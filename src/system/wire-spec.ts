@@ -107,6 +107,7 @@ function objectSchemaFromWireShape(fields: WireField[]): JsonSchemaObject {
 
 export function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
   switch (t.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
       switch (t.name) {
         case "int":
@@ -132,7 +133,7 @@ export function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
           // Opaque blob — freeform object at the JSON boundary.
           return { type: "object" };
       }
-    /* eslint-disable-next-line no-fallthrough */
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the id valueType union is exhaustive (every arm returns)
     case "id":
       // Id wire shape mirrors the underlying value-type: guid → uuid
       // string, int/long → integer, plain string → string with no
@@ -146,7 +147,6 @@ export function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
         case "string":
           return { type: "string" };
       }
-    /* eslint-disable-next-line no-fallthrough */
     case "enum":
       return { type: "string" };
     case "valueobject":

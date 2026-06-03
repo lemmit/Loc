@@ -72,3 +72,53 @@ describe("typescript generator — retrieval", () => {
     expect(repo).not.toMatch(/runAllActive[\s\S]*\.orderBy\(/);
   });
 });
+
+// PR4 — the retrieval `loadPlan` is a no-op on Hono/Drizzle, same as EF.
+// `eagerContainsOf` bulk-loads every owned containment and the hydrate
+// folds them all into the returned aggregate, so `whole(T)` is satisfied
+// and an explicit `loads:` can't narrow them out: owned containments are
+// part of the aggregate's wireShape, and the cross-backend parity
+// invariant forbids dropping a part on one backend. Guards against a
+// future contributor "honouring" loads with a spurious narrowing branch.
+const LOADS_SRC = `
+  context Sales {
+    aggregate Order {
+      status: string
+      contains lines: Line[]
+      contains notes: Note[]
+      entity Line { sku: string }
+      entity Note { text: string }
+    }
+    repository Orders for Order { }
+    criterion Open(s: string) of Order = status == s
+    retrieval Recent(s: string) of Order { where: Open(s) }
+    retrieval Slim(s: string) of Order { where: Open(s) loads: [this.lines] }
+  }
+`;
+
+/** Body of one `async run<Name>(…)` method, bounded by the next class
+ *  member (`async `, the `toWire` helper, or the class close). */
+function runBody(repo: string, name: string): string {
+  const start = repo.indexOf(`async ${name}(`);
+  expect(start, `${name} method not found`).toBeGreaterThanOrEqual(0);
+  const rest = repo.slice(start + 1);
+  const endRel = rest.search(/\n {2}(?:async |toWire\()|\n\}/);
+  return rest.slice(0, endRel === -1 ? rest.length : endRel);
+}
+
+describe("typescript generator — retrieval loadPlan (whole/explicit parity)", () => {
+  it("explicit `loads` does not narrow — both retrievals bulk-load every owned containment", async () => {
+    const { model, errors } = await parseString(LOADS_SRC);
+    expect(errors).toEqual([]);
+    const repo = generateHono(model).get("db/repositories/order-repository.ts")!;
+    // `Slim` declares `loads: [this.lines]` but still loads `notes` too —
+    // owned containments are always materialised (no narrowing).
+    const slim = runBody(repo, "runSlim");
+    expect(slim).toContain("schema.lines");
+    expect(slim).toContain("schema.notes");
+    // …and the body is structurally identical to the default-whole one.
+    expect(runBody(repo, "runSlim").replaceAll("runSlim", "RUN")).toBe(
+      runBody(repo, "runRecent").replaceAll("runRecent", "RUN"),
+    );
+  });
+});

@@ -69,3 +69,51 @@ describe(".NET generator — retrieval", () => {
     expect(handler!).toMatch(/await _customers\.SaveAsync\(c, ct\);/);
   });
 });
+
+// PR4 — the retrieval `loadPlan` is a no-op on EF Core: owned containments
+// (`OwnsOne`/`OwnsMany`) are always materialised with their owner, so
+// `whole(T)` is satisfied for free and an explicit `loads:` can neither
+// widen nor narrow the query (you can't project an owned navigation away).
+// This guards against a future contributor "honouring" loads with a
+// spurious `.Include` / projection that would diverge whole from explicit.
+const LOADS_SRC = `
+  context Sales {
+    aggregate Order {
+      status: string
+      contains lines: Line[]
+      contains notes: Note[]
+      entity Line { sku: string }
+      entity Note { text: string }
+    }
+    repository Orders for Order { }
+    criterion Open(s: string) of Order = status == s
+    retrieval Recent(s: string) of Order { where: Open(s) }
+    retrieval Slim(s: string) of Order { where: Open(s) loads: [this.lines] }
+  }
+`;
+
+/** The single `var query = _db.… .AsQueryable();` line of a Run<Name>Async. */
+function queryLine(repo: string, method: string): string {
+  const body = repo.slice(repo.indexOf(`Run${method}Async`));
+  const m = body.match(/var query = _db\.[^\n]*\.AsQueryable\(\);/);
+  expect(m, `query line for Run${method}Async not found`).not.toBeNull();
+  return m![0];
+}
+
+describe(".NET generator — retrieval loadPlan (owned-type no-op)", () => {
+  it("maps owned containments to OwnsMany (always loaded with the owner)", async () => {
+    const out = await generateDotnet(await parseValid(LOADS_SRC));
+    const cfg = out.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
+    expect(cfg).toMatch(/\.OwnsMany<Line>\("_lines"/);
+    expect(cfg).toMatch(/\.OwnsMany<Note>\("_notes"/);
+  });
+
+  it("whole and explicit-`loads` retrievals emit the identical query (no Include, no narrowing)", async () => {
+    const out = await generateDotnet(await parseValid(LOADS_SRC));
+    const repo = out.get("Infrastructure/Repositories/OrderRepository.cs")!;
+    // Explicit `loads: [this.lines]` neither narrows nor Includes — the
+    // query body is byte-identical to the default-whole retrieval's.
+    expect(queryLine(repo, "Slim")).toBe(queryLine(repo, "Recent"));
+    expect(repo).not.toMatch(/\.Include\(/);
+  });
+});

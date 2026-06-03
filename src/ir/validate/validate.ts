@@ -6,6 +6,7 @@ import {
 import { allPlatforms, platformFor } from "../../platform/registry.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
 import { capabilitiesFor, configSchemaFor, supportsSurfaceKind } from "../../util/source-types.js";
+import { createInputFields, omittableCreateInputs } from "../enrich/wire-projection.js";
 import { verbsForKind } from "../resource-verbs.js";
 import type {
   AggregateIR,
@@ -77,6 +78,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDataSourceCoverage(sys, diags);
     validateSavingShapeSupport(sys, diags);
     validateContextFilterSupport(sys, diags);
+    validateDapperSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
@@ -136,6 +138,7 @@ function validateWorkspaceUniqueness(loom: EnrichedLoomModel, diags: LoomDiagnos
     if (rootVoSeen.has(vo.name)) {
       diags.push({
         severity: "error",
+        code: "loom.duplicate-valueobject",
         source: `valueobject ${vo.name}`,
         message: `duplicate root-level value object '${vo.name}' — declare it once in the workspace.`,
       });
@@ -149,6 +152,7 @@ function validateWorkspaceUniqueness(loom: EnrichedLoomModel, diags: LoomDiagnos
     if (rootEnumSeen.has(e.name)) {
       diags.push({
         severity: "error",
+        code: "loom.duplicate-enum",
         source: `enum ${e.name}`,
         message: `duplicate root-level enum '${e.name}' — declare it once in the workspace.`,
       });
@@ -162,6 +166,7 @@ function validateWorkspaceUniqueness(loom: EnrichedLoomModel, diags: LoomDiagnos
     if (sysSeen.has(s.name)) {
       diags.push({
         severity: "error",
+        code: "loom.duplicate-system",
         source: `system ${s.name}`,
         message: `duplicate system '${s.name}' — declare each system once across the workspace.`,
       });
@@ -178,6 +183,7 @@ function validateWorkspaceUniqueness(loom: EnrichedLoomModel, diags: LoomDiagnos
     if (ctxSeen.has(c.name)) {
       diags.push({
         severity: "error",
+        code: "loom.duplicate-context",
         source: `context ${c.name}`,
         message: `duplicate context '${c.name}' — context names must be unique across the workspace.`,
       });
@@ -200,6 +206,7 @@ function validateWorkspaceUniqueness(loom: EnrichedLoomModel, diags: LoomDiagnos
         if (injected && injected === vo) continue;
         diags.push({
           severity: "error",
+          code: "loom.valueobject-shadows-root",
           source: `${c.name}.${vo.name}`,
           message: `context '${c.name}' declares value object '${vo.name}' that shadows the root-level declaration; rename one of them.`,
         });
@@ -211,6 +218,7 @@ function validateWorkspaceUniqueness(loom: EnrichedLoomModel, diags: LoomDiagnos
         if (injected && injected === e) continue;
         diags.push({
           severity: "error",
+          code: "loom.enum-shadows-root",
           source: `${c.name}.${e.name}`,
           message: `context '${c.name}' declares enum '${e.name}' that shadows the root-level declaration; rename one of them.`,
         });
@@ -254,6 +262,7 @@ function validateFindNameCollisions(ctx: BoundedContextIR, diags: LoomDiagnostic
       if (reserved.has(find.name)) {
         diags.push({
           severity: "error",
+          code: "loom.find-reserved-name",
           message:
             `repository '${repo.name}' find '${find.name}': name collides with the auto-emitted repository method '${find.name}(...)'. ` +
             `Choose a different find name (e.g. 'persist', 'fetchById').`,
@@ -263,6 +272,7 @@ function validateFindNameCollisions(ctx: BoundedContextIR, diags: LoomDiagnostic
       if (seen.has(find.name)) {
         diags.push({
           severity: "error",
+          code: "loom.duplicate-find",
           message: `repository '${repo.name}' declares find '${find.name}' more than once.`,
           source: `${ctx.name}/${repo.name}.${find.name}`,
         });
@@ -310,6 +320,7 @@ function validateGenericInstancesUnimplemented(
     if (!ctor) return;
     diags.push({
       severity: "error",
+      code: "loom.generic-carrier-unsupported",
       message:
         `${where} uses the generic carrier '${ctor}', which parses and is represented in ` +
         `the IR but is not emittable yet (payload-transport-layer.md, P3b: monomorphization ` +
@@ -391,6 +402,7 @@ function validateAggregateTestBodies(ctx: BoundedContextIR, diags: LoomDiagnosti
         if (!reason) continue;
         diags.push({
           severity: "error",
+          code: "loom.aggregate-test-context",
           message:
             `aggregate '${agg.name}' test '${test.name}': ${reason} ` +
             `Aggregate-level tests are bound to a value-object / pure-function context — they don't have a 'this' aggregate to mutate.  ` +
@@ -456,6 +468,7 @@ function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagnostic[]
       if (op.visibility === "private") {
         diags.push({
           severity: "error",
+          code: "loom.extern-on-private-operation",
           message:
             `aggregate '${agg.name}' operation '${op.name}': 'extern' isn't valid on a private operation. ` +
             `Private operations are callable only from inside the aggregate, so there's nowhere for an external handler to plug in. Make the operation public, or drop 'extern'.`,
@@ -466,6 +479,7 @@ function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagnostic[]
         if (stmt.kind === "precondition") continue;
         diags.push({
           severity: "error",
+          code: "loom.extern-body-not-precondition",
           message:
             `aggregate '${agg.name}' operation '${op.name}': 'extern' bodies may only contain 'precondition' statements (found '${stmt.kind}'). ` +
             `The user-supplied handler owns mutation, emit, and any other logic — leave the .ddd body to the gates that run before it.`,
@@ -513,6 +527,7 @@ function validateEventSourcedDiscipline(ctx: BoundedContextIR, diags: LoomDiagno
     if (!isEventSourced && appliers.length > 0) {
       diags.push({
         severity: "error",
+        code: "loom.applier-on-non-event-sourced",
         message:
           `aggregate '${agg.name}' declares apply(...) but is not event-sourced. ` +
           `Appliers fold events into state; they only apply to a 'persistedAs(eventLog)' aggregate. ` +
@@ -532,6 +547,7 @@ function validateEventSourcedDiscipline(ctx: BoundedContextIR, diags: LoomDiagno
       if (count > 1) {
         diags.push({
           severity: "error",
+          code: "loom.duplicate-applier",
           message:
             `aggregate '${agg.name}' declares ${count} appliers for event '${eventName}'. ` +
             `An event folds into state exactly one way — declare a single apply(${eventName}).`,
@@ -561,6 +577,7 @@ function validateEventSourcedDiscipline(ctx: BoundedContextIR, diags: LoomDiagno
         if (stmt.kind === "assign" || stmt.kind === "add" || stmt.kind === "remove") {
           diags.push({
             severity: "error",
+            code: "loom.event-sourced-direct-mutation",
             message:
               `aggregate '${agg.name}' ${cmd.label} mutates 'this' directly, but the aggregate is event-sourced. ` +
               `Command bodies on a 'persistedAs(eventLog)' aggregate decide and 'emit'; the state change belongs in an apply(...) block. ` +
@@ -571,6 +588,7 @@ function validateEventSourcedDiscipline(ctx: BoundedContextIR, diags: LoomDiagno
         if (stmt.kind === "emit" && !appliedEvents.has(stmt.eventName)) {
           diags.push({
             severity: "error",
+            code: "loom.emitted-event-unhandled",
             message:
               `aggregate '${agg.name}' ${cmd.label} emits '${stmt.eventName}' but no applier folds it. ` +
               `Every emitted event needs a matching apply(${stmt.eventName}: ${stmt.eventName}) on the aggregate, ` +
@@ -587,6 +605,7 @@ function validateEventSourcedDiscipline(ctx: BoundedContextIR, diags: LoomDiagno
         if (stmt.kind === "emit") {
           diags.push({
             severity: "error",
+            code: "loom.applier-emits",
             message:
               `aggregate '${agg.name}' apply(${ap.event}) emits an event. ` +
               `An applier reacts to an event by folding it into state — it must not emit. ` +
@@ -596,6 +615,7 @@ function validateEventSourcedDiscipline(ctx: BoundedContextIR, diags: LoomDiagno
         } else if (stmt.kind === "call") {
           diags.push({
             severity: "error",
+            code: "loom.applier-impure-call",
             message:
               `aggregate '${agg.name}' apply(${ap.event}) calls '${stmt.name}'. ` +
               `Applier bodies must be deterministic, replayable folds — assignments and 'let' only, no side-effecting calls.`,
@@ -604,6 +624,7 @@ function validateEventSourcedDiscipline(ctx: BoundedContextIR, diags: LoomDiagno
         } else if (stmt.kind === "precondition" || stmt.kind === "requires") {
           diags.push({
             severity: "error",
+            code: "loom.applier-guard",
             message:
               `aggregate '${agg.name}' apply(${ap.event}) contains a '${stmt.kind}' statement. ` +
               `Guards belong in the command that decides the event; by the time it is applied the decision is already made.`,
@@ -738,6 +759,7 @@ function checkIdReference(
   if (!agg) {
     diags.push({
       severity: "error",
+      code: "loom.ui-id-ref-unknown-aggregate",
       message: `UI-mounting deployable '${deployableName}': '${source}' references ${target} id, but no aggregate '${target}' is declared in the system.`,
       source: `${deployableName}/${source}`,
     });
@@ -749,6 +771,7 @@ function checkIdReference(
   if (!mounted.has(target)) {
     diags.push({
       severity: "error",
+      code: "loom.ui-id-ref-unmounted",
       message:
         `UI-mounting deployable '${deployableName}': '${source}' references ${target} id, but '${target}' is not mounted on this deployable's modules.  ` +
         `Mount the module containing '${target}' on the deployable's targeted backend, or remove the reference.`,
@@ -761,6 +784,7 @@ function checkIdReference(
   if (!agg.displayDerived) {
     diags.push({
       severity: "error",
+      code: "loom.ui-id-ref-no-display",
       message:
         `UI-mounting deployable '${deployableName}': '${source}' references ${target} id, but '${target}' has no 'derived display' clause.  ` +
         `Add 'derived display: string = <field>' to '${target}' so the form's <Select> picker can label options.`,
@@ -794,6 +818,7 @@ function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagnostic[])
       if (offending) {
         diags.push({
           severity: "error",
+          code: "loom.find-where-not-queryable",
           message:
             `repository '${repo.name}' find '${find.name}': ` +
             `where-clause is not queryable (${offending}). ` +
@@ -812,6 +837,7 @@ function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagnostic[])
         if (unknown) {
           diags.push({
             severity: "error",
+            code: "loom.find-where-unknown-field",
             message:
               `repository '${repo.name}' find '${find.name}': ` +
               `where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
@@ -829,6 +855,7 @@ function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagnostic[])
       if (bothCols) {
         diags.push({
           severity: "error",
+          code: "loom.find-where-column-column",
           message:
             `repository '${repo.name}' find '${find.name}': ` +
             `comparison between two columns (${bothCols}) is not queryable. ` +
@@ -897,6 +924,7 @@ function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[]): voi
     if (offending) {
       diags.push({
         severity: "error",
+        code: "loom.retrieval-where-not-queryable",
         message:
           `retrieval '${r.name}': where-clause is not queryable (${offending}). ` +
           `Allowed: comparisons, &&/||/!, parens, 'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
@@ -907,6 +935,7 @@ function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[]): voi
       if (unknown) {
         diags.push({
           severity: "error",
+          code: "loom.retrieval-where-unknown-field",
           message: `retrieval '${r.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
           source: src,
         });
@@ -915,6 +944,7 @@ function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[]): voi
       if (bothCols) {
         diags.push({
           severity: "error",
+          code: "loom.retrieval-where-column-column",
           message:
             `retrieval '${r.name}': comparison between two columns (${bothCols}) is not queryable. ` +
             `eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
@@ -931,28 +961,32 @@ function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[]): voi
       if (head && !aggregateHasMember(agg, head.name)) {
         diags.push({
           severity: "error",
+          code: "loom.retrieval-sort-unknown-field",
           message: `retrieval '${r.name}': sort references unknown field '${head.name}' on aggregate '${agg.name}'.`,
           source: src,
         });
       }
     }
 
-    // `loads` — each path's first segment must resolve on the aggregate
-    // (a stored field, a containment, or a cross-aggregate reference
-    // field).  Deeper path resolution across parts / referenced
-    // aggregates is the v2 load-inference concern (load-specifications.md);
-    // v1 validates the entry point only.
+    // `loads` — explicit eager-load specs are not supported yet.  Every
+    // retrieval loads the *whole* aggregate (all owned containments).  The
+    // planned replacement is per-operation autoload: derive the load set
+    // from the expressions an operation's body uses, so it's sufficient by
+    // construction (no `loads`-sufficiency validator needed).  Until then a
+    // narrowing `loads:` would silently under-fetch on Phoenix (a
+    // `%NotLoaded{}` crash in a downstream for-loop op) while being inert
+    // on Hono/.NET (owned parts always materialise) — so it is rejected
+    // outright rather than honoured inconsistently across backends.  See
+    // load-specifications.md.
     if (r.loadPlan.kind === "explicit") {
-      for (const path of r.loadPlan.paths) {
-        const head = path[0];
-        if (head && !aggregateHasMember(agg, head.name)) {
-          diags.push({
-            severity: "error",
-            message: `retrieval '${r.name}': loads references unknown field '${head.name}' on aggregate '${agg.name}'.`,
-            source: src,
-          });
-        }
-      }
+      diags.push({
+        severity: "error",
+        code: "loom.retrieval-loads-unsupported",
+        message:
+          `retrieval '${r.name}': explicit 'loads:' is not supported yet — ` +
+          `retrievals load the whole aggregate. (Per-operation autoload is planned.)`,
+        source: src,
+      });
     }
   }
 }
@@ -1249,6 +1283,7 @@ function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): voi
         if (covered.has(key)) continue;
         diags.push({
           severity: "error",
+          code: "loom.persistence-mode-unsupported",
           message:
             `Deployable '${dep.name}' hosts aggregate '${ctxName}.${agg.name}' ` +
             `(persistedAs: ${agg.persistedAs ?? "state"}, ` +
@@ -1286,6 +1321,7 @@ function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[]): voi
       if (!reason) continue;
       diags.push({
         severity: "warning",
+        code: "loom.datasource-unused",
         message:
           `Deployable '${dep.name}' lists resource '${ds.name}' (kind: ${ds.kind}) for ` +
           `context '${ds.contextName}', but ${reason}.  This binding routes no data — ` +
@@ -1328,6 +1364,7 @@ function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[]): voi
         if (supported.includes(shape)) continue;
         diags.push({
           severity: "error",
+          code: "loom.saving-shape-unsupported",
           message:
             `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
             `'${ctxName}.${agg.name}' with shape(${shape}), but that backend can only ` +
@@ -1408,6 +1445,70 @@ function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
   }
 }
 
+// ---------------------------------------------------------------------------
+// `persistence: dapper` capability gate (D-REALIZATION-AXES Phase 5c).
+//
+// The .NET Dapper adapter is a MINIMAL-v1 alternate persistence: relational,
+// state-based, flat aggregates whose fields are scalar / enum / value-object /
+// single id-ref.  This rejects — with a clear, actionable error — any model
+// feature dapper v1 doesn't emit, so a selection either works end-to-end or
+// fails fast at validate time (rather than producing a non-compiling project).
+// efcore (the default) supports the full surface, so this only fires for an
+// explicit `persistence: dapper`.
+// ---------------------------------------------------------------------------
+function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  const MANAGED_ACCESS = new Set(["managed", "token", "internal", "secret"]);
+
+  for (const dep of sys.deployables) {
+    if (dep.persistence !== "dapper") continue;
+    const reject = (subject: string, reason: string): void => {
+      diags.push({
+        severity: "error",
+        message:
+          `Deployable '${dep.name}' selects 'persistence: dapper', but ${subject} ${reason}. ` +
+          `The Dapper adapter is minimal in v1 (relational, state-based, flat aggregates with ` +
+          `scalar / enum / value-object / id-ref fields). Use 'persistence: efcore' for this model, ` +
+          `or remove the unsupported feature.`,
+        source: `${sys.name}/${dep.name}`,
+        code: "loom.dapper-unsupported",
+      });
+    };
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      // Named-query bundles emit `Run<Name>Async` on the repository interface,
+      // which the v1 Dapper repository doesn't implement.
+      if ((ctx.retrievals ?? []).length > 0)
+        reject(`context '${ctxName}'`, "declares 'retrieval' query bundles (not yet on Dapper)");
+      if ((ctx.seeds ?? []).length > 0)
+        reject(`context '${ctxName}'`, "declares 'seed' data (the Dapper seed path is not wired)");
+      for (const agg of ctx.aggregates) {
+        const a = agg as EnrichedAggregateIR;
+        const where = `aggregate '${ctxName}.${agg.name}'`;
+        if (a.persistedAs === "eventLog") reject(where, "is event-sourced");
+        const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
+        if (shape !== "relational") reject(where, `is persisted as shape(${shape})`);
+        if (a.isAbstract || a.extendsAggregate)
+          reject(where, "participates in aggregate inheritance");
+        if ((a.associations ?? []).length > 0)
+          reject(where, "has reference-collection associations (Id[] join tables)");
+        if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
+          reject(where, "contains nested entity parts");
+        if ((a.contextStamps ?? []).length > 0) reject(where, "uses audit stamping");
+        if ((a.contextFilters ?? []).length > 0)
+          reject(where, "uses a 'filter' capability predicate");
+        for (const f of a.fields) {
+          if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
+          else if (f.access && MANAGED_ACCESS.has(f.access))
+            reject(`field '${agg.name}.${f.name}'`, `has server-managed access '${f.access}'`);
+        }
+      }
+    }
+  }
+}
+
 /** Returns a human-readable reason a dataSource of `kind` covers
  *  nothing in `ctx`, or undefined when the binding is exercised by
  *  at least one aggregate.  Encodes the dataSource-kind → aggregate-
@@ -1449,6 +1550,7 @@ function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagnostic[]
     if (missing.length > 0) {
       diags.push({
         severity: "error",
+        code: "loom.resource-missing-capability",
         message:
           `resource '${resource.name}' (sourceType '${sourceType}') does not offer ` +
           `${missing.map((c) => `'${c}'`).join(", ")} required by context ` +
@@ -1496,6 +1598,7 @@ function checkConfigBlock(
     if (!spec) {
       diags.push({
         severity: "warning",
+        code: "loom.config-key-unknown",
         message: `${label}: config key '${entry.key}' is not recognised by sourceType '${sourceType}' — it will be ignored.`,
         source: `${sysName}/${label}`,
       });
@@ -1506,6 +1609,7 @@ function checkConfigBlock(
         spec.type === "enum" && spec.values ? `one of ${spec.values.join(", ")}` : spec.type;
       diags.push({
         severity: "error",
+        code: "loom.config-key-type",
         message: `${label}: config key '${entry.key}' expects ${expected}.`,
         source: `${sysName}/${label}`,
       });
@@ -1516,6 +1620,7 @@ function checkConfigBlock(
       if (spec.required && !present.has(spec.name)) {
         diags.push({
           severity: "error",
+          code: "loom.config-key-required",
           message: `${label}: required config key '${spec.name}' (sourceType '${sourceType}') is missing.`,
           source: `${sysName}/${label}`,
         });
@@ -1679,6 +1784,7 @@ function validateInheritanceStorage(
         : "no Hono backend deployable hosts this context";
     diags.push({
       severity: "error",
+      code: "loom.tph-backend-unsupported",
       message:
         `aggregate '${agg.name}' (${role}) resolves to sharedTable (TPH) inheritance via ` +
         `${how}, but TPH storage emission is implemented for the Hono backend only — ` +
@@ -1715,6 +1821,7 @@ function validateEventSourcedStorage(
         : "no Hono backend deployable hosts this context";
     diags.push({
       severity: "error",
+      code: "loom.event-sourcing-backend-unsupported",
       message:
         `aggregate '${agg.name}' is persistedAs(eventLog), but event-sourced storage emission ` +
         `is implemented for the Hono backend only — ${hostNote}. Host the context on a Hono ` +
@@ -1732,6 +1839,7 @@ function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]):
       if (value === undefined) continue;
       diags.push({
         severity: "warning",
+        code: "loom.datasource-knob-unwired",
         message:
           `resource '${ds.name}' sets '${knob.property}', but ${knob.description}.  ` +
           `The value is accepted by validation and persisted in the IR but no current ` +
@@ -1767,6 +1875,7 @@ function validateE2ETest(
       // with a source location instead of leaking a generator fallback.
       diags.push({
         severity: "error",
+        code: "loom.e2e-unsupported-statement",
         message:
           `e2e test '${test.name}': '${badKind}' is not supported in an e2e test body. ` +
           `Only expect, expect-throws, let, expression, and ${magicId}.<...> calls are allowed.`,
@@ -1848,6 +1957,7 @@ function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
     if (e.kind === "call" && SCAFFOLD_PRIMITIVE_NAMES.has(e.name)) {
       diags.push({
         severity: "error",
+        code: "loom.scaffold-unexpanded",
         message: `un-expanded scaffold primitive '${e.name}' — walker-primitive-expander could not resolve its target aggregate/workflow/view; check that the referenced symbol exists in the surrounding context.`,
         source,
       });
@@ -2029,6 +2139,7 @@ function checkMagicCall(
         .join(", ");
       diags.push({
         severity: "error",
+        code: "loom.e2e-unknown-workflow",
         message:
           `e2e: unknown workflow '${magicId}.workflows.${method}' on this deployable. ` +
           `Available workflows: ${known || "(none)"}.`,
@@ -2048,6 +2159,7 @@ function checkMagicCall(
         .join(", ");
       diags.push({
         severity: "error",
+        code: "loom.e2e-unknown-view",
         message:
           `e2e: unknown view '${magicId}.views.${method}' on this deployable. ` +
           `Available views: ${known || "(none)"}.`,
@@ -2064,6 +2176,7 @@ function checkMagicCall(
       .join(", ");
     diags.push({
       severity: "error",
+      code: "loom.e2e-unknown-aggregate",
       message:
         `e2e: unknown aggregate '${magicId}.${aggregateSlug}' on this deployable. ` +
         `Available aggregates: ${known || "(none)"}.`,
@@ -2085,6 +2198,7 @@ function checkMagicCall(
   const knownVerbs = ["create", "getById", ...ops, ...finds];
   diags.push({
     severity: "error",
+    code: "loom.e2e-unknown-method",
     message:
       `e2e: unknown method '${magicId}.${aggregateSlug}.${method}'. ` +
       `Available: ${knownVerbs.join(", ")}.`,
@@ -2149,6 +2263,7 @@ function validateWorkflows(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void
     if (seenWorkflowNames.has(wf.name)) {
       diags.push({
         severity: "error",
+        code: "loom.duplicate-workflow",
         message: `context '${ctx.name}': workflow '${wf.name}' is declared more than once.`,
         source: `${ctx.name}/${wf.name}`,
       });
@@ -2159,6 +2274,7 @@ function validateWorkflows(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void
     if (clash) {
       diags.push({
         severity: "error",
+        code: "loom.workflow-name-collision",
         message: `context '${ctx.name}': workflow '${wf.name}' collides with the ${clash} of the same name.`,
         source: `${ctx.name}/${wf.name}`,
       });
@@ -2287,6 +2403,7 @@ function validateWorkflowBody(
         if (st.expr.kind === "ref" && st.expr.refKind === "unknown") {
           diags.push({
             severity: "error",
+            code: "loom.workflow-unknown-name",
             message: `workflow '${wf.name}': ${st.kind} references unknown name '${st.expr.name}'.`,
             source: `${ctx.name}/${wf.name}`,
           });
@@ -2297,6 +2414,7 @@ function validateWorkflowBody(
         if (!ev) {
           diags.push({
             severity: "error",
+            code: "loom.workflow-emit-unknown-event",
             message: `workflow '${wf.name}': emit refers to unknown event '${st.eventName}'.`,
             source: `${ctx.name}/${wf.name}`,
           });
@@ -2308,6 +2426,7 @@ function validateWorkflowBody(
           if (!provided.has(f)) {
             diags.push({
               severity: "error",
+              code: "loom.workflow-emit-missing-field",
               message: `workflow '${wf.name}': emit '${ev.name}' is missing field '${f}'.`,
               source: `${ctx.name}/${wf.name}`,
             });
@@ -2317,6 +2436,7 @@ function validateWorkflowBody(
           if (!declared.has(f)) {
             diags.push({
               severity: "error",
+              code: "loom.workflow-emit-unknown-field",
               message: `workflow '${wf.name}': emit '${ev.name}' has unknown field '${f}'.`,
               source: `${ctx.name}/${wf.name}`,
             });
@@ -2330,27 +2450,41 @@ function validateWorkflowBody(
         if (!agg) {
           diags.push({
             severity: "error",
+            code: "loom.workflow-create-unknown-aggregate",
             message: `workflow '${wf.name}': '${st.aggName}.create(...)' references unknown aggregate '${st.aggName}'.`,
             source: `${ctx.name}/${wf.name}`,
           });
           break;
         }
-        const required = agg.fields.filter((f) => !f.optional).map((f) => f.name);
+        // A workflow `Agg.create({...})` invokes the canonical create,
+        // which is parameterized by the aggregate's *create-input* fields
+        // — `forCreateInput` drops the server-populated roles
+        // (`managed`/`token`/`internal`) and the required subset further
+        // drops fields the client may omit (optional, `= default`, bare
+        // `bool`).  Validate against that contract, the same set the
+        // backends' create-call emitters consume, rather than the raw
+        // field list: a `managed` timestamp is neither required here nor a
+        // legal argument (passing one would fail the backend create-call).
+        const omittable = omittableCreateInputs(agg);
+        const inputFields = createInputFields(agg).map((f) => f.name);
+        const required = inputFields.filter((n) => !omittable.has(n));
         const provided = new Set(st.fields.map((f) => f.name));
         for (const r of required) {
           if (!provided.has(r)) {
             diags.push({
               severity: "error",
+              code: "loom.workflow-create-missing-field",
               message: `workflow '${wf.name}': '${st.aggName}.create(...)' is missing required field '${r}'.`,
               source: `${ctx.name}/${wf.name}`,
             });
           }
         }
-        const allowed = new Set(agg.fields.map((f) => f.name));
+        const allowed = new Set(inputFields);
         for (const p of provided) {
           if (!allowed.has(p)) {
             diags.push({
               severity: "error",
+              code: "loom.workflow-create-unknown-field",
               message: `workflow '${wf.name}': '${st.aggName}.create(...)' has unknown field '${p}'.`,
               source: `${ctx.name}/${wf.name}`,
             });
@@ -2365,6 +2499,7 @@ function validateWorkflowBody(
         if (!repo) {
           diags.push({
             severity: "error",
+            code: "loom.workflow-unknown-repository",
             message: `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' references unknown repository '${st.repoName}'.`,
             source: `${ctx.name}/${wf.name}`,
           });
@@ -2373,6 +2508,7 @@ function validateWorkflowBody(
         if (st.method !== "getById" && !repo.finds.some((f) => f.name === st.method)) {
           diags.push({
             severity: "error",
+            code: "loom.workflow-unknown-repository-method",
             message: `workflow '${wf.name}': repository '${st.repoName}' has no method '${st.method}'.  Available: getById, ${repo.finds.map((f) => f.name).join(", ") || "(no declared finds)"}.`,
             source: `${ctx.name}/${wf.name}`,
           });
@@ -2387,6 +2523,7 @@ function validateWorkflowBody(
         if (calledFind && findUsesCurrentUser(calledFind)) {
           diags.push({
             severity: "error",
+            code: "loom.workflow-currentuser-find",
             message:
               `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' references a currentUser-bound find, ` +
               `which workflows don't yet pass the user into.  Use 'getById' with an explicit id parameter, ` +
@@ -2402,6 +2539,7 @@ function validateWorkflowBody(
           if (st.returnType.kind === "array") {
             diags.push({
               severity: "error",
+              code: "loom.workflow-load-array-unsupported",
               message: `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' returns an array; v1 supports only single non-nullable aggregates.  Split iteration into a follow-up workflow or use getById.`,
               source: `${ctx.name}/${wf.name}`,
             });
@@ -2410,6 +2548,7 @@ function validateWorkflowBody(
           if (st.returnType.kind === "optional") {
             diags.push({
               severity: "error",
+              code: "loom.workflow-load-nullable-unsupported",
               message: `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' returns a nullable; v1 supports only single non-nullable aggregates.  Use getById (throws → 404) instead.`,
               source: `${ctx.name}/${wf.name}`,
             });
@@ -2426,6 +2565,7 @@ function validateWorkflowBody(
         if (!repo) {
           diags.push({
             severity: "error",
+            code: "loom.workflow-run-unknown-repository",
             message: `workflow '${wf.name}': '${st.repoName}.run(...)' references unknown repository '${st.repoName}'.`,
             source: `${ctx.name}/${wf.name}`,
           });
@@ -2435,6 +2575,7 @@ function validateWorkflowBody(
         if (!retrieval) {
           diags.push({
             severity: "error",
+            code: "loom.workflow-run-unknown-retrieval",
             message: `workflow '${wf.name}': '${st.repoName}.run(${st.retrievalName}(...))' references unknown retrieval '${st.retrievalName}'.`,
             source: `${ctx.name}/${wf.name}`,
           });
@@ -2444,6 +2585,7 @@ function validateWorkflowBody(
         if (target !== st.aggName) {
           diags.push({
             severity: "error",
+            code: "loom.workflow-run-retrieval-mismatch",
             message: `workflow '${wf.name}': retrieval '${st.retrievalName}' is over '${target}', but '${st.repoName}' is a repository for '${st.aggName}'.`,
             source: `${ctx.name}/${wf.name}`,
           });
@@ -2465,6 +2607,7 @@ function validateWorkflowBody(
         if (st.varAggName === "Unknown" || !isArrayBinding) {
           diags.push({
             severity: "error",
+            code: "loom.workflow-foreach-source",
             message: `workflow '${wf.name}': 'for ${st.var} in ...' must iterate a 'let xs = Repo.run(...)' result (the only aggregate array in v1).`,
             source: `${ctx.name}/${wf.name}`,
           });
@@ -2476,6 +2619,7 @@ function validateWorkflowBody(
             if (!bindingAgg.get(inner.target)) {
               diags.push({
                 severity: "error",
+                code: "loom.workflow-foreach-unknown-binding",
                 message: `workflow '${wf.name}': in 'for ${st.var}', '${inner.target}.${inner.op}(...)' references unknown binding '${inner.target}'.`,
                 source: `${ctx.name}/${wf.name}`,
               });
@@ -2489,6 +2633,7 @@ function validateWorkflowBody(
         if (!aggName) {
           diags.push({
             severity: "error",
+            code: "loom.workflow-unknown-binding",
             message: `workflow '${wf.name}': '${st.target}.${st.op}(...)' references unknown let-binding '${st.target}', or '${st.target}' isn't bound to an aggregate.`,
             source: `${ctx.name}/${wf.name}`,
           });
@@ -2500,6 +2645,7 @@ function validateWorkflowBody(
         if (!op) {
           diags.push({
             severity: "error",
+            code: "loom.workflow-unknown-operation",
             message: `workflow '${wf.name}': aggregate '${aggName}' has no operation '${st.op}'.`,
             source: `${ctx.name}/${wf.name}`,
           });
@@ -2508,6 +2654,7 @@ function validateWorkflowBody(
         if (op.visibility === "private") {
           diags.push({
             severity: "error",
+            code: "loom.workflow-private-operation",
             message: `workflow '${wf.name}': '${aggName}.${op.name}' is private.  Workflows can only call public operations.`,
             source: `${ctx.name}/${wf.name}`,
           });
@@ -2525,6 +2672,7 @@ function validateWorkflowBody(
         if (st.name === "__bad__") {
           diags.push({
             severity: "error",
+            code: "loom.workflow-unrecognised-statement",
             message: `workflow '${wf.name}': statement isn't a recognised workflow form.  Allowed: precondition, let (factory / repo / scalar), name.op(args), emit.`,
             source: `${ctx.name}/${wf.name}`,
           });
@@ -2542,6 +2690,7 @@ function validateWorkflowBody(
   if (wf.transactional && !mutated) {
     diags.push({
       severity: "warning",
+      code: "loom.transactional-no-effect",
       message: `workflow '${wf.name}': declared 'transactional' but does not mutate any aggregate or emit any event — the keyword has no effect.`,
       source: `${ctx.name}/${wf.name}`,
     });
@@ -2554,6 +2703,7 @@ function validateWorkflowBody(
   if (wf.isolation && !wf.transactional) {
     diags.push({
       severity: "error",
+      code: "loom.isolation-requires-transactional",
       message: `workflow '${wf.name}': isolation level '${wf.isolation}' requires the 'transactional' keyword.`,
       source: `${ctx.name}/${wf.name}`,
     });
@@ -2578,6 +2728,7 @@ function checkResourceOpExpr(
   if (op.capability === "") {
     diags.push({
       severity: "error",
+      code: "loom.resource-verb-invalid",
       message: `workflow '${wf.name}': '${op.resourceName}.${op.verb}(...)' — '${op.verb}' is not a valid verb for a ${op.resourceKind} resource.  Available: ${verbsForKind(op.resourceKind).join(", ") || "(none)"}.`,
       source: `${ctx.name}/${wf.name}`,
     });
@@ -2585,6 +2736,7 @@ function checkResourceOpExpr(
   if (wf.transactional) {
     diags.push({
       severity: "error",
+      code: "loom.resource-op-in-transaction",
       message: `workflow '${wf.name}': resource operation '${op.resourceName}.${op.verb}(...)' cannot run inside a transactional workflow — external effects don't roll back with the database transaction.  Move it out of the transactional span, or publish through an outbox.`,
       source: `${ctx.name}/${wf.name}`,
     });
@@ -2631,6 +2783,7 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
     if (seen.has(view.name)) {
       diags.push({
         severity: "error",
+        code: "loom.duplicate-view",
         message: `context '${ctx.name}': view '${view.name}' is declared more than once.`,
         source: `${ctx.name}/${view.name}`,
       });
@@ -2641,6 +2794,7 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
     if (clash) {
       diags.push({
         severity: "error",
+        code: "loom.view-name-collision",
         message: `context '${ctx.name}': view '${view.name}' collides with the ${clash} of the same name.`,
         source: `${ctx.name}/${view.name}`,
       });
@@ -2649,6 +2803,7 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
     if (!agg) {
       diags.push({
         severity: "error",
+        code: "loom.view-unknown-source",
         message: `view '${view.name}': source '${view.aggregateName}' is not an aggregate in context '${ctx.name}'.`,
         source: `${ctx.name}/${view.name}`,
       });
@@ -2659,6 +2814,7 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
       if (offending) {
         diags.push({
           severity: "error",
+          code: "loom.view-where-not-queryable",
           message:
             `view '${view.name}': where-clause is not queryable (${offending}). ` +
             `Allowed: comparisons, &&/||/!, parens, ` +
@@ -2671,6 +2827,7 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
       if (unknown) {
         diags.push({
           severity: "error",
+          code: "loom.view-where-unknown-field",
           message: `view '${view.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
           source: `${ctx.name}/${view.name}`,
         });
@@ -2679,6 +2836,7 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
       if (bothCols) {
         diags.push({
           severity: "error",
+          code: "loom.view-where-column-column",
           message:
             `view '${view.name}': comparison between two columns (${bothCols}) is not queryable. ` +
             `Drizzle's eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
@@ -2694,6 +2852,7 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
         if (!boundNames.has(f.name)) {
           diags.push({
             severity: "error",
+            code: "loom.view-field-unbound",
             message: `view '${view.name}': field '${f.name}' has no bind expression.  Add 'bind ${f.name} = ...' to the body.`,
             source: `${ctx.name}/${view.name}`,
           });
@@ -2704,6 +2863,7 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
         if (!fieldNames.has(b.name)) {
           diags.push({
             severity: "error",
+            code: "loom.view-bind-no-field",
             message: `view '${view.name}': bind '${b.name}' has no matching declared field.  Either declare 'name: Type' at the top of the view or remove the bind.`,
             source: `${ctx.name}/${view.name}`,
           });
@@ -2711,6 +2871,7 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
         if (seenBinds.has(b.name)) {
           diags.push({
             severity: "error",
+            code: "loom.view-bind-duplicate",
             message: `view '${view.name}': field '${b.name}' is bound more than once.`,
             source: `${ctx.name}/${view.name}`,
           });
@@ -2752,6 +2913,7 @@ function validateAuth(sys: SystemIR, diags: LoomDiagnostic[]): void {
       if (seen.has(f.name)) {
         diags.push({
           severity: "error",
+          code: "loom.user-duplicate-field",
           message: `system '${sys.name}': user block declares field '${f.name}' more than once.`,
           source: `${sys.name}/user`,
         });
@@ -2766,6 +2928,7 @@ function validateAuth(sys: SystemIR, diags: LoomDiagnostic[]): void {
     if (d.auth?.required && !sys.user) {
       diags.push({
         severity: "error",
+        code: "loom.auth-no-user-block",
         message:
           `deployable '${d.name}' has 'auth: required' but system '${sys.name}' declares no 'user { ... }' block. ` +
           `Add a system-level user block describing the JWT claim shape (e.g. 'user { id: string, role: string }').`,
@@ -2786,6 +2949,7 @@ function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagnostic[]
       if (e.kind === "ref" && e.refKind === "current-user") {
         diags.push({
           severity: "error",
+          code: "loom.currentuser-not-in-request-scope",
           message:
             `currentUser is only available in per-request handlers (operations, workflows, view bind expressions, repository find / view where filters). ` +
             `Found in ${location}; remove the reference or move the logic into a per-request body.`,
@@ -2855,6 +3019,7 @@ function validatePermissions(sys: SystemIR, diags: LoomDiagnostic[]): void {
       if (seen.has(p.name)) {
         diags.push({
           severity: "error",
+          code: "loom.duplicate-permission",
           message: `subdomain '${mod.name}': permission '${p.name}' is declared more than once.`,
           source: `${sys.name}/${mod.name}/permissions.${p.name}`,
         });
@@ -2876,6 +3041,7 @@ function validatePermissionRefs(ctx: BoundedContextIR, diags: LoomDiagnostic[]):
         const name = e.value.slice(UNKNOWN_PERMISSION_SENTINEL.length);
         diags.push({
           severity: "error",
+          code: "loom.unknown-permission",
           message:
             `permissions.${name}: no permission named '${name}' is declared in this subdomain's 'permissions { ... }' block. ` +
             `Either add the declaration or fix the reference.`,

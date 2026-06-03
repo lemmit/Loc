@@ -60,7 +60,13 @@ export default defineMacro({
     "host's user-declared fields.  Field-list iteration on the host validates that " +
     "the macro mechanism supports compile-time AST inspection of the target.",
   expand({ target, args }) {
-    const updateFields = writableUpdateFields(target);
+    // Error-recovery ASTs can leave a malformed field (e.g. `count = 0`, a
+    // property written without its `: type`) with no `type` node.  Skip such
+    // fields so the macro surfaces the real syntax error instead of throwing
+    // a cryptic "Cannot read properties of undefined (reading 'array')" from
+    // `cloneType` on top of it.
+    const hasType = (f: { type?: unknown }): boolean => f.type != null;
+    const updateFields = writableUpdateFields(target).filter(hasType);
     // Per-field positional parameters; once input-type synthesis
     // lands this collapses to a single `input: <Name>Input` param.
     const updateParams = updateFields.map((f) => param(f.name, cloneType(f.type)));
@@ -80,7 +86,7 @@ export default defineMacro({
       // Canonical create: the create surface keeps `immutable` fields
       // (settable at creation), so it uses writableCreateFields — a
       // superset of the update params for any aggregate with immutables.
-      const createFields = writableCreateFields(target);
+      const createFields = writableCreateFields(target).filter(hasType);
       const createParams = createFields.map((f) => param(f.name, cloneType(f.type)));
       members.push(create(createParams, assignBody(createFields)));
       // Canonical hard delete — no params, empty body.

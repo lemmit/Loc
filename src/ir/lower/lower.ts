@@ -20,12 +20,10 @@ import type {
   EnumDecl,
   EventDecl,
   Expression,
-  ForStmt,
   FunctionDecl,
   HandleDecl,
   Invariant,
   Layout,
-  LayoutMainSlot,
   LayoutNamedSlot,
   LoadPath,
   MenuBlock,
@@ -45,24 +43,29 @@ import type {
   StateField,
   Statement,
   Storage,
+  Subdomain,
   System,
+  SystemMember,
   Targetable,
   TestBlock,
   TestCase,
   TestE2E,
   ThemeBlock,
   Ui,
+  UserBlock,
   ValueObject,
   View,
   Workflow,
 } from "../../language/generated/ast.js";
 import {
   isAggregate,
+  isApi,
   isApply,
   isAssignOrCallStmt,
   isBoundedContext,
   isCallSuffix,
   isChannel,
+  isChannelSource,
   isComponent,
   isContainment,
   isCreate,
@@ -80,6 +83,7 @@ import {
   isFunctionDecl,
   isHandleDecl,
   isInvariant,
+  isLayout,
   isLetStmt,
   isMemberSuffix,
   isNameRef,
@@ -98,12 +102,14 @@ import {
   isRetrieval,
   isSeed,
   isSolution,
+  isStorage,
   isSubdomain,
   isSystem,
   isTestBlock,
   isTestCase,
   isTestE2E,
   isThemeBlock,
+  isUi,
   isUserBlock,
   isValueObject,
   isView,
@@ -306,6 +312,62 @@ function canonicalFramework(value: string | undefined): string | undefined {
 // ---------------------------------------------------------------------------
 
 export function lowerModel(model: Model): RawLoomModel {
+  // Single-document lowering = a one-element project (composes the file's
+  // own `system` with any top-level domain members it declares).
+  return lowerProject([model]);
+}
+
+/** Lower an entire project — every `.ddd` document in the import graph —
+ *  composing the lone `system { }` block (its name + singletons +
+ *  deployment) with top-level `subdomain` / `context` declarations from
+ *  ANY file into one project system.  See
+ *  docs/proposals/implicit-system-composition.md.
+ *
+ *  Resolution: exactly one `system` block in the project ⇒ fold every
+ *  top-level domain member into it (the user / permission threading in
+ *  `lowerSystem` then applies to them).  Zero or many systems ⇒ legacy
+ *  behaviour: top-level `context`s stay loose (single-deployable mode);
+ *  a stray top-level `subdomain` is a validation error
+ *  (`loom.top-level-domain-needs-single-system`), but its contexts are
+ *  still lowered loose here so nothing is silently dropped. */
+export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
+  const allMembers = models.flatMap((m) => m.members);
+  const systemNodes = allMembers.filter(isSystem);
+  // Every top-level system-scoped declaration across the import graph —
+  // domain (Tier 1: subdomain / context) plus deployment (Tier 2:
+  // deployable / storage / resource / ui / theme / user / api / layout /
+  // e2e).  These fold into the project's single system.
+  const topLevelSystemMembers = allMembers.filter(
+    (
+      m,
+    ): m is
+      | Subdomain
+      | BoundedContext
+      | Deployable
+      | Storage
+      | Resource
+      | ChannelSource
+      | Ui
+      | ThemeBlock
+      | UserBlock
+      | Api
+      | Layout
+      | TestE2E =>
+      isSubdomain(m) ||
+      isBoundedContext(m) ||
+      isDeployable(m) ||
+      isStorage(m) ||
+      isResource(m) ||
+      isChannelSource(m) ||
+      isUi(m) ||
+      isThemeBlock(m) ||
+      isUserBlock(m) ||
+      isApi(m) ||
+      isLayout(m) ||
+      isTestE2E(m),
+  );
+  const compose = systemNodes.length === 1;
+
   const systems: SystemIR[] = [];
   const looseContexts: BoundedContextIR[] = [];
   const rootValueObjects: ValueObjectIR[] = [];
@@ -317,13 +379,18 @@ export function lowerModel(model: Model): RawLoomModel {
   // Root-level VOs / enums have no enclosing context — pass an empty
   // env so `lowerValueObject`'s `inValueObject(env, vo)` still works.
   const rootEnv: Env = { locals: new Map() };
-  for (const m of model.members) {
-    if (isSystem(m)) systems.push(lowerSystem(m));
-    // Top-level loose contexts (legacy single-deployable mode) have
-    // no enclosing system, so no user block ever applies — the env's
-    // `currentUser` resolution falls through to ordinary lookup.
-    else if (isBoundedContext(m)) looseContexts.push(lowerContext(m));
-    else if (isValueObject(m)) rootValueObjects.push(lowerValueObject(m, rootEnv));
+  for (const m of allMembers) {
+    if (isSystem(m)) {
+      systems.push(lowerSystem(m, compose ? topLevelSystemMembers : []));
+    } else if (isBoundedContext(m)) {
+      // Folded into the single system above when composing; otherwise a
+      // legacy loose context (single-deployable mode).
+      if (!compose) looseContexts.push(lowerContext(m));
+    } else if (isSubdomain(m)) {
+      // Folded when composing; otherwise a validation error — still lower
+      // its contexts loose so the IR names them.
+      if (!compose) for (const c of m.contexts) looseContexts.push(lowerContext(c));
+    } else if (isValueObject(m)) rootValueObjects.push(lowerValueObject(m, rootEnv));
     else if (isEnumDecl(m)) rootEnums.push(lowerEnum(m));
     else if (isComponent(m)) components.push(lowerComponent(m));
     else if (isRequirement(m)) requirements.push(lowerRequirement(m));
@@ -481,7 +548,21 @@ function codeRefKindOf(node: Targetable): CodeRefKind {
   }
 }
 
-function lowerSystem(sys: System): SystemIR {
+/** Lower a `system { … }` block.  `extraDomainMembers` are top-level
+ *  `subdomain` / `context` declarations from sibling files (the import
+ *  graph) that compose into THIS system — see `lowerProject` /
+ *  docs/proposals/implicit-system-composition.md.  They are folded in
+ *  alongside `sys.members` so the `user` / `permissions` threading below
+ *  applies to them identically to a nested declaration. */
+function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []): SystemIR {
+  // `extraMembers` are top-level system-scoped declarations from sibling
+  // files (the import graph) that compose into THIS system — subdomains
+  // and contexts (Tier 1) plus the deployment shape (Tier 2: deployable /
+  // storage / resource / ui / theme / user / api / layout / e2e).  Fold
+  // them in alongside `sys.members` so every member-kind pass below treats
+  // them identically to a nested declaration.
+  const members: ReadonlyArray<SystemMember> =
+    extraMembers.length > 0 ? [...sys.members, ...extraMembers] : sys.members;
   // Pre-pass over members: pull the user block out first so every
   // context lowering downstream sees the same shape.  At most one
   // block per system (validator enforces; we take the last one if
@@ -490,7 +571,7 @@ function lowerSystem(sys: System): SystemIR {
   // (otherwise reserved for aggregate identity) is admissible.
   let user: UserIR | undefined;
   let theme: ThemeIR | undefined;
-  for (const m of sys.members) {
+  for (const m of members) {
     if (isUserBlock(m)) {
       user = {
         fields: m.fields.map(
@@ -515,7 +596,11 @@ function lowerSystem(sys: System): SystemIR {
   // Bare `context` declarations directly under a `system` block live in
   // an implicit anonymous subdomain so we can index them like any other.
   const looseContexts: BoundedContextIR[] = [];
-  for (const m of sys.members) {
+  // Fold sibling-file top-level `subdomain` / `context` declarations in
+  // with this system's own members.  Only the Subdomain / BoundedContext
+  // branches below match them; Deployable / TestE2E / Ui / … stay
+  // system-block-only (Tier 1), so iterating the union is safe.
+  for (const m of members) {
     if (isSubdomain(m)) {
       // Subdomain-scoped permissions catalogue.  Multiple
       // `permissions { ... }` blocks merge their declarations;
@@ -596,9 +681,9 @@ function lowerSystem(sys: System): SystemIR {
   // components, scaffolds, and the optional menu block are each turned
   // into their literal IR shape.  Scaffold expansion and body type
   // inference happen in subsequent passes.
-  const uis = sys.members.filter((m): m is Ui => m.$type === "Ui").map((u) => lowerUi(u));
+  const uis = members.filter((m): m is Ui => m.$type === "Ui").map((u) => lowerUi(u));
   // Api declarations — system-level peers to module / ui / deployable.
-  const apis = sys.members
+  const apis = members
     .filter((m): m is Api => m.$type === "Api")
     .map(
       (a): ApiIR => ({
@@ -607,7 +692,7 @@ function lowerSystem(sys: System): SystemIR {
         urlStyle: a.urlStyle === "resource" ? "resource" : "literal",
       }),
     );
-  const storages = sys.members
+  const storages = members
     .filter((m): m is Storage => m.$type === "Storage")
     .map(
       (s): StorageIR => ({
@@ -618,7 +703,7 @@ function lowerSystem(sys: System): SystemIR {
         ...(s.config.length ? { config: s.config.map(lowerConfigEntry) } : {}),
       }),
     );
-  const dataSources = sys.members
+  const dataSources = members
     .filter((m): m is Resource => m.$type === "Resource")
     .map(
       (d): DataSourceIR => ({
@@ -646,7 +731,7 @@ function lowerSystem(sys: System): SystemIR {
   // body is a page-body-shaped expression lowered against the same
   // env shape pages use.  No params or state — layouts are static
   // wrappers, not parametric components.
-  const channelSources = sys.members
+  const channelSources = members
     .filter((m): m is ChannelSource => m.$type === "ChannelSource")
     .map(
       (cs): ChannelSourceIR => ({
@@ -655,7 +740,7 @@ function lowerSystem(sys: System): SystemIR {
         storageName: cs.use?.ref?.name ?? "",
       }),
     );
-  const layouts = sys.members
+  const layouts = members
     .filter((m): m is Layout => m.$type === "Layout")
     .map((l): LayoutIR => lowerLayout(l));
   const built: SystemIR = {

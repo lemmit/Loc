@@ -152,9 +152,9 @@ export function generateReactForContexts(
     topLevelComponents: options.topLevelComponents ?? [],
   };
   const pages = emitPagesForUi(ui, emitCtx);
-  pages.forEach((content, path) => out.set(path, content));
+  for (const [path, content] of pages) out.set(path, content);
   const pageObjects = emitPageObjectsForUi(ui, emitCtx);
-  pageObjects.forEach((content, path) => out.set(path, content));
+  for (const [path, content] of pageObjects) out.set(path, content);
 
   // Workflow UI — the shared workflows API module is 1:1 with the
   // workflow inventory; emit it regardless of the page-emission

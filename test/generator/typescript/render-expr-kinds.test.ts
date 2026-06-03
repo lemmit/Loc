@@ -287,6 +287,7 @@ describe("ts renderTsExpr — binary, unary, paren, ternary", () => {
       renderTsExpr({
         kind: "ternary",
         cond: litBool("true"),
+        // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then`
         then: litInt("1"),
         otherwise: litInt("2"),
       }),

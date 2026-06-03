@@ -83,5 +83,44 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 600_000);
+
+    // D-REALIZATION-AXES Phase 5c: `persistence: dapper` is a SYSTEM-MODE
+    // selection, so `generate dotnet` above never sees it.  Generate the SYSTEM
+    // and build the dapper deployable's project under /warnaserror — proving the
+    // generated Dapper repositories / DbSchema / Npgsql wiring compile.
+    it("system `persistence: dapper` (dotnet) — repositories + schema build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/dapper.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        // Sanity: dapper replaced the EF DbContext with the self-applied schema.
+        expect(fs.existsSync(path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"))).toBe(
+          true,
+        );
+        expect(
+          fs.existsSync(path.join(proj, "Infrastructure", "Persistence", "AppDbContext.cs")),
+        ).toBe(false);
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net8.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
   },
 );

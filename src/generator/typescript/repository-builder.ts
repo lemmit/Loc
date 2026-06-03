@@ -1,17 +1,9 @@
-import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { forApiRead } from "../../ir/enrich/wire-projection.js";
 import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
-  AggregateIR,
-  BoundedContextIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
-  EnrichedEntityPartIR,
-  EntityPartIR,
-  FieldIR,
   FindIR,
   RepositoryIR,
-  TypeIR,
 } from "../../ir/types/loom-ir.js";
 import {
   aggregateUsesMoney,
@@ -19,14 +11,7 @@ import {
   viewUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
-import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
-import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
-import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./emit.js";
-import {
-  associationMapLines,
-  associationsOf,
-  isRefCollection,
-} from "./repository-associations-builder.js";
+import { lowerFirst, plural } from "../../util/naming.js";
 import {
   contextFilterPredicate,
   findByIdMethod,

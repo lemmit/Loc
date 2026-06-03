@@ -1,0 +1,14 @@
+// Minimal invalid model: a cross-aggregate reference written as a bare
+// aggregate name in type position instead of `Customer id`.  Exercises the
+// `loom.bare-aggregate-in-type` validator (phase ④, scope/type) and the
+// always-valid JSON envelope.
+context Sales {
+  aggregate Order {
+    customer: Customer
+    total: int
+  }
+
+  aggregate Customer {
+    name: string
+  }
+}

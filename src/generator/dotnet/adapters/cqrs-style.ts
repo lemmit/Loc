@@ -163,6 +163,7 @@ export const cqrsStyleAdapter: StyleAdapter = {
     emitCqrs(enriched, repo, owningCtx, ns, collected, {
       routePrefix,
       emitTrace: !!ctx.emitTrace,
+      usingDapper: ctx.deployable.persistence === "dapper",
     });
     const out: EmittedArtifact[] = [];
     for (const [path, content] of [...collected.entries()].sort()) {

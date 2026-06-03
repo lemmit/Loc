@@ -1,0 +1,161 @@
+// ── Governance: traceability graph ────────────────────────────────────
+// requirement ─► solution (entitles code) ; testCase (verifies a
+// requirement + covers code).  `ddd generate system` turns the aggregate
+// `test` blocks into runnable vitest specs and joins them onto this graph;
+// `ddd verify` then emits per-requirement Definition-of-Done verdicts under
+// `.loom/`.  Splitting the graph into its own imported file keeps the
+// domain files focused while the requirements still resolve against code
+// declared in main.ddd (traceability is model-global).  See
+// docs/traceability.md.  (Trace IDs must end in `-<number>`.)
+
+// ── Sales ─────────────────────────────────────────────────────────────
+requirement US-SALES-1 {
+  type: UserStory
+  title: "A sales rep can place a confirmed order for a customer"
+  status: InProgress
+  priority: 1
+}
+requirement AC-SALES-1 parent US-SALES-1 {
+  type: AcceptanceCriteria
+  title: "An order can only be confirmed when it has at least one line"
+}
+solution SOL-SALES-1 for US-SALES-1 {
+  title: "SalesOrder aggregate tree + transactional placeOrder workflow"
+  entitles [
+    Sales.Sales.SalesOrder.addLine,
+    Sales.Sales.SalesOrder.confirm,
+    Sales.Sales.placeOrder
+  ]
+}
+testCase TC-SALES-1 verifies AC-SALES-1 {
+  title: "Add a line then confirm the order"
+  covers [
+    Sales.Sales.SalesOrder.addLine,
+    Sales.Sales.SalesOrder.confirm
+  ]
+}
+
+// ── Inventory ─────────────────────────────────────────────────────────
+requirement US-INV-1 {
+  type: UserStory
+  title: "A warehouse operator can receive and issue stock against an item"
+  status: InProgress
+}
+requirement AC-INV-1 parent US-INV-1 {
+  type: AcceptanceCriteria
+  title: "Stock cannot be issued below the quantity on hand"
+}
+solution SOL-INV-1 for US-INV-1 {
+  title: "StockItem receive/issue operations with an on-hand guard"
+  entitles [
+    Inventory.Inventory.StockItem.receive,
+    Inventory.Inventory.StockItem.issue
+  ]
+}
+testCase TC-INV-1 verifies AC-INV-1 {
+  title: "Receive then over-issue is rejected"
+  covers [
+    Inventory.Inventory.StockItem.receive,
+    Inventory.Inventory.StockItem.issue
+  ]
+}
+
+// ── Procurement ───────────────────────────────────────────────────────
+requirement US-PROC-1 {
+  type: UserStory
+  title: "A buyer can raise a purchase order and receive the goods"
+  status: InProgress
+}
+requirement AC-PROC-1 parent US-PROC-1 {
+  type: AcceptanceCriteria
+  title: "Receiving goods marks the purchase order received atomically"
+}
+solution SOL-PROC-1 for US-PROC-1 {
+  title: "PurchaseOrder line capture + transactional receiveGoods workflow"
+  entitles [
+    Procurement.Procurement.PurchaseOrder.addLine,
+    Procurement.Procurement.PurchaseOrder.markReceived,
+    Procurement.Procurement.receiveGoods
+  ]
+}
+testCase TC-PROC-1 verifies AC-PROC-1 {
+  title: "Add a PO line then receive against it"
+  covers [
+    Procurement.Procurement.PurchaseOrder.addLine,
+    Procurement.Procurement.receiveGoods
+  ]
+}
+
+// ── CRM ───────────────────────────────────────────────────────────────
+requirement US-CRM-1 {
+  type: UserStory
+  title: "A rep can qualify and convert a lead through the pipeline"
+  status: InProgress
+}
+requirement AC-CRM-1 parent US-CRM-1 {
+  type: AcceptanceCriteria
+  title: "A lead can only be converted once it has been qualified"
+}
+solution SOL-CRM-1 for US-CRM-1 {
+  title: "Lead qualify/convert lifecycle"
+  entitles [
+    Crm.Crm.Lead.qualify,
+    Crm.Crm.Lead.convert
+  ]
+}
+testCase TC-CRM-1 verifies AC-CRM-1 {
+  title: "Qualify then convert a lead"
+  covers [
+    Crm.Crm.Lead.qualify,
+    Crm.Crm.Lead.convert
+  ]
+}
+
+// ── Finance ───────────────────────────────────────────────────────────
+requirement US-FIN-1 {
+  type: UserStory
+  title: "An accountant can post debits and credits to a ledger account"
+  status: Approved
+}
+requirement AC-FIN-1 parent US-FIN-1 {
+  type: AcceptanceCriteria
+  title: "The ledger balance is the fold of its debit/credit event stream"
+}
+solution SOL-FIN-1 for US-FIN-1 {
+  title: "Event-sourced GeneralLedgerAccount with apply-fold balances"
+  entitles [
+    Finance.Ledger.GeneralLedgerAccount.debit,
+    Finance.Ledger.GeneralLedgerAccount.credit
+  ]
+}
+testCase TC-FIN-1 verifies AC-FIN-1 {
+  title: "Debit then credit reconstructs the expected balance"
+  covers [
+    Finance.Ledger.GeneralLedgerAccount.debit,
+    Finance.Ledger.GeneralLedgerAccount.credit
+  ]
+}
+
+// ── People (HR) ───────────────────────────────────────────────────────
+requirement US-HR-1 {
+  type: UserStory
+  title: "An HR manager can promote an active employee"
+  status: InProgress
+}
+requirement AC-HR-1 parent US-HR-1 {
+  type: AcceptanceCriteria
+  title: "Only an HR role (or the employeesManage permission) may promote"
+}
+solution SOL-HR-1 for US-HR-1 {
+  title: "Employee.promote behind a `requires` authorization gate"
+  entitles [
+    People.People.Employee.promote,
+    People.People.Employee.terminate
+  ]
+}
+testCase TC-HR-1 verifies AC-HR-1 {
+  title: "A non-HR caller without the permission is refused (403)"
+  covers [
+    People.People.Employee.promote
+  ]
+}

@@ -52,7 +52,7 @@ import type {
   UiIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
-import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
+import { humanize, snake, upperFirst } from "../../util/naming.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { heexTarget } from "./heex-target.js";
 

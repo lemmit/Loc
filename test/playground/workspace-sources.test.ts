@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
 import { GitStore, openGitFs } from "../../web/src/workspace/git/index.js";
 import {

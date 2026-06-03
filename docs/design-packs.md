@@ -540,7 +540,7 @@ design: ashPhoenix               // forced for phoenixLiveView platform
 The five shipped families: `mantine` (v7, v9), `shadcn` (v3, v4),
 `mui` (v5, v7), `chakra` (v2, v3), `ashPhoenix` (v3).  The current
 bareword defaults live in `BUILTIN_PACK_LATEST` in
-`src/generator/_packs/builtin-formats.ts`.
+`src/util/builtin-formats.ts`.
 
 The loader (`src/generator/_packs/loader-fs.ts:resolvePackDir`)
 resolves identifiers in this order:
@@ -690,7 +690,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
 
 ### Step 5 — Register the new version
 
-Add the qualified name to `src/generator/_packs/builtin-formats.ts`:
+Add the qualified name to `src/util/builtin-formats.ts`:
 
 ```ts
 export const BUILTIN_PACK_FORMATS = {
@@ -767,7 +767,7 @@ catches class-shape mismatches `tsc --noEmit` lets through.
 In a separate PR after the new version has soaked:
 
 1. Flip `BUILTIN_PACK_LATEST.<family>` from `<vOld>` to `<vNew>` in
-   `src/generator/_packs/builtin-formats.ts`.
+   `src/util/builtin-formats.ts`.
 2. Regenerate the byte-equivalence baseline:
 
    ```bash
@@ -800,7 +800,7 @@ In a separate PR after the new version has soaked:
 - `src/generator/_packs/loader.ts` — pure compile core
 - `src/generator/_packs/loader-fs.ts` — Node FS adapter
 - `src/generator/_packs/loader-vfs.ts` — playground VFS adapter
-- `src/generator/_packs/builtin-formats.ts` — built-in pack format map + bareword defaults
+- `src/util/builtin-formats.ts` — built-in pack format map + bareword defaults
 - `stacks/<id>/` — stack definitions (`v1`, `v2`, `v3`)
 - `designs/<family>/<version>/` — reference implementations
 - `test/generated-react-build.test.ts` — the static-validation gate

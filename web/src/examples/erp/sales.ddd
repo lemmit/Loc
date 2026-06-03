@@ -1,0 +1,215 @@
+// ── Sales subdomain — split out of the Acme ERP project.
+// A top-level `subdomain` composes into the single `system` declared in
+// main.ddd (implicit-system-composition).
+
+// ════════════════════════════════════════════════════════════════════
+//  SALES — quote-to-order, the revenue front door.
+// ════════════════════════════════════════════════════════════════════
+subdomain Sales {
+  context Sales {
+
+    enum SalesOrderStatus { Draft, Confirmed, Fulfilled, Cancelled }
+    enum QuoteStatus      { Draft, Sent, Accepted, Expired }
+
+    // ── Payload family — the structured carriers crossing the API
+    // boundary.  Four sugar keywords (command/query/response/error)
+    // over the same flat-record shape, each carrying its intent.
+    command  PlaceOrderCmd     { customerRef: string, priority: Priority }
+    query    FindOrdersByStatus { status: SalesOrderStatus }
+    response OrderSummary       { reference: string, status: SalesOrderStatus, total: decimal }
+    error    OrderRejected      { reference: string, reason: string }
+
+    // ── Events carried by the SalesEvents channel below.
+    event SalesOrderConfirmed { order: SalesOrder id, total: decimal, at: datetime }
+    event SalesOrderFulfilled { order: SalesOrder id, at: datetime }
+
+    aggregate Customer with crudish {
+      name: string
+      contact: ContactInfo
+      billingAddress: Address
+      creditLimit: Money
+      active: bool = true
+      invariant name.length > 0
+      derived display: string = name
+    }
+
+    // The aggregate tree: a SalesOrder owns its SalesOrderLine parts.
+    aggregate SalesOrder with crudish {
+      reference: string
+      customerId: Customer id
+      status: SalesOrderStatus = Draft
+      priority: Priority = Normal
+      placedAt: datetime managed
+      shipTo: Address
+      contains lines: SalesOrderLine[]
+
+      derived lineCount: int = lines.count
+      derived subtotal: decimal = lines.sum(l => l.lineTotal)
+      derived display: string = reference
+
+      invariant reference.length > 0
+      invariant lines.count > 0 when status == Confirmed
+
+      function isMutable(): bool = status == Draft
+
+      operation addLine(productRef: string, description: string, unitPrice: Money, qty: int) {
+        precondition isMutable()
+        precondition qty > 0
+        lines += SalesOrderLine {
+          productRef: productRef,
+          description: description,
+          unitPrice: unitPrice,
+          qty: qty
+        }
+      }
+
+      operation confirm() {
+        precondition isMutable()
+        precondition lines.count > 0
+        status := Confirmed
+        emit SalesOrderConfirmed { order: id, total: subtotal, at: now() }
+      }
+
+      operation fulfill() {
+        precondition status == Confirmed
+        status := Fulfilled
+        emit SalesOrderFulfilled { order: id, at: now() }
+      }
+
+      operation cancel(reason: string) {
+        precondition status != Fulfilled
+        precondition status != Cancelled
+        status := Cancelled
+      }
+
+      entity SalesOrderLine {
+        productRef: string
+        description: string
+        unitPrice: Money
+        qty: int
+        derived lineTotal: decimal = unitPrice.amount * qty
+        invariant qty > 0
+      }
+
+      test "adding a line then confirming yields a confirmed order" verifies TC-SALES-1 {
+        let order = SalesOrder.create({
+          reference: "SO-TEST-1",
+          customerId: "00000000-0000-0000-0000-000000000001",
+          status: Draft,
+          priority: Normal,
+          shipTo: { line1: "1 Test St", city: "Testville", region: "TS", postalCode: "00001", country: US }
+        })
+        order.addLine("PRD-1", "Widget", Money { amount: 5.00, currency: "USD" }, 2)
+        order.confirm()
+        expect(order.status).toBe(Confirmed)
+        expect(order.lineCount).toBe(1)
+      }
+
+      test "lines cannot be added once confirmed" verifies TC-SALES-1 {
+        let order = SalesOrder.create({
+          reference: "SO-TEST-2",
+          customerId: "00000000-0000-0000-0000-000000000001",
+          status: Draft,
+          priority: Normal,
+          shipTo: { line1: "1 Test St", city: "Testville", region: "TS", postalCode: "00001", country: US }
+        })
+        order.addLine("PRD-1", "Widget", Money { amount: 5.00, currency: "USD" }, 2)
+        order.confirm()
+        expectThrows order.addLine("PRD-2", "Gadget", Money { amount: 9.00, currency: "USD" }, 1)
+      }
+    }
+
+    aggregate Quote with crudish {
+      reference: string
+      customerId: Customer id
+      status: QuoteStatus = Draft
+      amount: Money
+      probability: Percentage
+      validUntil: datetime
+      invariant reference.length > 0
+      derived display: string = reference
+
+      operation send() {
+        precondition status == Draft
+        status := Sent
+      }
+      operation accept() {
+        precondition status == Sent
+        status := Accepted
+      }
+    }
+
+    // ── Criterion — named, reusable predicates (Specification Pattern).
+    criterion OpenOrder of SalesOrder = status == Draft || status == Confirmed
+    criterion ForCustomer(c: Customer id) of SalesOrder = customerId == c
+
+    // ── Retrieval — a named query bundle (predicate + sort); pagination
+    // is supplied at the call site, not here.
+    retrieval OpenOrdersFor(c: Customer id) of SalesOrder {
+      where: OpenOrder && ForCustomer(c)
+      sort:  [placedAt desc]
+    }
+
+    repository Customers for Customer {
+      find byEmail(email: string): Customer? where this.contact.email == email
+      find active(): Customer[] where this.active == true
+    }
+    repository SalesOrders for SalesOrder {
+      find byCustomer(customerId: Customer id): SalesOrder[] where this.customerId == customerId
+      find open(): SalesOrder[] where OpenOrder
+    }
+    repository Quotes for Quote {
+      find byCustomer(customerId: Customer id): Quote[] where this.customerId == customerId
+    }
+
+    // ── View — a saved typed query (shorthand form: result shape is the
+    // source aggregate's wire shape).
+    view ConfirmedOrders = SalesOrder where status == Confirmed
+
+    // ── Transactional workflow: create + confirm an order atomically.
+    // If `confirm`'s precondition throws, the whole creation rolls back.
+    workflow placeOrder(
+      customerId: Customer id,
+      reference: string,
+      productRef: string,
+      unitPrice: Money,
+      qty: int,
+      shipTo: Address
+    ) transactional {
+      precondition qty > 0
+      let order = SalesOrder.create({
+        reference: reference,
+        customerId: customerId,
+        status: Draft,
+        priority: Normal,
+        shipTo: shipTo
+      })
+      order.addLine(productRef, "Ordered item", unitPrice, qty)
+      order.confirm()
+    }
+
+    // ── Channel — the publisher-side transport contract for this
+    // context's events; bound to the Kafka bus by `salesBus` (system scope).
+    channel SalesEvents {
+      carries: SalesOrderConfirmed, SalesOrderFulfilled
+      delivery: broadcast
+      retention: log
+      key: order
+    }
+
+    // ── Declarative seed — each row lowered through the canonical create,
+    // so invariants hold on first boot.
+    seed default {
+      Customer { name: "Globex Corporation",
+                 contact: { email: "ap@globex.example", phone: "+1-555-0100" },
+                 billingAddress: { line1: "500 Industrial Way", city: "Springfield", region: "IL", postalCode: "62701", country: US },
+                 creditLimit: { amount: 50000.00, currency: "USD" },
+                 active: true }
+      Customer { name: "Initech Ltd",
+                 contact: { email: "purchasing@initech.example" },
+                 billingAddress: { line1: "1 Office Park", city: "London", region: "LDN", postalCode: "EC1A1BB", country: GB },
+                 creditLimit: { amount: 25000.00, currency: "GBP" },
+                 active: true }
+    }
+  }
+}

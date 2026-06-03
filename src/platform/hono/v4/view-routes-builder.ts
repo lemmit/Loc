@@ -170,7 +170,7 @@ function emitViewRoute(
   out.push(`  async (httpCtx) => {`);
   if (usesUser) {
     out.push(
-      `    const currentUser = httpCtx.get("currentUser") as import("../auth/user-types").User;`,
+      `    const currentUser = (httpCtx as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
   }
   out.push(`    const repo = new ${view.aggregateName}Repository(db, events);`);
@@ -297,6 +297,7 @@ function idFollowPath(e: ExprIR): string[] | undefined {
  *  inline as a string-literal union pulled from `enumValues`. */
 function zodForRow(t: TypeIR, enumValues: Map<string, string[]>): string {
   switch (t.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
       switch (t.name) {
         case "int":

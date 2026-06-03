@@ -702,7 +702,7 @@ deployable (`migrationsOwner` enrichment in
 their syntax via the per-platform emitters listed below — they never
 recompute the schema themselves.  Shared SQL rendering for the two
 Postgres-backed emitters lives in
-[`src/system/sql-pg.ts`](../src/system/sql-pg.ts).
+[`src/generator/sql-pg.ts`](../src/generator/sql-pg.ts).
 
 | Backend | Emits | Applied by |
 | --- | --- | --- |
@@ -711,7 +711,7 @@ Postgres-backed emitters lives in
 | .NET | `Migrations/<Version>_<Name>.cs` (`migrationBuilder.Sql(@"...")`) | `db.Database.Migrate()` in `Program.cs` after `builder.Build()`; no `ModelSnapshot` is emitted — Loom owns SQL generation, so `dotnet ef migrations add` is never run and the runtime migrator is happy without one |
 
 Phoenix stays in Ecto DSL because its output is Elixir.  Hono and
-.NET share `src/system/sql-pg.ts` for bit-identical Postgres DDL.
+.NET share `src/generator/sql-pg.ts` for bit-identical Postgres DDL.
 
 Initial regen of an output tree emits one "Initial" migration per
 subdomain per backend.  Subsequent regens diff against the snapshot and

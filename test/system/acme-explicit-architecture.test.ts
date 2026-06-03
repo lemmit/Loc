@@ -45,10 +45,8 @@ describe("examples/acme.ddd — explicit architecture migration", () => {
     const apiNames = sys.apis.map((a) => a.name).sort();
     expect(apiNames).toEqual(["CatalogApi", "CustomerMgmtApi", "SalesApi"]);
     // Each api derives from its module of the same root name.
-    const sources = sys.apis.reduce<Record<string, string>>(
-      (acc, a) => ({ ...acc, [a.name]: a.sourceModule }),
-      {},
-    );
+    const sources: Record<string, string> = {};
+    for (const a of sys.apis) sources[a.name] = a.sourceModule;
     expect(sources).toEqual({
       CatalogApi: "Catalog",
       SalesApi: "Sales",

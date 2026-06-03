@@ -41,15 +41,27 @@
         "useTemplate": "off"
       },
       "suspicious": {
-        "noFallthroughSwitchClause": "warn",
-        "noAssignInExpressions": "warn",
-        "useIterableCallbackReturn": "warn",
-        "noThenProperty": "warn",
-        "noSelfCompare": "warn"
+        "noFallthroughSwitchClause": "error",
+        "noAssignInExpressions": "error",
+        "useIterableCallbackReturn": "error",
+        "noThenProperty": "error",
+        "noSelfCompare": "error"
       },
       "performance": {
-        "noAccumulatingSpread": "warn"
+        "noAccumulatingSpread": "error"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["test/macro/**/*.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    }
+  ]
 }

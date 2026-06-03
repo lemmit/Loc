@@ -88,7 +88,7 @@ Three findings from this session point at the same gap:
 
 Bump each `pack.json` `"version"` from the placeholder `"0.1.0"` to `"v7"` / `"v2"` / etc.
 
-### `src/generator/_packs/builtin-formats.ts`
+### `src/util/builtin-formats.ts`
 
 Rewrite to version-keyed maps + a parsing helper:
 
@@ -229,7 +229,7 @@ Once a new pack version has been live for a release cycle:
 
 ## Critical files
 
-- `src/generator/_packs/builtin-formats.ts` — version maps + `parseBuiltinDesignRef` helper.
+- `src/util/builtin-formats.ts` — version maps + `parseBuiltinDesignRef` helper.
 - `src/generator/_packs/loader-fs.ts:60` — `resolvePackDir` (Node).
 - `web/src/build/loader-vfs.ts:77` — `resolvePackDir` (browser VFS); delete the hardcoded set at line 35.
 - `web/src/build/template-bundled.ts` — glob + path-extract for the version axis.

@@ -16,6 +16,7 @@ export interface OpenApiSchema {
   properties?: Record<string, unknown>;
   items?: OpenApiSchema;
   $ref?: string;
+  required?: string[];
 }
 
 export interface OpenApiSpec {
@@ -193,7 +194,7 @@ export function schemaNames(spec: OpenApiSpec): Set<string> {
  * change clients would notice (a field flipping required → optional).
  */
 export function requiredSet(spec: OpenApiSpec, schemaName: string): Set<string> {
-  const schema = spec.components?.schemas?.[schemaName] as { required?: string[] } | undefined;
+  const schema = spec.components?.schemas?.[schemaName];
   return new Set((schema?.required ?? []).filter((k) => !k.endsWith("_provenance")));
 }
 

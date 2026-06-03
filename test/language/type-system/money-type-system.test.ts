@@ -367,7 +367,7 @@ describe("money — array.sum is money-aware", () => {
     `);
     const { allAggregates } = await import("../../../src/ir/types/loom-ir.js");
     const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
-    const total = inv.derived.find((d) => d.name === "total")!;
+    const _total = inv.derived.find((d) => d.name === "total")!;
     // The IR-side wireShape for the derived 'total' field carries the
     // computed type — money preserved through the collection-op.
     const totalField = inv.wireShape!.find((f) => f.name === "total");

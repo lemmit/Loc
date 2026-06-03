@@ -1,0 +1,88 @@
+// ═══════════════════════════════════════════════════════════════════════
+//  Acme ERP — a full, multi-file enterprise resource-planning system.
+// ═══════════════════════════════════════════════════════════════════════
+//
+//  This is the deliberately-maximal Loom showcase: one `system` that fuses
+//  six subdomains the way a real ERP does, wired onto a heterogeneous
+//  deployment (a Hono operations backend + React back-office, plus two
+//  .NET services for Finance and HR where capabilities/auth/event-sourcing
+//  matter most).  It exercises essentially the whole language surface.
+//
+//  The project is split ONE FILE PER SUBDOMAIN, with the deployment in its
+//  own file too: this `main.ddd` holds ONLY the system's name + the `user`
+//  and `theme` singletons.  Each `subdomain` and every deployment
+//  declaration (`storage` / `resource` / `deployable` / `ui` / `test e2e`)
+//  is a top-level declaration in its own file that composes into this single
+//  `system` (docs/proposals/implicit-system-composition.md).
+//
+//  ── File layout (open the tabs above the editor) ──────────────────────
+//    main.ddd ................ this file — just `system AcmeErp { user theme }`
+//    deploy.ddd ............. storage, resources, channelSource, the UI
+//                              (BackOffice + Dashboard), deployables, e2e tests
+//    sales.ddd ............... subdomain Sales
+//    inventory.ddd .......... subdomain Inventory (+ the Quantity root VO)
+//    procurement.ddd ........ subdomain Procurement
+//    crm.ddd ................ subdomain Crm
+//    finance.ddd ............ subdomain Finance (Billing + Ledger contexts)
+//    hr.ddd ................. subdomain People
+//    shared/money.ddd ....... Currency + Money + Percentage (ambient kernel)
+//    shared/geo.ddd ......... Country + Address + GeoPoint
+//    shared/common.ddd ...... Priority/ApprovalStatus/UnitOfMeasure + names
+//    ui/components.ddd ...... reusable top-level UI components
+//    governance/requirements.ddd  requirements → solutions → testCases
+//
+//  ── Feature map (where to look) ───────────────────────────────────────
+//    Sales ......... aggregate tree, Money VO, criterion, retrieval,
+//                    payload family, channel/channelSource, seed, views,
+//                    transactional workflow, aggregate tests
+//    Inventory ..... cross-context `X id`, Quantity VO, nested parts,
+//                    managed fields, guid ids, non-transactional `for…in`
+//    Procurement ... extern operation, provenanced field, approval flow,
+//                    transactional goods-receipt workflow
+//    Crm ........... abstract aggregate + `extends` (TPH/sharedTable),
+//                    polymorphic reader, pipeline stages, derived match
+//    Finance ....... `money`/`json` primitives, shape(document)+shape(embedded),
+//                    TPC inheritance (ownTable) — Billing on .NET; the
+//                    event-sourced ledger (persistedAs(eventLog) + apply)
+//                    runs on the Hono backend (event-sourcing is Hono-only)
+//    People (HR) ... auth `user{}` + `currentUser`, subdomain permissions,
+//                    capabilities (audit/softDelete + a hand-written tenant
+//                    filter), `requires` vs `precondition`, sensitive(pii),
+//                    row-level visibility, .NET deployable with auth
+// ═══════════════════════════════════════════════════════════════════════
+
+import "./shared/money.ddd"
+import "./shared/geo.ddd"
+import "./shared/common.ddd"
+import "./ui/components.ddd"
+import "./governance/requirements.ddd"
+import "./sales.ddd"
+import "./inventory.ddd"
+import "./procurement.ddd"
+import "./crm.ddd"
+import "./finance.ddd"
+import "./hr.ddd"
+import "./deploy.ddd"
+
+system AcmeErp {
+
+  // The JWT claim shape the Finance/HR verifier middleware decodes per
+  // request; every `currentUser.<field>` below type-checks against it.
+  user {
+    id: string
+    role: string
+    permissions: string[]
+    tenantId: string
+    employeeId: string
+  }
+
+  // Corporate identity — projected by each React pack to its own idiom.
+  theme {
+    primary: "#2563eb"
+    neutral: "#475569"
+    accent: "#f59e0b"
+    radius: "md"
+    fontFamily: "Inter, system-ui, sans-serif"
+  }
+
+}

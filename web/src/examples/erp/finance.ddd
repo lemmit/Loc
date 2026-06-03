@@ -1,0 +1,175 @@
+// ── Finance subdomain — split out of the Acme ERP project.
+// A top-level `subdomain` composes into the single `system` declared in
+// main.ddd (implicit-system-composition).
+
+// ════════════════════════════════════════════════════════════════════
+//  FINANCE — billing (persistence shapes) + ledger (TPC + event source).
+//  Hosted on a dedicated .NET service: EF Core implements every storage
+//  shape and the `money`/`json` primitives end-to-end.
+// ════════════════════════════════════════════════════════════════════
+subdomain Finance {
+
+  context Billing {
+
+    enum InvoiceStatus { Draft, Issued, Paid, Void }
+    enum PaymentMethod { Card, BankTransfer, Cash, Cheque }
+
+    // `money` primitive — a precise decimal with closed arithmetic
+    // (money ± money, money × decimal), distinct from the Money VO.
+    // `json` primitive — an opaque blob Loom never looks inside.
+    aggregate Invoice with crudish {
+      number: string
+      customerRef: string
+      subtotal: money
+      taxRate: decimal = 0
+      status: InvoiceStatus = Draft
+      metadata: json
+
+      derived tax:   money = subtotal * taxRate
+      derived total: money = subtotal + tax
+      derived display: string = number
+
+      invariant number.length > 0
+      invariant subtotal >= 0
+
+      operation issue() {
+        precondition status == Draft
+        status := Issued
+      }
+      operation pay() {
+        precondition status == Issued
+        status := Paid
+      }
+      operation applyCredit(amount: money) {
+        precondition status == Draft
+        precondition amount > 0
+        precondition amount <= subtotal
+        subtotal := subtotal - amount
+      }
+    }
+
+    aggregate Payment with crudish {
+      invoiceRef: string
+      amount: money
+      method: PaymentMethod
+      receivedAt: datetime managed
+      derived display: string = invoiceRef
+    }
+
+    // shape(document) — the whole aggregate (root + contained lines)
+    // serialises to one JSONB blob.  Document/embedded aggregates use an
+    // explicit canonical `create` (no crudish hard-delete on a blob).
+    aggregate Receipt shape(document) {
+      store: string
+      contains lines: ReceiptLine[]
+
+      create(store: string) { store := store }
+
+      derived total: money = lines.sum(l => l.amount)
+      derived display: string = store
+      invariant lines.count >= 0
+
+      operation addLine(label: string, amount: money) {
+        precondition amount > 0
+        lines += ReceiptLine { label: label, amount: amount }
+      }
+
+      entity ReceiptLine {
+        label: string
+        amount: money
+        invariant amount > 0
+      }
+    }
+
+    // shape(embedded) — the root (owner, label) stays queryable columns;
+    // the contained TagItem parts fold into a JSONB column.
+    aggregate TagList shape(embedded) {
+      owner: string
+      label: string
+      contains tags: TagItem[]
+
+      create(owner: string, label: string) {
+        owner := owner
+        label := label
+      }
+
+      invariant label.length > 0
+      derived display: string = label
+
+      operation addTag(name: string) {
+        tags += TagItem { name: name }
+      }
+
+      entity TagItem {
+        name: string
+        invariant name.length > 0
+      }
+    }
+
+    repository Invoices for Invoice {
+      find byStatus(status: InvoiceStatus): Invoice[] where this.status == status
+    }
+    repository Payments for Payment {
+      find byInvoice(invoiceRef: string): Payment[] where this.invoiceRef == invoiceRef
+    }
+    repository Receipts for Receipt { }
+    repository TagLists for TagList { }
+
+    view UnpaidInvoices = Invoice where status == Issued
+  }
+
+  context Ledger {
+
+    enum AccountKind { Asset, Liability, Equity, Revenue, Expense }
+
+    event LedgerDebited  { account: GeneralLedgerAccount id, amount: money, at: datetime }
+    event LedgerCredited { account: GeneralLedgerAccount id, amount: money, at: datetime }
+
+    // ── TPC inheritance (ownTable) ───────────────────────────────────
+    // Abstract base, no table of its own; each concrete gets its OWN
+    // table (no discriminator).  The polymorphic reader is auto-emitted
+    // as the union of the concrete loaders.
+    abstract aggregate Account inheritanceUsing(ownTable) {
+      name: string
+      kind: AccountKind
+      invariant name.length > 0
+      derived display: string = name
+    }
+
+    aggregate CashAccount extends Account inheritanceUsing(ownTable) with crudish {
+      location: string
+    }
+    aggregate BankAccount extends Account inheritanceUsing(ownTable) with crudish {
+      iban: string
+      bankName: string
+    }
+
+    // ── Event sourcing (persistedAs(eventLog)) ───────────────────────
+    // The account's truth is its event stream; the `apply(...)` bodies
+    // are the only place state mutates — replaying rebuilds the balance.
+    aggregate GeneralLedgerAccount persistedAs(eventLog) {
+      code: string
+      balance: money
+
+      invariant code.length > 0
+
+      operation debit(amount: money) {
+        precondition amount > 0
+        emit LedgerDebited { account: id, amount: amount, at: now() }
+      }
+      operation credit(amount: money) {
+        precondition amount > 0
+        emit LedgerCredited { account: id, amount: amount, at: now() }
+      }
+
+      apply(e: LedgerDebited)  { balance := balance - e.amount }
+      apply(e: LedgerCredited) { balance := balance + e.amount }
+    }
+
+    repository CashAccounts for CashAccount { }
+    repository BankAccounts for BankAccount { }
+    repository GeneralLedgerAccounts for GeneralLedgerAccount {
+      find byCode(code: string): GeneralLedgerAccount? where this.code == code
+    }
+  }
+}

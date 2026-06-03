@@ -5,7 +5,6 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
-  EntityPartIR,
   IdValueType,
   TypeIR,
   ValueObjectIR,

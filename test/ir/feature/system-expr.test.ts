@@ -15,7 +15,6 @@ import {
   type ExprSlot,
   editExprSlot,
   enumPickerCandidates,
-  exprHints,
   exprSlotOptions,
   listDerived,
   listInvariants,
@@ -100,6 +99,7 @@ describe("structured expression editor — model", () => {
     expect(tree).toMatchObject({
       kind: "ternary",
       cond: { kind: "binary", op: ">" },
+      // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then`
       then: { kind: "lit", lit: "string", value: "yes" },
       else: { kind: "lit", lit: "string", value: "no" },
     });

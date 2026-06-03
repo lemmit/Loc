@@ -1,0 +1,26 @@
+// ── Shared kernel: geography ──────────────────────────────────────────
+// Postal addresses and coordinates, shared by Sales (ship-to), Procurement
+// (supplier), Inventory (warehouse) and HR (work location).
+
+enum Country { US, GB, DE, FR, PL, JP }
+
+valueobject Address {
+  line1: string
+  line2: string?
+  city: string
+  region: string
+  postalCode: string
+  country: Country
+  invariant line1.length > 0
+  invariant postalCode.length > 0
+  derived display: string = line1 + ", " + city + " " + postalCode
+}
+
+valueobject GeoPoint {
+  lat: decimal
+  lng: decimal
+  invariant lat >= -90
+  invariant lat <= 90
+  invariant lng >= -180
+  invariant lng <= 180
+}

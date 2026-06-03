@@ -1479,7 +1479,10 @@ describe("typescript generator", () => {
       expect(order).toMatch(/cancel\([^)]*currentUser: User[^)]*\)/);
       expect(order).toMatch(/currentUser\.role/);
       const route = files.get("http/order.routes.ts")!;
-      expect(route).toMatch(/c\.get\("currentUser"\)/);
+      // The context's Variables map doesn't declare `currentUser`, so the
+      // read goes through a cast (`(c as unknown as { get(k: "currentUser") … })`)
+      // — a bare `c.get("currentUser")` fails to type-check (key never).
+      expect(route).toMatch(/const currentUser = \(c as unknown as \{ get\(k: "currentUser"\)/);
       expect(route).toMatch(/aggregate\.cancel\(currentUser\)/);
     });
 
@@ -1522,14 +1525,16 @@ describe("typescript generator", () => {
       // failed guard raises ForbiddenError, which onError maps to 403.
       const files = await emitForAuthSystem(SRC_WORKFLOW_GUARD);
       const wf = files.get("http/workflows.ts")!;
+      // Read via a cast — the context Variables map has no `currentUser` key,
+      // so a bare `httpCtx.get("currentUser")` would not type-check.
       expect(wf).toMatch(
-        /const currentUser = httpCtx\.get\("currentUser"\) as import\("\.\.\/auth\/user-types"\)\.User;/,
+        /const currentUser = \(httpCtx as unknown as \{ get\(k: "currentUser"\): import\("\.\.\/auth\/user-types"\)\.User \}\)\.get\("currentUser"\);/,
       );
       expect(wf).toMatch(/if \(!\(currentUser\.role === "admin"\)\) throw new ForbiddenError\(/);
       expect(wf).toMatch(/if \(err instanceof ForbiddenError\) return problem\(403,/);
       // The binding is conditional: only the guarded workflow's handler
       // gets it — `touchOne` never references currentUser.
-      expect((wf.match(/httpCtx\.get\("currentUser"\)/g) ?? []).length).toBe(1);
+      expect((wf.match(/\.get\("currentUser"\)/g) ?? []).length).toBe(1);
       // The guarded workflow DECLARES 403 in its OpenAPI responses (the
       // unguarded `touchOne` does not) — exactly one 403 across the file.
       expect(wf).toMatch(
@@ -1615,14 +1620,16 @@ describe("typescript generator", () => {
     it('find route reads c.get("currentUser") and threads it into the repo call', async () => {
       const files = await emitForAuthSystem(SRC_FILTER_AUTH);
       const route = files.get("http/order.routes.ts")!;
-      expect(route).toMatch(/c\.get\("currentUser"\)/);
+      expect(route).toMatch(/const currentUser = \(c as unknown as \{ get\(k: "currentUser"\)/);
       expect(route).toMatch(/repo\.mine\(currentUser\)/);
     });
 
     it('view route reads c.get("currentUser") and threads it into the repo call', async () => {
       const files = await emitForAuthSystem(SRC_FILTER_AUTH);
       const views = files.get("http/views.ts")!;
-      expect(views).toMatch(/httpCtx\.get\("currentUser"\)/);
+      expect(views).toMatch(
+        /const currentUser = \(httpCtx as unknown as \{ get\(k: "currentUser"\)/,
+      );
       expect(views).toMatch(/repo\.myOrders\(currentUser\)/);
     });
 

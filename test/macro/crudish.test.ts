@@ -287,4 +287,25 @@ describe("crudish via IR lowering", () => {
     }
     expect(found).toBe(true);
   });
+
+  it("degrades gracefully on a malformed field instead of throwing inside the macro", async () => {
+    // A field written without its `: type` (here `count = 0`) is a syntax
+    // error; error-recovery leaves the Property with no `type` node.  The
+    // macro must skip it and let the syntax error surface — not crash with
+    // "Cannot read properties of undefined (reading 'array')" on top.
+    const { errors } = await parseString(
+      wrap(`
+        subdomain M { context C {
+          aggregate Item with crudish {
+            name: string
+            count = 0
+          }
+        } }
+      `),
+    );
+    // The real syntax error is reported …
+    expect(errors.some((e) => /Expecting token of type ':'/.test(e))).toBe(true);
+    // … and the macro did NOT throw on the malformed field.
+    expect(errors.some((e) => /threw during expansion|reading 'array'/.test(e))).toBe(false);
+  });
 });

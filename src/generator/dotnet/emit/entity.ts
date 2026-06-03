@@ -1,9 +1,7 @@
 import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
-  AggregateIR,
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
-  EntityPartIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";

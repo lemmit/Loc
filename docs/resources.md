@@ -23,7 +23,7 @@ interface   access mode (sql / rest / amqp / sdk) — selected per kind, derived
 ```
 
 `storage` and `resource` are the only user-authored declarations. `sourceType`
-is a platform-internal registry (`src/ir/source-types.ts`), never written in
+is a platform-internal registry (`src/util/source-types.ts`), never written in
 `.ddd`. `need`, `capability`, and `interface` are derived/internal — only `kind`
 surfaces, on `resource`.
 
