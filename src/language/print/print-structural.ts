@@ -23,7 +23,6 @@ import type {
   FunctionDecl,
   Invariant,
   Layout,
-  LayoutMainSlot,
   LayoutNamedSlot,
   MenuBlock,
   MenuLink,

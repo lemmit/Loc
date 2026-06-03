@@ -11,7 +11,6 @@ import type {
   ContainmentIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
-  EnrichedEntityPartIR,
   EntityPartIR,
   ExprIR,
   FieldIR,

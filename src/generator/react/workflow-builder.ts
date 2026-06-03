@@ -222,6 +222,7 @@ export function buildWorkflowPageObject(wf: WorkflowIR, ctx: BoundedContextIR): 
 
 function zodForRequest(t: TypeIR): string {
   switch (t.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
       switch (t.name) {
         case "int":
@@ -241,7 +242,6 @@ function zodForRequest(t: TypeIR): string {
         case "json":
           return "z.unknown()";
       }
-    /* eslint-disable-next-line no-fallthrough */
     case "id":
       return "z.string()";
     case "enum":

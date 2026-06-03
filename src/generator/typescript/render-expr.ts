@@ -314,6 +314,7 @@ function renderMoneyBinary(op: BinOp, left: string, right: string): string {
 
 export function renderTsType(t: TypeIR): string {
   switch (t.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
       switch (t.name) {
         case "int":
@@ -336,7 +337,6 @@ export function renderTsType(t: TypeIR): string {
         case "json":
           return "unknown";
       }
-    /* eslint-disable-next-line no-fallthrough */
     case "id":
       return `Ids.${t.targetName}Id`;
     case "enum":

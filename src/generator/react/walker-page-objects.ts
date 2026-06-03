@@ -148,10 +148,8 @@ function routeAsTemplateLiteral(route: string, params: readonly ParamIR[]): stri
   // literal.  Param refs become `${name}`; literal segments stay
   // as text inside the backticks.
   const parts: string[] = [];
-  const re = /:([A-Za-z_][A-Za-z0-9_]*)/g;
   let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(route)) !== null) {
+  for (const m of route.matchAll(/:([A-Za-z_][A-Za-z0-9_]*)/g)) {
     if (m.index > last) parts.push(escapeTemplateText(route.slice(last, m.index)));
     const name = m[1]!;
     if (paramNames.has(name)) {

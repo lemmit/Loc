@@ -21,7 +21,6 @@ import { generateTypeScript } from "../platform/hono/v4/emit.js";
 // backend; the CLI (an entrypoint) supplies that package's pins to
 // the version-agnostic shared emitter.
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
-import { bootSourceTypePlugins } from "../platform/source-type-plugins.js";
 import { generateSystemsFromLoom } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
 import { fsSnapshotStore } from "../system/snapshot.js";

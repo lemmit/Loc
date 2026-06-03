@@ -118,8 +118,8 @@ export function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   let ofName: string | undefined;
   if (formChild) {
     const argNames = formChild.argNames ?? [];
-    const ofIdx = argNames.findIndex((n) => n === "of");
-    const opIdx = argNames.findIndex((n) => n === "op");
+    const ofIdx = argNames.indexOf("of");
+    const opIdx = argNames.indexOf("op");
     if (ofIdx >= 0 && opIdx >= 0) {
       const ofArg = formChild.args[ofIdx];
       const opArg = formChild.args[opIdx];

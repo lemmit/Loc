@@ -15,7 +15,6 @@ import {
   type ExprSlot,
   editExprSlot,
   enumPickerCandidates,
-  exprHints,
   exprSlotOptions,
   listDerived,
   listInvariants,

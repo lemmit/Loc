@@ -230,8 +230,12 @@ export function operation(
     }),
     origin,
   );
-  params.forEach((p, i) => setContainer(p, op, "params", i));
-  body.forEach((s, i) => setContainer(s, op, "body", i));
+  params.forEach((p, i) => {
+    setContainer(p, op, "params", i);
+  });
+  body.forEach((s, i) => {
+    setContainer(s, op, "body", i);
+  });
   return op;
 }
 
@@ -247,8 +251,12 @@ export function create(
 ): Create {
   const origin = currentOrigin();
   const node: Create = tag(mkCreate({ $type: "Create", name: opts.name, params, body }), origin);
-  params.forEach((p, i) => setContainer(p, node, "params", i));
-  body.forEach((s, i) => setContainer(s, node, "body", i));
+  params.forEach((p, i) => {
+    setContainer(p, node, "params", i);
+  });
+  body.forEach((s, i) => {
+    setContainer(s, node, "body", i);
+  });
   return node;
 }
 
@@ -264,8 +272,12 @@ export function destroy(
   const origin = currentOrigin();
   const params = opts.params ?? [];
   const node: Destroy = tag(mkDestroy({ $type: "Destroy", name: opts.name, params, body }), origin);
-  params.forEach((p, i) => setContainer(p, node, "params", i));
-  body.forEach((s, i) => setContainer(s, node, "body", i));
+  params.forEach((p, i) => {
+    setContainer(p, node, "params", i);
+  });
+  body.forEach((s, i) => {
+    setContainer(s, node, "body", i);
+  });
   return node;
 }
 
@@ -318,7 +330,9 @@ export function memberAccess(
     }),
     origin,
   );
-  callArgs.forEach((c, i) => setContainer(c, suffix, "args", i));
+  callArgs.forEach((c, i) => {
+    setContainer(c, suffix, "args", i);
+  });
   const chain: PostfixChain = tag(
     mkPostfixChain({
       $type: "PostfixChain",
@@ -630,7 +644,9 @@ function buildStamp(
     }),
     origin,
   );
-  stmts.forEach((s, i) => setContainer(s, node, "assignments", i));
+  stmts.forEach((s, i) => {
+    setContainer(s, node, "assignments", i);
+  });
   return node as StampDeclAst & AggregateMember;
 }
 

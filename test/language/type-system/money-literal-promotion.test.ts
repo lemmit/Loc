@@ -17,11 +17,11 @@ import { AstUtils, EmptyFileSystem, URI } from "langium";
 import { describe, expect, it } from "vitest";
 import { allAggregates } from "../../../src/ir/types/loom-ir.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
-import type { Aggregate, DerivedProp, Model } from "../../../src/language/generated/ast.js";
+import type { Aggregate, Model } from "../../../src/language/generated/ast.js";
 import { buildLoomModel } from "../../_helpers/index.js";
 import { parseString } from "../../_helpers/parse.js";
 
-async function linkedModel(src: string): Promise<Model> {
+async function _linkedModel(src: string): Promise<Model> {
   const services = createDddServices(EmptyFileSystem).Ddd;
   const shared = services.shared;
   const uri = URI.parse("memory:///money-literal-promotion.ddd");
@@ -33,7 +33,7 @@ async function linkedModel(src: string): Promise<Model> {
   return doc.parseResult.value as Model;
 }
 
-function findAgg(model: Model, name: string): Aggregate {
+function _findAgg(model: Model, name: string): Aggregate {
   for (const n of AstUtils.streamAst(model)) {
     if (n.$type === "Aggregate" && (n as { name?: string }).name === name) {
       return n as Aggregate;

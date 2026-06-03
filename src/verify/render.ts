@@ -103,7 +103,9 @@ export function renderVerificationMd(loom: LoomModel, v: VerificationIR): string
 export function renderVerdictGraph(loom: LoomModel, v: VerificationIR): string {
   const children = loom.traceability?.childrenOf ?? {};
   const idOf = new Map<string, string>();
-  loom.requirements.forEach((r, i) => idOf.set(r.id, `r${i}`));
+  loom.requirements.forEach((r, i) => {
+    idOf.set(r.id, `r${i}`);
+  });
   const esc = (s: string): string => s.replace(/"/g, "'");
 
   const body: string[] = [];
@@ -119,6 +121,7 @@ export function renderVerdictGraph(loom: LoomModel, v: VerificationIR): string {
   const groups: Record<string, string[]> = {};
   for (const r of loom.requirements) {
     const verdict = v.requirements[r.id]?.verdict ?? "UNTESTED";
+    // biome-ignore lint/suspicious/noAssignInExpressions: `(map[k] ??= []).push(v)` is the canonical bucket-push idiom
     (groups[MMD_CLASS[verdict]] ??= []).push(idOf.get(r.id)!);
   }
   const classLines = Object.keys(groups)

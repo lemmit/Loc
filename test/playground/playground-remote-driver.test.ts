@@ -62,11 +62,11 @@ describe("message-driven UI driver (parent shim → wire → sandbox executor)",
       <div role="listbox"><div role="option">Confirmed</div></div>
     `;
     let clicked = "";
-    document.querySelectorAll('[role="option"]').forEach((o) =>
+    for (const o of document.querySelectorAll('[role="option"]')) {
       o.addEventListener("click", () => {
         clicked = o.textContent ?? "";
-      }),
-    );
+      });
+    }
     const page = harness();
     const listbox = page
       .locator('[role="listbox"]')

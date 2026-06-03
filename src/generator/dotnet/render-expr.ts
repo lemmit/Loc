@@ -386,6 +386,7 @@ function renderNew(
 
 export function renderCsType(t: TypeIR): string {
   switch (t.kind) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
       switch (t.name) {
         case "int":
@@ -411,7 +412,6 @@ export function renderCsType(t: TypeIR): string {
         case "json":
           return "System.Text.Json.JsonElement";
       }
-    /* eslint-disable-next-line no-fallthrough */
     case "id":
       return `${t.targetName}Id`;
     case "enum":
