@@ -30,9 +30,15 @@ import {
 } from "./report.js";
 
 export type {
+  FindSymbolResult,
   GenerateReport,
+  HoverResult,
   JsonDiagnostic,
+  NavError,
+  NavLocation,
+  NavSymbol,
   Outline,
+  ReferencesResult,
   ValidateReport,
 } from "../diagnostics/contract.js";
 export type {
@@ -44,6 +50,7 @@ export type {
 } from "../language/model-patch.js";
 export { applyPatches, resolvePatchEdits } from "../language/model-patch.js";
 export { fixHintCodeActions, toLspDiagnostic, toLspDiagnostics } from "./lsp.js";
+export { findSymbol, hover, references } from "./navigate.js";
 export { LOOM_VERSION } from "./report.js";
 
 interface ParsedSource {

@@ -46,7 +46,15 @@ describe("ddd-mcp server", () => {
     const client = await connectClient();
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["loom_apply_patch", "loom_generate", "loom_outline", "loom_validate"]);
+    expect(names).toEqual([
+      "loom_apply_patch",
+      "loom_find_symbol",
+      "loom_generate",
+      "loom_hover",
+      "loom_outline",
+      "loom_references",
+      "loom_validate",
+    ]);
     for (const t of tools) {
       expect(t.description?.length).toBeGreaterThan(20);
       expect((t.inputSchema as { type?: string }).type).toBe("object");

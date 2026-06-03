@@ -107,14 +107,22 @@ hover, and rename engine — behind **by-name** addressing instead of
 `(line, character)` tuples, because an LLM has a symbol name, not an offset.
 Patches *mutate*; these *query and locally rewrite*.
 
-| Tool | Input | Returns | Kind |
-|---|---|---|---|
-| `loom_find_symbol` | `{ source, symbol, kind? }` | `{ address, range, kind, parent? }` | read |
-| `loom_references` | `{ source, symbol }` | `Location[]` | read |
-| `loom_hover` | `{ source, symbol }` | markdown string | read |
-| `loom_rename` | `{ source, symbol, newName }` | `WorkspaceEdit` (edits, **not applied**) | pure |
-| `loom_quickfix` | `{ source, code, at? }` | `WorkspaceEdit` for that diagnostic code | pure |
-| `loom_unfold_macro` | `{ source, macro, on }` | `WorkspaceEdit` | pure |
+| Tool | Input | Returns | Kind | Status |
+|---|---|---|---|---|
+| `loom_find_symbol` | `{ source, symbol, kind? }` | `{ address, range, kind, parent? }` \| `NavError` | read | ✅ |
+| `loom_references` | `{ source, symbol }` | `{ locations: NavLocation[] }` \| `NavError` | read | ✅ |
+| `loom_hover` | `{ source, symbol }` | `{ markdown }` \| `NavError` | read | ✅ |
+| `loom_rename` | `{ source, symbol, newName }` | `WorkspaceEdit` (edits, **not applied**) | pure | ⬜ |
+| `loom_quickfix` | `{ source, code, at? }` | `WorkspaceEdit` for that diagnostic code | pure | ⬜ |
+| `loom_unfold_macro` | `{ source, macro, on }` | `WorkspaceEdit` | pure | ⬜ |
+
+The **read trio** ships in `src/api/navigate.ts` (pure, browser-safe — same
+EmptyFileSystem parse as the rest of `src/api/`) and is registered in the
+catalog. `kind` returns the node's OWN kind (`property` / `operation` / …), not
+the address keyword `addressOf` qualifies plain members under, and the same
+`kind` value is the disambiguating filter. The **rewrite trio** (returning
+`WorkspaceEdit`s, not applying them) is the follow-up slice over the same
+resolver.
 
 **Addressing.** `symbol` is a dotted path — short form (`Order.customerId`) when
 unambiguous, fully-qualified (`Sales.Orders.Order.customerId`) otherwise. This
@@ -357,9 +365,11 @@ playground settings matter, independent of the tools.
 3. **LSP-provider correctness** (§4c) — fix the operation-rename bug + coverage,
    add quick-fix `fixHintFor` providers. Standalone editor value; gates the
    navigational verbs.
-4. **Navigational family** (§4b) — `loom_find_symbol` / `loom_references` /
-   `loom_hover` / `loom_rename` / `loom_quickfix` / `loom_unfold_macro` over the
-   providers, by-name addressing, edits-returned. Joins the same catalog and
-   inherits the MCP + playground transports.
+4. **Navigational family** (§4b) — by-name addressing over the providers.
+   - ✅ read trio: `loom_find_symbol` / `loom_references` / `loom_hover`
+     (`src/api/navigate.ts` + catalog), inheriting the MCP + playground
+     transports.
+   - ⬜ rewrite trio: `loom_rename` / `loom_quickfix` / `loom_unfold_macro`
+     (return `WorkspaceEdit`s, not applied) over the same resolver.
 5. *(separate slice)* playground agentic chat: catalog dispatch + LLM wiring +
    key handling + apply-to-editor.

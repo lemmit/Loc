@@ -9,13 +9,22 @@
 // (model `source` in → report / new-source out) — no server-side state, no
 // filesystem side effect.  No MCP dependency, no Node-only imports → browser-safe.
 //
-// This module is the GENERATIVE family (the authoring loop).  The NAVIGATIONAL
-// family (find_symbol / references / rename / quickfix over the LSP providers)
-// joins the same catalog in a later slice — see
-// docs/proposals/agent-tools-and-mcp.md §4b.
+// This module hosts the GENERATIVE family (the authoring loop) AND the read
+// half of the NAVIGATIONAL family (find_symbol / references / hover over the
+// LSP providers, by-name addressing — §4b).  The rewrite half (rename /
+// quickfix / unfold_macro, returning WorkspaceEdits) joins in a follow-up
+// slice — see docs/proposals/agent-tools-and-mcp.md §4b.
 // ---------------------------------------------------------------------------
 
-import { applyPatches, generate, outline, validate } from "../api/index.js";
+import {
+  applyPatches,
+  findSymbol,
+  generate,
+  hover,
+  outline,
+  references,
+  validate,
+} from "../api/index.js";
 import type { ModelPatch } from "../diagnostics/contract.js";
 
 /** A single agent tool: a name, an LLM-facing description, a JSON-Schema input,
@@ -40,6 +49,28 @@ function reqString(args: Record<string, unknown>, key: string): string {
   if (typeof v !== "string") throw new Error(`'${key}' must be a string`);
   return v;
 }
+
+function optString(args: Record<string, unknown>, key: string): string | undefined {
+  const v = args[key];
+  if (v === undefined) return undefined;
+  if (typeof v !== "string") throw new Error(`'${key}' must be a string`);
+  return v;
+}
+
+/** `{ source, symbol }` schema shared by the read-navigation tools. */
+const SYMBOL_SCHEMA = {
+  type: "object",
+  properties: {
+    source: { type: "string", description: "The .ddd model source." },
+    symbol: {
+      type: "string",
+      description:
+        "Dotted symbol path — short form 'Order.customerId' when unambiguous, fully qualified 'Sales.Order.customerId' otherwise. Same address space as loom_outline and the diagnostic node fields.",
+    },
+  },
+  required: ["source", "symbol"],
+  additionalProperties: false,
+} as const;
 
 export const TOOLS: ToolDef[] = [
   {
@@ -108,6 +139,45 @@ export const TOOLS: ToolDef[] = [
       if (!Array.isArray(args.patches)) throw new Error("'patches' must be an array");
       return applyPatches(source, args.patches as ModelPatch[]);
     },
+  },
+  {
+    name: "loom_find_symbol",
+    description:
+      "Locate a symbol by name. Returns its canonical address, kind, name-token range, and parent declaration. Optional 'kind' (e.g. 'aggregate', 'property', 'operation') disambiguates a name shared across kinds. An ambiguous or unknown symbol returns { error, candidates } — never a silent pick.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: { type: "string", description: "The .ddd model source." },
+        symbol: {
+          type: "string",
+          description:
+            "Dotted symbol path — short form 'Order.customerId' when unambiguous, fully qualified otherwise.",
+        },
+        kind: {
+          type: "string",
+          description:
+            "Optional kind filter — the node's own kind (aggregate / valueobject / property / containment / derived / operation / function / event / enum / value / repository / find / context / deployable / …).",
+        },
+      },
+      required: ["source", "symbol"],
+      additionalProperties: false,
+    },
+    handler: (args) =>
+      findSymbol(reqString(args, "source"), reqString(args, "symbol"), optString(args, "kind")),
+  },
+  {
+    name: "loom_references",
+    description:
+      "Find every usage site of a symbol (including its declaration) — member accesses and bare refs the cross-reference index can't see are included. Returns located ranges. Ambiguous/unknown symbol returns { error, candidates }.",
+    inputSchema: SYMBOL_SCHEMA,
+    handler: (args) => references(reqString(args, "source"), reqString(args, "symbol")),
+  },
+  {
+    name: "loom_hover",
+    description:
+      "The hover bubble (markdown) for a symbol — its signature / type summary, exactly as the editor shows. Ambiguous/unknown symbol returns { error, candidates }.",
+    inputSchema: SYMBOL_SCHEMA,
+    handler: (args) => hover(reqString(args, "source"), reqString(args, "symbol")),
   },
 ];
 
