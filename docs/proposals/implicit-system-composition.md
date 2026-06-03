@@ -112,10 +112,12 @@ deployable pass, etc. The composition validator fires for any top-level
 foldable member (not just `subdomain`); a bare top-level `context` stays
 exempt (legacy loose-context mode with zero systems).
 
-> **`user` / `theme` are singletons.** The lowering pre-pass takes the last
-> one across the folded member list, so a duplicate is resolved rather than
-> rejected. A strict "at most one `user` / `theme` across the project"
-> diagnostic is a small follow-up, not yet added.
+> **`user` / `theme` are singletons.** A composed (single-system) project
+> admits at most one `user { }` and one `theme { }`, wherever in the import
+> graph they are written (nested in the system or top-level).  A second one
+> is rejected — `loom.duplicate-user-block` / `loom.duplicate-theme-block`
+> (`checkProjectSingletons`).  Multi-system projects are out of scope (each
+> system carries its own singletons).
 
 ## Open questions
 

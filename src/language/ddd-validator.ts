@@ -38,6 +38,7 @@ import {
   checkMatchesCalls,
   checkPayloads,
   checkPrimitiveConversions,
+  checkProjectSingletons,
   checkSeeds,
   checkSlotMemberAccess,
   checkSlotTypePosition,
@@ -100,6 +101,9 @@ export class DddValidator {
     // exactly one system exists across the import graph.  See
     // docs/proposals/implicit-system-composition.md.
     checkTopLevelDomainComposition(model, accept, this.services);
+    // A composed project (single system) admits at most one `user` / `theme`
+    // block, wherever in the import graph they're written.
+    checkProjectSingletons(model, accept, this.services);
     // `component` declarations: enforce the extern↔body exclusivity the
     // grammar admits but can't constrain (extern ⇒ no body; normal ⇒ body).
     checkComponent(model, accept);

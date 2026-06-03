@@ -80,3 +80,66 @@ export function checkTopLevelDomainComposition(
     );
   }
 }
+
+/** `user { }` / `theme { }` blocks reachable in a document — at file top
+ *  level (a `ModelMember`) or nested directly in a `system { }`.  Those are
+ *  the only two positions the grammar admits them. */
+function collectBlocks<T extends AstNode>(model: Model, pred: (n: AstNode) => n is T): T[] {
+  const out: T[] = [];
+  for (const m of model.members) {
+    if (pred(m)) out.push(m);
+    else if (isSystem(m)) for (const sm of m.members) if (pred(sm)) out.push(sm);
+  }
+  return out;
+}
+
+/** A composed project has exactly one `system`, so it admits at most one
+ *  `user { }` and one `theme { }` — whether written nested in the system or
+ *  at file top level, in any file of the import graph.  The lowering pre-pass
+ *  would otherwise silently keep only the last; flag the duplicates instead.
+ *  Skipped for zero- or multi-system projects (a multi-system project gives
+ *  each system its own singletons; that case is out of composition scope). */
+export function checkProjectSingletons(
+  model: Model,
+  accept: ValidationAcceptor,
+  services?: DddServices,
+): void {
+  const localUser = collectBlocks(model, isUserBlock);
+  const localTheme = collectBlocks(model, isThemeBlock);
+  if (localUser.length === 0 && localTheme.length === 0) return;
+
+  let systemCount = model.members.filter(isSystem).length;
+  let userCount = localUser.length;
+  let themeCount = localTheme.length;
+  if (services) {
+    for (const doc of services.shared.workspace.LangiumDocuments.all) {
+      const root = doc.parseResult?.value as Model | undefined;
+      if (!root || root === model) continue;
+      systemCount += root.members.filter(isSystem).length;
+      userCount += collectBlocks(root, isUserBlock).length;
+      themeCount += collectBlocks(root, isThemeBlock).length;
+    }
+  }
+  if (systemCount !== 1) return;
+
+  if (userCount > 1) {
+    for (const node of localUser) {
+      accept(
+        "error",
+        `The project declares ${userCount} 'user { ... }' blocks, but a system admits at most one. ` +
+          "Keep a single user block (it may live in any file that composes into the system).",
+        { node, code: "loom.duplicate-user-block" },
+      );
+    }
+  }
+  if (themeCount > 1) {
+    for (const node of localTheme) {
+      accept(
+        "error",
+        `The project declares ${themeCount} 'theme { ... }' blocks, but a system admits at most one. ` +
+          "Keep a single theme block (it may live in any file that composes into the system).",
+        { node, code: "loom.duplicate-theme-block" },
+      );
+    }
+  }
+}
