@@ -626,7 +626,7 @@ Aggregate IR maps onto Ash:
 | `view ActiveOrders = Order where …` | thin module wrapping `Order |> Ash.Query.filter(…)` |
 | `emit OrderConfirmed { … }` | `Phoenix.PubSub.broadcast(<App>.PubSub, "events", %Events.OrderConfirmed{…})` |
 | `abstract aggregate Party` + `extends` (TPC) | base emits no resource; each concrete is a standalone `Ash.Resource`; the context Ash.Domain gains `list_parties!/0` (the union of the concrete `list_<concrete>!` reads). TPH (`sharedTable`) is not implemented on Phoenix — IR-validate error. |
-| `persistedAs(eventLog)` + `apply(...)` (event sourcing) | **deferred — IR-validate error** (`validateEventSourcedStorage`; `EVENT_SOURCING_BACKENDS` excludes Phoenix). Ash assumes a state table and the functional changeset model fights `emit`-and-fold; recon + chosen design (a plain `<Agg>Fold` module + Ecto `<agg>_events` table + thin repository) are recorded in [workflow-and-applier.md](proposals/workflow-and-applier.md). |
+| `persistedAs(eventLog)` + `apply(...)` (event sourcing) | **deferred — IR-validate error** (`validateEventSourcedStorage`; `EVENT_SOURCING_BACKENDS` excludes Phoenix). Deferred for effort + no-local-Elixir validation, not framework fit: the ecosystem offers [AshCommanded](https://hexdocs.pm/ash_commanded) (full CQRS/ES — closest to Loom's emit/apply model) and [AshEvents](https://hexdocs.pm/ash_events) (first-class events, but *hybrid* — keeps a state table, so a partial fit for Loom's *pure* eventLog). Landscape + re-weighted design options in [workflow-and-applier.md](proposals/workflow-and-applier.md). |
 
 ### Per-page detail
 
