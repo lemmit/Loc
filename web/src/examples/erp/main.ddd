@@ -42,6 +42,18 @@ import "./shared/common.ddd"
 import "./ui/components.ddd"
 import "./governance/requirements.ddd"
 
+// A root-level (ambient) value object declared at file scope, alongside
+// the `system` whose Inventory context constructs it by name in operation
+// bodies (`Quantity { … }`).  Root-level VOs in the same document are
+// constructible from any context here — see findValueObjectByName /
+// checkBuilderCallType.  (It references the imported UnitOfMeasure enum.)
+valueobject Quantity {
+  value: decimal
+  unit: UnitOfMeasure
+  invariant value >= 0
+  derived label: string = value + " " + unit
+}
+
 system AcmeErp {
 
   // The JWT claim shape the Finance/HR verifier middleware decodes per
@@ -243,7 +255,6 @@ system AcmeErp {
           customerId: customerId,
           status: Draft,
           priority: Normal,
-          placedAt: now(),
           shipTo: shipTo
         })
         order.addLine(productRef, "Ordered item", unitPrice, qty)
@@ -286,17 +297,6 @@ system AcmeErp {
 
       event StockReceived { item: StockItem id, quantity: decimal, at: datetime }
       event StockIssued   { item: StockItem id, quantity: decimal, at: datetime }
-
-      // A measured amount with its unit.  Declared context-local (rather
-      // than in the shared kernel) because it is constructed by name in
-      // operation bodies (`Quantity { … }`), which the builder-call
-      // checker resolves against the enclosing context's value objects.
-      valueobject Quantity {
-        value: decimal
-        unit: UnitOfMeasure
-        invariant value >= 0
-        derived label: string = value + " " + unit
-      }
 
       aggregate Product with crudish {
         sku: string
@@ -546,8 +546,7 @@ system AcmeErp {
         let po = PurchaseOrders.getById(poId)
         let receipt = GoodsReceipt.create({
           poId: poId,
-          warehouseRef: warehouseRef,
-          receivedAt: now()
+          warehouseRef: warehouseRef
         })
         po.markReceived()
       }

@@ -1,4 +1,5 @@
 import type { AstNode } from "langium";
+import { AstUtils } from "langium";
 import type {
   Aggregate,
   BoundedContext,
@@ -6,6 +7,7 @@ import type {
   EnumDecl,
   EventDecl,
   FunctionDecl,
+  Model,
   Operation,
   TypeRef,
   ValueObject,
@@ -20,6 +22,7 @@ import {
   isEventDecl,
   isFunctionDecl,
   isIdType,
+  isModel,
   isNamedType,
   isOperation,
   isPrimitiveType,
@@ -263,6 +266,20 @@ export function findValueObjectByName(env: Env, name: string): ValueObject | und
   if (!env.ctx) return undefined;
   for (const m of env.ctx.members) {
     if (isValueObject(m) && m.name === name) return m;
+  }
+  // Fall back to root-level value objects declared at the top of the same
+  // document (the ambient shared kernel: `valueobject` outside any
+  // context).  Without this, a root VO constructed by name in an
+  // operation body lowers to a "free" call instead of a value-object
+  // ctor.  Cross-document root VOs aren't resolved here — lowering runs
+  // per-document and the builder-call type is a plain string with no
+  // linked reference to follow (the validator matches: see
+  // checkBuilderCallType in validators/builder-call.ts).
+  const model = AstUtils.getContainerOfType(env.ctx, isModel) as Model | undefined;
+  if (model) {
+    for (const m of model.members) {
+      if (isValueObject(m) && m.name === name) return m;
+    }
   }
   return undefined;
 }

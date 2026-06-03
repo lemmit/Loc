@@ -96,6 +96,18 @@ export function checkBuilderCallType(
       }
       if (resolved) continue;
     }
+    // 2b. Root-level value object declared at the top of the SAME document
+    //     (the ambient shared kernel — `valueobject` outside any context).
+    //     The enclosing context's VOs are checked above; this adds the
+    //     file-level ones so `Money { … }` resolves when `Money` is
+    //     declared at model scope.  Cross-document root VOs are not
+    //     constructible by bare name (the builder-call type is a plain
+    //     string, not a linked reference), so only the local document is
+    //     consulted — matching the lowering resolver
+    //     (`findValueObjectByName` in src/ir/lower/lower-types.ts).
+    if (model.members.some((m) => isValueObject(m) && (m as { name: string }).name === name)) {
+      continue;
+    }
     // 3. User-defined component in enclosing UI (ui-scope wins on
     //    name collision with a top-level component declared in the
     //    same workspace).
