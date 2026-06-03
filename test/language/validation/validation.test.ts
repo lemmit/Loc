@@ -957,6 +957,68 @@ describe("validation", () => {
       `);
       expect(errors, errors.join("\n")).toEqual([]);
     });
+
+    it("accepts an event name as a workflow create parameter type", async () => {
+      // Transport types (`event` / payload) are offered in scope only in a
+      // workflow `create`/`handle` parameter, so `create(e: PaymentReceived)`
+      // resolves where a bare event name elsewhere would not.
+      const { errors } = await parse(`
+        context T {
+          aggregate Order { total: int }
+          repository Orders for Order { }
+          event PaymentReceived { order: Order id, amount: int }
+          workflow Fulfillment {
+            create(paid: PaymentReceived) by paid.order { let a = paid.amount }
+          }
+        }
+      `);
+      expect(errors, errors.join("\n")).toEqual([]);
+    });
+
+    it("accepts a payload (command) name as a workflow handle parameter type", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate Order { total: int }
+          repository Orders for Order { }
+          command SettleOrder { order: Order id, note: string }
+          workflow Fulfillment {
+            handle settle(c: SettleOrder) { let n = c.note }
+          }
+        }
+      `);
+      expect(errors, errors.join("\n")).toEqual([]);
+    });
+
+    it("keeps an event name out of scope in an aggregate field position", async () => {
+      // Outside a workflow command param, a bare event name is not offered as
+      // a type — it surfaces as an unresolved reference rather than silently
+      // typing the field as the event's transport record.
+      const { errors } = await parse(`
+        context T {
+          aggregate Order { total: int }
+          event PaymentReceived { order: Order id, amount: int }
+          aggregate Bad { x: PaymentReceived }
+        }
+      `);
+      expect(
+        errors.some((e) => /PaymentReceived/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("keeps an event name out of the 'X id' slot ('PaymentReceived id' is meaningless)", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate Order { total: int }
+          event PaymentReceived { order: Order id, amount: int }
+          aggregate Bad { x: PaymentReceived id }
+        }
+      `);
+      expect(
+        errors.some((e) => /PaymentReceived/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+    });
   });
 
   describe("slot type position", () => {
