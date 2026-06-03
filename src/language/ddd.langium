@@ -889,25 +889,35 @@ FindDecl:
 // to operation bodies only.  See docs/workflow.md for semantics.
 Workflow:
     'workflow' name=ID (eventSourced?='eventSourced')?
-        '(' (params+=Parameter (',' params+=Parameter)*)? ')'
         (transactional?='transactional' ('(' isolation=IsolationLevel ')')?)?
     '{'
         members+=WorkflowMember*
     '}';
 
-// A2-S1/S2 (workflow-and-applier.md): the workflow body is a flat member list
-// that still admits every legacy statement form (precondition / let / emit /
-// call — unchanged) plus the new `on(...)` reactor member (S1) and workflow
-// state `Property` fields (S2 — the correlation field + saga state).  This is
-// the additive, non-breaking shape — the full workflow-as-aggregate reshape
-// (Properties + create/handle members, no free statements) is a later slice.
-// `Property` (`name ':' …`) is unambiguous against `AssignOrCallStmt` (whose
-// LValue continues with `:=`/`.`/`(`, never a bare `:`), and `on`/`apply` are
-// keywords so they can never start a Statement.  `Apply` (A2-S5b) reuses the
-// aggregate applier rule: an `eventSourced` workflow folds its emitted events
-// into state via `apply(e: E) { … }`, exactly like an event-sourced aggregate.
+// A2-S5f (workflow-and-applier.md): the workflow body is MEMBERS-ONLY — no
+// free statements, no header params.  A workflow is now a state-bearing entity
+// like an aggregate: state (`Property`), starters (`create`), continuation
+// commands (`handle`), event reactors (`on`), and event folds (`apply`).  The
+// legacy `workflow X(params) { stmts }` is migrated to
+// `workflow X { create(params) { stmts } }` by scripts/migrate-workflows-to-create.mjs.
 WorkflowMember:
-    Apply | OnDecl | HandleDecl | Property | Statement;
+    WorkflowCreateDecl | Apply | OnDecl | HandleDecl | Property;
+
+// A workflow starter.  Param-shape discriminates the trigger (resolved at
+// lowering, not parse time):
+//   create(event: E) by <expr>  → event-triggered (allocate-if-correlation-misses)
+//   create(c: Command)          → explicit command-triggered
+//   create(p1: T1, p2: T2, …)   → implicit command sugar (legacy paren-body lands here)
+// `by` reuses CorrelationExpr (the restricted name/postfix grammar `on` uses, so a
+// BuilderCall can't swallow the body block).
+WorkflowCreateDecl:
+    'create' (name=ID)?
+        '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+        ('by' correlation=CorrelationExpr)?
+    '{'
+        body+=Statement*
+    '}';
+
 
 // A named orchestration command handler on a workflow (A2-S5c): `handle
 // confirm(orderId: Order id) { … }`.  Like the legacy paren-form body, a

@@ -107,10 +107,12 @@ context Sales {
   // Retrieval-driven loop: page a named query and mutate each element.
   // Exercises Repo.run + the workflow `for` loop end-to-end on Hono and
   // .NET (the build gates compile the emitted runByName + foreach/save).
-  workflow verifyByName(needle: string) {
-    let matched = Customers.run(ByName(needle), page: { offset: 0, limit: 100 })
-    for c in matched {
-      c.verify()
+  workflow verifyByName {
+    create(needle: string) {
+      let matched = Customers.run(ByName(needle), page: { offset: 0, limit: 100 })
+      for c in matched {
+        c.verify()
+      }
     }
   }
 
@@ -128,13 +130,15 @@ context Sales {
   // fresh draft order from the request, persist it.  Non-transactional
   // — the customer load is read-only, the order save is independent.
   // See docs/workflow.md for the full surface.
-  workflow placeOrder(customerId: Customer id, placedAt: datetime) {
-    let customer = Customers.getById(customerId)
-    let order = Order.create({
-      customerId: customerId,
-      status: Draft,
-      placedAt: placedAt
-    })
+  workflow placeOrder {
+    create(customerId: Customer id, placedAt: datetime) {
+      let customer = Customers.getById(customerId)
+      let order = Order.create({
+        customerId: customerId,
+        status: Draft,
+        placedAt: placedAt
+      })
+    }
   }
 
   // Saved query — strongly-typed, parameterless, filter-only.

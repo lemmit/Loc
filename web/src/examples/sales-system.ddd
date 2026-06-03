@@ -144,21 +144,19 @@ system SalesSystem {
       // → 404 on miss), creates the order, adds the line, confirms.
       // Invoke via POST /workflows/place_order with body
       //   { customerId, productId, qty }
-      workflow placeOrder(
-        customerId: Customer id,
-        productId: Product id,
-        qty: int
-      ) transactional {
-        precondition qty > 0
-        let customer = Customers.getById(customerId)
-        let product = Products.getById(productId)
-        let order = Order.create({
-          customerId: customer.id,
-          status: Draft,
-          placedAt: now()
-        })
-        order.addLine(productId, qty)
-        order.confirm()
+      workflow placeOrder transactional {
+        create(customerId: Customer id, productId: Product id, qty: int) {
+          precondition qty > 0
+          let customer = Customers.getById(customerId)
+          let product = Products.getById(productId)
+          let order = Order.create({
+            customerId: customer.id,
+            status: Draft,
+            placedAt: now()
+          })
+          order.addLine(productId, qty)
+          order.confirm()
+        }
       }
     }
   }

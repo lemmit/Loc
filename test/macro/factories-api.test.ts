@@ -329,7 +329,9 @@ describe("cross-decl helpers (aggregatesIn / workflowsIn / viewsIn)", () => {
             aggregate Order { name: string operation go() {} }
             aggregate Customer { email: string operation go() {} }
             repository Orders for Order { }
-            workflow fulfil() { }
+            workflow fulfil {
+      create() { }
+    }
             view ActiveOrders = Order where name == "x"
           }
         }

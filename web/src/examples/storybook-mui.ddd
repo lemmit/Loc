@@ -165,25 +165,21 @@ system Storybook {
       //   Generates a full-page form with id-select, text, decimal,
       //   and bool inputs plus a submit button.
       // ---------------------------------------------------------
-      workflow placeOrder(
-        ownerId: Owner id,
-        notes: string,
-        amount: decimal,
-        urgent: bool
-      ) {
-        // empty body — the showcase only exercises the form
-        // scaffold the React generator produces.
+      workflow placeOrder {
+        create(ownerId: Owner id, notes: string, amount: decimal, urgent: bool) {
+          // empty body — the showcase only exercises the form
+          // scaffold the React generator produces.
+        }
       }
 
       // ---------------------------------------------------------
       // STORY: simple workflow — single param.
       //   Demonstrates the minimal workflow form layout.
       // ---------------------------------------------------------
-      workflow renameOwner(
-        ownerId: Owner id,
-        newName: string
-      ) {
-        // empty
+      workflow renameOwner {
+        create(ownerId: Owner id, newName: string) {
+          // empty
+        }
       }
 
       // ---------------------------------------------------------

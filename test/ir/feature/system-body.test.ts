@@ -83,10 +83,12 @@ describe("System builder — operation/workflow body editing", () => {
 
   it("structures a bare call into head + args (incl. a head-only call)", () => {
     const src = `context C {
-  workflow doIt(x: int) {
+  workflow doIt {
+      create(x: int) {
     order.addLine(productId, qty)
     cancel()
   }
+    }
 }`;
     const views = listStatementViews(parse(src), { kind: "workflow", name: "doIt" })!;
     expect(views[0]).toEqual({ kind: "call", head: "order.addLine", args: ["productId", "qty"] });

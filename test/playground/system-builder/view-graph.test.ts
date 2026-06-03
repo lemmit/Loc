@@ -124,10 +124,12 @@ describe("Model v2 — view-graph per level", () => {
   repository Orders for Order {
     find byId(id: int): Order? where this.id == id
   }
-  workflow place(x: int) {
+  workflow place {
+      create(x: int) {
     let o = Orders.byId(x)
     o.confirm()
   }
+    }
 }`;
     const g = buildViewGraph(parse(D), [{ kind: "context", name: "Sales" }]);
     const wfRepo = g.edges.filter((e) => e.id.startsWith("wf-uses-repo:"));
@@ -311,11 +313,13 @@ describe("Model v2 — view-graph per level", () => {
   });
 
   const WF_SRC = `context C {
-  workflow place(x: int) {
+  workflow place {
+      create(x: int) {
     let a = x
     a := x
     let b = 0
   }
+    }
 }`;
   it("workflow view returns one stmt node per statement and chains them with next edges", () => {
     const g = buildViewGraph(parse(WF_SRC), [{ kind: "workflow", name: "place" }]);

@@ -20,11 +20,13 @@ const SRC = `
     criterion InRegion(rgn: string) of Customer = region == rgn
     retrieval ByRegion(rgn: string) of Customer { where: InRegion(rgn) sort: [name asc] }
 
-    workflow deactivateRegion(rgn: string) {
+    workflow deactivateRegion {
+      create(rgn: string) {
       let matched = Customers.run(ByRegion(rgn), page: { offset: 0, limit: 100 })
       for c in matched {
         c.deactivate()
       }
+    }
     }
   }
 `;
@@ -88,10 +90,12 @@ describe("workflow for-loop — validation negatives", () => {
           operation deactivate() { active := false }
         }
         repository Customers for Customer { }
-        workflow bad(id: Customer id) {
+        workflow bad {
+      create(id: Customer id) {
           let one = Customers.getById(id)
           for c in one { c.deactivate() }
         }
+    }
       }
     `);
     const diags = validateLoomModel(loom).filter((d) => d.source.includes("bad"));
@@ -107,10 +111,12 @@ describe("workflow for-loop — validation negatives", () => {
         repository Orders for Order { }
         criterion Big of Order = total > 100
         retrieval BigOrders of Order = Big
-        workflow bad() {
+        workflow bad {
+      create() {
           let xs = Customers.run(BigOrders)
           for x in xs { }
         }
+    }
       }
     `);
     const diags = validateLoomModel(loom).filter((d) => d.source.includes("bad"));

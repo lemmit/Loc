@@ -23,7 +23,7 @@ async function lowerFirstWorkflow(body: string) {
 describe("event-sourced workflows — lowering", () => {
   it("lowers the `eventSourced` flag and apply(...) members", async () => {
     const wf = await lowerFirstWorkflow(`
-      workflow Tally eventSourced() {
+      workflow Tally eventSourced {
         orderId: Order id
         count: int
         apply(paid: PaymentReceived) { count := paid.amount }
@@ -36,7 +36,7 @@ describe("event-sourced workflows — lowering", () => {
 
   it("folds an applier body into workflow state (count := paid.amount)", async () => {
     const wf = await lowerFirstWorkflow(`
-      workflow Tally eventSourced() {
+      workflow Tally eventSourced {
         orderId: Order id
         count: int
         apply(paid: PaymentReceived) { count := paid.amount }
@@ -52,7 +52,7 @@ describe("event-sourced workflows — lowering", () => {
   });
 
   it("leaves eventSourced false and appliers undefined for a plain workflow", async () => {
-    const wf = await lowerFirstWorkflow(`workflow Plain() { let x = 1 }`);
+    const wf = await lowerFirstWorkflow(`workflow Plain { create() { let x = 1 } }`);
     expect(wf.eventSourced).toBe(false);
     expect(wf.appliers).toBeUndefined();
   });
@@ -69,14 +69,14 @@ describe("event-sourced workflows — discipline validation", () => {
 
   it("rejects apply(...) on a non-event-sourced workflow", async () => {
     const { errors } = await parseString(
-      ctx(`workflow Bad() { apply(paid: PaymentReceived) { let x = paid.amount } }`),
+      ctx(`workflow Bad { apply(paid: PaymentReceived) { let x = paid.amount } }`),
     );
     expect(errors.some((e) => /not event-sourced/.test(e))).toBe(true);
   });
 
   it("rejects an emitted event with no applier", async () => {
     const { errors } = await parseString(
-      ctx(`workflow Emit eventSourced() {
+      ctx(`workflow Emit eventSourced {
         orderId: Order id
         on(paid: PaymentReceived) by paid.order { emit OrderCounted { order: paid.order } }
       }`),
@@ -86,7 +86,7 @@ describe("event-sourced workflows — discipline validation", () => {
 
   it("accepts an emitted event with a matching applier", async () => {
     const { errors } = await parseString(
-      ctx(`workflow Ok eventSourced() {
+      ctx(`workflow Ok eventSourced {
         orderId: Order id
         count: int
         on(paid: PaymentReceived) by paid.order { emit OrderCounted { order: paid.order } }
@@ -98,7 +98,7 @@ describe("event-sourced workflows — discipline validation", () => {
 
   it("rejects two appliers for the same event", async () => {
     const { errors } = await parseString(
-      ctx(`workflow Dup eventSourced() {
+      ctx(`workflow Dup eventSourced {
         count: int
         apply(paid: PaymentReceived) { count := paid.amount }
         apply(p2: PaymentReceived) { count := p2.amount }
@@ -109,7 +109,7 @@ describe("event-sourced workflows — discipline validation", () => {
 
   it("rejects direct mutation in an event-sourced handler body", async () => {
     const { errors } = await parseString(
-      ctx(`workflow Mut eventSourced() {
+      ctx(`workflow Mut eventSourced {
         orderId: Order id
         count: int
         on(paid: PaymentReceived) by paid.order { count := paid.amount }

@@ -1,7 +1,7 @@
 import { AstUtils, type AstNode } from "langium";
 import {
   isBoundedContext,
-  isStatement,
+  isWorkflowCreateDecl,
   type Aggregate,
   type AssignOrCallStmt,
   type BindEntry,
@@ -30,6 +30,7 @@ import {
   type ValueObject,
   type View,
   type Workflow,
+  type WorkflowCreateDecl,
 } from "../../../../src/language/generated/ast.js";
 import { printExpr } from "../../../../src/language/print/index.js";
 import {
@@ -180,12 +181,15 @@ function findWorkflow(ast: Model, name: string): Workflow | null {
   return null;
 }
 
-/** A workflow body is a `WorkflowMember[]` (statements interleaved with
- *  `on(...)` reactors and `Property` state fields); the statement editor / slot
- *  indices operate on the statement members only.  Used everywhere a `wfStmt`
- *  index is produced or read so the indices stay aligned. */
+/** A2-S5f: a workflow body is members-only; its sequential statements + params
+ *  live in the primary `create(...)` starter (unnamed, command-triggered).  The
+ *  statement editor / slot indices operate on that create body. */
+function primaryWfCreate(wf: Workflow): WorkflowCreateDecl | undefined {
+  const creates = wf.members.filter(isWorkflowCreateDecl);
+  return creates.find((c) => !c.name) ?? creates[0];
+}
 function wfStatements(wf: Workflow): Statement[] {
-  return wf.members.filter(isStatement);
+  return primaryWfCreate(wf)?.body ?? [];
 }
 
 function findView(ast: Model, name: string): View | null {
@@ -358,7 +362,8 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
     if (!wf) return null;
     const ctx = AstUtils.getContainerOfType(wf, isBoundedContext);
     const base: Env = ctx ? newEnv(ctx) : { ctx: undefined, locals: new Map() };
-    return withParamsAndLets(base, wf.params, letsBefore(wfStatements(wf), slot.index));
+    const create = primaryWfCreate(wf);
+    return withParamsAndLets(base, create?.params ?? [], letsBefore(create?.body ?? [], slot.index));
   }
 
   let owner: AstNode | null = null;

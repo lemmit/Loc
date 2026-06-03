@@ -22,7 +22,7 @@ async function lowerFirstWorkflow(body: string) {
 describe("workflow handle(...) command handlers — lowering", () => {
   it("lowers a handle member with name, params and body", async () => {
     const wf = await lowerFirstWorkflow(`
-      workflow Ops() {
+      workflow Ops {
         handle bump(n: int) { let x = n }
       }`);
     expect(wf.handlers).toHaveLength(1);
@@ -35,7 +35,7 @@ describe("workflow handle(...) command handlers — lowering", () => {
 
   it("derives exit-saves for a handle that loads + operates on an aggregate", async () => {
     const wf = await lowerFirstWorkflow(`
-      workflow Ops() {
+      workflow Ops {
         handle settle(orderId: Order id) {
           let o = Orders.getById(orderId)
         }
@@ -46,7 +46,7 @@ describe("workflow handle(...) command handlers — lowering", () => {
 
   it("supports multiple handles (multi-command saga)", async () => {
     const wf = await lowerFirstWorkflow(`
-      workflow Ops() {
+      workflow Ops {
         handle a(n: int) { let x = n }
         handle b(m: int) { let y = m }
       }`);
@@ -54,7 +54,7 @@ describe("workflow handle(...) command handlers — lowering", () => {
   });
 
   it("leaves handlers undefined when none declared", async () => {
-    const wf = await lowerFirstWorkflow(`workflow Ops() { let z = 1 }`);
+    const wf = await lowerFirstWorkflow(`workflow Ops { create() { let z = 1 } }`);
     expect(wf.handlers).toBeUndefined();
   });
 });
@@ -65,7 +65,7 @@ describe("workflow handle(...) — event-sourced discipline", () => {
       `system S { subdomain M { context C {
         aggregate Order { total: int }
         event PaymentReceived { order: Order id, amount: int }
-        workflow Es eventSourced() {
+        workflow Es eventSourced {
           count: int
           handle touch(n: int) { count := n }
         }

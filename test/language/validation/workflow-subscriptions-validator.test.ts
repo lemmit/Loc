@@ -16,7 +16,7 @@ const ctx = (members: string): string => `
 describe("workflow on(...) reactors — validation", () => {
   it("accepts a workflow with one on(...) reactor", async () => {
     const { errors } = await parseString(
-      ctx(`workflow W() { on(paid: PaymentReceived) { let x = paid.amount } }`),
+      ctx(`workflow W { on(paid: PaymentReceived) { let x = paid.amount } }`),
     );
     expect(errors).toEqual([]);
   });
@@ -29,13 +29,13 @@ describe("workflow on(...) reactors — validation", () => {
   });
 
   it("flags an unresolved event in on(bad: NoSuchEvent)", async () => {
-    const { errors } = await parseString(ctx(`workflow W() { on(e: NoSuchEvent) { } }`));
+    const { errors } = await parseString(ctx(`workflow W { on(e: NoSuchEvent) { } }`));
     expect(errors.length).toBeGreaterThan(0);
   });
 
   it("warns on two reactors for the same event (loom.on-duplicate-subscription)", async () => {
     const { diagnostics } = await parseString(
-      ctx(`workflow W() {
+      ctx(`workflow W {
         on(a: PaymentReceived) { let x = a.amount }
         on(b: PaymentReceived) { let y = b.amount }
       }`),

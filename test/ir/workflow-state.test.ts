@@ -18,7 +18,7 @@ function src(workflowBody: string): string {
       aggregate Payment { amount: int }
       enum FulfillmentStatus { Pending, Done }
       event PaymentReceived { order: Order id, amount: int }
-      workflow Fulfillment() {
+      workflow Fulfillment {
         ${workflowBody}
       }
     }}}`;
@@ -69,7 +69,7 @@ describe("workflow state fields — surface + lowering", () => {
   });
 
   it("leaves stateFields undefined when the workflow declares none", async () => {
-    const wf = await lowerFirstWorkflow(`let x = 1`);
+    const wf = await lowerFirstWorkflow(`create() { let x = 1 }`);
     expect(wf.stateFields).toBeUndefined();
   });
 });
@@ -101,7 +101,7 @@ describe("workflow correlation — validation", () => {
   });
 
   it("does not require a correlation field when there are no reactors", async () => {
-    const diags = await correlationDiags(`status: FulfillmentStatus\n let x = 1`);
+    const diags = await correlationDiags(`status: FulfillmentStatus\n create() { let x = 1 }`);
     expect(diags).toEqual([]);
   });
 });

@@ -138,7 +138,8 @@ describe("parsing & validation of examples", () => {
         repository Orders for Order { }
         event OrderPlaced { order: Order id, at: datetime }
 
-        workflow placeOrder(customerId: Customer id, placedAt: datetime) {
+        workflow placeOrder {
+      create(customerId: Customer id, placedAt: datetime) {
           let customer = Customers.getById(customerId)
           let order = Order.create({
             customerId: customerId,
@@ -147,10 +148,13 @@ describe("parsing & validation of examples", () => {
           })
           emit OrderPlaced { order: order.id, at: placedAt }
         }
+    }
 
-        workflow noop(amount: decimal) transactional {
+        workflow noop transactional {
+      create(amount: decimal) {
           precondition amount > 0
         }
+    }
       }
       `,
       { validation: true },

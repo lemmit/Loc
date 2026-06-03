@@ -678,26 +678,34 @@ function printLoadPath(node: import("../generated/ast.js").LoadPath): string {
 }
 
 function printWorkflow(node: Workflow): string {
-  const params = node.params.map(printParameter).join(", ");
+  // A2-S5f: members-only body, no header params.
   const es = node.eventSourced ? " eventSourced" : "";
-  let head = `workflow ${node.name}${es}(${params})`;
+  let head = `workflow ${node.name}${es}`;
   if (node.transactional) {
     head += node.isolation ? ` transactional(${node.isolation})` : " transactional";
   }
   return block(
     head,
     node.members.map((m) =>
-      m.$type === "OnDecl"
-        ? printOnDecl(m)
-        : m.$type === "Property"
-          ? printProperty(m)
-          : m.$type === "Apply"
-            ? printApply(m)
-            : m.$type === "HandleDecl"
-              ? printHandleDecl(m)
-              : printStmt(m),
+      m.$type === "WorkflowCreateDecl"
+        ? printWorkflowCreateDecl(m)
+        : m.$type === "OnDecl"
+          ? printOnDecl(m)
+          : m.$type === "Property"
+            ? printProperty(m)
+            : m.$type === "Apply"
+              ? printApply(m)
+              : printHandleDecl(m),
     ),
   );
+}
+
+// `create [name](params) [by <expr>] { … }` workflow starter (workflow-and-applier.md A2-S5f).
+function printWorkflowCreateDecl(node: import("../generated/ast.js").WorkflowCreateDecl): string {
+  const name = node.name ? ` ${node.name}` : "";
+  const params = node.params.map(printParameter).join(", ");
+  const by = node.correlation ? ` by ${printExpr(node.correlation)}` : "";
+  return block(`create${name}(${params})${by}`, node.body.map(printStmt));
 }
 
 // `handle name(params) { … }` command-handler member (workflow-and-applier.md A2).

@@ -13,7 +13,7 @@ const SRC = `
   system S { subdomain M { context C {
     aggregate Order { total: int }
     event PaymentReceived { order: Order id, amount: int }
-    workflow Fulfillment() {
+    workflow Fulfillment {
       orderId: Order id
       count: int
       on(paid: PaymentReceived) by paid.order {
@@ -60,7 +60,7 @@ describe("workflow-as-entity resolution (A2-S5a)", () => {
       system S { subdomain M { context C {
         aggregate Order { total: int }
         event PaymentReceived { order: Order id, amount: int }
-        workflow Fulfillment() {
+        workflow Fulfillment {
           orderId: Order id
           on(paid: PaymentReceived) by paid.order {
             let t = this.orderId.total

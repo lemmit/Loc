@@ -794,10 +794,12 @@ describe("typescript generator", () => {
             operation confirm() extern { precondition isMutable() }
           }
           repository Orders for Order { }
-          workflow confirmOne(orderId: Order id) {
+          workflow confirmOne {
+      create(orderId: Order id) {
             let order = Orders.getById(orderId)
             order.confirm()
           }
+    }
         }
       `,
         { validation: true },
@@ -868,7 +870,8 @@ describe("typescript generator", () => {
         repository Customers for Customer { }
         repository Orders for Order { }
         event OrderPlaced { order: Order id, at: datetime }
-        workflow placeOrder(customerId: Customer id, amount: decimal, placedAt: datetime) {
+        workflow placeOrder {
+      create(customerId: Customer id, amount: decimal, placedAt: datetime) {
           precondition amount > 0
           let customer = Customers.getById(customerId)
           customer.deductCredit(amount)
@@ -879,6 +882,7 @@ describe("typescript generator", () => {
           })
           emit OrderPlaced { order: order.id, at: placedAt }
         }
+    }
       }
     `,
       { validation: true },
@@ -936,11 +940,13 @@ describe("typescript generator", () => {
           }
         }
         repository Customers for Customer { }
-        workflow topUp(customerId: Customer id, amount: decimal) transactional {
+        workflow topUp transactional {
+      create(customerId: Customer id, amount: decimal) {
           precondition amount > 0
           let target = Customers.getById(customerId)
           target.addCredit(amount)
         }
+    }
       }
     `,
       { validation: true },
@@ -1116,10 +1122,12 @@ describe("typescript generator", () => {
           operation confirm() extern { precondition isMutable() }
         }
         repository Orders for Order { }
-        workflow placeAndConfirm(orderId: Order id) {
+        workflow placeAndConfirm {
+      create(orderId: Order id) {
           let order = Orders.getById(orderId)
           order.confirm()
         }
+    }
       }
     `,
       { validation: true },
@@ -1157,10 +1165,12 @@ describe("typescript generator", () => {
           }
         }
         repository Orders for Order { }
-        workflow chargeOrder(orderId: Order id, amount: decimal) {
+        workflow chargeOrder {
+      create(orderId: Order id, amount: decimal) {
           let order = Orders.getById(orderId)
           order.deduct(amount)
         }
+    }
       }
     `,
       { validation: true },
@@ -1257,16 +1267,18 @@ describe("typescript generator", () => {
           }
         }
         repository Accounts for Account { }
-        workflow transferFunds(
+        workflow transferFunds transactional {
+      create(
           fromAccount: Account id,
           toAccount: Account id,
           amount: Money,
-        ) transactional {
+        ) {
           let from = Accounts.getById(fromAccount)
           let to = Accounts.getById(toAccount)
           from.withdraw(amount)
           to.deposit(amount)
         }
+    }
       }
     `,
       { validation: true },
@@ -1310,26 +1322,36 @@ describe("typescript generator", () => {
           }
         }
         repository Customers for Customer { }
-        workflow ser(customerId: Customer id, amount: decimal) transactional(serializable) {
+        workflow ser transactional(serializable) {
+      create(customerId: Customer id, amount: decimal) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow rr(customerId: Customer id, amount: decimal) transactional(repeatableRead) {
+    }
+        workflow rr transactional(repeatableRead) {
+      create(customerId: Customer id, amount: decimal) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow ru(customerId: Customer id, amount: decimal) transactional(readUncommitted) {
+    }
+        workflow ru transactional(readUncommitted) {
+      create(customerId: Customer id, amount: decimal) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow rc(customerId: Customer id, amount: decimal) transactional(readCommitted) {
+    }
+        workflow rc transactional(readCommitted) {
+      create(customerId: Customer id, amount: decimal) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow plain(customerId: Customer id, amount: decimal) transactional {
+    }
+        workflow plain transactional {
+      create(customerId: Customer id, amount: decimal) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
+    }
       }
     `,
       { validation: true },
@@ -1499,13 +1521,17 @@ describe("typescript generator", () => {
               status: string
             }
             repository Orders for Order { }
-            workflow archiveAll() {
+            workflow archiveAll {
+      create() {
               requires currentUser.role == "admin"
               let o = Order.create({ customerId: "c", status: "archived" })
             }
-            workflow touchOne() {
+    }
+            workflow touchOne {
+      create() {
               let o = Order.create({ customerId: "c", status: "new" })
             }
+    }
           }
         }
         deployable api {

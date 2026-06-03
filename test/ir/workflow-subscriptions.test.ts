@@ -17,7 +17,7 @@ function sales(opts: { reactors?: string; body?: string } = {}): string {
         context C {
           aggregate Order { total: int }
           event PaymentReceived { order: Order id, amount: int }
-          workflow Fulfillment() {
+          workflow Fulfillment {
             ${opts.body ?? ""}
             ${opts.reactors ?? "on(paid: PaymentReceived) { let seen = paid.amount }"}
           }
@@ -69,7 +69,9 @@ describe("workflow on(...) reactors — surface + lowering", () => {
   });
 
   it("leaves subscriptions undefined when the workflow declares none", async () => {
-    const wf = await lowerFirstWorkflow(sales({ reactors: "", body: "let total = 1" }));
+    const wf = await lowerFirstWorkflow(
+      sales({ reactors: "", body: "create() { let total = 1 }" }),
+    );
     expect(wf.subscriptions).toBeUndefined();
   });
 
@@ -78,7 +80,7 @@ describe("workflow on(...) reactors — surface + lowering", () => {
     // is split off into `wf.subscriptions` and does not pollute the body.
     const wf = await lowerFirstWorkflow(
       sales({
-        body: "let total = 1",
+        body: "create() { let total = 1 }",
         reactors: "on(paid: PaymentReceived) { let seen = paid.amount }",
       }),
     );
