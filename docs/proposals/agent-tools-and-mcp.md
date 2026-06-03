@@ -189,23 +189,22 @@ each** (`src/language/fix-hints.ts`), not switch arms — so each rides
 `fixHintCodeActions` into Monaco + VS Code *and* the agent loop (`loom_quickfix`)
 for free.
 
-> **Prerequisite found (patch-addressing).** A `fixHintFor` provider emits a
-> `ModelPatch`, whose `target` must be an **addressable node** — and today the
-> address space (`addressOf` / `buildOutline` / the patch index) covers only
-> contexts, aggregates + their members, workflows, views, pages. The bare-
-> aggregate fix worked because it edits an *aggregate member*. The batch below,
-> however, edits **VO members** (`reserved-derived-on-vo`), **`seed` blocks**
-> (`seed-id-needs-raw`), and **aggregate / deployable headers** (`es-tph-…`,
-> `react-deployable-missing-ui`, the `inheritanceUsing` clause) — none currently
-> addressable. So these are **not agent-reachable fix-hints yet**: they need
-> either (a) **extending `ModelPatch` addressing** to VO members / seed blocks /
-> headers (the right, reusable fix — unlocks all of them as `loom_quickfix`), or
-> (b) shipping them as **editor-only `TextEdit` code-actions** in
-> `DddCodeActionProvider` (range-based, no addressing — but editor-only, and each
-> needs to locate an edit point distinct from the diagnostic range). **Recommended
-> next: (a)** — extend addressing, then the batch lands as `fixHintFor` providers.
+> **Patch-addressing (extended).** A `fixHintFor` provider emits a `ModelPatch`,
+> whose `target` must be an **addressable node**. The address space
+> (`addressOf` / `buildOutline` / the patch index) now covers contexts,
+> aggregates **+ their members**, **value objects + their members**, workflows,
+> views, pages, **enums, events, repositories**, and system-level
+> **deployables** (value objects and deployables are also `add` containers). So:
+> - **`reserved-derived-on-vo`** (edits a VO member) and
+>   **`react-deployable-missing-ui`** (`add ui:` into a deployable) are **now
+>   agent-reachable** — implement as `fixHintFor` providers.
+> - **`seed-id-needs-raw`** (a `seed` block) and **`es-tph-forced-own-table`**
+>   (the `inheritanceUsing` **header clause** — a node property, not a child
+>   declaration) remain **not node-addressable**; they need either further
+>   addressing work (seed blocks) or a within-node "header edit" patch kind, or
+>   ship as editor-only `TextEdit` code-actions. Tracked.
 
-Next batch (blocked on the addressing prerequisite above):
+Next batch (the first two now unblocked by the addressing extension):
 
 | Diagnostic code | Patch | Effort |
 |---|---|---|
