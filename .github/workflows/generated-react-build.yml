@@ -89,7 +89,7 @@ jobs:
             EXAMPLES='["examples/showcase.ddd"]'
           else
             # Full Cartesian — push:main and workflow_dispatch.  88 cells.
-            EXAMPLES='["examples/acme.ddd","examples/showcase.ddd","web/src/examples/banking-system.ddd","web/src/examples/inventory-system.ddd","web/src/examples/provenance-system.ddd","web/src/examples/sales-system.ddd","web/src/examples/storefront-system.ddd","web/src/examples/storybook-mantine.ddd","web/src/examples/storybook-shadcn.ddd","web/src/examples/storybook-components.ddd","web/src/examples/action-showcase.ddd"]'
+            EXAMPLES='["examples/acme.ddd","examples/showcase.ddd","web/src/examples/banking-system.ddd","web/src/examples/inventory-system.ddd","web/src/examples/provenance-system.ddd","web/src/examples/sales-system.ddd","web/src/examples/storefront-system.ddd","web/src/examples/inheritance-system.ddd","web/src/examples/fulfillment-newest.ddd","web/src/examples/storybook-mantine.ddd","web/src/examples/storybook-shadcn.ddd","web/src/examples/storybook-components.ddd","web/src/examples/action-showcase.ddd"]'
           fi
           echo "matrix={\"example\":$EXAMPLES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
 

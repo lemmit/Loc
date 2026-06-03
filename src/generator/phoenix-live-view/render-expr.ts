@@ -51,6 +51,12 @@ export interface RenderCtx {
    *  A `resource-op` call renders `<Module>.<resource>_<verb>(args)`.
    *  Unset outside workflow rendering — a resource-op there throws. */
   resourceModules?: Map<string, string>;
+  /** When true, the expression renders inside an Ash read-action
+   *  `filter expr(...)`, where a read-action argument must be referenced
+   *  as `^arg(:name)` (not a bare identifier).  Set for retrieval / find
+   *  `where` predicates that bind declared parameters.  Off everywhere
+   *  else (op / derived / invariant bodies use plain locals). */
+  filterArgs?: boolean;
 }
 
 const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };
@@ -156,6 +162,11 @@ function renderLiteral(lit: string, value: string): string {
 function renderRef(e: RefExpr, ctx: RenderCtx): string {
   switch (e.refKind) {
     case "param":
+      // Inside an Ash read-action `filter expr(...)`, a declared argument
+      // is bound via `^arg(:name)`; everywhere else a param is a plain
+      // local.  (`let`/`lambda` are always locals — never read-action args.)
+      if (ctx.filterArgs) return `^arg(:${snake(e.name)})`;
+      return snake(e.name);
     case "let":
     case "lambda":
       return snake(e.name);

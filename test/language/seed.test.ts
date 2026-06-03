@@ -70,3 +70,50 @@ describe("seed — validation (negative)", () => {
     );
   });
 });
+
+describe("seed — raw explicit-id path", () => {
+  const base = `
+    enum St { Draft, Done }
+    aggregate Customer with crudish { name: string }
+    aggregate Order with crudish { customerId: Customer id status: St }
+    repository Customers for Customer { }
+    repository Orders for Order { }
+  `;
+
+  it("parses a `raw` dataset with explicit id + literal FK columns", async () => {
+    const { errors } = await parseString(
+      wrap(`${base}
+        seed reference raw {
+          Customer { id: "c1", name: "Acme" }
+          Order { id: "o1", customerId: "c1", status: Draft }
+        }
+      `),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("flags an explicit `id` on the (non-raw) domain path", async () => {
+    const { errors } = await parseString(
+      wrap(`${base}
+        seed demo {
+          Customer { id: "c1", name: "Acme" }
+        }
+      `),
+    );
+    expect(errors.some((e) => /explicit `id` requires `seed raw/.test(e))).toBe(true);
+  });
+
+  it("flags a value-object column on a raw row", async () => {
+    const { errors } = await parseString(
+      wrap(`
+        valueobject Money { amount: decimal  currency: string }
+        aggregate Product with crudish { price: Money }
+        repository Products for Product { }
+        seed reference raw {
+          Product { id: "p1", price: Money { amount: 1.0, currency: "USD" } }
+        }
+      `),
+    );
+    expect(errors.some((e) => /raw rows\s+support scalar/.test(e))).toBe(true);
+  });
+});

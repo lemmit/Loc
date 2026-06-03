@@ -1,4 +1,4 @@
-name: Phoenix observability events (runtime e2e)
+name: Phoenix runtime e2e (observability + embeds-react)
 
 # Boots the generated Phoenix backend against a real postgres sidecar,
 # hits /health, then asserts the JSON-per-line stdout from the custom
@@ -22,9 +22,12 @@ on:
     paths:
       - 'src/generator/phoenix-live-view/**'
       - 'src/generator/_obs/**'
+      - 'src/generator/react/**'
       - 'src/platform/phoenix-live-view.ts'
       - 'designs/ashPhoenix/**'
       - 'test/e2e/observability-events-phoenix.test.ts'
+      - 'test/e2e/embed-react-phoenix.test.ts'
+      - 'test/e2e/fixtures/phoenix-build/phoenix-embed-react.ddd'
       - 'package.json'
       - '.github/workflows/phoenix-obs-e2e.yml'
   workflow_dispatch:
@@ -111,10 +114,25 @@ jobs:
           LOOM_OBS_PG_DB: 'phoenix_app'
         run: npx vitest run test/e2e/observability-events-phoenix.test.ts --reporter=verbose
 
+      # D-PHOENIX-SURFACE: same postgres service + BEAM setup, second
+      # runtime guard — boots a phoenix-embeds-react deployable, builds the
+      # SPA into priv/static/app, and asserts GET /app serves the SPA
+      # index.html while GET /api/products serves the Ash JSON API from one
+      # origin.  Shares this workflow rather than minting a new one (the
+      # heavy provisioning — postgres + hex deps + Ash compile — is
+      # identical).
+      - name: Run Phoenix embeds-React runtime e2e
+        env:
+          LOOM_EMBED_E2E_PHOENIX: '1'
+          LOOM_OBS_PG_URL: 'postgres://postgres:postgres@127.0.0.1:5432'
+          LOOM_OBS_PG_DB: 'phoenix_app'
+        run: npx vitest run test/e2e/embed-react-phoenix.test.ts --reporter=verbose
+
       - name: Surface failure context
         if: failure()
         run: |
           echo '## Phoenix runtime e2e failed' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
-          echo 'See the "Run Phoenix observability runtime e2e" step above for the captured server stdout.' >> $GITHUB_STEP_SUMMARY
-          echo 'The test asserts the <App>.LogFormatter stream carries the catalog envelope (server_starting → server_listening → request_start → request_end → server_shutdown → server_drained).' >> $GITHUB_STEP_SUMMARY
+          echo 'See the runtime-e2e steps above for the captured server stdout.' >> $GITHUB_STEP_SUMMARY
+          echo '- Observability: asserts the <App>.LogFormatter stream carries the catalog envelope (server_starting → server_listening → request_start → request_end → server_shutdown → server_drained).' >> $GITHUB_STEP_SUMMARY
+          echo '- Embeds-React: asserts GET /app serves the SPA index.html and GET /api/products serves the Ash JSON API from one origin.' >> $GITHUB_STEP_SUMMARY

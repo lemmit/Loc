@@ -84,12 +84,12 @@ describe("Hono validation-error extension — emission", () => {
     // Registered under the OpenAPI component name "ProblemDetails" so
     // cross-backend parity diffs stay stable.
     expect(src).toMatch(/\.openapi\("ProblemDetails"\)/);
-    // §3.2 errors[] extension is intentionally NOT declared on the
-    // OpenAPI schema in Phase A — see file header comment.  Declaration
-    // moves with Phase B+C of validation-error-extension.md.  The
-    // RUNTIME hook below still emits it in the response body.
-    expect(src).not.toMatch(
-      /errors:\s*z\.array\(z\.object\(\{\s*pointer:\s*z\.string\(\),\s*message:\s*z\.string\(\)\s*\}\)\)/,
+    // §3.2 errors[] extension is now declared on the OpenAPI component
+    // schema (Phase D — all three backends move in lockstep so the
+    // cross-backend parity gate stays green).  See
+    // docs/proposals/validation-error-extension.md.
+    expect(src).toMatch(
+      /errors:\s*z\.array\(z\.object\(\{\s*pointer:\s*z\.string\(\),\s*message:\s*z\.string\(\)\s*\}\)\)\.nullish\(\)/,
     );
   });
 
@@ -173,12 +173,11 @@ describe("Hono validation-error extension — emission", () => {
     }
   });
 
-  it("OpenAPI route declarations do NOT yet carry 422 (parity-deferred until Phase B+C)", async () => {
-    // Phase A intentionally defers the OpenAPI route declaration for 422
-    // until .NET + Phoenix catch up (cross-backend openapi-errors matrix
-    // in src/ir/util/openapi-errors.ts).  Until then the runtime hook
-    // emits the body but the OpenAPI schema stays parity-equal to .NET
-    // + Phoenix.  This test will be inverted in Phase B+C.
+  it("OpenAPI route declarations carry 422 alongside 400 for body-bearing routes", async () => {
+    // Phase D shipped: all three backends now declare 422 in lockstep via
+    // the central matrix in src/ir/util/openapi-errors.ts.  Hono's
+    // create / operation / workflow routes declare 422 ProblemDetails
+    // alongside 400.  See docs/proposals/validation-error-extension.md.
     const { files } = generateSystems(await buildAcme());
     const root = honoRootOf(files);
     const customerSrc = files.get(`${root}/http/customer.routes.ts`)!;
@@ -189,8 +188,9 @@ describe("Hono validation-error extension — emission", () => {
       /422:\s*\{ description: "Unprocessable Entity", content: \{ "application\/problem\+json": \{ schema: ProblemDetails \} \} \}/g,
     );
     expect(fourHundreds, "expected at least one 400 declaration").not.toBeNull();
-    // 422 OpenAPI declaration is deferred until Phase B+C — runtime
-    // emission ships now, schema declaration follows.
-    expect(fourTwentyTwos, "422 OpenAPI declaration should NOT be present in Phase A").toBeNull();
+    expect(fourTwentyTwos, "expected at least one 422 declaration").not.toBeNull();
+    // Every 400 (body-bearing route) pairs with a 422 (validation arm
+    // of the same route).
+    expect(fourTwentyTwos!.length).toBe(fourHundreds!.length);
   });
 });

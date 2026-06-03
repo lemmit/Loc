@@ -480,13 +480,18 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
    ignore it; Phoenix emits `%Ctx.Money{amount: …, currency: …}`), which
    also fixes the same latent bug for VO construction in Phoenix
    *operation bodies*.
-4. **`raw` explicit-id path** — the home for **cross-references**
-   (D-SEED-XREF): a `raw` row's fields (explicit `id` + literal FK
-   columns) emit a direct Postgres `INSERT` shared across all three
-   backends (executed via Drizzle `db.execute`, EF `ExecuteSqlRawAsync`,
-   Ecto `Ecto.Adapters.SQL`), bypassing `create`. v1 = scalar / enum /
-   id columns; value-object + containment columns stay on the domain
-   path. Author orders parents before children.
+4. **`raw` explicit-id path ✅ Done** — the home for **cross-references**
+   (D-SEED-XREF). A shared `renderSeedRowInsert` (`src/system/sql-pg.ts`)
+   turns a `raw` row (explicit `id` + literal FK columns) into a direct
+   Postgres `INSERT`, emitted **bit-identically** by all three backends
+   and executed via their raw-SQL channels (Drizzle `db.execute(sql.raw)`,
+   EF `ExecuteSqlRawAsync`, Ecto `Ecto.Adapters.SQL`), bypassing `create`.
+   Table/column naming mirrors the migration builder
+   (`plural(snake(agg))` / `snake(field)`). v1 = scalar / enum / id
+   columns; value-object + containment columns stay on the domain path
+   (`loom.seed-raw-unsupported-column`). An explicit `id` on the domain
+   path is rejected (`loom.seed-id-needs-raw`). Author orders parents
+   before children — no topological reorder.
 5. Imperative (workflow-body) form — reuses statement lowering.
    Deferred: grammar disambiguation is proven feasible, but the
    statement-execution + auto-save semantics are a standalone project.

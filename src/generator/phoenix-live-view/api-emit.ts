@@ -334,9 +334,17 @@ ${actions}
 
   # RFC 7807 problem body — application/problem+json + x-request-id header
   # (trace correlation off the body so it's byte-identical to Hono / .NET).
-  # Status-aware: a \`{:error, :forbidden}\` from a workflow \`requires\` guard
-  # maps to 403 (matching Hono/.NET); every other reason is a 400 domain
-  # error.
+  # Status-aware:
+  #   - \`%Ash.Error.Invalid{}\` (validation) → 422 with §3.2 \`errors[]\`
+  #     extension via the shared ProblemDetails responder, consumed by
+  #     the frontend ACL's \`applyServerErrors\` (Phase C of
+  #     docs/proposals/validation-error-extension.md).
+  #   - \`:forbidden\` (requires guard) → 403.
+  #   - everything else → 400 domain error.
+  defp error_response(conn, %Ash.Error.Invalid{} = err) do
+    ${webModule}.ProblemDetails.validation_error_response(conn, err)
+  end
+
   defp error_response(conn, reason) do
     {status, title} =
       case reason do
@@ -344,12 +352,7 @@ ${actions}
         _ -> {400, "Bad Request"}
       end
 
-    trace_id = get_resp_header(conn, "x-request-id") |> List.first("unknown")
-    body = Jason.encode!(%{type: "about:blank", title: title, status: status, detail: inspect(reason), instance: conn.request_path})
-    conn
-    |> put_resp_content_type("application/problem+json")
-    |> put_resp_header("x-request-id", trace_id)
-    |> send_resp(status, body)
+    ${webModule}.ProblemDetails.problem_response(conn, status, title, inspect(reason))
   end
 end
 `;
@@ -609,6 +612,16 @@ ${cuLine}    ${contextModule}.${opSnake}_${aggSnake}!(${callArgs}${callOpts})
   return `# Auto-generated.
 defmodule ${controllerModule} do
   use ${webModule}, :controller
+  # Plug.ErrorHandler intercepts raised exceptions from the bang
+  # Ash code-interface calls below (\`create_${aggSnake}!\`, etc.).
+  # When the raised reason is an \`Ash.Error.Invalid\`, we route to
+  # the shared ProblemDetails responder which emits 422 + the §3.2
+  # \`errors[]\` extension consumed by the frontend ACL's
+  # \`applyServerErrors\` (matches Hono / .NET).  Anything else falls
+  # through to Phoenix's default \`render_errors\` pipeline.
+  # See docs/proposals/validation-error-extension.md (Phase C).
+  use Plug.ErrorHandler
+
   # Catalog log events (aggregate_created on Create; see
   # docs/proposals/observability.md) reach Elixir's Logger via the
   # renderer in src/generator/_obs/render-phoenix.ts.
@@ -621,6 +634,17 @@ defmodule ${controllerModule} do
   """
 
 ${allActions}
+
+  # ---------------------------------------------------------------------------
+  # Plug.ErrorHandler — Ash.Error.Invalid → 422 ProblemDetails + errors[]
+  # ---------------------------------------------------------------------------
+
+  @impl Plug.ErrorHandler
+  def handle_errors(conn, %{reason: %Ash.Error.Invalid{} = err}) do
+    ${webModule}.ProblemDetails.validation_error_response(conn, err)
+  end
+
+  def handle_errors(conn, _assigns), do: conn
 end
 `;
 }

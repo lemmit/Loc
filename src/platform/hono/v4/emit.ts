@@ -57,11 +57,7 @@ import {
 } from "../../../ir/util/resolve-datasource.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { lowerFirst } from "../../../util/naming.js";
-import {
-  byLayerLayoutAdapter,
-  type HonoArtifact,
-  type HonoArtifactCategory,
-} from "./adapters/by-layer-layout.js";
+import { byLayerLayoutAdapter } from "./adapters/by-layer-layout.js";
 import { DRIZZLE_CONNECTION_SETUP } from "./adapters/drizzle-persistence.js";
 import { layeredStyleAdapter } from "./adapters/layered-style.js";
 import { resourceAdapterFor } from "./adapters/resource-clients.js";
@@ -123,21 +119,22 @@ import { z } from "zod";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 
-/** RFC 7807 ProblemDetails body — the base shape (5 fields per the spec
- *  core).  Hono's runtime additionally emits an \`errors[]\` extension
- *  (RFC 7807 §3.2) on 422 validation responses — consumed by the
- *  frontend ACL's \`applyServerErrors\` — but that field is intentionally
- *  NOT advertised here in the OpenAPI component schema until .NET +
- *  Phoenix catch up (Phase B + C of validation-error-extension.md), so
- *  the cross-backend parity gate (\`test/_helpers/openapi-normalize.ts\`)
- *  keeps \`fieldSet("ProblemDetails")\` byte-equal across all three.
- *  All fields nullable / optional, matching the base spec. */
+/** RFC 7807 ProblemDetails body — the base 5 spec fields plus the §3.2
+ *  \`errors[]\` extension (per-field \`{ pointer, message }\` array) that
+ *  the runtime emits on 422 validation responses.  Consumed by the
+ *  frontend ACL's \`applyServerErrors\` (see docs/proposals/frontend-acl.md).
+ *  All fields nullable / optional — base 5 per the spec core; \`errors\` is
+ *  only present on 422 validation responses.  Phase D of
+ *  docs/proposals/validation-error-extension.md — all three backends
+ *  (Hono / .NET / Phoenix) declare the same shape in lockstep so the
+ *  cross-backend parity gate stays green. */
 export const ProblemDetails = z.object({
   type: z.string().nullish(),
   title: z.string().nullish(),
   status: z.number().int().nullish(),
   detail: z.string().nullish(),
   instance: z.string().nullish(),
+  errors: z.array(z.object({ pointer: z.string(), message: z.string() })).nullish(),
 }).openapi("ProblemDetails");
 
 /** RFC 6901 JSON pointer from a Zod issue path.  Empty path → empty
@@ -338,9 +335,12 @@ export function generateTypeScriptForContexts(
   }
   out.set("http/index.ts", renderHttpIndex(merged, { authRequired }));
 
-  // Adapter dispatch context — present only in system-mode emit so the
-  // routes file (via the StyleAdapter) AND every other per-aggregate file
-  // route through the deployable's RESOLVED layout adapter.
+  // Adapter dispatch context — present only in system-mode emit so
+  // routes-file emission can route through the layered StyleAdapter +
+  // byLayer LayoutAdapter.  Other per-aggregate emissions (aggregate
+  // module, repository, extern handler, tests) still write inline
+  // paths; future slices can move them under the persistence adapter +
+  // additional layout categories.
   const emitCtx: EmitCtx | undefined = system
     ? {
         deployable: system.deployable,
@@ -352,22 +352,6 @@ export function generateTypeScriptForContexts(
         layoutAdapter: system.layoutAdapter,
       }
     : undefined;
-  // Per-aggregate placement (D-REALIZATION-AXES `directoryLayout:`): route the
-  // aggregate's domain module / repository / extern / test through the
-  // threaded layout adapter, byLayer fallback in the legacy single-context
-  // path.  byLayer reproduces the historical inline paths byte-for-byte;
-  // byFeature rehomes them under `features/<agg>/`.  The adapters ignore the
-  // EmitCtx arg for path routing, so an empty stand-in is fine without one.
-  const layout = emitCtx?.layoutAdapter ?? byLayerLayoutAdapter;
-  const place = (category: HonoArtifactCategory, aggregateName: string, content: string): void => {
-    out.set(
-      layout.pathFor(
-        { name: "", content, category, aggregateName } as HonoArtifact,
-        emitCtx ?? ({} as EmitCtx),
-      ),
-      content,
-    );
-  };
   // Per-aggregate emission stays per-context — each aggregate file
   // and its repository / routes are emitted in the context that
   // owns the aggregate.
@@ -379,15 +363,17 @@ export function generateTypeScriptForContexts(
       // the shared table filtered by `kind` (see the repository builders).
       if (agg.isAbstract) continue;
       const repo = findRepoFor(ctx, agg.name);
-      place("domain-aggregate", agg.name, renderAggregate(agg, ctx, emitProvenance, emitTrace));
+      out.set(
+        `domain/${lowerFirst(agg.name)}.ts`,
+        renderAggregate(agg, ctx, emitProvenance, emitTrace),
+      );
       // Saving-shape routing: `document` → one jsonb blob + JSON
       // round-trip via `_create`; `embedded` → queryable root columns +
       // containments in jsonb columns; `relational` (default) → the
       // normalised table-per-entity hydrate.
       const shape = effectiveSavingShape(agg, resolveDataSource?.(agg));
-      place(
-        "drizzle-repository",
-        agg.name,
+      out.set(
+        `db/repositories/${lowerFirst(agg.name)}-repository.ts`,
         shape === "document"
           ? buildDocumentRepositoryFile(agg, repo, ctx, emitTrace)
           : shape === "embedded"
@@ -416,11 +402,11 @@ export function generateTypeScriptForContexts(
         );
       }
       if (agg.operations.some((o) => o.extern)) {
-        place("domain-extern", agg.name, buildExternHandlersFile(agg, ctx));
+        out.set(`domain/${lowerFirst(agg.name)}-extern.ts`, buildExternHandlersFile(agg, ctx));
       }
       const testsFile = renderTestsFile(agg, ctx);
       if (testsFile) {
-        place("domain-test", agg.name, testsFile);
+        out.set(`domain/${lowerFirst(agg.name)}.test.ts`, testsFile);
       }
     }
     // TPH (aggregate-inheritance.md): each `sharedTable` base owns the shared
@@ -432,8 +418,11 @@ export function generateTypeScriptForContexts(
       if (!isTphBase(base, ctx.aggregates)) continue;
       const concretes = tphConcretesOf(base, ctx.aggregates) as typeof ctx.aggregates;
       if (concretes.length === 0) continue;
-      place("domain-aggregate", base.name, buildBaseUnionFile(base, concretes));
-      place("drizzle-repository", base.name, buildBaseReaderFile(base, concretes, ctx));
+      out.set(`domain/${lowerFirst(base.name)}.ts`, buildBaseUnionFile(base, concretes));
+      out.set(
+        `db/repositories/${lowerFirst(base.name)}-repository.ts`,
+        buildBaseReaderFile(base, concretes, ctx),
+      );
     }
     // TPC (aggregate-inheritance.md, ownTable): the base owns no table, but is
     // the read home for the polymorphic `find all <Base>`.  Emit the `<Base>`
@@ -445,8 +434,14 @@ export function generateTypeScriptForContexts(
       if (!isTpcBase(base, ctx.aggregates)) continue;
       const concretes = tpcConcretesOf(base, ctx.aggregates) as typeof ctx.aggregates;
       if (concretes.length === 0) continue;
-      place("domain-aggregate", base.name, buildBaseUnionFile(base, concretes, "ownTable"));
-      place("drizzle-repository", base.name, buildTpcBaseReaderFile(base, concretes));
+      out.set(
+        `domain/${lowerFirst(base.name)}.ts`,
+        buildBaseUnionFile(base, concretes, "ownTable"),
+      );
+      out.set(
+        `db/repositories/${lowerFirst(base.name)}-repository.ts`,
+        buildTpcBaseReaderFile(base, concretes),
+      );
     }
   }
 
