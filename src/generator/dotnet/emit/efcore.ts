@@ -8,6 +8,7 @@ import type {
   ExprIR,
   FieldIR,
 } from "../../../ir/types/loom-ir.js";
+import { isValueCollectionType, valueCollectionsFor } from "../../../ir/util/value-collections.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
@@ -138,7 +139,9 @@ export function renderConfiguration(
   options: { schema?: string; tablePrefix?: string; embedded?: boolean } = {},
 ): string {
   const voLookup: VoLookup = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
-  const fieldConfigs = agg.fields.flatMap((f) => fieldConfigLines(f, "        ", "b", voLookup));
+  const fieldConfigs = agg.fields.flatMap((f) =>
+    fieldConfigLines(f, "        ", "b", voLookup, false, agg.name),
+  );
   const containmentLines = agg.contains.flatMap((c) => containmentConfigLines(c, agg, options));
   // Reference-collection (`Id<T>[]`) fields are persisted via a
   // separate join entity (see `join-entities.ts`), so the public
@@ -268,7 +271,15 @@ function fieldConfigLines(
   builder: string,
   voLookup?: VoLookup,
   embedded = false,
+  ownerName?: string,
 ): string[] {
+  // Value-object array (`charges: Money[]`): an owned collection mapped to
+  // the id-less child table — the migration's `order_charges` (owner FK +
+  // `ordinal` + flattened VO columns).  EF maps `List<Money>` into that
+  // table rather than inventing a convention-named one.
+  if (voLookup && ownerName && !embedded && isValueCollectionType(f.type)) {
+    return ownedVoArrayLines(f, ownerName, voLookup, indent, builder);
+  }
   if (f.type.kind === "id") {
     return [
       `${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v));`,
@@ -329,6 +340,47 @@ function ownedVoLines(
     return [`${inner}${sel}.HasColumnName("${col}");`];
   });
   return [`${indent}${builder}.OwnsOne<${voName}>(x => x.${nav}, o => {`, ...body, `${indent}});`];
+}
+
+/** Map a value-object array field to its id-less child table as an EF owned
+ *  collection: FK to the owner, a shadow `ordinal` key column, and the value
+ *  object's columns named bare (matching the migration's `order_charges`). */
+function ownedVoArrayLines(
+  f: FieldIR,
+  ownerName: string,
+  voLookup: VoLookup,
+  indent: string,
+  builder: string,
+): string[] {
+  const vc = valueCollectionsFor({ name: ownerName, fields: [f] })[0];
+  if (!vc) return [];
+  const inner = indent + "    ";
+  const props = (voLookup.get(vc.voName) ?? []).flatMap((vf) => {
+    const col = snake(vf.name);
+    const base = vf.type.kind === "optional" ? vf.type.inner : vf.type;
+    if (base.kind === "valueobject") {
+      return ownedVoLines(base.name, upperFirst(vf.name), col, voLookup, inner, "o");
+    }
+    const sel = `o.Property(x => x.${upperFirst(vf.name)})`;
+    if (base.kind === "id") {
+      return [
+        `${inner}${sel}.HasConversion(v => v.Value, v => new ${base.targetName}Id(v)).HasColumnName("${col}");`,
+      ];
+    }
+    if (base.kind === "enum") {
+      return [`${inner}${sel}.HasConversion<string>().HasColumnName("${col}");`];
+    }
+    return [`${inner}${sel}.HasColumnName("${col}");`];
+  });
+  return [
+    `${indent}${builder}.OwnsMany<${vc.voName}>(x => x.${upperFirst(f.name)}, o => {`,
+    `${inner}o.ToTable("${vc.childTable}");`,
+    `${inner}o.WithOwner().HasForeignKey("${vc.parentFk}");`,
+    `${inner}o.Property<int>("ordinal");`,
+    `${inner}o.HasKey("${vc.parentFk}", "ordinal");`,
+    ...props,
+    `${indent}});`,
+  ];
 }
 
 function containmentConfigLines(

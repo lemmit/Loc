@@ -13,6 +13,7 @@ import type {
   FieldIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { isValueCollectionType, valueCollectionsFor } from "../../ir/util/value-collections.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
@@ -85,11 +86,35 @@ function saveTxBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace: 
       `      }`,
     ];
   });
+  // Replace each value-object collection wholesale: the elements are
+  // identity-less, so there is nothing to diff on.  Delete every child row
+  // for this owner, then re-insert the current list with its ordinals.
+  const valueCollectionBlocks = valueCollectionsFor(agg).flatMap((vc) => {
+    const vo = ctx.valueObjects.find((v) => v.name === vc.voName);
+    const voEntries = (vo?.fields ?? []).flatMap((vf) =>
+      projectValueEntries(vf.name, vf.type, `e.${vf.name}`, ctx, vf.optional),
+    );
+    const rowFields = [
+      `parentId: aggregate.id as string`,
+      `ordinal: i`,
+      ...voEntries.map((en) => `${en.fieldName}: ${en.expr}`),
+    ].join(", ");
+    return [
+      "",
+      `      await tx.delete(schema.${vc.tableConst}).where(eq(schema.${vc.tableConst}.parentId, aggregate.id));`,
+      `      const ${vc.fieldName}List = aggregate.${vc.fieldName} ?? [];`,
+      `      for (let i = 0; i < ${vc.fieldName}List.length; i++) {`,
+      `        const e = ${vc.fieldName}List[i]!;`,
+      `        await tx.insert(schema.${vc.tableConst}).values({ ${rowFields} });`,
+      `      }`,
+    ];
+  });
   return [
     `      const rootRow = ${rootProjection(agg, "aggregate", ctx)};`,
     `      await tx.insert(schema.${tableName}).values(rootRow).onConflictDoUpdate({ target: schema.${tableName}.id, set: rootRow });`,
     ...containBlocks,
     ...assocBlocks,
+    ...valueCollectionBlocks,
   ];
 }
 
@@ -144,7 +169,7 @@ function rootProjection(agg: EnrichedAggregateIR, varExpr: string, ctx: BoundedC
     ...(kind ? [{ fieldName: "kind", expr: JSON.stringify(kind) }] : []),
     // Reference collections live in join tables, not on the root row.
     ...agg.fields
-      .filter((f) => !isRefCollection(f.type))
+      .filter((f) => !isRefCollection(f.type) && !isValueCollectionType(f.type))
       .flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
     ...provColumnEntries(agg.fields, varExpr),
   ]);

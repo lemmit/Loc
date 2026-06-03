@@ -9,6 +9,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js";
 import { effectiveSavingShape } from "../../../ir/util/resolve-datasource.js";
+import { type ValueCollectionIR, valueCollectionsFor } from "../../../ir/util/value-collections.js";
 import { lines as joinLines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import { isTphBase, isTphConcrete, ownFieldsOf, tableOwnerName, tphConcretesOf } from "../tph.js";
@@ -146,6 +147,17 @@ export function renderSchema(
     // FKs stay valid.
     for (const assoc of agg.associations) {
       tables.push(emitJoinTable(assoc, { schema, prefix }));
+    }
+    // Id-less child tables for `<VO>[]` value-object collections — one
+    // row per element keyed by (parent_id, ordinal), columns flattened
+    // from the value object.  Plain relational shape (portable).
+    for (const vc of valueCollectionsFor(agg)) {
+      tables.push(emitValueCollectionTable(vc, ctx, { schema, prefix }));
+    }
+    for (const part of agg.parts) {
+      for (const vc of valueCollectionsFor(part)) {
+        tables.push(emitValueCollectionTable(vc, ctx, { schema, prefix }));
+      }
     }
   }
   if (opts.audit) tables.push(AUDIT_TABLE);
@@ -458,6 +470,35 @@ function emitTphTable(
   return lines.join("\n");
 }
 
+/** Id-less child table for a value-object collection field (`<VO>[]`).
+ *  Columns: the owner FK + an `ordinal` (preserves list order) + the value
+ *  object's flattened fields; primary key `(parentId, ordinal)`.  A plain
+ *  relational child table — no Postgres array / jsonb — so it ports to any
+ *  SQL backend that shares the database. */
+function emitValueCollectionTable(
+  vc: ValueCollectionIR,
+  ctx: BoundedContextIR,
+  options: { schema?: string; prefix?: string } = {},
+): string {
+  const vo = ctx.valueObjects.find((v) => v.name === vc.voName);
+  const tableName = options.prefix ? `${options.prefix}${vc.childTable}` : vc.childTable;
+  const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
+  const lines: string[] = [];
+  lines.push(`export const ${vc.tableConst} = ${tableFactory}("${tableName}", {`);
+  lines.push(`  parentId: text("${vc.parentFk}").notNull(),`);
+  lines.push(`  ordinal: integer("ordinal").notNull(),`);
+  for (const f of vo?.fields ?? []) {
+    lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
+  }
+  lines.push(`}, (table) => ({`);
+  lines.push(`  ${vc.tableConst}Pk: primaryKey({ columns: [table.parentId, table.ordinal] }),`);
+  lines.push(
+    `  ${vc.tableConst}ParentIdIdx: index("${tableName}_parent_id_idx").on(table.parentId),`,
+  );
+  lines.push(`}));`);
+  return lines.join("\n");
+}
+
 function emitTable(
   name: string,
   fields: FieldIR[],
@@ -619,6 +660,10 @@ function drizzleColumnLinesForName(
           return [`${fieldName}: ${builder}.array()${not},`];
         }
       }
+      // Collections of value objects (`<VO>[]`) are persisted as an id-less
+      // child table (emitted separately in renderSchema via
+      // `emitValueCollectionTable`), so they contribute no column here.
+      if (inner.element.kind === "valueobject") return [];
       return [`${fieldName}: text("${colName}")${not}, // non-scalar arrays stored as text`];
     case "optional":
       return drizzleColumnLinesForName(fieldName, inner.inner, true, ctx);

@@ -26,6 +26,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { valueCollectionsFor } from "../../ir/util/value-collections.js";
 import { indent, lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
@@ -35,6 +36,7 @@ import {
   hydrateEntityExpr,
   hydrateRootExpr,
   hydrateRootForFindAllExpr,
+  valueCollectionElementExpr,
 } from "./repository-find-hydrate.js";
 import { combinePredicate, lowerToDrizzle } from "./repository-find-predicate.js";
 import { discriminatorValue, tableOwnerName } from "./tph.js";
@@ -120,6 +122,30 @@ function bulkLoadContainmentLines(
   });
 }
 
+/** Single-row read path (findById, inside the `tx` callback): load each
+ *  value-object collection by the owner id, ordered, into a `const
+ *  <field>` the root `_create` references by shorthand. */
+function valueCollectionLoadLinesById(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string[] {
+  return valueCollectionsFor(agg).flatMap((vc) => [
+    `      const ${vc.fieldName}Rows = await tx.select().from(schema.${vc.tableConst}).where(eq(schema.${vc.tableConst}.parentId, id)).orderBy(schema.${vc.tableConst}.ordinal);`,
+    `      const ${vc.fieldName} = ${vc.fieldName}Rows.map((r) => ${valueCollectionElementExpr(vc, "r", ctx)});`,
+  ]);
+}
+
+/** Array read path (findManyByIds / find*): bulk-load each value-object
+ *  collection across `rootIds` into a per-parent `Map`, ordered. */
+function bulkLoadValueCollectionLines(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string[] {
+  return valueCollectionsFor(agg).flatMap((vc) => [
+    `    const ${vc.fieldName}Rows = await this.db.select().from(schema.${vc.tableConst}).where(inArray(schema.${vc.tableConst}.parentId, rootIds)).orderBy(schema.${vc.tableConst}.ordinal);`,
+    `    const ${vc.fieldName}ByParent = new Map<string, ${vc.voName}[]>();`,
+    `    for (const r of ${vc.fieldName}Rows) {`,
+    `      const list = ${vc.fieldName}ByParent.get(r.parentId) ?? [];`,
+    `      list.push(${valueCollectionElementExpr(vc, "r", ctx)});`,
+    `      ${vc.fieldName}ByParent.set(r.parentId, list);`,
+    `    }`,
+  ]);
+}
+
 export function findManyByIdsMethod(
   agg: EnrichedAggregateIR,
   ctx: BoundedContextIR,
@@ -134,7 +160,10 @@ export function findManyByIdsMethod(
   // Bulk-load every containment (collections + singulars) into per-
   // parent maps; mirrors the array-return path of findQueryMethod.
   const eagerContains = eagerContainsOf(agg);
-  const needsIdsLocal = eagerContains.length > 0 || associationsOf(agg).length > 0;
+  const needsIdsLocal =
+    eagerContains.length > 0 ||
+    associationsOf(agg).length > 0 ||
+    valueCollectionsFor(agg).length > 0;
   return lines(
     `  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
@@ -143,6 +172,7 @@ export function findManyByIdsMethod(
     needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
     ...bulkLoadContainmentLines(eagerContains, agg, ctx),
     associationMapLines(agg, "this.db", "    "),
+    ...bulkLoadValueCollectionLines(agg, ctx),
     `    return rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
     `  }`,
   );
@@ -231,6 +261,7 @@ function txCallbackBody(
     `      const root = rootRows[0]!;`,
     ...childLoads,
     ...assocLoads,
+    ...valueCollectionLoadLinesById(agg, ctx),
     // Hydrate root.  Bind to a local so the load-success log line can
     // fire BEFORE returning — keeping the debug record adjacent to the
     // row read.
@@ -264,7 +295,10 @@ export function findQueryMethod(
   // through `toWire`).
   if (pagedReturn(find.returnType)) {
     const eagerContains = eagerContainsOf(agg);
-    const needsIdsLocal = eagerContains.length > 0 || associationsOf(agg).length > 0;
+    const needsIdsLocal =
+      eagerContains.length > 0 ||
+      associationsOf(agg).length > 0 ||
+      valueCollectionsFor(agg).length > 0;
     const pagedParams = [...baseParams, "page: number", "pageSize: number"];
     const pagedAll = (usesUser ? [...pagedParams, "currentUser: User"] : pagedParams).join(", ");
     const ret = `{ items: ${agg.name}[]; page: number; pageSize: number; total: number; totalPages: number }`;
@@ -282,6 +316,7 @@ export function findQueryMethod(
       needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
       ...bulkLoadContainmentLines(eagerContains, agg, ctx),
       associationMapLines(agg, "this.db", "    "),
+      ...bulkLoadValueCollectionLines(agg, ctx),
       `    const items = rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
       `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: items.length`)}`,
       `    return { items, page, pageSize, total, totalPages };`,
@@ -299,7 +334,10 @@ export function findQueryMethod(
     // into a per-parent Map and use a hydrate helper that reads from
     // those maps.
     const eagerContains = eagerContainsOf(agg);
-    const needsIdsLocal = eagerContains.length > 0 || associationsOf(agg).length > 0;
+    const needsIdsLocal =
+      eagerContains.length > 0 ||
+      associationsOf(agg).length > 0 ||
+      valueCollectionsFor(agg).length > 0;
     return lines(
       `  async ${find.name}(${params}): Promise<${agg.name}[]> {`,
       `    const rootRows = await this.db.select().from(schema.${tableName})${whereClause};`,
@@ -310,6 +348,7 @@ export function findQueryMethod(
       needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
       ...bulkLoadContainmentLines(eagerContains, agg, ctx),
       associationMapLines(agg, "this.db", "    "),
+      ...bulkLoadValueCollectionLines(agg, ctx),
       `    const result = rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
       `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: result.length`)}`,
       `    return result;`,
@@ -398,7 +437,10 @@ export function runMethod(
       : "";
 
   const eagerContains = eagerContainsOf(agg);
-  const needsIdsLocal = eagerContains.length > 0 || associationsOf(agg).length > 0;
+  const needsIdsLocal =
+    eagerContains.length > 0 ||
+    associationsOf(agg).length > 0 ||
+    valueCollectionsFor(agg).length > 0;
   return lines(
     `  async ${methodName}(${params}): Promise<${agg.name}[]> {`,
     // `page` is optional — apply limit / offset only when supplied.
@@ -413,6 +455,7 @@ export function runMethod(
     needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
     ...bulkLoadContainmentLines(eagerContains, agg, ctx),
     associationMapLines(agg, "this.db", "    "),
+    ...bulkLoadValueCollectionLines(agg, ctx),
     `    const result = rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
     `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${methodName}", rows: result.length`)}`,
     `    return result;`,

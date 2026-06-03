@@ -52,6 +52,10 @@ describe.skipIf(!ENABLED)(
   () => {
     it.each([
       { name: "acme-lv.ddd" },
+      // Value-object array (`Money[]`) — Ash stores it inline as an
+      // `{:array, Money}` embedded attribute → `{:array, :map}` column (no
+      // child table); compiles the embedded-array path.
+      { name: "value-collections.ddd" },
       // Reference-collection (`Id<T>[]`) fixture — exercises the m2m join
       // entity + many_to_many relationship + `manage_relationship` mutations
       // + `exists(...)` filter that Phoenix join-table emission produces.

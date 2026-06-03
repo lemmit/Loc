@@ -40,6 +40,10 @@ describe.skipIf(!ENABLED)(
       // First-boot seeding (database-seeding.md): compiles db/seed.ts + the
       // index.ts runSeeds wiring + the db:seed package.json script.
       "examples/seeding.ddd",
+      // Value-object array (`Money[]`): the id-less child table + the repo
+      // load/save round-trip (bulk-load → `new Money(...)`, delete + re-insert
+      // with ordinal).
+      "examples/value-collections.ddd",
     ])("%s — `ddd generate ts` output type-checks + tsup-bundles", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
       try {
