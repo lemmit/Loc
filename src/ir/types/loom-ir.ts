@@ -811,6 +811,33 @@ export interface WorkflowIR {
    *  exactly one id-shaped state field exists; absence / ambiguity are
    *  diagnosed by the IR validator. */
   correlationField?: string;
+  /** `eventSourced` workflow (workflow-and-applier.md A2-S5b): command /
+   *  reactor handlers may only `emit`, and state transitions live in
+   *  `apply(...)` folds — exactly the event-sourced discipline aggregates
+   *  carry via `persistedAs(eventLog)`. */
+  eventSourced: boolean;
+  /** Event-fold appliers declared via `apply(e: Event) { … }` members on an
+   *  `eventSourced` workflow.  Lowered with the workflow's `this`-bound env
+   *  (A2-S5a), so bodies fold events into workflow state.  Omitted when the
+   *  workflow declares none. */
+  appliers?: ApplyIR[];
+  /** Named orchestration command handlers declared via `handle name(params)
+   *  { … }` members (A2-S5c) — a multi-command saga's continuation commands.
+   *  Each carries its own params + saves, lowered like the legacy paren-form
+   *  body.  Omitted when the workflow declares none. */
+  handlers?: HandleIR[];
+}
+
+/** A named `handle name(params) { … }` command handler on a workflow
+ *  (workflow-and-applier.md A2-S5c) — structurally the legacy paren-form
+ *  workflow body, but named and repeatable. */
+export interface HandleIR {
+  name: string;
+  params: ParamIR[];
+  statements: WorkflowStmtIR[];
+  /** Which let-bound aggregates need a save call at handler exit, in
+   *  declaration order — same derivation as `WorkflowIR.savesAtExit`. */
+  savesAtExit: { name: string; aggName: string; repoName: string }[];
 }
 
 /** A `on(e: Event) [by <expr>] { … }` reactor on a workflow — an extrinsic
