@@ -1,0 +1,21 @@
+{
+  "name": "ddd-mcp",
+  "version": "0.0.0-experimental",
+  "private": true,
+  "type": "module",
+  "description": "Loom MCP stdio server — surfaces the transport-neutral agent-tool catalog (src/tools/) over the Model Context Protocol so external hosts can drive the .ddd authoring loop (validate / outline / generate / apply_patch).",
+  "main": "./index.js",
+  "bin": {
+    "ddd-mcp": "./bin.js"
+  },
+  "exports": {
+    ".": "./index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "loom": {
+    "kind": "mcp-server",
+    "core": "^1.0.0"
+  }
+}
