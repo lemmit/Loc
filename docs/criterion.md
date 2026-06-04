@@ -11,7 +11,11 @@ guards.
 > **Status.** This ships the *core* of
 > [`docs/proposals/criterion.md`](proposals/criterion.md): the
 > `criterion` declaration, body validation, and **inline use** in every
-> existing boolean-expression position. The proposal's further surfaces —
+> existing boolean-expression position. A criterion referenced by a
+> [`retrieval`](#reification-retrieval-criteria)'s `where` additionally
+> **reifies** — it emits a named, constructed predicate object on every
+> backend rather than dissolving at compile time (see "Reification"
+> below). The proposal's further surfaces —
 > `Repo.findAll(criterion, sort?, page?, loads?)`, `when <Criterion>`
 > operation guards with auto-exposed `can-<op>` endpoints, and
 > `from <Criterion>(args)` parameter binding — depend on the
@@ -91,6 +95,37 @@ lowered expression** (and therefore the same generated SQL) as the
 equivalent hand-written inline filter. No backend query-engine change is
 involved; criteria ride the existing `where`→SQL path on every backend.
 
+## Reification (retrieval criteria)
+
+There is one position where a criterion is **not** dissolved into its
+host: when a [`retrieval`](proposals/retrieval.md)'s `where` is *exactly*
+a named criterion reference. There the criterion **reifies** — the backend emits
+a named, constructed predicate object (the Specification pattern made
+real in generated code) that the retrieval's query method consumes, the
+functional analog of inlining lifted into a reusable object:
+
+```ddd
+criterion NamedLike(needle: string) of Customer = this.name == needle
+retrieval ByName(needle: string) of Customer { where: NamedLike(needle) sort: [name asc] }
+```
+
+| Backend | What the criterion reifies to |
+|---|---|
+| .NET / EF | a `Criterion<Customer>` (with `IsSatisfiedBy` + a query-side `ToExpression()`), fed into the retrieval's Ardalis `Specification<Customer>` bundle |
+| .NET / Dapper | a parameterised SQL `WHERE` fragment composed into the retrieval's `Run<Name>Async` |
+| Hono / Drizzle | a module-level predicate function `const namedLikeCriterion = (needle) => eq(schema.customers.name, needle)`, called by `run<Name>` |
+| Phoenix / Ash | a `:boolean` Ash **calculation** the read action filters by (`filter expr(named_like(needle: ^arg(:needle)))`) |
+
+The emitted predicate is **byte-identical** to what inlining would
+produce — reification is a code-organisation choice, not a behavioural
+one, so cross-backend conformance/wire parity is unchanged. The rule for
+*when* a criterion reifies is simply **"if it has a name."** Anonymous
+boolean expressions (most invariants, preconditions, capability filters)
+have nothing to reify and stay inline. See
+[`docs/proposals/reified-criteria.md`](proposals/reified-criteria.md) for
+the full design and the remaining-work register (`find` criteria and the
+anonymous `filter` capability predicates still inline on Hono/Ash).
+
 ## Validation
 
 | Diagnostic | When |
@@ -107,5 +142,8 @@ and workflow calls are already excluded by the grammar.
 
 - [`docs/proposals/criterion.md`](proposals/criterion.md) — the full
   design, including the deferred `findAll` / `when` / `from` surfaces.
+- [`docs/proposals/reified-criteria.md`](proposals/reified-criteria.md) —
+  the Specification-reification design (shipped for retrieval criteria;
+  the remaining-work register for `find` / capability-filter reification).
 - [`docs/views.md`](views.md) — views, whose `where` accepts a criterion.
 - [`docs/workflow.md`](workflow.md) — repository finds.

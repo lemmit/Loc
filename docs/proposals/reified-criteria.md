@@ -61,6 +61,28 @@ Three pieces, identical in shape on every backend:
 `CriterionIR` stops being "retained for tooling / future query emission"
 and becomes the artifact backends actually consume.
 
+## Remaining-work register (shipped ✓ / left ▢)
+
+The retrieval-criterion reification path is **shipped on all four
+backends**; everything below is the residue. Each row keys to a phase in
+"Implementation sketch (phased)".
+
+| | Work | Backends | Phase | PRs |
+|---|---|---|---|---|
+| ✓ | `retrieval` `where` = named criterion → reified Specification/predicate object | .NET (EF + Dapper), Hono, Phoenix/Ash | 0 | #890 #901 #910 #926 #936 #943 #952 #955 |
+| ▢ | **`find` criteria** reify (today still inlined into the find's `where`) | Hono, .NET, Phoenix/Ash | 1 | — |
+| ▢ | **Anonymous `filter` capability** predicates reify (the #760/#762 `contextFilters` mechanism — still inlined) | Hono, Phoenix/Ash | 1, 3 | — |
+| ▢ | **Principal/tenancy** (`currentUser.<field>`) as a factory-bound constructor arg — retire the `usesUser` find-parameter threading (the held-#767 case, reified directly) | .NET first, then Hono/Phoenix | 2, 3 | (holds #767) |
+| ▢ | **`isSatisfiedBy` duality** — route invariant/precondition/guard use-sites through the spec's in-memory face; replace the selectability *validator* with the spec's `toExpression()` capability | all | 4 | — |
+| ▢ | **Java** `Specification<T>` falls out for free | Java (when the backend lands) | 5 | see [`java-backend.md`](./java-backend.md) |
+
+The shipped rows are **code-organisation only** — each emits the
+byte-identical predicate the inline form did, so conformance/wire parity
+is unchanged. The ▢ rows are where reification *changes the shape* of
+generated code (the principal-binding factory) or *removes* a mechanism
+(the `usesUser` threading), so they land in slices behind the
+build-gates, per the sketch.
+
 ## The problem the inline model has
 
 The shipped pipeline inlines criteria: `criterion.md` states it
