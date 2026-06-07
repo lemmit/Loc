@@ -11,6 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR, DataSourceIR, StorageIR } from "../../../ir/types/loom-ir.js";
+import { dedupeByName } from "../../../util/dedupe.js";
 import { PLATFORM_SAVING_SHAPES } from "../../../util/platform-axes.js";
 import type { EmitCtx, Lines, PersistenceAdapter } from "../../_adapters/index.js";
 import { renderConfiguration, renderDbContext } from "../emit/efcore.js";
@@ -186,8 +187,11 @@ export function emitDbContext(ctx: EmitCtx): Lines {
   const ns = nsOf(ctx);
   const merged = {
     name: ns,
-    enums: ctx.contexts.flatMap((c) => c.enums),
-    valueObjects: ctx.contexts.flatMap((c) => c.valueObjects),
+    // Dedupe the ambient root-level enums / VOs that enrichment folds into
+    // every hosted context — a plain union would emit duplicate enum / class
+    // declarations across the merged DbContext.
+    enums: dedupeByName(ctx.contexts.flatMap((c) => c.enums)),
+    valueObjects: dedupeByName(ctx.contexts.flatMap((c) => c.valueObjects)),
     events: ctx.contexts.flatMap((c) => c.events),
     aggregates: ctx.contexts.flatMap((c) => c.aggregates),
     repositories: ctx.contexts.flatMap((c) => c.repositories),

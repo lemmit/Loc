@@ -22,6 +22,7 @@ import type {
   EnrichedBoundedContextIR,
   StorageIR,
 } from "../../../../ir/types/loom-ir.js";
+import { dedupeByName } from "../../../../util/dedupe.js";
 import { BACKEND_PINS } from "../pins.js";
 
 /** Find the matching repository declaration across the deployable's
@@ -181,8 +182,11 @@ export function emitDrizzleSchema(
   const ns = ctx.deployable.name;
   const merged: EnrichedBoundedContextIR = {
     name: ns,
-    enums: ctx.contexts.flatMap((c) => c.enums),
-    valueObjects: ctx.contexts.flatMap((c) => c.valueObjects),
+    // Dedupe the ambient root-level enums / VOs that enrichment folds into
+    // every hosted context — a plain union would emit duplicate
+    // `pgEnum` exports in the schema (rejected by the bundler).
+    enums: dedupeByName(ctx.contexts.flatMap((c) => c.enums)),
+    valueObjects: dedupeByName(ctx.contexts.flatMap((c) => c.valueObjects)),
     events: ctx.contexts.flatMap((c) => c.events),
     payloads: ctx.contexts.flatMap((c) => c.payloads),
     aggregates: ctx.contexts.flatMap((c) => c.aggregates),

@@ -16,6 +16,7 @@ import {
   resolveDataSourceConfig,
 } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
+import { dedupeByName } from "../../util/dedupe.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { generateReactForContexts } from "../react/index.js";
@@ -241,8 +242,12 @@ function emitProjectFromContexts(
   // collected from the union of contexts.
   const merged: EnrichedBoundedContextIR = {
     name: ns,
-    enums: contexts.flatMap((c) => c.enums),
-    valueObjects: contexts.flatMap((c) => c.valueObjects),
+    // Ambient root-level enums / VOs are folded into every context by
+    // enrichment, so a plain union across hosted contexts would emit them
+    // once per context (duplicate enum / class declarations).  Dedupe by
+    // name to collapse the ambient copies.
+    enums: dedupeByName(contexts.flatMap((c) => c.enums)),
+    valueObjects: dedupeByName(contexts.flatMap((c) => c.valueObjects)),
     events: contexts.flatMap((c) => c.events),
     payloads: contexts.flatMap((c) => c.payloads),
     aggregates: contexts.flatMap((c) => c.aggregates),
