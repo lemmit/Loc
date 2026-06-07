@@ -69,8 +69,7 @@ export function buildApiModule(
   lines.push("");
 
   // Schemas — enums + value-objects + per-route DTOs.
-  const usedVOs = collectValueObjects(agg, repo, ctx);
-  const usedEnums = collectEnums(agg, repo, ctx);
+  const { valueObjects: usedVOs, enums: usedEnums } = collectUsedTypes(agg, repo, ctx);
 
   for (const e of usedEnums) lines.push(...emitEnumSchema(e));
   for (const vo of usedVOs) lines.push(...emitValueObjectSchema(vo));
@@ -520,14 +519,33 @@ function zodForResponseInner(t: TypeIR): string {
   }
 }
 
-function collectValueObjects(
+// Collect every value object and enum whose schema this aggregate's api
+// module must declare.  Traversal is TRANSITIVE through value-object
+// fields: an emitted `<VO>Schema = z.object({...})` references the schema
+// of each field's type (`country: CountrySchema`), so a VO reached only
+// through another VO — e.g. `Address.country` pulling in the `Country`
+// enum — must be emitted too.  Without the closure those references
+// resolve to undeclared variables at bundle time ("Can't find variable:
+// CountrySchema").
+function collectUsedTypes(
   agg: AggregateIR,
   repo: RepositoryIR | undefined,
   ctx: BoundedContextIR,
-): ValueObjectIR[] {
-  const used = new Set<string>();
+): { valueObjects: ValueObjectIR[]; enums: EnumIR[] } {
+  const voByName = new Map(ctx.valueObjects.map((v) => [v.name, v]));
+  const usedVOs = new Set<string>();
+  const usedEnums = new Set<string>();
+  const pending: string[] = [];
   const visit = (t: TypeIR) => {
-    if (t.kind === "valueobject") used.add(t.name);
+    if (t.kind === "valueobject") {
+      if (!usedVOs.has(t.name)) {
+        usedVOs.add(t.name);
+        // Defer the VO's own fields so its transitively-referenced
+        // types (further VOs / enums) are collected too.
+        pending.push(t.name);
+      }
+    }
+    if (t.kind === "enum") usedEnums.add(t.name);
     if (t.kind === "array") visit(t.element);
     if (t.kind === "optional") visit(t.inner);
   };
@@ -539,27 +557,16 @@ function collectValueObjects(
     for (const f of part.fields) visit(f.type);
     for (const d of part.derived) visit(d.type);
   }
-  return ctx.valueObjects.filter((v) => used.has(v.name));
-}
-
-function collectEnums(
-  agg: AggregateIR,
-  repo: RepositoryIR | undefined,
-  ctx: BoundedContextIR,
-): EnumIR[] {
-  const used = new Set<string>();
-  const visit = (t: TypeIR) => {
-    if (t.kind === "enum") used.add(t.name);
-    if (t.kind === "array") visit(t.element);
-    if (t.kind === "optional") visit(t.inner);
-  };
-  for (const f of agg.fields) visit(f.type);
-  for (const d of agg.derived) visit(d.type);
-  for (const op of agg.operations) for (const p of op.params) visit(p.type);
-  for (const f of repo?.finds ?? []) for (const p of f.params) visit(p.type);
-  for (const part of agg.parts) {
-    for (const f of part.fields) visit(f.type);
-    for (const d of part.derived) visit(d.type);
+  // Worklist closure over the fields of every VO we've pulled in.  The
+  // emitted `<VO>Schema` only lists `vo.fields`, so those field types are
+  // exactly what its schema body references.
+  while (pending.length > 0) {
+    const vo = voByName.get(pending.pop()!);
+    if (!vo) continue;
+    for (const f of vo.fields) visit(f.type);
   }
-  return ctx.enums.filter((e) => used.has(e.name));
+  return {
+    valueObjects: ctx.valueObjects.filter((v) => usedVOs.has(v.name)),
+    enums: ctx.enums.filter((e) => usedEnums.has(e.name)),
+  };
 }
