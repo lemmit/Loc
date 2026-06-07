@@ -90,14 +90,20 @@ export function buildRepositoryFile(
     if (r.sort.length > 0) for (const s of r.sort) drizzleOps.add(s.direction);
   }
   // Reified criteria (one module-level predicate fn per named criterion a
-  // retrieval `where` reifies to — the functional analog of .NET's
-  // `Criterion<T>`).  Deduped by name; the fn body lowers the criterion's own
-  // predicate against the candidate table, so its Drizzle ops join the import
-  // narrowing walk.  runMethod calls these instead of inlining (parity-clean).
+  // retrieval or find `where` reifies to — the functional analog of .NET's
+  // `Criterion<T>`).  Deduped by name across both consumers (a criterion used
+  // by a find *and* a retrieval emits one fn); the fn body lowers the
+  // criterion's own predicate against the candidate table, so its Drizzle ops
+  // join the import narrowing walk.  runMethod / findQueryMethod call these
+  // instead of inlining (parity-clean).
   const retrievalTable = repoTableName(agg, ctx);
   const criterionFnByName = new Map<string, string>();
-  for (const r of aggRetrievals) {
-    const c = reifiableCriterion(r.criterionRef, ctx, retrievalTable);
+  const reifyingRefs = [
+    ...aggRetrievals.map((r) => r.criterionRef),
+    ...(repo?.finds ?? []).map((f) => f.criterionRef),
+  ];
+  for (const ref of reifyingRefs) {
+    const c = reifiableCriterion(ref, ctx, retrievalTable);
     if (c && !criterionFnByName.has(c.name)) {
       criterionFnByName.set(c.name, renderCriterionFn(c, retrievalTable, ctx));
       const lowered = lowerToDrizzle(c.body, retrievalTable, ctx);
