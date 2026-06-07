@@ -57,6 +57,15 @@ jobs:
         working-directory: web
         run: npm run typecheck
 
+      # Network-free unit guard for the runtime DDL synth — catches the
+      # per-context-pgSchema regression class (system-mode backends
+      # query schema-qualified tables) that the network-dependent
+      # e2e/runtime.spec.ts self-skips when the npm registry is
+      # unreachable.
+      - name: Test runtime DDL synth
+        working-directory: web
+        run: npm run test:ddl
+
       - name: Smoke playground (Node-side end-to-end)
         working-directory: web
         run: npm run e2e:smoke
