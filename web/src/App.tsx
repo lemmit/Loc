@@ -296,10 +296,30 @@ export default function App(): JSX.Element {
 
   // Sub-view of the consolidated Code tab — source / builder / model /
   // generated. Persisted so a reload lands back on the same view.
-  const [codeView, setCodeView] = usePersistedState<MobileCodeView>(
+  const [codeViewRaw, setCodeViewRaw] = usePersistedState<MobileCodeView>(
     "loom.mobile.codeView",
     "source",
   );
+  // Mobile crash-guard: the Builder / Model / Model v2 / Requirements
+  // sub-views are heavy on mount (craft.js + a main-thread Langium parse,
+  // or React Flow). Restoring one of them verbatim on a mobile reload mounts
+  // that cost immediately — before the user does anything — which on a
+  // memory-constrained device is a prime crash trigger when a tab is
+  // refreshed mid-work. So until the user explicitly picks a sub-view, a
+  // persisted heavy view renders as the lightweight Source editor on mobile;
+  // the raw (persisted) value is untouched, so a later tap restores it and a
+  // desktop reload is unaffected. Mirrors the `userPickedExampleRef` pattern.
+  const userPickedCodeViewRef = useRef(false);
+  const setCodeView = (v: MobileCodeView): void => {
+    userPickedCodeViewRef.current = true;
+    setCodeViewRaw(v);
+  };
+  const isHeavyCodeView = (v: MobileCodeView): boolean =>
+    v === "builder" || v === "model" || v === "model-v2" || v === "requirements";
+  const codeView: MobileCodeView =
+    !isDesktop && !userPickedCodeViewRef.current && isHeavyCodeView(codeViewRaw)
+      ? "source"
+      : codeViewRaw;
 
   // Test runner results, lifted here so the Output panel's Tests stream
   // can read them independently of the (sometimes-unmounted) Tests tab.
@@ -579,7 +599,17 @@ export default function App(): JSX.Element {
   const generatingRef = useRef(false);
   generatingRef.current = pipeline.generating;
   const runGenerateRef = useRef<() => Promise<void> | void>(() => {});
+  // Flipped on the first user-origin source change.  On mobile we use it to
+  // skip the *unprompted* auto-generate that the initial-mount / example-pick
+  // effects schedule: firing the esbuild build worker 5s after a reload —
+  // during the fragile post-reload startup window (Monaco + LSP + build
+  // workers + WASM all coming up at once) — is a needless load spike on a
+  // memory-constrained device, and mobile already drives the pipeline through
+  // the explicit "Run" button.  Once the user actually edits, auto-generate
+  // resumes on mobile too.  Desktop is unaffected.
+  const hasUserEditedRef = useRef(false);
   const scheduleAutoGenerate = (): void => {
+    if (!isDesktop && !hasUserEditedRef.current) return;
     if (autoGenTimerRef.current) clearTimeout(autoGenTimerRef.current);
     autoGenTimerRef.current = setTimeout(() => {
       if (errorCountRef.current === 0 && !generatingRef.current) {
@@ -1029,6 +1059,9 @@ export default function App(): JSX.Element {
     engine: engineRef.current,
     onSourceChange: (text, origin) => {
       sourceRef.current = text;
+      // A real source change (typing in Monaco or a Builder Apply) — from
+      // here on, mobile auto-generate is allowed (see hasUserEditedRef).
+      hasUserEditedRef.current = true;
       // Bump the live-sync tick **only** for editor-origin edits (the user
       // typing in Monaco).  Builder Apply also flows through here with
       // origin "builder" — bumping for those would re-seed the canvas
