@@ -4,6 +4,7 @@ import type {
   BoundedContextIR,
   CriterionIR,
   EnrichedAggregateIR,
+  ExprIR,
   FindIR,
   RepositoryIR,
   RetrievalIR,
@@ -38,6 +39,7 @@ export function buildFindActions(
   repo: RepositoryIR,
   agg: EnrichedAggregateIR,
   contextModule: string,
+  bctx: BoundedContextIR,
 ): string[] {
   // `agg` threaded so renderMethodCall's contains branch (see
   // render-expr.ts) can resolve `this.<refColl>.contains(param)` to
@@ -49,7 +51,11 @@ export function buildFindActions(
   // redundant; leaving it would also force the domain to keep a
   // duplicate `define :all_X, action: :all` which adds noise without
   // adding behaviour.
-  return repo.finds.filter((f) => f.name !== "all").map((find) => renderFindAction(find, agg, ctx));
+  return repo.finds
+    .filter((f) => f.name !== "all")
+    .map((find) =>
+      renderFindAction(find, agg, ctx, reifiedCriterionForRef(find.criterionRef, bctx)),
+    );
 }
 
 /** Build Ash read-action snippets for each context retrieval targeting
@@ -79,13 +85,21 @@ export function buildRetrievalActions(
 // criterion as a first-class, reusable, queryable predicate.
 // ---------------------------------------------------------------------------
 
-/** The named criterion a retrieval's `where` reifies to — present in the
- *  context and named via `criterionRef` — or undefined (the `where` is
- *  composed/anonymous, so it stays inline). */
-export function reifiedCriterionOf(r: RetrievalIR, ctx: BoundedContextIR): CriterionIR | undefined {
-  const ref = r.criterionRef;
+/** The named criterion a `criterionRef` reifies to — present in the context —
+ *  or undefined (the `where` is composed/anonymous, so it stays inline).
+ *  Shared by retrievals and finds (both carry an optional `criterionRef`). */
+export function reifiedCriterionForRef(
+  ref: { name: string; args: ExprIR[] } | undefined,
+  ctx: BoundedContextIR,
+): CriterionIR | undefined {
   if (!ref) return undefined;
   return (ctx.criteria ?? []).find((c) => c.name === ref.name);
+}
+
+/** The named criterion a retrieval's `where` reifies to (see
+ *  `reifiedCriterionForRef`). */
+export function reifiedCriterionOf(r: RetrievalIR, ctx: BoundedContextIR): CriterionIR | undefined {
+  return reifiedCriterionForRef(r.criterionRef, ctx);
 }
 
 /** Ash calculation atom for a reified criterion (`:named_like`). */
@@ -93,19 +107,26 @@ export function criterionCalcName(name: string): string {
   return snake(name);
 }
 
-/** The distinct criteria the retrievals targeting `agg` reify to — one Ash
- *  boolean calculation each, deduped by name (a criterion shared by two
- *  retrievals yields one calculation). */
+/** The distinct criteria the retrievals *and finds* targeting `agg` reify to —
+ *  one Ash boolean calculation each, deduped by name across both consumers (a
+ *  criterion shared by a find and a retrieval yields one calculation).  Must
+ *  cover every `criterionRef` the read-action emitters reference, or a `filter
+ *  expr(<calc>(...))` would name a calculation that was never defined. */
 export function reifiedCriteriaFor(ctx: BoundedContextIR, agg: EnrichedAggregateIR): CriterionIR[] {
   const seen = new Set<string>();
   const out: CriterionIR[] = [];
-  for (const r of ctx.retrievals ?? []) {
-    if (r.targetType.kind !== "entity" || r.targetType.name !== agg.name) continue;
-    const c = reifiedCriterionOf(r, ctx);
+  const add = (c: CriterionIR | undefined) => {
     if (c && !seen.has(c.name)) {
       seen.add(c.name);
       out.push(c);
     }
+  };
+  for (const r of ctx.retrievals ?? []) {
+    if (r.targetType.kind !== "entity" || r.targetType.name !== agg.name) continue;
+    add(reifiedCriterionOf(r, ctx));
+  }
+  for (const f of findRepoFor(ctx, agg.name)?.finds ?? []) {
+    add(reifiedCriterionForRef(f.criterionRef, ctx));
   }
   return out;
 }
@@ -230,7 +251,12 @@ function ashArgType(type: import("../../ir/types/loom-ir.js").TypeIR): string {
   return ":string";
 }
 
-function renderFindAction(find: FindIR, agg: AggregateIR, ctx: RenderCtx): string {
+function renderFindAction(
+  find: FindIR,
+  agg: AggregateIR,
+  ctx: RenderCtx,
+  reified?: CriterionIR | undefined,
+): string {
   const lines: string[] = [];
   lines.push(`    read :${snake(find.name)} do`);
   // Arguments
@@ -239,8 +265,27 @@ function renderFindAction(find: FindIR, agg: AggregateIR, ctx: RenderCtx): strin
   }
   // Filter preparation
   if (find.filter) {
-    const filterExpr = renderFilterPreparation(find, agg, ctx);
-    lines.push(`      filter ${filterExpr}`);
+    // When the `where` reifies to a named criterion, reference its boolean
+    // calculation (`in_region(rgn: ^arg(:r))`) instead of inlining the
+    // predicate — matching the retrieval path (renderRetrievalAction).  The
+    // calc args pair the criterion's parameter names with the find's call-site
+    // argument expressions (`^arg(:…)` under `filterArgs`).
+    if (reified) {
+      const filterCtx: RenderCtx = { ...ctx, thisName: "record", filterArgs: true };
+      const callArgs = reified.params.map((p, i) => {
+        const argExpr = find.criterionRef!.args[i]!;
+        const val = renderExpr(argExpr, filterCtx).replace(/\brecord\./g, "");
+        return `${snake(p.name)}: ${val}`;
+      });
+      const rendered =
+        callArgs.length === 0
+          ? criterionCalcName(reified.name)
+          : `${criterionCalcName(reified.name)}(${callArgs.join(", ")})`;
+      lines.push(`      filter expr(${rendered})`);
+    } else {
+      const filterExpr = renderFilterPreparation(find, agg, ctx);
+      lines.push(`      filter ${filterExpr}`);
+    }
   } else if (find.params.length > 0) {
     // Convention-based: match params to same-named fields
     const conditions = buildConventionFilter(find, agg);
