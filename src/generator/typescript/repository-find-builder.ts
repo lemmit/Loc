@@ -545,7 +545,16 @@ export function buildFindWhereClause(
           "Please file a bug.",
       );
     }
-    return `.where(${combinePredicate(withKind(lowered.expr, kindPred), filterPred)})`;
+    // When the `where` is exactly a named criterion, call its reified predicate
+    // function (emitted module-level by repository-builder) instead of inlining
+    // — behaviour-identical, matching the retrieval path.
+    const reified = reifiableCriterion(find.criterionRef, ctx, tableName);
+    const whereInner = reified
+      ? `${criterionFnName(reified.name)}(${(find.criterionRef?.args ?? [])
+          .map(renderCriterionArg)
+          .join(", ")})`
+      : lowered.expr;
+    return `.where(${combinePredicate(withKind(whereInner, kindPred), filterPred)})`;
   }
   // Drizzle's `eq<T>(left, right)` infers `T` from the column's TS type
   // (plain `string` for `text(...)` columns).  Branded id params
