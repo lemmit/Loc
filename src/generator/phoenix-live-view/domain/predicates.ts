@@ -91,6 +91,7 @@ export function stmtUsesThis(s: StmtIR): boolean {
     case "assign":
     case "add":
     case "remove":
+    case "return":
       return exprUsesThis(s.value);
     case "emit":
       return s.fields.some((f) => exprUsesThis(f.value));
@@ -110,6 +111,7 @@ export function stmtUsesCurrentUser(s: StmtIR): boolean {
     case "assign":
     case "add":
     case "remove":
+    case "return":
       return exprUsesCurrentUser(s.value);
     case "emit":
       return s.fields.some((f) => exprUsesCurrentUser(f.value));
@@ -134,6 +136,7 @@ export function stmtUsesParam(s: StmtIR, name: string): boolean {
     case "assign":
     case "add":
     case "remove":
+    case "return":
       return exprUsesParam(s.value, name);
     case "emit":
       return s.fields.some((f) => exprUsesParam(f.value, name));

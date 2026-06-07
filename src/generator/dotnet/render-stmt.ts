@@ -50,6 +50,7 @@ export function collectCsStmtUsings(stmts: StmtIR[], into: Set<string> = new Set
       case "assign":
       case "add":
       case "remove":
+      case "return":
         collectCsExprUsings(s.value, into);
         break;
       case "emit":
@@ -104,6 +105,8 @@ function renderCsStatement(
     }
     case "expression":
       return `${INDENT}${renderCsExpr(s.expr, ctx)};`;
+    case "return":
+      return `${INDENT}return ${renderCsExpr(s.value, ctx)};`;
   }
 }
 

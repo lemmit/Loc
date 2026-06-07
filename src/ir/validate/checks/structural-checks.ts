@@ -353,6 +353,37 @@ export function validateUnionsUnimplemented(
   for (const vo of ctx.valueObjects) flagAggregateLike(vo, `valueobject ${vo.name}`, flag);
 }
 
+// ---------------------------------------------------------------------------
+// Operation-return gate (exception-less.md, spike).
+//
+// `operation foo(...): X or NotFound { ... return ... }` parses, lowers to an
+// `OperationIR.returnType` + `return` statements, and prints — but the
+// producer-side emission (tag the returned union value; translate an
+// `error`-variant result to a ProblemDetails status at the route, a success
+// to HTTP 200) is the next slice.  Until then any operation that declares a
+// return type is a hard error, mirroring the P3a/P4a surface-first staging.
+// ---------------------------------------------------------------------------
+
+export function validateOperationReturnsUnimplemented(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  for (const agg of ctx.aggregates) {
+    for (const op of agg.operations) {
+      if (!op.returnType) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.operation-return-unsupported",
+        message:
+          `operation '${agg.name}.${op.name}' declares an \`or\`-union return type, but ` +
+          `producer-side emission (return-value tagging + route ProblemDetails translation) is ` +
+          `not implemented yet (exception-less.md, spike).`,
+        source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
+      });
+    }
+  }
+}
+
 /** Shared field / derived / function-signature walk for the structural
  *  shapes (aggregate, entity part, value object) that carry all three. */
 function flagAggregateLike(

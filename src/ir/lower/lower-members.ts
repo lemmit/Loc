@@ -41,6 +41,7 @@ import type {
   OperationKind,
   ParamIR,
   StmtIR,
+  TypeIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
 import { lowerExpr, lowerExprInContext } from "./lower-expr.js";
@@ -211,6 +212,7 @@ export function lowerOperation(op: Operation, env: Env): OperationIR {
       visibility: op.private ? "private" : "public",
       extern: !!op.extern,
       audited: !!op.audited,
+      returnType: op.returnType ? lowerType(op.returnType, env) : undefined,
     },
     env,
   );
@@ -264,6 +266,8 @@ interface ActionSpec {
   visibility: "public" | "private";
   extern: boolean;
   audited: boolean;
+  /** Declared `or`-union return type (exception-less.md, spike). */
+  returnType?: TypeIR;
 }
 
 function lowerActionBody(spec: ActionSpec, env: Env): OperationIR {
@@ -289,6 +293,7 @@ function lowerActionBody(spec: ActionSpec, env: Env): OperationIR {
     statements: stmts,
     extern: spec.extern,
     audited: spec.audited,
+    returnType: spec.returnType,
   };
 }
 
