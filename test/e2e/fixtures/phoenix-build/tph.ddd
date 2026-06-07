@@ -20,7 +20,7 @@ system PartyDirectory {
   }
   storage pg { type: postgres }
   resource partiesState { for: Parties, kind: state, use: pg }
-  deployable api {
+  deployable phoenixApp {
     platform: phoenix
     contexts: [Parties]
     dataSources: [partiesState]
