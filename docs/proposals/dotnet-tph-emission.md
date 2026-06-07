@@ -1,0 +1,114 @@
+# .NET TPH emission — build spec
+
+> Status: **PLAN** (code-grounded; ready to implement). The next slice of
+> [`aggregate-inheritance.md`](./aggregate-inheritance.md) **I2** — TPH
+> (`sharedTable`) storage on the **.NET / EF Core** backend.
+>
+> Prereq **DONE**: the TPH/TPC predicates are consolidated in the
+> platform-neutral `src/ir/util/inheritance.ts` (PR #975), so the .NET
+> generator can import them without crossing platform folders.
+
+## What ships today (verified against code)
+
+| Backend | TPC (`ownTable`) | TPH (`sharedTable`) |
+|---|:---:|:---:|
+| Hono / Drizzle | ✓ | ✓ (`src/generator/typescript/emit/schema.ts:emitTphTable`) |
+| .NET / EF Core | ✓ (`emit/entity.ts:renderAbstractBaseEntity` + `efcore.ts:Ignore<Base>()`) | ✗ — gated `loom.tph-backend-unsupported` |
+| Phoenix / Ash | ✗ | ✗ |
+
+So the .NET frontier is **TPH only** (TPC already ships). EF Core has
+native TPH (`HasDiscriminator`), so EF derives the single wide table from
+the model — no hand-built DDL (`.NET` uses the EF model via
+`EnsureCreated`, not `MigrationsIR`).
+
+## Cross-backend parity contract (pin to Hono — `emit/schema.ts:emitTphTable`)
+
+- **One table** named for the abstract base (snake-plural of base name).
+- A single **`id`** primary-key column (plain string/uuid — *not* a
+  per-concrete strongly-typed id).
+- A **`kind`** discriminator column; discriminator **value = the concrete
+  aggregate's own name** (`discriminatorValue(agg, pool)` ⇒ `agg.name`).
+- Base fields, then **each concrete's own fields forced nullable**
+  (`ownFieldsOf(concrete, base)`).
+
+The decisive consequence for .NET: **the base owns the shared `Id`**
+(typed `<Base>Id`); **concretes inherit it** and declare no `Id` of their
+own. This is the one structural divergence from the shipped TPC path
+(where the base declares *no* `Id` and each concrete keeps its own
+`<Concrete>Id`).
+
+## Per-file plan
+
+### 1. `src/ir/validate/checks/system-checks.ts` — relax the gate
+`validateInheritanceStorage`: replace the `hostedByHono =
+backendPlatforms.has("node")` check with a `TPH_CAPABLE = {node, dotnet}`
+set (`hostedByCapable = [...backendPlatforms].some(p =>
+TPH_CAPABLE.has(p))`); update the `others` filter + the diagnostic text
+("Hono and .NET backends"). **Lands with emission, not before** — relaxing
+alone would let a dotnet-TPH model pass validate and emit broken code.
+
+### 2. `src/generator/dotnet/emit/entity.ts`
+- **`renderAbstractBaseEntity(base, ns, { tph })`** — add a `tph` flag.
+  When set, the base is a *mapped* abstract class that **owns the key**:
+  emit `public <Base>Id Id { get; internal set; }` + a private
+  parameterless ctor (EF) setting `Id = default!`. (TPC base stays
+  Id-less.)
+- **`SuperTypeInfo`** — add `sharesIdentity?: boolean`. For a TPH
+  concrete (`true`): in `renderEntity`, **skip the `Id` property line**
+  (line ~114) and its `ctor` assignment (Id is inherited); the
+  `State` / `_Create` / `Create` factory keep setting `Id` via the
+  inherited `internal set` accessor, but typed as the **base's** id
+  (`createInputFieldList` already excludes `id`; the synthesized `id`
+  in `_Create`/`Create` uses `<Base>Id`). Audit each `entity.name`Id`
+  reference in the Create/State path and switch to the base id type when
+  `sharesIdentity`.
+
+### 3. `src/generator/dotnet/emit/efcore.ts`
+- **DbContext (`renderDbContext`)**: a TPH base is **no longer
+  `Ignore<Base>()`d** — add `DbSet<Base> <BasePlural>` and an
+  `ApplyConfiguration(new <Base>Configuration())`. TPH concretes keep
+  their `DbSet<Concrete>` (EF auto-filters by discriminator).
+- **`renderConfiguration(agg, ns, ctx, { tph })`**:
+  - *TPH base* → `ToTable("<baseplural>")` + `HasKey(x => x.Id)` +
+    `HasDiscriminator<string>("kind")` chained
+    `.HasValue<C>("C")` over `tphConcretesOf(base, pool)` + the base's
+    own property configs.
+  - *TPH concrete* → **no `ToTable` / `HasKey`** (inherited); configure
+    only `ownFieldsOf(concrete, base)` (strongly-typed id/VO/enum
+    `HasConversion`s) — EF maps them as the shared table's nullable
+    columns.
+
+### 4. `src/generator/dotnet/index.ts`
+- The `if (agg.isAbstract) { renderAbstractBaseEntity; return; }` early
+  exit gains a TPH branch: a **TPH base** emits the mapped class +
+  `<Base>Configuration.cs` (with `HasDiscriminator`) and is added to the
+  DbContext — it is *not* a no-table abstract.
+- The concrete dispatch grows a `tphBase` lookup
+  (`isTphBase` parallel to the existing `tpcBase`/`isTpcBase`):
+  pass `superType.sharesIdentity = true`; for a TPH concrete the
+  per-aggregate configuration is the concrete (own-fields-only) variant,
+  and **no separate table / join config** for the shared columns.
+- Repositories/routes for TPH concretes are unchanged in shape — EF's
+  `DbSet<Concrete>` routes to the shared table and applies the
+  discriminator automatically.
+
+### 5. Tests + CI
+- `test/generator/dotnet/*` — vitest emitted-string assertions:
+  base config contains `HasDiscriminator<string>("kind").HasValue<…>`;
+  concrete class is `: <Base>` with no `Id` property; concrete config has
+  no `ToTable`.
+- **`examples/tph-dotnet.ddd`** fixture (abstract base + 2 concretes,
+  `inheritanceUsing(sharedTable)`, dotnet deployable) added to the
+  `build-generated-dotnet` matrix — `dotnet build /warnaserror` is the
+  **decisive** compile gate (no local SDK; the P3b/P4c pattern).
+
+## Risk / sequencing
+
+The structural risk is concentrated in **§2** (the base-owns-`Id`
+restructure in `entity.ts`'s `State`/`Create` path) — it's the only place
+the `<Concrete>Id` → `<Base>Id` shift threads through. EF config (§3) is
+mechanical once the entity shape is right. Recommend implementing
+§2 first with vitest emitted-string coverage, then §3/§4, then flip the
+gate (§1) and add the CI fixture (§5) last so CI compiles the whole
+vertical in one decisive run. Phoenix/Ash TPH (Ash polymorphic embedding)
+is a separate, later slice.
