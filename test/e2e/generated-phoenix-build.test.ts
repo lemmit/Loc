@@ -78,6 +78,12 @@ describe.skipIf(!ENABLED)(
       // controller `tag_<union>/1` serializer (struct-pattern clauses → the
       // `%{type: tag, …}` wire) for an `Order or Cancel` find.
       { name: "union.ddd" },
+      // TPH (sharedTable) inheritance (aggregate-inheritance.md I2): the two
+      // concrete Ash resources (Customer, Vendor) share one `parties` table,
+      // each `base_filter`'d on a `kind` discriminator, plus the polymorphic
+      // `list_parties` base reader.  The decisive check that Ash 3.x compiles
+      // multiple resources mapping to one table (Ash has no native STI).
+      { name: "tph.ddd" },
     ])("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

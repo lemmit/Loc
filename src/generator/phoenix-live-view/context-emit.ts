@@ -4,7 +4,7 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
 } from "../../ir/types/loom-ir.js";
-import { isTpcBase, isTpcConcrete } from "../../ir/util/inheritance.js";
+import { isTpcBase, isTpcConcrete, isTphBase, isTphConcrete } from "../../ir/util/inheritance.js";
 import { effectiveSavingShape } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { crudOpNames } from "./api-emit.js";
@@ -314,16 +314,21 @@ function renderDomainModule(
     resourceBlocks.push(`    resource ${r} do\n${defines.join("\n")}\n    end`);
   }
 
-  // Polymorphic read home for each abstract TPC (`ownTable`) base
-  // (aggregate-inheritance.md, `find all <Base>`).  The base owns no resource;
-  // its read is the union of its concrete subtypes' generated `list_<concrete>`
-  // code-interface functions.  Emitted as plain module functions (Ash has no
-  // cross-resource read action) — read-only; writes go through the concretes.
+  // Polymorphic read home for each abstract base (aggregate-inheritance.md,
+  // `find all <Base>`).  The base owns no resource; its read is the union of its
+  // concrete subtypes' generated `list_<concrete>` code-interface functions.
+  // Emitted as plain module functions (Ash has no cross-resource read action) —
+  // read-only; writes go through the concretes.  Identical shape for TPC and
+  // TPH: a TPH concrete's `list_*` is already `kind`-scoped by its `base_filter`,
+  // so the union over the shared table returns exactly the base's rows.
   const baseBlocks: string[] = [];
   for (const base of ctx.aggregates) {
-    if (!isTpcBase(base, ctx.aggregates)) continue;
+    const tphB = isTphBase(base, ctx.aggregates);
+    if (!isTpcBase(base, ctx.aggregates) && !tphB) continue;
     const concretes = ctx.aggregates.filter(
-      (a) => a.extendsAggregate === base.name && isTpcConcrete(a, ctx.aggregates),
+      (a) =>
+        a.extendsAggregate === base.name &&
+        (isTpcConcrete(a, ctx.aggregates) || isTphConcrete(a, ctx.aggregates)),
     );
     if (concretes.length === 0) continue;
     const listName = `list_${snake(plural(base.name))}`;

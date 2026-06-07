@@ -13,6 +13,7 @@ import type {
   InvariantIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { discriminatorValue, isTphConcrete, tableOwnerName } from "../../ir/util/inheritance.js";
 import { effectiveSavingShape } from "../../ir/util/resolve-datasource.js";
 import { singleFieldShape } from "../../ir/validate/invariant-classify.js";
 import { snake, upperFirst } from "../../util/naming.js";
@@ -91,7 +92,14 @@ function renderAggregateResource(
 ): string {
   const embedded = !!options.embedded;
   const moduleName = `${ctxModule}.${upperFirst(agg.name)}`;
-  const baseTable = snake(plural(agg.name));
+  // TPH (`sharedTable`): a concrete maps to its base's shared table and carries
+  // a `kind` discriminator (value = its own name), `base_filter`'d so it
+  // reads/writes only its rows.  `tableOwnerName` returns the base for a TPH
+  // concrete and the aggregate itself otherwise, so off the TPH path this is
+  // byte-identical.  (Ash has no native STI — see docs/proposals/phoenix-tph-emission.md.)
+  const tphConcrete = isTphConcrete(agg, ctx.aggregates);
+  const kindValue = tphConcrete ? discriminatorValue(agg, ctx.aggregates) : undefined;
+  const baseTable = snake(plural(tableOwnerName(agg, ctx.aggregates)));
   const tableSnake = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
   const repoModule = `${appModule}.Repo`;
   // AshPostgres `postgres do` block — table + repo always present;
@@ -129,7 +137,11 @@ function renderAggregateResource(
   // (`validatePhoenixContextFilterSupport`).  Renders the same
   // `record.<field>` form the find-action filters use (the established,
   // Ash-valid convention).
-  const baseFilterLine = renderBaseFilter(agg, renderCtx);
+  // A TPH concrete prepends `kind == "<Concrete>"` to its base_filter so every
+  // read of the shared table is scoped to this concrete's rows (Ash's analog to
+  // the discriminator filter EF Core / Drizzle apply).
+  const kindPredicate = kindValue ? `kind == ${JSON.stringify(kindValue)}` : undefined;
+  const baseFilterLine = renderBaseFilter(agg, renderCtx, kindPredicate);
 
   // Field list for the `defimpl Jason.Encoder` block: :id, persisted
   // fields only, timestamps.  Reference-collection fields are excluded
@@ -149,6 +161,9 @@ function renderAggregateResource(
 
   const wireAtoms = [
     ":id",
+    // The TPH discriminator is part of the wire shape (tells the client which
+    // concrete a row is), mirroring the `kind`/`type` tag on the other backends.
+    ...(kindValue ? [":kind"] : []),
     ...persistedFields.map((f) => `:${snake(f.name)}`),
     // Embedded containments serialise inline (each has its own Jason
     // encoder); add them to the wire shape.  Relational containments are
@@ -219,7 +234,7 @@ ${postgresBlockLines.join("\n")}
 ${baseFilterLine}
   attributes do
     ${renderPrimaryKey(agg.idValueType)}
-    ${[...persistedFields.map((f) => renderAttribute(f, ctxModule)), ...embeddedAttrLines].join("\n    ")}
+    ${[...(kindValue ? [`attribute :kind, :string, default: ${JSON.stringify(kindValue)}, allow_nil?: false`] : []), ...persistedFields.map((f) => renderAttribute(f, ctxModule)), ...embeddedAttrLines].join("\n    ")}
     timestamps()
   end
 ${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg, criterionCalcLines)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
@@ -355,12 +370,14 @@ ${jasonImpl}`;
  *  shared `renderExpr` threads `thisName` as the receiver, so we render
  *  with `record` and strip the leading `record.` from each reference
  *  (`record.address.postal_code` → `address.postal_code`). */
-function renderBaseFilter(agg: AggregateIR, ctx: RenderCtx): string {
-  const predicates = (agg.contextFilters ?? []).filter((p) => !exprUsesCurrentUser(p));
-  if (predicates.length === 0) return "";
-  const rendered = predicates.map((p) =>
-    renderExpr(p, { ...ctx, thisName: "record" }).replace(/\brecord\./g, ""),
-  );
+function renderBaseFilter(agg: AggregateIR, ctx: RenderCtx, extraPredicate?: string): string {
+  const capability = (agg.contextFilters ?? [])
+    .filter((p) => !exprUsesCurrentUser(p))
+    .map((p) => renderExpr(p, { ...ctx, thisName: "record" }).replace(/\brecord\./g, ""));
+  // The TPH `kind` discriminator (when present) leads the conjunction, then the
+  // aggregate's own capability filters.
+  const rendered = [...(extraPredicate ? [extraPredicate] : []), ...capability];
+  if (rendered.length === 0) return "";
   const body = rendered.length === 1 ? rendered[0]! : `and(${rendered.join(", ")})`;
   return `\n  base_filter expr(${body})\n`;
 }
