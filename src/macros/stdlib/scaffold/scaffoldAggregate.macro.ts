@@ -22,6 +22,16 @@ export default defineMacro({
     of: { kind: "ref", of: "Aggregate" },
   },
   expand({ args }) {
-    return pagesForAggregate(args.of as Aggregate);
+    const agg = args.of as Aggregate;
+    // An `abstract aggregate` base owns no table, repository, or HTTP
+    // routes — only the polymorphic union reader is emitted, as
+    // infrastructure (see docs/inheritance.md).  There is no data
+    // endpoint to back List/Detail/New pages, so scaffolding them
+    // produces pages whose api hooks resolve to nothing (the React
+    // walker emits `/* unresolved */ undefined` sentinels that fail
+    // strict tsc).  Skip the base; its concrete `extends` subtypes
+    // each get their own pages.
+    if (agg.isAbstract) return [];
+    return pagesForAggregate(agg);
   },
 });
