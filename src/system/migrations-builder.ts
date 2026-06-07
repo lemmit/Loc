@@ -11,6 +11,7 @@ import type {
   SubdomainIR,
   SystemIR,
   TypeIR,
+  WorkflowIR,
 } from "../ir/types/loom-ir.js";
 import type {
   ColumnShape,
@@ -162,11 +163,59 @@ export function schemaFromModule(
     }
     tables.push(...produced);
   }
+  // Persisted workflow-correlation state tables (workflow-and-applier.md A2-S2):
+  // one per correlation-bearing workflow, keyed by its correlation field with
+  // the saga state fields as columns.  Emitted in the (unqualified) public
+  // schema, matching the plain `pgTable(...)` the Drizzle schema emitter uses
+  // for these, so the runtime DDL and the ORM mapping line up.
+  for (const ctx of module.contexts) {
+    for (const wf of ctx.workflows) {
+      if (wf.correlationField) tables.push(workflowStateTableShape(wf, module.name, voLookup));
+    }
+  }
   // The snapshot stays alphabetical (a stable, diff-friendly record);
   // `diffSchema` reorders the emitted `createTable` steps by FK
   // dependency so the SQL applies cleanly.
   tables.sort((a, b) => a.name.localeCompare(b.name));
   return { schemaVersion: 1, tables };
+}
+
+/** Persisted workflow-correlation state table (mirrors `tableForAggregate`):
+ *  PK is the workflow's single id-shaped correlation field, the remaining
+ *  state fields are saga columns mapped the same way an aggregate's fields are.
+ *  Saga `X id` references are stored as plain columns without a foreign key —
+ *  the workflow row is a standalone routing record, not a child of those
+ *  aggregates, so it must not constrain their delete order. */
+function workflowStateTableShape(
+  wf: WorkflowIR,
+  ownerModule: string,
+  voLookup: VoLookup,
+): TableShape {
+  const tableName = plural(snake(wf.name));
+  const corr = wf.correlationField as string;
+  const columns: ColumnShape[] = [];
+  for (const f of wf.stateFields ?? []) {
+    if (f.name === corr) {
+      const vt = f.type.kind === "id" ? f.type.valueType : "guid";
+      columns.push({ name: snake(f.name), type: idColumnType(vt), nullable: false });
+      continue;
+    }
+    if (isReferenceCollection(f.type)) {
+      columns.push({ name: snake(f.name), type: { kind: "json" }, nullable: !!f.optional });
+      continue;
+    }
+    for (const mapped of columnsForField(f, voLookup, wf.name)) {
+      columns.push(mapped.column);
+    }
+  }
+  return {
+    name: tableName,
+    ownerModule,
+    columns,
+    primaryKey: [snake(corr)],
+    foreignKeys: [],
+    indexes: [],
+  };
 }
 
 /** Order tables so an FK target is always created before the table that

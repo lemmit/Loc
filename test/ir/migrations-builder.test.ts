@@ -61,6 +61,43 @@ describe("schemaFromModule", () => {
     expect(orders.primaryKey).toEqual(["id"]);
   });
 
+  it("emits a persisted state table for a correlation-bearing workflow", async () => {
+    const loom = await buildLoomModel(`
+      system Saga {
+        subdomain S {
+          context C {
+            aggregate Order ids guid { total: int }
+            repository Orders for Order { }
+            event OrderPlaced { order: Order id, at: datetime }
+            channel L { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }
+            workflow Fulfillment {
+              orderId: Order id
+              attempts: int
+              on(p: OrderPlaced) by p.order { }
+            }
+          }
+        }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
+      }`);
+    const snap = schemaFromModule(loom.systems[0]!.subdomains[0]!);
+    const wf = snap.tables.find((t) => t.name === "fulfillments");
+    expect(wf, "fulfillments workflow-state table").toBeDefined();
+    // PK = the correlation field; saga state field follows.
+    expect(wf?.primaryKey).toEqual(["order_id"]);
+    expect(wf?.columns.map((c) => c.name)).toEqual(["order_id", "attempts"]);
+    // Standalone routing record — no FK back to the orders table.
+    expect(wf?.foreignKeys).toEqual([]);
+  });
+
+  it("emits no workflow-state table for a workflow without a correlation field", async () => {
+    const { module } = await loadShop();
+    // Shop has no workflows at all → no workflow-state tables.
+    const snap = schemaFromModule(module);
+    expect(snap.tables.every((t) => ["customers", "order_lines", "orders"].includes(t.name))).toBe(
+      true,
+    );
+  });
+
   it("maps the `money` primitive to a decimal column (precise-decimal family)", async () => {
     // Regression: a system whose aggregate carries a `money` field used to
     // throw "unknown primitive type 'money'" out of the migrations builder
