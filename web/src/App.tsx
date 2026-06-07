@@ -132,10 +132,9 @@ function workspacePathsToRelative(
 
 export default function App(): JSX.Element {
   // Read once on mount.  When the URL hash carries a shareable
-  // payload — single-file `s=` (legacy) or multi-file `p=` (Stage
-  // 3) — we synthesise a "Shared link" entry at the top of the
-  // dropdown so a recipient lands on the shared project even before
-  // they touch the picker.
+  // payload — single-file `s=` (legacy) or multi-file `p=` — it's
+  // imported into the active workspace on mount so a recipient lands
+  // on the shared project (see the workspace-open effect below).
   const hashLoadOnMount = useMemo<HashLoad | null>(() => readHash(), []);
   // A shareable URL payload (single-file `s=` or multi-file `p=`),
   // normalised into an importable shape.  It's imported into the active
