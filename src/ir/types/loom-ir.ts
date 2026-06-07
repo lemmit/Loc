@@ -961,6 +961,11 @@ export interface OnIR {
   correlation?: ExprIR;
   /** The reactor body — workflow statements (emit / let / op-call / …). */
   statements: WorkflowStmtIR[];
+  /** Which let-bound aggregates need a save call at reactor exit, in
+   *  declaration order — same `computeSaves` derivation as `HandleIR` /
+   *  `CreateIR`.  A reactor is a workflow continuation, so a created /
+   *  loaded-and-mutated aggregate is persisted on the way out. */
+  savesAtExit: { name: string; aggName: string; repoName: string }[];
 }
 
 export type WorkflowStmtIR =
@@ -1133,9 +1138,40 @@ export type EnrichedValueObjectIR = ValueObjectIR & {
   wireShape: WireField[];
 };
 
+/** A channel-routed event subscription — the enrich-time join of a workflow
+ *  consumer (`on(e: Event)` reactor or event-triggered `create(e: Event) by`)
+ *  against the channels that `carries:` that event (channels.md; the
+ *  in-process dispatch slice).  Computed per context by `enrichContext`; the
+ *  Hono backend reads it to wire the in-process `DomainEventDispatcher` to the
+ *  reactor/starter handlers.  Only events a channel in this context carries
+ *  appear — the "channel-routed" rule.  Empty for channel-less contexts, so
+ *  their generated output stays byte-identical (Noop dispatcher). */
+export interface EventSubscriptionIR {
+  /** The carried event type the consumer subscribes to. */
+  event: string;
+  /** The channel (in this context) that carries `event` and routes it.  When
+   *  more than one carries it, the first by declaration order — disambiguation
+   *  is a deferred validation rule (`reactor-channel-ambiguous`). */
+  channel: string;
+  /** Owning workflow name. */
+  workflow: string;
+  /** `"on"` reactor or event-triggered `"create"` starter. */
+  trigger: "on" | "create";
+  /** The event-instance binding name in the handler body (`paid` in
+   *  `on(paid: E)` / `create(paid: E) by …`). */
+  param: string;
+  /** For `trigger: "create"`, the create's declared name (null for the
+   *  canonical unnamed create).  Undefined for `on` reactors. */
+  createName?: string | null;
+}
+
 export type EnrichedBoundedContextIR = Omit<BoundedContextIR, "aggregates" | "valueObjects"> & {
   aggregates: EnrichedAggregateIR[];
   valueObjects: EnrichedValueObjectIR[];
+  /** Channel-routed event subscriptions in this context (in-process dispatch
+   *  slice).  Derived by `enrichContext`; empty when the context declares no
+   *  channel that carries a subscribed event. */
+  eventSubscriptions: EventSubscriptionIR[];
 };
 
 export type EnrichedSubdomainIR = Omit<SubdomainIR, "contexts"> & {

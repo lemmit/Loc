@@ -45,7 +45,7 @@ import {
   tpcConcretesOf,
   tphConcretesOf,
 } from "../../../generator/typescript/tph.js";
-import { enrichLoomModel } from "../../../ir/enrich/enrichments.js";
+import { deriveEventSubscriptions, enrichLoomModel } from "../../../ir/enrich/enrichments.js";
 import { lowerModel } from "../../../ir/lower/lower.js";
 import {
   type BoundedContextIR,
@@ -301,6 +301,13 @@ export function generateTypeScriptForContexts(
     channels: contexts.flatMap((c) => c.channels),
     retrievals: contexts.flatMap((c) => c.retrievals),
     seeds: contexts.flatMap((c) => c.seeds),
+    // Re-derive over the merged union so a reactor in one hosted context can
+    // route off a channel declared in another — cross-context choreography
+    // within a single deployable (in-process dispatch slice).
+    eventSubscriptions: deriveEventSubscriptions(
+      contexts.flatMap((c) => c.channels),
+      contexts.flatMap((c) => c.workflows),
+    ),
   };
 
   out.set("domain/ids.ts", renderIds(merged));

@@ -210,11 +210,21 @@ elsewhere a bare event/payload name stays unresolved.  See the
 [language reference](language.md#type-references).
 
 > **Status.** The parameter surface above parses, resolves, and
-> type-checks today, and an event-triggered `create` lowers to a
-> correlated starter (`eventRef` / `eventBinding`).  The runtime that
-> *delivers* an inbound event to that starter — the typed event-handler
-> registry / subscription wiring on each backend — is a later slice;
-> until it lands, event-triggered workflows are declarable and
-> validated but not yet dispatched end-to-end.  See
-> [`workflow-and-applier.md`](proposals/workflow-and-applier.md) for the
-> roadmap.
+> type-checks today.  **In-process dispatch ships on the Hono backend**
+> (channels.md): when a `channel` in the deployable `carries:` the event,
+> an emitted event is delivered to every `on(e: Event)` reactor and
+> event-triggered `create(e: Event) by` starter that subscribes to it —
+> the generated `createInProcessDispatcher(db)` routes each `emit` to its
+> handlers (and re-enters on the handlers' own emits, so choreography
+> chains run).  No `channelSource` ⇒ this in-process dispatcher is the
+> default; a channel-less project keeps the no-op.
+>
+> Still deferred: external brokers (redis / kafka / nats via
+> `channelSource`), the **.NET / Phoenix** dispatch wiring (the
+> `IDomainEventDispatcher` seam exists, the routing does not yet), and
+> *persisted* workflow correlation — reactors run **statelessly** today (a
+> fresh handler per event; the `by <expr>` correlation expression is
+> evaluated but "route to an existing workflow instance vs allocate"
+> rides the persisted-workflow-row slice).  See
+> [`channels.md`](proposals/channels.md) and
+> [`workflow-and-applier.md`](proposals/workflow-and-applier.md).

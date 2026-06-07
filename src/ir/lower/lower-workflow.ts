@@ -213,6 +213,7 @@ function lowerOn(
     param: o.param,
     ...(correlation ? { correlation } : {}),
     statements,
+    savesAtExit: computeSaves(statements, repoForAgg),
   };
 }
 
