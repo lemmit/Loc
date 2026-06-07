@@ -1,8 +1,12 @@
 // Phase 3 of the IDE refactor: workspace edits flow through an
 // IDB-backed VFS so they survive reload.  This spec drives the
 // editor, types into it, reloads the page, and asserts the source
-// comes back via the auto-prepended "Workspace (autosaved)"
-// example entry.
+// comes back from the active workspace's autosaved git store.
+//
+// With the multi-workspace model the active workspace IS the
+// persisted content — there's no "Workspace (autosaved)" pseudo-
+// example any more — so we assert the workspace switcher shows the
+// default "My workspace" and the editor restored the typed marker.
 //
 // No network needed — runs everywhere the playground bundle does.
 
@@ -53,13 +57,12 @@ test("editor change → reload → source restored from IDB", async ({ page, con
   await page.goto("/");
   await waitForPlaygroundReady(page);
 
-  // After reload, the example dropdown should have auto-selected
-  // "Workspace (autosaved)" — Mantine Select renders the active
-  // option's label inside the textbox value, so we read it from
-  // there (not from the collapsed listbox, which is `hidden`).
+  // After reload, the active workspace is the default "My workspace"
+  // (Mantine Select renders the active option's label as the textbox
+  // value), and its autosaved content is restored below.
   await expect(
-    page.getByRole("textbox", { name: "Choose example" }),
-  ).toHaveValue("Workspace (autosaved)", { timeout: 10_000 });
+    page.getByRole("textbox", { name: "Choose workspace" }),
+  ).toHaveValue("My workspace", { timeout: 10_000 });
 
   // The editor's first line should be the marker we typed before
   // reload.  Monaco renders text inside `.view-line` divs.

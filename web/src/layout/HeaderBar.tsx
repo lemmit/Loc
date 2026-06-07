@@ -11,6 +11,7 @@ import {
   Title,
 } from "@mantine/core";
 import { PackPicker } from "../workspace/PackPicker";
+import { WorkspaceSwitcher } from "../workspace/WorkspaceSwitcher";
 import { WorkspaceTree } from "../workspace/WorkspaceTree";
 import type { LayoutCtx } from "./ctx";
 
@@ -44,6 +45,7 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
     <Group h="100%" px="md" justify="space-between" wrap="wrap" gap="xs">
       <Group gap="md" wrap="wrap">
         <Title order={5}>Loom Playground</Title>
+        <WorkspaceSwitcher workspace={workspace} size="xs" />
         <Select
           size="xs"
           value={exampleId}
@@ -51,13 +53,13 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
           data={augmentedExamplesList.map((e) => ({ value: e.id, label: e.label }))}
           allowDeselect={false}
           w={300}
-          // Screen readers + Playwright locators need a stable
-          // accessible name — without one the combobox is an
-          // empty-name `role="textbox"` and the first-match query
-          // is order-dependent.  Mantine's `label` prop is the
-          // visible-text variant; we use `aria-label` because the
-          // toolbar is space-constrained.
+          // Selecting an example imports it into the active workspace
+          // (overwriting its sources).  Stable accessible name for screen
+          // readers + Playwright locators — without one the combobox is an
+          // empty-name `role="textbox"` and the first-match query is
+          // order-dependent.
           aria-label="Choose example"
+          placeholder="Import example…"
         />
         <Button
           size="xs"
@@ -232,6 +234,9 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
               </Text>
             </Box>
             <Menu.Divider />
+            <Box px="sm" py={6}>
+              <WorkspaceSwitcher workspace={workspace} size="sm" />
+            </Box>
             <Box px="sm" py={6}>
               <PackPicker
                 workspaceStore={workspace.store}

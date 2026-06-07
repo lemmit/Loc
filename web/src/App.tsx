@@ -24,11 +24,11 @@ import {
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { useWorkspaceSources } from "./workspace/use-workspace-sources";
+import type { WorkspaceSourcesController } from "./workspace/workspace-sources";
 import { applyGeneratedTree, readGeneratedTree, startAutoCommit } from "./workspace/git";
 import {
   buildShareUrl,
   readHash,
-  readHashSource,
   writeHashProject,
   writeHashSource,
   type HashLoad,
@@ -137,41 +137,18 @@ export default function App(): JSX.Element {
   // dropdown so a recipient lands on the shared project even before
   // they touch the picker.
   const hashLoadOnMount = useMemo<HashLoad | null>(() => readHash(), []);
-  // Legacy single-file snapshot — `null` when the URL hash isn't a source / is
-  // empty. Callers that need the project state use `hashLoadOnMount` instead.
-  const hashSourceOnMount = useMemo<string | null>(() => readHashSource(), []);
-  // Convenience accessor: the source the "Shared link" entry's
-  // editor should open with — i.e. the active file's content for a
-  // project payload, or the raw text for a single-file payload.
-  const hashEntrySource = useMemo<string | null>(() => {
+  // A shareable URL payload (single-file `s=` or multi-file `p=`),
+  // normalised into an importable shape.  It's imported into the active
+  // workspace once on mount (see the workspace-open effect below) so a
+  // recipient lands on the shared project — there's no longer a synthetic
+  // "Shared link" entry in the example picker.
+  const sharedImport = useMemo<{ source: string; files?: Record<string, string> } | null>(() => {
     if (!hashLoadOnMount) return null;
-    if (hashLoadOnMount.kind === "single") return hashLoadOnMount.text;
+    if (hashLoadOnMount.kind === "single") return { source: hashLoadOnMount.text };
     const { files, active } = hashLoadOnMount.project;
-    return files[active] ?? files["/workspace/main.ddd"] ?? null;
+    const source = files[active] ?? files["/workspace/main.ddd"] ?? "";
+    return { source, files: workspacePathsToRelative(files, active) };
   }, [hashLoadOnMount]);
-  const examplesList = useMemo<LoomExample[]>(() => {
-    if (hashEntrySource === null) return examples;
-    // For a multi-file hash we hand the example its full `files`
-    // record (workspace-relative paths) so the example-pick effect
-    // below writes every file into the VFS.  The legacy single-
-    // file form stays single-file (no `files` key).
-    const shared: LoomExample = {
-      id: "shared",
-      label: "Shared link (from URL)",
-      source: hashEntrySource,
-      blurb:
-        "Loaded from the URL hash — your edits update the URL so it stays shareable.",
-      ...(hashLoadOnMount?.kind === "project"
-        ? {
-            files: workspacePathsToRelative(
-              hashLoadOnMount.project.files,
-              hashLoadOnMount.project.active,
-            ),
-          }
-        : {}),
-    };
-    return [shared, ...examples];
-  }, [hashEntrySource, hashLoadOnMount]);
 
   // Responsive layout switch.  Below the Mantine `sm` breakpoint
   // (768 px) we render `MobileShell` (bottom-tab nav, fullscreen
@@ -195,43 +172,20 @@ export default function App(): JSX.Element {
   const [buildClientReady, setBuildClientReady] = useState(false);
   const userPickedExampleRef = useRef(false);
 
-  const augmentedExamplesList = useMemo<LoomExample[]>(() => {
-    if (workspace.persistedSource === null || hashSourceOnMount !== null) {
-      return examplesList;
-    }
-    return [
-      {
-        id: "workspace",
-        label: "Workspace (autosaved)",
-        source: workspace.persistedSource,
-        blurb:
-          "Restored from this browser's autosave.  Edits flow back to local IndexedDB so reloads keep your work.",
-      },
-      ...examplesList,
-    ];
-  }, [examplesList, workspace.persistedSource, hashSourceOnMount]);
+  // The example picker now lists only the real examples; selecting one
+  // *imports* it into the active workspace (see `importExample`).  There
+  // are no synthetic "Workspace" / "Shared link" entries — persisted
+  // content lives in the workspace itself, and a shared URL is imported
+  // on mount.
+  const augmentedExamplesList: LoomExample[] = examples;
 
-  const [exampleId, setExampleIdRaw] = useState(() =>
-    hashSourceOnMount !== null ? "shared" : defaultExample.id,
-  );
-  // Wrapper so any consumer that picks an example also flips the
-  // "user-picked" flag — that flag guards the workspace-autoswitch
-  // effect below.  Used by both shell headers.
+  // The example whose content was last imported into the active
+  // workspace — drives the picker's displayed value only.
+  const [exampleId, setExampleIdRaw] = useState(defaultExample.id);
+  // Selecting an example is an explicit import into the current workspace.
   const setExampleId = (v: string): void => {
-    userPickedExampleRef.current = true;
-    setExampleIdRaw(v);
+    void importExample(v);
   };
-
-  useEffect(() => {
-    if (
-      workspace.persistedSource !== null &&
-      !userPickedExampleRef.current &&
-      exampleId === defaultExample.id
-    ) {
-      setExampleIdRaw("workspace");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace.persistedSource]);
 
   // Content of the currently-picked example.  Drives the editor's
   // initial value for `/workspace/main.ddd`; non-main files take
@@ -254,9 +208,16 @@ export default function App(): JSX.Element {
   const initialSource = useMemo(() => {
     const persisted = sources.files.get(sources.activePath);
     if (persisted !== undefined) return persisted;
-    if (sources.activePath === "/workspace/main.ddd") return exampleSource;
+    // For main.ddd the active workspace's persisted content is the
+    // authoritative seed (sync-read at store-open); it covers the gap
+    // before the sources controller finishes its async load on a
+    // workspace switch.  Falls back to the last-imported example for a
+    // brand-new / hostile-storage workspace.
+    if (sources.activePath === "/workspace/main.ddd") {
+      return workspace.persistedSource ?? exampleSource;
+    }
     return "// New file — declare a context, valueobject, or enum here.\n";
-  }, [sources.files, sources.activePath, exampleSource]);
+  }, [sources.files, sources.activePath, exampleSource, workspace.persistedSource]);
 
   const [pipeline, dispatch] = useReducer(pipelineReducer, initialPipelineState);
 
@@ -539,47 +500,18 @@ export default function App(): JSX.Element {
   // the active file's content.  Keep this effect cheap; the heavy
   // "new project" reset below is gated on exampleId only.
   useEffect(() => {
+    // Keep handlers that read `sourceRef.current` in sync with the active
+    // file's content.  Regeneration is kicked explicitly by the edit /
+    // import / workspace-switch paths (not here), so a tab switch or an
+    // async content load no longer schedules a redundant rebuild.
     sourceRef.current = initialSource;
-    scheduleAutoGenerate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSource]);
 
-  // Heavy reset — pipeline state, diagnostics, preview, logs,
-  // runtime engine — fires only on a genuine "new project" picker
-  // change (the example dropdown).  A multi-file tab switch is NOT
-  // a new project: the user is still working on the same workspace,
-  // so we preserve all of these.
-  //
-  // Multi-file (Stage 3): the picked example may carry companion
-  // `files` (workspace-relative paths).  Seed each into the VFS at
-  // `/workspace/<rel>` so the tabs strip shows them and the
-  // project loader's import-graph walk resolves them.  We also
-  // write `example.source` to `/workspace/main.ddd` and flip the
-  // active path so the user lands on main.ddd regardless of what
-  // they had open before — a multi-file example with no obvious
-  // entry would otherwise leave the editor on a stale file.
-  //
-  // URL hash always tracks main.ddd content (per-keystroke sync
-  // stays single-file by design; explicit Share button generates
-  // the multi-file URL via `copyShareLink`), so we use
-  // `writeHashSource` here with the example's main.ddd content.
-  useEffect(() => {
-    const picked = augmentedExamplesList.find((e) => e.id === exampleId);
-    const mainContent = picked?.source ?? exampleSource;
-    // Phase-3 seeding: write the example's files to the VFS so the
-    // workspace immediately reflects the picked example.
-    const s = sourcesRef.current;
-    s.write("/workspace/main.ddd", mainContent);
-    if (picked?.files) {
-      for (const [rel, content] of Object.entries(picked.files)) {
-        const abs = `/workspace/${rel.replace(/^\/+/, "")}`;
-        if (abs.endsWith(".ddd")) s.write(abs, content);
-      }
-    }
-    s.setActivePath("/workspace/main.ddd");
-    writeHashSource(mainContent);
-    // Bump the generation epoch so any generate still in flight for the
-    // previous project can't land its result into this one's file view.
+  // Reset every downstream slot for a "new project" transition (example
+  // import or workspace switch) and bump the generation epoch so any
+  // generate still in flight for the previous project can't land its
+  // result into this one's file view.
+  function resetProject(): void {
     generationEpochRef.current++;
     dispatch({ type: "RESET" });
     setDiagnostics([]);
@@ -589,11 +521,101 @@ export default function App(): JSX.Element {
     setBackendLog([]);
     setAppLog([]);
     void engineRef.current?.reset();
-    // Regenerate promptly on a project switch rather than waiting out the
-    // keystroke debounce — otherwise the file view stays blank for 5s.
+  }
+
+  // Write a project's main + companion `.ddd` files into the workspace
+  // and land the editor on main.ddd.  Awaiting the controller writes is
+  // deliberate: the resident sources snapshot must reflect the new
+  // content BEFORE the editor remounts, otherwise it would seed from the
+  // previous project's still-current snapshot (the stale-editor bug).
+  async function seedProject(
+    ctrl: WorkspaceSourcesController,
+    source: string,
+    files?: Record<string, string>,
+  ): Promise<void> {
+    await ctrl.write("/workspace/main.ddd", source);
+    if (files) {
+      for (const [rel, content] of Object.entries(files)) {
+        const clean = rel.replace(/^\/+/, "");
+        if (clean.endsWith(".ddd")) await ctrl.write(`/workspace/${clean}`, content);
+      }
+    }
+    ctrl.setActivePath("/workspace/main.ddd");
+  }
+
+  // Import an example into the active workspace (the new meaning of
+  // picking from the example dropdown): overwrite its sources, drop any
+  // companion files the example doesn't include, reset downstream state,
+  // and regenerate promptly.
+  async function importExample(id: string): Promise<void> {
+    userPickedExampleRef.current = true;
+    const ex = examples.find((e) => e.id === id) ?? defaultExample;
+    const ctrl = sourcesRef.current.controller;
+    const keep = new Set<string>(["/workspace/main.ddd"]);
+    if (ex.files) {
+      for (const rel of Object.keys(ex.files)) {
+        const clean = rel.replace(/^\/+/, "");
+        if (clean.endsWith(".ddd")) keep.add(`/workspace/${clean}`);
+      }
+    }
+    for (const path of [...sourcesRef.current.files.keys()]) {
+      if (!keep.has(path)) await ctrl.delete(path);
+    }
+    await seedProject(ctrl, ex.source, ex.files);
+    sourceRef.current = ex.source;
+    writeHashSource(ex.source);
+    resetProject();
+    setExampleIdRaw(id);
     scheduleAutoGenerate(50);
+  }
+
+  // Open / switch / create transition for the active workspace.  Each
+  // distinct store is handled exactly once: the initial open seeds a
+  // brand-new (or shared-link) workspace and kicks the first generate; a
+  // later switch resets downstream state, reseats the build worker on the
+  // new workspace, and regenerates.  An existing workspace keeps its
+  // persisted content untouched.
+  const handledStoreRef = useRef<unknown>("init");
+  useEffect(() => {
+    if (!workspace.loaded) return; // wait for the open-or-fail decision
+    if (handledStoreRef.current === workspace.store) return; // already handled
+    const initial = handledStoreRef.current === "init";
+    handledStoreRef.current = workspace.store;
+    const ctrl = sourcesRef.current.controller;
+
+    if (initial && sharedImport) {
+      // Shared-link payload — import it, then flip the picker to the
+      // non-example "shared" sentinel so the editor remounts and reseeds
+      // from the freshly-written content (the editor mounted on the
+      // default example before this async seed lands).
+      void (async () => {
+        await seedProject(ctrl, sharedImport.source, sharedImport.files);
+        sourceRef.current = sharedImport.source;
+        writeHashSource(sharedImport.source);
+        setExampleIdRaw("shared");
+        scheduleAutoGenerate(80);
+      })();
+    } else if (workspace.persistedSource === null) {
+      // Brand-new (or hostile-storage) workspace — seed the default
+      // example so the playground is never blank.
+      void seedProject(ctrl, defaultExample.source, defaultExample.files);
+      sourceRef.current = defaultExample.source;
+    } else {
+      sourceRef.current = workspace.persistedSource;
+    }
+
+    if (!initial) {
+      // A genuine switch — reseat the build worker on the new workspace's
+      // VFS so the previous workspace's files can't leak into generation.
+      buildClientRef.current?.respawn();
+    }
+    resetProject();
+    // Give the new store's sources controller (and the respawned worker)
+    // a moment to settle, then regenerate.  A switch needs a touch longer
+    // than the initial open / same-store seed.
+    scheduleAutoGenerate(initial ? 80 : 400);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exampleId]);
+  }, [workspace.store, workspace.loaded]);
 
   const hashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleHashSync = (text: string): void => {

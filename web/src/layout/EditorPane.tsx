@@ -43,6 +43,7 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
     emptySourceFolders,
     createEmptySourceFolder,
     deleteEmptySourceFolder,
+    workspace,
   } = ctx;
   if (!lspClient) return null;
   const picker = isDesktop ? (
@@ -81,7 +82,13 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
       {picker}
       <Box style={{ flex: 1, minHeight: 0 }}>
         <LoomEditor
-          key={`${exampleId}::${activeSourcePath}`}
+          // Remount on a project change so the editor reseeds from
+          // `initialSource`: the active workspace (switch), whether its
+          // content has finished loading, the last-imported example, and
+          // the active file path.  Keying on `loaded` makes the final
+          // mount land once `persistedSource` is the new workspace's
+          // content, not the previous one.
+          key={`${workspace.activeId}:${workspace.loaded ? 1 : 0}:${exampleId}::${activeSourcePath}`}
           client={lspClient}
           initialValue={initialSource}
           isMobile={!isDesktop}
