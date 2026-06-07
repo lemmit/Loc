@@ -961,6 +961,11 @@ export interface OnIR {
   correlation?: ExprIR;
   /** The reactor body — workflow statements (emit / let / op-call / …). */
   statements: WorkflowStmtIR[];
+  /** Which let-bound aggregates need a save call at reactor exit, in
+   *  declaration order — same `computeSaves` derivation as `HandleIR` /
+   *  `CreateIR`.  A reactor is a workflow continuation, so a created /
+   *  loaded-and-mutated aggregate is persisted on the way out. */
+  savesAtExit: { name: string; aggName: string; repoName: string }[];
 }
 
 export type WorkflowStmtIR =

@@ -1,0 +1,43 @@
+// Fixture for in-process event dispatch (channels.md): a channel that
+// `carries:` an event, an `on(e: Event)` reactor that loads/creates an
+// aggregate and emits a follow-on event, and an event-triggered
+// `create(e: Event) by` starter.  Used by the generator unit test that pins
+// the emitted `http/workflows.ts` handlers + `createInProcessDispatcher` and
+// the `createApp` default-dispatcher wiring.
+context Fulfillment {
+  aggregate Order { customerId: string  status: string  total: int }
+  repository Orders for Order { }
+  aggregate Shipment {
+    orderRef: Order id
+    status: string
+    operation markTracked() { status := "Tracked" }
+  }
+  repository Shipments for Shipment { }
+
+  event OrderPlaced { order: Order id, at: datetime }
+  event ShipmentRequested { shipment: Shipment id, at: datetime }
+
+  channel Lifecycle {
+    carries: OrderPlaced, ShipmentRequested
+    delivery: broadcast
+    retention: ephemeral
+  }
+
+  // Reactor: starts on OrderPlaced, requests a shipment.
+  workflow Fulfiller {
+    orderId: Order id
+    on(p: OrderPlaced) by p.order {
+      let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+      emit ShipmentRequested { shipment: ship.id, at: now() }
+    }
+  }
+
+  // Event-triggered starter on the follow-on event.
+  workflow ShipmentTracker {
+    shipId: Shipment id
+    create(s: ShipmentRequested) by s.shipment {
+      let ship = Shipments.getById(s.shipment)
+      ship.markTracked()
+    }
+  }
+}

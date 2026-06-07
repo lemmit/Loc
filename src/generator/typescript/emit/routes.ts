@@ -1,4 +1,4 @@
-import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
+import type { EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
@@ -10,7 +10,7 @@ import { renderHonoBaseLogCall, renderHonoLogCall } from "../../_obs/render-hono
 // `createApp` composition entry, which mounts each aggregate's
 // sub-router and exposes `/openapi.json`.
 export function renderHttpIndex(
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   options?: { authRequired?: boolean; persistence?: string },
 ): string {
   const authRequired = !!options?.authRequired;
@@ -64,7 +64,18 @@ export function renderHttpIndex(
   const needsBaseLogger = externAggs.length > 0 || authRequired;
   const baseLoggerImport = needsBaseLogger ? `import { baseLogger } from "../obs/log";` : null;
   const hasWorkflows = ctx.workflows.length > 0;
-  const workflowImport = hasWorkflows ? `import { workflowsRoutes } from "./workflows";` : null;
+  // In-process event dispatch (channels.md): when this deployable has any
+  // channel-routed subscription AND uses the default drizzle persistence, the
+  // generated `http/workflows.ts` exports `createInProcessDispatcher`, and
+  // `createApp` defaults `events` to it (routing emitted events to reactors /
+  // event-creates) instead of the no-op.  Mikro and channel-less projects keep
+  // the Noop default — byte-identical output.
+  const wireDispatcher = ctx.eventSubscriptions.length > 0 && !usingMikro;
+  const workflowImport = hasWorkflows
+    ? wireDispatcher
+      ? `import { createInProcessDispatcher, workflowsRoutes } from "./workflows";`
+      : `import { workflowsRoutes } from "./workflows";`
+    : null;
   const workflowMount = hasWorkflows
     ? `  app.route("/workflows", workflowsRoutes(db, events));`
     : null;
@@ -102,11 +113,18 @@ export function renderHttpIndex(
         ? 'import { EntityManager } from "@mikro-orm/postgresql";'
         : 'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
       usingMikro ? null : 'import type * as schema from "../db/schema";',
-      'import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events";',
+      wireDispatcher
+        ? 'import { type DomainEventDispatcher } from "../domain/events";'
+        : 'import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events";',
       "",
       "export function createApp(",
       usingMikro ? "  db: EntityManager," : "  db: NodePgDatabase<typeof schema>,",
-      "  events: DomainEventDispatcher = NoopDomainEventDispatcher,",
+      // When dispatch is wired, the default builds the in-process dispatcher
+      // from `db` (a later default param may reference an earlier one); a caller
+      // can still pass an explicit dispatcher (e.g. a broker publisher).
+      wireDispatcher
+        ? "  events: DomainEventDispatcher = createInProcessDispatcher(db),"
+        : "  events: DomainEventDispatcher = NoopDomainEventDispatcher,",
       "): OpenAPIHono {",
       externAggs.length > 0
         ? "  // Verify every extern operation has a registered handler.  Fails\n  // fast at startup so a missing user implementation surfaces here\n  // instead of as a 500 on the first request."

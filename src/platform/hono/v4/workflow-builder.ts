@@ -2,6 +2,7 @@ import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
+  type EnrichedBoundedContextIR,
   type ExprIR,
   operationUsesCurrentUser,
   type TypeIR,
@@ -39,7 +40,7 @@ import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 // ---------------------------------------------------------------------------
 
 export function buildWorkflowsFile(
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   aggsByName: Map<string, AggregateIR>,
   /** resourceName → sourceType, so resource-op verb helpers can be
    *  imported from `../resources/<sourceType>` (Phase 4). */
@@ -154,6 +155,18 @@ export function buildWorkflowsFile(
   body.push("");
   body.push(`  return app;`);
   body.push(`}`);
+
+  // In-process event dispatch (channels.md): for every channel-routed
+  // `on(e: Event)` reactor / event-triggered `create(e: Event) by` starter
+  // (`ctx.eventSubscriptions`, the enrich join), emit a handler function plus
+  // a `createInProcessDispatcher(db)` factory that routes each emitted
+  // `DomainEvent` to its subscribers.  Absent any subscription this block is
+  // skipped entirely, so a channel-less project's `http/workflows.ts` stays
+  // byte-identical (and `createApp` keeps the Noop dispatcher).
+  if (ctx.eventSubscriptions.length > 0) {
+    body.push("");
+    body.push(...emitSubscriptionHandlers(ctx));
+  }
   // Now derive imports from what the body actually references.
   const rawBodyStr = body.join("\n");
   // Strip string contents before scanning so symbols mentioned only in
@@ -366,6 +379,131 @@ function emitWorkflowRoute(
   out.push(`  },`);
   out.push(`);`);
   return out;
+}
+
+/** Deterministic handler-function name for an event subscription —
+ *  `<workflow>On<Event>` for reactors, `<workflow>Start<Event>` for
+ *  event-triggered creates. */
+function handlerName(workflow: string, trigger: "on" | "create", event: string): string {
+  return `${lowerFirst(workflow)}${trigger === "on" ? "On" : "Start"}${upperFirst(event)}`;
+}
+
+/** Emit the in-process subscription handlers + the `createInProcessDispatcher`
+ *  factory for a context that has channel-routed subscriptions. */
+function emitSubscriptionHandlers(ctx: EnrichedBoundedContextIR): string[] {
+  const subs = ctx.eventSubscriptions;
+  const out: string[] = [];
+  // Group handler names by event type for the dispatcher switch.
+  const byEvent = new Map<string, string[]>();
+  for (const sub of subs) {
+    const wf = ctx.workflows.find((w) => w.name === sub.workflow);
+    if (!wf) continue;
+    let statements: WorkflowStmtIR[];
+    let saves: { name: string; aggName: string; repoName: string }[];
+    if (sub.trigger === "on") {
+      const on = (wf.subscriptions ?? []).find(
+        (o) => o.event === sub.event && o.param === sub.param,
+      );
+      if (!on) continue;
+      statements = on.statements;
+      saves = on.savesAtExit;
+    } else {
+      const cr = wf.creates.find((c) => c.eventRef === sub.event && c.eventBinding === sub.param);
+      if (!cr) continue;
+      statements = cr.statements;
+      saves = cr.savesAtExit;
+    }
+    const fn = handlerName(sub.workflow, sub.trigger, sub.event);
+    out.push(...emitHandlerFn(fn, sub.event, sub.param, statements, saves, ctx));
+    out.push("");
+    const list = byEvent.get(sub.event) ?? [];
+    list.push(fn);
+    byEvent.set(sub.event, list);
+  }
+  out.push(...emitDispatcherFactory(byEvent));
+  return out;
+}
+
+/** One reactor / event-create handler.  The inbound event instance binds as
+ *  the body's event param directly (it is already domain-typed in-process —
+ *  no wire→domain conversion, unlike the HTTP command path); repos are built
+ *  on `db` with the re-entrant `events` dispatcher so a body `emit` re-routes
+ *  to its own subscribers (choreography chains). */
+function emitHandlerFn(
+  fn: string,
+  eventName: string,
+  paramName: string,
+  statements: WorkflowStmtIR[],
+  saves: { name: string; aggName: string; repoName: string }[],
+  ctx: BoundedContextIR,
+): string[] {
+  const out: string[] = [];
+  out.push(`export async function ${fn}(`);
+  out.push(`  db: NodePgDatabase<typeof schema>,`);
+  out.push(`  events: DomainEventDispatcher,`);
+  out.push(`  ${paramName}: Events.${eventName},`);
+  out.push(`): Promise<void> {`);
+  const hasEmit = statements.some((st) => st.kind === "emit");
+  if (hasEmit) out.push(`  const workflowEvents: Events.DomainEvent[] = [];`);
+  for (const r of collectReposFromStmts(statements, saves)) {
+    out.push(`  const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
+  }
+  const noParams = new Map<string, string>();
+  for (const st of statements) out.push(...renderStmt(st, noParams, "  ", ctx));
+  for (const save of saves) out.push(`  await ${lowerFirst(save.repoName)}.save(${save.name});`);
+  if (hasEmit) out.push(`  for (const ev of workflowEvents) await events.dispatch(ev);`);
+  out.push(`}`);
+  return out;
+}
+
+/** The in-process dispatcher: a `DomainEventDispatcher` whose `dispatch`
+ *  switches on `event.type` and fans each event out to its handlers, passing
+ *  itself so a handler's own emits re-enter.  `createApp` installs this as the
+ *  default dispatcher (replacing Noop) when the context has subscriptions. */
+function emitDispatcherFactory(byEvent: Map<string, string[]>): string[] {
+  const out: string[] = [];
+  out.push(`export function createInProcessDispatcher(`);
+  out.push(`  db: NodePgDatabase<typeof schema>,`);
+  out.push(`): DomainEventDispatcher {`);
+  out.push(`  const dispatcher: DomainEventDispatcher = {`);
+  out.push(`    async dispatch(event: Events.DomainEvent): Promise<void> {`);
+  out.push(`      switch (event.type) {`);
+  for (const [event, fns] of byEvent) {
+    out.push(`        case "${event}": {`);
+    for (const fn of fns) out.push(`          await ${fn}(db, dispatcher, event);`);
+    out.push(`          break;`);
+    out.push(`        }`);
+  }
+  out.push(`        default:`);
+  out.push(`          break;`);
+  out.push(`      }`);
+  out.push(`    },`);
+  out.push(`  };`);
+  out.push(`  return dispatcher;`);
+  out.push(`}`);
+  return out;
+}
+
+/** Repos referenced by a handler body — same derivation as
+ *  `collectReposForWorkflow` but over a statement list + its saves (reactors /
+ *  event-creates carry statements + savesAtExit, not a whole WorkflowIR). */
+function collectReposFromStmts(
+  statements: WorkflowStmtIR[],
+  saves: { name: string; aggName: string; repoName: string }[],
+): { repoName: string; aggName: string }[] {
+  const seen = new Map<string, string>();
+  const walk = (stmts: WorkflowStmtIR[]): void => {
+    for (const st of stmts) {
+      if (st.kind === "repo-let" || st.kind === "repo-run") seen.set(st.repoName, st.aggName);
+      else if (st.kind === "for-each") {
+        for (const sv of st.savesPerIteration) seen.set(sv.repoName, sv.aggName);
+        walk(st.body);
+      }
+    }
+  };
+  walk(statements);
+  for (const save of saves) seen.set(save.repoName, save.aggName);
+  return [...seen.entries()].map(([repoName, aggName]) => ({ repoName, aggName }));
 }
 
 function renderStmt(
