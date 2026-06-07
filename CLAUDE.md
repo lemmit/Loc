@@ -18,7 +18,7 @@ npm run watch                # tsc -b --watch
 npm run prepare              # = langium:generate && build; runs on `npm install`
 ```
 
-`src/language/generated/` is **gitignored** and produced by `npm run langium:generate`. You must run `prepare` (or at least `langium:generate`) once after a fresh clone or any grammar edit before `tsc` will succeed — many imports resolve into the generated dir.
+`src/language/generated/` (parser/AST/reflection) is **committed**, produced by `npm run langium:generate`. After any grammar edit, re-run `prepare` (or at least `langium:generate`) and commit the regenerated files — `langium-generated.yml` fails CI on any drift between `ddd.langium` and the committed output. A fresh clone already has them, but many imports resolve into this dir, so run `prepare` if a checkout looks stale before `tsc`.
 
 ### Tests
 
@@ -133,7 +133,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 | Path | What lives here |
 |---|---|
 | `src/` | The Loom toolchain (compiler, generators, CLI). |
-| `src/language/generated/` | **Gitignored.** `langium generate` output — parser, AST types, reflection. Must exist before `tsc` runs. |
+| `src/language/generated/` | **Committed** `langium generate` output — parser, AST types, reflection. Regenerate and commit after a grammar edit; `langium-generated.yml` guards it against drift. Must exist before `tsc` runs. |
 | `src/language/print/` | AST → `.ddd` source printer (`printExpr` / `printStmt` / `printStructural`).  Drives the LSP "unfold macro" code action (`src/language/lsp/unfold-macro.ts`), which rewrites a `with X(...)` clause into its expanded source in place. Each printer dispatches on `node.$type` and throws on an unhandled type; `test/language/print/print-completeness.test.ts` pins all three against the grammar's printable unions (via Langium reflection), so a new member/expr/stmt rule without a printer arm fails CI — add the matching `case` when extending the grammar. Round-trip safety is gated by `print-structural-roundtrip.test.ts`. |
 | `src/ir/{types,lower,enrich,validate,util}/` | The phase-revealing IR layout. One subdir per pipeline phase. `lower/` is a thin `lower.ts` orchestrator over sibling leaves: the expr/stmt/type passes (`lower-expr.ts` / `lower-stmt.ts` / `lower-types.ts`), the scaffold expander (`walker-primitive-expander.ts`), and the per-declaration-kind lowerers (`lower-platform` / `-requirements` / `-capabilities` / `-members` / `-view` / `-deployment` / `-ui` / `-workflow`). `validate/` is a thin `validate.ts` orchestrator over `validate/checks/*` (per-theme check leaves + `shared.ts` + `diagnostic.ts`). |
 | `src/macros/` | Macro pipeline. `expander.ts` is the Langium `DocumentBuilder` listener; `registry.ts` is the global lookup; `api/` is the macro-authoring surface (`defineMacro`, factories); `stdlib/` ships the built-in macros (`audit/`, `softDelete/`, `scaffold/`, `crudish.macro.ts`). `bootMacros()` from `src/language/ddd-module.ts` registers them once at language-module init. |
