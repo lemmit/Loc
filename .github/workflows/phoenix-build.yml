@@ -60,12 +60,13 @@ concurrency:
 jobs:
   build-generated-phoenix:
     runs-on: ubuntu-latest
-    # Tight cap to protect CI minutes.  Cold path (no cache hit) is
-    # ~3-4min dominated by `mix deps.get`; warm runs (deps cache
-    # restored) are ~60-90s for the fixtures.  10min leaves headroom
-    # without letting a hung job burn through quota.  (The heavier
-    # showcase system compiles in its own parallel job below.)
-    timeout-minutes: 10
+    # Cap to protect CI minutes.  Cold path (no cache hit — e.g. when a new
+    # fixture changes the deps-cache key) is dominated by `mix deps.get` plus a
+    # full `mix compile` of every fixture; warm runs (deps cache restored) are
+    # ~60-90s per fixture.  15min leaves headroom for the cold path across the
+    # current fixture set without letting a hung job burn through quota.  (The
+    # heavier showcase system compiles in its own parallel job below.)
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v6
 

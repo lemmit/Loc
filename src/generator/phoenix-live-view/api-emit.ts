@@ -3,9 +3,11 @@ import {
   PAGED_DEFAULT_PAGE_SIZE,
   pagedReturn,
 } from "../../ir/stdlib/generics.js";
-import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/types/loom-ir.js";
+import { unionInstanceName } from "../../ir/stdlib/unions.js";
+import type { BoundedContextIR, DeployableIR, SystemIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
+import { type UnionMember, unionMembers } from "../_payload/union-wire.js";
 
 // ---------------------------------------------------------------------------
 // API controller emission for Phoenix LiveView / Ash.
@@ -479,6 +481,57 @@ function renderViewAction(
 }
 
 // ---------------------------------------------------------------------------
+// Discriminated-union serialization (payload-transport-layer.md, P4d)
+// ---------------------------------------------------------------------------
+
+/** A find whose return type is a discriminated union — inline `A or B` or a
+ *  named `payload Foo = …` reference.  Returns the serializer name + variants. */
+function unionForFind(
+  t: TypeIR,
+  ctx: BoundedContextIR,
+): { name: string; variants: TypeIR[] } | null {
+  if (t.kind === "union") return { name: unionInstanceName(t.variants), variants: t.variants };
+  if (t.kind === "entity") {
+    const p = ctx.payloads.find((pl) => pl.name === t.name && pl.variants);
+    if (p?.variants) return { name: p.name, variants: p.variants };
+  }
+  return null;
+}
+
+/** The private tagger function name for a union (`OrderOrCancel` → `tag_order_or_cancel`). */
+function unionTagFn(name: string): string {
+  return `tag_${snake(name)}`;
+}
+
+/** Emit `defp tag_<union>/1` — one struct-pattern clause per record variant
+ *  (an Ash resource / embedded value object), mapping it to the cross-backend
+ *  `%{type: tag, …fields}` wire (camelCase atom keys; snake struct access).  A
+ *  final catch-all raises for an unhandled variant (a scalar / `none` value, or
+ *  a struct the producer shouldn't have yielded). */
+function renderUnionTagger(
+  name: string,
+  variants: TypeIR[],
+  ctx: BoundedContextIR,
+  contextModule: string,
+): string {
+  const fn = unionTagFn(name);
+  const members = unionMembers(variants, ctx);
+  const clauseFor = (m: UnionMember): string | null => {
+    if (m.shape !== "record") return null; // scalar / none → catch-all
+    const fields = m.fields.map((f) => `${f.name}: v.${snake(f.name)}`).join(", ");
+    const body = fields
+      ? `%{type: ${JSON.stringify(m.tag)}, ${fields}}`
+      : `%{type: ${JSON.stringify(m.tag)}}`;
+    return `  defp ${fn}(%${contextModule}.${upperFirst(m.tag)}{} = v), do: ${body}`;
+  };
+  const clauses = members.map(clauseFor).filter((c): c is string => c !== null);
+  clauses.push(
+    `  defp ${fn}(_other), do: raise(ArgumentError, message: "unhandled ${name} variant")`,
+  );
+  return clauses.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Per-aggregate controllers (`<Aggs>Controller`)
 // ---------------------------------------------------------------------------
 
@@ -567,6 +620,10 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
   // `list/2` above already serves it.
   const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
   const findActions: string[] = [];
+  // Discriminated-union find returns (P4d): name → variants, deduped, so the
+  // controller can emit one `tag_<union>/1` serializer (struct-pattern clauses
+  // → the `%{type: tag, …}` wire) shared across finds that return it.
+  const unionsUsed = new Map<string, TypeIR[]>();
   if (repo) {
     for (const find of repo.finds) {
       if (find.name === "all") continue;
@@ -577,6 +634,21 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
       const argReads = find.params
         .map((p) => `params[${JSON.stringify(snake(p.name))}]`)
         .join(", ");
+      const union = unionForFind(find.returnType, ctx);
+      if (union) {
+        // Tagged-union return (P4d): the read yields the repo aggregate; the
+        // controller tags it into the cross-backend `%{type: tag, …}` wire.
+        // Producer-side variant selection (yielding a non-primary variant) is
+        // developer logic — same boundary as the TS/.NET stubs.
+        unionsUsed.set(union.name, union.variants);
+        findActions.push(`  @doc "GET /api/${aggPlural}/${findSnake}"
+  def ${findSnake}(conn, params) do
+    _ = params
+    result = ${contextModule}.${findSnake}_${aggSnake}!(${argReads})
+    json(conn, ${unionTagFn(union.name)}(result))
+  end`);
+        continue;
+      }
       if (pagedReturn(find.returnType)) {
         // Paged (P3b): read page/pageSize (1-based, defaults), pass Ash
         // offset pagination with `count: true`, and map the
@@ -633,7 +705,12 @@ ${cuLine}    ${contextModule}.${opSnake}_${aggSnake}!(${callArgs}${callOpts})
   end`);
   }
 
-  const allActions = [crud, ...findActions, ...opActions].join("\n\n");
+  // One private tagger per distinct union returned by this aggregate's finds.
+  const unionTaggers = [...unionsUsed].map(([name, variants]) =>
+    renderUnionTagger(name, variants, ctx, contextModule),
+  );
+
+  const allActions = [crud, ...findActions, ...opActions, ...unionTaggers].join("\n\n");
 
   return `# Auto-generated.
 defmodule ${controllerModule} do
