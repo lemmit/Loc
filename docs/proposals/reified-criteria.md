@@ -1,23 +1,28 @@
 # Reified criteria — specifications as constructed objects
 
-> Status: **PARTIAL — retrieval criteria reified on all four backends.**
-> The Specification reframe landed first on the .NET/EF backend in four
-> slices: Slice 1a — emit `Criterion<T>` + `IsSatisfiedBy` (the in-memory
-> evaluate face, #890); Slice 2a — emit the `ToExpression()` query face
-> (#901); Slice 2b — retrievals consume `ToExpression` (#910) and `find`
-> consumes it (#926); Slice 3 — the retrieval **Ardalis `Specification<T>`
-> bundle**, EF-only (#936); Dapper retrievals as parameterised SQL (#943).
+> Status: **PARTIAL — retrieval *and* find criteria reified on all four
+> backends.** The Specification reframe landed first on the .NET/EF backend
+> in four slices: Slice 1a — emit `Criterion<T>` + `IsSatisfiedBy` (the
+> in-memory evaluate face, #890); Slice 2a — emit the `ToExpression()` query
+> face (#901); Slice 2b — retrievals consume `ToExpression` (#910) and
+> `find` consumes it (#926); Slice 3 — the retrieval **Ardalis
+> `Specification<T>` bundle**, EF-only (#936); Dapper retrievals as
+> parameterised SQL (#943).
 > Generated under `src/generator/dotnet/{criteria-emit,spec-emit,find-emit}.ts`;
 > `render-expr.ts` gates query-translatable bodies via
 > `canEmitToExpressionFor()`. A `retrieval` whose `where` is exactly a named
 > criterion now **reifies on Hono** (a module-level Drizzle predicate fn,
 > `<name>Criterion`, #952) and **on Phoenix/Ash** (a `:boolean` Ash
-> **calculation** the read action filters by). These two are code-organisation
+> **calculation** the read action filters by, #955) — and the same is now
+> true for a repository **`find`** whose `where` is exactly a named criterion
+> on Hono (#963) and Phoenix/Ash (#964) (a criterion shared by a find and a
+> retrieval reifies to a single fn/calculation). These are code-organisation
 > only — the emitted predicate is byte-identical to the inline form, so
 > conformance parity is unchanged (functional parity predates the reify).
-> Still inline everywhere: **`find` criteria** and the anonymous **`filter`
-> capability** predicates on Hono/Ash (the #760/#762 mechanism) — reifying
-> those is the remaining work. The architecture below
+> Still inline everywhere: the anonymous **`filter` capability** predicates
+> on Hono/Ash (the #760/#762 `contextFilters` mechanism) and the
+> principal/tenancy factory (`currentUser.<field>` as a constructor arg) —
+> reifying those is the remaining work. The architecture below
 > reverses the current pipeline's
 > "inline everything" decision for `criterion` (and the anonymous `filter`
 > capability): instead of substituting a criterion's body into an
@@ -63,14 +68,14 @@ and becomes the artifact backends actually consume.
 
 ## Remaining-work register (shipped ✓ / left ▢)
 
-The retrieval-criterion reification path is **shipped on all four
-backends**; everything below is the residue. Each row keys to a phase in
-"Implementation sketch (phased)".
+The retrieval- *and* find-criterion reification paths are **shipped on all
+four backends**; everything below is the residue. Each row keys to a phase
+in "Implementation sketch (phased)".
 
 | | Work | Backends | Phase | PRs |
 |---|---|---|---|---|
 | ✓ | `retrieval` `where` = named criterion → reified Specification/predicate object | .NET (EF + Dapper), Hono, Phoenix/Ash | 0 | #890 #901 #910 #926 #936 #943 #952 #955 |
-| ▢ | **`find` criteria** reify (today still inlined into the find's `where`) | Hono, .NET, Phoenix/Ash | 1 | — |
+| ✓ | **`find` `where` = named criterion** → same reified object (deduped with the retrieval's); Dapper finds emit inline parameterised SQL, like Dapper retrievals — no reified object | .NET EF, Hono, Phoenix/Ash (Dapper = SQL) | 1 | #926 (.NET EF) #963 (Hono) #964 (Phoenix) |
 | ▢ | **Anonymous `filter` capability** predicates reify (the #760/#762 `contextFilters` mechanism — still inlined) | Hono, Phoenix/Ash | 1, 3 | — |
 | ▢ | **Principal/tenancy** (`currentUser.<field>`) as a factory-bound constructor arg — retire the `usesUser` find-parameter threading (the held-#767 case, reified directly) | .NET first, then Hono/Phoenix | 2, 3 | (holds #767) |
 | ▢ | **`isSatisfiedBy` duality** — route invariant/precondition/guard use-sites through the spec's in-memory face; replace the selectability *validator* with the spec's `toExpression()` capability | all | 4 | — |

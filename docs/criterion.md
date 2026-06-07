@@ -12,10 +12,10 @@ guards.
 > [`docs/proposals/criterion.md`](proposals/criterion.md): the
 > `criterion` declaration, body validation, and **inline use** in every
 > existing boolean-expression position. A criterion referenced by a
-> [`retrieval`](#reification-retrieval-criteria)'s `where` additionally
-> **reifies** — it emits a named, constructed predicate object on every
-> backend rather than dissolving at compile time (see "Reification"
-> below). The proposal's further surfaces —
+> [`retrieval`](#reification-retrieval-and-find-criteria)'s or a `find`'s
+> `where` additionally **reifies** — it emits a named, constructed
+> predicate object on every backend rather than dissolving at compile time
+> (see "Reification" below). The proposal's further surfaces —
 > `Repo.findAll(criterion, sort?, page?, loads?)`, `when <Criterion>`
 > operation guards with auto-exposed `can-<op>` endpoints, and
 > `from <Criterion>(args)` parameter binding — depend on the
@@ -95,36 +95,47 @@ lowered expression** (and therefore the same generated SQL) as the
 equivalent hand-written inline filter. No backend query-engine change is
 involved; criteria ride the existing `where`→SQL path on every backend.
 
-## Reification (retrieval criteria)
+## Reification (retrieval and find criteria)
 
-There is one position where a criterion is **not** dissolved into its
-host: when a [`retrieval`](proposals/retrieval.md)'s `where` is *exactly*
-a named criterion reference. There the criterion **reifies** — the backend emits
-a named, constructed predicate object (the Specification pattern made
-real in generated code) that the retrieval's query method consumes, the
-functional analog of inlining lifted into a reusable object:
+There are positions where a criterion is **not** dissolved into its host:
+when a [`retrieval`](proposals/retrieval.md)'s `where`, or a repository
+`find`'s `where`, is *exactly* a named criterion reference. There the
+criterion **reifies** — the backend emits a named, constructed predicate
+object (the Specification pattern made real in generated code) that the
+query method consumes, the functional analog of inlining lifted into a
+reusable object:
 
 ```ddd
 criterion NamedLike(needle: string) of Customer = this.name == needle
 retrieval ByName(needle: string) of Customer { where: NamedLike(needle) sort: [name asc] }
+repository Customers for Customer {
+  find named(needle: string): Customer[] where NamedLike(needle)   // reifies too
+}
 ```
 
 | Backend | What the criterion reifies to |
 |---|---|
-| .NET / EF | a `Criterion<Customer>` (with `IsSatisfiedBy` + a query-side `ToExpression()`), fed into the retrieval's Ardalis `Specification<Customer>` bundle |
-| .NET / Dapper | a parameterised SQL `WHERE` fragment composed into the retrieval's `Run<Name>Async` |
-| Hono / Drizzle | a module-level predicate function `const namedLikeCriterion = (needle) => eq(schema.customers.name, needle)`, called by `run<Name>` |
+| .NET / EF | a `Criterion<Customer>` (with `IsSatisfiedBy` + a query-side `ToExpression()`), fed into the retrieval's Ardalis `Specification<Customer>` bundle (and into a `find`'s `.Where(crit.ToExpression())`) |
+| .NET / Dapper | a parameterised SQL `WHERE` fragment inlined into the retrieval's `Run<Name>Async` / the find method (Dapper emits SQL, not a reified object) |
+| Hono / Drizzle | a module-level predicate function `const namedLikeCriterion = (needle) => eq(schema.customers.name, needle)`, called by `run<Name>` and the matching `find` |
 | Phoenix / Ash | a `:boolean` Ash **calculation** the read action filters by (`filter expr(named_like(needle: ^arg(:needle)))`) |
+
+A criterion shared by a retrieval and a find reifies to a **single**
+predicate object (one module-level fn / one Ash calculation), consumed by
+both.
 
 The emitted predicate is **byte-identical** to what inlining would
 produce — reification is a code-organisation choice, not a behavioural
 one, so cross-backend conformance/wire parity is unchanged. The rule for
-*when* a criterion reifies is simply **"if it has a name."** Anonymous
-boolean expressions (most invariants, preconditions, capability filters)
-have nothing to reify and stay inline. See
+*when* a criterion reifies is simply **"if it has a name."** A `where`
+that is exactly one named criterion reifies; a *composed* one
+(`Active && InRegion(r)`) or an anonymous boolean expression (most
+invariants, preconditions, capability filters) has nothing to reify and
+stays inline. See
 [`docs/proposals/reified-criteria.md`](proposals/reified-criteria.md) for
-the full design and the remaining-work register (`find` criteria and the
-anonymous `filter` capability predicates still inline on Hono/Ash).
+the full design and the remaining-work register (the anonymous `filter`
+capability predicates and the principal/tenancy factory are the parts
+that still inline).
 
 ## Validation
 
