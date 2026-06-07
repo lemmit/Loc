@@ -65,22 +65,25 @@ export function validateWorkflows(ctx: BoundedContextIR, diags: LoomDiagnostic[]
 }
 
 // Workflow create-declaration well-formedness (workflow-and-applier.md A2-S5f,
-// validation rules 21–22).  A workflow may declare several `create` starters —
+// validation rules 21–23).  A workflow may declare several `create` starters —
 // one per entry point.  These checks keep that set unambiguous so the runtime
-// can route a command to exactly one starter, and so the deprecated
-// `params`/`statements` facade has a single, well-defined primary create to
-// project from (it picks the unnamed command-triggered create).
+// can route a command (or inbound event) to exactly one starter, and so the
+// deprecated `params`/`statements` facade has a single, well-defined primary
+// create to project from (it picks the unnamed command-triggered create).
 //
 //   - rule 21 (`loom.canonical-create-duplicate-workflow`) — at most one
 //     unnamed (canonical) create; extra entry points must be named.
 //   - rule 22 (`loom.create-name-conflict-workflow`)       — no two creates
 //     share a name.
+//   - rule 23 (`loom.event-create-overlap-workflow`)       — no two
+//     event-triggered creates start on the same event.
 //
-// Rules 23–24 (event-triggered overlap / create-vs-on correlation agreement)
-// are deferred: they key on `CreateIR.eventRef`, which lowering does not yet
-// derive for event-triggered creates, and the canonical `create(event: E)`
-// binding name collides with the `event` keyword.  Validating them before that
-// surface lands would test a form the compiler can't yet express.
+// Rule 24 (create-vs-on correlation agreement) is not a check of its own: an
+// event-triggered create's `by` clause is validated against the single
+// correlation field by `validateWorkflowCorrelation`, exactly like a reactor,
+// so a `create` and an `on` for one event necessarily agree.  (Both rules 23
+// and 24 are now expressible: `CreateIR.eventRef` / `correlation` are derived
+// for event-triggered creates.)
 function validateWorkflowCreates(wf: WorkflowIR, diags: LoomDiagnostic[], ctxName: string): void {
   const src = `${ctxName}/${wf.name}`;
   const creates = wf.creates ?? [];
@@ -116,6 +119,30 @@ function validateWorkflowCreates(wf: WorkflowIR, diags: LoomDiagnostic[], ctxNam
       });
     }
   }
+
+  // rule 23 — no two event-triggered creates start on the same event.  The
+  // runtime allocates one workflow instance per inbound event, so two starters
+  // on the same event leave it unable to choose which to allocate.  (Now
+  // checkable: `CreateIR.eventRef` is derived for event-triggered creates.)
+  const eventCreateCounts = new Map<string, number>();
+  for (const c of creates) {
+    if (c.triggerKind === "event" && c.eventRef) {
+      eventCreateCounts.set(c.eventRef, (eventCreateCounts.get(c.eventRef) ?? 0) + 1);
+    }
+  }
+  for (const [event, count] of eventCreateCounts) {
+    if (count > 1) {
+      diags.push({
+        severity: "error",
+        code: "loom.event-create-overlap-workflow",
+        message:
+          `workflow '${wf.name}' declares ${count} event-triggered 'create' starters on event ` +
+          `'${event}'; an event may start at most one create per workflow (the runtime can't ` +
+          `choose which instance to allocate).`,
+        source: src,
+      });
+    }
+  }
 }
 
 /** The resolved type a `by <expr>` correlation expression yields — a member
@@ -130,31 +157,53 @@ const idTarget = (t: TypeIR | undefined): string | undefined =>
   t && t.kind === "id" ? t.targetName : undefined;
 
 // Correlation-field rules (workflow-and-applier.md A2-S2 + A2-S3).  A workflow
-// with event reactors routes inbound events to exactly one id-shaped state
-// field — the correlation field.
+// with event consumers — `on(e: Event)` reactors *and* event-triggered
+// `create(e: Event) by` starters — routes each inbound event to exactly one
+// id-shaped state field, the correlation field.
 //
 //   - rule 10 (`loom.workflow-correlation-required`) — no id-shaped field.
 //   - rule 19 (`loom.correlation-field-ambiguous`)   — more than one.
 //   - rule 12 (`loom.correlation-type-mismatch`)     — a `by <expr>` yields a
 //     value of a different id type than the correlation field.
-//   - (`loom.correlation-uninferrable`) — a reactor omits `by` but its event
+//   - (`loom.correlation-uninferrable`) — a consumer omits `by` but its event
 //     has no field whose name matches the correlation field, so routing can't
 //     be inferred by name-match.
+//
+// Applying these uniformly to reactors AND event-creates also subsumes rule 24
+// (create-vs-on correlation agreement): both are checked against the same
+// correlation field, so a `create` and an `on` for one event necessarily agree.
 function validateWorkflowCorrelation(
   ctx: BoundedContextIR,
   wf: WorkflowIR,
   diags: LoomDiagnostic[],
 ): void {
-  const subs = wf.subscriptions ?? [];
-  if (subs.length === 0) return;
+  // Unified event-consumer list: `on` reactors + event-triggered creates.  Each
+  // carries the subscribed event, its optional `by <expr>` routing, and a label
+  // for diagnostics.
+  const consumers: { event: string; correlation?: ExprIR; label: string }[] = [
+    ...(wf.subscriptions ?? []).map((s) => ({
+      event: s.event,
+      correlation: s.correlation,
+      label: `on(${s.event})`,
+    })),
+    ...(wf.creates ?? [])
+      .filter((c) => c.triggerKind === "event" && !!c.eventRef)
+      .map((c) => ({
+        event: c.eventRef as string,
+        correlation: c.correlation,
+        label: `create(${c.eventBinding ?? "_"}: ${c.eventRef})`,
+      })),
+  ];
+  if (consumers.length === 0) return;
   const src = `${ctx.name}/${wf.name}`;
   const idFields = (wf.stateFields ?? []).filter((f) => f.type.kind === "id");
   if (idFields.length === 0) {
     diags.push({
       severity: "error",
       message:
-        `workflow '${wf.name}' has on(...) reactors but no correlation field. ` +
-        `Declare one id-shaped state field (e.g. 'orderId: Order id') for the runtime to route inbound events to.`,
+        `workflow '${wf.name}' has event consumers (reactors / event-triggered creates) but no ` +
+        `correlation field. Declare one id-shaped state field (e.g. 'orderId: Order id') for the ` +
+        `runtime to route inbound events to.`,
       source: src,
       code: "loom.workflow-correlation-required",
     });
@@ -166,23 +215,23 @@ function validateWorkflowCorrelation(
       message:
         `workflow '${wf.name}' has ${idFields.length} id-shaped state fields ` +
         `(${idFields.map((f) => f.name).join(", ")}); the correlation field can't be inferred. ` +
-        `A workflow with reactors must declare exactly one id-shaped field.`,
+        `A workflow with event consumers must declare exactly one id-shaped field.`,
       source: src,
       code: "loom.correlation-field-ambiguous",
     });
     return;
   }
-  // Exactly one correlation field — type-check each reactor's routing.
+  // Exactly one correlation field — type-check each consumer's routing.
   const corr = idFields[0];
   const corrTarget = idTarget(corr.type);
-  for (const sub of subs) {
+  for (const sub of consumers) {
     if (sub.correlation) {
       const byTarget = idTarget(correlationExprType(sub.correlation));
       if (byTarget !== corrTarget) {
         diags.push({
           severity: "error",
           message:
-            `workflow '${wf.name}': the 'by' expression on on(${sub.event}) yields ` +
+            `workflow '${wf.name}': the 'by' expression on ${sub.label} yields ` +
             `${byTarget ? `'${byTarget} id'` : "a non-id value"}, but the correlation field ` +
             `'${corr.name}' is '${corrTarget} id'. A 'by' clause must route by the correlation field's type.`,
           source: src,
@@ -198,7 +247,7 @@ function validateWorkflowCorrelation(
         diags.push({
           severity: "error",
           message:
-            `workflow '${wf.name}': on(${sub.event}) omits 'by' but event '${sub.event}' has no ` +
+            `workflow '${wf.name}': ${sub.label} omits 'by' but event '${sub.event}' has no ` +
             `field named '${corr.name}' to infer routing from. Add a 'by <expr>' clause.`,
           source: src,
           code: "loom.correlation-uninferrable",

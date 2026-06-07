@@ -92,3 +92,49 @@ describe("workflow by-correlation — validation", () => {
     expect(diags).toContain("loom.correlation-uninferrable");
   });
 });
+
+/** Every diagnostic code from the IR validator for a workflow built around the
+ *  injected members. */
+async function codesFor(members: string): Promise<string[]> {
+  const { model } = await parseString(src(members), { validate: false });
+  return validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code ?? "");
+}
+
+describe("event-triggered create — correlation + overlap", () => {
+  it("validates an event-create `by` against the correlation field, same as a reactor", async () => {
+    const ok = await diagsFor(
+      `create(paid: PaymentReceived) by paid.order { let x = paid.amount }`,
+    );
+    expect(ok).toEqual([]);
+  });
+
+  it("rejects an event-create `by` of a different id type (rule 24 via the uniform check)", async () => {
+    const diags = await diagsFor(
+      `create(paid: PaymentReceived) by paid.payment { let x = paid.amount }`,
+    );
+    expect(diags).toContain("loom.correlation-type-mismatch");
+  });
+
+  it("flags two event-triggered creates on the same event (rule 23)", async () => {
+    const codes = await codesFor(
+      `create a(paid: PaymentReceived) by paid.order { let x = paid.amount }
+       create b(p2: PaymentReceived) by p2.order { let x = p2.amount }`,
+    );
+    expect(codes).toContain("loom.event-create-overlap-workflow");
+  });
+
+  it("requires a correlation field when a workflow has only an event-create (rule 10)", async () => {
+    const noIdField = `
+      system S { subdomain M { context C {
+        aggregate Order { total: int }
+        event PaymentReceived { order: Order id, amount: int }
+        workflow W {
+          count: int
+          create(paid: PaymentReceived) by paid.order { let x = paid.amount }
+        }
+      }}}`;
+    const { model } = await parseString(noIdField, { validate: false });
+    const codes = validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code ?? "");
+    expect(codes).toContain("loom.workflow-correlation-required");
+  });
+});
