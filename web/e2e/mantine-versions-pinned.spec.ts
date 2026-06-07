@@ -14,7 +14,8 @@ test("playground dropdown lists both Mantine versions", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
 
-  // Open the example combobox.
+  // Open the "new workspace" popover, then its example combobox.
+  await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: /Choose example/i }).click();
 
   const options = await page.locator('[role="option"]').allInnerTexts();
@@ -34,8 +35,10 @@ test("pinned mantine@v9 storybook generates files end-to-end", async ({ page }) 
   await page.goto("/");
   await waitForPlaygroundReady(page);
 
+  await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: /Choose example/i }).click();
   await page.getByRole("option", { name: /Mantine 9 · pinned storybook/ }).click();
+  await page.getByTestId("workspace-create").click();
 
   // Auto-Generate fires ~800ms after the example switch.  The footer
   // updates to "generated N file(s)" when the worker round-trips.

@@ -6,7 +6,6 @@ import {
   Button,
   Group,
   Menu,
-  Select,
   Switch,
   Text,
   Title,
@@ -27,8 +26,7 @@ interface Props {
 export function DesktopHeader({ ctx }: Props): JSX.Element {
   const {
     augmentedExamplesList,
-    exampleId,
-    setExampleId,
+    createWorkspaceFromExample,
     copyShareLink,
     copied,
     workspace,
@@ -47,21 +45,14 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
     <Group h="100%" px="md" justify="space-between" wrap="wrap" gap="xs">
       <Group gap="md" wrap="wrap">
         <Title order={5}>Loom Playground</Title>
-        <WorkspaceSwitcher workspace={workspace} size="xs" />
-        <Select
+        {/* Workspaces own content; you pick a starting example when you
+            create one (the "+" popover) — no separate always-on example
+            dropdown that destructively overwrites the active workspace. */}
+        <WorkspaceSwitcher
+          workspace={workspace}
+          examples={augmentedExamplesList}
+          onCreateFromExample={createWorkspaceFromExample}
           size="xs"
-          value={exampleId}
-          onChange={(v) => v && setExampleId(v)}
-          data={augmentedExamplesList.map((e) => ({ value: e.id, label: e.label }))}
-          allowDeselect={false}
-          w={300}
-          // Selecting an example imports it into the active workspace
-          // (overwriting its sources).  Stable accessible name for screen
-          // readers + Playwright locators — without one the combobox is an
-          // empty-name `role="textbox"` and the first-match query is
-          // order-dependent.
-          aria-label="Choose example"
-          placeholder="Import example…"
         />
         <Button
           size="xs"
