@@ -41,6 +41,9 @@ function producesProblem(kind: OpErrorKind, guarded = false, indent = "    "): s
  *  param names (lowerCamel — matching the wire JSON key set the
  *  request was de-serialised from) flow through `publicOps[i].paramNames`. */
 interface ControllerShape {
+  /** The strongly-typed id class to construct from a route id (default
+   *  `<Agg>Id`; a TPH concrete uses its base's `<Base>Id`). */
+  idClass?: string;
   idClrType: string;
   createCmdArgs: string[];
   /** When true, the aggregate has a canonical `create` — emit a
@@ -107,11 +110,12 @@ export function renderController(
 ): string {
   const className = `${plural(upperFirst(agg.name))}Controller`;
   const route = `${shape.routePrefix ?? ""}${snake(plural(agg.name))}`;
+  const idClass = shape.idClass ?? `${agg.name}Id`;
 
   const createBody = renderCmdConstructorBody(shape.createCmdArgs, "            ");
 
   const opBlocks = shape.publicOps.flatMap((op) => {
-    const cmdArgs = [`new ${agg.name}Id(id)`, ...op.cmdArgs];
+    const cmdArgs = [`new ${idClass}(id)`, ...op.cmdArgs];
     const cmdBody = renderCmdConstructorBody(cmdArgs, "            ");
     // wire_in (trace) — the structural shape (keys only, no values) of
     // the parsed request, emitted right after `[FromBody]` binding so
@@ -274,7 +278,7 @@ export function renderController(
       ...producesProblem("getById"),
       `    public async Task<ActionResult<${agg.name}Response>> ${actionName(opGetById(agg.name))}([FromRoute] ${shape.idClrType} id)`,
       "    {",
-      `        var response = await _mediator.Send(new Get${agg.name}ByIdQuery(new ${agg.name}Id(id)));`,
+      `        var response = await _mediator.Send(new Get${agg.name}ByIdQuery(new ${idClass}(id)));`,
       "        return response is null ? NotFound() : Ok(response);",
       "    }",
       "",
@@ -294,13 +298,11 @@ export function renderController(
             // shared DomainExceptionFilter stays untouched.  Dapper v1 emits no
             // FK constraints, so it skips the catch (and the EF reference).
             ...(shape.usingDapper
-              ? [
-                  `        await _mediator.Send(new Destroy${agg.name}Command(new ${agg.name}Id(id)));`,
-                ]
+              ? [`        await _mediator.Send(new Destroy${agg.name}Command(new ${idClass}(id)));`]
               : [
                   "        try",
                   "        {",
-                  `            await _mediator.Send(new Destroy${agg.name}Command(new ${agg.name}Id(id)));`,
+                  `            await _mediator.Send(new Destroy${agg.name}Command(new ${idClass}(id)));`,
                   "        }",
                   "        catch (Microsoft.EntityFrameworkCore.DbUpdateException)",
                   "        {",

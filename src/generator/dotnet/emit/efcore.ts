@@ -8,6 +8,7 @@ import type {
   ExprIR,
   FieldIR,
 } from "../../../ir/types/loom-ir.js";
+import { isTphBase, ownFieldsOf } from "../../../ir/util/inheritance.js";
 import { isValueCollectionType, valueCollectionsFor } from "../../../ir/util/value-collections.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
@@ -48,13 +49,18 @@ export function renderDbContext(
 ): string {
   const isDoc = (name: string) => documentAggs.has(name);
   const isEs = (name: string) => eventSourcedAggs.has(name);
-  // Abstract TPC (`ownTable`) bases own no table — they are excluded from the
-  // EF model via `modelBuilder.Ignore<Base>()` so each concrete maps standalone
-  // (its own table carrying the inherited base columns flattened), instead of
-  // EF folding the hierarchy into TPH/TPC mapping.  They contribute no DbSet
-  // and no configuration; the concretes do.
+  // Abstract bases split by layout.  A TPC (`ownTable`) base owns no table —
+  // it is excluded from the EF model via `modelBuilder.Ignore<Base>()` so each
+  // concrete maps standalone (its own table carrying the inherited base columns
+  // flattened).  A TPH (`sharedTable`) base, by contrast, IS mapped: it owns the
+  // single shared table + `kind` discriminator (configured in its
+  // `<Base>Configuration`, via `HasDiscriminator`), so it gets a `DbSet<Base>`
+  // (for the polymorphic `find all <Base>` reader) and is NOT ignored.  Its
+  // concrete subtypes keep their own `DbSet<Concrete>` (EF auto-filters by
+  // discriminator) + an own-fields-only configuration.
   const entityAggs = ctx.aggregates.filter((a) => !a.isAbstract);
-  const abstractBases = ctx.aggregates.filter((a) => a.isAbstract);
+  const tphBases = ctx.aggregates.filter((a) => a.isAbstract && isTphBase(a, ctx.aggregates));
+  const tpcBases = ctx.aggregates.filter((a) => a.isAbstract && !isTphBase(a, ctx.aggregates));
   const anyDoc = entityAggs.some((a) => isDoc(a.name));
   const anyEs = entityAggs.some((a) => isEs(a.name));
   const aggUsings = ctx.aggregates.map((a) => `using ${ns}.Domain.${plural(a.name)};`);
@@ -67,13 +73,24 @@ export function renderDbContext(
         ? `    public DbSet<${a.name}Document> ${plural(upperFirst(a.name))} => Set<${a.name}Document>();`
         : `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
   );
-  const ignoreBases = abstractBases.map((a) => `        modelBuilder.Ignore<${a.name}>();`);
+  // The TPH base's polymorphic DbSet — `find all <Base>` queries it and EF
+  // returns every concrete in the shared table.
+  const tphBaseDbSets = tphBases.map(
+    (a) => `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
+  );
+  const ignoreBases = tpcBases.map((a) => `        modelBuilder.Ignore<${a.name}>();`);
   const applyConfigs = entityAggs.map((a) =>
     isEs(a.name)
       ? `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}EventRecordConfiguration());`
       : isDoc(a.name)
         ? `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}DocumentConfiguration());`
         : `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
+  );
+  // The TPH base's configuration owns the shared table + `HasDiscriminator`;
+  // apply it FIRST so EF sees the discriminator mapping before the derived
+  // concrete configurations refine their own columns.
+  const tphBaseConfigs = tphBases.map(
+    (a) => `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
   );
   // Join-entity DbSets + their ApplyConfiguration entries.  Each
   // reference-collection field on an aggregate produces one join
@@ -115,10 +132,12 @@ export function renderDbContext(
       "    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }",
       "",
       ...dbSets,
+      ...tphBaseDbSets,
       ...joinDbSets,
       "    protected override void OnModelCreating(ModelBuilder modelBuilder)",
       "    {",
       ...ignoreBases,
+      ...tphBaseConfigs,
       ...applyConfigs,
       ...joinApplyConfigs,
       "    }",
@@ -136,47 +155,103 @@ export function renderConfiguration(
    *  snake-case plural ("tenant_a_orders").  Absent today on systems
    *  that don't declare any dataSource bindings — output stays
    *  byte-identical when both fields are undefined. */
-  options: { schema?: string; tablePrefix?: string; embedded?: boolean } = {},
+  options: {
+    schema?: string;
+    tablePrefix?: string;
+    embedded?: boolean;
+    /** TPH (aggregate-inheritance.md, `sharedTable`).  `base`: this aggregate
+     *  is the abstract base owning the shared table — emit `ToTable` + `HasKey`
+     *  + a `HasDiscriminator<string>("kind")` over `concretes` (value = each
+     *  concrete's name, matching the Hono/Drizzle wire).  `concrete`: this is a
+     *  subtype sharing the base's table — configure only its OWN columns
+     *  (`ownFieldsOf`); `ToTable`/`HasKey`/`Id` are inherited from the base
+     *  config, so EF maps the own columns as the shared table's nullable
+     *  columns and auto-filters reads by the discriminator. */
+    tph?:
+      | { role: "base"; concretes: readonly AggregateIR[] }
+      | { role: "concrete"; base: AggregateIR };
+  } = {},
 ): string {
+  const tph = options.tph;
+  const isTphConcreteCfg = tph?.role === "concrete";
   const voLookup: VoLookup = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
-  const fieldConfigs = agg.fields.flatMap((f) =>
+  // A TPH concrete configures only its OWN columns (the base columns belong to
+  // the base config); a base / standalone aggregate configures all its fields.
+  const cfgFields = tph?.role === "concrete" ? ownFieldsOf(agg, tph.base) : agg.fields;
+  const fieldConfigs = cfgFields.flatMap((f) =>
     fieldConfigLines(f, "        ", "builder", voLookup, false, agg.name),
   );
-  const containmentLines = agg.contains.flatMap((c) => containmentConfigLines(c, agg, options));
-  // Reference-collection (`Id<T>[]`) fields are persisted via a
-  // separate join entity (see `join-entities.ts`), so the public
-  // `List<TargetId>` accessor on the root must be unmapped — without
-  // `builder.Ignore(...)` EF Core 8's primitive-collection support pins it
-  // as a JSON column on the root row, defeating the relational join.
-  const refCollectionIgnores = agg.associations.map(
-    (a) => `        builder.Ignore(x => x.${upperFirst(a.fieldName)});`,
-  );
-  // Emit HasIndex for every aggregate-root column referenced by a
-  // repository find — same set the Drizzle schema indexes.  Without
-  // these, `find byEmail` / `byCustomer` etc. run sequential scans
-  // once the table grows past a few hundred rows.
-  const indexed = indexedColumnsFor(agg, ctx);
-  const indexLines = [...indexed].map(
-    (col) => `        builder.HasIndex(x => x.${pascalCol(col, agg)});`,
-  );
-  // Context filters install per-EntityConfiguration: one
-  // `builder.HasQueryFilter(...)` per propagated predicate.  EF Core's
-  // HasQueryFilter is per-entity-type by design — the
-  // DbContext-level grouping mechanism Phase 3 introduced was a
-  // workaround for a misplaced abstraction.  After splitting stdlib
-  // macros into level-correct trios (capability at context, state
-  // at aggregate), every filter just lands here regardless of
-  // whether the aggregate names a capability via `implements`.
-  const filterLines = (agg.contextFilters ?? []).map(
-    (predicate) =>
-      `        builder.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
-  );
+  // Table + key + id-conversion live on the table-owning config: a standalone
+  // aggregate or a TPH base.  A TPH concrete inherits all three from the base.
+  const tableKeyLines = isTphConcreteCfg
+    ? []
+    : [
+        // dataSource-driven table mapping.  `tablePrefix` lands first (it
+        // shifts the local table name); `schema` is the second arg when set.
+        // Both default to undefined → byte-identical single-arg `ToTable`.
+        `        builder.ToTable(${renderTableArgs(plural(agg.name), options)});`,
+        "        builder.HasKey(x => x.Id);",
+        `        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new ${agg.name}Id(v));`,
+      ];
+  // The TPH base maps the hierarchy: a `kind` discriminator column whose value
+  // for each concrete is that concrete's name (the cross-backend contract —
+  // see Hono's `emitTphTable` / `discriminatorValue`).
+  const discriminatorLines =
+    tph?.role === "base"
+      ? [
+          `        builder.HasDiscriminator<string>("kind")`,
+          ...tph.concretes.map(
+            (c, i) =>
+              `            .HasValue<${c.name}>(${JSON.stringify(c.name)})${i === tph.concretes.length - 1 ? ";" : ""}`,
+          ),
+        ]
+      : [];
+  // Containment / join-collection / index / filter config attach to the
+  // table-owning, non-inheritance configs.  TPH hierarchies are flat in v1
+  // (`contains` on a TPH concrete is gated `loom.tph-contains-unsupported`),
+  // so a TPH base/concrete configures scalar columns + the discriminator only.
+  const containmentLines = tph
+    ? []
+    : agg.contains.flatMap((c) => containmentConfigLines(c, agg, options));
+  // Reference-collection (`Id<T>[]`) fields persist via a separate join entity,
+  // so the public `List<TargetId>` accessor must be unmapped (else EF Core 8's
+  // primitive-collection support pins it as a JSON column on the row).
+  const refCollectionIgnores = tph
+    ? []
+    : agg.associations.map((a) => `        builder.Ignore(x => x.${upperFirst(a.fieldName)});`);
+  // HasIndex for every root column referenced by a repository find — same set
+  // the Drizzle schema indexes; without them `find byEmail` scans sequentially.
+  const indexLines = tph
+    ? []
+    : [...indexedColumnsFor(agg, ctx)].map(
+        (col) => `        builder.HasIndex(x => x.${pascalCol(col, agg)});`,
+      );
+  // Context filters: one `builder.HasQueryFilter(...)` per propagated predicate.
+  const filterLines = tph
+    ? []
+    : (agg.contextFilters ?? []).map(
+        (predicate) =>
+          `        builder.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
+      );
+  // The abstract TPH base carries no `_domainEvents` list (only concrete roots
+  // do), so it has nothing to ignore; every other config ignores it.
+  const domainEventsIgnore =
+    tph?.role === "base" ? [] : ["        builder.Ignore(x => x.DomainEvents);"];
+  // The base config references each concrete type in its `HasValue<C>` chain,
+  // so it imports every concrete's namespace.
+  const concreteUsings =
+    tph?.role === "base"
+      ? tph.concretes
+          .filter((c) => c.name !== agg.name)
+          .map((c) => `using ${ns}.Domain.${plural(c.name)};`)
+      : [];
   return (
     lines(
       "// Auto-generated.",
       "using Microsoft.EntityFrameworkCore;",
       "using Microsoft.EntityFrameworkCore.Metadata.Builders;",
       `using ${ns}.Domain.${plural(agg.name)};`,
+      ...concreteUsings,
       `using ${ns}.Domain.Ids;`,
       `using ${ns}.Domain.ValueObjects;`,
       `using ${ns}.Domain.Enums;`,
@@ -187,21 +262,14 @@ export function renderConfiguration(
       "{",
       `    public void Configure(EntityTypeBuilder<${agg.name}> builder)`,
       "    {",
-      // dataSource-driven table mapping.  `tablePrefix` lands first
-      // (it shifts the local table name); `schema` is the second arg
-      // when set so EF Core places the entity in the right Postgres
-      // schema.  Both default to undefined → byte-identical with the
-      // existing single-arg ToTable on systems without dataSource
-      // declarations.
-      `        builder.ToTable(${renderTableArgs(plural(agg.name), options)});`,
-      "        builder.HasKey(x => x.Id);",
-      `        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new ${agg.name}Id(v));`,
+      ...tableKeyLines,
       ...fieldConfigs,
+      ...discriminatorLines,
       ...containmentLines,
       ...refCollectionIgnores,
       ...indexLines,
       ...filterLines,
-      "        builder.Ignore(x => x.DomainEvents);",
+      ...domainEventsIgnore,
       "    }",
       "}",
     ) + "\n"

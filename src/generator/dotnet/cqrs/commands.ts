@@ -20,9 +20,10 @@ export function emitCreateCommandAndHandler(
    *  the field set).  Skipped for event-sourced aggregates, whose create
    *  input is the command's params (not the field set) and whose invariants
    *  are enforced on the fold.  Defaults true. */
-  opts?: { emitValidator?: boolean },
+  opts?: { emitValidator?: boolean; idClass?: string },
 ): void {
   const emitValidator = opts?.emitValidator ?? true;
+  const idClass = opts?.idClass ?? `${agg.name}Id`;
   out.set(
     `Application/${aggFolder}/Commands/Create${agg.name}Command.cs`,
     renderCommand({
@@ -32,7 +33,7 @@ export function emitCreateCommandAndHandler(
       commandParams: requiredFields
         .map((f) => `${renderCsType(f.type)} ${upperFirst(f.name)}`)
         .join(", "),
-      returnType: `${agg.name}Id`,
+      returnType: idClass,
     }),
   );
   out.set(
@@ -42,7 +43,7 @@ export function emitCreateCommandAndHandler(
       aggName: agg.name,
       handlerName: `Create${agg.name}Handler`,
       commandName: `Create${agg.name}Command`,
-      returnType: `${agg.name}Id`,
+      returnType: idClass,
       body:
         `        var aggregate = ${agg.name}.Create(${requiredFields
           .map((f) => `command.${upperFirst(f.name)}`)
@@ -74,6 +75,7 @@ export function emitDestroyCommandAndHandler(
   ns: string,
   aggFolder: string,
   out: Map<string, string>,
+  idClass: string = `${agg.name}Id`,
 ): void {
   out.set(
     `Application/${aggFolder}/Commands/Destroy${agg.name}Command.cs`,
@@ -81,7 +83,7 @@ export function emitDestroyCommandAndHandler(
       ns,
       aggName: agg.name,
       commandName: `Destroy${agg.name}Command`,
-      commandParams: `${agg.name}Id Id`,
+      commandParams: `${idClass} Id`,
     }),
   );
   out.set(
@@ -110,10 +112,11 @@ export function emitOperationCommandsAndHandlers(
   ns: string,
   aggFolder: string,
   out: Map<string, string>,
+  idClass: string = `${agg.name}Id`,
 ): void {
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     const params = [
-      `${agg.name}Id Id`,
+      `${idClass} Id`,
       ...op.params.map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`),
     ].join(", ");
     out.set(

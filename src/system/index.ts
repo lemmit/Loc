@@ -251,13 +251,15 @@ function collectContextsFor(
   //   - `ownTable` (TPC) base, any backend → kept for the base-reader pass
   //     (see keepsForBaseReader); it contributes no table of its own, but is
   //     the read home for `find all <Base>`.
-  //   - `sharedTable` (TPH) base on a non-Hono backend → dropped; TPH is
-  //     gated as not-implemented there by IR-validate, so it never generates.
+  //   - `sharedTable` (TPH) base on a non-TPH-capable backend → dropped; TPH
+  //     is gated as not-implemented there by IR-validate, so it never generates.
   // Concretes always stay; the per-aggregate emit loop skips abstract bases
   // for repo/routes regardless, so a kept TPH base only contributes its table.
-  const isHono = d.platform === "node";
+  // TPH storage is implemented on Hono (Drizzle shared table) and .NET (EF Core
+  // `HasDiscriminator`); both keep the base so it can own the shared table.
+  const isTphCapable = d.platform === "node" || d.platform === "dotnet";
   const keepsTable = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
-    !!a.isAbstract && isHono && (a.inheritanceUsing ?? "sharedTable") === "sharedTable";
+    !!a.isAbstract && isTphCapable && (a.inheritanceUsing ?? "sharedTable") === "sharedTable";
   // A TPC (`ownTable`) base is kept in the view on every backend that
   // implements the polymorphic read home — not for a table of its own (the
   // per-aggregate emit loop skips abstract aggregates), but so the base-reader

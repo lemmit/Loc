@@ -9,7 +9,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
-import { isTpcBase } from "../../ir/util/inheritance.js";
+import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
 import {
   effectiveSavingShape,
   isDocumentShaped,
@@ -488,24 +488,54 @@ function emitAggregate(
       content,
     );
   };
-  // An abstract TPC (`ownTable`) base owns no table, no repository, no routes
-  // — it is kept in the generation view only to anchor the polymorphic reader
-  // (emitBaseReaders) and to give the concretes a C# base class to inherit.
-  // Emit just the abstract class and stop; everything else below is per
-  // instantiable aggregate.
+  // An abstract base owns no repository / routes.  A TPC (`ownTable`) base owns
+  // no table either — emit just the class (Ignore<Base>()d at the DbContext) so
+  // the polymorphic reader + concretes have a C# base.  A TPH (`sharedTable`)
+  // base, by contrast, IS the table owner: emit the mapped class (owns the
+  // shared Id) + its EF configuration (ToTable + HasDiscriminator over the
+  // concretes).  Either way, stop — everything below is per concrete aggregate.
   if (agg.isAbstract) {
-    place(`${agg.name}.cs`, "entity", renderAbstractBaseEntity(agg, ns));
+    if (isTphBase(agg, ctx.aggregates)) {
+      place(`${agg.name}.cs`, "entity", renderAbstractBaseEntity(agg, ns, { tph: true }));
+      place(
+        `${agg.name}Configuration.cs`,
+        "ef-configuration",
+        renderConfiguration(agg, ns, ctx, {
+          tph: { role: "base", concretes: tphConcretesOf(agg, ctx.aggregates) },
+        }),
+      );
+    } else {
+      place(`${agg.name}.cs`, "entity", renderAbstractBaseEntity(agg, ns));
+    }
     return;
   }
-  // A concrete TPC subtype inherits the abstract base's fields from the base
-  // class instead of re-declaring them; thread the base name + its field set
-  // through so renderEntity emits `: <Base>` and skips the inherited fields.
+  // A concrete subtype inherits the abstract base's fields from the base class
+  // instead of re-declaring them; thread the base name + its field set through
+  // so renderEntity emits `: <Base>` and skips the inherited fields.  A TPH
+  // concrete additionally shares the base's single-table Id (`sharesIdentity`),
+  // so it declares no `Id` of its own and mints the inherited `<Base>Id`.
   const tpcBase = agg.extendsAggregate
     ? ctx.aggregates.find((a) => a.name === agg.extendsAggregate && isTpcBase(a, ctx.aggregates))
     : undefined;
-  const superType = tpcBase
-    ? { name: tpcBase.name, fieldNames: new Set(tpcBase.fields.map((f) => f.name)) }
+  const tphBase = agg.extendsAggregate
+    ? ctx.aggregates.find((a) => a.name === agg.extendsAggregate && isTphBase(a, ctx.aggregates))
     : undefined;
+  const inheritedBase = tpcBase ?? tphBase;
+  const superType = inheritedBase
+    ? {
+        name: inheritedBase.name,
+        fieldNames: new Set(inheritedBase.fields.map((f) => f.name)),
+        derivedNames: new Set(inheritedBase.derived.map((d) => d.name)),
+        sharesIdentity: !!tphBase,
+        idValueType: tphBase?.idValueType,
+      }
+    : undefined;
+  // The strongly-typed id class for this aggregate's key.  `tableOwnerName`
+  // resolves a TPH concrete to its base (the shared single-table key it
+  // inherits); a standalone aggregate / TPC concrete keeps its own `<Agg>Id`,
+  // so this is byte-identical off the TPH path.  Threaded through the
+  // repository + CQRS emitters so every id surface names the right class.
+  const idClass = `${tableOwnerName(agg, ctx.aggregates)}Id`;
   const repo = findRepoFor(ctx, agg.name);
   // dataSource resolution drives BOTH the table-mapping knobs (schema /
   // tablePrefix) and the saving SHAPE.  `isDoc` (shape(document))
@@ -548,7 +578,7 @@ function emitAggregate(
   place(
     `I${agg.name}Repository.cs`,
     "repository-interface",
-    renderRepositoryInterface(agg, repoWithViews, ns, aggRetrievals),
+    renderRepositoryInterface(agg, repoWithViews, ns, aggRetrievals, idClass),
   );
   // Each retrieval emits an Ardalis `Specification<T>` (where + sort) the
   // EF repository's `Run<Name>Async` consumes via `.WithSpecification(...)`.
@@ -603,6 +633,7 @@ function emitAggregate(
       "repository-impl",
       renderEventSourcedRepositoryImpl(agg, repoWithViews, ns, findBodies, {
         extraUsings: [...repoImplUsings].sort(),
+        idClass,
       }),
     );
     place(`${agg.name}EventRecord.cs`, "event-record-poco", renderEventRecordPoco(agg, ns));
@@ -618,12 +649,14 @@ function emitAggregate(
       isDoc
         ? renderDocumentRepositoryImpl(agg, repoWithViews, ns, findBodies, {
             extraUsings: [...repoImplUsings].sort(),
+            idClass,
           })
         : renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
             extraUsings: [...repoImplUsings].sort(),
             emitTrace,
             retrievals: aggRetrievals,
             retrievalBodies,
+            idClass,
           }),
     );
     if (isDoc) {
@@ -652,6 +685,9 @@ function emitAggregate(
           schema: ds?.schema,
           tablePrefix: ds?.tablePrefix,
           embedded: isEmbedded,
+          // A TPH concrete configures only its OWN columns; ToTable/HasKey/Id
+          // are inherited from the base config (the shared table owner).
+          ...(tphBase ? { tph: { role: "concrete" as const, base: tphBase } } : {}),
         }),
       );
       // One file per reference-collection association: the join entity

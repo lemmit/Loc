@@ -1,4 +1,5 @@
 import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
+import { isTphBase } from "../../../ir/util/inheritance.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { DAPPER_PROJECT_DEPS, renderDapperConnectionSetup } from "./dapper.js";
@@ -81,6 +82,11 @@ using (var seedScope = app.Services.CreateScope())
     : "";
   const emitTrace = !!options?.emitTrace;
   const repoRegistrations = ctx.aggregates
+    // A TPH (`sharedTable`) base owns the shared table but emits no repository
+    // of its own (only its concretes do; reads route through their DbSets),
+    // so it has no I<Base>Repository / <Base>Repository to register.  A TPC
+    // base, by contrast, has a base-reader repository — kept.
+    .filter((a) => !isTphBase(a, ctx.aggregates))
     .map(
       (a) =>
         `builder.Services.AddScoped<${ns}.Domain.${plural(a.name)}.I${a.name}Repository, ${ns}.Infrastructure.Repositories.${a.name}Repository>();`,

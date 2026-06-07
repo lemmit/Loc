@@ -1,5 +1,5 @@
 import type { BoundedContextIR, EnrichedBoundedContextIR } from "../../ir/types/loom-ir.js";
-import { isTpcBase, isTpcConcrete } from "../../ir/util/inheritance.js";
+import { isTpcBase, isTpcConcrete, isTphBase } from "../../ir/util/inheritance.js";
 import { plural } from "../../util/naming.js";
 import {
   renderAuditableInterceptor,
@@ -43,7 +43,9 @@ export function emitIds(ctx: BoundedContextIR, ns: string, out: Map<string, stri
   for (const agg of ctx.aggregates) {
     // An abstract TPC base keeps no identity of its own (each concrete carries
     // its own strongly-typed `<Concrete>Id`), so it contributes no `<Base>Id`.
-    if (agg.isAbstract) continue;
+    // A TPH base, by contrast, OWNS the shared single-table key — emit its
+    // `<Base>Id`, which the concretes inherit (they declare none of their own).
+    if (agg.isAbstract && !isTphBase(agg, ctx.aggregates)) continue;
     out.set(`Domain/Ids/${agg.name}Id.cs`, renderId(agg.name, agg.idValueType, ns));
     for (const part of agg.parts) {
       out.set(`Domain/Ids/${part.name}Id.cs`, renderId(part.name, agg.idValueType, ns));

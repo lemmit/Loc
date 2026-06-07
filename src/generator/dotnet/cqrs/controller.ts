@@ -35,6 +35,9 @@ export function emitController(
    *  field-set constructibility check — is false).  Defaults to
    *  `hasCreate(agg)`. */
   createActionOverride?: boolean,
+  /** Strongly-typed id class for the route id param (default `<Agg>Id`); a TPH
+   *  concrete passes its base's `<Base>Id` (the shared inherited key). */
+  idClass: string = `${agg.name}Id`,
 ): void {
   // Namespaces the wire→command conversions below reach into (e.g.
   // System.Globalization for a datetime/money parse); collected over the
@@ -51,6 +54,7 @@ export function emitController(
   out.set(
     `Api/${upperFirst(plural(agg.name))}Controller.cs`,
     renderController(agg, repo, ns, {
+      idClass,
       idClrType: csIdValueClrType(agg.idValueType),
       createAction: createActionOverride ?? hasCreate(agg),
       destroyAction: !!agg.canonicalDestroy,

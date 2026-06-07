@@ -485,14 +485,25 @@ system Sys {
     expect(diags.filter((d) => d.severity === "error" && /TPH/.test(d.message))).toEqual([]);
   });
 
-  it("errors a TPH hierarchy hosted by a non-Hono backend (dotnet)", async () => {
+  it("does not gate a TPH hierarchy hosted by a .NET backend", async () => {
+    // .NET ships TPH via EF Core `HasDiscriminator` (aggregate-inheritance.md I2).
     const ON_DOTNET = TPH.replace("platform: hono", "platform: dotnet").replace(
       "port: 3000",
       "port: 5000",
     );
     const diags = validateLoomModel(enrichLoomModel(lowerModel(await parseValid(ON_DOTNET))));
+    expect(diags.filter((d) => d.severity === "error" && /TPH/.test(d.message))).toEqual([]);
+  });
+
+  it("errors a TPH hierarchy hosted by a non-capable backend (phoenix)", async () => {
+    // Phoenix/Ash TPH is unbuilt — the remaining ✗ row in the parity matrix.
+    const ON_PHOENIX = TPH.replace("platform: hono", "platform: phoenix").replace(
+      "port: 3000",
+      "port: 5000",
+    );
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(await parseValid(ON_PHOENIX))));
     const errors = diags.filter(
-      (d) => d.severity === "error" && /Hono backend only/.test(d.message),
+      (d) => d.severity === "error" && /TPH storage emission is implemented/.test(d.message),
     );
     expect(errors.map((e) => e.source).sort()).toEqual([
       "Parties/Customer",

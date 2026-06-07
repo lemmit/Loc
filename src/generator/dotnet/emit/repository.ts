@@ -26,6 +26,10 @@ export function renderRepositoryInterface(
   repo: RepositoryIR | undefined,
   ns: string,
   retrievals: RetrievalIR[] = [],
+  /** The strongly-typed id class this aggregate's key uses.  Defaults to the
+   *  aggregate's own `<Agg>Id`; a TPH (`sharedTable`) concrete passes its base's
+   *  `<Base>Id` (the shared single-table key it inherits). */
+  idClass: string = `${agg.name}Id`,
 ): string {
   // Union-returning finds (P4c) are handled entirely in the Application layer
   // (the query handler stubs them); the Domain repository emits no method for
@@ -54,8 +58,8 @@ export function renderRepositoryInterface(
       "",
       `public interface I${agg.name}Repository`,
       "{",
-      `    Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default);`,
-      `    Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default);`,
+      `    Task<${agg.name}?> GetByIdAsync(${idClass} id, CancellationToken cancellationToken = default);`,
+      `    Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${idClass}> ids, CancellationToken cancellationToken = default);`,
       `    Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default);`,
       // Hard delete — only when the aggregate has a canonical `destroy`
       // (declared or via `crudish`); keeps plain repos unchanged.
@@ -92,9 +96,13 @@ export function renderRepositoryImpl(
      *  fragments — emit a `Run<Name>Async` method each. */
     retrievals?: RetrievalIR[];
     retrievalBodies?: Array<{ name: string; whereClause: string; orderByClause: string }>;
+    /** Strongly-typed id class for this aggregate's key (default `<Agg>Id`); a
+     *  TPH concrete passes its base's `<Base>Id` (the shared inherited key). */
+    idClass?: string;
   },
 ): string {
   const emitTrace = !!options?.emitTrace;
+  const idClass = options?.idClass ?? `${agg.name}Id`;
   // Union-returning finds (P4c) are handled entirely in the Application layer
   // (the query handler stubs them); the Domain repository emits no method for
   // them, so it never needs to name the Response-side union type.
@@ -229,7 +237,7 @@ export function renderRepositoryImpl(
       "        _log = log;",
       "    }",
       "",
-      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
+      `    public async Task<${agg.name}?> GetByIdAsync(${idClass} id, CancellationToken cancellationToken = default)`,
       "    {",
       `        var found = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);`,
       // aggregate_loaded (debug) — mirrors the Hono repo emission;
@@ -244,7 +252,7 @@ export function renderRepositoryImpl(
       "        return found;",
       "    }",
       "",
-      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${idClass}> ids, CancellationToken cancellationToken = default)`,
       "    {",
       "        if (ids.Count == 0) return Array.Empty<" + agg.name + ">();",
       ...loadManyByIdsLines,
@@ -467,8 +475,9 @@ export function renderDocumentRepositoryImpl(
   repo: RepositoryIR | undefined,
   ns: string,
   findBodies: Array<{ name: string; filterClause: string; projectionClause: string }>,
-  options?: { extraUsings?: readonly string[] },
+  options?: { extraUsings?: readonly string[]; idClass?: string },
 ): string {
+  const idClass = options?.idClass ?? `${agg.name}Id`;
   // Union-returning finds (P4c) are handled entirely in the Application layer
   // (the query handler stubs them); the Domain repository emits no method for
   // them, so it never needs to name the Response-side union type.
@@ -542,7 +551,7 @@ export function renderDocumentRepositoryImpl(
       "        _log = log;",
       "    }",
       "",
-      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
+      `    public async Task<${agg.name}?> GetByIdAsync(${idClass} id, CancellationToken cancellationToken = default)`,
       "    {",
       `        var __doc = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == id.Value, cancellationToken);`,
       `        ${renderDotnetLogCall("aggregateLoaded", [
@@ -554,7 +563,7 @@ export function renderDocumentRepositoryImpl(
       `        return ${agg.name}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snap}>(__doc.Data, __json)!);`,
       "    }",
       "",
-      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${idClass}> ids, CancellationToken cancellationToken = default)`,
       "    {",
       `        if (ids.Count == 0) return Array.Empty<${agg.name}>();`,
       "        var __raw = ids.Select(i => i.Value).ToList();",
@@ -614,8 +623,9 @@ export function renderEventSourcedRepositoryImpl(
   repo: RepositoryIR | undefined,
   ns: string,
   findBodies: Array<{ name: string; filterClause: string; projectionClause: string }>,
-  options?: { extraUsings?: readonly string[] },
+  options?: { extraUsings?: readonly string[]; idClass?: string },
 ): string {
+  const idClass = options?.idClass ?? `${agg.name}Id`;
   // Union-returning finds (P4c) are handled entirely in the Application layer
   // (the query handler stubs them); the Domain repository emits no method for
   // them, so it never needs to name the Response-side union type.
@@ -704,7 +714,7 @@ export function renderEventSourcedRepositoryImpl(
       "        _log = log;",
       "    }",
       "",
-      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
+      `    public async Task<${agg.name}?> GetByIdAsync(${idClass} id, CancellationToken cancellationToken = default)`,
       "    {",
       "        var __sid = id.Value.ToString();",
       `        var __rows = await _db.${dbSet}.Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync(cancellationToken);`,
@@ -717,7 +727,7 @@ export function renderEventSourcedRepositoryImpl(
       `        return ${agg.name}._FromEvents(id, __rows.Select(RowToEvent).ToList());`,
       "    }",
       "",
-      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${idClass}> ids, CancellationToken cancellationToken = default)`,
       "    {",
       `        if (ids.Count == 0) return Array.Empty<${agg.name}>();`,
       `        var __out = new List<${agg.name}>();`,
@@ -779,7 +789,7 @@ export function renderEventSourcedRepositoryImpl(
       "            }",
       "            __list.Add(RowToEvent(__r));",
       "        }",
-      `        return __byStream.Select(__kv => ${agg.name}._FromEvents(new ${agg.name}Id(${parseId}), __kv.Value)).ToList();`,
+      `        return __byStream.Select(__kv => ${agg.name}._FromEvents(new ${idClass}(${parseId}), __kv.Value)).ToList();`,
       "    }",
       "",
       `    private static IDomainEvent RowToEvent(${agg.name}EventRecord __r)`,

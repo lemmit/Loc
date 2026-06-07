@@ -1,0 +1,45 @@
+// TPH (sharedTable) inheritance on the .NET / EF Core backend
+// (aggregate-inheritance.md I2).  The whole Party hierarchy maps to one
+// EF table with a `kind` discriminator; EF derives it natively from
+// `HasDiscriminator`.  This fixture exists to compile that emission under
+// `dotnet build /warnaserror` — the decisive gate (no local .NET SDK).
+system PartyDirectory {
+  subdomain Registry {
+    context Parties {
+      // Abstract base — owns the shared table + the `kind` discriminator.
+      abstract aggregate Party inheritanceUsing(sharedTable) {
+        name: string
+        email: string
+      }
+
+      // Concrete subtypes — derived EF entities sharing the Party table,
+      // each contributing its own nullable columns.
+      aggregate Customer extends Party {
+        creditLimit: int
+        operation raiseLimit(by: int) {
+          creditLimit := creditLimit + by
+        }
+      }
+
+      aggregate Vendor extends Party {
+        rating: int
+      }
+
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.email == email
+      }
+      repository Vendors for Vendor { }
+    }
+  }
+
+  storage pg { type: postgres }
+
+  resource partiesState { for: Parties, kind: state, use: pg }
+
+  deployable api {
+    platform: dotnet
+    contexts: [Parties]
+    dataSources: [partiesState]
+    port: 8080
+  }
+}
