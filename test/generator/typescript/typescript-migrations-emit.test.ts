@@ -68,8 +68,10 @@ describe("typescript migrations emitter", () => {
       ],
       out,
     );
-    expect(out.has("db/migrations/20260101000000_initial.sql")).toBe(true);
-    const sql = out.get("db/migrations/20260101000000_initial.sql")!;
+    // The tag is module-qualified ("sales") so a backend hosting several
+    // modules doesn't collide every module's "Initial" onto one file.
+    expect(out.has("db/migrations/20260101000000_sales_initial.sql")).toBe(true);
+    const sql = out.get("db/migrations/20260101000000_sales_initial.sql")!;
     expect(sql).toMatch(/CREATE TABLE orders \(/);
     expect(sql).toMatch(/PRIMARY KEY \(id\)/);
     // Drizzle splits on the sentinel — both statements need to be
@@ -99,12 +101,12 @@ describe("typescript migrations emitter", () => {
     expect(journal.entries).toHaveLength(2);
     expect(journal.entries[0]).toMatchObject({
       idx: 0,
-      tag: "20260101000000_initial",
+      tag: "20260101000000_sales_initial",
       breakpoints: true,
     });
     expect(journal.entries[1]).toMatchObject({
       idx: 1,
-      tag: "20260101000005_drop_x",
+      tag: "20260101000005_sales_drop_x",
       breakpoints: true,
     });
     // `when` is derived from the version slug (epoch-millis).
@@ -131,31 +133,36 @@ describe("typescript migrations emitter", () => {
     expect(out.size).toBe(0);
   });
 
-  it("dedupes multi-module history entries by version", () => {
+  it("keeps multi-module history entries distinct (module-qualified, no cross-module version dedup)", () => {
     const out = new Map<string, string>();
-    // Two modules, both with an "Initial" entry sharing the BASE
-    // version — journal must list it once.
-    const shared: MigrationHistoryEntry = { version: "20260101000000", name: "Initial" };
+    // Two modules in one deployable, each with its own "Initial" at the
+    // shared BASE version.  De-duping by version alone (the old bug)
+    // would collapse both Initials into one tag and lose a module's
+    // tables.  Qualifying the tag with the module keeps them distinct.
+    const initial: MigrationHistoryEntry = { version: "20260101000000", name: "Initial" };
     emitTypescriptMigrations(
       [
         {
           ...ir([{ op: "dropTable", name: "a" }], { version: "20260101000001" }),
           module: "ModuleA",
-          next: snap([shared, { version: "20260101000001", name: "AddSomething" }]),
+          next: snap([initial, { version: "20260101000001", name: "AddSomething" }]),
         },
         {
           ...ir([{ op: "dropTable", name: "b" }], { version: "20260101000002" }),
           module: "ModuleB",
-          next: snap([shared, { version: "20260101000002", name: "AddSomething" }]),
+          next: snap([initial, { version: "20260101000002", name: "AddSomething" }]),
         },
       ],
       out,
     );
     const journal = JSON.parse(out.get("db/migrations/meta/_journal.json")!);
+    // Sorted by (version, module): both Initials survive, then each
+    // module's delta — four entries, none colliding.
     expect(journal.entries.map((e: { version: string; tag: string }) => e.tag)).toEqual([
-      "20260101000000_initial",
-      "20260101000001_add_something",
-      "20260101000002_add_something",
+      "20260101000000_module_a_initial",
+      "20260101000000_module_b_initial",
+      "20260101000001_module_a_add_something",
+      "20260101000002_module_b_add_something",
     ]);
   });
 });

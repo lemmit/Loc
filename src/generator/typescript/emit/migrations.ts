@@ -1,4 +1,4 @@
-import type { MigrationsIR, SchemaSnapshot } from "../../../ir/types/migrations-ir.js";
+import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
 import { snake } from "../../../util/naming.js";
 import { renderPgStep } from "../../sql-pg.js";
 
@@ -28,6 +28,16 @@ import { renderPgStep } from "../../sql-pg.js";
 
 const STATEMENT_BREAKPOINT = "--> statement-breakpoint";
 
+/** Migration file/journal tag.  Qualified with the module: a backend
+ *  that hosts several modules gets one MigrationsIR per module, and
+ *  every module's *initial* migration shares `version` (BASE_TIMESTAMP)
+ *  and `name` ("Initial").  Without the module both the `.sql` filename
+ *  and the journal entry collide, so only the last module's tables are
+ *  ever applied and the rest of the database is empty. */
+function migrationTag(version: string, module: string, name: string): string {
+  return `${version}_${snake(module)}_${snake(name)}`;
+}
+
 export function emitTypescriptMigrations(
   migrations: MigrationsIR[],
   out: Map<string, string>,
@@ -35,7 +45,7 @@ export function emitTypescriptMigrations(
   let anyEmitted = false;
   for (const m of migrations) {
     if (m.steps.length === 0) continue;
-    const tag = `${m.version}_${snake(m.name)}`;
+    const tag = migrationTag(m.version, m.module, m.name);
     const sql = m.steps.map(renderPgStep).join(`\n${STATEMENT_BREAKPOINT}\n`);
     out.set(`db/migrations/${tag}.sql`, sql + "\n");
     anyEmitted = true;
@@ -61,16 +71,31 @@ function renderJournal(migrations: MigrationsIR[]): string {
     breakpoints: boolean;
   }[] = [];
   let idx = 0;
-  // De-duplicate by version: when two modules in this deployable both
-  // produce entries (unlikely in v1 but defensive), the version is the
-  // sort key.  Within the same version, name order is stable.
-  const merged = mergeHistories(migrations.map((m) => m.next));
-  for (const entry of merged) {
+  // One row per (module, history entry).  Modules in the same deployable
+  // share a version on their initial migration, so the journal must be
+  // keyed on the module too — de-duping by version alone would collapse
+  // every module's "Initial" into one entry and drop the rest of the
+  // database's tables.  Sort by (version, module) for a stable, ordered
+  // journal that mirrors the emitted `.sql` filenames.
+  const rows = migrations
+    .flatMap((m) => (m.next.migrationHistory ?? []).map((e) => ({ ...e, module: m.module })))
+    .sort((a, b) =>
+      a.version !== b.version
+        ? a.version < b.version
+          ? -1
+          : 1
+        : a.module < b.module
+          ? -1
+          : a.module > b.module
+            ? 1
+            : 0,
+    );
+  for (const row of rows) {
     entries.push({
       idx,
       version: "7",
-      when: versionToEpochMillis(entry.version),
-      tag: `${entry.version}_${snake(entry.name)}`,
+      when: versionToEpochMillis(row.version),
+      tag: migrationTag(row.version, row.module, row.name),
       breakpoints: true,
     });
     idx++;
@@ -90,19 +115,6 @@ function renderJournal(migrations: MigrationsIR[]): string {
       2,
     ) + "\n"
   );
-}
-
-function mergeHistories(snapshots: SchemaSnapshot[]): { version: string; name: string }[] {
-  const all: { version: string; name: string }[] = [];
-  const seen = new Set<string>();
-  for (const s of snapshots) {
-    for (const entry of s.migrationHistory ?? []) {
-      if (seen.has(entry.version)) continue;
-      seen.add(entry.version);
-      all.push(entry);
-    }
-  }
-  return all.sort((a, b) => (a.version < b.version ? -1 : a.version > b.version ? 1 : 0));
 }
 
 /** Map a `YYYYMMDDHHMMSS` version slug to epoch millis.  Deterministic;

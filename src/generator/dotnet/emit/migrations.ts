@@ -30,13 +30,17 @@ export function emitDotnetMigrations(
 ): void {
   for (const m of migrations) {
     if (m.steps.length === 0) continue;
-    const className = `M${m.version}_${upperFirst(m.name)}`;
-    const migrationId = `${m.version}_${upperFirst(m.name)}`;
+    // Qualify the migration identity with the module.  A backend that
+    // hosts several modules gets one MigrationsIR per module, and every
+    // module's *initial* migration shares `version` (BASE_TIMESTAMP) and
+    // `name` ("Initial") — so without the module the filename, class
+    // name, and `[Migration(id)]` all collide and only the last module's
+    // tables survive (the rest of that backend's database is empty →
+    // `relation "<schema>.<table>" does not exist` at runtime).
+    const slug = `${m.version}_${upperFirst(m.module)}_${upperFirst(m.name)}`;
+    const className = `M${slug}`;
     const sql = m.steps.map(renderPgStep).join("\n\n");
-    out.set(
-      `Migrations/${m.version}_${upperFirst(m.name)}.cs`,
-      renderMigrationClass(ns, className, migrationId, sql),
-    );
+    out.set(`Migrations/${slug}.cs`, renderMigrationClass(ns, className, slug, sql));
   }
 }
 
