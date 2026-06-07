@@ -28,6 +28,52 @@ import { firstColumnVsColumn, firstNonQueryableNode, firstUnknownColumnRef } fro
 // bindings all surface as errors here.
 // ---------------------------------------------------------------------------
 
+// System-wide: a workflow event consumer (`on(e: Event)` reactor /
+// event-triggered `create(e: Event) by` starter) whose event no `channel`
+// anywhere carries can never be dispatched — in-process delivery is
+// channel-routed (channels.md).  Almost always a mistake (a reactor written
+// before its channel was declared), so warn.  Cross-context-safe: a channel
+// only carries events of its own context, but the reactor may live elsewhere,
+// so the carried-event set is gathered across the whole model rather than per
+// context.  A warning (not an error) so a model mid-construction — or one that
+// reaches the consumer by a transport other than the in-process dispatcher —
+// still builds.
+export function validateEventConsumersCarried(
+  contexts: BoundedContextIR[],
+  diags: LoomDiagnostic[],
+): void {
+  const carried = new Set<string>();
+  for (const c of contexts)
+    for (const ch of c.channels) for (const ev of ch.carries) carried.add(ev);
+  for (const c of contexts) {
+    for (const wf of c.workflows) {
+      const consumers: { event: string; label: string }[] = [
+        ...(wf.subscriptions ?? []).map((s) => ({ event: s.event, label: `on(${s.event})` })),
+        ...(wf.creates ?? [])
+          .filter((cr) => cr.triggerKind === "event" && !!cr.eventRef)
+          .map((cr) => ({
+            event: cr.eventRef as string,
+            label: `create(${cr.eventBinding ?? "_"}: ${cr.eventRef})`,
+          })),
+      ];
+      for (const cons of consumers) {
+        if (!carried.has(cons.event)) {
+          diags.push({
+            severity: "warning",
+            code: "loom.reactor-event-uncarried",
+            message:
+              `workflow '${wf.name}': ${cons.label} subscribes to event '${cons.event}', but no ` +
+              `'channel' carries it. In-process dispatch is channel-routed, so this consumer never ` +
+              `fires — declare a channel (e.g. 'channel C { carries: ${cons.event} }') in the ` +
+              `event's context.`,
+            source: `${c.name}/${wf.name}`,
+          });
+        }
+      }
+    }
+  }
+}
+
 export function validateWorkflows(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   // Reserved-name guard: workflows share the context namespace with
   // aggregates, value objects, enums, events, repositories.

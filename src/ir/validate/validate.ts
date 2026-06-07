@@ -33,7 +33,11 @@ import {
   validateSystem,
 } from "./checks/system-checks.js";
 import { validateAggregateTestBodies } from "./checks/test-checks.js";
-import { validateViews, validateWorkflows } from "./checks/workflow-checks.js";
+import {
+  validateEventConsumersCarried,
+  validateViews,
+  validateWorkflows,
+} from "./checks/workflow-checks.js";
 
 // Public surface kept stable: LoomDiagnostic (now defined in checks/diagnostic)
 // and firstNonQueryableNode (in checks/shared) are re-exported here so existing
@@ -73,6 +77,10 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // Harmless for single-file projects: every collection is small
   // and the checks short-circuit when there are no duplicates.
   validateWorkspaceUniqueness(loom, diags);
+  // System-wide: warn when a workflow event consumer subscribes to an event no
+  // channel carries (it can't be dispatched in-process).  Needs every
+  // context's channels, so it runs once over the whole model, not per-context.
+  validateEventConsumersCarried([...allContexts(loom)], diags);
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
     validateDataSourceCoverage(sys, diags);

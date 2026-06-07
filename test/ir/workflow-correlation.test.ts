@@ -138,3 +138,27 @@ describe("event-triggered create — correlation + overlap", () => {
     expect(codes).toContain("loom.workflow-correlation-required");
   });
 });
+
+describe("uncarried event consumer (channel-routed dispatch)", () => {
+  it("warns when no channel carries a reactor's event (it can't be dispatched)", async () => {
+    // `src()` declares no channel, so PaymentReceived is uncarried.
+    const codes = await codesFor(`on(paid: PaymentReceived) by paid.order { let x = paid.amount }`);
+    expect(codes).toContain("loom.reactor-event-uncarried");
+  });
+
+  it("is silent when a channel carries the subscribed event", async () => {
+    const withChannel = `
+      system S { subdomain M { context C {
+        aggregate Order { total: int }
+        event PaymentReceived { order: Order id, amount: int }
+        channel Pay { carries: PaymentReceived  delivery: broadcast  retention: ephemeral }
+        workflow W {
+          orderId: Order id
+          on(paid: PaymentReceived) by paid.order { let x = paid.amount }
+        }
+      }}}`;
+    const { model } = await parseString(withChannel, { validate: false });
+    const codes = validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code ?? "");
+    expect(codes).not.toContain("loom.reactor-event-uncarried");
+  });
+});
