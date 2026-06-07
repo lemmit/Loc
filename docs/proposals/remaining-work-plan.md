@@ -77,14 +77,18 @@ landings" for PR-level detail:
 ### Storage & platform config
 
 - **storage-and-platform-config** — per-deployable `persistence:` / `style:` /
-  `layout:` selection (grammar + `DeployableIR` fields → orchestrator resolves
-  via `resolve-adapters.ts` + validator capability checks); the
-  `STORAGE_CAPABILITIES` matrix. The adapter taxonomy + `resolve*` seam already
-  exist — this is the *consumer*. Per-context `dataSource` bindings
-  (D-STORAGE-SPLIT / D-GRANULARITY); per-aggregate `for:` deferred to v2.
-- **platform-realization-axes** — naming review + the cross-axis gating matrix
-  (with validator codes) + grammar sketch for the homeless config axes; the
-  remaining real per-axis adapters (5c/5d).
+  `layout:` selection is **SHIPPED** (D-REALIZATION-AXES 5a–5d: .NET
+  `efcore`/`dapper`, hono `drizzle`/`mikroorm`, `cqrs` style, `byLayer`/
+  `byFeature` layout; backends read `deployable.persistence` directly, with
+  `loom.dapper-unsupported` / `loom.mikroorm-unsupported` capability gates in
+  `system-checks.ts`). Remaining: per-context `dataSource` bindings
+  (D-STORAGE-SPLIT / D-GRANULARITY), the `STORAGE_CAPABILITIES` matrix, the
+  reserved `marten` / `layered` stubs, outbox emission + per-deployable
+  overrides; per-aggregate `for:` deferred to v2.
+- **platform-realization-axes** — phases 1–5d shipped (per-axis style/layout/
+  persistence adapters on .NET + hono, with the cross-axis gating matrix +
+  validator codes). Remaining: naming review + grammar sketch for the
+  still-homeless config axes (actor runtimes, etc.).
 - **document-and-json-hierarchies** — Phoenix shape emission + TS `embedded`
   shape (Marten / EF `.ToJson()` paths landed for .NET; TS `relational` +
   `document` landed).
@@ -176,10 +180,12 @@ sequencing; most are gated on the packaging-split or the realization axes.
 
 A pragmatic next-N, consistent with the global plan's two-agent split:
 
-1. **Storage per-deployable selection** — the ready consumer of the
-   already-landed adapter seam (build when a non-default adapter is pulled).
-2. **Lifecycle Phase 2** (`urlStyle`/`routeSlug`) → **loom-forms F1** — unblocks
+1. **Lifecycle Phase 2** (`urlStyle`/`routeSlug`) → **loom-forms F1** — unblocks
    typed-action forms and fixes the create-contract layering bug.
+   (Per-deployable storage selection — formerly listed here — **shipped** via
+   D-REALIZATION-AXES; the storage tail that remains is logical `dataSource`
+   bindings + the `STORAGE_CAPABILITIES` matrix + outbox/overrides, not the
+   adapter selection itself.)
 3. **Payload P1→P4 (M1)** → **exception-less A1–A3 (M2)** → **A4 (M3)** — the
    type-system spine; everything in the criterion/exception tail rides it.
 4. **Aggregate inheritance I2/I3** — independent; parallelisable.
