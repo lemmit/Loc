@@ -87,8 +87,22 @@ function renderTsStatement(
     }
     case "expression":
       return `${INDENT}${renderTsExpr(s.expr)};`;
-    case "return":
-      return `${INDENT}return ${renderTsExpr(s.value)};`;
+    case "return": {
+      // Tag the returned value with its union variant on the wire (producer):
+      // a record variant flattens its fields beside `type`, a scalar wraps a
+      // `value`, `none` is the bare unit.  An untagged return (no union) prints
+      // the value verbatim.
+      const v = renderTsExpr(s.value);
+      if (!s.variantTag) return `${INDENT}return ${v};`;
+      const tag = JSON.stringify(s.variantTag);
+      const tagged =
+        s.variantShape === "none"
+          ? `{ type: ${tag} }`
+          : s.variantShape === "scalar"
+            ? `{ type: ${tag}, value: ${v} }`
+            : `{ type: ${tag}, ...(${v}) }`;
+      return `${INDENT}return ${tagged};`;
+    }
   }
 }
 

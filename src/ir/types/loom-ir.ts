@@ -2048,8 +2048,19 @@ export type StmtIR =
    * (exception-less.md).  `value` produces the operation's declared
    * `or`-union return; the route translator maps an `error`-variant result
    * to a ProblemDetails status and a success variant to HTTP 200.
+   *
+   * In a union-returning operation, lowering tags the return with the matching
+   * variant: `variantTag` is the wire discriminator, `variantShape` says how
+   * the value carries on the wire — `"record"` (fields flattened beside
+   * `type`), `"scalar"` (a single `value` field), or `"none"` (the bare unit).
+   * Absent when the operation has no union return (a plain value return).
    */
-  | { kind: "return"; value: ExprIR };
+  | {
+      kind: "return";
+      value: ExprIR;
+      variantTag?: string;
+      variantShape?: "record" | "scalar" | "none";
+    };
 
 /**
  * A path used as the LHS of an assignment / collection mutation.  All
