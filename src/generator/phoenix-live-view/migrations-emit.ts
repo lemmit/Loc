@@ -29,6 +29,25 @@ import { snake, upperFirst } from "../../util/naming.js";
 
 const BASE_TIMESTAMP = 20260101000000;
 
+/** Ecto option string for a table / index / reference that lives in a
+ *  non-default Postgres schema — the owning bounded context's schema,
+ *  carried on `TableShape.schema` (the Ash resource maps `table "x"` +
+ *  `schema "catalog"`, so the migration must create `catalog.x` or the
+ *  resource queries a relation that doesn't exist).  Empty for the
+ *  default (`public`) schema, preserving the unqualified output. */
+function prefixOpt(schema: string | undefined): string {
+  return schema ? `, prefix: ${JSON.stringify(schema)}` : "";
+}
+
+/** The `execute "CREATE SCHEMA …"` line (4-space indented, trailing
+ *  newline) prepended to a `change/0` body when the table is schema-
+ *  qualified, or "" for the default schema.  Idempotent (`IF NOT
+ *  EXISTS`) since several per-aggregate migrations can share one schema.
+ *  Forward-only — matching the no-op down of every other backend. */
+function schemaCreateLine(schema: string | undefined): string {
+  return schema ? `    execute "CREATE SCHEMA IF NOT EXISTS ${schema}"\n` : "";
+}
+
 export function emitMigrations(
   _appName: string,
   migrations: MigrationsIR[],
@@ -115,17 +134,18 @@ function renderInitialFile(table: TableShape, migrationName: string, appModule: 
   const pkType = idCol ? ectoPrimaryKeyType(idCol.type) : ":uuid";
   const otherCols = collapseVoGroups(table.columns.filter((c) => c.name !== "id"));
   const colLines = otherCols.map((c) => "      " + renderEctoColumn(c, table));
+  const prefix = prefixOpt(table.schema);
   const indexLines = table.indexes.map((i) => {
     const cols = i.columns.map((n) => `:${n}`).join(", ");
     const unique = i.unique ? ", unique: true" : "";
-    return `    create index(:${i.table}, [${cols}]${unique})`;
+    return `    create index(:${i.table}, [${cols}]${unique}${prefix})`;
   });
 
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
   use Ecto.Migration
 
   def change do
-    create table(:${table.name}, primary_key: false) do
+${schemaCreateLine(table.schema)}    create table(:${table.name}, primary_key: false${prefix}) do
       add :id, ${pkType}, primary_key: true, null: false
 ${colLines.join("\n")}
       timestamps()
@@ -147,12 +167,13 @@ function renderInitialJoinFile(
   appModule: string,
 ): string {
   const pkSet = new Set(table.primaryKey);
+  const prefix = prefixOpt(table.schema);
   const lines: string[] = [];
   for (const c of table.columns) {
     const defaultClause = c.default !== undefined ? `, default: ${c.default}` : "";
     const fk = table.foreignKeys.find((f) => f.column === c.name);
     if (fk) {
-      const ref = `references(:${fk.refTable}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${fk.onDelete === "cascade" ? "delete_all" : "restrict"})`;
+      const ref = `references(:${fk.refTable}${prefix}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${fk.onDelete === "cascade" ? "delete_all" : "restrict"})`;
       const pk = pkSet.has(c.name) ? ", primary_key: true" : "";
       lines.push(`      add :${c.name}, ${ref}, null: ${c.nullable}${pk}${defaultClause}`);
     } else {
@@ -165,13 +186,13 @@ function renderInitialJoinFile(
   const indexLines = table.indexes.map((i) => {
     const cols = i.columns.map((n) => `:${n}`).join(", ");
     const unique = i.unique ? ", unique: true" : "";
-    return `    create index(:${i.table}, [${cols}]${unique})`;
+    return `    create index(:${i.table}, [${cols}]${unique}${prefix})`;
   });
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
   use Ecto.Migration
 
   def change do
-    create table(:${table.name}, primary_key: false) do
+${schemaCreateLine(table.schema)}    create table(:${table.name}, primary_key: false${prefix}) do
 ${lines.join("\n")}
     end
 ${indexLines.join("\n")}${indexLines.length > 0 ? "\n" : ""}  end
@@ -241,7 +262,10 @@ function renderEctoStep(step: MigrationStep): string[] {
 function renderCreateTableInline(table: TableShape): string[] {
   const idCol = table.columns.find((c) => c.name === "id");
   const others = collapseVoGroups(table.columns.filter((c) => c.name !== "id"));
-  const lines: string[] = [`create table(:${table.name}, primary_key: false) do`];
+  const prefix = prefixOpt(table.schema);
+  const lines: string[] = [];
+  if (table.schema) lines.push(`execute "CREATE SCHEMA IF NOT EXISTS ${table.schema}"`);
+  lines.push(`create table(:${table.name}, primary_key: false${prefix}) do`);
   if (idCol) {
     lines.push(`  add :id, ${ectoPrimaryKeyType(idCol.type)}, primary_key: true, null: false`);
   }
@@ -251,7 +275,7 @@ function renderCreateTableInline(table: TableShape): string[] {
   for (const idx of table.indexes) {
     const cols = idx.columns.map((n) => `:${n}`).join(", ");
     const unique = idx.unique ? ", unique: true" : "";
-    lines.push(`create index(:${table.name}, [${cols}]${unique})`);
+    lines.push(`create index(:${table.name}, [${cols}]${unique}${prefix})`);
   }
   return lines;
 }
@@ -284,7 +308,7 @@ function renderEctoColumn(c: ColumnShape, table: TableShape): string {
   const defaultClause = c.default !== undefined ? `, default: ${c.default}` : "";
   const fk = table.foreignKeys.find((f) => f.column === c.name);
   if (fk) {
-    const ref = `references(:${fk.refTable}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${fk.onDelete === "cascade" ? "delete_all" : "restrict"})`;
+    const ref = `references(:${fk.refTable}${prefixOpt(table.schema)}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${fk.onDelete === "cascade" ? "delete_all" : "restrict"})`;
     return `add :${c.name}, ${ref}, null: ${c.nullable}${defaultClause}`;
   }
   return `add :${c.name}, ${ectoColumnType(c.type)}, null: ${c.nullable}${defaultClause}`;

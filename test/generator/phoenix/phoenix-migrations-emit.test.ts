@@ -192,4 +192,62 @@ describe("phoenix migrations-emit — delta path", () => {
       /add :order_id, references\(:orders, type: :uuid, on_delete: :delete_all\), null: false/,
     );
   });
+
+  it("creates the Postgres schema and prefixes table / FK / index when the table is schema-qualified", () => {
+    const ir: MigrationsIR = {
+      module: "Catalog",
+      storageName: "",
+      baseline: null,
+      next: EMPTY_SNAP,
+      steps: [
+        {
+          op: "createTable",
+          table: {
+            name: "projects",
+            schema: "catalog",
+            ownerModule: "Catalog",
+            columns: [{ name: "id", type: { kind: "uuid" }, nullable: false }],
+            primaryKey: ["id"],
+            foreignKeys: [],
+            indexes: [],
+          },
+        },
+        {
+          op: "createTable",
+          table: {
+            name: "pipelines",
+            schema: "catalog",
+            ownerModule: "Catalog",
+            columns: [
+              { name: "id", type: { kind: "uuid" }, nullable: false },
+              { name: "project_id", type: { kind: "uuid" }, nullable: false },
+            ],
+            primaryKey: ["id"],
+            foreignKeys: [{ column: "project_id", refTable: "projects", onDelete: "cascade" }],
+            indexes: [
+              {
+                name: "pipelines_project_id_idx",
+                table: "pipelines",
+                columns: ["project_id"],
+                unique: false,
+              },
+            ],
+          },
+        },
+      ],
+      version: "20260101000000",
+      name: "Initial",
+    };
+    const files = emit(ir);
+    // The Ash resource maps `table "projects"` + `schema "catalog"`, so the
+    // migration must create the schema and qualify every relation.
+    const projects = files.get("priv/repo/migrations/20260101000000_create_projects.exs")!;
+    expect(projects).toContain('execute "CREATE SCHEMA IF NOT EXISTS catalog"');
+    expect(projects).toContain('create table(:projects, primary_key: false, prefix: "catalog")');
+    // The part table's FK reference and index carry the prefix too.
+    const pipelines = files.get("priv/repo/migrations/20260101000011_create_pipelines.exs")!;
+    expect(pipelines).toContain('create table(:pipelines, primary_key: false, prefix: "catalog")');
+    expect(pipelines).toMatch(/references\(:projects, prefix: "catalog", type: :uuid/);
+    expect(pipelines).toContain('create index(:pipelines, [:project_id], prefix: "catalog")');
+  });
 });
