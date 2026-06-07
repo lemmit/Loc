@@ -12,7 +12,7 @@ import {
   emitOperationCommandsAndHandlers,
 } from "./cqrs/commands.js";
 import { emitController } from "./cqrs/controller.js";
-import { emitRequestDtos, emitResponseDtos } from "./cqrs/dtos.js";
+import { emitRequestDtos, emitResponseDtos, emitUnionDtos } from "./cqrs/dtos.js";
 import { emitFindQueriesAndHandlers, emitGetByIdQueryAndHandler } from "./cqrs/queries.js";
 
 // ---------------------------------------------------------------------------
@@ -63,6 +63,9 @@ export function emitCqrs(
   const aggHasCreate = esCreate ? true : hasCreate(agg);
 
   emitResponseDtos(agg, ctx, ns, aggFolder, out);
+  // Discriminated-union response DTOs (P4c) — polymorphic base + variant
+  // records for each union find return on this aggregate's repository.
+  emitUnionDtos(repo, ctx, ns, aggFolder, out);
   emitRequestDtos(agg, ctx, ns, aggFolder, out, aggHasCreate ? requiredFields : undefined);
   // Create command/handler gated on the IR lifecycle (`canonicalCreate`),
   // mirroring the destroy gate below: an aggregate that declares no create

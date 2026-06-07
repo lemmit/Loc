@@ -311,7 +311,7 @@ export function validateUnionsUnimplemented(
   // backend serves.  `"node"` is the hono/TS backend's platform identity.
   // When a context is served only by these (or by no backend at all — the
   // legacy single-context path), unions are emittable and the gate stays quiet.
-  const SUPPORTED_UNION_BACKENDS = new Set(["node"]);
+  const SUPPORTED_UNION_BACKENDS = new Set(["node", "dotnet"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_UNION_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 

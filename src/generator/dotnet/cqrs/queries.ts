@@ -1,4 +1,5 @@
 import { pagedReturn } from "../../../ir/stdlib/generics.js";
+import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -126,6 +127,19 @@ function buildFindHandlerBody(
       `        return new Paged<${agg.name}Response>(domain.Items.Select(d => ${projectEntityExpr("d", agg, ctx)}).ToList(), domain.Page, domain.PageSize, domain.Total, domain.TotalPages);\n`
     );
   }
+  if (find.returnType.kind === "union") {
+    // Discriminated-union return (P4c): the wire DTO + query + controller are
+    // fully generated, but selecting *which* variant the query yields is
+    // producer-side logic (exception-less track).  The handler is the stub —
+    // kept in the Application layer so it can name the Response-side union (the
+    // Domain repository never sees it, so it emits no method for this find).
+    // `Task.FromException` keeps the `async` handler awaiting (no CS1998) while
+    // surfacing the not-implemented contract at call time.  `callArgs` is
+    // referenced so the unused-parameter shape matches the other branches.
+    void callArgs;
+    const unionType = unionInstanceName(find.returnType.variants);
+    return `        return await Task.FromException<${unionType}>(new System.NotImplementedException("Union-returning find '${find.name}': supply the variant selection (payload-transport-layer.md, producer-side)."));\n`;
+  }
   if (find.returnType.kind === "array") {
     return (
       `        var domain = await _repo.${upperFirst(find.name)}(${callArgs});\n` +
@@ -149,6 +163,9 @@ function renderResponseReturnType(t: TypeIR, agg: AggregateIR): string {
     // The wire-side paged envelope wraps the response DTO (P3b).
     return `Paged<${agg.name}Response>`;
   }
+  // Discriminated union → the polymorphic base record (P4c); the repo returns
+  // the response union directly (no domain→response projection in the handler).
+  if (t.kind === "union") return unionInstanceName(t.variants);
   if (t.kind === "array") {
     return `IReadOnlyList<${agg.name}Response>`;
   }

@@ -69,7 +69,11 @@ interface ControllerShape {
      * type + the body's `Ok(result)` / `result is null ? NotFound()`
      * shape.  Must agree with the matching Hono Zod schema for the
      * cross-platform contract check to pass. */
-    returnShape: "list" | "optional" | "single" | "paged";
+    returnShape: "list" | "optional" | "single" | "paged" | "union";
+    /** Explicit response type name, set only for `returnShape: "union"` — the
+     *  polymorphic base record (P4c).  Other shapes derive their type from the
+     *  aggregate name. */
+    responseType?: string;
   }>;
   /** Prefix prepended to the controller's `[Route(...)]` (e.g.
    *  `"api/"` for fullstack-dotnet — leaves `/orders/*` paths free
@@ -163,15 +167,17 @@ export function renderController(
 
   const findBlocks = shape.finds.flatMap((f) => {
     const responseType =
-      f.returnShape === "paged"
-        ? `Paged<${agg.name}Response>`
-        : f.returnShape === "list"
-          ? `IReadOnlyList<${agg.name}Response>`
-          : f.returnShape === "optional"
-            ? `${agg.name}Response?`
-            : `${agg.name}Response`;
+      f.returnShape === "union"
+        ? f.responseType!
+        : f.returnShape === "paged"
+          ? `Paged<${agg.name}Response>`
+          : f.returnShape === "list"
+            ? `IReadOnlyList<${agg.name}Response>`
+            : f.returnShape === "optional"
+              ? `${agg.name}Response?`
+              : `${agg.name}Response`;
     // Optional finds map a null result to 404 — same convention as
-    // GetById.  List / paged / single return Ok(result) directly.
+    // GetById.  List / paged / single / union return Ok(result) directly.
     const returnLine =
       f.returnShape === "optional"
         ? "        return result is null ? NotFound() : Ok(result);"
@@ -179,11 +185,13 @@ export function renderController(
     // Non-nullable success type for [ProducesResponseType] (typeof can't
     // carry a `?` nullable annotation).
     const successType =
-      f.returnShape === "paged"
-        ? `Paged<${agg.name}Response>`
-        : f.returnShape === "list"
-          ? `IReadOnlyList<${agg.name}Response>`
-          : `${agg.name}Response`;
+      f.returnShape === "union"
+        ? f.responseType!
+        : f.returnShape === "paged"
+          ? `Paged<${agg.name}Response>`
+          : f.returnShape === "list"
+            ? `IReadOnlyList<${agg.name}Response>`
+            : `${agg.name}Response`;
     return [
       `    [HttpGet${f.isRoot ? "" : `("${snake(f.name)}")`}]`,
       `    [ProducesResponseType(typeof(${successType}), 200)]`,

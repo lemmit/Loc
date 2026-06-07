@@ -1,0 +1,23 @@
+// Discriminated-union finds on the .NET backend — exercises P4c union
+// emission (a `[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]`
+// base record with one `[JsonDerivedType]` per variant, the union CQRS
+// query/handler returning the polymorphic base, and the controller action)
+// under `ddd generate dotnet` + `dotnet build /warnaserror` in the
+// generated-dotnet CI matrix.
+//
+// A loose context (like paged-dotnet.ddd) so the single-context
+// `generate dotnet` path emits a complete project.  The repository find
+// returns an anonymous `Order or Cancel` union; its variant selection is
+// producer-side logic, so the query handler is a generated stub.
+context Orders {
+  aggregate Order ids guid {
+    code: string
+    region: string
+  }
+  aggregate Cancel ids guid {
+    reason: string
+  }
+  repository Orders for Order {
+    find recent(): Order or Cancel
+  }
+}

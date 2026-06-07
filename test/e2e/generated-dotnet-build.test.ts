@@ -57,6 +57,10 @@ describe.skipIf(!ENABLED)(
       // the `Paged<T>` record, the CountAsync + Skip/Take repository methods,
       // the paged CQRS query/handler, and the controller page/pageSize action.
       "examples/paged-dotnet.ddd",
+      // Discriminated-union find (payload-transport-layer.md, P4c): compiles
+      // the JsonPolymorphic base + variant records, the union CQRS
+      // query/handler (Task.FromException stub), and the controller action.
+      "examples/union-dotnet.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {
