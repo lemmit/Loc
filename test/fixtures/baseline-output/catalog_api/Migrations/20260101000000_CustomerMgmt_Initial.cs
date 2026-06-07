@@ -1,14 +1,15 @@
 // Auto-generated.
 using Microsoft.EntityFrameworkCore.Migrations;
 
-namespace Api.Migrations
+namespace CatalogApi.Migrations
 {
-    [Migration("20260101000000_Initial")]
-    public partial class M20260101000000_Initial : Migration
+    [Migration("20260101000000_CustomerMgmt_Initial")]
+    public partial class M20260101000000_CustomerMgmt_Initial : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(@"CREATE TABLE customers (
+            migrationBuilder.Sql(@"CREATE SCHEMA IF NOT EXISTS customers;
+CREATE TABLE customers.customers (
   id UUID NOT NULL,
   username TEXT NOT NULL,
   email TEXT NOT NULL,

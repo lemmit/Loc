@@ -69,6 +69,14 @@ export function schemaFromModule(
    *  stays consistent with the EF/Drizzle/Ash emitters, which resolve
    *  the same way via `effectiveSavingShape`). */
   shapeOf: (agg: EnrichedAggregateIR) => SavingShape = (agg) => effectiveSavingShape(agg),
+  /** Per-aggregate Postgres schema — the owning context's schema, from
+   *  `resolveDataSourceConfig` (`buildMigrations` passes a binding-aware
+   *  resolver; mirrors `shapeOf`).  Defaults to `() => undefined` so
+   *  callers (and the many `schemaFromModule(module)` unit tests) that
+   *  have no system to resolve against keep the legacy unqualified
+   *  output.  Every table an aggregate produces is stamped with its
+   *  schema. */
+  schemaOf: (agg: EnrichedAggregateIR) => string | undefined = () => undefined,
 ): SchemaSnapshot {
   const tables: TableShape[] = [];
   const pool = collectAggregates(module);
@@ -80,12 +88,15 @@ export function schemaFromModule(
   const voLookup: VoLookup = new Map(
     module.contexts.flatMap((c) => c.valueObjects.map((v) => [v.name, v.fields] as const)),
   );
-  for (const agg of pool) {
+  // Produce the table(s) for one aggregate.  Returns an array so the
+  // caller can stamp the schema uniformly — every table an aggregate
+  // contributes lives in the same (context) schema.
+  const tablesForOneAggregate = (agg: EnrichedAggregateIR): TableShape[] => {
     // An abstract base that is NOT a TPH base owns no table — a TPC
     // (`ownTable`) base emits nothing here (each concrete is standalone);
     // mirrors the schema emitter (emit/schema.ts).  The TPH base falls through
     // to `tphTableForAggregate` below.
-    if (agg.isAbstract && !isTphBase(agg, pool)) continue;
+    if (agg.isAbstract && !isTphBase(agg, pool)) return [];
     // TPH (aggregate-inheritance.md, sharedTable): the hierarchy is one
     // shared table named for the abstract base.  A TPH concrete shares it
     // (emits no table); the base emits the shared table (base columns + every
@@ -97,35 +108,28 @@ export function schemaFromModule(
       // mirroring emit/schema.ts.  `tableOwnerName` resolves the concrete to
       // its base; the part's `parentId` holds the shared-table row id.
       const owner = tableOwnerName(agg, pool);
-      for (const part of agg.parts) {
-        tables.push(tableForPart(part, agg, module.name, voLookup, owner));
-      }
-      continue;
+      return agg.parts.map((part) => tableForPart(part, agg, module.name, voLookup, owner));
     }
     if (isTphBase(agg, pool)) {
-      tables.push(tphTableForAggregate(agg, pool, module.name, voLookup));
-      continue;
+      return [tphTableForAggregate(agg, pool, module.name, voLookup)];
     }
     // Event-sourced (`persistedAs(eventLog)`): an append-only stream table
     // keyed by `(stream_id, version)`, not a state table.  State is folded
     // from the stream at load time (appliers A2).  Mirrors the Drizzle
     // schema's `emitEventLogTable`.
     if (agg.persistedAs === "eventLog") {
-      tables.push(eventLogTableForAggregate(agg, module.name));
-      continue;
+      return [eventLogTableForAggregate(agg, module.name)];
     }
     const shape = shapeOf(agg);
     if (shape === "document") {
-      tables.push(documentTableForAggregate(agg, module.name));
-      continue;
+      return [documentTableForAggregate(agg, module.name)];
     }
     if (shape === "embedded") {
-      tables.push(embeddedTableForAggregate(agg, module.name));
-      continue;
+      return [embeddedTableForAggregate(agg, module.name)];
     }
-    tables.push(tableForAggregate(agg, module.name, voLookup));
+    const out: TableShape[] = [tableForAggregate(agg, module.name, voLookup)];
     for (const part of agg.parts) {
-      tables.push(tableForPart(part, agg, module.name, voLookup));
+      out.push(tableForPart(part, agg, module.name, voLookup));
     }
     // Reference-collection fields (`Target id[]`) persist via a join
     // table rather than a column on the owner row — enrichment derives
@@ -133,23 +137,69 @@ export function schemaFromModule(
     // here.  `tableForAggregate` / `tableForPart` skip the column at
     // emission time (see `mapField`).
     for (const assoc of agg.associations) {
-      tables.push(tableForAssociation(assoc, module.name));
+      out.push(tableForAssociation(assoc, module.name));
     }
     // Value-object array fields (`charges: Money[]`) persist as an id-less
     // child table (flattened VO columns + parent FK + ordinal).  Relational
     // backends create it; Phoenix skips it (it stores the array inline as a
     // `{:array, :map}` column on the parent).
     for (const vc of valueCollectionsFor(agg)) {
-      tables.push(valueCollectionTableShape(vc, agg, module.name, voLookup));
+      out.push(valueCollectionTableShape(vc, agg, module.name, voLookup));
     }
     for (const part of agg.parts) {
       for (const vc of valueCollectionsFor(part)) {
-        tables.push(valueCollectionTableShape(vc, agg, module.name, voLookup, part.name));
+        out.push(valueCollectionTableShape(vc, agg, module.name, voLookup, part.name));
       }
     }
+    return out;
+  };
+
+  for (const agg of pool) {
+    const produced = tablesForOneAggregate(agg);
+    const schema = schemaOf(agg);
+    if (schema !== undefined) {
+      for (const t of produced) t.schema = schema;
+    }
+    tables.push(...produced);
   }
+  // The snapshot stays alphabetical (a stable, diff-friendly record);
+  // `diffSchema` reorders the emitted `createTable` steps by FK
+  // dependency so the SQL applies cleanly.
   tables.sort((a, b) => a.name.localeCompare(b.name));
   return { schemaVersion: 1, tables };
+}
+
+/** Order tables so an FK target is always created before the table that
+ *  references it — otherwise the inline `REFERENCES` in `CREATE TABLE`
+ *  hits a relation that doesn't exist yet and the migration aborts (a
+ *  child part like `pipelines` sorts alphabetically before its parent
+ *  `projects`).  Deterministic Kahn's sort with an alphabetical
+ *  tiebreak; a genuine FK cycle (none today — DDD parts/associations
+ *  point "up" to roots, forming a DAG) falls back to alphabetical order
+ *  for the stuck nodes.  Only FKs whose target is also in this set
+ *  constrain the order; references to already-existing tables (a prior
+ *  migration, or another module) are treated as satisfied. */
+function orderTablesByFkDependency(tables: TableShape[]): TableShape[] {
+  const present = new Set(tables.map((t) => t.name));
+  const deps = new Map<string, Set<string>>();
+  for (const t of tables) {
+    const s = new Set<string>();
+    for (const fk of t.foreignKeys) {
+      if (fk.refTable !== t.name && present.has(fk.refTable)) s.add(fk.refTable);
+    }
+    deps.set(t.name, s);
+  }
+  const remaining = [...tables].sort((a, b) => a.name.localeCompare(b.name));
+  const emitted = new Set<string>();
+  const order: TableShape[] = [];
+  while (remaining.length > 0) {
+    let idx = remaining.findIndex((t) => [...deps.get(t.name)!].every((d) => emitted.has(d)));
+    if (idx === -1) idx = 0; // cycle — best effort, alphabetical
+    const [t] = remaining.splice(idx, 1);
+    order.push(t);
+    emitted.add(t.name);
+  }
+  return order;
 }
 
 /** Embedded-children aggregate (`shape(embedded)`): the root stays a
@@ -257,11 +307,14 @@ export function diffSchema(prev: SchemaSnapshot | null, next: SchemaSnapshot): M
     for (const t of dropTables) steps.push({ op: "dropTable", name: t.name });
   }
 
-  // Creates next — alphabetical order of the next side (snapshot is
-  // already sorted, but the builder defends).
-  const createTables = [...next.tables]
-    .filter((t) => !prevByName.has(t.name))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // Creates next — ordered so an FK target is created before the table
+  // that references it (a child part otherwise sorts before its parent
+  // and the inline `REFERENCES` fails).  FKs to tables already present
+  // on the prev side are satisfied by an earlier migration, so only the
+  // newly-created set constrains the order.
+  const createTables = orderTablesByFkDependency(
+    [...next.tables].filter((t) => !prevByName.has(t.name)),
+  );
   for (const t of createTables) steps.push({ op: "createTable", table: t });
 
   // Per-table column / index diffs for tables present on both sides.
@@ -350,7 +403,17 @@ export function buildMigrations(sys: EnrichedSystemIR, snapshots: SnapshotStore)
       if (!ctx) return effectiveSavingShape(agg);
       return effectiveSavingShape(agg, resolveDataSourceConfig(agg, ctx, sys));
     };
-    const next = schemaFromModule(m, shapeOf);
+    // Same binding-aware resolution for the Postgres schema each table
+    // lands in — the owning context's schema (`snake(ctx.name)` default,
+    // or the dataSource `schema:` override).  Matches what the EF /
+    // Drizzle table mappings resolve, so the migration DDL creates the
+    // exact schema-qualified relations the backends query at runtime.
+    const schemaOf = (agg: EnrichedAggregateIR): string | undefined => {
+      const ctx = m.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
+      if (!ctx) return undefined;
+      return resolveDataSourceConfig(agg, ctx, sys)?.schema;
+    };
+    const next = schemaFromModule(m, shapeOf, schemaOf);
     const baseline = snapshots.read(m.name);
     const steps = diffSchema(baseline, next);
     const storageName = findPrimaryStorageBinding(sys, m, m.migrationsOwner) ?? "";

@@ -55,13 +55,24 @@ function renderCreateTable(table: TableShape): string {
   if (table.primaryKey.length > 0) {
     lines.push(`  PRIMARY KEY (${table.primaryKey.map(ident).join(", ")})`);
   }
+  // FK targets live in the same context as the table, hence the same
+  // schema — qualify them with the table's schema so the reference
+  // resolves under `search_path = public` (which is all the backends set).
   for (const fk of table.foreignKeys) {
-    lines.push("  " + renderFkConstraint(fk));
+    lines.push("  " + renderFkConstraint(fk, table.schema));
   }
   const body = lines.join(",\n");
-  let sql = `CREATE TABLE ${ident(table.name)} (\n${body}\n);`;
-  for (const idx of table.indexes) sql += "\n" + renderAddIndex(idx);
+  // Create the owning context's schema first (idempotent) so the
+  // `<schema>.<table>` the EF / Drizzle mappings query actually exists.
+  const createSchema = table.schema ? `CREATE SCHEMA IF NOT EXISTS ${ident(table.schema)};\n` : "";
+  let sql = `${createSchema}CREATE TABLE ${qualified(table.schema, table.name)} (\n${body}\n);`;
+  for (const idx of table.indexes) sql += "\n" + renderAddIndex(idx, table.schema);
   return sql;
+}
+
+/** `<schema>.<name>` when a schema is set, else the bare (public) name. */
+function qualified(schema: string | undefined, name: string): string {
+  return schema ? `${ident(schema)}.${ident(name)}` : ident(name);
 }
 
 function renderAddColumn(table: string, column: ColumnShape, fk: FKShape | undefined): string {
@@ -82,17 +93,17 @@ function renderColumnDef(c: ColumnShape): string {
   return parts.join(" ");
 }
 
-function renderFkConstraint(fk: FKShape): string {
+function renderFkConstraint(fk: FKShape, schema?: string): string {
   return (
-    `FOREIGN KEY (${ident(fk.column)}) REFERENCES ${ident(fk.refTable)} ` +
+    `FOREIGN KEY (${ident(fk.column)}) REFERENCES ${qualified(schema, fk.refTable)} ` +
     `ON DELETE ${fk.onDelete.toUpperCase()}`
   );
 }
 
-function renderAddIndex(idx: IndexShape): string {
+function renderAddIndex(idx: IndexShape, schema?: string): string {
   const unique = idx.unique ? "UNIQUE " : "";
   return (
-    `CREATE ${unique}INDEX ${ident(idx.name)} ON ${ident(idx.table)} ` +
+    `CREATE ${unique}INDEX ${ident(idx.name)} ON ${qualified(schema, idx.table)} ` +
     `(${idx.columns.map(ident).join(", ")});`
   );
 }

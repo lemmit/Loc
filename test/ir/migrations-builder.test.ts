@@ -133,6 +133,40 @@ describe("diffSchema", () => {
     expect(diffSchema(snap, snap)).toEqual([]);
   });
 
+  it("orders createTable so an FK target precedes the table referencing it", () => {
+    // `pipelines` FK-references `projects` but sorts alphabetically
+    // first; the inline `REFERENCES projects` would fail if pipelines
+    // were created first.  diffSchema must emit projects before pipelines.
+    const snap: SchemaSnapshot = {
+      schemaVersion: 1,
+      tables: [
+        {
+          name: "pipelines",
+          ownerModule: "Catalog",
+          columns: [
+            { name: "id", type: { kind: "uuid" }, nullable: false },
+            { name: "project_id", type: { kind: "uuid" }, nullable: false },
+          ],
+          primaryKey: ["id"],
+          foreignKeys: [{ column: "project_id", refTable: "projects", onDelete: "cascade" }],
+          indexes: [],
+        },
+        {
+          name: "projects",
+          ownerModule: "Catalog",
+          columns: [{ name: "id", type: { kind: "uuid" }, nullable: false }],
+          primaryKey: ["id"],
+          foreignKeys: [],
+          indexes: [],
+        },
+      ],
+    };
+    const created = diffSchema(null, snap)
+      .filter((s) => s.op === "createTable")
+      .map((s) => (s.op === "createTable" ? s.table.name : ""));
+    expect(created).toEqual(["projects", "pipelines"]);
+  });
+
   it("emits dropTable for tables only in prev", async () => {
     const { module } = await loadShop();
     const next = schemaFromModule(module);

@@ -40,7 +40,8 @@
         "id"
       ],
       "foreignKeys": [],
-      "indexes": []
+      "indexes": [],
+      "schema": "products"
     }
   ],
   "lastVersion": "20260101000000",

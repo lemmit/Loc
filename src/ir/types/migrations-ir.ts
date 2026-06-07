@@ -62,6 +62,15 @@ export interface IndexShape {
 
 export interface TableShape {
   name: string;
+  /** Postgres schema the table lives in — the owning bounded context's
+   *  schema (`snake(context.name)` by default, or the dataSource's
+   *  explicit `schema:` override).  `undefined` means the unqualified
+   *  `public` schema (single-context legacy systems, or callers that
+   *  build a schema without a system to resolve bindings against).
+   *  The SQL renderer emits `CREATE SCHEMA IF NOT EXISTS` + qualifies
+   *  table / FK / index references; the EF + Drizzle table mappings
+   *  resolve the same schema, so the runtime DDL matches what they query. */
+  schema?: string;
   ownerModule: string;
   columns: ColumnShape[];
   primaryKey: string[];

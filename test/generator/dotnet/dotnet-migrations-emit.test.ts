@@ -54,18 +54,66 @@ describe("dotnet migrations emitter", () => {
       "Api",
       out,
     );
-    expect(out.has("Migrations/20260101000000_Initial.cs")).toBe(true);
+    // Filename / class / [Migration] id are module-qualified ("Sales")
+    // so a backend hosting several modules doesn't collide every
+    // module's "Initial" onto one file.
+    expect(out.has("Migrations/20260101000000_Sales_Initial.cs")).toBe(true);
     // ModelSnapshot is intentionally absent — `dotnet ef migrations add` is
     // never invoked against this project, and `Database.Migrate()` only
     // consults the [Migration] classes + __EFMigrationsHistory at runtime.
     expect(out.has("Migrations/AppDbContextModelSnapshot.cs")).toBe(false);
 
-    const mig = out.get("Migrations/20260101000000_Initial.cs")!;
+    const mig = out.get("Migrations/20260101000000_Sales_Initial.cs")!;
     expect(mig).toMatch(/namespace Api\.Migrations/);
-    expect(mig).toMatch(/\[Migration\("20260101000000_Initial"\)\]/);
-    expect(mig).toMatch(/public partial class M20260101000000_Initial : Migration/);
+    expect(mig).toMatch(/\[Migration\("20260101000000_Sales_Initial"\)\]/);
+    expect(mig).toMatch(/public partial class M20260101000000_Sales_Initial : Migration/);
     expect(mig).toMatch(/migrationBuilder\.Sql\(@"CREATE TABLE orders \(/);
     expect(mig).toMatch(/protected override void Down\(MigrationBuilder migrationBuilder\)/);
+  });
+
+  it("schema-qualifies the table, its FK references, and its indexes when the table has a schema", () => {
+    const out = new Map<string, string>();
+    emitDotnetMigrations(
+      [
+        ir(
+          [
+            {
+              op: "createTable",
+              table: {
+                name: "pipelines",
+                schema: "catalog",
+                ownerModule: "Projects",
+                columns: [
+                  { name: "id", type: { kind: "uuid" }, nullable: false },
+                  { name: "project_id", type: { kind: "uuid" }, nullable: false },
+                ],
+                primaryKey: ["id"],
+                foreignKeys: [{ column: "project_id", refTable: "projects", onDelete: "cascade" }],
+                indexes: [
+                  {
+                    name: "pipelines_project_id_idx",
+                    table: "pipelines",
+                    columns: ["project_id"],
+                    unique: false,
+                  },
+                ],
+              },
+            },
+          ],
+          { version: "20260101000000", name: "Initial" },
+        ),
+      ],
+      "Api",
+      out,
+    );
+    const mig = out.get("Migrations/20260101000000_Sales_Initial.cs")!;
+    // The context's schema is created first, then every relation is
+    // schema-qualified so EF's `ToTable("pipelines","catalog")` mapping
+    // finds the table it queries at runtime.
+    expect(mig).toContain("CREATE SCHEMA IF NOT EXISTS catalog;");
+    expect(mig).toContain("CREATE TABLE catalog.pipelines (");
+    expect(mig).toContain("REFERENCES catalog.projects");
+    expect(mig).toContain("ON catalog.pipelines (project_id)");
   });
 
   it("skips empty-step migrations entirely", () => {

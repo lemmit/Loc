@@ -3,16 +3,17 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace CatalogApi.Migrations
 {
-    [Migration("20260101000000_Initial")]
-    public partial class M20260101000000_Initial : Migration
+    [Migration("20260101000000_Catalog_Initial")]
+    public partial class M20260101000000_Catalog_Initial : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(@"CREATE TABLE customers (
+            migrationBuilder.Sql(@"CREATE SCHEMA IF NOT EXISTS products;
+CREATE TABLE products.products (
   id UUID NOT NULL,
-  username TEXT NOT NULL,
-  email TEXT NOT NULL,
-  age INTEGER NOT NULL,
+  sku TEXT NOT NULL,
+  price_amount DECIMAL NOT NULL,
+  price_currency TEXT NOT NULL,
   PRIMARY KEY (id)
 );");
         }
