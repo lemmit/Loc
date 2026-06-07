@@ -843,6 +843,10 @@ Warnings (non-fatal):
 
 - Self-recursive operation calls (often unintentional).
 - `emit` payloads missing optional fields.
+- A workflow `on(e: Event)` reactor or event-triggered `create(e: Event) by`
+  starter whose event no `channel` carries (`loom.reactor-event-uncarried`):
+  in-process dispatch is channel-routed, so the consumer would never fire —
+  declare a `channel { carries: … }` for the event.
 
 ---
 
