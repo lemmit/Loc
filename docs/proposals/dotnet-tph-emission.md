@@ -1,12 +1,13 @@
-# .NET TPH emission — build spec
+# .NET TPH emission — design note
 
-> Status: **PLAN** (code-grounded; ready to implement). The next slice of
-> [`aggregate-inheritance.md`](./aggregate-inheritance.md) **I2** — TPH
-> (`sharedTable`) storage on the **.NET / EF Core** backend.
+> Status: **SHIPPED** (this PR). [`aggregate-inheritance.md`](./aggregate-inheritance.md)
+> **I2** — TPH (`sharedTable`) storage on the **.NET / EF Core** backend.
+> Phoenix/Ash TPH remains the one ✗ row.
 >
-> Prereq **DONE**: the TPH/TPC predicates are consolidated in the
-> platform-neutral `src/ir/util/inheritance.ts` (PR #975), so the .NET
-> generator can import them without crossing platform folders.
+> Prereq (PR #975): the TPH/TPC predicates are consolidated in the
+> platform-neutral `src/ir/util/inheritance.ts`, so the .NET generator
+> imports them without crossing platform folders. This doc records the
+> design that landed; the per-file plan below maps 1:1 onto the diff.
 
 ## What ships today (verified against code)
 

@@ -2,6 +2,7 @@ import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js
 import type {
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
+  IdValueType,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
@@ -34,14 +35,24 @@ function isRefCollection(t: TypeIR): boolean {
 // project's assembly (handlers ship in the same csproj).
 // ---------------------------------------------------------------------------
 
-/** Identifies the abstract TPC base a concrete aggregate `extends`, so the
+/** Identifies the abstract base a concrete aggregate `extends`, so the
  *  concrete declares `: <Base>` and leaves the base's fields to the inherited
  *  declarations (see `renderAbstractBaseEntity`).  `fieldNames` is the set of
  *  base-declared field names the concrete must NOT re-declare (re-declaring
- *  would trip CS0108 hidden-member → fatal under `/warnaserror`). */
+ *  would trip CS0108 hidden-member → fatal under `/warnaserror`).
+ *
+ *  `sharesIdentity` distinguishes TPH (`sharedTable`) from TPC (`ownTable`):
+ *  a TPH concrete shares the base's single-table primary key, so the base
+ *  owns the `Id` property and the concrete must NOT declare its own (it
+ *  inherits the strongly-typed `<Base>Id`).  `idValueType` carries the
+ *  base's id value type so the concrete's `Create` factory mints the
+ *  inherited key with the right `csNewIdValue`.  A TPC concrete leaves both
+ *  unset and keeps its own `<Concrete>Id`. */
 export interface SuperTypeInfo {
   readonly name: string;
   readonly fieldNames: ReadonlySet<string>;
+  readonly sharesIdentity?: boolean;
+  readonly idValueType?: IdValueType;
 }
 
 export function renderEntity(
@@ -66,6 +77,13 @@ export function renderEntity(
   // narrows in every downstream consumer without per-site casts.
   const isAgg = (e: typeof entity): e is EnrichedAggregateIR => "operations" in e;
   const idValueType = isAgg(entity) ? entity.idValueType : "guid";
+  // TPH (`sharesIdentity`): the concrete shares the base's single-table key,
+  // so its `Id` / `State.Id` / `Create` mint the inherited `<Base>Id` with the
+  // base's value type.  TPC and standalone aggregates use their own id class.
+  const idClass = superType?.sharesIdentity ? `${superType.name}Id` : `${entity.name}Id`;
+  const effIdValueType: IdValueType = superType?.sharesIdentity
+    ? (superType.idValueType ?? idValueType)
+    : idValueType;
   const operations = isAgg(entity) ? entity.operations : [];
   // Public `Create(...)` factory params — the create-input set
   // (`forCreateInput`, incl. optionals), matching the CreateCommand/handler
@@ -111,7 +129,11 @@ export function renderEntity(
   };
 
   const propLines: string[] = [];
-  propLines.push(`    public ${entity.name}Id Id { get; ${setterVisibility} set; }`);
+  // A TPH concrete inherits `Id` from its base (the shared-table key); declaring
+  // it again would shadow the inherited member (CS0108, fatal under /warnaserror).
+  if (!superType?.sharesIdentity) {
+    propLines.push(`    public ${entity.name}Id Id { get; ${setterVisibility} set; }`);
+  }
   if (!isRoot) {
     propLines.push(`    public ${rootName}Id ParentId { get; ${setterVisibility} set; }`);
   }
@@ -316,7 +338,7 @@ export function renderEntity(
             .join(", ")})`,
           "    {",
           `        var e = new ${entity.name}();`,
-          `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
+          `        e.Id = new ${idClass}(${csNewIdValue(effIdValueType)});`,
           `        e._Init(${esCreate.params.map((p) => p.name).join(", ")});`,
           "        return e;",
           "    }",
@@ -374,7 +396,7 @@ export function renderEntity(
   const stateLines: string[] = [];
   stateLines.push("    public sealed class State");
   stateLines.push("    {");
-  stateLines.push(`        public ${entity.name}Id Id { get; init; } = default!;`);
+  stateLines.push(`        public ${idClass} Id { get; init; } = default!;`);
   if (!isRoot) {
     stateLines.push(`        public ${rootName}Id ParentId { get; init; } = default!;`);
   }
@@ -418,7 +440,7 @@ export function renderEntity(
             .join(", ")})`,
           "    {",
           `        var e = new ${entity.name}();`,
-          `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
+          `        e.Id = new ${idClass}(${csNewIdValue(effIdValueType)});`,
           ...createAssignments,
           // Public Create factory — same "<init>" label as the hydration path.
           emitTrace ? `        e.AssertInvariants("<init>");` : "        e.AssertInvariants();",
@@ -557,10 +579,24 @@ export function renderEntity(
  *  `<Concrete>Id`), so the base declares no `Id`; EF maps each concrete
  *  standalone via `modelBuilder.Ignore<<Base>>()` (the base is excluded from
  *  the model, its properties flatten onto each concrete's own table). */
-export function renderAbstractBaseEntity(base: EnrichedAggregateIR, ns: string): string {
+export function renderAbstractBaseEntity(
+  base: EnrichedAggregateIR,
+  ns: string,
+  /** TPH (`sharedTable`): the base is a *mapped* abstract entity that owns
+   *  the single shared-table primary key, so it declares `Id` (concretes
+   *  inherit it).  TPC (`ownTable`, the default): the base is Id-less and
+   *  excluded from the EF model via `Ignore<Base>()`. */
+  options: { tph?: boolean } = {},
+): string {
   const renderCtx = { thisName: "this", agg: base };
   const usings = new Set<string>();
   for (const d of base.derived) collectCsExprUsings(d.expr, usings);
+  // A TPH base owns the shared `Id`; the concretes inherit it.  `internal set`
+  // matches the field accessors so hydration (`_Create` / `Create`) assigns it
+  // across the same assembly.
+  const idLines = options.tph
+    ? [`    public ${base.name}Id Id { get; internal set; } = default!;`]
+    : [];
   const propLines = base.fields.map((f) => {
     // Optional fields default to null on their own — emitting `= default`
     // explicitly trips CA1805 ("redundant initialization to default").
@@ -587,10 +623,19 @@ export function renderAbstractBaseEntity(base: EnrichedAggregateIR, ns: string):
       "",
       `namespace ${ns}.Domain.${plural(base.name)};`,
       "",
-      `// Abstract TPC base — never instantiated; each concrete subtype is its`,
-      `// own EF entity/table.  Excluded from the EF model via Ignore<${base.name}>().`,
+      ...(options.tph
+        ? [
+            `// Abstract TPH base — the whole hierarchy maps to one table named`,
+            `// for this base; it owns the shared Id + a 'kind' discriminator.`,
+            `// Each concrete subtype is a derived EF entity sharing this table.`,
+          ]
+        : [
+            `// Abstract TPC base — never instantiated; each concrete subtype is its`,
+            `// own EF entity/table.  Excluded from the EF model via Ignore<${base.name}>().`,
+          ]),
       `public abstract class ${base.name}`,
       "{",
+      ...idLines,
       ...propLines,
       ...(derivedLines.length > 0 ? ["", ...derivedLines] : []),
       "}",

@@ -135,6 +135,57 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // TPH (sharedTable) inheritance on EF Core (aggregate-inheritance.md I2):
+    // the whole hierarchy maps to one table via `HasDiscriminator`.  This is a
+    // SYSTEM-mode feature (the deployable host gates it), so generate the system
+    // and build the dotnet project — proving the abstract base entity (owns the
+    // shared Id), the `HasDiscriminator` base config, the derived concrete
+    // entities (`: Base`, no own Id) + own-fields-only configs, and the
+    // `DbSet<Base>` all compile under /warnaserror.
+    it("system TPH (`inheritanceUsing(sharedTable)`, dotnet) — EF HasDiscriminator hierarchy builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tph-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/tph.ddd -o ${outDir}`,
+          {
+            stdio: "inherit",
+            cwd: repoRoot,
+          },
+        );
+        const proj = path.join(outDir, "api");
+        // Sanity: the base config maps the shared table + discriminator.
+        const partyCfg = fs.readFileSync(
+          path.join(
+            proj,
+            "Infrastructure",
+            "Persistence",
+            "Configurations",
+            "PartyConfiguration.cs",
+          ),
+          "utf8",
+        );
+        expect(partyCfg).toContain('HasDiscriminator<string>("kind")');
+        expect(partyCfg).toContain('.HasValue<Customer>("Customer")');
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net8.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // Dapper event sourcing (appliers, Dapper edition): a `persistence: dapper`
     // deployable hosting a `persistedAs(eventLog)` aggregate emits the raw-Npgsql
     // event-store repository (read stream → fold, append on save) + the

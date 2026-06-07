@@ -17,7 +17,7 @@ Legend: ✓ implemented · ✗ gated (fail-fast validator error) · ⚠ partial 
 | Feature | node | dotnet | phoenix | react | Owning proposal |
 |---|:---:|:---:|:---:|:---:|---|
 | Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✗ | N/A | [workflow-and-applier](./workflow-and-applier.md) |
-| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✗ | ✗ | N/A | [aggregate-inheritance](./aggregate-inheritance.md) |
+| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✗ | N/A | [aggregate-inheritance](./aggregate-inheritance.md) |
 | `shape(document)` persistence | ✓ | ✓ | ✗ | N/A | [document-and-json-hierarchies](./document-and-json-hierarchies.md) |
 | Principal `filter` (`currentUser`/tenancy) | ✗ | ✓ | ✗ | N/A | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
 | Provenanced fields (runtime trace) | ✓ | ✗ gated | ✗ gated | N/A | [provenance](./provenance.md) |
