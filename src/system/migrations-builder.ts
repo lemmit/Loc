@@ -162,8 +162,44 @@ export function schemaFromModule(
     }
     tables.push(...produced);
   }
+  // The snapshot stays alphabetical (a stable, diff-friendly record);
+  // `diffSchema` reorders the emitted `createTable` steps by FK
+  // dependency so the SQL applies cleanly.
   tables.sort((a, b) => a.name.localeCompare(b.name));
   return { schemaVersion: 1, tables };
+}
+
+/** Order tables so an FK target is always created before the table that
+ *  references it — otherwise the inline `REFERENCES` in `CREATE TABLE`
+ *  hits a relation that doesn't exist yet and the migration aborts (a
+ *  child part like `pipelines` sorts alphabetically before its parent
+ *  `projects`).  Deterministic Kahn's sort with an alphabetical
+ *  tiebreak; a genuine FK cycle (none today — DDD parts/associations
+ *  point "up" to roots, forming a DAG) falls back to alphabetical order
+ *  for the stuck nodes.  Only FKs whose target is also in this set
+ *  constrain the order; references to already-existing tables (a prior
+ *  migration, or another module) are treated as satisfied. */
+function orderTablesByFkDependency(tables: TableShape[]): TableShape[] {
+  const present = new Set(tables.map((t) => t.name));
+  const deps = new Map<string, Set<string>>();
+  for (const t of tables) {
+    const s = new Set<string>();
+    for (const fk of t.foreignKeys) {
+      if (fk.refTable !== t.name && present.has(fk.refTable)) s.add(fk.refTable);
+    }
+    deps.set(t.name, s);
+  }
+  const remaining = [...tables].sort((a, b) => a.name.localeCompare(b.name));
+  const emitted = new Set<string>();
+  const order: TableShape[] = [];
+  while (remaining.length > 0) {
+    let idx = remaining.findIndex((t) => [...deps.get(t.name)!].every((d) => emitted.has(d)));
+    if (idx === -1) idx = 0; // cycle — best effort, alphabetical
+    const [t] = remaining.splice(idx, 1);
+    order.push(t);
+    emitted.add(t.name);
+  }
+  return order;
 }
 
 /** Embedded-children aggregate (`shape(embedded)`): the root stays a
@@ -271,11 +307,14 @@ export function diffSchema(prev: SchemaSnapshot | null, next: SchemaSnapshot): M
     for (const t of dropTables) steps.push({ op: "dropTable", name: t.name });
   }
 
-  // Creates next — alphabetical order of the next side (snapshot is
-  // already sorted, but the builder defends).
-  const createTables = [...next.tables]
-    .filter((t) => !prevByName.has(t.name))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // Creates next — ordered so an FK target is created before the table
+  // that references it (a child part otherwise sorts before its parent
+  // and the inline `REFERENCES` fails).  FKs to tables already present
+  // on the prev side are satisfied by an earlier migration, so only the
+  // newly-created set constrains the order.
+  const createTables = orderTablesByFkDependency(
+    [...next.tables].filter((t) => !prevByName.has(t.name)),
+  );
   for (const t of createTables) steps.push({ op: "createTable", table: t });
 
   // Per-table column / index diffs for tables present on both sides.

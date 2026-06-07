@@ -69,8 +69,12 @@ describe("value-object collection — migration (relational child table / Ash :a
     expect(sql).toMatch(/CREATE TABLE order_charges \(/);
     expect(sql).toMatch(/amount\s+DECIMAL/i);
     expect(sql).toMatch(/PRIMARY KEY \(order_id, ordinal\)/);
-    // The parent table carries no `charges` column — the data is in the child.
-    const ordersTable = sql.slice(sql.indexOf("CREATE TABLE orders"));
+    // The parent table carries no `charges` column — the data is in the
+    // child.  Bound the slice to the `orders` CREATE statement: FK
+    // ordering now emits the parent before its `order_charges` child, so
+    // slicing to end-of-file would wrongly pull in the child table.
+    const ordersStart = sql.indexOf("CREATE TABLE orders");
+    const ordersTable = sql.slice(ordersStart, sql.indexOf(");", ordersStart));
     expect(ordersTable).not.toMatch(/charges/);
   });
 
