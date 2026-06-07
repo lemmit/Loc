@@ -51,9 +51,14 @@ export function buildWorkflowsFile(
   // references (keeps the generated import line free of dead names per the
   // generated-code Biome gate). Aggregate / repository / VO / enum imports
   // are all conditional on appearing in the body text.
+  // Import candidates are gathered from the facade body PLUS the reactor /
+  // event-create handler bodies (which this file now also emits).  The final
+  // import list is still the intersection with the emitted text below, so a
+  // candidate that isn't actually referenced is dropped — keeping a
+  // subscription-free project byte-identical.
   const aggsTouched = new Set<string>();
   for (const wf of ctx.workflows) {
-    for (const st of wf.statements) {
+    for (const st of allHandlerStmts(wf)) {
       if (st.kind === "factory-let" || st.kind === "repo-let") {
         aggsTouched.add(st.aggName);
       }
@@ -61,7 +66,7 @@ export function buildWorkflowsFile(
   }
   const externAggs = new Set<string>();
   for (const wf of ctx.workflows) {
-    for (const st of wf.statements) {
+    for (const st of allHandlerStmts(wf)) {
       if (st.kind !== "op-call") continue;
       const op = lookupOp(ctx, st.aggName, st.op);
       if (op?.extern) externAggs.add(st.aggName);
@@ -103,8 +108,12 @@ export function buildWorkflowsFile(
     body.push("");
   }
 
-  // Per-workflow request schema.
+  // Per-workflow request schema — only for workflows with an HTTP command
+  // surface.  An event-triggered-only workflow is invoked by the dispatcher,
+  // not POSTed, and its facade param is an event type (no wire/zod form), so
+  // it gets neither a request schema nor a route.
   for (const wf of ctx.workflows) {
+    if (!emitsCommandRoute(wf)) continue;
     body.push(`const ${upperFirst(wf.name)}Request = z.object({`);
     for (const p of wf.params) {
       body.push(`  ${p.name}: ${zodFor(p.type)},`);
@@ -127,6 +136,7 @@ export function buildWorkflowsFile(
   body.push("");
 
   for (const wf of ctx.workflows) {
+    if (!emitsCommandRoute(wf)) continue;
     body.push(...emitWorkflowRoute(wf, ctx, aggsByName).map((l) => `  ${l}`));
     body.push("");
   }
@@ -379,6 +389,28 @@ function emitWorkflowRoute(
   out.push(`  },`);
   out.push(`);`);
   return out;
+}
+
+/** True when the workflow has an HTTP command surface (a POST route).  Mirrors
+ *  lowering's facade-`primary` selection: a command-triggered unnamed create,
+ *  else the first create.  A workflow whose facade is event-triggered is
+ *  invoked only by the dispatcher (no route); a create-less reactor-only
+ *  workflow keeps today's empty route (byte-identical). */
+function emitsCommandRoute(wf: WorkflowIR): boolean {
+  const facade =
+    wf.creates.find((c) => c.name === null && c.triggerKind === "command") ?? wf.creates[0];
+  return !facade || facade.triggerKind === "command";
+}
+
+/** All statements that contribute emitted handler code for a workflow — the
+ *  facade body plus the reactor / event-create handler bodies this file emits.
+ *  Used only to gather import candidates (intersected with the emitted text). */
+function allHandlerStmts(wf: WorkflowIR): WorkflowStmtIR[] {
+  return [
+    ...wf.statements,
+    ...(wf.subscriptions ?? []).flatMap((o) => o.statements),
+    ...wf.creates.flatMap((c) => c.statements),
+  ];
 }
 
 /** Deterministic handler-function name for an event subscription —

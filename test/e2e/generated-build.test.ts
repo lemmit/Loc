@@ -44,6 +44,11 @@ describe.skipIf(!ENABLED)(
       // load/save round-trip (bulk-load → `new Money(...)`, delete + re-insert
       // with ordinal).
       "examples/value-collections.ddd",
+      // In-process event dispatch (channels.md): a channel-carried event with
+      // an `on(e: Event)` reactor + an event-triggered `create(e: Event) by`
+      // starter — type-checks the generated `createInProcessDispatcher`, the
+      // reactor/starter handlers, and the `createApp` in-process default.
+      "test/fixtures/dispatch-sample.ddd",
     ])("%s — `ddd generate ts` output type-checks + tsup-bundles", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
       try {
