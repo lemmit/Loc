@@ -17,9 +17,10 @@ the native database tooling (Drizzle Kit and EF Core migrations).
 
 ## CLI
 
-The `ddd` binary lives at `bin/cli.js` and exposes five sub-commands:
+The `ddd` binary lives at `bin/cli.js` and exposes these sub-commands:
 
 ```bash
+ddd new <name> [--platform …] [--template …]      # scaffold a starter project
 ddd parse <file.ddd>                              # parse + validate
 ddd generate ts <file.ddd> -o <outdir>            # emit a single TypeScript project (legacy)
 ddd generate dotnet <file.ddd> -o <outdir>        # emit a single .NET project (legacy)
@@ -27,6 +28,34 @@ ddd generate system <file.ddd> -o <outdir>        # emit every deployable + dock
 ddd verify <file.ddd> --results <results.json>    # join test results onto the requirements graph
 ddd snapshot <file.ddd> -o <outdir>               # capture provenance rule snapshots
 ```
+
+### `new` — scaffold a starter project
+
+`ddd new <name>` is the on-ramp: it writes a small, **already-valid**
+starter into `./<name>/` (or `--out <dir>`) so a newcomer goes from
+nothing to an editable model without hand-assembling `system` /
+`deployable` / `dataSource` wiring.
+
+```bash
+ddd new acme                                   # hono backend + React (mantine), crud template
+ddd new acme --platform dotnet --design shadcn # .NET backend + React (shadcn)
+ddd new acme --platform phoenix                # Phoenix LiveView fullstack (ashPhoenix)
+ddd new acme --platform phoenix --design mui   # Phoenix backend + a React (mui) frontend
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--platform <hono\|dotnet\|phoenix>` | `hono` | Backend platform (ports: hono 3000, dotnet 8080, phoenix 4000). Prints a hint listing the alternatives when defaulted. |
+| `--template <blank\|crud>` | `crud` | `blank` = one aggregate; `crud` = two aggregates with a repository `find`. |
+| `--design <mantine\|shadcn\|mui\|chakra\|ashPhoenix>` | `mantine` (`ashPhoenix` for phoenix) | Frontend. A React pack scaffolds a separate React deployable; `ashPhoenix` makes Phoenix a single LiveView fullstack. `ashPhoenix` is only valid with `--platform phoenix`. |
+| `-o, --out <dir>` | `./<name>` | Output directory. |
+| `--force` | off | Scaffold into an existing, non-empty directory. |
+
+It writes exactly three files — `main.ddd`, `README.md` (the run steps),
+and a commented `.loomignore` — and **validates the rendered model
+in-memory before writing anything**, so a starter is never emitted in a
+broken state. It does not emit the project tree; the README walks you
+through `ddd generate system main.ddd -o .` and `docker compose up`.
 
 `generate ts` / `generate dotnet` work on **legacy** sources (bare
 `context` declarations) and produce a single project for the chosen

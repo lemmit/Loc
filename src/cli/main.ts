@@ -30,6 +30,17 @@ import {
   renderVerificationMd,
 } from "../verify/render.js";
 import { computeVerification } from "../verify/verification.js";
+import {
+  DESIGN_PACKS,
+  type DesignPack,
+  renderLoomignore,
+  renderReadme,
+  renderStarter,
+  STARTER_PLATFORMS,
+  STARTER_TEMPLATES,
+  type StarterPlatform,
+  type StarterTemplate,
+} from "./new-templates.js";
 
 interface ParseResult {
   model: Model;
@@ -489,6 +500,91 @@ async function runSnapshot(
   return { hadError: false, written };
 }
 
+interface NewOptions {
+  platform?: string;
+  template?: string;
+  design?: string;
+  out?: string;
+  force?: boolean;
+}
+
+/**
+ * `ddd new <name>` — scaffold a small, provably-valid starter project
+ * (docs/proposals/quickstart-and-day-one-batteries.md §3.1).  Picks the
+ * backend platform (`--platform`) and frontend (`--design`: a React pack, or
+ * `ashPhoenix` for a Phoenix LiveView fullstack), renders a `main.ddd` +
+ * `README.md` + `.loomignore`, validates the rendered model in-memory, and
+ * only then writes.  Validate-only — the README points the author at
+ * `ddd generate system` to emit the runnable tree.
+ */
+async function runNew(name: string, options: NewOptions): Promise<void> {
+  // Clean user-facing failure — a flag mistake is guidance, not a crash, so
+  // print the message without a stack trace (the top-level catch prints stacks).
+  const fail = (msg: string): never => {
+    console.error(`ddd new: ${msg}`);
+    process.exit(1);
+  };
+
+  // --- resolve + validate flags (fail fast, write nothing) ---
+  const platformDefaulted = options.platform === undefined;
+  const platform = (options.platform ?? "hono") as StarterPlatform;
+  if (!STARTER_PLATFORMS.includes(platform)) {
+    fail(`unknown --platform "${options.platform}". Valid: ${STARTER_PLATFORMS.join(" | ")}.`);
+  }
+  const template = (options.template ?? "crud") as StarterTemplate;
+  if (!STARTER_TEMPLATES.includes(template)) {
+    fail(`unknown --template "${options.template}". Valid: ${STARTER_TEMPLATES.join(" | ")}.`);
+  }
+  // Frontend: a React pack for hono/dotnet (default mantine); a Phoenix
+  // LiveView (ashPhoenix) is the default for phoenix.
+  const design = (options.design ??
+    (platform === "phoenix" ? "ashPhoenix" : "mantine")) as DesignPack;
+  if (!DESIGN_PACKS.includes(design)) {
+    fail(`unknown --design "${options.design}". Valid: ${DESIGN_PACKS.join(" | ")}.`);
+  }
+  if (design === "ashPhoenix" && platform !== "phoenix") {
+    fail("--design ashPhoenix requires --platform phoenix (it is the Phoenix LiveView UI).");
+  }
+
+  const outDir = path.resolve(options.out ?? name);
+  if (fs.existsSync(outDir) && fs.readdirSync(outDir).length > 0 && !options.force) {
+    fail(`directory not empty: ${outDir} (use --force to scaffold into it anyway).`);
+  }
+
+  // --- render + soundness check (guards against template drift) ---
+  const source = renderStarter({ name, template, platform, design });
+  const report = await validate(source, { path: "main.ddd" });
+  if (!report.ok) {
+    console.error("ddd new: the generated starter failed validation (please report this):");
+    for (const d of report.diagnostics) {
+      if (d.severity === "error") console.error(`  ${d.message}`);
+    }
+    process.exit(1);
+  }
+
+  // --- write the three starter files ---
+  const files = new Map<string, string>([
+    ["main.ddd", source],
+    ["README.md", renderReadme({ name, platform, design })],
+    [".loomignore", renderLoomignore()],
+  ]);
+  for (const [rel, content] of files) {
+    const full = path.join(outDir, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content, "utf8");
+  }
+
+  // --- report + the platform hint ---
+  const where = options.out ?? name;
+  console.log(
+    `Scaffolded ${files.size} file(s) in ${outDir} (platform: ${platform}, template: ${template}).`,
+  );
+  if (platformDefaulted) {
+    console.log("  platform: hono (default) — also: dotnet, phoenix (re-run with --platform <p>)");
+  }
+  console.log(`  next: cd ${where} && ddd generate system main.ddd -o . && docker compose up`);
+}
+
 /** True iff the file at `absPath` exists and its bytes match `content`
  * exactly.  Used to skip writes that would produce identical output. */
 function fileContentMatches(absPath: string, content: string): boolean {
@@ -735,6 +831,23 @@ program
   .option("--dry-run", "list snapshot files that would be captured, write nothing")
   .action(async (file: string, options: { out: string; dryRun?: boolean }) => {
     await runSnapshot(file, options.out, { dryRun: options.dryRun });
+  });
+
+program
+  .command("new <name>")
+  .description(
+    "Scaffold a starter .ddd project (main.ddd + README + .loomignore), validated before writing. Pick the backend with --platform and the frontend with --design.",
+  )
+  .option("--platform <platform>", "backend: hono | dotnet | phoenix (default: hono)")
+  .option("--template <template>", "starter model: blank | crud (default: crud)")
+  .option(
+    "--design <pack>",
+    "frontend: mantine | shadcn | mui | chakra (React), or ashPhoenix (Phoenix LiveView)",
+  )
+  .option("-o, --out <dir>", "output directory (default: ./<name>)")
+  .option("--force", "scaffold into an existing, non-empty directory")
+  .action(async (name: string, options: NewOptions) => {
+    await runNew(name, options);
   });
 
 async function watchAndRegenerate(
