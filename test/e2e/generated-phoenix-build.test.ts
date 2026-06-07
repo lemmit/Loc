@@ -74,6 +74,10 @@ describe.skipIf(!ENABLED)(
       // the Ash offset-pagination read actions + the controller page/pageSize
       // actions that map %Ash.Page.Offset{} to the cross-backend envelope.
       { name: "paged.ddd" },
+      // Discriminated unions (payload-transport-layer.md, P4d): compiles the
+      // controller `tag_<union>/1` serializer (struct-pattern clauses → the
+      // `%{type: tag, …}` wire) for an `Order or Cancel` find.
+      { name: "union.ddd" },
     ])("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
