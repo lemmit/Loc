@@ -28,8 +28,10 @@ test("shadcn@v4 preview boots without runtime errors", async ({ page }) => {
   // Pick the pinned shadcn@v4 storybook.  The bareword shadcn entry
   // still maps to shadcn@v3 (Tailwind 3) until
   // `BUILTIN_PACK_LATEST.shadcn` flips in a follow-up promote PR.
+  await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: /Choose example/i }).click();
   await page.getByRole("option", { name: /shadcn v4 · aggregate-CRUD storybook/ }).click();
+  await page.getByTestId("workspace-create").click();
 
   await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible({
     timeout: 30_000,

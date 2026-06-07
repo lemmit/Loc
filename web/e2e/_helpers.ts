@@ -33,24 +33,22 @@ export async function waitForPlaygroundReady(page: Page): Promise<void> {
   await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 30_000 });
 }
 
-// Pick a specific example from the header's example dropdown.
-// Tests that rely on a particular starter source (sales-system,
-// banking-system, …) call this after `waitForPlaygroundReady` so
-// the default-example ordering in `examples/index.ts` can change
-// without breaking specs.  Mantine's `<Select>` renders the active
-// option label inside an accessible-labeled input; clicking it
-// opens a listbox of `role="option"` entries.
+// Open a specific example.  Examples are now starting points for
+// workspaces (not a destructive "replace active" dropdown), so this
+// creates a NEW workspace seeded from `label` via the WorkspaceSwitcher
+// "+" popover: open it, choose the example, Create.  Tests that rely on
+// a particular starter source call this after `waitForPlaygroundReady`.
 //
-// We target `role="textbox"` with the accessible name (not
-// `getByLabel`) because Mantine threads the same `aria-label`
-// onto both the underlying `<input>` AND the listbox container —
-// `getByLabel` matches both and Playwright's strict mode errors.
-// `getByRole("textbox")` limits to the input.
+// We target `role="textbox"` with the accessible name (not `getByLabel`)
+// because Mantine threads the same `aria-label` onto both the `<input>`
+// AND the listbox container; `getByRole("textbox")` limits to the input.
 export async function selectExample(page: Page, label: string | RegExp): Promise<void> {
+  await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: "Choose example" }).click();
   await page.getByRole("option", { name: label }).first().click();
-  // Re-wait for the LSP "0 errors" badge — switching examples
-  // re-mounts the editor and re-parses the source, so the badge
-  // momentarily flickers to "—" before the new source validates.
+  await page.getByTestId("workspace-create").click();
+  // Re-wait for the LSP "0 errors" badge — the new workspace remounts
+  // the editor and re-parses the source, so the badge momentarily
+  // flickers to "—" before the new source validates.
   await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 30_000 });
 }

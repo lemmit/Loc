@@ -38,8 +38,10 @@ test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   // that exercises stack v2; the bareword Mantine entry still maps
   // to stack v1 (mantine@v7) until `BUILTIN_PACK_LATEST.mantine`
   // flips in a follow-up PR.
+  await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: /Choose example/i }).click();
   await page.getByRole("option", { name: /Mantine 9 · pinned storybook/ }).click();
+  await page.getByTestId("workspace-create").click();
 
   // Wait for auto-Generate to populate the file tree.
   await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible({
