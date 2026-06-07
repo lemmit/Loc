@@ -5,6 +5,7 @@ import {
   isLetStmt,
   isPreconditionStmt,
   isRequiresStmt,
+  isReturnStmt,
 } from "../../language/generated/ast.js";
 import type { ExprIR, PathIR, StmtIR } from "../types/loom-ir.js";
 import {
@@ -47,6 +48,12 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
     return {
       stmt: { kind: "let", name: stmt.name, expr, type: t },
       envAfter: next,
+    };
+  }
+  if (isReturnStmt(stmt)) {
+    return {
+      stmt: { kind: "return", value: lowerExpr(stmt.value, env) },
+      envAfter: env,
     };
   }
   if (isEmitStmt(stmt)) {

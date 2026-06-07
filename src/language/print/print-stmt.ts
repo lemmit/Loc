@@ -27,6 +27,8 @@ export function printStmt(node: Statement): string {
       const body = node.body.map((s) => `  ${printStmt(s)}`).join("\n");
       return `for ${node.var} in ${printExpr(node.iterable)} {\n${body}\n}`;
     }
+    case "ReturnStmt":
+      return `return ${printExpr(node.value)}`;
     default: {
       const exhaustive: never = node;
       throw new Error(`printStmt: unhandled node ${(exhaustive as { $type: string }).$type}`);

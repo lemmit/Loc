@@ -98,6 +98,10 @@ function renderElixirStatement(s: StmtIR, ctx: RenderCtx, changesetVar: string):
 
     case "expression":
       return `${INDENT}${renderExpr(s.expr, ctx)}`;
+    case "return":
+      // Elixir has no `return`; the value is just an expression (the last one
+      // in a function body is the result).
+      return `${INDENT}${renderExpr(s.value, ctx)}`;
   }
 }
 

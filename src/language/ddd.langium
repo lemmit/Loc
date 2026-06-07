@@ -1188,7 +1188,7 @@ FunctionDecl:
     'function' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef '=' body=Expression;
 
 Operation:
-    (private?='private')? 'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' (extern?='extern')? (audited?='audited')? '{'
+    (private?='private')? 'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' (extern?='extern')? (audited?='audited')? (':' returnType=TypeRef)? '{'
         body+=Statement*
     '}';
 
@@ -1410,7 +1410,15 @@ Statement:
   | LetStmt
   | EmitStmt
   | ForStmt
+  | ReturnStmt
   | AssignOrCallStmt;
+
+// `return <expr>` — an operation's designed-in outcome (exception-less.md).
+// Produces the operation's declared `or`-union return value; the route
+// translates an `error`-variant result to a ProblemDetails status, a success
+// variant to HTTP 200.
+ReturnStmt:
+    'return' value=Expression;
 
 // `for <var> in <iterable> { <body> }` — iterate an aggregate array
 // (typically `Repo.run(<Retrieval>(args), page?)`), binding each element

@@ -16,7 +16,14 @@
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type { Model, TypeAtom, TypeRef } from "../generated/ast.js";
-import { isFindDecl, isPayloadDecl, isProperty, isSlotType, isTypeRef } from "../generated/ast.js";
+import {
+  isFindDecl,
+  isOperation,
+  isPayloadDecl,
+  isProperty,
+  isSlotType,
+  isTypeRef,
+} from "../generated/ast.js";
 
 export function checkUnions(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
@@ -40,11 +47,14 @@ function checkUnionPosition(t: TypeRef, accept: ValidationAcceptor): void {
   const container = t.$container;
   if (isFindDecl(container)) return;
   if (isProperty(container) && isPayloadDecl(container.$container)) return;
+  // An operation's `or`-union return type (exception-less.md): a designed-in
+  // outcome (`operation place(): OrderId or NotFound`), not a stored value.
+  if (isOperation(container)) return;
   accept(
     "error",
     `An inline 'or' union is a transport shape — it may only appear as a repository find ` +
-      `return type or a payload field, not in this position. Name it with 'payload X = A | B' ` +
-      `to use it elsewhere.`,
+      `return type, a payload field, or an operation return, not in this position. Name it ` +
+      `with 'payload X = A | B' to use it elsewhere.`,
     { node: t, code: "loom.union-position" },
   );
 }

@@ -271,6 +271,11 @@ export type OperationKind = "create" | "mutate" | "destroy";
 
 export interface OperationIR {
   name: string;
+  /** Declared `or`-union return type (exception-less.md, spike).  Absent on a
+   *  legacy mutation operation (no `: T` clause).  When present, the operation
+   *  body produces the value via a `return` statement and the route translates
+   *  an `error`-variant result to a ProblemDetails status. */
+  returnType?: TypeIR;
   /** Lifecycle kind discriminator.  Absent ⇒ `"mutate"` (the legacy
    * `operation` keyword and every pre-lifecycle IR literal).
    * `agg.operations` only ever holds `"mutate"` actions; `"create"` /
@@ -2037,7 +2042,14 @@ export type StmtIR =
    * `a.b.c(args)` appears as an operation- or test-body statement.
    * Renderers emit `<expr>;` (TS / e2e) or `<expr>;` (C#).
    */
-  | { kind: "expression"; expr: ExprIR };
+  | { kind: "expression"; expr: ExprIR }
+  /**
+   * `return <expr>` — an operation's designed-in outcome
+   * (exception-less.md).  `value` produces the operation's declared
+   * `or`-union return; the route translator maps an `error`-variant result
+   * to a ProblemDetails status and a success variant to HTTP 200.
+   */
+  | { kind: "return"; value: ExprIR };
 
 /**
  * A path used as the LHS of an assignment / collection mutation.  All
@@ -2437,6 +2449,7 @@ function stmtUsesCurrentUser(s: StmtIR): boolean {
     case "assign":
     case "add":
     case "remove":
+    case "return":
       return exprUsesCurrentUser(s.value);
     case "emit":
       return s.fields.some((f) => exprUsesCurrentUser(f.value));
@@ -2504,6 +2517,7 @@ function stmtUsesMoney(s: StmtIR): boolean {
     case "assign":
     case "add":
     case "remove":
+    case "return":
       return exprUsesMoney(s.value);
     case "emit":
       return s.fields.some((f) => exprUsesMoney(f.value));

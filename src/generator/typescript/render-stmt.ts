@@ -87,6 +87,8 @@ function renderTsStatement(
     }
     case "expression":
       return `${INDENT}${renderTsExpr(s.expr)};`;
+    case "return":
+      return `${INDENT}return ${renderTsExpr(s.value)};`;
   }
 }
 

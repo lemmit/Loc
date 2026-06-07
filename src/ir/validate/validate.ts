@@ -9,6 +9,7 @@ import {
   validateExternOperations,
   validateFindNameCollisions,
   validateGenericInstancesUnimplemented,
+  validateOperationReturnsUnimplemented,
   validatePermissionRefs,
   validateUnionsUnimplemented,
   validateWorkspaceUniqueness,
@@ -128,6 +129,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       backendPlatformsByContext.get(c.name) ?? new Set(),
     );
     validateUnionsUnimplemented(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateOperationReturnsUnimplemented(c, diags);
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateEventSourcedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateProvenancedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
