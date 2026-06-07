@@ -13,11 +13,12 @@ test.use({ viewport: { width: 390, height: 844 } });
 // header. We just pick the option and let the next `c4system-v2-pane`
 // assertion verify the source parsed.
 async function pickExample(page: Page, label: RegExp): Promise<void> {
-  // On mobile the example picker lives inside the workspace drawer
-  // (opened from the top-row workspace button), not in the header.
+  // On mobile a workspace is created from an example via the drawer:
+  // open it, choose the starting example, then Create.
   await page.getByTestId("mobile-workspace-button").click({ timeout: 30_000 });
   await page.getByRole("textbox", { name: "Choose example" }).click({ timeout: 30_000 });
   await page.getByRole("option", { name: label }).first().click();
+  await page.getByTestId("workspace-create").click();
   // Brief settle while the source switches + the LSP re-parses.
   await page.waitForTimeout(1500);
 }

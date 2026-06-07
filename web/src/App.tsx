@@ -568,6 +568,16 @@ export default function App(): JSX.Element {
     scheduleAutoGenerate(50);
   }
 
+  // Create a NEW workspace seeded from an example (the non-destructive
+  // "pick a starting point" flow).  The example is stashed in a ref the
+  // workspace-open effect consumes once the new store has opened — that
+  // sidesteps the async gap between switching the registry and the new
+  // sources controller becoming live.
+  function createWorkspaceFromExample(name: string, exampleId: string): void {
+    pendingSeedExampleRef.current = exampleId;
+    workspace.createWorkspace(name);
+  }
+
   // Open / switch / create transition for the active workspace.  Each
   // distinct store is handled exactly once: the initial open seeds a
   // brand-new (or shared-link) workspace and kicks the first generate; a
@@ -575,6 +585,10 @@ export default function App(): JSX.Element {
   // new workspace, and regenerates.  An existing workspace keeps its
   // persisted content untouched.
   const handledStoreRef = useRef<unknown>("init");
+  // Example a freshly-created workspace should be seeded from (set by
+  // `createWorkspaceFromExample` just before the new store opens).  Null
+  // → seed the default example so a new workspace is never blank.
+  const pendingSeedExampleRef = useRef<string | null>(null);
   useEffect(() => {
     if (!workspace.loaded) return; // wait for the open-or-fail decision
     if (handledStoreRef.current === workspace.store) return; // already handled
@@ -595,10 +609,14 @@ export default function App(): JSX.Element {
         scheduleAutoGenerate(80);
       })();
     } else if (workspace.persistedSource === null) {
-      // Brand-new (or hostile-storage) workspace — seed the default
-      // example so the playground is never blank.
-      void seedProject(ctrl, defaultExample.source, defaultExample.files);
-      sourceRef.current = defaultExample.source;
+      // Brand-new (or hostile-storage) workspace — seed from the example
+      // chosen at creation, else the default so it's never blank.
+      const pendId = pendingSeedExampleRef.current;
+      pendingSeedExampleRef.current = null;
+      const ex = (pendId && examples.find((e) => e.id === pendId)) || defaultExample;
+      void seedProject(ctrl, ex.source, ex.files);
+      sourceRef.current = ex.source;
+      setExampleIdRaw(ex.id);
     } else {
       sourceRef.current = workspace.persistedSource;
     }
@@ -1134,6 +1152,7 @@ export default function App(): JSX.Element {
     isDesktop,
     exampleId,
     setExampleId,
+    createWorkspaceFromExample,
     augmentedExamplesList,
     initialSource,
     getSource: () => sourceRef.current,

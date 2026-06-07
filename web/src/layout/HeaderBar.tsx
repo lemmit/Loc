@@ -131,8 +131,7 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
 export function MobileHeader({ ctx }: Props): JSX.Element {
   const {
     augmentedExamplesList,
-    exampleId,
-    setExampleId,
+    createWorkspaceFromExample,
     copyShareLink,
     copied,
     workspace,
@@ -266,8 +265,7 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
         onClose={() => setWsDrawerOpen(false)}
         workspace={workspace}
         examples={augmentedExamplesList}
-        exampleId={exampleId}
-        onImportExample={setExampleId}
+        onCreateFromExample={createWorkspaceFromExample}
       />
     </Group>
   );
