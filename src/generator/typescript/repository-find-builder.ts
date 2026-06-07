@@ -28,6 +28,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { discriminatorValue, tableOwnerName } from "../../ir/util/inheritance.js";
 import { valueCollectionsFor } from "../../ir/util/value-collections.js";
 import { indent, lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
@@ -41,7 +42,6 @@ import {
   valueCollectionElementExpr,
 } from "./repository-find-hydrate.js";
 import { combinePredicate, lowerToDrizzle } from "./repository-find-predicate.js";
-import { discriminatorValue, tableOwnerName } from "./tph.js";
 
 // Re-export the leaf modules' externally-consumed surface so the sibling
 // repository builders (and the queryable-subset-parity test) keep importing

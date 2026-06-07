@@ -1,15 +1,14 @@
 // Platform-neutral aggregate-inheritance helpers (aggregate-inheritance.md).
 //
-// The Hono backend keeps its own copy of the TPH/TPC predicates in
-// `src/generator/typescript/tph.ts` (it additionally encodes the
-// shared-table / discriminator machinery TPH needs).  These helpers are the
-// subset every backend needs for the TPC (`ownTable`) polymorphic read home —
-// "is this aggregate an abstract TPC base", "what are its concrete subtypes",
-// "which of a concrete's fields are its own vs inherited from the base".  They
-// live under `ir/util/` (not a generator) so `dotnet/` and `phoenix-live-view/`
-// can consume them without importing across platform folders (the
-// one-directional layering rule: `generator/<platform>` knows nothing about
-// other platforms).
+// The single source of truth for the TPH (`sharedTable`) and TPC (`ownTable`)
+// predicates every backend needs — "is this an abstract TPH/TPC base", "what
+// are its concrete subtypes", "which table owns a concrete", "what `kind`
+// discriminator value a concrete stamps", "which of a concrete's fields are
+// its own vs inherited from the base".  They live under `ir/util/` (not a
+// generator) so every backend — `typescript/`, `dotnet/`,
+// `phoenix-live-view/` — and the system migration builder consume them
+// without importing across platform folders (the one-directional layering
+// rule: `generator/<platform>` knows nothing about other platforms).
 
 import type { AggregateIR, FieldIR } from "../types/loom-ir.js";
 
@@ -63,4 +62,44 @@ export function tpcConcretesOf(base: AggregateIR, pool: AggPool): AggregateIR[] 
 export function ownFieldsOf(concrete: AggregateIR, base: AggregateIR): FieldIR[] {
   const baseNames = new Set(base.fields.map((f) => f.name));
   return concrete.fields.filter((f) => !baseNames.has(f.name));
+}
+
+// ---------------------------------------------------------------------------
+// TPH (`sharedTable`) predicates — the whole hierarchy lives in ONE table
+// named for the abstract base, with a `kind` discriminator column and the
+// per-concrete columns made nullable.  These are the single source of truth
+// the schema emitter, the repository builders, and the migration builder
+// consult so the owning table name + discriminator are derived identically
+// on every backend.
+// ---------------------------------------------------------------------------
+
+/** True when `agg` is an abstract base whose hierarchy uses TPH — i.e. it
+ *  owns the single shared table for itself and its concrete subtypes. */
+export function isTphBase(agg: AggregateIR, pool: AggPool): boolean {
+  return !!agg.isAbstract && effectiveLayout(agg, pool) === "sharedTable";
+}
+
+/** True when `agg` is a concrete subtype that shares its TPH base's table
+ *  (so it emits no table of its own; its repo/routes target the base table
+ *  filtered by `kind`). */
+export function isTphConcrete(agg: AggregateIR, pool: AggPool): boolean {
+  const base = baseOf(agg, pool);
+  return !!base?.isAbstract && !agg.isAbstract && effectiveLayout(agg, pool) === "sharedTable";
+}
+
+/** The aggregate name that owns the physical table for `agg`: the TPH base
+ *  for a TPH concrete, otherwise `agg` itself. */
+export function tableOwnerName(agg: AggregateIR, pool: AggPool): string {
+  return isTphConcrete(agg, pool) ? agg.extendsAggregate! : agg.name;
+}
+
+/** The `kind` discriminator value for a TPH concrete (its own name), or
+ *  undefined when `agg` is not a TPH concrete. */
+export function discriminatorValue(agg: AggregateIR, pool: AggPool): string | undefined {
+  return isTphConcrete(agg, pool) ? agg.name : undefined;
+}
+
+/** The concrete subtypes of a TPH base, in declaration order. */
+export function tphConcretesOf(base: AggregateIR, pool: AggPool): AggregateIR[] {
+  return pool.filter((a) => a.extendsAggregate === base.name && isTphConcrete(a, pool));
 }

@@ -39,12 +39,6 @@ import { buildRepositoryFile } from "../../../generator/typescript/repository-bu
 import { buildDocumentRepositoryFile } from "../../../generator/typescript/repository-document-builder.js";
 import { buildEmbeddedRepositoryFile } from "../../../generator/typescript/repository-embedded-builder.js";
 import { buildEventSourcedRepositoryFile } from "../../../generator/typescript/repository-eventsourced-builder.js";
-import {
-  isTpcBase,
-  isTphBase,
-  tpcConcretesOf,
-  tphConcretesOf,
-} from "../../../generator/typescript/tph.js";
 import { deriveEventSubscriptions, enrichLoomModel } from "../../../ir/enrich/enrichments.js";
 import { lowerModel } from "../../../ir/lower/lower.js";
 import {
@@ -60,6 +54,12 @@ import {
   type UserIR,
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
+import {
+  isTpcBase,
+  isTphBase,
+  tpcConcretesOf,
+  tphConcretesOf,
+} from "../../../ir/util/inheritance.js";
 import { contextsHaveProvenancedField } from "../../../ir/util/prov-id.js";
 import {
   effectiveSavingShape,
