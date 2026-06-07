@@ -128,62 +128,49 @@ Deployable:
                 | 'runtime' ':' runtime=LooseName ','?
             )* '}')?
             ','?)
-        // D-STORAGE-SPLIT: contexts the deployable hosts (semantic
-        // change from the legacy `modules:` clause — refs are
-        // BoundedContext, not the subdomain wrappers).  All v1
-        // deployables list contexts directly; per-(context, kind)
-        // storage bindings live on the parallel `dataSources:` clause.
-        ('contexts' ':' '[' contextRefs+=[BoundedContext:ID] (',' contextRefs+=[BoundedContext:ID])* ','? ']' ','?)?
-        // D-STORAGE-SPLIT: the deployable's dataSource ↔ context bindings.
-        // Each ref points at a system-level `dataSource { for: …, kind: …,
-        // use: … }` declaration.  Validator enforces (a) every listed
-        // dataSource's `for:` is one of `contexts:` above; (b) per
-        // (context, kind) uniqueness; (c) every aggregate's required
-        // kind (state / eventLog / cache / snapshot / replica) has a
-        // matching dataSource for its hosting context.
-        ('dataSources' ':' '[' dataSourceRefs+=[Resource:LooseName] (',' dataSourceRefs+=[Resource:LooseName])* ','? ']' ','?)?
-        ('targets' ':' targets=[Deployable:LooseName] ','?)?
-        // Slice 11.26 — explicit api composition.  Backend deployables
-        // declare which contracts they serve via `serves:`.  Frontend
-        // composition is per-ui-parameter via the `ui: WebApp { … }`
-        // compose-block (see UiComposeBinding below): each UI api
-        // parameter is bound by name to the backend deployable that
-        // supplies it.
-        ('serves' ':' serves+=[Api:ID] (',' serves+=[Api:ID])* ','?)?
-        // UI binding — references a `ui { ... }` block at system scope.
-        // Three surface forms:
-        //   ui: WebApp                            // sugar — no params
-        //   ui: WebApp { Sales: salesApi, ... }   // compose-block — per-param backend bindings
-        //   ui WebApp { framework: react }        // legacy block form, framework override
-        // Validator (Slice 3 + 11.26) ensures the referenced ui exists,
-        // the deployable's platform supports a UI mount, the framework
-        // value is one of the v0 allowed values, and every UI api
-        // parameter has a binding when the UI declares any.
-        (uiSugar=UiSugarBinding | uiCompose=UiComposeBinding | uiBlock=UiBlockBinding)?
-        // D-PHOENIX-SURFACE: `hosts:` is the host↔ui relation that
-        // supersedes the `ui:`/`ui {}` bindings above.  A deployable
-        // hosts one or more `ui` declarations; the framework lives on
-        // the `ui` (phase 2), not derived from the platform.  Two forms:
-        // bare single (`hosts: WebApp`) and bracketed multi
-        // (`hosts: [Web, Admin]`) — the bracketed form mirrors
-        // `contexts:`/`dataSources:` and avoids the unbracketed-comma
-        // ambiguity where a following soft-keyword clause (`design`)
-        // would be swallowed as another ref.  A list type from day one
-        // so the deferred one-ui-many-frameworks case needs no grammar
-        // change.  Additive in this phase — parses alongside the legacy
-        // bindings; later phases make it canonical and retire `ui:`.
-        ('hosts' ':' (
-            '[' hosts+=[Ui:ID] (',' hosts+=[Ui:ID])* ','? ']'
-          | hosts+=[Ui:ID]
-        ) ','?)?
-        ('port' ':' port=INT ','?)?
-        ('auth' ':' auth=AuthMode ','?)?
-        ('design' ':' design=DesignPack ','?)?
-        // Optional favicon path — relative to the .ddd source file.
-        // The React generator copies the referenced file into
-        // `public/favicon.<ext>` and the index.html shell emits a
-        // `<link rel="icon" href="/favicon.<ext>">`.
-        ('favicon' ':' favicon=STRING ','?)?
+        // The remaining clauses are ORDER-INDEPENDENT: each is introduced by
+        // a distinct keyword, so an interleaving `(...)*` group parses them in
+        // any order (same shape as the realization-axes sub-block above). The
+        // value of a ref clause is a single token consumed before the loop
+        // re-checks the next clause keyword, so reordering introduces no
+        // ambiguity. (`platform` stays first as the deployable's lead.)
+        (
+            // D-STORAGE-SPLIT: contexts the deployable hosts (refs are
+            // BoundedContext, not the subdomain wrappers).
+            ('contexts' ':' '[' contextRefs+=[BoundedContext:ID] (',' contextRefs+=[BoundedContext:ID])* ','? ']' ','?)
+            // D-STORAGE-SPLIT: the deployable's dataSource ↔ context bindings.
+            // Each ref points at a system-level `dataSource { for: …, kind: …,
+            // use: … }` declaration. Validator enforces (a) every listed
+            // dataSource's `for:` is one of `contexts:`; (b) per (context, kind)
+            // uniqueness; (c) every aggregate's required kind has a matching
+            // dataSource for its hosting context.
+          | ('dataSources' ':' '[' dataSourceRefs+=[Resource:LooseName] (',' dataSourceRefs+=[Resource:LooseName])* ','? ']' ','?)
+          | ('targets' ':' targets=[Deployable:LooseName] ','?)
+            // Slice 11.26 — explicit api composition. Backend deployables
+            // declare which contracts they serve via `serves:`.
+          | ('serves' ':' serves+=[Api:ID] (',' serves+=[Api:ID])* ','?)
+            // UI binding — references a `ui { ... }` block at system scope:
+            //   ui: WebApp                            // sugar — no params
+            //   ui: WebApp { Sales: salesApi, ... }   // compose-block
+            //   ui WebApp { framework: react }        // legacy block form
+          | (uiSugar=UiSugarBinding | uiCompose=UiComposeBinding | uiBlock=UiBlockBinding)
+            // D-PHOENIX-SURFACE: `hosts:` is the host↔ui relation. Bracketed
+            // multi form mirrors `contexts:`/`dataSources:`; the bare single
+            // form takes one ref. (The bracketed form avoids the
+            // unbracketed-comma swallow where `hosts: A, design` would read
+            // `design` as another ref.)
+          | ('hosts' ':' (
+                '[' hosts+=[Ui:ID] (',' hosts+=[Ui:ID])* ','? ']'
+              | hosts+=[Ui:ID]
+            ) ','?)
+          | ('port' ':' port=INT ','?)
+          | ('auth' ':' auth=AuthMode ','?)
+          | ('design' ':' design=DesignPack ','?)
+            // Optional favicon path — relative to the .ddd source file. The
+            // React generator copies it into `public/favicon.<ext>` and the
+            // index.html shell emits a `<link rel="icon">`.
+          | ('favicon' ':' favicon=STRING ','?)
+        )*
     '}';
 
 // Slice 11.26 — frontend composition.  `ui: WebApp { Sales: salesApi
