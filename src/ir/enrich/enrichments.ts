@@ -7,6 +7,7 @@ import type {
   AggregateIR,
   AssociationIR,
   BoundedContextIR,
+  ChannelIR,
   CodeRefKind,
   DataSourceKind,
   DeployableIR,
@@ -20,6 +21,7 @@ import type {
   EnrichedValueObjectIR,
   EntityPartIR,
   EnumIR,
+  EventSubscriptionIR,
   ExprIR,
   FieldIR,
   FindIR,
@@ -347,7 +349,18 @@ export function enrichContext(
   // position success type once, so the backends can narrow `{:ok, term()}`
   // to a concrete `{:ok, T}` instead of re-walking the body per emitter.
   const workflows = ctx.workflows.map(enrichWorkflowReturnType);
-  return { ...ctx, valueObjects, enums, aggregates, repositories, payloads, workflows };
+  // In-process dispatch slice: the channel-routed subscription join.
+  const eventSubscriptions = deriveEventSubscriptions(ctx.channels, workflows);
+  return {
+    ...ctx,
+    valueObjects,
+    enums,
+    aggregates,
+    repositories,
+    payloads,
+    workflows,
+    eventSubscriptions,
+  };
 }
 
 /** Attach `returnType` (the tail-position success type) to a workflow, idempotently. */
@@ -415,6 +428,54 @@ function isNarrowableType(t: TypeIR): boolean {
     default:
       return false;
   }
+}
+
+/** Join workflow consumers (`on(e: Event)` reactors and event-triggered
+ *  `create(e: Event) by` starters) against the channels that `carries:` each
+ *  event (channels.md; the in-process dispatch slice).  Only events a channel
+ *  carries are routable — the channel-routed rule — so an empty-or-uncarried
+ *  set yields `[]` and stays byte-identical (Noop dispatcher).  When several
+ *  channels carry one event the first by declaration order wins; diagnosing the
+ *  ambiguity is a deferred validation rule.
+ *
+ *  Takes `channels` + `workflows` rather than a whole context so a backend can
+ *  re-derive over its *merged* deployable context (every hosted context's
+ *  channels ∪ workflows) — that union is what makes cross-context choreography
+ *  fall out for free, since a reactor in one context can match a channel in
+ *  another within the same deployable. */
+export function deriveEventSubscriptions(
+  channels: ChannelIR[],
+  workflows: WorkflowIR[],
+): EventSubscriptionIR[] {
+  // Tolerate hand-built IR fixtures that predate the `channels` / `creates`
+  // fields (the real lowering pipeline always populates them).
+  if (!channels || channels.length === 0) return [];
+  const carrier = (event: string): string | undefined =>
+    channels.find((ch) => ch.carries.includes(event))?.name;
+  const subs: EventSubscriptionIR[] = [];
+  for (const wf of workflows ?? []) {
+    for (const on of wf.subscriptions ?? []) {
+      const channel = carrier(on.event);
+      if (channel) {
+        subs.push({ event: on.event, channel, workflow: wf.name, trigger: "on", param: on.param });
+      }
+    }
+    for (const create of wf.creates ?? []) {
+      if (create.triggerKind !== "event" || !create.eventRef || !create.eventBinding) continue;
+      const channel = carrier(create.eventRef);
+      if (channel) {
+        subs.push({
+          event: create.eventRef,
+          channel,
+          workflow: wf.name,
+          trigger: "create",
+          param: create.eventBinding,
+          createName: create.name,
+        });
+      }
+    }
+  }
+  return subs;
 }
 
 /** Collect every distinct anonymous-union shape reachable from the context's

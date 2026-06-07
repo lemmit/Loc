@@ -253,6 +253,7 @@ function emitProjectFromContexts(
     channels: contexts.flatMap((c) => c.channels),
     retrievals: contexts.flatMap((c) => c.retrievals),
     seeds: contexts.flatMap((c) => c.seeds),
+    eventSubscriptions: contexts.flatMap((c) => c.eventSubscriptions),
   };
   // Auth files — emitted only when the deployable opts in
   // via `auth: required` AND the system declares a user block (the

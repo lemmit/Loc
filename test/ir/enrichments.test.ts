@@ -139,6 +139,67 @@ describe("enrichment — idempotency", () => {
     }
   `;
 
+  it("derives channel-routed eventSubscriptions for on-reactors and event-creates", async () => {
+    const SRC = `
+      context Sales {
+        aggregate Order { total: int }
+        repository Orders for Order { }
+        event OrderPlaced { order: Order id, at: datetime }
+        event PaymentTaken { order: Order id, amount: int }
+        channel Lifecycle {
+          carries: OrderPlaced, PaymentTaken
+          delivery: broadcast
+          retention: ephemeral
+          key: order
+        }
+        workflow Fulfillment {
+          orderId: Order id
+          on(p: OrderPlaced) by p.order { }
+          create(pay: PaymentTaken) by pay.order { }
+        }
+      }`;
+    const loom = await buildLoomModel(SRC);
+    const ctx = allContexts(loom).find((c) => c.name === "Sales")!;
+    const subs = ctx.eventSubscriptions;
+    expect(subs.find((s) => s.trigger === "on")).toMatchObject({
+      event: "OrderPlaced",
+      channel: "Lifecycle",
+      workflow: "Fulfillment",
+      param: "p",
+    });
+    expect(subs.find((s) => s.trigger === "create")).toMatchObject({
+      event: "PaymentTaken",
+      channel: "Lifecycle",
+      workflow: "Fulfillment",
+      param: "pay",
+    });
+  });
+
+  it("omits a subscription for an event no channel carries (channel-routed)", async () => {
+    const SRC = `
+      context Sales {
+        aggregate Order { total: int }
+        repository Orders for Order { }
+        event OrderPlaced { order: Order id, at: datetime }
+        channel Empty { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }
+        event Ignored { order: Order id }
+        workflow W {
+          orderId: Order id
+          on(i: Ignored) by i.order { }
+        }
+      }`;
+    const loom = await buildLoomModel(SRC);
+    const ctx = allContexts(loom).find((c) => c.name === "Sales")!;
+    expect(ctx.eventSubscriptions.some((s) => s.event === "Ignored")).toBe(false);
+  });
+
+  it("yields [] for a channel-less context (byte-identical / Noop path)", async () => {
+    const loom = await buildLoomModel(SRC);
+    for (const ctx of allContexts(loom)) {
+      expect(ctx.eventSubscriptions).toEqual([]);
+    }
+  });
+
   it("re-enriching deep-equals the first enrichment pass", async () => {
     const once = await buildLoomModel(SYSTEM_SRC);
     // Brand cast: enrichLoomModel's input is the `RawLoomModel` brand;
