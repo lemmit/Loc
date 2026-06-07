@@ -485,14 +485,16 @@ export function renderDapperEventSourcedRepository(
   const findMethods = (repo?.finds ?? []).flatMap((f) => {
     const body = findBodies.find((b) => b.name === f.name);
     const filter = body?.filterClause ?? "";
-    const projection = (body?.projectionClause ?? ".ToListAsync(ct)")
-      .replace(".ToListAsync(ct)", ".ToList()")
-      .replace(".FirstOrDefaultAsync(ct)", ".FirstOrDefault()")
-      .replace(".FirstAsync(ct)", ".First()");
+    // ES finds load every stream in-memory, so strip the async EF terminal
+    // (the projection clause is built with `cancellationToken`).
+    const projection = (body?.projectionClause ?? ".ToListAsync(cancellationToken)")
+      .replace(".ToListAsync(cancellationToken)", ".ToList()")
+      .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()")
+      .replace(".FirstAsync(cancellationToken)", ".First()");
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParams(f.params)})`,
       "    {",
-      "        var __all = await _LoadAllAsync(ct);",
+      "        var __all = await _LoadAllAsync(cancellationToken);",
       `        return __all${filter}${projection};`,
       "    }",
     ];
@@ -536,49 +538,49 @@ export function renderDapperEventSourcedRepository(
       "        public string data { get; set; } = default!;",
       "    }",
       "",
-      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken ct = default)`,
+      `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
       "    {",
       "        var __sid = id.Value.ToString();",
-      "        await using var conn = await _db.OpenConnectionAsync(ct);",
-      `        var __rows = (await conn.QueryAsync<EvRow>(new CommandDefinition("SELECT stream_id, type, data FROM ${table} WHERE stream_id = @sid ORDER BY version", new { sid = __sid }, cancellationToken: ct))).ToList();`,
+      "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
+      `        var __rows = (await conn.QueryAsync<EvRow>(new CommandDefinition("SELECT stream_id, type, data FROM ${table} WHERE stream_id = @sid ORDER BY version", new { sid = __sid }, cancellationToken: cancellationToken))).ToList();`,
       "        if (__rows.Count == 0) return null;",
       `        return ${agg.name}._FromEvents(id, __rows.Select(RowToEvent).ToList());`,
       "    }",
       "",
-      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default)`,
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
       "    {",
       `        if (ids.Count == 0) return Array.Empty<${agg.name}>();`,
       `        var __out = new List<${agg.name}>();`,
       "        foreach (var __id in ids)",
       "        {",
-      "            var __a = await GetByIdAsync(__id, ct);",
+      "            var __a = await GetByIdAsync(__id, cancellationToken);",
       "            if (__a != null) __out.Add(__a);",
       "        }",
       "        return __out;",
       "    }",
       "",
-      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken ct = default)`,
+      `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
       "    {",
       "        var __pending = aggregate.PullEvents();",
       "        if (__pending.Count > 0)",
       "        {",
       "            var __sid = aggregate.Id.Value.ToString();",
-      "            await using var conn = await _db.OpenConnectionAsync(ct);",
-      `            var __version = await conn.ExecuteScalarAsync<int?>(new CommandDefinition("SELECT MAX(version) FROM ${table} WHERE stream_id = @sid", new { sid = __sid }, cancellationToken: ct)) ?? 0;`,
+      "            await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
+      `            var __version = await conn.ExecuteScalarAsync<int?>(new CommandDefinition("SELECT MAX(version) FROM ${table} WHERE stream_id = @sid", new { sid = __sid }, cancellationToken: cancellationToken)) ?? 0;`,
       "            foreach (var __ev in __pending)",
       "            {",
       "                __version++;",
       "                var __data = System.Text.Json.JsonSerializer.Serialize((object)__ev, __json);",
-      `                await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (stream_id, version, type, data, occurred_at) VALUES (@sid, @version, @type, CAST(@data AS jsonb), now())", new { sid = __sid, version = __version, type = __ev.GetType().Name, data = __data }, cancellationToken: ct));`,
+      `                await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (stream_id, version, type, data, occurred_at) VALUES (@sid, @version, @type, CAST(@data AS jsonb), now())", new { sid = __sid, version = __version, type = __ev.GetType().Name, data = __data }, cancellationToken: cancellationToken));`,
       "            }",
       "        }",
-      "        foreach (var ev in __pending) await _events.DispatchAsync(ev, ct);",
+      "        foreach (var ev in __pending) await _events.DispatchAsync(ev, cancellationToken);",
       "    }",
       "",
-      `    private async Task<List<${agg.name}>> _LoadAllAsync(CancellationToken ct)`,
+      `    private async Task<List<${agg.name}>> _LoadAllAsync(CancellationToken cancellationToken)`,
       "    {",
-      "        await using var conn = await _db.OpenConnectionAsync(ct);",
-      `        var __rows = (await conn.QueryAsync<EvRow>(new CommandDefinition("SELECT stream_id, type, data FROM ${table} ORDER BY stream_id, version", cancellationToken: ct))).ToList();`,
+      "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
+      `        var __rows = (await conn.QueryAsync<EvRow>(new CommandDefinition("SELECT stream_id, type, data FROM ${table} ORDER BY stream_id, version", cancellationToken: cancellationToken))).ToList();`,
       `        return __rows`,
       "            .GroupBy(__r => __r.stream_id)",
       `            .Select(__g => ${agg.name}._FromEvents(new ${agg.name}Id(${parseId}), __g.Select(RowToEvent).ToList()))`,
