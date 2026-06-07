@@ -56,7 +56,9 @@ describe("Phoenix capability filter — base_filter", () => {
     // (Scope the negative check to the base_filter line — `record.` is a
     // legitimate Elixir binding elsewhere, e.g. the inspect fn.)
     const baseFilterLine = doc.split("\n").find((l) => l.includes("base_filter"))!;
-    expect(baseFilterLine).toBe("  base_filter expr(not is_deleted)");
+    // `base_filter` nests inside the `resource do … end` DSL section (Ash 3.x).
+    expect(baseFilterLine).toBe("    base_filter expr(not is_deleted)");
+    expect(doc).toContain("  resource do\n    base_filter expr(not is_deleted)\n  end");
   });
 
   it("emits no base_filter when the aggregate has no capability filter", async () => {

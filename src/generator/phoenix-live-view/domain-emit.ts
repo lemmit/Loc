@@ -360,9 +360,11 @@ ${jasonImpl}`;
  *  it applies to every read of the resource.  Multiple predicates are
  *  conjoined with Ash's `and`.  Principal-referencing predicates are
  *  excluded here (the IR validator rejects them on Phoenix), so what
- *  remains renders to a closed Ash expression.  Returns a line that
- *  splices after the `postgres do` block (leading newline so the module
- *  template stays readable when absent).
+ *  remains renders to a closed Ash expression.  Returns a `resource do
+ *  base_filter … end` block that splices after the `postgres do` block
+ *  (leading newline so the module template stays readable when absent) —
+ *  in Ash 3.x `base_filter` is a DSL entry inside the `resource` section,
+ *  not a top-level resource macro.
  *
  *  Ash filter expressions reference the row's own attributes by BARE
  *  name (`is_deleted`), and related attributes by relationship path
@@ -379,7 +381,9 @@ function renderBaseFilter(agg: AggregateIR, ctx: RenderCtx, extraPredicate?: str
   const rendered = [...(extraPredicate ? [extraPredicate] : []), ...capability];
   if (rendered.length === 0) return "";
   const body = rendered.length === 1 ? rendered[0]! : `and(${rendered.join(", ")})`;
-  return `\n  base_filter expr(${body})\n`;
+  // `base_filter` is declared inside the `resource do … end` DSL section in
+  // Ash 3.x — it is not a top-level resource macro.
+  return `\n  resource do\n    base_filter expr(${body})\n  end\n`;
 }
 
 function renderPrimaryKey(idValueType: string): string {
