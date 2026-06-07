@@ -51,6 +51,10 @@ function isRefCollection(t: TypeIR): boolean {
 export interface SuperTypeInfo {
   readonly name: string;
   readonly fieldNames: ReadonlySet<string>;
+  /** Base-declared derived members (e.g. the synthesized `inspect`) the
+   *  concrete must NOT re-declare — it inherits them, and re-declaring would
+   *  hide the inherited member (CS0108, fatal under `/warnaserror`). */
+  readonly derivedNames?: ReadonlySet<string>;
   readonly sharesIdentity?: boolean;
   readonly idValueType?: IdValueType;
 }
@@ -192,7 +196,13 @@ export function renderEntity(
   }
   ctorLines.push("    }");
 
-  const derivedLines = entity.derived.map(
+  // A concrete subtype inherits the base's derived members; re-declaring one
+  // hides the inherited member (CS0108 under /warnaserror), so skip any the
+  // base already declares (same rule as the inherited fields above).
+  const ownDerived = superType?.derivedNames
+    ? entity.derived.filter((d) => !superType.derivedNames!.has(d.name))
+    : entity.derived;
+  const derivedLines = ownDerived.map(
     (d) =>
       `    public ${renderCsType(d.type)} ${upperFirst(d.name)} => ${renderCsExpr(d.expr, renderCtx)};`,
   );

@@ -106,10 +106,29 @@ alone would let a dotnet-TPH model pass validate and emit broken code.
 ## Risk / sequencing
 
 The structural risk is concentrated in **§2** (the base-owns-`Id`
-restructure in `entity.ts`'s `State`/`Create` path) — it's the only place
-the `<Concrete>Id` → `<Base>Id` shift threads through. EF config (§3) is
-mechanical once the entity shape is right. Recommend implementing
-§2 first with vitest emitted-string coverage, then §3/§4, then flip the
-gate (§1) and add the CI fixture (§5) last so CI compiles the whole
-vertical in one decisive run. Phoenix/Ash TPH (Ash polymorphic embedding)
-is a separate, later slice.
+restructure). EF config (§3) is mechanical once the entity shape is right.
+
+### Status of the in-flight implementation (#981)
+
+§1–§5 of the **domain + storage** layer are implemented and the
+`dotnet-build` gate confirmed them after two fixes CI surfaced:
+- `PartyId` is now emitted for the TPH base (`context-scaffolding-emit.ts`
+  was skipping every abstract aggregate's id class).
+- the concrete no longer re-declares the base's synthesized `inspect`
+  derived (CS0108) — `SuperTypeInfo.derivedNames` filters inherited
+  derived members, as it already does for inherited fields.
+
+**Remaining (the larger follow-on the `<Concrete>Id` → `<Base>Id` shift
+forces):** because EF-native TPH keys the whole hierarchy on the base's
+`PartyId`, a TPH concrete's id is `PartyId` *everywhere* — but the
+application layer still emits `CustomerId` (~49 `${agg.name}Id` sites
+across `cqrs/commands.ts`, `cqrs/queries.ts`, `dto-mapping.ts`,
+`emit/api.ts`, `emit/repository.ts`, the wire DTO). The clean fix is a
+single `concreteIdClass(agg, ctx)` helper (`isTphConcrete(agg) ?
+<base>Id : <agg>Id`) routed through those emit sites, so the repository
+`GetByIdAsync`, the `ICommand<…>` / command-record id params, the query
+id, the controller route param, and the response DTO all name the shared
+`PartyId`. That threading is the bulk of the remaining work; it's
+mechanical but wide, and `dotnet build /warnaserror` is the gate.
+
+Phoenix/Ash TPH (Ash polymorphic embedding) is a separate, later slice.

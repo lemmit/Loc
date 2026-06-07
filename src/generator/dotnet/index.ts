@@ -525,6 +525,7 @@ function emitAggregate(
     ? {
         name: inheritedBase.name,
         fieldNames: new Set(inheritedBase.fields.map((f) => f.name)),
+        derivedNames: new Set(inheritedBase.derived.map((d) => d.name)),
         sharesIdentity: !!tphBase,
         idValueType: tphBase?.idValueType,
       }
