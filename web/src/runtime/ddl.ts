@@ -16,6 +16,13 @@ interface DrizzleHelpers {
   Table: unknown;
   getTableConfig: (table: unknown) => {
     name: string;
+    /** The Postgres schema the table lives under, set when the
+     *  generated `db/schema.ts` routes it through `pgSchema(...)`
+     *  (system-mode emits `<context>.table(...)`, defaulting the
+     *  schema to `snake(context.name)`).  `undefined` for unqualified
+     *  `pgTable(...)` (legacy single-context mode) — those tables
+     *  live in `public`. */
+    schema?: string;
     columns: DrizzleColumn[];
     indexes: DrizzleIndex[];
   };
@@ -123,6 +130,15 @@ function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
+/** Schema-qualified table reference: `"sales"."products"` when the
+ *  table declares a pgSchema, plain `"products"` otherwise.  The index
+ *  NAME is never schema-qualified — Postgres places a new index in its
+ *  table's schema automatically — so this is used only for the table
+ *  reference in CREATE TABLE / CREATE INDEX ... ON. */
+function qualifiedTable(schema: string | undefined, name: string): string {
+  return schema ? `${quoteIdent(schema)}.${quoteIdent(name)}` : quoteIdent(name);
+}
+
 function quoteSqlString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
@@ -143,6 +159,27 @@ export function synthDDL(
 
   const lines: string[] = [];
 
+  // Postgres schemas first — the generated repositories query
+  // schema-qualified tables (`from "sales"."products"`) whenever the
+  // source's context resolves a dataSource, so the matching
+  // `CREATE SCHEMA` must run before any qualified CREATE TABLE.
+  // Without this the tables land in `public`, boot succeeds, and
+  // every query 500s on a missing `sales.*` relation.  Collected from
+  // each table's `getTableConfig().schema`; `public` is implicit so
+  // it's skipped.  `IF NOT EXISTS` keeps re-apply idempotent.
+  const schemas: string[] = [];
+  const seenSchemas = new Set<string>();
+  for (const t of tables) {
+    const s = helpers.getTableConfig(t).schema;
+    if (s && s !== "public" && !seenSchemas.has(s)) {
+      seenSchemas.add(s);
+      schemas.push(s);
+    }
+  }
+  for (const s of schemas) {
+    lines.push(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(s)};`);
+  }
+
   // Enums first — column declarations in CREATE TABLE may reference
   // their type names.  Postgres lacks `CREATE TYPE IF NOT EXISTS`
   // so we wrap each in a DO block that catches the duplicate-object
@@ -159,6 +196,7 @@ export function synthDDL(
 
   for (const t of tables) {
     const cfg = helpers.getTableConfig(t);
+    const tableRef = qualifiedTable(cfg.schema, cfg.name);
     const colDefs: string[] = [];
     for (const c of cfg.columns) {
       const parts = [quoteIdent(c.name), columnSql(c)];
@@ -170,7 +208,7 @@ export function synthDDL(
     // doesn't migrate existing tables — if the source schema
     // changes, the user has to "Reset DB" to drop + re-create.
     lines.push(
-      `CREATE TABLE IF NOT EXISTS ${quoteIdent(cfg.name)} (\n${colDefs.join(",\n")}\n);`,
+      `CREATE TABLE IF NOT EXISTS ${tableRef} (\n${colDefs.join(",\n")}\n);`,
     );
     for (const ix of cfg.indexes) {
       const cols = ix.config.columns
@@ -178,7 +216,7 @@ export function synthDDL(
         .join(", ");
       lines.push(
         `CREATE INDEX IF NOT EXISTS ${quoteIdent(ix.config.name)} ` +
-          `ON ${quoteIdent(cfg.name)} (${cols});`,
+          `ON ${tableRef} (${cols});`,
       );
     }
   }

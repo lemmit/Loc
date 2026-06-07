@@ -11,6 +11,7 @@
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:smoke": "tsx scripts/smoke-runtime.mjs",
+    "test:ddl": "tsx scripts/test-ddl.mjs",
     "build:npm-mirror": "tsx scripts/build-npm-mirror.mjs",
     "build:sandbox-driver": "tsx scripts/build-sandbox-driver.mjs",
     "build:vendor": "tsx scripts/build-vendor.mjs"

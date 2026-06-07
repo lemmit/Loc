@@ -130,3 +130,12 @@ jobs:
       - name: Typecheck web
         working-directory: web
         run: npx tsc -b
+
+      # Network-free unit guard for the runtime DDL synth — pre-merge gate
+      # for the per-context-pgSchema regression (system-mode backends query
+      # schema-qualified tables).  The end-to-end e2e/runtime.spec.ts covers
+      # the same path but self-skips when the npm registry is unreachable,
+      # so it doesn't gate reliably; this does.
+      - name: Test runtime DDL synth
+        working-directory: web
+        run: npm run test:ddl
