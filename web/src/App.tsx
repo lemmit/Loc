@@ -296,10 +296,30 @@ export default function App(): JSX.Element {
 
   // Sub-view of the consolidated Code tab — source / builder / model /
   // generated. Persisted so a reload lands back on the same view.
-  const [codeView, setCodeView] = usePersistedState<MobileCodeView>(
+  const [codeViewRaw, setCodeViewRaw] = usePersistedState<MobileCodeView>(
     "loom.mobile.codeView",
     "source",
   );
+  // Mobile crash-guard: the Builder / Model / Model v2 / Requirements
+  // sub-views are heavy on mount (craft.js + a main-thread Langium parse,
+  // or React Flow). Restoring one of them verbatim on a mobile reload mounts
+  // that cost immediately — before the user does anything — which on a
+  // memory-constrained device is a prime crash trigger when a tab is
+  // refreshed mid-work. So until the user explicitly picks a sub-view, a
+  // persisted heavy view renders as the lightweight Source editor on mobile;
+  // the raw (persisted) value is untouched, so a later tap restores it and a
+  // desktop reload is unaffected. Mirrors the `userPickedExampleRef` pattern.
+  const userPickedCodeViewRef = useRef(false);
+  const setCodeView = (v: MobileCodeView): void => {
+    userPickedCodeViewRef.current = true;
+    setCodeViewRaw(v);
+  };
+  const isHeavyCodeView = (v: MobileCodeView): boolean =>
+    v === "builder" || v === "model" || v === "model-v2" || v === "requirements";
+  const codeView: MobileCodeView =
+    !isDesktop && !userPickedCodeViewRef.current && isHeavyCodeView(codeViewRaw)
+      ? "source"
+      : codeViewRaw;
 
   // Test runner results, lifted here so the Output panel's Tests stream
   // can read them independently of the (sometimes-unmounted) Tests tab.
