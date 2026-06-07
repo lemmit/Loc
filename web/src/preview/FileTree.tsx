@@ -6,12 +6,13 @@ interface FileTreeProps {
   root: TreeFolder;
   selectedPath: string | null;
   onSelect: (path: string) => void;
-  /** Optional per-file inline action slot — typically a delete `×`
-   *  button.  Renders to the right of the file name; not called for
-   *  folder rows.  Used by the source-files tree to attach a
-   *  delete affordance without forking the renderer; defaults to
-   *  nothing for the generated-output use case. */
-  rowActions?: (filePath: string) => ReactNode;
+  /** Optional per-row inline action slot — typically a `⋮` kebab or
+   *  delete button.  Rendered to the right of the name for BOTH file
+   *  and folder rows (the `kind` lets the caller offer different
+   *  actions for each).  Used by the source-files tree to attach its
+   *  create/rename/delete menu; defaults to nothing for the
+   *  generated-output use case. */
+  rowActions?: (path: string, kind: "file" | "folder") => ReactNode;
   /** Initial open state for folders.  Defaults to `true` —
    *  generated-output uses want every level visible at a glance.
    *  Source-files use sometimes wants nested folders expanded by
@@ -111,7 +112,7 @@ interface NodeRowProps {
   depth: number;
   selectedPath: string | null;
   onSelect: (path: string) => void;
-  rowActions?: (filePath: string) => ReactNode;
+  rowActions?: (path: string, kind: "file" | "folder") => ReactNode;
   defaultFolderOpen: boolean;
   shouldRenderFile?: (filePath: string) => boolean;
   onContextMenu?: (path: string, kind: "file" | "folder", e: React.MouseEvent) => void;
@@ -154,14 +155,31 @@ function NodeRow({
   };
 
   if (node.kind === "folder") {
+    const folderAction = rowActions?.(node.path, "folder");
+    // A button can't contain the action button (nested buttons are
+    // invalid + double-fire on touch), so switch to a div+role when an
+    // action slot is present — same pattern as the file row below.
+    const FolderWrapper = folderAction ? "div" : "button";
     return (
       <Box>
-        <button
-          type="button"
+        <FolderWrapper
+          type={folderAction ? undefined : "button"}
+          role={folderAction ? "button" : undefined}
+          tabIndex={folderAction ? 0 : undefined}
           onClick={() => setOpen((v) => !v)}
+          onKeyDown={
+            folderAction
+              ? (e: React.KeyboardEvent) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setOpen((v) => !v);
+                  }
+                }
+              : undefined
+          }
           onContextMenu={
             onContextMenu
-              ? (e) => {
+              ? (e: React.MouseEvent) => {
                   e.preventDefault();
                   e.stopPropagation();
                   onContextMenu(node.path, "folder", e);
@@ -190,8 +208,16 @@ function NodeRow({
           >
             {open ? "▾" : "▸"}
           </span>
-          <span style={{ fontSize: 14, fontWeight: 500 }}>{node.name}</span>
-        </button>
+          <span style={{ fontSize: 14, fontWeight: 500, flex: 1, minWidth: 0 }}>{node.name}</span>
+          {folderAction && (
+            <span
+              style={{ flex: "0 0 auto", marginLeft: 4 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {folderAction}
+            </span>
+          )}
+        </FolderWrapper>
         {open &&
           node.children.map((c) => (
             <NodeRow
@@ -210,7 +236,7 @@ function NodeRow({
     );
   }
   const selected = selectedPath === node.path;
-  const action = rowActions?.(node.path);
+  const action = rowActions?.(node.path, "file");
   // Use a div instead of a button when actions are present so the
   // inner action button has unambiguous click handling (a button
   // inside a button is non-conforming HTML and triggers both
