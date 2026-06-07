@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { reactBuildExamples as examples } from "./react-build-cases.js";
 
 // ---------------------------------------------------------------------------
 // Generator regression test for the React frontend: for each example
@@ -14,9 +15,13 @@ import { describe, expect, it } from "vitest";
 // the kind of thing that's invisible to the IR-level tests but
 // blows up at user time.
 //
-// Matrix: 7 examples × 4 packs = 28 cases.  Non-mantine variants are
-// produced by injecting `design: <pack>` into the deployable at test-
-// run time, so the canonical example sources stay pack-neutral.
+// Matrix: 13 single-file examples × 8 packs.  Non-default-pack variants
+// are produced by injecting `design: <pack>` into the deployable at
+// test-run time, so the canonical example sources stay pack-neutral.
+// Multi-file examples (those with `import "./…"`, e.g. erp/main.ddd,
+// fulfillment-newest.ddd) are intentionally excluded — the harness
+// copies a single .ddd to a temp dir, which breaks relative imports.
+// Their parse/generate coverage lives in playground-feature-examples.
 //
 // Run modes:
 //   1. Full sweep — `LOOM_REACT_BUILD=1 npx vitest run …` runs every
@@ -35,25 +40,6 @@ const cli = path.join(repoRoot, "bin", "cli.js");
 
 const SHARD = process.env.LOOM_REACT_BUILD_CASE;
 const ENABLED = process.env.LOOM_REACT_BUILD === "1" || SHARD !== undefined;
-
-const examples = [
-  { ddd: "examples/acme.ddd", reactDir: "web_app" },
-  // Conformance fixture: console_web is the richest React deployable
-  // (exercises every walker primitive).  injectDesign rewrites its
-  // `design:` slot — the first in the source — so this cell tests the
-  // full primitive surface compiling under each pack.
-  { ddd: "examples/showcase.ddd", reactDir: "console_web" },
-  { ddd: "web/src/examples/banking-system.ddd", reactDir: "web_app" },
-  { ddd: "web/src/examples/inventory-system.ddd", reactDir: "web_app" },
-  { ddd: "web/src/examples/provenance-system.ddd", reactDir: "web_app" },
-  { ddd: "web/src/examples/sales-system.ddd", reactDir: "web_app" },
-  { ddd: "web/src/examples/storefront-system.ddd", reactDir: "web_app" },
-  { ddd: "web/src/examples/storybook-mantine.ddd", reactDir: "web_app" },
-  { ddd: "web/src/examples/storybook-shadcn.ddd", reactDir: "web_app" },
-  { ddd: "web/src/examples/storybook-components.ddd", reactDir: "web_app" },
-  { ddd: "web/src/examples/loom-landing.ddd", reactDir: "web_app" },
-  { ddd: "web/src/examples/action-showcase.ddd", reactDir: "web_app" },
-] as const;
 
 /** Inject `design: "<family>@<version>"` into the `deployable webApp
  *  { ... }` block of a `.ddd` source.  Handles both the multi-line
