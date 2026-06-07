@@ -1,7 +1,6 @@
 import { Box } from "@mantine/core";
 import { LoomEditor } from "../editor/LoomEditor";
 import { SourceFilesTree } from "./SourceFilesTree";
-import { SourceFileTabs } from "./SourceFileTabs";
 import type { LayoutCtx } from "./ctx";
 
 interface Props {
@@ -17,15 +16,12 @@ interface Props {
 // ResizeObserver needs a parent with definite size on first paint —
 // flex + minHeight: 0 satisfies that on every shell).
 //
-// Multi-file picker:
-//   - Desktop: horizontal tab strip above the editor — fast switch
-//     for 2-5 files, but starts to scroll horizontally past that.
-//   - Mobile: vertical tree below a small "Files" header — thumb-
-//     scannable, makes nested paths (`shared/money.ddd`) obvious in
-//     a way the tabs strip's truncated names didn't.
-// Both pickers source identical state from the workspace-sources
-// hook (Phase 2a) and drive the same ctx callbacks; switching
-// between them is purely a layout choice.
+// File explorer (`SourceFilesTree`):
+//   - Desktop: a persistent left sidebar beside the editor — file
+//     management is right-click → context menu (New / Rename / Delete).
+//   - Mobile: a collapsible tree above the editor (closed by default so
+//     the editor keeps the viewport); same context menu via long-press,
+//     plus a header "+" and per-row delete for touch.
 export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null {
   const {
     lspClient,
@@ -40,32 +36,48 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
     setActiveSourcePath,
     createSourceFile,
     deleteSourceFile,
+    renameSourceFile,
+    deleteSourceFolder,
     emptySourceFolders,
     createEmptySourceFolder,
-    deleteEmptySourceFolder,
+    workspace,
   } = ctx;
   if (!lspClient) return null;
-  const picker = isDesktop ? (
-    <SourceFileTabs
-      files={sourceFiles}
-      activePath={activeSourcePath}
-      onSelect={setActiveSourcePath}
-      onCreate={createSourceFile}
-      onDelete={deleteSourceFile}
-      onCreateFolder={createEmptySourceFolder}
-    />
-  ) : (
+
+  const explorer = (
     <SourceFilesTree
+      variant={isDesktop ? "sidebar" : "accordion"}
       files={sourceFiles}
       activePath={activeSourcePath}
       onSelect={setActiveSourcePath}
       onCreate={createSourceFile}
       onDelete={deleteSourceFile}
+      onRename={renameSourceFile}
       emptyFolders={emptySourceFolders}
       onCreateFolder={createEmptySourceFolder}
-      onDeleteFolder={deleteEmptySourceFolder}
+      onDeleteFolder={deleteSourceFolder}
     />
   );
+
+  const editor = (
+    <Box style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
+      <LoomEditor
+        // Remount on a project change so the editor reseeds from
+        // `initialSource`: the active workspace (switch), whether its
+        // content has finished loading, the last-imported example, and
+        // the active file path.
+        key={`${workspace.activeId}:${workspace.loaded ? 1 : 0}:${exampleId}::${activeSourcePath}`}
+        client={lspClient}
+        initialValue={initialSource}
+        isMobile={!isDesktop}
+        handleRef={editorHandleRef}
+        onChange={(v) => onSourceChange(v, "editor")}
+        onDiagnosticsChange={onDiagnosticsChange}
+        activePath={activeSourcePath}
+      />
+    </Box>
+  );
+
   return (
     <Box
       style={{
@@ -73,24 +85,15 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
         minWidth: 0,
         minHeight: 0,
         display: "flex",
-        flexDirection: "column",
+        // Desktop: explorer sidebar beside the editor.  Mobile: explorer
+        // accordion stacked above the editor.
+        flexDirection: isDesktop ? "row" : "column",
         borderRight: border === "right" ? "1px solid var(--mantine-color-dark-4)" : undefined,
         borderBottom: border === "bottom" ? "1px solid var(--mantine-color-dark-4)" : undefined,
       }}
     >
-      {picker}
-      <Box style={{ flex: 1, minHeight: 0 }}>
-        <LoomEditor
-          key={`${exampleId}::${activeSourcePath}`}
-          client={lspClient}
-          initialValue={initialSource}
-          isMobile={!isDesktop}
-          handleRef={editorHandleRef}
-          onChange={(v) => onSourceChange(v, "editor")}
-          onDiagnosticsChange={onDiagnosticsChange}
-          activePath={activeSourcePath}
-        />
-      </Box>
+      {explorer}
+      {editor}
     </Box>
   );
 }

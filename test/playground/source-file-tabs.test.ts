@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  fileInFolderPath,
+  joinWorkspace,
   newFolderSeedPath,
   normaliseNewFilePath,
+  parentRelOf,
+  renameTargetPath,
   validateNewFileBasename,
+  validateNewFileInFolder,
   validateNewFolderName,
+  validateRename,
 } from "../../web/src/layout/source-file-tabs-validation.js";
 
 describe("SourceFileTabs — new-file basename validation", () => {
@@ -114,6 +120,52 @@ describe("SourceFileTabs — new-file basename validation", () => {
         "/workspace/billing/untitled-2.ddd",
       ]);
       expect(newFolderSeedPath("billing", existing)).toBe("/workspace/billing/untitled-3.ddd");
+    });
+  });
+
+  // The context-menu create/rename helpers (right-click file management).
+  describe("context-menu file ops", () => {
+    it("joinWorkspace handles root and nested parents", () => {
+      expect(joinWorkspace("", "main.ddd")).toBe("/workspace/main.ddd");
+      expect(joinWorkspace("shared", "money.ddd")).toBe("/workspace/shared/money.ddd");
+      expect(joinWorkspace("/a/b/", "c.ddd")).toBe("/workspace/a/b/c.ddd");
+    });
+
+    it("fileInFolderPath qualifies a new file with its parent folder", () => {
+      expect(fileInFolderPath("shared", "money")).toBe("/workspace/shared/money.ddd");
+      expect(fileInFolderPath("", "orders.ddd")).toBe("/workspace/orders.ddd");
+    });
+
+    it("validateNewFileInFolder rejects duplicates within the target folder", () => {
+      const existing = new Set(["/workspace/shared/money.ddd"]);
+      expect(validateNewFileInFolder("money", existing, "shared")).toMatch(/already exists/);
+      // Same leaf in a different folder is fine.
+      expect(validateNewFileInFolder("money", existing, "billing")).toBeUndefined();
+    });
+
+    it("parentRelOf returns the folder a file lives in", () => {
+      expect(parentRelOf("/workspace/main.ddd")).toBe("");
+      expect(parentRelOf("/workspace/shared/money.ddd")).toBe("shared");
+      expect(parentRelOf("/workspace/a/b/c.ddd")).toBe("a/b");
+    });
+
+    it("renameTargetPath keeps the file in its folder", () => {
+      expect(renameTargetPath("/workspace/shared/money.ddd", "currency")).toBe(
+        "/workspace/shared/currency.ddd",
+      );
+      expect(renameTargetPath("/workspace/orders.ddd", "sales.ddd")).toBe("/workspace/sales.ddd");
+    });
+
+    it("validateRename allows a no-op and rejects a clash", () => {
+      const existing = new Set(["/workspace/shared/money.ddd", "/workspace/shared/currency.ddd"]);
+      // Unchanged name → allowed.
+      expect(validateRename("money", existing, "/workspace/shared/money.ddd")).toBeUndefined();
+      // Collides with the sibling → rejected.
+      expect(validateRename("currency", existing, "/workspace/shared/money.ddd")).toMatch(
+        /already exists/,
+      );
+      // Slashes aren't allowed in a rename leaf.
+      expect(validateRename("a/b", existing, "/workspace/shared/money.ddd")).toMatch(/No slashes/);
     });
   });
 });
