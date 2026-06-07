@@ -73,9 +73,15 @@ describe("workspace registry", () => {
   });
 
   it("sanitizes malformed payloads back to a valid registry", () => {
-    expect(sanitizeRegistry(null)).toEqual(defaultRegistry());
-    expect(sanitizeRegistry({ workspaces: [] })).toEqual(defaultRegistry());
-    expect(sanitizeRegistry({ workspaces: [{ id: "x" }] })).toEqual(defaultRegistry());
+    // `sanitizeRegistry` stamps `createdAt: Date.now()` for the default
+    // workspace it falls back to; comparing against a separately-built
+    // `defaultRegistry()` races on that millisecond.  Pin the expected
+    // registry to the timestamp the sanitizer actually produced so the
+    // assertion is deterministic.
+    for (const malformed of [null, { workspaces: [] }, { workspaces: [{ id: "x" }] }]) {
+      const reg = sanitizeRegistry(malformed);
+      expect(reg).toEqual(defaultRegistry(reg.workspaces[0].createdAt));
+    }
   });
 
   it("sanitizes a stale activeId to a present workspace", () => {
