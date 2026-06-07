@@ -117,13 +117,13 @@ function renderWorkflow(
   // @spec on `def run/2`.  Param shape: the declared workflow params lower
   // to a typed map (`%{p1: T1, p2: T2 | nil, ...}`); empty-params workflows
   // accept `any()` since they ignore the first arg (`_args`).  `current_user`
-  // is `any()` — Ash actors are pluggable.  Return is conservatively
-  // `:ok | {:ok, term()} | {:error, term()}` since WorkflowIR carries no
-  // explicit return type today: bodies either succeed with `:ok` / `{:ok,
-  // value}`, fail with `{:error, reason}` (guards throw, with-clauses tail
-  // `{:error, ...}` through), or compose differently per workflow.  When
-  // workflows gain an explicit returnType in the IR, this can tighten to
-  // `Types.result(T)` shape per workflow.
+  // is `any()` — Ash actors are pluggable.  Return: when enrichment computed a
+  // precise tail-position type (`wf.returnType`), the body always returns
+  // `{:ok, T}` on success (the `with`-chain do-branch yields `{:ok, <bind>}`)
+  // so we narrow to `{:ok, T} | {:error, term()}`.  Otherwise stay
+  // conservative — bodies may succeed with bare `:ok` / `{:ok, value}`, fail
+  // with `{:error, reason}` (guards throw, with-clauses tail `{:error, ...}`
+  // through), or compose differently per workflow.
   const paramSpec =
     wf.params.length === 0
       ? "any()"
@@ -133,7 +133,10 @@ function renderWorkflow(
             return `${snake(p.name)}: ${base}`;
           })
           .join(", ")}}`;
-  const runSpec = `@spec run(${paramSpec}, any()) :: :ok | {:ok, term()} | {:error, term()}`;
+  const successArm = wf.returnType
+    ? `{:ok, ${renderTypespec(wf.returnType, contextModule, typesModule)}}`
+    : ":ok | {:ok, term()}";
+  const runSpec = `@spec run(${paramSpec}, any()) :: ${successArm} | {:error, term()}`;
 
   return `# Auto-generated.
 defmodule ${moduleName} do

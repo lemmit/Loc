@@ -898,6 +898,16 @@ export interface WorkflowIR {
    *  Each carries its own params + saves, lowered like the legacy paren-form
    *  body.  Omitted when the workflow declares none. */
   handlers?: HandleIR[];
+  /** Tail-position success type of the primary `run` body, derived once in
+   *  enrichment (`enrichWorkflowReturnType`).  The value the workflow returns
+   *  on the happy path is the last value-binding statement's result (the same
+   *  `last-bind` rule the backends use to pick the `{:ok, <bind>}` return), so
+   *  this is the `T` in a `{:ok, T}` success.  Set only when that type can be
+   *  computed precisely and narrowed safely (no loop/sequence tail, a
+   *  renderable leaf type); left `undefined` otherwise, so a backend keeps its
+   *  conservative `{:ok, term()}` arm.  Consumed today by the Phoenix `@spec`
+   *  emitter to tighten Dialyzer narrowing on every workflow call site. */
+  returnType?: TypeIR;
 }
 
 /** A named `handle name(params) { … }` command handler on a workflow
