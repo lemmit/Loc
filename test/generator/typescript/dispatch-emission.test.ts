@@ -85,4 +85,29 @@ describe("in-process event dispatch emission", () => {
     expect(schema).toMatch(/export const shipmentTrackers = pgTable\("shipment_trackers", \{/);
     expect(schema).toMatch(/shipId: text\("ship_id"\)\.primaryKey\(\)/);
   });
+
+  it("persists an event-triggered create: load-or-allocate by correlation, then save", async () => {
+    const wf = (await generate("test/fixtures/dispatch-sample.ddd")).get("http/workflows.ts") ?? "";
+    // load/save helpers + the row type for the starter's workflow.
+    expect(wf).toContain(
+      "type ShipmentTrackerState = typeof schema.shipmentTrackers.$inferInsert;",
+    );
+    expect(wf).toContain("async function loadShipmentTracker(");
+    expect(wf).toMatch(/eq\(schema\.shipmentTrackers\.shipId, key\)/);
+    expect(wf).toMatch(/\.onConflictDoUpdate\(\{ target: schema\.shipmentTrackers\.shipId/);
+    // The create handler routes by the correlation key, allocates if missing,
+    // and saves the row at exit.
+    expect(wf).toMatch(/const __key = s\.shipment;/);
+    expect(wf).toMatch(
+      /const state = \(await loadShipmentTracker\(db, __key\)\) \?\? \(\{ shipId: __key \} as ShipmentTrackerState\);/,
+    );
+    expect(wf).toContain("await saveShipmentTracker(db, state);");
+    // The `on` reactor stays stateless this slice — no load/allocate/save.
+    const onBody = wf.slice(
+      wf.indexOf("fulfillerOnOrderPlaced"),
+      wf.indexOf("shipmentTrackerStartShipmentRequested"),
+    );
+    expect(onBody).not.toContain("loadFulfiller");
+    expect(onBody).not.toContain("__key");
+  });
 });

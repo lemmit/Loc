@@ -12,7 +12,7 @@ import {
   workflowUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import { camelId, opWorkflow } from "../../../ir/util/openapi-ids.js";
-import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -220,7 +220,21 @@ export function buildWorkflowsFile(
     imports.push(`import type { DomainEventDispatcher } from "../domain/events";`);
   if (usesEvents) imports.push(`import type * as Events from "../domain/events";`);
   if (usesDb) imports.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
-  if (usesSchema) imports.push(`import type * as schema from "../db/schema";`);
+  // The persisted-workflow load helper filters by the correlation column.
+  if (/(?<!\.)\beq\(/.test(bodyStr)) imports.push(`import { eq } from "drizzle-orm";`);
+  // `schema` is used as a runtime value (`db.select().from(schema.x)`) only by
+  // the persisted-workflow helpers; otherwise it's `typeof schema` (a type).
+  // `import * as schema` still satisfies `typeof schema`, so the value form is
+  // a superset — but stick to `import type` when there are no value uses to
+  // keep subscription-free files byte-identical.
+  if (usesSchema) {
+    const schemaAsValue = /db\.(?:select|insert)\(/.test(bodyStr);
+    imports.push(
+      schemaAsValue
+        ? `import * as schema from "../db/schema";`
+        : `import type * as schema from "../db/schema";`,
+    );
+  }
   for (const aggName of aggsReferenced) {
     imports.push(`import { ${aggName} } from "../domain/${lowerFirst(aggName)}";`);
   }
@@ -425,6 +439,18 @@ function handlerName(workflow: string, trigger: "on" | "create", event: string):
 function emitSubscriptionHandlers(ctx: EnrichedBoundedContextIR): string[] {
   const subs = ctx.eventSubscriptions;
   const out: string[] = [];
+  // load/save helpers, once per workflow that has a persisted event-create
+  // starter (its correlation row is allocated/loaded by the handler).
+  const helperDone = new Set<string>();
+  for (const sub of subs) {
+    if (sub.trigger !== "create") continue;
+    const wf = ctx.workflows.find((w) => w.name === sub.workflow);
+    if (wf?.correlationField && !helperDone.has(wf.name)) {
+      out.push(...emitWorkflowStateHelpers(wf));
+      out.push("");
+      helperDone.add(wf.name);
+    }
+  }
   // Group handler names by event type for the dispatcher switch.
   const byEvent = new Map<string, string[]>();
   for (const sub of subs) {
@@ -432,6 +458,7 @@ function emitSubscriptionHandlers(ctx: EnrichedBoundedContextIR): string[] {
     if (!wf) continue;
     let statements: WorkflowStmtIR[];
     let saves: { name: string; aggName: string; repoName: string }[];
+    let correlation: ExprIR | undefined;
     if (sub.trigger === "on") {
       const on = (wf.subscriptions ?? []).find(
         (o) => o.event === sub.event && o.param === sub.param,
@@ -439,14 +466,28 @@ function emitSubscriptionHandlers(ctx: EnrichedBoundedContextIR): string[] {
       if (!on) continue;
       statements = on.statements;
       saves = on.savesAtExit;
+      correlation = on.correlation;
     } else {
       const cr = wf.creates.find((c) => c.eventRef === sub.event && c.eventBinding === sub.param);
       if (!cr) continue;
       statements = cr.statements;
       saves = cr.savesAtExit;
+      correlation = cr.correlation;
     }
     const fn = handlerName(sub.workflow, sub.trigger, sub.event);
-    out.push(...emitHandlerFn(fn, sub.event, sub.param, statements, saves, ctx));
+    out.push(
+      ...emitHandlerFn(
+        fn,
+        wf,
+        sub.trigger,
+        sub.event,
+        sub.param,
+        correlation,
+        statements,
+        saves,
+        ctx,
+      ),
+    );
     out.push("");
     const list = byEvent.get(sub.event) ?? [];
     list.push(fn);
@@ -456,15 +497,47 @@ function emitSubscriptionHandlers(ctx: EnrichedBoundedContextIR): string[] {
   return out;
 }
 
+/** `loadX` / `saveX` for a workflow's persisted correlation row, plus the row
+ *  type.  `loadX` reads by the correlation column; `saveX` upserts on it.
+ *  Keyed off the Drizzle table the schema emitter produces (PR #991). */
+function emitWorkflowStateHelpers(wf: WorkflowIR): string[] {
+  const T = upperFirst(wf.name);
+  const table = `schema.${lowerFirst(plural(wf.name))}`;
+  const corr = wf.correlationField as string;
+  return [
+    `type ${T}State = typeof ${table}.$inferInsert;`,
+    `async function load${T}(`,
+    `  db: NodePgDatabase<typeof schema>,`,
+    `  key: string,`,
+    `): Promise<${T}State | undefined> {`,
+    `  const rows = await db.select().from(${table}).where(eq(${table}.${corr}, key)).limit(1);`,
+    `  return rows[0];`,
+    `}`,
+    `async function save${T}(db: NodePgDatabase<typeof schema>, state: ${T}State): Promise<void> {`,
+    `  await db.insert(${table}).values(state).onConflictDoUpdate({ target: ${table}.${corr}, set: state });`,
+    `}`,
+  ];
+}
+
 /** One reactor / event-create handler.  The inbound event instance binds as
  *  the body's event param directly (it is already domain-typed in-process —
  *  no wire→domain conversion, unlike the HTTP command path); repos are built
  *  on `db` with the re-entrant `events` dispatcher so a body `emit` re-routes
- *  to its own subscribers (choreography chains). */
+ *  to its own subscribers (choreography chains).
+ *
+ *  An event-triggered `create` (a starter) is **persisted**: it loads its
+ *  correlation row or allocates one (seeded with the correlation key), renders
+ *  the body with `this.<stateField>` reading that row, and saves it back —
+ *  load-or-allocate per the channels.md routing.  (The `on` reactor's
+ *  route-to-existing / drop+log path is a later slice; today it stays the
+ *  stateless #970 handler.) */
 function emitHandlerFn(
   fn: string,
+  wf: WorkflowIR,
+  trigger: "on" | "create",
   eventName: string,
   paramName: string,
+  correlation: ExprIR | undefined,
   statements: WorkflowStmtIR[],
   saves: { name: string; aggName: string; repoName: string }[],
   ctx: BoundedContextIR,
@@ -475,14 +548,32 @@ function emitHandlerFn(
   out.push(`  events: DomainEventDispatcher,`);
   out.push(`  ${paramName}: Events.${eventName},`);
   out.push(`): Promise<void> {`);
+  const persisted = trigger === "create" && !!wf.correlationField;
   const hasEmit = statements.some((st) => st.kind === "emit");
   if (hasEmit) out.push(`  const workflowEvents: Events.DomainEvent[] = [];`);
+  const noParams = new Map<string, string>();
+  let thisName = "this";
+  if (persisted) {
+    const T = upperFirst(wf.name);
+    const corr = wf.correlationField as string;
+    // Correlation key: the `by <expr>` routing value, else the event field
+    // that name-matches the correlation field (the omitted-`by` rule).
+    const keyExpr = correlation
+      ? renderExprWithParams(correlation, noParams)
+      : `${paramName}.${corr}`;
+    out.push(`  const __key = ${keyExpr};`);
+    // Allocate-if-correlation-misses; the cast seeds only the key (other saga
+    // state defaults to its column defaults — a later slice fills typed
+    // defaults for required non-key state).
+    out.push(`  const state = (await load${T}(db, __key)) ?? ({ ${corr}: __key } as ${T}State);`);
+    thisName = "state";
+  }
   for (const r of collectReposFromStmts(statements, saves)) {
     out.push(`  const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
   }
-  const noParams = new Map<string, string>();
-  for (const st of statements) out.push(...renderStmt(st, noParams, "  ", ctx));
+  for (const st of statements) out.push(...renderStmt(st, noParams, "  ", ctx, thisName));
   for (const save of saves) out.push(`  await ${lowerFirst(save.repoName)}.save(${save.name});`);
+  if (persisted) out.push(`  await save${upperFirst(wf.name)}(db, state);`);
   if (hasEmit) out.push(`  for (const ev of workflowEvents) await events.dispatch(ev);`);
   out.push(`}`);
   return out;
@@ -543,8 +634,9 @@ function renderStmt(
   paramExprs: Map<string, string>,
   indent: string,
   ctx: BoundedContextIR,
+  thisName = "this",
 ): string[] {
-  const renderArg = (e: ExprIR): string => renderExprWithParams(e, paramExprs);
+  const renderArg = (e: ExprIR): string => renderExprWithParams(e, paramExprs, thisName);
   switch (st.kind) {
     case "precondition":
       return [
@@ -637,7 +729,7 @@ function renderStmt(
       // indent, then each iteration's dirty bindings save INSIDE the loop
       // (aggregate events drain through the same save).
       const inner = `${indent}  `;
-      const bodyLines = st.body.flatMap((s) => renderStmt(s, paramExprs, inner, ctx));
+      const bodyLines = st.body.flatMap((s) => renderStmt(s, paramExprs, inner, ctx, thisName));
       const saveLines = st.savesPerIteration.map(
         (sv) => `${inner}await ${lowerFirst(sv.repoName)}.save(${sv.name});`,
       );
@@ -664,13 +756,22 @@ function lookupOp(
   return ctx.aggregates.find((a) => a.name === aggName)?.operations.find((o) => o.name === opName);
 }
 
-function renderExprWithParams(e: ExprIR, paramExprs: Map<string, string>): string {
+function renderExprWithParams(
+  e: ExprIR,
+  paramExprs: Map<string, string>,
+  thisName = "this",
+): string {
   // Workflow params are local consts now; ExprIR `ref` nodes for them
   // already carry refKind="param" and the bare name.  renderTsExpr
   // emits bare names for params, which match the local consts we
   // just declared.  So a plain renderTsExpr is correct.
+  //
+  // `thisName` redirects `this.<stateField>` saga reads: the HTTP route
+  // path leaves it `"this"` (no workflow `this` in scope there); the
+  // dispatcher handler passes the loaded state-row local so
+  // `this.<field>` renders as `state.field` (persisted correlation).
   void paramExprs;
-  return renderTsExpr(e);
+  return renderTsExpr(e, { thisName });
 }
 
 function collectReposForWorkflow(wf: WorkflowIR): {
