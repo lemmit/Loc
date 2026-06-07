@@ -6,6 +6,7 @@ import type {
   ExprIR,
   FieldIR,
   TypeIR,
+  WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import {
   isTphBase,
@@ -168,6 +169,16 @@ export function renderSchema(
   }
   if (opts.audit) tables.push(AUDIT_TABLE);
   if (opts.provenance) tables.push(PROVENANCE_TABLE);
+  // Persisted workflow-correlation state (workflow-and-applier.md A2-S2):
+  // one row per running workflow instance, keyed by the correlation field, with
+  // the saga state fields as columns.  Emitted for any workflow that declares a
+  // single id-shaped correlation field; the in-process dispatcher loads/saves
+  // these rows to route inbound events to the right instance.  A workflow
+  // without a correlation field (a plain command workflow) gets no table —
+  // byte-identical.
+  for (const wf of ctx.workflows) {
+    if (wf.correlationField) tables.push(emitWorkflowStateTable(wf, ctx));
+  }
   const schemaDecls = schemaNames.map(
     (name) => `export const ${schemaConstName(name)} = pgSchema("${name}");`,
   );
@@ -390,6 +401,26 @@ function emitEmbeddedTable(
     lines.push(...indexEntries);
     lines.push(`}));`);
   }
+  return lines.join("\n");
+}
+
+/** Persisted workflow-correlation state table.  PK is the workflow's single
+ *  id-shaped correlation field (`text(...).primaryKey()`, mirroring the
+ *  aggregate-id column); the remaining state fields are saga columns rendered
+ *  the same way an aggregate's are.  Reuses `drizzleColumnLines`, so column
+ *  types stay in lockstep with aggregate tables. */
+function emitWorkflowStateTable(wf: WorkflowIR, ctx: BoundedContextIR): string {
+  const tableName = snake(plural(wf.name));
+  const lines: string[] = [];
+  lines.push(`export const ${lowerFirst(plural(wf.name))} = pgTable("${tableName}", {`);
+  for (const f of wf.stateFields ?? []) {
+    if (f.name === wf.correlationField) {
+      lines.push(`  ${f.name}: text("${snake(f.name)}").primaryKey(),`);
+    } else {
+      lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
+    }
+  }
+  lines.push(`});`);
   return lines.join("\n");
 }
 

@@ -75,4 +75,14 @@ describe("in-process event dispatch emission", () => {
     expect(idx).toContain("NoopDomainEventDispatcher");
     expect(idx).not.toContain("createInProcessDispatcher");
   });
+
+  it("emits a persisted state table per correlation-bearing workflow (db/schema.ts)", async () => {
+    const schema = (await generate("test/fixtures/dispatch-sample.ddd")).get("db/schema.ts") ?? "";
+    // Fulfiller (orderId: Order id) and ShipmentTracker (shipId: Shipment id)
+    // each get a state table keyed by their correlation field.
+    expect(schema).toMatch(/export const fulfillers = pgTable\("fulfillers", \{/);
+    expect(schema).toMatch(/orderId: text\("order_id"\)\.primaryKey\(\)/);
+    expect(schema).toMatch(/export const shipmentTrackers = pgTable\("shipment_trackers", \{/);
+    expect(schema).toMatch(/shipId: text\("ship_id"\)\.primaryKey\(\)/);
+  });
 });
