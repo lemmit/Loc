@@ -99,7 +99,7 @@ export function emitContext(
     // Retrieval read actions (retrieval.md) join the custom finds — both
     // splice into the resource's `actions do` block the same way.
     const customFinds = [
-      ...buildFindActions(repoWithViews, agg, contextModule),
+      ...buildFindActions(repoWithViews, agg, contextModule, ctx),
       ...buildRetrievalActions(ctx, agg, contextModule),
     ];
     if (customFinds.length === 0) continue;
