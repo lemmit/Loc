@@ -74,6 +74,10 @@ export interface LayoutCtx {
   // Example picker
   exampleId: string;
   setExampleId: (v: string) => void;
+  /** Create a NEW workspace seeded from an example (non-destructive
+   *  "pick a starting point" — distinct from `setExampleId`, which
+   *  overwrites the active workspace). */
+  createWorkspaceFromExample: (name: string, exampleId: string) => void;
   augmentedExamplesList: LoomExample[];
   initialSource: string;
   /** The live editor source (reflects unsaved edits); for the Builder. */
