@@ -98,6 +98,11 @@ export interface Env {
    *  (`files.put(...)`) in workflow bodies (Phase 4).  Undefined / empty
    *  outside a context or when none are declared for it. */
   resources?: Map<string, DataSourceKind>;
+  /** The variants of the enclosing operation's `or`-union return type
+   *  (exception-less.md, producer).  Set while lowering a union-returning
+   *  operation body so a `return <expr>` can tag its value with the matching
+   *  variant.  Undefined for mutation operations / non-operation bodies. */
+  returnVariants?: TypeIR[];
 }
 
 export function newEnv(

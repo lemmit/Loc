@@ -7,6 +7,7 @@ import {
   isRequiresStmt,
   isReturnStmt,
 } from "../../language/generated/ast.js";
+import { typeKey, variantTag as unionVariantTag } from "../stdlib/unions.js";
 import type { ExprIR, PathIR, StmtIR } from "../types/loom-ir.js";
 import {
   inferExprType,
@@ -51,8 +52,26 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
     };
   }
   if (isReturnStmt(stmt)) {
+    const value = lowerExpr(stmt.value, env);
+    // In a union-returning operation, tag the return with the variant whose
+    // structural key matches the returned value's type (producer).
+    let variantTag: string | undefined;
+    let variantShape: "record" | "scalar" | "none" | undefined;
+    if (env.returnVariants) {
+      const vt = inferExprType(stmt.value, env);
+      const match = env.returnVariants.find((v) => typeKey(v) === typeKey(vt));
+      if (match) {
+        variantTag = unionVariantTag(match);
+        variantShape =
+          match.kind === "none"
+            ? "none"
+            : match.kind === "entity" || match.kind === "valueobject"
+              ? "record"
+              : "scalar";
+      }
+    }
     return {
-      stmt: { kind: "return", value: lowerExpr(stmt.value, env) },
+      stmt: { kind: "return", value, variantTag, variantShape },
       envAfter: env,
     };
   }

@@ -278,6 +278,11 @@ function lowerActionBody(spec: ActionSpec, env: Env): OperationIR {
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
+  // A union-returning operation threads its variants into the env so each
+  // `return <expr>` can tag its value with the matching variant (producer).
+  if (spec.returnType?.kind === "union") {
+    inner = { ...inner, returnVariants: spec.returnType.variants };
+  }
   const stmts: StmtIR[] = [];
   for (const s of spec.body) {
     const result = lowerStatement(s, inner);
