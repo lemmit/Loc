@@ -578,6 +578,9 @@ export default function App(): JSX.Element {
     }
     s.setActivePath("/workspace/main.ddd");
     writeHashSource(mainContent);
+    // Bump the generation epoch so any generate still in flight for the
+    // previous project can't land its result into this one's file view.
+    generationEpochRef.current++;
     dispatch({ type: "RESET" });
     setDiagnostics([]);
     setSelectedPath(null);
@@ -586,6 +589,9 @@ export default function App(): JSX.Element {
     setBackendLog([]);
     setAppLog([]);
     void engineRef.current?.reset();
+    // Regenerate promptly on a project switch rather than waiting out the
+    // keystroke debounce — otherwise the file view stays blank for 5s.
+    scheduleAutoGenerate(50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exampleId]);
 
@@ -609,18 +615,28 @@ export default function App(): JSX.Element {
   // the explicit "Run" button.  Once the user actually edits, auto-generate
   // resumes on mobile too.  Desktop is unaffected.
   const hasUserEditedRef = useRef(false);
-  const scheduleAutoGenerate = (): void => {
+  // Monotonic generation epoch.  Bumped whenever the project identity
+  // changes (example import / workspace switch / reset).  Each
+  // `runGenerateStep` captures the epoch at kick time; a result that
+  // resolves after the epoch moved belongs to a project the user has
+  // since navigated away from and is discarded — without this, an
+  // in-flight generate from the previous example lands its files into
+  // the current file view ("generate ran on the previous files").
+  const generationEpochRef = useRef(0);
+  const scheduleAutoGenerate = (delayMs = 5000): void => {
     if (!isDesktop && !hasUserEditedRef.current) return;
     if (autoGenTimerRef.current) clearTimeout(autoGenTimerRef.current);
     autoGenTimerRef.current = setTimeout(() => {
       if (errorCountRef.current === 0 && !generatingRef.current) {
         void runGenerateRef.current();
       }
-      // 5s (was 800ms): the preview now refreshes in place, so the
-      // debounce is the throttle on how often a background refresh
+      // Default 5s (was 800ms): the preview now refreshes in place, so
+      // the debounce is the throttle on how often a background refresh
       // fires — long enough to coalesce a burst of keystrokes into one
-      // rebuild after the user pauses.
-    }, 5000);
+      // rebuild after the user pauses.  A project switch passes a short
+      // delay so the file view repopulates promptly instead of sitting
+      // blank until the keystroke debounce elapses.
+    }, delayMs);
   };
   useEffect(() => {
     return () => {
@@ -710,13 +726,36 @@ export default function App(): JSX.Element {
   async function runGenerateStep(): Promise<GenerateResult | null> {
     const client = buildClientRef.current;
     if (!client) return null;
+    // Capture the epoch this run belongs to; if it moves while we await
+    // the worker, the result is for a project the user has left.
+    const epoch = generationEpochRef.current;
     dispatch({ type: "GENERATE_START" });
-    const entryPath = sourcesRef.current.activePath;
-    await client.vfsWrite([{ kind: "file", path: entryPath, content: sourceRef.current }]);
+    const s = sourcesRef.current;
+    const entryPath = s.activePath;
+    // Push every workspace `.ddd` source, not just the active file, so a
+    // multi-file example's imports resolve against fresh content in the
+    // worker's VFS.  The active file is written last with the editor's
+    // live text (which may be ahead of the controller snapshot).
+    const entries: VfsEntry[] = [];
+    for (const [path, content] of s.files) {
+      if (path === entryPath) continue;
+      entries.push({ kind: "file", path, content });
+    }
+    entries.push({ kind: "file", path: entryPath, content: sourceRef.current });
+    await client.vfsWrite(entries);
     const result = await client.generateFromPath(entryPath);
+    // Superseded by a newer project — drop the result so it neither
+    // repaints the file view nor drives the live-mode bundle/boot cascade.
+    if (epoch !== generationEpochRef.current) return null;
     dispatch({ type: "GENERATE_DONE", result });
     if (result.ok && result.files.length > 0) {
-      setSelectedPath((prev) => prev ?? result.files[0].path);
+      // Preserve the user's selection only when that exact path still
+      // exists in the freshly generated tree; otherwise fall back to the
+      // first file.  This is what makes the file view actually refresh on
+      // a project change instead of sticking on a now-absent path.
+      setSelectedPath((prev) =>
+        prev && result.files.some((f) => f.path === prev) ? prev : result.files[0].path,
+      );
     } else {
       setSelectedPath(null);
     }
