@@ -12,10 +12,10 @@ import type {
   FieldIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { isTphConcrete } from "../../ir/util/inheritance.js";
 import { isValueCollectionType, type ValueCollectionIR } from "../../ir/util/value-collections.js";
 import { valueObjectColumnNames } from "./emit.js";
 import { isRefCollection } from "./repository-associations-builder.js";
-import { isTphConcrete } from "./tph.js";
 
 export function hydrateRootExpr(
   agg: EnrichedAggregateIR,

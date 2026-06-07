@@ -13,13 +13,13 @@ import type {
   FieldIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { discriminatorValue, tableOwnerName } from "../../ir/util/inheritance.js";
 import { isValueCollectionType, valueCollectionsFor } from "../../ir/util/value-collections.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { joinColumnName, joinTableConstName } from "./emit.js";
 import { associationsOf, isRefCollection } from "./repository-associations-builder.js";
-import { discriminatorValue, tableOwnerName } from "./tph.js";
 
 /** Inner body of the save db.transaction callback at 6-space indent.
  *  Extracted so the trace-on variant can re-indent and wrap it with the

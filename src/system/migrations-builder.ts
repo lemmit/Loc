@@ -1,10 +1,3 @@
-import {
-  isTphBase,
-  isTphConcrete,
-  ownFieldsOf,
-  tableOwnerName,
-  tphConcretesOf,
-} from "../generator/typescript/tph.js";
 import type {
   AggregateIR,
   AssociationIR,
@@ -29,6 +22,13 @@ import type {
   SchemaSnapshot,
   TableShape,
 } from "../ir/types/migrations-ir.js";
+import {
+  isTphBase,
+  isTphConcrete,
+  ownFieldsOf,
+  tableOwnerName,
+  tphConcretesOf,
+} from "../ir/util/inheritance.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../ir/util/resolve-datasource.js";
 import {
   isValueCollectionType,
