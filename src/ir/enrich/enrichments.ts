@@ -36,6 +36,8 @@ import type {
   TypeIR,
   ValueObjectIR,
   WireField,
+  WorkflowIR,
+  WorkflowStmtIR,
 } from "../types/loom-ir.js";
 import { buildCreateInput } from "./wire-projection.js";
 
@@ -341,7 +343,78 @@ export function enrichContext(
   // lowering, so they pass through `withGenerics` and are skipped here by name.
   const unions = monomorphizeUnions(aggregates, valueObjects, repositories, withGenerics);
   const payloads = [...withGenerics, ...unions];
-  return { ...ctx, valueObjects, enums, aggregates, repositories, payloads };
+  // Slice 4 (static-analysis-followups.md): derive each workflow's tail-
+  // position success type once, so the backends can narrow `{:ok, term()}`
+  // to a concrete `{:ok, T}` instead of re-walking the body per emitter.
+  const workflows = ctx.workflows.map(enrichWorkflowReturnType);
+  return { ...ctx, valueObjects, enums, aggregates, repositories, payloads, workflows };
+}
+
+/** Attach `returnType` (the tail-position success type) to a workflow, idempotently. */
+function enrichWorkflowReturnType(wf: WorkflowIR): WorkflowIR {
+  const returnType = computeWorkflowReturnType(wf);
+  return returnType ? { ...wf, returnType } : wf;
+}
+
+/** The value a workflow's primary `run` body yields on the happy path — the
+ *  result of its last value-binding statement, mirroring the `last-bind` rule
+ *  the backends use to pick the `{:ok, <bind>}` return.  Returns `undefined`
+ *  (keep the conservative `{:ok, term()}`) when the body has no value bind,
+ *  ends in a loop/sequence whose tail type isn't a single bind, or the bound
+ *  type isn't a safely-renderable leaf.  Pure — testable on synthetic IR. */
+export function computeWorkflowReturnType(wf: WorkflowIR): TypeIR | undefined {
+  const stmts = wf.statements;
+  // A `repo-run` / `for-each` makes the body a sequence/loop, not a `with`-
+  // chain — its tail is the loop's own `{:ok, _}`, not a named bind — so the
+  // success type can't be pinned precisely.  Stay conservative.
+  if (stmts.some((s) => s.kind === "repo-run" || s.kind === "for-each")) return undefined;
+  // The return value is the LAST statement that binds a usable value, in
+  // declaration order: `factory-let` / `repo-let` / `expr-let` (an `op-call`
+  // binds `_`, so it never becomes the return — matching the emitter, which
+  // only tracks statements carrying a `bindName`).
+  for (let i = stmts.length - 1; i >= 0; i--) {
+    const t = tailBindType(stmts[i]!);
+    if (t) return isNarrowableType(t) ? t : undefined;
+  }
+  return undefined;
+}
+
+/** The type a binding statement contributes as a `with`-chain return value, or
+ *  `undefined` if it binds nothing returnable. */
+function tailBindType(stmt: WorkflowStmtIR): TypeIR | undefined {
+  switch (stmt.kind) {
+    case "factory-let":
+      return { kind: "entity", name: stmt.aggName };
+    case "repo-let":
+      // The `{:ok, name} <-` clause unwraps the loaded aggregate; strip any
+      // declared `optional` so the success arm is the non-nil value.
+      return stmt.returnType.kind === "optional" ? stmt.returnType.inner : stmt.returnType;
+    case "expr-let":
+      return stmt.type;
+    default:
+      return undefined;
+  }
+}
+
+/** Whether a type renders to a precise, non-widening backend typespec.  The
+ *  transport-only carriers (`union` / `none` / `genericInstance`) and the
+ *  UI-only `slot` collapse to `map()` — too loose to be worth narrowing to —
+ *  so they fall back to the conservative `term()` arm. */
+function isNarrowableType(t: TypeIR): boolean {
+  switch (t.kind) {
+    case "primitive":
+    case "id":
+    case "enum":
+    case "valueobject":
+    case "entity":
+      return true;
+    case "array":
+      return isNarrowableType(t.element);
+    case "optional":
+      return isNarrowableType(t.inner);
+    default:
+      return false;
+  }
 }
 
 /** Collect every distinct anonymous-union shape reachable from the context's

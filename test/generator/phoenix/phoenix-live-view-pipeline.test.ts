@@ -1757,6 +1757,25 @@ describe("Ash.transaction/2 domain-list form (workflow-emit unit)", () => {
     );
   });
 
+  it("narrows the @spec success arm to {:ok, T} when the workflow carries a returnType", () => {
+    // Slice 4 (static-analysis-followups.md): enrichment derives the tail
+    // bind's type; the emitter tightens `{:ok, term()}` to the concrete
+    // struct, dropping the bare `:ok` arm (the body always returns a tuple).
+    const typedCtx: BoundedContextIR = {
+      ...transactionalCtx,
+      workflows: [
+        { ...transactionalCtx.workflows[0]!, returnType: { kind: "entity", name: "Order" } },
+      ],
+    };
+    const out = new Map<string, string>();
+    emitWorkflows("phoenix_app", typedCtx, "PhoenixApp", out);
+    const wfEx = out.get("lib/phoenix_app/sales/workflows/place_order.ex")!;
+    expect(wfEx).toMatch(
+      /@spec run\(%\{customer_id: String\.t\(\)\}, any\(\)\) :: \{:ok, PhoenixApp\.Sales\.Order\.t\(\)\} \| \{:error, term\(\)\}/,
+    );
+    expect(wfEx).not.toMatch(/:ok \| \{:ok, term\(\)\}/);
+  });
+
   it("emits @spec run/2 with any() for empty-params workflows", () => {
     // No declared params → run/2 takes `_args` and accepts any().
     const emptyParamsCtx: BoundedContextIR = {
