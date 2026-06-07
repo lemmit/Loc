@@ -1,5 +1,6 @@
 import { hasCreate } from "../../../ir/enrich/wire-projection.js";
 import { pagedReturn } from "../../../ir/stdlib/generics.js";
+import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   EnrichedBoundedContextIR,
@@ -74,9 +75,16 @@ export function emitController(
         })),
       finds: (repo?.finds ?? []).map((find) => {
         const paged = pagedReturn(find.returnType);
+        // Discriminated-union find return (P4c): the controller returns the
+        // polymorphic base record directly (no agg-derived wrapper).
+        const unionType =
+          find.returnType.kind === "union"
+            ? unionInstanceName(find.returnType.variants)
+            : undefined;
         return {
           name: find.name,
           isRoot: find.name === "all",
+          responseType: unionType,
           queryRouteParams: [
             ...find.params.map((p) => {
               // A required find param must bind required so Swashbuckle emits
@@ -100,11 +108,13 @@ export function emitController(
           ].join(", "),
           returnShape: (paged
             ? "paged"
-            : find.returnType.kind === "array"
-              ? "list"
-              : find.returnType.kind === "optional"
-                ? "optional"
-                : "single") as "list" | "optional" | "single" | "paged",
+            : unionType
+              ? "union"
+              : find.returnType.kind === "array"
+                ? "list"
+                : find.returnType.kind === "optional"
+                  ? "optional"
+                  : "single") as "list" | "optional" | "single" | "paged" | "union",
         };
       }),
       extraUsings: [...usings].sort(),

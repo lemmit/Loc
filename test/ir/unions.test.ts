@@ -200,15 +200,15 @@ describe("unions — platform-aware emission gate (P4b)", () => {
     expect(await gate("hono", "Order option")).toEqual([]);
   });
 
-  it("still gates a union find served by dotnet (P4c)", async () => {
-    expect((await gate("dotnet", "Order or Cancel")).length).toBeGreaterThan(0);
+  it("does NOT gate a union find served by dotnet (emission implemented in P4c)", async () => {
+    expect(await gate("dotnet", "Order or Cancel")).toEqual([]);
   });
 
   it("still gates a union find served by phoenix (P4d)", async () => {
     expect((await gate("phoenix", "Order or Cancel")).length).toBeGreaterThan(0);
   });
 
-  it("does not fire when no union is used (dotnet)", async () => {
-    expect(await gate("dotnet", "Order[]")).toEqual([]);
+  it("does not fire when no union is used (phoenix)", async () => {
+    expect(await gate("phoenix", "Order[]")).toEqual([]);
   });
 });

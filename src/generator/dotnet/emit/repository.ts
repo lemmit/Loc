@@ -27,7 +27,10 @@ export function renderRepositoryInterface(
   ns: string,
   retrievals: RetrievalIR[] = [],
 ): string {
-  const finds = repo?.finds ?? [];
+  // Union-returning finds (P4c) are handled entirely in the Application layer
+  // (the query handler stubs them); the Domain repository emits no method for
+  // them, so it never needs to name the Response-side union type.
+  const finds = (repo?.finds ?? []).filter((f) => f.returnType.kind !== "union");
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const anyFindIsPaged = finds.some((f) => pagedReturn(f.returnType));
   const findLines = finds.map((f) => {
@@ -92,7 +95,10 @@ export function renderRepositoryImpl(
   },
 ): string {
   const emitTrace = !!options?.emitTrace;
-  const finds = repo?.finds ?? [];
+  // Union-returning finds (P4c) are handled entirely in the Application layer
+  // (the query handler stubs them); the Domain repository emits no method for
+  // them, so it never needs to name the Response-side union type.
+  const finds = (repo?.finds ?? []).filter((f) => f.returnType.kind !== "union");
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const setName = plural(upperFirst(agg.name));
   const associations = agg.associations;
@@ -463,7 +469,10 @@ export function renderDocumentRepositoryImpl(
   findBodies: Array<{ name: string; filterClause: string; projectionClause: string }>,
   options?: { extraUsings?: readonly string[] },
 ): string {
-  const finds = repo?.finds ?? [];
+  // Union-returning finds (P4c) are handled entirely in the Application layer
+  // (the query handler stubs them); the Domain repository emits no method for
+  // them, so it never needs to name the Response-side union type.
+  const finds = (repo?.finds ?? []).filter((f) => f.returnType.kind !== "union");
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const setName = plural(upperFirst(agg.name));
   const snap = `${agg.name}Snapshot`;
@@ -607,7 +616,10 @@ export function renderEventSourcedRepositoryImpl(
   findBodies: Array<{ name: string; filterClause: string; projectionClause: string }>,
   options?: { extraUsings?: readonly string[] },
 ): string {
-  const finds = repo?.finds ?? [];
+  // Union-returning finds (P4c) are handled entirely in the Application layer
+  // (the query handler stubs them); the Domain repository emits no method for
+  // them, so it never needs to name the Response-side union type.
+  const finds = (repo?.finds ?? []).filter((f) => f.returnType.kind !== "union");
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const dbSet = `${agg.name}Events`;
   // The event types this aggregate's stream can contain — the events its

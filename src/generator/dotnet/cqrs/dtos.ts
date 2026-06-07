@@ -3,12 +3,16 @@ import {
   hasCreate,
   wireCreateDefault,
 } from "../../../ir/enrich/wire-projection.js";
+import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
+import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
+import { type UnionMemberField, unionMembers } from "../../_payload/union-wire.js";
 import {
   aggregateResponseParams,
   csIdValueClrType,
@@ -61,6 +65,73 @@ export function emitResponseDtos(
   out.set(
     `Application/${aggFolder}/Responses/${agg.name}Responses.cs`,
     renderResponseDtos({ ns, aggName: agg.name, records }),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Discriminated-union response DTOs (payload-transport-layer.md, P4c).
+//
+// A `find x(): A or B` emits one polymorphic base record per distinct union,
+// `[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]` with one
+// `[JsonDerivedType(typeof(Variant), "Tag")]` per variant.  System.Text.Json
+// serializes a variant as `{ "type": "Tag", …fields }` — byte-identical to the
+// TS/Hono `z.discriminatedUnion("type", …)`.  Variant fields come from the
+// shared `unionMembers` resolver (entity → wire shape, scalar → `Value`, the
+// `none` unit → an empty record).
+// ---------------------------------------------------------------------------
+
+export function emitUnionDtos(
+  repo: RepositoryIR | undefined,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+  aggFolder: string,
+  out: Map<string, string>,
+): void {
+  const seen = new Set<string>();
+  for (const find of repo?.finds ?? []) {
+    if (find.returnType.kind !== "union") continue;
+    const name = unionInstanceName(find.returnType.variants);
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.set(
+      `Application/${aggFolder}/Responses/${name}.cs`,
+      renderUnionDto(name, unionMembers(find.returnType.variants, ctx), ns, aggFolder, ctx),
+    );
+  }
+}
+
+function renderUnionDto(
+  name: string,
+  members: ReturnType<typeof unionMembers>,
+  ns: string,
+  aggFolder: string,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const variantRecord = (tag: string): string => `${name}_${tag}`;
+  const memberParams = (m: (typeof members)[number]): string => {
+    if (m.shape === "none") return "";
+    if (m.shape === "scalar") return dtoParam(wireType(m.type, ctx, "response"), "Value");
+    return m.fields
+      .map((f: UnionMemberField) => dtoParam(wireType(f.type, ctx, "response"), upperFirst(f.name)))
+      .join(", ");
+  };
+  return lines(
+    "// Auto-generated.",
+    "using System;",
+    "using System.Collections.Generic;",
+    "using System.ComponentModel.DataAnnotations;",
+    "using System.Text.Json.Serialization;",
+    `using ${ns}.Domain.Enums;`,
+    "",
+    `namespace ${ns}.Application.${aggFolder}.Responses;`,
+    "",
+    '[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]',
+    ...members.map((m) => `[JsonDerivedType(typeof(${variantRecord(m.tag)}), "${m.tag}")]`),
+    `public abstract record ${name};`,
+    "",
+    ...members.map(
+      (m) => `public sealed record ${variantRecord(m.tag)}(${memberParams(m)}) : ${name};`,
+    ),
   );
 }
 

@@ -1,3 +1,4 @@
+import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { upperFirst } from "../../util/naming.js";
@@ -448,13 +449,15 @@ export function renderCsType(t: TypeIR): string {
       // response record when serializing.
       return `${upperFirst(t.ctor)}<${renderCsType(t.arg)}>`;
     case "union":
+      // Discriminated union → the polymorphic base record name (P4c).  The
+      // emitter (`emitUnionDtos`) declares it `[JsonPolymorphic("type")]` with
+      // one `[JsonDerivedType]` per variant, so the wire matches the TS
+      // `z.discriminatedUnion("type", …)` byte-for-byte.
+      return unionInstanceName(t.variants);
     case "none":
-      // Discriminated unions (`A or B`, `T option`) are P4c; the IR-validate
-      // gate (`loom.union-unsupported`) blocks them before any backend
-      // renderer runs, so reaching here is a bug.
-      throw new Error(
-        `renderCsType: discriminated unions are not emitted yet (payload-transport-layer.md, P4c); got '${t.kind}'.`,
-      );
+      // `none` only ever appears inside an option's union (rendered by the
+      // union DTO emitter), never as a standalone C# type — defensive.
+      return "object";
   }
 }
 
