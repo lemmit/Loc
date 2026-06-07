@@ -1,9 +1,14 @@
 # Proposal — Reorganize tests and consolidate the macro pipeline
 
-> Status: **Proposal**. Nothing in this document is implemented yet. It
-> captures a layout we want to converge on so the test tree and the
-> macro subsystem mirror the one-directional pipeline described in
-> `CLAUDE.md` and `docs/technical.md`.
+> Status: **SHIPPED.** The `test/` tree now mirrors the `src/` pipeline
+> phases — `test/generator/` is subdivided per backend
+> (`typescript/`, `dotnet/`, `react/`, `phoenix/`) plus `_walker/` /
+> `_packs/` / `_obs/`; LSP tests live under `test/language/lsp/`; the
+> macro subsystem is consolidated under `src/macros/`
+> (`expander.ts` / `registry.ts` / `api/` / `stdlib/`). The layout this
+> proposal argued for is the layout on main — see `CLAUDE.md`'s
+> repository-layout table. The original target text is retained below
+> for context.
 
 ## Context
 

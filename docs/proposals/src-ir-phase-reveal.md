@@ -1,9 +1,19 @@
 # Proposal — Reveal the IR pipeline phases in `src/ir/`
 
-> Status: **Proposal**. Nothing in this document is implemented yet.
+> Status: **SHIPPED.** `src/ir/` now reveals the pipeline phases as
+> sibling directories: `types/` (the IR vocabulary), `lower/` (phase ⑤),
+> `enrich/` (phase ⑥), `validate/` (phase ⑦), and `util/`;
+> `migrations-builder.ts` moved out of `src/ir/` to `src/system/` (it
+> runs at system-composition time, phase ⑨). `lower/` and `validate/`
+> were further decomposed into per-declaration-kind / per-theme leaves
+> (#921/#923/#930/#935 for lower; #900 for validate). The layout this
+> proposal argued for is the layout on main — see `CLAUDE.md`'s
+> repository-layout table. The original proposal text is retained below
+> for context.
+>
 > Companion to [`test-layout-and-macro-consolidation.md`](./test-layout-and-macro-consolidation.md)
-> — that one made the *test tree* mirror the pipeline; this one does
-> the same for the *IR source tree*.
+> (also SHIPPED) — that one made the *test tree* mirror the pipeline;
+> this one did the same for the *IR source tree*.
 >
 > **Revision history**
 > - **v2** — corrected `transform/` bucket (see "Correction" below); folded
