@@ -112,6 +112,25 @@ function errText(err: unknown): string {
   return String(err);
 }
 
+// Reset the database by dropping every user-defined schema, not just
+// `public`.  System-mode backends place their tables under a
+// per-context pgSchema (e.g. `sales`) whenever the source resolves a
+// dataSource, so a `DROP SCHEMA public CASCADE` alone leaves those
+// tables behind — the subsequent IF-NOT-EXISTS DDL then no-ops and the
+// stale shape (or a schema-drift mismatch) survives the reset.  This
+// drops public + every generated schema, preserving only Postgres'
+// own schemas and (optionally) our `__loom` bookkeeping schema.
+function dropUserSchemasSql(includeLoom: boolean): string {
+  const loomFilter = includeLoom ? "" : " AND nspname <> '__loom'";
+  return (
+    "DO $$ DECLARE s text; BEGIN " +
+    "FOR s IN SELECT nspname FROM pg_namespace " +
+    `WHERE nspname !~ '^pg_' AND nspname <> 'information_schema'${loomFilter} ` +
+    "LOOP EXECUTE format('DROP SCHEMA IF EXISTS %I CASCADE', s); END LOOP; " +
+    "EXECUTE 'CREATE SCHEMA IF NOT EXISTS public'; END $$;"
+  );
+}
+
 let cachedPgliteWasm: WebAssembly.Module | null = null;
 let cachedInitdbWasm: WebAssembly.Module | null = null;
 let cachedFsBundle: Blob | null = null;
@@ -250,10 +269,9 @@ async function boot(
   // apply starts from a blank database.
   if (fresh) {
     try {
-      await pglite.exec(
-        "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; " +
-          "DROP SCHEMA IF EXISTS __loom CASCADE;",
-      );
+      // `includeLoom: true` — a full wipe also clears the schema-hash
+      // bookkeeping so the following apply is treated as a first boot.
+      await pglite.exec(dropUserSchemasSql(true));
     } catch (err) {
       return {
         ok: false,
@@ -365,8 +383,10 @@ async function migrateOrApplyDDL(
   let migrated = false;
   if (oldHash !== null) {
     // Schema drifted: drop and recreate.  CASCADE is essential —
-    // foreign-keyed rows would otherwise block the drop.
-    await pglite.exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
+    // foreign-keyed rows would otherwise block the drop.  Drops every
+    // generated schema (a system-mode backend's `sales` etc.), not
+    // just `public`, while keeping our `__loom` hash bookkeeping.
+    await pglite.exec(dropUserSchemasSql(false));
     migrated = true;
   }
   if (ddl.trim().length > 0) await pglite.exec(ddl);
@@ -480,13 +500,12 @@ async function wipe(): Promise<{ ok: boolean; message?: string }> {
     return { ok: false, message: "Runtime not booted — nothing to wipe." };
   }
   try {
-    // `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` is the
+    // Drop every user-defined schema (public + any generated
+    // per-context schema like `sales`) and recreate `public` — the
     // shortest path to "remove every user object and start fresh".
-    // Postgres-flavoured PGlite supports it.  We then re-run the
-    // saved DDL to recreate the tables in the same shape.
-    await state.pglite.exec(
-      "DROP SCHEMA public CASCADE; CREATE SCHEMA public;",
-    );
+    // We then re-run the saved DDL to recreate the tables in the same
+    // shape.  Keeps `__loom` so the schema-hash bookkeeping survives.
+    await state.pglite.exec(dropUserSchemasSql(false));
     if (state.ddl.trim().length > 0) {
       await state.pglite.exec(state.ddl);
     }
