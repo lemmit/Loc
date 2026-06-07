@@ -62,14 +62,26 @@ export function renderDevExs(appName: string, appModule: string, port: number): 
   return `# Auto-generated.
 import Config
 
-config :${appName}, ${appModule}.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "${appName}_dev",
-  stacktrace: true,
-  show_sensitive_data_on_connection_error: true,
-  pool_size: 10
+# Honor DATABASE_URL when set (containerized dev + e2e harnesses point
+# the app at a provisioned database / port), otherwise fall back to the
+# local default.  Ecto rejects mixing \`url:\` with discrete host/database
+# options, so exactly one branch configures the repo.
+if url = System.get_env("DATABASE_URL") do
+  config :${appName}, ${appModule}.Repo,
+    url: url,
+    stacktrace: true,
+    show_sensitive_data_on_connection_error: true,
+    pool_size: 10
+else
+  config :${appName}, ${appModule}.Repo,
+    username: "postgres",
+    password: "postgres",
+    hostname: "localhost",
+    database: "${appName}_dev",
+    stacktrace: true,
+    show_sensitive_data_on_connection_error: true,
+    pool_size: 10
+end
 
 config :${appName}, ${appModule}Web.Endpoint,
   # PORT env var overrides the dev default so test harnesses + parallel

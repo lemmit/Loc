@@ -111,7 +111,14 @@ jobs:
           # The test reads LOOM_OBS_PG_URL and skips its in-test
           # `docker run postgres` step when the URL is supplied.
           LOOM_OBS_PG_URL: 'postgres://postgres:postgres@127.0.0.1:5432'
-          LOOM_OBS_PG_DB: 'phoenix_app'
+          # Distinct database per step — both generated apps are named
+          # `phoenix_app` and their initial migrations share one version
+          # (BASE_TIMESTAMP), so a shared database lets the first step's
+          # `schema_migrations` shadow the second's migration (it gets
+          # skipped, leaving its tables uncreated).  Isolate them.  The
+          # generated dev.exs honors DATABASE_URL, so each app targets its
+          # own database.
+          LOOM_OBS_PG_DB: 'phoenix_app_obs'
         run: npx vitest run test/e2e/observability-events-phoenix.test.ts --reporter=verbose
 
       # D-PHOENIX-SURFACE: same postgres service + BEAM setup, second
@@ -125,7 +132,9 @@ jobs:
         env:
           LOOM_EMBED_E2E_PHOENIX: '1'
           LOOM_OBS_PG_URL: 'postgres://postgres:postgres@127.0.0.1:5432'
-          LOOM_OBS_PG_DB: 'phoenix_app'
+          # Distinct from the observability step's database (see note above)
+          # so the shared migration version doesn't shadow this migration.
+          LOOM_OBS_PG_DB: 'phoenix_app_embed'
         run: npx vitest run test/e2e/embed-react-phoenix.test.ts --reporter=verbose
 
       - name: Surface failure context
