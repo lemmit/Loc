@@ -19,8 +19,10 @@ test("mobile Run kicks the pipeline and surfaces files", async ({ page }) => {
   await page.goto("/");
   await page.waitForTimeout(1500);
 
-  // Pick a system-mode example.
-  await page.getByRole("textbox").first().click();
+  // Pick a system-mode example via the workspace drawer (the example
+  // picker moved off the mobile header into the drawer).
+  await page.getByTestId("mobile-workspace-button").click();
+  await page.getByRole("textbox", { name: "Choose example" }).click();
   await page.getByRole("option", { name: /Sales System/ }).click();
   // Auto-Generate fires ~800 ms after the source mirrors land — give
   // it a beat so the Files tab is already populated.
