@@ -255,9 +255,10 @@ function collectContextsFor(
   //     is gated as not-implemented there by IR-validate, so it never generates.
   // Concretes always stay; the per-aggregate emit loop skips abstract bases
   // for repo/routes regardless, so a kept TPH base only contributes its table.
-  // TPH storage is implemented on Hono (Drizzle shared table) and .NET (EF Core
-  // `HasDiscriminator`); both keep the base so it can own the shared table.
-  const isTphCapable = d.platform === "node" || d.platform === "dotnet";
+  // TPH storage is implemented on Hono (Drizzle shared table), .NET (EF Core
+  // `HasDiscriminator`), and Phoenix (Ash shared-table multi-resource +
+  // `base_filter` on `kind`); all keep the base so it can own the shared table.
+  const isTphCapable = d.platform === "node" || d.platform === "dotnet" || d.platform === "phoenix";
   const keepsTable = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
     !!a.isAbstract && isTphCapable && (a.inheritanceUsing ?? "sharedTable") === "sharedTable";
   // A TPC (`ownTable`) base is kept in the view on every backend that

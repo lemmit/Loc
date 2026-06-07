@@ -1,9 +1,11 @@
-# Phoenix / Ash TPH emission — build spec
+# Phoenix / Ash TPH emission — design note
 
-> Status: **PLAN** (design-decided, code-grounded). The last ✗ in the TPH
-> parity matrix: TPH (`sharedTable`) storage on the **Phoenix / Ash**
-> backend. TPC (`ownTable`) already ships on Phoenix; TPH is gated
-> (`loom.tph-backend-unsupported`, which after [#981] admits `node` + `dotnet`).
+> Status: **SHIPPED.** The last TPH ✗ in the parity matrix — TPH (`sharedTable`)
+> on **Phoenix / Ash** — closed via the shared-table multi-resource +
+> `base_filter` design below; `loom.tph-backend-unsupported` now admits all
+> three DB backends (`node` / `dotnet` / `phoenix`). The per-file plan maps 1:1
+> onto the diff; `mix compile --warnings-as-errors` against real Ash 3.x (the
+> `phoenix-build` `tph.ddd` fixture) is the decisive gate.
 
 ## The design problem: Ash has no native STI
 

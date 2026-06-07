@@ -796,9 +796,10 @@ export function validateInheritanceStorage(
   backendPlatforms: Set<string>,
 ): void {
   const byName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
-  // TPH storage emission ships on Hono (Drizzle shared table + `kind`) and
-  // .NET (EF Core native `HasDiscriminator`).  Phoenix/Ash TPH is unbuilt.
-  const TPH_CAPABLE = new Set(["node", "dotnet"]);
+  // TPH storage emission ships on Hono (Drizzle shared table + `kind`), .NET
+  // (EF Core native `HasDiscriminator`), and Phoenix (Ash shared-table
+  // multi-resource + `base_filter` on `kind`).
+  const TPH_CAPABLE = new Set(["node", "dotnet", "phoenix"]);
   const hostedByCapable = [...backendPlatforms].some((p) => TPH_CAPABLE.has(p));
   for (const agg of ctx.aggregates) {
     if (!agg.isAbstract && !agg.extendsAggregate) continue;
@@ -819,14 +820,14 @@ export function validateInheritanceStorage(
     const hostNote =
       others.length > 0
         ? `it is hosted by ${others.join(", ")}, where TPH is not implemented`
-        : "no Hono or .NET backend deployable hosts this context";
+        : "no Hono, .NET, or Phoenix backend deployable hosts this context";
     diags.push({
       severity: "error",
       code: "loom.tph-backend-unsupported",
       message:
         `aggregate '${agg.name}' (${role}) resolves to sharedTable (TPH) inheritance via ` +
-        `${how}, but TPH storage emission is implemented for the Hono and .NET backends only — ` +
-        `${hostNote}. Host the context on a Hono or .NET deployable, or declare ` +
+        `${how}, but TPH storage emission is implemented for the Hono, .NET, and Phoenix backends only — ` +
+        `${hostNote}. Host the context on a Hono, .NET, or Phoenix deployable, or declare ` +
         `'inheritanceUsing(ownTable)' to use the per-concrete (TPC) layout (all backends). ` +
         `Tracked in aggregate-inheritance.md I2/I3.`,
       source: `${ctx.name}/${agg.name}`,

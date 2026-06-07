@@ -495,21 +495,16 @@ system Sys {
     expect(diags.filter((d) => d.severity === "error" && /TPH/.test(d.message))).toEqual([]);
   });
 
-  it("errors a TPH hierarchy hosted by a non-capable backend (phoenix)", async () => {
-    // Phoenix/Ash TPH is unbuilt — the remaining ✗ row in the parity matrix.
+  it("does not gate a TPH hierarchy hosted by a Phoenix backend", async () => {
+    // Phoenix ships TPH via Ash shared-table multi-resource + base_filter on
+    // `kind` (aggregate-inheritance.md I2).  All three DB backends now support
+    // TPH, so the gate has no triggering host left.
     const ON_PHOENIX = TPH.replace("platform: hono", "platform: phoenix").replace(
       "port: 3000",
       "port: 5000",
     );
     const diags = validateLoomModel(enrichLoomModel(lowerModel(await parseValid(ON_PHOENIX))));
-    const errors = diags.filter(
-      (d) => d.severity === "error" && /TPH storage emission is implemented/.test(d.message),
-    );
-    expect(errors.map((e) => e.source).sort()).toEqual([
-      "Parties/Customer",
-      "Parties/Party",
-      "Parties/Supplier",
-    ]);
+    expect(diags.filter((d) => d.severity === "error" && /TPH/.test(d.message))).toEqual([]);
   });
 
   it("emits ONE shared table with a `kind` discriminator + nullable concrete columns", async () => {

@@ -17,7 +17,7 @@ Legend: ✓ implemented · ✗ gated (fail-fast validator error) · ⚠ partial 
 | Feature | node | dotnet | phoenix | react | Owning proposal |
 |---|:---:|:---:|:---:|:---:|---|
 | Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✗ | N/A | [workflow-and-applier](./workflow-and-applier.md) |
-| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✗ | N/A | [aggregate-inheritance](./aggregate-inheritance.md) |
+| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | N/A | [aggregate-inheritance](./aggregate-inheritance.md) |
 | `shape(document)` persistence | ✓ | ✓ | ✗ | N/A | [document-and-json-hierarchies](./document-and-json-hierarchies.md) |
 | Principal `filter` (`currentUser`/tenancy) | ✗ | ✓ | ✗ | N/A | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
 | Provenanced fields (runtime trace) | ✓ | ✗ gated | ✗ gated | N/A | [provenance](./provenance.md) |
@@ -48,9 +48,10 @@ backend today** — designed boundaries with no implementation:
 
 Ordered by blast radius — how many real models the gap blocks today:
 
-1. **Phoenix backend depth** — event sourcing, TPH, `shape(document)`, ordered
+1. **Phoenix backend depth** — event sourcing, `shape(document)`, ordered
    `X id[]`, principal filters. Phoenix is the backend furthest from parity; it
-   is the common factor in most ✗ rows above.
+   is the common factor in most ✗ rows above. (TPH now closed — shared-table
+   multi-resource + `base_filter`, see [phoenix-tph-emission](./phoenix-tph-emission.md).)
 2. ✅ **DONE (Tier 0) — silent no-ops made honest.** Provenanced fields and the
    per-operation `audited` flag used to compile and do nothing on dotnet/phoenix;
    they now fail fast (`loom.provenanced-backend-unsupported`,
