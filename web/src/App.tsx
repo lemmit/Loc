@@ -11,6 +11,7 @@ import type { GenerateOk, GenerateResult, VfsEntry, VirtualFile } from "./build/
 import type { BundleOk } from "./bundle/protocol";
 import { engineRegistry, selectedEngineId, type RuntimeEngine } from "./engine";
 import { emptyDependencySet } from "./engine";
+import { recordAndGcOpfs } from "./engine/opfs-gc";
 import type { QueryResult } from "./runtime/protocol";
 import {
   CUSTOM_ENDPOINT,
@@ -807,6 +808,11 @@ export default function App(): JSX.Element {
           persistent: res.persistent,
           migrated: res.migrated,
         });
+        // House-keep OPFS: this boot's island is now most-recently-used;
+        // drop stale islands from sources the user has moved on from so
+        // they don't accumulate toward the storage quota.  Only when the
+        // boot is actually OPFS-backed, and never blocking the boot.
+        if (res.persistent) void recordAndGcOpfs(sourceHash);
         await loadOpenApiSpec(engine);
         return true;
       }

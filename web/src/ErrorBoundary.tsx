@@ -19,6 +19,7 @@
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Box, Button, Code, Group, Stack, Text, Title } from "@mantine/core";
+import { logDiagnostic } from "./util/diagnostics";
 
 interface Props {
   children: ReactNode;
@@ -98,6 +99,7 @@ export class ErrorBoundary extends Component<Props, State> {
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     // eslint-disable-next-line no-console
     console.error("Playground crashed:", error, info.componentStack);
+    void logDiagnostic("react-error");
   }
 
   override render(): ReactNode {
@@ -116,9 +118,11 @@ export function installGlobalErrorLogging(): void {
   window.addEventListener("error", (e) => {
     // eslint-disable-next-line no-console
     console.error("Uncaught error:", e.error ?? e.message);
+    void logDiagnostic("window-error");
   });
   window.addEventListener("unhandledrejection", (e) => {
     // eslint-disable-next-line no-console
     console.error("Unhandled promise rejection:", e.reason);
+    void logDiagnostic("unhandledrejection");
   });
 }
