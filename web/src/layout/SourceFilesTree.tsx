@@ -202,81 +202,105 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
     [props],
   );
 
-  // Menu items for the current target.  `relPathOf` maps a tree row's
-  // workspace-relative path; files come from FileTree as workspace-
-  // relative, so re-prefix to the full path the callbacks expect.
-  const menuItems = (() => {
-    if (!menu) return null;
-    const t = menu.target;
-    if (t === null) {
+  // The action menu for a target row (`null` = empty-area / root).
+  // Shared by the right-click context menu AND the per-row `⋮` kebab so
+  // both surfaces offer the identical set — the kebab is what makes
+  // rename + folder ops reachable on touch, where right-click isn't.
+  // Tree row paths are workspace-relative; files re-prefix to the full
+  // path the callbacks expect, folders use the rel path directly.
+  const actionItems = useCallback(
+    (target: { path: string; kind: "file" | "folder" } | null): JSX.Element => {
+      if (target === null) {
+        return (
+          <>
+            <Menu.Item onClick={() => openForm({ kind: "create-file", parent: "" })}>
+              New file…
+            </Menu.Item>
+            <Menu.Item onClick={() => openForm({ kind: "create-folder", parent: "" })}>
+              New folder…
+            </Menu.Item>
+          </>
+        );
+      }
+      if (target.kind === "folder") {
+        const folderRel = target.path;
+        return (
+          <>
+            <Menu.Item onClick={() => openForm({ kind: "create-file", parent: folderRel })}>
+              New file…
+            </Menu.Item>
+            <Menu.Item onClick={() => openForm({ kind: "create-folder", parent: folderRel })}>
+              New folder…
+            </Menu.Item>
+            <Menu.Divider />
+            <Menu.Item color="red" onClick={() => confirmDeleteFolder(folderRel)}>
+              Delete folder
+            </Menu.Item>
+          </>
+        );
+      }
+      const fullPath = `${WORKSPACE_PREFIX}${target.path}`;
+      const isMain = fullPath === DEFAULT_PATH;
       return (
         <>
-          <Menu.Item onClick={() => openForm({ kind: "create-file", parent: "" })}>New file…</Menu.Item>
-          <Menu.Item onClick={() => openForm({ kind: "create-folder", parent: "" })}>New folder…</Menu.Item>
-        </>
-      );
-    }
-    if (t.kind === "folder") {
-      const folderRel = t.path; // workspace-relative from FileTree
-      return (
-        <>
-          <Menu.Item onClick={() => openForm({ kind: "create-file", parent: folderRel })}>
-            New file…
-          </Menu.Item>
-          <Menu.Item onClick={() => openForm({ kind: "create-folder", parent: folderRel })}>
-            New folder…
+          <Menu.Item onClick={() => props.onSelect(fullPath)}>Open</Menu.Item>
+          <Menu.Item
+            disabled={isMain}
+            onClick={() => openForm({ kind: "rename", target: fullPath }, leafNoExt(fullPath))}
+          >
+            Rename…
           </Menu.Item>
           <Menu.Divider />
-          <Menu.Item color="red" onClick={() => confirmDeleteFolder(folderRel)}>
-            Delete folder
+          <Menu.Item color="red" disabled={isMain} onClick={() => confirmDeleteFile(fullPath)}>
+            Delete file
           </Menu.Item>
         </>
       );
-    }
-    const fullPath = `${WORKSPACE_PREFIX}${t.path}`;
-    const isMain = fullPath === DEFAULT_PATH;
-    return (
-      <>
-        <Menu.Item onClick={() => props.onSelect(fullPath)}>Open</Menu.Item>
-        <Menu.Item
-          disabled={isMain}
-          onClick={() => openForm({ kind: "rename", target: fullPath }, leafNoExt(fullPath))}
-        >
-          Rename…
-        </Menu.Item>
-        <Menu.Divider />
-        <Menu.Item color="red" disabled={isMain} onClick={() => confirmDeleteFile(fullPath)}>
-          Delete file
-        </Menu.Item>
-      </>
-    );
-  })();
+    },
+    [openForm, confirmDeleteFile, confirmDeleteFolder, props],
+  );
+
+  const menuItems = menu ? actionItems(menu.target) : null;
 
   const activeRelPath = props.activePath.startsWith(WORKSPACE_PREFIX)
     ? props.activePath.slice(WORKSPACE_PREFIX.length)
     : props.activePath;
 
-  // Per-row inline delete `×` — kept for one-tap discoverability
-  // (touch especially), now with a confirm.  Hidden for main.ddd.
+  // Per-row `⋮` kebab — a plain tap that opens the same action menu as
+  // right-click.  This is the primary affordance on touch (long-press →
+  // contextmenu is unreliable there, especially iOS Safari), and gives
+  // folders an explicit action surface they otherwise lacked.
   const rowActions = useCallback(
-    (relPath: string) => {
-      const fullPath = `${WORKSPACE_PREFIX}${relPath}`;
-      if (fullPath === DEFAULT_PATH) return null;
-      return (
-        <Tooltip label="Delete file" withArrow openDelay={400}>
-          <ActionIcon
-            size="sm"
-            variant="subtle"
-            color="gray"
-            aria-label={`Delete ${relPath}`}
-            onClick={() => confirmDeleteFile(fullPath)}
-          >
-            ×
-          </ActionIcon>
-        </Tooltip>
-      );
-    },
-    [confirmDeleteFile],
+    (relPath: string, kind: "file" | "folder") => (
+      <Menu position="bottom-end" shadow="md" width={190} withinPortal>
+        <Menu.Target>
+          <Tooltip label="File actions" withArrow openDelay={400}>
+            <ActionIcon
+              component="span"
+              size="sm"
+              variant="subtle"
+              color="gray"
+              aria-label={`Actions for ${relPath}`}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+            >
+              ⋮
+            </ActionIcon>
+          </Tooltip>
+        </Menu.Target>
+        <Menu.Dropdown
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        >
+          {actionItems({ path: relPath, kind })}
+        </Menu.Dropdown>
+      </Menu>
+    ),
+    [actionItems],
   );
 
   const addMenu = (
