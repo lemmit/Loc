@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   ActionIcon,
   Badge,
@@ -11,6 +12,7 @@ import {
   Title,
 } from "@mantine/core";
 import { PackPicker } from "../workspace/PackPicker";
+import { WorkspaceDrawer } from "../workspace/WorkspaceDrawer";
 import { WorkspaceSwitcher } from "../workspace/WorkspaceSwitcher";
 import { WorkspaceTree } from "../workspace/WorkspaceTree";
 import type { LayoutCtx } from "./ctx";
@@ -151,24 +153,29 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
   // bundler crunched.  This was the root cause of the "Run does
   // nothing" complaint.
   const runLoading = pipeline.generating || pipeline.bundling || pipeline.booting;
+  const [wsDrawerOpen, setWsDrawerOpen] = useState(false);
   return (
     <Group h="100%" px="sm" justify="space-between" gap="xs" wrap="nowrap">
       <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
         <Title order={6} style={{ flexShrink: 0 }}>Loom</Title>
-        <Select
+        {/* Workspaces are the primary concept on mobile too: a single
+            button shows the active workspace and opens the drawer that
+            owns switch / new / rename / delete + example import.  This
+            replaces the cramped top-row example Select and the fragile
+            nested Select/Menu that used to live in the overflow kebab. */}
+        <Button
           size="sm"
-          value={exampleId}
-          onChange={(v) => v && setExampleId(v)}
-          data={augmentedExamplesList.map((e) => ({ value: e.id, label: e.label }))}
-          allowDeselect={false}
-          comboboxProps={{ withinPortal: true }}
-          // 16px font keeps iOS Safari from auto-zooming on focus.
-          styles={{ input: { fontSize: 16, minHeight: 36 } }}
+          variant="default"
+          onClick={() => setWsDrawerOpen(true)}
+          data-testid="mobile-workspace-button"
+          aria-label={`Workspace: ${workspace.activeName} — switch or import an example`}
+          styles={{ root: { minHeight: 36 }, label: { overflow: "hidden", textOverflow: "ellipsis" } }}
           style={{ flex: 1, minWidth: 0 }}
-          // Matches DesktopHeader — gives the example combobox a
-          // stable accessible name for SRs + the e2e suite.
-          aria-label="Choose example"
-        />
+        >
+          <Text size="sm" truncate>
+            {workspace.activeName}
+          </Text>
+        </Button>
       </Group>
       <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
         <Button
@@ -234,9 +241,9 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
               </Text>
             </Box>
             <Menu.Divider />
-            <Box px="sm" py={6}>
-              <WorkspaceSwitcher workspace={workspace} size="sm" />
-            </Box>
+            {/* Workspace switch / create / rename / delete + example
+                import live in the WorkspaceDrawer (opened from the
+                top-row button), not nested in this menu. */}
             <Box px="sm" py={6}>
               <PackPicker
                 workspaceStore={workspace.store}
@@ -254,6 +261,14 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
           </Menu.Dropdown>
         </Menu>
       </Group>
+      <WorkspaceDrawer
+        opened={wsDrawerOpen}
+        onClose={() => setWsDrawerOpen(false)}
+        workspace={workspace}
+        examples={augmentedExamplesList}
+        exampleId={exampleId}
+        onImportExample={setExampleId}
+      />
     </Group>
   );
 }

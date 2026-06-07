@@ -14,6 +14,8 @@ test.use({ viewport: { width: 375, height: 812 } });
 async function openExample(page: Page, label: RegExp): Promise<void> {
   await page.goto("/");
   await page.waitForTimeout(1500);
+  // The example picker lives in the workspace drawer on mobile.
+  await page.getByTestId("mobile-workspace-button").click();
   await page.getByRole("textbox", { name: "Choose example" }).click();
   await page.getByRole("option", { name: label }).first().click();
   await page.waitForTimeout(1500);
