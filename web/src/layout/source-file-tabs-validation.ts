@@ -74,6 +74,75 @@ export function validateNewFolderName(
   return undefined;
 }
 
+/** Join a workspace-relative folder (`""` = root, `shared`, `a/b`) and a
+ *  leaf to a full `/workspace/...` path. */
+export function joinWorkspace(parentRel: string, leaf: string): string {
+  const p = parentRel.replace(/^\/+/, "").replace(/\/+$/, "");
+  return p ? `${WORKSPACE_PREFIX}${p}/${leaf}` : `${WORKSPACE_PREFIX}${leaf}`;
+}
+
+/** Full path for a new file `basename` created inside folder `parentRel`
+ *  (`.ddd` appended when missing). */
+export function fileInFolderPath(parentRel: string, basename: string): string {
+  const trimmed = basename.trim().replace(/^\/+/, "");
+  const withExt = trimmed.endsWith(".ddd") ? trimmed : `${trimmed}.ddd`;
+  return joinWorkspace(parentRel, withExt);
+}
+
+/** Validate a new-file basename created inside a known parent folder.
+ *  Like {@link validateNewFileBasename} but the duplicate check is made
+ *  against the folder-qualified path. */
+export function validateNewFileInFolder(
+  basename: string,
+  existing: ReadonlySet<string>,
+  parentRel: string,
+): string | undefined {
+  const trimmed = basename.trim();
+  if (trimmed === "") return "Name is required.";
+  if (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)?$/.test(trimmed)) {
+    return "Use letters, digits, dash, underscore, dot (one optional `/`).";
+  }
+  if (existing.has(fileInFolderPath(parentRel, trimmed))) {
+    return "A file with that name already exists.";
+  }
+  return undefined;
+}
+
+/** The workspace-relative folder a file lives in (`""` for root). */
+export function parentRelOf(fullPath: string): string {
+  const rel = fullPath.startsWith(WORKSPACE_PREFIX)
+    ? fullPath.slice(WORKSPACE_PREFIX.length)
+    : fullPath;
+  const slash = rel.lastIndexOf("/");
+  return slash >= 0 ? rel.slice(0, slash) : "";
+}
+
+/** The target path for renaming `ownFullPath`'s leaf to `newLeaf`,
+ *  keeping it in the same folder (`.ddd` appended when missing). */
+export function renameTargetPath(ownFullPath: string, newLeaf: string): string {
+  const trimmed = newLeaf.trim().replace(/^\/+/, "");
+  const withExt = trimmed.endsWith(".ddd") ? trimmed : `${trimmed}.ddd`;
+  return joinWorkspace(parentRelOf(ownFullPath), withExt);
+}
+
+/** Validate a rename of `ownFullPath` to leaf `newLeaf`.  Unchanged is
+ *  allowed (no-op); a collision with a *different* existing file is not. */
+export function validateRename(
+  newLeaf: string,
+  existing: ReadonlySet<string>,
+  ownFullPath: string,
+): string | undefined {
+  const trimmed = newLeaf.trim();
+  if (trimmed === "") return "Name is required.";
+  if (!/^[A-Za-z0-9._-]+$/.test(trimmed)) {
+    return "Use letters, digits, dash, underscore, dot.  No slashes.";
+  }
+  const target = renameTargetPath(ownFullPath, trimmed);
+  if (target === ownFullPath) return undefined;
+  if (existing.has(target)) return "A file with that name already exists.";
+  return undefined;
+}
+
 /** Build the full workspace path for the seed file dropped into a
  *  newly-created folder.  Defaults to `<folder>/untitled.ddd`;
  *  disambiguates against `existing` so two folder creations in a

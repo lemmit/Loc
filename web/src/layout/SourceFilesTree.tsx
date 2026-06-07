@@ -1,50 +1,37 @@
 // ---------------------------------------------------------------------------
-// `SourceFilesTree` — accordion-style file picker for the mobile
-// editor.  Mirrors the FilesPane mobile pattern (closed `<details>`
-// summary above the editor) so the source-files picker and the
-// generated-files picker feel like the same thing.  The tree itself
-// reuses `preview/FileTree.tsx` — same chevrons, indents, touch
-// targets, hover/pressed states — with delete buttons threaded in
-// via the new `rowActions` slot.
+// `SourceFilesTree` — the workspace file explorer used by BOTH shells.
 //
-// Visual model (collapsed):
+//   - `variant="sidebar"` (desktop): a persistent left column beside the
+//     editor.  Replaces the old delete-on-× tab strip — the tree is the
+//     file manager and the editor shows the selected file.
+//   - `variant="accordion"` (mobile): a collapsible `<details>` panel
+//     above the editor (closed by default to give the editor the screen).
 //
-//   ▸ Files (3)                                       [+]
+// File management is **right-click → context menu** (the primary
+// affordance the user asked for): on a file → Rename / Delete; on a
+// folder → New file / New folder / Delete folder; on empty space →
+// New file / New folder.  A header "+" menu is kept for discoverability
+// and for touch, where a right-click isn't natural.  Deletes confirm
+// first so a misclick can't silently destroy a file — the old tab "×"
+// deleted with no confirmation.
 //
-// Visual model (expanded):
-//
-//   ▾ Files (3)                                       [+]
-//   ─────────────────────────────────────────────────────
-//   ▾ main.ddd                                          ·
-//   ▾ shared/
-//       ▸ money.ddd                                     ×
-//       ▸ currency.ddd                                  ×
-//
-// Closed by default so the editor gets the screen real estate; the
-// summary always shows the file count + Add button so the
-// affordance is discoverable even when the tree is collapsed.
+// The tree itself reuses `preview/FileTree.tsx`; this module owns the
+// workspace-relative projection, the create/rename inline form, and the
+// context menu.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import {
-  ActionIcon,
-  Box,
-  Button,
-  Group,
-  Menu,
-  Stack,
-  Text,
-  TextInput,
-  Tooltip,
-} from "@mantine/core";
+import { ActionIcon, Box, Button, Group, Menu, Stack, Text, TextInput, Tooltip } from "@mantine/core";
 import { buildTree, type TreeFolder } from "../preview/file-tree";
 import { FileTree } from "../preview/FileTree";
 import { DEFAULT_PATH } from "../workspace/workspace-sources";
 import {
-  newFolderSeedPath,
-  normaliseNewFilePath,
-  validateNewFileBasename,
+  fileInFolderPath,
+  parentRelOf,
+  renameTargetPath,
+  validateNewFileInFolder,
   validateNewFolderName,
+  validateRename,
 } from "./source-file-tabs-validation";
 
 const WORKSPACE_PREFIX = "/workspace/";
@@ -57,30 +44,22 @@ export interface SourceFilesTreeProps {
   activePath: string;
   /** Switch which file the editor shows. */
   onSelect: (path: string) => void;
-  /** Create a new `/workspace/<basename>.ddd`. */
+  /** Create a new `/workspace/...ddd` (full path). */
   onCreate: (path: string) => void;
-  /** Delete a file from the VFS.  Tree never calls this for
-   *  `main.ddd` (the delete button isn't rendered there). */
+  /** Delete a file from the VFS.  Never called for `main.ddd`. */
   onDelete: (path: string) => void;
-  /** Workspace-relative folder paths that exist as empty folders
-   *  (real VFS dir entries with no `.ddd` descendants).  Merged
-   *  into the tree as folder-only rows so a freshly-created empty
-   *  folder is visible. */
+  /** Workspace-relative folder paths that exist as empty folders. */
   emptyFolders?: ReadonlySet<string>;
-  /** Create an empty folder via the VFS's first-class `mkdir`.
-   *  Workspace-relative folder name (no leading slash). */
+  /** Create an empty folder via the VFS's `mkdir` (workspace-relative). */
   onCreateFolder?: (folder: string) => void;
-  /** Delete an empty folder via the VFS's `rmdir`.  Workspace-
-   *  relative form. */
+  /** Delete a folder and everything under it (workspace-relative). */
   onDeleteFolder?: (folder: string) => void;
+  /** Rename a file: write `newPath` with the old content, drop `oldPath`. */
+  onRename?: (oldPath: string, newPath: string) => void;
+  /** Layout: a persistent desktop sidebar or a collapsible mobile panel. */
+  variant?: "sidebar" | "accordion";
 }
 
-/** Build a tree of workspace-relative paths suitable for `FileTree`.
- *  Reuses `buildTree`; the path scheme is identical (POSIX, `/`-
- *  separated).  Empty folders are folded in via a hidden-from-the-
- *  user marker entry per folder (`.empty-folder`) so `buildTree`
- *  creates the folder node; the renderer filters the marker out via
- *  `shouldRenderFile`. */
 const EMPTY_FOLDER_MARKER = ".empty-folder";
 
 function isEmptyFolderMarker(relPath: string): boolean {
@@ -92,34 +71,50 @@ function workspaceTree(
   activePath: string,
   emptyFolders: ReadonlySet<string>,
 ): TreeFolder {
-  // Drop the `/workspace/` prefix so the top level reads `main.ddd`
-  // / `shared/...` instead of a useless `workspace` root folder.
-  // Synthesise the VirtualFile shape `buildTree` consumes; content /
-  // size are unused by the tree renderer.
   const virtual = [...files.keys()].map((p) => ({
     path: p.startsWith(WORKSPACE_PREFIX) ? p.slice(WORKSPACE_PREFIX.length) : p,
     content: "",
     size: 0,
   }));
-  // Ensure the active path always has a row even when it isn't in
-  // the VFS yet (first edit of main.ddd before the VFS write lands)
-  // — otherwise the user types into a "phantom" row.
   const activeRel = activePath.startsWith(WORKSPACE_PREFIX)
     ? activePath.slice(WORKSPACE_PREFIX.length)
     : activePath;
   if (!virtual.some((v) => v.path === activeRel)) {
     virtual.push({ path: activeRel, content: "", size: 0 });
   }
-  // Empty-folder rows: append a hidden marker entry per empty
-  // folder so `buildTree` creates the folder node.  The renderer
-  // filters the marker out via `shouldRenderFile`.
   for (const folder of emptyFolders) {
     virtual.push({ path: `${folder}/${EMPTY_FOLDER_MARKER}`, content: "", size: 0 });
   }
   return buildTree(virtual);
 }
 
+/** Leaf of a workspace path with the `.ddd` extension stripped — the
+ *  pre-fill for the rename form. */
+function leafNoExt(fullPath: string): string {
+  const rel = fullPath.startsWith(WORKSPACE_PREFIX)
+    ? fullPath.slice(WORKSPACE_PREFIX.length)
+    : fullPath;
+  const leaf = rel.slice(rel.lastIndexOf("/") + 1);
+  return leaf.endsWith(".ddd") ? leaf.slice(0, -4) : leaf;
+}
+
+// Inline form: create a file/folder under a known parent folder, or
+// rename an existing file.  `parent` is workspace-relative ("" = root).
+type FormState =
+  | { kind: "create-file"; parent: string }
+  | { kind: "create-folder"; parent: string }
+  | { kind: "rename"; target: string }
+  | null;
+
+// Context menu anchored at the cursor.  `target` null = empty-area menu.
+interface MenuState {
+  x: number;
+  y: number;
+  target: { path: string; kind: "file" | "folder" } | null;
+}
+
 export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
+  const variant = props.variant ?? "accordion";
   const emptyFolders = props.emptyFolders ?? new Set<string>();
   const root = useMemo(
     () => workspaceTree(props.files, props.activePath, emptyFolders),
@@ -127,59 +122,142 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
   );
   const detailsRef = useRef<HTMLDetailsElement | null>(null);
 
-  // Create-form mode: `null` = closed, `"file"` = file-create
-  // form, `"folder"` = folder-create form.  Separate modes because
-  // each calls a different controller method (write vs mkdir) and
-  // takes a different shape of name (file basename vs folder path).
-  const [creating, setCreating] = useState<"file" | "folder" | null>(null);
+  const [form, setForm] = useState<FormState>(null);
   const [draft, setDraft] = useState("");
-  const existingPaths = new Set(props.files.keys());
-  const draftError =
-    creating === "file"
-      ? validateNewFileBasename(draft, existingPaths)
-      : creating === "folder"
-        ? validateNewFolderName(draft, existingPaths)
-        : undefined;
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const existingPaths = useMemo(() => new Set(props.files.keys()), [props.files]);
 
-  const startCreate = useCallback((mode: "file" | "folder") => {
-    setDraft("");
-    setCreating(mode);
-    // Tapping "+" should also expand the accordion so the user can
-    // see the new file / folder appear at the right place in the
-    // tree.
+  const draftError =
+    form?.kind === "create-file"
+      ? validateNewFileInFolder(draft, existingPaths, form.parent)
+      : form?.kind === "create-folder"
+        ? validateNewFolderName(draft, existingPaths)
+        : form?.kind === "rename"
+          ? validateRename(draft, existingPaths, form.target)
+          : undefined;
+
+  const formTitle =
+    form?.kind === "create-file"
+      ? form.parent
+        ? `New file in ${form.parent}/`
+        : "New file"
+      : form?.kind === "create-folder"
+        ? form.parent
+          ? `New folder in ${form.parent}/`
+          : "New folder"
+        : form?.kind === "rename"
+          ? "Rename file"
+          : "";
+
+  const openForm = useCallback((next: FormState, prefill = "") => {
+    setMenu(null);
+    setDraft(prefill);
+    setForm(next);
     if (detailsRef.current) detailsRef.current.open = true;
   }, []);
-  const cancelCreate = useCallback(() => {
-    setCreating(null);
+  const cancelForm = useCallback(() => {
+    setForm(null);
     setDraft("");
   }, []);
-  const submitCreate = useCallback(() => {
-    if (draftError || draft.trim() === "") return;
-    if (creating === "file") {
-      props.onCreate(normaliseNewFilePath(draft));
-    } else if (creating === "folder") {
-      // True empty folder via the controller's VFS-`mkdir` path.
-      // Falls back to the placeholder-file approach for hosts that
-      // didn't wire `onCreateFolder` (older callers / desktop tabs).
-      if (props.onCreateFolder) {
-        const folder = draft.trim().replace(/^\/+/, "").replace(/\/+$/, "");
-        props.onCreateFolder(folder);
-      } else {
-        props.onCreate(newFolderSeedPath(draft, existingPaths));
-      }
+  const submitForm = useCallback(() => {
+    if (!form || draftError || draft.trim() === "") return;
+    if (form.kind === "create-file") {
+      props.onCreate(fileInFolderPath(form.parent, draft));
+    } else if (form.kind === "create-folder") {
+      const name = draft.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+      const folder = form.parent ? `${form.parent}/${name}` : name;
+      props.onCreateFolder?.(folder);
+    } else if (form.kind === "rename") {
+      const target = renameTargetPath(form.target, draft);
+      if (target !== form.target) props.onRename?.(form.target, target);
     }
-    setCreating(null);
-    setDraft("");
-  }, [creating, draft, draftError, existingPaths, props]);
+    cancelForm();
+  }, [form, draft, draftError, props, cancelForm]);
+
+  // ---- context-menu actions ------------------------------------------
+  const onContextMenu = useCallback(
+    (path: string, kind: "file" | "folder", e: React.MouseEvent) => {
+      setMenu({ x: e.clientX, y: e.clientY, target: { path, kind } });
+    },
+    [],
+  );
+  const onEmptyContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, target: null });
+  }, []);
+
+  const confirmDeleteFile = useCallback(
+    (fullPath: string) => {
+      const rel = fullPath.slice(WORKSPACE_PREFIX.length);
+      if (window.confirm(`Delete "${rel}"? This can't be undone.`)) props.onDelete(fullPath);
+    },
+    [props],
+  );
+  const confirmDeleteFolder = useCallback(
+    (folderRel: string) => {
+      if (window.confirm(`Delete folder "${folderRel}" and everything in it?`)) {
+        props.onDeleteFolder?.(folderRel);
+      }
+    },
+    [props],
+  );
+
+  // Menu items for the current target.  `relPathOf` maps a tree row's
+  // workspace-relative path; files come from FileTree as workspace-
+  // relative, so re-prefix to the full path the callbacks expect.
+  const menuItems = (() => {
+    if (!menu) return null;
+    const t = menu.target;
+    if (t === null) {
+      return (
+        <>
+          <Menu.Item onClick={() => openForm({ kind: "create-file", parent: "" })}>New file…</Menu.Item>
+          <Menu.Item onClick={() => openForm({ kind: "create-folder", parent: "" })}>New folder…</Menu.Item>
+        </>
+      );
+    }
+    if (t.kind === "folder") {
+      const folderRel = t.path; // workspace-relative from FileTree
+      return (
+        <>
+          <Menu.Item onClick={() => openForm({ kind: "create-file", parent: folderRel })}>
+            New file…
+          </Menu.Item>
+          <Menu.Item onClick={() => openForm({ kind: "create-folder", parent: folderRel })}>
+            New folder…
+          </Menu.Item>
+          <Menu.Divider />
+          <Menu.Item color="red" onClick={() => confirmDeleteFolder(folderRel)}>
+            Delete folder
+          </Menu.Item>
+        </>
+      );
+    }
+    const fullPath = `${WORKSPACE_PREFIX}${t.path}`;
+    const isMain = fullPath === DEFAULT_PATH;
+    return (
+      <>
+        <Menu.Item onClick={() => props.onSelect(fullPath)}>Open</Menu.Item>
+        <Menu.Item
+          disabled={isMain}
+          onClick={() => openForm({ kind: "rename", target: fullPath }, leafNoExt(fullPath))}
+        >
+          Rename…
+        </Menu.Item>
+        <Menu.Divider />
+        <Menu.Item color="red" disabled={isMain} onClick={() => confirmDeleteFile(fullPath)}>
+          Delete file
+        </Menu.Item>
+      </>
+    );
+  })();
 
   const activeRelPath = props.activePath.startsWith(WORKSPACE_PREFIX)
     ? props.activePath.slice(WORKSPACE_PREFIX.length)
     : props.activePath;
 
-  // Per-row delete button injected via the FileTree's actions slot.
-  // Hides for the workspace's default entry path (main.ddd) — the
-  // generator's entry assumes it, so the tab strip and tree both
-  // refuse to delete it.
+  // Per-row inline delete `×` — kept for one-tap discoverability
+  // (touch especially), now with a confirm.  Hidden for main.ddd.
   const rowActions = useCallback(
     (relPath: string) => {
       const fullPath = `${WORKSPACE_PREFIX}${relPath}`;
@@ -191,15 +269,161 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
             variant="subtle"
             color="gray"
             aria-label={`Delete ${relPath}`}
-            onClick={() => props.onDelete(fullPath)}
+            onClick={() => confirmDeleteFile(fullPath)}
           >
             ×
           </ActionIcon>
         </Tooltip>
       );
     },
-    [props.onDelete],
+    [confirmDeleteFile],
   );
+
+  const addMenu = (
+    <Menu position="bottom-end" shadow="sm" withinPortal>
+      <Menu.Target>
+        <Tooltip label="Add a new .ddd file or folder" withArrow openDelay={400}>
+          <ActionIcon
+            component="span"
+            size={variant === "accordion" ? "md" : "sm"}
+            variant="subtle"
+            color="gray"
+            aria-label="Add a new .ddd file or folder"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+          >
+            +
+          </ActionIcon>
+        </Tooltip>
+      </Menu.Target>
+      <Menu.Dropdown
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+      >
+        <Menu.Item onClick={() => openForm({ kind: "create-file", parent: "" })}>New file</Menu.Item>
+        <Menu.Item onClick={() => openForm({ kind: "create-folder", parent: "" })}>New folder</Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
+  );
+
+  const inlineForm = form !== null && (
+    <Box px="sm" py={6}>
+      <Stack gap={4}>
+        <Text size="xs" c="dimmed" fw={600} tt="uppercase">
+          {formTitle}
+        </Text>
+        <TextInput
+          size="sm"
+          autoFocus
+          placeholder={
+            form.kind === "create-folder" ? "folder name" : "filename (.ddd optional)"
+          }
+          value={draft}
+          error={draftError}
+          onChange={(e) => setDraft(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submitForm();
+            else if (e.key === "Escape") cancelForm();
+          }}
+        />
+        <Group gap={6} wrap="nowrap">
+          <Button size="xs" variant="default" onClick={submitForm} disabled={!!draftError}>
+            {form.kind === "rename" ? "Rename" : "Add"}
+          </Button>
+          <Button size="xs" variant="subtle" color="gray" onClick={cancelForm}>
+            Cancel
+          </Button>
+        </Group>
+      </Stack>
+    </Box>
+  );
+
+  // The positioned context menu — a zero-size fixed target at the cursor
+  // that Mantine's floating dropdown anchors to.
+  const contextMenu = (
+    <Menu
+      opened={menu !== null}
+      onClose={() => setMenu(null)}
+      position="right-start"
+      shadow="md"
+      width={180}
+      withinPortal
+    >
+      <Menu.Target>
+        <div
+          style={{
+            position: "fixed",
+            left: menu?.x ?? -9999,
+            top: menu?.y ?? -9999,
+            width: 1,
+            height: 1,
+            pointerEvents: "none",
+          }}
+        />
+      </Menu.Target>
+      <Menu.Dropdown>{menuItems}</Menu.Dropdown>
+    </Menu>
+  );
+
+  const treeBody = (
+    <Box
+      onContextMenu={onEmptyContextMenu}
+      style={
+        variant === "sidebar"
+          ? { flex: 1, minHeight: 0, overflow: "auto" }
+          : { maxHeight: 240, overflow: "auto" }
+      }
+    >
+      {inlineForm}
+      <FileTree
+        root={root}
+        selectedPath={activeRelPath}
+        onSelect={(rel) => {
+          if (isEmptyFolderMarker(rel)) return;
+          props.onSelect(`${WORKSPACE_PREFIX}${rel}`);
+          if (variant === "accordion" && detailsRef.current) detailsRef.current.open = false;
+        }}
+        rowActions={rowActions}
+        shouldRenderFile={(rel) => !isEmptyFolderMarker(rel)}
+        onContextMenu={onContextMenu}
+      />
+      {contextMenu}
+    </Box>
+  );
+
+  if (variant === "sidebar") {
+    return (
+      <Box
+        data-testid="source-files-tree"
+        style={{
+          width: 220,
+          flexShrink: 0,
+          display: "flex",
+          flexDirection: "column",
+          borderRight: "1px solid var(--mantine-color-dark-4)",
+          background: "var(--mantine-color-dark-7)",
+        }}
+      >
+        <Group
+          justify="space-between"
+          wrap="nowrap"
+          px="sm"
+          py={6}
+          style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+        >
+          <Text size="xs" c="dimmed" fw={600} tt="uppercase">
+            Files
+          </Text>
+          {addMenu}
+        </Group>
+        {treeBody}
+      </Box>
+    );
+  }
 
   return (
     <Box
@@ -229,104 +453,10 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
           gap: 8,
         }}
       >
-        {/* Native `<summary>` swallows arbitrary clicks as "toggle";
-            wrap the label in a span so the "+" button (which calls
-            preventDefault / stopPropagation) doesn't collapse the
-            details when tapped.  File count mirrors the FilesPane
-            summary so the two pickers read consistently. */}
         <span>Files ({props.files.size || 1})</span>
-        {/* Menu instead of a single button so users can pick "New
-            file" vs "New folder" explicitly — typing `shared` in the
-            file form would otherwise silently produce `shared.ddd`
-            when the user wanted a `shared/` folder.  preventDefault
-            + stopPropagation on the click stops `<summary>` from
-            toggling the accordion. */}
-        <Menu position="bottom-end" shadow="sm">
-          <Menu.Target>
-            <Tooltip label="Add a new .ddd file or folder" withArrow openDelay={400}>
-              <ActionIcon
-                component="span"
-                size="md"
-                variant="subtle"
-                color="gray"
-                aria-label="Add a new .ddd file or folder"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-              >
-                +
-              </ActionIcon>
-            </Tooltip>
-          </Menu.Target>
-          <Menu.Dropdown
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-          >
-            <Menu.Item onClick={() => startCreate("file")}>New file</Menu.Item>
-            <Menu.Item onClick={() => startCreate("folder")}>New folder</Menu.Item>
-          </Menu.Dropdown>
-        </Menu>
+        {addMenu}
       </Box>
-      <Box style={{ maxHeight: 240, overflow: "auto" }}>
-        {creating !== null && (
-          <Box px="sm" py={6}>
-            <Stack gap={4}>
-              <Text size="xs" c="dimmed" fw={600} tt="uppercase">
-                {creating === "file" ? "New file" : "New folder"}
-              </Text>
-              <TextInput
-                size="sm"
-                autoFocus
-                placeholder={
-                  creating === "file"
-                    ? "filename or sub/dir/filename"
-                    : "folder name (creates folder/untitled.ddd)"
-                }
-                value={draft}
-                error={draftError}
-                onChange={(e) => setDraft(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submitCreate();
-                  else if (e.key === "Escape") cancelCreate();
-                }}
-              />
-              <Group gap={6} wrap="nowrap">
-                <Button
-                  size="xs"
-                  variant="default"
-                  onClick={submitCreate}
-                  disabled={!!draftError}
-                >
-                  Add
-                </Button>
-                <Button size="xs" variant="subtle" color="gray" onClick={cancelCreate}>
-                  Cancel
-                </Button>
-              </Group>
-            </Stack>
-          </Box>
-        )}
-        <FileTree
-          root={root}
-          selectedPath={activeRelPath}
-          onSelect={(rel) => {
-            // Empty-folder marker rows never reach onSelect because
-            // they're filtered via `shouldRenderFile`, but defend
-            // just in case — clicking the marker would be
-            // confusing.
-            if (isEmptyFolderMarker(rel)) return;
-            props.onSelect(`${WORKSPACE_PREFIX}${rel}`);
-            // Auto-close after a pick so the editor reclaims the
-            // viewport, matching the FilesPane mobile pattern.
-            if (detailsRef.current) detailsRef.current.open = false;
-          }}
-          rowActions={rowActions}
-          shouldRenderFile={(rel) => !isEmptyFolderMarker(rel)}
-        />
-      </Box>
+      {treeBody}
     </Box>
   );
 }

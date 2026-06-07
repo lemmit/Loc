@@ -1074,6 +1074,41 @@ export default function App(): JSX.Element {
     return engine.query(sql);
   }
 
+  // Rename a `.ddd` source: write the new path with the old content,
+  // drop the old, and follow the active file across the rename.  Awaits
+  // the controller so the tree + editor see a consistent snapshot.
+  async function renameSourceFile(oldPath: string, newPath: string): Promise<void> {
+    if (oldPath === newPath) return;
+    const s = sourcesRef.current;
+    const ctrl = s.controller;
+    const content = s.files.get(oldPath) ?? "";
+    const wasActive = s.activePath === oldPath;
+    await ctrl.write(newPath, content);
+    await ctrl.delete(oldPath);
+    if (wasActive) ctrl.setActivePath(newPath);
+    scheduleAutoGenerate();
+  }
+
+  // Delete a folder and every `.ddd` file beneath it, then drop the
+  // (now-empty) folder entry.  `folderRel` is workspace-relative.
+  function deleteSourceFolder(folderRel: string): void {
+    const clean = folderRel.replace(/^\/+/, "").replace(/\/+$/, "");
+    if (clean === "") return;
+    const prefix = `/workspace/${clean}/`;
+    const ctrl = sourcesRef.current.controller;
+    void (async () => {
+      for (const path of [...sourcesRef.current.files.keys()]) {
+        if (path.startsWith(prefix)) await ctrl.delete(path);
+      }
+      try {
+        await ctrl.deleteEmptyFolder(clean);
+      } catch {
+        /* implicit folders vanish with their last file; rmdir is a no-op */
+      }
+      scheduleAutoGenerate();
+    })();
+  }
+
   const files: VirtualFile[] = generateSuccess?.files ?? [];
   // The `.c4.json` sidecar backs the in-browser LikeC4 render of its
   // `.c4` sibling — kept in `files` for lookup, but hidden from the tree.
@@ -1117,6 +1152,8 @@ export default function App(): JSX.Element {
       s.setActivePath(path);
     },
     deleteSourceFile: sources.delete,
+    renameSourceFile,
+    deleteSourceFolder,
     emptySourceFolders: sources.emptyFolders,
     createEmptySourceFolder: sources.createEmptyFolder,
     deleteEmptySourceFolder: sources.deleteEmptyFolder,

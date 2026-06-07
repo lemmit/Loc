@@ -24,6 +24,14 @@ interface FileTreeProps {
    *  make `buildTree` materialise an empty folder node.  Not
    *  consulted for folder rows. */
   shouldRenderFile?: (filePath: string) => boolean;
+  /** Optional right-click handler per row.  Fired for both file and
+   *  folder rows with the row's path + kind and the raw event (so the
+   *  caller can position a context menu at the cursor).  The renderer
+   *  calls `preventDefault` before invoking it, suppressing the native
+   *  browser menu.  Used by the source-files tree for its create /
+   *  rename / delete context menu; unset for the generated-output
+   *  pane (no native menu suppression there). */
+  onContextMenu?: (path: string, kind: "file" | "folder", e: React.MouseEvent) => void;
 }
 
 // Visual constants tuned by hand against a 240 px pane width:
@@ -70,6 +78,7 @@ export function FileTree({
   rowActions,
   defaultFolderOpen = true,
   shouldRenderFile,
+  onContextMenu,
 }: FileTreeProps): JSX.Element {
   if (root.children.length === 0) {
     return (
@@ -90,6 +99,7 @@ export function FileTree({
           rowActions={rowActions}
           defaultFolderOpen={defaultFolderOpen}
           shouldRenderFile={shouldRenderFile}
+          onContextMenu={onContextMenu}
         />
       ))}
     </Box>
@@ -104,6 +114,7 @@ interface NodeRowProps {
   rowActions?: (filePath: string) => ReactNode;
   defaultFolderOpen: boolean;
   shouldRenderFile?: (filePath: string) => boolean;
+  onContextMenu?: (path: string, kind: "file" | "folder", e: React.MouseEvent) => void;
 }
 
 function NodeRow({
@@ -114,6 +125,7 @@ function NodeRow({
   rowActions,
   defaultFolderOpen,
   shouldRenderFile,
+  onContextMenu,
 }: NodeRowProps): JSX.Element | null {
   // File-row filter — used by the source-files tree to hide the
   // in-memory empty-folder shim entries while still letting their
@@ -147,6 +159,15 @@ function NodeRow({
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
+          onContextMenu={
+            onContextMenu
+              ? (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onContextMenu(node.path, "folder", e);
+                }
+              : undefined
+          }
           {...rowEvents}
           style={{
             ...baseRowStyle,
@@ -182,6 +203,7 @@ function NodeRow({
               rowActions={rowActions}
               defaultFolderOpen={defaultFolderOpen}
               shouldRenderFile={shouldRenderFile}
+              onContextMenu={onContextMenu}
             />
           ))}
       </Box>
@@ -201,6 +223,15 @@ function NodeRow({
       role={action ? "button" : undefined}
       tabIndex={action ? 0 : undefined}
       onClick={() => onSelect(node.path)}
+      onContextMenu={
+        onContextMenu
+          ? (e: React.MouseEvent) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onContextMenu(node.path, "file", e);
+            }
+          : undefined
+      }
       onKeyDown={
         action
           ? (e: React.KeyboardEvent) => {

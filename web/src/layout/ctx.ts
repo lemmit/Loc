@@ -100,9 +100,16 @@ export interface LayoutCtx {
    *  immediately switch the active path to it.  The tab strip
    *  validates the basename before calling. */
   createSourceFile: (path: string) => void;
-  /** Delete a `.ddd` source file from the VFS.  The tab strip
+  /** Delete a `.ddd` source file from the VFS.  The tree
    *  never offers this for `/workspace/main.ddd`. */
   deleteSourceFile: (path: string) => void;
+  /** Rename a `.ddd` source file: write `newPath` with the old
+   *  content and drop `oldPath`, re-pointing the active file when the
+   *  renamed one was open. */
+  renameSourceFile: (oldPath: string, newPath: string) => void;
+  /** Delete a folder and every `.ddd` file under it (workspace-
+   *  relative path, no leading slash). */
+  deleteSourceFolder: (folder: string) => void;
   /** Workspace-relative folder paths that exist as empty folders
    *  — real VFS dir entries with no `.ddd` descendants.  Tree
    *  picker merges these into its tree as folder-only rows. */
