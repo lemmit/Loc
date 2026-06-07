@@ -5,6 +5,7 @@ import type {
   EnrichedBoundedContextIR,
   RepositoryIR,
 } from "../../ir/types/loom-ir.js";
+import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { plural } from "../../util/naming.js";
 import {
   emitCreateCommandAndHandler,
@@ -42,6 +43,12 @@ export function emitCqrs(
   options?: { routePrefix?: string; emitTrace?: boolean; usingDapper?: boolean },
 ): void {
   const aggFolder = plural(agg.name);
+  // Strongly-typed id class for this aggregate's key — a TPH (`sharedTable`)
+  // concrete shares its base's `<Base>Id`; everyone else uses `<Agg>Id`
+  // (`tableOwnerName` returns the aggregate itself off the TPH path, so this is
+  // byte-identical there).  Threaded into the command / query / controller
+  // emitters so every id surface names the inherited key.
+  const idClass = `${tableOwnerName(agg, ctx.aggregates)}Id`;
   // Create-request payload: required + access-permitted client input.
   // `forCreateInput` excludes `managed` / `token` / `internal` (server-
   // owned or domain-only), keeps `immutable` (settable at creation) and
@@ -74,13 +81,14 @@ export function emitCqrs(
   if (aggHasCreate) {
     emitCreateCommandAndHandler(agg, requiredFields, ns, aggFolder, out, {
       emitValidator: !esCreate,
+      idClass,
     });
   }
   // Canonical destroy → Delete command + handler (gated on the IR
   // lifecycle, so plain aggregates emit no extra CQRS files).
-  if (agg.canonicalDestroy) emitDestroyCommandAndHandler(agg, ns, aggFolder, out);
-  emitOperationCommandsAndHandlers(agg, ctx, ns, aggFolder, out);
-  emitGetByIdQueryAndHandler(agg, ctx, ns, aggFolder, out);
+  if (agg.canonicalDestroy) emitDestroyCommandAndHandler(agg, ns, aggFolder, out, idClass);
+  emitOperationCommandsAndHandlers(agg, ctx, ns, aggFolder, out, idClass);
+  emitGetByIdQueryAndHandler(agg, ctx, ns, aggFolder, out, idClass);
   emitFindQueriesAndHandlers(agg, repo, ctx, ns, aggFolder, out);
   emitController(
     agg,
@@ -93,5 +101,6 @@ export function emitCqrs(
     options?.emitTrace,
     options?.usingDapper,
     aggHasCreate,
+    idClass,
   );
 }

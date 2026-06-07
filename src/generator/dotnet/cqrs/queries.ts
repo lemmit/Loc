@@ -24,6 +24,7 @@ export function emitGetByIdQueryAndHandler(
   ns: string,
   aggFolder: string,
   out: Map<string, string>,
+  idClass: string = `${agg.name}Id`,
 ): void {
   out.set(
     `Application/${aggFolder}/Queries/Get${agg.name}ByIdQuery.cs`,
@@ -31,7 +32,7 @@ export function emitGetByIdQueryAndHandler(
       ns,
       aggName: agg.name,
       queryName: `Get${agg.name}ByIdQuery`,
-      queryParams: `${agg.name}Id Id`,
+      queryParams: `${idClass} Id`,
       returnType: `${agg.name}Response?`,
     }),
   );

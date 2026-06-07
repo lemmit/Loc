@@ -9,7 +9,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
-import { isTpcBase, isTphBase, tphConcretesOf } from "../../ir/util/inheritance.js";
+import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
 import {
   effectiveSavingShape,
   isDocumentShaped,
@@ -530,6 +530,12 @@ function emitAggregate(
         idValueType: tphBase?.idValueType,
       }
     : undefined;
+  // The strongly-typed id class for this aggregate's key.  `tableOwnerName`
+  // resolves a TPH concrete to its base (the shared single-table key it
+  // inherits); a standalone aggregate / TPC concrete keeps its own `<Agg>Id`,
+  // so this is byte-identical off the TPH path.  Threaded through the
+  // repository + CQRS emitters so every id surface names the right class.
+  const idClass = `${tableOwnerName(agg, ctx.aggregates)}Id`;
   const repo = findRepoFor(ctx, agg.name);
   // dataSource resolution drives BOTH the table-mapping knobs (schema /
   // tablePrefix) and the saving SHAPE.  `isDoc` (shape(document))
@@ -572,7 +578,7 @@ function emitAggregate(
   place(
     `I${agg.name}Repository.cs`,
     "repository-interface",
-    renderRepositoryInterface(agg, repoWithViews, ns, aggRetrievals),
+    renderRepositoryInterface(agg, repoWithViews, ns, aggRetrievals, idClass),
   );
   // Each retrieval emits an Ardalis `Specification<T>` (where + sort) the
   // EF repository's `Run<Name>Async` consumes via `.WithSpecification(...)`.
@@ -627,6 +633,7 @@ function emitAggregate(
       "repository-impl",
       renderEventSourcedRepositoryImpl(agg, repoWithViews, ns, findBodies, {
         extraUsings: [...repoImplUsings].sort(),
+        idClass,
       }),
     );
     place(`${agg.name}EventRecord.cs`, "event-record-poco", renderEventRecordPoco(agg, ns));
@@ -642,12 +649,14 @@ function emitAggregate(
       isDoc
         ? renderDocumentRepositoryImpl(agg, repoWithViews, ns, findBodies, {
             extraUsings: [...repoImplUsings].sort(),
+            idClass,
           })
         : renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
             extraUsings: [...repoImplUsings].sort(),
             emitTrace,
             retrievals: aggRetrievals,
             retrievalBodies,
+            idClass,
           }),
     );
     if (isDoc) {
