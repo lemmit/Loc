@@ -3,8 +3,8 @@ import { DEFAULT_GIT_DB } from "../../web/src/workspace/git/index.js";
 import {
   activeWorkspace,
   addWorkspace,
-  defaultRegistry,
   DEFAULT_WORKSPACE_ID,
+  defaultRegistry,
   gitDbForId,
   removeWorkspace,
   renameWorkspace,
