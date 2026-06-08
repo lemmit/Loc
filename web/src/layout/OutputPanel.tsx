@@ -155,7 +155,7 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
           />
         )}
         {stream === "app" && (
-          <LogView
+          <FilterableLogView
             lines={ctx.appLog}
             empty="No app logs yet — open the Preview and interact with the generated app."
             testid="output-app-log"
@@ -274,13 +274,15 @@ function DiagRow({ snap }: { snap: DiagSnapshot }): JSX.Element {
   );
 }
 
-// Backend log view with a per-level filter chip-row.  Generated Hono
-// backends emit structured pino lines that the worker's captureConsole
-// parses + tags with the embedded catalog level (see log-line.ts +
-// runtime.worker.ts), so filtering here matches the SEMANTIC stratum —
-// hiding `trace` works even though pino in browser routes trace through
-// console.debug.  Defaults to "all visible" so the existing experience
-// is unchanged unless the user explicitly narrows.
+// Live-console view with a per-level filter chip-row — used by BOTH the
+// Backend (Hono runtime) and App (preview) streams so the two read
+// consistently.  Backend lines are structured pino payloads tagged with
+// the embedded catalog level (see log-line.ts + the runtime worker's
+// console tee), so filtering matches the SEMANTIC stratum — hiding
+// `trace` works even though pino in browser routes trace through
+// console.debug.  App lines are plain `console.*` calls tinted by their
+// method's level.  Defaults to "all visible" so every captured line
+// shows unless the user explicitly narrows.
 function FilterableLogView({
   lines,
   empty,
