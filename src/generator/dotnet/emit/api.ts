@@ -12,6 +12,7 @@ import {
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall, renderDotnetLogCallWithException } from "../../_obs/render-dotnet.js";
+import type { ReturnUnionSpec } from "../cqrs/controller.js";
 
 /** Controller action method name = PascalCase of the shared operationId,
  *  so Program.cs's `CustomOperationIds` (lower-first of the action name)
@@ -61,6 +62,10 @@ interface ControllerShape {
     paramNames: string[];
     /** Has a `requires` guard → declares 403 (authorization denied). */
     guarded: boolean;
+    /** Exception-less return-typed op: the Domain-union → HTTP translation spec.
+     *  When set, the action returns the mapped ProblemDetails / wire DTO instead
+     *  of 204 (exception-less.md). */
+    returnUnion?: ReturnUnionSpec;
   }>;
   finds: Array<{
     name: string;
@@ -140,13 +145,53 @@ export function renderController(
           ])}`,
         ]
       : [];
+    // Exception-less return-typed op (exception-less.md): the action dispatches
+    // the command, then translates the Domain union — an error variant to an
+    // RFC-7807 ProblemDetails (status from the api `httpStatus` override or the
+    // stdlib default), a success variant to 200 wrapped in the Application wire
+    // DTO (cast to the polymorphic base so it serializes with the `type` tag).
+    const ru = op.returnUnion;
+    const STD = new Set<number>([400, 422, 404, ...(op.guarded ? [403] : [])]);
+    const responseDecls = ru
+      ? [
+          `    [ProducesResponseType(typeof(${ru.appNs}.${ru.unionName}), 200)]`,
+          ...producesProblem("operation", op.guarded),
+          ...ru.errorStatuses
+            .filter((s) => !STD.has(s))
+            .map((s) => `    [ProducesResponseType(${s})]`),
+        ]
+      : ["    [ProducesResponseType(204)]", ...producesProblem("operation", op.guarded)];
+    const dispatchTail = ru
+      ? [
+          "        var result = await _mediator.Send(cmd);",
+          "        switch (result)",
+          "        {",
+          ...ru.arms.flatMap((a) => {
+            const variant = `${ru.domainNs}.${ru.unionName}_${a.tag}`;
+            if (a.isError) {
+              return [
+                `            case ${variant} _:`,
+                `                return Problem(statusCode: ${a.status}, title: ${JSON.stringify(a.title)}, type: ${JSON.stringify(a.typeUri)}, detail: ${JSON.stringify(a.title)});`,
+              ];
+            }
+            const bind = a.ctorArgs.length > 0 ? "v" : "_";
+            const ctor = `new ${ru.appNs}.${ru.unionName}_${a.tag}(${a.ctorArgs.join(", ")})`;
+            return [
+              `            case ${variant} ${bind}:`,
+              `                return Ok((${ru.appNs}.${ru.unionName})${ctor});`,
+            ];
+          }),
+          "            default:",
+          '                return Problem(statusCode: 500, title: "Internal Server Error");',
+          "        }",
+        ]
+      : ["        await _mediator.Send(cmd);", "        return NoContent();"];
     return [
       `    [HttpPost("{id}/${snake(op.routeSlug ?? op.name)}")]`,
       // Declare the success response explicitly — once any
       // [ProducesResponseType] is present, Swashbuckle stops inferring the
       // 2xx body from the action signature, so it must be spelled out.
-      "    [ProducesResponseType(204)]",
-      ...producesProblem("operation", op.guarded),
+      ...responseDecls,
       `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}${agg.name}Request request)`,
       "    {",
       ...wireInLine,
@@ -162,8 +207,7 @@ export function renderController(
       `        var cmd = new ${upperFirst(op.name)}Command(`,
       ...cmdBody,
       "        );",
-      "        await _mediator.Send(cmd);",
-      "        return NoContent();",
+      ...dispatchTail,
       "    }",
       "",
     ];

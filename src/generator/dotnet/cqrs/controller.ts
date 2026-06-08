@@ -4,10 +4,13 @@ import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   EnrichedBoundedContextIR,
+  OperationIR,
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
 import { operationIsGuarded } from "../../../ir/types/loom-ir.js";
+import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, upperFirst } from "../../../util/naming.js";
+import { unionMembers } from "../../_payload/union-wire.js";
 import {
   collectWireUsings,
   csIdValueClrType,
@@ -15,6 +18,74 @@ import {
   wireType,
 } from "../dto-mapping.js";
 import { renderController } from "../emit.js";
+
+/** One arm of a return-typed operation's controller translation. */
+export interface ReturnUnionArm {
+  tag: string;
+  isError: boolean;
+  /** Error arm: the HTTP status, RFC-7807 title + type URI. */
+  status: number;
+  title: string;
+  typeUri: string;
+  /** Success arm: the App-DTO variant constructor args (`v.Id`, `v.Code`, …);
+   *  `["v.Value"]` for a scalar, `[]` for `none`. */
+  ctorArgs: string[];
+}
+
+/** Controller-side translation spec for an exception-less operation return. */
+export interface ReturnUnionSpec {
+  unionName: string;
+  /** Fully-qualified Domain union namespace (the `_mediator.Send` result type)
+   *  and Application wire-DTO namespace — both define `<Union>` / `<Union>_<Tag>`,
+   *  so the controller spells them out to disambiguate. */
+  domainNs: string;
+  appNs: string;
+  arms: ReturnUnionArm[];
+  /** Distinct error statuses → `[ProducesResponseType]` declarations. */
+  errorStatuses: number[];
+}
+
+function buildReturnUnionSpec(
+  op: OperationIR,
+  agg: AggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): ReturnUnionSpec | undefined {
+  if (op.returnType?.kind !== "union") return undefined;
+  const variants = op.returnType.variants;
+  const members = unionMembers(variants, ctx);
+  const isError = (i: number): boolean => {
+    const v = variants[i]!;
+    return v.kind === "entity" && ctx.payloads.some((p) => p.name === v.name && p.kind === "error");
+  };
+  const arms: ReturnUnionArm[] = members.map((m, i) => {
+    const status = ctx.errorStatusOverrides?.[m.tag] ?? defaultErrorStatus(m.tag);
+    const ctorArgs =
+      m.shape === "none"
+        ? []
+        : m.shape === "scalar"
+          ? ["v.Value"]
+          : m.fields.map((f) => `v.${upperFirst(f.name)}`);
+    return {
+      tag: m.tag,
+      isError: isError(i),
+      status,
+      title: errorTitle(m.tag),
+      typeUri: errorTypeUri(m.tag),
+      ctorArgs,
+    };
+  });
+  const errorStatuses = [...new Set(arms.filter((a) => a.isError).map((a) => a.status))].sort(
+    (a, b) => a - b,
+  );
+  return {
+    unionName: unionInstanceName(variants),
+    domainNs: `${ns}.Domain.${plural(agg.name)}`,
+    appNs: `${ns}.Application.${plural(agg.name)}.Responses`,
+    arms,
+    errorStatuses,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -76,6 +147,9 @@ export function emitController(
           // (default ASP.NET JsonNamingPolicy.CamelCase).
           paramNames: op.params.map((p) => p.name),
           guarded: operationIsGuarded(op),
+          // Exception-less return-typed op: the controller-side translation spec
+          // (Domain union → ProblemDetails / Ok-wrapped wire DTO).
+          returnUnion: buildReturnUnionSpec(op, agg, ctx, ns),
         })),
       finds: (repo?.finds ?? []).map((find) => {
         const paged = pagedReturn(find.returnType);

@@ -1,3 +1,4 @@
+import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type { AggregateIR, EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
@@ -119,6 +120,12 @@ export function emitOperationCommandsAndHandlers(
       `${idClass} Id`,
       ...op.params.map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`),
     ].join(", ");
+    // Exception-less return-typed op (exception-less.md): the command carries
+    // the Domain union as its result (`ICommand<Union>`), the handler returns it
+    // (the aggregate method produces the tagged value), and the controller maps
+    // it to HTTP.  `null` ⇒ a plain void mutation command.
+    const returnUnion =
+      op.returnType?.kind === "union" ? unionInstanceName(op.returnType.variants) : undefined;
     out.set(
       `Application/${aggFolder}/Commands/${upperFirst(op.name)}Command.cs`,
       renderCommand({
@@ -126,6 +133,8 @@ export function emitOperationCommandsAndHandlers(
         aggName: agg.name,
         commandName: `${upperFirst(op.name)}Command`,
         commandParams: params,
+        returnType: returnUnion,
+        extraUsings: returnUnion ? [`${ns}.Domain.${plural(agg.name)}`] : undefined,
       }),
     );
     // Per-op FluentValidation rules from wire-translatable
@@ -232,6 +241,19 @@ export function emitOperationCommandsAndHandlers(
       );
       continue;
     }
+    // A return-typed op threads the union value: capture the method result,
+    // save, then return it (the aggregate produces the tagged Domain union).
+    const handlerBody = returnUnion
+      ? `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
+        `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+        `        var result = aggregate.${upperFirst(op.name)}(${callArgs});\n` +
+        `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
+        `        return result;\n`
+      : `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
+        `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+        `        aggregate.${upperFirst(op.name)}(${callArgs});\n` +
+        `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
+        `        return Unit.Value;\n`;
     out.set(
       `Application/${aggFolder}/Commands/${upperFirst(op.name)}Handler.cs`,
       renderCommandHandler({
@@ -239,14 +261,10 @@ export function emitOperationCommandsAndHandlers(
         aggName: agg.name,
         handlerName: `${upperFirst(op.name)}Handler`,
         commandName: `${upperFirst(op.name)}Command`,
+        returnType: returnUnion,
         extraDeps: userExtraDeps,
         extraUsings: userExtraUsings,
-        body:
-          `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
-          `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
-          `        aggregate.${upperFirst(op.name)}(${callArgs});\n` +
-          `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
-          `        return Unit.Value;\n`,
+        body: handlerBody,
       }),
     );
   }

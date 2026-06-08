@@ -84,8 +84,8 @@ describe("operation returns — platform-aware emission gate (exception-less spi
     expect(await gateDiags("hono")).toEqual([]);
   });
 
-  it("fires `loom.operation-return-unsupported` when served by dotnet (not implemented yet)", async () => {
-    expect(await gateDiags("dotnet")).not.toEqual([]);
+  it("does NOT gate a return-typed operation served by dotnet (producer translation implemented)", async () => {
+    expect(await gateDiags("dotnet")).toEqual([]);
   });
 
   it("fires `loom.operation-return-unsupported` when served by phoenix (not implemented yet)", async () => {

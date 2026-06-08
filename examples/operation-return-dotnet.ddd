@@ -1,0 +1,25 @@
+// Exception-less operation returns on the .NET backend (exception-less.md, A3
+// — dotnet slice).  An `operation foo(): X or NotFound` emits:
+//   - a pure Domain union (Domain/Orders/OrderOrNotFound.cs) the aggregate
+//     method returns the tagged value through;
+//   - the JsonPolymorphic Application wire DTO;
+//   - a `ICommand<OrderOrNotFound>` command + handler;
+//   - a controller action translating an error variant to an RFC-7807
+//     ProblemDetails (stdlib status default) and a success to 200 wrapped in
+//     the wire DTO (cast to the polymorphic base).
+// Compiled under `ddd generate dotnet` + `dotnet build /warnaserror` in the
+// generated-dotnet CI matrix.
+//
+// A loose context (like union-dotnet.ddd) so the single-context `generate
+// dotnet` path emits a complete project.  The body returns the error variant;
+// the success path is part of the type + controller (compiled, not executed
+// here) — matching the Hono producer fixture.
+context Orders {
+  error NotFound { resource: string }
+  aggregate Order ids guid {
+    code: string
+    operation reserve(): Order or NotFound {
+      return NotFound { resource: code }
+    }
+  }
+}

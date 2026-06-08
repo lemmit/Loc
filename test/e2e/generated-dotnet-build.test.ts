@@ -61,6 +61,11 @@ describe.skipIf(!ENABLED)(
       // the JsonPolymorphic base + variant records, the union CQRS
       // query/handler (Task.FromException stub), and the controller action.
       "examples/union-dotnet.ddd",
+      // Exception-less operation return (exception-less.md, A3): compiles the
+      // pure Domain union, the `ICommand<Union>` command + handler returning the
+      // tagged value, and the controller action that switch-translates an error
+      // variant to a ProblemDetails (stdlib status) and a success to the wire DTO.
+      "examples/operation-return-dotnet.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {
