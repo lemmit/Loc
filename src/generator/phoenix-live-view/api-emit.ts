@@ -14,6 +14,7 @@ import {
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type UnionMember, unionMembers } from "../_payload/union-wire.js";
+import { stateModule } from "./dispatch-emit.js";
 
 // ---------------------------------------------------------------------------
 // API controller emission for Phoenix LiveView / Ash.
@@ -187,6 +188,42 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
         path: `/views/${actionSnake}`,
         controller: "ViewsController",
         action: `:${actionSnake}`,
+      });
+    }
+  }
+
+  // --- Workflow-instance controller (read-only) ------------------------------
+  // Observable workflows (a persisted correlation row + `instanceWireShape`)
+  // get read-only GET list + GET-by-id over the saga-state schema
+  // (workflow-instance-visibility.md).  Independent of the command controller
+  // above — an event-triggered-only saga is still observable.
+  const observableWorkflows: Array<{
+    ctx: BoundedContextIR;
+    wf: import("../../ir/types/loom-ir.js").WorkflowIR;
+  }> = [];
+  for (const ctx of contexts) {
+    for (const wf of ctx.workflows) {
+      if (wf.instanceWireShape) observableWorkflows.push({ ctx, wf });
+    }
+  }
+  if (hasServes && observableWorkflows.length > 0) {
+    files.set(
+      `lib/${appName}_web/controllers/workflow_instances_controller.ex`,
+      renderWorkflowInstancesController(observableWorkflows, appModule),
+    );
+    for (const { wf } of observableWorkflows) {
+      const actionSnake = snake(wf.name);
+      apiRoutes.push({
+        method: "get",
+        path: `/workflows/${actionSnake}/instances`,
+        controller: "WorkflowInstancesController",
+        action: `:${actionSnake}_instances`,
+      });
+      apiRoutes.push({
+        method: "get",
+        path: `/workflows/${actionSnake}/instances/:id`,
+        controller: "WorkflowInstancesController",
+        action: `:${actionSnake}_instance`,
       });
     }
   }
@@ -484,6 +521,79 @@ function renderViewAction(
         |> put_resp_content_type("application/problem+json")
         |> put_resp_header("x-request-id", trace_id)
         |> send_resp(500, body)
+    end
+  end`;
+}
+
+// ---------------------------------------------------------------------------
+// Workflow-instance controller (read-only, workflow-instance-visibility.md)
+// ---------------------------------------------------------------------------
+
+function renderWorkflowInstancesController(
+  workflows: Array<{ ctx: BoundedContextIR; wf: import("../../ir/types/loom-ir.js").WorkflowIR }>,
+  appModule: string,
+): string {
+  const webModule = `${appModule}Web`;
+  const actions = workflows
+    .map(({ ctx, wf }) => renderWorkflowInstanceActions(ctx, wf, appModule))
+    .join("\n\n");
+  return `# Auto-generated.
+defmodule ${webModule}.WorkflowInstancesController do
+  use ${webModule}, :controller
+
+  @moduledoc """
+  Read-only HTTP entry points for running workflow instances (saga state).
+  Each action reads the workflow's persisted correlation-state schema via the
+  app Repo and encodes the cross-backend wire shape (camelCase keys).
+  """
+
+${actions}
+end
+`;
+}
+
+/** The GET list + GET-by-id actions for one observable workflow.  Reads the
+ *  saga-state Ecto schema through `<App>.Repo`; the row is projected to the
+ *  `instanceWireShape` (camelCase atom keys → matching Hono/.NET JSON, snake
+ *  struct access).  A missing id returns an RFC-7807 404, mirroring the
+ *  views controller's problem-response shape. */
+function renderWorkflowInstanceActions(
+  ctx: BoundedContextIR,
+  wf: import("../../ir/types/loom-ir.js").WorkflowIR,
+  appModule: string,
+): string {
+  const slug = snake(wf.name);
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+  const stateMod = stateModule(contextModule, wf);
+  // camelCase key (the declared field name) ← snake struct field.
+  const mapFields = (wf.instanceWireShape ?? [])
+    .map((f) => `${f.name}: row.${snake(f.name)}`)
+    .join(", ");
+  return `  @doc "GET /api/workflows/${slug}/instances"
+  def ${slug}_instances(conn, _params) do
+    data = Enum.map(${appModule}.Repo.all(${stateMod}), fn row -> %{${mapFields}} end)
+
+    conn
+    |> put_status(:ok)
+    |> json(%{data: data})
+  end
+
+  @doc "GET /api/workflows/${slug}/instances/:id"
+  def ${slug}_instance(conn, %{"id" => id}) do
+    case ${appModule}.Repo.get(${stateMod}, id) do
+      nil ->
+        trace_id = get_resp_header(conn, "x-request-id") |> List.first("unknown")
+        body = Jason.encode!(%{type: "about:blank", title: "Not Found", status: 404, detail: "not_found", instance: conn.request_path})
+
+        conn
+        |> put_resp_content_type("application/problem+json")
+        |> put_resp_header("x-request-id", trace_id)
+        |> send_resp(404, body)
+
+      row ->
+        conn
+        |> put_status(:ok)
+        |> json(%{${mapFields}})
     end
   end`;
 }

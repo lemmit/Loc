@@ -12,7 +12,7 @@ import { generateReactForContexts } from "../react/index.js";
 import { emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitContext } from "./context-emit.js";
-import { emitDispatch } from "./dispatch-emit.js";
+import { emitDispatch, emitWorkflowStateSchemas } from "./dispatch-emit.js";
 import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
 import { emitMigrations } from "./migrations-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
@@ -133,6 +133,10 @@ export function generatePhoenixLiveViewProject(
     // handler modules + the per-context dispatcher + saga-state schemas.
     // No-op when the context carries no channel-routed subscriptions.
     emitDispatch(appName, ctx, appModule, out, sys);
+    // Saga-state schemas for every correlation-bearing workflow (even those
+    // no subscription references) so the read-only instance endpoints
+    // (workflow-instance-visibility.md) have a schema to query.
+    emitWorkflowStateSchemas(appName, ctx, appModule, out);
   }
 
   // --- Migrations -----------------------------------------------------------
