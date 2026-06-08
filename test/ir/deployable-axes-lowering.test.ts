@@ -99,4 +99,17 @@ describe("realization axes — lowering defaults", () => {
     expect(web.transport).toBeUndefined();
     expect(web.runtime).toBeUndefined();
   });
+
+  // P1 of proposals/vanilla-phoenix-foundation.md — the menu admits
+  // `foundation: vanilla` on phoenix, so an explicit value lowers cleanly
+  // (the validator's R5 gates emission separately; lowering must not crash
+  // or drop the value).
+  it("explicit `foundation: vanilla` on phoenix is carried through to DeployableIR", async () => {
+    const d = await lowerDeployable("phoenix { foundation: vanilla }");
+    expect(d.foundation).toBe("vanilla");
+    // The other axes default normally.
+    expect(d.persistence).toBe("ashPostgres");
+    expect(d.transport).toBe("phoenixRouter");
+    expect(d.runtime).toBe("transactional");
+  });
 });

@@ -136,3 +136,51 @@ describe("realization axes — R4 foundation owns layers", () => {
     expect(errors).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// P1 of proposals/vanilla-phoenix-foundation.md — the menu admits
+// `foundation: vanilla` on phoenix (D-VANILLA-PHOENIX-FOUNDATION pinned the
+// axis value), but R5 rejects the value until the vanilla emitter ships in
+// P2. The grammar+lowering still need to carry the value cleanly so the
+// rejection is a clean validator error, not a parse / IR crash.
+// ---------------------------------------------------------------------------
+describe("realization axes — R5 vanilla-on-phoenix planned but not yet implemented", () => {
+  it("parses `foundation: vanilla` on phoenix without a grammar / out-of-menu error", async () => {
+    // The menu lift (platform-rules.ts:184) means R1 does NOT fire on this
+    // value. R5 still rejects it, but with the focused emitter-not-shipped
+    // diagnostic — not a generic "not on the menu" rejection.
+    const { errors } = await parse(sys("phoenix { foundation: vanilla }"));
+    expect(errors.some((e) => /foundation: vanilla.*not available on platform/i.test(e))).toBe(
+      false,
+    );
+    expect(errors.some((e) => /foundation: vanilla.*reserved.*not yet implemented/i.test(e))).toBe(
+      true,
+    );
+  });
+
+  it("R5 diagnostic names the proposal + the three today-actionable escapes", async () => {
+    const { errors } = await parse(sys("phoenix { foundation: vanilla }"));
+    const msg =
+      errors.find((e) => /foundation: vanilla.*reserved.*not yet implemented/i.test(e)) ?? "";
+    // Names the proposal so the user can read why.
+    expect(msg).toContain("vanilla-phoenix-foundation.md");
+    expect(msg).toContain("D-VANILLA-PHOENIX-FOUNDATION");
+    // Lists the three escapes (foundation: ash; node/dotnet; track P2).
+    expect(msg).toContain("foundation: ash");
+    expect(msg).toContain("platform: node");
+    expect(msg).toContain("platform: dotnet");
+  });
+
+  it("does NOT fire on phoenix with `foundation: ash` (current emit path)", async () => {
+    const { errors } = await parse(sys("phoenix { foundation: ash }"));
+    expect(errors.some((e) => /foundation: vanilla.*reserved.*not yet implemented/i.test(e))).toBe(
+      false,
+    );
+  });
+
+  it("`foundation: vanilla` is accepted on non-phoenix platforms (the existing default)", async () => {
+    // Regression: the menu lift shouldn't change anything for dotnet/node.
+    const { errors } = await parse(sys("dotnet { foundation: vanilla }"));
+    expect(errors).toEqual([]);
+  });
+});
