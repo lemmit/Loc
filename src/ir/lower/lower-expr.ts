@@ -75,6 +75,7 @@ import {
   findEntityByName,
   findEventByName,
   findFunctionInEnv,
+  findOperationInEnv,
   findPayloadByName,
   findValueObjectByName,
   findWorkflowByName,
@@ -330,15 +331,22 @@ function applySuffixToRecv(
         ...(named ? { argNames } : {}),
         ...(styleHoist.style ? { style: styleHoist.style } : {}),
       };
-      // Result type best-effort — a function returns its declared type,
-      // a value-object ctor returns the VO, everything else falls
-      // back to a string placeholder (matches the legacy inferExprType).
+      // Result type best-effort — a function returns its declared type, an
+      // operation returns its declared return type (an `or`-union for an
+      // exception-less op, so a `let x = reserve()` types as the union; the `?`
+      // propagation operator builds on this), a value-object ctor returns the
+      // VO, everything else falls back to a string placeholder (matches the
+      // legacy inferExprType).
       let resultType: TypeIR = { kind: "primitive", name: "string" };
       const fn = findFunctionInEnv(env, recv.name);
       if (fn) resultType = lowerType(fn.returnType);
       else {
-        const vo = findValueObjectByName(env, recv.name);
-        if (vo) resultType = { kind: "valueobject", name: vo.name };
+        const op = findOperationInEnv(env, recv.name);
+        if (op?.returnType) resultType = lowerType(op.returnType, env);
+        else {
+          const vo = findValueObjectByName(env, recv.name);
+          if (vo) resultType = { kind: "valueobject", name: vo.name };
+        }
       }
       return { recv: callIR, recvType: resultType };
     }
@@ -1023,9 +1031,17 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
       const fn = findFunctionInEnv(env, expr.head.name);
       if (fn) curType = lowerType(fn.returnType);
       else {
-        const vo = findValueObjectByName(env, expr.head.name);
-        if (vo) curType = { kind: "valueobject", name: vo.name };
-        else curType = { kind: "primitive", name: "string" };
+        // An operation call types as the operation's declared return type — an
+        // `or`-union for an exception-less op (so `let x = reserve()` types as
+        // the union, the operand `?` propagation consumes).  A void operation
+        // has no returnType; fall through to the string placeholder.
+        const op = findOperationInEnv(env, expr.head.name);
+        if (op?.returnType) curType = lowerType(op.returnType, env);
+        else {
+          const vo = findValueObjectByName(env, expr.head.name);
+          if (vo) curType = { kind: "valueobject", name: vo.name };
+          else curType = { kind: "primitive", name: "string" };
+        }
       }
       for (let i = 1; i < expr.suffixes.length; i++) {
         curType = inferSuffixType(curType, expr.suffixes[i]!, env);
