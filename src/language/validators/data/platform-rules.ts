@@ -181,7 +181,13 @@ function adapterKindForAxis(axis: RealizationAxis): "persistence" | "style" | "l
 /** Single current value for a greenfield axis on a backend family. */
 function greenfieldMenu(family: Platform, axis: "foundation" | "transport" | "runtime"): string[] {
   if (axis === "runtime") return ["transactional"];
-  if (axis === "foundation") return [family === "phoenix" ? "ash" : "vanilla"];
+  // Phoenix carries a two-element foundation menu: today's `ash` (the
+  // current emitter) and `vanilla` (planned — D-VANILLA-PHOENIX-FOUNDATION).
+  // The menu admits both at the syntactic/grammar layer; the emission gate
+  // for `foundation: vanilla` on phoenix lives in `checkDeployable`'s R5
+  // (`loom.foundation-vanilla-phoenix-not-yet-implemented`) until the
+  // vanilla emitter ships in P2 of proposals/vanilla-phoenix-foundation.md.
+  if (axis === "foundation") return family === "phoenix" ? ["ash", "vanilla"] : ["vanilla"];
   // transport — the platform's only current HTTP surface.
   return [family === "dotnet" ? "minimalApi" : family === "phoenix" ? "phoenixRouter" : "hono"];
 }

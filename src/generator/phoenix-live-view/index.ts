@@ -86,6 +86,18 @@ export function generatePhoenixLiveViewProject(
   const { contexts, deployable, sys, migrations, emitTrace, styleAdapter } = args;
   const out = new Map<string, string>();
 
+  // Foundation branch — D-VANILLA-PHOENIX-FOUNDATION. Today only `ash`
+  // emits; `vanilla` is reserved (menu admits it) but the validator's R5
+  // (`loom.foundation-vanilla-phoenix-not-yet-implemented`) rejects it
+  // before we reach this orchestrator. This branch is defence-in-depth
+  // for callers that bypass the validator (e.g. snapshot-driven
+  // regenerate paths): return an empty Map rather than silently falling
+  // back to Ash emit, which would lose the user's foundation choice.
+  // Lift when the `vanilla/` emit subtree lands in P2.
+  if (deployable.foundation === "vanilla") {
+    return out;
+  }
+
   const appName = toSnakeApp(deployable.name);
   const appModule = toModulePrefix(appName);
 
