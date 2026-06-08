@@ -64,6 +64,24 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
   ];
 }
 
+/** An event-triggered-only workflow (every `create` carries a `by`
+ *  correlation clause — a reactor / saga started by an event, never an
+ *  inbound call) has no command surface: the backends emit no `run/2` /
+ *  HTTP route for it (see `workflowEmitsCommandRoute`), so the scaffold
+ *  must not synthesise a form page (it would `phx-submit` / POST to a
+ *  route that doesn't exist).  AST mirror of the lowered predicate: the
+ *  facade create is the unnamed command create, else the first create;
+ *  event-triggered iff that facade has a `by` clause. */
+export function workflowIsEventTriggeredOnly(wf: Workflow): boolean {
+  const creates = wf.members.filter(
+    (m): m is Extract<Workflow["members"][number], { $type: "WorkflowCreateDecl" }> =>
+      m.$type === "WorkflowCreateDecl",
+  );
+  if (creates.length === 0) return false;
+  const facade = creates.find((c) => !c.name && !c.correlation) ?? creates[0]!;
+  return !!facade.correlation;
+}
+
 export function pageForWorkflow(wf: Workflow): Page {
   return page({
     name: `${pascal(wf.name)}Workflow`,

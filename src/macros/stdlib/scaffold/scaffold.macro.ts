@@ -1,6 +1,11 @@
 import type { Aggregate, BoundedContext, Subdomain, View, Workflow } from "../../api/index.js";
 import { defineMacro, viewsIn, workflowsIn } from "../../api/index.js";
-import { homePage, viewsIndexPage, workflowsIndexPage } from "./_pages.js";
+import {
+  homePage,
+  viewsIndexPage,
+  workflowIsEventTriggeredOnly,
+  workflowsIndexPage,
+} from "./_pages.js";
 
 /** Top of the scaffold-macro family: takes any combination of
  * subdomains / contexts / aggregates / workflows / views, then fans
@@ -69,10 +74,16 @@ export default defineMacro({
         (args.views as readonly View[]).length >
       0;
     if (hasAnyWork) out.push(homePage());
+    // Only workflows with a command surface get a form page, so the
+    // WorkflowsIndex singleton (and its menu link) is emitted only when at
+    // least one such workflow exists — a context of purely event-triggered
+    // sagas would otherwise produce an empty index linking nowhere.
+    const hasCommandWorkflow = (wfs: readonly Workflow[]) =>
+      wfs.some((w) => !workflowIsEventTriggeredOnly(w));
     const hasWorkflowsAnywhere =
-      (args.workflows as readonly Workflow[]).length > 0 ||
-      contexts.some((c) => workflowsIn(c).length > 0) ||
-      subdomains.some((m) => workflowsIn(m).length > 0);
+      hasCommandWorkflow(args.workflows as readonly Workflow[]) ||
+      contexts.some((c) => hasCommandWorkflow(workflowsIn(c))) ||
+      subdomains.some((m) => hasCommandWorkflow(workflowsIn(m)));
     if (hasWorkflowsAnywhere) out.push(workflowsIndexPage());
     const hasViewsAnywhere =
       (args.views as readonly View[]).length > 0 ||

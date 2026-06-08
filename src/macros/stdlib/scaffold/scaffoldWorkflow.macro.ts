@@ -1,6 +1,6 @@
 import type { Workflow } from "../../api/index.js";
 import { defineMacro } from "../../api/index.js";
-import { pageForWorkflow } from "./_pages.js";
+import { pageForWorkflow, workflowIsEventTriggeredOnly } from "./_pages.js";
 
 /** Synthesise the default form page for one workflow.  Leaf of
  * the scaffold-macro family. */
@@ -16,6 +16,10 @@ export default defineMacro({
     of: { kind: "ref", of: "Workflow" },
   },
   expand({ args }) {
-    return [pageForWorkflow(args.of as Workflow)];
+    const wf = args.of as Workflow;
+    // An event-triggered-only workflow runs via the in-process dispatch
+    // handlers, not an HTTP command — it has no form to submit.
+    if (workflowIsEventTriggeredOnly(wf)) return [];
+    return [pageForWorkflow(wf)];
   },
 });
