@@ -108,6 +108,45 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 }
 
+// A stale tab still running the previous deployment will reference asset
+// URLs whose content hashes no longer exist on the server (GitHub Pages
+// overwrites the site on each deploy, so the prior build's hashed chunks
+// 404).  Symptom: `TypeError: Failed to fetch dynamically imported module`
+// the first time a feature touches a lazy chunk — most visibly Mermaid,
+// which lazy-loads one chunk per diagram type from inside its own bundle.
+// Detect the error message pattern and reload once so the tab picks up
+// the current `index.html` (and therefore the current chunk hashes).  The
+// session flag stops the recovery from looping if the reload itself
+// somehow re-hits the same error.
+const STALE_RELOAD_FLAG = "loom.stale-chunk-reloaded";
+const STALE_CHUNK_PATTERNS = [
+  "Failed to fetch dynamically imported module",
+  "error loading dynamically imported module",
+  "Importing a module script failed",
+];
+function isStaleChunkError(reason: unknown): boolean {
+  const message =
+    reason instanceof Error
+      ? reason.message
+      : typeof reason === "string"
+        ? reason
+        : "";
+  return STALE_CHUNK_PATTERNS.some((p) => message.includes(p));
+}
+export function reloadOnceForStaleChunks(reason: unknown): boolean {
+  if (!isStaleChunkError(reason)) return false;
+  try {
+    if (sessionStorage.getItem(STALE_RELOAD_FLAG)) return false;
+    sessionStorage.setItem(STALE_RELOAD_FLAG, "1");
+  } catch {
+    // storage blocked — reload anyway; worst case the user retries
+  }
+  // eslint-disable-next-line no-console
+  console.warn("Stale deployment detected, reloading to fetch current assets");
+  location.reload();
+  return true;
+}
+
 /** Install window-level handlers for errors React boundaries can't catch
  *  (async throws, rejected promises, worker/event-handler errors).  These
  *  don't render UI — they just make a crash observable in the console
@@ -115,12 +154,19 @@ export class ErrorBoundary extends Component<Props, State> {
  *  diagnosable report and "it sometimes crashes". */
 export function installGlobalErrorLogging(): void {
   if (typeof window === "undefined") return;
+  // Vite emits this when a `<link rel="modulepreload">` 404s; same
+  // root cause as the dynamic-import failure below.
+  window.addEventListener("vite:preloadError", (e) => {
+    if (reloadOnceForStaleChunks(e.payload)) e.preventDefault();
+  });
   window.addEventListener("error", (e) => {
+    if (reloadOnceForStaleChunks(e.error ?? e.message)) return;
     // eslint-disable-next-line no-console
     console.error("Uncaught error:", e.error ?? e.message);
     void logDiagnostic("window-error");
   });
   window.addEventListener("unhandledrejection", (e) => {
+    if (reloadOnceForStaleChunks(e.reason)) return;
     // eslint-disable-next-line no-console
     console.error("Unhandled promise rejection:", e.reason);
     void logDiagnostic("unhandledrejection");

@@ -585,6 +585,14 @@ export default function App(): JSX.Element {
   // new workspace, and regenerates.  An existing workspace keeps its
   // persisted content untouched.
   const handledStoreRef = useRef<unknown>("init");
+  // Tracks an in-flight seed of a brand-new workspace.  Multi-file
+  // examples (Acme ERP — 12 companion files) write each `.ddd` to
+  // IndexedDB sequentially, which can outrun the auto-generate
+  // debounce; a manual Generate click during the seed window would
+  // run against the partial VFS and fail on the first unresolved
+  // `import "./shared/money.ddd"`.  `runGenerateStep` awaits this
+  // before reading `sourcesRef.current.files`.
+  const pendingSeedRef = useRef<Promise<void> | null>(null);
   // Example a freshly-created workspace should be seeded from (set by
   // `createWorkspaceFromExample` just before the new store opens).  Null
   // → seed the default example so a new workspace is never blank.
@@ -601,22 +609,27 @@ export default function App(): JSX.Element {
       // non-example "shared" sentinel so the editor remounts and reseeds
       // from the freshly-written content (the editor mounted on the
       // default example before this async seed lands).
-      void (async () => {
+      const seed = (async (): Promise<void> => {
         await seedProject(ctrl, sharedImport.source, sharedImport.files);
         sourceRef.current = sharedImport.source;
         writeHashSource(sharedImport.source);
         setExampleIdRaw("shared");
-        scheduleAutoGenerate(80);
       })();
+      pendingSeedRef.current = seed.finally(() => {
+        if (pendingSeedRef.current === seed) pendingSeedRef.current = null;
+      });
     } else if (workspace.persistedSource === null) {
       // Brand-new (or hostile-storage) workspace — seed from the example
       // chosen at creation, else the default so it's never blank.
       const pendId = pendingSeedExampleRef.current;
       pendingSeedExampleRef.current = null;
       const ex = (pendId && examples.find((e) => e.id === pendId)) || defaultExample;
-      void seedProject(ctrl, ex.source, ex.files);
       sourceRef.current = ex.source;
       setExampleIdRaw(ex.id);
+      const seed = seedProject(ctrl, ex.source, ex.files);
+      pendingSeedRef.current = seed.finally(() => {
+        if (pendingSeedRef.current === seed) pendingSeedRef.current = null;
+      });
     } else {
       sourceRef.current = workspace.persistedSource;
     }
@@ -629,7 +642,9 @@ export default function App(): JSX.Element {
     resetProject();
     // Give the new store's sources controller (and the respawned worker)
     // a moment to settle, then regenerate.  A switch needs a touch longer
-    // than the initial open / same-store seed.
+    // than the initial open / same-store seed.  `runGenerateStep` awaits
+    // `pendingSeedRef` for the multi-file-example case where the seed's
+    // sequential IndexedDB writes can outrun this debounce.
     scheduleAutoGenerate(initial ? 80 : 400);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.store, workspace.loaded]);
@@ -765,6 +780,12 @@ export default function App(): JSX.Element {
   async function runGenerateStep(): Promise<GenerateResult | null> {
     const client = buildClientRef.current;
     if (!client) return null;
+    // Wait out any in-flight workspace seed so the multi-file example's
+    // companion .ddd writes have all landed in the controller's snapshot
+    // before we read it.  Without this, an early click (or the auto-
+    // generate firing mid-seed) reads a partial VFS and the project-
+    // loader throws on the first unresolved `import "./shared/…"`.
+    if (pendingSeedRef.current) await pendingSeedRef.current;
     // Capture the epoch this run belongs to; if it moves while we await
     // the worker, the result is for a project the user has left.
     const epoch = generationEpochRef.current;
