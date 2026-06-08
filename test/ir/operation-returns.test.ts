@@ -55,11 +55,41 @@ describe("operation returns — lowering (exception-less spike)", () => {
   });
 });
 
-describe("operation returns — not-implemented gate (exception-less spike)", () => {
-  it("fires `loom.operation-return-unsupported` on a return-typed operation", async () => {
-    const { model } = await parseString(SRC, { validate: false });
-    const diags = validateLoomModel(enrichLoomModel(lowerModel(model)));
-    expect(diags.some((d) => d.code === "loom.operation-return-unsupported")).toBe(true);
+describe("operation returns — platform-aware emission gate (exception-less spike)", () => {
+  // A return-typed operation served by the named backend platform.
+  const sysWith = (platform: string): string => `
+    system Shop {
+      subdomain Sales {
+        context Shop {
+          error NotFound { resource: string }
+          aggregate Order ids guid {
+            code: string
+            operation lookup(): string or NotFound { return code }
+          }
+        }
+      }
+      storage pg { type: postgres }
+      resource shopState { for: Shop, kind: state, use: pg }
+      deployable api { platform: ${platform}, contexts: [Shop], dataSources: [shopState], port: 4000 }
+    }`;
+
+  const gateDiags = async (platform: string): Promise<string[]> => {
+    const { model } = await parseString(sysWith(platform), { validate: false });
+    return validateLoomModel(enrichLoomModel(lowerModel(model)))
+      .filter((d) => d.code === "loom.operation-return-unsupported")
+      .map((d) => d.message);
+  };
+
+  it("does NOT gate a return-typed operation served by hono/node (route translation implemented)", async () => {
+    expect(await gateDiags("hono")).toEqual([]);
+  });
+
+  it("fires `loom.operation-return-unsupported` when served by dotnet (not implemented yet)", async () => {
+    expect(await gateDiags("dotnet")).not.toEqual([]);
+  });
+
+  it("fires `loom.operation-return-unsupported` when served by phoenix (not implemented yet)", async () => {
+    expect(await gateDiags("phoenix")).not.toEqual([]);
   });
 
   it("does not fire on a plain mutation operation (no return type)", async () => {

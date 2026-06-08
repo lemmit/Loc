@@ -1,0 +1,25 @@
+// Compile-gate fixture for exception-less operation returns (exception-less.md,
+// spike — TS/Hono slice).  An `operation foo(): X or NotFound` returns its
+// tagged `or`-union; the Hono route captures the result and translates an
+// `error`-variant to an RFC-7807 ProblemDetails (404), a success to HTTP 200.
+// This pins that the tagged-union method signature + the route translation
+// compile under strict tsc.
+
+context Shop {
+  // An `error` payload — the route maps a result tagged with it to a 404
+  // ProblemDetails instead of serializing it as a 200 body.
+  error NotFound { resource: string }
+
+  aggregate Order ids guid {
+    code: string
+
+    // Returns the success variant for now: producer-side payload construction
+    // in a `return` (`return NotFound { … }`) isn't accepted by the AST
+    // validator yet (a later producer-track slice).  The error variant is still
+    // part of the return TYPE, so the route's ProblemDetails translation + the
+    // tagged-union response DTO are fully emitted and compiled here.
+    operation lookup(): string or NotFound {
+      return code
+    }
+  }
+}

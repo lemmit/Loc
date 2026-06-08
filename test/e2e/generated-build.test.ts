@@ -49,6 +49,12 @@ describe.skipIf(!ENABLED)(
       // starter — type-checks the generated `createInProcessDispatcher`, the
       // reactor/starter handlers, and the `createApp` in-process default.
       "test/fixtures/dispatch-sample.ddd",
+      // Exception-less operation returns (exception-less.md, spike): an
+      // `operation foo(): X or NotFound` emits a tagged-union domain method
+      // signature + a route that captures the result and translates an
+      // `error`-variant to an RFC-7807 ProblemDetails (404), a success to 200.
+      // Compiles the inline tagged-union return type + the route translation.
+      "test/e2e/fixtures/ts-build/operation-return.ddd",
     ])("%s — `ddd generate ts` output type-checks + tsup-bundles", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
       try {
