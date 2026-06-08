@@ -1,4 +1,4 @@
-import { AstUtils } from "langium";
+import { type AstNode, AstUtils } from "langium";
 import type {
   Aggregate,
   Api,
@@ -154,6 +154,7 @@ import {
 import { lowerRequirement, lowerSolution, lowerTestCase } from "./lower-requirements.js";
 import { lowerStatement } from "./lower-stmt.js";
 import {
+  type AmbientTypeKind,
   cstText,
   type Env,
   findEntityByName,
@@ -162,6 +163,7 @@ import {
   lowerAtom,
   lowerType,
   newEnv,
+  setAmbientTypeIndex,
   withLocal,
 } from "./lower-types.js";
 import { lowerComponent, lowerLayout, lowerUi } from "./lower-ui.js";
@@ -218,6 +220,28 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     }
   }
   setAmbientEnumIndex(ambientEnumIndex);
+  // Project-global name → kind index for every value object / enum / entity
+  // across the import graph (recursing into systems / subdomains / contexts).
+  // Backstops the NamedType fallback in lower-types so a macro-emitted param
+  // type (e.g. a `crudish` update field) pointing at a sibling-file shared-
+  // kernel VO keeps its type instead of collapsing to `string`.  First
+  // declaration wins on a name collision (the validator owns ambiguity).
+  const ambientTypeIndex = new Map<string, AmbientTypeKind>();
+  const indexType = (name: string, kind: AmbientTypeKind): void => {
+    if (!ambientTypeIndex.has(name)) ambientTypeIndex.set(name, kind);
+  };
+  const indexMembers = (members: readonly AstNode[]): void => {
+    for (const m of members) {
+      if (isValueObject(m)) indexType(m.name, "valueobject");
+      else if (isEnumDecl(m)) indexType(m.name, "enum");
+      else if (isAggregate(m)) indexType(m.name, "entity");
+      if ("members" in m && Array.isArray((m as { members?: unknown }).members)) {
+        indexMembers((m as { members: AstNode[] }).members);
+      }
+    }
+  };
+  indexMembers(allMembers);
+  setAmbientTypeIndex(ambientTypeIndex);
   const systemNodes = allMembers.filter(isSystem);
   // Every top-level system-scoped declaration across the import graph —
   // domain (Tier 1: subdomain / context) plus deployment (Tier 2:

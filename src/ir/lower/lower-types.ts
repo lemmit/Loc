@@ -193,6 +193,24 @@ export function inScopeNames(env: Env): ScopeCandidate[] {
 // Types
 // ---------------------------------------------------------------------------
 
+/** Project-global name → kind index for the ambient shared kernel.
+ *
+ *  `lowerProject` collects every value object / enum / entity across the
+ *  whole import graph once and installs it here before any body is lowered.
+ *  It backstops the NamedType fallback below: a macro-emitted reference
+ *  without a `$refNode` (Langium's Linker skips it silently) whose target
+ *  lives in a *sibling document* — e.g. a `shared/` kernel VO referenced by
+ *  a `crudish` update param in another file — isn't reachable through the
+ *  env-local lookups (which only see the current context + same-document
+ *  root).  Without this it collapses to `string`.  Env-local resolution
+ *  still wins first; this is a cross-document fallback only. */
+export type AmbientTypeKind = "valueobject" | "enum" | "entity";
+let ambientTypeIndex: ReadonlyMap<string, AmbientTypeKind> = new Map();
+
+export function setAmbientTypeIndex(index: ReadonlyMap<string, AmbientTypeKind>): void {
+  ambientTypeIndex = index;
+}
+
 export function lowerType(t: TypeRef | undefined, env?: Env): TypeIR {
   if (!t) return { kind: "primitive", name: "string" };
   const head = lowerAtom(t, env);
@@ -283,6 +301,14 @@ function lowerBase(t: TypeRef | TypeAtom, env?: Env): TypeIR {
       if (findEntityByName(env, refText)) return { kind: "entity", name: refText };
       if (findEventByName(env, refText)) return { kind: "entity", name: refText };
       if (findPayloadByName(env, refText)) return { kind: "entity", name: refText };
+    }
+    // Cross-document fallback: a sibling-file shared-kernel type (the
+    // env-local lookups above only see the current context + same-document
+    // root).  Keeps a `crudish` update param typed to its VO/enum across a
+    // multi-file workspace instead of collapsing to `string`.
+    if (refText) {
+      const ambient = ambientTypeIndex.get(refText);
+      if (ambient) return { kind: ambient, name: refText };
     }
     return { kind: "primitive", name: "string" };
   }
