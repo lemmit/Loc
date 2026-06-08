@@ -113,3 +113,33 @@ public sealed class NoopDomainEventDispatcher : IDomainEventDispatcher
 }
 `;
 }
+
+/** The in-process dispatcher: publishes each domain event as a Mediator
+ *  notification, so every `INotificationHandler<TEvent>` (workflow reactor /
+ *  event-triggered starter) for it runs.  Uses the non-generic `Publish(object)`
+ *  so dispatch is by the event's RUNTIME type (the concrete event), not the
+ *  `IDomainEvent` interface.  Registered (replacing the no-op) when the
+ *  deployable has channel-routed subscriptions. */
+export function renderInProcessDispatcher(ns: string): string {
+  return `// Auto-generated.
+using System.Threading;
+using System.Threading.Tasks;
+using Mediator;
+using ${ns}.Domain.Common;
+using ${ns}.Domain.Events;
+
+namespace ${ns}.Infrastructure.Events;
+
+/// <summary>Publishes domain events as Mediator notifications to their
+/// reactor / starter handlers.</summary>
+public sealed class InProcessDomainEventDispatcher : IDomainEventDispatcher
+{
+    private readonly IMediator _mediator;
+
+    public InProcessDomainEventDispatcher(IMediator mediator) => _mediator = mediator;
+
+    public Task DispatchAsync(IDomainEvent ev, CancellationToken cancellationToken = default)
+        => _mediator.Publish((object)ev, cancellationToken).AsTask();
+}
+`;
+}

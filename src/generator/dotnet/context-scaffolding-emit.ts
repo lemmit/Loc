@@ -10,6 +10,7 @@ import {
   renderEvent,
   renderIDomainEvent,
   renderId,
+  renderInProcessDispatcher,
   renderNoopDispatcher,
   renderValueObject,
 } from "./emit.js";
@@ -80,8 +81,13 @@ export function emitValueObjects(
   }
 }
 
-export function emitEvents(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
-  out.set("Domain/Events/IDomainEvent.cs", renderIDomainEvent(ns));
+export function emitEvents(
+  ctx: BoundedContextIR,
+  ns: string,
+  out: Map<string, string>,
+  hasSubscriptions = false,
+): void {
+  out.set("Domain/Events/IDomainEvent.cs", renderIDomainEvent(ns, hasSubscriptions));
   for (const ev of ctx.events) {
     out.set(`Domain/Events/${ev.name}.cs`, renderEvent(ev, ns));
   }
@@ -91,8 +97,22 @@ export function emitCommon(ns: string, out: Map<string, string>): void {
   out.set("Domain/Common/DomainException.cs", renderCommon(ns));
 }
 
-export function emitDispatcher(ns: string, out: Map<string, string>): void {
+export function emitDispatcher(
+  ns: string,
+  out: Map<string, string>,
+  hasSubscriptions = false,
+): void {
   out.set("Infrastructure/Events/NoopDomainEventDispatcher.cs", renderNoopDispatcher(ns));
+  // In-process dispatch (channels.md): the Mediator-notification dispatcher
+  // that routes emitted events to reactor / starter handlers.  Only emitted
+  // when the deployable has channel-routed subscriptions; otherwise the
+  // project keeps only the no-op (byte-identical).
+  if (hasSubscriptions) {
+    out.set(
+      "Infrastructure/Events/InProcessDomainEventDispatcher.cs",
+      renderInProcessDispatcher(ns),
+    );
+  }
 }
 
 /** Polymorphic read home for each abstract TPC (`ownTable`) base in the

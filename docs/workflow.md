@@ -210,21 +210,30 @@ elsewhere a bare event/payload name stays unresolved.  See the
 [language reference](language.md#type-references).
 
 > **Status.** The parameter surface above parses, resolves, and
-> type-checks today.  **In-process dispatch ships on the Hono backend**
-> (channels.md): when a `channel` in the deployable `carries:` the event,
-> an emitted event is delivered to every `on(e: Event)` reactor and
-> event-triggered `create(e: Event) by` starter that subscribes to it —
-> the generated `createInProcessDispatcher(db)` routes each `emit` to its
-> handlers (and re-enters on the handlers' own emits, so choreography
-> chains run).  No `channelSource` ⇒ this in-process dispatcher is the
-> default; a channel-less project keeps the no-op.
+> type-checks today.  **In-process dispatch ships on the Hono and .NET
+> backends** (channels.md): when a `channel` in the deployable `carries:`
+> the event, an emitted event is delivered to every `on(e: Event)` reactor
+> and event-triggered `create(e: Event) by` starter that subscribes to it,
+> and a handler's own `emit` re-enters the dispatcher so choreography
+> chains run.  No `channelSource` ⇒ this in-process dispatcher is the
+> default; a channel-less project keeps the no-op (byte-identical).
+>
+> - **Hono** routes each `emit` through the generated
+>   `createInProcessDispatcher(db)`.  Correlation is **persisted**: a
+>   `create` starter loads-or-allocates its workflow-state row (keyed by
+>   the correlation field), and an `on` reactor routes to the existing row
+>   or drops + logs `event_unrouted` when none exists.
+> - **.NET** publishes each emitted domain event as a Mediator notification
+>   (`IDomainEvent : INotification`), so every reactor / starter
+>   `INotificationHandler<TEvent>` runs; Program.cs registers the
+>   `InProcessDomainEventDispatcher` (Scoped) instead of the no-op.
+>   Reactors run **statelessly** today — a fresh handler per event that
+>   loads / creates aggregates and emits; the `by <expr>` correlation and
+>   the persisted saga row ride a later .NET slice.
 >
 > Still deferred: external brokers (redis / kafka / nats via
-> `channelSource`), the **.NET / Phoenix** dispatch wiring (the
+> `channelSource`), **Phoenix** dispatch wiring (the
 > `IDomainEventDispatcher` seam exists, the routing does not yet), and
-> *persisted* workflow correlation — reactors run **statelessly** today (a
-> fresh handler per event; the `by <expr>` correlation expression is
-> evaluated but "route to an existing workflow instance vs allocate"
-> rides the persisted-workflow-row slice).  See
+> *persisted* **.NET** workflow correlation.  See
 > [`channels.md`](proposals/channels.md) and
 > [`workflow-and-applier.md`](proposals/workflow-and-applier.md).

@@ -88,7 +88,7 @@ import {
 import { emitRetrievalSpecs, renderPagingExtension } from "./spec-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
-import { emitWorkflows } from "./workflow-emit.js";
+import { emitDispatchHandlers, emitWorkflows } from "./workflow-emit.js";
 
 // ---------------------------------------------------------------------------
 // .NET backend entry point.
@@ -192,9 +192,14 @@ function emitProjectFromContexts(
   const routePrefix = hasEmbeddedSpa ? "api/" : undefined;
   // Common files written once per project, regardless of how many
   // contexts contribute their domain code.
+  // In-process dispatch (channels.md): does any hosted context have a
+  // channel-routed event subscription?  Gates the Mediator-notification
+  // dispatcher, the `IDomainEvent : INotification` upgrade, the reactor /
+  // starter `INotificationHandler`s, and the Program.cs registration.
+  const hasSubscriptions = contexts.some((c) => c.eventSubscriptions.length > 0);
   emitCommon(ns, out);
-  emitDispatcher(ns, out);
-  out.set("Domain/Events/IDomainEvent.cs", renderIDomainEvent(ns));
+  emitDispatcher(ns, out, hasSubscriptions);
+  out.set("Domain/Events/IDomainEvent.cs", renderIDomainEvent(ns, hasSubscriptions));
   // Adapter dispatch context — built once per system-mode emit so
   // every per-aggregate call dispatches through the same EmitCtx
   // (deployable, contexts, sys, migrations).  Threaded into
@@ -260,6 +265,12 @@ function emitProjectFromContexts(
     seeds: contexts.flatMap((c) => c.seeds),
     eventSubscriptions: contexts.flatMap((c) => c.eventSubscriptions),
   };
+  // In-process dispatch (channels.md): one `INotificationHandler<TEvent>` per
+  // channel-routed reactor / event-create, derived over the merged context so
+  // a reactor in one hosted context can route off another's channel.
+  if (hasSubscriptions) {
+    emitDispatchHandlers(merged, ns, out, system?.sys);
+  }
   // Auth files — emitted only when the deployable opts in
   // via `auth: required` AND the system declares a user block (the
   // validator already rejects the half-state).  Computed first
@@ -349,6 +360,7 @@ function emitProjectFromContexts(
     hasSeeds,
     emitTrace,
     usingDapper,
+    hasSubscriptions,
     resourceNugetDeps: resourceEmission.nugetDeps,
   });
   emitTestProject(merged, ns, out);
@@ -418,17 +430,19 @@ function emitContext(
   out: Map<string, string>,
   emitTrace = false,
 ): void {
+  const hasSubscriptions = ctx.eventSubscriptions.length > 0;
   emitIds(ctx, ns, out);
   emitEnums(ctx, ns, out);
   emitValueObjects(ctx, ns, out);
-  emitEvents(ctx, ns, out);
+  emitEvents(ctx, ns, out, hasSubscriptions);
   emitCommon(ns, out);
-  emitDispatcher(ns, out);
+  emitDispatcher(ns, out, hasSubscriptions);
   for (const agg of ctx.aggregates) {
     emitAggregate(agg, ctx, ns, out, undefined, emitTrace);
   }
   emitBaseReaders(ctx, ns, out);
   emitWorkflows(ctx, ns, out);
+  if (hasSubscriptions) emitDispatchHandlers(ctx, ns, out, undefined);
   emitViews(ctx, ns, out);
   // Reified `criterion` specifications (evaluate face) — additive, not yet
   // wired into invariants/preconditions (see criteria-emit.ts).
@@ -451,7 +465,13 @@ function emitContext(
     emitDotnetSeeds(ctx, ns, out);
   }
   const hasSeeds = out.has("Infrastructure/Persistence/Seed.cs");
-  emitProject(ctx, ns, out, { usesValidators, usesStamping, emitTrace, hasSeeds });
+  emitProject(ctx, ns, out, {
+    usesValidators,
+    usesStamping,
+    emitTrace,
+    hasSeeds,
+    hasSubscriptions,
+  });
   emitTestProject(ctx, ns, out);
 }
 
@@ -770,6 +790,7 @@ function emitProject(
     hasSeeds?: boolean;
     emitTrace?: boolean;
     usingDapper?: boolean;
+    hasSubscriptions?: boolean;
     resourceNugetDeps?: Record<string, string>;
   },
 ): void {
@@ -792,6 +813,7 @@ function emitProject(
       hasSeeds,
       emitTrace,
       usingDapper,
+      hasSubscriptions: !!options?.hasSubscriptions,
     }),
   );
   // Ardalis.Specification ships only when a retrieval exists (EF Core path;
