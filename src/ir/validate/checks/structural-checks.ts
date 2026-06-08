@@ -5,6 +5,7 @@
 // -------------------------------------------------------------------------
 
 import { allPlatforms } from "../../../platform/registry.js";
+import { isStdlibError } from "../../../util/error-defaults.js";
 import type {
   BoundedContextIR,
   EnrichedLoomModel,
@@ -395,6 +396,49 @@ export function validateOperationReturnsUnimplemented(
             .join(", ")}.`,
         source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
       });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Unmapped error status (exception-less.md A1).
+//
+// A user-declared `error` returned by an operation that is neither a blessed
+// stdlib error (which carries a default status) nor given an api `httpStatus
+// <Error> <Code>` mapping falls through to a 500 ProblemDetails — almost never
+// what the author intended for a domain-specific failure.  Warn (not error) so
+// the pipeline still runs, prompting an explicit mapping.
+// ---------------------------------------------------------------------------
+
+export function validateUnmappedErrorStatuses(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  const overrides = ctx.errorStatusOverrides ?? {};
+  const errorNames = new Set(ctx.payloads.filter((p) => p.kind === "error").map((p) => p.name));
+  for (const agg of ctx.aggregates) {
+    for (const op of agg.operations) {
+      if (op.returnType?.kind !== "union") continue;
+      const flagged = new Set<string>();
+      for (const v of op.returnType.variants) {
+        if (v.kind !== "entity") continue;
+        const name = v.name;
+        if (!errorNames.has(name)) continue; // only `error` payloads
+        if (isStdlibError(name)) continue; // carries a stdlib default
+        if (name in overrides) continue; // explicit api mapping
+        if (flagged.has(name)) continue;
+        flagged.add(name);
+        diags.push({
+          severity: "warning",
+          code: "loom.unmapped-error-status",
+          message:
+            `error '${name}' returned by '${agg.name}.${op.name}' has no stdlib default HTTP ` +
+            `status and no api \`httpStatus ${name} <code>\` mapping, so it defaults to 500. Add ` +
+            `a \`httpStatus ${name} <code>\` line to the api serving this context to set an ` +
+            `explicit status.`,
+          source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
+        });
+      }
     }
   }
 }

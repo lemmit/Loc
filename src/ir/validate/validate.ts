@@ -12,6 +12,7 @@ import {
   validateOperationReturnsUnimplemented,
   validatePermissionRefs,
   validateUnionsUnimplemented,
+  validateUnmappedErrorStatuses,
   validateWorkspaceUniqueness,
 } from "./checks/structural-checks.js";
 import {
@@ -134,6 +135,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       diags,
       backendPlatformsByContext.get(c.name) ?? new Set(),
     );
+    validateUnmappedErrorStatuses(c, diags);
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateEventSourcedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateProvenancedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
