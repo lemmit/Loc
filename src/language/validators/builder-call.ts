@@ -10,6 +10,7 @@ import {
   isBoundedContext,
   isCallSuffix,
   isComponent,
+  isPayloadDecl,
   isPostfixChain,
   isValueObject,
 } from "../generated/ast.js";
@@ -81,6 +82,15 @@ export function checkBuilderCallType(
       let resolved = false;
       for (const m of ctx.members) {
         if (isValueObject(m) && m.name === name) {
+          resolved = true;
+          break;
+        }
+        // A record payload (`payload`/`command`/`query`/`response`/`error` with
+        // fields, not a named `= A | B` union) is a structural record, so it's
+        // constructible by the same builder-call form — `NotFound { resource:
+        // … }`.  This is the producer-side surface for exception-less returns
+        // (exception-less.md); lowering routes the name to an `object` ExprIR.
+        if (isPayloadDecl(m) && m.name === name && m.variants.length === 0) {
           resolved = true;
           break;
         }

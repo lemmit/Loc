@@ -282,6 +282,40 @@ describe("validation", () => {
       `);
       expect(errors.some((e) => /Unknown builder type/.test(e))).toBe(false);
     });
+
+    it("accepts a record payload constructed by name in a `return` (exception-less)", async () => {
+      // A record payload (`error`/`payload`/…) is a structural record, so it's
+      // constructible with the builder-call form — the producer-side surface
+      // for exception-less returns (exception-less.md).  `NotFound { … }` must
+      // resolve where it previously failed as an unknown builder type.
+      const { errors } = await parse(`
+        context Shop {
+          error NotFound { resource: string }
+          aggregate Order ids guid {
+            code: string
+            operation lookup(): string or NotFound {
+              return NotFound { resource: code }
+            }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type/.test(e))).toBe(false);
+    });
+
+    it("rejects a typo on a payload name", async () => {
+      const { errors } = await parse(`
+        context Shop {
+          error NotFound { resource: string }
+          aggregate Order ids guid {
+            code: string
+            operation lookup(): string or NotFound {
+              return NotFund { resource: code }
+            }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type 'NotFund'/.test(e))).toBe(true);
+    });
   });
 
   // ---------------------------------------------------------------------------

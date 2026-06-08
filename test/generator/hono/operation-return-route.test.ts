@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
-import { parseString } from "../../_helpers/parse.js";
+import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Shop {
@@ -21,12 +21,7 @@ const SRC = `
 `;
 
 async function routes(): Promise<string> {
-  // Parsed without AST validation: payload construction in an expression
-  // position (`return NotFound { … }`) isn't recognized by the builder-call
-  // validator yet (a producer-track gap the earlier slices also worked around;
-  // the route emission below is what this spike proves).
-  const { model } = await parseString(SRC, { validate: false });
-  const files = generateHono(model);
+  const files = generateHono(await parseValid(SRC));
   return files.get("http/order.routes.ts")!;
 }
 
