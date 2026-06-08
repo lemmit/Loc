@@ -106,6 +106,11 @@ export function Preview({
   onAppLog,
 }: PreviewProps): JSX.Element {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // Current route the preview app is showing (the path under the
+  // sandbox basename, e.g. "/" or "/products").  Polled from the iframe
+  // location while same-origin (staging); shown in the preview header in
+  // place of a static description.
+  const [route, setRoute] = useState("/");
   // Held in a ref so a changing callback identity never re-triggers the
   // bridge handshake effect (its deps are deliberately narrow).
   const onAppLogRef = useRef(onAppLog);
@@ -180,6 +185,38 @@ export function Preview({
 
   // Static stub URL on SANDBOX_ORIGIN (computed once).
   const stubUrl = useMemo(() => sandboxStubUrl(), []);
+  // BrowserRouter basename the app routes under; we strip it off the
+  // iframe pathname to recover the app-visible route.
+  const basename = useMemo(() => sandboxBasename(stubUrl), [stubUrl]);
+
+  // Reflect the preview app's current route in the header.  Same-origin
+  // only (staging): once SANDBOX_ORIGIN is a distinct origin, reading the
+  // iframe location throws cross-origin, so we leave the last known route.
+  // A light poll (rather than instrumenting the generated app) keeps this
+  // contained to the playground shell.
+  useEffect(() => {
+    if (!SANDBOX_SAME_ORIGIN) return;
+    const read = (): void => {
+      try {
+        const loc = iframeRef.current?.contentWindow?.location;
+        // Skip the transient pre-load document so the header doesn't
+        // flash "/blank" before the stub navigates to the app route.
+        if (!loc || loc.href === "about:blank") return;
+        let path = loc.pathname || "/";
+        if (basename && path.startsWith(basename)) {
+          path = path.slice(basename.length) || "/";
+        }
+        if (!path.startsWith("/")) path = `/${path}`;
+        const full = `${path}${loc.search || ""}${loc.hash || ""}`;
+        setRoute((prev) => (prev === full ? prev : full || "/"));
+      } catch {
+        /* cross-origin once isolated — keep the last known route */
+      }
+    };
+    read();
+    const id = setInterval(read, 400);
+    return () => clearInterval(id);
+  }, [basename]);
   // The sandbox UI-test driver module, served alongside the stub (so it is
   // same-origin as the sandbox document in both same- and cross-origin modes).
   const driverUrl = useMemo(
@@ -300,8 +337,20 @@ export function Preview({
         style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
       >
         <Group justify="space-between" wrap="nowrap" gap="xs">
-          <Text size="xs" fw={600} tt="uppercase" c="dimmed">
-            Preview — generated React app, fetches routed to PGlite
+          {/* The app's current route — more useful than repeating the
+              "Preview" region title.  Falls back to "/" before the app
+              has navigated (or when the iframe is a distinct, unreadable
+              origin). */}
+          <Text
+            size="xs"
+            ff="monospace"
+            c="dimmed"
+            truncate
+            title="Current preview route"
+            data-testid="preview-route"
+            style={{ flex: 1, minWidth: 0 }}
+          >
+            {route}
           </Text>
           <Tooltip
             label={isMaximized ? "Exit full screen (Esc)" : "Open full screen"}
