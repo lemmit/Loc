@@ -36,6 +36,7 @@ import {
 } from "./checks/system-checks.js";
 import { validateAggregateTestBodies } from "./checks/test-checks.js";
 import {
+  validateEventChannelAmbiguous,
   validateEventConsumersCarried,
   validateViews,
   validateWorkflows,
@@ -83,6 +84,10 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // channel carries (it can't be dispatched in-process).  Needs every
   // context's channels, so it runs once over the whole model, not per-context.
   validateEventConsumersCarried([...allContexts(loom)], diags);
+  // System-wide: warn when a consumer's event is carried by more than one
+  // channel in its context (ambiguous in-process routing; first-by-declaration
+  // wins).  Per-context internally, but gathered here alongside the carried check.
+  validateEventChannelAmbiguous([...allContexts(loom)], diags);
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
     validateDataSourceCoverage(sys, diags);

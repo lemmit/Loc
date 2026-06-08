@@ -38,6 +38,21 @@ import { firstColumnVsColumn, firstNonQueryableNode, firstUnknownColumnRef } fro
 // context.  A warning (not an error) so a model mid-construction — or one that
 // reaches the consumer by a transport other than the in-process dispatcher —
 // still builds.
+// A workflow's event consumers — `on(e: Event)` reactors and event-triggered
+// `create(e: Event) by` starters — as `{ event, label }` pairs.  Shared by the
+// channel-routing checks (`reactor-event-uncarried`, `reactor-channel-ambiguous`).
+function eventConsumersOf(wf: WorkflowIR): { event: string; label: string }[] {
+  return [
+    ...(wf.subscriptions ?? []).map((s) => ({ event: s.event, label: `on(${s.event})` })),
+    ...(wf.creates ?? [])
+      .filter((cr) => cr.triggerKind === "event" && !!cr.eventRef)
+      .map((cr) => ({
+        event: cr.eventRef as string,
+        label: `create(${cr.eventBinding ?? "_"}: ${cr.eventRef})`,
+      })),
+  ];
+}
+
 export function validateEventConsumersCarried(
   contexts: BoundedContextIR[],
   diags: LoomDiagnostic[],
@@ -47,16 +62,7 @@ export function validateEventConsumersCarried(
     for (const ch of c.channels) for (const ev of ch.carries) carried.add(ev);
   for (const c of contexts) {
     for (const wf of c.workflows) {
-      const consumers: { event: string; label: string }[] = [
-        ...(wf.subscriptions ?? []).map((s) => ({ event: s.event, label: `on(${s.event})` })),
-        ...(wf.creates ?? [])
-          .filter((cr) => cr.triggerKind === "event" && !!cr.eventRef)
-          .map((cr) => ({
-            event: cr.eventRef as string,
-            label: `create(${cr.eventBinding ?? "_"}: ${cr.eventRef})`,
-          })),
-      ];
-      for (const cons of consumers) {
+      for (const cons of eventConsumersOf(wf)) {
         if (!carried.has(cons.event)) {
           diags.push({
             severity: "warning",
@@ -66,6 +72,43 @@ export function validateEventConsumersCarried(
               `'channel' carries it. In-process dispatch is channel-routed, so this consumer never ` +
               `fires — declare a channel (e.g. 'channel C { carries: ${cons.event} }') in the ` +
               `event's context.`,
+            source: `${c.name}/${wf.name}`,
+          });
+        }
+      }
+    }
+  }
+}
+
+// A workflow event consumer whose event is carried by MORE THAN ONE channel in
+// its context has an ambiguous channel binding: the in-process dispatch enrich
+// (`deriveEventSubscriptions`) records the first channel by declaration order.
+// In-process delivery routes by event *type*, so the consumer still fires
+// exactly once today — but once channels bind distinct transports (via
+// `channelSource`), the routing is genuinely ambiguous.  There's no `via
+// <Channel>` disambiguator in the grammar yet, so warn (don't block): carry the
+// event on a single channel to make routing explicit.  Counted per context,
+// matching the enrich's routing scope (`deriveEventSubscriptions(ctx.channels,
+// …)`).
+export function validateEventChannelAmbiguous(
+  contexts: BoundedContextIR[],
+  diags: LoomDiagnostic[],
+): void {
+  for (const c of contexts) {
+    for (const wf of c.workflows) {
+      for (const cons of eventConsumersOf(wf)) {
+        const carriers = c.channels
+          .filter((ch) => ch.carries.includes(cons.event))
+          .map((ch) => ch.name);
+        if (carriers.length > 1) {
+          diags.push({
+            severity: "warning",
+            code: "loom.reactor-channel-ambiguous",
+            message:
+              `workflow '${wf.name}': ${cons.label} subscribes to event '${cons.event}', which is ` +
+              `carried by ${carriers.length} channels (${carriers.join(", ")}). In-process dispatch ` +
+              `records the first by declaration order ('${carriers[0]}') — carry '${cons.event}' on a ` +
+              `single channel to keep routing unambiguous.`,
             source: `${c.name}/${wf.name}`,
           });
         }

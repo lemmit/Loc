@@ -847,6 +847,10 @@ Warnings (non-fatal):
   starter whose event no `channel` carries (`loom.reactor-event-uncarried`):
   in-process dispatch is channel-routed, so the consumer would never fire —
   declare a `channel { carries: … }` for the event.
+- A reactor / event-create whose event is carried by **more than one** channel
+  in its context (`loom.reactor-channel-ambiguous`): in-process dispatch records
+  the first channel by declaration order, so the binding is ambiguous — carry
+  the event on a single channel to keep routing explicit.
 
 ---
 
