@@ -147,6 +147,17 @@ describe("Phoenix in-process event dispatch emission", () => {
     );
   });
 
+  it("scaffolds no UI form page for an event-triggered-only workflow", async () => {
+    const files = await generate(DISPATCH);
+    const keys = [...files.keys()];
+    // The scaffold synthesises no Form page for a dispatch-only workflow
+    // (it would phx-submit to a non-existent route), so no workflow
+    // LiveView page and no WorkflowsIndex singleton — the saga has no
+    // command surface to drive from the UI.
+    expect(keys.some((k) => /\/live\/.*workflow.*\.ex$/.test(k))).toBe(false);
+    expect(keys.some((k) => /workflows_index_live\.ex$/.test(k))).toBe(false);
+  });
+
   it("emits no dispatch wiring for a channel-less project (byte-identical / no-op)", async () => {
     const files = await generate("test/e2e/fixtures/phoenix-build/roster.ddd");
     const keys = [...files.keys()];
