@@ -30,6 +30,7 @@ import type {
   EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
   EnumIR,
+  ExprIR,
   FindIR,
   InvariantIR,
   OperationIR,
@@ -235,7 +236,9 @@ export function buildRoutesFile(
           // default is applied at the wire (`.default(...)`), so it drops
           // out of the request's required-set (mirrors the bool rule).
           const d = f.default;
-          const base = d ? `${zodFor(f.type)}.default(${renderTsExpr(d)})` : zodFor(f.type);
+          const base = d
+            ? `${zodFor(f.type)}.default(${wireDefaultLiteral(f.type, d)})`
+            : zodFor(f.type);
           return { name: f.name, base };
         }),
         agg.invariants,
@@ -1189,6 +1192,24 @@ function zodForResponseInner(t: TypeIR): string {
     case "entity":
       return `${info.base}Response`;
   }
+}
+
+/** Render a create-input field's default in WIRE form for its zod schema.
+ *  An enum field's request schema is `z.enum([<wire strings>])`, so its
+ *  `.default(...)` must be the wire STRING — not the runtime enum const
+ *  `Enum.Value` that `renderTsExpr` emits for an enum-value expression.
+ *  The route file imports the value-object runtime classes but NOT the
+ *  enum consts (enums travel as strings on the wire), so a const
+ *  reference is undefined at bundle time ("SalesOrderStatus is not
+ *  defined").  Emitting the value name as a string literal is both
+ *  in-scope and wire-correct.  Every non-enum default renders as its
+ *  ordinary TS expression. */
+function wireDefaultLiteral(type: TypeIR, d: ExprIR): string {
+  const inner = peelNullable(peelCollection(type));
+  if (inner.kind === "enum" && d.kind === "ref" && d.refKind === "enum-value") {
+    return JSON.stringify(d.name);
+  }
+  return renderTsExpr(d);
 }
 
 function collectUsedValueObjects(
