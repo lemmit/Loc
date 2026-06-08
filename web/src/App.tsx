@@ -790,7 +790,18 @@ export default function App(): JSX.Element {
     // the worker, the result is for a project the user has left.
     const epoch = generationEpochRef.current;
     dispatch({ type: "GENERATE_START" });
-    const s = sourcesRef.current;
+    // Read the controller's OWN synchronous snapshot, not `sourcesRef.current`
+    // (a React-state mirror updated via emit→re-render).  Even after
+    // `pendingSeedRef` resolves — which guarantees every companion `.ddd`
+    // has landed in the controller — the React mirror can still lag a tick,
+    // so a multi-file example's first auto-generate would otherwise run
+    // against a PARTIAL file set / stale active path: the project loader
+    // then throws on the not-yet-mirrored `import "./governance/…"`, and a
+    // retry against an inconsistent state surfaces as unresolved cross-file
+    // references.  The controller snapshot is authoritative the instant the
+    // seed completes (this is why manually picking main.ddd, by which point
+    // the mirror has caught up, makes generation succeed).
+    const s = sourcesRef.current.controller.snapshot();
     const entryPath = s.activePath;
     // Push every workspace `.ddd` source, not just the active file, so a
     // multi-file example's imports resolve against fresh content in the
