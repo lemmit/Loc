@@ -303,7 +303,18 @@ UiMember:
 // available; consumers (ui, deployable) reference it by name.
 Api:
     'api' name=ID 'from' source=[Subdomain:ID]
-        ('{' ('urlStyle' ':' urlStyle=('literal' | 'resource'))? '}')?;
+        ('{'
+            ('urlStyle' ':' urlStyle=('literal' | 'resource'))?
+            (statuses+=ApiStatus)*
+        '}')?;
+
+// Per-error HTTP status override for the exception-less ProblemDetails
+// translator (exception-less.md A1).  `httpStatus <Error> <Code>` overrides the
+// stdlib default for an `error` payload this api can return.  `httpStatus`
+// (not the proposal's `status`) is the clause head so the very common
+// `status: OrderStatus` field name keeps parsing without a soft keyword.
+ApiStatus:
+    'httpStatus' error=ID code=INT;
 
 // ---- storage declaration (system-level) ------------------------
 //

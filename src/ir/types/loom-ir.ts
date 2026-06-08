@@ -762,6 +762,12 @@ export interface BoundedContextIR {
    *  Platform-neutral; the system-level seed builder (phase ⑨) groups these
    *  per (module, dataset) and the backends emit native seeders. */
   seeds: SeedIR[];
+  /** Per-error HTTP status overrides reaching this context, merged from the
+   *  `httpStatus <Error> <Code>` clauses of every api over its subdomain
+   *  (exception-less.md A1).  Populated by `enrichLoomModel`; the route
+   *  translator reads `errorStatusOverrides?.[name] ?? defaultErrorStatus(name)`.
+   *  Undefined in single-context (no-api) lowering — defaults apply. */
+  errorStatusOverrides?: Record<string, number>;
 }
 
 /** A first-boot seed dataset for a context's aggregates
@@ -1586,6 +1592,11 @@ export interface ApiIR {
    *  pluralises it.  Drives `OperationIR.routeSlug` derivation in
    *  enrichment (D-URLSTYLE / lifecycle-operations.md Phase 2). */
   urlStyle: "literal" | "resource";
+  /** Per-error HTTP status overrides declared via `httpStatus <Error> <Code>`
+   *  in the api block (exception-less.md A1).  Keyed by error-payload name; an
+   *  error absent here falls back to the stdlib default
+   *  (`src/util/error-defaults.ts`).  Empty when the api declares none. */
+  errorStatuses: Record<string, number>;
 }
 
 /** UI api parameter — local handle + which api it expects. */

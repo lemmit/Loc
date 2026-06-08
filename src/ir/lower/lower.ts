@@ -446,6 +446,7 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
         name: a.name,
         sourceModule: a.source?.$refText ?? "",
         urlStyle: a.urlStyle === "resource" ? "resource" : "literal",
+        errorStatuses: Object.fromEntries((a.statuses ?? []).map((s) => [s.error, s.code])),
       }),
     );
   const storages = members

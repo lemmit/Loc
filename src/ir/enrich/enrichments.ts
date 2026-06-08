@@ -139,13 +139,30 @@ function enrichSystem(
     if (!urlStyleBySubdomain.has(a.sourceModule))
       urlStyleBySubdomain.set(a.sourceModule, a.urlStyle);
   }
+  // Merge each subdomain's per-error HTTP status overrides from every api that
+  // surfaces it (`httpStatus <Error> <Code>`).  First-declared api wins on a
+  // conflicting code for the same error (mirrors urlStyle).  Consumed by the
+  // route translator as `ctx.errorStatusOverrides` (exception-less.md A1).
+  const errorStatusesBySubdomain = new Map<string, Record<string, number>>();
+  for (const a of sys.apis) {
+    const merged = errorStatusesBySubdomain.get(a.sourceModule) ?? {};
+    for (const [err, code] of Object.entries(a.errorStatuses))
+      if (!(err in merged)) merged[err] = code;
+    errorStatusesBySubdomain.set(a.sourceModule, merged);
+  }
   // First enrich each subdomain's contexts (auto-findAll, wire-shape,
   // routeSlug).
   const subdomains: EnrichedSubdomainIR[] = sys.subdomains.map((m) => ({
     ...m,
-    contexts: m.contexts.map((c) =>
-      enrichContext(c, rootValueObjects, rootEnums, urlStyleBySubdomain.get(m.name) ?? "literal"),
-    ),
+    contexts: m.contexts.map((c) => ({
+      ...enrichContext(
+        c,
+        rootValueObjects,
+        rootEnums,
+        urlStyleBySubdomain.get(m.name) ?? "literal",
+      ),
+      errorStatusOverrides: errorStatusesBySubdomain.get(m.name),
+    })),
   }));
   // Then propagate react deployables' context sets from their targets.
   // Done after subdomain enrichment so frontends see the same enriched
