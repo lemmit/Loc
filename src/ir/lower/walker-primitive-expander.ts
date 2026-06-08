@@ -453,7 +453,7 @@ function expandScaffoldInstanceList(wf: import("../types/loom-ir.js").WorkflowIR
     [
       call("Breadcrumbs", [
         call("Anchor", [lit("Home")], [["to", lit("/")]]),
-        call("Anchor", [lit("Workflows")], [["to", lit("/workflows")]]),
+        call("Text", [lit("Workflows")]),
         call("Text", [lit(`${humanWf} instances`)]),
       ]),
       call("Heading", [lit(`${humanWf} instances`)], [["level", intLit(2)]]),
@@ -520,7 +520,7 @@ function expandScaffoldInstanceDetails(wf: import("../types/loom-ir.js").Workflo
   return call("Stack", [
     call("Breadcrumbs", [
       call("Anchor", [lit("Home")], [["to", lit("/")]]),
-      call("Anchor", [lit("Workflows")], [["to", lit("/workflows")]]),
+      call("Text", [lit("Workflows")]),
       call("Anchor", [lit(`${humanWf} instances`)], [["to", lit(`/workflows/${slug}/instances`)]]),
       call("Text", [lit("Detail")]),
     ]),
