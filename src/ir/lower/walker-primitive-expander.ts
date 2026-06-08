@@ -17,6 +17,7 @@
 
 import { humanize, plural, snake } from "../../util/naming.js";
 import type { AggregateIR, BoundedContextIR, ExprIR, SystemIR, UiIR } from "../types/loom-ir.js";
+import { workflowEmitsCommandRoute } from "../types/loom-ir.js";
 
 /** Inputs for the expander.  Carried as a struct so callers don't
  *  have to thread through the same handful of derived maps every
@@ -521,7 +522,12 @@ function expandScaffoldViewList(
  *  page; recognised inline by `expandInlineScaffoldPrimitives`. */
 function expandScaffoldHome(ctx: WalkerExpandContext): ExprIR {
   const aggCount = ctx.aggregatesByName.size;
-  const wfCount = ctx.workflowsByName.size;
+  // Only workflows that emit a command route get a scaffolded page (an
+  // event-triggered-only workflow has no `/workflows/<wf>` route and no
+  // `/workflows` index — #1029).  The home "Open workflows → /workflows" link
+  // must count *those*, or it dangles to a non-existent route and fails the
+  // Phoenix `~p` verified-route check under --warnings-as-errors.
+  const wfCount = [...ctx.workflowsByName.values()].filter(workflowEmitsCommandRoute).length;
   const viewCount = ctx.viewsByName.size;
   const cards: ExprIR[] = [];
   if (aggCount > 0) {
