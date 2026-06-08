@@ -48,10 +48,26 @@ describe("event-sourced storage capability validation", () => {
     expect(await esErrors(sys("dotnet"))).toEqual([]);
   });
 
-  it("rejects persistedAs(eventLog) on a Phoenix deployable (not implemented)", async () => {
+  it("rejects persistedAs(eventLog) on a Phoenix deployable with an Ash-foundation-specific diagnostic", async () => {
+    // Phoenix-specific diagnostic (P0 of vanilla-phoenix-foundation.md):
+    // names the Ash foundation as the constraint, distinguishes from a
+    // Phoenix-platform limitation, points at foundation: vanilla as the
+    // planned escape, and lists the today-actionable alternatives.
     const errs = await esErrors(sys("phoenixLiveView"));
     expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("Account");
-    expect(errs[0]).toContain("event-sourced");
+    const msg = errs[0];
+    expect(msg).toContain("Account");
+    expect(msg).toContain("persistedAs(eventLog)");
+    // Names the foundation, not the platform, as the constraint.
+    expect(msg).toContain("Ash-foundation limitation");
+    expect(msg).toContain("not a Phoenix-platform limitation");
+    // Mentions why each Ash-foundation alternative was rejected.
+    expect(msg).toContain("AshEvents");
+    expect(msg).toContain("AshCommanded");
+    // Points at the proposal for the planned vanilla escape.
+    expect(msg).toContain("foundation: vanilla");
+    expect(msg).toContain("vanilla-phoenix-foundation.md");
+    // Lists the today-actionable escapes (host on node/dotnet; drop ES).
+    expect(msg).toContain("node / dotnet");
   });
 });

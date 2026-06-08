@@ -842,6 +842,14 @@ export function validateInheritanceStorage(
 // its context implements it. On a backend that doesn't (Phoenix today) the
 // aggregate would silently fall back to state persistence, losing the event
 // log — an error, not a silent downgrade. Mirrors the TPH storage gate.
+//
+// For Phoenix specifically the gap is foundation-shaped, not platform-shaped:
+// Phoenix itself is domain-layer-agnostic, but `foundation: ash` (today's
+// only Phoenix foundation) doesn't have a pure-ES fit (AshEvents is hybrid,
+// AshCommanded is heavy, custom Ash.DataLayer is ~months). The planned
+// `foundation: vanilla` (D-VANILLA-PHOENIX-FOUNDATION + D-VANILLA-ES-HOME)
+// will host pure ES on Phoenix; until it ships the diagnostic names the Ash
+// foundation as the constraint and points at the proposal.
 const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet"]);
 export function validateEventSourcedStorage(
   ctx: BoundedContextIR,
@@ -852,21 +860,44 @@ export function validateEventSourcedStorage(
   // don't (e.g. a Phoenix deployable hosting the context alongside a node one).
   const unsupported = [...backendPlatforms].filter((p) => !EVENT_SOURCING_BACKENDS.has(p));
   const anyBackend = backendPlatforms.size > 0;
+  const includesPhoenix = unsupported.includes("phoenix");
   for (const agg of ctx.aggregates) {
     if (agg.persistedAs !== "eventLog") continue;
     if (anyBackend && unsupported.length === 0) continue;
-    const hostNote =
-      unsupported.length > 0
-        ? `it is hosted by ${unsupported.join(", ")}, where event-sourced persistence is not implemented`
-        : "no event-sourcing-capable (node / dotnet) backend deployable hosts this context";
+    const message = includesPhoenix
+      ? // Phoenix-specific: name the Ash-foundation constraint, point at the
+        // planned vanilla foundation (D-VANILLA-ES-HOME) and the cross-backend
+        // escape (host the context on node / dotnet).
+        `aggregate '${agg.name}' is persistedAs(eventLog), which requires a pure-ES data ` +
+        `layer (per-aggregate stream, fold-on-load, no state table). This is an ` +
+        `Ash-foundation limitation, not a Phoenix-platform limitation — Phoenix itself ` +
+        `is domain-layer-agnostic, but foundation: ash (today's only Phoenix foundation) ` +
+        `has no pure-ES fit: AshEvents is hybrid (keeps the state table), AshCommanded ` +
+        `couples to Commanded's infrastructure, and a custom Ash.DataLayer over event ` +
+        `streams effectively re-implements AshCommanded. Three escapes: ` +
+        `(1) host event-sourced aggregates on a node / dotnet deployable (same .ddd ` +
+        `source — they share the cross-backend ES contract); ` +
+        `(2) drop persistedAs(eventLog) to use state persistence on Phoenix; ` +
+        `(3) wait for foundation: vanilla on Phoenix — see ` +
+        `proposals/vanilla-phoenix-foundation.md (D-VANILLA-PHOENIX-FOUNDATION + ` +
+        `D-VANILLA-ES-HOME). Tracked in workflow-and-applier.md (appliers A2).`
+      : // Generic non-Phoenix unsupported backend (or no backend at all).
+        (() => {
+          const hostNote =
+            unsupported.length > 0
+              ? `it is hosted by ${unsupported.join(", ")}, where event-sourced persistence is not implemented`
+              : "no event-sourcing-capable (node / dotnet) backend deployable hosts this context";
+          return (
+            `aggregate '${agg.name}' is persistedAs(eventLog), but event-sourced storage emission ` +
+            `is implemented for the Hono (node) and .NET (dotnet) backends only — ${hostNote}. ` +
+            `Host the context on a node / dotnet deployable, or drop persistedAs(eventLog) to use ` +
+            `state persistence (all backends). Tracked in workflow-and-applier.md (appliers A2).`
+          );
+        })();
     diags.push({
       severity: "error",
       code: "loom.event-sourcing-backend-unsupported",
-      message:
-        `aggregate '${agg.name}' is persistedAs(eventLog), but event-sourced storage emission ` +
-        `is implemented for the Hono (node) and .NET (dotnet) backends only — ${hostNote}. ` +
-        `Host the context on a node / dotnet deployable, or drop persistedAs(eventLog) to use ` +
-        `state persistence (all backends). Tracked in workflow-and-applier.md (appliers A2).`,
+      message,
       source: `${ctx.name}/${agg.name}`,
     });
   }
