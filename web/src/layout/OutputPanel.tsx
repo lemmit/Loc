@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { ProblemsPanel } from "./ProblemsPanel";
 import { formatBytes, modeLabel, type LayoutCtx } from "./ctx";
 import { LOG_LEVELS, type LogLine, type StructuredLogPayload } from "../util/log-line";
+import { clearDiagnostics, readDiagnostics, type DiagSnapshot } from "../util/diagnostics";
 
 // The playground used to scatter read-only status across sibling dock
 // tabs — LSP diagnostics, generator output, bundle errors — so a red dot
@@ -19,7 +20,8 @@ export type OutputStream =
   | "conflicts"
   | "backend"
   | "app"
-  | "tests";
+  | "tests"
+  | "diag";
 
 type DotColour = "red" | "yellow" | "green" | "gray" | null;
 
@@ -31,6 +33,7 @@ const STREAMS: { value: OutputStream; label: string }[] = [
   { value: "backend", label: "Backend logs" },
   { value: "app", label: "App logs" },
   { value: "tests", label: "Tests" },
+  { value: "diag", label: "Diagnostics" },
 ];
 
 // Per-stream status dot.  Drives both the Select's option/trigger dots
@@ -57,6 +60,11 @@ export function streamDot(ctx: LayoutCtx, stream: OutputStream): DotColour {
       return Object.values(ctx.testResults).some((r) => r.status === "fail")
         ? "red"
         : null;
+    case "diag":
+      // Inspection-only stream; reading localStorage on every aggregate-dot
+      // pass would add a parse to the render hot path, so it never lights the
+      // tab indicator. Pressure is surfaced inside the panel body instead.
+      return null;
   }
 }
 
@@ -154,7 +162,114 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
           />
         )}
         {stream === "tests" && <TestsLog ctx={ctx} />}
+        {stream === "diag" && <DiagBody />}
       </Box>
+    </Box>
+  );
+}
+
+// Crash/pressure breadcrumbs (see util/diagnostics.ts) — JS heap + storage
+// usage captured at tab-hide / pagehide / caught-error and persisted in
+// localStorage so they survive the reload a crash causes.  Rendered newest-
+// first so the snapshot just before a crash is at the top.  This is the
+// no-tether way to read what `window.__loomDiag()` holds, straight on the
+// device that crashed.
+function DiagBody(): JSX.Element {
+  const [snaps, setSnaps] = useState<DiagSnapshot[]>(() => readDiagnostics());
+  const refresh = (): void => setSnaps(readDiagnostics());
+  const clear = (): void => {
+    clearDiagnostics();
+    setSnaps([]);
+  };
+  const rows = [...snaps].reverse(); // newest-first
+
+  return (
+    <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <Group
+        gap="xs"
+        px="sm"
+        py={4}
+        wrap="nowrap"
+        style={{ flexShrink: 0, borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+      >
+        <Text size="xs" c="dimmed" style={{ flex: 1 }}>
+          {rows.length} snapshot{rows.length === 1 ? "" : "s"} · captured on tab
+          hide / crash
+        </Text>
+        <Button size="compact-xs" variant="subtle" color="gray" onClick={refresh} data-testid="output-diag-refresh">
+          Refresh
+        </Button>
+        {rows.length > 0 && (
+          <Button size="compact-xs" variant="subtle" color="gray" onClick={clear} data-testid="output-diag-clear">
+            Clear
+          </Button>
+        )}
+      </Group>
+      {rows.length === 0 ? (
+        <Text c="dimmed" size="sm" p="sm">
+          No diagnostics yet. A snapshot is recorded when the tab is backgrounded
+          or a crash is caught; switch away and back, or hit Refresh.
+        </Text>
+      ) : (
+        <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+          <Stack gap={6} p="xs" data-testid="output-diag-list">
+            {rows.map((s, i) => (
+              <DiagRow key={`${s.t}\0${i}`} snap={s} />
+            ))}
+          </Stack>
+        </ScrollArea>
+      )}
+    </Box>
+  );
+}
+
+/** Tint a storage-usage percentage by eviction risk. */
+function pctColour(pct: number): "red" | "yellow" | undefined {
+  if (pct >= 90) return "red";
+  if (pct >= 75) return "yellow";
+  return undefined;
+}
+
+function reasonColour(reason: string): "red" | "gray" {
+  return reason === "hidden" || reason === "pagehide" ? "gray" : "red";
+}
+
+function DiagRow({ snap }: { snap: DiagSnapshot }): JSX.Element {
+  const when = snap.t.replace("T", " ").replace(/\.\d+Z$/, "");
+  return (
+    <Box data-testid="output-diag-row">
+      <Group gap={8} wrap="nowrap">
+        <Badge size="xs" variant="light" color={reasonColour(snap.reason)}>
+          {snap.reason}
+        </Badge>
+        <Text size="xs" c="dimmed" ff="monospace" style={{ flex: 1 }}>
+          {when}
+        </Text>
+      </Group>
+      <Group gap={12} wrap="wrap" mt={2} pl={2}>
+        {snap.storage && (
+          <Text size="xs" ff="monospace" c={pctColour(snap.storage.pct)}>
+            storage {snap.storage.usageMB}/{snap.storage.quotaMB} MB ({snap.storage.pct}%)
+          </Text>
+        )}
+        {snap.mem && (
+          <Text
+            size="xs"
+            ff="monospace"
+            c={pctColour(Math.round((snap.mem.usedMB / snap.mem.limitMB) * 100))}
+          >
+            heap {snap.mem.usedMB}/{snap.mem.limitMB} MB
+          </Text>
+        )}
+        <Text size="xs" ff="monospace" c="dimmed">
+          {snap.vw}×{snap.vh}
+        </Text>
+        {snap.hashLen > 0 && (
+          <Text size="xs" ff="monospace" c="dimmed">
+            hash {snap.hashLen}b
+          </Text>
+        )}
+      </Group>
     </Box>
   );
 }
