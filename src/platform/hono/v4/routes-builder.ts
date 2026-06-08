@@ -22,7 +22,7 @@ import {
   PAGED_DEFAULT_PAGE_SIZE,
   pagedReturn,
 } from "../../../ir/stdlib/generics.js";
-import { unionInstanceName } from "../../../ir/stdlib/unions.js";
+import { unionInstanceName, variantTag } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -330,8 +330,13 @@ export function buildRoutesFile(
   // client's schema byte-for-byte (both derive from `unionMembers`).
   {
     const unionSeen = new Set<string>();
-    for (const find of repo?.finds ?? []) {
-      const u = unionForFind(find.returnType, ctx);
+    // Union return shapes come from two sites: repository find returns and
+    // exception-less operation returns (`operation foo(): X or NotFound`).
+    const unionReturns = [
+      ...(repo?.finds ?? []).map((f) => unionForFind(f.returnType, ctx)),
+      ...agg.operations.flatMap((op) => (op.returnType ? [unionForFind(op.returnType, ctx)] : [])),
+    ];
+    for (const u of unionReturns) {
       if (!u || unionSeen.has(u.name)) continue;
       unionSeen.add(u.name);
       const fieldZod = (f: UnionMemberField): string =>
@@ -644,6 +649,14 @@ function emitOperationRoute(
   // backend owns the snake-casing convention; identity uses (operationId,
   // request DTOs, extern handler keys) stay keyed on op.name below.
   const opSnake = snake(op.routeSlug ?? op.name);
+  // Exception-less operation (`operation foo(): X or NotFound`): the route
+  // captures the tagged-union result and translates an `error`-variant to an
+  // RFC-7807 ProblemDetails status, a success to HTTP 200 (exception-less.md).
+  // The spike supports the plain repo path only (audit / prov / extern return-
+  // typed ops are a later slice); they fall through to the void handler.
+  if (op.returnType && !audit && !prov && !op.extern) {
+    return emitReturningOperationRoute(agg, op, ctx, emitTrace);
+  }
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
@@ -799,6 +812,104 @@ function emitOperationRoute(
     out.push(`    });`);
   }
   out.push(`    return c.body(null, 204);`);
+  out.push(`  },`);
+  out.push(`);`);
+  return out;
+}
+
+/** True when a union variant is an `error` payload — the route maps it to an
+ *  RFC-7807 ProblemDetails status instead of serializing it as a success body
+ *  (exception-less.md). */
+function isErrorVariant(v: TypeIR, ctx: BoundedContextIR): boolean {
+  if (v.kind !== "entity") return false;
+  return ctx.payloads.some((p) => p.name === v.name && p.kind === "error");
+}
+
+/** The exception-less operation route (`operation foo(): X or NotFound`).  Calls
+ *  the aggregate method (which now returns its tagged `or`-union), saves, then
+ *  translates: an `error`-variant result → an RFC-7807 ProblemDetails (404 in
+ *  the spike), a success variant → HTTP 200 with the tagged body. */
+function emitReturningOperationRoute(
+  agg: AggregateIR,
+  op: OperationIR,
+  ctx: BoundedContextIR,
+  emitTrace: boolean,
+): string[] {
+  const aggSlug = snake(plural(agg.name));
+  const opSnake = snake(op.routeSlug ?? op.name);
+  const variants = op.returnType?.kind === "union" ? op.returnType.variants : [];
+  const u = op.returnType ? unionForFind(op.returnType, ctx) : null;
+  const unionName = u?.name ?? `${agg.name}Response`;
+  const out: string[] = [];
+  out.push(`app.openapi(`);
+  out.push(`  createRoute({`);
+  out.push(`    method: "post",`);
+  out.push(`    path: "/{id}/${opSnake}",`);
+  out.push(`    tags: ["${aggSlug}"],`);
+  out.push(`    operationId: "${camelId(opOperation(agg.name, op.name))}",`);
+  out.push(`    request: {`);
+  out.push(`      params: z.object({ id: z.string().uuid() }),`);
+  out.push(
+    `      body: { content: { "application/json": { schema: ${upperFirst(op.name)}${agg.name}Request } } },`,
+  );
+  out.push(`    },`);
+  out.push(`    responses: {`);
+  // 200 declares the whole tagged union; only success variants actually reach
+  // it (error variants are intercepted to 404 below) — the documented shape is
+  // the closed set of outcomes, which a typed client narrows on `type`.
+  out.push(
+    `      200: { description: "OK", content: { "application/json": { schema: ${unionName} } } },`,
+  );
+  out.push(
+    `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  out.push(
+    `      422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  if (operationIsGuarded(op)) {
+    out.push(
+      `      403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+  }
+  out.push(
+    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  out.push(`    },`);
+  out.push(`  }),`);
+  out.push(`  async (c) => {`);
+  out.push(`    const { id } = c.req.valid("param");`);
+  out.push(`    const body = c.req.valid("json");`);
+  if (emitTrace) {
+    out.push(
+      `    ${renderHonoLogCall("wireIn", "keys: Object.keys(body as Record<string, unknown>)")}`,
+    );
+  }
+  out.push(
+    `    ${renderHonoLogCall("operationInvoked", `aggregate: "${agg.name}", op: "${op.name}", id`)}`,
+  );
+  const usesUser = operationUsesCurrentUser(op);
+  if (usesUser) {
+    out.push(
+      `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+    );
+  }
+  const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
+  const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
+  out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
+  out.push(`    const result = aggregate.${lowerFirst(op.name)}(${callArgs});`);
+  out.push(`    await repo.save(aggregate);`);
+  // Translate each error variant to a ProblemDetails before the success path.
+  // The error payload's own fields ride along as RFC-7807 §3.2 extension
+  // members (e.g. NotFound's `resource`), with the spec fields overridden.
+  for (const v of variants.filter((vv) => isErrorVariant(vv, ctx))) {
+    const tag = variantTag(v);
+    out.push(`    if (result.type === ${JSON.stringify(tag)}) {`);
+    out.push(
+      `      return c.json({ ...result, type: "about:blank", title: ${JSON.stringify(tag)}, status: 404, detail: ${JSON.stringify(`${agg.name}.${op.name} returned ${tag}`)}, instance: c.req.path }, 404, { "content-type": "application/problem+json" });`,
+    );
+    out.push(`    }`);
+  }
+  out.push(`    return c.json(result, 200);`);
   out.push(`  },`);
   out.push(`);`);
   return out;

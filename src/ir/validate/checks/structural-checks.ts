@@ -357,17 +357,28 @@ export function validateUnionsUnimplemented(
 // Operation-return gate (exception-less.md, spike).
 //
 // `operation foo(...): X or NotFound { ... return ... }` parses, lowers to an
-// `OperationIR.returnType` + `return` statements, and prints — but the
-// producer-side emission (tag the returned union value; translate an
-// `error`-variant result to a ProblemDetails status at the route, a success
-// to HTTP 200) is the next slice.  Until then any operation that declares a
-// return type is a hard error, mirroring the P3a/P4a surface-first staging.
+// `OperationIR.returnType` + `return` statements, and prints — and the Hono/TS
+// backend (`"node"`) now emits the producer side: the returned union value is
+// tagged at lowering and the operation route translates an `error`-variant
+// result to an RFC-7807 ProblemDetails status (a success → HTTP 200).  The
+// other backends (dotnet, phoenix) don't emit the route translation yet, so a
+// return-typed operation stays a hard error while any of them serve the
+// context — mirroring the P3a/P4a/P4c surface-first staging.
 // ---------------------------------------------------------------------------
 
 export function validateOperationReturnsUnimplemented(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
 ): void {
+  // Backends that emit the operation-return ProblemDetails translation today.
+  // `"node"` is the Hono/TS backend (exception-less.md spike); the others land
+  // in later slices.  No backend (legacy single-context path) → emittable, gate
+  // stays quiet.
+  const SUPPORTED_RETURN_BACKENDS = new Set(["node"]);
+  const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_RETURN_BACKENDS.has(p));
+  if (unsupported.length === 0) return;
+
   for (const agg of ctx.aggregates) {
     for (const op of agg.operations) {
       if (!op.returnType) continue;
@@ -375,9 +386,13 @@ export function validateOperationReturnsUnimplemented(
         severity: "error",
         code: "loom.operation-return-unsupported",
         message:
-          `operation '${agg.name}.${op.name}' declares an \`or\`-union return type, but ` +
-          `producer-side emission (return-value tagging + route ProblemDetails translation) is ` +
-          `not implemented yet (exception-less.md, spike).`,
+          `operation '${agg.name}.${op.name}' declares an \`or\`-union return type, but the ` +
+          `backend(s) serving this context (${unsupported.sort().join(", ")}) don't emit the ` +
+          `producer-side route translation yet (exception-less.md). It's supported on: ${[
+            ...SUPPORTED_RETURN_BACKENDS,
+          ]
+            .sort()
+            .join(", ")}.`,
         source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
       });
     }

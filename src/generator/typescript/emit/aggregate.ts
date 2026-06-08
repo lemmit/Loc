@@ -1,3 +1,4 @@
+import { unionMembers } from "../../../generator/_payload/union-wire.js";
 import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
@@ -10,6 +11,7 @@ import type {
   FunctionIR,
   InvariantIR,
   OperationIR,
+  TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { aggregateUsesMoney, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { stmtHasProv } from "../../../ir/util/prov-id.js";
@@ -74,9 +76,9 @@ export function renderAggregate(
   // the domain layer free of any infra import.
   const hasDomainTrace = emitTrace;
   const partsRendered = agg.parts.map((p) =>
-    renderEntity(partShape(p, agg), emitProvenance, emitTrace),
+    renderEntity(partShape(p, agg), ctx, emitProvenance, emitTrace),
   );
-  const rootRendered = renderEntity(rootShape(agg), emitProvenance, emitTrace);
+  const rootRendered = renderEntity(rootShape(agg), ctx, emitProvenance, emitTrace);
   // When any aggregate op references `currentUser` we pull the User
   // type from the auth/ package so the operation's `currentUser:
   // User` parameter typechecks.  Files emitted under deployables
@@ -179,7 +181,31 @@ function partShape(p: EntityPartIR, root: AggregateIR): EntityShape {
   };
 }
 
-function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false): string {
+/** The TS type of an exception-less operation's `or`-union return, rendered
+ *  inline from the resolved wire members so the domain method signature carries
+ *  no external payload-type reference (payloads aren't emitted as domain
+ *  interfaces).  Mirrors the route's `z.discriminatedUnion` field-for-field
+ *  (both derive from `unionMembers`): a record variant flattens its wire fields
+ *  beside `type`, a scalar wraps a `value`, `none` is the bare unit. */
+function renderOperationReturnType(returnType: TypeIR, ctx: BoundedContextIR): string {
+  if (returnType.kind !== "union") return renderTsType(returnType);
+  const members = unionMembers(returnType.variants, ctx).map((m) => {
+    if (m.shape === "none") return `{ type: "none" }`;
+    if (m.shape === "scalar") return `{ type: "${m.tag}"; value: ${renderTsType(m.type)} }`;
+    const body = m.fields
+      .map((f) => `${f.name}: ${f.isId ? "string" : renderTsType(f.type)}`)
+      .join("; ");
+    return `{ type: "${m.tag}"${body ? `; ${body}` : ""} }`;
+  });
+  return `(${members.join(" | ")})`;
+}
+
+function renderEntity(
+  e: EntityShape,
+  ctx: BoundedContextIR,
+  emitProvenance = false,
+  emitTrace = false,
+): string {
   const containsType = (c: ContainmentIR): string =>
     `${c.partName}${c.collection ? "[]" : " | null"}`;
   const containsGetterType = (c: ContainmentIR): string =>
@@ -340,7 +366,13 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
       ops.push("");
       continue;
     }
-    ops.push(`  ${visibility} ${lowerFirst(op.name)}(${params}): void {`);
+    // An exception-less operation (`operation foo(): X or NotFound`) returns its
+    // declared `or`-union; lowering tags each `return` with the matching variant
+    // so the method body emits the tagged-wire shape.  A void operation keeps the
+    // `void` signature and asserts invariants on the way out; a returning one
+    // ends in `return`, so the trailing assert would be unreachable — skip it.
+    const retType = op.returnType ? renderOperationReturnType(op.returnType, ctx) : "void";
+    ops.push(`  ${visibility} ${lowerFirst(op.name)}(${params}): ${retType} {`);
     const body = renderTsStatements(op.statements, emitProvenance, {
       emitTrace,
       aggregate: e.name,
@@ -348,9 +380,11 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
       eventSourced: e.eventSourced,
     });
     if (body.length > 0) ops.push(body);
-    ops.push(
-      emitTrace ? `    this._assertInvariants("${op.name}");` : "    this._assertInvariants();",
-    );
+    if (!op.returnType) {
+      ops.push(
+        emitTrace ? `    this._assertInvariants("${op.name}");` : "    this._assertInvariants();",
+      );
+    }
     ops.push("  }");
     ops.push("");
   }
