@@ -215,14 +215,22 @@ user hits the gate.
 
 ## Phasing
 
+Estimates are calibrated against **observed main-branch velocity** (Phoenix
+TPH proposal → ship → docs cycle in ~24 hours; ~25 merged PRs/day across
+the project; substantial Phoenix-backend features routinely shipping
+same-day) — not a from-zero solo-dev baseline. The earlier
+[`elixir-ecto-and-api-only-backends.md`](./elixir-ecto-and-api-only-backends.md)
+proposal's "~4–6 weeks" for the Ecto domain layer was written before this
+velocity was visible; it is the safe upper bound, not the median.
+
 | Phase | Scope | Approx. | Dependency |
 |---|---|---|---|
-| **P0** | Structured validator diagnostic on `persistedAs(eventLog)` + `foundation: ash` (today's bare reject → an Ash-foundation explanation pointing at vanilla / other backends). One-day fix; banks DX improvement before any vanilla emitter exists. | <1 day | — |
-| **P1** | Foundation axis plumbing: lift `platform-rules.ts:184` menu to `["ash", "vanilla"]`; `lower-platform.ts:46` keeps `ash` default; orchestrator (`phoenix-live-view/index.ts`) gains a foundation branch (no-op stub for `vanilla`). Grammar + scope + parsing test + negative validator test. | ~2 days | — |
-| **P2** | Vanilla state-based emit: `schema-emit`, `changeset-emit`, `policy-emit`, `context-emit`, `repository-emit`, `vanilla/api-emit`, `vanilla/problem-details-emit`, `ecto-postgres-persistence` adapter. Conformance parity gate must pass at strict mode (`LOOM_E2E_STRICT_PARITY=1`, all 9 dimensions). | ~3–4 wk | P1 |
-| **P3** | Vanilla LiveView: per-command embedded `Ecto.Schema` + `to_form(changeset)` replacement for `AshPhoenix.Form`. Walker reuse — no `heex-walker` changes. | ~1.5–2 wk | P2 |
-| **P4** | Vanilla event sourcing: `<Agg>.Events`, `<Agg>.Fold`, `<Agg>.Repository` ES variant. Migrations gain `<agg>_events` for Ecto. Un-gate `validateEventSourcedStorage` *only* for `foundation: vanilla`. | ~1.5 wk | P2 + workflow-and-applier A2.1-shaped ES infra |
-| **P5** | CI: `phoenix-vanilla-build.yml` (mirrors `phoenix-build.yml` — `mix compile --warnings-as-errors`); obs-e2e variant; strict-parity matrix entry. Examples: one `.ddd` under `examples/` exercising `foundation: vanilla` end-to-end. | ~3–4 days | P2 |
+| **P0** | Structured validator diagnostic on `persistedAs(eventLog)` + `foundation: ash` (today's bare reject → an Ash-foundation explanation pointing at vanilla / other backends). Banks DX improvement before any vanilla emitter exists. | <1 day | — |
+| **P1** | Foundation axis plumbing: lift `platform-rules.ts:184` menu to `["ash", "vanilla"]`; `lower-platform.ts:46` keeps `ash` default; orchestrator (`phoenix-live-view/index.ts`) gains a foundation branch (no-op stub for `vanilla`). Grammar + scope + parsing test + negative validator test. | 1–2 days | — |
+| **P2** | Vanilla state-based emit: `schema-emit`, `changeset-emit`, `policy-emit`, `context-emit`, `repository-emit`, `vanilla/api-emit`, `vanilla/problem-details-emit`, `ecto-postgres-persistence` adapter. Conformance parity gate must pass at strict mode (`LOOM_E2E_STRICT_PARITY=1`, all 9 dimensions). | 1–2 wk | P1 |
+| **P3** | Vanilla LiveView: per-command embedded `Ecto.Schema` + `to_form(changeset)` replacement for `AshPhoenix.Form`. Walker reuse — no `heex-walker` changes. | 3–7 days (high tail-risk — see below) | P2 |
+| **P4** | Vanilla event sourcing: `<Agg>.Events`, `<Agg>.Fold`, `<Agg>.Repository` ES variant. Migrations gain `<agg>_events` for Ecto. Un-gate `validateEventSourcedStorage` *only* for `foundation: vanilla`. | 3–5 days | P2 + workflow-and-applier A2.1-shaped ES infra |
+| **P5** | CI: `phoenix-vanilla-build.yml` (mirrors `phoenix-build.yml` — `mix compile --warnings-as-errors`); obs-e2e variant; strict-parity matrix entry. Examples: one `.ddd` under `examples/` exercising `foundation: vanilla` end-to-end. | 2–3 days | P2 |
 
 P0 is detachable and ships immediately. P1–P5 are sequential. Strict
 conformance parity (per §5 of
@@ -230,7 +238,22 @@ conformance parity (per §5 of
 is the gate that makes P2 the largest phase — every wire-spec dimension
 must match Ash's emission byte-for-byte.
 
-Total: ~6–8 weeks focused, P0 immediate.
+**Median:** ~3–4 weeks focused, P0 immediate. **Upper bound:** ~6–8 weeks
+if the tail risks below hit. Two specifically that can't be compressed
+regardless of velocity:
+
+1. **`AshPhoenix.Form` replacement complexity.** Embedded-schema-per-command
+   is clean for flat forms; nested forms and association forms (the
+   `inputs_for` / `cast_assoc` shape) are where it can blow up. Worst
+   case adds ~1–2 weeks to P3.
+2. **No local `mix` toolchain.** Every subtle Phoenix-emit change costs a
+   CI round-trip — documented at 2–3x slower per LOC than TS/.NET work
+   in `experience_gathered.md`. Multiplies P2/P3 tail risk.
+
+The upper-bound estimate from `elixir-ecto-and-api-only-backends.md`
+(~4–6 weeks for the Ecto layer alone) is what materialises if both tails
+hit. The median estimate assumes neither does, which matches the velocity
+visible on main today.
 
 ## Open questions
 
