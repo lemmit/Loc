@@ -1,4 +1,5 @@
 import { pagedReturn } from "../../ir/stdlib/generics.js";
+import { tableOwnerName } from "../../ir/util/inheritance.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -171,7 +172,7 @@ export function buildRepositoryFile(
     // unchanged.  Containment children and join-table rows drop via
     // `ON DELETE CASCADE`; a still-referenced aggregate (cross-aggregate
     // `X id` FK is `restrict`) surfaces as a DB error the route maps to 409.
-    ...(agg.canonicalDestroy ? [deleteMethod(agg), ""] : []),
+    ...(agg.canonicalDestroy ? [deleteMethod(agg, ctx), ""] : []),
     // Find / view queries — capability filter AND-ed into each read.
     ...(repo?.finds ?? []).flatMap((find) => [findQueryMethod(agg, find, ctx, filterPred), ""]),
     ...viewFinds.flatMap((find) => [findQueryMethod(agg, find, ctx, filterPred), ""]),
@@ -249,8 +250,11 @@ export function buildRepositoryFile(
  * removed by their `ON DELETE CASCADE` foreign keys, so no per-child
  * cleanup is needed here (unlike `save`, which diffs collections).  Only
  * emitted when `agg.canonicalDestroy` is set. */
-function deleteMethod(agg: EnrichedAggregateIR): string {
-  const tableName = lowerFirst(plural(agg.name));
+function deleteMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
+  // A TPH concrete subtype lives in its abstract base's shared table, so the
+  // delete targets the owner's table (`tableOwnerName`) — not the subtype's
+  // own pluralised name, which has no `schema` export (matches save/find).
+  const tableName = lowerFirst(plural(tableOwnerName(agg, ctx.aggregates)));
   return lines(
     `  async delete(id: Ids.${agg.name}Id): Promise<void> {`,
     `    await this.db.delete(schema.${tableName}).where(eq(schema.${tableName}.id, id));`,

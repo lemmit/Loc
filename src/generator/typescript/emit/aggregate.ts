@@ -187,6 +187,36 @@ function partShape(p: EntityPartIR, root: AggregateIR): EntityShape {
  *  interfaces).  Mirrors the route's `z.discriminatedUnion` field-for-field
  *  (both derive from `unionMembers`): a record variant flattens its wire fields
  *  beside `type`, a scalar wraps a `value`, `none` is the bare unit. */
+/** Type-correct seed value for a non-optional, non-input field the create
+ *  factory must name in its all-fields state literal but the server owns
+ *  (`managed`/`token`/`internal`).  A `datetime managed` placement stamp
+ *  seeds to `new Date()`; numeric counters to `0`, etc.  Falls back to
+ *  `null` for shapes with no obvious zero (value objects, enums) — those
+ *  don't occur as server-managed non-optional fields today, and `null`
+ *  preserves the prior behaviour rather than fabricating a bogus instance. */
+function serverInitSeed(t: TypeIR): string {
+  if (t.kind === "primitive") {
+    switch (t.name) {
+      case "datetime":
+        return "new Date()";
+      case "int":
+      case "long":
+      case "decimal":
+        return "0";
+      // `money` renders as `Decimal` (decimal.js) and `json`/value-object /
+      // enum shapes have no obvious bare zero — those fall through to the
+      // `null` default below (none occur as server-managed non-optional
+      // fields today; the seed only has to cover the cases that do).
+      case "bool":
+        return "false";
+      case "string":
+      case "guid":
+        return '""';
+    }
+  }
+  return "null";
+}
+
 function renderOperationReturnType(returnType: TypeIR, ctx: BoundedContextIR): string {
   if (returnType.kind !== "union") return renderTsType(returnType);
   const members = unionMembers(returnType.variants, ctx).map((m) => {
@@ -430,9 +460,15 @@ function renderEntity(
     if (createInputNames.has(f.name)) {
       return f.optional ? `input.${f.name} ?? null` : `input.${f.name}`;
     }
-    // Outside the create input (managed/token/internal): server-initialised
-    // to null.
-    return "null";
+    // Outside the create input (managed/token/internal): server-initialised.
+    // An optional field may simply be null; a non-optional one is server-
+    // stamped (e.g. a `datetime managed` placement timestamp) and needs a
+    // type-correct seed so the all-fields ctor state literal type-checks —
+    // `null` against a non-nullable `Date`/`number` is the bug.  The .NET
+    // backend sidesteps this by leaving such fields at their property
+    // default; Hono's state object has to name every field, so it seeds one.
+    if (f.optional) return "null";
+    return serverInitSeed(f.type);
   };
   // Event-sourced create factory (appliers A2.2): an event-sourced
   // aggregate is constructed from its creation event, not by writing state.

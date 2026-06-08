@@ -61,4 +61,30 @@ describe("TS/Hono generator — field access modifiers", () => {
     expect(createReq, "version (token) NOT in Create request").not.toMatch(/version/);
     expect(createReq, "adminNotes (internal) NOT in Create request").not.toMatch(/adminNotes/);
   });
+
+  it("create factory seeds server-managed non-optional fields with a type-correct value, not null", async () => {
+    // A `datetime managed` (server-stamped, non-optional) field must not be
+    // initialised to `null` in the all-fields ctor state literal — `null`
+    // against a non-nullable `Date` is a tsc error.  It seeds `new Date()`;
+    // a managed `int` seeds `0`.  (An *optional* managed field stays null.)
+    const files = await gen(`
+      context Orders {
+        aggregate Order {
+          reference: string
+          placedAt: datetime managed
+          loginCount: int managed
+          closedAt: datetime? managed
+          create(reference: string) { reference := reference }
+        }
+        repository Orders for Order { }
+      }
+    `);
+    const domain = files.get("domain/order.ts") ?? "";
+    const create = domain.match(/static create\([\s\S]*?\n {2}\}/)?.[0] ?? "";
+    expect(create, "create factory block must be located").not.toEqual("");
+    expect(create, "managed datetime seeds new Date()").toMatch(/placedAt:\s*new Date\(\)/);
+    expect(create, "managed int seeds 0").toMatch(/loginCount:\s*0/);
+    expect(create, "optional managed datetime stays null").toMatch(/closedAt:\s*null/);
+    expect(create, "managed datetime must NOT seed null").not.toMatch(/placedAt:\s*null/);
+  });
 });

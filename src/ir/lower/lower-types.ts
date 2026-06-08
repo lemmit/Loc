@@ -193,22 +193,32 @@ export function inScopeNames(env: Env): ScopeCandidate[] {
 // Types
 // ---------------------------------------------------------------------------
 
-/** Project-global name → kind index for the ambient shared kernel.
+/** Project-global name → decl index for the ambient shared kernel.
  *
- *  `lowerProject` collects every value object / enum / entity across the
- *  whole import graph once and installs it here before any body is lowered.
- *  It backstops the NamedType fallback below: a macro-emitted reference
- *  without a `$refNode` (Langium's Linker skips it silently) whose target
- *  lives in a *sibling document* — e.g. a `shared/` kernel VO referenced by
- *  a `crudish` update param in another file — isn't reachable through the
- *  env-local lookups (which only see the current context + same-document
- *  root).  Without this it collapses to `string`.  Env-local resolution
- *  still wins first; this is a cross-document fallback only. */
-export type AmbientTypeKind = "valueobject" | "enum" | "entity";
-let ambientTypeIndex: ReadonlyMap<string, AmbientTypeKind> = new Map();
+ *  `lowerProject` collects every root / cross-context value object, enum and
+ *  entity across the whole import graph once and installs it here before any
+ *  body is lowered.  It backstops the `findXByName` lookups below, which only
+ *  see the current context + same-document root: a declaration that lives in
+ *  a *sibling document* — e.g. a `shared/` kernel `Money` VO referenced by a
+ *  `crudish` update param, or by its own `plus` function returning a `Money
+ *  { … }` literal — isn't reachable env-locally, so a NamedType param
+ *  collapses to `string` and a VO literal lowers to a `free` call (missing
+ *  `new`).  Env-local resolution still wins first; this is a cross-document
+ *  fallback only.  First declaration wins on a name collision (the validator
+ *  owns the ambiguity diagnostic). */
+export interface AmbientDeclIndex {
+  valueObjects: ReadonlyMap<string, ValueObject>;
+  enums: ReadonlyMap<string, EnumDecl>;
+  entities: ReadonlyMap<string, Aggregate | EntityPart>;
+}
+let ambientDeclIndex: AmbientDeclIndex = {
+  valueObjects: new Map(),
+  enums: new Map(),
+  entities: new Map(),
+};
 
-export function setAmbientTypeIndex(index: ReadonlyMap<string, AmbientTypeKind>): void {
-  ambientTypeIndex = index;
+export function setAmbientDeclIndex(index: AmbientDeclIndex): void {
+  ambientDeclIndex = index;
 }
 
 export function lowerType(t: TypeRef | undefined, env?: Env): TypeIR {
@@ -294,6 +304,10 @@ function lowerBase(t: TypeRef | TypeAtom, env?: Env): TypeIR {
     // param keeps its value-object / enum type instead of collapsing to
     // `string` (the bug that broke `crudish` update params on VO/enum
     // fields).
+    // The `findXByName` lookups consult the project-global ambient decl
+    // index as a final fallback, so a macro-emitted param typed by a
+    // sibling-document shared-kernel VO / enum still resolves here instead
+    // of collapsing to `string`.
     const refText = base.target?.$refText;
     if (refText && env) {
       if (findValueObjectByName(env, refText)) return { kind: "valueobject", name: refText };
@@ -301,14 +315,6 @@ function lowerBase(t: TypeRef | TypeAtom, env?: Env): TypeIR {
       if (findEntityByName(env, refText)) return { kind: "entity", name: refText };
       if (findEventByName(env, refText)) return { kind: "entity", name: refText };
       if (findPayloadByName(env, refText)) return { kind: "entity", name: refText };
-    }
-    // Cross-document fallback: a sibling-file shared-kernel type (the
-    // env-local lookups above only see the current context + same-document
-    // root).  Keeps a `crudish` update param typed to its VO/enum across a
-    // multi-file workspace instead of collapsing to `string`.
-    if (refText) {
-      const ambient = ambientTypeIndex.get(refText);
-      if (ambient) return { kind: ambient, name: refText };
     }
     return { kind: "primitive", name: "string" };
   }
@@ -320,38 +326,40 @@ function lowerBase(t: TypeRef | TypeAtom, env?: Env): TypeIR {
 // ---------------------------------------------------------------------------
 
 export function findEntityByName(env: Env, name: string): Aggregate | EntityPart | undefined {
-  if (!env.ctx) return undefined;
-  for (const m of env.ctx.members) {
-    if (isAggregate(m)) {
-      if (m.name === name) return m;
-      for (const inner of m.members) {
-        if (isEntityPart(inner) && inner.name === name) return inner;
+  if (env.ctx) {
+    for (const m of env.ctx.members) {
+      if (isAggregate(m)) {
+        if (m.name === name) return m;
+        for (const inner of m.members) {
+          if (isEntityPart(inner) && inner.name === name) return inner;
+        }
       }
     }
   }
-  return undefined;
+  return ambientDeclIndex.entities.get(name);
 }
 
 export function findValueObjectByName(env: Env, name: string): ValueObject | undefined {
-  if (!env.ctx) return undefined;
-  for (const m of env.ctx.members) {
-    if (isValueObject(m) && m.name === name) return m;
-  }
-  // Fall back to root-level value objects declared at the top of the same
-  // document (the ambient shared kernel: `valueobject` outside any
-  // context).  Without this, a root VO constructed by name in an
-  // operation body lowers to a "free" call instead of a value-object
-  // ctor.  Cross-document root VOs aren't resolved here — lowering runs
-  // per-document and the builder-call type is a plain string with no
-  // linked reference to follow (the validator matches: see
-  // checkBuilderCallType in validators/builder-call.ts).
-  const model = AstUtils.getContainerOfType(env.ctx, isModel) as Model | undefined;
-  if (model) {
-    for (const m of model.members) {
+  if (env.ctx) {
+    for (const m of env.ctx.members) {
       if (isValueObject(m) && m.name === name) return m;
     }
+    // Fall back to root-level value objects declared at the top of the same
+    // document (the ambient shared kernel: `valueobject` outside any
+    // context).  Without this, a root VO constructed by name in an
+    // operation body lowers to a "free" call instead of a value-object ctor.
+    const model = AstUtils.getContainerOfType(env.ctx, isModel) as Model | undefined;
+    if (model) {
+      for (const m of model.members) {
+        if (isValueObject(m) && m.name === name) return m;
+      }
+    }
   }
-  return undefined;
+  // Final fallback: a cross-document shared-kernel VO (the env-local lookups
+  // above only see the current context + same-document root).  Also covers a
+  // root VO whose own function body constructs itself (`Money { … }` inside
+  // `Money.plus`), lowered with no `env.ctx` at all.
+  return ambientDeclIndex.valueObjects.get(name);
 }
 
 /** Look up a context-level `workflow` declaration by name.  Workflows are
@@ -372,11 +380,12 @@ export function findWorkflowByName(env: Env, name: string): Workflow | undefined
  *  `crudish`'s update params) lacks a `$refNode` and the Langium linker
  *  left `ref` undefined. */
 export function findEnumByName(env: Env, name: string): EnumDecl | undefined {
-  if (!env.ctx) return undefined;
-  for (const m of env.ctx.members) {
-    if (isEnumDecl(m) && m.name === name) return m;
+  if (env.ctx) {
+    for (const m of env.ctx.members) {
+      if (isEnumDecl(m) && m.name === name) return m;
+    }
   }
-  return undefined;
+  return ambientDeclIndex.enums.get(name);
 }
 
 /** Look up a context-level `event` declaration by name.  Used to
