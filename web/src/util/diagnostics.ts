@@ -104,6 +104,15 @@ export function readDiagnostics(): DiagSnapshot[] {
   }
 }
 
+/** Drop the persisted breadcrumb ring. */
+export function clearDiagnostics(): void {
+  try {
+    localStorage.removeItem(RING_KEY);
+  } catch {
+    // storage disabled — nothing to clear
+  }
+}
+
 /** Capture + log + persist one breadcrumb.  Fire-and-forget; never throws. */
 export async function logDiagnostic(reason: string): Promise<void> {
   try {
