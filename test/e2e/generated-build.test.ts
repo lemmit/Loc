@@ -161,6 +161,50 @@ describe.skipIf(!ENABLED)(
       }
     }, 300_000);
 
+    // Multi-context Acme ERP bundle (web/src/examples/erp): a single Hono
+    // deployable (`core_api`) hosts five bounded contexts that share an ambient
+    // kernel (root-level value objects + enums in sibling files), a TPH
+    // aggregate hierarchy, `money` events, server-managed datetimes, a
+    // declarative seed and per-aggregate domain `test` blocks.  This is the
+    // real workspace whose generated project failed `tsc` with 76 errors; the
+    // gate now type-checks AND bundles AND *runs* the generated domain tests so
+    // a generator regression that breaks the emitted suite is caught here, not
+    // only at hand-inspection time.
+    it("system Acme ERP (multi-context Hono) — generated core_api type-checks, bundles, and its domain tests pass", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-erp-"));
+      try {
+        execSync(`node ${cli} generate system web/src/examples/erp/main.ddd -o ${outDir}`, {
+          stdio: "inherit",
+          cwd: repoRoot,
+        });
+        // The lone Hono deployable in the bundle is `core_api`.
+        const proj = path.join(outDir, "core_api");
+        expect(fs.existsSync(path.join(proj, "package.json")), "core_api project emitted").toBe(
+          true,
+        );
+        // Sanity: it hosts the cross-file ambient Money VO + a generated test.
+        expect(fs.existsSync(path.join(proj, "domain", "salesOrder.test.ts"))).toBe(true);
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 120_000 });
+        execSync(`npm run build`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        expect(fs.existsSync(path.join(proj, "dist", "index.js"))).toBe(true);
+        // Run the generated per-aggregate domain `test` blocks (pure domain
+        // logic — no DB).  These exercise the create-factory + value-object +
+        // branded-id construction the emitter coerces.
+        execSync(`npx vitest run`, { cwd: proj, stdio: "inherit", timeout: 120_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 420_000);
+
     // D-REALIZATION-AXES Phase 5d: `persistence: mikroorm` is a SYSTEM-MODE
     // selection (the second node persistence backend alongside the default
     // drizzle).  Generate the SYSTEM and type-check + bundle the mikroorm
