@@ -858,12 +858,16 @@ function emitReturningOperationRoute(
   const errorVariants = variants.filter((vv) => isErrorVariant(vv, ctx));
   const u = op.returnType ? unionForFind(op.returnType, ctx) : null;
   const unionName = u?.name ?? `${agg.name}Response`;
+  // The HTTP status an error variant maps to: the api's `httpStatus` override
+  // for this context (exception-less.md A1) if present, else the stdlib default.
+  const statusFor = (tag: string): number =>
+    ctx.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag);
   // The ProblemDetails statuses this route can produce: the framework defaults
   // (400 domain, 422 validation, 404 aggregate-not-found from getById), 403 if
-  // guarded, plus each error variant's stdlib status (exception-less.md A1).
+  // guarded, plus each error variant's mapped status.
   const problemStatuses = new Set<number>([400, 422, 404]);
   if (operationIsGuarded(op)) problemStatuses.add(403);
-  for (const v of errorVariants) problemStatuses.add(defaultErrorStatus(variantTag(v)));
+  for (const v of errorVariants) problemStatuses.add(statusFor(variantTag(v)));
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
@@ -919,7 +923,7 @@ function emitReturningOperationRoute(
   // (e.g. NotFound's `resource`), with the spec fields overridden.
   for (const v of errorVariants) {
     const tag = variantTag(v);
-    const status = defaultErrorStatus(tag);
+    const status = statusFor(tag);
     out.push(`    if (result.type === ${JSON.stringify(tag)}) {`);
     out.push(
       `      return c.json({ ...result, type: ${JSON.stringify(errorTypeUri(tag))}, title: ${JSON.stringify(errorTitle(tag))}, status: ${status}, detail: ${JSON.stringify(errorTitle(tag))}, instance: c.req.path }, ${status}, { "content-type": "application/problem+json" });`,
