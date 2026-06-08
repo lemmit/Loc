@@ -87,22 +87,26 @@ emission**, not before.
   `mix compile --warnings-as-errors` against real Ash 3.x is the **decisive
   gate** (no local Elixir; mirrors the showcase phoenix split).
 
-## Open questions / risk (all resolve at the `phoenix-build` gate)
+## Open questions — resolved at the `phoenix-build` gate
 
-1. **Two Ash resources, one table** — does Ash 3.x compile two resources sharing
-   a `table` cleanly, or does it warn/error without extra config (e.g. a
-   `migration_defaults`/reference note)? This is the decisive unknown; the
-   `phoenix-build` gate answers it.
-2. **`kind` type** — string (matches the wire) vs atom (idiomatic Ash). String
-   keeps cross-backend parity; confirm it round-trips through Ash + the LiveView.
-3. **`base_filter_sql`** — exact form ash_postgres wants for the discriminator.
-4. **Create-stamp mechanism** — attribute `default:` vs a create-action change.
+1. **Two Ash resources, one table** — ✅ Ash 3.x compiles two resources sharing a
+   `table` cleanly, no extra config (no `migration_defaults`/reference note
+   needed). The decisive unknown; the green gate confirmed it.
+2. **`kind` type** — ✅ string (`attribute :kind, :string`), matching the
+   cross-backend wire value (`agg.name`).
+3. **`base_filter_sql`** — ✅ not needed. `base_filter expr(kind == "<Concrete>")`
+   compiles and filters without an explicit `base_filter_sql` companion.
+4. **Create-stamp mechanism** — ✅ attribute `default:` (`default: "<Concrete>",
+   allow_nil?: false`) rather than a create-action change.
+5. **`base_filter` placement** (surfaced at the gate, not anticipated) — it is a
+   DSL entry **inside the `resource do … end` section**, not a top-level resource
+   macro; emitting it at module top level fails with `undefined function
+   base_filter/1`. (This also corrected the latent capability-filter path.)
 
-**Risk:** blind-verified only via the slow docker `phoenix-build` gate, and the
-"multiple resources / one table / base_filter" combo is the genuine uncertainty
-(no native Ash STI). Recommend building it behind that gate the same way .NET
-TPH was driven (push a fixture, read the `mix compile` errors, iterate) — but
-budget for several rounds given the design is hand-rolled, not native.
+**Outcome:** shipped in #992. The design was driven the same way .NET TPH was —
+push the `tph.ddd` fixture, read the `mix compile` errors, iterate — and cleared
+in two gate rounds (a fixture-naming harness fix, then the `base_filter`
+placement fix).
 
 ## References
 

@@ -107,7 +107,7 @@ suggests either hosting the context on a node/Hono deployable or switching to
 | `loom.abstract-repository` | a `repository` targets an abstract base |
 | `loom.polymorphic-id-ref-unsupported` | a `<Base> id` reference to an `ownTable` (TPC) base |
 | `loom.es-tph-forced-own-table` | event-sourced / document opt-out forces `ownTable` on a TPH member |
-| (storage gate) | a `sharedTable` (TPH) hierarchy whose context has no node/Hono host |
+| (storage gate) | a `sharedTable` (TPH) hierarchy whose context has no node/Hono, .NET, or Phoenix host |
 
 ## Deferred (gated, not emitted)
 
@@ -119,4 +119,7 @@ suggests either hosting the context on a node/Hono deployable or switching to
   (`loom.tph-contains-unsupported`); the join table is never emitted for a TPH
   concrete. TPC concretes are unaffected — each is a standalone table and its
   parts join normally.
-- **TPH on .NET / Phoenix / React** — not built (see backend gating above).
+- **TPH on React** — N/A; the frontend consumes the concrete wire shapes, it
+  does not own storage. TPH ships on node/Hono (`kind` column), .NET (EF Core
+  `HasDiscriminator`), and Phoenix (Ash shared-table multi-resource +
+  `base_filter`); see backend gating above.
