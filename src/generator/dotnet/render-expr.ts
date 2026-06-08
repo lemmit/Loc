@@ -11,6 +11,7 @@ import {
   type RefExpr,
   renderExprWith,
 } from "../_expr/target.js";
+import type { UnionMember } from "../_payload/union-wire.js";
 import { joinDbSetName, joinFkPropName } from "./emit/join-entities.js";
 
 // ---------------------------------------------------------------------------
@@ -46,6 +47,12 @@ export interface CsRenderContext {
    *  `<class>.<Resource>_<Verb>(args)`.  When unset, a resource-op
    *  throws at emit (non-resource render contexts never see one). */
   resourceClasses?: Map<string, string>;
+  /** Exception-less operation return (exception-less.md): the Domain union the
+   *  enclosing method returns.  `name` is the Domain union type; `members` give
+   *  each variant's tag + field order so a tagged `return` constructs the right
+   *  `<name>_<Tag>(...)` variant record positionally.  Unset outside a
+   *  union-returning operation body. */
+  returnUnion?: { name: string; members: UnionMember[] };
 }
 
 const DEFAULT: CsRenderContext = { thisName: "this" };

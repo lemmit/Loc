@@ -9,14 +9,18 @@ export function renderCommand(args: {
   commandName: string;
   commandParams: string;
   returnType?: string;
+  /** Extra `using` namespaces — e.g. `Domain.<Plural>` so an exception-less
+   *  command's `ICommand<DomainUnion>` result type resolves. */
+  extraUsings?: string[];
 }): string {
   const sig = args.returnType ? `ICommand<${args.returnType}>` : "ICommand";
+  const extra = (args.extraUsings ?? []).map((u) => `using ${u};\n`).join("");
   return `// Auto-generated.
 using Mediator;
 using ${args.ns}.Domain.Ids;
 using ${args.ns}.Domain.ValueObjects;
 using ${args.ns}.Domain.Enums;
-
+${extra}
 namespace ${args.ns}.Application.${plural(args.aggName)}.Commands;
 
 public sealed record ${args.commandName}(${args.commandParams}) : ${sig};

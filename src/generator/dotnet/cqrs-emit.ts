@@ -72,7 +72,7 @@ export function emitCqrs(
   emitResponseDtos(agg, ctx, ns, aggFolder, out);
   // Discriminated-union response DTOs (P4c) — polymorphic base + variant
   // records for each union find return on this aggregate's repository.
-  emitUnionDtos(repo, ctx, ns, aggFolder, out);
+  emitUnionDtos(agg, repo, ctx, ns, aggFolder, out);
   emitRequestDtos(agg, ctx, ns, aggFolder, out, aggHasCreate ? requiredFields : undefined);
   // Create command/handler gated on the IR lifecycle (`canonicalCreate`),
   // mirroring the destroy gate below: an aggregate that declares no create

@@ -1,5 +1,6 @@
 import { enrichLoomModel } from "../../ir/enrich/enrichments.js";
 import { lowerModel } from "../../ir/lower/lower.js";
+import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type {
   BoundedContextIR,
   DeployableIR,
@@ -19,6 +20,7 @@ import type { Model } from "../../language/generated/ast.js";
 import { dedupeByName } from "../../util/dedupe.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
+import { unionMembers } from "../_payload/union-wire.js";
 import { generateReactForContexts } from "../react/index.js";
 import {
   byLayerLayoutAdapter,
@@ -38,6 +40,7 @@ import {
   emitStampingInterceptor,
   emitValueObjects,
 } from "./context-scaffolding-emit.js";
+import { domainUnionFiles } from "./cqrs/dtos.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { canEmitToExpressionFor, emitCriteria } from "./criteria-emit.js";
 import {
@@ -561,11 +564,28 @@ function emitAggregate(
   for (const part of agg.parts) {
     place(`${part.name}.cs`, "entity", renderEntity(part, false, ns, agg.name, emitTrace, isDoc));
   }
+  // Exception-less operation returns (exception-less.md): precompute opName →
+  // Domain union name + variant members where the bounded context is in scope,
+  // so the entity emitter can type the method + thread the variant order.
+  const operationReturnUnions = new Map<
+    string,
+    { name: string; members: ReturnType<typeof unionMembers> }
+  >();
+  for (const op of agg.operations) {
+    if (op.returnType?.kind !== "union") continue;
+    operationReturnUnions.set(op.name, {
+      name: unionInstanceName(op.returnType.variants),
+      members: unionMembers(op.returnType.variants, ctx),
+    });
+  }
   place(
     `${agg.name}.cs`,
     "entity",
-    renderEntity(agg, true, ns, agg.name, emitTrace, isDoc, superType),
+    renderEntity(agg, true, ns, agg.name, emitTrace, isDoc, superType, operationReturnUnions),
   );
+  // Pure Domain union types for exception-less operation returns — Domain-layer
+  // artifacts (the aggregate method produces them), placed alongside the entity.
+  for (const f of domainUnionFiles(agg, ctx, ns)) place(f.name, "entity", f.content);
   // Views whose source is this aggregate become parameterless,
   // filtered, list-returning finds on the repository.  Synthesised
   // here so all the existing find emission paths (interface,

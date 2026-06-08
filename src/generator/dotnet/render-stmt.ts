@@ -105,8 +105,30 @@ function renderCsStatement(
     }
     case "expression":
       return `${INDENT}${renderCsExpr(s.expr, ctx)};`;
-    case "return":
-      return `${INDENT}return ${renderCsExpr(s.value, ctx)};`;
+    case "return": {
+      // Exception-less operation return (exception-less.md): a tagged return
+      // constructs the Domain union's variant record `<Union>_<Tag>(...)`.  A
+      // record variant orders its positional args by the variant's declared
+      // field order (from `ctx.returnUnion.members`), looking each up by name in
+      // the lowered object literal; a scalar wraps the single value; `none` is
+      // the empty unit.  Untagged returns (plain value) render the value as-is.
+      if (!s.variantTag || !ctx.returnUnion) {
+        return `${INDENT}return ${renderCsExpr(s.value, ctx)};`;
+      }
+      const variant = `${ctx.returnUnion.name}_${s.variantTag}`;
+      if (s.variantShape === "none") return `${INDENT}return new ${variant}();`;
+      if (s.variantShape === "scalar") {
+        return `${INDENT}return new ${variant}(${renderCsExpr(s.value, ctx)});`;
+      }
+      const member = ctx.returnUnion.members.find((m) => m.tag === s.variantTag);
+      const objFields = s.value.kind === "object" ? s.value.fields : [];
+      const order = member && member.shape === "record" ? member.fields : [];
+      const args = order.map((mf) => {
+        const f = objFields.find((of) => of.name === mf.name);
+        return f ? renderCsExpr(f.value, ctx) : "default";
+      });
+      return `${INDENT}return new ${variant}(${args.join(", ")});`;
+    }
   }
 }
 

@@ -782,8 +782,11 @@ function printOperation(node: Operation): string {
   const params = node.params.map(printParameter).join(", ");
   const extern = node.extern ? " extern" : "";
   const audited = node.audited ? " audited" : "";
+  // Exception-less `or`-union return (exception-less.md): `: X or NotFound`,
+  // grammar-positioned after extern/audited.
+  const ret = node.returnType ? `: ${printTypeRef(node.returnType)}` : "";
   return block(
-    `${priv}operation ${node.name}(${params})${extern}${audited}`,
+    `${priv}operation ${node.name}(${params})${extern}${audited}${ret}`,
     node.body.map(printStmt),
   );
 }

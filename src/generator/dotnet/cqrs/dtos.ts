@@ -11,7 +11,7 @@ import type {
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { upperFirst } from "../../../util/naming.js";
+import { plural, upperFirst } from "../../../util/naming.js";
 import { type UnionMemberField, unionMembers } from "../../_payload/union-wire.js";
 import {
   aggregateResponseParams,
@@ -80,24 +80,94 @@ export function emitResponseDtos(
 // `none` unit → an empty record).
 // ---------------------------------------------------------------------------
 
+/** Every distinct union return reaching this aggregate: repository find returns
+ *  plus exception-less operation returns (`operation foo(): X or NotFound`).
+ *  Both wire the same tagged DTO, so they share one emission path. */
+function aggregateUnionReturns(
+  agg: AggregateIR,
+  repo: RepositoryIR | undefined,
+): { name: string; variants: import("../../../ir/types/loom-ir.js").TypeIR[] }[] {
+  const out: { name: string; variants: import("../../../ir/types/loom-ir.js").TypeIR[] }[] = [];
+  const seen = new Set<string>();
+  const add = (variants: import("../../../ir/types/loom-ir.js").TypeIR[]): void => {
+    const name = unionInstanceName(variants);
+    if (seen.has(name)) return;
+    seen.add(name);
+    out.push({ name, variants });
+  };
+  for (const find of repo?.finds ?? [])
+    if (find.returnType.kind === "union") add(find.returnType.variants);
+  for (const op of agg.operations) if (op.returnType?.kind === "union") add(op.returnType.variants);
+  return out;
+}
+
 export function emitUnionDtos(
+  agg: AggregateIR,
   repo: RepositoryIR | undefined,
   ctx: EnrichedBoundedContextIR,
   ns: string,
   aggFolder: string,
   out: Map<string, string>,
 ): void {
-  const seen = new Set<string>();
-  for (const find of repo?.finds ?? []) {
-    if (find.returnType.kind !== "union") continue;
-    const name = unionInstanceName(find.returnType.variants);
-    if (seen.has(name)) continue;
-    seen.add(name);
+  for (const u of aggregateUnionReturns(agg, repo)) {
     out.set(
-      `Application/${aggFolder}/Responses/${name}.cs`,
-      renderUnionDto(name, unionMembers(find.returnType.variants, ctx), ns, aggFolder, ctx),
+      `Application/${aggFolder}/Responses/${u.name}.cs`,
+      renderUnionDto(u.name, unionMembers(u.variants, ctx), ns, aggFolder, ctx),
     );
   }
+}
+
+/** Pure Domain union types for exception-less operation returns: the aggregate
+ *  method produces them, so they live in the Domain layer (which can't see the
+ *  Application wire DTO above).  No serialization attributes — the controller
+ *  maps a success variant to the Application DTO before serializing, keeping
+ *  Domain transport-agnostic (exception-less.md, "Pure Domain + mapping"). */
+export function domainUnionFiles(
+  agg: AggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): { name: string; content: string }[] {
+  const files: { name: string; content: string }[] = [];
+  const seen = new Set<string>();
+  for (const op of agg.operations) {
+    if (op.returnType?.kind !== "union") continue;
+    const name = unionInstanceName(op.returnType.variants);
+    if (seen.has(name)) continue;
+    seen.add(name);
+    files.push({
+      name: `${name}.cs`,
+      content: renderDomainUnion(name, unionMembers(op.returnType.variants, ctx), agg, ns, ctx),
+    });
+  }
+  return files;
+}
+
+function renderDomainUnion(
+  name: string,
+  members: ReturnType<typeof unionMembers>,
+  agg: AggregateIR,
+  ns: string,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const memberParams = (m: (typeof members)[number]): string => {
+    if (m.shape === "none") return "";
+    if (m.shape === "scalar") return `${wireType(m.type, ctx, "response")} Value`;
+    return m.fields
+      .map((f: UnionMemberField) => `${wireType(f.type, ctx, "response")} ${upperFirst(f.name)}`)
+      .join(", ");
+  };
+  return lines(
+    "// Auto-generated.",
+    "using System;",
+    "using System.Collections.Generic;",
+    `using ${ns}.Domain.Enums;`,
+    "",
+    `namespace ${ns}.Domain.${plural(agg.name)};`,
+    "",
+    `public abstract record ${name};`,
+    "",
+    ...members.map((m) => `public sealed record ${name}_${m.tag}(${memberParams(m)}) : ${name};`),
+  );
 }
 
 function renderUnionDto(

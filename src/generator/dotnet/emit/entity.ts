@@ -8,6 +8,7 @@ import type {
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
+import type { UnionMember } from "../../_payload/union-wire.js";
 import { collectCsExprUsings, csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
 import { collectCsStmtUsings, renderCsStatements } from "../render-stmt.js";
 
@@ -75,6 +76,12 @@ export function renderEntity(
    *  base fields rather than re-declaring them.  Undefined ⇒ byte-identical
    *  with the standalone-aggregate output. */
   superType?: SuperTypeInfo,
+  /** Exception-less operation returns (exception-less.md): opName → the Domain
+   *  union the method returns + its variant members (field order), precomputed
+   *  where the bounded context is in scope.  A return-typed op renders its
+   *  signature with the union type and threads `returnUnion` into the body's
+   *  render context so tagged `return`s build the right variant record. */
+  operationReturnUnions?: Map<string, { name: string; members: UnionMember[] }>,
 ): string {
   // `operations` is the discriminator between EnrichedAggregateIR and
   // EnrichedEntityPartIR — wrapped in a type predicate so the union
@@ -248,18 +255,30 @@ export function renderEntity(
       continue;
     }
     const visibility = op.visibility === "public" ? "public" : "private";
-    opLines.push(`    ${visibility} void ${upperFirst(op.name)}(${params})`);
+    // Exception-less return-typed op: the method returns its Domain union and
+    // ends in `return` (so the trailing AssertInvariants would be unreachable —
+    // skip it, mirroring the Hono producer).  Thread `returnUnion` so tagged
+    // returns construct the variant records.
+    const retUnion = operationReturnUnions?.get(op.name);
+    const retType = op.returnType ? renderCsType(op.returnType) : "void";
+    opLines.push(`    ${visibility} ${retType} ${upperFirst(op.name)}(${params})`);
     opLines.push("    {");
-    const body = renderCsStatements(op.statements, renderCtx, {
-      emitTrace,
-      aggregate: entity.name,
-      op: op.name,
-      eventSourced,
-    });
-    if (body.length > 0) opLines.push(body);
-    opLines.push(
-      emitTrace ? `        AssertInvariants("${op.name}");` : "        AssertInvariants();",
+    const body = renderCsStatements(
+      op.statements,
+      retUnion ? { ...renderCtx, returnUnion: retUnion } : renderCtx,
+      {
+        emitTrace,
+        aggregate: entity.name,
+        op: op.name,
+        eventSourced,
+      },
     );
+    if (body.length > 0) opLines.push(body);
+    if (!op.returnType) {
+      opLines.push(
+        emitTrace ? `        AssertInvariants("${op.name}");` : "        AssertInvariants();",
+      );
+    }
     opLines.push("    }");
     opLines.push("");
   }
