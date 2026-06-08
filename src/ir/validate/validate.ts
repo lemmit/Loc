@@ -11,6 +11,7 @@ import {
   validateGenericInstancesUnimplemented,
   validateOperationReturnsUnimplemented,
   validatePermissionRefs,
+  validatePropagation,
   validateUnionsUnimplemented,
   validateUnmappedErrorStatuses,
   validateWorkspaceUniqueness,
@@ -141,6 +142,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       backendPlatformsByContext.get(c.name) ?? new Set(),
     );
     validateUnmappedErrorStatuses(c, diags);
+    validatePropagation(c, diags);
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateEventSourcedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateProvenancedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());

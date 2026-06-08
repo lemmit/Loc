@@ -2315,7 +2315,18 @@ export type ExprIR =
       kind: "match";
       arms: { cond: ExprIR; value: ExprIR }[];
       otherwise?: ExprIR;
-    };
+    }
+  /**
+   * `?` propagation (exception-less.md A2): `expr?` short-circuits the enclosing
+   * function when `operand` evaluates to an `error`-marked variant (returning
+   * that variant), otherwise unwraps to the non-error value.  `errorTags` is the
+   * set of discriminator tags that short-circuit (the error variants of the
+   * operand's `or`-union, incl. `none`); a backend renders `const __r = operand;
+   * if (__r.type ∈ errorTags) return __r; <__r as the unwrapped value>`.  The
+   * expression's type (via `inferExprType`) is the `or`-join of the non-error
+   * variants.
+   */
+  | { kind: "propagate"; operand: ExprIR; errorTags: string[] };
 
 // Convenience constructors used by the lowering layer.
 export const lit = (kind: LiteralKind, value: string): ExprIR => ({

@@ -152,6 +152,10 @@ function constructionEvaluable(
       // The server applies the coercion; the wrapped value must itself be
       // evaluable.
       return constructionEvaluable(e.value, available, scope);
+    case "propagate":
+      // `?` propagation can't appear in a construction-evaluable position;
+      // conservatively not evaluable (exception-less.md A2).
+      return false;
     case "match":
       return (
         e.arms.every(
@@ -275,6 +279,10 @@ function exprIsTranslatable(
       // Same posture as money literals: server-side only.  Server's
       // `_assertInvariants` renders the conversion correctly via
       // `renderTsConvert`.
+      return false;
+    case "propagate":
+      // `?` propagation can't appear in a wire-translatable predicate;
+      // conservatively not translatable (exception-less.md A2).
       return false;
     case "match":
       // A match expression is wire-translatable iff every arm
@@ -517,6 +525,10 @@ function firstFieldRef(e: ExprIR): string | null {
     case "convert":
       // The wrapped value may itself be a field reference; walk into it.
       return firstFieldRef(e.value);
+    case "propagate":
+      // `?` propagation doesn't occur in invariant/precondition expressions,
+      // but walk the operand defensively (exception-less.md A2).
+      return firstFieldRef(e.operand);
     case "match":
       // First arm (cond, then value), then the `else` branch — same
       // left-to-right walk semantics as `ternary`.

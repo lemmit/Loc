@@ -352,6 +352,10 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
     }
     case "ternary":
       return `${renderE2EExpr(e.cond, ctx)} ? ${renderE2EExpr(e.then, ctx)} : ${renderE2EExpr(e.otherwise, ctx)}`;
+    case "propagate":
+      // `?` propagation is an operation/workflow-body construct, not a test
+      // expression; defensive (exception-less.md A2).
+      throw new Error("renderE2EExpr: unexpected '?' propagation.");
     case "lambda":
       // Lambda body is now optional (block-body lambdas were
       // added for page event handlers).  E2E tests don't currently
