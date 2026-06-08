@@ -867,6 +867,200 @@ deployable grammar; `DeployableIR`; `checkDeployable`; each backend's
 
 ---
 
+## D-VANILLA-PHOENIX-FOUNDATION — `foundation: vanilla` is added to the Phoenix menu
+
+**Status:** PINNED. (Concretises one menu slot of **D-REALIZATION-AXES**; spec in
+`proposals/vanilla-phoenix-foundation.md`.)
+
+**Problem.** D-REALIZATION-AXES pinned the `foundation:` axis with `phoenix: ash ·
+vanilla` as the menu, but the validator (`src/language/validators/data/platform-rules.ts:184`)
+currently returns the single-element `["ash"]` and the lowerer
+(`src/ir/lower/lower-platform.ts:46`) defaults to `ash` — `vanilla` is a planned
+value with no emitter behind it. Two operationally distinct strains on
+`foundation: ash` motivate building the second emitter:
+
+1. **Exception-less alignment.** A4 of `proposals/exception-less.md` deletes
+   route-layer try/catch towers on every backend in favour of variant dispatch
+   on typed `or`-union returns. The current Phoenix emitter has the tower as a
+   design feature (`Plug.ErrorHandler` translates `Ash.Error.Invalid` → 422,
+   `Ash.Error.Forbidden` → 403, `Ash.Error.Query.NotFound` → 404).  Vanilla
+   Ecto's `{:ok, _} | {:error, changeset}` is the natural typed-error carrier;
+   the tower collapses into per-variant `with`-block dispatch (the same shape
+   TS/.NET adopt post-A4).
+2. **Pure event sourcing.** The cross-backend pure-ES contract (no state
+   table, per-aggregate `<agg>_events` stream, fold-on-load, emit-and-apply
+   command bodies) is live on Hono/Drizzle, Hono/MikroORM, .NET/EF, and
+   .NET/Dapper. Under `foundation: ash` there is no clean fit — AshEvents is
+   hybrid (state table, single centralised event log, action-wrapping);
+   AshCommanded is closer but heavy; a custom `Ash.DataLayer` over event
+   streams is months of work (re-implements AshCommanded's internals).
+
+Both strains are **Ash-foundation limitations, not Phoenix-platform
+limitations** — Phoenix itself (Plug + Endpoint + Router + LiveView) is
+domain-layer-agnostic; what doesn't fit is `Ash.Resource`'s changeset-shaped
+action model + `Ash.DataLayer`'s queryable-store callback contract.
+
+**Decision.** `foundation: vanilla` is added to the Phoenix menu as a
+first-class second adapter. Emits plain `Phoenix.Endpoint` + `Phoenix.Router` +
+LiveView over plain `Ecto.Schema` / `Ecto.Changeset` / `Ecto.Repo` — no
+`Ash.Resource`, no `AshPostgres`, no `AshPhoenix.Form`. The existing
+`foundation: ash` path is unchanged and remains first-class; neither is
+deprecated.
+
+**Affects.** `src/language/validators/data/platform-rules.ts:184` (lift the
+single-element menu); `src/ir/lower/lower-platform.ts:46` (keep `ash` default —
+see D-VANILLA-DEFAULT); a new `src/generator/phoenix-live-view/vanilla/`
+subtree (sibling emitters: `schema-emit`, `changeset-emit`, `policy-emit`,
+`context-emit`, `repository-emit`, `vanilla/api-emit`,
+`vanilla/problem-details-emit`); a new `ecto-postgres-persistence` adapter; the
+strict-parity conformance gate. **Depends on D-REALIZATION-AXES**;
+**enables D-VANILLA-ES-HOME**.
+
+---
+
+## D-VANILLA-ES-HOME — pure event sourcing on Phoenix lands only under `foundation: vanilla`
+
+**Status:** PINNED. (Resolves the `EVENT_SOURCING_BACKENDS` Phoenix gap left
+open in `proposals/workflow-and-applier.md`; **depends on
+D-VANILLA-PHOENIX-FOUNDATION**.)
+
+**Problem.** `validateEventSourcedStorage` (`src/ir/validate/checks/system-checks.ts`)
+rejects `persistedAs(eventLog)` aggregates on Phoenix today;
+`ash-postgres-persistence.ts:60` advertises `supportedStrategies: ["state"]`
+only. Once vanilla exists, the gate can lift on a foundation-sensitive basis —
+but the question of *whether to also pursue Ash-foundation ES* (via AshEvents
+adoption, AshCommanded adoption, or a custom `Ash.DataLayer`) is independent
+and material.
+
+**Decision.** Pure event sourcing on Phoenix lands **only** under `foundation:
+vanilla`. `foundation: ash` + `persistedAs(eventLog)` stays a hard error after
+vanilla ships, with a structured diagnostic naming the Ash foundation as the
+constraint and pointing the user at `foundation: vanilla` or a non-Phoenix
+backend. The following alternatives are **explicitly not pursued**:
+
+- **AshEvents adoption.** Its hybrid model (state table + centralised event
+  log + action-wrapping + manual whole-resource replay) diverges from Loom's
+  pure per-aggregate-stream / fold-on-load contract. Reconciling would force
+  either a divergent Phoenix semantics or a fight-the-grain projection.
+- **AshCommanded adoption.** Closest match semantically (Commanded aggregates
+  + apply/2 + per-aggregate streams) but ships heavy infrastructure
+  (Commanded + EventStore Postgres) for a single foundation, when the vanilla
+  path achieves the same contract zero-dep.
+- **Custom `Ash.DataLayer` over event streams.** Re-implements AshCommanded
+  internals; ~months of work; half-bridges leak (`AshPhoenix.Form`,
+  `AshGraphql`, `AshJsonApi`, relationships all assume the data layer answers
+  queries about current state).
+
+Rationale: the cross-backend pure-ES contract is live on four paths already
+(Hono/Drizzle, Hono/MikroORM, .NET/EF, .NET/Dapper); vanilla joins them as a
+fifth port of a proven shape (~2–4 days of work). The Ash paths each carry
+multi-week-to-month costs to land *partial* fits. Routing ES through vanilla
+costs nothing additional once vanilla exists.
+
+**Affects.** `src/ir/validate/checks/system-checks.ts`
+(`EVENT_SOURCING_BACKENDS` un-gate gains a foundation predicate — `phoenix` +
+`foundation: vanilla` only); `test/ir/eventsourced-storage-support.test.ts`
+(extend the matrix); the structured diagnostic from
+`proposals/vanilla-phoenix-foundation.md` P0; `MigrationsIR` consumers (the
+shared `<agg>_events` shape extends to the Ecto migrations renderer in P4).
+**Depends on D-VANILLA-PHOENIX-FOUNDATION**.
+
+---
+
+## D-NO-MIXED-FOUNDATION — one foundation per deployable; per-aggregate override not added
+
+**Status:** PINNED. (Structural consequence of **D-REALIZATION-AXES** + the
+deployable model; recorded explicitly to forestall the per-aggregate override
+extension request.)
+
+**Problem.** A natural-sounding feature request is "let me keep Ash resources
+for state-based aggregates and use vanilla emit for the ES aggregate in the
+*same* deployable." The motivation is real (some domains genuinely mix
+state-based-CRUD aggregates with one or two ES aggregates), but the
+implementation cost compounds at every call site: workflow bodies branch on
+per-aggregate strategy, forms split between `AshPhoenix.Form` and stock
+`to_form(changeset)`, authorization splits between Ash policies and plain
+guard functions, telemetry emission splits between Ash trace events and
+hand-emitted equivalents.
+
+**Decision.** A single deployable carries one `foundation` value. Per-aggregate
+`foundation` override is **not** added.
+
+**Crucially: this is a structural consequence, not an additional policy.**
+Under D-REALIZATION-AXES, `foundation:` is a **per-deployable axis** on the
+deployable's `platform:` config block (each deployable declares one platform
+with one foundation). The per-deployable scope of the axis *already* makes
+mixed foundation within a deployable inexpressible in the grammar — this
+decision merely confirms the architecture won't grow a per-aggregate escape
+hatch, with the rationale that the plumbing cost (above) outweighs the
+mixed-foundation use case.
+
+Users who need both Ash-resource and pure-ES aggregates have two principled
+paths:
+
+1. **Split bounded contexts across deployables.** State-based contexts deploy
+   under `foundation: ash`; ES contexts deploy under `foundation: vanilla`.
+   Each deployable is internally coherent; cross-deployable consumption uses
+   the api surface as on any cross-deployable boundary.
+2. **Pick `foundation: vanilla` for the whole deployable.** State-based
+   aggregates emit as plain Ecto schemas (no loss vs Ash for simple CRUD);
+   ES aggregates emit as fold+repository. Single mental model.
+
+**Affects.** `proposals/vanilla-phoenix-foundation.md` (the "Mixed-mode within a
+context" section is the conversational origin of this decision). No grammar
+change required (the constraint is already structural); no validator rule
+needed beyond today's per-deployable `foundation:` typing.
+
+---
+
+## D-VANILLA-DEFAULT — vanilla becomes Phoenix default after stabilisation, not on first ship
+
+**Status:** PINNED. (Sequences the default-flip of **D-VANILLA-PHOENIX-FOUNDATION**;
+deferred to a later release than vanilla's initial ship.)
+
+**Problem.** Today's Phoenix default is `foundation: ash`
+(`lower-platform.ts:46`). Once vanilla ships and exception-less A4 is in
+place, vanilla is objectively the lower-friction default — no
+`Plug.ErrorHandler` rescue tower, direct typed-error mapping, broader contract
+coverage (ES + state). But flipping the default in the *same* release that
+introduces vanilla risks two things: (a) silent emit-shape change for every
+bare-`platform: phoenix` deployable that hasn't been re-validated against
+vanilla; (b) regression discovery happening in production before vanilla has
+seen real usage.
+
+**Decision.** Vanilla ships **opt-in only initially**. The default stays
+`foundation: ash` for at least one minor release after vanilla lands. The flip
+is gated on two operational signals:
+
+1. Vanilla has run **at least one minor-release cycle with green CI** —
+   `phoenix-vanilla-build.yml` (`mix compile --warnings-as-errors`) and the
+   strict-parity matrix entry pass cleanly without ongoing-fix churn.
+2. **No obs-e2e regressions** observed on `phoenix-obs-e2e.yml` (vanilla
+   variant) for the same cycle.
+
+When both signals are clear, flip in two steps:
+
+1. **Warn-then-flip release.** Emit a `loom.foundation-default-flipping`
+   warning on every bare `platform: phoenix` (no explicit `foundation:`)
+   for one release cycle, telling the user to set explicit `ash` if they
+   want to stay on the current behaviour.
+2. **Flip release.** Change `lower-platform.ts:46`'s default from `ash` to
+   `vanilla`. Users who didn't act on the warning get vanilla emit; the
+   one-line escape hatch (`foundation: ash`) remains supported and
+   first-class.
+
+Rationale: zero-surprise migration; opt-in window gives real users time to
+validate vanilla before it becomes the default emission; the warning cycle
+makes the change visible without breaking anyone's build.
+
+**Affects.** `src/ir/lower/lower-platform.ts:46` (default flip, gated on
+release sequencing); `src/language/validators/data/platform-rules.ts`
+(`loom.foundation-default-flipping` warning during the warn cycle); release
+notes for the two flip-related releases. **Depends on
+D-VANILLA-PHOENIX-FOUNDATION**.
+
+---
+
 ## D-NODE-PLATFORM — `node` is the JS-runtime platform; `hono` is a `transport:` value
 
 **Status:** PINNED. (Mirrors **D-PHOENIX-SURFACE**'s rename pattern; depends on

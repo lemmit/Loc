@@ -1,8 +1,12 @@
 # Vanilla Phoenix foundation — `foundation: vanilla` for `platform: phoenix`
 
-> Status: **proposal**. Nothing here is implemented; the menu slot exists
+> Status: **PROPOSED — decisions pinned**. The four decisions in §"Decisions
+> to pin" below are now recorded in [`decisions.md`](../decisions.md) as
+> **D-VANILLA-PHOENIX-FOUNDATION**, **D-VANILLA-ES-HOME**,
+> **D-NO-MIXED-FOUNDATION**, **D-VANILLA-DEFAULT** — implementation is
+> unblocked but not yet started. The menu slot exists
 > (`platform-rules.ts:184` lists `vanilla` as a future Phoenix
-> `foundation:` value) but `lower-platform.ts:46` defaults to `ash` and
+> `foundation:` value) and `lower-platform.ts:46` defaults to `ash`;
 > there is no second emitter today. Builds on **D-REALIZATION-AXES**
 > (which already names this axis), supersedes the framing —
 > not the substance — of [`elixir-ecto-and-api-only-backends.md`](./elixir-ecto-and-api-only-backends.md)
@@ -204,14 +208,17 @@ The middle-ground that is worth shipping is the **structured validator
 diagnostic** (see §"Phasing" P0) that explains the choice clearly when a
 user hits the gate.
 
-## Decisions to pin
+## Decisions pinned
+
+All four are now in [`decisions.md`](../decisions.md) (canonical text there;
+summarised here):
 
 | ID | Decision |
 |---|---|
-| D-VANILLA-PHOENIX-FOUNDATION | `foundation: vanilla` is added to the `phoenix` foundation menu. `foundation: ash` remains the Phoenix default. Both are first-class; neither is deprecated. |
-| D-VANILLA-ES-HOME | Pure event sourcing on Phoenix lands **only** under `foundation: vanilla`. `foundation: ash` + `persistedAs(eventLog)` stays a hard error, with the structured diagnostic from P0 below. AshEvents / AshCommanded paths are explicitly **not pursued**. |
-| D-NO-MIXED-FOUNDATION | A single deployable carries one `foundation` value; per-aggregate foundation override is not added. Users who need both Ash-resource and pure-ES aggregates split contexts across deployables or pick `vanilla` for the whole deployable. |
-| D-VANILLA-DEFAULT | The Phoenix default stays `foundation: ash` for backwards compatibility. *Open question*: should the default flip to `vanilla` once exception-less A4 ships? Recommend revisiting then, not now. |
+| [D-VANILLA-PHOENIX-FOUNDATION](../decisions.md#d-vanilla-phoenix-foundation--foundation-vanilla-is-added-to-the-phoenix-menu) | `foundation: vanilla` is added to the `phoenix` foundation menu as a first-class second adapter. Both `ash` and `vanilla` are first-class; neither is deprecated. |
+| [D-VANILLA-ES-HOME](../decisions.md#d-vanilla-es-home--pure-event-sourcing-on-phoenix-lands-only-under-foundation-vanilla) | Pure event sourcing on Phoenix lands **only** under `foundation: vanilla`. AshEvents adoption, AshCommanded adoption, and custom `Ash.DataLayer` over event streams are explicitly **not pursued** (rationale: each carries multi-week-to-month cost for a partial fit; vanilla port costs ~2–4 days for the proven contract). `foundation: ash` + `persistedAs(eventLog)` stays a hard error, with the structured diagnostic from P0 naming the Ash foundation as the constraint. |
+| [D-NO-MIXED-FOUNDATION](../decisions.md#d-no-mixed-foundation--one-foundation-per-deployable-per-aggregate-override-not-added) | A single deployable carries one `foundation` value; per-aggregate foundation override is not added. **This is a structural consequence**, not an additional policy — `foundation:` is a per-deployable axis under D-REALIZATION-AXES, so mixed-foundation within one deployable is already inexpressible in the grammar. The decision merely confirms no per-aggregate escape hatch will be added; users with mixed needs split contexts across deployables or pick `vanilla` for the whole deployable. |
+| [D-VANILLA-DEFAULT](../decisions.md#d-vanilla-default--vanilla-becomes-phoenix-default-after-stabilisation-not-on-first-ship) | Vanilla becomes the Phoenix default **after stabilisation**, not on first ship. Sequencing: (1) vanilla ships opt-in only; (2) after one minor-release cycle with green `phoenix-vanilla-build.yml` + no obs-e2e regressions, emit `loom.foundation-default-flipping` warning for one cycle; (3) flip the default in the next release. Users who want `ash` after the flip set it explicitly (one-line escape hatch remains first-class). |
 
 ## Phasing
 
@@ -353,7 +360,10 @@ factored in; treat it as the worst-case ceiling, not the planning median.
 - The `ui` DSL, `walker-stdlib`, the HEEx walker, the design packs.
 - The React frontend consuming a Phoenix backend (API-only path is
   already resolved by D-API-ONLY; vanilla inherits).
-- `foundation: ash` users (zero migration burden — the proposal is
-  strictly additive).
+- `foundation: ash` users on first ship — vanilla is opt-in only initially
+  (per D-VANILLA-DEFAULT). Existing bare `platform: phoenix` deployables
+  continue to emit Ash until the warn-then-flip sequence completes; the
+  one-line escape hatch (`foundation: ash`) remains first-class
+  indefinitely.
 - The Phoenix obs-e2e contract (telemetry envelope is foundation-agnostic
   once the emission sites are matched).
