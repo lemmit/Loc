@@ -105,6 +105,14 @@ export const LogEvents = {
   },
   workflowStarted: { event: "workflow_started", level: "info", fields: ["workflow"] },
   workflowCompleted: { event: "workflow_completed", level: "info", fields: ["workflow"] },
+  // An inbound event reached an `on(...)` reactor but no persisted workflow
+  // instance existed for its correlation key — the continuation is dropped
+  // (channels.md drop+log policy).  `event_type` mirrors `event_dispatched`.
+  eventUnrouted: {
+    event: "event_unrouted",
+    level: "warn",
+    fields: ["workflow", "event_type", "key"],
+  },
 
   // ─── domain — warn (client/domain fault, recoverable) ────────────────
   domainError: {
