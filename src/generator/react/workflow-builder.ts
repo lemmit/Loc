@@ -5,6 +5,7 @@ import {
   type WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
+import { zodForResponse } from "./api-builder.js";
 import { fillBlock } from "./page-objects-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -47,10 +48,17 @@ export function allWorkflows(
 
 export function buildWorkflowsApiModule(contexts: BoundedContextIR[]): string {
   const workflows = allWorkflows(contexts);
+  // Observable workflows (a persisted correlation-state row) get read-only
+  // instance query hooks (workflow-instance-visibility.md) — `useQuery` is
+  // only imported when at least one exists, so a saga-less project's module
+  // stays byte-identical.
+  const anyInstances = workflows.some(({ wf }) => wf.instanceWireShape);
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { z } from "zod";`);
-  lines.push(`import { useMutation } from "@tanstack/react-query";`);
+  lines.push(
+    `import { ${anyInstances ? "useMutation, useQuery" : "useMutation"} } from "@tanstack/react-query";`,
+  );
   lines.push(`import { api } from "./client";`);
   if (contexts.some(contextUsesMoney)) {
     lines.push(`import { moneySchema } from "../lib/schemas";`);
@@ -80,9 +88,56 @@ export function buildWorkflowsApiModule(contexts: BoundedContextIR[]): string {
     lines.push(`  });`);
     lines.push(`}`);
     lines.push("");
+    if (wf.instanceWireShape) {
+      lines.push(...emitInstanceHooks(wf));
+    }
   }
 
   return lines.join("\n");
+}
+
+/** Read-only instance query hooks for an observable workflow
+ *  (workflow-instance-visibility.md): the `<Wf>InstanceResponse` /
+ *  `<Wf>InstanceListResponse` Zod schemas (the React mirror of the Hono DTOs)
+ *  plus `useAll<Wf>Instances()` / `use<Wf>InstanceById(id)` — the same
+ *  react-query shape as an aggregate's `useAll<Agg>` / `use<Agg>ById`. */
+function emitInstanceHooks(wf: WorkflowIR): string[] {
+  const T = upperFirst(wf.name);
+  const slug = snake(wf.name);
+  const key = `["workflow_instances", "${slug}"]`;
+  const lines: string[] = [];
+  lines.push(`export const ${T}InstanceResponse = z.object({`);
+  for (const f of wf.instanceWireShape ?? []) {
+    lines.push(
+      `  ${f.name}: ${f.source === "id" ? "z.string()" : zodForResponse(f.type, f.optional)},`,
+    );
+  }
+  lines.push(`});`);
+  lines.push(`export type ${T}InstanceResponse = z.infer<typeof ${T}InstanceResponse>;`);
+  lines.push(`export const ${T}InstanceListResponse = z.array(${T}InstanceResponse);`);
+  lines.push("");
+  lines.push(`export function useAll${T}Instances() {`);
+  lines.push(`  return useQuery({`);
+  lines.push(`    queryKey: ${key},`);
+  lines.push(`    queryFn: async () => {`);
+  lines.push(`      const r = await api.get(\`/workflows/${slug}/instances\`);`);
+  lines.push(`      return ${T}InstanceListResponse.parse(r);`);
+  lines.push(`    },`);
+  lines.push(`  });`);
+  lines.push(`}`);
+  lines.push("");
+  lines.push(`export function use${T}InstanceById(id: string | undefined) {`);
+  lines.push(`  return useQuery({`);
+  lines.push(`    queryKey: [...${key}, id],`);
+  lines.push(`    enabled: !!id,`);
+  lines.push(`    queryFn: async () => {`);
+  lines.push(`      const r = await api.get(\`/workflows/${slug}/instances/\${id}\`);`);
+  lines.push(`      return ${T}InstanceResponse.parse(r);`);
+  lines.push(`    },`);
+  lines.push(`  });`);
+  lines.push(`}`);
+  lines.push("");
+  return lines;
 }
 
 interface SchemaDep {
@@ -90,11 +145,18 @@ interface SchemaDep {
   schemaName: string;
 }
 
+/** The types a workflow's API surface references: its command params plus —
+ *  for an observable workflow — its instance wire-shape fields (whose response
+ *  schema may name enum / value-object schemas that must be imported). */
+function apiSurfaceTypes(wf: WorkflowIR): TypeIR[] {
+  return [...wf.params.map((p) => p.type), ...(wf.instanceWireShape ?? []).map((f) => f.type)];
+}
+
 function collectEnumDeps(workflows: Array<{ wf: WorkflowIR; ctx: BoundedContextIR }>): SchemaDep[] {
   const out = new Map<string, SchemaDep>();
   for (const { wf, ctx } of workflows) {
-    for (const p of wf.params) {
-      walkType(p.type, (t) => {
+    for (const t0 of apiSurfaceTypes(wf)) {
+      walkType(t0, (t) => {
         if (t.kind === "enum") {
           const owner = findFirstAggregateUsingEnum(ctx, t.name);
           if (owner && !out.has(t.name)) {
@@ -115,8 +177,8 @@ function collectValueObjectDeps(
 ): SchemaDep[] {
   const out = new Map<string, SchemaDep>();
   for (const { wf, ctx } of workflows) {
-    for (const p of wf.params) {
-      walkType(p.type, (t) => {
+    for (const t0 of apiSurfaceTypes(wf)) {
+      walkType(t0, (t) => {
         if (t.kind === "valueobject") {
           const owner = findFirstAggregateUsingValueObject(ctx, t.name);
           if (owner && !out.has(t.name)) {

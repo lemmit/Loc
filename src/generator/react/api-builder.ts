@@ -466,7 +466,7 @@ function zodForRequest(t: TypeIR): string {
   }
 }
 
-function zodForResponse(t: TypeIR, optional: boolean): string {
+export function zodForResponse(t: TypeIR, optional: boolean): string {
   const z = zodForResponseInner(t);
   return optional ? `${z}.nullish()` : z;
 }

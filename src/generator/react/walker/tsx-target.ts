@@ -101,6 +101,19 @@ export const tsxTarget: WalkerTarget = {
         argsRendered: [],
       };
     }
+    if (detected.kind === "workflow-instance") {
+      // `Fulfillment.instances.all` → useAllFulfillmentInstances();
+      // `Fulfillment.instances.byId(id)` → useFulfillmentInstanceById(id).
+      // Both live in the shared `../api/workflows` module.
+      const wf = upperFirstLocal(detected.aggregateName);
+      const isAll = detected.operation === "all";
+      return {
+        varName: isAll ? `all${wf}Instances` : `${lowerFirstLocal(detected.aggregateName)}Instance`,
+        hookName: isAll ? `useAll${wf}Instances` : `use${wf}InstanceById`,
+        importFrom: "../api/workflows",
+        argsRendered: detected.args.map(renderArg),
+      };
+    }
     const aggregate = detected.aggregateName;
     const op = detected.operation;
     return {

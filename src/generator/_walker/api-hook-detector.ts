@@ -8,6 +8,8 @@
 //   Pattern C: `member(ref:"Views", viewName)`                    — `Views.activeOrders`
 //   Pattern D: `member(ref:<Aggregate>, op)`                      — `Customer.create`   (no api-param prefix)
 //   Pattern E: `method-call(ref:<Aggregate>, op, args)`           — `Customer.byId(id)` (no api-param prefix)
+//   Pattern F: `member(member(ref:<Workflow>, "instances"), "all")`        — `Fulfillment.instances.all`
+//   Pattern G: `method-call(member(ref:<Workflow>, "instances"), "byId", args)` — `Fulfillment.instances.byId(id)`
 //
 // Detection is PURE IR analysis — no framework assumptions, no
 // emission.  Splitting it out of `react/walker/api-hooks.ts` (where it
@@ -41,10 +43,13 @@ export interface DetectedApiCall {
    *  reads and Pattern C view hooks.  Caller renders via its own
    *  walker context so refs to params/state propagate. */
   args: ExprIR[];
-  /** Discriminator between the two-shape pipeline:
-   *    `"aggregate"` — Patterns A/B/D/E (aggregate-rooted hook)
-   *    `"view"`      — Pattern C (`Views.<viewName>`) */
-  kind: "aggregate" | "view";
+  /** Discriminator between the pipelines:
+   *    `"aggregate"`         — Patterns A/B/D/E (aggregate-rooted hook)
+   *    `"view"`              — Pattern C (`Views.<viewName>`)
+   *    `"workflow-instance"` — Patterns F/G (`<Workflow>.instances.all` /
+   *                            `.byId(id)`); `aggregateName` carries the
+   *                            workflow name, `operation` is `all`/`byId`. */
+  kind: "aggregate" | "view" | "workflow-instance";
 }
 
 /** Detector context — the minimum subset of `WalkContext` the
@@ -62,6 +67,11 @@ export interface ApiHookDetectorContext {
    *  modules.  Patterns D / E (no api-param prefix) match against
    *  this set. */
   aggregatesByName: { has(name: string): boolean };
+  /** Container of workflow names declared in the bound modules.
+   *  Patterns F / G (`<Workflow>.instances.…`) match against this set.
+   *  Optional so callers that never reference workflow instances need
+   *  not supply it. */
+  workflowsByName?: { has(name: string): boolean };
 }
 
 /** Returns a `DetectedApiCall` when `expr` matches one of the five
@@ -93,6 +103,40 @@ export function tryDetectApiHook(
   // Pattern C: member(ref:"Views", viewName) — view hook.
   if (expr.kind === "member" && expr.receiver.kind === "ref" && expr.receiver.name === "Views") {
     return { aggregateName: expr.member, operation: expr.member, args: [], kind: "view" };
+  }
+  // Pattern F: member(member(ref:<Workflow>, "instances"), "all") — workflow
+  // instance list (workflow-instance-visibility.md).
+  if (
+    expr.kind === "member" &&
+    expr.member === "all" &&
+    expr.receiver.kind === "member" &&
+    expr.receiver.member === "instances" &&
+    expr.receiver.receiver.kind === "ref" &&
+    ctx.workflowsByName?.has(expr.receiver.receiver.name)
+  ) {
+    return {
+      aggregateName: expr.receiver.receiver.name,
+      operation: "all",
+      args: [],
+      kind: "workflow-instance",
+    };
+  }
+  // Pattern G: method-call(member(ref:<Workflow>, "instances"), "byId", args)
+  // — one workflow instance by correlation id.
+  if (
+    expr.kind === "method-call" &&
+    expr.member === "byId" &&
+    expr.receiver.kind === "member" &&
+    expr.receiver.member === "instances" &&
+    expr.receiver.receiver.kind === "ref" &&
+    ctx.workflowsByName?.has(expr.receiver.receiver.name)
+  ) {
+    return {
+      aggregateName: expr.receiver.receiver.name,
+      operation: "byId",
+      args: expr.args,
+      kind: "workflow-instance",
+    };
   }
   // Pattern D: member(ref:<Aggregate>, op) without api-param prefix.
   // Lets UIs without a `api X: Y` binding still get auto-injected
