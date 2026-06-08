@@ -1188,3 +1188,43 @@ each backend's operation lowering target *returns a value at all*. A model
 that returns a fixed framework type (Ash's resource record, EF's `Unit`) has
 no free seam for an arbitrary result — and Ash's is the one with no escape
 hatch short of changing the action kind.
+
+## Verifying generated Phoenix locally is blocked by the egress proxy (Erlang httpc ≠ curl)
+
+Building the Phoenix dispatch feature (#1020) with no local `mix compile`
+forced a workaround hunt. What's reproducible behind this environment's
+TLS-intercepting egress proxy:
+
+- **Pulling the CI Elixir image:** `docker pull hexpm/elixir:…` hits the
+  Docker Hub anonymous rate limit. **Google's mirror works:**
+  `docker pull mirror.gcr.io/hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim`,
+  then re-tag to the canonical name so the test harness finds it.
+- **Trusting the proxy CA inside the container:** mount the host's
+  `/usr/local/share/ca-certificates/` (the `egress-gateway-ca-*` /
+  `sandboxing-egress-ca` / `swp-ca-*` certs), `cp` them in, and
+  `update-ca-certificates`. This fixes the TLS `unknown_ca` handshake error.
+- **The hard wall — `mix deps.get` cannot reach hex.pm.** With TLS trusted,
+  **curl to `builds.hex.pm` / `repo.hex.pm` is a reliable 200**, but
+  **Erlang's `httpc`** (what `mix local.hex` and Hex's downloader use) gets a
+  reliable **503 "upstream connect error … connection termination"** from the
+  egress Envoy. Tested and ruled out: explicit `server_name_indication`,
+  TLS-1.2-pinning, spacing/retries, a curl-downloaded local `hex.ez` via
+  `mix archive.install`. The proxy keys its upstream decision on something in
+  Erlang's TLS ClientHello that curl's doesn't trip (SNI-forward-proxy /
+  JA3-style). So **`mix compile` against real Ash 3.x is not runnable here** —
+  the dep tree can't be fetched without re-implementing Hex's resolver over
+  curl (disproportionate).
+
+**What you *can* do locally as a substitute:** generate the project and
+syntax-check every emitted file with `Code.string_to_quoted!` in the Elixir
+image — it parses (catches indentation / `do`-`end` / unbalanced-delimiter
+errors across the whole tree) without needing deps. It does **not** catch
+`--warnings-as-errors` traps (unused alias/var, undefined refs) or Ash
+semantics — so write the emitters defensively (fully-qualified module refs so
+no unused `alias`; underscore statically-unused vars; `require Logger` only
+where a `Logger` macro is used) and treat the **`build-generated-phoenix` CI
+job as the authoritative gate**. On #1020 the local syntax pass + careful
+emission got it green on the first CI compile.
+
+Lesson: in this sandbox, curl ≠ Erlang/httpc for outbound TLS. Don't assume a
+toolchain that "has network" can fetch — check the *specific* client.

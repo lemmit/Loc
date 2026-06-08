@@ -594,6 +594,10 @@ phoenix_app/
 │       ├── money.ex                              # value objects as Ash.Type.NewType / embedded
 │       ├── events/order_confirmed.ex             # plain defstruct modules
 │       ├── workflows/place_order.ex              # code-interface fns wrapping Ash.transaction
+│       ├── dispatcher.ex                         # in-process event router (when a channel carries a subscribed event)
+│       ├── workflows/order_fulfillment_state.ex  # saga-state Ecto.Schema (correlation-keyed)
+│       ├── workflows/order_fulfillment/start_order_placed.ex   # event-create starter handle/1
+│       ├── workflows/order_fulfillment/on_shipment_requested.ex # on(...) reactor handle/1
 │       └── views/active_orders.ex                # Ash.Query.filter on read action
 │   └── sales.ex                                  # use Ash.Domain — resource list + code interfaces
 ├── lib/phoenix_app_web.ex                        # __using__ macro
@@ -627,7 +631,8 @@ Aggregate IR maps onto Ash:
 | `repository finds: find byCustomer(...) where ...` | `read :by_customer do argument :customer_id, :uuid; filter expr(...) end` |
 | `workflow placeOrder(...) { ... }` | code-interface module with `Ash.transaction(<App>.<Ctx>, fn -> with … end)` |
 | `view ActiveOrders = Order where …` | thin module wrapping `Order |> Ash.Query.filter(…)` |
-| `emit OrderConfirmed { … }` | `Phoenix.PubSub.broadcast(<App>.PubSub, "events", %Events.OrderConfirmed{…})` |
+| `emit OrderConfirmed { … }` | `Phoenix.PubSub.broadcast(<App>.PubSub, "events", %Events.OrderConfirmed{…})`; inside an in-process dispatch handler, `emit` re-enters `<Ctx>.Dispatcher.dispatch(%Events.OrderConfirmed{…})` so choreography chains run. |
+| `on(e: Event)` reactor / event-triggered `create(e: Event) by …` (channel-carried) | one `<Ctx>.Workflows.<Wf>.On<Event>` / `.Start<Event>` module with `handle(event)`, routed by a per-context `<Ctx>.Dispatcher` that pattern-matches each event struct. Correlation persists through a `<Wf>State` `Ecto.Schema` keyed by the correlation field (`create` loads-or-allocates, `on` routes-or-drops + logs `event_unrouted`). An event-triggered-only workflow emits no `run/2` / HTTP route / UI form page. See [`workflow.md`](workflow.md) §Triggers and [`channels.md`](proposals/channels.md). |
 | `abstract aggregate Party` + `extends` (TPC) | base emits no resource; each concrete is a standalone `Ash.Resource`; the context Ash.Domain gains `list_parties!/0` (the union of the concrete `list_<concrete>!` reads). |
 | `abstract aggregate Party` + `inheritanceUsing(sharedTable)` (TPH) | Ash has no native STI, so the concretes share one table via multiple resources: each concrete `Ash.Resource` declares `table "<base_plural>"`, a `:kind` string attribute defaulted to its own name, and `base_filter expr(kind == "<Concrete>")` (inside the `resource do` block) so it reads/writes only its rows. The base owns no resource; the Ash.Domain gains the same polymorphic `list_parties!/0` union reader. See [`phoenix-tph-emission.md`](./proposals/phoenix-tph-emission.md). |
 | `persistedAs(eventLog)` + `apply(...)` (event sourcing) | **deferred — IR-validate error** (`validateEventSourcedStorage`; `EVENT_SOURCING_BACKENDS` excludes Phoenix). Deferred for effort + no-local-Elixir validation, not framework fit: the ecosystem offers [AshCommanded](https://hexdocs.pm/ash_commanded) (full CQRS/ES — closest to Loom's emit/apply model) and [AshEvents](https://hexdocs.pm/ash_events) (first-class events, but *hybrid* — keeps a state table, so a partial fit for Loom's *pure* eventLog). Landscape + re-weighted design options in [workflow-and-applier.md](proposals/workflow-and-applier.md). |

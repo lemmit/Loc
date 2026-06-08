@@ -161,6 +161,22 @@ handle (or from `tx` inside `db.transaction(async (tx) => {...})`
 when `transactional`), runs the body, awaits each `repo.save(...)`
 in declaration order, then dispatches workflow-level events.
 
+### Phoenix LiveView (Elixir + Ash)
+
+```
+lib/<app>/<ctx>/
+  workflows/place_order.ex      — code-interface module: run/2 wrapping Ash.transaction
+lib/<app>_web/controllers/
+  workflows_controller.ex       — POST /api/workflows/place_order per command workflow
+```
+
+`run/2` threads `current_user` as its second arg, weaves the body into
+a `with`-chain over the context's Ash code interfaces (`create_<agg>`,
+`get_<agg>`, `<op>_<agg>`), wraps it in `Ash.transaction/2` when
+`transactional`, and broadcasts workflow-level events via
+`Phoenix.PubSub`.  An **event-triggered-only** workflow emits no `run/2`
+or controller — see *Status* below.
+
 ## When to reach for a workflow
 
 Reach for a workflow when:
