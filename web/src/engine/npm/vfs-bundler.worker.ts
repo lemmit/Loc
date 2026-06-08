@@ -193,6 +193,23 @@ const BUILD_COMMON = {
   // comes back in outputFiles, collected below.
   outdir: "/" as const,
   loader: { ".wasm": "binary" as const },
+  // The preview is a *development* build, so define `import.meta.env`
+  // the way `vite dev` would.  Without this the generated app's logger
+  // (api/logger.hbs reads `import.meta.env.DEV`) falls to its production
+  // default of `warn`, hiding the per-request `debug` lines it emits on
+  // every API call — so the playground's "App logs" tab looked empty.
+  // We don't invent logs: the app's own logger now emits its normal
+  // dev-level stream, identical to running `vite dev` locally.  The
+  // generated app reads no other `import.meta.env` key.
+  define: {
+    "import.meta.env": JSON.stringify({
+      DEV: true,
+      PROD: false,
+      MODE: "development",
+      SSR: false,
+      BASE_URL: "/",
+    }),
+  },
 };
 
 // Persistent esbuild contexts, one per build "slot" (hono / react-vendor
