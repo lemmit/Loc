@@ -39,14 +39,20 @@ describe("hono routes — exception-less operation returns (spike)", () => {
     );
   });
 
-  it("captures the operation result and translates an error variant to a 404 ProblemDetails", async () => {
+  it("captures the operation result and translates an error variant to a ProblemDetails (A1 stdlib defaults)", async () => {
     const r = await routes();
     expect(r).toContain("const result = aggregate.reserve();");
     expect(r).toContain('if (result.type === "NotFound") {');
-    // RFC-7807 problem+json with the error payload's fields riding along.
+    // RFC-7807 problem+json with the stdlib-derived status / title / type URI
+    // and the error payload's own fields riding along.
     expect(r).toContain('"content-type": "application/problem+json"');
     expect(r).toMatch(/c\.json\(\{ \.\.\.result,[^}]*status: 404/);
-    expect(r).toContain('detail: "Order.reserve returned NotFound"');
+    expect(r).toContain('type: "/errors/not-found"');
+    expect(r).toContain('title: "Not Found"');
+    // NotFound's stdlib default status is declared as a problem+json response.
+    expect(r).toMatch(
+      /404: \{ description: "Not Found", content: \{ "application\/problem\+json": \{ schema: ProblemDetails \} \} \}/,
+    );
   });
 
   it("returns the success variant as HTTP 200", async () => {

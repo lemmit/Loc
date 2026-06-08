@@ -62,6 +62,7 @@ import type {
   ClassifyContext,
   SingleFieldPattern,
 } from "../../../ir/validate/invariant-classify.js";
+import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -825,6 +826,22 @@ function isErrorVariant(v: TypeIR, ctx: BoundedContextIR): boolean {
   return ctx.payloads.some((p) => p.name === v.name && p.kind === "error");
 }
 
+/** RFC reason phrase for the HTTP statuses an exception-less route can emit —
+ *  used for the OpenAPI response `description`. */
+function httpStatusText(status: number): string {
+  const TEXT: Readonly<Record<number, string>> = {
+    400: "Bad Request",
+    402: "Payment Required",
+    403: "Forbidden",
+    404: "Not Found",
+    409: "Conflict",
+    422: "Unprocessable Entity",
+    500: "Internal Server Error",
+    502: "Bad Gateway",
+  };
+  return TEXT[status] ?? "Error";
+}
+
 /** The exception-less operation route (`operation foo(): X or NotFound`).  Calls
  *  the aggregate method (which now returns its tagged `or`-union), saves, then
  *  translates: an `error`-variant result → an RFC-7807 ProblemDetails (404 in
@@ -838,8 +855,15 @@ function emitReturningOperationRoute(
   const aggSlug = snake(plural(agg.name));
   const opSnake = snake(op.routeSlug ?? op.name);
   const variants = op.returnType?.kind === "union" ? op.returnType.variants : [];
+  const errorVariants = variants.filter((vv) => isErrorVariant(vv, ctx));
   const u = op.returnType ? unionForFind(op.returnType, ctx) : null;
   const unionName = u?.name ?? `${agg.name}Response`;
+  // The ProblemDetails statuses this route can produce: the framework defaults
+  // (400 domain, 422 validation, 404 aggregate-not-found from getById), 403 if
+  // guarded, plus each error variant's stdlib status (exception-less.md A1).
+  const problemStatuses = new Set<number>([400, 422, 404]);
+  if (operationIsGuarded(op)) problemStatuses.add(403);
+  for (const v of errorVariants) problemStatuses.add(defaultErrorStatus(variantTag(v)));
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
@@ -855,25 +879,16 @@ function emitReturningOperationRoute(
   out.push(`    },`);
   out.push(`    responses: {`);
   // 200 declares the whole tagged union; only success variants actually reach
-  // it (error variants are intercepted to 404 below) — the documented shape is
-  // the closed set of outcomes, which a typed client narrows on `type`.
+  // it (error variants are intercepted below) — the documented shape is the
+  // closed set of outcomes, which a typed client narrows on `type`.
   out.push(
     `      200: { description: "OK", content: { "application/json": { schema: ${unionName} } } },`,
   );
-  out.push(
-    `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-  );
-  out.push(
-    `      422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-  );
-  if (operationIsGuarded(op)) {
+  for (const status of [...problemStatuses].sort((a, b) => a - b)) {
     out.push(
-      `      403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+      `      ${status}: { description: ${JSON.stringify(httpStatusText(status))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
   }
-  out.push(
-    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-  );
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (c) => {`);
@@ -899,13 +914,15 @@ function emitReturningOperationRoute(
   out.push(`    const result = aggregate.${lowerFirst(op.name)}(${callArgs});`);
   out.push(`    await repo.save(aggregate);`);
   // Translate each error variant to a ProblemDetails before the success path.
-  // The error payload's own fields ride along as RFC-7807 §3.2 extension
-  // members (e.g. NotFound's `resource`), with the spec fields overridden.
-  for (const v of variants.filter((vv) => isErrorVariant(vv, ctx))) {
+  // Status / title / type come from the stdlib defaults (exception-less.md A1);
+  // the error payload's own fields ride along as RFC-7807 §3.2 extension members
+  // (e.g. NotFound's `resource`), with the spec fields overridden.
+  for (const v of errorVariants) {
     const tag = variantTag(v);
+    const status = defaultErrorStatus(tag);
     out.push(`    if (result.type === ${JSON.stringify(tag)}) {`);
     out.push(
-      `      return c.json({ ...result, type: "about:blank", title: ${JSON.stringify(tag)}, status: 404, detail: ${JSON.stringify(`${agg.name}.${op.name} returned ${tag}`)}, instance: c.req.path }, 404, { "content-type": "application/problem+json" });`,
+      `      return c.json({ ...result, type: ${JSON.stringify(errorTypeUri(tag))}, title: ${JSON.stringify(errorTitle(tag))}, status: ${status}, detail: ${JSON.stringify(errorTitle(tag))}, instance: c.req.path }, ${status}, { "content-type": "application/problem+json" });`,
     );
     out.push(`    }`);
   }
