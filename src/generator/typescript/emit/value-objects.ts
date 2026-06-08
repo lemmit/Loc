@@ -49,7 +49,10 @@ function renderValueObject(v: ValueObjectIR): string[] {
   );
   const fns = v.functions.map((fn) => {
     const params = fn.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
-    return `  private ${lowerFirst(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
+    // Value-object functions are part of the VO's public surface — they're
+    // invoked across aggregate boundaries (e.g. `probability.asFraction()`
+    // from an aggregate's derived field), so they cannot be `private`.
+    return `  ${lowerFirst(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
   });
   return [
     `export class ${v.name} {`,

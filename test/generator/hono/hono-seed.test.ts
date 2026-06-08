@@ -74,6 +74,39 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
     expect(seed).toContain('import { Money, Tier } from "../domain/value-objects"');
   });
 
+  it("coerces a bare object literal in a value-object field into a VO ctor, gap-filling skipped optionals", async () => {
+    // The seed grammar allows the unprefixed object form (`addr: { line1: … }`)
+    // for a value-object-typed create field.  It must lower to a VO ctor, not
+    // a plain object (which isn't assignable to the VO class), and an omitted
+    // optional field (`line2`) fills with `null` so the positional ctor args
+    // stay aligned.
+    const src = `system AddrSeed {
+      subdomain S { context C {
+        valueobject Address {
+          line1: string
+          line2: string?
+          city: string
+        }
+        aggregate Place with crudish {
+          name: string
+          addr: Address
+        }
+        repository Places for Place { }
+        seed default {
+          Place { name: "HQ", addr: { line1: "1 Main St", city: "Springfield" } }
+        }
+      }}
+      api A from S
+      deployable api { platform: hono contexts: [C] serves: A port: 3000 }
+    }`;
+    const { model, errors } = await parseString(src);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const seed = find(generateSystems(model).files, /\/db\/seed\.ts$/);
+    // line2 (optional, omitted) fills with null, in declared field order.
+    expect(seed).toContain('addr: new Address("1 Main St", null, "Springfield")');
+    expect(seed).not.toMatch(/addr:\s*\(?\{ line1:/);
+  });
+
   it("is ship-once per dataset via the __loom_seed marker (D-SEED-IDEMPOTENCY)", async () => {
     const files = await build();
     const seed = find(files, /\/db\/seed\.ts$/);

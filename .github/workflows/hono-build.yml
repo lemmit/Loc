@@ -24,9 +24,11 @@ on:
     branches: [main]
     paths:
       - 'src/generator/typescript/**'
+      - 'src/ir/**'
       - 'src/platform/hono.ts'
       - 'src/platform/hono/**'
       - 'examples/**'
+      - 'web/src/examples/erp/**'
       - 'package.json'
       - '.github/workflows/hono-build.yml'
       - 'test/e2e/generated-build.test.ts'
@@ -34,9 +36,11 @@ on:
   pull_request:
     paths:
       - 'src/generator/typescript/**'
+      - 'src/ir/**'
       - 'src/platform/hono.ts'
       - 'src/platform/hono/**'
       - 'examples/**'
+      - 'web/src/examples/erp/**'
       - 'package.json'
       - '.github/workflows/hono-build.yml'
       - 'test/e2e/generated-build.test.ts'

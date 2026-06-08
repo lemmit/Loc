@@ -234,12 +234,16 @@ export function buildRoutesFile(
         requiredFields.map((f) => {
           // An explicit `= default` field is optional input: omitted → the
           // default is applied at the wire (`.default(...)`), so it drops
-          // out of the request's required-set (mirrors the bool rule).
+          // out of the request's required-set (mirrors the bool rule).  The
+          // literal is passed to `emitWireSchema` separately so the
+          // `.default(...)` lands AFTER any `.min`/`.max` chain (a
+          // `ZodDefault` has no `.min`).
           const d = f.default;
-          const base = d
-            ? `${zodFor(f.type)}.default(${wireDefaultLiteral(f.type, d)})`
-            : zodFor(f.type);
-          return { name: f.name, base };
+          return {
+            name: f.name,
+            base: zodFor(f.type),
+            default: d ? wireDefaultLiteral(f.type, d) : undefined,
+          };
         }),
         agg.invariants,
         // Only fields present in the create input can be validated at the
@@ -1259,7 +1263,12 @@ function* aggSchemaSeeds(agg: AggregateIR, repo: RepositoryIR | undefined): Gene
 export function emitWireSchema(
   declPrefix: string, // e.g. `const Create<Agg>Request` or `const <VO>Schema`
   openapiName: string, // component name passed to `.openapi(...)`
-  fields: { name: string; base: string }[],
+  // `default` (when set) is the zod `.default(...)` literal; it is appended
+  // AFTER the single-field invariant chain, because `.default(x)` returns a
+  // `ZodDefault` that no longer exposes `.min`/`.max` — emitting
+  // `.default(3).min(1)` is a type error that poisons the whole object
+  // schema's inferred type (every `body.<field>` then becomes `unknown`).
+  fields: { name: string; base: string; default?: string }[],
   invariants: InvariantIR[],
   available: ReadonlySet<string>,
 ): string[] {
@@ -1288,6 +1297,9 @@ export function emitWireSchema(
     if (patterns) {
       for (const p of patterns) schema = chainSingleFieldNative(schema, p);
     }
+    // `.default(...)` last: it wraps the (now constrained) schema in a
+    // ZodDefault, so any `.min`/`.max` must already be applied above.
+    if (f.default !== undefined) schema = `${schema}.default(${f.default})`;
     out.push(`  ${f.name}: ${schema},`);
   }
   out.push(`}).openapi("${openapiName}")${refines.join("")};`);

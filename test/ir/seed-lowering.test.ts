@@ -41,8 +41,15 @@ describe("seed — lowering", () => {
       lit: "string",
       value: "DEMO-1",
     });
-    // Value-object object-literal field lowers to a `kind: "object"` expr.
-    expect(first.fields[1].value).toMatchObject({ kind: "object" });
+    // A bare object literal in a value-object-typed create field coerces to a
+    // value-object ctor call (not a plain `kind: "object"` expr, which isn't
+    // assignable to the VO class) — field-ordered, ready for `new Money(…)`.
+    expect(first.fields[1].value).toMatchObject({
+      kind: "call",
+      callKind: "value-object-ctor",
+      name: "Money",
+      argNames: ["amount", "currency"],
+    });
   });
 
   it("defaults the dataset name and records the `raw` path", async () => {

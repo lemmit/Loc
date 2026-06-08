@@ -1,4 +1,4 @@
-import { AstUtils } from "langium";
+import { type AstNode, AstUtils } from "langium";
 import type {
   Aggregate,
   Api,
@@ -12,11 +12,14 @@ import type {
   Criterion,
   Deployable,
   Destroy,
+  EntityPart,
   EnumDecl,
   EventDecl,
+  Expression,
   Layout,
   LoadPath,
   Model,
+  ObjectLit,
   Operation,
   PayloadDecl,
   Property,
@@ -32,6 +35,7 @@ import type {
   TestBlock,
   TestE2E,
   ThemeBlock,
+  TypeRef,
   Ui,
   UserBlock,
   ValueObject,
@@ -58,6 +62,7 @@ import {
   isFunctionDecl,
   isInvariant,
   isLayout,
+  isObjectLit,
   isOperation,
   isPayloadDecl,
   isPermissionsBlock,
@@ -98,6 +103,7 @@ import type {
   EntityPartIR,
   EnumIR,
   EventIR,
+  ExprIR,
   FieldIR,
   IdValueType,
   LayoutIR,
@@ -128,6 +134,7 @@ import type {
   ViewIR,
   WorkflowIR,
 } from "../types/loom-ir.js";
+import { lit } from "../types/loom-ir.js";
 import type { ContextLevelCapabilities } from "./lower-capabilities.js";
 import {
   collectContextLevelCapabilities,
@@ -157,11 +164,13 @@ import {
   cstText,
   type Env,
   findEntityByName,
+  findValueObjectByName,
   inAggregate,
   inValueObject,
   lowerAtom,
   lowerType,
   newEnv,
+  setAmbientDeclIndex,
   withLocal,
 } from "./lower-types.js";
 import { lowerComponent, lowerLayout, lowerUi } from "./lower-ui.js";
@@ -218,6 +227,36 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     }
   }
   setAmbientEnumIndex(ambientEnumIndex);
+  // Project-global name → decl index for every value object / enum / entity
+  // across the import graph (recursing into systems / subdomains / contexts).
+  // Backstops the `findXByName` lookups in lower-types so a macro-emitted
+  // param type (e.g. a `crudish` update field) or a VO literal pointing at a
+  // sibling-file shared-kernel decl resolves instead of collapsing to
+  // `string` / a `free` call.  First declaration wins on a name collision
+  // (the validator owns the ambiguity diagnostic).
+  const ambientVOs = new Map<string, ValueObject>();
+  const ambientEnums = new Map<string, EnumDecl>();
+  const ambientEntities = new Map<string, Aggregate | EntityPart>();
+  const indexMembers = (members: readonly AstNode[]): void => {
+    for (const m of members) {
+      if (isValueObject(m)) {
+        if (!ambientVOs.has(m.name)) ambientVOs.set(m.name, m);
+      } else if (isEnumDecl(m)) {
+        if (!ambientEnums.has(m.name)) ambientEnums.set(m.name, m);
+      } else if (isAggregate(m)) {
+        if (!ambientEntities.has(m.name)) ambientEntities.set(m.name, m);
+      }
+      if ("members" in m && Array.isArray((m as { members?: unknown }).members)) {
+        indexMembers((m as { members: AstNode[] }).members);
+      }
+    }
+  };
+  indexMembers(allMembers);
+  setAmbientDeclIndex({
+    valueObjects: ambientVOs,
+    enums: ambientEnums,
+    entities: ambientEntities,
+  });
   const systemNodes = allMembers.filter(isSystem);
   // Every top-level system-scoped declaration across the import graph —
   // domain (Tier 1: subdomain / context) plus deployment (Tier 2:
@@ -863,17 +902,63 @@ function lowerChannel(c: Channel): ChannelIR {
  *  `now()` all resolve there).  No `this` binding — seed rows construct fresh
  *  instances, they do not operate on an existing aggregate. */
 function lowerSeed(s: Seed, env: Env): SeedIR {
-  const rows: SeedRowIR[] = s.rows.map((row) => ({
-    aggregate: row.aggregate.ref?.name ?? "Unknown",
-    fields: row.value.fields.map((f) => ({
-      name: f.name,
-      value: lowerExpr(f.value, env),
-    })),
-  }));
+  const rows: SeedRowIR[] = s.rows.map((row) => {
+    const agg = row.aggregate.ref;
+    // Per-field declared type, so a bare object literal in a value-object-
+    // typed create field (`contact: { email: … }`) coerces to a VO ctor
+    // instead of an unassignable plain object.
+    const fieldTypes = new Map<string, TypeRef | undefined>();
+    if (agg) for (const m of agg.members) if (isProperty(m)) fieldTypes.set(m.name, m.type);
+    return {
+      aggregate: agg?.name ?? "Unknown",
+      fields: row.value.fields.map((f) => ({
+        name: f.name,
+        value: lowerSeedValue(f.value, fieldTypes.get(f.name), env),
+      })),
+    };
+  });
   return {
     dataset: s.dataset ?? "default",
     path: s.raw ? "raw" : "domain",
     rows,
+  };
+}
+
+/** Lower a seed field value, coercing a bare object literal written in a
+ *  value-object-typed position (`contact: { email: … }`) into a value-object
+ *  ctor call.  The seed grammar allows the unprefixed object form, but the
+ *  backends construct value objects as classes — a plain object literal isn't
+ *  assignable to the VO type (missing its derived getters / methods).  Other
+ *  values lower normally.  Nested value objects coerce recursively. */
+function lowerSeedValue(value: Expression, expected: TypeRef | undefined, env: Env): ExprIR {
+  if (expected && isObjectLit(value)) {
+    const t = lowerType(expected, env);
+    if (t.kind === "valueobject") {
+      const vo = findValueObjectByName(env, t.name);
+      if (vo) return objectLitToVoCtor(value, vo, env);
+    }
+  }
+  return lowerExpr(value, env);
+}
+
+/** Build a `value-object-ctor` call IR from a bare object literal and its
+ *  target value object.  Args are emitted in the VO's declared field order
+ *  (positional backends ignore `argNames`); an omitted entry — a skipped
+ *  optional field like `Address.line2` — fills with `null` so the positional
+ *  argument list stays aligned with the ctor signature. */
+function objectLitToVoCtor(obj: ObjectLit, vo: ValueObject, env: Env): ExprIR {
+  const props = vo.members.filter(isProperty) as Property[];
+  const byName = new Map(obj.fields.map((f) => [f.name, f.value] as const));
+  const args = props.map((p) => {
+    const v = byName.get(p.name);
+    return v ? lowerSeedValue(v, p.type, env) : lit("null", "null");
+  });
+  return {
+    kind: "call",
+    callKind: "value-object-ctor",
+    name: vo.name,
+    args,
+    argNames: props.map((p) => p.name),
   };
 }
 

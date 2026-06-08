@@ -11,10 +11,13 @@ export function renderEvents(ctx: BoundedContextIR): string {
   const voImports = new Set<string>();
   const enumImports = new Set<string>();
   let usesIds = false;
+  let usesDecimal = false;
   const visit = (t: TypeIR): void => {
     if (t.kind === "valueobject") voImports.add(t.name);
     if (t.kind === "enum") enumImports.add(t.name);
     if (t.kind === "id") usesIds = true;
+    // The `money` primitive renders as decimal.js `Decimal` — needs an import.
+    if (t.kind === "primitive" && t.name === "money") usesDecimal = true;
     if (t.kind === "array") visit(t.element);
     if (t.kind === "optional") visit(t.inner);
   };
@@ -26,6 +29,7 @@ export function renderEvents(ctx: BoundedContextIR): string {
   return (
     lines(
       "// Auto-generated.",
+      usesDecimal ? 'import Decimal from "decimal.js";' : null,
       usesIds ? 'import type * as Ids from "./ids";' : null,
       voList.length > 0 ? `import type { ${voList.join(", ")} } from "./value-objects";` : null,
       enumList.length > 0 ? `import type { ${enumList.join(", ")} } from "./value-objects";` : null,
