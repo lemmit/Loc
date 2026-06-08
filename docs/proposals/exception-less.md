@@ -501,6 +501,61 @@ land in the extension array.
 | .NET | Controller returns `ActionResult<T>`; the global `IExceptionHandler` + per-route filter use the same `errorStatuses` table to build `ProblemDetails`. Idiomatic ASP.NET Core pipeline; Loom generates the wiring. |
 | Phoenix | Action returns the value; route handler maps non-success variants via `ProblemDetails.from(variant, errorStatuses)` and `conn |> put_status(pd.status) |> json(pd)`. |
 
+### Implementation status — producer-side translation (as shipped)
+
+A1's stdlib status table + the api `httpStatus` override clause + the
+operation-return → ProblemDetails translation have shipped on **two of
+the three backends**. The find-variant re-shape (A4) has *not* shipped, so
+the producer surface is exercised only by **explicit** union returns today
+(`operation foo(): X or NotFound { return … }`).
+
+| Backend | Operation-return translation | Notes |
+|---|---|---|
+| **Hono / `node`** | ✅ shipped | The domain method returns an inline TS tagged union; the route captures the result and translates (error variant → ProblemDetails with the stdlib-or-overridden status, success → 200). |
+| **.NET / `dotnet`** | ✅ shipped | "Pure Domain + mapping": a pure Domain union (no serialization attrs) the aggregate method returns; the command/handler carry it (`ICommand<Union>`); the controller `switch`-translates — error variant → `Problem(...)`, success → 200 wrapped in the Application `[JsonPolymorphic]` wire DTO. |
+| **Phoenix / `phoenixLiveView`** | ⛔ **deferred** | Gated by `loom.operation-return-unsupported` (`SUPPORTED_RETURN_BACKENDS` excludes it). The architectural blocker + the intended design are below. |
+
+#### Why Phoenix is deferred
+
+On Phoenix, a Loom `operation` lowers to an **Ash `update` action** — its
+body runs inside `change fn changeset, _ctx -> … changeset end` and the
+action's result is the **resource record** (`%Order{}`). That model
+**cannot return a discriminated union**:
+
+- An `update` action's return type is the resource struct, not an arbitrary
+  value — so `return NotFound { resource: code }` has nowhere to go (a
+  `change` function must return a changeset, not a `%{type: "NotFound", …}`
+  map).
+- This is unlike Hono (a domain method that already returns an arbitrary
+  value) and .NET (a command handler that already returns `TResponse`) —
+  both had a natural seam for a union result. Phoenix's update-action /
+  changeset model does not.
+
+#### Intended design (when un-deferred)
+
+Emit a union-returning operation as an **Ash 3.x generic action**
+(`action :<op>, :map do … run fn input, _ctx -> {:ok, tagged_map} end
+end`) rather than an `update` action:
+
+- The `run` function loads the record by id, runs the operation body, and
+  returns `{:ok, %{type: "<tag>", …}}` — the same tagged-wire map the find
+  serializer (`tag_<union>/1`, P4d) and the Hono/.NET producers emit.
+- The controller calls the generic action's code-interface and translates
+  on `result.type`: an error variant → `ProblemDetails.problem_response/4`
+  with the stdlib-or-overridden status; a success variant → `200` JSON.
+- **Scope caveat:** the operation body renderer currently assumes a
+  changeset context (field mutations lower to `Ash.Changeset.*`). A generic
+  action has no changeset, so the first slice should support
+  **return-dominant** bodies (the shape every current fixture uses);
+  *mutation-then-return* needs the body renderer to also emit the
+  generic-action mutation form (`record |> Ash.Changeset.for_update(…) |>
+  Ash.update!()`) and is a follow-up.
+
+Until this lands, a `.ddd` that declares a union-returning operation on a
+Phoenix-served context fails validation with `loom.operation-return-unsupported`
+(message lists the supported backends), so the gap is a hard, discoverable
+error rather than silent mis-emission.
+
 ### Aggregate-invariant throws
 
 These hit the global error middleware on every backend. Generated:
@@ -826,7 +881,7 @@ Layered on top of upstream proposal's Phase 1–5:
 |---|---|---|
 | **A1** | `error` payload sugar keyword (no status clause — domain stays HTTP-blind). `none` unit type + `option` postfix sugar. Stdlib error payloads (`NotFound`, `ParseError`, `ApiError` variants, `ValidationError`) and stdlib `ProblemDetails` payload. Generator-side stdlib status defaults table. Validator enforces no-throw outside aggregate bodies. | Upstream Phase 1+3+4 |
 | **A2** | `?` propagation operator with error-marker dispatch. Scoping rules. Per-backend lowering. | A1 |
-| **A3** | API-surface `status <Error> <Code>` clause + per-api `errorStatuses` enrichment. Per-backend route emitter auto-generates ProblemDetails translation (status from api mapping or stdlib default; body auto-derived). Aggregate-invariant throws hit a global 500-ProblemDetails fallback per backend. | A1 |
+| **A3** | API-surface `httpStatus <Error> <Code>` clause + per-api `errorStatuses` enrichment. Per-backend route emitter auto-generates ProblemDetails translation (status from api mapping or stdlib default; body auto-derived). Aggregate-invariant throws hit a global 500-ProblemDetails fallback per backend. **Status: shipped on Hono + .NET; Phoenix deferred** (the Ash update-action model can't return a union — see "Implementation status" above). The clause spelling is `httpStatus` (not `status`) to avoid colliding with the very common `status:` field name. | A1 |
 | **A4** | Re-shape find variants. `: X` → `X or NotFound`, `: X?` → `X option`. Migrate every example .ddd + every backend's route/repository emitter. **Single coordinated PR.** | A1, A3 |
 | **A5** | Parse intrinsics return `T or ParseError`. External API calls return `T or ApiError`. Macro-wrapped throwing helpers retired. | A1, A2 |
 | **A6** | `validate for X` (upstream Phase 5) returns `X or ValidationError[]`. Multi-error accumulation via `combine`. | A1, A2, upstream Phase 5 |

@@ -1155,3 +1155,36 @@ Also: `on`/`apply` event params are a `LooseName` + cross-ref, **not** a
 need an explicit `bindings.set` or they stay `unknown` (same suppression)
 even after the type kind exists.
 
+
+## Exception-less producer returns — Phoenix is the odd backend out
+
+`operation foo(): X or NotFound { return … }` (exception-less.md, A3)
+ships **real execution on Hono + .NET but is deferred on Phoenix**, and
+the reason is architectural, not effort: each backend's operation seam
+either does or doesn't have a place to put a union result.
+
+- **Hono** — the operation lowers to a plain domain *method*; it already
+  returns an arbitrary value, so it returns an inline tagged union and the
+  route translates. Trivial seam.
+- **.NET** — the operation lowers to a CQRS *command handler* that already
+  returns `TResponse`; switch it from `Unit` to the union. The only friction
+  is layering (Domain can't name the Application wire DTO), solved with a
+  *pure Domain union* + a controller that maps the success variant to the
+  `[JsonPolymorphic]` Application DTO. See `cqrs/dtos.ts:domainUnionFiles` +
+  `cqrs/controller.ts:buildReturnUnionSpec`.
+- **Phoenix** — the operation lowers to an Ash **`update` action**: its body
+  runs inside `change fn changeset, _ -> … changeset end` and the action's
+  result is the **resource struct**. There is **no seam for a union return** —
+  a `change` function must return a changeset, not a `%{type: "…"}` map. Real
+  execution requires re-emitting union-returning ops as Ash **generic actions**
+  (`action :op, :map do run fn … -> {:ok, tagged_map} end end`), which also
+  means the operation-body renderer (today changeset-shaped) needs a
+  generic-action mutation form. Scoped out for now; the gate
+  (`loom.operation-return-unsupported`, `SUPPORTED_RETURN_BACKENDS`) keeps it a
+  hard error. Full design in exception-less.md → "Implementation status".
+
+Lesson: before promising "translate this to every backend," check whether
+each backend's operation lowering target *returns a value at all*. A model
+that returns a fixed framework type (Ash's resource record, EF's `Unit`) has
+no free seam for an arbitrary result — and Ash's is the one with no escape
+hatch short of changing the action kind.
