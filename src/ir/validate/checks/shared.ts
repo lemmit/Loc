@@ -233,6 +233,10 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       return `'new ${e.partName}' construction`;
     case "object":
       return "object literal";
+    case "propagate":
+      // `?` propagation is an operation/workflow body construct (it can
+      // short-circuit the enclosing function), never a queryable `where`.
+      return "propagation '?'";
     case "ternary":
       return "ternary";
     case "convert":
@@ -291,6 +295,9 @@ export function walkExpr(e: ExprIR | undefined, visit: (e: ExprIR) => void): voi
       break;
     case "lambda":
       walkExpr(e.body, visit);
+      break;
+    case "propagate":
+      walkExpr(e.operand, visit);
       break;
   }
 }

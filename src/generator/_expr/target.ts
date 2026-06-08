@@ -117,6 +117,11 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
       return t.binary(r(e.left), r(e.right), e);
     case "ternary":
       return t.ternary(r(e.cond), r(e.then), r(e.otherwise));
+    case "propagate":
+      // `?` propagation is a statement-level early-return; its render lands in
+      // a follow-up.  Surface-first, it's blocked before codegen by
+      // `loom.propagate-unsupported` (exception-less.md A2), so this is dead.
+      throw new Error("renderExprWith: '?' propagation is not emitted yet (exception-less.md A2).");
     case "convert":
       return t.convert(r(e.value), e);
     case "match":
