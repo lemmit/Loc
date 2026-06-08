@@ -162,3 +162,54 @@ describe("uncarried event consumer (channel-routed dispatch)", () => {
     expect(codes).not.toContain("loom.reactor-event-uncarried");
   });
 });
+
+describe("ambiguous channel routing (channel-routed dispatch)", () => {
+  // Two channels carrying the same consumed event: the enrich records the first
+  // by declaration order, so the binding is ambiguous (no `via` to disambiguate).
+  const twoChannels = (reactor: string) => `
+    system S { subdomain M { context C {
+      aggregate Order { total: int }
+      event PaymentReceived { order: Order id, amount: int }
+      channel Pay   { carries: PaymentReceived  delivery: broadcast  retention: ephemeral }
+      channel Audit { carries: PaymentReceived  delivery: broadcast  retention: log }
+      workflow W {
+        orderId: Order id
+        ${reactor}
+      }
+    }}}`;
+
+  async function codes(srcText: string): Promise<string[]> {
+    const { model } = await parseString(srcText, { validate: false });
+    return validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code ?? "");
+  }
+
+  it("warns when a reactor's event is carried by more than one channel", async () => {
+    const got = await codes(
+      twoChannels(`on(paid: PaymentReceived) by paid.order { let x = paid.amount }`),
+    );
+    expect(got).toContain("loom.reactor-channel-ambiguous");
+    // It is a routing ambiguity, not an uncarried event.
+    expect(got).not.toContain("loom.reactor-event-uncarried");
+  });
+
+  it("warns for an event-triggered create carried by more than one channel", async () => {
+    const got = await codes(
+      twoChannels(`create(paid: PaymentReceived) by paid.order { let x = paid.amount }`),
+    );
+    expect(got).toContain("loom.reactor-channel-ambiguous");
+  });
+
+  it("is silent when exactly one channel carries the subscribed event", async () => {
+    const oneChannel = `
+      system S { subdomain M { context C {
+        aggregate Order { total: int }
+        event PaymentReceived { order: Order id, amount: int }
+        channel Pay { carries: PaymentReceived  delivery: broadcast  retention: ephemeral }
+        workflow W {
+          orderId: Order id
+          on(paid: PaymentReceived) by paid.order { let x = paid.amount }
+        }
+      }}}`;
+    expect(await codes(oneChannel)).not.toContain("loom.reactor-channel-ambiguous");
+  });
+});

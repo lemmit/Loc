@@ -270,10 +270,13 @@ No extra DSL — replica count is a deployment fact, the channel knob is the
 only switch.
 
 **Validation:** `loom.reactor-event-uncarried` (the reacted event is carried
-by no channel the hosting deployable binds), `loom.reactor-channel-mismatch`
-(`via X` where `X` doesn't carry the event), `loom.reactor-channel-ambiguous`
-(no `via` but the event is carried by more than one bound channel — name one),
-plus the inherited `cross-bc-internal-event`.
+by no channel the hosting deployable binds) **[shipped]** and
+`loom.reactor-channel-ambiguous` (the event is carried by more than one channel
+in its context — in-process dispatch records the first by declaration order)
+**[shipped, warning]**.  Still deferred pending the `via <Channel>` surface:
+`loom.reactor-channel-mismatch` (`via X` where `X` doesn't carry the event) and
+upgrading the ambiguity rule to an error once `via` gives it a remedy.  Plus the
+inherited `cross-bc-internal-event`.
 
 ## Surface — transport binding (`channelSource`)
 
