@@ -15,6 +15,7 @@ import {
   type WirePrimitive,
   wireTypeInfo,
 } from "../../ir/types/wire-types.js";
+import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import { upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -421,25 +422,30 @@ function containmentPartName(t: TypeIR): string | undefined {
   return inner.kind === "entity" ? inner.name : undefined;
 }
 
-/** Set of value objects reachable from an aggregate's surface. */
+/** Value objects reachable from an aggregate's surface — TRANSITIVELY
+ *  through value objects' own fields.  The DTO emitters render a
+ *  `<Vo>Response` / `<Vo>Request` record per returned VO whose params
+ *  reference each field's wire type, so a VO nested inside another VO
+ *  (e.g. `A { b: B }` where the aggregate uses `A` but not `B` directly)
+ *  must be included — otherwise `AResponse` references an unemitted
+ *  `BResponse` and the project fails to compile.  (Enums need no entry
+ *  here: the .NET backend emits every enum of the context as a first-class
+ *  type, mapped directly.) */
 export function valueObjectsUsedBy(
   agg: AggregateIR,
   ctx: EnrichedBoundedContextIR,
 ): ValueObjectIR[] {
-  const used = new Set<string>();
-  const visit = (t: TypeIR) => {
-    if (t.kind === "valueobject") used.add(t.name);
-    if (t.kind === "array") visit(t.element);
-    if (t.kind === "optional") visit(t.inner);
+  const seeds = function* (): Generator<TypeIR> {
+    for (const f of agg.fields) yield f.type;
+    for (const d of agg.derived) yield d.type;
+    for (const op of agg.operations) for (const p of op.params) yield p.type;
+    for (const part of agg.parts) {
+      for (const f of part.fields) yield f.type;
+      for (const d of part.derived) yield d.type;
+    }
   };
-  for (const f of agg.fields) visit(f.type);
-  for (const d of agg.derived) visit(d.type);
-  for (const op of agg.operations) for (const p of op.params) visit(p.type);
-  for (const part of agg.parts) {
-    for (const f of part.fields) visit(f.type);
-    for (const d of part.derived) visit(d.type);
-  }
-  return ctx.valueObjects.filter((v) => used.has(v.name));
+  const { valueObjects } = collectReachableTypes(seeds(), ctx.valueObjects);
+  return ctx.valueObjects.filter((v) => valueObjects.has(v.name));
 }
 
 export function csIdValueClrType(idValueType: IdValueType): string {
