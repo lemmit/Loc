@@ -1,3 +1,4 @@
+import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
@@ -5,6 +6,7 @@ import {
   operationUsesCurrentUser,
   type TestIR,
   type TestStmtIR,
+  type TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr } from "../render-expr.js";
@@ -95,7 +97,65 @@ function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
       return `${recv}.${e.member}(${args.join(", ")})`;
     }
   }
+  // `<Agg>.create({ … })` — coerce each create-input field of the literal
+  // object to its declared domain type, the same way the route handler does
+  // when mapping a request body: a bare string in an `X id` position brands
+  // to `Ids.XId(…)`, a bare object in a value-object position constructs
+  // `new VO(…)`, a string in a datetime position to `new Date(…)`.  Without
+  // this the user-written test literal (raw guid string, untyped object)
+  // doesn't type-check against the create factory's branded input.  The
+  // static receiver carries no entity instance type, so it's matched by the
+  // bare aggregate-name ref rather than `receiverType`.
+  if (
+    e.kind === "method-call" &&
+    e.member === "create" &&
+    e.receiver.kind === "ref" &&
+    e.args.length === 1 &&
+    e.args[0]!.kind === "object"
+  ) {
+    const agg = ctx.aggregates.find((a) => a.name === (e.receiver as { name: string }).name);
+    if (agg) {
+      return `${agg.name}.create(${renderCreateInput(e.args[0] as Extract<ExprIR, { kind: "object" }>, agg, ctx)})`;
+    }
+  }
   return renderTsExpr(e);
+}
+
+/** Render a `create({ … })` input object with each field coerced to the
+ *  aggregate's declared create-input type (see `renderTestExpr`). */
+function renderCreateInput(
+  obj: Extract<ExprIR, { kind: "object" }>,
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+): string {
+  const types = new Map(forCreateInput(agg.fields).map((f) => [f.name, f.type] as const));
+  const parts = obj.fields.map((f) => `${f.name}: ${coerceCreateValue(f.value, types.get(f.name), ctx)}`);
+  return parts.length === 0 ? "{}" : `{ ${parts.join(", ")} }`;
+}
+
+/** Coerce one create-input value to its declared type for a domain test:
+ *  `X id` string → `Ids.XId(…)`, value-object object literal → `new VO(…)`
+ *  (declared field order, omitted optionals filled with `null`), datetime
+ *  literal → `new Date(…)`.  Everything else renders unchanged. */
+function coerceCreateValue(value: ExprIR, type: TypeIR | undefined, ctx: BoundedContextIR): string {
+  if (type?.kind === "id") {
+    return `Ids.${type.targetName}Id(${renderTestExpr(value, ctx)})`;
+  }
+  if (type?.kind === "valueobject" && value.kind === "object") {
+    const vo = ctx.valueObjects.find((v) => v.name === type.name);
+    if (vo) {
+      const byName = new Map(value.fields.map((f) => [f.name, f.value] as const));
+      const args = vo.fields.map((vf) => {
+        const v = byName.get(vf.name);
+        return v ? coerceCreateValue(v, vf.type, ctx) : "null";
+      });
+      return `new ${vo.name}(${args.join(", ")})`;
+    }
+  }
+  if (type?.kind === "primitive" && type.name === "datetime" && value.kind === "literal") {
+    return `new Date(${renderTestExpr(value, ctx)})`;
+  }
+  return renderTestExpr(value, ctx);
 }
 
 /** Detect `expect(x).<matcher>(y)` / `expect(x).not.<matcher>(y)` — an

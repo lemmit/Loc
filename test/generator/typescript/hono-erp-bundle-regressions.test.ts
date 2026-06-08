@@ -82,6 +82,48 @@ describe("Hono ERP-bundle generator regressions", () => {
     expect(events, "Decimal is imported").toMatch(/import Decimal from "decimal\.js"/);
   });
 
+  it("a domain test's `create({…})` coerces ids / value objects / datetimes to their domain types", async () => {
+    const files = await gen(`
+      context Sales {
+        valueobject Address {
+          line1: string
+          line2: string?
+          city: string
+        }
+        aggregate Order with crudish {
+          reference: string
+          buyerId: Order id
+          shipTo: Address
+          placedAt: datetime
+          test "creates" {
+            let o = Order.create({
+              reference: "R1",
+              buyerId: "00000000-0000-0000-0000-000000000001",
+              shipTo: { line1: "1 Main St", city: "Town" },
+              placedAt: "2020-01-01T00:00:00Z"
+            })
+            expect(o.reference).toBe("R1")
+          }
+        }
+        repository Orders for Order { }
+      }
+    `);
+    const test = files.get("domain/order.test.ts") ?? "";
+    const create = test.match(/Order\.create\([\s\S]*?\}\);/)?.[0] ?? "";
+    expect(create, "create call located").not.toEqual("");
+    // `X id` string → branded ctor.
+    expect(create, "id brands").toContain('buyerId: Ids.OrderId("00000000-0000-0000-0000-000000000001")');
+    // bare object → VO ctor, omitted optional line2 filled with null.
+    expect(create, "value object constructs, gap-filled").toContain(
+      'shipTo: new Address("1 Main St", null, "Town")',
+    );
+    // datetime string → Date.
+    expect(create, "datetime constructs").toContain('placedAt: new Date("2020-01-01T00:00:00Z")');
+    // The raw untyped forms must be gone.
+    expect(create, "no raw id string").not.toMatch(/buyerId:\s*"0000/);
+    expect(create, "no bare shipTo object").not.toMatch(/shipTo:\s*\(?\{ line1:/);
+  });
+
   it("a TPH concrete subtype's repository delete targets the shared base table", async () => {
     const files = await gen(`
       context Crm {
