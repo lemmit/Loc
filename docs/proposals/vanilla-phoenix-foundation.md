@@ -283,6 +283,95 @@ envelope or relationship-loading parity issue. The earlier
 was sized before either the reuse surface above or current velocity were
 factored in; treat it as the worst-case ceiling, not the planning median.
 
+## Test plan (consolidated)
+
+Every phase carries its own test surface. Listed together here so the
+implementing agent can see the full expected coverage in one place; the
+proposal's strict-parity gate (per §5 of
+[`elixir-ecto-and-api-only-backends.md`](./elixir-ecto-and-api-only-backends.md))
+is the non-negotiable cross-cutting one.
+
+### Unit / fast vitest suite (every PR)
+
+| Phase | Test addition | Location |
+|---|---|---|
+| P0 | Diagnostic shape (Phoenix-specific Ash-foundation framing; links to proposal; cites all three escapes) | `test/ir/eventsourced-storage-support.test.ts` — extend existing matrix |
+| P1 | Parsing test for `foundation: vanilla` on `platform: phoenix`; positive validator acceptance; negative for an unsupported foundation value | `test/language/platform-rules.test.ts` (or a new sibling) |
+| P1 | `DeployableIR` lowering snapshot — `foundation` field carries `"vanilla"` through to enriched IR | `test/ir/lower-platform.test.ts` |
+| P2 | Per-emitter golden tests: `schema-emit` / `changeset-emit` / `policy-emit` / `context-emit` / `repository-emit` / `vanilla/api-emit` / `vanilla/problem-details-emit` each emit byte-identical output for the canonical inputs | new `test/generator/phoenix-live-view/vanilla/*-emit.test.ts` (one per emitter, mirrors the existing Ash pattern) |
+| P3 | LiveView form binding — `to_form(changeset)` swap renders the same HEEx as the Ash path for an identical aggregate (changeset-shape-agnostic walker assertion) | `test/generator/phoenix-live-view/vanilla/liveview-emit.test.ts` |
+| P4 | `<Agg>.Events` schema shape, `<Agg>.Fold.from_events/2` + per-event `apply_event/2` clauses, `<Agg>.Repository.find_by_id/1` reads stream → folds, `save/2` appends with gap-free versions | `test/generator/phoenix-live-view/vanilla/event-store.test.ts` (mirrors `test/generator/typescript/emit/event-store.test.ts`) |
+| P4 | Validator un-gate: `validateEventSourcedStorage` accepts `phoenix` deployable iff `foundation: vanilla`; still rejects under `foundation: ash` | extend `test/ir/eventsourced-storage-support.test.ts` matrix |
+
+### Strict cross-backend wire-spec parity (`LOOM_E2E_STRICT_PARITY=1`, CI per-PR)
+
+The 9-dimension contract (per `docs/conformance.md` and §5 of
+`elixir-ecto-and-api-only-backends.md`) is the unforgiving gate. Vanilla
+must match Ash byte-for-byte on:
+
+| Dimension | What it asserts |
+|---|---|
+| Operation set | Same `operationId`s across vanilla and ash for the same `.ddd` |
+| Response cardinality | Same `200` / `4xx` / `5xx` per route |
+| Schema set | `<Agg>Response`, `<Agg>CreatePayload`, etc., emit identically named |
+| Per-schema fields | `wireShape` is the source of truth; both render to the same JSON keys + types |
+| Required flags | Field optionality matches |
+| Path-param types | Same id-shape on every parameterised route |
+| Request/response body refs | `$ref` chains identical |
+| OperationIds | Same camelCase ids end-to-end |
+| ProblemDetails envelope | `type` / `title` / `status` / `detail` / `instance` byte-identical; `errors[]` extension on 422 identical |
+
+Test entry: extend `conformance-parity.yml`'s matrix to include
+`{ash, vanilla} × every example .ddd × every relevant design pack`.
+
+### Generated-project build gate (CI per-PR — slow opt-in `LOOM_PHOENIX_VANILLA_BUILD=1`)
+
+A new `phoenix-vanilla-build.yml` workflow mirrors `phoenix-build.yml`:
+
+| Step | What it runs |
+|---|---|
+| Generate | `node bin/cli.js generate system examples/<ddd> -o tmp/<ddd>-vanilla` for each example with a `foundation: vanilla` Phoenix deployable |
+| Deps | `mix deps.get` inside the generated Phoenix project |
+| Compile | `mix compile --warnings-as-errors` (zero warnings tolerated, matching the Ash gate) |
+| Migrations | `mix ecto.create && mix ecto.migrate` against a Postgres sidecar |
+| Smoke | One end-to-end command per aggregate via the generated controllers |
+
+Sharded the same way `LOOM_PHOENIX_BUILD` is today; runs on PRs that
+touch `src/generator/phoenix-live-view/**`.
+
+### Observability e2e (CI per-PR — `LOOM_OBS_E2E_PHOENIX_VANILLA=1`)
+
+Mirror `test:obs-phoenix`: boot the generated vanilla Phoenix backend,
+exercise a representative command flow, assert the catalog envelope on
+stdout matches the cross-backend shape (same event types, same
+correlation/causation ids, same actor attribution). The telemetry
+emitter is foundation-agnostic; this test pins that the emission *sites*
+match between vanilla and Ash for the same aggregate.
+
+### Examples (P5)
+
+At least one `.ddd` under `examples/` with a `foundation: vanilla`
+Phoenix deployable, exercising:
+
+- A state-based aggregate with `operation` + `requires` + `precondition`
+  (proves the `with`-block dispatch + plain policy guard pattern)
+- An event-sourced aggregate with `create(event:)` + `apply` (proves the
+  fold + repository pattern, validates the `validateEventSourcedStorage`
+  un-gate)
+- A LiveView page rendering both via the stock `to_form(changeset)`
+  binding (proves the HEEx walker reuse)
+
+This example is also the input for the strict-parity matrix entry: it
+must compile, build, and emit byte-identical wire spec to its Ash
+sibling.
+
+### Test debt explicitly **not** taken on by this proposal
+
+- Property-based parity (vs. example-based). Out of scope.
+- Mutation testing of the vanilla emitters. Out of scope.
+- End-to-end LiveView interaction tests (Playwright) under vanilla. The
+  walker is reused; the e2e harness against vanilla can land later.
+
 ## Open questions
 
 1. **Default flip timing.** D-VANILLA-DEFAULT recommends keeping `ash`
