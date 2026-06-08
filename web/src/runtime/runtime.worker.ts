@@ -2,7 +2,8 @@
 import { synthDDL } from "./ddl";
 import { pgliteAssetUrl } from "../bundle/plugin.js";
 import { fnv1a32 } from "../util/hash.js";
-import { asStructuredPayload, formatLogArg, LOG_LEVELS, type LogLine } from "../util/log-line.js";
+import type { LogLine } from "../util/log-line.js";
+import { installConsoleTee, setLogSink } from "./console-tee.js";
 import type {
   BootResult,
   DispatchResult,
@@ -15,43 +16,11 @@ import type {
 
 declare const self: DedicatedWorkerGlobalScope;
 
-// Tee `console.*` into `sink` (while still writing through to the real
-// console for DevTools) for the duration of one RPC.  This is how the
-// generated Hono handlers' logs — which run inside this worker via
-// `app.fetch` — reach the playground's "Backend" log stream.  Returns a
-// restore fn the caller invokes in a `finally`.
-//
-// Structured pino lines (emitted by every generated Hono backend; see
-// docs/proposals/observability.md) flow in as a single object argument:
-// `console.info({ level, event, ts, request_id, … })`.  We detect that
-// shape on the way through and:
-//   - attach the parsed payload as `structured` so the Output panel can
-//     render event / request_id / fields without re-parsing,
-//   - override the LogLine `level` from `payload.level`.  pino in
-//     browser maps `logger.trace(...)` to `console.debug(...)`, so the
-//     console method's name UNDER-represents the semantic level —
-//     reading it off the payload restores `trace` as a first-class
-//     filter target in the UI.
-function captureConsole(sink: LogLine[]): () => void {
-  const original: Partial<Record<LogLine["level"], (...a: unknown[]) => void>> = {};
-  for (const level of LOG_LEVELS) {
-    original[level] = console[level] as (...a: unknown[]) => void;
-    console[level] = (...args: unknown[]): void => {
-      const structured = args.length === 1 ? asStructuredPayload(args[0]) : undefined;
-      sink.push({
-        level: structured?.level ?? level,
-        text: args.map(formatLogArg).join(" "),
-        ...(structured ? { structured } : {}),
-      });
-      original[level]!(...args);
-    };
-  }
-  return () => {
-    for (const level of LOG_LEVELS) {
-      console[level] = original[level]!;
-    }
-  };
-}
+// Install the permanent console tee ONCE, before any generated bundle is
+// imported, so pino (which binds `console.*` at logger creation during
+// boot) routes through it for the lifetime of the worker.  See
+// console-tee.ts for why a per-RPC patch lost every structured line.
+installConsoleTee();
 
 // PGlite's normal boot path computes WASM/data URLs relative to its
 // own `import.meta.url` and fetches them at runtime.  When the
@@ -524,7 +493,9 @@ self.onmessage = async (ev: MessageEvent<RuntimeRpcRequest>) => {
   const req = ev.data;
   const response: RuntimeRpcResponse = { id: req.id };
   const logs: LogLine[] = [];
-  const restore = captureConsole(logs);
+  // Route this RPC's console output (incl. the bundle's pino lines) into
+  // `logs` for the duration of the call.
+  setLogSink(logs);
   try {
     switch (req.method) {
       case "boot":
@@ -562,7 +533,7 @@ self.onmessage = async (ev: MessageEvent<RuntimeRpcRequest>) => {
       message: errText(err),
     };
   } finally {
-    restore();
+    setLogSink(null);
   }
   if (logs.length > 0) response.logs = logs;
   self.postMessage(response);
