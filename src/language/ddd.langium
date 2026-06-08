@@ -1540,7 +1540,10 @@ MatchArm:
     cond=Expression '=>' value=Expression;
 
 TernaryExpr infers Expression:
-    OrExpr ({infer TernaryExpr.cond=current} '?' thenExpr=Expression ':' elseExpr=Expression)?;
+    OrExpr (
+        {infer TernaryExpr.cond=current} '?' thenExpr=Expression ':' elseExpr=Expression
+      | {infer PropagateExpr.operand=current} '?'
+    )?;
 
 OrExpr infers Expression:
     AndExpr ({infer BinaryChain.head=current} (ops+='||' rest+=AndExpr)+)?;

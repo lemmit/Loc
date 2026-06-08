@@ -318,6 +318,10 @@ export function renderExpr(expr: ExprIR, ctx: WalkContext): string {
       return renderBinary(expr, ctx);
     case "ternary":
       return `if ${renderExpr(expr.cond, ctx)}, do: ${renderExpr(expr.then, ctx)}, else: ${renderExpr(expr.otherwise, ctx)}`;
+    case "propagate":
+      // `?` propagation is an operation-body construct, not a HEEx expression;
+      // defensive (exception-less.md A2).
+      throw new Error("heex renderExpr: unexpected '?' propagation.");
     case "convert": {
       // Phoenix HEEx conversion — mirror the renderExpr emit in
       // `phoenix-live-view/render-expr.ts`.  HEEx pages embed Elixir

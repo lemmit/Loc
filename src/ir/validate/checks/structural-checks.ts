@@ -6,6 +6,7 @@
 
 import { allPlatforms } from "../../../platform/registry.js";
 import { isStdlibError } from "../../../util/error-defaults.js";
+import { variantTag } from "../../stdlib/unions.js";
 import type {
   BoundedContextIR,
   EnrichedLoomModel,
@@ -438,6 +439,71 @@ export function validateUnmappedErrorStatuses(
             `explicit status.`,
           source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
         });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// `?` propagation operator (exception-less.md A2).
+//
+// Surface-first: `expr?` parses, lowers to a `propagate` ExprIR, and
+// type-checks (the unwrapped success type), but no backend renders the
+// statement-level early-return yet — so it's gated before codegen
+// (`loom.propagate-unsupported`).  The semantic compatibility rule
+// (`loom.propagate-incompatible-error`) is enforced regardless, so it's correct
+// once emission lands: every error variant a `?` can short-circuit must be a
+// variant of the enclosing operation's return `or`-union.
+// ---------------------------------------------------------------------------
+
+/** The error-variant discriminator tags of a union return type — `none` (an
+ *  `option`'s empty case) or an `entity` naming an `error` payload. */
+function unionErrorTags(t: TypeIR, ctx: BoundedContextIR): string[] {
+  if (t.kind !== "union") return [];
+  return t.variants
+    .filter(
+      (v) =>
+        v.kind === "none" ||
+        (v.kind === "entity" && ctx.payloads.some((p) => p.name === v.name && p.kind === "error")),
+    )
+    .map(variantTag);
+}
+
+export function validatePropagation(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  for (const agg of ctx.aggregates) {
+    for (const op of agg.operations) {
+      const propagates: Extract<ExprIR, { kind: "propagate" }>[] = [];
+      for (const st of op.statements)
+        walkExprsInStmt(st, (e) => {
+          if (e.kind === "propagate") propagates.push(e);
+        });
+      if (propagates.length === 0) continue;
+      // Surface-first gate: parses + lowers + type-checks, but the early-return
+      // render isn't implemented on any backend yet.
+      diags.push({
+        severity: "error",
+        code: "loom.propagate-unsupported",
+        message:
+          `operation '${agg.name}.${op.name}' uses the \`?\` propagation operator, but ` +
+          `producer-side emission is not implemented yet (exception-less.md A2).`,
+        source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
+      });
+      // Semantic: every error variant a `?` can short-circuit must be declared
+      // on the enclosing operation's return union (the propagation rule).
+      const retErrors = new Set(op.returnType ? unionErrorTags(op.returnType, ctx) : []);
+      for (const p of propagates) {
+        const missing = p.errorTags.filter((t) => !retErrors.has(t));
+        if (missing.length > 0) {
+          diags.push({
+            severity: "error",
+            code: "loom.propagate-incompatible-error",
+            message:
+              `\`?\` in '${agg.name}.${op.name}' can propagate error(s) ` +
+              `[${[...new Set(missing)].sort().join(", ")}] that the operation's return type ` +
+              `doesn't declare — add them to the return \`or\`-union or handle them explicitly.`,
+            source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
+          });
+        }
       }
     }
   }
