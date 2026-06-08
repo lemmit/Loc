@@ -25,6 +25,7 @@ import {
   type WirePrimitive,
   wireTypeInfo,
 } from "../../ir/types/wire-types.js";
+import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
@@ -532,41 +533,19 @@ function collectUsedTypes(
   repo: RepositoryIR | undefined,
   ctx: BoundedContextIR,
 ): { valueObjects: ValueObjectIR[]; enums: EnumIR[] } {
-  const voByName = new Map(ctx.valueObjects.map((v) => [v.name, v]));
-  const usedVOs = new Set<string>();
-  const usedEnums = new Set<string>();
-  const pending: string[] = [];
-  const visit = (t: TypeIR) => {
-    if (t.kind === "valueobject") {
-      if (!usedVOs.has(t.name)) {
-        usedVOs.add(t.name);
-        // Defer the VO's own fields so its transitively-referenced
-        // types (further VOs / enums) are collected too.
-        pending.push(t.name);
-      }
+  const seeds = function* (): Generator<TypeIR> {
+    for (const f of agg.fields) yield f.type;
+    for (const d of agg.derived) yield d.type;
+    for (const op of agg.operations) for (const p of op.params) yield p.type;
+    for (const f of repo?.finds ?? []) for (const p of f.params) yield p.type;
+    for (const part of agg.parts) {
+      for (const f of part.fields) yield f.type;
+      for (const d of part.derived) yield d.type;
     }
-    if (t.kind === "enum") usedEnums.add(t.name);
-    if (t.kind === "array") visit(t.element);
-    if (t.kind === "optional") visit(t.inner);
   };
-  for (const f of agg.fields) visit(f.type);
-  for (const d of agg.derived) visit(d.type);
-  for (const op of agg.operations) for (const p of op.params) visit(p.type);
-  for (const f of repo?.finds ?? []) for (const p of f.params) visit(p.type);
-  for (const part of agg.parts) {
-    for (const f of part.fields) visit(f.type);
-    for (const d of part.derived) visit(d.type);
-  }
-  // Worklist closure over the fields of every VO we've pulled in.  The
-  // emitted `<VO>Schema` only lists `vo.fields`, so those field types are
-  // exactly what its schema body references.
-  while (pending.length > 0) {
-    const vo = voByName.get(pending.pop()!);
-    if (!vo) continue;
-    for (const f of vo.fields) visit(f.type);
-  }
+  const { valueObjects, enums } = collectReachableTypes(seeds(), ctx.valueObjects);
   return {
-    valueObjects: ctx.valueObjects.filter((v) => usedVOs.has(v.name)),
-    enums: ctx.enums.filter((e) => usedEnums.has(e.name)),
+    valueObjects: ctx.valueObjects.filter((v) => valueObjects.has(v.name)),
+    enums: ctx.enums.filter((e) => enums.has(e.name)),
   };
 }

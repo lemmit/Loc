@@ -13,6 +13,7 @@ import {
   workflowUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import { camelId, opWorkflow } from "../../../ir/util/openapi-ids.js";
+import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 
@@ -872,28 +873,22 @@ function pgIsolationLevel(level: import("../../../ir/types/loom-ir.js").Isolatio
  *  workflow params instead of aggregate-level surfaces.  Used to
  *  decide which `<Vo>Schema` declarations the workflows file needs
  *  to emit so its request schemas don't reference undefined names. */
-function collectUsedValueObjects(ctx: BoundedContextIR) {
-  const used = new Set<string>();
-  const visit = (t: TypeIR): void => {
-    if (t.kind === "valueobject") used.add(t.name);
-    if (t.kind === "array") visit(t.element);
-    if (t.kind === "optional") visit(t.inner);
-  };
+/** Type seeds named on the context's workflow surface — every workflow
+ *  parameter.  The schema collectors take the transitive closure of these
+ *  through value objects' own fields (see `collectReachableTypes`) so a
+ *  `<Vo>Schema` body never references an undeclared `<Enum>Schema`. */
+function* workflowSchemaSeeds(ctx: BoundedContextIR): Generator<TypeIR> {
   for (const wf of ctx.workflows) {
-    for (const p of wf.params) visit(p.type);
+    for (const p of wf.params) yield p.type;
   }
-  return ctx.valueObjects.filter((v) => used.has(v.name));
+}
+
+function collectUsedValueObjects(ctx: BoundedContextIR) {
+  const { valueObjects } = collectReachableTypes(workflowSchemaSeeds(ctx), ctx.valueObjects);
+  return ctx.valueObjects.filter((v) => valueObjects.has(v.name));
 }
 
 function collectUsedEnums(ctx: BoundedContextIR) {
-  const used = new Set<string>();
-  const visit = (t: TypeIR): void => {
-    if (t.kind === "enum") used.add(t.name);
-    if (t.kind === "array") visit(t.element);
-    if (t.kind === "optional") visit(t.inner);
-  };
-  for (const wf of ctx.workflows) {
-    for (const p of wf.params) visit(p.type);
-  }
-  return ctx.enums.filter((e) => used.has(e.name));
+  const { enums } = collectReachableTypes(workflowSchemaSeeds(ctx), ctx.valueObjects);
+  return ctx.enums.filter((e) => enums.has(e.name));
 }

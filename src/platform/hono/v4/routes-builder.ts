@@ -58,6 +58,7 @@ import {
   opOperation,
 } from "../../../ir/util/openapi-ids.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
+import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import type {
   ClassifyContext,
   SingleFieldPattern,
@@ -1195,21 +1196,8 @@ function collectUsedValueObjects(
   repo: RepositoryIR | undefined,
   ctx: BoundedContextIR,
 ): ValueObjectIR[] {
-  const used = new Set<string>();
-  const visit = (t: TypeIR) => {
-    if (t.kind === "valueobject") used.add(t.name);
-    if (t.kind === "array") visit(t.element);
-    if (t.kind === "optional") visit(t.inner);
-  };
-  for (const f of agg.fields) visit(f.type);
-  for (const d of agg.derived) visit(d.type);
-  for (const op of agg.operations) for (const p of op.params) visit(p.type);
-  for (const f of repo?.finds ?? []) for (const p of f.params) visit(p.type);
-  for (const part of agg.parts) {
-    for (const f of part.fields) visit(f.type);
-    for (const d of part.derived) visit(d.type);
-  }
-  return ctx.valueObjects.filter((v) => used.has(v.name));
+  const { valueObjects } = collectReachableTypes(aggSchemaSeeds(agg, repo), ctx.valueObjects);
+  return ctx.valueObjects.filter((v) => valueObjects.has(v.name));
 }
 
 function collectUsedEnums(
@@ -1217,21 +1205,23 @@ function collectUsedEnums(
   repo: RepositoryIR | undefined,
   ctx: BoundedContextIR,
 ): EnumIR[] {
-  const used = new Set<string>();
-  const visit = (t: TypeIR) => {
-    if (t.kind === "enum") used.add(t.name);
-    if (t.kind === "array") visit(t.element);
-    if (t.kind === "optional") visit(t.inner);
-  };
-  for (const f of agg.fields) visit(f.type);
-  for (const d of agg.derived) visit(d.type);
-  for (const op of agg.operations) for (const p of op.params) visit(p.type);
-  for (const f of repo?.finds ?? []) for (const p of f.params) visit(p.type);
+  const { enums } = collectReachableTypes(aggSchemaSeeds(agg, repo), ctx.valueObjects);
+  return ctx.enums.filter((e) => enums.has(e.name));
+}
+
+/** Every type named on the aggregate's HTTP surface — its own fields,
+ *  derived, public-operation + find params, and contained parts.  The
+ *  schema collectors take the transitive closure of these through value
+ *  objects' own fields (see `collectReachableTypes`). */
+function* aggSchemaSeeds(agg: AggregateIR, repo: RepositoryIR | undefined): Generator<TypeIR> {
+  for (const f of agg.fields) yield f.type;
+  for (const d of agg.derived) yield d.type;
+  for (const op of agg.operations) for (const p of op.params) yield p.type;
+  for (const f of repo?.finds ?? []) for (const p of f.params) yield p.type;
   for (const part of agg.parts) {
-    for (const f of part.fields) visit(f.type);
-    for (const d of part.derived) visit(d.type);
+    for (const f of part.fields) yield f.type;
+    for (const d of part.derived) yield d.type;
   }
-  return ctx.enums.filter((e) => used.has(e.name));
 }
 
 // ---------------------------------------------------------------------------
