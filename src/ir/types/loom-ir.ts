@@ -1729,6 +1729,8 @@ export type PageOriginIR =
   | { kind: "aggregate-new"; aggregateName: string; contextName: string }
   | { kind: "aggregate-detail"; aggregateName: string; contextName: string }
   | { kind: "workflow-form"; workflowName: string; contextName: string }
+  | { kind: "workflow-instances-list"; workflowName: string; contextName: string }
+  | { kind: "workflow-instance-detail"; workflowName: string; contextName: string }
   | { kind: "view-list"; viewName: string; contextName: string }
   | { kind: "workflows-index" }
   | { kind: "views-index" }

@@ -361,6 +361,8 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   scaffoldNewForm: { group: "scaffold", admissibleInSource: true },
   scaffoldWorkflowForm: { group: "scaffold", admissibleInSource: true },
   scaffoldViewList: { group: "scaffold", admissibleInSource: true },
+  scaffoldInstanceList: { group: "scaffold", admissibleInSource: true },
+  scaffoldInstanceDetails: { group: "scaffold", admissibleInSource: true },
   Home: { group: "scaffold", admissibleInSource: true },
   WorkflowsIndex: { group: "scaffold", admissibleInSource: true },
   ViewsIndex: { group: "scaffold", admissibleInSource: true },

@@ -118,6 +118,20 @@ export function expandInlineScaffoldPrimitives(body: ExprIR, ctx: WalkerExpandCo
       if (!wf) return body;
       return expandScaffoldWorkflowForm(wf);
     }
+    // Workflow-instance scaffold primitives (`of:` arg, ref to a workflow)
+    // — read-only list / detail over a saga's correlation-state rows
+    // (workflow-instance-visibility.md).
+    if (body.name === "scaffoldInstanceList" || body.name === "scaffoldInstanceDetails") {
+      const argNames = body.argNames ?? [];
+      const ofIdx = argNames.indexOf("of");
+      const ofArg = ofIdx >= 0 ? body.args[ofIdx] : undefined;
+      const wfRef = ofArg && ofArg.kind === "ref" ? ofArg.name : undefined;
+      const wf = wfRef ? ctx.workflowsByName.get(wfRef) : undefined;
+      if (!wf) return body;
+      return body.name === "scaffoldInstanceList"
+        ? expandScaffoldInstanceList(wf)
+        : expandScaffoldInstanceDetails(wf);
+    }
     // View-keyed scaffold primitive (`of:` arg, ref to a view).
     if (body.name === "scaffoldViewList") {
       const argNames = body.argNames ?? [];
@@ -383,6 +397,154 @@ function expandScaffoldList(agg: AggregateIR, ctx: WalkerExpandContext): ExprIR 
     ],
     [["testid", lit(`${slug}-list`)]],
   );
+}
+
+/** Expand `scaffoldInstanceList(of: <Wf>)`: the read-only list-page body for
+ *  an observable workflow's running instances — Breadcrumbs, Heading,
+ *  QueryView wrapping a Paper-framed Table over `<Wf>.instances.all`
+ *  (workflow-instance-visibility.md).  Mirrors `expandScaffoldList` minus the
+ *  "New" button (instances are born from triggers, not a form).  Columns walk
+ *  `instanceWireShape`; the correlation (id) cell is an Anchor to the instance
+ *  detail, other cells dispatch through `columnAccessorFor` (enum → EnumBadge,
+ *  etc.). */
+function expandScaffoldInstanceList(wf: import("../types/loom-ir.js").WorkflowIR): ExprIR {
+  const queryRoot = member(ref(wf.name), "instances");
+  const slug = snake(wf.name);
+  const humanWf = humanize(wf.name);
+  const corr = wf.correlationField as string;
+  const cellVar = "i";
+  const rowVar = "r";
+
+  const cols: ExprIR[] = [];
+  for (const f of wf.instanceWireShape ?? []) {
+    if (f.source === "id") {
+      cols.push(
+        call("Column", [
+          lit(humanize(f.name)),
+          lambda(
+            cellVar,
+            call(
+              "Anchor",
+              [member(ref(cellVar), f.name)],
+              [
+                [
+                  "to",
+                  binary(lit(`/workflows/${slug}/instances/`), "+", member(ref(cellVar), f.name)),
+                ],
+              ],
+            ),
+          ),
+        ]),
+      );
+      continue;
+    }
+    const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+    if (inner.kind === "valueobject" || inner.kind === "array") continue;
+    cols.push(
+      call("Column", [
+        lit(humanize(f.name)),
+        lambda(cellVar, columnAccessorFor(f.name, f.type, cellVar)),
+      ]),
+    );
+  }
+
+  return call(
+    "Stack",
+    [
+      call("Breadcrumbs", [
+        call("Anchor", [lit("Home")], [["to", lit("/")]]),
+        call("Anchor", [lit("Workflows")], [["to", lit("/workflows")]]),
+        call("Text", [lit(`${humanWf} instances`)]),
+      ]),
+      call("Heading", [lit(`${humanWf} instances`)], [["level", intLit(2)]]),
+      call(
+        "QueryView",
+        [],
+        [
+          ["of", member(queryRoot, "all")],
+          ["loading", call("Skeleton", [], [["count", intLit(5)]])],
+          ["error", call("Alert", [lit(`Couldn't load ${humanWf.toLowerCase()} instances`)])],
+          ["empty", call("Empty", [lit(`No ${humanWf.toLowerCase()} instances yet.`)])],
+          [
+            "data",
+            lambda(
+              "rows",
+              call("Paper", [
+                call(
+                  "Table",
+                  [...cols],
+                  [
+                    ["rows", ref("rows")],
+                    ["striped", boolLit(true)],
+                    ["highlight", boolLit(true)],
+                    ["sticky", boolLit(true)],
+                    [
+                      "rowTestid",
+                      lambda(
+                        rowVar,
+                        binary(lit(`${slug}-instances-row-`), "+", member(ref(rowVar), corr)),
+                      ),
+                    ],
+                  ],
+                ),
+              ]),
+            ),
+          ],
+        ],
+      ),
+    ],
+    [["testid", lit(`${slug}-instances-list`)]],
+  );
+}
+
+/** Expand `scaffoldInstanceDetails(of: <Wf>)`: the read-only detail body for
+ *  one workflow instance — Breadcrumbs, Heading, QueryView (single) wrapping a
+ *  Card of `KeyValueRow`s over `instanceWireShape`, loaded via
+ *  `<Wf>.instances.byId(id)`.  The `scaffoldDetails` shape minus the
+ *  operations block — a workflow instance exposes no ad-hoc operations. */
+function expandScaffoldInstanceDetails(wf: import("../types/loom-ir.js").WorkflowIR): ExprIR {
+  const queryRoot = member(ref(wf.name), "instances");
+  const slug = snake(wf.name);
+  const humanWf = humanize(wf.name);
+  const rows: ExprIR[] = [];
+  for (const f of wf.instanceWireShape ?? []) {
+    const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+    if (inner.kind === "array") continue;
+    rows.push(
+      call("KeyValueRow", [
+        lit(humanize(f.name)),
+        typedCellFor(member(ref("data"), f.name), f.type),
+      ]),
+    );
+  }
+  return call("Stack", [
+    call("Breadcrumbs", [
+      call("Anchor", [lit("Home")], [["to", lit("/")]]),
+      call("Anchor", [lit("Workflows")], [["to", lit("/workflows")]]),
+      call("Anchor", [lit(`${humanWf} instances`)], [["to", lit(`/workflows/${slug}/instances`)]]),
+      call("Text", [lit("Detail")]),
+    ]),
+    call("Heading", [lit(`${humanWf} instance`)], [["level", intLit(2)]]),
+    call(
+      "QueryView",
+      [],
+      [
+        ["of", methodCall(queryRoot, "byId", [ref("id")])],
+        ["single", boolLit(true)],
+        ["loading", call("Skeleton", [], [["count", intLit(3)]])],
+        ["error", call("Alert", [lit(`Couldn't load ${humanWf.toLowerCase()} instance`)])],
+        [
+          "empty",
+          call(
+            "Alert",
+            [lit(`No ${humanWf.toLowerCase()} instance matches that id.`)],
+            [["color", lit("yellow")]],
+          ),
+        ],
+        ["data", lambda("data", call("Card", rows))],
+      ],
+    ),
+  ]);
 }
 
 /** Expand `scaffoldNewForm(of: <Agg>)`: Stack(Breadcrumbs, Heading,

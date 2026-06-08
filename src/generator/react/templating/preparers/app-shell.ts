@@ -82,6 +82,12 @@ export function prepareAppShellVM(
    *  Already deduped by the layouts-emitter; the preparer appends
    *  them to the shared `imports` list. */
   layoutImports?: ReadonlyArray<{ specifier: string; from: string }>,
+  /** Observable workflows (workflow-instance-visibility.md) — those whose
+   *  scaffold synthesised read-only instance pages.  Each gets a list route
+   *  (`/workflows/<slug>/instances`) + a detail route
+   *  (`/workflows/<slug>/instances/:id`).  Distinct from `workflows` (the
+   *  form set): an event-triggered-only saga appears here but not there. */
+  observableWorkflows: WorkflowIR[] = [],
 ): AppShellVM {
   const imports: ImportVM[] = [];
   const routes: RouteVM[] = [];
@@ -119,6 +125,25 @@ export function prepareAppShellVM(
       imports.push({ specifier: cap, from: `./pages/workflows/${slug}` });
       routes.push({ path: `/workflows/${slug}`, elementJsx: `<${cap} />` });
     }
+  }
+
+  // Per-observable-workflow instance pages (workflow-instance-visibility.md):
+  // read-only list + detail over a saga's correlation-state rows.  Default
+  // imports (local name = component) keep the page-name → module mapping; an
+  // event-triggered-only saga is routed here even with no form page above.
+  for (const wf of observableWorkflows) {
+    const slug = snake(wf.name);
+    const cap = upperFirst(wf.name);
+    imports.push({ specifier: `${cap}InstancesList`, from: `./pages/workflows/${slug}/instances` });
+    imports.push({
+      specifier: `${cap}InstanceDetail`,
+      from: `./pages/workflows/${slug}/instance_detail`,
+    });
+    routes.push({ path: `/workflows/${slug}/instances`, elementJsx: `<${cap}InstancesList />` });
+    routes.push({
+      path: `/workflows/${slug}/instances/:id`,
+      elementJsx: `<${cap}InstanceDetail />`,
+    });
   }
 
   // Per-view pages — index + per-view table.

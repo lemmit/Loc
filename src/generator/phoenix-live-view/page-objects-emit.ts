@@ -89,6 +89,12 @@ export function buildPlaywrightPageObject(args: BuildPlaywrightPageObjectArgs): 
       return buildViewsIndexPageObject(page);
     case "home":
       return buildHomePageObject(page);
+    // Workflow-instance read pages (workflow-instance-visibility.md) use the
+    // generic param/route page object for v1 — a bespoke instance page object
+    // is a later refinement.
+    case "workflow-instances-list":
+    case "workflow-instance-detail":
+      return buildGenericPageObject(page);
   }
 }
 
