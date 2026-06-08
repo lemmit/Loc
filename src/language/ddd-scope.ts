@@ -20,6 +20,7 @@ import {
   isEntityPart,
   isEnumDecl,
   isModel,
+  isPayloadDecl,
   isSystem,
   isTargetable,
   isValueObject,
@@ -128,6 +129,18 @@ export class DddScopeComputation extends DefaultScopeComputation {
     for (const node of AstUtils.streamAllContents(document.parseResult.value)) {
       if (cancelToken?.isCancellationRequested) break;
       if (isAggregate(node) || isEntityPart(node) || isValueObject(node) || isEnumDecl(node)) {
+        const name = this.nameProvider.getName(node);
+        if (name) {
+          exports.push(this.descriptions.createDescription(node, name, document));
+        }
+      }
+      // Root-level payloads (`payload`/`error`/… declared at file scope, outside
+      // any context — exception-less.md A1) are the ambient shared kernel for
+      // transport types: exported globally so a `find`/operation `or`-union can
+      // name an ambient `NotFound` from any context.  Context-local payloads
+      // stay context-scoped (NOT exported here) so they don't leak across
+      // contexts.
+      if (isPayloadDecl(node) && isModel(node.$container)) {
         const name = this.nameProvider.getName(node);
         if (name) {
           exports.push(this.descriptions.createDescription(node, name, document));

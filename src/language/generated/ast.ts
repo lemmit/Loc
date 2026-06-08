@@ -467,7 +467,7 @@ export function isMemberName(item: unknown): item is MemberName {
     return item === 'by' || item === 'handle' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'create' || item === 'destroy' || item === 'where' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type ModelMember = Api | BoundedContext | ChannelSource | Component | Deployable | EnumDecl | Layout | Requirement | Resource | Solution | Storage | Subdomain | System | TestCase | TestE2E | ThemeBlock | Ui | UserBlock | ValueObject;
+export type ModelMember = Api | BoundedContext | ChannelSource | Component | Deployable | EnumDecl | Layout | PayloadDecl | Requirement | Resource | Solution | Storage | Subdomain | System | TestCase | TestE2E | ThemeBlock | Ui | UserBlock | ValueObject;
 
 export const ModelMember = 'ModelMember';
 
@@ -1830,7 +1830,7 @@ export function isParenExpr(item: unknown): item is ParenExpr {
 }
 
 export interface PayloadDecl extends AstNode {
-    readonly $container: BoundedContext;
+    readonly $container: BoundedContext | Model;
     readonly $type: 'PayloadDecl';
     fields: Array<Property>;
     kind: PayloadKind;
@@ -2883,7 +2883,8 @@ export class DddAstReflection extends AbstractAstReflection {
             case EntityPart: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(NamedDecl, supertype);
             }
-            case EnumDecl: {
+            case EnumDecl:
+            case PayloadDecl: {
                 return this.isSubtype(ContextMember, supertype) || this.isSubtype(ModelMember, supertype) || this.isSubtype(NamedDecl, supertype);
             }
             case EnvConnectionSource:
@@ -2935,9 +2936,6 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case Operation: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(Targetable, supertype);
-            }
-            case PayloadDecl: {
-                return this.isSubtype(ContextMember, supertype) || this.isSubtype(NamedDecl, supertype);
             }
             case Property: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype) || this.isSubtype(ValueObjectMember, supertype) || this.isSubtype(WorkflowMember, supertype);

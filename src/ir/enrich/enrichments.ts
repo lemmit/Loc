@@ -83,11 +83,15 @@ export function enrichLoomModel(loom: RawLoomModel): EnrichedLoomModel {
   // into a shared module per deployable.
   const enrichedRootVOs = loom.rootValueObjects.map(enrichValueObject);
   const rootEnums = loom.rootEnums;
+  const rootPayloads = loom.rootPayloads;
   return {
-    systems: loom.systems.map((s) => enrichSystem(s, enrichedRootVOs, rootEnums)),
-    contexts: loom.contexts.map((c) => enrichContext(c, enrichedRootVOs, rootEnums)),
+    systems: loom.systems.map((s) => enrichSystem(s, enrichedRootVOs, rootEnums, rootPayloads)),
+    contexts: loom.contexts.map((c) =>
+      enrichContext(c, enrichedRootVOs, rootEnums, "literal", rootPayloads),
+    ),
     rootValueObjects: enrichedRootVOs,
     rootEnums,
+    rootPayloads,
     components: loom.components,
     requirements: loom.requirements,
     solutions: loom.solutions,
@@ -128,6 +132,7 @@ function enrichSystem(
   sys: SystemIR,
   rootValueObjects: EnrichedValueObjectIR[],
   rootEnums: EnumIR[],
+  rootPayloads: PayloadIR[] = [],
 ): EnrichedSystemIR {
   // Resolve each subdomain's lifecycle URL style from the api(s) that
   // surface it (`api X from <subdomain>`).  An aggregate belongs to one
@@ -160,6 +165,7 @@ function enrichSystem(
         rootValueObjects,
         rootEnums,
         urlStyleBySubdomain.get(m.name) ?? "literal",
+        rootPayloads,
       ),
       errorStatusOverrides: errorStatusesBySubdomain.get(m.name),
     })),
@@ -297,6 +303,7 @@ export function enrichContext(
   rootValueObjects: EnrichedValueObjectIR[] = [],
   rootEnums: EnumIR[] = [],
   urlStyle: "literal" | "resource" = "literal",
+  rootPayloads: PayloadIR[] = [],
 ): EnrichedBoundedContextIR {
   // Fold the ambient root-level VOs / enums into the context's
   // effective set so every per-context emitter sees them as if they
@@ -347,7 +354,18 @@ export function enrichContext(
   // `?? []` tolerates IR hand-constructed outside the standard lowering
   // pipeline (test fixtures, the IR-level expander shim) that predate the
   // `payloads` field — lowering always populates it for real sources.
-  const basePayloads = [...(ctx.payloads ?? []).filter((p) => !p.synthesized), ...wirePayloads];
+  // Ambient root-level payloads (exception-less.md A1) fold in like root VOs:
+  // a context-local payload of the same name shadows.  Folded before generic /
+  // union monomorphization so an `or`-union naming an ambient `NotFound`
+  // resolves its fields here.
+  const ownPayloadNames = new Set(
+    (ctx.payloads ?? []).filter((p) => !p.synthesized).map((p) => p.name),
+  );
+  const basePayloads = [
+    ...(ctx.payloads ?? []).filter((p) => !p.synthesized),
+    ...rootPayloads.filter((p) => !ownPayloadNames.has(p.name)),
+    ...wirePayloads,
+  ];
   // P3b (payload-transport-layer.md): monomorphize every distinct generic
   // carrier instantiation (`string paged`, `Customer envelope`) reachable from
   // a type position into a concrete, named `PayloadIR` — sibling to the

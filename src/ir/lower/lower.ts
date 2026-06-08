@@ -258,6 +258,7 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
   const looseContexts: BoundedContextIR[] = [];
   const rootValueObjects: ValueObjectIR[] = [];
   const rootEnums: EnumIR[] = [];
+  const rootPayloads: PayloadIR[] = [];
   const components: ComponentIR[] = [];
   const requirements: RequirementIR[] = [];
   const solutions: SolutionIR[] = [];
@@ -278,6 +279,7 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
       if (!compose) for (const c of m.contexts) looseContexts.push(lowerContext(c));
     } else if (isValueObject(m)) rootValueObjects.push(lowerValueObject(m, rootEnv));
     else if (isEnumDecl(m)) rootEnums.push(lowerEnum(m));
+    else if (isPayloadDecl(m)) rootPayloads.push(lowerPayload(m));
     else if (isComponent(m)) components.push(lowerComponent(m));
     else if (isRequirement(m)) requirements.push(lowerRequirement(m));
     else if (isSolution(m)) solutions.push(lowerSolution(m));
@@ -288,6 +290,7 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     contexts: looseContexts,
     rootValueObjects,
     rootEnums,
+    rootPayloads,
     components,
     requirements,
     solutions,
@@ -311,6 +314,7 @@ export function mergeLoomModels(models: RawLoomModel[]): RawLoomModel {
     contexts: models.flatMap((m) => m.contexts),
     rootValueObjects: models.flatMap((m) => m.rootValueObjects),
     rootEnums: models.flatMap((m) => m.rootEnums),
+    rootPayloads: models.flatMap((m) => m.rootPayloads),
     components: models.flatMap((m) => m.components),
     requirements: models.flatMap((m) => m.requirements),
     solutions: models.flatMap((m) => m.solutions),

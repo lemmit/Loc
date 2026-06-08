@@ -1075,6 +1075,13 @@ export interface LoomModel {
   /** Root-level enums.  Same visibility / emission rules as
    *  `rootValueObjects`. */
   rootEnums: EnumIR[];
+  /** Root-level payloads — `payload`/`command`/`query`/`response`/`error`
+   *  declared at the top of any `.ddd` file outside any context (the ambient
+   *  shared kernel for transport types, exception-less.md A1).  Folded into
+   *  every context's `payloads` during enrichment (mirroring `rootValueObjects`)
+   *  so a `find`/operation `or`-union can name `NotFound` without a per-context
+   *  re-declaration.  A context-local payload of the same name shadows. */
+  rootPayloads: PayloadIR[];
   /** Root-level components — declared at the top of any `.ddd` file
    *  outside any `ui { … }`.  Pure render functions visible to every
    *  page in every ui workspace-wide; the import-graph walk merges
