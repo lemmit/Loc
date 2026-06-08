@@ -1,3 +1,4 @@
+import { renderHonoStoreLogCall } from "../../../generator/_obs/render-hono.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
   type AggregateIR,
@@ -222,6 +223,9 @@ export function buildWorkflowsFile(
   if (usesDb) imports.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   // The persisted-workflow load helper filters by the correlation column.
   if (/(?<!\.)\beq\(/.test(bodyStr)) imports.push(`import { eq } from "drizzle-orm";`);
+  // The `on`-reactor drop+log path logs `event_unrouted` via the ALS logger.
+  if (/(?<!\.)\brequestLog\(/.test(bodyStr))
+    imports.push(`import { requestLog } from "../obs/als";`);
   // `schema` is used as a runtime value (`db.select().from(schema.x)`) only by
   // the persisted-workflow helpers; otherwise it's `typeof schema` (a type).
   // `import * as schema` still satisfies `typeof schema`, so the value form is
@@ -439,11 +443,10 @@ function handlerName(workflow: string, trigger: "on" | "create", event: string):
 function emitSubscriptionHandlers(ctx: EnrichedBoundedContextIR): string[] {
   const subs = ctx.eventSubscriptions;
   const out: string[] = [];
-  // load/save helpers, once per workflow that has a persisted event-create
-  // starter (its correlation row is allocated/loaded by the handler).
+  // load/save helpers, once per correlation-bearing workflow that any handler
+  // (event-create starter OR on-reactor continuation) loads/saves its row from.
   const helperDone = new Set<string>();
   for (const sub of subs) {
-    if (sub.trigger !== "create") continue;
     const wf = ctx.workflows.find((w) => w.name === sub.workflow);
     if (wf?.correlationField && !helperDone.has(wf.name)) {
       out.push(...emitWorkflowStateHelpers(wf));
@@ -519,18 +522,60 @@ function emitWorkflowStateHelpers(wf: WorkflowIR): string[] {
   ];
 }
 
+/** The object literal that allocates a fresh workflow instance: the correlation
+ *  key plus a typed default for each required (non-optional) non-key saga state
+ *  field, so the literal satisfies the row's insert type.  Optional fields are
+ *  omitted (nullable columns). */
+function allocateLiteral(wf: WorkflowIR): string {
+  const corr = wf.correlationField as string;
+  const parts = [`${corr}: __key`];
+  for (const f of wf.stateFields ?? []) {
+    if (f.name === corr || f.optional) continue;
+    parts.push(`${f.name}: ${defaultLiteralFor(f.type)}`);
+  }
+  return `{ ${parts.join(", ")} }`;
+}
+
+/** A backend-zero literal for a required saga-state column, matching the
+ *  Drizzle insert type: numeric integers → `0`, precise-decimals (numeric
+ *  columns) → the string `"0"`, bool → `false`, datetime → `new Date()`, json →
+ *  `{}`, everything textual (string / guid / enum / id) → `""`, arrays → `[]`. */
+function defaultLiteralFor(t: TypeIR): string {
+  if (t.kind === "primitive") {
+    switch (t.name) {
+      case "int":
+      case "long":
+        return "0";
+      case "decimal":
+      case "money":
+        return `"0"`;
+      case "bool":
+        return "false";
+      case "datetime":
+        return "new Date()";
+      case "json":
+        return "{}";
+      default:
+        return `""`;
+    }
+  }
+  if (t.kind === "array") return "[]";
+  return `""`;
+}
+
 /** One reactor / event-create handler.  The inbound event instance binds as
  *  the body's event param directly (it is already domain-typed in-process —
  *  no wire→domain conversion, unlike the HTTP command path); repos are built
  *  on `db` with the re-entrant `events` dispatcher so a body `emit` re-routes
  *  to its own subscribers (choreography chains).
  *
- *  An event-triggered `create` (a starter) is **persisted**: it loads its
- *  correlation row or allocates one (seeded with the correlation key), renders
- *  the body with `this.<stateField>` reading that row, and saves it back —
- *  load-or-allocate per the channels.md routing.  (The `on` reactor's
- *  route-to-existing / drop+log path is a later slice; today it stays the
- *  stateless #970 handler.) */
+ *  Both forms are **persisted** when the workflow has a correlation field: a
+ *  `create` starter loads-or-allocates its row (allocate seeds the correlation
+ *  key + typed defaults for required saga state); an `on` reactor routes to the
+ *  existing row, or — when none exists for the key — drops the event and logs
+ *  `event_unrouted` (a continuation can't run before its start; channels.md
+ *  drop+log policy).  Either way the body renders with `this.<stateField>`
+ *  reading the row, and the row is saved at exit. */
 function emitHandlerFn(
   fn: string,
   wf: WorkflowIR,
@@ -548,7 +593,7 @@ function emitHandlerFn(
   out.push(`  events: DomainEventDispatcher,`);
   out.push(`  ${paramName}: Events.${eventName},`);
   out.push(`): Promise<void> {`);
-  const persisted = trigger === "create" && !!wf.correlationField;
+  const persisted = !!wf.correlationField;
   const hasEmit = statements.some((st) => st.kind === "emit");
   if (hasEmit) out.push(`  const workflowEvents: Events.DomainEvent[] = [];`);
   const noParams = new Map<string, string>();
@@ -562,10 +607,21 @@ function emitHandlerFn(
       ? renderExprWithParams(correlation, noParams)
       : `${paramName}.${corr}`;
     out.push(`  const __key = ${keyExpr};`);
-    // Allocate-if-correlation-misses; the cast seeds only the key (other saga
-    // state defaults to its column defaults — a later slice fills typed
-    // defaults for required non-key state).
-    out.push(`  const state = (await load${T}(db, __key)) ?? ({ ${corr}: __key } as ${T}State);`);
+    if (trigger === "create") {
+      // Load-or-allocate: a starter creates the instance if its key is new.
+      out.push(`  const state = (await load${T}(db, __key)) ?? ${allocateLiteral(wf)};`);
+    } else {
+      // Route-to-existing, else drop + log: a continuation needs a started
+      // instance.  `requestLog()` resolves the request-bound logger (the
+      // dispatcher runs inside the request that emitted the event).
+      out.push(`  const state = await load${T}(db, __key);`);
+      out.push(`  if (!state) {`);
+      out.push(
+        `    ${renderHonoStoreLogCall("eventUnrouted", `workflow: "${wf.name}", event_type: "${eventName}", key: __key`)}`,
+      );
+      out.push(`    return;`);
+      out.push(`  }`);
+    }
     thisName = "state";
   }
   for (const r of collectReposFromStmts(statements, saves)) {

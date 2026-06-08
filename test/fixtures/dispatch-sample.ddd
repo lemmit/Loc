@@ -1,9 +1,9 @@
-// Fixture for in-process event dispatch (channels.md): a channel that
-// `carries:` an event, an `on(e: Event)` reactor that loads/creates an
-// aggregate and emits a follow-on event, and an event-triggered
-// `create(e: Event) by` starter.  Used by the generator unit test that pins
-// the emitted `http/workflows.ts` handlers + `createInProcessDispatcher` and
-// the `createApp` default-dispatcher wiring.
+// Fixture for in-process event dispatch (channels.md) with persisted
+// correlation.  A real saga: OrderPlaced STARTS the OrderFulfillment instance
+// (a `create` that allocates the correlation row), which emits ShipmentRequested
+// carrying the order; that event routes back to the SAME instance via an
+// `on(...) by s.order` continuation (route-to-existing).  A ShipmentRequested
+// whose order has no started instance drops + logs `event_unrouted`.
 context Fulfillment {
   aggregate Order { customerId: string  status: string  total: int }
   repository Orders for Order { }
@@ -15,7 +15,7 @@ context Fulfillment {
   repository Shipments for Shipment { }
 
   event OrderPlaced { order: Order id, at: datetime }
-  event ShipmentRequested { shipment: Shipment id, at: datetime }
+  event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
 
   channel Lifecycle {
     carries: OrderPlaced, ShipmentRequested
@@ -23,19 +23,18 @@ context Fulfillment {
     retention: ephemeral
   }
 
-  // Reactor: starts on OrderPlaced, requests a shipment.
-  workflow Fulfiller {
-    orderId: Order id
-    on(p: OrderPlaced) by p.order {
-      let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
-      emit ShipmentRequested { shipment: ship.id, at: now() }
-    }
-  }
+  workflow OrderFulfillment {
+    orderId: Order id          // correlation field — one instance per order
+    attempts: int              // saga state — exercises typed allocate defaults
 
-  // Event-triggered starter on the follow-on event.
-  workflow ShipmentTracker {
-    shipId: Shipment id
-    create(s: ShipmentRequested) by s.shipment {
+    // Starter: allocates the instance, requests a shipment.
+    create(p: OrderPlaced) by p.order {
+      let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+      emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+    }
+
+    // Continuation: routes to the started instance by order; marks the shipment.
+    on(s: ShipmentRequested) by s.order {
       let ship = Shipments.getById(s.shipment)
       ship.markTracked()
     }

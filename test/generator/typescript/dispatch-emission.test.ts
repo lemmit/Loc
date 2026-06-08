@@ -33,26 +33,24 @@ async function generate(file: string): Promise<Map<string, string>> {
 }
 
 describe("in-process event dispatch emission", () => {
-  it("emits reactor + event-create handlers and a dispatcher in http/workflows.ts", async () => {
+  it("emits create + on handlers and a dispatcher in http/workflows.ts", async () => {
     const files = await generate("test/fixtures/dispatch-sample.ddd");
     const wf = files.get("http/workflows.ts") ?? "";
 
-    // on(OrderPlaced) reactor → a handler that loads/creates + emits + dispatches.
-    expect(wf).toContain("export async function fulfillerOnOrderPlaced(");
+    // create(OrderPlaced) starter + on(ShipmentRequested) continuation.
+    expect(wf).toContain("export async function orderFulfillmentStartOrderPlaced(");
     expect(wf).toMatch(/p: Events\.OrderPlaced/);
-    expect(wf).toContain("for (const ev of workflowEvents) await events.dispatch(ev);");
-
-    // event-triggered create(ShipmentRequested) → a starter handler.
-    expect(wf).toContain("export async function shipmentTrackerStartShipmentRequested(");
+    expect(wf).toContain("export async function orderFulfillmentOnShipmentRequested(");
     expect(wf).toMatch(/s: Events\.ShipmentRequested/);
+    expect(wf).toContain("for (const ev of workflowEvents) await events.dispatch(ev);");
 
     // The dispatcher factory routes by event.type and passes itself (re-entrant).
     expect(wf).toContain("export function createInProcessDispatcher(");
     expect(wf).toMatch(
-      /case "OrderPlaced": \{\s*await fulfillerOnOrderPlaced\(db, dispatcher, event\);/,
+      /case "OrderPlaced": \{\s*await orderFulfillmentStartOrderPlaced\(db, dispatcher, event\);/,
     );
     expect(wf).toMatch(
-      /case "ShipmentRequested": \{\s*await shipmentTrackerStartShipmentRequested\(db, dispatcher, event\);/,
+      /case "ShipmentRequested": \{\s*await orderFulfillmentOnShipmentRequested\(db, dispatcher, event\);/,
     );
   });
 
@@ -76,38 +74,39 @@ describe("in-process event dispatch emission", () => {
     expect(idx).not.toContain("createInProcessDispatcher");
   });
 
-  it("emits a persisted state table per correlation-bearing workflow (db/schema.ts)", async () => {
+  it("emits a persisted state table keyed by the correlation field (db/schema.ts)", async () => {
     const schema = (await generate("test/fixtures/dispatch-sample.ddd")).get("db/schema.ts") ?? "";
-    // Fulfiller (orderId: Order id) and ShipmentTracker (shipId: Shipment id)
-    // each get a state table keyed by their correlation field.
-    expect(schema).toMatch(/export const fulfillers = pgTable\("fulfillers", \{/);
+    expect(schema).toMatch(/export const orderFulfillments = pgTable\("order_fulfillments", \{/);
     expect(schema).toMatch(/orderId: text\("order_id"\)\.primaryKey\(\)/);
-    expect(schema).toMatch(/export const shipmentTrackers = pgTable\("shipment_trackers", \{/);
-    expect(schema).toMatch(/shipId: text\("ship_id"\)\.primaryKey\(\)/);
+    expect(schema).toMatch(/attempts: integer\("attempts"\)\.notNull\(\)/);
   });
 
-  it("persists an event-triggered create: load-or-allocate by correlation, then save", async () => {
+  it("create starter loads-or-allocates (typed defaults), on continuation routes-or-drops+logs", async () => {
     const wf = (await generate("test/fixtures/dispatch-sample.ddd")).get("http/workflows.ts") ?? "";
-    // load/save helpers + the row type for the starter's workflow.
+    // load/save helpers + the row type.
     expect(wf).toContain(
-      "type ShipmentTrackerState = typeof schema.shipmentTrackers.$inferInsert;",
+      "type OrderFulfillmentState = typeof schema.orderFulfillments.$inferInsert;",
     );
-    expect(wf).toContain("async function loadShipmentTracker(");
-    expect(wf).toMatch(/eq\(schema\.shipmentTrackers\.shipId, key\)/);
-    expect(wf).toMatch(/\.onConflictDoUpdate\(\{ target: schema\.shipmentTrackers\.shipId/);
-    // The create handler routes by the correlation key, allocates if missing,
-    // and saves the row at exit.
-    expect(wf).toMatch(/const __key = s\.shipment;/);
-    expect(wf).toMatch(
-      /const state = \(await loadShipmentTracker\(db, __key\)\) \?\? \(\{ shipId: __key \} as ShipmentTrackerState\);/,
+    expect(wf).toMatch(/eq\(schema\.orderFulfillments\.orderId, key\)/);
+    expect(wf).toMatch(/\.onConflictDoUpdate\(\{ target: schema\.orderFulfillments\.orderId/);
+
+    // create: load-or-allocate with a TYPED default for the required saga
+    // state (`attempts: int` → 0), no cast; saves the row.
+    const start = wf.slice(wf.indexOf("orderFulfillmentStartOrderPlaced"));
+    expect(start).toMatch(/const __key = p\.order;/);
+    expect(start).toMatch(
+      /const state = \(await loadOrderFulfillment\(db, __key\)\) \?\? \{ orderId: __key, attempts: 0 \};/,
     );
-    expect(wf).toContain("await saveShipmentTracker(db, state);");
-    // The `on` reactor stays stateless this slice — no load/allocate/save.
-    const onBody = wf.slice(
-      wf.indexOf("fulfillerOnOrderPlaced"),
-      wf.indexOf("shipmentTrackerStartShipmentRequested"),
+    expect(start).toContain("await saveOrderFulfillment(db, state);");
+
+    // on: route-to-existing, else drop + log `event_unrouted`.
+    const onH = wf.slice(wf.indexOf("orderFulfillmentOnShipmentRequested"));
+    expect(onH).toMatch(/const state = await loadOrderFulfillment\(db, __key\);/);
+    expect(onH).toMatch(/if \(!state\) \{/);
+    expect(onH).toMatch(
+      /requestLog\(\)\.warn\(\{ event: "event_unrouted", workflow: "OrderFulfillment", event_type: "ShipmentRequested", key: __key \}\);/,
     );
-    expect(onBody).not.toContain("loadFulfiller");
-    expect(onBody).not.toContain("__key");
+    // The `requestLog` import is wired at the file top.
+    expect(wf).toContain('import { requestLog } from "../obs/als";');
   });
 });
