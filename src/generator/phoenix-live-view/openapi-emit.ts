@@ -18,7 +18,11 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../ir/types/loom-ir.js";
-import { operationIsGuarded, workflowIsGuarded } from "../../ir/types/loom-ir.js";
+import {
+  operationIsGuarded,
+  workflowEmitsCommandRoute,
+  workflowIsGuarded,
+} from "../../ir/types/loom-ir.js";
 import {
   peelCollection,
   peelNullable,
@@ -111,7 +115,9 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
 
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) allAggregates.push({ ctx, agg });
-    for (const wf of ctx.workflows) allWorkflows.push({ ctx, wf });
+    // Event-triggered-only workflows expose no HTTP route (dispatch-only).
+    for (const wf of ctx.workflows.filter(workflowEmitsCommandRoute))
+      allWorkflows.push({ ctx, wf });
     for (const view of ctx.views) allViews.push({ ctx, view });
   }
 

@@ -1,8 +1,9 @@
-import type {
-  BoundedContextIR,
-  SystemIR,
-  WorkflowIR,
-  WorkflowStmtIR,
+import {
+  type BoundedContextIR,
+  type SystemIR,
+  type WorkflowIR,
+  type WorkflowStmtIR,
+  workflowEmitsCommandRoute,
 } from "../../ir/types/loom-ir.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { snake, upperFirst } from "../../util/naming.js";
@@ -46,7 +47,13 @@ export function emitWorkflows(
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
 
-  for (const wf of ctx.workflows) {
+  // An event-triggered-only workflow (a reactor / saga started by an event,
+  // never an inbound call) has no `run/2` command surface — its bodies run
+  // via the in-process dispatch handlers (dispatch-emit.ts).  Emitting a
+  // `run/2` over its event-typed `create(e: Event)` would reference the
+  // event as a workflow param and wouldn't compile.  Mirrors .NET's
+  // `emitsCommandRoute` filter.
+  for (const wf of ctx.workflows.filter(workflowEmitsCommandRoute)) {
     const path = `lib/${appName}/${ctxSnake}/workflows/${snake(wf.name)}.ex`;
     const content = renderWorkflow(wf, ctx, contextModule, appModule, sys);
     out.set(path, content);

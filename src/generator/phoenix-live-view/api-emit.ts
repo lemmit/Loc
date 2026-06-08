@@ -4,7 +4,13 @@ import {
   pagedReturn,
 } from "../../ir/stdlib/generics.js";
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
-import type { BoundedContextIR, DeployableIR, SystemIR, TypeIR } from "../../ir/types/loom-ir.js";
+import {
+  type BoundedContextIR,
+  type DeployableIR,
+  type SystemIR,
+  type TypeIR,
+  workflowEmitsCommandRoute,
+} from "../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type UnionMember, unionMembers } from "../_payload/union-wire.js";
@@ -143,7 +149,9 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
   }> = [];
 
   for (const ctx of contexts) {
-    for (const wf of ctx.workflows) {
+    // Event-triggered-only workflows have no HTTP command surface — their
+    // bodies run via the in-process dispatch handlers (dispatch-emit.ts).
+    for (const wf of ctx.workflows.filter(workflowEmitsCommandRoute)) {
       allWorkflows.push({ ctx, wf });
     }
     for (const view of ctx.views) {

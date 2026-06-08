@@ -2415,6 +2415,20 @@ export function workflowIsGuarded(wf: WorkflowIR): boolean {
   return wf.statements.some((s) => s.kind === "requires");
 }
 
+/** True when the workflow exposes an HTTP/UI command surface — its facade
+ *  (the primary unnamed `create`, else the first create) is
+ *  command-triggered.  A workflow whose only `create` is event-triggered
+ *  (`create(e: Event)`) — a reactor / saga started by an event, never an
+ *  inbound call — has no command surface: its bodies run via the
+ *  in-process dispatcher's handlers, so emitting a Request/Command/route
+ *  with an event-typed param would be bogus (and wouldn't compile).
+ *  Shared by every backend's command-surface emitters (channels.md). */
+export function workflowEmitsCommandRoute(wf: WorkflowIR): boolean {
+  const creates = wf.creates ?? [];
+  const facade = creates.find((c) => c.name === null && c.triggerKind === "command") ?? creates[0];
+  return !facade || facade.triggerKind === "command";
+}
+
 /** True when any of the workflow's statements (or a sub-expression
  *  inside one) references `currentUser`.  When true, a backend's
  *  workflow handler must materialise a `currentUser` binding (from the
