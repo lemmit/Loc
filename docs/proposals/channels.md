@@ -3,14 +3,18 @@
 > Status: **PARTIAL** — Slice 1 shipped (#797): the `channel { carries / delivery /
 > retention / key }` context-member surface and the system-scope `channelSource`
 > binding lower to `ChannelIR` / `ChannelSourceIR` (`src/ir/types/loom-ir.ts`).
-> **In-process dispatch shipped (Hono):** an emitted event a `channel` carries is
-> delivered to its `on(e: Event)` reactors and event-triggered `create(e: Event)
-> by` starters via a generated `createInProcessDispatcher(db)` (the default when
-> there is no `channelSource`) — see `docs/workflow.md` §Triggers.  Still
-> unstarted: external brokers via `channelSource` (redis / kafka / nats), the
-> .NET / Phoenix dispatch wiring, the `delivery: queue` competing-consumer
-> semantics, the realtime wire (SSE/WebSocket + edge relay + router), and
-> **Part II** caching / invalidation. The async-messaging / realtime **and** the
+> **In-process dispatch shipped (Hono + .NET):** an emitted event a `channel`
+> carries is delivered to its `on(e: Event)` reactors and event-triggered
+> `create(e: Event) by` starters (the default when there is no `channelSource`)
+> — see `docs/workflow.md` §Triggers.  Hono routes through a generated
+> `createInProcessDispatcher(db)`; .NET publishes each event as a Mediator
+> notification to its reactor / starter `INotificationHandler<TEvent>`s.
+> Both **persist** workflow correlation — a saga-state row keyed by the
+> correlation field, with load-or-allocate (`create`) and route-or-drop+log
+> (`on`).  Still unstarted: external brokers via `channelSource` (redis /
+> kafka / nats), the Phoenix dispatch wiring, the `delivery: queue`
+> competing-consumer semantics, the realtime wire (SSE/WebSocket + edge relay
+> + router), and **Part II** caching / invalidation. The async-messaging / realtime **and** the
 > read-side caching tiers, designed together. Fills the "async messaging/outbox"
 > and "caching & invalidation" gaps in `production-readiness.md` (§3.3–3.4).
 > Depends on / reuses: the publish-subscribe placement + `on(e: Event)` /

@@ -11,7 +11,7 @@ export {
 } from "./emit/api.js";
 export { renderAuditableInterceptor } from "./emit/auditable-interceptor.tpl.js";
 export { renderBaseReaderImpl, renderBaseReaderInterface } from "./emit/base-reader.js";
-export { renderCommon, renderNoopDispatcher } from "./emit/common.js";
+export { renderCommon, renderInProcessDispatcher, renderNoopDispatcher } from "./emit/common.js";
 export {
   renderCommand,
   renderCommandHandler,

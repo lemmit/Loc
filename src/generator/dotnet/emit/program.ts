@@ -55,6 +55,10 @@ export function renderProgram(
      *  trace calls in aggregate methods.  Off keeps Program.cs
      *  free of the registration entirely. */
     emitTrace?: boolean;
+    /** When true, the deployable has channel-routed event subscriptions, so
+     *  Program.cs registers the in-process Mediator-notification dispatcher
+     *  (instead of the no-op) and `IDomainEvent` is a Mediator notification. */
+    hasSubscriptions?: boolean;
     /** Persistence selection (D-REALIZATION-AXES `persistence:`): when true,
      *  the deployable uses Dapper — Program.cs registers an `NpgsqlDataSource`
      *  (not a `DbContext`) and applies the self-contained `DbSchema` at
@@ -67,6 +71,13 @@ export function renderProgram(
   const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   const hasMigrations = !!options?.hasMigrations;
+  // In-process dispatch (channels.md): when the deployable has channel-routed
+  // subscriptions, register the Mediator-notification dispatcher (Scoped — it
+  // depends on the scoped IMediator) so emitted events reach their reactor /
+  // starter handlers.  Otherwise the default no-op stands (byte-identical).
+  const dispatcherRegistration = options?.hasSubscriptions
+    ? `// Domain event dispatch — in-process Mediator-notification dispatcher.\nbuilder.Services.AddScoped<IDomainEventDispatcher, InProcessDomainEventDispatcher>();`
+    : `// Domain event dispatch — default no-op; replace in tests / production.\nbuilder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();`;
   const hasSeeds = !!options?.hasSeeds;
   const usingDapper = !!options?.usingDapper;
   const seedBlock = hasSeeds
@@ -275,8 +286,7 @@ builder.Services.AddScoped(
 `
     : ""
 }
-// Domain event dispatch — default no-op; replace in tests / production.
-builder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();
+${dispatcherRegistration}
 
 ${repoRegistrations}
 ${authDi}

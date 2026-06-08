@@ -20,7 +20,20 @@ public sealed record ${e.name}(${params}) : IDomainEvent;
 `;
 }
 
-export function renderIDomainEvent(ns: string): string {
+export function renderIDomainEvent(ns: string, hasSubscriptions = false): string {
+  // When the deployable has channel-routed subscriptions, domain events are
+  // Mediator notifications so the in-process dispatcher can publish them to
+  // the reactor / starter `INotificationHandler<T>`s.  Otherwise it stays a
+  // plain marker (byte-identical for non-dispatch projects).
+  if (hasSubscriptions) {
+    return `// Auto-generated.
+using Mediator;
+
+namespace ${ns}.Domain.Events;
+
+public interface IDomainEvent : INotification { }
+`;
+  }
   return `// Auto-generated.
 namespace ${ns}.Domain.Events;
 
