@@ -1,0 +1,80 @@
+// Workflow `instanceWireShape` enrichment (workflow-instance-visibility.md):
+// the persisted correlation-state row's canonical wire shape — the
+// workflow-instance analogue of an aggregate's `wireShape`.  Derived only for
+// correlation-bearing workflows; absent for stateless / event-sourced ones.
+
+import { describe, expect, it } from "vitest";
+import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
+import { lowerModel } from "../../src/ir/lower/lower.js";
+import { allContexts } from "../../src/ir/types/loom-ir.js";
+import { parseString } from "../_helpers/index.js";
+
+async function enrichFirstWorkflow(members: string) {
+  const srcText = `
+    system S { subdomain M { context C {
+      aggregate Order { total: int }
+      enum FulfillmentStatus { Pending, Shipped }
+      event PaymentReceived { order: Order id, amount: int }
+      workflow Fulfillment {
+        ${members}
+      }
+    }}}`;
+  const { model } = await parseString(srcText, { validate: false });
+  return allContexts(enrichLoomModel(lowerModel(model)))[0].workflows[0];
+}
+
+describe("workflow instanceWireShape enrichment", () => {
+  it("derives the instance wire shape from the correlation field + state fields", async () => {
+    const wf = await enrichFirstWorkflow(`
+      orderId: Order id
+      status: FulfillmentStatus
+      amountPaid: int
+      create(paid: PaymentReceived) by paid.order { let x = paid.amount }
+    `);
+    expect(wf.correlationField).toBe("orderId");
+    expect(wf.instanceWireShape).toBeDefined();
+    const shape = wf.instanceWireShape ?? [];
+    // Correlation field first, as the id-shaped token row.
+    expect(shape[0]).toMatchObject({ name: "orderId", source: "id", access: "token" });
+    // Then the remaining state fields, declaration order, as properties.
+    expect(shape.slice(1).map((f) => f.name)).toEqual(["status", "amountPaid"]);
+    expect(shape.slice(1).every((f) => f.source === "property")).toBe(true);
+  });
+
+  it("carries the correlation field's declared name (not always `id`)", async () => {
+    const wf = await enrichFirstWorkflow(`
+      orderId: Order id
+      create(paid: PaymentReceived) by paid.order { let x = paid.amount }
+    `);
+    expect(wf.instanceWireShape?.map((f) => f.name)).toEqual(["orderId"]);
+  });
+
+  it("leaves instanceWireShape undefined for a workflow without a correlation field", async () => {
+    // A command-only workflow with no id-shaped state field has no instance
+    // to persist or observe.
+    const wf = await enrichFirstWorkflow(`
+      create(customerId: Order id) { let o = Order.create({ total: 1 }) }
+    `);
+    expect(wf.correlationField).toBeUndefined();
+    expect(wf.instanceWireShape).toBeUndefined();
+  });
+
+  it("is idempotent — enrich(enrich(m)) yields the same shape", async () => {
+    const srcText = `
+      system S { subdomain M { context C {
+        aggregate Order { total: int }
+        event PaymentReceived { order: Order id, amount: int }
+        workflow Fulfillment {
+          orderId: Order id
+          note: string
+          create(paid: PaymentReceived) by paid.order { let x = paid.amount }
+        }
+      }}}`;
+    const { model } = await parseString(srcText, { validate: false });
+    const once = enrichLoomModel(lowerModel(model));
+    const twice = enrichLoomModel(once);
+    expect(allContexts(twice)[0].workflows[0].instanceWireShape).toEqual(
+      allContexts(once)[0].workflows[0].instanceWireShape,
+    );
+  });
+});

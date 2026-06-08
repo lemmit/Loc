@@ -919,6 +919,18 @@ export interface WorkflowIR {
    *  conservative `{:ok, term()}` arm.  Consumed today by the Phoenix `@spec`
    *  emitter to tighten Dialyzer narrowing on every workflow call site. */
   returnType?: TypeIR;
+  /** The canonical wire shape of a *persisted workflow instance* — the
+   *  correlation-state row this workflow's saga persists (the same row
+   *  `workflowStateTableShape` derives a table for).  Set by enrichment
+   *  only when `correlationField` is present (a correlation-bearing,
+   *  state-table-backed workflow): the correlation field as the `id`-shaped
+   *  `token` row, then the remaining `stateFields` as `property` rows, in
+   *  declaration order.  This is the workflow-instance analogue of
+   *  `AggregateIR.wireShape` — the read-only "instance" API + scaffold
+   *  pages (workflow-instance-visibility.md) consume it the way the
+   *  aggregate read surface consumes `wireShape`.  Absent for stateless and
+   *  `eventSourced` workflows (no state table to read). */
+  instanceWireShape?: WireField[];
 }
 
 /** A named `handle name(params) { … }` command handler on a workflow
