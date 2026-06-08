@@ -137,7 +137,7 @@ import {
   EMPTY_CONTEXT_CAPABILITIES,
 } from "./lower-capabilities.js";
 import { lowerDeployable } from "./lower-deployment.js";
-import { criterionRefOf, lowerExpr } from "./lower-expr.js";
+import { criterionRefOf, lowerExpr, setAmbientEnumIndex } from "./lower-expr.js";
 import {
   lowerApply,
   lowerContainment,
@@ -204,6 +204,20 @@ export function lowerModel(model: Model): RawLoomModel {
  *  still lowered loose here so nothing is silently dropped. */
 export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
   const allMembers = models.flatMap((m) => m.members);
+  // Index the project-global ambient root-level enums (value name → enum
+  // name) so a bare enum-value reference (`priority: Normal`) resolves to
+  // its qualified const even when the enum is declared in a sibling kernel
+  // file.  Installed before any body is lowered; first declaration wins on
+  // a cross-enum value-name collision (the validator owns the ambiguity).
+  // See `setAmbientEnumIndex` in lower-expr.ts.
+  const ambientEnumIndex = new Map<string, string>();
+  for (const m of allMembers) {
+    if (!isEnumDecl(m)) continue;
+    for (const v of m.values) {
+      if (!ambientEnumIndex.has(v.name)) ambientEnumIndex.set(v.name, m.name);
+    }
+  }
+  setAmbientEnumIndex(ambientEnumIndex);
   const systemNodes = allMembers.filter(isSystem);
   // Every top-level system-scoped declaration across the import graph —
   // domain (Tier 1: subdomain / context) plus deployment (Tier 2:

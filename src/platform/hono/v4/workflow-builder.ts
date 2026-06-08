@@ -58,14 +58,6 @@ export function buildWorkflowsFile(
   // import list is still the intersection with the emitted text below, so a
   // candidate that isn't actually referenced is dropped — keeping a
   // subscription-free project byte-identical.
-  const aggsTouched = new Set<string>();
-  for (const wf of ctx.workflows) {
-    for (const st of allHandlerStmts(wf)) {
-      if (st.kind === "factory-let" || st.kind === "repo-let") {
-        aggsTouched.add(st.aggName);
-      }
-    }
-  }
   const externAggs = new Set<string>();
   for (const wf of ctx.workflows) {
     for (const st of allHandlerStmts(wf)) {
@@ -199,10 +191,20 @@ export function buildWorkflowsFile(
   const usesSchema = /\bschema\.\w/.test(bodyStr) || /\bNodePgDatabase\b/.test(bodyStr);
   const usesDb = /\bNodePgDatabase\b/.test(bodyStr);
   const usesDispatcher = /\bDomainEventDispatcher\b/.test(bodyStr);
-  const aggsReferenced = [...aggsTouched].filter((n) =>
+  // Candidate aggregate / repository imports: EVERY aggregate in the
+  // (possibly multi-context) merged deployable, filtered to what the body
+  // actually references.  `aggsTouched` only captures factory-let /
+  // repo-let statements, so a retrieval-driven repo from another hosted
+  // context (`new StockItemRepository(...)` for a `runItemsToRecount`
+  // spec) was never imported — `tsc` then fails with "Cannot find name
+  // 'StockItemRepository'".  Scanning the full aggregate set keeps the
+  // import line correct across context boundaries; the body-text filter
+  // still drops anything not referenced so the file stays dead-import-free.
+  const allAggNames = ctx.aggregates.map((a) => a.name);
+  const aggsReferenced = allAggNames.filter((n) =>
     new RegExp(`\\bnew\\s+${n}\\(|\\b${n}\\.\\w`).test(bodyStr),
   );
-  const reposReferenced = [...aggsTouched].filter((n) =>
+  const reposReferenced = allAggNames.filter((n) =>
     new RegExp(`\\bnew\\s+${n}Repository\\(`).test(bodyStr),
   );
   const externReferenced = [...externAggs].filter((n) =>

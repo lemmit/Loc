@@ -94,6 +94,29 @@ import {
  *  the name carries no members of its own (Phase 4). */
 const RESOURCE_HANDLE_SHAPE = "__ResourceHandle";
 
+// ── Ambient root-level enum index ─────────────────────────────────────
+// Root-level (`enum X { … }` outside any `context`) enums are an ambient
+// shared kernel — every context in the import graph may reference their
+// values by bare name (`priority: Normal`).  Enrichment folds them into
+// each context's `enums`, but that runs AFTER lowering, and in a
+// multi-file project the enum lives in a different document than the
+// context being lowered, so `resolveBareName`'s context-member scan can't
+// see it.  Without this, `Normal` lowers to `refKind: "unknown"` and
+// renders as a bare, undefined identifier (`priority: Normal`) instead of
+// the qualified const (`priority: Priority.Normal`).
+//
+// `lowerProject` collects the project-global value→enum index once (across
+// every document) and installs it here before lowering any body.  It's a
+// fallback only — context-local enums still win — and lowering is a
+// synchronous single pass, so the scoped index is safe.  First declaration
+// wins on a value-name collision across root enums (the validator owns the
+// ambiguity diagnostic).
+let ambientEnumIndex: ReadonlyMap<string, string> = new Map();
+
+export function setAmbientEnumIndex(index: ReadonlyMap<string, string>): void {
+  ambientEnumIndex = index;
+}
+
 /** Map a resource verb's declared result to a `TypeIR`.  `json`/`json?`
  *  → the `json` primitive (optional wrapped); `void`/unknown → a string
  *  placeholder (the value is unused at a void call site). */
@@ -801,6 +824,21 @@ function resolveNameRef(name: string, env: Env): ExprIR {
         }
       }
     }
+  }
+  // Ambient root-level enum value (`Priority.Normal` from a kernel file).
+  // Checked after context-local enums so a same-named local value wins.
+  // Gated on `env.ctx` like the context-local enum scan above: an e2e
+  // test body (no ctx) renders bare names verbatim, so it must not start
+  // resolving names that happen to match a kernel enum value.
+  const ambientEnum = env.ctx ? ambientEnumIndex.get(name) : undefined;
+  if (ambientEnum) {
+    return {
+      kind: "ref",
+      name,
+      refKind: "enum-value",
+      enumName: ambientEnum,
+      type: { kind: "enum", name: ambientEnum },
+    };
   }
   return { kind: "ref", name, refKind: "unknown" };
 }
