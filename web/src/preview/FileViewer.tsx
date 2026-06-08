@@ -6,6 +6,7 @@ import { languageFromPath } from "./file-tree";
 import type { VirtualFile } from "../build/protocol";
 import type { C4Spec, LayoutedC4Model } from "./likec4-model";
 import { buildLayoutedModel } from "./likec4-model";
+import { reloadOnceForStaleChunks } from "../ErrorBoundary";
 
 installMonacoEnvironment();
 
@@ -77,6 +78,7 @@ function LikeC4Viewer({ specJson, source }: { specJson: string; source: string }
           setModel(built);
         }
       } catch (err) {
+        if (reloadOnceForStaleChunks(err)) return;
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       }
     })();
@@ -241,6 +243,11 @@ function MermaidViewer({ content }: { content: string }): JSX.Element {
         const { svg } = await mermaid.render(id, content);
         if (!cancelled) setSvg(svg);
       } catch (err) {
+        // Mermaid lazy-loads one chunk per diagram type; on a stale tab
+        // after a redeploy those chunk URLs 404 and surface here as
+        // "Failed to fetch dynamically imported module".  Trigger the
+        // one-shot reload so the user picks up the current asset hashes.
+        if (reloadOnceForStaleChunks(err)) return;
         if (!cancelled) {
           setSvg(null);
           setError(err instanceof Error ? err.message : String(err));
