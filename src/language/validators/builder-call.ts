@@ -118,6 +118,13 @@ export function checkBuilderCallType(
     if (model.members.some((m) => isValueObject(m) && (m as { name: string }).name === name)) {
       continue;
     }
+    // 2c. Root-level record payload (`error`/`payload`/… at file scope, the
+    //     ambient shared kernel — exception-less.md A1).  Constructible by the
+    //     builder-call form like a context-local record payload (case 2),
+    //     matching the lowering resolver (`findPayloadByName`'s root fallback).
+    if (model.members.some((m) => isPayloadDecl(m) && m.name === name && m.variants.length === 0)) {
+      continue;
+    }
     // 3. User-defined component in enclosing UI (ui-scope wins on
     //    name collision with a top-level component declared in the
     //    same workspace).

@@ -373,9 +373,19 @@ export function findEventByName(env: Env, name: string): EventDecl | undefined {
  *  c.field … }`) resolves the param's `entity` marker back to the payload's
  *  flat field set through this lookup. */
 export function findPayloadByName(env: Env, name: string): PayloadDecl | undefined {
-  if (!env.ctx) return undefined;
-  for (const m of env.ctx.members) {
-    if (isPayloadDecl(m) && m.name === name) return m;
+  if (env.ctx) {
+    for (const m of env.ctx.members) {
+      if (isPayloadDecl(m) && m.name === name) return m;
+    }
+  }
+  // Ambient root-level payloads (exception-less.md A1): a context-local payload
+  // shadows (checked first above), else fall back to a file-scope `payload`/
+  // `error` declared on the Model root.
+  const root = env.ctx ? AstUtils.findRootNode(env.ctx) : undefined;
+  if (root && isModel(root)) {
+    for (const m of root.members) {
+      if (isPayloadDecl(m) && m.name === name) return m;
+    }
   }
   return undefined;
 }
