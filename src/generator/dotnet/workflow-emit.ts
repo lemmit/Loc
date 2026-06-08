@@ -11,7 +11,12 @@ import {
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { errorStatuses } from "../../ir/util/openapi-errors.js";
-import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
+import {
+  camelId,
+  opWorkflow,
+  opWorkflowInstanceById,
+  opWorkflowInstances,
+} from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderDotnetLogCall } from "../_obs/render-dotnet.js";
@@ -21,6 +26,7 @@ import {
   csIdValueClrType,
   domainToRequestExpr,
   dtoParam,
+  projectToResponse,
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
@@ -1006,6 +1012,133 @@ public sealed class ${className} : ControllerBase
 {
     private readonly IMediator _mediator;
     public ${className}(IMediator mediator) => _mediator = mediator;
+
+${blocks.join("\n")}
+}
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Read-only instance endpoints (workflow-instance-visibility.md).
+//
+// For every observable workflow (a correlation-state row + enriched
+// `instanceWireShape`), emit an instance Response DTO and a controller exposing
+// GET list + GET by-id over the saga-state table — the read-side analogue of an
+// aggregate's GET list / GET-by-id, mirroring the Hono instance routes.  Driven
+// off `instanceWireShape` independently of the command controller, so an
+// event-triggered-only saga still gets observed.
+// ---------------------------------------------------------------------------
+
+export function emitWorkflowInstanceReads(
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+  out: Map<string, string>,
+  options?: { routePrefix?: string },
+): void {
+  const observable = ctx.workflows.filter((wf) => !!wf.instanceWireShape);
+  if (observable.length === 0) return;
+  for (const wf of observable) {
+    out.set(
+      `Application/Workflows/${upperFirst(wf.name)}InstanceResponse.cs`,
+      renderInstanceResponseDto(wf, ctx, ns),
+    );
+  }
+  out.set(
+    `Api/${ctx.name}WorkflowInstancesController.cs`,
+    renderInstancesController(ctx, ns, observable, options?.routePrefix),
+  );
+}
+
+/** The instance Response DTO — `instanceWireShape` projected to wire types,
+ *  the workflow-instance analogue of an aggregate's `<Agg>Response`. */
+function renderInstanceResponseDto(
+  wf: WorkflowIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): string {
+  const params = (wf.instanceWireShape ?? [])
+    .map((f) => `${wireType(f.type, ctx, "response")} ${upperFirst(f.name)}`)
+    .join(", ");
+  return `// Auto-generated.
+using System;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+
+namespace ${ns}.Application.Workflows;
+
+public sealed record ${upperFirst(wf.name)}InstanceResponse(${params});
+`;
+}
+
+/** One controller per context exposing every observable workflow's instances
+ *  as `GET workflows/<snake>/instances` + `.../instances/{id}`, reading the
+ *  EF-mapped saga-state DbSet and projecting each row through
+ *  `projectToResponse` (id → `.Value`, enum/datetime/etc. handled). */
+function renderInstancesController(
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+  workflows: WorkflowIR[],
+  routePrefix?: string,
+): string {
+  const className = `${ctx.name}WorkflowInstancesController`;
+  const route = `${routePrefix ?? ""}workflows`;
+  const usings = new Set<string>();
+  const blocks: string[] = [];
+  for (const wf of workflows) {
+    const slug = snake(wf.name);
+    const T = upperFirst(wf.name);
+    const dbSet = workflowStateDbSet(wf);
+    const shape = wf.instanceWireShape ?? [];
+    for (const f of shape) collectWireUsings(f.type, ctx, usings);
+    const corr = shape.find((f) => f.source === "id");
+    const corrName = upperFirst(wf.correlationField as string);
+    const targetName = corr && corr.type.kind === "id" ? corr.type.targetName : "";
+    const proj = (rowVar: string): string =>
+      shape
+        .map((f) => projectToResponse(`${rowVar}.${upperFirst(f.name)}`, f.type, ctx))
+        .join(", ");
+    blocks.push(
+      `    [HttpGet("${slug}/instances")]\n` +
+        `    [ProducesResponseType(typeof(IEnumerable<${T}InstanceResponse>), 200)]\n` +
+        `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflowInstances(wf.name)))}()\n` +
+        `    {\n` +
+        `        var rows = await _db.${dbSet}.AsNoTracking().ToListAsync();\n` +
+        `        return Ok(rows.Select(x => new ${T}InstanceResponse(${proj("x")})));\n` +
+        `    }\n` +
+        `    [HttpGet("${slug}/instances/{id}")]\n` +
+        `    [ProducesResponseType(typeof(${T}InstanceResponse), 200)]\n` +
+        `    [ProducesResponseType(typeof(ProblemDetails), 404)]\n` +
+        `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflowInstanceById(wf.name)))}(Guid id)\n` +
+        `    {\n` +
+        `        var __key = new ${targetName}Id(id);\n` +
+        `        var x = await _db.${dbSet}.AsNoTracking().FirstOrDefaultAsync(r => r.${corrName} == __key);\n` +
+        `        if (x is null) return NotFound();\n` +
+        `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n` +
+        `    }\n`,
+    );
+  }
+  const extraUsings = [...usings].sort().map((n) => `using ${n};`);
+  return `// Auto-generated.
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;${extraUsings.length > 0 ? "\n" + extraUsings.join("\n") : ""}
+using ${ns}.Application.Workflows;
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+using ${ns}.Infrastructure.Persistence;
+
+namespace ${ns}.Api;
+
+[ApiController]
+[Route("${route}")]
+public sealed class ${className} : ControllerBase
+{
+    private readonly AppDbContext _db;
+    public ${className}(AppDbContext db) => _db = db;
 
 ${blocks.join("\n")}
 }
