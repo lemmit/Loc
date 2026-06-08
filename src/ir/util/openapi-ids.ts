@@ -66,6 +66,17 @@ export function opWorkflow(wfName: string): OpIdTokens {
   return [wfName, "workflow"];
 }
 
+/** `GET /workflows/<wf>/instances` — list a workflow's running instances. */
+export function opWorkflowInstances(wfName: string): OpIdTokens {
+  return ["all", wfName, "instances"];
+}
+
+/** `GET /workflows/<wf>/instances/{id}` — fetch one workflow instance by its
+ *  correlation id. */
+export function opWorkflowInstanceById(wfName: string): OpIdTokens {
+  return ["get", wfName, "instance", "byId"];
+}
+
 /** `GET /views/<view>` — query a read-model view. */
 export function opView(viewName: string): OpIdTokens {
   return [viewName, "view"];

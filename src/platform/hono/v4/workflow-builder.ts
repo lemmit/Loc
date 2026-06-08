@@ -12,10 +12,15 @@ import {
   workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
-import { camelId, opWorkflow } from "../../../ir/util/openapi-ids.js";
+import {
+  camelId,
+  opWorkflow,
+  opWorkflowInstanceById,
+  opWorkflowInstances,
+} from "../../../ir/util/openapi-ids.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
+import { emitWireSchema, wireToDomainExpr, zodFor, zodForResponse } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
 // Hono workflow emission.
@@ -114,6 +119,14 @@ export function buildWorkflowsFile(
     }
     body.push(`}).openapi("${upperFirst(wf.name)}Request");`);
   }
+  // Per-workflow instance response DTOs (workflow-instance-visibility.md):
+  // the persisted correlation-state row's wire shape + its list carrier.
+  // Emitted for every correlation-bearing workflow (`instanceWireShape` set
+  // by enrichment) — independent of whether the workflow has a command route.
+  for (const wf of ctx.workflows) {
+    if (!wf.instanceWireShape) continue;
+    body.push(...emitInstanceResponseSchemas(wf));
+  }
   // RFC 7807 ProblemDetails (with §3.2 `errors[]` extension for validation
   // failures) lives in `http/problem-details.ts` — imported at the top of
   // this file.  Same Zod schema instance referenced in every router so
@@ -132,6 +145,16 @@ export function buildWorkflowsFile(
   for (const wf of ctx.workflows) {
     if (!emitsCommandRoute(wf)) continue;
     body.push(...emitWorkflowRoute(wf, ctx, aggsByName).map((l) => `  ${l}`));
+    body.push("");
+  }
+
+  // Read-only instance routes (workflow-instance-visibility.md): GET the
+  // running instances + GET one by correlation id, over the saga-state table.
+  // Driven off `instanceWireShape` independently of the command route — an
+  // event-triggered-only saga still has instances to observe.
+  for (const wf of ctx.workflows) {
+    if (!wf.instanceWireShape) continue;
+    body.push(...emitInstanceRoutes(wf).map((l) => `  ${l}`));
     body.push("");
   }
 
@@ -421,6 +444,95 @@ function emitsCommandRoute(wf: WorkflowIR): boolean {
   const facade =
     wf.creates.find((c) => c.name === null && c.triggerKind === "command") ?? wf.creates[0];
   return !facade || facade.triggerKind === "command";
+}
+
+/** The instance-response Zod DTO + its list carrier for an observable
+ *  workflow (workflow-instance-visibility.md).  Walks `instanceWireShape` the
+ *  same way `routes-builder.emitResponseDtoSchema` walks an aggregate's
+ *  `wireShape` — id-source rows are `z.string()`, the rest go through the
+ *  shared `zodForResponse`.  File-local (`const`): nothing imports these. */
+function emitInstanceResponseSchemas(wf: WorkflowIR): string[] {
+  const T = upperFirst(wf.name);
+  const out: string[] = [];
+  out.push(`const ${T}InstanceResponse = z.object({`);
+  for (const f of wf.instanceWireShape ?? []) {
+    if (f.source === "id") {
+      out.push(`  ${f.name}: z.string(),`);
+    } else {
+      out.push(`  ${f.name}: ${zodForResponse(f.type, f.optional)},`);
+    }
+  }
+  out.push(`}).openapi("${T}InstanceResponse");`);
+  out.push(
+    `const ${T}InstanceListResponse = z.array(${T}InstanceResponse).openapi("${T}InstanceListResponse");`,
+  );
+  return out;
+}
+
+/** The two read-only instance routes for an observable workflow:
+ *    GET /<snake>/instances        → list every saga-state row
+ *    GET /<snake>/instances/{id}   → one row by correlation id (404 if absent)
+ *  Both read the workflow-state Drizzle table directly (the same table
+ *  `emitWorkflowStateHelpers` loads/upserts).  Rows are cast to the response
+ *  type: `c.json` JSON-serialises them (Date → ISO string, branded ids →
+ *  string), so the raw row matches the wire shape for the common saga types —
+ *  the read-side analogue of an aggregate route's `repo.toWire(...)` cast.
+ *  The route prefix nests under the already-mounted `/workflows` router, so
+ *  `/<snake>/instances` does not collide with the bare-path POST command. */
+function emitInstanceRoutes(wf: WorkflowIR): string[] {
+  const T = upperFirst(wf.name);
+  const slug = snake(wf.name);
+  const table = `schema.${lowerFirst(plural(wf.name))}`;
+  const corr = wf.correlationField as string;
+  const out: string[] = [];
+  // List.
+  out.push(`app.openapi(`);
+  out.push(`  createRoute({`);
+  out.push(`    method: "get",`);
+  out.push(`    path: "/${slug}/instances",`);
+  out.push(`    tags: ["workflows"],`);
+  out.push(`    operationId: "${camelId(opWorkflowInstances(wf.name))}",`);
+  out.push(`    responses: {`);
+  out.push(
+    `      200: { description: "OK", content: { "application/json": { schema: ${T}InstanceListResponse } } },`,
+  );
+  out.push(`    },`);
+  out.push(`  }),`);
+  out.push(`  async (httpCtx) => {`);
+  out.push(`    const rows = await db.select().from(${table});`);
+  out.push(
+    `    return httpCtx.json(rows as unknown as z.infer<typeof ${T}InstanceListResponse>, 200);`,
+  );
+  out.push(`  },`);
+  out.push(`);`);
+  // By correlation id.
+  out.push(`app.openapi(`);
+  out.push(`  createRoute({`);
+  out.push(`    method: "get",`);
+  out.push(`    path: "/${slug}/instances/{id}",`);
+  out.push(`    tags: ["workflows"],`);
+  out.push(`    operationId: "${camelId(opWorkflowInstanceById(wf.name))}",`);
+  out.push(`    request: { params: z.object({ id: z.string() }) },`);
+  out.push(`    responses: {`);
+  out.push(
+    `      200: { description: "OK", content: { "application/json": { schema: ${T}InstanceResponse } } },`,
+  );
+  out.push(
+    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  out.push(`    },`);
+  out.push(`  }),`);
+  out.push(`  async (httpCtx) => {`);
+  out.push(`    const { id } = httpCtx.req.valid("param");`);
+  out.push(
+    `    const rows = await db.select().from(${table}).where(eq(${table}.${corr}, id)).limit(1);`,
+  );
+  out.push(`    const row = rows[0];`);
+  out.push(`    if (!row) throw new AggregateNotFoundError("not_found");`);
+  out.push(`    return httpCtx.json(row as unknown as z.infer<typeof ${T}InstanceResponse>, 200);`);
+  out.push(`  },`);
+  out.push(`);`);
+  return out;
 }
 
 /** All statements that contribute emitted handler code for a workflow — the
