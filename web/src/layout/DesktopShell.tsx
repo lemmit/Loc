@@ -1,5 +1,5 @@
 import { Box, Group as MGroup, SegmentedControl, Text, UnstyledButton } from "@mantine/core";
-import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 
 // The visual Builder pulls in craft.js + a main-thread Langium parse; lazily
 // loaded so neither lands in the main chunk until the Builder tab is opened.
@@ -20,9 +20,8 @@ import { PreviewPane } from "./PreviewPane";
 import { DevToolsDock, type DockTab } from "./DevToolsDock";
 import { ExplorerTree } from "../preview/ExplorerTree";
 import { FileViewer } from "../preview/FileViewer";
-import { useWorkspaceFiles } from "../workspace/use-workspace-files";
+import { SourceFilesTree } from "./SourceFilesTree";
 import { usePersistedState } from "../util/usePersistedState";
-import type { TreeNode } from "../preview/file-tree";
 import { modeLabel, type LayoutCtx } from "./ctx";
 
 type ExplorerMode = "user" | "generated";
@@ -59,7 +58,7 @@ const layoutStorage = typeof window !== "undefined" ? window.localStorage : unde
 //   │ Bottom — Dev Tools (tabbed)             │
 //   └─────────────────────────────────────────┘
 export function DesktopShell({ ctx }: Props): JSX.Element {
-  const { files, generateResult, reactBundleStatus, ddl, setSelectedPath, tree, workspace } = ctx;
+  const { files, generateResult, reactBundleStatus, ddl, setSelectedPath, tree } = ctx;
 
   // Center area shows either the editable source (main.ddd) or a
   // read-only view of a file opened from the Explorer.  The editor
@@ -70,7 +69,9 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
   const [secondaryDoc, setSecondaryDoc] = useState<SecondaryDoc | null>(null);
   const [explorerMode, setExplorerMode] = usePersistedState<ExplorerMode>(
     "loom.desktop.explorerMode",
-    "generated",
+    // Default to your source files — the managed "User code" tree is the
+    // primary explorer now; "Generated" is for browsing emitted output.
+    "user",
   );
   // Coerce tab values persisted before Problems/Generator/Bundler were
   // folded into the consolidated Output panel.
@@ -82,16 +83,6 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
       ? "output"
       : dockTabRaw;
 
-  const workspaceNodes = useWorkspaceFiles(workspace.store);
-  // main.ddd is the user's source; surface it even before the first
-  // autosave has written it into the workspace VFS.
-  const userNodes = useMemo<TreeNode[]>(() => {
-    if (workspaceNodes.some((n) => n.kind === "file" && n.path === "main.ddd")) {
-      return workspaceNodes;
-    }
-    return [{ kind: "file", name: "main.ddd", path: "main.ddd", size: 0 }, ...workspaceNodes];
-  }, [workspaceNodes]);
-
   const onPickGenerated = (path: string): void => {
     const file = files.find((f) => f.path === path);
     if (!file) return;
@@ -100,30 +91,9 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
     setCenterView("secondary");
   };
 
-  const onPickUser = (path: string): void => {
-    if (path === "main.ddd") {
-      setCenterView("source");
-      return;
-    }
-    const store = workspace.store;
-    if (!store) return;
-    // git-backed reads are async — open the file once it resolves.
-    void store.readFile(`/workspace/${path}`).then((content) => {
-      if (content == null) return;
-      setSecondaryDoc({ source: "workspace", path, content });
-      setCenterView("secondary");
-    });
-  };
-
-  // Which row each Explorer view highlights as active.
+  // Which row the generated Explorer view highlights as active.
   const generatedSelection =
     secondaryDoc?.source === "generated" ? secondaryDoc.path : null;
-  const userSelection =
-    centerView === "source"
-      ? "main.ddd"
-      : secondaryDoc?.source === "workspace"
-        ? secondaryDoc.path
-        : null;
 
   const leftRef = usePanelRef();
   const rightRef = usePanelRef();
@@ -234,11 +204,23 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                       emptyHint="No files yet — click Generate."
                     />
                   ) : (
-                    <ExplorerTree
-                      nodes={userNodes}
-                      selectedPath={userSelection}
-                      onActivateFile={onPickUser}
-                      emptyHint="No workspace files."
+                    // The single source-file explorer: create / rename /
+                    // delete via right-click or the per-row kebab, and a
+                    // click opens the file editable in the center editor.
+                    <SourceFilesTree
+                      variant="embedded"
+                      files={ctx.sourceFiles}
+                      activePath={ctx.activeSourcePath}
+                      onSelect={(p) => {
+                        ctx.setActiveSourcePath(p);
+                        setCenterView("source");
+                      }}
+                      onCreate={ctx.createSourceFile}
+                      onDelete={ctx.deleteSourceFile}
+                      onRename={ctx.renameSourceFile}
+                      emptyFolders={ctx.emptySourceFolders}
+                      onCreateFolder={ctx.createEmptySourceFolder}
+                      onDeleteFolder={ctx.deleteSourceFolder}
                     />
                   )}
                 </Box>

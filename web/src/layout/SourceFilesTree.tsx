@@ -56,8 +56,12 @@ export interface SourceFilesTreeProps {
   onDeleteFolder?: (folder: string) => void;
   /** Rename a file: write `newPath` with the old content, drop `oldPath`. */
   onRename?: (oldPath: string, newPath: string) => void;
-  /** Layout: a persistent desktop sidebar or a collapsible mobile panel. */
-  variant?: "sidebar" | "accordion";
+  /** Layout:
+   *   - `sidebar`   — a standalone desktop column (own header + border).
+   *   - `accordion` — a collapsible mobile panel.
+   *   - `embedded`  — fills a host panel (no own header/border); used by
+   *     the desktop left Explorer's "User code" view. */
+  variant?: "sidebar" | "accordion" | "embedded";
 }
 
 const EMPTY_FOLDER_MARKER = ".empty-folder";
@@ -397,9 +401,9 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
     <Box
       onContextMenu={onEmptyContextMenu}
       style={
-        variant === "sidebar"
-          ? { flex: 1, minHeight: 0, overflow: "auto" }
-          : { maxHeight: 240, overflow: "auto" }
+        variant === "accordion"
+          ? { maxHeight: 240, overflow: "auto" }
+          : { flex: 1, minHeight: 0, overflow: "auto" }
       }
     >
       {inlineForm}
@@ -418,6 +422,22 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
       {contextMenu}
     </Box>
   );
+
+  if (variant === "embedded") {
+    // Fills a host panel (the desktop left Explorer): just a compact "+"
+    // row + the tree.  The host owns the section header / chrome.
+    return (
+      <Box
+        data-testid="source-files-tree"
+        style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+      >
+        <Group justify="flex-end" wrap="nowrap" px="xs" py={2}>
+          {addMenu}
+        </Group>
+        {treeBody}
+      </Box>
+    );
+  }
 
   if (variant === "sidebar") {
     return (

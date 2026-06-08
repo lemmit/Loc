@@ -44,9 +44,13 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
   } = ctx;
   if (!lspClient) return null;
 
-  const explorer = (
+  // Mobile only: a collapsible source-file tree above the editor.  On
+  // desktop the single file explorer lives in the left Explorer panel
+  // (DesktopShell), so the editor pane is just the editor — no second
+  // tree of the same files.
+  const explorer = isDesktop ? null : (
     <SourceFilesTree
-      variant={isDesktop ? "sidebar" : "accordion"}
+      variant="accordion"
       files={sourceFiles}
       activePath={activeSourcePath}
       onSelect={setActiveSourcePath}
@@ -85,9 +89,10 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
         minWidth: 0,
         minHeight: 0,
         display: "flex",
-        // Desktop: explorer sidebar beside the editor.  Mobile: explorer
-        // accordion stacked above the editor.
-        flexDirection: isDesktop ? "row" : "column",
+        // Mobile stacks the accordion explorer above the editor; desktop
+        // has no in-pane explorer (it's the left panel), so this is just
+        // the editor.
+        flexDirection: "column",
         borderRight: border === "right" ? "1px solid var(--mantine-color-dark-4)" : undefined,
         borderBottom: border === "bottom" ? "1px solid var(--mantine-color-dark-4)" : undefined,
       }}
