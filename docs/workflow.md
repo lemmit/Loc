@@ -210,13 +210,14 @@ elsewhere a bare event/payload name stays unresolved.  See the
 [language reference](language.md#type-references).
 
 > **Status.** The parameter surface above parses, resolves, and
-> type-checks today.  **In-process dispatch ships on the Hono and .NET
-> backends** (channels.md): when a `channel` in the deployable `carries:`
-> the event, an emitted event is delivered to every `on(e: Event)` reactor
-> and event-triggered `create(e: Event) by` starter that subscribes to it,
-> and a handler's own `emit` re-enters the dispatcher so choreography
-> chains run.  No `channelSource` ⇒ this in-process dispatcher is the
-> default; a channel-less project keeps the no-op (byte-identical).
+> type-checks today.  **In-process dispatch ships on the Hono, .NET, and
+> Phoenix backends** (channels.md): when a `channel` in the deployable
+> `carries:` the event, an emitted event is delivered to every
+> `on(e: Event)` reactor and event-triggered `create(e: Event) by` starter
+> that subscribes to it, and a handler's own `emit` re-enters the dispatcher
+> so choreography chains run.  No `channelSource` ⇒ this in-process
+> dispatcher is the default; a channel-less project keeps the no-op
+> (byte-identical).
 >
 > - **Hono** routes each `emit` through the generated
 >   `createInProcessDispatcher(db)`.  Correlation is **persisted**: a
@@ -234,9 +235,17 @@ elsewhere a bare event/payload name stays unresolved.  See the
 >   row (seeding the key + typed defaults via the injected `AppDbContext`),
 >   an `on` reactor routes to the existing row or drops + logs
 >   `event_unrouted`, and `this.<stateField>` reads the loaded row.
+> - **Phoenix** emits a per-context `<Ctx>.Dispatcher` that pattern-matches
+>   each event struct to its handler module(s); each subscription becomes a
+>   `<Wf>.Start<Event>` / `<Wf>.On<Event>` module with a `handle(event)`,
+>   and a handler's own `emit` re-enters `<Ctx>.Dispatcher.dispatch/1`.
+>   Correlation is **persisted** through a saga-state `Ecto.Schema` keyed by
+>   the correlation field (over the table the canonical migration derives),
+>   read/written through the app `Repo`: a `create` starter loads-or-allocates
+>   the row, an `on` reactor routes to it or drops + logs `event_unrouted`.
+>   An event-triggered-only workflow emits no `run/2` / HTTP command surface.
 >
 > Still deferred: external brokers (redis / kafka / nats via
-> `channelSource`) and **Phoenix** dispatch wiring (the
-> `IDomainEventDispatcher` seam exists, the routing does not yet).  See
+> `channelSource`).  See
 > [`channels.md`](proposals/channels.md) and
 > [`workflow-and-applier.md`](proposals/workflow-and-applier.md).

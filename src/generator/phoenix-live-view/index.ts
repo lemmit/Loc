@@ -12,6 +12,7 @@ import { generateReactForContexts } from "../react/index.js";
 import { emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitContext } from "./context-emit.js";
+import { emitDispatch } from "./dispatch-emit.js";
 import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
 import { emitMigrations } from "./migrations-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
@@ -128,6 +129,10 @@ export function generatePhoenixLiveViewProject(
   for (const ctx of contexts) {
     emitWorkflows(appName, ctx, appModule, out, sys);
     emitViews(appName, ctx, appModule, out);
+    // In-process event dispatch (channels.md): reactor / event-create
+    // handler modules + the per-context dispatcher + saga-state schemas.
+    // No-op when the context carries no channel-routed subscriptions.
+    emitDispatch(appName, ctx, appModule, out, sys);
   }
 
   // --- Migrations -----------------------------------------------------------

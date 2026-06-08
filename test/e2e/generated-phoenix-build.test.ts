@@ -84,6 +84,13 @@ describe.skipIf(!ENABLED)(
       // `list_parties` base reader.  The decisive check that Ash 3.x compiles
       // multiple resources mapping to one table (Ash has no native STI).
       { name: "tph.ddd" },
+      // In-process event dispatch (channels.md): compiles the emitted
+      // per-context Dispatcher, the reactor / event-create handler modules
+      // (`StartOrderPlaced` / `OnShipmentRequested`), and the persisted
+      // saga-state `Ecto.Schema` (load-or-allocate / route-or-drop+log)
+      // against real Ash 3.x — the decisive check that the event-triggered
+      // saga path compiles under `--warnings-as-errors`.
+      { name: "dispatch.ddd" },
     ])("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

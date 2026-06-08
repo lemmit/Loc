@@ -125,8 +125,45 @@ function writeInitialFile(
   const migrationName = `Create${tableToPascal(table.name)}`;
   const body = isJoinTable(table)
     ? renderInitialJoinFile(table, migrationName, appModule)
-    : renderInitialFile(table, migrationName, appModule);
+    : isStateTable(table)
+      ? renderInitialStateFile(table, migrationName, appModule)
+      : renderInitialFile(table, migrationName, appModule);
   out.set(path, body);
+}
+
+/** A persisted workflow-correlation (saga) state table: keyed by the
+ *  workflow's correlation field rather than a synthetic `id`, with no
+ *  foreign keys (the routing row is standalone).  `renderInitialFile`'s
+ *  hard-coded `id` PK doesn't fit, so these render with the correlation
+ *  column(s) marked `primary_key: true`. */
+function isStateTable(t: TableShape): boolean {
+  return !t.columns.some((c) => c.name === "id") && !isJoinTable(t);
+}
+
+function renderInitialStateFile(
+  table: TableShape,
+  migrationName: string,
+  appModule: string,
+): string {
+  const pk = new Set(table.primaryKey);
+  const prefix = prefixOpt(table.schema);
+  const colLines = table.columns.map((c) => {
+    if (pk.has(c.name)) {
+      return `      add :${c.name}, ${ectoPrimaryKeyType(c.type)}, primary_key: true, null: false`;
+    }
+    return "      " + renderEctoColumn(c, table);
+  });
+  return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
+  use Ecto.Migration
+
+  def change do
+${schemaCreateLine(table.schema)}    create table(:${table.name}, primary_key: false${prefix}) do
+${colLines.join("\n")}
+      timestamps()
+    end
+  end
+end
+`;
 }
 
 function renderInitialFile(table: TableShape, migrationName: string, appModule: string): string {

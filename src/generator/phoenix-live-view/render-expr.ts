@@ -65,6 +65,13 @@ export interface RenderCtx {
    *  `where` predicates that bind declared parameters.  Off everywhere
    *  else (op / derived / invariant bodies use plain locals). */
   filterArgs?: boolean;
+  /** Per-name rewrite for `param` references.  Used by the in-process
+   *  dispatch handlers (dispatch-emit.ts), where a reactor / event-create
+   *  body's single bound event param (`s` in `on(s: ShipmentRequested)`)
+   *  must render as the handler's `event` argument rather than a bare
+   *  `s`.  A param whose name is a key here renders as the mapped value
+   *  (so `s.order` → `event.order`); other refs are unaffected. */
+  paramRenames?: Record<string, string>;
 }
 
 const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };
@@ -170,6 +177,8 @@ function renderLiteral(lit: string, value: string): string {
 function renderRef(e: RefExpr, ctx: RenderCtx): string {
   switch (e.refKind) {
     case "param":
+      // Dispatch handlers rename the bound event param to `event`.
+      if (ctx.paramRenames?.[e.name]) return ctx.paramRenames[e.name];
       // Inside an Ash read-action `filter expr(...)`, a declared argument
       // is bound via `^arg(:name)`; everywhere else a param is a plain
       // local.  (`let`/`lambda` are always locals — never read-action args.)
