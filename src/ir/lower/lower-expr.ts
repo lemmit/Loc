@@ -117,7 +117,6 @@ export function setAmbientEnumIndex(index: ReadonlyMap<string, string>): void {
   ambientEnumIndex = index;
 }
 
-
 /** Map a resource verb's declared result to a `TypeIR`.  `json`/`json?`
  *  → the `json` primitive (optional wrapped); `void`/unknown → a string
  *  placeholder (the value is unused at a void call site). */

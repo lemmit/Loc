@@ -56,6 +56,8 @@ describe("Hono workflow — ambient root-enum value resolves qualified", () => {
     expect(wf).toContain("priority: Priority.Normal");
     expect(wf).not.toMatch(/priority:\s*Normal\b/);
     // The enum const must be imported (it's referenced as a runtime value).
-    expect(wf).toMatch(/import\s*\{[^}]*\bPriority\b[^}]*\}\s*from\s*"\.\.\/domain\/value-objects"/);
+    expect(wf).toMatch(
+      /import\s*\{[^}]*\bPriority\b[^}]*\}\s*from\s*"\.\.\/domain\/value-objects"/,
+    );
   });
 });
