@@ -33,6 +33,14 @@ export function defaultErrorStatus(name: string): number {
   return STDLIB_ERROR_STATUS[name] ?? 500;
 }
 
+/** True when an error name is one of the blessed stdlib errors (carries a
+ *  default status).  A user-declared error that is *not* stdlib and has no
+ *  api `httpStatus` override falls through to 500 — the validator warns
+ *  (`loom.unmapped-error-status`) prompting an explicit mapping. */
+export function isStdlibError(name: string): boolean {
+  return name in STDLIB_ERROR_STATUS;
+}
+
 /** The RFC-7807 `title` for an error: its name prettified —
  *  `NotFound` → `"Not Found"`, `OutOfStock` → `"Out Of Stock"`. */
 export function errorTitle(name: string): string {
