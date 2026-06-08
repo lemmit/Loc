@@ -545,6 +545,16 @@ function lowerBuilderCall(expr: BuilderCall, env: Env): ExprIR {
       }));
     return { kind: "new", partName: name, fields };
   }
+  // A payload construction (`NotFound { resource: … }`, exception-less.md) is a
+  // structural record, not a class — lower it to an object literal so a
+  // `return <Error> { … }` renders as a plain object the route can tag.
+  const payload = findPayloadByName(env, name);
+  if (payload) {
+    const fields = expr.entries
+      .filter((e) => e.name !== undefined)
+      .map((e) => ({ name: e.name as string, value: lowerExpr(e.value, env) }));
+    return { kind: "object", fields };
+  }
   return lowerBuilderCallAsCall(expr, env, name, "free");
 }
 
