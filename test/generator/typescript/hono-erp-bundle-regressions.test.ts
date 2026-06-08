@@ -39,7 +39,9 @@ describe("Hono ERP-bundle generator regressions", () => {
     expect(plus, "plus body located").not.toEqual("");
     expect(plus, "constructs with new").toContain("new Money(");
     expect(plus, "numeric add, not string concat").toContain("this.amount + other.amount");
-    expect(plus, "no String() wrapping of the numeric operand").not.toContain("String(this.amount)");
+    expect(plus, "no String() wrapping of the numeric operand").not.toContain(
+      "String(this.amount)",
+    );
   });
 
   it("value-object functions are public (invoked across aggregate boundaries)", async () => {
@@ -112,7 +114,9 @@ describe("Hono ERP-bundle generator regressions", () => {
     const create = test.match(/Order\.create\([\s\S]*?\}\);/)?.[0] ?? "";
     expect(create, "create call located").not.toEqual("");
     // `X id` string → branded ctor.
-    expect(create, "id brands").toContain('buyerId: Ids.OrderId("00000000-0000-0000-0000-000000000001")');
+    expect(create, "id brands").toContain(
+      'buyerId: Ids.OrderId("00000000-0000-0000-0000-000000000001")',
+    );
     // bare object → VO ctor, omitted optional line2 filled with null.
     expect(create, "value object constructs, gap-filled").toContain(
       'shipTo: new Address("1 Main St", null, "Town")',

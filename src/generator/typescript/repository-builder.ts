@@ -1,5 +1,4 @@
 import { pagedReturn } from "../../ir/stdlib/generics.js";
-import { tableOwnerName } from "../../ir/util/inheritance.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -11,6 +10,7 @@ import {
   findUsesCurrentUser,
   viewUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import {

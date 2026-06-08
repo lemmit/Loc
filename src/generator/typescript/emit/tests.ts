@@ -129,7 +129,9 @@ function renderCreateInput(
   ctx: BoundedContextIR,
 ): string {
   const types = new Map(forCreateInput(agg.fields).map((f) => [f.name, f.type] as const));
-  const parts = obj.fields.map((f) => `${f.name}: ${coerceCreateValue(f.value, types.get(f.name), ctx)}`);
+  const parts = obj.fields.map(
+    (f) => `${f.name}: ${coerceCreateValue(f.value, types.get(f.name), ctx)}`,
+  );
   return parts.length === 0 ? "{}" : `{ ${parts.join(", ")} }`;
 }
 
