@@ -15,9 +15,11 @@ import type {
   EntityPart,
   EnumDecl,
   EventDecl,
+  Expression,
   Layout,
   LoadPath,
   Model,
+  ObjectLit,
   Operation,
   PayloadDecl,
   Property,
@@ -33,6 +35,7 @@ import type {
   TestBlock,
   TestE2E,
   ThemeBlock,
+  TypeRef,
   Ui,
   UserBlock,
   ValueObject,
@@ -59,6 +62,7 @@ import {
   isFunctionDecl,
   isInvariant,
   isLayout,
+  isObjectLit,
   isOperation,
   isPayloadDecl,
   isPermissionsBlock,
@@ -96,6 +100,7 @@ import type {
   DataSourceIR,
   DataSourceKind,
   DeployableIR,
+  ExprIR,
   EntityPartIR,
   EnumIR,
   EventIR,
@@ -129,6 +134,7 @@ import type {
   ViewIR,
   WorkflowIR,
 } from "../types/loom-ir.js";
+import { lit } from "../types/loom-ir.js";
 import type { ContextLevelCapabilities } from "./lower-capabilities.js";
 import {
   collectContextLevelCapabilities,
@@ -158,6 +164,7 @@ import {
   cstText,
   type Env,
   findEntityByName,
+  findValueObjectByName,
   inAggregate,
   inValueObject,
   lowerAtom,
@@ -891,17 +898,63 @@ function lowerChannel(c: Channel): ChannelIR {
  *  `now()` all resolve there).  No `this` binding — seed rows construct fresh
  *  instances, they do not operate on an existing aggregate. */
 function lowerSeed(s: Seed, env: Env): SeedIR {
-  const rows: SeedRowIR[] = s.rows.map((row) => ({
-    aggregate: row.aggregate.ref?.name ?? "Unknown",
-    fields: row.value.fields.map((f) => ({
-      name: f.name,
-      value: lowerExpr(f.value, env),
-    })),
-  }));
+  const rows: SeedRowIR[] = s.rows.map((row) => {
+    const agg = row.aggregate.ref;
+    // Per-field declared type, so a bare object literal in a value-object-
+    // typed create field (`contact: { email: … }`) coerces to a VO ctor
+    // instead of an unassignable plain object.
+    const fieldTypes = new Map<string, TypeRef | undefined>();
+    if (agg) for (const m of agg.members) if (isProperty(m)) fieldTypes.set(m.name, m.type);
+    return {
+      aggregate: agg?.name ?? "Unknown",
+      fields: row.value.fields.map((f) => ({
+        name: f.name,
+        value: lowerSeedValue(f.value, fieldTypes.get(f.name), env),
+      })),
+    };
+  });
   return {
     dataset: s.dataset ?? "default",
     path: s.raw ? "raw" : "domain",
     rows,
+  };
+}
+
+/** Lower a seed field value, coercing a bare object literal written in a
+ *  value-object-typed position (`contact: { email: … }`) into a value-object
+ *  ctor call.  The seed grammar allows the unprefixed object form, but the
+ *  backends construct value objects as classes — a plain object literal isn't
+ *  assignable to the VO type (missing its derived getters / methods).  Other
+ *  values lower normally.  Nested value objects coerce recursively. */
+function lowerSeedValue(value: Expression, expected: TypeRef | undefined, env: Env): ExprIR {
+  if (expected && isObjectLit(value)) {
+    const t = lowerType(expected, env);
+    if (t.kind === "valueobject") {
+      const vo = findValueObjectByName(env, t.name);
+      if (vo) return objectLitToVoCtor(value, vo, env);
+    }
+  }
+  return lowerExpr(value, env);
+}
+
+/** Build a `value-object-ctor` call IR from a bare object literal and its
+ *  target value object.  Args are emitted in the VO's declared field order
+ *  (positional backends ignore `argNames`); an omitted entry — a skipped
+ *  optional field like `Address.line2` — fills with `null` so the positional
+ *  argument list stays aligned with the ctor signature. */
+function objectLitToVoCtor(obj: ObjectLit, vo: ValueObject, env: Env): ExprIR {
+  const props = vo.members.filter(isProperty) as Property[];
+  const byName = new Map(obj.fields.map((f) => [f.name, f.value] as const));
+  const args = props.map((p) => {
+    const v = byName.get(p.name);
+    return v ? lowerSeedValue(v, p.type, env) : lit("null", "null");
+  });
+  return {
+    kind: "call",
+    callKind: "value-object-ctor",
+    name: vo.name,
+    args,
+    argNames: props.map((p) => p.name),
   };
 }
 
