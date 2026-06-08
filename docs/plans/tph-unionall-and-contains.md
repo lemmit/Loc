@@ -212,5 +212,6 @@ type-checkable here. No `dotnet`/docker dependency.
 
 ## Out of scope
 - TPH on .NET / Phoenix / React (separate slice; needs `dotnet build` to verify).
+  _Update: .NET (#981) and Phoenix (#992) TPH have since shipped; React is N/A._
 - `find all Base` returning concrete-specific columns in the *union* projection
   (Feature 1 v1 may return the base-shaped projection — see the design fork).

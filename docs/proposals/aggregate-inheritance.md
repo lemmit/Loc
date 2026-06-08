@@ -19,15 +19,19 @@
 >   (abstract C# base + `Ignore<Base>()` + delegating reader → `IReadOnlyList<Base>`),
 >   and Phoenix (`list_<bases>!/0` on the Ash.Domain).  `Base id` refs rejected
 >   (`loom.polymorphic-id-ref-unsupported`).
-> - **I2 — `sharedTable`/TPH, node/Hono only** — one shared table + `kind`
+> - **I2 — `sharedTable`/TPH, all three backends** — one shared table + `kind`
 >   discriminator + nullable per-concrete columns; `Base id` refs + base reader
->   supported.  A TPH hierarchy with no node/Hono host is an IR-validate error.
+>   supported.  Emits on node/Hono (`kind` column), .NET (EF Core
+>   `HasDiscriminator`), and Phoenix (Ash shared-table multi-resource +
+>   `base_filter`, see [`phoenix-tph-emission.md`](./phoenix-tph-emission.md)).
+>   A TPH hierarchy with no node/.NET/Phoenix host is an IR-validate error.
 > - **Gated corners** — mixed strategy (Pattern 3:
 >   `loom.tph-own-override-unsupported` / `loom.polymorphic-id-ref-mixed-strategy`)
 >   and `contains` on a TPH concrete (Pattern 4: `loom.tph-contains-unsupported`)
 >   are rejected, not emitted.
 >
-> **Deferred**: TPH on .NET / Phoenix / React; Patterns 3 and 4.
+> **Deferred**: Patterns 3 and 4. (TPH now ships on all three backends; React is
+> N/A — the frontend consumes the concrete wire shapes, not storage.)
 >
 > **Sister proposal**:
 > [`payload-transport-layer.md`](./payload-transport-layer.md) — they together
