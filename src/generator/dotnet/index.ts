@@ -89,6 +89,7 @@ import { emitRetrievalSpecs, renderPagingExtension } from "./spec-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitDispatchHandlers, emitWorkflows } from "./workflow-emit.js";
+import { emitWorkflowStatePersistence } from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
 // .NET backend entry point.
@@ -308,6 +309,10 @@ function emitProjectFromContexts(
         eventSourcedAggNames(contexts),
       ),
     );
+    // Persisted workflow-correlation state POCOs + EF configs (one per
+    // correlation-bearing workflow); the DbSet/ApplyConfiguration wiring is
+    // inside renderDbContext above.
+    emitWorkflowStatePersistence(merged.workflows, ns, out);
   }
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
@@ -771,6 +776,7 @@ function emitInfrastructure(
     "Infrastructure/Persistence/AppDbContext.cs",
     renderDbContext(ctx, ns, documentAggNames([ctx]), eventSourcedAggNames([ctx])),
   );
+  emitWorkflowStatePersistence(ctx.workflows, ns, out);
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set("Api/ListResponseWrapperFilter.cs", renderListWrapperFilter(ns, listWrapperPairs([ctx])));

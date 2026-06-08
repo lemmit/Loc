@@ -70,6 +70,68 @@ describe(".NET in-process event dispatch emission", () => {
     expect(onH!).toContain("await _shipments.SaveAsync(ship, cancellationToken);");
   });
 
+  it("persists correlation: state POCO + EF config + DbContext wiring", async () => {
+    const files = await generate("test/fixtures/dispatch-sample.ddd");
+
+    // State POCO — correlation field (id-typed) + saga state column.
+    const poco = files.get("Infrastructure/Persistence/Workflows/OrderFulfillmentState.cs") ?? "";
+    expect(poco).toContain("public sealed class OrderFulfillmentState");
+    expect(poco).toContain("public OrderId OrderId { get; set; }");
+    expect(poco).toContain("public int Attempts { get; set; }");
+
+    // EF configuration — table + correlation PK + id conversion.
+    const cfg =
+      files.get(
+        "Infrastructure/Persistence/Configurations/OrderFulfillmentStateConfiguration.cs",
+      ) ?? "";
+    expect(cfg).toContain(
+      "public sealed class OrderFulfillmentStateConfiguration : IEntityTypeConfiguration<OrderFulfillmentState>",
+    );
+    expect(cfg).toContain('builder.ToTable("order_fulfillments");');
+    expect(cfg).toContain("builder.HasKey(x => x.OrderId);");
+    expect(cfg).toContain(
+      "builder.Property(x => x.OrderId).HasConversion(v => v.Value, v => new OrderId(v));",
+    );
+
+    // DbContext wires the DbSet + ApplyConfiguration.
+    const db = files.get("Infrastructure/Persistence/AppDbContext.cs") ?? "";
+    expect(db).toContain("using Fulfillment.Infrastructure.Persistence.Workflows;");
+    expect(db).toContain(
+      "public DbSet<OrderFulfillmentState> OrderFulfillments => Set<OrderFulfillmentState>();",
+    );
+    expect(db).toContain(
+      "modelBuilder.ApplyConfiguration(new Configurations.OrderFulfillmentStateConfiguration());",
+    );
+  });
+
+  it("create loads-or-allocates the saga row; on routes-or-drops+logs", async () => {
+    const files = await generate("test/fixtures/dispatch-sample.ddd");
+
+    // create: load by correlation, allocate (typed default) + Add when new, save.
+    const start =
+      files.get("Application/Workflows/OrderFulfillmentStartOrderPlacedHandler.cs") ?? "";
+    expect(start).toContain("var __key = notification.Order;");
+    expect(start).toContain(
+      "var state = await _db.OrderFulfillments.FirstOrDefaultAsync(x => x.OrderId == __key, cancellationToken);",
+    );
+    expect(start).toContain("state = new OrderFulfillmentState { OrderId = __key, Attempts = 0 };");
+    expect(start).toContain("_db.OrderFulfillments.Add(state);");
+    expect(start).toContain("await _db.SaveChangesAsync(cancellationToken);");
+
+    // on: route-to-existing, else drop + log event_unrouted (no save).
+    const onH =
+      files.get("Application/Workflows/OrderFulfillmentOnShipmentRequestedHandler.cs") ?? "";
+    expect(onH).toContain("if (state is null)");
+    expect(onH).toContain(
+      '_log.LogWarning("{Event} workflow={Workflow} event_type={EventType} key={Key}", "event_unrouted", "OrderFulfillment", "ShipmentRequested", __key);',
+    );
+    expect(onH).toContain("return;");
+    // The reactor injects the AppDbContext + ILogger.
+    expect(onH).toContain(
+      "private readonly ILogger<OrderFulfillmentOnShipmentRequestedHandler> _log;",
+    );
+  });
+
   it("makes IDomainEvent a Mediator notification + wires the in-process dispatcher", async () => {
     const files = await generate("test/fixtures/dispatch-sample.ddd");
 
@@ -111,6 +173,9 @@ describe(".NET in-process event dispatch emission", () => {
     // No in-process dispatcher, no reactor handlers.
     expect(keys).not.toContain("Infrastructure/Events/InProcessDomainEventDispatcher.cs");
     expect(keys.some((k) => /Handler\.cs$/.test(k) && /Start|On/.test(k))).toBe(false);
+    // No persisted workflow-state files (placeOrder has no correlation field).
+    expect(keys.some((k) => k.startsWith("Infrastructure/Persistence/Workflows/"))).toBe(false);
+    expect(keys.some((k) => /State(Configuration)?\.cs$/.test(k))).toBe(false);
 
     // IDomainEvent stays a plain marker; Program.cs keeps the no-op.
     const iface = files.get("Domain/Events/IDomainEvent.cs") ?? "";

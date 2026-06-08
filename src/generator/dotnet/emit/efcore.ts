@@ -13,6 +13,11 @@ import { isValueCollectionType, valueCollectionsFor } from "../../../ir/util/val
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
+import {
+  correlationWorkflows,
+  workflowStateClass,
+  workflowStateDbSet,
+} from "../workflow-state-emit.js";
 import { joinDbSetName, joinEntityName } from "./join-entities.js";
 
 // AppDbContext + per-aggregate IEntityTypeConfiguration<T>.  The
@@ -111,6 +116,22 @@ export function renderDbContext(
     (a) =>
       `        modelBuilder.ApplyConfiguration(new Configurations.${joinEntityName(a)}Configuration());`,
   );
+  // Persisted workflow-correlation state (channels.md / workflow-and-applier.md
+  // A2-S2): one DbSet + configuration per correlation-bearing workflow, keyed
+  // by its correlation field.  Empty (byte-identical) when the context declares
+  // no saga.  Requires `using <ns>.Infrastructure.Persistence.Workflows;` for
+  // the state POCO type.
+  const corrWfs = correlationWorkflows(ctx.workflows);
+  const wfStateUsings =
+    corrWfs.length > 0 ? [`using ${ns}.Infrastructure.Persistence.Workflows;`] : [];
+  const wfStateDbSets = corrWfs.map(
+    (wf) =>
+      `    public DbSet<${workflowStateClass(wf)}> ${workflowStateDbSet(wf)} => Set<${workflowStateClass(wf)}>();`,
+  );
+  const wfStateApplyConfigs = corrWfs.map(
+    (wf) =>
+      `        modelBuilder.ApplyConfiguration(new Configurations.${workflowStateClass(wf)}Configuration());`,
+  );
   // Capability filter installation is per-EntityConfiguration —
   // see `renderConfiguration` below, which emits one
   // `builder.HasQueryFilter(...)` per `agg.contextFilters` entry.  No
@@ -125,6 +146,7 @@ export function renderDbContext(
       "using Microsoft.EntityFrameworkCore;",
       ...aggUsings,
       ...joinUsings,
+      ...wfStateUsings,
       `namespace ${ns}.Infrastructure.Persistence;`,
       "",
       "public sealed class AppDbContext : DbContext",
@@ -134,12 +156,14 @@ export function renderDbContext(
       ...dbSets,
       ...tphBaseDbSets,
       ...joinDbSets,
+      ...wfStateDbSets,
       "    protected override void OnModelCreating(ModelBuilder modelBuilder)",
       "    {",
       ...ignoreBases,
       ...tphBaseConfigs,
       ...applyConfigs,
       ...joinApplyConfigs,
+      ...wfStateApplyConfigs,
       "    }",
       "}",
     ) + "\n"

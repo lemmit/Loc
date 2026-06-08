@@ -227,13 +227,16 @@ elsewhere a bare event/payload name stays unresolved.  See the
 >   (`IDomainEvent : INotification`), so every reactor / starter
 >   `INotificationHandler<TEvent>` runs; Program.cs registers the
 >   `InProcessDomainEventDispatcher` (Scoped) instead of the no-op.
->   Reactors run **statelessly** today — a fresh handler per event that
->   loads / creates aggregates and emits; the `by <expr>` correlation and
->   the persisted saga row ride a later .NET slice.
+>   Correlation is **persisted** the same way: each correlation-bearing
+>   workflow gets an EF-mapped saga-state row (a `<Workflow>State` POCO +
+>   `IEntityTypeConfiguration` keyed by the correlation field, table shared
+>   with the canonical migration); a `create` starter loads-or-allocates the
+>   row (seeding the key + typed defaults via the injected `AppDbContext`),
+>   an `on` reactor routes to the existing row or drops + logs
+>   `event_unrouted`, and `this.<stateField>` reads the loaded row.
 >
 > Still deferred: external brokers (redis / kafka / nats via
-> `channelSource`), **Phoenix** dispatch wiring (the
-> `IDomainEventDispatcher` seam exists, the routing does not yet), and
-> *persisted* **.NET** workflow correlation.  See
+> `channelSource`) and **Phoenix** dispatch wiring (the
+> `IDomainEventDispatcher` seam exists, the routing does not yet).  See
 > [`channels.md`](proposals/channels.md) and
 > [`workflow-and-applier.md`](proposals/workflow-and-applier.md).

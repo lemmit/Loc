@@ -14,6 +14,7 @@ import { errorStatuses } from "../../ir/util/openapi-errors.js";
 import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import { renderDotnetLogCall } from "../_obs/render-dotnet.js";
 import { dotnetResourceAdapterFor, resourceClassName } from "./adapters/resource-clients.js";
 import {
   collectWireUsings,
@@ -24,6 +25,7 @@ import {
   wireType,
 } from "./dto-mapping.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
+import { workflowAllocateInitializer, workflowStateDbSet } from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
 // .NET workflow emission.
@@ -137,11 +139,13 @@ function emitsCommandRoute(wf: WorkflowIR): boolean {
 // dispatcher, so choreography chains (OrderPlaced → ShipmentRequested → …)
 // fan out.
 //
-// Stateless: a fresh handler per delivered event, which loads / creates
-// aggregates and emits.  The `by <expr>` correlation routing and the persisted
-// workflow-state row (saga instance) are a later .NET slice — here the reactor
-// body actually runs and effects domain changes, which is the visible
-// behaviour, matching how the Hono slice landed before persisted correlation.
+// Correlation is persisted when the workflow declares a correlation field: the
+// handler injects the AppDbContext, routes the event to a saga-state row keyed
+// by that field (load-or-allocate for `create`, route-or-drop+log for `on`),
+// renders the body with `this.<stateField>` reading the loaded row, and saves
+// it at exit.  A workflow with no correlation field runs statelessly (a fresh
+// handler per event).  See workflow-state-emit.ts for the row's POCO + EF
+// configuration.
 // ---------------------------------------------------------------------------
 
 export function emitDispatchHandlers(
@@ -156,6 +160,7 @@ export function emitDispatchHandlers(
     if (!wf) continue;
     let statements: WorkflowStmtIR[];
     let saves: { name: string; aggName: string; repoName: string }[];
+    let correlation: ExprIR | undefined;
     if (sub.trigger === "on") {
       const on = (wf.subscriptions ?? []).find(
         (o) => o.event === sub.event && o.param === sub.param,
@@ -163,19 +168,24 @@ export function emitDispatchHandlers(
       if (!on) continue;
       statements = on.statements;
       saves = on.savesAtExit;
+      correlation = on.correlation;
     } else {
       const cr = wf.creates.find((c) => c.eventRef === sub.event && c.eventBinding === sub.param);
       if (!cr) continue;
       statements = cr.statements;
       saves = cr.savesAtExit;
+      correlation = cr.correlation;
     }
     const className = `${upperFirst(wf.name)}${sub.trigger === "on" ? "On" : "Start"}${upperFirst(sub.event)}Handler`;
     out.set(
       `Application/Workflows/${className}.cs`,
       renderEventReactorHandler(
         className,
+        wf,
+        sub.trigger,
         sub.event,
         sub.param,
+        correlation,
         statements,
         saves,
         aggsByName,
@@ -225,11 +235,22 @@ function analyseStmts(
  *  argument (already domain-typed in-process — no wire→domain conversion,
  *  unlike the HTTP command path); repos are DI-injected, the re-entrant
  *  `IDomainEventDispatcher` carries a body `emit` back to its own subscribers,
- *  and let-bound / loaded aggregates are saved at exit. */
+ *  and let-bound / loaded aggregates are saved at exit.
+ *
+ *  When the workflow declares a correlation field the handler is **persisted**:
+ *  it injects the `AppDbContext`, routes the event to a saga-instance row keyed
+ *  by the correlation field, and renders the body with `this.<stateField>`
+ *  reading/writing that row (the `thisName: "state"` seam).  A `create` starter
+ *  loads-or-allocates (seeding the key + typed defaults); an `on` reactor routes
+ *  to the existing row, or — when none exists — drops the event and logs
+ *  `event_unrouted` (channels.md drop+log policy).  The row is saved at exit. */
 function renderEventReactorHandler(
   className: string,
+  wf: WorkflowIR,
+  trigger: "on" | "create",
   eventName: string,
   paramName: string,
+  correlation: ExprIR | undefined,
   statements: WorkflowStmtIR[],
   saves: { name: string; aggName: string; repoName: string }[],
   aggsByName: Map<string, AggregateIR>,
@@ -239,6 +260,9 @@ function renderEventReactorHandler(
 ): string {
   const usage = analyseStmts(statements, saves, aggsByName);
   const usings = new Set<string>();
+  const persisted = !!wf.correlationField;
+  // A persisted handler renders `this.<stateField>` against the loaded row.
+  const thisName = persisted ? "state" : "this";
 
   // Field declarations + ctor for injected dependencies (mirrors renderHandler).
   const fields: string[] = [];
@@ -262,8 +286,23 @@ function renderEventReactorHandler(
     ctorParamPairs.push(`${ifaceName} ${fieldName.replace(/^_/, "")}`);
     ctorAssigns.push(`${fieldName} = ${fieldName.replace(/^_/, "")}`);
   }
+  // The saga row lives in the AppDbContext; the `on` drop path logs via ILogger.
+  if (persisted) {
+    fields.push(`    private readonly ${ns}.Infrastructure.Persistence.AppDbContext _db;`);
+    ctorParamPairs.push(`${ns}.Infrastructure.Persistence.AppDbContext db`);
+    ctorAssigns.push("_db = db");
+    usings.add("Microsoft.EntityFrameworkCore");
+    usings.add(`${ns}.Infrastructure.Persistence.Workflows`);
+    if (trigger === "on") {
+      fields.push(`    private readonly ILogger<${className}> _log;`);
+      ctorParamPairs.push(`ILogger<${className}> log`);
+      ctorAssigns.push("_log = log");
+      usings.add("Microsoft.Extensions.Logging");
+    }
+  }
 
-  // Statement rendering.  The bound event param resolves to `notification`.
+  // Statement rendering.  The bound event param resolves to `notification`;
+  // `this.<stateField>` resolves to the loaded `state` row (persisted only).
   const stmtLines: string[] = [];
   if (usage.hasEmit) stmtLines.push("        var _workflowEvents = new List<IDomainEvent>();");
   const resourceClasses = buildResourceClasses(sys);
@@ -275,8 +314,44 @@ function renderEventReactorHandler(
   if (resourceClasses.size > 0 && usesResourceOp) usings.add(`${ns}.Resources`);
   const renderArg = (e: ExprIR): string => {
     collectCsExprUsings(e, usings);
-    return renderExprWithEventParam(e, paramName, resourceClasses);
+    return renderExprWithEventParam(e, paramName, resourceClasses, thisName);
   };
+  // Correlation routing: load-or-allocate (create) / route-or-drop+log (on).
+  if (persisted) {
+    const corr = wf.correlationField as string;
+    const dbSet = workflowStateDbSet(wf);
+    const corrPascal = upperFirst(corr);
+    // The routing key: the `by <expr>` value, else the event field that
+    // name-matches the correlation field (the omitted-`by` rule).
+    const keyExpr = correlation
+      ? renderExprWithEventParam(correlation, paramName, resourceClasses)
+      : `notification.${corrPascal}`;
+    stmtLines.push(`        var __key = ${keyExpr};`);
+    stmtLines.push(
+      `        var state = await _db.${dbSet}.FirstOrDefaultAsync(x => x.${corrPascal} == __key, cancellationToken);`,
+    );
+    if (trigger === "create") {
+      // A starter creates the instance if its key is new.
+      stmtLines.push("        if (state is null)");
+      stmtLines.push("        {");
+      stmtLines.push(`            state = ${workflowAllocateInitializer(wf, "__key")};`);
+      stmtLines.push(`            _db.${dbSet}.Add(state);`);
+      stmtLines.push("        }");
+    } else {
+      // A continuation needs a started instance; otherwise drop + log.
+      stmtLines.push("        if (state is null)");
+      stmtLines.push("        {");
+      stmtLines.push(
+        `            ${renderDotnetLogCall("eventUnrouted", [
+          { name: "workflow", valueExpr: JSON.stringify(wf.name) },
+          { name: "event_type", valueExpr: JSON.stringify(eventName) },
+          { name: "key", valueExpr: "__key" },
+        ])}`,
+      );
+      stmtLines.push("            return;");
+      stmtLines.push("        }");
+    }
+  }
   for (const st of statements) {
     stmtLines.push(...renderStatement(st, renderArg, ctx, usage, /* guardLoads */ true));
   }
@@ -284,6 +359,8 @@ function renderEventReactorHandler(
     const fieldName = `_${save.repoName.charAt(0).toLowerCase() + save.repoName.slice(1)}`;
     stmtLines.push(`        await ${fieldName}.SaveAsync(${save.name}, cancellationToken);`);
   }
+  // Persist the saga row (a new allocation, or a `this.<stateField>` mutation).
+  if (persisted) stmtLines.push("        await _db.SaveChangesAsync(cancellationToken);");
 
   let body = stmtLines.join("\n") + "\n";
   if (usage.hasEmit) {
@@ -291,9 +368,9 @@ function renderEventReactorHandler(
       `        foreach (var ev in _workflowEvents)\n` +
       `            await _events.DispatchAsync(ev, cancellationToken);\n`;
   }
-  // CS1998 (async method without await) is fatal under /warnaserror.  Saves
-  // and emit-dispatch both `await`, so a body normally has one; guard the rare
-  // pure-compute reactor by dropping `async` + returning a completed task.
+  // CS1998 (async method without await) is fatal under /warnaserror.  Saves,
+  // the persisted load, and emit-dispatch all `await`, so a body normally has
+  // one; guard the rare pure-compute reactor by dropping `async`.
   const isAsync = /\bawait\b/.test(body);
   if (!isAsync) body += "        return ValueTask.CompletedTask;\n";
 
@@ -859,13 +936,14 @@ function renderExprWithEventParam(
   e: ExprIR,
   eventParam: string,
   resourceClasses?: Map<string, string>,
+  thisName = "this",
 ): string {
   const rewritten = rewriteExprRefs(e, (r) =>
     r.refKind === "param" && r.name === eventParam
       ? { ...r, name: "notification", refKind: "let" }
       : undefined,
   );
-  return renderCsExpr(rewritten, { thisName: "this", resourceClasses });
+  return renderCsExpr(rewritten, { thisName, resourceClasses });
 }
 
 // ---------------------------------------------------------------------------

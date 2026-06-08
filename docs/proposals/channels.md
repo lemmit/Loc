@@ -7,15 +7,14 @@
 > carries is delivered to its `on(e: Event)` reactors and event-triggered
 > `create(e: Event) by` starters (the default when there is no `channelSource`)
 > — see `docs/workflow.md` §Triggers.  Hono routes through a generated
-> `createInProcessDispatcher(db)` with **persisted** workflow correlation;
-> .NET publishes each event as a Mediator notification to its reactor /
-> starter `INotificationHandler<TEvent>`s, **statelessly** (a fresh handler
-> per event; persisted .NET correlation is a later slice).  Still
-> unstarted: external brokers via `channelSource` (redis / kafka / nats), the
-> Phoenix dispatch wiring, persisted .NET workflow correlation, the
-> `delivery: queue` competing-consumer semantics, the realtime wire
-> (SSE/WebSocket + edge relay + router), and **Part II** caching /
-> invalidation. The async-messaging / realtime **and** the
+> `createInProcessDispatcher(db)`; .NET publishes each event as a Mediator
+> notification to its reactor / starter `INotificationHandler<TEvent>`s.
+> Both **persist** workflow correlation — a saga-state row keyed by the
+> correlation field, with load-or-allocate (`create`) and route-or-drop+log
+> (`on`).  Still unstarted: external brokers via `channelSource` (redis /
+> kafka / nats), the Phoenix dispatch wiring, the `delivery: queue`
+> competing-consumer semantics, the realtime wire (SSE/WebSocket + edge relay
+> + router), and **Part II** caching / invalidation. The async-messaging / realtime **and** the
 > read-side caching tiers, designed together. Fills the "async messaging/outbox"
 > and "caching & invalidation" gaps in `production-readiness.md` (§3.3–3.4).
 > Depends on / reuses: the publish-subscribe placement + `on(e: Event)` /

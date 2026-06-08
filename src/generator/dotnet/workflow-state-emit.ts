@@ -1,0 +1,169 @@
+import type { TypeIR, WorkflowIR } from "../../ir/types/loom-ir.js";
+import { lines } from "../../util/code-builder.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
+import { renderCsType } from "./render-expr.js";
+
+// ---------------------------------------------------------------------------
+// Persisted workflow-correlation state (.NET / EF Core).
+//
+// The .NET counterpart of the Hono persisted-correlation slice: a workflow
+// that declares a correlation field (one id-shaped state field) gets a
+// saga-instance table keyed by that field, with the remaining state fields as
+// columns.  This emits the EF-mapped POCO + its `IEntityTypeConfiguration`;
+// the DbSet + `ApplyConfiguration` wiring lives in `renderDbContext`
+// (emit/efcore.ts), and the load-or-allocate / route-or-drop+log handler
+// logic lives in `renderEventReactorHandler` (workflow-emit.ts).  The
+// CREATE TABLE migration is already derived platform-neutrally
+// (`workflowStateTableShape` in src/system/migrations-builder.ts).
+//
+// The table name (`plural(snake(wf.name))`, e.g. `order_fulfillments`) matches
+// the migration's, so EF's runtime model and the canonical migration agree.
+// ---------------------------------------------------------------------------
+
+/** Workflows in a context that carry a persisted correlation row. */
+export function correlationWorkflows(workflows: readonly WorkflowIR[]): WorkflowIR[] {
+  return workflows.filter((wf) => !!wf.correlationField);
+}
+
+/** The EF table name for a workflow's state row — matches
+ *  `workflowStateTableShape` in the migrations builder. */
+export function workflowStateTable(wf: WorkflowIR): string {
+  return plural(snake(wf.name));
+}
+
+/** The DbSet property name (`OrderFulfillments`) the handlers load/save through. */
+export function workflowStateDbSet(wf: WorkflowIR): string {
+  return plural(upperFirst(wf.name));
+}
+
+/** The state POCO class name (`OrderFulfillmentState`). */
+export function workflowStateClass(wf: WorkflowIR): string {
+  return `${upperFirst(wf.name)}State`;
+}
+
+/** Emit the state POCO + its EF configuration for every correlation-bearing
+ *  workflow in the context.  No-op when none — byte-identical for projects
+ *  without a saga. */
+export function emitWorkflowStatePersistence(
+  workflows: readonly WorkflowIR[],
+  ns: string,
+  out: Map<string, string>,
+): void {
+  for (const wf of correlationWorkflows(workflows)) {
+    out.set(
+      `Infrastructure/Persistence/Workflows/${workflowStateClass(wf)}.cs`,
+      renderWorkflowStateEntity(wf, ns),
+    );
+    out.set(
+      `Infrastructure/Persistence/Configurations/${workflowStateClass(wf)}Configuration.cs`,
+      renderWorkflowStateConfiguration(wf, ns),
+    );
+  }
+}
+
+/** The saga-instance POCO: the correlation field plus every other state field
+ *  as a public auto-property (EF maps it; handler bodies read/write
+ *  `state.<Prop>` via the `thisName: "state"` seam). */
+export function renderWorkflowStateEntity(wf: WorkflowIR, ns: string): string {
+  const props = (wf.stateFields ?? []).map((f) => {
+    // Non-optional reference types need `= default!` to satisfy nullable
+    // reference types; value types (int / record-struct ids) accept it too.
+    const def = f.optional ? "" : " = default!;";
+    return `    public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; set; }${def}`;
+  });
+  return (
+    lines(
+      "// Auto-generated.",
+      "using System;",
+      `using ${ns}.Domain.Ids;`,
+      `using ${ns}.Domain.ValueObjects;`,
+      `using ${ns}.Domain.Enums;`,
+      "",
+      `namespace ${ns}.Infrastructure.Persistence.Workflows;`,
+      "",
+      `public sealed class ${workflowStateClass(wf)}`,
+      "{",
+      ...props,
+      "}",
+    ) + "\n"
+  );
+}
+
+/** The state row's EF configuration — mirrors the aggregate configuration's
+ *  `ToTable` / `HasKey` / per-field `HasConversion` shape, keyed by the
+ *  correlation field instead of `Id`. */
+export function renderWorkflowStateConfiguration(wf: WorkflowIR, ns: string): string {
+  const corr = wf.correlationField as string;
+  const cls = workflowStateClass(wf);
+  const fieldConfigs = (wf.stateFields ?? []).flatMap((f) => {
+    if (f.type.kind === "id") {
+      return [
+        `        builder.Property(x => x.${upperFirst(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v));`,
+      ];
+    }
+    if (f.type.kind === "enum") {
+      return [`        builder.Property(x => x.${upperFirst(f.name)}).HasConversion<string>();`];
+    }
+    return [];
+  });
+  return (
+    lines(
+      "// Auto-generated.",
+      "using Microsoft.EntityFrameworkCore;",
+      "using Microsoft.EntityFrameworkCore.Metadata.Builders;",
+      `using ${ns}.Domain.Ids;`,
+      `using ${ns}.Domain.ValueObjects;`,
+      `using ${ns}.Domain.Enums;`,
+      `using ${ns}.Infrastructure.Persistence.Workflows;`,
+      "",
+      `namespace ${ns}.Infrastructure.Persistence.Configurations;`,
+      "",
+      `public sealed class ${cls}Configuration : IEntityTypeConfiguration<${cls}>`,
+      "{",
+      `    public void Configure(EntityTypeBuilder<${cls}> builder)`,
+      "    {",
+      `        builder.ToTable("${workflowStateTable(wf)}");`,
+      `        builder.HasKey(x => x.${upperFirst(corr)});`,
+      ...fieldConfigs,
+      "    }",
+      "}",
+    ) + "\n"
+  );
+}
+
+/** A backend-zero C# literal for a required saga-state column at allocation —
+ *  the .NET analogue of the Hono `defaultLiteralFor`.  The correlation field
+ *  is seeded from the routing key, never this. */
+export function csStateDefault(t: TypeIR): string {
+  if (t.kind === "primitive") {
+    switch (t.name) {
+      case "int":
+      case "long":
+        return "0";
+      case "decimal":
+      case "money":
+        return "0m";
+      case "bool":
+        return "false";
+      case "datetime":
+        return "DateTime.UtcNow";
+      default:
+        return '""';
+    }
+  }
+  if (t.kind === "array") return "new()";
+  return "default!";
+}
+
+/** The allocate-object initializer for a fresh saga instance: the correlation
+ *  key plus a typed default for each required (non-optional, non-correlation)
+ *  state field. */
+export function workflowAllocateInitializer(wf: WorkflowIR, keyExpr: string): string {
+  const corr = wf.correlationField as string;
+  const parts = [`${upperFirst(corr)} = ${keyExpr}`];
+  for (const f of wf.stateFields ?? []) {
+    if (f.name === corr || f.optional) continue;
+    parts.push(`${upperFirst(f.name)} = ${csStateDefault(f.type)}`);
+  }
+  return `new ${workflowStateClass(wf)} { ${parts.join(", ")} }`;
+}
