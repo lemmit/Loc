@@ -82,10 +82,49 @@ authoritative per D-REALIZATION-AXES; the comment is wrong.
 
 ## 3. Answers to the three review questions (folded in)
 
-1. **Why `ashPostgres`, not `ash`?** Because `persistence:` names the
-   data-access *library*, and Ash's data layer is the per-DB package
-   `ash_postgres`. The vanilla analogue is `ecto` (DB via its adapter, off the
-   `storage` block). Fix = **add `ecto`**, keep `ashPostgres`.
+1. **Why `ashPostgres`, not `ash`?** Because a `persistence:` value names the
+   **unit of data-layer substitution**, and Ash's data layers are **not
+   drop-in** — confirmed in the emit: `data_layer: AshPostgres.DataLayer` +
+   a `postgres do … end` block (`domain-emit.ts:229,231`), `use AshPostgres.Repo`
+   + a Postgres-only `min_pg_version/0` (`shell/runtime.ts:14,24`), embedded VOs
+   as `jsonb` (`domain-emit.ts:152`). Swapping to SQLite changes the
+   `data_layer:` module, the DSL block (`postgres do` → `sqlite do`), the repo
+   macro, and the types — a *different* adapter, not a config flip. So
+   `ashPostgres` / `ashSqlite` are correctly per-DB. The vanilla analogue is
+   **`ecto`** (singular) because Ecto *is* substantially drop-in (same
+   schema/query/changeset; DB is an `Ecto.Adapters.*` config + migration-type
+   swap), exactly like `efcore`/`drizzle`. Fix = **add `ecto`**, keep
+   `ashPostgres`. See §3.1 for the principle.
+
+### 3.1 The naming principle (what the name *means*)
+
+> A `persistence:` value names the **unit you swap to change data layer.**
+> - **DB-agnostic library** (same code across DBs; DB is a provider/adapter
+>   config) → value = the **library**, DB rides the orthogonal `storage` axis.
+>   `ecto`, `efcore`, `drizzle`, `mikroorm`.
+> - **DB-specific, non-drop-in data layer** (different code per DB) → value =
+>   **per-DB**. `ashPostgres`, `ashSqlite`.
+
+This is not cosmetic — it's load-bearing and testable:
+
+- **Menu shape.** `foundation: ash` → `persistence: { ashPostgres, ashSqlite, … }`
+  (one per supported DB); `foundation: vanilla` → `persistence: { ecto }` (one,
+  multi-DB).
+- **`supports(storageType)`.** Each `ash*` adapter is single-DB
+  (`ashPostgres` ⇒ postgres only); `ecto` answers `true` for postgres *and*
+  sqlite.
+- **Validation.** `foundation: ash` + `storage: sqlite` *requires* `ashSqlite`
+  (`ashPostgres` is a mismatch error); `foundation: vanilla` + any DB → `ecto`.
+
+The axis is therefore *deliberately heterogeneous* — some values are
+DB-agnostic libraries, some are DB-specific layers — because that heterogeneity
+is the honest encoding of whether a given data layer is drop-in across
+databases. (Alternative considered: a single `ash` adapter that internally
+branches `postgres do`/`sqlite do` like `efcore` branches providers. Rejected
+for now: Ash's per-DB packages diverge structurally at the resource-DSL level,
+not just at a provider call, so modelling them as one adapter would hide a real
+substitution boundary. Revisit only if the `postgres do`/`sqlite do` blocks
+converge upstream.)
 2. **Is elixir `byLayer` possible?** Technically yes (Elixir binds by module
    name, not path), but byLayer is **unidiomatic for Phoenix** (whose convention
    *is* byFeature/by-context). `by-layer-layout.ts` exists for dotnet/node, not
