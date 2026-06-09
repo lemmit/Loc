@@ -519,6 +519,30 @@ system DevPlatform {
         let rows = ui.views.activeProjects()
         expect rows.length >= 0
     }
+
+    // ----- Negative-path conformance (cross-backend) -------------------
+    // These replay against every backend serving the referenced module
+    // (Hono / .NET / Phoenix).  `expectThrows` lowers to a non-2xx HTTP
+    // assertion, so each block pins "every backend rejects the same bad
+    // input" at runtime — the behavioral complement to the static
+    // `errorResponseDiffs` OpenAPI parity gate.  Payloads mirror the
+    // happy-path creates above so the *only* reason to fail is the one
+    // field under test.
+
+    // 422 — invariant `name.length > 0` (Catalog.Project) must reject.
+    test e2e "creating a project with an empty name is rejected" against dotnetApi {
+        expectThrows api.projects.create({ name: "", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", createdAt: "2024-01-01T00:00:00Z" })
+    }
+
+    // 422 — invariant `commitSha.length > 0` (Builds.Build) must reject.
+    test e2e "creating a build with an empty commitSha is rejected" against honoApi {
+        expectThrows api.builds.create({ commitSha: "", buildState: "Passed", startedAt: "2024-01-01T00:00:00Z" })
+    }
+
+    // 404 — reading an id that was never created must error, not 200.
+    test e2e "reading a non-existent project is rejected" against dotnetApi {
+        expectThrows api.projects.getById("ffffffff-ffff-ffff-ffff-ffffffffffff")
+    }
 }
 
 // ---------------------------------------------------------------------------
