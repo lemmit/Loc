@@ -65,6 +65,15 @@ export interface RenderCtx {
    *  `where` predicates that bind declared parameters.  Off everywhere
    *  else (op / derived / invariant bodies use plain locals). */
   filterArgs?: boolean;
+  /** Foundation the expression is rendered for (workflow-instance-views.md /
+   *  D-PHOENIX-FOUNDATION-STRATEGY).  Defaults to `"ash"` (back-compat).
+   *  Under `"vanilla"` (plain Ecto/Phoenix, no Ash) two leaf renderings
+   *  diverge: an `enum-value` is the stored **string** (`"confirmed"`) not an
+   *  Ash atom (`:confirmed`), and a `filterArgs` param is a bare Ecto pin
+   *  (`^name`) not the Ash read-action binding (`^arg(:name)`).  The shared
+   *  17-arm `ExprIR.kind` dispatch is unchanged — only these leaves branch.
+   *  See `docs/plans/vanilla-foundation-research.md` §3. */
+  foundation?: "ash" | "vanilla";
   /** Per-name rewrite for `param` references.  Used by the in-process
    *  dispatch handlers (dispatch-emit.ts), where a reactor / event-create
    *  body's single bound event param (`s` in `on(s: ShipmentRequested)`)
@@ -182,7 +191,11 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
       // Inside an Ash read-action `filter expr(...)`, a declared argument
       // is bound via `^arg(:name)`; everywhere else a param is a plain
       // local.  (`let`/`lambda` are always locals — never read-action args.)
-      if (ctx.filterArgs) return `^arg(:${snake(e.name)})`;
+      // Vanilla Ecto pins a plain local (`^name`); Ash binds a read-action
+      // argument (`^arg(:name)`).
+      if (ctx.filterArgs) {
+        return ctx.foundation === "vanilla" ? `^${snake(e.name)}` : `^arg(:${snake(e.name)})`;
+      }
       return snake(e.name);
     case "let":
     case "lambda":
@@ -194,8 +207,9 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
     case "helper-fn":
       return snake(e.name);
     case "enum-value":
-      // Ash enum values are atoms in Elixir.
-      return `:${snake(e.name)}`;
+      // Ash enum values are atoms (`:confirmed`); a vanilla Ecto `:string`
+      // column stores the value as a string (`"confirmed"`).
+      return ctx.foundation === "vanilla" ? `"${snake(e.name)}"` : `:${snake(e.name)}`;
     case "current-user":
       return "current_user";
     default:
