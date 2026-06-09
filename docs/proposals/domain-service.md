@@ -7,6 +7,16 @@
 > Nothing here is decided; each design axis lists alternatives with a
 > lean, and the end assembles them into three concrete **shapes** to
 > react to.
+>
+> **Relationship to existing constructs** (checked against the grammar):
+> distinct from [`criterion.md`](./criterion.md) (the shipped *pure
+> `bool` predicate*, queryable/inlineable — Axis 5), from the
+> [`authorization.md`](./authorization.md) `policy {}` block (the
+> *authorization* construct, which **claims the `policy` keyword** —
+> see Axis 6), and from `workflow` ([`workflow-and-applier.md`](./workflow-and-applier.md),
+> the application-layer orchestration this is explicitly *not*). The
+> domain service is the error-returning, possibly-mutating sibling of
+> `criterion`.
 
 ## The gap, precisely
 
@@ -126,23 +136,39 @@ constructs — queryability is the line.*
 `service` is overloaded (application service? microservice? a
 docker-compose service / `deployable`?). Candidates:
 
-- **`service`** — familiar to DDD readers, but collides conceptually
-  with deployables/compose services.
-- **`policy`** — DDD often calls decision-shaped domain services
-  "policies"; reads well for calculators (`Pricing`, `Overbooking`),
-  awkward for `transfer`.
+- **`service`** — familiar to DDD readers. Note `'service'` is already
+  a *soft* keyword elsewhere (the `service(...)` connection-source slot
+  + the source-type enums), so a top-level `service Foo { … }`
+  declaration must be admitted carefully — but it's a different
+  position, so not a hard clash.
+- **`policy`** — **ruled out.** `authorization.md` (PROPOSED) claims
+  `policy` for its top-level authorization block (`policy Orders { data
+  { allow … } allow … on Agg.Op }`). Reusing it for a domain service
+  would be a direct keyword collision for a different concept (authz
+  gate vs domain rule). DDD's "policy" naming is tempting for
+  decision-shaped services, but the keyword is spoken for.
 - **`domain service Foo` / `domainservice`** — unambiguous, verbose.
 - **`function` / `def`** — generic; pairs with the (5c) unification.
 
-*Lean: `service` if we add a validator nudge clarifying it's a
-**domain** service (not a deployable); revisit if the deployable
-collision proves confusing in practice.*
+*Lean: `service`, with a validator nudge clarifying it's a **domain**
+service (not a deployable). Avoid `policy` (authorization owns it).*
 
 ---
 
 ## Three assembled shapes
 
 Pick a gestalt; the axes above are the dials behind each.
+
+> **Syntax is illustrative.** The `service` construct does not exist
+> yet, so the bodies necessarily use proposed syntax. Two things in
+> particular are **not** current Loom and are sketches: (a) there is no
+> `if` statement (control flow is `match`) and no `save` keyword
+> (workflow persistence is implicit); (b) discriminating an `or`-union
+> result needs a variant-pattern `match`, which Loom lacks today (its
+> `match` is boolean-guard-only — see `failure-taxonomy.md`'s open
+> questions). The shipped guard keyword used below is `precondition`
+> (→ 400) / aggregate `invariant` (→ 500); neither takes a message
+> string.
 
 ### Shape A — "Pure calculator" (minimal floor)
 
@@ -155,12 +181,14 @@ other aggregates' mutable state, so it's always safe).
 context Sales {
   service Pricing {
     quote(cart: Cart, customer: Customer): Money {
-      require cart.lines.count > 0     "cannot quote an empty cart"   // bug → 500
+      precondition cart.lines.count > 0      // domain-validity guard → 400
       return cart.subtotal - customer.tier.discount(cart.subtotal)
     }
     applyCoupon(price: Money, coupon: Coupon): Money or CouponExpired {  // expected failure
-      if coupon.isExpired   return CouponExpired { code: coupon.code }
-      return price - coupon.discount
+      match {                                 // variant-match: sketch (see disclaimer)
+        coupon.isExpired => return CouponExpired { code: coupon.code }
+        else => return price - coupon.discount
+      }
     }
   }
 }
@@ -182,9 +210,12 @@ workflow persists**. Workflow-only callers.
 context Banking {
   service Transfer {
     run(from: Account, to: Account, amount: Money): Transferred or InsufficientFunds {
-      require amount > Money.zero      "amount must be positive"        // bug → 500
-      if from.balance < amount
-        return InsufficientFunds { account: from.id, shortfall: amount - from.balance }
+      precondition amount > Money.zero       // domain-validity guard → 400
+      match {                                 // variant-match: sketch (see disclaimer)
+        from.balance < amount =>
+          return InsufficientFunds { account: from.id, shortfall: amount - from.balance }
+        else => {}
+      }
       from.withdraw(amount)            // mutates each aggregate via its own op
       to.deposit(amount)
       return Transferred { from: from.id, to: to.id, amount }
@@ -195,11 +226,9 @@ context Banking {
     handle move(cmd: MoveMoney): Transferred or InsufficientFunds {
       let from = Accounts.required(cmd.from)   // workflow LOADS (application concern)
       let to   = Accounts.required(cmd.to)
-      let r = Transfer.run(from, to, cmd.amount)   // service DECIDES + mutates in-memory
-      match r {
-        Transferred t      => { save from; save to; return t }   // workflow PERSISTS
-        InsufficientFunds e => return e
-      }
+      // service DECIDES + mutates in-memory; the workflow persists `from`/`to`
+      // implicitly on the success arm (no `save` keyword — see disclaimer).
+      return Transfer.run(from, to, cmd.amount)
     }
   }
 }
@@ -268,8 +297,11 @@ made physical.
    single-aggregate `service` ("could be an `operation` on `X`")?
    Domain services are the most over-used tactical pattern; a nudge
    keeps people honest. (Lean: yes, warn.)
-4. **Naming** — `service` vs `policy` vs `domainservice`. (Lean:
-   `service` + a clarifying validator message.)
+4. **Naming** — `service` vs `domainservice` (`policy` is ruled out —
+   `authorization.md` owns it). Confirm the soft-keyword
+   `service(...)` connection-source slot doesn't block a top-level
+   `service Foo { … }` declaration. (Lean: `service` + a clarifying
+   validator message.)
 5. **`criterion` boundary** — confirm keep-distinct (5a); document
    "criterion = queryable bool decision, service = general value/error
    over domain objects."

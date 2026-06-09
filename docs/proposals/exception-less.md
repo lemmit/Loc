@@ -5,8 +5,9 @@
 > note that keeps this proposal's structural core (errors-as-data,
 > HTTP-blind domain + edge `httpStatus`, two-regime throw/return) and
 > reconsiders its ergonomics (the `?` operator, the carrier-monad
-> stdlib), adding first-class declarative validation. Read that for the
-> current thinking on the overall error story.
+> stdlib), and grounds the validation story in the shipped value-object
+> `invariant` (routed to 422 — not a new `validate` keyword). Read that
+> for the current thinking on the overall error story.
 >
 > **Upstream proposal**:
 > [`payload-transport-layer.md`](./payload-transport-layer.md) — this
