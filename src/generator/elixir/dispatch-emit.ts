@@ -169,7 +169,7 @@ export function emitDispatch(
  *  aligned with the migration's column type (`idColumnType` in the
  *  migrations builder): guid → uuid column → `:binary_id`, string → text
  *  column → `:string`, int/long → `:integer`. */
-function ectoIdType(vt: IdValueType): string {
+export function ectoIdType(vt: IdValueType): string {
   switch (vt) {
     case "guid":
       return ":binary_id";
@@ -184,7 +184,7 @@ function ectoIdType(vt: IdValueType): string {
 /** Plain (non-id) state-field Ecto type.  Only the handful of primitive
  *  saga-column shapes the migrations builder emits are mapped; anything
  *  exotic falls back to `:string` (no saga fixture exercises it yet). */
-function ectoStateFieldType(t: import("../../ir/types/loom-ir.js").TypeIR): string {
+export function ectoStateFieldType(t: import("../../ir/types/loom-ir.js").TypeIR): string {
   if (t.kind === "id") return ectoIdType(t.valueType);
   if (t.kind === "primitive") {
     switch (t.name) {

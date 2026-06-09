@@ -3,20 +3,16 @@ import { generateElixirProject } from "../../../src/generator/elixir/index.js";
 import type { DeployableIR, SystemIR } from "../../../src/ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
-// P1 of proposals/vanilla-phoenix-foundation.md — defence-in-depth.
+// P2 of proposals/vanilla-phoenix-foundation.md — the orchestrator routes a
+// `foundation: vanilla` elixir deployable to the `vanilla/` emit subtree
+// (plain Ecto/Phoenix, no Ash), slice by slice (vanilla-foundation-tdd-plan.md).
 //
-// The validator's R5 (`loom.foundation-vanilla-phoenix-not-yet-implemented`)
-// rejects `foundation: vanilla` on `platform: elixir` before lowering, so
-// in normal use the orchestrator never sees a vanilla deployable. But the
-// orchestrator may also be invoked by snapshot-driven regenerate paths and
-// by direct programmatic callers that bypass validation; in those cases
-// silently emitting the Ash project would lose the user's foundation
-// choice. The orchestrator branches on `deployable.foundation` and returns
-// an empty Map for `vanilla`, until the vanilla emit subtree lands in P2.
-//
-// This test pins that contract: foundation: vanilla → no files emitted.
-// When P2 lands, replace the empty-Map expectation with the real vanilla
-// emit set.
+// The user-facing validator gate (R5,
+// `loom.foundation-vanilla-phoenix-not-yet-implemented`) is still up, so in
+// normal use the orchestrator only reaches this path via tests / direct
+// programmatic callers. This test pins that the vanilla branch emits the
+// vanilla project (the shared `<App>.Types` module + per-aggregate Ecto
+// schemas) and never the Ash project.
 // ---------------------------------------------------------------------------
 
 function vanillaDeployable(): DeployableIR {
@@ -40,20 +36,24 @@ function emptySystem(): SystemIR {
   } as SystemIR;
 }
 
-describe("elixir orchestrator — foundation: vanilla stub", () => {
-  it("emits zero files for an elixir deployable with foundation: vanilla", () => {
+describe("elixir orchestrator — foundation: vanilla emit", () => {
+  it("emits the vanilla project (shared Types module), never the Ash project", () => {
     const out = generateElixirProject({
       contexts: [],
       deployable: vanillaDeployable(),
       sys: emptySystem(),
     });
-    expect(out.size).toBe(0);
+    // With no contexts the only file is the shared `<App>.Types` module.
+    expect(out.has("lib/api/types.ex")).toBe(true);
+    expect(out.get("lib/api/types.ex")).toContain("defmodule Api.Types do");
+    // No Ash anywhere in the vanilla emit.
+    for (const content of out.values()) {
+      expect(content).not.toContain("use Ash.Resource");
+      expect(content).not.toContain("use Ash.Domain");
+    }
   });
 
-  it("does NOT crash with empty contexts when foundation: vanilla is set (defence in depth)", () => {
-    // The early-return on foundation: vanilla means none of the per-context
-    // emitters fire, so empty contexts (which would otherwise be a no-op
-    // anyway) don't blow up.
+  it("does NOT crash with empty contexts when foundation: vanilla is set", () => {
     const out = generateElixirProject({
       contexts: [],
       deployable: vanillaDeployable(),

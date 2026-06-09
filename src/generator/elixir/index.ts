@@ -20,6 +20,7 @@ import { emitShellFiles, renderSpaController, toModulePrefix, toSnakeApp } from 
 import { renderSidebarComponent } from "./sidebar-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
 import { renderTypesModule } from "./types-module-emit.js";
+import { emitVanillaProject } from "./vanilla/index.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
 
@@ -84,15 +85,19 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   const { contexts, deployable, sys, migrations, emitTrace, styleAdapter } = args;
   const out = new Map<string, string>();
 
-  // Foundation branch — D-VANILLA-PHOENIX-FOUNDATION. Today only `ash`
-  // emits; `vanilla` is reserved (menu admits it) but the validator's R5
-  // (`loom.foundation-vanilla-phoenix-not-yet-implemented`) rejects it
-  // before we reach this orchestrator. This branch is defence-in-depth
-  // for callers that bypass the validator (e.g. snapshot-driven
-  // regenerate paths): return an empty Map rather than silently falling
-  // back to Ash emit, which would lose the user's foundation choice.
-  // Lift when the `vanilla/` emit subtree lands in P2.
+  // Foundation branch — D-VANILLA-PHOENIX-FOUNDATION / D-PHOENIX-FOUNDATION-
+  // STRATEGY. `vanilla` is plain Ecto/Phoenix (no Ash); its emit subtree is
+  // being built slice by slice (vanilla-foundation-tdd-plan.md). The
+  // user-facing validator gate (R5,
+  // `loom.foundation-vanilla-phoenix-not-yet-implemented`) stays up until the
+  // tree emits a project that compiles end-to-end, so production callers never
+  // reach a half-built project; tests drive this path with `validate: false`.
   if (deployable.foundation === "vanilla") {
+    const vanillaApp = toSnakeApp(deployable.name);
+    emitVanillaProject(
+      { contexts, appName: vanillaApp, appModule: toModulePrefix(vanillaApp) },
+      out,
+    );
     return out;
   }
 
