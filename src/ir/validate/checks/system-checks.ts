@@ -369,8 +369,8 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // Backends that consume contextFilters with the principal / shape
   // limitation.  .NET (HasQueryFilter) is deliberately absent — it
   // supports both deferred cases.  Canonical families (D-NODE-PLATFORM /
-  // D-PHOENIX-SURFACE): `node` (was `hono`), `phoenix` (was `phoenixLiveView`).
-  const LIMITED_FAMILIES = new Set(["node", "phoenix"]);
+  // D-ELIXIR-PLATFORM): `node` (was `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
+  const LIMITED_FAMILIES = new Set(["node", "elixir"]);
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
@@ -799,7 +799,7 @@ export function validateInheritanceStorage(
   // TPH storage emission ships on Hono (Drizzle shared table + `kind`), .NET
   // (EF Core native `HasDiscriminator`), and Phoenix (Ash shared-table
   // multi-resource + `base_filter` on `kind`).
-  const TPH_CAPABLE = new Set(["node", "dotnet", "phoenix"]);
+  const TPH_CAPABLE = new Set(["node", "dotnet", "elixir"]);
   const hostedByCapable = [...backendPlatforms].some((p) => TPH_CAPABLE.has(p));
   for (const agg of ctx.aggregates) {
     if (!agg.isAbstract && !agg.extendsAggregate) continue;
@@ -860,7 +860,7 @@ export function validateEventSourcedStorage(
   // don't (e.g. a Phoenix deployable hosting the context alongside a node one).
   const unsupported = [...backendPlatforms].filter((p) => !EVENT_SOURCING_BACKENDS.has(p));
   const anyBackend = backendPlatforms.size > 0;
-  const includesPhoenix = unsupported.includes("phoenix");
+  const includesPhoenix = unsupported.includes("elixir");
   for (const agg of ctx.aggregates) {
     if (agg.persistedAs !== "eventLog") continue;
     if (anyBackend && unsupported.length === 0) continue;

@@ -8,7 +8,7 @@
 // `integer()`, `T | nil`, `[T]`, `Mod.Ctx.X.t()`).
 
 import { describe, expect, it } from "vitest";
-import { renderTypespec } from "../../../src/generator/phoenix-live-view/render-expr.js";
+import { renderTypespec } from "../../../src/generator/elixir/render-expr.js";
 import type { TypeIR } from "../../../src/ir/types/loom-ir.js";
 
 const CTX = "MyApp.Sales";

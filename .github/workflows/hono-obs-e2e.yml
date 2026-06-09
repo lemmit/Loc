@@ -11,7 +11,7 @@ name: Hono observability events (runtime e2e)
 # project's deps (~60-90s with cache, ~3-4min cold).
 #
 # Triggers `push: main` + manual dispatch only — NOT per-PR.  Sibling
-# to dotnet-obs-e2e / phoenix-obs-e2e; same rationale (regression net,
+# to dotnet-obs-e2e / elixir-ash-obs-e2e; same rationale (regression net,
 # not a PR gate).  Three concurrent obs-e2e runs on every Hono / .NET /
 # Phoenix-touching PR added up to a docker / runner burst exactly of
 # the shape anti-abuse heuristics watch for on public repos.  Catching

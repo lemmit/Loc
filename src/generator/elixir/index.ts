@@ -26,7 +26,7 @@ import { emitWorkflows } from "./workflow-emit.js";
 // ---------------------------------------------------------------------------
 // Phoenix LiveView / Ash generator orchestrator.
 //
-// `generatePhoenixLiveViewProject` is the single entry point called by
+// `generateElixirProject` is the single entry point called by
 // the platform's `emitProject`.  It mirrors dotnet/index.ts's shape:
 //
 //   - Iterates contexts, aggregates, workflows, views.
@@ -53,7 +53,7 @@ import { emitWorkflows } from "./workflow-emit.js";
 //   mix.exs, .formatter.exs, Dockerfile, .dockerignore
 // ---------------------------------------------------------------------------
 
-export interface GeneratePhoenixLiveViewArgs {
+export interface GenerateElixirArgs {
   contexts: EnrichedBoundedContextIR[];
   deployable: DeployableIR;
   sys: SystemIR;
@@ -80,9 +80,7 @@ export interface GeneratePhoenixLiveViewArgs {
   styleAdapter?: StyleAdapter;
 }
 
-export function generatePhoenixLiveViewProject(
-  args: GeneratePhoenixLiveViewArgs,
-): Map<string, string> {
+export function generateElixirProject(args: GenerateElixirArgs): Map<string, string> {
   const { contexts, deployable, sys, migrations, emitTrace, styleAdapter } = args;
   const out = new Map<string, string>();
 

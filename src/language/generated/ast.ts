@@ -100,6 +100,7 @@ export type DddKeywordNames =
     | "dotnet"
     | "e2e"
     | "elastic"
+    | "elixir"
     | "else"
     | "embedded"
     | "emit"
@@ -503,10 +504,10 @@ export function isPayloadKind(item: unknown): item is PayloadKind {
     return item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error';
 }
 
-export type Platform = 'dotnet' | 'hono' | 'node' | 'phoenix' | 'phoenixLiveView' | 'react' | 'static' | string;
+export type Platform = 'dotnet' | 'elixir' | 'hono' | 'node' | 'phoenix' | 'phoenixLiveView' | 'react' | 'static' | string;
 
 export function isPlatform(item: unknown): item is Platform {
-    return item === 'dotnet' || item === 'hono' || item === 'node' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'dotnet' || item === 'hono' || item === 'node' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || item === 'elixir' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export type PostfixSuffix = CallSuffix | MemberSuffix;

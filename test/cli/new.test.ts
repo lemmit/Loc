@@ -26,9 +26,9 @@ function tmpdir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "loom-new-"));
 }
 
-const platforms = ["hono", "dotnet", "phoenix"] as const;
+const platforms = ["hono", "dotnet", "elixir"] as const;
 const templates = ["blank", "crud"] as const;
-const backendPort: Record<string, number> = { hono: 3000, dotnet: 8080, phoenix: 4000 };
+const backendPort: Record<string, number> = { hono: 3000, dotnet: 8080, elixir: 4000 };
 
 describe("ddd new — scaffold matrix", () => {
   for (const platform of platforms) {
@@ -68,6 +68,7 @@ describe("ddd new — scaffold matrix", () => {
         };
         expect(report.ok).toBe(true);
         // `hono` is a legacy alias that resolves to `node` in the IR.
+        // (`elixir` is the new canonical name; `phoenix` aliases to it.)
         const resolved = platform === "hono" ? "node" : platform;
         expect(report.deployables.some((d) => d.platform === resolved)).toBe(true);
 
@@ -88,22 +89,22 @@ describe("ddd new — platform/frontend wiring", () => {
     fs.rmSync(tmp, { recursive: true });
   });
 
-  it("phoenix defaults to a LiveView fullstack (ashPhoenix, no react deployable)", () => {
+  it("elixir defaults to a LiveView fullstack (ashPhoenix, no react deployable)", () => {
     const tmp = tmpdir();
     const out = path.join(tmp, "p");
-    runCli(["new", "app", "-o", out, "--platform", "phoenix"]);
+    runCli(["new", "app", "-o", out, "--platform", "elixir"]);
     const src = fs.readFileSync(path.join(out, "main.ddd"), "utf8");
     expect(src).toContain("design: ashPhoenix");
     expect(src).not.toContain("platform: react");
     fs.rmSync(tmp, { recursive: true });
   });
 
-  it("phoenix + a React pack scaffolds backend + React frontend", () => {
+  it("elixir + a React pack scaffolds backend + React frontend", () => {
     const tmp = tmpdir();
     const out = path.join(tmp, "p");
-    runCli(["new", "app", "-o", out, "--platform", "phoenix", "--design", "shadcn"]);
+    runCli(["new", "app", "-o", out, "--platform", "elixir", "--design", "shadcn"]);
     const src = fs.readFileSync(path.join(out, "main.ddd"), "utf8");
-    expect(src).toContain("platform: phoenix");
+    expect(src).toContain("platform: elixir");
     expect(src).toContain("platform: react");
     expect(src).toContain("design: shadcn");
     fs.rmSync(tmp, { recursive: true });
@@ -118,7 +119,7 @@ describe("ddd new — guards and ergonomics", () => {
     fs.rmSync(tmp, { recursive: true });
   });
 
-  it("rejects --design ashPhoenix with a non-phoenix platform", () => {
+  it("rejects --design ashPhoenix with a non-elixir platform", () => {
     const tmp = tmpdir();
     const r = runCli([
       "new",
@@ -131,7 +132,7 @@ describe("ddd new — guards and ergonomics", () => {
       "ashPhoenix",
     ]);
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("ashPhoenix requires --platform phoenix");
+    expect(r.stderr).toContain("ashPhoenix requires --platform elixir");
     expect(fs.existsSync(path.join(tmp, "p"))).toBe(false);
     fs.rmSync(tmp, { recursive: true });
   });

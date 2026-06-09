@@ -105,8 +105,10 @@ function quote(s: string): string {
 const PLATFORM_KEYWORDS = new Set([
   "dotnet",
   "hono",
+  "node",
   "react",
   "static",
+  "elixir",
   "phoenix",
   "phoenixLiveView",
 ]);

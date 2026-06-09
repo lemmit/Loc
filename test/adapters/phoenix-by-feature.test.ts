@@ -8,7 +8,7 @@ import type { EmitCtx } from "../../src/generator/_adapters/index.js";
 import {
   byFeatureLayoutAdapter,
   type PhoenixArtifact,
-} from "../../src/generator/phoenix-live-view/adapters/by-feature-layout.js";
+} from "../../src/generator/elixir/adapters/by-feature-layout.js";
 import { resolveLayout } from "../../src/platform/resolve-adapters.js";
 
 // The phoenix paths are deployable-scoped — pathFor reads

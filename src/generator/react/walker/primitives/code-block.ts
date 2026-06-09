@@ -11,7 +11,7 @@
 //
 // Both shapes are admissible.  The Phoenix backend accepts the
 // positional form (see `renderCodeBlock` in
-// `src/generator/phoenix-live-view/heex-walker.ts:1660+`), and the
+// `src/generator/elixir/heex-walker.ts:1660+`), and the
 // React emitter mirrors that surface — a positional first arg wins
 // over a missing `source:` named arg.  Without this, a write like
 // `CodeBlock { "x", language: "ts" }` silently emitted an empty

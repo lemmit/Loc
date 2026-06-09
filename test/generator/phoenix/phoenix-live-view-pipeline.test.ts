@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { beforeAll, describe, expect, it } from "vitest";
-import { emitApiControllers } from "../../../src/generator/phoenix-live-view/api-emit.js";
-import { emitAggregateResources } from "../../../src/generator/phoenix-live-view/domain-emit.js";
-import { emitOpenApiSpec } from "../../../src/generator/phoenix-live-view/openapi-emit.js";
+import { emitApiControllers } from "../../../src/generator/elixir/api-emit.js";
+import { emitAggregateResources } from "../../../src/generator/elixir/domain-emit.js";
+import { emitOpenApiSpec } from "../../../src/generator/elixir/openapi-emit.js";
 import { enrichContext } from "../../../src/ir/enrich/enrichments.js";
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../../src/ir/types/loom-ir.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
@@ -836,7 +836,7 @@ void repoRoot;
 // LiveView routes in a `live_session` with the LiveAuth on_mount hook.
 // ---------------------------------------------------------------------------
 
-import { emitAuth } from "../../../src/generator/phoenix-live-view/auth-emit.js";
+import { emitAuth } from "../../../src/generator/elixir/auth-emit.js";
 
 describe("JWT auth emission (auth-emit unit)", () => {
   const baseDeployable: DeployableIR = {
@@ -1063,9 +1063,7 @@ describe("router wiring (orchestrator integration)", () => {
 
 describe.skip("integration (parent wires emitters)", () => {
   it("renderThemeCss produces a :root block with CSS custom properties", async () => {
-    const { renderThemeCss } = await import(
-      "../../../src/generator/phoenix-live-view/theme-emit.js"
-    );
+    const { renderThemeCss } = await import("../../../src/generator/elixir/theme-emit.js");
     const css = renderThemeCss(undefined);
     expect(css).toMatch(/:root\s*\{/);
     expect(css).toMatch(/--color-brand-6:/);
@@ -1076,9 +1074,7 @@ describe.skip("integration (parent wires emitters)", () => {
   });
 
   it("renderSidebarComponent emits a Phoenix.Component nav block", async () => {
-    const { renderSidebarComponent } = await import(
-      "../../src/generator/phoenix-live-view/sidebar-emit.js"
-    );
+    const { renderSidebarComponent } = await import("../../src/generator/elixir/sidebar-emit.js");
     const ui = {
       name: "SalesAdmin",
       pages: [{ name: "Home", route: "/", params: [], state: [], source: "scaffold" as const }],
@@ -1094,7 +1090,7 @@ describe.skip("integration (parent wires emitters)", () => {
 
   it("renderWorkflowFormHeex returns a non-placeholder HEEx string when workflow exists", async () => {
     const { renderWorkflowFormHeex } = await import(
-      "../../src/generator/phoenix-live-view/extra-archetype-emit.js"
+      "../../src/generator/elixir/extra-archetype-emit.js"
     );
     const { loadPack, resolvePackDir } = await import("../../../src/generator/_packs/loader-fs.js");
     const pack = loadPack(resolvePackDir("ashPhoenix"));
@@ -1123,7 +1119,7 @@ describe.skip("integration (parent wires emitters)", () => {
 
   it("buildPlaywrightPageObject emits a class with goto() for a home page", async () => {
     const { buildPlaywrightPageObject } = await import(
-      "../../src/generator/phoenix-live-view/page-objects-emit.js"
+      "../../src/generator/elixir/page-objects-emit.js"
     );
     const page = {
       name: "Home",
@@ -1344,7 +1340,7 @@ describe("cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
 //   - Enum.map projection with snake_case keys for every declared bind
 // ---------------------------------------------------------------------------
 
-import { emitViews } from "../../../src/generator/phoenix-live-view/view-emit.js";
+import { emitViews } from "../../../src/generator/elixir/view-emit.js";
 import type { ExprIR } from "../../../src/ir/types/loom-ir.js";
 
 describe("full-form view bind projection (view-emit unit)", () => {
@@ -1512,7 +1508,7 @@ describe("full-form view bind projection (view-emit unit)", () => {
 // top-level `code_interface do` block (Ash 2.x pattern).
 // ---------------------------------------------------------------------------
 
-import { emitDomainModule } from "../../../src/generator/phoenix-live-view/domain-module.js";
+import { emitDomainModule } from "../../../src/generator/elixir/domain-module.js";
 
 describe("Ash 3.x code_interface shape (domain-module unit)", () => {
   const salesCtxE2: BoundedContextIR = {
@@ -1618,7 +1614,7 @@ describe("Ash 3.x code_interface shape (domain-module unit)", () => {
 //   Ash.transaction(fn -> ... end, <AppModule>.Repo)
 // ---------------------------------------------------------------------------
 
-import { emitWorkflows } from "../../../src/generator/phoenix-live-view/workflow-emit.js";
+import { emitWorkflows } from "../../../src/generator/elixir/workflow-emit.js";
 
 describe("Ash.transaction/2 domain-list form (workflow-emit unit)", () => {
   const transactionalCtx: BoundedContextIR = {
@@ -2802,7 +2798,7 @@ describe("Ash 3.x compile-correctness regressions", () => {
 // handlers, no Ash event subscriptions.
 // ---------------------------------------------------------------------------
 
-import { renderTelemetry } from "../../../src/generator/phoenix-live-view/telemetry-emit.js";
+import { renderTelemetry } from "../../../src/generator/elixir/telemetry-emit.js";
 
 describe("renderTelemetry --trace (telemetry-emit unit)", () => {
   it("off path: byte-identical to the Bite 1 shape — no Ash handlers", () => {
@@ -2882,9 +2878,7 @@ describe("renderTelemetry --trace (telemetry-emit unit)", () => {
     // Generating the full project with emitTrace via the orchestrator
     // surfaces the Ash handlers in the emitted file (integration check
     // for the args plumbing through emitShellFiles → renderTelemetry).
-    const { generatePhoenixLiveViewProject } = await import(
-      "../../../src/generator/phoenix-live-view/index.js"
-    );
+    const { generateElixirProject } = await import("../../../src/generator/elixir/index.js");
     const ctx: BoundedContextIR = {
       name: "Sales",
       enums: [],
@@ -2915,7 +2909,7 @@ describe("renderTelemetry --trace (telemetry-emit unit)", () => {
       storages: [],
     };
 
-    const offFiles = generatePhoenixLiveViewProject({
+    const offFiles = generateElixirProject({
       contexts: [ctx],
       deployable,
       sys: baseSys,
@@ -2923,7 +2917,7 @@ describe("renderTelemetry --trace (telemetry-emit unit)", () => {
     const offTel = offFiles.get("lib/phoenix_app/telemetry.ex")!;
     expect(offTel).not.toMatch(/:ash,/);
 
-    const onFiles = generatePhoenixLiveViewProject({
+    const onFiles = generateElixirProject({
       contexts: [ctx],
       deployable,
       sys: baseSys,

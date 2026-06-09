@@ -168,7 +168,7 @@ describe("pipeline layering — value imports point one way", () => {
   });
 
   it("no generator/<platform>/ imports a sibling platform directory", () => {
-    const platformDirs = ["typescript", "dotnet", "phoenix-live-view", "react"];
+    const platformDirs = ["typescript", "dotnet", "elixir", "react"];
     const out: string[] = [];
     for (const plat of platformDirs) {
       const dir = path.join(srcDir, "generator", plat);

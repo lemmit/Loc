@@ -57,7 +57,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     canonicalFramework(d.uiBlock?.framework) ??
     canonicalFramework(firstHostedUi?.framework) ??
     (uiName
-      ? platform === "phoenix"
+      ? platform === "elixir"
         ? "phoenixLiveView"
         : platformFor(platform).isFrontend || platform === "dotnet"
           ? "react"
@@ -71,7 +71,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   //  - backends without a `ui:` mount carry no design.
   const design = platformFor(platform).isFrontend
     ? qualifyDesign(d.design, "mantine")
-    : platform === "phoenix"
+    : platform === "elixir"
       ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
       : platform === "dotnet" && uiName
         ? qualifyDesign(d.design, "mantine")

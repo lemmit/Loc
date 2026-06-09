@@ -8,7 +8,7 @@
 // the IR + each backend's render-expr.  The per-backend tests pin
 // shape locally:
 //   - test/language/display-inspect-derived.test.ts  (IR walk)
-//   - test/generator/phoenix-live-view-pipeline.test.ts (Phoenix)
+//   - test/generator/elixir-pipeline.test.ts (Phoenix)
 //   - .NET / TS rely on the IR walk + the entity emitter loop.
 //
 // What this file adds is the *acceptance gate*: a single source-of-

@@ -23,8 +23,8 @@ import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { EnrichedBoundedContextIR } from "../../src/ir/types/loom-ir.js";
 import dotnetPlatform from "../../src/platform/dotnet.js";
+import phoenixPlatform from "../../src/platform/elixir.js";
 import honoPlatform from "../../src/platform/hono/v4/index.js";
-import phoenixPlatform from "../../src/platform/phoenix-live-view.js";
 import type { PlatformSurface } from "../../src/platform/surface.js";
 import { parseValid } from "../_helpers/parse.js";
 
@@ -118,7 +118,7 @@ describe.each([
 
 describe("style threading — phoenix", () => {
   it("dispatches config DI through the THREADED style adapter", async () => {
-    const { contexts, deployable, sys } = await emitInputs("phoenix");
+    const { contexts, deployable, sys } = await emitInputs("elixir");
     const files = (phoenixPlatform as PlatformSurface).emitProject({
       contexts,
       deployable,
@@ -131,7 +131,7 @@ describe("style threading — phoenix", () => {
   });
 
   it("falls back to ashStyleAdapter when no adapter is threaded", async () => {
-    const { contexts, deployable, sys } = await emitInputs("phoenix");
+    const { contexts, deployable, sys } = await emitInputs("elixir");
     const files = (phoenixPlatform as PlatformSurface).emitProject({
       contexts,
       deployable,

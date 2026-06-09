@@ -27,7 +27,7 @@
 // The contract has two implementations:
 //
 //   - `src/generator/react/walker/tsx-target.ts`            → `tsxTarget`
-//   - `src/generator/phoenix-live-view/heex-target.ts`      → `heexTarget`
+//   - `src/generator/elixir/heex-target.ts`      → `heexTarget`
 //
 // Both validate the interface end-to-end through the cross-target
 // conformance test.  The walkers (`body-walker.ts` for React,

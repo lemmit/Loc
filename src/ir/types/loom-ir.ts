@@ -1920,7 +1920,7 @@ export interface NeedIR {
 // `ashPhoenix` HEEx pack.  Unlike `react`/`static` it owns its own
 // database (`needsDb: true`) and never declares `targets:` —
 // validator enforces both.
-export type Platform = "dotnet" | "node" | "react" | "static" | "phoenix";
+export type Platform = "dotnet" | "node" | "react" | "static" | "elixir";
 
 // The `application:`/`shape(…)` platform-axes lookups
 // (`applicationDslToAdapter`, `applicationAdapterToDsl`,

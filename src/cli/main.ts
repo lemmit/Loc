@@ -536,14 +536,14 @@ async function runNew(name: string, options: NewOptions): Promise<void> {
     fail(`unknown --template "${options.template}". Valid: ${STARTER_TEMPLATES.join(" | ")}.`);
   }
   // Frontend: a React pack for hono/dotnet (default mantine); a Phoenix
-  // LiveView (ashPhoenix) is the default for phoenix.
+  // LiveView (ashPhoenix) is the default for elixir.
   const design = (options.design ??
-    (platform === "phoenix" ? "ashPhoenix" : "mantine")) as DesignPack;
+    (platform === "elixir" ? "ashPhoenix" : "mantine")) as DesignPack;
   if (!DESIGN_PACKS.includes(design)) {
     fail(`unknown --design "${options.design}". Valid: ${DESIGN_PACKS.join(" | ")}.`);
   }
-  if (design === "ashPhoenix" && platform !== "phoenix") {
-    fail("--design ashPhoenix requires --platform phoenix (it is the Phoenix LiveView UI).");
+  if (design === "ashPhoenix" && platform !== "elixir") {
+    fail("--design ashPhoenix requires --platform elixir (it is the Ash/Phoenix LiveView UI).");
   }
 
   const outDir = path.resolve(options.out ?? name);
@@ -580,7 +580,7 @@ async function runNew(name: string, options: NewOptions): Promise<void> {
     `Scaffolded ${files.size} file(s) in ${outDir} (platform: ${platform}, template: ${template}).`,
   );
   if (platformDefaulted) {
-    console.log("  platform: hono (default) — also: dotnet, phoenix (re-run with --platform <p>)");
+    console.log("  platform: hono (default) — also: dotnet, elixir (re-run with --platform <p>)");
   }
   console.log(`  next: cd ${where} && ddd generate system main.ddd -o . && docker compose up`);
 }
@@ -838,7 +838,7 @@ program
   .description(
     "Scaffold a starter .ddd project (main.ddd + README + .loomignore), validated before writing. Pick the backend with --platform and the frontend with --design.",
   )
-  .option("--platform <platform>", "backend: hono | dotnet | phoenix (default: hono)")
+  .option("--platform <platform>", "backend: hono | dotnet | elixir (default: hono)")
   .option("--template <template>", "starter model: blank | crud (default: crud)")
   .option(
     "--design <pack>",

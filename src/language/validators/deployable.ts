@@ -328,12 +328,12 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
   // subtree lands. Kept separate from R1 so the menu stays honest about
   // the planned value (a snapshot/round-trip survives the value) and the
   // implementation gap is one focused error message.
-  if (family === "phoenix" && d.foundation === "vanilla") {
+  if (family === "elixir" && d.foundation === "vanilla") {
     accept(
       "error",
-      `'foundation: vanilla' on deployable '${d.name}' is reserved on platform 'phoenix' (D-VANILLA-PHOENIX-FOUNDATION) but the emitter is not yet implemented. ` +
+      `'foundation: vanilla' on deployable '${d.name}' is reserved on platform 'elixir' (D-VANILLA-PHOENIX-FOUNDATION) but the emitter is not yet implemented. ` +
         `Three escapes today: ` +
-        `(1) use 'foundation: ash' (the current Phoenix emit path); ` +
+        `(1) use 'foundation: ash' (the current Ash/Phoenix emit path); ` +
         `(2) host this deployable on 'platform: node' or 'platform: dotnet' (cross-backend ES contract is portable); ` +
         `(3) track P2 of proposals/vanilla-phoenix-foundation.md (vanilla state-based emit + strict conformance parity).`,
       {

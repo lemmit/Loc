@@ -688,8 +688,14 @@ sections (superseded by `lifecycle-url-style.md`); `ApiIR.urlStyle`,
 
 ## D-PHOENIX-SURFACE — the decomposed Phoenix platform surface
 
-**Status:** PINNED. (Reconciles two proposals that, taken individually,
-collide. Subsumes the **D-PHOENIX-ECTO** ask from
+**Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (the canonical platform
+name renamed `phoenix` → `elixir`; legacy `phoenix` and `phoenixLiveView`
+remain back-compat aliases at the lowering boundary). The *decomposition*
+conclusions of this decision (one platform for the language ecosystem; UI
+framework axis on `ui`; default domain Ash; no `family@version`; no
+`apiOnly`) all stand; only the spelling of the canonical platform name
+changes. (Reconciles two proposals that, taken individually, collide.
+Subsumes the **D-PHOENIX-ECTO** ask from
 `elixir-ecto-and-api-only-backends.md`.)
 
 **Problem.** Two proposals each free a *different* axis off the single
@@ -867,10 +873,14 @@ deployable grammar; `DeployableIR`; `checkDeployable`; each backend's
 
 ---
 
-## D-VANILLA-PHOENIX-FOUNDATION — `foundation: vanilla` is added to the Phoenix menu
+## D-VANILLA-PHOENIX-FOUNDATION — `foundation: vanilla` is added to the Elixir foundation menu
 
-**Status:** PINNED. (Concretises one menu slot of **D-REALIZATION-AXES**; spec in
-`proposals/vanilla-phoenix-foundation.md`.)
+**Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (the foundation menu lives
+on `platform: elixir` after the rename; "Phoenix menu" wording below refers to
+the same surface). The decision's substance — `foundation: vanilla` as a
+first-class second adapter on the Elixir backend, `foundation: ash` remaining
+the default, the validator R5 gate — is unchanged. (Concretises one menu slot of
+**D-REALIZATION-AXES**; spec in `proposals/vanilla-phoenix-foundation.md`.)
 
 **Problem.** D-REALIZATION-AXES pinned the `foundation:` axis with `phoenix: ash ·
 vanilla` as the menu, but the validator (`src/language/validators/data/platform-rules.ts:184`)
@@ -918,10 +928,14 @@ strict-parity conformance gate. **Depends on D-REALIZATION-AXES**;
 
 ---
 
-## D-VANILLA-ES-HOME — pure event sourcing on Phoenix lands only under `foundation: vanilla`
+## D-VANILLA-ES-HOME — pure event sourcing on Elixir lands only under `foundation: vanilla`
 
-**Status:** PINNED. (Resolves the `EVENT_SOURCING_BACKENDS` Phoenix gap left
-open in `proposals/workflow-and-applier.md`; **depends on
+**Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (the gap lives on
+`platform: elixir` after the rename; the Ash-foundation-vs-Phoenix-platform
+distinction in this decision's body is unchanged — the constraint is the
+Ash *foundation*, on the Elixir *platform*). (Resolves the
+`EVENT_SOURCING_BACKENDS` Elixir gap left open in
+`proposals/workflow-and-applier.md`; **depends on
 D-VANILLA-PHOENIX-FOUNDATION**.)
 
 **Problem.** `validateEventSourcedStorage` (`src/ir/validate/checks/system-checks.ts`)
@@ -969,7 +983,9 @@ shared `<agg>_events` shape extends to the Ecto migrations renderer in P4).
 
 ## D-NO-MIXED-FOUNDATION — one foundation per deployable; per-aggregate override not added
 
-**Status:** PINNED. (Structural consequence of **D-REALIZATION-AXES** + the
+**Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (substance unchanged;
+`platform: phoenix` references in the body now read `platform: elixir`
+post-rename). (Structural consequence of **D-REALIZATION-AXES** + the
 deployable model; recorded explicitly to forestall the per-aggregate override
 extension request.)
 
@@ -1013,10 +1029,12 @@ needed beyond today's per-deployable `foundation:` typing.
 
 ---
 
-## D-VANILLA-DEFAULT — vanilla becomes Phoenix default after stabilisation, not on first ship
+## D-VANILLA-DEFAULT — vanilla becomes Elixir default after stabilisation, not on first ship
 
-**Status:** PINNED. (Sequences the default-flip of **D-VANILLA-PHOENIX-FOUNDATION**;
-deferred to a later release than vanilla's initial ship.)
+**Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (the default-flip target
+is `platform: elixir` after the rename; sequencing and rationale unchanged).
+(Sequences the default-flip of **D-VANILLA-PHOENIX-FOUNDATION**; deferred to a
+later release than vanilla's initial ship.)
 
 **Problem.** Today's Phoenix default is `foundation: ash`
 (`lower-platform.ts:46`). Once vanilla ships and exception-less A4 is in
@@ -1063,9 +1081,16 @@ D-VANILLA-PHOENIX-FOUNDATION**.
 
 ## D-NODE-PLATFORM — `node` is the JS-runtime platform; `hono` is a `transport:` value
 
-**Status:** PINNED. (Mirrors **D-PHOENIX-SURFACE**'s rename pattern; depends on
-**D-REALIZATION-AXES** for the `transport:` axis. Rollout in
-`proposals/realization-axes-rollout.md` Phase 3.)
+**Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (this decision's body
+asserts *"`dotnet`/`phoenix` name the language-ecosystem"* — a rationalisation,
+since `phoenix` is a web framework, not a language-ecosystem; the actual
+ecosystem is **Elixir**. D-ELIXIR-PLATFORM completes the rename pattern by
+making `elixir` the canonical language-ecosystem platform and `phoenix` a
+back-compat alias. The framing in the original problem statement should now
+be read as *"`dotnet`/`elixir` name the language-ecosystem"*.) (Mirrors
+**D-PHOENIX-SURFACE**'s rename pattern; depends on **D-REALIZATION-AXES** for
+the `transport:` axis. Rollout in `proposals/realization-axes-rollout.md`
+Phase 3.)
 
 **Problem.** `platform: hono` conflates the **JS runtime** (Node) with the **web
 framework** (Hono) in one token — the same conflation just resolved for
@@ -1101,6 +1126,130 @@ back-compat keyword); the `transport:` menu (`hono` becomes its default value);
 `src/platform/hono/` (reframed as node's Hono transport); the derived `language`
 property on `PlatformSurface`. **Depends on D-REALIZATION-AXES**; mirrors
 **D-PHOENIX-SURFACE**.
+
+---
+
+## D-ELIXIR-PLATFORM — `elixir` is the canonical language-ecosystem platform; `phoenix` is a back-compat alias
+
+**Status:** PINNED. (Mirrors **D-NODE-PLATFORM**'s rename pattern; amends
+**D-PHOENIX-SURFACE**'s platform-name choice; depends on **D-REALIZATION-AXES**
+for the `transport:` axis. Spec in `proposals/elixir-platform-rename.md`.)
+
+**Problem.** D-NODE-PLATFORM (the later decision) renamed `platform: hono` →
+`platform: node` on the principle that *platform names the language-ecosystem,
+transport names the web framework*. Its own text justifies itself by asserting
+*"`dotnet`/`phoenix` name the language-ecosystem"* (decisions.md:1072) — a
+rationalisation, since `phoenix` is a web framework, not a language-ecosystem.
+The actual ecosystem is **Elixir**.
+
+The result was visible repetition: `platform: phoenix, transport: phoenixRouter`
+reads as "Phoenix Phoenix" — two restatements of the same framework. And the
+generator scaffolding around the platform name (`src/generator/phoenix-live-view/`
+the directory, `src/platform/phoenix-live-view.ts` the module, `phoenix-build.yml`
+the CI workflow) carried the legacy `phoenixLiveView`-era spelling that
+D-PHOENIX-SURFACE retired at the *platform name* level but never followed
+through at the *scaffolding* level.
+
+**Decision.**
+
+- **`elixir` is the canonical language-ecosystem platform**. The platform
+  surface that emits the fullstack Elixir/Ash + Phoenix LiveView project
+  registers under `elixir` in `src/platform/registry.ts`.
+- **`phoenix` and `phoenixLiveView` are back-compat aliases** that desugar to
+  `elixir` at the lowering boundary (`canonicalPlatform` /
+  `LEGACY_PLATFORM_ALIASES`), preserving any `@version` pin
+  (`phoenix@v1` → `elixir@v1`; `phoenixLiveView@v1` → `elixir@v1`). Every
+  existing `.ddd` source continues to parse, validate, lower, and emit
+  byte-identical output. Identical mechanism to `hono` → `node`
+  (D-NODE-PLATFORM).
+- **`language` is a derived surface property** (`elixir` for `elixir`,
+  `typescript` for `node`/`react`, `csharp` for `dotnet`), consumed by the
+  Phase-F shared-contracts grouping — *not* a platform-name prefix. Matches
+  D-NODE-PLATFORM's framing now that `phoenix` is no longer the platform.
+
+**Affects.** `src/platform/registry.ts` (register under `elixir`; add `phoenix`
+and `phoenixLiveView` to `LEGACY_PLATFORM_ALIASES`); the `Platform` IR union
+(`"phoenix"` → `"elixir"`); grammar `Platform` rule (add `elixir` keyword);
+`src/ir/lower/lower-platform.ts` (`canonicalPlatform` adds the `phoenix`
+arm); every `family === "phoenix"` check across the toolchain (renamed to
+`"elixir"`); CLI `--platform` (canonical `elixir`, `phoenix` accepted as
+alias); the seven affected decisions get an amend-by-this-one note.
+**Mirrors D-NODE-PLATFORM**; **amends D-PHOENIX-SURFACE**.
+
+---
+
+## D-PHOENIX-TRANSPORT — Phoenix is the `transport:` value on `platform: elixir`; `phoenixRouter` is a back-compat alias
+
+**Status:** PINNED. (Depends on **D-ELIXIR-PLATFORM** and **D-REALIZATION-AXES**;
+spec in `proposals/elixir-platform-rename.md`.)
+
+**Problem.** The transport value `phoenixRouter` carried a redundant `Router`
+suffix that named no real distinction (Phoenix has one router; there's no
+"Phoenix-but-not-the-router" alternative). Under `foundation: ash` the
+transport axis is owned (`FOUNDATION_OWNED_AXES.ash = ["application",
+"transport"]`), so users never even wrote it. It existed only as a default
+value in the IR — repeating the framework name with no information added.
+
+**Decision.**
+
+- **`phoenix` is the canonical `transport:` value** on `platform: elixir`
+  (D-ELIXIR-PLATFORM). Names the Phoenix web framework, parallel to how
+  `transport: hono` names the Hono web framework on `platform: node`.
+- **`phoenixRouter` is a back-compat alias** that desugars to `phoenix` at
+  the lowering boundary (`canonicalTransport` in
+  `src/ir/lower/lower-platform.ts`). Every existing source with explicit
+  `transport: phoenixRouter` keeps working unchanged.
+- **Future Elixir web frameworks** (a Plug-only minimal API, hypothetical
+  alternatives) slot into `transport:` as siblings; the menu grows from
+  size-1 to size-N without a platform-level change.
+
+**Affects.** `src/ir/lower/lower-platform.ts` (new `canonicalTransport` +
+`greenfieldMenu` returns `"phoenix"` for `elixir`); `src/language/validators/data/platform-rules.ts`
+(transport menu update); test expectations across the lowering / axes test
+files; `proposals/elixir-platform-rename.md`. **Depends on
+D-ELIXIR-PLATFORM**.
+
+---
+
+## D-PHOENIX-DIR — generator directory + platform module + CI workflow renames
+
+**Status:** PINNED. (Mechanical completion of the D-ELIXIR-PLATFORM rename;
+spec in `proposals/elixir-platform-rename.md`.)
+
+**Problem.** When D-PHOENIX-SURFACE renamed `platform: phoenixLiveView` →
+`platform: phoenix`, the legacy directory `src/generator/phoenix-live-view/`,
+the platform module `src/platform/phoenix-live-view.ts`, and the CI workflows
+`phoenix-*.yml` were not renamed alongside. After D-ELIXIR-PLATFORM the
+debt compounds: the LiveView part of the name is no longer accurate (the
+emitter outputs the whole Phoenix project — API controllers, OpenAPI,
+shell scaffolding — most of which has nothing to do with LiveView), and
+the `phoenix` part needs to align with the new `elixir` platform name.
+
+**Decision.** Three coordinated renames, no back-compat alias at the
+directory / module / workflow level (callers reach these through the
+registered platform surface and the CI matrix, not directly):
+
+| Today | After |
+|---|---|
+| `src/generator/phoenix-live-view/` | `src/generator/elixir/` |
+| `src/platform/phoenix-live-view.ts` | `src/platform/elixir.ts` |
+| `generatePhoenixLiveViewProject` | `generateElixirProject` |
+| `GeneratePhoenixLiveViewArgs` | `GenerateElixirArgs` |
+| `phoenixPlatform` (registry alias) | `elixirPlatform` |
+| `.github/workflows/phoenix-build.yml` | `.github/workflows/elixir-ash-build.yml` |
+| `.github/workflows/phoenix-dialyzer.yml` | `.github/workflows/elixir-ash-dialyzer.yml` |
+| `.github/workflows/phoenix-obs-e2e.yml` | `.github/workflows/elixir-ash-obs-e2e.yml` |
+
+The CI rename uses the `elixir-ash-` prefix (foundation in the name) so a
+future `elixir-vanilla-build.yml` pairs cleanly when P2 of
+`vanilla-phoenix-foundation.md` ships.
+
+**Affects.** ~80 import paths across `src/` and `test/` (mechanical `sed`,
+TypeScript imports resolve through the rename); workflow display names
+updated alongside (`Phoenix LiveView build verification` → `Elixir / Ash
+build verification`, etc.). The `ashPhoenix` design pack name is **not**
+renamed in this pass — its foundation-aware rework belongs to P2 of
+`vanilla-phoenix-foundation.md`. **Depends on D-ELIXIR-PLATFORM**.
 
 ---
 

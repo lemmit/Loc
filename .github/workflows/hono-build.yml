@@ -8,7 +8,7 @@ name: TypeScript (Hono) build verification
 # barrel exports, etc.).
 #
 # Mirrors `dotnet-build.yml` (.NET → dotnet build /warnaserror) and
-# `phoenix-build.yml` (Phoenix → Ash 3.x mix compile).  Until this
+# `elixir-ash-build.yml` (Phoenix → Ash 3.x mix compile).  Until this
 # lands, the Hono emitter had no fast PR gate — TS-compile regressions
 # only surfaced via the heavy `conformance-parity.yml` docker e2e (on
 # main only, runtime >10min).

@@ -9,7 +9,7 @@
 // concept fuses schema + repository + actions in one module, so
 // `emitRepository(agg)` returns the full Ash.Resource definition (no
 // separate "schema" emit).  Today the orchestrator
-// (`src/generator/phoenix-live-view/index.ts`) calls
+// (`src/generator/elixir/index.ts`) calls
 // `emitAggregateResources` per-context — this adapter is the forward
 // seam for the F7d-equivalent rewire.
 // ---------------------------------------------------------------------------

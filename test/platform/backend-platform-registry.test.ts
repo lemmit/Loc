@@ -22,9 +22,11 @@ describe("parseBuiltinPlatformRef", () => {
       qualified: "node@v4",
     });
     expect(parseBuiltinPlatformRef("dotnet")?.qualified).toBe("dotnet@v8");
-    expect(parseBuiltinPlatformRef("phoenix")?.qualified).toBe("phoenix@v1");
-    // Back-compat: legacy `phoenixLiveView` aliases to canonical `phoenix`.
-    expect(parseBuiltinPlatformRef("phoenixLiveView")?.qualified).toBe("phoenix@v1");
+    expect(parseBuiltinPlatformRef("elixir")?.qualified).toBe("elixir@v1");
+    // Back-compat: legacy `phoenix` and `phoenixLiveView` alias to
+    // canonical `elixir` (D-ELIXIR-PLATFORM).
+    expect(parseBuiltinPlatformRef("phoenix")?.qualified).toBe("elixir@v1");
+    expect(parseBuiltinPlatformRef("phoenixLiveView")?.qualified).toBe("elixir@v1");
   });
 
   it("parses an explicit family@version pin", () => {
@@ -52,9 +54,11 @@ describe("platformFor — byte-identity guarantee", () => {
     // is unchanged.
     expect(platformFor("hono")).toBe(platformFor("hono@v4" as never));
     expect(platformFor("dotnet")).toBe(platformFor("dotnet@v8" as never));
-    expect(platformFor("phoenix")).toBe(platformFor("phoenix@v1" as never));
-    // Back-compat: the legacy `phoenixLiveView` spelling resolves identically.
-    expect(platformFor("phoenixLiveView")).toBe(platformFor("phoenix"));
+    expect(platformFor("elixir")).toBe(platformFor("elixir@v1" as never));
+    // Back-compat: the legacy `phoenix` and `phoenixLiveView` spellings
+    // resolve identically (D-ELIXIR-PLATFORM).
+    expect(platformFor("phoenix")).toBe(platformFor("elixir"));
+    expect(platformFor("phoenixLiveView")).toBe(platformFor("elixir"));
   });
 
   it("frontend platforms resolve straight through (single-version)", () => {
@@ -66,7 +70,7 @@ describe("platformFor — byte-identity guarantee", () => {
   });
 
   it("the defaults map covers exactly the backend families", () => {
-    expect(Object.keys(BUILTIN_PLATFORM_LATEST).sort()).toEqual(["dotnet", "node", "phoenix"]);
+    expect(Object.keys(BUILTIN_PLATFORM_LATEST).sort()).toEqual(["dotnet", "elixir", "node"]);
   });
 
   it("throws a clear error for an unregistered backend version", () => {

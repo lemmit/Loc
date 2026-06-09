@@ -44,7 +44,7 @@ import type { SnapshotStore } from "./snapshot.js";
 //
 // `schemaFromModule` is the single source of truth for "what tables this
 // module needs"; both the Phoenix refactor (was inline at
-// `phoenix-live-view/migrations-emit.ts`) and the new TS / .NET emitters
+// `elixir/migrations-emit.ts`) and the new TS / .NET emitters
 // read from it.  Backends never derive their own table list.
 //
 // `diffSchema` is a pure function from (prev, next) snapshots to an

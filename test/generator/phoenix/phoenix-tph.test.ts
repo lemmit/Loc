@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { emitContext } from "../../../src/generator/phoenix-live-view/context-emit.js";
-import { emitAggregateResources } from "../../../src/generator/phoenix-live-view/domain-emit.js";
+import { emitContext } from "../../../src/generator/elixir/context-emit.js";
+import { emitAggregateResources } from "../../../src/generator/elixir/domain-emit.js";
 import { allContexts } from "../../../src/ir/types/loom-ir.js";
 import { buildLoomModel } from "../../_helpers/index.js";
 

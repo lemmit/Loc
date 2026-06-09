@@ -28,7 +28,7 @@
 import { describe, expect, it } from "vitest";
 import type { DetectedApiCall } from "../../../src/generator/_walker/api-hook-detector.js";
 import type { ApiCallSite, StateRef, WalkerTarget } from "../../../src/generator/_walker/target.js";
-import { heexTarget } from "../../../src/generator/phoenix-live-view/heex-target.js";
+import { heexTarget } from "../../../src/generator/elixir/heex-target.js";
 import { tsxTarget } from "../../../src/generator/react/walker/tsx-target.js";
 
 const SAMPLE_STATE_REF: StateRef = {

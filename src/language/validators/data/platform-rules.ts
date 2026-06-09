@@ -116,7 +116,7 @@ export function expectedFrameworkFor(
   // framework as its bareword.
   const fam = platformFamily(platform);
   if (fam === "react" || fam === "static") return "react";
-  if (fam === "phoenix") return "phoenixLiveView";
+  if (fam === "elixir") return "phoenixLiveView";
   if (fam === "dotnet" && hasUi) return "react";
   return undefined;
 }
@@ -181,15 +181,18 @@ function adapterKindForAxis(axis: RealizationAxis): "persistence" | "style" | "l
 /** Single current value for a greenfield axis on a backend family. */
 function greenfieldMenu(family: Platform, axis: "foundation" | "transport" | "runtime"): string[] {
   if (axis === "runtime") return ["transactional"];
-  // Phoenix carries a two-element foundation menu: today's `ash` (the
+  // Elixir carries a two-element foundation menu: today's `ash` (the
   // current emitter) and `vanilla` (planned — D-VANILLA-PHOENIX-FOUNDATION).
   // The menu admits both at the syntactic/grammar layer; the emission gate
-  // for `foundation: vanilla` on phoenix lives in `checkDeployable`'s R5
+  // for `foundation: vanilla` on elixir lives in `checkDeployable`'s R5
   // (`loom.foundation-vanilla-phoenix-not-yet-implemented`) until the
   // vanilla emitter ships in P2 of proposals/vanilla-phoenix-foundation.md.
-  if (axis === "foundation") return family === "phoenix" ? ["ash", "vanilla"] : ["vanilla"];
-  // transport — the platform's only current HTTP surface.
-  return [family === "dotnet" ? "minimalApi" : family === "phoenix" ? "phoenixRouter" : "hono"];
+  if (axis === "foundation") return family === "elixir" ? ["ash", "vanilla"] : ["vanilla"];
+  // transport — the platform's only current HTTP surface.  Elixir's
+  // transport is `phoenix` (the Phoenix web framework) per
+  // D-PHOENIX-TRANSPORT; the legacy `phoenixRouter` value desugars at
+  // the lowering boundary (`canonicalTransport`).
+  return [family === "dotnet" ? "minimalApi" : family === "elixir" ? "phoenix" : "hono"];
 }
 
 /** The DSL-legal values for one realization axis on a platform family.

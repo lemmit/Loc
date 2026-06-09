@@ -1,4 +1,4 @@
-name: Phoenix runtime e2e (observability + embeds-react)
+name: Elixir / Ash runtime e2e (observability + embeds-react)
 
 # Boots the generated Phoenix backend against a real postgres sidecar,
 # hits /health, then asserts the JSON-per-line stdout from the custom

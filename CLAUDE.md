@@ -122,7 +122,7 @@ The three expression renderers share one dispatcher: `src/generator/_expr/target
 
 Page bodies in the `ui` DSL are written in a closed primitive library (`List`/`Detail`/`Form`/`MasterDetail`/`Stack`/`Heading`/`Button`/`Card`/`Toolbar`/`match`/lambdas/`state := …`). The dispatch registry lives in `src/generator/_walker/registry.ts`; `src/language/walker-stdlib.ts` holds the name-only mirror consumed by the validator (pinned by `walker-stdlib-completeness.test.ts`). Contributors adding a primitive register it in both places — the test gates the mirror. The renderer lives in `src/generator/react/body-walker.ts` and dispatches per-primitive through the active **design pack** (`designs/mantine|shadcn|mui|chakra/`, plus `designs/ashPhoenix/` for Phoenix HEEx). The `walker-*.test.ts` files (~30 of them) each cover one primitive or rendering concern; if you change the walker, expect to touch one of these.
 
-The framework-specific seams (state read/write syntax, helper imports, navigation, API call lowering, `match` rendering) are framework-shaped and cannot be expressed as pack templates. `src/generator/_walker/target.ts` **defines** the `WalkerTarget` contract that captures them. Both targets are now implemented and consumed: `src/generator/react/walker/tsx-target.ts` (consumed by `body-walker.ts`) and `src/generator/phoenix-live-view/heex-target.ts` (consumed by `heex-walker.ts`). The byte-identical-output gate guarded each per-seam extraction (Phase A Item 1 slices; see PRs #607, #610, #612, #616, #622, #623, #624, #625, #627).
+The framework-specific seams (state read/write syntax, helper imports, navigation, API call lowering, `match` rendering) are framework-shaped and cannot be expressed as pack templates. `src/generator/_walker/target.ts` **defines** the `WalkerTarget` contract that captures them. Both targets are now implemented and consumed: `src/generator/react/walker/tsx-target.ts` (consumed by `body-walker.ts`) and `src/generator/elixir/heex-target.ts` (consumed by `heex-walker.ts`). The byte-identical-output gate guarded each per-seam extraction (Phase A Item 1 slices; see PRs #607, #610, #612, #616, #622, #623, #624, #625, #627).
 
 ### Scaffolding
 
@@ -192,8 +192,8 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `generated-react-build.yml` — matrix `{example × pack}`, generates the React project, `npm install`, `tsc --noEmit`. Catches generator drift invisible to IR-level tests.
 - `hono-build.yml` — fast `tsc --noEmit` + `tsup` gate against the Hono backend output.
 - `dotnet-build.yml` — `dotnet build /warnaserror` against the .NET output.
-- `phoenix-build.yml` — `mix deps.get && mix compile --warnings-as-errors` against the real Ash 3.x dep set in an Elixir docker image.
-- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `phoenix-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout).
+- `elixir-ash-build.yml` — `mix deps.get && mix compile --warnings-as-errors` against the real Ash 3.x dep set in an Elixir docker image.
+- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-ash-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout).
 - `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview).
 - `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader run).
 - `cleanup-artifacts.yml` — scheduled tidy of test artefacts.

@@ -40,9 +40,9 @@
 // together so the gate stays green.
 
 import { describe, expect, it } from "vitest";
-import { emitApiControllers } from "../../../src/generator/phoenix-live-view/api-emit.js";
-import { emitOpenApiSpec } from "../../../src/generator/phoenix-live-view/openapi-emit.js";
-import { renderProblemDetailsModule } from "../../../src/generator/phoenix-live-view/problem-details-emit.js";
+import { emitApiControllers } from "../../../src/generator/elixir/api-emit.js";
+import { emitOpenApiSpec } from "../../../src/generator/elixir/openapi-emit.js";
+import { renderProblemDetailsModule } from "../../../src/generator/elixir/problem-details-emit.js";
 import type {
   AggregateIR,
   BoundedContextIR,
