@@ -1,6 +1,14 @@
 # Exception-less flow — `or` unions, `option`, `?` propagation, `error` payloads
 
-> Status: proposal. **Upstream proposal**:
+> Status: proposal. **Revisited by**:
+> [`failure-taxonomy.md`](./failure-taxonomy.md) — a step-back design
+> note that keeps this proposal's structural core (errors-as-data,
+> HTTP-blind domain + edge `httpStatus`, two-regime throw/return) and
+> reconsiders its ergonomics (the `?` operator, the carrier-monad
+> stdlib), adding first-class declarative validation. Read that for the
+> current thinking on the overall error story.
+>
+> **Upstream proposal**:
 > [`payload-transport-layer.md`](./payload-transport-layer.md) — this
 > doc consumes its Phase 3+4 (carrier-bounded generics + tagged
 > unions, both named and anonymous-`or`), its `: carrier` bound
