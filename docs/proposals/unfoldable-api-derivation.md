@@ -26,9 +26,11 @@ silently produces an enormous amount of generated material:
   (added in enrichment).
 - One route per public aggregate method, repository find, and workflow
   trigger.
-- One request DTO per route, derived from `wireShape`'s
-  create-vs-update projection.
-- One response DTO per route, derived from `wireShape`.
+- One request DTO per route, derived ad-hoc from the aggregate's
+  `wireShape` plus a create-vs-update access-modifier filter
+  (`forCreateInput` / `forUpdateInput`).
+- One response DTO per route, derived ad-hoc from `wireShape` plus
+  the `forApiRead` filter.
 - One error → HTTP status mapping per declared error, from
   `src/util/error-defaults.ts` plus per-api `httpStatus` overrides.
 - One OpenAPI tag per aggregate.
@@ -55,7 +57,7 @@ individually unfoldable to source:
 | Layer | Holds | Lives in | Depends on |
 |---|---|---|---|
 | **domain** | aggregate, repository, workflow, value object, enum | `context` | nothing |
-| **contract** | command, query, response, error (the published wire vocabulary) | `context` | domain (optional, via `wire X`) |
+| **contract** | command, query, response, error (the published wire vocabulary) | `context` | nothing in source — scaffolds project from domain at expansion time |
 | **application** | commandHandler, queryHandler (orchestration; workflow stays where it is) | `context` | contract + domain |
 | **api** | route (transport binding) | system | contract |
 
@@ -66,21 +68,26 @@ reference a contract type; it must not reach into a handler body or a
 domain method.
 
 ```
-              api
-               │
-               ▼
-            contract ─────┐
-               ▲          │
-               │          ▼
-          application ─> domain
+              ┌─── api ───┐
+              │           │
+              ▼           ▼
+          contract ◄──── (shared vocabulary) ──── application
+                                                   │
+                                                   ▼
+                                                 domain
 ```
 
-The dependency arrow from contract to domain is **optional and
-breakable** — `response OrderResponse = wire Order` consumes the
-domain wire shape; `response OrderResponse { id: OrderId, … }` cuts
-the dependency and lets the contract diverge from the model. This is
-how versioning, deprecation, and anti-corruption translation are
-expressed.
+Both api and application depend on **contract** — they share its types
+as their I/O vocabulary. Neither depends on the other directly: api
+dispatches via a mediator (generator-emitted; not declared in DSL) to
+the application handler that claims a given contract type.
+
+In source the **contract → domain link is absent at runtime**. When a
+contract is unfolded, it carries literal field declarations; when it
+isn't, the scaffold projects its fields from the domain at expansion
+time and emits literal source. After codegen, neither form retains any
+runtime reference to the domain — the contract is a flat record on the
+wire.
 
 ### Layer 1 — domain (unchanged from today)
 
@@ -95,12 +102,13 @@ named, addressable wire shapes the system speaks. Lives inside
 
 Today these declarations exist (`payload-transport-layer.md` is the
 relevant background) but are not the *only* expression of the wire
-shape — `wireShape` enrichment also synthesises DTOs at codegen time
-from the aggregate. The proposal: when scaffolding has unfolded fully,
-*every* request and response shape on the wire is a named contract
-declaration. The codegen-time wireShape projection becomes a
-**default** (used by `response X = wire Y`) rather than the source of
-truth.
+shape — every backend re-derives DTOs ad-hoc from the aggregate's
+`wireShape` enrichment, with `forApiRead` / `forCreateInput` /
+`forUpdateInput` filters applied per call site. The proposal: when
+scaffolding has unfolded, *every* request and response shape on the
+wire is a named contract declaration with literal fields. Backends
+read those declarations directly. The `wireShape` enrichment retires
+(see § "wireShape retires from the IR" below).
 
 Each handler I/O type is a contract declaration. Each route's request
 body and response body is a contract declaration. The api speaks
@@ -116,10 +124,15 @@ contract, not domain.
   tool descriptions, OpenAPI consumers, and reviewers checking what's
   exposed. Domain is read by people debugging behaviour. Mixing them
   in one file leaves neither audience served.
-- **It already exists as an artefact.** `.loom/wire-spec.json` is
-  exactly this layer crystallised. Promoting it from a generated
-  artefact to a source-layer makes it the contract, not a
-  side-effect.
+- **Both peer layers depend on it.** Both api and application reference
+  contract types as their I/O vocabulary, but neither references the
+  other directly. The contract is the *shared seam* that lets the
+  mediator route between them (see § "The mediator seam" below).
+- **`.loom/wire-spec.json` becomes redundant.** Today the artefact
+  exists to crystallise the implicit wire shape for diff-based
+  contract-change detection. With contract source declared explicitly,
+  the artefact's job duplicates the source. It retires too (see
+  § "wire-spec.json retires" below).
 
 ### Layer 3 — application (the orchestration)
 
@@ -189,24 +202,209 @@ route <METHOD> <PATH> -> <Context>.<HandlerOrWorkflow>
 Path params bind by name to the handler's parameters; the trailing
 parameter (if any) is the request body. The validator pins the match.
 
+## The mediator seam
+
+`route POST /orders -> Ordering.PlaceOrder` is **a registration, not a
+call**. At runtime the generated api code:
+
+1. Receives the HTTP request.
+2. Deserialises the body into the contract type that the route binds
+   (`PlaceOrderCommand`).
+3. Hands the command to a mediator: `mediator.Send(command)`.
+4. The mediator routes the command to the handler that registered for
+   `PlaceOrderCommand` — `PlaceOrder` in this case.
+5. The handler returns a contract response, which the api serialises
+   to HTTP.
+
+The mediator is **generator-emitted**, not declared in the DSL. It's
+the canonical pattern in .NET (MediatR's `IRequestHandler<T>`
+registrations), straightforward in Hono (a handler table keyed by
+command type), and uniform across Phoenix. Every backend implements
+the same dispatch contract.
+
+This is why the contract layer earns its split structurally: it's the
+*only* layer both api and application reference. Without it, api and
+application would have to depend on each other directly, breaking the
+strict one-directionality.
+
+In the IR, the route's target is a `HandlerRef` (qualified handler
+name). The runtime indirection through the mediator is a backend
+emission detail, not a DSL concern.
+
+## wireShape retires from the IR
+
+`wireShape` — the canonical ordered field list stamped on every
+`EnrichedAggregateIR` / `EnrichedEntityPartIR` /
+`EnrichedValueObjectIR` by phase ⑥ enrichment — is doing **less
+architectural work than its uniformity suggests**. Mechanically it is:
+
+1. A walk: `id` → declared properties → containments → derived (with
+   `inspect` excluded).
+2. A set of five pure predicate filters keyed on the per-field access
+   modifier (`forApiRead`, `forUiRead`, `forCreateInput`,
+   `forUpdateInput`, `forUpdatePreconditions`).
+
+There is **no transformation, reshaping, rename, or recomputation**.
+Renaming `wireShape` to "the field list, filtered" describes it
+exactly. The filters live in `src/ir/enrich/wire-projection.ts`
+keyed on this matrix (`src/language/ddd.langium:1118-1119`):
+
+| Access | apiRead | uiRead | createInput | updateInput | preconditions |
+|---|---|---|---|---|---|
+| editable (default) | ✓ | ✓ | ✓ | ✓ | – |
+| immutable | ✓ | ✓ | ✓ | – | – |
+| managed | ✓ | ✓ | – | – | – |
+| token | ✓ | ✓ | – | – | ✓ |
+| internal | – | ✓ | – | – | – |
+| secret | – | – | ✓ | ✓ | – |
+
+That matrix is the entire projection logic. It's already declarative.
+It can stay in `wire-projection.ts` *as a scaffold-time helper*,
+without enrichment ever stamping a `WireField[]` onto IR nodes.
+
+### Why per-operation projection is wrong-grained today
+
+The current pipeline routes *all* shapes through aggregate `wireShape`
+plus an access-modifier filter. But lifecycle operations
+(`lifecycle-operations.md`) already give each factory / operation /
+destroyer its own typed parameter list (`OperationIR.params`). The
+parameter list is the **natural source of truth** for a create or
+update command — the user wrote it; the aggregate's field set is
+irrelevant. `forCreateInput(wireShape)` was a workaround for the
+pre-lifecycle world where factories had no typed parameters; now they
+do.
+
+Six shapes, six natural sources:
+
+| Shape | Source |
+|---|---|
+| Create command | factory's parameter list (`OperationIR.params`, `kind: create`) |
+| Update command | operation's parameter list (`kind: operation`) |
+| Destroy command | destroyer's parameter list (`kind: destroy`) — often empty |
+| Custom operation command | the operation's parameter list, full stop |
+| Find query | the find's parameter list (`FindDecl.params`) |
+| Response (and list response) | aggregate's `fields + containments + derived`, filtered by `apiRead` |
+
+Five of six don't touch wireShape at all. The sixth is a one-shot
+walk-with-filter the scaffold can do at expansion time without any IR
+state.
+
+### What disappears
+
+| Today | After |
+|---|---|
+| `EnrichedAggregateIR.wireShape: WireField[]` | Removed. |
+| `EnrichedEntityPartIR.wireShape` | Removed. |
+| `EnrichedValueObjectIR.wireShape` | Removed. |
+| `wireShapeFor(entity)` | Removed. |
+| Phase ⑥ wireShape stamping | Removed. (Phase keeps auto-`findAll`, associations, react `targets:`, `migrationsOwner`.) |
+| `forApiRead`, `forCreateInput`, `forUpdateInput`, `forUiRead`, `forUpdatePreconditions` | **Stay**, but become scaffold-time helpers invoked once at expansion to filter literal fields. Not enrichment-stamped. |
+| `EnrichedAggregateIR` brand | Stays — other enrichments still load-bearing. |
+
+The backend emitters that today call `wireShapeFor(ent)` get
+refactored to read contract declarations from the IR. No filter, no
+walk — just iterate the contract's declared fields. The projection
+logic relocates to a single point (scaffold expansion) instead of
+running at every emit site.
+
+### Why this isn't a `wire(X)` macro
+
+A prior iteration of this proposal floated `with wire(X)` as a macro
+that would expand an aggregate to a contract declaration. The audit
+above shows there's nothing to name: the projection is "walk + filter
+by access modifier", same logic each scaffold runs on its own source.
+A dedicated `wire` keyword would suggest a fourth layer between domain
+and contract; the truth is the edge has no compile-time or runtime
+artefact at all — it's source generation only.
+
+The relationship between domain and contract is therefore:
+
+- **Macro form** (`with apiSurface(Sales)`): each layer scaffold walks
+  the relevant domain node (operation params or aggregate fields) and
+  emits contract declarations. The contract stays in sync with the
+  domain by re-expansion.
+- **Unfolded form** (literal contract source): contract declarations
+  carry literal fields. They no longer track the domain; divergence
+  must be re-scaffolded or hand-edited.
+
+Same semantics every other Loom scaffold has — macro is the tracker,
+unfold is the freeze. No additional language construct needed.
+
+### Non-emitter consumers — sweep result
+
+A separate exploration confirmed that the non-emitter consumers of
+`wireShape` either already use the per-operation source (forms read
+`op.params` directly) or already use literal contract declarations
+(workflow validators read `createInputFields`):
+
+| Consumer | Current source | Replacement |
+|---|---|---|
+| React form generation (`src/generator/react/walker/primitives/forms.ts`) | `op.params` | Already correct — no change. |
+| Workflow validation (`src/ir/validate/checks/workflow-checks.ts`) | `createInputFields(agg)` reads `agg.createInput` literal contract | Already correct — no change. |
+| Conformance tests (`test/generator/{hono,dotnet}/*-wire-conformance.test.ts`) | Compares post-emission OpenAPI / Zod / .NET artefacts | Unaffected (compares emitted output, not IR). |
+| Discriminated unions (`src/generator/_payload/union-wire.ts`) | `agg.wireShape` per variant | Phase 2 — migrate to response-contract-keyed bundles. |
+| Wire-spec artefact (`src/system/wire-spec.ts`) | `wireShape` | See § "wire-spec.json retires" below. |
+| Migrations, traceability, SQL | None — use schema/operation IR | Unaffected. |
+
+No hard blockers. The retirement is clean if staged in two phases (see
+Migration story below).
+
+## wire-spec.json retires
+
+`.loom/wire-spec.json` exists primarily for diff-based contract change
+detection — conformance tests parse it alongside backend OpenAPI to
+verify wire parity across backends. With contract source declared
+explicitly:
+
+- **Contract source files become the diffable artefact.** `git diff`
+  on `*.contract.ddd` tells you what changed between releases. CI
+  gating becomes "any change to `*.contract.ddd` requires explicit
+  review".
+- **Cross-backend parity becomes a type-check on the source.** When
+  every backend reads the same contract declarations, parity is
+  structural by construction — not a runtime diff.
+- **Debug escape hatch.** External tooling that consumes a JSON
+  Schema dump (third-party OpenAPI generators, etc.) can request one
+  on demand via `ddd snapshot --wire` (folded into the existing
+  `ddd snapshot` from `provenance.md`). Not part of the default
+  generate pipeline.
+
+Three options for the retirement:
+
+1. **Drop entirely.** Contract source is the diffable artefact.
+2. **Generate on demand only.** `ddd snapshot --wire` for external
+   tooling.
+3. **Keep, derive from contract source.** One-line change in
+   `src/system/wire-spec.ts` — walk contract declarations instead of
+   `wireShape`. Byte-identical output for non-diverged contracts.
+
+(1) with (2) as escape hatch is recommended.
+
 ## Scaffold tree
 
 Three independent sub-trees, one per layer. Every leaf scaffold
 materialises exactly one declaration.
 
+Each leaf scaffold consults exactly one IR node — an operation's
+parameter list, a find's parameter list, or an aggregate's field set
+— and emits a literal contract declaration. Six leaf shapes, six
+sources, no shared `wireShape` intermediary.
+
 ```
 scaffoldApiFromContext(of: Sales)
 ├── scaffoldContractForContext(of: Ordering)
 │   ├── scaffoldContractForAggregate(of: Order)
-│   │   ├── scaffoldCommandForOperation(of: Order.place)          ← leaf
-│   │   ├── scaffoldCommandForOperation(of: Order.cancel)         ← leaf
-│   │   ├── scaffoldCommandForOperation(of: Order.archive)        ← leaf
-│   │   └── scaffoldResponseForAggregate(of: Order)               ← leaf
+│   │   ├── scaffoldCreateCommandFor(operation: Order.place)      ← leaf  (reads place.params)
+│   │   ├── scaffoldUpdateCommandFor(operation: Order.cancel)     ← leaf  (reads cancel.params)
+│   │   ├── scaffoldDestroyCommandFor(operation: Order.archive)   ← leaf  (reads archive.params)
+│   │   └── scaffoldResponseFor(aggregate: Order)                 ← leaf  (walks fields+containments+derived, apiRead filter)
 │   ├── scaffoldContractForRepository(of: Orders)
-│   │   ├── scaffoldQueryForFind(of: Orders.byId)                 ← leaf
-│   │   ├── scaffoldQueryForFind(of: Orders.byCustomer)           ← leaf
-│   │   └── scaffoldQueryForFind(of: Orders.findAll)              ← leaf
-│   └── scaffoldContractForWorkflow(of: ReorderStockedItems)      ← leaf
+│   │   ├── scaffoldQueryFor(find: Orders.byId)                   ← leaf  (reads byId.params)
+│   │   ├── scaffoldQueryFor(find: Orders.byCustomer)             ← leaf  (reads byCustomer.params)
+│   │   └── scaffoldQueryFor(find: Orders.findAll)                ← leaf  (reads findAll.params)
+│   └── scaffoldContractForWorkflow(of: ReorderStockedItems)
+│       ├── scaffoldCommandFor(workflowHandle: ReorderStockedItems.invoke)  ← leaf  (reads handle.params)
+│       └── scaffoldResponseFor(workflowOutput: ReorderStockedItems)        ← leaf  (if the handle returns)
 ├── scaffoldApplicationForContext(of: Ordering)
 │   ├── scaffoldHandlersForAggregate(of: Order)
 │   │   ├── scaffoldHandlerForOperation(of: Order.place)          → commandHandler PlaceOrder
@@ -228,6 +426,19 @@ scaffoldApiFromContext(of: Sales)
             // emitted only when the workflow exposes a callable surface
             // (a `handle` member). Scheduled-only / event-only workflows skip.
 ```
+
+A seventh leaf shape covers views with implicit projection:
+
+```
+scaffoldViewProjectionFor(aggregate: Order)                       ← leaf
+  // Walks Order.fields+containments+derived with `uiRead` filter
+  // (admin views keep `internal`; production responses drop it).
+  // Used when a `view` declaration omits its field list.
+```
+
+Same walk-with-filter mechanic as `scaffoldResponseFor`, different
+filter. Source of truth is still the aggregate's literal field set —
+no `wireShape` intermediary.
 
 Workflows are user-written, not scaffolded — the application sub-tree
 fans `scaffoldHandlersForAggregate` and `scaffoldHandlersForRepository`
@@ -314,21 +525,18 @@ The existing `WithClause` rule is grammar-level reusable; today's
 aggregates and UI consume it. Adding `withClause=WithClause?` to the
 `Api` rule lets `api SalesApi with apiSurface(Sales)` parse.
 
-### NEW — `wire X` as a type expression
+### NOT NEW — no `wire X` operator
 
-```
-TypeAtom:
-    … existing …
-  | WireTypeRef;
+A prior draft proposed `wire X` as a type expression
+(`response OrderResponse = wire Order`). It's deliberately dropped.
+The domain → contract relationship is **scaffold-time only** — a walk
+of `aggregate.fields + containments + derived` filtered by the
+`apiRead` access modifier. The macro form (`with apiSurface(Sales)`)
+runs that walk and emits literal contract source; the unfolded form
+*is* the literal contract source. Neither carries a residual `wire`
+reference into the AST, the IR, or the runtime.
 
-WireTypeRef:
-    'wire' target=[Aggregate:ID];
-```
-
-Used in payload-declaration value position: `response OrderResponse =
-wire Order` — sugar for the literal wire-shape projection of `Order`.
-This is the *only* place the contract layer is allowed to delegate to
-the domain.
+See § "wireShape retires from the IR" above for the full reasoning.
 
 ### EXISTING — leveraged unchanged
 
@@ -398,8 +606,21 @@ subdomain Sales {
     query    OrdersListQuery       { page: int = 1, pageSize: int = 25 }
     query    OrdersByCustomerQuery { customerId: CustomerId, page: int = 1, pageSize: int = 25 }
 
-    response OrderResponse     = wire Order
-    response OrderLineResponse = wire OrderLine
+    // Response shapes are always literal in the unfolded form.
+    // Produced by `scaffoldResponseFor(aggregate: Order)` walking
+    // Order.fields + containments + derived with the `apiRead` filter.
+    response OrderResponse {
+      id:         OrderId
+      customerId: CustomerId
+      items:      OrderLineResponse[]
+      total:      Money
+      placedAt:   timestamp
+    }
+    response OrderLineResponse {
+      sku:   Sku
+      qty:   int
+      price: Money
+    }
 
     // ====== Application ==========================================
     commandHandler PlaceOrder(cmd: PlaceOrderCommand): OrderResponse {
@@ -495,6 +716,20 @@ deleted.
   has none. The enrichment pass that injects `findAll` today can stay
   as a back-compat for non-unfolded code, or be removed once every
   example is migrated.
+- **`wireShape` enrichment**. Retires in two phases (see § "wireShape
+  retires from the IR" above). Phase 1: backends switch from
+  `wireShapeFor(ent)` to reading contract declarations directly,
+  starting with the four DTO emitters (`src/generator/typescript/`,
+  `src/generator/dotnet/dto-mapping.ts`,
+  `src/generator/elixir/`, `src/generator/react/api-builder.ts`).
+  Phase 2: discriminated-union bundles (`src/generator/_payload/union-wire.ts`)
+  switch to response-contract-keyed bundles; the enrichment stamping
+  and `wireShapeFor` can then be deleted. Phase 1 and 2 are
+  independent.
+- **`.loom/wire-spec.json` artefact**. Retires alongside `wireShape`
+  (see § "wire-spec.json retires" above). Replaced by contract source
+  as the diffable artefact, with `ddd snapshot --wire` as an optional
+  on-demand JSON dump for external tooling.
 
 ## Migration story
 
@@ -515,29 +750,33 @@ rest of the macro tree intact.
    `handler` keyword with contract derived from body shape (`.save`
    present → command; cross-aggregate → workflow). Three is more
    honest; one is less to learn. Open.
-2. **`wire X` semantics on collections.** A query handler returning
-   `Order paged` and a contract declaring `response = wire Order`
-   together imply `wire (Order paged) = (wire Order) paged`. Worth
-   pinning the distribution rule (paged, option, array) as a single
-   "wire distributes over carriers" axiom rather than leaving each
-   carrier to its own emitter.
-3. **Where do errors live?** Names are contract (per context; what
+2. **Where do errors live?** Names are contract (per context; what
    counts as `NotFound` is domain-shaped). Status mapping is system
    policy (one truth). This proposal sketches the split; the policy
    surface itself wants its own short proposal.
-4. **HandlerRef vs system-flat handler names.** `Ordering.PlaceOrder`
+3. **HandlerRef vs system-flat handler names.** `Ordering.PlaceOrder`
    qualifies by context. The alternative is system-flat names with
    uniqueness enforced. The qualified form documents the contract's
    bounded-context origin in the route line itself; the flat form
    reads cleaner. Open.
-5. **`with apiSurface(...)` macro arguments.** Positional (`(Sales)`)
+4. **`with apiSurface(...)` macro arguments.** Positional (`(Sales)`)
    vs named (`(of: Sales)`). The rest of the macro stdlib uses named
    (`of:` is canonical). Worth aligning before this lands.
-6. **Should `commandHandler` / `queryHandler` be folded into
+5. **Should `commandHandler` / `queryHandler` be folded into
    workflow's existing `handle` / read-only-handle members?** The
    semantic overlap is real; the cost of a separate keyword is the
    ceremony of declaring a workflow for every single-aggregate
    handler. Open — see (1).
+6. **Should routes target contract types directly instead of named
+   handlers?** `route POST /orders body: PlaceOrderCommand` (mediator
+   finds the registered handler) vs `route POST /orders -> PlaceOrder`
+   (explicit registration). The first is more honest about the
+   mediator's role; the second is more readable in source. Open.
+7. **Access-modifier coverage.** Six access modifiers cover five
+   projection modes today. If contract divergence introduces new
+   projection modes (e.g. an `auditOnly` field that appears only in
+   audit responses), we'd add a modifier rather than special-casing
+   per scaffold. Worth a separate proposal if the need arises.
 
 ## Out of scope for this proposal
 
@@ -562,7 +801,8 @@ rest of the macro tree intact.
   per-api IR field consumed by every backend.
 - `payload-transport-layer.md` — payloads are the substance of the
   contract layer; this proposal proposes nothing new there, only
-  promotes them to the canonical wire-shape source.
+  promotes them to the canonical wire-shape source (literal
+  declarations, no `wireShape` intermediary).
 - `workflow-and-applier.md` — workflow's existing `create` / `handle`
   / `on` / `apply` members stay unchanged; the proposal only extends
   routes to target a workflow's `handle` directly.
@@ -577,21 +817,39 @@ rest of the macro tree intact.
 If adopted, a reasonable ordering would be:
 
 1. **Grammar + IR** for `commandHandler`, `queryHandler`, `route` as
-   an api-body member, `HandlerRef`, `wire X` type expression.
+   an api-body member, and `HandlerRef`.
 2. **Lowering + validation** of the new members (one-directional
    layering checks: queryHandler must not save; commandHandler must
    not touch two aggregates; route target must resolve).
 3. **Scaffold stdlib** — three sub-tree macros plus their leaves,
    following the existing `scaffoldSubdomain` /
    `scaffoldContext` / `scaffoldAggregate` composition pattern.
+   `wire-projection.ts` filters relocate from enrichment-stamped
+   to scaffold-time consumed at this step.
 4. **`apiSurface` composer** wiring all three sub-trees, replacing
    the current `Api from Subdomain` implicit derivation.
-5. **Backend updates** — each generator consumes explicit routes +
-   handlers + contract types instead of re-deriving from aggregates.
-   The old derivation path stays until every example migrates.
-6. **`ddd unfold` CLI** and LSP code-action for per-scaffold
+5. **Backend DTO emitters** — each generator switches from
+   `wireShapeFor(ent) → filter → emit` to reading literal contract
+   declarations. The old path stays in parallel until every example
+   migrates.
+6. **`wireShape` IR field deletion (Phase 1)** — once every backend
+   DTO emitter reads contracts, remove `wireShape` stamping from
+   enrichment and `wireShapeFor` from the IR surface. Union-bundle
+   emission still uses it; that's Phase 2.
+7. **Discriminated-union bundle migration (Phase 2)** —
+   `src/generator/_payload/union-wire.ts` switches to
+   response-contract-keyed bundles. After this, `wireShape` can be
+   fully deleted.
+8. **`.loom/wire-spec.json` retirement** — contract source becomes
+   the diffable artefact; `ddd snapshot --wire` lands as the
+   on-demand JSON dump for external tooling. Conformance tests
+   refactor to compare emitted backend artefacts against the
+   contract source directly.
+9. **`ddd unfold` CLI** and LSP code-action for per-scaffold
    unfolding. File-move tooling is a follow-up.
 
 Each step is independent enough to ship behind its own PR; the
 generators don't have to change until the IR has the new shape they
-can read.
+can read, and the `wireShape` retirement (steps 6-7) is independent
+of the layer additions (steps 1-4) — they could be sequenced in
+either order.
