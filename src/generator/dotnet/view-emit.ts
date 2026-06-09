@@ -5,12 +5,14 @@ import type {
   EnrichedBoundedContextIR,
   ExprIR,
   ViewIR,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { viewUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { dtoParam, projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
+import { workflowStateDbSet } from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
 // .NET view emission.
@@ -41,7 +43,24 @@ export function emitViews(
 ): void {
   if (ctx.views.length === 0) return;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
   for (const view of ctx.views) {
+    // Workflow-sourced view (workflow-instance-views.md): a Mediator query
+    // whose handler reads the saga-state DbSet with the filter, returning the
+    // workflow's `<Wf>InstanceResponse` (emitted by emitWorkflowInstanceReads).
+    if (view.source.kind === "workflow") {
+      const wf = wfByName.get(view.source.name);
+      if (!wf?.instanceWireShape) continue; // validator already errored
+      out.set(
+        `Application/Views/${upperFirst(view.name)}Query.cs`,
+        renderWorkflowViewQuery(view, wf, ns),
+      );
+      out.set(
+        `Application/Views/${upperFirst(view.name)}Handler.cs`,
+        renderWorkflowViewHandler(view, wf, ctx, ns),
+      );
+      continue;
+    }
     const agg = aggsByName.get(view.source.name);
     if (!agg) continue; // validator already errored
     if (view.output) {
@@ -219,6 +238,75 @@ function projectFullForm(
   return `new ${upperFirst(view.name)}Row(${args.join(", ")})`;
 }
 
+// ---------------------------------------------------------------------------
+// Workflow-sourced views (workflow-instance-views.md) — a Mediator query whose
+// handler reads the saga-state DbSet with the view filter, returning the
+// workflow's `<Wf>InstanceResponse` (the read-side analogue of the .NET
+// instance endpoints from #1035; the DTO is emitted by emitWorkflowInstanceReads).
+// ---------------------------------------------------------------------------
+
+function renderWorkflowViewQuery(view: ViewIR, wf: WorkflowIR, ns: string): string {
+  const responseRecord = `${upperFirst(wf.name)}InstanceResponse`;
+  return `// Auto-generated.
+using System.Collections.Generic;
+using Mediator;
+using ${ns}.Application.Workflows;
+
+namespace ${ns}.Application.Views;
+
+public sealed record ${upperFirst(view.name)}Query() : IQuery<IReadOnlyList<${responseRecord}>>;
+`;
+}
+
+function renderWorkflowViewHandler(
+  view: ViewIR,
+  wf: WorkflowIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): string {
+  const queryName = `${upperFirst(view.name)}Query`;
+  const handlerName = `${upperFirst(view.name)}Handler`;
+  const responseRecord = `${upperFirst(wf.name)}InstanceResponse`;
+  const dbSet = workflowStateDbSet(wf);
+  const usings = new Set<string>();
+  const where = view.filter ? renderCsExpr(view.filter, { thisName: "r" }) : undefined;
+  if (view.filter) collectCsExprUsings(view.filter, usings);
+  const proj = (wf.instanceWireShape ?? [])
+    .map((f) => projectToResponse(`r.${upperFirst(f.name)}`, f.type, ctx))
+    .join(", ");
+  const extraUsings = [...usings]
+    .sort()
+    .map((n) => `using ${n};`)
+    .join("\n");
+  return `// Auto-generated.
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
+using Microsoft.EntityFrameworkCore;
+using Mediator;
+using ${ns}.Application.Workflows;
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+using ${ns}.Infrastructure.Persistence;
+
+namespace ${ns}.Application.Views;
+
+public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<${responseRecord}>>
+{
+    private readonly AppDbContext _db;
+    public ${handlerName}(AppDbContext db) => _db = db;
+
+    public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} query, CancellationToken cancellationToken)
+    {
+        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);
+        return rows.Select(r => new ${responseRecord}(${proj})).ToList();
+    }
+}
+`;
+}
+
 /** Render a bind expression with chained `X id` follow rewriting
  *  for .NET.  At each `member` whose receiverType is `X id`, the
  *  access becomes `<map>[<receiverRendered>].<Member>`; receiver
@@ -294,11 +382,21 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
   const className = `${ctx.name}ViewsController`;
   const route = `${routePrefix ?? ""}views`;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
+  let hasWorkflowView = false;
   const blocks: string[] = [];
   for (const view of ctx.views) {
-    const agg = aggsByName.get(view.source.name);
-    if (!agg) continue;
-    const recordName = responseRecordName(view, agg);
+    let recordName: string;
+    if (view.source.kind === "workflow") {
+      const wf = wfByName.get(view.source.name);
+      if (!wf?.instanceWireShape) continue;
+      recordName = `${upperFirst(wf.name)}InstanceResponse`;
+      hasWorkflowView = true;
+    } else {
+      const agg = aggsByName.get(view.source.name);
+      if (!agg) continue;
+      recordName = responseRecordName(view, agg);
+    }
     const responseType = `IReadOnlyList<${recordName}>`;
     blocks.push(
       `    [HttpGet("${snake(view.name)}")]\n` +
@@ -314,12 +412,14 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
   const aggResponseUsings = [
     ...new Set(
       ctx.views
-        .filter((v) => !v.output)
+        .filter((v) => !v.output && v.source.kind === "aggregate")
         .map((v) => aggsByName.get(v.source.name))
         .filter((a): a is AggregateIR => !!a)
         .map((a) => `using ${ns}.Application.${plural(a.name)}.Responses;`),
     ),
   ];
+  // Workflow-view responses (`<Wf>InstanceResponse`) live in Application.Workflows.
+  if (hasWorkflowView) aggResponseUsings.push(`using ${ns}.Application.Workflows;`);
   return `// Auto-generated.
 using System.Threading.Tasks;
 using Mediator;
