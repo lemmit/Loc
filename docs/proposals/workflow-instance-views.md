@@ -1,15 +1,19 @@
 # Workflow instances as `view` sources — curated saga projections
 
-> Status: **proposed (not implemented).** Follow-up to
+> Status: **implemented on Hono, .NET, and React/scaffold (#1037).** The
+> foundation (grammar `ViewSource = Aggregate | Workflow`, `ViewIR.source`,
+> lowering via `inWorkflow`, IR validation) and backend emission for Hono,
+> .NET, and the React client + scaffold pages all ship; aggregate views are
+> byte-identical. **Phoenix workflow-view emission is deferred** — see
+> *Deferred* below. Follow-up to
 > [workflow-instance-visibility.md](./workflow-instance-visibility.md)
-> (shipped in #1035), which gave every correlation-bearing workflow an
+> (#1035), which gave every correlation-bearing workflow an
 > `instanceWireShape` and a raw read surface (`GET
-> /workflows/<wf>/instances` + scaffolded List/Detail). This proposal lets
-> a `view` take a **workflow** as its source — `view ActiveFulfillments =
-> Fulfillment where status == Pending` — so authors can curate filtered
+> /workflows/<wf>/instances` + scaffolded List/Detail). A `view` can now
+> take a **workflow** as its source — `view ActiveFulfillments =
+> Fulfillment where status == Pending` — so authors curate filtered
 > projections over running sagas the way they already do over aggregates,
-> reusing the entire `view` pipeline on top of the read model that now
-> exists.
+> reusing the `view` pipeline on top of that read model.
 
 ## Problem
 
@@ -163,6 +167,35 @@ table):
 
 ## Deferred
 
+- **Phoenix workflow-view emission — deferred, and contingent on the
+  broader Ash question.** On Phoenix the saga correlation state is a plain
+  `Ecto.Schema` (not an Ash resource), deliberately, to keep the saga
+  write path — the dispatcher's imperative *load-or-allocate* (`create`)
+  and *route-or-drop+log* (`on`) — **off the Ash action surface**
+  (`dispatch-emit.ts` header; `channels.md`). So a Phoenix workflow view
+  cannot reuse the aggregate view's `Ash.Query.filter` path; it would need
+  an Ecto-`where` filter renderer (the existing renderer targets Ash
+  filter syntax) plus a camelCase encoder for the plain Ecto struct (Ash
+  resources get one per-resource for free). Two paths were weighed:
+  1. **Promote the saga state to an Ash resource** — makes reads (views +
+     the #1035 instance endpoints) trivial and uniform with aggregates,
+     but drags the imperative allocate/route *write* path onto Ash
+     changeset actions, re-introducing exactly the friction the Ecto
+     choice avoided. Rejected.
+  2. **Keep Ecto, add an Ecto-`where` view read + a shared camel encoder**
+     — consistent with the saga's existing access model; the realistic
+     path *if* Phoenix support is pursued.
+
+  Deferred for now: this is one more entry in a growing list of
+  **Ash-framework compatibility frictions** (cf. `workflow-and-applier.md`
+  — event sourcing on Phoenix/Ash is deferred for the same
+  changeset-shaped-action / queryable-data-layer reasons; the `vanilla`
+  Phoenix foundation exists partly to sidestep them). Whether Phoenix
+  workflow views (and indeed how far the Ash foundation is carried) get
+  built at all is an open product question. A Phoenix deployable with a
+  workflow-sourced view today **validates but emits no view endpoint** for
+  it (graceful skip; aggregate Phoenix views unchanged; no conformance
+  example pairs the two, so cross-backend parity is unaffected).
 - Full-form (`bind`-projected) workflow views (decision 2).
 - Event-sourced workflow view sources (needs the fold-from-stream read
   model the parent also deferred).

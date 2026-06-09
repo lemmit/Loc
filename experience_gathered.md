@@ -1228,3 +1228,38 @@ emission got it green on the first CI compile.
 
 Lesson: in this sandbox, curl ≠ Erlang/httpc for outbound TLS. Don't assume a
 toolchain that "has network" can fetch — check the *specific* client.
+
+## Ash's action model keeps not fitting Loom's imperative persistence — the saga state is deliberately Ecto, not Ash
+
+Recurring theme, now with a third data point. Loom's Phoenix backend models
+**aggregates** as full `Ash.Resource` (AshPostgres data layer), but several
+persistence paths are deliberately kept **off the Ash action surface** because
+Ash models writes as changeset-shaped actions (`create`/`read`/`update` with
+accept-lists, change chains, authorizers) over a data layer that assumes it
+answers queries about *current state* — and Loom's non-CRUD write paths don't fit:
+
+- **Event sourcing on Phoenix/Ash — deferred** (`workflow-and-applier.md`): the
+  emit/apply, no-state-table, fold-on-load contract can't ride Ash's changeset
+  actions + queryable-data-layer callbacks without a custom data layer or leaky
+  half-bridges. The escape hatch is the `foundation: vanilla` axis (plain Ecto),
+  not the platform.
+- **Workflow saga/correlation state — plain `Ecto.Schema`, by design**
+  (`channels.md`, `dispatch-emit.ts`): the dispatcher mutates the saga row
+  imperatively — *load-or-allocate* on a `create` starter, *route-or-drop+log*
+  on an `on` reactor. That's routing/correlation bookkeeping, not domain CRUD,
+  so it's read/written through the app `Repo` (`AshPostgres.Repo` is itself an
+  `Ecto.Repo`) over the shared `MigrationsIR` table — keeping it off Ash.
+- **Workflow-instance views on Phoenix — deferred** (`workflow-instance-views.md`):
+  because the saga state is Ecto, a workflow-sourced `view` can't reuse the
+  aggregate view's `Ash.Query.filter` path. Promoting the saga to an Ash
+  resource to fix the *read* side would drag the imperative *write* path onto
+  Ash actions — re-introducing the very friction the Ecto choice avoided. So the
+  read stays Ecto if/when built (Ecto `where` + a shared camelCase encoder for
+  the plain struct).
+
+Lesson: when a persistence path is imperative / non-CRUD / non-current-state
+(event streams, saga correlation, upsert-by-key), Ash fights you. Reach for plain
+Ecto over the shared `Repo` and keep it off the action surface. The frictions are
+accumulating enough that whether the Ash foundation is carried further at all is
+an open product question — design new Phoenix work so it doesn't *deepen* the Ash
+coupling.
