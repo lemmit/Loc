@@ -272,6 +272,9 @@ read model to be a `view` source so authors can curate
 first would invert the dependency (a view needs the underlying read model
 to exist), so the instance surface is the right first slice either way.
 
+> Now that this slice has shipped, that follow-up is specified in
+> [workflow-instance-views.md](./workflow-instance-views.md).
+
 ## Deferred
 
 - Event-sourced workflow instance views (fold-from-stream) and the
