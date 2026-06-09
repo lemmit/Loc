@@ -5,6 +5,7 @@
 import type { LayoutAdapter } from "./layout-surface.js";
 import type { PersistenceAdapter } from "./persistence-surface.js";
 import type { StyleAdapter } from "./style-surface.js";
+import type { TransportAdapter } from "./transport-surface.js";
 
 export type {
   LayoutAdapter,
@@ -30,6 +31,10 @@ export type {
   StyleAdapter,
   StyleCapabilities,
 } from "./style-surface.js";
+export type {
+  TransportAdapter,
+  TransportCapabilities,
+} from "./transport-surface.js";
 export type { EmitCtx, EmittedArtifact, Lines } from "./types.js";
 
 /** Per-platform adapter menu — every supported adapter, keyed by its
@@ -41,12 +46,17 @@ export interface PlatformAdapters {
   persistence: Record<string, PersistenceAdapter>;
   styles: Record<string, StyleAdapter>;
   layouts: Record<string, LayoutAdapter>;
+  /** HTTP surface (`transport:` axis).  Thin today — one real transport
+   *  per backend (the per-transport emit is future work); the menu may
+   *  carry reserved stubs (`controllers` on dotnet). */
+  transports: Record<string, TransportAdapter>;
 }
 
 /** Defaults a platform falls back to when the source doesn't pin one
- *  via `persistence:` / `style:` / `layout:`. */
+ *  via `persistence:` / `style:` / `layout:` / `transport:`. */
 export interface PlatformAdapterDefaults {
   persistence: { state: string; eventLog: string };
   style: string;
   layout: string;
+  transport: string;
 }

@@ -25,6 +25,7 @@ import {
   type PlatformAdapterDefaults,
   type PlatformAdapters,
   type StyleAdapter,
+  type TransportAdapter,
 } from "../generator/_adapters/index.js";
 import type { Platform } from "../ir/types/loom-ir.js";
 import { platformFor } from "./registry.js";
@@ -51,18 +52,9 @@ export function defaultsFor(platform: Platform): PlatformAdapterDefaults | undef
  *  (D-REALIZATION-AXES R1): a stub key parses but must be rejected with
  *  "reserved but not yet implemented", not silently accepted.  Returns
  *  `[]` for frontend / unknown platforms (no adapter menu). */
-export function availableAdapterNames(
-  platform: Platform,
-  kind: "persistence" | "style" | "layout",
-): string[] {
-  const adapters = adaptersFor(platform);
-  if (!adapters) return [];
-  const bag: Record<string, object> =
-    kind === "persistence"
-      ? adapters.persistence
-      : kind === "style"
-        ? adapters.styles
-        : adapters.layouts;
+export function availableAdapterNames(platform: Platform, kind: AdapterAxisKind): string[] {
+  const bag = adapterBagFor(platform, kind);
+  if (!bag) return [];
   return Object.entries(bag)
     .filter(([, adapter]) => (adapter as Record<symbol, unknown>)[ADAPTER_IS_STUB] !== true)
     .map(([name]) => name)
@@ -72,19 +64,35 @@ export function availableAdapterNames(
 /** Every adapter name in a platform's menu for one axis — REAL and STUB.
  *  Used to distinguish "reserved but unimplemented" (a registered stub)
  *  from "unknown" in validator diagnostics.  `[]` for frontends. */
-export function allAdapterNames(
-  platform: Platform,
-  kind: "persistence" | "style" | "layout",
-): string[] {
-  const adapters = adaptersFor(platform);
-  if (!adapters) return [];
-  const bag =
-    kind === "persistence"
-      ? adapters.persistence
-      : kind === "style"
-        ? adapters.styles
-        : adapters.layouts;
+export function allAdapterNames(platform: Platform, kind: AdapterAxisKind): string[] {
+  const bag = adapterBagFor(platform, kind);
+  if (!bag) return [];
   return Object.keys(bag).sort();
+}
+
+/** The adapter-backed realization axes (each maps 1:1 to a `PlatformAdapters`
+ *  record).  `transport` joined the set when it was promoted from a greenfield
+ *  axis (realization-axes-alignment.md). */
+type AdapterAxisKind = "persistence" | "style" | "layout" | "transport";
+
+/** The adapter record for one axis on a platform, or undefined for
+ *  frontends / unknown platforms (no menu). */
+function adapterBagFor(
+  platform: Platform,
+  kind: AdapterAxisKind,
+): Record<string, object> | undefined {
+  const adapters = adaptersFor(platform);
+  if (!adapters) return undefined;
+  switch (kind) {
+    case "persistence":
+      return adapters.persistence;
+    case "style":
+      return adapters.styles;
+    case "layout":
+      return adapters.layouts;
+    case "transport":
+      return adapters.transports;
+  }
 }
 
 /** Resolve a persistence adapter by platform + name.  Falls back to the
@@ -148,6 +156,29 @@ export function resolveLayout(platform: Platform, name: string | null | undefine
       resolved,
       platform,
       Object.keys(adapters.layouts),
+    );
+  }
+  return adapter;
+}
+
+export function resolveTransport(
+  platform: Platform,
+  name: string | null | undefined,
+): TransportAdapter {
+  const surface = platformFor(platform);
+  const adapters = surface.adapters?.();
+  const defaults = surface.adapterDefaults?.();
+  if (!adapters || !defaults) {
+    throw new AdapterNotImplementedError("transport", name ?? "<default>", platform, []);
+  }
+  const resolved = name && name.length > 0 ? name : defaults.transport;
+  const adapter = adapters.transports[resolved];
+  if (!adapter) {
+    throw new AdapterNotImplementedError(
+      "transport",
+      resolved,
+      platform,
+      Object.keys(adapters.transports),
     );
   }
   return adapter;

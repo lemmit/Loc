@@ -108,6 +108,8 @@ const honoPlatform: PlatformSurface = {
         byLayer: byLayerLayoutAdapter,
         byFeature: byFeatureLayoutAdapter,
       },
+      // The Hono router — the Node backend's only HTTP surface today.
+      transports: { hono: { name: "hono" } },
     };
     return menu;
   },
@@ -116,6 +118,7 @@ const honoPlatform: PlatformSurface = {
       persistence: { state: "drizzle", eventLog: "drizzle" },
       style: "layered",
       layout: "byLayer",
+      transport: "hono",
     };
   },
 };
