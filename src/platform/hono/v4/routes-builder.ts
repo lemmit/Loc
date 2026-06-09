@@ -1172,7 +1172,7 @@ export function zodFor(t: TypeIR, context: "body" | "query" = "body"): string {
 /** Response-side zod for a `TypeIR`.  Decimals are exposed as strings on
  *  the wire (JSON loses precision); datetimes as ISO strings; ids as
  *  plain strings.  Every other shape mirrors the request side. */
-function zodForResponse(t: TypeIR, optional: boolean): string {
+export function zodForResponse(t: TypeIR, optional: boolean): string {
   const z = zodForResponseInner(t);
   // `zodForResponseInner` already appends `.nullish()` for a nullable type;
   // only add it for an `optional` field whose type isn't already nullable,

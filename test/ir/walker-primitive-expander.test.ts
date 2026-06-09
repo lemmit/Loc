@@ -41,6 +41,8 @@ function containsScaffoldCall(expr: ExprIR | undefined): boolean {
     "scaffoldNewForm",
     "scaffoldWorkflowForm",
     "scaffoldViewList",
+    "scaffoldInstanceList",
+    "scaffoldInstanceDetails",
     "Home",
     "WorkflowsIndex",
     "ViewsIndex",

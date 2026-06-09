@@ -383,7 +383,7 @@ export function enrichContext(
   // Slice 4 (static-analysis-followups.md): derive each workflow's tail-
   // position success type once, so the backends can narrow `{:ok, term()}`
   // to a concrete `{:ok, T}` instead of re-walking the body per emitter.
-  const workflows = ctx.workflows.map(enrichWorkflowReturnType);
+  const workflows = ctx.workflows.map(enrichWorkflowReturnType).map(enrichWorkflowInstanceShape);
   // In-process dispatch slice: the channel-routed subscription join.
   const eventSubscriptions = deriveEventSubscriptions(ctx.channels, workflows);
   return {
@@ -402,6 +402,50 @@ export function enrichContext(
 function enrichWorkflowReturnType(wf: WorkflowIR): WorkflowIR {
   const returnType = computeWorkflowReturnType(wf);
   return returnType ? { ...wf, returnType } : wf;
+}
+
+/** Attach `instanceWireShape` (the persisted correlation-state row's wire
+ *  shape) to a correlation-bearing workflow, idempotently — the
+ *  workflow-instance analogue of an aggregate's `wireShape`
+ *  (workflow-instance-visibility.md).  No-op for stateless / `eventSourced`
+ *  workflows (no correlation field ⇒ no state table to read). */
+function enrichWorkflowInstanceShape(wf: WorkflowIR): WorkflowIR {
+  if (!wf.correlationField) return wf;
+  return { ...wf, instanceWireShape: wireFieldsForWorkflow(wf) };
+}
+
+/** The wire shape of a persisted workflow instance: the correlation field as
+ *  the `id`-shaped `token` row (mirroring an aggregate's synthetic `id`),
+ *  then the remaining `stateFields` as `property` rows in declaration order.
+ *  Order is the contract, exactly like `wireFieldsForAggregate`.  The
+ *  correlation field keeps its declared name (it is a real column on the
+ *  state table `workflowStateTableShape` derives), unlike an aggregate's
+ *  always-`"id"` key. */
+function wireFieldsForWorkflow(wf: WorkflowIR): WireField[] {
+  const corr = wf.correlationField;
+  const fields = wf.stateFields ?? [];
+  const corrField = fields.find((f) => f.name === corr);
+  const out: WireField[] = [];
+  if (corrField) {
+    out.push({
+      name: corrField.name,
+      type: corrField.type,
+      optional: corrField.optional,
+      source: "id",
+      access: "token",
+    });
+  }
+  for (const f of fields) {
+    if (f.name === corr) continue;
+    out.push({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      source: "property",
+      access: f.access ?? "editable",
+    });
+  }
+  return out;
 }
 
 /** The value a workflow's primary `run` body yields on the happy path — the

@@ -645,7 +645,11 @@ function applyPageOriginSideEffects(sys: SystemIR): void {
       // route `/<plural>/:id` but no declarative `params` block, so
       // synthesise the typed param here for the walker to consume
       // when it emits `useParams<{id: string}>()`.
-      if (page.origin.kind === "aggregate-detail" && !page.params.some((p) => p.name === "id")) {
+      if (
+        (page.origin.kind === "aggregate-detail" ||
+          page.origin.kind === "workflow-instance-detail") &&
+        !page.params.some((p) => p.name === "id")
+      ) {
         page.params.push({
           name: "id",
           type: { kind: "primitive", name: "string" },
@@ -676,6 +680,12 @@ function conventionalEmitPath(origin: PageOriginIR, ctx: WalkerExpandContext): s
     const wf = ctx.workflowsByName.get(origin.workflowName);
     if (!wf) return undefined;
     return `src/pages/workflows/${snakeOnly(wf.name)}.tsx`;
+  }
+  if (origin.kind === "workflow-instances-list" || origin.kind === "workflow-instance-detail") {
+    const wf = ctx.workflowsByName.get(origin.workflowName);
+    if (!wf) return undefined;
+    const file = origin.kind === "workflow-instances-list" ? "instances" : "instance_detail";
+    return `src/pages/workflows/${snakeOnly(wf.name)}/${file}.tsx`;
   }
   if (origin.kind === "view-list") {
     return `src/pages/views/${snakeOnly(origin.viewName)}.tsx`;

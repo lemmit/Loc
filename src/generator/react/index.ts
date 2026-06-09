@@ -257,6 +257,15 @@ export function generateReactForContexts(
   const scaffoldedViews = views.filter(({ view }) =>
     ui.pages.some((p) => p.origin?.kind === "view-list" && p.origin.viewName === view.name),
   );
+  // Observable workflows (workflow-instance-visibility.md) — those whose
+  // scaffold produced read-only instance pages.  A superset of the form set in
+  // one direction (an event-triggered-only saga has instance pages but no
+  // form), so it's derived independently.
+  const observableWorkflows = workflows.filter(({ wf }) =>
+    ui.pages.some(
+      (p) => p.origin?.kind === "workflow-instances-list" && p.origin.workflowName === wf.name,
+    ),
+  );
 
   // Whether the scaffold expander synthesised a `Home` page (only
   // happens when the ui declared at least one scaffold).
@@ -276,6 +285,7 @@ export function generateReactForContexts(
       outOfShellRoutes,
       namedLayouts,
       layoutImports,
+      observableWorkflows.map((w) => w.wf),
     ),
   );
   // Home is synthesised by the scaffold expander whenever the

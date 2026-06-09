@@ -91,7 +91,7 @@ import {
 import { emitRetrievalSpecs, renderPagingExtension } from "./spec-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
-import { emitDispatchHandlers, emitWorkflows } from "./workflow-emit.js";
+import { emitDispatchHandlers, emitWorkflowInstanceReads, emitWorkflows } from "./workflow-emit.js";
 import { emitWorkflowStatePersistence } from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -245,6 +245,7 @@ function emitProjectFromContexts(
     }
     emitBaseReaders(ctx, ns, out);
     emitWorkflows(ctx, ns, out, { routePrefix, sys: system?.sys });
+    emitWorkflowInstanceReads(ctx, ns, out, { routePrefix });
     emitViews(ctx, ns, out, { routePrefix });
   }
   // DbContext + project shell are emitted once, with all aggregates
@@ -450,6 +451,7 @@ function emitContext(
   }
   emitBaseReaders(ctx, ns, out);
   emitWorkflows(ctx, ns, out);
+  emitWorkflowInstanceReads(ctx, ns, out);
   if (hasSubscriptions) emitDispatchHandlers(ctx, ns, out, undefined);
   emitViews(ctx, ns, out);
   // Reified `criterion` specifications (evaluate face) — additive, not yet

@@ -88,8 +88,30 @@ function resolveSubscriptions(ctx: EnrichedBoundedContextIR): Subscription[] {
 }
 
 /** The saga-state module name (`<App>.<Ctx>.Workflows.<Wf>State`). */
-function stateModule(contextModule: string, wf: WorkflowIR): string {
+export function stateModule(contextModule: string, wf: WorkflowIR): string {
   return `${contextModule}.Workflows.${upperFirst(wf.name)}State`;
+}
+
+/** Emit the saga-state Ecto schema (`<wf>_state.ex`) for EVERY
+ *  correlation-bearing workflow in the context — not just the ones a
+ *  subscription references (workflow-instance-visibility.md needs the schema
+ *  to read instances even for a command-only saga).  Idempotent with
+ *  `emitDispatch`'s own schema emission: same path, byte-identical content. */
+export function emitWorkflowStateSchemas(
+  appName: string,
+  ctx: EnrichedBoundedContextIR,
+  appModule: string,
+  out: Map<string, string>,
+): void {
+  const ctxSnake = snake(ctx.name);
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+  for (const wf of ctx.workflows) {
+    if (!wf.correlationField) continue;
+    out.set(
+      `lib/${appName}/${ctxSnake}/workflows/${snake(wf.name)}_state.ex`,
+      renderStateSchema(contextModule, wf),
+    );
+  }
 }
 
 /** The handler module name for a subscription

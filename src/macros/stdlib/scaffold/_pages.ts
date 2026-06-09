@@ -82,6 +82,50 @@ export function workflowIsEventTriggeredOnly(wf: Workflow): boolean {
   return !!facade.correlation;
 }
 
+/** Whether a workflow persists an observable instance row
+ *  (workflow-instance-visibility.md).  AST mirror of the IR rule
+ *  (`lower-workflow.ts`): a single id-shaped `Property` state field is the
+ *  correlation field, and only a correlation-bearing, non-event-sourced
+ *  workflow has a state table to list.  Two id fields (ambiguous) or zero
+ *  (no correlation) ⇒ no instance surface, matching the IR's
+ *  `instanceWireShape` gate, so the scaffolded pages never reference hooks
+ *  that weren't emitted. */
+export function workflowIsObservable(wf: Workflow): boolean {
+  if (wf.eventSourced) return false;
+  const props = wf.members.filter(
+    (m): m is Extract<Workflow["members"][number], { $type: "Property" }> => m.$type === "Property",
+  );
+  const idProps = props.filter((p) => p.type.base.$type === "IdType" && !p.type.array);
+  return idProps.length === 1;
+}
+
+/** The two read-only instance pages for an observable workflow: a list of
+ *  running instances and a per-instance detail (no `New` analogue — instances
+ *  are born from triggers, not a form).  Mirrors `pagesForAggregate`'s
+ *  List/Detail; the bodies expand inline via the `scaffoldInstance*`
+ *  sentinels in `walker-primitive-expander.ts`. */
+export function pagesForWorkflowInstances(wf: Workflow): Page[] {
+  const slug = snake(wf.name);
+  const wfName = wf.name;
+  return [
+    page({
+      name: `${pascal(wfName)}InstancesList`,
+      route: `/workflows/${slug}/instances`,
+      body: callExpr("scaffoldInstanceList", [{ name: "of", value: nameRefExpr(wfName) }]),
+      menu: {
+        section: stringLit("Workflows"),
+        label: stringLit(`${humanize(wfName)} Instances`),
+      },
+    }),
+    page({
+      name: `${pascal(wfName)}InstanceDetail`,
+      route: `/workflows/${slug}/instances/:id`,
+      body: callExpr("scaffoldInstanceDetails", [{ name: "of", value: nameRefExpr(wfName) }]),
+      menu: { hidden: boolLit(true) },
+    }),
+  ];
+}
+
 export function pageForWorkflow(wf: Workflow): Page {
   return page({
     name: `${pascal(wf.name)}Workflow`,

@@ -250,6 +250,16 @@ function inferPageOrigin(body: ExprIR | undefined): PageOriginIR {
     const viewName = refArg(0);
     if (viewName) return { kind: "view-list", viewName, contextName: "" };
   }
+  // Workflow-instance read pages (workflow-instance-visibility.md) — list /
+  // detail over a saga's persisted correlation-state rows.
+  if (callName === "scaffoldInstanceList" && argNames[0] === "of") {
+    const wfName = refArg(0);
+    if (wfName) return { kind: "workflow-instances-list", workflowName: wfName, contextName: "" };
+  }
+  if (callName === "scaffoldInstanceDetails" && argNames[0] === "of") {
+    const wfName = refArg(0);
+    if (wfName) return { kind: "workflow-instance-detail", workflowName: wfName, contextName: "" };
+  }
   // Detail pages emit `Stack(scaffoldDetails(of:),
   // scaffoldOperations(of:), testid:)` — recognised by scanning for
   // a `scaffoldDetails` child at the top of the Stack.

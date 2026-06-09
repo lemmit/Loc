@@ -72,6 +72,9 @@ export function renderAppShell(
       }>
     | undefined = undefined,
   layoutImports: ReadonlyArray<{ specifier: string; from: string }> | undefined = undefined,
+  /** Observable workflows (workflow-instance-visibility.md) — get read-only
+   *  instance list/detail routes. */
+  observableWorkflows: WorkflowIR[] = [],
 ): string {
   return pack.render("app-shell", {
     ...prepareAppShellVM(
@@ -85,6 +88,7 @@ export function renderAppShell(
       outOfShellRoutes,
       namedLayouts,
       layoutImports,
+      observableWorkflows,
     ),
     // Router 7 (stack v3) renamed the package react-router-dom →
     // react-router; library mode keeps the v6 API so only the

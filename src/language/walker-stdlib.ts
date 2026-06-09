@@ -108,6 +108,8 @@ export const WALKER_SCAFFOLD_PRIMITIVES: ReadonlySet<string> = new Set([
   "scaffoldNewForm",
   "scaffoldWorkflowForm",
   "scaffoldViewList",
+  "scaffoldInstanceList",
+  "scaffoldInstanceDetails",
   // Singleton sentinels.
   "Home",
   "WorkflowsIndex",
