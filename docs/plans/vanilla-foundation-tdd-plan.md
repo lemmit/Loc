@@ -133,6 +133,34 @@ problem-details) + an `ecto-postgres-persistence` adapter advertising
 4. **CI-only compile** means a slice can be green locally yet fail `mix`. Keep
    slices small; push each; read `phoenix-vanilla-build.yml` logs as the truth.
 
+## Parallelization
+
+The properties that make this plan safe — one global parity oracle, CI-only
+compile, deliberately vertical slices — also bound how much parallelizes. The
+split:
+
+- **Phase A — serial, single owner (no fan-out).** Slice 0 + Slice 1: the
+  orchestrator branch, the parity harness, the vanilla `render-expr` target, and
+  one CRUD aggregate end-to-end with parity green. This is the spine every later
+  slice builds on; it cannot be split.
+- **Phase B — worktree fan-out (2–3 agents), *after* the spine.** Once the
+  harness exists, the genuinely independent leaf string-builders — each an "IR
+  slice → Elixir" unit with its own structure tests — fan out in isolated git
+  worktrees (`isolation: "worktree"`): e.g. `changeset-emit`, `policy-emit`,
+  `problem-details-emit`. The owner integrates them **one at a time** and runs
+  the single parity gate after each. Keep it to 2–3 leaves: past that the
+  merge + parity-attribution + CI-serialization tax exceeds the speedup on a
+  single-contract, CI-only-compile generator.
+- **Cross-cutting — read-only research fan-out (immediate, any time).** Pin the
+  byte-exact ash behaviors the parity tests must encode, in parallel: the
+  `Ash.Error.*` → ProblemDetails envelope (422 `errors[]`, 403/404/400 bodies +
+  headers), the `TypeIR` → Ecto schema/column + migration mapping, and the
+  Ash-flavoured edges of `render-expr.ts` a vanilla Ecto expr target must diverge
+  from. These have no integration risk and directly feed the test-first specs.
+- **Always serial (single owner):** integration, parity-closing, and every CI
+  push. Parallel pushes to one branch interleave CI runs you can't attribute;
+  parallel branches only validate the integrated whole.
+
 ## Definition of done (state-based, this plan)
 
 `foundation: vanilla` on a CRUD `.ddd`: lifts the gate, emits the full `vanilla/`
