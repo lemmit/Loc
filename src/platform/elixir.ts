@@ -1,8 +1,8 @@
 import type { PlatformAdapterDefaults, PlatformAdapters } from "../generator/_adapters/index.js";
-import { ashPostgresPersistenceAdapter } from "../generator/phoenix-live-view/adapters/ash-postgres-persistence.js";
-import { ashStyleAdapter } from "../generator/phoenix-live-view/adapters/ash-style.js";
-import { byFeatureLayoutAdapter } from "../generator/phoenix-live-view/adapters/by-feature-layout.js";
-import { generatePhoenixLiveViewProject } from "../generator/phoenix-live-view/index.js";
+import { ashPostgresPersistenceAdapter } from "../generator/elixir/adapters/ash-postgres-persistence.js";
+import { ashStyleAdapter } from "../generator/elixir/adapters/ash-style.js";
+import { byFeatureLayoutAdapter } from "../generator/elixir/adapters/by-feature-layout.js";
+import { generateElixirProject } from "../generator/elixir/index.js";
 import {
   type ComposeServiceShape,
   type PlatformSurface,
@@ -10,10 +10,11 @@ import {
 } from "./surface.js";
 
 // ---------------------------------------------------------------------------
-// Phoenix LiveView platform — fullstack Elixir/Ash deployable.
+// Elixir platform — fullstack Elixir/Ash + Phoenix deployable
+// (D-ELIXIR-PLATFORM: platform names the language-ecosystem).
 //
 // Unlike `dotnet`/`hono` (backend-only) and `react`/`static` (frontend-only),
-// a `phoenixLiveView` deployable ships ONE project that both serves an
+// an `elixir` deployable ships ONE project that both serves an
 // Ash-derived API (when `serves:` is populated) AND mounts a `ui:`
 // rendered as Phoenix LiveView modules against the `ashPhoenix` HEEx
 // design pack.  It owns its own Postgres database (`needsDb: true`),
@@ -22,12 +23,12 @@ import {
 //
 // All project emission (mix.exs, configs, Dockerfile, lib/<app>/*,
 // migrations, LiveView modules, controllers) lives under
-// `../generator/phoenix-live-view/`; this module is a thin
-// `PlatformSurface` wiring that delegates to the orchestrator.
+// `../generator/elixir/`; this module is a thin `PlatformSurface`
+// wiring that delegates to the orchestrator.
 // ---------------------------------------------------------------------------
 
-const phoenixPlatform: PlatformSurface = {
-  name: "phoenix",
+const elixirPlatform: PlatformSurface = {
+  name: "elixir",
   defaultPort: 4000,
   needsDb: true,
   mountsUi: true,
@@ -53,7 +54,7 @@ const phoenixPlatform: PlatformSurface = {
     // Forward the deployable's resolved style adapter (D-REALIZATION-AXES
     // `application:`) into the generator's EmitCtx; the layout axis has no
     // Phoenix consumer (Ash owns the byFeature layout), so it's dropped.
-    return generatePhoenixLiveViewProject({
+    return generateElixirProject({
       contexts,
       deployable,
       sys,
@@ -99,4 +100,4 @@ const phoenixPlatform: PlatformSurface = {
   },
 };
 
-export default phoenixPlatform;
+export default elixirPlatform;

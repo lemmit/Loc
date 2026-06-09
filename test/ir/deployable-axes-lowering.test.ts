@@ -47,14 +47,30 @@ describe("realization axes — lowering defaults", () => {
     expect(d.runtime).toBe("transactional");
   });
 
-  it("bare phoenix → ash foundation + ashPostgres/byFeature (after canonicalization)", async () => {
-    const d = await lowerDeployable("phoenix");
+  it("bare elixir → ash foundation + ashPostgres/byFeature (after canonicalization)", async () => {
+    // D-ELIXIR-PLATFORM: `platform: elixir` is the canonical name; legacy
+    // `phoenix` aliases to it (`phoenix` is now a back-compat keyword).
+    // D-PHOENIX-TRANSPORT: `transport: phoenix` is canonical;
+    // `phoenixRouter` aliases to it.
+    const d = await lowerDeployable("elixir");
     expect(d.foundation).toBe("ash");
     expect(d.application).toBe("ash");
     expect(d.persistence).toBe("ashPostgres");
     expect(d.directoryLayout).toBe("byFeature");
-    expect(d.transport).toBe("phoenixRouter");
+    expect(d.transport).toBe("phoenix");
     expect(d.runtime).toBe("transactional");
+  });
+
+  it("legacy bare phoenix aliases to elixir on the lowering boundary", async () => {
+    const d = await lowerDeployable("phoenix");
+    expect(d.platform).toBe("elixir");
+    expect(d.foundation).toBe("ash");
+    expect(d.transport).toBe("phoenix");
+  });
+
+  it("legacy bare phoenixLiveView aliases to elixir on the lowering boundary", async () => {
+    const d = await lowerDeployable("phoenixLiveView");
+    expect(d.platform).toBe("elixir");
   });
 
   it("defaults are sourced from the adapter menu, not hardcoded literals", async () => {
@@ -101,15 +117,16 @@ describe("realization axes — lowering defaults", () => {
   });
 
   // P1 of proposals/vanilla-phoenix-foundation.md — the menu admits
-  // `foundation: vanilla` on phoenix, so an explicit value lowers cleanly
+  // `foundation: vanilla` on elixir, so an explicit value lowers cleanly
   // (the validator's R5 gates emission separately; lowering must not crash
   // or drop the value).
-  it("explicit `foundation: vanilla` on phoenix is carried through to DeployableIR", async () => {
-    const d = await lowerDeployable("phoenix { foundation: vanilla }");
+  it("explicit `foundation: vanilla` on elixir is carried through to DeployableIR", async () => {
+    const d = await lowerDeployable("elixir { foundation: vanilla }");
     expect(d.foundation).toBe("vanilla");
-    // The other axes default normally.
+    // The other axes default normally.  Canonical post-rename:
+    // `transport: phoenix` (was `phoenixRouter`).
     expect(d.persistence).toBe("ashPostgres");
-    expect(d.transport).toBe("phoenixRouter");
+    expect(d.transport).toBe("phoenix");
     expect(d.runtime).toBe("transactional");
   });
 });

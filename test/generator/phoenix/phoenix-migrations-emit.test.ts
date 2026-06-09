@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { emitMigrations } from "../../../src/generator/phoenix-live-view/migrations-emit.js";
+import { emitMigrations } from "../../../src/generator/elixir/migrations-emit.js";
 import type { MigrationsIR, SchemaSnapshot } from "../../../src/ir/types/migrations-ir.js";
 
 // ---------------------------------------------------------------------------

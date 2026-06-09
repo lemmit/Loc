@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // byFeature — the real LayoutAdapter for the phoenixLiveView platform.
 // Captures the path conventions the existing Phoenix orchestrator
-// (`src/generator/phoenix-live-view/index.ts` + sibling `*-emit.ts`)
+// (`src/generator/elixir/index.ts` + sibling `*-emit.ts`)
 // spells out inline at every `out.set(...)` call site.  Today the
 // orchestrator hard-codes these paths; this adapter exposes them as a
 // single pure `pathFor()` so the eventual rewire (F7d) can drop the

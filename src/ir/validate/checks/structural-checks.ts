@@ -223,10 +223,11 @@ export function validateGenericInstancesUnimplemented(
   // emittable and the gate stays quiet.  React is a frontend, not a backend,
   // so it never appears here — its hooks consume whatever the backend serves.
   // `"node"` is the hono/TS backend's platform identity (realization axes);
-  // `"dotnet"` the EF/ASP.NET backend; `"phoenix"` the Ash/Phoenix backend
-  // (the `phoenixLiveView` framework keyword canonicalizes to `phoenix`).
-  // All four backends now emit generic carriers.
-  const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "phoenix"]);
+  // `"dotnet"` the EF/ASP.NET backend; `"elixir"` the Ash/Phoenix backend
+  // (the legacy `phoenix` / `phoenixLiveView` platform aliases canonicalize
+  // to `elixir` per D-ELIXIR-PLATFORM).  All four backends now emit
+  // generic carriers.
+  const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_PAGED_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 
@@ -313,7 +314,7 @@ export function validateUnionsUnimplemented(
   // backend serves.  `"node"` is the hono/TS backend's platform identity.
   // When a context is served only by these (or by no backend at all — the
   // legacy single-context path), unions are emittable and the gate stays quiet.
-  const SUPPORTED_UNION_BACKENDS = new Set(["node", "dotnet", "phoenix"]);
+  const SUPPORTED_UNION_BACKENDS = new Set(["node", "dotnet", "elixir"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_UNION_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 

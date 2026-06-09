@@ -1,12 +1,12 @@
 // Supplementary `emitViews` unit tests focused on the shorthand-form
 // path (`view X = Aggregate where filter`) — the full-form path is
-// already covered in `phoenix-live-view-pipeline.test.ts:1306+`.
+// already covered in `elixir-pipeline.test.ts:1306+`.
 //
 // Shorthand emits a thin Ash.Query.filter pipe; no projection,
 // no auxiliary loads.
 
 import { describe, expect, it } from "vitest";
-import { emitViews } from "../../../src/generator/phoenix-live-view/view-emit.js";
+import { emitViews } from "../../../src/generator/elixir/view-emit.js";
 import type { BoundedContextIR, ExprIR } from "../../../src/ir/types/loom-ir.js";
 
 const baseAggregate = {

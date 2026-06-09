@@ -477,7 +477,7 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
     //     by Playwright page objects) AND an API spec (driven by
     //     fetch against the deployable's HTTP surface).
     const isFrontendOnly = !!targetPlatform && platformFor(targetPlatform).isFrontend;
-    const isFullstack = targetPlatform === "phoenix";
+    const isFullstack = targetPlatform === "elixir";
     if (isFrontendOnly) {
       e2eTests.push(lowerE2E(b, e2eEnv, "ui"));
     } else if (isFullstack) {

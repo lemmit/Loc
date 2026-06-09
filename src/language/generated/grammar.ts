@@ -2544,6 +2544,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "value": "phoenix"
           },
           {
+            "$type": "Keyword",
+            "value": "elixir"
+          },
+          {
             "$type": "RuleCall",
             "rule": {
               "$ref": "#/rules@188"

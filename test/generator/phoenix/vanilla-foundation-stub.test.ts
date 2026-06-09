@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { generatePhoenixLiveViewProject } from "../../../src/generator/phoenix-live-view/index.js";
+import { generateElixirProject } from "../../../src/generator/elixir/index.js";
 import type { DeployableIR, SystemIR } from "../../../src/ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // P1 of proposals/vanilla-phoenix-foundation.md — defence-in-depth.
 //
 // The validator's R5 (`loom.foundation-vanilla-phoenix-not-yet-implemented`)
-// rejects `foundation: vanilla` on `platform: phoenix` before lowering, so
+// rejects `foundation: vanilla` on `platform: elixir` before lowering, so
 // in normal use the orchestrator never sees a vanilla deployable. But the
 // orchestrator may also be invoked by snapshot-driven regenerate paths and
 // by direct programmatic callers that bypass validation; in those cases
@@ -22,8 +22,8 @@ import type { DeployableIR, SystemIR } from "../../../src/ir/types/loom-ir.js";
 function vanillaDeployable(): DeployableIR {
   return {
     name: "api",
-    platform: "phoenix",
-    platformRef: "phoenix@v1",
+    platform: "elixir",
+    platformRef: "elixir@v1",
     contextNames: [],
     foundation: "vanilla",
     port: 4000,
@@ -40,9 +40,9 @@ function emptySystem(): SystemIR {
   } as SystemIR;
 }
 
-describe("phoenix orchestrator — foundation: vanilla stub", () => {
-  it("emits zero files for a phoenix deployable with foundation: vanilla", () => {
-    const out = generatePhoenixLiveViewProject({
+describe("elixir orchestrator — foundation: vanilla stub", () => {
+  it("emits zero files for an elixir deployable with foundation: vanilla", () => {
+    const out = generateElixirProject({
       contexts: [],
       deployable: vanillaDeployable(),
       sys: emptySystem(),
@@ -54,7 +54,7 @@ describe("phoenix orchestrator — foundation: vanilla stub", () => {
     // The early-return on foundation: vanilla means none of the per-context
     // emitters fire, so empty contexts (which would otherwise be a no-op
     // anyway) don't blow up.
-    const out = generatePhoenixLiveViewProject({
+    const out = generateElixirProject({
       contexts: [],
       deployable: vanillaDeployable(),
       sys: emptySystem(),

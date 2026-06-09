@@ -8,7 +8,7 @@
 // reference flows through event / value-object emission).
 
 import { describe, expect, it } from "vitest";
-import { renderTypesModule } from "../../../src/generator/phoenix-live-view/types-module-emit.js";
+import { renderTypesModule } from "../../../src/generator/elixir/types-module-emit.js";
 
 describe("renderTypesModule", () => {
   const module = renderTypesModule("MyApp.Types");

@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Walker primitive registry — typed dispatch table consumed by both
 // per-platform walkers (src/generator/react/body-walker.ts for TSX,
-// src/generator/phoenix-live-view/heex-walker.ts for HEEx).
+// src/generator/elixir/heex-walker.ts for HEEx).
 //
 // One entry per closed-primitive-library name (`Stack`, `Heading`,
 // `Button`, …).  The entry carries:
@@ -48,7 +48,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ExprIR } from "../../ir/types/loom-ir.js";
-import type { WalkContext as HeexWalkContext } from "../phoenix-live-view/heex-walker.js";
+import type { WalkContext as HeexWalkContext } from "../elixir/heex-walker.js";
 // Re-exported renderers from the Phoenix/HEEx walker.  Each function
 // takes `(call, ctx)` and returns the HEEx fragment.
 import {
@@ -82,7 +82,7 @@ import {
   renderTable as renderTableHeex,
   renderText as renderTextHeex,
   renderToolbar as renderToolbarHeex,
-} from "../phoenix-live-view/heex-walker.js";
+} from "../elixir/heex-walker.js";
 import type { WalkContext as TsxWalkContext } from "../react/body-walker.js";
 import { emitCodeBlock } from "../react/walker/primitives/code-block.js";
 // Re-exported emitters from the React/TSX walker.  Each function

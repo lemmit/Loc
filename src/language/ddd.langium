@@ -237,11 +237,11 @@ Framework returns string:
 // with `DesignPack` below.  Bareword keywords are unchanged so
 // every existing source parses identically; the validator + lowering
 // (`parseBuiltinPlatformRef`) are the resolution authority.
-// `phoenix` is the D-PHOENIX-SURFACE host-platform name; lowering
-// canonicalises it to `phoenixLiveView` until the literal-rename
-// cleanup phase.
+// `elixir` is the D-ELIXIR-PLATFORM canonical name for the
+// language-ecosystem platform; legacy `phoenix` and `phoenixLiveView`
+// desugar to `elixir` (the latter through a `phoenix → elixir` chain).
 Platform returns string:
-    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | STRING;
+    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,

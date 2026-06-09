@@ -324,7 +324,7 @@ export function renderExpr(expr: ExprIR, ctx: WalkContext): string {
       throw new Error("heex renderExpr: unexpected '?' propagation.");
     case "convert": {
       // Phoenix HEEx conversion — mirror the renderExpr emit in
-      // `phoenix-live-view/render-expr.ts`.  HEEx pages embed Elixir
+      // `elixir/render-expr.ts`.  HEEx pages embed Elixir
       // expressions verbatim inside `<%= … %>`, so the same Elixir
       // idioms apply (Decimal.to_string for money, to_string for
       // primitives, Decimal.new for the inverse).

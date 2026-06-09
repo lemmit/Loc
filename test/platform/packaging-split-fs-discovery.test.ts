@@ -74,11 +74,11 @@ describe("installFsBackendSource — composition with in-tree default", () => {
     await installFsBackendSource(repoRoot);
     const set = discoverBackends();
     const families = set.map((b) => `${b.manifest.family}@${b.manifest.loomVersion}`);
-    // dotnet@v8 and phoenix@v1 have no workspace package yet,
+    // dotnet@v8 and elixir@v1 have no workspace package yet,
     // but they MUST still appear via the in-tree fallback — otherwise
     // resolution silently breaks for `platform: dotnet` etc.
     expect(families).toContain("dotnet@v8");
-    expect(families).toContain("phoenix@v1");
+    expect(families).toContain("elixir@v1");
     // hono@v4 is now sourced through fs (its workspace symlink),
     // but the entry still resolves to the same surface instance.
     expect(families).toContain("node@v4");

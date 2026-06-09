@@ -8,8 +8,8 @@
 // automatically via the project config.
 
 import { describe, expect, it } from "vitest";
-import { renderDialyzerIgnoreExs } from "../../../src/generator/phoenix-live-view/dialyzer-ignore-emit.js";
-import { renderMixExs } from "../../../src/generator/phoenix-live-view/shell/project.js";
+import { renderDialyzerIgnoreExs } from "../../../src/generator/elixir/dialyzer-ignore-emit.js";
+import { renderMixExs } from "../../../src/generator/elixir/shell/project.js";
 
 describe("renderDialyzerIgnoreExs", () => {
   const ignore = renderDialyzerIgnoreExs("my_app");

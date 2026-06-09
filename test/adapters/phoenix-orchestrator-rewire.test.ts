@@ -11,7 +11,7 @@
 // emits at the per-CONTEXT granularity (not per aggregate).
 
 import { describe, expect, it, vi } from "vitest";
-import * as ashStyleModule from "../../src/generator/phoenix-live-view/adapters/ash-style.js";
+import * as ashStyleModule from "../../src/generator/elixir/adapters/ash-style.js";
 import { generateSystems } from "../../src/system/index.js";
 import { parseValid } from "../_helpers/parse.js";
 

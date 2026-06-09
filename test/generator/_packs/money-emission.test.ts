@@ -13,7 +13,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { renderCsType } from "../../../src/generator/dotnet/render-expr.js";
-import { renderAshType } from "../../../src/generator/phoenix-live-view/render-expr.js";
+import { renderAshType } from "../../../src/generator/elixir/render-expr.js";
 import { renderTsType } from "../../../src/generator/typescript/render-expr.js";
 import {
   buildExternHandlersFile as _externStub,

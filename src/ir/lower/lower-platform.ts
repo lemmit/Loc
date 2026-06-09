@@ -40,13 +40,14 @@ export function greenfieldAxisDefaults(platform: Platform): {
   runtime: string;
 } {
   return {
-    // Phoenix's domain framework defaults to Ash (matches today's
+    // Elixir's domain framework defaults to Ash (matches today's
     // `phoenixLiveView` behaviour after desugar — D-PHOENIX-SURFACE
-    // open-item 2); every other backend is `vanilla` (no framework).
-    foundation: platform === "phoenix" ? "ash" : "vanilla",
-    // The platform's only current HTTP surface.
-    transport:
-      platform === "dotnet" ? "minimalApi" : platform === "phoenix" ? "phoenixRouter" : "hono",
+    // open-item 2, renamed to elixir by D-ELIXIR-PLATFORM); every other
+    // backend is `vanilla` (no framework).
+    foundation: platform === "elixir" ? "ash" : "vanilla",
+    // The platform's only current HTTP surface (D-PHOENIX-TRANSPORT:
+    // Phoenix is the Elixir web framework's transport value).
+    transport: platform === "dotnet" ? "minimalApi" : platform === "elixir" ? "phoenix" : "hono",
     // Repository-loaded, DB-transaction consistency — the only runtime
     // shipped today (actor runtimes land per-backend later).
     runtime: "transactional",
@@ -66,10 +67,11 @@ export function qualifyPlatform(raw: string | undefined): {
   family: Platform;
   ref: string;
 } {
-  // D-PHOENIX-SURFACE: `phoenix` is the canonical host-platform name.
-  // Legacy *platform* spellings (`phoenixLiveView`, `hono`) are desugared
-  // here at the boundary so every downstream consumer sees only the
-  // canonical family (`phoenix`, `node`).
+  // D-ELIXIR-PLATFORM: `elixir` is the canonical language-ecosystem
+  // platform name.  Legacy *platform* spellings (`phoenix`,
+  // `phoenixLiveView`, `hono`) are desugared here at the boundary so
+  // every downstream consumer sees only the canonical family
+  // (`elixir`, `node`).
   const value = canonicalPlatform(raw ?? "node");
   const parsed = parseBuiltinPlatformRef(value);
   return parsed
@@ -78,15 +80,29 @@ export function qualifyPlatform(raw: string | undefined): {
 }
 
 /** Canonicalise a legacy *platform* alias to its canonical family
- *  (`phoenixLiveView` → `phoenix`, `hono` → `node`); everything else
- *  passes through.  Boundary-only: the alias never reaches the IR or any
- *  generator.  (The Hono *web framework* keeps the `hono` spelling as the
- *  `transport:` value; the LiveView *framework* keeps `phoenixLiveView` —
- *  see `canonicalFramework`.) */
+ *  (`phoenixLiveView` → `phoenix` → `elixir`, `hono` → `node`); everything
+ *  else passes through.  Boundary-only: the alias never reaches the IR or
+ *  any generator.  (The Hono *web framework* keeps the `hono` spelling as
+ *  the `transport:` value; the LiveView *framework* keeps `phoenixLiveView`
+ *  — see `canonicalFramework`.  D-ELIXIR-PLATFORM renamed the language-
+ *  ecosystem platform `phoenix` → `elixir`; D-PHOENIX-TRANSPORT renamed
+ *  the Phoenix web framework `phoenixRouter` → `phoenix` (see
+ *  `canonicalTransport`).) */
 export function canonicalPlatform(value: string): string {
-  if (value === "phoenixLiveView") return "phoenix";
+  // Chain: phoenixLiveView → phoenix → elixir.  Order matters so the
+  // legacy `phoenixLiveView` lands at the canonical `elixir` in one pass.
+  if (value === "phoenixLiveView") return "elixir";
+  if (value === "phoenix") return "elixir";
   if (value === "hono") return "node";
   return value;
+}
+
+/** Canonicalise a legacy *transport* alias to its canonical value.
+ *  D-PHOENIX-TRANSPORT: the Phoenix web framework is the `transport:`
+ *  value on `platform: elixir`; legacy `transport: phoenixRouter`
+ *  desugars to `transport: phoenix`.  Other transports pass through. */
+export function canonicalTransport(value: string | undefined): string | undefined {
+  return value === "phoenixRouter" ? "phoenix" : value;
 }
 
 /** Canonicalise a D-PHOENIX-SURFACE framework alias.  `liveview` →

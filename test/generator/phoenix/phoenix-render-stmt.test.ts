@@ -1,11 +1,11 @@
 // Direct unit tests for Phoenix's `renderElixirStatements` —
 // exercises each `StmtIR.kind` arm in
-// `src/generator/phoenix-live-view/render-stmt.ts:33-102`.
+// `src/generator/elixir/render-stmt.ts:33-102`.
 // Statements appear inside Ash action `change` blocks and lower to
 // changeset-threading lines of Elixir.
 
 import { describe, expect, it } from "vitest";
-import { renderElixirStatements } from "../../../src/generator/phoenix-live-view/render-stmt.js";
+import { renderElixirStatements } from "../../../src/generator/elixir/render-stmt.js";
 import type { EnrichedAggregateIR, ExprIR, StmtIR, TypeIR } from "../../../src/ir/types/loom-ir.js";
 
 const ctx = { thisName: "record", contextModule: "MyApp" };

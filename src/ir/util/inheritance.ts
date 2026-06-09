@@ -6,7 +6,7 @@
 // discriminator value a concrete stamps", "which of a concrete's fields are
 // its own vs inherited from the base".  They live under `ir/util/` (not a
 // generator) so every backend — `typescript/`, `dotnet/`,
-// `phoenix-live-view/` — and the system migration builder consume them
+// `elixir/` — and the system migration builder consume them
 // without importing across platform folders (the one-directional layering
 // rule: `generator/<platform>` knows nothing about other platforms).
 

@@ -1,6 +1,6 @@
 // ashPostgres — real PersistenceAdapter for phoenixLiveView (F7a).
 // Mirrors dotnet-efcore.test.ts and hono-drizzle.test.ts.  Today the
-// orchestrator (`src/generator/phoenix-live-view/index.ts`) still
+// orchestrator (`src/generator/elixir/index.ts`) still
 // calls the underlying emit fns directly, so the byte-identical gate
 // is the existing phoenix fixture suite — this file proves the
 // adapter contract is wired through to real output.
@@ -11,7 +11,7 @@ import {
   ashPostgresPersistenceAdapter,
   toModulePrefix,
   toSnakeApp,
-} from "../../src/generator/phoenix-live-view/adapters/ash-postgres-persistence.js";
+} from "../../src/generator/elixir/adapters/ash-postgres-persistence.js";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { EnrichedBoundedContextIR } from "../../src/ir/types/loom-ir.js";
@@ -46,7 +46,7 @@ system Sys {
 async function buildCtx(): Promise<EmitCtx> {
   const loom = enrichLoomModel(lowerModel(await parseValid(SRC)));
   const sys = loom.systems[0]!;
-  const deployable = sys.deployables.find((d) => d.platform === "phoenix")!;
+  const deployable = sys.deployables.find((d) => d.platform === "elixir")!;
   const all: EnrichedBoundedContextIR[] = sys.subdomains.flatMap((s) => s.contexts);
   const contexts = all.filter((c) => deployable.contextNames.includes(c.name));
   return { deployable, contexts, sys, migrations: [] };

@@ -1,13 +1,13 @@
 // Direct unit tests for Phoenix's `renderExpr` — exercises each
 // `ExprIR.kind` arm against the live emitter to lock per-kind output
 // without going through codegen/build.  Mirrors the dispatch table in
-// `src/generator/phoenix-live-view/render-expr.ts:55-102`.
+// `src/generator/elixir/render-expr.ts:55-102`.
 //
 // These tests run in the fast suite (no `LOOM_PHOENIX_BUILD`, no Elixir,
 // no `mix`); Phoenix codegen is pure TS string emission.
 
 import { describe, expect, it } from "vitest";
-import { renderExpr } from "../../../src/generator/phoenix-live-view/render-expr.js";
+import { renderExpr } from "../../../src/generator/elixir/render-expr.js";
 import type { ExprIR, TypeIR } from "../../../src/ir/types/loom-ir.js";
 
 const ctx = { thisName: "record", contextModule: "MyApp" };

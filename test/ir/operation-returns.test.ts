@@ -89,7 +89,7 @@ describe("operation returns — platform-aware emission gate (exception-less spi
   });
 
   it("fires `loom.operation-return-unsupported` when served by phoenix (not implemented yet)", async () => {
-    expect(await gateDiags("phoenix")).not.toEqual([]);
+    expect(await gateDiags("elixir")).not.toEqual([]);
   });
 
   it("does not fire on a plain mutation operation (no return type)", async () => {

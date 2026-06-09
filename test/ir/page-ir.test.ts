@@ -603,7 +603,7 @@ describe("page metamodel — IR shape", () => {
           deployable app { platform: phoenix, contexts: [C], hosts: Admin, port: 4000 }
         }
       `);
-      expect(deployableByName(loom, "app").platform).toBe("phoenix");
+      expect(deployableByName(loom, "app").platform).toBe("elixir");
     });
 
     it("legacy platform: phoenix desugars to the canonical phoenix", async () => {
@@ -614,7 +614,7 @@ describe("page metamodel — IR shape", () => {
           deployable app { platform: phoenix, contexts: [C], hosts: Admin, port: 4000 }
         }
       `);
-      expect(deployableByName(loom, "app").platform).toBe("phoenix");
+      expect(deployableByName(loom, "app").platform).toBe("elixir");
     });
 
     it("framework: liveview canonicalises to phoenixLiveView on the ui", async () => {

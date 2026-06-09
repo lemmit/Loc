@@ -7,11 +7,11 @@
 // so a template that drifts from the grammar fails fast rather than shipping
 // a broken starter — `test/cli/new.test.ts` pins every combination.
 
-export type StarterPlatform = "hono" | "dotnet" | "phoenix";
+export type StarterPlatform = "hono" | "dotnet" | "elixir";
 export type StarterTemplate = "blank" | "crud";
 export type DesignPack = "mantine" | "shadcn" | "mui" | "chakra" | "ashPhoenix";
 
-export const STARTER_PLATFORMS: readonly StarterPlatform[] = ["hono", "dotnet", "phoenix"];
+export const STARTER_PLATFORMS: readonly StarterPlatform[] = ["hono", "dotnet", "elixir"];
 export const STARTER_TEMPLATES: readonly StarterTemplate[] = ["blank", "crud"];
 export const REACT_DESIGN_PACKS: readonly DesignPack[] = ["mantine", "shadcn", "mui", "chakra"];
 export const DESIGN_PACKS: readonly DesignPack[] = [...REACT_DESIGN_PACKS, "ashPhoenix"];
@@ -21,7 +21,7 @@ export const DESIGN_PACKS: readonly DesignPack[] = [...REACT_DESIGN_PACKS, "ashP
 export const BACKEND_PORT: Record<StarterPlatform, number> = {
   hono: 3000,
   dotnet: 8080,
-  phoenix: 4000,
+  elixir: 4000,
 };
 export const FRONTEND_PORT = 3001;
 
@@ -41,7 +41,7 @@ export function toSystemName(name: string): string {
 /** True when the (platform, design) pair is the Phoenix LiveView fullstack
  *  shape — one deployable that both serves the API and mounts a HEEx UI. */
 function isLiveView(platform: StarterPlatform, design: DesignPack): boolean {
-  return platform === "phoenix" && design === "ashPhoenix";
+  return platform === "elixir" && design === "ashPhoenix";
 }
 
 interface DomainBlock {
@@ -100,21 +100,21 @@ function renderDeployment(platform: StarterPlatform, design: DesignPack, context
   resource appState { for: ${context}, kind: state, use: primary }`;
 
   if (isLiveView(platform, design)) {
-    // Phoenix LiveView: a single fullstack deployable mounts the HEEx UI.
-    // Field order follows the grammar: …ui → port → design.
+    // Phoenix LiveView on `platform: elixir`: a single fullstack deployable
+    // mounts the HEEx UI.  Field order follows the grammar: …ui → port → design.
     return `${storage}
 
   deployable app {
-    platform: phoenix,
+    platform: elixir,
     contexts: [${context}],
     dataSources: [appState],
     ui: WebApp,
-    port: ${BACKEND_PORT.phoenix},
+    port: ${BACKEND_PORT.elixir},
     design: ashPhoenix
   }`;
   }
 
-  // Backend + a separate React frontend (hono/dotnet, or phoenix + a React pack).
+  // Backend + a separate React frontend (hono/dotnet, or elixir + a React pack).
   return `${storage}
 
   deployable api {

@@ -1,4 +1,4 @@
-name: Phoenix Dialyzer verification
+name: Elixir / Ash Dialyzer verification
 
 # Runs `mix dialyzer` against a generated Phoenix project to catch
 # structural-typing bugs that the compile gate (`phoenix-build.yml`)

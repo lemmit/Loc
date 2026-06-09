@@ -246,7 +246,7 @@ describe("generics — platform-aware emission gate (P3b)", () => {
   });
 
   it("does NOT gate a paged find served by phoenix (emission implemented)", async () => {
-    expect(await gateDiags("phoenix")).toEqual([]);
+    expect(await gateDiags("elixir")).toEqual([]);
   });
 
   it("does not fire when no generic carrier is used (hono)", async () => {

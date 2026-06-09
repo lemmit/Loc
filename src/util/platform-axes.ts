@@ -43,5 +43,5 @@ export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingSha
   // Phoenix/Ash emits relational + embedded (Ash embedded resources);
   // `document` (a single opaque `:map` — non-idiomatic for Ash) is a
   // future allowed-but-warned addition.
-  phoenix: ["relational", "embedded"],
+  elixir: ["relational", "embedded"],
 };
