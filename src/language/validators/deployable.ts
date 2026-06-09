@@ -20,10 +20,12 @@ import type { Deployable } from "../generated/ast.js";
 import {
   builtinPackNamesForFormat,
   canonicalFramework,
+  defaultFoundationFor,
   expectedFrameworkFor,
   expectedPackFormatFor,
   FOUNDATION_OWNED_AXES,
   FRONTEND_KEYWORDS,
+  foundationCompatibleMenu,
   hostableFrameworksFor,
   isReservedStub,
   platformMountsUi,
@@ -326,6 +328,31 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
   // branches to `vanilla/index.ts` for the vanilla emit subtree; per-
   // slice gaps (e.g. unsupported aggregate shapes) raise their own
   // focused diagnostics as they arise.
+
+  // R6 — `persistence:` / `application:` must be compatible with the
+  // foundation (docs/plans/realization-axes-alignment.md).  A named
+  // foundation admits only its framework family (`ash` ⇒ `ashPostgres`);
+  // `vanilla` admits the non-framework libraries (`ecto`).  The effective
+  // foundation is the explicit value or the platform default, so
+  // `persistence: ecto` without a foundation on elixir (which defaults to
+  // `ash`) is caught too.  Owned axes (R4) are skipped to avoid a double
+  // diagnostic.
+  const effectiveFoundation = d.foundation ?? defaultFoundationFor(family);
+  if (effectiveFoundation != null) {
+    const owned = FOUNDATION_OWNED_AXES[effectiveFoundation] ?? [];
+    for (const axis of ["persistence", "application"] as const) {
+      const value = axis === "persistence" ? d.persistence : d.application;
+      if (value == null || owned.includes(axis)) continue;
+      const compat = foundationCompatibleMenu(family, effectiveFoundation, axis);
+      if (compat.length === 0 || compat.includes(value)) continue;
+      const via = d.foundation == null ? ` (the default on '${family}')` : "";
+      accept(
+        "error",
+        `'${axis}: ${value}' on deployable '${d.name}' is incompatible with 'foundation: ${effectiveFoundation}'${via}. Compatible: ${compat.map((v) => `'${v}'`).join(", ")}.`,
+        { node: d, property: axis, code: "loom.platform-knob-foundation-mismatch" },
+      );
+    }
+  }
 }
 
 /** Rule 14 — design-pack format must match the deployable's
