@@ -31,6 +31,9 @@ function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedC
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(), to: ${repoMod}, as: :list
   defdelegate get_${aggSnake}(id), to: ${repoMod}, as: :find_by_id
+  defdelegate create_${aggSnake}(attrs), to: ${repoMod}, as: :insert
+  defdelegate update_${aggSnake}(record, attrs), to: ${repoMod}, as: :update
+  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete
 `;
   });
 

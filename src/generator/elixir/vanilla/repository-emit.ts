@@ -38,6 +38,7 @@ defmodule ${repoMod} do
   import Ecto.Query
   alias ${appModule}.Repo
   alias ${aggModule}
+  alias ${aggModule}Changeset
 
   @spec list() :: {:ok, [${aggModule}.t()]} | {:error, term()}
   def list do
@@ -50,6 +51,24 @@ defmodule ${repoMod} do
       nil -> {:error, :not_found}
       record -> {:ok, record}
     end
+  end
+
+  @spec insert(map()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+  def insert(attrs) when is_map(attrs) do
+    ${aggModule}Changeset.base_changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @spec update(${aggModule}.t(), map()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+  def update(%${aggModule}{} = record, attrs) when is_map(attrs) do
+    record
+    |> ${aggModule}Changeset.base_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @spec delete(${aggModule}.t()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+  def delete(%${aggModule}{} = record) do
+    Repo.delete(record)
   end
 end
 `;
