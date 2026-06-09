@@ -136,6 +136,7 @@ proposals (`cross-stack-static-analysis`, `implicit-system-composition`).
 | [`retrieval.md`](./retrieval.md) | PARTIAL — surface + IR + lowering + validation shipped (#794); `Run<Name>Async` emission + workflow `foreach` on .NET (#810); Hono `run<Name>` (#952) + Phoenix/Ash read action (#955) shipped; `loads` plan remaining | The **named query bundle**: `retrieval <Name>(args) of T { where: <criteria> sort: … loads: … }`, run via `Repo.run(R(args), page?)`. `criterion` is the predicate atom; `retrieval` is the bundle (predicate + sort + loads). `where`/`sort`/`loads` are the named rule; **`page` is call-site only**. Deliberately avoids the name "Specification" (the atom on JPA, the bundle on .NET/Ardalis) — lowers to `RetrievalIR` + `LoadPlanIR` (default `whole(agg)`). Graduates the seam from `reified-criteria.md`. |
 | [`partial-update.md`](./partial-update.md) | PROPOSED | `command` + `T option` fields for PATCH semantics. Supersedes the v0 `Optional<T>` proposal. **Folded into A1** of the implementation plan. |
 | [`load-specifications.md`](./load-specifications.md) | PROPOSED | `loads` clause + compiler-inferred load plans + shape (loadedness) typing. **Folded into P3** of the implementation plan. |
+| [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md) | PROPOSED | Four-layer model (**domain / contract / application / api**) replacing the implicit `api X from Subdomain` derivation. Routes register against contract types and the mediator dispatches to handlers (`commandHandler` / `queryHandler`; workflow stays its own peer). Every layer is **macro-scaffolded by default, unfoldable to literal source** — one `apiSurface(Sales)` expands through `scaffoldContext` / `scaffoldAggregate` / `scaffoldOperation` aggregators down to per-output leaves (`scaffoldCommand` / `scaffoldQuery` / `scaffoldResponse` / `scaffoldHandler` / `scaffoldRoute`); polymorphic over source kind. **Retires `wireShape` from the IR** — the projection logic was pure access-modifier filtering, which scaffolds do once at expansion time per the existing `wire-projection.ts` matrix. Retires `.loom/wire-spec.json` in favour of contract source as the diffable artefact (with `ddd snapshot --wire` as the on-demand escape hatch). Coordinates with `payload-transport-layer.md` (supersedes its "auto-synthesised `<Agg>Wire payload`" Phase 2 in favour of literal contract source) and `aggregate-inheritance.md` (I2 emission needs to read contract source rather than inherited wireShape once retirement lands). |
 
 ### Aggregate lifecycle + forms
 
@@ -330,6 +331,23 @@ parallel.
   actions; workflow-and-applier reframes context-level orchestration
   and adds appliers. Read the lifecycle doc first; the workflow doc
   builds on its `OperationIR.kind` tagging.
+
+- **unfoldable-api-derivation ↔ payload-transport-layer ↔
+  aggregate-inheritance.** Three docs touch the wire-shape pipeline.
+  `payload-transport-layer.md` proposes naming the wireShape
+  projection (`<Agg>Wire payload`) as a first-class type;
+  `unfoldable-api-derivation.md` goes further and **retires
+  wireShape from the IR**, replacing the named projection with literal
+  contract source produced by scaffolds at expansion time.
+  `aggregate-inheritance.md`'s I2 (TPH emission) currently walks the
+  extends-chain to build wireShape for inherited fields; under
+  unfoldable-api-derivation it walks the chain to emit literal contract
+  fields into the response payload of the concrete instead. Read
+  payload-transport-layer first for the original framing;
+  unfoldable-api-derivation for the simplification; aggregate-inheritance
+  alongside for its I2 dependency. Coordinated landing not strictly
+  required — payload-transport-layer can ship first with `<Agg>Wire`
+  as a transitional name that retires when scaffolds take over.
 
 - **platform-directory-layout / per-package-output-tree ↔
   packaging-split.** Backend layout is governed by
