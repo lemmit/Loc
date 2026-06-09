@@ -388,85 +388,114 @@ Three options for the retirement:
 Three independent sub-trees, one per layer. Every leaf scaffold
 materialises exactly one declaration.
 
-Leaf-scaffold rule: **one scaffold per output declaration kind;
-generic over source kind.** A `command` is the same shape whether it
-comes from a `create`, `operation`, `destroy`, or workflow `handle`
-— the lifecycle distinction matters at the route and handler sites
-(which pick verb / path / body protocol), not at the payload site.
-Splitting commands by kind would create three near-identical macro
-entries.
+**Naming rule** (matches today's `scaffoldAggregate(of: X)` /
+`scaffoldWorkflow(of: X)` stdlib): one word per node kind, parameter
+names the target. No `For` connectors, no per-output redundant
+suffixes. Two unfold levels:
 
-Five leaf scaffolds cover the contract + application + routes tree:
+- **Per-source aggregators** — one source node fans out across all
+  three layers (contract + application + api). Default unfold target.
+- **Per-output leaves** — one declaration. Next unfold level when the
+  aggregator-level granularity isn't fine enough.
+
+**Polymorphism rule** ("scaffold reads its input's IR kind to
+decide"): every scaffold reads its target's kind/structure to decide
+what to emit. No per-kind macro variants — `scaffoldRoute(of: X)`
+reads `X.kind` to pick the HTTP verb; `scaffoldHandler(of: X)` picks
+`commandHandler` vs `queryHandler` from whether `X` is mutating.
 
 ```
-scaffoldApiFromContext(of: Sales)
-├── scaffoldContractForContext(of: Ordering)
-│   ├── scaffoldContractForAggregate(of: Order)
-│   │   ├── scaffoldCommandFor(operation: Order.place)            ← leaf  (reads place.params; kind: create)
-│   │   ├── scaffoldCommandFor(operation: Order.cancel)           ← leaf  (reads cancel.params; kind: operation)
-│   │   ├── scaffoldCommandFor(operation: Order.archive)          ← leaf  (reads archive.params; kind: destroy)
-│   │   └── scaffoldResponseFor(aggregate: Order)                 ← leaf  (walks fields+containments+derived, apiRead filter)
-│   ├── scaffoldContractForRepository(of: Orders)
-│   │   ├── scaffoldQueryFor(find: Orders.byId)                   ← leaf  (reads byId.params)
-│   │   ├── scaffoldQueryFor(find: Orders.byCustomer)             ← leaf
-│   │   └── scaffoldQueryFor(find: Orders.findAll)                ← leaf
-│   └── scaffoldContractForWorkflow(of: ReorderStockedItems)
-│       └── scaffoldCommandFor(workflowHandle: ReorderStockedItems.invoke)  ← leaf  (same scaffold as operations)
-├── scaffoldApplicationForContext(of: Ordering)
-│   ├── scaffoldHandlersForAggregate(of: Order)
-│   │   ├── scaffoldHandlerForOperation(of: Order.place)          → commandHandler PlaceOrder   (body: create protocol)
-│   │   ├── scaffoldHandlerForOperation(of: Order.cancel)         → commandHandler CancelOrder  (body: operation protocol)
-│   │   └── scaffoldHandlerForOperation(of: Order.archive)        → commandHandler ArchiveOrder (body: destroy protocol)
-│   └── scaffoldHandlersForRepository(of: Orders)
-│       ├── scaffoldHandlerForFind(of: Orders.byId)               → queryHandler GetOrderById
-│       ├── scaffoldHandlerForFind(of: Orders.byCustomer)         → queryHandler ListOrdersByCustomer
-│       └── scaffoldHandlerForFind(of: Orders.findAll)            → queryHandler ListOrders
-└── scaffoldRoutesForContext(of: Ordering)
-    ├── scaffoldRoutesForAggregate(of: Order)
-    │   ├── scaffoldRouteForHandler(of: Ordering.PlaceOrder)      ← leaf  (POST /orders, no id)
-    │   ├── scaffoldRouteForHandler(of: Ordering.CancelOrder)     ← leaf  (POST /orders/{id}/...)
-    │   └── scaffoldRouteForHandler(of: Ordering.ArchiveOrder)    ← leaf  (DELETE /orders/{id})
-    ├── scaffoldRoutesForRepository(of: Orders)
-    │   └── … one per find …
-    └── scaffoldRoutesForWorkflow(of: ReorderStockedItems)
-        └── scaffoldRouteForWorkflow(of: ReorderStockedItems)     ← leaf
-            // emitted only when the workflow exposes a callable surface
-            // (a `handle` member). Scheduled-only / event-only workflows skip.
+apiSurface(Sales)
+├── scaffoldContext(of: Ordering)
+│   ├── scaffoldAggregate(of: Order)
+│   │   ├── scaffoldOperation(of: Order.place)         ← aggregator level
+│   │   │   ├── scaffoldCommand(of: Order.place)       ← leaf
+│   │   │   ├── scaffoldHandler(of: Order.place)       ← leaf
+│   │   │   └── scaffoldRoute(of: Order.place)         ← leaf
+│   │   ├── scaffoldOperation(of: Order.cancel)        (similar fan-out)
+│   │   ├── scaffoldOperation(of: Order.archive)
+│   │   └── scaffoldResponse(of: Order)                ← leaf (no aggregator — response is per-aggregate)
+│   ├── scaffoldRepository(of: Orders)
+│   │   ├── scaffoldFind(of: Orders.byId)
+│   │   │   ├── scaffoldQuery(of: Orders.byId)
+│   │   │   ├── scaffoldHandler(of: Orders.byId)
+│   │   │   └── scaffoldRoute(of: Orders.byId)
+│   │   ├── scaffoldFind(of: Orders.byCustomer)        (similar)
+│   │   └── scaffoldFind(of: Orders.findAll)
+│   ├── scaffoldWorkflow(of: ReorderStockedItems)
+│   │   ├── scaffoldCommand(of: ReorderStockedItems.invoke)
+│   │   └── scaffoldRoute(of: ReorderStockedItems.invoke)
+│   │   // No scaffoldHandler — workflow IS the application-layer node.
+│   │   // Emitted only when the workflow exposes a `handle` member;
+│   │   // scheduled-only / event-only workflows skip the route too.
+│   └── scaffoldView(of: OrderListView)
+│       ├── scaffoldResponse(of: OrderListView)        // walks view's fields with apiRead
+│       ├── scaffoldHandler(of: OrderListView)         // queryHandler reading the view
+│       └── scaffoldRoute(of: OrderListView)
 ```
 
-### Where the lifecycle kind is read
+### Source kinds each leaf accepts
 
-| Scaffold | Reads `OperationIR.kind`? | What for |
+| Leaf | Accepts | Walks |
 |---|---|---|
-| `scaffoldCommandFor` | No | Command shape = `params`; same for all kinds |
-| `scaffoldResponseFor` | No | Response shape comes from aggregate fields, not operation |
-| `scaffoldQueryFor` | n/a | Finds have no `kind`; params straight through |
-| `scaffoldHandlerForOperation` | **Yes** | Body protocol: `new→save` (create) vs `load→mutate→save` (operation) vs `load→call` (destroy) |
-| `scaffoldRouteForHandler` | **Yes** | HTTP verb + path: `POST /orders` (create) vs `POST /orders/{id}/...` (operation) vs `DELETE /orders/{id}` (destroy) |
+| `scaffoldCommand(of: X)` | Operation, WorkflowHandle | `X.params` |
+| `scaffoldQuery(of: X)` | Find | `X.params` |
+| `scaffoldResponse(of: X)` | Aggregate, View | fields + containments + derived, with `apiRead` filter |
+| `scaffoldHandler(of: X)` | Operation, Find, View | reads `X` to decide `commandHandler` vs `queryHandler` and pick the body protocol |
+| `scaffoldRoute(of: X)` | Operation, Find, WorkflowHandle, View | reads `X.kind` (lifecycle) and source type to pick verb + path |
 
-Two scaffolds care about lifecycle kind; three don't. The split lives
-where the decision lives.
+`scaffoldHandler` and `scaffoldRoute` are the polymorphic ones — they
+read the target IR's kind to decide. Three leaves (`scaffoldCommand`,
+`scaffoldQuery`, `scaffoldResponse`) just walk a field list. The
+lifecycle distinction lives where the decision lives — not at the
+command-payload site, where every kind has the same shape.
 
-### Views
+### What each aggregator emits
 
-Views with an implicit projection (a `view` declaration omitting its
-field list) are a separate scaffold concern — they produce view AST,
-not contract AST. Same walk-with-filter mechanic as
-`scaffoldResponseFor` but a `uiRead` filter (keeps `internal` for
-admin surfaces). Not part of this proposal's contract tree; lives
-alongside the existing UI-scaffold stdlib.
+| Aggregator | Emits |
+|---|---|
+| `scaffoldOperation(of: op)` | `scaffoldCommand(of: op)`, `scaffoldHandler(of: op)`, `scaffoldRoute(of: op)` |
+| `scaffoldFind(of: f)` | `scaffoldQuery(of: f)`, `scaffoldHandler(of: f)`, `scaffoldRoute(of: f)` |
+| `scaffoldWorkflow(of: w)` | `scaffoldCommand(of: w.handle)`, `scaffoldRoute(of: w.handle)` (when `handle` exists) |
+| `scaffoldView(of: v)` | `scaffoldResponse(of: v)`, `scaffoldHandler(of: v)`, `scaffoldRoute(of: v)` |
+| `scaffoldAggregate(of: a)` | one `scaffoldOperation` per public operation/create/destroy + `scaffoldResponse(of: a)` |
+| `scaffoldRepository(of: r)` | one `scaffoldFind` per find |
+| `scaffoldContext(of: c)` | one aggregator per aggregate / repository / workflow / view in `c` |
 
-Workflows are user-written, not scaffolded — the application sub-tree
-fans `scaffoldHandlersForAggregate` and `scaffoldHandlersForRepository`
-only. The route sub-tree includes `scaffoldRoutesForWorkflow` because
-the route is mechanical even if the workflow body isn't.
+Aggregators are pure composition — they invoke leaves. They never
+emit declarations directly. Mirrors how today's
+`scaffold(subdomains: …)` → `scaffoldSubdomain(of: …)` →
+`scaffoldContext(of: …)` chain works.
+
+### Overrides
+
+Each scaffold accepts optional overrides as named params, matching
+the existing macro-stdlib pattern:
+
+```ddd
+with scaffoldHandler(of: Order.place, name: "QuickPlace")
+with scaffoldRoute(of: Order.cancel, path: "/orders/{id}/cancel")
+with scaffoldResponse(of: Order, exclude: [internal, audit])
+```
+
+When the override fully describes the output (e.g. a custom body), the
+unfolded form is the override verbatim. When the override is partial,
+the scaffold uses the default for the unspecified parts. This is the
+"magic where it's obvious" principle — defaults handle the common
+case; overrides handle the rest; unfold materialises the literal.
+
+Workflow bodies are user-written, not scaffolded — `scaffoldWorkflow`
+only emits the *contract + route* glue for a workflow that exposes a
+callable `handle` member. Scheduled-only / event-only workflows skip
+that scaffold entirely.
 
 Two scaffold-stdlib invariants:
 
-1. **Leaf scaffolds compose into composers.** `scaffoldApiFromContext`
-   doesn't synthesise anything directly — it invokes the three
-   layer composers, which invoke the per-aggregate composers, which
-   invoke the per-method leaves. Mirrors today's
+1. **Aggregators compose; leaves emit.** `apiSurface` doesn't
+   synthesise anything directly — it invokes `scaffoldContext`, which
+   invokes the per-source aggregators (`scaffoldAggregate`,
+   `scaffoldRepository`, `scaffoldWorkflow`, `scaffoldView`), which
+   invoke the per-output leaves. Mirrors today's
    `scaffold(subdomains: …)` →
    `scaffoldSubdomain(of: …)` →
    `scaffoldContext(of: …)` →
@@ -566,7 +595,7 @@ See § "wireShape retires from the IR" above for the full reasoning.
 - `WithClause` (the macro invocation form). Already wired on
   aggregates / UI; extended to api blocks here.
 
-## Worked example — three altitudes
+## Worked example — four altitudes
 
 ### Macro form (level 0)
 
@@ -577,18 +606,40 @@ api SalesApi with apiSurface(Sales)
 ### One-level unfold (level 1)
 
 ```ddd
-with scaffoldContractForContext(of: Ordering)
-with scaffoldApplicationForContext(of: Ordering)
+subdomain Sales {
+  context Ordering {
+    // existing domain declarations …
+    with scaffoldContext(of: Ordering)
+  }
+}
+
+api SalesApi { source: Sales; with scaffoldContext(of: Ordering) }
+```
+
+`scaffoldContext` fans across all four output layers (contract + handler
+inside the context; routes inside the api block). Replace either call
+with hand-written declarations to take over one layer; the other
+remains scaffolded.
+
+### Two-level unfold (level 2 — per-source aggregators)
+
+```ddd
+context Ordering {
+  // …
+  with scaffoldAggregate(of: Order)        // emits operations + response
+  with scaffoldRepository(of: Orders)      // emits finds
+  with scaffoldWorkflow(of: ReorderStockedItems)
+}
 
 api SalesApi {
   source: Sales
-  with scaffoldRoutesForContext(of: Ordering)
+  with scaffoldAggregate(of: Order)
+  with scaffoldRepository(of: Orders)
+  with scaffoldWorkflow(of: ReorderStockedItems)
 }
 ```
 
-The three layers are now nameable; each is independently editable.
-
-### Fully unfolded (level 3)
+### Fully unfolded (level 4 — leaves)
 
 ```ddd
 subdomain Sales {
@@ -623,7 +674,7 @@ subdomain Sales {
     query    OrdersByCustomerQuery { customerId: CustomerId, page: int = 1, pageSize: int = 25 }
 
     // Response shapes are always literal in the unfolded form.
-    // Produced by `scaffoldResponseFor(aggregate: Order)` walking
+    // Produced by `scaffoldResponse(of: Order)` walking
     // Order.fields + containments + derived with the `apiRead` filter.
     response OrderResponse {
       id:         OrderId
