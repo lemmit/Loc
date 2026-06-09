@@ -60,13 +60,16 @@ describe.skipIf(!ENABLED)(
         expect(mix).not.toContain(":ash_postgres,");
         expect(mix).not.toContain(":ash_phoenix,");
 
-        // mix deps.get + compile inside the elixir image.
+        // mix deps.get + compile inside the elixir image.  Mirrors the Ash
+        // test's 600s exec timeout — cold-cache mix deps.get + compile of
+        // a plain Phoenix+Ecto skeleton fits comfortably under this budget,
+        // but the headroom protects against transient hex registry slowness.
         const image = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
         execSync(
           `docker run --rm -v ${projDir}:/app -w /app -e MIX_ENV=prod ${image} ` +
             `bash -c 'mix local.hex --force && mix local.rebar --force && ` +
             `mix deps.get --only prod && mix compile --warnings-as-errors'`,
-          { stdio: "inherit", cwd: repoRoot },
+          { stdio: "inherit", cwd: repoRoot, timeout: 600_000 },
         );
       } finally {
         if (!baseOutDir) {
@@ -77,6 +80,10 @@ describe.skipIf(!ENABLED)(
           }
         }
       }
-    });
+    }, 700_000);
+    // Cold mix deps.get + mix compile inside docker can take several
+    // minutes on a fresh cache; mirror the Ash test's 700_000 ms
+    // per-test timeout so vitest doesn't kill the docker exec at the
+    // default 30s.
   },
 );
