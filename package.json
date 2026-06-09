@@ -30,6 +30,7 @@
     "test:dotnet": "LOOM_DOTNET_BUILD=1 vitest run test/e2e/generated-dotnet-build.test.ts",
     "test:format-dotnet": "LOOM_DOTNET_FORMAT=1 vitest run test/e2e/generated-dotnet-format.test.ts",
     "test:phoenix": "LOOM_PHOENIX_BUILD=1 vitest run test/e2e/generated-phoenix-build.test.ts",
+    "test:phoenix-vanilla": "LOOM_PHOENIX_VANILLA_BUILD=1 vitest run test/e2e/generated-elixir-vanilla-build.test.ts",
     "test:format-phoenix": "LOOM_PHOENIX_FORMAT=1 vitest run test/e2e/generated-phoenix-format.test.ts",
     "test:dialyzer-phoenix": "LOOM_PHOENIX_DIALYZER=1 vitest run test/e2e/generated-phoenix-dialyzer.test.ts",
     "test:obs": "LOOM_OBS_E2E=1 vitest run test/e2e/observability-events.test.ts",

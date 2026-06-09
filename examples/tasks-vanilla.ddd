@@ -1,0 +1,26 @@
+// Example exercising `foundation: vanilla` on `platform: elixir` —
+// plain Phoenix + Ecto (no Ash).  Mirrored by the e2e build test
+// (`test/e2e/fixtures/elixir-vanilla-build/vanilla-min.ddd`).  This
+// copy lives in `examples/` so the example matrix and `ddd new`
+// scaffolding can reference it.
+system Tasks {
+  subdomain Productivity {
+    context Tracker {
+      aggregate Task with crudish {
+        title: string
+        done: bool
+      }
+      repository Tasks for Task { }
+    }
+  }
+  api TrackerApi from Productivity
+  storage primary { type: postgres }
+  resource trackerState { for: Tracker, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Tracker]
+    dataSources: [trackerState]
+    serves: TrackerApi
+    port: 4000
+  }
+}

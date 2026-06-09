@@ -1,0 +1,82 @@
+import { execSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+// ---------------------------------------------------------------------------
+// Slice 6 of docs/plans/vanilla-foundation-tdd-plan.md — CI gate for
+// the vanilla emit subtree.  Parallel to test/e2e/generated-phoenix-
+// build.test.ts but exercises `foundation: vanilla` deployables and
+// expects no Ash deps in the generated mix.exs.
+//
+// For every fixture under `test/e2e/fixtures/elixir-vanilla-build/`,
+// generate the project then `mix deps.get && mix compile
+// --warnings-as-errors` inside the hexpm/elixir Docker image.  Catches
+// every Elixir surface error the unit-test layer (string assertions)
+// can't see — the actual acceptance gate for the vanilla emitters.
+//
+// Gated behind LOOM_PHOENIX_VANILLA_BUILD=1 so it stays out of the
+// always-on `test` matrix; runs in CI via .github/workflows/elixir-
+// vanilla-build.yml and locally via `npm run test:phoenix-vanilla`.
+// ---------------------------------------------------------------------------
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, "..", "..");
+const cli = path.join(repoRoot, "bin", "cli.js");
+const fixturesDir = path.join(here, "fixtures", "elixir-vanilla-build");
+const ENABLED = process.env.LOOM_PHOENIX_VANILLA_BUILD === "1";
+
+describe.skipIf(!ENABLED)(
+  "generated vanilla Phoenix project compiles against plain Ecto (LOOM_PHOENIX_VANILLA_BUILD=1)",
+  () => {
+    it.each([
+      { name: "vanilla-min.ddd", deployable: "api" },
+    ])("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
+      const fixturePath = path.join(fixturesDir, name);
+      const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
+      const outDir = baseOutDir
+        ? path.join(baseOutDir, name.replace(/\.ddd$/, ""))
+        : fs.mkdtempSync(path.join(os.tmpdir(), "loom-vanilla-"));
+      fs.mkdirSync(outDir, { recursive: true });
+
+      try {
+        // The vanilla orchestrator emits to `<deployable>/`, not
+        // `phoenix_app/`.  Read the deployable slug per fixture.
+        const projDir = path.join(outDir, "out", deployable);
+        if (!fs.existsSync(path.join(projDir, "mix.exs"))) {
+          execSync(`node ${cli} generate system ${fixturePath} -o ${outDir}/out`, {
+            stdio: "inherit",
+            cwd: repoRoot,
+          });
+        }
+        expect(fs.existsSync(path.join(projDir, "mix.exs"))).toBe(true);
+
+        // Vanilla mix.exs must have zero Ash deps — re-asserting at
+        // the e2e level on top of the unit assertion.
+        const mix = fs.readFileSync(path.join(projDir, "mix.exs"), "utf8");
+        expect(mix).not.toContain(":ash,");
+        expect(mix).not.toContain(":ash_postgres,");
+        expect(mix).not.toContain(":ash_phoenix,");
+
+        // mix deps.get + compile inside the elixir image.
+        const image = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
+        execSync(
+          `docker run --rm -v ${projDir}:/app -w /app -e MIX_ENV=prod ${image} ` +
+            `bash -c 'mix local.hex --force && mix local.rebar --force && ` +
+            `mix deps.get --only prod && mix compile --warnings-as-errors'`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+      } finally {
+        if (!baseOutDir) {
+          try {
+            fs.rmSync(outDir, { recursive: true, force: true });
+          } catch {
+            // best-effort cleanup
+          }
+        }
+      }
+    });
+  },
+);
