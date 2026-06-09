@@ -1,0 +1,107 @@
+import { describe, expect, it } from "vitest";
+import { generateSystemFiles } from "../../_helpers/generate.js";
+
+// ---------------------------------------------------------------------------
+// Slice 5c body-lowering follow-up #1 — factory-let + op-call.
+//
+// The two simplest mutating WorkflowStmtIR kinds, both consuming
+// Slice 5c's context facade functions:
+//
+//   factory-let  → `{:ok, <name>} <- Context.create_<agg>(%{fields})`
+//   op-call      → `{:ok, _}      <- Context.<op>_<agg>(target, %{args})`
+//
+// Unsupported kinds fall through to a `# TODO: lower <kind>` comment so
+// the workflow module still compiles under --warnings-as-errors.  Each
+// remaining kind (precondition / requires / emit / repo-let / expr-let /
+// for-each / repo-run) lands as its own focused slice.
+// ---------------------------------------------------------------------------
+
+const SOURCE = `
+system Tasks {
+  subdomain Productivity {
+    context Tracker {
+      aggregate Task with crudish {
+        title: string
+        done: bool
+
+        operation markDone() {
+          done := true
+        }
+      }
+      repository Tasks for Task { }
+
+      workflow createAndComplete transactional {
+        create() {
+          let t = Task.create({ title: "Untitled", done: false })
+          t.markDone()
+        }
+      }
+    }
+  }
+  api TrackerApi from Productivity
+  storage primary { type: postgres }
+  resource trackerState { for: Tracker, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Tracker]
+    dataSources: [trackerState]
+    serves: TrackerApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla — workflow body lowering (factory-let + op-call)", () => {
+  it("aliases the context module as Context for tidy rendering", async () => {
+    const files = await generateSystemFiles(SOURCE);
+    const wf = files.get(
+      [...files.keys()].find((k) => k.endsWith("/workflows/create_and_complete.ex"))!,
+    )!;
+    expect(wf).toContain("alias Api.Tracker, as: Context");
+  });
+
+  it("lowers `let t = Task.create({...})` to a Context.create_task with-clause", async () => {
+    const files = await generateSystemFiles(SOURCE);
+    const wf = files.get(
+      [...files.keys()].find((k) => k.endsWith("/workflows/create_and_complete.ex"))!,
+    )!;
+    expect(wf).toMatch(
+      /with \{:ok, t\} <- Context\.create_task\(%\{title: "Untitled", done: false\}\)/,
+    );
+  });
+
+  it("lowers `t.markDone()` to a Context.mark_done_task with-clause that pattern-matches success", async () => {
+    const files = await generateSystemFiles(SOURCE);
+    const wf = files.get(
+      [...files.keys()].find((k) => k.endsWith("/workflows/create_and_complete.ex"))!,
+    )!;
+    expect(wf).toContain("{:ok, _} <- Context.mark_done_task(t, %{})");
+  });
+
+  it("the with-chain returns {:ok, <last-bound>} on success", async () => {
+    const files = await generateSystemFiles(SOURCE);
+    const wf = files.get(
+      [...files.keys()].find((k) => k.endsWith("/workflows/create_and_complete.ex"))!,
+    )!;
+    expect(wf).toMatch(/with [\s\S]*do\n\s+\{:ok, t\}\n\s+end/);
+  });
+
+  it("the lowered body is wrapped in Repo.transaction for a `transactional` workflow", async () => {
+    const files = await generateSystemFiles(SOURCE);
+    const wf = files.get(
+      [...files.keys()].find((k) => k.endsWith("/workflows/create_and_complete.ex"))!,
+    )!;
+    expect(wf).toContain("Repo.transaction(fn ->");
+    expect(wf).toContain("Repo.rollback(reason)");
+  });
+
+  it("no Ash references appear in the lowered body", async () => {
+    const files = await generateSystemFiles(SOURCE);
+    const wf = files.get(
+      [...files.keys()].find((k) => k.endsWith("/workflows/create_and_complete.ex"))!,
+    )!;
+    expect(wf).not.toContain("Ash.");
+    expect(wf).not.toContain("Ash.Resource");
+    expect(wf).not.toContain("Ash.transaction");
+  });
+});

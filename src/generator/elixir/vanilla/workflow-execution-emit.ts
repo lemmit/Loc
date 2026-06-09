@@ -11,26 +11,25 @@
 // route through the per-context named-operation functions emitted
 // by `context-emit.ts` (Slice 5c prerequisite).
 //
-// Body lowering for the full WorkflowStmtIR kind set
-// (factory-let / repo-let / op-call / emit / precondition / requires /
-// expr-let / for-each / repo-run) is intentionally incremental.  This
-// slice ships:
-//   - the workflow module shape (`run/1`, optional `Repo.transaction`),
-//   - the WorkflowsController + spliced POST /workflows/<name> routes,
-//   - the prerequisite (named-operation context functions),
-// with workflow bodies stubbed to `{:ok, params}`.  Each statement
-// kind lands as its own follow-up so the body fills incrementally
-// and every step is validated by the `elixir-vanilla-build.yml`
-// mix-compile gate.
+// Body lowering by WorkflowStmtIR kind (incremental):
+//   ✓ factory-let → `{:ok, <name>} <- Context.create_<agg>(%{...})`
+//   ✓ op-call     → `{:ok, _}      <- Context.<op>_<agg>(target, %{...})`
+//   ✓ default     → preserved as `# TODO:<kind>` comment; the workflow
+//                   still compiles and the route is exercisable.
+// Remaining kinds (precondition / requires / emit / repo-let /
+// expr-let / for-each / repo-run) land as their own focused slices
+// each validated by the elixir-vanilla-build.yml mix-compile gate.
 // ---------------------------------------------------------------------------
 
 import {
   type BoundedContextIR,
   type WorkflowIR,
+  type WorkflowStmtIR,
   workflowEmitsCommandRoute,
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
+import { type RenderCtx, renderExpr } from "../render-expr.js";
 
 export interface VanillaWorkflowExecResult {
   routes: ApiRoute[];
@@ -52,7 +51,6 @@ export function emitVanillaWorkflowExecution(
   const commandWorkflows = ctx.workflows.filter(workflowEmitsCommandRoute);
   if (commandWorkflows.length === 0) return { routes: [] };
 
-  // One module per command-triggered workflow.
   for (const wf of commandWorkflows) {
     const wfSnake = snake(wf.name);
     out.set(
@@ -61,7 +59,6 @@ export function emitVanillaWorkflowExecution(
     );
   }
 
-  // One shared WorkflowsController per context.
   out.set(
     `lib/${appName}_web/controllers/workflows_controller.ex`,
     renderWorkflowsController(appModule, ctxModule, commandWorkflows),
@@ -79,18 +76,168 @@ export function emitVanillaWorkflowExecution(
   return { routes };
 }
 
+// ---------------------------------------------------------------------------
+// Body lowering — per-WorkflowStmtIR-kind translation to plain Elixir.
+// ---------------------------------------------------------------------------
+
+interface BodyLine {
+  /** `with-clause` lines stack into the `with ... do ... end` chain.
+   *  `pre` lines run before the `with` (preconditions / requires).
+   *  `post` lines run after a successful `with` body (e.g. `emit`). */
+  kind: "with-clause" | "pre" | "post" | "stmt";
+  text: string;
+  /** Bind name for `with-clause` lines — used to pick the final result
+   *  of `run/1` (last bound name, or `:ok` if no binds). */
+  bindName?: string;
+}
+
+function lowerStatements(
+  stmts: WorkflowStmtIR[],
+  contextModule: string,
+  renderCtx: RenderCtx,
+): BodyLine[] {
+  const lines: BodyLine[] = [];
+  for (const st of stmts) {
+    lines.push(...lowerStatement(st, contextModule, renderCtx));
+  }
+  return lines;
+}
+
+function lowerStatement(
+  st: WorkflowStmtIR,
+  contextModule: string,
+  renderCtx: RenderCtx,
+): BodyLine[] {
+  switch (st.kind) {
+    case "factory-let": {
+      // `let order = Order.create({ field: value, … })` →
+      // `{:ok, order} <- Context.create_order(%{field: value, …})`
+      const fields = st.fields
+        .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
+        .join(", ");
+      const action = `create_${snake(st.aggName)}`;
+      const call = `${contextModule}.${action}(%{${fields}})`;
+      return [
+        {
+          kind: "with-clause",
+          text: `{:ok, ${snake(st.name)}} <- ${call}`,
+          bindName: snake(st.name),
+        },
+      ];
+    }
+
+    case "op-call": {
+      // `order.confirm(args)` →
+      // `{:ok, _} <- Context.confirm_order(order, %{args...})`
+      const argFields = st.args
+        .map((arg, i) => `arg${i}: ${renderExpr(arg, renderCtx)}`)
+        .join(", ");
+      const target = snake(st.target);
+      const action = `${snake(st.op)}_${snake(st.aggName)}`;
+      const call = `${contextModule}.${action}(${target}, %{${argFields}})`;
+      return [
+        {
+          kind: "with-clause",
+          text: `{:ok, _} <- ${call}`,
+          bindName: undefined,
+        },
+      ];
+    }
+
+    default:
+      // Unsupported kind today — preserved as a TODO comment so the
+      // workflow still compiles.  Future slices add per-kind lowering
+      // and remove this fallthrough as each kind moves into a real
+      // BodyLine.
+      return [
+        {
+          kind: "stmt",
+          text: `# TODO: lower workflow statement kind '${st.kind}' (vanilla-foundation-tdd-plan.md follow-up)`,
+        },
+      ];
+  }
+}
+
+/** Compose lowered body lines into the inner-function body that the
+ *  workflow module's `run_inner` (transactional) or inline body
+ *  (non-transactional) executes.  Two assembly modes:
+ *
+ *  - Pure `with`-chain when every line is a `with-clause`:
+ *      with {:ok, x} <- ...,
+ *           {:ok, _} <- ...,
+ *           do: {:ok, x}
+ *  - Sequential when stmt lines are mixed in:
+ *      stmt
+ *      with {:ok, x} <- ..., do: {:ok, x}
+ *
+ *  The final result is `{:ok, <last-bound-name>}` or `{:ok, params}`
+ *  if no binds were produced — matching the contract `run/1` returns
+ *  `{:ok, _} | {:error, _}`. */
+function assembleBody(lines: BodyLine[]): string {
+  const withClauses = lines.filter((l) => l.kind === "with-clause");
+  const stmtLines = lines.filter((l) => l.kind === "stmt");
+  const lastBind = withClauses.reverse().find((l) => l.bindName)?.bindName;
+  withClauses.reverse(); // restore order
+
+  const resultExpr = lastBind ? `{:ok, ${lastBind}}` : "{:ok, params}";
+
+  if (stmtLines.length === 0 && withClauses.length > 0) {
+    // Pure with-chain.
+    const clauses = withClauses.map((l) => `      ${l.text}`).join(",\n");
+    return `    with ${withClauses[0]!.text.trimStart()}${
+      withClauses.length > 1
+        ? `,\n${withClauses
+            .slice(1)
+            .map((l) => `         ${l.text}`)
+            .join(",\n")}`
+        : ""
+    } do
+      ${resultExpr}
+    end`;
+  }
+
+  if (withClauses.length === 0 && stmtLines.length > 0) {
+    return `    # Workflow body — incremental lowering (see workflow-execution-emit.ts).
+${stmtLines.map((l) => `    ${l.text}`).join("\n")}
+    ${resultExpr}`;
+  }
+
+  if (withClauses.length === 0 && stmtLines.length === 0) {
+    // Empty body — keep the stub semantics.
+    return `    {:ok, params}`;
+  }
+
+  // Mixed: stmt lines first, then with-chain.
+  const stmtBlock = stmtLines.map((l) => `    ${l.text}`).join("\n");
+  const withBlock = withClauses
+    .map((l, i) => (i === 0 ? `with ${l.text}` : `         ${l.text}`))
+    .join(",\n");
+  return `${stmtBlock}
+    ${withBlock} do
+      ${resultExpr}
+    end`;
+}
+
 function renderWorkflowModule(appModule: string, ctxModule: string, wf: WorkflowIR): string {
   const wfPascal = upperFirst(wf.name);
   const moduleName = `${appModule}.${ctxModule}.Workflows.${wfPascal}`;
+  const contextModuleFq = `${appModule}.${ctxModule}`;
   const repoMod = `${appModule}.Repo`;
   const transactional = !!wf.transactional;
 
-  // Body lowering for the full WorkflowStmtIR kind set is incremental
-  // (per-kind follow-up PRs).  Slice 5c ships the SHAPE — run/1 +
-  // optional Repo.transaction wrap — with the body stubbed to
-  // `{:ok, params}` so the module compiles and the route is
-  // exercisable.  Subsequent slices fill in factory-let, op-call,
-  // emit, precondition/requires, repo-let, expr-let, for-each.
+  const renderCtx: RenderCtx = {
+    thisName: "record",
+    contextModule: contextModuleFq,
+    foundation: "vanilla",
+  };
+  const lines = lowerStatements(wf.statements ?? [], contextModuleFq, renderCtx);
+  const body = assembleBody(lines);
+  const hasContextCall = lines.some((l) => l.kind === "with-clause");
+  const contextAlias = hasContextCall ? `\n  alias ${contextModuleFq}, as: Context` : "";
+  // Rewrite the body's fully-qualified context module to the `Context`
+  // alias to keep the rendered Elixir tidy and avoid long-line warnings.
+  const aliasedBody = hasContextCall ? body.replaceAll(contextModuleFq, "Context") : body;
+
   const transactionalDoc = transactional
     ? "\n\n  Marked `transactional` — the body runs inside `Repo.transaction/1`;\n  a rejection result rolls the transaction back."
     : "";
@@ -101,13 +248,11 @@ defmodule ${moduleName} do
   @moduledoc """
   Workflow \`${wf.name}\` — vanilla foundation (plain Elixir, no Ash).${transactionalDoc}
 
-  Body lowering for individual workflow statement kinds is incremental;
-  the current body returns \`{:ok, params}\` so the module compiles and
-  the route is exercisable.  See \`workflow-execution-emit.ts\` head
-  comment for the lowering plan.
+  Body lowering for individual statement kinds is incremental.  See
+  \`workflow-execution-emit.ts\` for the per-kind status.
   """
 
-  alias ${repoMod}
+  alias ${repoMod}${contextAlias}
 
   @spec run(map()) :: {:ok, term()} | {:error, term()}
   def run(params) when is_map(params) do
@@ -120,39 +265,24 @@ defmodule ${moduleName} do
   end
 
   defp run_inner(params) when is_map(params) do
-    # Slice 5c: workflow body lowering is incremental.  Per-statement-
-    # kind lowering (factory-let / op-call / emit / precondition /
-    # requires / repo-let / expr-let / for-each) lands in follow-up
-    # slices consuming context facade functions \`<op>_<agg>/2\`,
-    # \`create_<agg>/1\`, \`get_<agg>/1\` (already emitted by
-    # context-emit.ts).
-    {:ok, params}
+${aliasedBody}
   end
 end
 `;
   }
 
-  // Non-transactional: no Repo wrap, no alias.
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc """
   Workflow \`${wf.name}\` — vanilla foundation (plain Elixir, no Ash).
 
-  Body lowering for individual workflow statement kinds is incremental;
-  the current body returns \`{:ok, params}\` so the module compiles and
-  the route is exercisable.  See \`workflow-execution-emit.ts\` head
-  comment for the lowering plan.
-  """
+  Body lowering for individual statement kinds is incremental.  See
+  \`workflow-execution-emit.ts\` for the per-kind status.
+  """${hasContextCall ? `\n${contextAlias.trimStart()}\n` : ""}
 
   @spec run(map()) :: {:ok, term()} | {:error, term()}
   def run(params) when is_map(params) do
-    # Slice 5c: workflow body lowering is incremental.  Per-statement-
-    # kind lowering (factory-let / op-call / emit / precondition /
-    # requires / repo-let / expr-let / for-each) lands in follow-up
-    # slices consuming context facade functions \`<op>_<agg>/2\`,
-    # \`create_<agg>/1\`, \`get_<agg>/1\` (already emitted by
-    # context-emit.ts).
-    {:ok, params}
+${aliasedBody}
   end
 end
 `;
@@ -199,15 +329,7 @@ defmodule ${webModule}.WorkflowsController do
 
   @moduledoc """
   HTTP entry points for command-triggered workflows in the
-  ${ctxModule} context.  Each action delegates to its workflow
-  module's \`run/1\` and translates the typed result via the shared
-  vanilla ProblemDetails helper (Slice 4):
-
-    * \`{:ok, result}\` → 202 Accepted + JSON envelope
-    * \`{:error, %Ecto.Changeset{}}\` → 422 ProblemDetails (errors[])
-    * \`{:error, :not_found}\` → 404 ProblemDetails
-    * \`{:error, :forbidden}\` → 403 ProblemDetails
-    * \`{:error, reason}\` → 400 ProblemDetails with inspect(reason)
+  ${ctxModule} context.
   """
 
 ${actions}
