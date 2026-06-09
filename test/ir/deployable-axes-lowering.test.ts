@@ -116,17 +116,30 @@ describe("realization axes — lowering defaults", () => {
     expect(web.runtime).toBeUndefined();
   });
 
-  // P1 of proposals/vanilla-phoenix-foundation.md — the menu admits
-  // `foundation: vanilla` on elixir, so an explicit value lowers cleanly
-  // (the validator's R5 gates emission separately; lowering must not crash
-  // or drop the value).
-  it("explicit `foundation: vanilla` on elixir is carried through to DeployableIR", async () => {
+  // realization-axes-alignment.md — `foundation: vanilla` on elixir selects
+  // the plain-Phoenix axis defaults (Ecto + vanilla style), NOT the platform's
+  // ash-oriented defaults.  The foundation owns no axis, but the omitted-knob
+  // default follows the foundation (`foundationAdapterOverride`).
+  it("explicit `foundation: vanilla` on elixir defaults to ecto + vanilla style", async () => {
     const d = await lowerDeployable("elixir { foundation: vanilla }");
     expect(d.foundation).toBe("vanilla");
-    // The other axes default normally.  Canonical post-rename:
-    // `transport: phoenix` (was `phoenixRouter`).
-    expect(d.persistence).toBe("ashPostgres");
+    expect(d.application).toBe("vanilla");
+    expect(d.persistence).toBe("ecto");
+    // Greenfield axes are unaffected by foundation today.
     expect(d.transport).toBe("phoenix");
     expect(d.runtime).toBe("transactional");
+  });
+
+  it("default elixir foundation (ash) keeps ashPostgres / ash — vanilla override is foundation-scoped", async () => {
+    const d = await lowerDeployable("elixir");
+    expect(d.foundation).toBe("ash");
+    expect(d.application).toBe("ash");
+    expect(d.persistence).toBe("ashPostgres");
+  });
+
+  it("an explicit persistence overrides even the foundation default", async () => {
+    // ecto is the vanilla default, but an explicit knob still wins.
+    const d = await lowerDeployable("elixir { foundation: vanilla, persistence: ecto }");
+    expect(d.persistence).toBe("ecto");
   });
 });
