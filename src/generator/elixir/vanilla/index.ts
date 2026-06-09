@@ -24,6 +24,11 @@ import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
 import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaSchemas } from "./schema-emit.js";
 import { emitVanillaShellFiles } from "./shell-emit.js";
+import {
+  emitVanillaViewModules,
+  emitVanillaViewsController,
+  type VanillaViewRef,
+} from "./view-emit.js";
 
 export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<string, string> {
   const { contexts, deployable } = args;
@@ -38,6 +43,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // Per-context emit: schema, changeset, repository, context module,
   // controllers.  Changeset before Repository so the latter can alias it.
   const apiRoutes: ApiRoute[] = [];
+  const allViews: VanillaViewRef[] = [];
   for (const ctx of contexts) {
     emitVanillaSchemas(appModule, ctx, out);
     emitVanillaChangesets(appModule, ctx, out);
@@ -45,7 +51,12 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     emitVanillaContextModule(appModule, ctx, out);
     const { routes } = emitVanillaApiControllers(appName, appModule, ctx, out);
     apiRoutes.push(...routes);
+    // Views — per-context Ecto query modules; controller + routes collected
+    // project-wide (one `ViewsController` for all views, matching the ash path).
+    emitVanillaViewModules(appName, appModule, ctx, out);
+    for (const view of ctx.views) allViews.push({ ctx, view });
   }
+  apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
 
   // Shell files — emitted AFTER per-context emit so the router has the
   // collected `apiRoutes` to splice into the `/api` scope.
