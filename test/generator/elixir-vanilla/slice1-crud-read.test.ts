@@ -90,8 +90,9 @@ describe("vanilla — Slice 1 CRUD read path", () => {
     expect(ctl).toContain("case Tracker.get_task(id) do");
     expect(ctl).toContain("{:ok, record}");
     expect(ctl).toContain("{:error, :not_found}");
-    expect(ctl).toContain('"/errors/not-found"');
-    expect(ctl).toContain("put_status(404)");
+    // Slice 4: controller delegates to shared <App>Web.ProblemDetails
+    // helper instead of inline `/errors/not-found` envelope.
+    expect(ctl).toContain('ProblemDetails.not_found_response(conn, "Task", id)');
   });
 
   it("router has the per-aggregate routes spliced into the /api scope", async () => {

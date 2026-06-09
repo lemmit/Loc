@@ -99,6 +99,7 @@ function renderController(
 defmodule ${appModule}Web.${aggPascal}Controller do
   use ${appModule}Web, :controller
   alias ${facadeMod}
+  alias ${appModule}Web.ProblemDetails
 
   def index(conn, _params) do
     with {:ok, records} <- ${ctxModule}.list_${aggSnake}s() do
@@ -112,7 +113,7 @@ defmodule ${appModule}Web.${aggPascal}Controller do
         json(conn, serialize(record))
 
       {:error, :not_found} ->
-        not_found(conn, "${aggPascal}", id)
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
     end
   end
 
@@ -124,7 +125,7 @@ defmodule ${appModule}Web.${aggPascal}Controller do
         |> json(serialize(record))
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        validation_error(conn, changeset)
+        ProblemDetails.validation_error_response(conn, changeset)
     end
   end
 
@@ -136,10 +137,10 @@ defmodule ${appModule}Web.${aggPascal}Controller do
       json(conn, serialize(updated))
     else
       {:error, :not_found} ->
-        not_found(conn, "${aggPascal}", id)
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        validation_error(conn, changeset)
+        ProblemDetails.validation_error_response(conn, changeset)
     end
   end
 
@@ -149,10 +150,10 @@ defmodule ${appModule}Web.${aggPascal}Controller do
       send_resp(conn, 204, "")
     else
       {:error, :not_found} ->
-        not_found(conn, "${aggPascal}", id)
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        validation_error(conn, changeset)
+        ProblemDetails.validation_error_response(conn, changeset)
     end
   end
 
@@ -160,36 +161,6 @@ defmodule ${appModule}Web.${aggPascal}Controller do
     record
     |> Map.from_struct()
     |> Map.drop([:__meta__, :__struct__])
-  end
-
-  defp not_found(conn, kind, id) do
-    conn
-    |> put_status(404)
-    |> json(%{
-      type: "/errors/not-found",
-      title: "Not Found",
-      status: 404,
-      detail: "#{kind} #{id} not found"
-    })
-  end
-
-  defp validation_error(conn, changeset) do
-    errors =
-      Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-        Enum.reduce(opts, msg, fn {key, value}, acc ->
-          String.replace(acc, "%{#{key}}", to_string(value))
-        end)
-      end)
-
-    conn
-    |> put_status(422)
-    |> json(%{
-      type: "/errors/validation",
-      title: "Validation Failed",
-      status: 422,
-      detail: "Request body failed validation",
-      errors: errors
-    })
   end
 end
 `;
