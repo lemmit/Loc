@@ -5,35 +5,41 @@
 // AshPostgres).  Sibling of the Ash path under `../`; called from
 // `../index.ts` when `deployable.foundation === "vanilla"`.
 //
-// Per docs/plans/vanilla-foundation-tdd-plan.md — built in TDD slices:
-//
-//   Slice 0 (this file's initial scope): orchestrator branch + an empty
-//     `vanilla/index.ts` returning the shell files only.  Green = R5
-//     gate lifted, shell emits, nothing else asserted yet.
-//   Slice 1+ (follow-ups): schema-emit, repository-emit, context-emit,
-//     api-emit, parity-closing wire-spec test.
-//
-// Reuse (do not re-emit): heex-walker (LiveView body walker),
-// migrations-emit (foundation-agnostic), render-expr/stmt (with a
-// vanilla expr target where Ash filter syntax diverges), OpenAPI emit,
-// JasonCamelCase, telemetry, seeds, theme, sidebar, shell renderers
-// where they are framework-agnostic.
+// Per docs/plans/vanilla-foundation-tdd-plan.md — built in TDD slices.
+// Slice 0: shell.  Slice 1 (this file's current scope): per-aggregate
+// schema + repository + context module + read controllers + spliced
+// router routes.  Later slices: changesets, policies, ProblemDetails
+// parity, workflows + views, CI.
 // ---------------------------------------------------------------------------
 
+import type { ApiRoute } from "../api-emit.js";
 import type { GenerateElixirArgs } from "../index.js";
 import { toModulePrefix, toSnakeApp } from "../shell-emit.js";
+import { emitVanillaApiControllers } from "./api-emit.js";
+import { emitVanillaContextModule } from "./context-emit.js";
+import { emitVanillaRepositories } from "./repository-emit.js";
+import { emitVanillaSchemas } from "./schema-emit.js";
 import { emitVanillaShellFiles } from "./shell-emit.js";
 
 export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<string, string> {
-  const { deployable } = args;
+  const { contexts, deployable } = args;
   const out = new Map<string, string>();
   const appName = toSnakeApp(deployable.name);
   const appModule = toModulePrefix(appName);
 
-  // Shell files — mix.exs, application.ex, repo.ex, endpoint, router,
-  // config/*, Dockerfile, .formatter.exs.  Plain Phoenix + Ecto, no
-  // Ash deps.  See `./shell-emit.ts`.
-  emitVanillaShellFiles(appName, appModule, out);
+  // Per-context emit: schema, repository, context module, controllers.
+  const apiRoutes: ApiRoute[] = [];
+  for (const ctx of contexts) {
+    emitVanillaSchemas(appModule, ctx, out);
+    emitVanillaRepositories(appModule, ctx, out);
+    emitVanillaContextModule(appModule, ctx, out);
+    const { routes } = emitVanillaApiControllers(appName, appModule, ctx, out);
+    apiRoutes.push(...routes);
+  }
+
+  // Shell files — emitted AFTER per-context emit so the router has the
+  // collected `apiRoutes` to splice into the `/api` scope.
+  emitVanillaShellFiles(appName, appModule, out, apiRoutes);
 
   return out;
 }

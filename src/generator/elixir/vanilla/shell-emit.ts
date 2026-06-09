@@ -2,12 +2,16 @@
 // Vanilla shell renderers — plain Phoenix + Ecto skeleton.  No Ash deps,
 // no AshPhoenix, no AshPostgres.  Slice 0 of vanilla-foundation-tdd-plan.md:
 // emit a minimal project that `mix compile --warnings-as-errors` accepts.
+// Slice 1: router now accepts per-aggregate routes spliced into /api.
 // ---------------------------------------------------------------------------
+
+import type { ApiRoute } from "../api-emit.js";
 
 export function emitVanillaShellFiles(
   appName: string,
   appModule: string,
   out: Map<string, string>,
+  apiRoutes: ApiRoute[] = [],
 ): void {
   out.set("mix.exs", renderVanillaMixExs(appName, appModule));
   out.set(".formatter.exs", renderVanillaFormatterExs());
@@ -15,7 +19,7 @@ export function emitVanillaShellFiles(
   out.set(`lib/${appName}/repo.ex`, renderVanillaRepo(appName, appModule));
   out.set(`lib/${appName}_web.ex`, renderVanillaWebModule(appName, appModule));
   out.set(`lib/${appName}_web/endpoint.ex`, renderVanillaEndpoint(appName, appModule));
-  out.set(`lib/${appName}_web/router.ex`, renderVanillaRouter(appModule));
+  out.set(`lib/${appName}_web/router.ex`, renderVanillaRouter(appModule, apiRoutes));
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderVanillaErrorJson(appModule));
   out.set(
     `lib/${appName}_web/controllers/health_controller.ex`,
@@ -187,7 +191,10 @@ end
 `;
 }
 
-function renderVanillaRouter(appModule: string): string {
+function renderVanillaRouter(appModule: string, apiRoutes: ApiRoute[]): string {
+  const routeLines = apiRoutes
+    .map((r) => `    ${r.method} "${r.path}", ${r.controller}, ${r.action}`)
+    .join("\n");
   return `# Auto-generated.
 defmodule ${appModule}Web.Router do
   use ${appModule}Web, :router
@@ -202,6 +209,7 @@ defmodule ${appModule}Web.Router do
 
   scope "/api", ${appModule}Web do
     pipe_through :api
+${routeLines}
   end
 end
 `;
