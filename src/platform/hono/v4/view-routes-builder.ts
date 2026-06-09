@@ -1,14 +1,17 @@
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
+import { lowerToDrizzle } from "../../../generator/typescript/repository-find-predicate.js";
 import type {
   AggregateIR,
-  BoundedContextIR,
+  EnrichedBoundedContextIR,
   ExprIR,
   TypeIR,
   ViewIR,
+  WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { viewUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { camelId, opView } from "../../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { zodForResponse } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
 // Hono view routes emission.
@@ -28,10 +31,35 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // ---------------------------------------------------------------------------
 
 export function buildViewsRoutesFile(
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   aggsByName: Map<string, AggregateIR>,
 ): string {
   if (ctx.views.length === 0) return "";
+  // Workflow-sourced views (workflow-instance-views.md) read the saga-state
+  // table directly with the view's filter lowered to a Drizzle predicate (no
+  // aggregate repository).  Precompute each one's table + where + the Drizzle
+  // ops it needs so the imports below can include them.
+  const wfViews: Array<{ view: ViewIR; wf: WorkflowIR; table: string; where?: string }> = [];
+  const wfDrizzleOps = new Set<string>();
+  for (const v of ctx.views) {
+    if (v.source.kind !== "workflow") continue;
+    const wf = ctx.workflows.find((w) => w.name === v.source.name);
+    if (!wf?.instanceWireShape) continue;
+    // `lowerToDrizzle` prepends `schema.` to the table name itself when it
+    // renders column refs, so it takes the BARE table name; the `.from(...)`
+    // below uses the `schema.`-qualified form.
+    const tableBare = lowerFirst(plural(wf.name));
+    const table = `schema.${tableBare}`;
+    let where: string | undefined;
+    if (v.filter) {
+      const lowered = lowerToDrizzle(v.filter, tableBare, ctx);
+      if (lowered) {
+        where = lowered.expr;
+        for (const op of lowered.ops) wfDrizzleOps.add(op);
+      }
+    }
+    wfViews.push({ view: v, wf, table, where });
+  }
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
@@ -41,7 +69,16 @@ export function buildViewsRoutesFile(
   );
   lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
   lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
-  lines.push(`import type * as schema from "../db/schema";`);
+  // A workflow-sourced view reads `schema.<table>` as a runtime value
+  // (`db.select().from(...)`); aggregate-only files keep the type-only import.
+  lines.push(
+    wfViews.length > 0
+      ? `import * as schema from "../db/schema";`
+      : `import type * as schema from "../db/schema";`,
+  );
+  if (wfDrizzleOps.size > 0) {
+    lines.push(`import { ${[...wfDrizzleOps].sort().join(", ")} } from "drizzle-orm";`);
+  }
   // Source aggregates + repo imports per view, plus any foreign
   // aggregates referenced via `X id` follow auxiliaries.
   const aggsTouched = new Set<string>();
@@ -99,6 +136,13 @@ export function buildViewsRoutesFile(
   }
   if (ctx.views.some((v) => v.output)) lines.push("");
 
+  // Workflow-view response schemas — the saga instance shape (`<View>Row` /
+  // `<View>Response`), built from the source workflow's `instanceWireShape`.
+  for (const { view, wf } of wfViews) {
+    lines.push(...emitWorkflowViewSchema(view, wf));
+  }
+  if (wfViews.length > 0) lines.push("");
+
   lines.push(`export function viewsRoutes(`);
   lines.push(`  db: NodePgDatabase<typeof schema>,`);
   lines.push(`  events: DomainEventDispatcher,`);
@@ -112,6 +156,12 @@ export function buildViewsRoutesFile(
   for (const view of ctx.views) {
     if (view.source.kind !== "aggregate") continue;
     lines.push(...emitViewRoute(view, ctx, aggsByName).map((l) => `  ${l}`));
+    lines.push("");
+  }
+  // Workflow-sourced view routes — `GET /<view>` over the saga-state table
+  // with the lowered filter (workflow-instance-views.md).
+  for (const { view, wf, table, where } of wfViews) {
+    lines.push(...emitWorkflowViewRoute(view, wf, table, where).map((l) => `  ${l}`));
     lines.push("");
   }
 
@@ -146,7 +196,7 @@ export function buildViewsRoutesFile(
 
 function emitViewRoute(
   view: ViewIR,
-  ctx: BoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   aggsByName: Map<string, AggregateIR>,
 ): string[] {
   void ctx;
@@ -212,6 +262,56 @@ function emitViewRoute(
       `    return httpCtx.json(rows.map((r) => repo.toWire(r)) as z.infer<typeof ${view.source.name}Response>[], 200);`,
     );
   }
+  out.push(`  },`);
+  out.push(`);`);
+  return out;
+}
+
+/** A workflow-sourced view's response schema (`<View>Row` / `<View>Response`)
+ *  — the saga instance wire shape, walked the same way `emitInstanceRoutes`
+ *  walks `instanceWireShape` for the raw instance endpoints
+ *  (workflow-instance-visibility.md). */
+function emitWorkflowViewSchema(view: ViewIR, wf: WorkflowIR): string[] {
+  const T = upperFirst(view.name);
+  const out: string[] = [];
+  out.push(`const ${T}Row = z.object({`);
+  for (const f of wf.instanceWireShape ?? []) {
+    out.push(
+      `  ${f.name}: ${f.source === "id" ? "z.string()" : zodForResponse(f.type, f.optional)},`,
+    );
+  }
+  out.push(`}).openapi("${T}Row");`);
+  out.push(`const ${T}Response = z.array(${T}Row).openapi("${T}Response");`);
+  return out;
+}
+
+/** A workflow-sourced view route: `GET /<view>` over the saga-state table with
+ *  the view's filter lowered to a Drizzle `where` (workflow-instance-views.md).
+ *  Rows cast to the response type — `c.json` JSON-serialises them (Date → ISO,
+ *  branded ids → string), the read-side analogue of the instance endpoints. */
+function emitWorkflowViewRoute(
+  view: ViewIR,
+  wf: WorkflowIR,
+  table: string,
+  where: string | undefined,
+): string[] {
+  const T = upperFirst(view.name);
+  const out: string[] = [];
+  out.push(`app.openapi(`);
+  out.push(`  createRoute({`);
+  out.push(`    method: "get",`);
+  out.push(`    path: "/${snake(view.name)}",`);
+  out.push(`    tags: ["views", "${snake(plural(wf.name))}"],`);
+  out.push(`    operationId: "${camelId(opView(view.name))}",`);
+  out.push(`    responses: {`);
+  out.push(
+    `      200: { description: "OK", content: { "application/json": { schema: ${T}Response } } },`,
+  );
+  out.push(`    },`);
+  out.push(`  }),`);
+  out.push(`  async (httpCtx) => {`);
+  out.push(`    const rows = await db.select().from(${table})${where ? `.where(${where})` : ""};`);
+  out.push(`    return httpCtx.json(rows as unknown as z.infer<typeof ${T}Response>, 200);`);
   out.push(`  },`);
   out.push(`);`);
   return out;
