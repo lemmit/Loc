@@ -316,6 +316,59 @@ handler. The workflow gets *both* injected — domain services it calls
 directly, ports through DI — and that asymmetry (domain service: no ctor
 deps; port: pure ctor dep) is the layering made physical.
 
+## Author guidance — `port` vs `resource { kind: api }`
+
+Both let a workflow call out to an external system, so they will be
+confused. The line is **who writes the adapter and how typed the contract
+is**, and it resolves with four questions in order:
+
+```
+1. Is the capability a plain HTTP API you reach with plain GET/POST
+   + JSON, and does Loom ship a sourceType adapter for it (restApi)?
+      yes → keep going          no  → port
+2. Are path-keyed get/post verbs enough — i.e. you don't need
+   domain-named methods (charge / refund / render / send)?
+      yes → keep going          no  → port
+3. Do you want Loom to OWN the client (generated fetch, dev-compose
+   sidecar, vendor-neutral source) rather than hand-writing it?
+      yes → keep going          no  → port
+4. Is the closed resource verb vocabulary (get/post) sufficient, with
+   no need for your own auth/retry/SDK/streaming logic?
+      yes → resource { kind: api }   no → port
+```
+
+In one line: **`resource { kind: api }` is the closed-vocabulary,
+Loom-owns-the-adapter path for plain REST; `port` is the
+open-vocabulary, you-own-the-adapter escape hatch for everything else.**
+
+| | `resource { kind: api }` | `port` |
+|---|---|---|
+| Adapter author | **Loom** (generated `restApi` client) | **you** (hand-written, DI-injected) |
+| Vocabulary | **closed** — `get` / `post` (registry verbs) | **open** — you declare `charge(...)` / `send(...)` |
+| Contract shape | path + JSON | domain-named, typed signatures |
+| Transport | HTTP/REST only | anything (SMTP, gRPC, SDK, in-proc, SOAP) |
+| Dev sidecar | yes (compose) | no — your adapter, your deps |
+| Fail-fast | binding/capability validation | extern startup gate (adapter must register) |
+| Reach for it when | thin REST passthrough Loom can drive | the capability is off-registry or needs a real client |
+
+Worked calls:
+
+- `rates.get("/usd/" + cmd.currency)` → **`resource { kind: api }`** — a
+  thin REST read; Loom's `restApi` adapter is exactly right.
+- `billing.charge(order.total, card)` → **`port`** — domain-named, needs
+  your Stripe SDK + idempotency keys + retry; not a path-keyed GET.
+- `emailSender.send(to, subject, body)` → **`port`** — not HTTP-shaped at
+  all (SMTP / provider SDK); no `restApi` adapter applies.
+- `invoicePdf.render(order)` → **`port`** — a library/CPU capability, no
+  network verb fits.
+
+Gray zone (an HTTP API you *could* hit with get/post but want typed,
+domain-named methods and your own auth): either works; lean
+`resource { kind: api }` for a thin passthrough you want Loom to drive,
+`port` the moment you want a `charge`/`refund`-shaped contract and to own
+the client. If you find yourself wrapping `rates.get(...)` in a helper to
+give it a real signature, that is the signal to promote it to a `port`.
+
 ## Open questions
 
 1. **`extern` marker** — intrinsic to `port` (terser) or written
@@ -327,9 +380,10 @@ deps; port: pure ctor dep) is the layering made physical.
 3. **Deployable wiring & fail-fast** — `ports:` clause on the backend
    deployable vs implicit-from-usage; confirm the startup gate is the
    existing extern verify (Axis 7).
-4. **`port` vs `resource { kind: api }`** — author guidance: REST-shaped
-   and Loom-adapter-able ⇒ `resource`; off-registry or non-HTTP ⇒ `port`.
-   Pin the decision tree so the two don't drift into overlap.
+4. **`port` vs `resource { kind: api }`** — decision tree drafted above
+   ("Author guidance"); open sub-question is the gray zone (a typed
+   HTTP API) — confirm the lean (passthrough ⇒ resource, domain-named
+   contract ⇒ port) survives real use.
 5. **Cross-context ports** — own context only (mirror resources, §workflow-resource-consumption 9.5) or system-wide?
 6. **Testing surface** — the mockable adapter is the headline feature;
    define how a `test`/`test e2e` substitutes a fake port (likely: the
