@@ -20,6 +20,7 @@ import { toModulePrefix, toSnakeApp } from "../shell-emit.js";
 import { emitVanillaApiControllers } from "./api-emit.js";
 import { emitVanillaChangesets } from "./changeset-emit.js";
 import { emitVanillaContextModule } from "./context-emit.js";
+import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
 import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaSchemas } from "./schema-emit.js";
 import { emitVanillaShellFiles } from "./shell-emit.js";
@@ -29,6 +30,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   const out = new Map<string, string>();
   const appName = toSnakeApp(deployable.name);
   const appModule = toModulePrefix(appName);
+
+  // Shared cross-controller helper modules (Slice 4).  Emitted once
+  // per project; controllers `alias` the public functions.
+  out.set(`lib/${appName}_web/problem_details.ex`, renderVanillaProblemDetailsModule(appModule));
 
   // Per-context emit: schema, changeset, repository, context module,
   // controllers.  Changeset before Repository so the latter can alias it.

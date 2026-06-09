@@ -105,11 +105,10 @@ describe("vanilla — Slice 2 CRUD write path + Changeset", () => {
     // Status codes:
     expect(ctl).toContain("put_status(201)");
     expect(ctl).toContain("send_resp(conn, 204");
-    expect(ctl).toContain("put_status(422)");
-    // Validation error handler:
-    expect(ctl).toContain("defp validation_error");
-    expect(ctl).toContain('"/errors/validation"');
-    expect(ctl).toContain('"Validation Failed"');
+    // Slice 4: validation errors delegate to shared
+    // <App>Web.ProblemDetails (422 emitted by the helper, with the
+    // RFC 7807 envelope byte-aligned with Ash / Hono / .NET).
+    expect(ctl).toContain("ProblemDetails.validation_error_response(conn, changeset)");
   });
 
   it("router has POST/PATCH/DELETE routes spliced into /api", async () => {
