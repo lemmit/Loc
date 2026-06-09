@@ -859,6 +859,39 @@ rest of the macro tree intact.
   this tractable (two apis, two contracts, one application layer);
   the versioning surface itself is a follow-up.
 
+## Interaction with peer proposals
+
+Three peer proposals touch the wire-shape pipeline this proposal
+restructures. Coordinated landing is **not** strictly required — each
+peer can ship its current design and adapt when this lands.
+
+- **`payload-transport-layer.md`** is the closest peer. Its proposed
+  `<Agg>Wire payload` (Phase 2 of that proposal) is a named version of
+  the implicit `wireShape` enrichment — the next step toward
+  first-class contracts. This proposal **goes further** by making
+  contracts always literal source (no `<Agg>Wire` indirection).
+  Compatibility: `<Agg>Wire payload` can ship as a transitional name
+  that retires when scaffolds take over contract emission. The
+  proposals don't conflict, but the auto-synthesised `<Agg>Wire`
+  becomes redundant once scaffolds emit literal `response <Agg>Response`
+  declarations.
+
+- **`aggregate-inheritance.md`** I2 (TPH emission) currently walks the
+  extends-chain to build the concrete's `wireShape` with inherited
+  base fields appended after `id`. Under this proposal, the chain walk
+  moves into the scaffold layer: `scaffoldResponse(of: concrete)`
+  reads `concrete.extends?.fields` and emits literal contract fields
+  for both. Functionally identical — the walk's home shifts from
+  enrichment to scaffold expansion. I3 (TPC) is unaffected.
+
+- **`workflow-and-applier.md`** is unchanged. Workflow's existing
+  `create` / `handle` / `on` / `apply` members stay. The only
+  extension: routes may target a workflow's `handle` directly via
+  `HandlerRef`, so HTTP traffic can drive workflow continuation
+  without a wrapper handler. The workflow members aren't promoted to
+  top-level context members — `commandHandler` / `queryHandler` are
+  new sibling kinds, not replacements.
+
 ## Cross-references
 
 - `lifecycle-operations.md` — provides `OperationIR.kind`, which
@@ -866,18 +899,18 @@ rest of the macro tree intact.
   `operation`; archive handler per `destroy`").
 - `lifecycle-url-style.md` — `urlStyle` becomes a macro input, not a
   per-api IR field consumed by every backend.
-- `payload-transport-layer.md` — payloads are the substance of the
-  contract layer; this proposal proposes nothing new there, only
-  promotes them to the canonical wire-shape source (literal
-  declarations, no `wireShape` intermediary).
-- `workflow-and-applier.md` — workflow's existing `create` / `handle`
-  / `on` / `apply` members stay unchanged; the proposal only extends
-  routes to target a workflow's `handle` directly.
+- `payload-transport-layer.md` — see "Interaction" above. Payloads
+  are the substance of the contract layer; this proposal removes
+  the `wireShape` intermediary.
+- `aggregate-inheritance.md` — see "Interaction" above. I2's
+  inheritance walk moves from enrichment to scaffold expansion.
+- `workflow-and-applier.md` — see "Interaction" above. Routes gain
+  workflow `handle` as a target; workflow body grammar unchanged.
 - `agent-tools-and-mcp.md` — explicit contract declarations make MCP
   tool descriptions trivial: each command/query is a tool input
   schema, each response is an output schema.
 - `scaffold-macros.md` (doc, not proposal) — extends the scaffold
-  stdlib with three new sub-trees (contract / application / routes).
+  stdlib with the new per-source aggregators and per-output leaves.
 
 ## Implementation phasing (sketch — not a plan)
 
