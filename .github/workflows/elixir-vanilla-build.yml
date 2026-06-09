@@ -1,0 +1,114 @@
+name: Elixir / Vanilla build verification
+
+# For every fixture under `test/e2e/fixtures/elixir-vanilla-build/`,
+# generate the project then `mix deps.get && mix compile
+# --warnings-as-errors` inside the hexpm/elixir Docker image.  This is
+# the acceptance gate for the `foundation: vanilla` emit subtree —
+# Slice 6 of docs/plans/vanilla-foundation-tdd-plan.md.  Catches every
+# Elixir-side error the unit-test string-assertion layer can't see.
+#
+# The generate + compile loop lives in
+# `test/e2e/generated-elixir-vanilla-build.test.ts` (entrypoint:
+# `npm run test:phoenix-vanilla`); this workflow is a thin wrapper
+# that pre-generates each fixture into a stable path, computes the
+# deps-cache signature, restores the cache, then hands off to the
+# test.  The runner honours `LOOM_PHOENIX_OUT_DIR` and skips
+# regeneration when mix.exs already exists at the expected path.
+#
+# Sibling of `elixir-ash-build.yml` (the Ash-foundation gate).
+#
+# Triggers:
+#   - PRs that touch the vanilla generator subtree, the fixtures, or
+#     the test.
+#   - Pushes to main.
+#   - Manual dispatch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/elixir/vanilla/**'
+      - 'src/generator/elixir/index.ts'
+      - 'src/platform/elixir.ts'
+      - 'src/language/validators/deployable.ts'
+      - 'test/e2e/fixtures/elixir-vanilla-build/**'
+      - 'test/e2e/generated-elixir-vanilla-build.test.ts'
+      - 'package.json'
+      - '.github/workflows/elixir-vanilla-build.yml'
+  pull_request:
+    paths:
+      - 'src/generator/elixir/vanilla/**'
+      - 'src/generator/elixir/index.ts'
+      - 'src/platform/elixir.ts'
+      - 'src/language/validators/deployable.ts'
+      - 'test/e2e/fixtures/elixir-vanilla-build/**'
+      - 'test/e2e/generated-elixir-vanilla-build.test.ts'
+      - 'package.json'
+      - '.github/workflows/elixir-vanilla-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-generated-elixir-vanilla:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # `npm ci` runs the `prepare` lifecycle (langium:generate +
+      # build); the toolchain compiles before any test step needs it.
+      - name: Install Loom toolchain
+        run: npm ci
+
+      # Pre-generate each fixture once into a stable path so we can
+      # hash the emitted mix.exs for the cache key.  Vanilla fixtures
+      # emit to `<deployable>/` (e.g. `api/`), not `phoenix_app/` as
+      # the Ash matrix does.
+      - name: Pre-generate fixtures (for cache key)
+        run: |
+          for fixture in test/e2e/fixtures/elixir-vanilla-build/*.ddd; do
+            stem=$(basename "$fixture" .ddd)
+            mkdir -p "/tmp/ci/vanilla/$stem/out"
+            node bin/cli.js generate system "$fixture" -o "/tmp/ci/vanilla/$stem/out"
+          done
+
+      - name: Compute vanilla dep signature
+        id: vanilla-depsig
+        run: |
+          hash=$(find /tmp/ci/vanilla -name mix.exs -print0 | xargs -0 cat | sha256sum | cut -d' ' -f1)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+      - name: Cache vanilla deps + _build
+        uses: actions/cache@v5
+        with:
+          path: |
+            /tmp/ci/vanilla/*/out/*/deps
+            /tmp/ci/vanilla/*/out/*/_build
+          key: vanilla-mix-${{ steps.vanilla-depsig.outputs.hash }}
+          restore-keys: |
+            vanilla-mix-
+
+      - name: Run test:phoenix-vanilla (mix compile against every fixture)
+        env:
+          LOOM_PHOENIX_VANILLA_BUILD: "1"
+          LOOM_PHOENIX_OUT_DIR: /tmp/ci/vanilla
+        run: npx vitest run test/e2e/generated-elixir-vanilla-build.test.ts
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## Elixir / Vanilla mix compile failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the "Run test:phoenix-vanilla" step above for the captured `mix deps.get` + `mix compile --warnings-as-errors` diagnostics.' >> $GITHUB_STEP_SUMMARY
+          echo 'Each fixture under `test/e2e/fixtures/elixir-vanilla-build/` runs as its own `it.each` iteration in `test/e2e/generated-elixir-vanilla-build.test.ts`.' >> $GITHUB_STEP_SUMMARY

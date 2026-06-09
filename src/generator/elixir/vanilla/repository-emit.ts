@@ -35,10 +35,7 @@ function renderRepository(appModule: string, ctxModule: string, agg: AggregateIR
   return `# Auto-generated.
 defmodule ${repoMod} do
   @moduledoc false
-  import Ecto.Query
   alias ${appModule}.Repo
-  alias ${aggModule}
-  alias ${aggModule}Changeset
 
   @spec list() :: {:ok, [${aggModule}.t()]} | {:error, term()}
   def list do
