@@ -962,8 +962,8 @@ CorrelationExpr infers Expression:
 IsolationLevel returns string:
     'readUncommitted' | 'readCommitted' | 'repeatableRead' | 'serializable';
 
-// View — a saved, strongly-typed query over one source aggregate.
-// Two forms share the same head:
+// View — a saved, strongly-typed query over one source aggregate or
+// workflow (workflow-instance-views.md).  Two forms share the same head:
 //
 //   Shorthand (slice 1):
 //     view ActiveOrders = Order where status == Confirmed
@@ -980,13 +980,19 @@ IsolationLevel returns string:
 //     bind expression evaluated against the source aggregate.
 //
 // See docs/views.md for the full surface.
+// A view's source is an aggregate (the wire shape is its repository read)
+// or a workflow (the wire shape is its persisted instance / saga-state row —
+// see docs/proposals/workflow-instance-views.md).  The grammar admits both;
+// the validator restricts the workflow case (shorthand only, non-event-sourced).
+type ViewSource = Aggregate | Workflow;
+
 View:
     'view' name=ID
     (
-        '=' source=[Aggregate:ID] 'where' filter=Expression
+        '=' source=[ViewSource:ID] 'where' filter=Expression
       | '{'
             fields+=Property*
-            'from' source=[Aggregate:ID]
+            'from' source=[ViewSource:ID]
             ('where' filter=Expression)?
             'bind' binds+=BindEntry (',' binds+=BindEntry)* ','?
         '}'

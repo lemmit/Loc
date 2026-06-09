@@ -39,7 +39,7 @@ export function emitViews(
   const typesModule = `${appModule}.Types`;
 
   for (const view of ctx.views) {
-    const agg = aggsByName.get(view.aggregateName);
+    const agg = aggsByName.get(view.source.name);
     if (!agg) continue; // validator already errored
 
     const path = `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`;

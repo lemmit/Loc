@@ -155,7 +155,7 @@ export function buildDomainDiagram(sys: SystemIR): string {
       }
       for (const v of c.views) {
         classes.push(...classBlock(v.name, "view", []));
-        rel(`  ${v.name} ..> ${v.aggregateName} : reads`);
+        rel(`  ${v.name} ..> ${v.source.name} : reads`);
       }
     }
   }

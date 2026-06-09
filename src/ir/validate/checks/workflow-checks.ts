@@ -5,7 +5,13 @@
 
 import { createInputFields, omittableCreateInputs } from "../../enrich/wire-projection.js";
 import { verbsForKind } from "../../resource-verbs.js";
-import type { BoundedContextIR, ExprIR, TypeIR, WorkflowIR } from "../../types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ExprIR,
+  TypeIR,
+  WorkflowIR,
+} from "../../types/loom-ir.js";
 import { findUsesCurrentUser } from "../../types/loom-ir.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { firstColumnVsColumn, firstNonQueryableNode, firstUnknownColumnRef } from "./shared.js";
@@ -771,15 +777,59 @@ export function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): v
         source: `${ctx.name}/${view.name}`,
       });
     }
-    const agg = ctx.aggregates.find((a) => a.name === view.aggregateName);
-    if (!agg) {
-      diags.push({
-        severity: "error",
-        code: "loom.view-unknown-source",
-        message: `view '${view.name}': source '${view.aggregateName}' is not an aggregate in context '${ctx.name}'.`,
-        source: `${ctx.name}/${view.name}`,
-      });
-      continue;
+    // Resolve the source — an aggregate or a workflow's instance state
+    // (workflow-instance-views.md).  `columnSource` is the member set the
+    // filter's `this.<col>` refs resolve against (an aggregate's fields /
+    // containments / derived, or a workflow's `stateFields`); `agg` is set
+    // only for an aggregate source (the full-form bind path stays
+    // aggregate-only in v1).
+    let columnSource: Pick<AggregateIR, "fields" | "contains" | "derived">;
+    if (view.source.kind === "workflow") {
+      const wf = ctx.workflows.find((w) => w.name === view.source.name);
+      if (!wf) {
+        diags.push({
+          severity: "error",
+          code: "loom.view-unknown-source",
+          message: `view '${view.name}': source '${view.source.name}' is not an aggregate or workflow in context '${ctx.name}'.`,
+          source: `${ctx.name}/${view.name}`,
+        });
+        continue;
+      }
+      // A workflow source needs an observable instance read model: a single
+      // id-shaped correlation field, and not event-sourced (no state table).
+      if (!wf.correlationField || wf.eventSourced) {
+        diags.push({
+          severity: "error",
+          code: "loom.view-workflow-not-observable",
+          message: `view '${view.name}': workflow '${wf.name}' has no observable instance state (it needs a single id-shaped state field and must not be event-sourced), so it can't be a view source.`,
+          source: `${ctx.name}/${view.name}`,
+        });
+        continue;
+      }
+      // Full-form (bind-projected) views over a workflow are deferred (v1
+      // shorthand only) — see workflow-instance-views.md §Deferred.
+      if (view.output) {
+        diags.push({
+          severity: "error",
+          code: "loom.view-workflow-fullform-unsupported",
+          message: `view '${view.name}': full-form (bind-projected) views over a workflow source are not supported yet; use the shorthand form (\`view ${view.name} = ${wf.name} where ...\`).`,
+          source: `${ctx.name}/${view.name}`,
+        });
+        continue;
+      }
+      columnSource = { fields: wf.stateFields ?? [], contains: [], derived: [] };
+    } else {
+      const agg = ctx.aggregates.find((a) => a.name === view.source.name);
+      if (!agg) {
+        diags.push({
+          severity: "error",
+          code: "loom.view-unknown-source",
+          message: `view '${view.name}': source '${view.source.name}' is not an aggregate in context '${ctx.name}'.`,
+          source: `${ctx.name}/${view.name}`,
+        });
+        continue;
+      }
+      columnSource = agg;
     }
     if (view.filter) {
       const offending = firstNonQueryableNode(view.filter);
@@ -795,12 +845,12 @@ export function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): v
         });
         continue;
       }
-      const unknown = firstUnknownColumnRef(view.filter, agg, ctx);
+      const unknown = firstUnknownColumnRef(view.filter, columnSource, ctx);
       if (unknown) {
         diags.push({
           severity: "error",
           code: "loom.view-where-unknown-field",
-          message: `view '${view.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
+          message: `view '${view.name}': where-clause references unknown field ${unknown} on source '${view.source.name}'.`,
           source: `${ctx.name}/${view.name}`,
         });
       }

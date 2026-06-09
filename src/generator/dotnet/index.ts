@@ -930,7 +930,9 @@ function mergeViewsAsFinds(
   repo: RepositoryIR | undefined,
   ctx: BoundedContextIR,
 ): RepositoryIR | undefined {
-  const matching = ctx.views.filter((v) => v.aggregateName === agg.name);
+  const matching = ctx.views.filter(
+    (v) => v.source.kind === "aggregate" && v.source.name === agg.name,
+  );
   if (matching.length === 0) return repo;
   const arrayReturn: import("../../ir/types/loom-ir.js").TypeIR = {
     kind: "array",

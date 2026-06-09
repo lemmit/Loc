@@ -1373,7 +1373,7 @@ describe("full-form view bind projection (view-emit unit)", () => {
     views: [
       {
         name: "OrderSummary",
-        aggregateName: "Order",
+        source: { kind: "aggregate", name: "Order" },
         // filter: status != Cancelled
         filter: {
           kind: "binary",

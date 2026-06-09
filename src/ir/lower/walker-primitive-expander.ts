@@ -623,8 +623,15 @@ function expandScaffoldViewList(
   let fields: Array<{ name: string; type: import("../types/loom-ir.js").TypeIR }> = [];
   if (view.output) {
     fields = view.output.fields;
+  } else if (view.source.kind === "workflow") {
+    // Workflow-sourced view: columns are the saga instance wire shape
+    // (workflow-instance-views.md).
+    const wf = ctx.workflowsByName.get(view.source.name);
+    if (wf?.instanceWireShape) {
+      fields = wf.instanceWireShape.map((f) => ({ name: f.name, type: f.type }));
+    }
   } else {
-    const sourceAgg = ctx.aggregatesByName.get(view.aggregateName);
+    const sourceAgg = ctx.aggregatesByName.get(view.source.name);
     if (sourceAgg) fields = sourceAgg.fields;
   }
   const cellVar = "o";

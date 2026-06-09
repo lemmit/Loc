@@ -22,7 +22,12 @@ export function aggregateHasMember(agg: AggregateIR, name: string): boolean {
  * cleanly. */
 export function firstUnknownColumnRef(
   e: ExprIR,
-  agg: AggregateIR,
+  // Structural column source — an aggregate (fields + containments + derived)
+  // or a workflow's instance state (`stateFields` only; no containments /
+  // derived).  AggregateIR satisfies this directly; a workflow source passes
+  // `{ fields: wf.stateFields, contains: [], derived: [] }`
+  // (workflow-instance-views.md).
+  agg: Pick<AggregateIR, "fields" | "contains" | "derived">,
   ctx: BoundedContextIR,
 ): string | null {
   switch (e.kind) {

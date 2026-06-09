@@ -54,13 +54,21 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
   // Shorthand views reference the source aggregate's response
   // schema from the per-aggregate api module.
   const shorthandSources = new Set<string>();
+  const workflowSources = new Set<string>();
   for (const { view } of views) {
-    if (!view.output) shorthandSources.add(view.aggregateName);
+    if (view.output) continue;
+    // Shorthand views re-export the source's list response: an aggregate's
+    // `<Agg>ListResponse` (from `./<agg>`) or a workflow's
+    // `<Wf>InstanceListResponse` (from `./workflows`, workflow-instance-views.md).
+    if (view.source.kind === "workflow") workflowSources.add(view.source.name);
+    else shorthandSources.add(view.source.name);
   }
   for (const aggName of [...shorthandSources].sort()) {
-    // Shorthand views re-export `<Agg>ListResponse` only; the singular
-    // `<Agg>Response` is never referenced here.
     lines.push(`import { ${aggName}ListResponse } from "./${lowerFirst(aggName)}";`);
+  }
+  if (workflowSources.size > 0) {
+    const names = [...workflowSources].sort().map((w) => `${upperFirst(w)}InstanceListResponse`);
+    lines.push(`import { ${names.join(", ")} } from "./workflows";`);
   }
   // Full-form views may reference enum / VO schemas on their fields.
   const enumDeps = collectEnumDeps(views);
@@ -88,9 +96,14 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
         `export type ${upperFirst(view.name)}Response = z.infer<typeof ${upperFirst(view.name)}Response>;`,
       );
     } else {
-      lines.push(
-        `export const ${upperFirst(view.name)}Response = ${view.aggregateName}ListResponse;`,
-      );
+      // Shorthand: reuse the source's list-response — an aggregate's
+      // `<Agg>ListResponse` or a workflow's `<Wf>InstanceListResponse`
+      // (workflow-instance-views.md).
+      const listResponse =
+        view.source.kind === "workflow"
+          ? `${upperFirst(view.source.name)}InstanceListResponse`
+          : `${view.source.name}ListResponse`;
+      lines.push(`export const ${upperFirst(view.name)}Response = ${listResponse};`);
       lines.push(
         `export type ${upperFirst(view.name)}Response = z.infer<typeof ${upperFirst(view.name)}Response>;`,
       );
@@ -243,7 +256,11 @@ export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string
 
 function collectColumnNames(view: ViewIR, ctx: BoundedContextIR): string[] {
   if (view.output) return view.output.fields.map((f) => f.name);
-  const agg = ctx.aggregates.find((a) => a.name === view.aggregateName);
+  if (view.source.kind === "workflow") {
+    const wf = ctx.workflows.find((w) => w.name === view.source.name);
+    return wf?.instanceWireShape?.map((f) => f.name) ?? ["id"];
+  }
+  const agg = ctx.aggregates.find((a) => a.name === view.source.name);
   if (!agg) return ["id"];
   const cols = ["id"];
   for (const f of agg.fields) {

@@ -62,7 +62,7 @@ export function buildRepositoryFile(
   // candidate; the import narrower below keeps it only if `count(` is emitted.
   if ((repo?.finds ?? []).some((f) => pagedReturn(f.returnType))) drizzleOps.add("count");
   const viewFilters = ctx.views
-    .filter((v) => v.aggregateName === agg.name && v.filter)
+    .filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name && v.filter)
     .map((v) => v.filter!);
   const allFilters = [
     ...(repo?.finds ?? [])
@@ -124,7 +124,9 @@ export function buildRepositoryFile(
   // the verifier hook isn't wired yet.
   const repoUsesUser =
     (repo?.finds ?? []).some(findUsesCurrentUser) ||
-    ctx.views.filter((v) => v.aggregateName === agg.name).some(viewUsesCurrentUser);
+    ctx.views
+      .filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name)
+      .some(viewUsesCurrentUser);
   const partNames = agg.parts.map((p) => p.name);
   const domainImports = [agg.name, ...partNames].join(", ");
   const valueObjectsUsed = collectValueObjects(agg, ctx);
@@ -134,7 +136,7 @@ export function buildRepositoryFile(
   // from this aggregate.  Lowering reuses the find path so the
   // validator's queryable checks + bulk hydration all work for free.
   const viewFinds: FindIR[] = ctx.views
-    .filter((v) => v.aggregateName === agg.name)
+    .filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name)
     .map((view) => ({
       name: lowerFirst(view.name),
       params: [],
