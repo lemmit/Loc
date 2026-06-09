@@ -1,13 +1,16 @@
 // ---------------------------------------------------------------------------
 // Vanilla Ecto.Schema emit — per-aggregate `lib/<app>/<ctx>/<agg>.ex`.
-// Slice 1 of vanilla-foundation-tdd-plan.md.
+// Slices 1 + 3 of vanilla-foundation-tdd-plan.md.
 //
-// Produces a plain `Ecto.Schema` module with columns derived from
-// `AggregateIR.fields`.  No Ash.Resource, no actions, no policies —
-// pure data + cast/validate on the changeset module (next slice).
+//   Slice 1: primitives + array-of-primitive + system-field skip.
+//   Slice 3 (current): enum → `Ecto.Enum` with values list;
+//     valueobject → `:map` (JSONB) — sufficient for wire parity; an
+//     `embeds_one` rich-schema path can come later if richer typed
+//     query support is needed; id (foreign key reference) →
+//     `:binary_id` column; optional wrapper unwraps the inner type.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, BoundedContextIR } from "../../../ir/types/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, EnumIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 
 export function emitVanillaSchemas(
@@ -16,18 +19,32 @@ export function emitVanillaSchemas(
   out: Map<string, string>,
 ): void {
   const ctxModule = upperFirst(ctx.name);
+  // Per-context enum-lookup table so the schema can pull each enum's
+  // values list for the Ecto.Enum constraint.
+  const enumsByName = new Map(ctx.enums.map((e) => [e.name, e]));
   for (const agg of ctx.aggregates) {
     const aggSnake = snake(agg.name);
     const ctxSnake = snake(ctx.name);
     const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());
-    out.set(`lib/${appSnake}/${ctxSnake}/${aggSnake}.ex`, renderSchema(appModule, ctxModule, agg));
+    out.set(
+      `lib/${appSnake}/${ctxSnake}/${aggSnake}.ex`,
+      renderSchema(appModule, ctxModule, agg, enumsByName),
+    );
   }
 }
 
-function renderSchema(appModule: string, ctxModule: string, agg: AggregateIR): string {
+function renderSchema(
+  appModule: string,
+  ctxModule: string,
+  agg: AggregateIR,
+  enumsByName: Map<string, EnumIR>,
+): string {
   const moduleName = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const tableName = snake(plural(agg.name));
-  const fieldLines = agg.fields.map(renderFieldLine).filter(Boolean).join("\n");
+  const fieldLines = agg.fields
+    .map((f) => renderFieldLine(f, enumsByName))
+    .filter(Boolean)
+    .join("\n");
 
   return `# Auto-generated.
 defmodule ${moduleName} do
@@ -48,53 +65,70 @@ end
 
 interface AggField {
   name: string;
-  type: { kind: string; name?: string; element?: { kind: string; name?: string } };
+  type: TypeIR;
   optional?: boolean;
 }
 
-function renderFieldLine(field: AggField): string {
-  // Skip system-provided fields and ref-collection arrays — those are
-  // join tables, handled separately when Slice 3 lands.
+function renderFieldLine(field: AggField, enumsByName: Map<string, EnumIR>): string {
+  // Skip system-provided fields and ref-collection arrays (the latter
+  // live in join tables; covered when a richer fixture exercises them).
   if (field.name === "id" || field.name === "createdAt" || field.name === "updatedAt") return "";
-  const ectoType = mapTypeToEcto(field.type);
-  if (!ectoType) return ""; // unsupported in Slice 1; later slices fill in
+  const ectoType = mapTypeToEcto(field.type, enumsByName);
+  if (!ectoType) return "";
   return `    field :${snake(field.name)}, ${ectoType}`;
 }
 
-function mapTypeToEcto(t: AggField["type"]): string | null {
+function mapTypeToEcto(t: TypeIR, enumsByName: Map<string, EnumIR>): string | null {
   switch (t.kind) {
     case "primitive": {
       switch (t.name) {
         case "string":
           return ":string";
         case "int":
+        case "long":
           return ":integer";
         case "decimal":
+        case "money":
           return ":decimal";
         case "bool":
           return ":boolean";
         case "datetime":
           return ":utc_datetime";
-        case "date":
-          return ":date";
-        case "uuid":
+        case "guid":
           return "Ecto.UUID";
+        case "json":
+          return ":map";
         default:
           return ":string";
       }
     }
-    case "ref":
-      // X id → FK column.  Slice 3 lands the belongs_to association.
+    case "id":
+      // X id → FK column; `belongs_to` association left for a
+      // dedicated assoc emit pass.  The column itself is enough for
+      // wire shape parity (the agg JSON includes the FK value).
       return ":binary_id";
-    case "enum":
-      // Enum → string column (camelCase Jason.Encoder maps it to the
-      // wire enum tag).  Slice 3 may move this to Ecto.Enum.
-      return ":string";
-    case "array": {
-      const elem = mapTypeToEcto(t.element ?? { kind: "primitive", name: "string" });
-      if (!elem) return null;
-      return `{:array, ${elem}}`;
+    case "enum": {
+      const en = enumsByName.get(t.name);
+      if (!en) return ":string";
+      const values = en.values.map((v) => `:${snake(v)}`).join(", ");
+      return `Ecto.Enum, values: [${values}]`;
     }
+    case "valueobject":
+      // VO → `:map` (JSONB).  Simplest path that satisfies wire-shape
+      // parity: the JSON column holds the same object shape Ash's
+      // embedded resource emits.  A richer `embeds_one`-backed path
+      // (with its own embedded schema module) can replace this later
+      // when typed queries on inner fields are needed.
+      return ":map";
+    case "array": {
+      // Special-case array of VO → {:array, :map} (same JSONB shape).
+      // Otherwise wrap the element's Ecto type.
+      const inner = mapTypeToEcto(t.element, enumsByName);
+      if (!inner) return null;
+      return `{:array, ${inner}}`;
+    }
+    case "optional":
+      return mapTypeToEcto(t.inner, enumsByName);
     default:
       return null;
   }
