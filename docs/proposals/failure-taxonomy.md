@@ -27,12 +27,18 @@ ergonomics wrong.**
   (absence, error short-circuit, ternary) and reads like "a method
   call on a maybe-null value." It is the most questionable piece that
   shipped.
-- **Add (the highest-leverage missing investment):** first-class
-  **declarative validation** on types — the WebDSL lesson. Most
-  "errors" in a CRUD-ish system are malformed input; pulling that
-  entire category out onto the type (auto-surfacing as 422) is what
-  keeps the `or`-unions small enough that the rest of the scheme reads
-  cleanly.
+- **Add (the highest-leverage missing investment):** route
+  **value-object validation** to its own status. Validation is *not* a
+  new construct — a value object already takes an `invariant`, and
+  value construction runs it (grammar: `ValueObjectMember = Property |
+  DerivedProp | Invariant | FunctionDecl`). The only missing piece is
+  **mapping a VO-construction `invariant` failure to 422** instead of
+  letting it fall to the generic 500/400 path. Most "errors" in a
+  CRUD-ish system are malformed input; pulling that whole category onto
+  the value object (and giving it a 422) is what keeps the `or`-unions
+  small enough that the rest of the scheme reads cleanly. (A richer
+  string-constraint operator like regex `matches` would be its *own*
+  small proposal — not bundled here.)
 
 The reframing: **stop calling it "exception-less" and call it a
 *failure taxonomy*.** There are five kinds of failure; each gets the
@@ -43,9 +49,9 @@ lightest mechanism that fits, and they do not overlap.
 | Kind | Meaning | Mechanism | In a signature? | Maps to |
 |---|---|---|---|---|
 | **Absence** | the thing asked for isn't there | `T?` → native nullable + `match`/narrowing | no (it's the value's own shape) | `null` / 404-on-load |
-| **Validation** | input is malformed | declarative `validate … message` on the type | no (auto-surfaced) | 422 |
+| **Validation** | input is malformed | value-object `invariant`, run at construction | no (auto-surfaced) | 422 |
 | **Expected domain failure** | a legitimate "no", the caller must branch on | `or`-union return + `match` | **yes** | declared status at the edge |
-| **Bug** | an invariant/precondition is false → the program is wrong | `invariant` / `require` → **throw** | no | 500 |
+| **Bug** | an aggregate `invariant` is false → the program is wrong | aggregate `invariant` → **throw** | no | 500 |
 | **Integration** | a downstream dependency failed | isolated infra result, translated inline at the boundary | only as the translated domain error | 502 / mapped |
 
 The load-bearing line is between **expected domain failure** (returns,
@@ -57,7 +63,37 @@ crash?* If yes → union. If no → throw.
 `match` is the single branching construct for both absence and
 expected-failure. No sigil does three jobs.
 
+### The throw paths are not all "bug" — status follows *which construct*
+
+"Validation" and "bug" both ultimately throw, but Loom already has
+**four distinct guard constructs**, and the right status falls out of
+*which one* fired and *whose fault* the violation is. None of this is a
+new keyword:
+
+| Construct (shipped) | Checks | A violation means | Status |
+|---|---|---|---|
+| value-object `invariant` | a value's shape, at construction | the client sent a malformed value | **422** *(proposed routing)* |
+| operation/workflow `precondition` | a request's domain validity | the request is invalid in context | **400** *(shipped)* |
+| `requires` | the caller's authorization | not allowed | **403** *(shipped)* |
+| aggregate `invariant` | a postcondition our own code must preserve | **our** bug | **500** |
+
+So "validation vs bug" is really *where the `invariant` lives*: on a
+**value object** (fires against raw input → 422) versus on an
+**aggregate** (a postcondition → 500). The `precondition`/`requires`
+pair (400/403) are the two other already-shipped throw paths. The only
+new work is the 422 routing for VO-construction failures.
+
 ## Worked example
+
+> **Illustrative — mixes shipped and proposed syntax.** Shipped here:
+> `or`-union return types, `httpStatus <Error> <Int>`, value-object /
+> aggregate `invariant`, `precondition`. **Proposed / not-yet-real**,
+> called out inline: (a) routing a VO `invariant` failure to 422;
+> (b) discriminating an `or`-union result — Loom's `match` today is a
+> boolean-guard form (`match { cond => …, else => … }`) with **no
+> variant-pattern binding**, so the variant `match` below is a sketch,
+> not current grammar (see open questions); (c) qualified cross-context
+> error references (`Payments.PaymentDeclined`).
 
 ```ddd
 // ── Ambient transport kernel (root-level, shared across contexts) ──
@@ -75,33 +111,39 @@ context Payments {
 }
 
 context Checkout {
-  // Declarative validation — the WebDSL lesson. Constraints live ON the
-  // type. A violation is NOT a modelled domain failure; it auto-surfaces
-  // as 422 at the edge and never appears in any signature.
-  valueobject Email    { value: string  validate value matches /^[^@]+@[^@]+$/ message "must be a well-formed email" }
-  valueobject Quantity { value: int     validate value > 0                     message "quantity must be positive" }
+  // VALIDATION kind: a value-object `invariant`, run at construction.
+  // No new keyword — this is the shipped VO invariant. The proposed part
+  // is only that a construction failure maps to 422 (not the generic path).
+  // (`value > 0` is a real predicate; richer string constraints like a
+  // regex `matches` would be a separate operator proposal.)
+  valueobject Quantity { value: int  invariant value > 0 }
 
   aggregate Order ids guid {
-    customer: Email
+    customer: string
     lines: OrderLine[]
     status: OrderStatus
     couponCode: string?            // ABSENCE — native nullable, no Option<T> wrapper
 
-    // BUG regime: a statement of fact about the aggregate. If ever false,
-    // the program is wrong → THROW → 500. Not in any signature.
-    invariant lines.count > 0       "an order always has at least one line"
+    // BUG regime: an aggregate invariant is a postcondition our own code
+    // must preserve. If ever false, the program is wrong → THROW → 500.
+    // Not in any signature. (invariant takes no message string.)
+    invariant lines.count > 0
 
     // EXPECTED-FAILURE regime: a legitimate "no" the caller branches on →
     // IN THE SIGNATURE as an or-union. Checkout depends on Payments, so it
     // may name Payments.PaymentDeclined (dependency direction permits it).
     operation submit(): Confirmation or Payments.PaymentDeclined {
-      require status == Draft        "submit is only valid on a draft order"   // bug → 500
+      // domain-validity guard on the transition → 400 (shipped `precondition`,
+      // no message string). Submitting a non-draft order is a client mistake,
+      // not a bug — hence 400, not 500.
+      precondition status == Draft
 
       // INTEGRATION failure stays isolated to the infra boundary and is
       // translated INLINE to our vocabulary — no downstream codes leak up.
-      match payments.charge(this.total()) {
-        Charged c => { /* fallthrough */ }
-        Refused r => return Payments.PaymentDeclined { reason: r.message }
+      // (variant-`match` is a sketch — see the disclaimer above.)
+      match {
+        payments.charge(this.total()).declined => return Payments.PaymentDeclined { reason: "declined" }
+        else => {}
       }
       status := Submitted
       return Confirmation { orderId: id }
@@ -114,12 +156,14 @@ context Checkout {
   }
 }
 
-// ── HTTP lives at the edge, declared, never in the domain ──
+// ── HTTP lives at the edge, declared, never in the domain.
+// `httpStatus <Error> <Int>` — bare error id + status int (no arrow). ──
 api OrdersApi for Checkout {
-  httpStatus NotFound                -> 404
-  httpStatus AlreadyExists           -> 409
-  httpStatus Payments.PaymentDeclined -> 402
-  // Email/Quantity validation → auto 422. Broken invariants → auto 500.
+  httpStatus NotFound        404
+  httpStatus AlreadyExists   409
+  httpStatus PaymentDeclined 402
+  // Quantity VO-invariant failure → 422 (proposed). Aggregate invariant → 500.
+  // precondition failure → 400.
 }
 ```
 
@@ -144,8 +188,9 @@ switch (r.kind) {
   case "PaymentDeclined": return c.json(problem(r, 402), 402);
 }
 // couponCode serializes as `string | null` — no wrapper, no special
-// (de)serialization. Validation never reaches here (422 at the DTO edge);
-// a thrown InvariantViolation is caught by one middleware → 500.
+// (de)serialization. A Quantity built from a bad value throws its VO
+// invariant before this runs (→ 422); a violated aggregate invariant is
+// caught by one middleware → 500; a failed precondition → 400.
 ```
 
 `option` / `T?` **erases to native nullability** in every backend
@@ -222,7 +267,7 @@ one declarative bucket for everything routed rather than named.
 | A3 Hono + .NET producer translation | merged | **keep** |
 | A3 Phoenix translation | deferred | leave deferred |
 | A7 carrier-monad stdlib (`.map`/`.orError`) | not shipped | **drop** — operations are short; the union is read by a `match` one frame up, so the monad never earns its keep |
-| Declarative validation (auto-422) | **not in the proposal** | **add** — highest-leverage missing piece |
+| Validation → 422 | the VO `invariant` construct is **shipped**; 422 routing is not | **add only the routing** — map a VO-construction invariant failure to 422 (no new `validate` keyword; that was a hallucination in an earlier draft) |
 | A4 find re-shape (`: X` → `X or NotFound`) | partial | **soften** from law to *default + `: X?` opt-out* |
 
 ## Open questions (for the "think further" pass)
@@ -232,16 +277,26 @@ one declarative bucket for everything routed rather than named.
    overloads, or replace entirely with `match` + a `guard … else`
    early-return form. Lean: drop; reassess only if real bodies turn
    out verbose under pure `match`.
-2. **Validation surface.** Where do `validate … message` constraints
-   live (value-object body? a `constraint` block?), how do they
-   compose, and how does a violation render (one 422 with a field
-   list, à la RFC-7807 `errors[]`)? This is the new design work.
-3. **`expose` / public-contract syntax.** Concrete grammar for the
+2. **Validation → 422 routing.** The construct is settled (the VO
+   `invariant`); the work is the *status mapping*: how does a
+   VO-construction failure surface as 422 (vs the generic 400/500), and
+   how does a multi-field-bad payload render (one 422 with a field
+   list, à la RFC-7807 `errors[]` from `validation-error-extension.md`)?
+3. **`or`-union consumption — the missing variant-`match`.** Shipped
+   Loom has `or`-union *types* but no way to *discriminate* a result:
+   `match` is boolean-guard-only (`match { cond => …, else => … }`),
+   with no scrutinee and no variant binding, and there is no `is`/
+   variant-pattern operator. Every example in this doc (and the
+   exception-less premise) leans on pattern-matching a union — so a
+   variant-`match` is a real prerequisite, not a nicety. Noted here as
+   an open exception-less gap rather than a blocker, per the "land it
+   for now" call.
+4. **`expose` / public-contract syntax.** Concrete grammar for the
    `api`-block error translation, and whether it's worth shipping at
    all before a consumer needs it.
-4. **`option` erasure corners.** `T??` (optional-of-optional),
+5. **`option` erasure corners.** `T??` (optional-of-optional),
    optional inside a union variant, and OpenAPI `nullable` emission
    parity across the four backends.
-5. **Workflow error ergonomics.** Confirm `workflow … or E` reads and
+6. **Workflow error ergonomics.** Confirm `workflow … or E` reads and
    lowers like `operation … or E`, and that `?`-free `match` is
    pleasant in a multi-step handler.
