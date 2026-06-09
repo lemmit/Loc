@@ -2,6 +2,8 @@ import type { PlatformAdapterDefaults, PlatformAdapters } from "../generator/_ad
 import { ashPostgresPersistenceAdapter } from "../generator/elixir/adapters/ash-postgres-persistence.js";
 import { ashStyleAdapter } from "../generator/elixir/adapters/ash-style.js";
 import { byFeatureLayoutAdapter } from "../generator/elixir/adapters/by-feature-layout.js";
+import { ectoPersistenceAdapter } from "../generator/elixir/adapters/ecto-persistence.js";
+import { vanillaStyleAdapter } from "../generator/elixir/adapters/vanilla-style.js";
 import { generateElixirProject } from "../generator/elixir/index.js";
 import {
   type ComposeServiceShape,
@@ -80,14 +82,19 @@ const elixirPlatform: PlatformSurface = {
       internalPort: 4000,
     };
   },
-  // phoenixLiveView — Ash owns persistence + style (the Ash action
-  // surface), so the menu is a single ashPostgres persistence + an
-  // `ash` style + a default `byFeature` layout.  All real (F7a/b/c);
-  // no stubs.  Built lazily (see PlatformSurface.adapters jsdoc).
+  // elixir — two foundations share these axes (D-REALIZATION-AXES;
+  // docs/plans/realization-axes-alignment.md).  Per FOUNDATION_OWNED_AXES,
+  // `ash` owns `application` + `transport` (NOT persistence — `ashPostgres`
+  // stays selectable); `vanilla` owns nothing.  So both data layers are
+  // first-class on the persistence axis (`ashPostgres` for Ash, `ecto` for
+  // plain Phoenix) and both styles on the application axis (`ash`, `vanilla`).
+  // The defaults below describe elixir's DEFAULT foundation (ash); a
+  // `foundation: vanilla` deployable overrides them to `ecto` / `vanilla` in
+  // lowering (`foundationAdapterOverride`).  All real (F7a/b/c); no stubs.
   adapters(): PlatformAdapters {
     return {
-      persistence: { ashPostgres: ashPostgresPersistenceAdapter },
-      styles: { ash: ashStyleAdapter },
+      persistence: { ashPostgres: ashPostgresPersistenceAdapter, ecto: ectoPersistenceAdapter },
+      styles: { ash: ashStyleAdapter, vanilla: vanillaStyleAdapter },
       layouts: { byFeature: byFeatureLayoutAdapter },
     };
   },

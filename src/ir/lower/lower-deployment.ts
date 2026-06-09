@@ -5,6 +5,7 @@ import { applicationDslToAdapter } from "../../util/platform-axes.js";
 import type { DeployableIR, Platform, UiParamBindingIR } from "../types/loom-ir.js";
 import {
   canonicalFramework,
+  foundationAdapterOverride,
   greenfieldAxisDefaults,
   qualifyDesign,
   qualifyPlatform,
@@ -101,14 +102,21 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     adapterDefaults !== undefined
       ? (() => {
           const gf = greenfieldAxisDefaults(platform);
+          // The foundation selects which adapter-axis defaults apply: the
+          // platform `adapterDefaults` describe its DEFAULT foundation (elixir
+          // → ash), so a non-default foundation (`vanilla`) overrides the
+          // omitted-knob default for the axes it implies (D-REALIZATION-AXES;
+          // realization-axes-alignment.md).
+          const foundation = d.foundation ?? gf.foundation;
+          const fdn = foundationAdapterOverride(platform, foundation);
           return {
-            foundation: d.foundation ?? gf.foundation,
+            foundation,
             // Store the resolved adapter key (`serviceLayer` → `layered`)
             // so the future codegen passes it straight to `resolveStyle`.
             application: d.application
               ? applicationDslToAdapter(d.application)
-              : adapterDefaults.style,
-            persistence: d.persistence ?? adapterDefaults.persistence.state,
+              : (fdn.style ?? adapterDefaults.style),
+            persistence: d.persistence ?? fdn.persistence ?? adapterDefaults.persistence.state,
             directoryLayout: d.directoryLayout ?? adapterDefaults.layout,
             transport: d.transport ?? gf.transport,
             runtime: d.runtime ?? gf.runtime,
