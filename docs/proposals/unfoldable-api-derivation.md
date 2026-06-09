@@ -274,20 +274,23 @@ irrelevant. `forCreateInput(wireShape)` was a workaround for the
 pre-lifecycle world where factories had no typed parameters; now they
 do.
 
-Six shapes, six natural sources:
+Every contract shape has a natural source on a single IR node:
 
 | Shape | Source |
 |---|---|
-| Create command | factory's parameter list (`OperationIR.params`, `kind: create`) |
-| Update command | operation's parameter list (`kind: operation`) |
-| Destroy command | destroyer's parameter list (`kind: destroy`) — often empty |
-| Custom operation command | the operation's parameter list, full stop |
-| Find query | the find's parameter list (`FindDecl.params`) |
-| Response (and list response) | aggregate's `fields + containments + derived`, filtered by `apiRead` |
+| Command (create / operation / destroy / workflow handle) | the operation/handle's parameter list (`OperationIR.params` or `WorkflowHandleDecl.params`) |
+| Query | the find's parameter list (`FindDecl.params`) |
+| Response (single and list) | aggregate's `fields + containments + derived`, filtered by `apiRead` |
 
-Five of six don't touch wireShape at all. The sixth is a one-shot
-walk-with-filter the scaffold can do at expansion time without any IR
-state.
+Two of three (command, query) don't touch wireShape at all — they
+walk the operation or find's typed parameter list. The third
+(response) is a one-shot walk-with-filter the scaffold can do at
+expansion time without any IR state.
+
+The lifecycle kind (`create` / `operation` / `destroy`) doesn't change
+the command's shape — it's the same "walk params, emit a `command`
+record". Kind only matters downstream at the handler and route
+scaffolds, where it picks the body protocol and HTTP verb/path.
 
 ### What disappears
 
@@ -385,40 +388,44 @@ Three options for the retirement:
 Three independent sub-trees, one per layer. Every leaf scaffold
 materialises exactly one declaration.
 
-Each leaf scaffold consults exactly one IR node — an operation's
-parameter list, a find's parameter list, or an aggregate's field set
-— and emits a literal contract declaration. Six leaf shapes, six
-sources, no shared `wireShape` intermediary.
+Leaf-scaffold rule: **one scaffold per output declaration kind;
+generic over source kind.** A `command` is the same shape whether it
+comes from a `create`, `operation`, `destroy`, or workflow `handle`
+— the lifecycle distinction matters at the route and handler sites
+(which pick verb / path / body protocol), not at the payload site.
+Splitting commands by kind would create three near-identical macro
+entries.
+
+Five leaf scaffolds cover the contract + application + routes tree:
 
 ```
 scaffoldApiFromContext(of: Sales)
 ├── scaffoldContractForContext(of: Ordering)
 │   ├── scaffoldContractForAggregate(of: Order)
-│   │   ├── scaffoldCreateCommandFor(operation: Order.place)      ← leaf  (reads place.params)
-│   │   ├── scaffoldUpdateCommandFor(operation: Order.cancel)     ← leaf  (reads cancel.params)
-│   │   ├── scaffoldDestroyCommandFor(operation: Order.archive)   ← leaf  (reads archive.params)
+│   │   ├── scaffoldCommandFor(operation: Order.place)            ← leaf  (reads place.params; kind: create)
+│   │   ├── scaffoldCommandFor(operation: Order.cancel)           ← leaf  (reads cancel.params; kind: operation)
+│   │   ├── scaffoldCommandFor(operation: Order.archive)          ← leaf  (reads archive.params; kind: destroy)
 │   │   └── scaffoldResponseFor(aggregate: Order)                 ← leaf  (walks fields+containments+derived, apiRead filter)
 │   ├── scaffoldContractForRepository(of: Orders)
 │   │   ├── scaffoldQueryFor(find: Orders.byId)                   ← leaf  (reads byId.params)
-│   │   ├── scaffoldQueryFor(find: Orders.byCustomer)             ← leaf  (reads byCustomer.params)
-│   │   └── scaffoldQueryFor(find: Orders.findAll)                ← leaf  (reads findAll.params)
+│   │   ├── scaffoldQueryFor(find: Orders.byCustomer)             ← leaf
+│   │   └── scaffoldQueryFor(find: Orders.findAll)                ← leaf
 │   └── scaffoldContractForWorkflow(of: ReorderStockedItems)
-│       ├── scaffoldCommandFor(workflowHandle: ReorderStockedItems.invoke)  ← leaf  (reads handle.params)
-│       └── scaffoldResponseFor(workflowOutput: ReorderStockedItems)        ← leaf  (if the handle returns)
+│       └── scaffoldCommandFor(workflowHandle: ReorderStockedItems.invoke)  ← leaf  (same scaffold as operations)
 ├── scaffoldApplicationForContext(of: Ordering)
 │   ├── scaffoldHandlersForAggregate(of: Order)
-│   │   ├── scaffoldHandlerForOperation(of: Order.place)          → commandHandler PlaceOrder
-│   │   ├── scaffoldHandlerForOperation(of: Order.cancel)         → commandHandler CancelOrder
-│   │   └── scaffoldHandlerForOperation(of: Order.archive)        → commandHandler ArchiveOrder
+│   │   ├── scaffoldHandlerForOperation(of: Order.place)          → commandHandler PlaceOrder   (body: create protocol)
+│   │   ├── scaffoldHandlerForOperation(of: Order.cancel)         → commandHandler CancelOrder  (body: operation protocol)
+│   │   └── scaffoldHandlerForOperation(of: Order.archive)        → commandHandler ArchiveOrder (body: destroy protocol)
 │   └── scaffoldHandlersForRepository(of: Orders)
 │       ├── scaffoldHandlerForFind(of: Orders.byId)               → queryHandler GetOrderById
 │       ├── scaffoldHandlerForFind(of: Orders.byCustomer)         → queryHandler ListOrdersByCustomer
 │       └── scaffoldHandlerForFind(of: Orders.findAll)            → queryHandler ListOrders
 └── scaffoldRoutesForContext(of: Ordering)
     ├── scaffoldRoutesForAggregate(of: Order)
-    │   ├── scaffoldRouteForHandler(of: Ordering.PlaceOrder)      ← leaf
-    │   ├── scaffoldRouteForHandler(of: Ordering.CancelOrder)
-    │   └── scaffoldRouteForHandler(of: Ordering.ArchiveOrder)
+    │   ├── scaffoldRouteForHandler(of: Ordering.PlaceOrder)      ← leaf  (POST /orders, no id)
+    │   ├── scaffoldRouteForHandler(of: Ordering.CancelOrder)     ← leaf  (POST /orders/{id}/...)
+    │   └── scaffoldRouteForHandler(of: Ordering.ArchiveOrder)    ← leaf  (DELETE /orders/{id})
     ├── scaffoldRoutesForRepository(of: Orders)
     │   └── … one per find …
     └── scaffoldRoutesForWorkflow(of: ReorderStockedItems)
@@ -427,18 +434,27 @@ scaffoldApiFromContext(of: Sales)
             // (a `handle` member). Scheduled-only / event-only workflows skip.
 ```
 
-A seventh leaf shape covers views with implicit projection:
+### Where the lifecycle kind is read
 
-```
-scaffoldViewProjectionFor(aggregate: Order)                       ← leaf
-  // Walks Order.fields+containments+derived with `uiRead` filter
-  // (admin views keep `internal`; production responses drop it).
-  // Used when a `view` declaration omits its field list.
-```
+| Scaffold | Reads `OperationIR.kind`? | What for |
+|---|---|---|
+| `scaffoldCommandFor` | No | Command shape = `params`; same for all kinds |
+| `scaffoldResponseFor` | No | Response shape comes from aggregate fields, not operation |
+| `scaffoldQueryFor` | n/a | Finds have no `kind`; params straight through |
+| `scaffoldHandlerForOperation` | **Yes** | Body protocol: `new→save` (create) vs `load→mutate→save` (operation) vs `load→call` (destroy) |
+| `scaffoldRouteForHandler` | **Yes** | HTTP verb + path: `POST /orders` (create) vs `POST /orders/{id}/...` (operation) vs `DELETE /orders/{id}` (destroy) |
 
-Same walk-with-filter mechanic as `scaffoldResponseFor`, different
-filter. Source of truth is still the aggregate's literal field set —
-no `wireShape` intermediary.
+Two scaffolds care about lifecycle kind; three don't. The split lives
+where the decision lives.
+
+### Views
+
+Views with an implicit projection (a `view` declaration omitting its
+field list) are a separate scaffold concern — they produce view AST,
+not contract AST. Same walk-with-filter mechanic as
+`scaffoldResponseFor` but a `uiRead` filter (keeps `internal` for
+admin surfaces). Not part of this proposal's contract tree; lives
+alongside the existing UI-scaffold stdlib.
 
 Workflows are user-written, not scaffolded — the application sub-tree
 fans `scaffoldHandlersForAggregate` and `scaffoldHandlersForRepository`
