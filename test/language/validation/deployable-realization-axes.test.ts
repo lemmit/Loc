@@ -138,41 +138,25 @@ describe("realization axes — R4 foundation owns layers", () => {
 });
 
 // ---------------------------------------------------------------------------
-// P1 of proposals/vanilla-phoenix-foundation.md — the menu admits
-// `foundation: vanilla` on phoenix (D-VANILLA-PHOENIX-FOUNDATION pinned the
-// axis value), but R5 rejects the value until the vanilla emitter ships in
-// P2. The grammar+lowering still need to carry the value cleanly so the
-// rejection is a clean validator error, not a parse / IR crash.
+// Slice 0 of docs/plans/vanilla-foundation-tdd-plan.md — the previous
+// R5 emitter-not-implemented rejection is lifted now that the
+// `vanilla/` orchestrator subtree exists.  `foundation: vanilla` on
+// `platform: elixir` (and its legacy `phoenix` alias) must now parse,
+// lower, and validate without error.
 // ---------------------------------------------------------------------------
-describe("realization axes — R5 vanilla-on-phoenix planned but not yet implemented", () => {
-  it("parses `foundation: vanilla` on phoenix without a grammar / out-of-menu error", async () => {
-    // The menu lift (platform-rules.ts:184) means R1 does NOT fire on this
-    // value. R5 still rejects it, but with the focused emitter-not-shipped
-    // diagnostic — not a generic "not on the menu" rejection.
-    const { errors } = await parse(sys("phoenix { foundation: vanilla }"));
-    expect(errors.some((e) => /foundation: vanilla.*not available on platform/i.test(e))).toBe(
-      false,
-    );
-    expect(errors.some((e) => /foundation: vanilla.*reserved.*not yet implemented/i.test(e))).toBe(
-      true,
-    );
+describe("realization axes — foundation: vanilla on elixir is accepted (Slice 0)", () => {
+  it("accepts `foundation: vanilla` on elixir without R5 (gate lifted)", async () => {
+    const { errors } = await parse(sys("elixir { foundation: vanilla }"));
+    expect(errors).toEqual([]);
   });
 
-  it("R5 diagnostic names the proposal + the three today-actionable escapes", async () => {
+  it("accepts the legacy `phoenix` alias too", async () => {
     const { errors } = await parse(sys("phoenix { foundation: vanilla }"));
-    const msg =
-      errors.find((e) => /foundation: vanilla.*reserved.*not yet implemented/i.test(e)) ?? "";
-    // Names the proposal so the user can read why.
-    expect(msg).toContain("vanilla-phoenix-foundation.md");
-    expect(msg).toContain("D-VANILLA-PHOENIX-FOUNDATION");
-    // Lists the three escapes (foundation: ash; node/dotnet; track P2).
-    expect(msg).toContain("foundation: ash");
-    expect(msg).toContain("platform: node");
-    expect(msg).toContain("platform: dotnet");
+    expect(errors).toEqual([]);
   });
 
-  it("does NOT fire on phoenix with `foundation: ash` (current emit path)", async () => {
-    const { errors } = await parse(sys("phoenix { foundation: ash }"));
+  it("does NOT fire on elixir with `foundation: ash` (current emit path)", async () => {
+    const { errors } = await parse(sys("elixir { foundation: ash }"));
     expect(errors.some((e) => /foundation: vanilla.*reserved.*not yet implemented/i.test(e))).toBe(
       false,
     );

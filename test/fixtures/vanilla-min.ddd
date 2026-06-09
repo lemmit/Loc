@@ -1,0 +1,26 @@
+// Minimal vanilla-foundation fixture — one CRUD aggregate on
+// `foundation: vanilla` (plain Ecto, no Ash).  Drives Slice 0 + Slice 1
+// of docs/plans/vanilla-foundation-tdd-plan.md: gate-lift,
+// orchestrator branch, schema/repository/context/api emit, and
+// wire-spec parity with the same `.ddd` under `foundation: ash`.
+system Tasks {
+  subdomain Productivity {
+    context Tracker {
+      aggregate Task with crudish {
+        title: string
+        done: bool
+      }
+      repository Tasks for Task { }
+    }
+  }
+  api TrackerApi from Productivity
+  storage primary { type: postgres }
+  resource trackerState { for: Tracker, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Tracker]
+    dataSources: [trackerState]
+    serves: TrackerApi
+    port: 4000
+  }
+}

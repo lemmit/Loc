@@ -320,29 +320,12 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
     }
   }
 
-  // R5 — `foundation: vanilla` on `platform: phoenix` is admitted by the
-  // menu (D-VANILLA-PHOENIX-FOUNDATION pins it) but the vanilla emitter
-  // is not yet implemented (P2 of proposals/vanilla-phoenix-foundation.md).
-  // Reject with a clear diagnostic pointing at the proposal + the three
-  // today-actionable escapes; lift this check when the vanilla emit
-  // subtree lands. Kept separate from R1 so the menu stays honest about
-  // the planned value (a snapshot/round-trip survives the value) and the
-  // implementation gap is one focused error message.
-  if (family === "elixir" && d.foundation === "vanilla") {
-    accept(
-      "error",
-      `'foundation: vanilla' on deployable '${d.name}' is reserved on platform 'elixir' (D-VANILLA-PHOENIX-FOUNDATION) but the emitter is not yet implemented. ` +
-        `Three escapes today: ` +
-        `(1) use 'foundation: ash' (the current Ash/Phoenix emit path); ` +
-        `(2) host this deployable on 'platform: node' or 'platform: dotnet' (cross-backend ES contract is portable); ` +
-        `(3) track P2 of proposals/vanilla-phoenix-foundation.md (vanilla state-based emit + strict conformance parity).`,
-      {
-        node: d,
-        property: "foundation",
-        code: "loom.foundation-vanilla-phoenix-not-yet-implemented",
-      },
-    );
-  }
+  // R5 — `foundation: vanilla` on `platform: elixir` is now accepted
+  // (D-VANILLA-PHOENIX-FOUNDATION) — Slice 0 of the vanilla TDD plan
+  // lifts the previous emitter-not-implemented gate.  The orchestrator
+  // branches to `vanilla/index.ts` for the vanilla emit subtree; per-
+  // slice gaps (e.g. unsupported aggregate shapes) raise their own
+  // focused diagnostics as they arise.
 }
 
 /** Rule 14 — design-pack format must match the deployable's

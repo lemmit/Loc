@@ -20,6 +20,7 @@ import { emitShellFiles, renderSpaController, toModulePrefix, toSnakeApp } from 
 import { renderSidebarComponent } from "./sidebar-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
 import { renderTypesModule } from "./types-module-emit.js";
+import { generateVanillaElixirProject } from "./vanilla/index.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
 
@@ -84,16 +85,12 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   const { contexts, deployable, sys, migrations, emitTrace, styleAdapter } = args;
   const out = new Map<string, string>();
 
-  // Foundation branch — D-VANILLA-PHOENIX-FOUNDATION. Today only `ash`
-  // emits; `vanilla` is reserved (menu admits it) but the validator's R5
-  // (`loom.foundation-vanilla-phoenix-not-yet-implemented`) rejects it
-  // before we reach this orchestrator. This branch is defence-in-depth
-  // for callers that bypass the validator (e.g. snapshot-driven
-  // regenerate paths): return an empty Map rather than silently falling
-  // back to Ash emit, which would lose the user's foundation choice.
-  // Lift when the `vanilla/` emit subtree lands in P2.
+  // Foundation branch — D-VANILLA-PHOENIX-FOUNDATION.  `vanilla`
+  // dispatches to the parallel `vanilla/` emit subtree (plain Phoenix +
+  // Ecto, no Ash); `ash` stays on the existing path.  Per Slice 0 of
+  // docs/plans/vanilla-foundation-tdd-plan.md.
   if (deployable.foundation === "vanilla") {
-    return out;
+    return generateVanillaElixirProject(args);
   }
 
   const appName = toSnakeApp(deployable.name);
