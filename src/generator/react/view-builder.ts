@@ -55,7 +55,9 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
   // schema from the per-aggregate api module.
   const shorthandSources = new Set<string>();
   for (const { view } of views) {
-    if (!view.output) shorthandSources.add(view.aggregateName);
+    // Workflow-sourced views read the saga instance shape, not an aggregate's
+    // `<Agg>ListResponse` (workflow-instance-views.md) — emitted separately.
+    if (!view.output && view.source.kind === "aggregate") shorthandSources.add(view.source.name);
   }
   for (const aggName of [...shorthandSources].sort()) {
     // Shorthand views re-export `<Agg>ListResponse` only; the singular
@@ -71,6 +73,9 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
   lines.push("");
 
   for (const { view } of views) {
+    // Workflow-sourced views are emitted by a dedicated branch (a later
+    // slice); skip them here so the aggregate path stays byte-identical.
+    if (view.source.kind !== "aggregate") continue;
     const slug = snake(view.name);
     if (view.output) {
       lines.push(`export const ${upperFirst(view.name)}Row = z.object({`);
@@ -89,7 +94,7 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
       );
     } else {
       lines.push(
-        `export const ${upperFirst(view.name)}Response = ${view.aggregateName}ListResponse;`,
+        `export const ${upperFirst(view.name)}Response = ${view.source.name}ListResponse;`,
       );
       lines.push(
         `export type ${upperFirst(view.name)}Response = z.infer<typeof ${upperFirst(view.name)}Response>;`,
@@ -243,7 +248,7 @@ export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string
 
 function collectColumnNames(view: ViewIR, ctx: BoundedContextIR): string[] {
   if (view.output) return view.output.fields.map((f) => f.name);
-  const agg = ctx.aggregates.find((a) => a.name === view.aggregateName);
+  const agg = ctx.aggregates.find((a) => a.name === view.source.name);
   if (!agg) return ["id"];
   const cols = ["id"];
   for (const f of agg.fields) {

@@ -118,7 +118,11 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     // Event-triggered-only workflows expose no HTTP route (dispatch-only).
     for (const wf of ctx.workflows.filter(workflowEmitsCommandRoute))
       allWorkflows.push({ ctx, wf });
-    for (const view of ctx.views) allViews.push({ ctx, view });
+    // Workflow-sourced views (workflow-instance-views.md) are emitted by a
+    // dedicated branch in a later slice; the aggregate-view OpenAPI surface
+    // below stays byte-identical by only gathering aggregate sources.
+    for (const view of ctx.views)
+      if (view.source.kind === "aggregate") allViews.push({ ctx, view });
   }
 
   // --- Per-Api spec module ---------------------------------------------------
@@ -322,7 +326,7 @@ function renderApiSpec(
     // views project to their own `<View>Response`.  Matches Hono/.NET.
     const respMod = view.output
       ? `${schemasModule}.${upperFirst(view.name)}Response`
-      : `${schemasModule}.${view.aggregateName}ListResponse`;
+      : `${schemasModule}.${view.source.name}ListResponse`;
     pathEntries.push(`      "/views/${slug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "Query ${view.name} view",
@@ -906,7 +910,7 @@ function viewItemModule(
 ): string {
   return view.output
     ? `${schemasModule}.${upperFirst(view.name)}Row`
-    : `${schemasModule}.${view.aggregateName}Response`;
+    : `${schemasModule}.${view.source.name}Response`;
 }
 
 /** Full-form view row schema — the named element type (`<View>Row`)

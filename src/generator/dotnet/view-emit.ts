@@ -42,7 +42,7 @@ export function emitViews(
   if (ctx.views.length === 0) return;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   for (const view of ctx.views) {
-    const agg = aggsByName.get(view.aggregateName);
+    const agg = aggsByName.get(view.source.name);
     if (!agg) continue; // validator already errored
     if (view.output) {
       out.set(`Application/Views/${upperFirst(view.name)}Row.cs`, renderRowRecord(view, ctx, ns));
@@ -296,7 +296,7 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   const blocks: string[] = [];
   for (const view of ctx.views) {
-    const agg = aggsByName.get(view.aggregateName);
+    const agg = aggsByName.get(view.source.name);
     if (!agg) continue;
     const recordName = responseRecordName(view, agg);
     const responseType = `IReadOnlyList<${recordName}>`;
@@ -315,7 +315,7 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
     ...new Set(
       ctx.views
         .filter((v) => !v.output)
-        .map((v) => aggsByName.get(v.aggregateName))
+        .map((v) => aggsByName.get(v.source.name))
         .filter((a): a is AggregateIR => !!a)
         .map((a) => `using ${ns}.Application.${plural(a.name)}.Responses;`),
     ),

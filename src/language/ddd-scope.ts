@@ -24,6 +24,7 @@ import {
   isSystem,
   isTargetable,
   isValueObject,
+  isWorkflow,
   type Model,
 } from "./generated/ast.js";
 
@@ -129,6 +130,16 @@ export class DddScopeComputation extends DefaultScopeComputation {
     for (const node of AstUtils.streamAllContents(document.parseResult.value)) {
       if (cancelToken?.isCancellationRequested) break;
       if (isAggregate(node) || isEntityPart(node) || isValueObject(node) || isEnumDecl(node)) {
+        const name = this.nameProvider.getName(node);
+        if (name) {
+          exports.push(this.descriptions.createDescription(node, name, document));
+        }
+      }
+      // Workflows get a bare-name export too (in addition to the qualified
+      // `Targetable` export below) so a `view X = <Workflow> where …` source
+      // ref (`[ViewSource:ID]`) resolves by bare name, exactly as an aggregate
+      // source does (workflow-instance-views.md).
+      if (isWorkflow(node)) {
         const name = this.nameProvider.getName(node);
         if (name) {
           exports.push(this.descriptions.createDescription(node, name, document));

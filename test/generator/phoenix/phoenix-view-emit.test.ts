@@ -40,7 +40,7 @@ function buildCtx(filter: ExprIR | undefined): BoundedContextIR {
     views: [
       {
         name: "ActiveOrders",
-        aggregateName: "Order",
+        source: { kind: "aggregate", name: "Order" },
         filter,
         // No output → shorthand form
       },
@@ -118,7 +118,7 @@ describe("phoenix emitViews — shorthand form", () => {
 
   it("skips the view entirely when its aggregateName doesn't resolve", () => {
     const ctx = buildCtx(filterIR);
-    ctx.views[0]!.aggregateName = "DoesNotExist";
+    ctx.views[0]!.source = { kind: "aggregate", name: "DoesNotExist" };
     const out = new Map<string, string>();
     emitViews("acme", ctx, "Acme", out);
     expect(out.size).toBe(0);

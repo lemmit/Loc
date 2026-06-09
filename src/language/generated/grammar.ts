@@ -8644,7 +8644,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "CrossReference",
                       "type": {
-                        "$ref": "#/rules@75"
+                        "$ref": "#/types@1"
                       },
                       "terminal": {
                         "$type": "RuleCall",
@@ -8705,7 +8705,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "CrossReference",
                       "type": {
-                        "$ref": "#/rules@75"
+                        "$ref": "#/types@1"
                       },
                       "terminal": {
                         "$type": "RuleCall",
@@ -11445,7 +11445,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/types@1"
+                "$ref": "#/types@2"
               },
               "terminal": {
                 "$type": "RuleCall",
@@ -11480,7 +11480,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
         "terminal": {
           "$type": "CrossReference",
           "type": {
-            "$ref": "#/types@1"
+            "$ref": "#/types@2"
           },
           "terminal": {
             "$type": "RuleCall",
@@ -14878,6 +14878,27 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "$type": "SimpleType",
             "typeRef": {
               "$ref": "#/rules@27"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "$type": "Type",
+      "name": "ViewSource",
+      "type": {
+        "$type": "UnionType",
+        "types": [
+          {
+            "$type": "SimpleType",
+            "typeRef": {
+              "$ref": "#/rules@75"
+            }
+          },
+          {
+            "$type": "SimpleType",
+            "typeRef": {
+              "$ref": "#/rules@104"
             }
           }
         ]

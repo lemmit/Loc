@@ -46,7 +46,10 @@ export function buildViewsRoutesFile(
   // aggregates referenced via `X id` follow auxiliaries.
   const aggsTouched = new Set<string>();
   for (const v of ctx.views) {
-    aggsTouched.add(v.aggregateName);
+    // Workflow-sourced views read the saga-state table directly, not an
+    // aggregate repository (workflow-instance-views.md) — emitted separately.
+    if (v.source.kind !== "aggregate") continue;
+    aggsTouched.add(v.source.name);
     if (v.output) {
       for (const aux of v.output.auxiliaries) aggsTouched.add(aux.aggName);
     }
@@ -58,7 +61,9 @@ export function buildViewsRoutesFile(
   // sources to avoid emitting Response imports for follow-only
   // aggregates that may not have aggregates routes if they have no
   // operations / finds — defensive.
-  const sourceAggs = new Set(ctx.views.map((v) => v.aggregateName));
+  const sourceAggs = new Set(
+    ctx.views.filter((v) => v.source.kind === "aggregate").map((v) => v.source.name),
+  );
   for (const aggName of aggsTouched) {
     lines.push(
       `import { ${aggName}Repository } from "../db/repositories/${lowerFirst(aggName)}-repository";`,
@@ -105,6 +110,7 @@ export function buildViewsRoutesFile(
   lines.push("");
 
   for (const view of ctx.views) {
+    if (view.source.kind !== "aggregate") continue;
     lines.push(...emitViewRoute(view, ctx, aggsByName).map((l) => `  ${l}`));
     lines.push("");
   }
@@ -146,10 +152,10 @@ function emitViewRoute(
   void ctx;
   void aggsByName;
   const out: string[] = [];
-  const aggSlug = snake(plural(view.aggregateName));
+  const aggSlug = snake(plural(view.source.name));
   const responseSchema = view.output
     ? `${upperFirst(view.name)}Response`
-    : `${view.aggregateName}ListResponse`;
+    : `${view.source.name}ListResponse`;
   // Views whose filter / binds reference currentUser
   // thread the request's user through to the repository's
   // synthesised find method.  The auth middleware stashed it on the
@@ -173,7 +179,7 @@ function emitViewRoute(
       `    const currentUser = (httpCtx as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
   }
-  out.push(`    const repo = new ${view.aggregateName}Repository(db, events);`);
+  out.push(`    const repo = new ${view.source.name}Repository(db, events);`);
   const repoCallArgs = usesUser ? "currentUser" : "";
   out.push(`    const rows = await repo.${lowerFirst(view.name)}(${repoCallArgs});`);
   if (view.output) {
@@ -203,7 +209,7 @@ function emitViewRoute(
     );
   } else {
     out.push(
-      `    return httpCtx.json(rows.map((r) => repo.toWire(r)) as z.infer<typeof ${view.aggregateName}Response>[], 200);`,
+      `    return httpCtx.json(rows.map((r) => repo.toWire(r)) as z.infer<typeof ${view.source.name}Response>[], 200);`,
     );
   }
   out.push(`  },`);

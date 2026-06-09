@@ -1068,15 +1068,24 @@ export function envForNode(node: AstNode): Env {
   // repository's `for` aggregate (find filters) or the view's `from` aggregate
   // (view filters / binds) — both reached through a cross-reference, not
   // containment.  Workflows orchestrate across aggregates and have no `this`.
+  // A view's source is an aggregate or a workflow (workflow-instance-views.md).
+  // The aggregate case feeds the `this` aggregate below; the workflow case
+  // exposes the workflow's state-field members instead (the LSP analogue of
+  // lowering's `inWorkflow`), since a saga has no aggregate `this`.
+  const viewSource = view?.source?.ref;
+  const viewWorkflowSource = viewSource && isWorkflow(viewSource) ? viewSource : undefined;
   const agg =
     AstUtils.getContainerOfType(node, isAggregate) ??
     (find ? (find.$container as Repository | undefined)?.aggregate?.ref : undefined) ??
-    (view ? view.source?.ref : undefined);
+    (viewSource && isAggregate(viewSource) ? viewSource : undefined);
 
   const bindings = new Map<string, { type: DddType; origin: AstNode }>();
 
   // 1. Member bindings — innermost wins, so build outer→inner.
   if (agg && !part) addEntityMembers(agg.members, bindings);
+  // A workflow-sourced view filter resolves bare names against the workflow's
+  // state fields (its `Property` members) — same vocabulary lowering binds.
+  if (viewWorkflowSource) addEntityMembers(viewWorkflowSource.members, bindings);
   if (part) addEntityMembers(part.members, bindings);
   if (vo) {
     for (const m of vo.members) {

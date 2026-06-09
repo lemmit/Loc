@@ -4,20 +4,29 @@
 // lowerContext in ./lower.ts; builds on lower-members (lowerField).
 // -------------------------------------------------------------------------
 
-import type { View } from "../../language/generated/ast.js";
-import type { ExprIR, ViewIR } from "../types/loom-ir.js";
+import { isWorkflow, type View } from "../../language/generated/ast.js";
+import type { ExprIR, ViewIR, ViewSourceIR } from "../types/loom-ir.js";
 import { inferExprType, lowerExpr } from "./lower-expr.js";
 import { lowerField } from "./lower-members.js";
-import { type Env, inAggregate } from "./lower-types.js";
+import { type Env, inAggregate, inWorkflow } from "./lower-types.js";
 
 export function lowerView(view: View, env: Env): ViewIR {
-  // Filter + bind expressions resolve against the source
-  // aggregate's schema — same env shape repository find filters
-  // use.  Bare names (`status`, `lines.count`, `total`) lower to
-  // this-rooted property / containment / derived refs.
+  // Filter + bind expressions resolve against the source's schema — same env
+  // shape repository find filters use.  Bare names (`status`, `lines.count`,
+  // `total`) lower to this-rooted property / containment / derived refs.  A
+  // workflow source binds `this` to its state fields via `inWorkflow`
+  // (workflow-instance-views.md), exactly as an aggregate source uses
+  // `inAggregate` — the predicate machinery downstream is source-agnostic.
   const source = view.source?.ref;
   let inner = env;
-  if (source) inner = inAggregate(env, source);
+  let sourceIR: ViewSourceIR = { kind: "aggregate", name: "Unknown" };
+  if (source && isWorkflow(source)) {
+    inner = inWorkflow(env, source);
+    sourceIR = { kind: "workflow", name: source.name };
+  } else if (source) {
+    inner = inAggregate(env, source);
+    sourceIR = { kind: "aggregate", name: source.name };
+  }
   const filter = view.filter ? lowerExpr(view.filter, inner) : undefined;
   // Full-form views declare an output record.  Each `fields+=Property`
   // gives us a typed field; each `binds+=BindEntry` gives us the
@@ -54,7 +63,7 @@ export function lowerView(view: View, env: Env): ViewIR {
   }
   return {
     name: view.name,
-    aggregateName: source?.name ?? "Unknown",
+    source: sourceIR,
     filter,
     output,
   };

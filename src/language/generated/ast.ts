@@ -625,6 +625,14 @@ export function isValueObjectMember(item: unknown): item is ValueObjectMember {
     return reflection.isInstance(item, ValueObjectMember);
 }
 
+export type ViewSource = Aggregate | Workflow;
+
+export const ViewSource = 'ViewSource';
+
+export function isViewSource(item: unknown): item is ViewSource {
+    return reflection.isInstance(item, ViewSource);
+}
+
 export type WorkflowMember = Apply | HandleDecl | OnDecl | Property | WorkflowCreateDecl;
 
 export const WorkflowMember = 'WorkflowMember';
@@ -2563,7 +2571,7 @@ export interface View extends AstNode {
     fields: Array<Property>;
     filter: Expression;
     name: string;
-    source: Reference<Aggregate>;
+    source: Reference<ViewSource>;
 }
 
 export const View = 'View';
@@ -2782,6 +2790,7 @@ export type DddAstType = {
     ValueObject: ValueObject
     ValueObjectMember: ValueObjectMember
     View: View
+    ViewSource: ViewSource
     WithClause: WithClause
     Workflow: Workflow
     WorkflowCreateDecl: WorkflowCreateDecl
@@ -2791,14 +2800,13 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, ApiStatus, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, PropagateExpr, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
+        return [Aggregate, AggregateMember, Api, ApiStatus, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, ExpectThrowsStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, PropagateExpr, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
         switch (subtype) {
-            case Aggregate:
-            case EventDecl: {
-                return this.isSubtype(ContextMember, supertype) || this.isSubtype(NamedDecl, supertype) || this.isSubtype(Targetable, supertype);
+            case Aggregate: {
+                return this.isSubtype(ContextMember, supertype) || this.isSubtype(NamedDecl, supertype) || this.isSubtype(Targetable, supertype) || this.isSubtype(ViewSource, supertype);
             }
             case Api:
             case BoundedContext:
@@ -2907,6 +2915,9 @@ export class DddAstReflection extends AbstractAstReflection {
             case ServiceConnectionSource: {
                 return this.isSubtype(ConnectionSource, supertype);
             }
+            case EventDecl: {
+                return this.isSubtype(ContextMember, supertype) || this.isSubtype(NamedDecl, supertype) || this.isSubtype(Targetable, supertype);
+            }
             case ExpectStmt:
             case ExpectThrowsStmt: {
                 return this.isSubtype(TestStatement, supertype);
@@ -2955,8 +2966,7 @@ export class DddAstReflection extends AbstractAstReflection {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype) || this.isSubtype(ValueObjectMember, supertype) || this.isSubtype(WorkflowMember, supertype);
             }
             case Repository:
-            case View:
-            case Workflow: {
+            case View: {
                 return this.isSubtype(ContextMember, supertype) || this.isSubtype(Targetable, supertype);
             }
             case Requirement:
@@ -2971,6 +2981,9 @@ export class DddAstReflection extends AbstractAstReflection {
             case ValueObject: {
                 return this.isSubtype(ContextMember, supertype) || this.isSubtype(ModelMember, supertype) || this.isSubtype(NamedDecl, supertype) || this.isSubtype(Targetable, supertype);
             }
+            case Workflow: {
+                return this.isSubtype(ContextMember, supertype) || this.isSubtype(Targetable, supertype) || this.isSubtype(ViewSource, supertype);
+            }
             default: {
                 return false;
             }
@@ -2982,8 +2995,7 @@ export class DddAstReflection extends AbstractAstReflection {
         switch (referenceId) {
             case 'Aggregate:superType':
             case 'Repository:aggregate':
-            case 'SeedRow:aggregate':
-            case 'View:source': {
+            case 'SeedRow:aggregate': {
                 return Aggregate;
             }
             case 'Api:source': {
@@ -3043,6 +3055,9 @@ export class DddAstReflection extends AbstractAstReflection {
             case 'TestBlock:verifies':
             case 'TestE2E:verifies': {
                 return TestCase;
+            }
+            case 'View:source': {
+                return ViewSource;
             }
             default: {
                 throw new Error(`${referenceId} is not a valid reference id.`);

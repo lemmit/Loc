@@ -624,7 +624,7 @@ function expandScaffoldViewList(
   if (view.output) {
     fields = view.output.fields;
   } else {
-    const sourceAgg = ctx.aggregatesByName.get(view.aggregateName);
+    const sourceAgg = ctx.aggregatesByName.get(view.source.name);
     if (sourceAgg) fields = sourceAgg.fields;
   }
   const cellVar = "o";
