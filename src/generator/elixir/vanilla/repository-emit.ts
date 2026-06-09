@@ -67,6 +67,13 @@ defmodule ${repoMod} do
   def delete(%${aggModule}{} = record) do
     Repo.delete(record)
   end
+
+  @doc "Persist a pre-built changeset (Slice 5c — named-operation seam)."
+  @spec persist_change(Ecto.Changeset.t()) ::
+          {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+  def persist_change(%Ecto.Changeset{data: %${aggModule}{}} = changeset) do
+    Repo.update(changeset)
+  end
 end
 `;
 }

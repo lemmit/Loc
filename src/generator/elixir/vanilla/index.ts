@@ -29,6 +29,7 @@ import {
   emitVanillaViewsController,
   type VanillaViewRef,
 } from "./view-emit.js";
+import { emitVanillaWorkflowExecution } from "./workflow-execution-emit.js";
 import { emitVanillaWorkflowInstances } from "./workflow-instances-emit.js";
 
 export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<string, string> {
@@ -59,6 +60,12 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // Workflow-instance read endpoints — saga-state Ecto schema + a
     // read-only WorkflowInstancesController (the deferred-Phoenix gap closer).
     apiRoutes.push(...emitVanillaWorkflowInstances(appName, appModule, ctx, out));
+    // Slice 5c: workflow EXECUTION — `run/1` modules per command-triggered
+    // workflow + a project-wide `WorkflowsController` + POST /workflows/<name>
+    // routes.  Body lowering for individual statement kinds is incremental;
+    // this slice ships the shape (run/1 + optional Repo.transaction wrap) so
+    // every workflow compiles and its route is wired end-to-end.
+    apiRoutes.push(...emitVanillaWorkflowExecution(appName, appModule, ctx, out).routes);
   }
   apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
 
