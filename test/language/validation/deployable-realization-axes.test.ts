@@ -229,3 +229,35 @@ describe("realization axes — R6 foundation ↔ persistence/application compati
     expect((await parse(sys("dotnet { persistence: dapper }"))).errors).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// transport: is now an adapter-backed axis (realization-axes-alignment.md
+// slice 3), not a greenfield single value.  Each backend ships one real
+// transport; dotnet additionally reserves `controllers` as a stub.
+// ---------------------------------------------------------------------------
+describe("realization axes — transport is adapter-backed", () => {
+  it("accepts the real transport (dotnet `minimalApi`)", async () => {
+    // The canonical node/elixir transports (`hono` / `phoenix`) are hard
+    // platform keywords, so they aren't user-writable axis values — they're
+    // set by the lowering default.  dotnet's `minimalApi` is a plain ID.
+    expect((await parse(sys("dotnet { transport: minimalApi }"))).errors).toEqual([]);
+  });
+
+  it("rejects `transport: controllers` on dotnet as reserved-but-unimplemented", async () => {
+    const { errors } = await parse(sys("dotnet { transport: controllers }"));
+    expect(
+      errors.some((e) => /transport: controllers.*reserved.*not yet implemented/.test(e)),
+    ).toBe(true);
+    expect(errors.some((e) => /'minimalApi'/.test(e))).toBe(true);
+  });
+
+  it("rejects a wholly-unknown transport as unknown, not reserved", async () => {
+    const { errors } = await parse(sys("dotnet { transport: grpc }"));
+    expect(errors.some((e) => /transport: grpc.*is not available/.test(e))).toBe(true);
+  });
+
+  it("rejects a cross-platform transport (`minimalApi` on elixir)", async () => {
+    const { errors } = await parse(sys("elixir { transport: minimalApi }"));
+    expect(errors.some((e) => /transport: minimalApi.*is not available/.test(e))).toBe(true);
+  });
+});

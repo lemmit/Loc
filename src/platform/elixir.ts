@@ -96,6 +96,9 @@ const elixirPlatform: PlatformSurface = {
       persistence: { ashPostgres: ashPostgresPersistenceAdapter, ecto: ectoPersistenceAdapter },
       styles: { ash: ashStyleAdapter, vanilla: vanillaStyleAdapter },
       layouts: { byFeature: byFeatureLayoutAdapter },
+      // Phoenix (Router + controllers) — the Elixir backend's HTTP surface,
+      // shared by both foundations (D-PHOENIX-TRANSPORT).
+      transports: { phoenix: { name: "phoenix" } },
     };
   },
   adapterDefaults(): PlatformAdapterDefaults {
@@ -103,6 +106,7 @@ const elixirPlatform: PlatformSurface = {
       persistence: { state: "ashPostgres", eventLog: "ashPostgres" },
       style: "ash",
       layout: "byFeature",
+      transport: "phoenix",
     };
   },
 };

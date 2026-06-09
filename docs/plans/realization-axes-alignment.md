@@ -140,7 +140,24 @@ converge upstream.)
 Each phase is an independently green, mergeable unit. Phases 1 is the user-
 visible alignment; later phases are parity/idiom polish.
 
-**Phase 1 — elixir-vanilla joins the adapter machinery (the headline).**
+> **Status (shipped, slice by slice):**
+> - **Slice 1 ✅ (#1061)** — `ecto` persistence + `vanilla` style adapters
+>   registered on elixir; foundation-aware defaults (`vanilla ⇒ ecto/vanilla`).
+>   *Implementation note:* the planned "re-home + delete the foundation branch"
+>   was **not** needed — the elixir persistence/style adapters are **decorative**
+>   (only the style adapter is threaded; the actual emit is the `foundation`
+>   branch in `index.ts`). `ecto` mirrors `ashPostgres`'s decorative role
+>   exactly, so the foundation branch stays and Ash output is byte-identical.
+> - **Slice 2 ✅ (#1063)** — validator **R6** (`loom.platform-knob-foundation-
+>   mismatch`): `FOUNDATION_FAMILY_ADAPTERS` + `foundationCompatibleMenu`;
+>   rejects `ash`+`ecto`, `vanilla`+`ashPostgres`, `vanilla`+`application: ash`,
+>   and `persistence: ecto` with the default (ash) foundation.
+> - **Slice 3 ✅** — `transport:` promoted to an adapter axis (this PR); see
+>   Phase 2 below.
+> - Deferred: `runtime:` (Phase 3), elixir `byLayer` + `application:`
+>   value-name parity (Phase 4).
+
+**Phase 1 — elixir `ecto`/`vanilla` first-class on the axes (the headline). ✅**
 - Add `src/generator/elixir/adapters/ecto-persistence.ts` — a `PersistenceAdapter`
   named **`ecto`**, sibling of `ashPostgresPersistenceAdapter`; `supports`
   `state` now (`eventLog` later, D-VANILLA-ES-HOME); DB from `storageType`.
@@ -162,13 +179,23 @@ visible alignment; later phases are parity/idiom polish.
   — Phase 1 is a structural re-home, not new emit, so it rebases cleanly only if
   5c has settled.
 
-**Phase 2 — promote `transport:` to an adapter axis.**
-- Introduce a `TransportAdapter` contract (sibling of the others) and convert the
-  greenfield `transport` menu to adapter-backed.
-- Wire the real second entry where it exists: dotnet **`controllers`** alongside
-  `minimalApi` (the canonical ASP.NET split); elixir `phoenix` (controllers);
-  node `hono` (+ `express`/`fastify` as future stubs).
-- Independent of Phase 1 / 5c (different files) — can land in parallel.
+**Phase 2 — promote `transport:` to an adapter axis. ✅ (slice 3)**
+- Added a thin `TransportAdapter` contract (sibling of the others; just the
+  registry `name` — no backend branches its emit on transport yet) and a
+  `transports` slot on `PlatformAdapters` + a `transport` default on
+  `PlatformAdapterDefaults`. `transport` left the greenfield set
+  (`realizationAxisMenu` routes it to `availableAdapterNames(family,
+  "transport")`; `greenfieldMenu` is now `foundation`/`runtime` only).
+- Registered the real transports (`minimalApi` dotnet, `hono` node, `phoenix`
+  elixir) + **`controllers` as a dotnet stub** (reserved-not-implemented, like
+  `marten`). The actual MVC-controllers *emit* is future work — the stub makes
+  `transport: controllers` a recognized reserved value, not a runnable one.
+- Behavior-preserving: the menu values match the old greenfield defaults, so
+  lowering/resolution are unchanged.
+- *Caveat:* the canonical node/elixir transports (`hono` / `phoenix`) are hard
+  platform keywords, so they aren't user-writable axis values (set by the
+  lowering default). dotnet's `minimalApi` / `controllers` are plain IDs and
+  are writable.
 
 **Phase 3 — `runtime:` axis (defer-leaning).**
 - Today every backend is `transactional` size-1. Realizing `genserver` (elixir),

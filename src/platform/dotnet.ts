@@ -4,6 +4,7 @@ import {
   type PlatformAdapters,
   type StyleAdapter,
   stubAdapter,
+  type TransportAdapter,
 } from "../generator/_adapters/index.js";
 import { byFeatureLayoutAdapter } from "../generator/dotnet/adapters/by-feature-layout.js";
 import { byLayerLayoutAdapter } from "../generator/dotnet/adapters/by-layer-layout.js";
@@ -127,6 +128,19 @@ const dotnetPlatform: PlatformSurface = {
         byLayer: byLayerLayoutAdapter,
         byFeature: byFeatureLayoutAdapter,
       },
+      transports: {
+        // ASP.NET Minimal APIs — the only real HTTP surface today.
+        minimalApi: { name: "minimalApi" },
+        // ASP.NET MVC controllers — reserved; the per-transport
+        // request-pipeline emit is future work (realization-axes-alignment.md).
+        controllers: stubAdapter<TransportAdapter>(
+          "transport",
+          "controllers",
+          "dotnet",
+          () => Object.keys(menu.transports),
+          { name: "controllers" },
+        ),
+      },
     };
     return menu;
   },
@@ -135,6 +149,7 @@ const dotnetPlatform: PlatformSurface = {
       persistence: { state: "efcore", eventLog: "marten" },
       style: "cqrs",
       layout: "byLayer",
+      transport: "minimalApi",
     };
   },
 };

@@ -167,32 +167,33 @@ export type RealizationAxis =
 // `applicationDslToAdapter` / `applicationAdapterToDsl` live in
 // `util/platform-axes.ts` (shared with lowering) — imported above.
 
-/** Adapter kind backing each axis, or undefined for the greenfield axes. */
-const ADAPTER_KIND_BY_AXIS: Partial<Record<RealizationAxis, "persistence" | "style" | "layout">> = {
+/** Adapter kind backing each axis, or undefined for the greenfield axes
+ *  (`foundation` / `runtime`).  `transport` joined the adapter-backed set
+ *  when it was promoted from greenfield (realization-axes-alignment.md). */
+const ADAPTER_KIND_BY_AXIS: Partial<
+  Record<RealizationAxis, "persistence" | "style" | "layout" | "transport">
+> = {
   persistence: "persistence",
   application: "style",
   directoryLayout: "layout",
+  transport: "transport",
 };
 
-function adapterKindForAxis(axis: RealizationAxis): "persistence" | "style" | "layout" | undefined {
+function adapterKindForAxis(
+  axis: RealizationAxis,
+): "persistence" | "style" | "layout" | "transport" | undefined {
   return ADAPTER_KIND_BY_AXIS[axis];
 }
 
-/** Single current value for a greenfield axis on a backend family. */
-function greenfieldMenu(family: Platform, axis: "foundation" | "transport" | "runtime"): string[] {
+/** Single current value for a greenfield axis on a backend family
+ *  (`foundation` / `runtime`).  `transport` is no longer greenfield — it is an
+ *  adapter-backed axis (realization-axes-alignment.md), resolved via
+ *  `availableAdapterNames(family, "transport")` in `realizationAxisMenu`. */
+function greenfieldMenu(family: Platform, axis: "foundation" | "runtime"): string[] {
   if (axis === "runtime") return ["transactional"];
   // Elixir carries a two-element foundation menu: today's `ash` (the
-  // current emitter) and `vanilla` (planned — D-VANILLA-PHOENIX-FOUNDATION).
-  // The menu admits both at the syntactic/grammar layer; the emission gate
-  // for `foundation: vanilla` on elixir lives in `checkDeployable`'s R5
-  // (`loom.foundation-vanilla-phoenix-not-yet-implemented`) until the
-  // vanilla emitter ships in P2 of proposals/vanilla-phoenix-foundation.md.
-  if (axis === "foundation") return family === "elixir" ? ["ash", "vanilla"] : ["vanilla"];
-  // transport — the platform's only current HTTP surface.  Elixir's
-  // transport is `phoenix` (the Phoenix web framework) per
-  // D-PHOENIX-TRANSPORT; the legacy `phoenixRouter` value desugars at
-  // the lowering boundary (`canonicalTransport`).
-  return [family === "dotnet" ? "minimalApi" : family === "elixir" ? "phoenix" : "hono"];
+  // current emitter) and `vanilla` (D-VANILLA-PHOENIX-FOUNDATION).
+  return family === "elixir" ? ["ash", "vanilla"] : ["vanilla"];
 }
 
 /** The DSL-legal values for one realization axis on a platform family.
@@ -208,6 +209,8 @@ export function realizationAxisMenu(family: Platform, axis: RealizationAxis): st
       return availableAdapterNames(family, "layout");
     case "application":
       return availableAdapterNames(family, "style").map(applicationAdapterToDsl);
+    case "transport":
+      return availableAdapterNames(family, "transport");
     default:
       return greenfieldMenu(family, axis);
   }

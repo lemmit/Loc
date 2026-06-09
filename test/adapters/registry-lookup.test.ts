@@ -13,6 +13,7 @@ import {
   resolveLayout,
   resolvePersistence,
   resolveStyle,
+  resolveTransport,
 } from "../../src/platform/resolve-adapters.js";
 
 describe("adapter registry — lookup", () => {
@@ -146,5 +147,35 @@ describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 me
     expect(all).toContain("dapper"); // real since Phase 5c
     expect(all).toContain("marten"); // a registered stub
     expect(availableAdapterNames("dotnet", "persistence")).not.toContain("marten");
+  });
+});
+
+describe("transport — adapter-backed axis (realization-axes-alignment.md slice 3)", () => {
+  it("each backend exposes its real transport (controllers is a dotnet stub)", () => {
+    expect(availableAdapterNames("dotnet", "transport")).toEqual(["minimalApi"]);
+    expect(availableAdapterNames("hono", "transport")).toEqual(["hono"]);
+    expect(availableAdapterNames("phoenixLiveView", "transport")).toEqual(["phoenix"]);
+    // controllers is reserved (a stub) — present in allAdapterNames, excluded
+    // from the real menu.
+    expect(allAdapterNames("dotnet", "transport")).toEqual(["controllers", "minimalApi"]);
+  });
+
+  it("exposes the transport default per backend", () => {
+    expect(defaultsFor("dotnet")!.transport).toBe("minimalApi");
+    expect(defaultsFor("hono")!.transport).toBe("hono");
+    expect(defaultsFor("phoenixLiveView")!.transport).toBe("phoenix");
+  });
+
+  it("resolves a bareword default + an explicit transport; throws on unknown", () => {
+    expect(resolveTransport("dotnet", null).name).toBe("minimalApi");
+    expect(resolveTransport("dotnet", "minimalApi").name).toBe("minimalApi");
+    expect(resolveTransport("elixir", null).name).toBe("phoenix");
+    // controllers is a registered stub: capability fields answer (name), so
+    // resolution returns it cleanly (emit-time is where stubs throw).
+    expect(resolveTransport("dotnet", "controllers").name).toBe("controllers");
+  });
+
+  it("frontends expose no transport", () => {
+    expect(availableAdapterNames("react", "transport")).toEqual([]);
   });
 });
