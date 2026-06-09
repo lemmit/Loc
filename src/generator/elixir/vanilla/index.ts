@@ -29,6 +29,7 @@ import {
   emitVanillaViewsController,
   type VanillaViewRef,
 } from "./view-emit.js";
+import { emitVanillaWorkflowInstances } from "./workflow-instances-emit.js";
 
 export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<string, string> {
   const { contexts, deployable } = args;
@@ -55,6 +56,9 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // project-wide (one `ViewsController` for all views, matching the ash path).
     emitVanillaViewModules(appName, appModule, ctx, out);
     for (const view of ctx.views) allViews.push({ ctx, view });
+    // Workflow-instance read endpoints — saga-state Ecto schema + a
+    // read-only WorkflowInstancesController (the deferred-Phoenix gap closer).
+    apiRoutes.push(...emitVanillaWorkflowInstances(appName, appModule, ctx, out));
   }
   apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
 
