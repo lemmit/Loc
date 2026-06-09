@@ -7,17 +7,23 @@
 > P0 (ES-on-ash diagnostic) and P1 (foundation-axis plumbing) already shipped
 > (#1032). This plan covers the **state-based** emit subtree first; ES-on-vanilla
 > (P4) is a follow-up slice on the same scaffolding.
+>
+> **Naming note:** the `platform: phoenix` → `platform: elixir` rename
+> (#1043) landed *after* this plan was first written. Workflow filenames
+> below reflect the post-rename `elixir-*` convention; in-tree generator
+> identifiers (`generateElixirProject`, `src/generator/elixir/`) likewise.
 
 ## The constraint that shapes everything
 
 **There is no local Elixir/`mix` toolchain.** `mix compile --warnings-as-errors`
-is reachable only in CI (`phoenix-vanilla-build.yml`). So the local red→green
+is reachable only in CI (`elixir-vanilla-build.yml`). So the local red→green
 loop *cannot* be the Elixir compiler. It is, instead:
 
 - **Per-emitter structure tests** (vitest, string assertions on emitted `.ex`) —
-  the same shape as today's `test/generator/phoenix/*-emit.test.ts`. Fast, local.
+  the same shape as today's `test/generator/phoenix/*-emit.test.ts` (test dir
+  not renamed; only the `src/generator/` dir flipped). Fast, local.
 - **Cross-backend wire parity** — the decisive contract gate. Two tiers:
-  - *local, fast*: a `phoenix-vanilla-wire-conformance` test mirroring
+  - *local, fast*: an `elixir-vanilla-wire-conformance` test mirroring
     `test/generator/{hono,dotnet}/*-wire-conformance.test.ts` + the
     `test/_helpers/openapi-normalize.ts` normaliser — asserts the vanilla
     OpenAPI/wire-spec equals the ash one for the same `.ddd`, in-process, no boot.
@@ -35,9 +41,9 @@ before the first CI compile.
 |---|---|---|---|
 | Structure | vitest `*-emit` string asserts | local, seconds | per-file Elixir shape |
 | Wire parity (fast) | vitest conformance + `openapi-normalize` | local, seconds | the cross-backend contract |
-| Compile | `phoenix-vanilla-build.yml` (`mix compile --warnings-as-errors`) | CI, minutes | Elixir correctness (acceptance) |
+| Compile | `elixir-vanilla-build.yml` (`mix compile --warnings-as-errors`) | CI, minutes | Elixir correctness (acceptance) |
 | Live parity (strict) | `LOOM_E2E_STRICT_PARITY=1` e2e | CI, minutes | spec == ash at runtime |
-| Obs | `phoenix-obs-e2e.yml` (vanilla variant) | CI | telemetry envelope |
+| Obs | `elixir-vanilla-obs-e2e.yml` (vanilla variant) | CI | telemetry envelope |
 
 ## Vertical slices (each: write tests red → emit to green → push → CI compiles)
 
@@ -48,7 +54,7 @@ every slice is independently green + CI-compilable.
 **Slice 0 — harness + orchestrator branch.**
 - Tests first: a `foundation: vanilla` deployable lowers + lifts the
   `loom.foundation-vanilla-phoenix-not-yet-implemented` gate
-  (`src/language/validators/deployable.ts`); `generatePhoenixLiveViewProject`
+  (`src/language/validators/deployable.ts`); `generateElixirProject`
   dispatches to a `vanilla/` orchestrator (today it early-returns `{}` for
   vanilla). Add the smallest fixture (`vanilla-min.ddd`: one CRUD aggregate).
 - Emit: the orchestrator branch + an empty `vanilla/index.ts` returning the
@@ -98,7 +104,7 @@ every slice is independently green + CI-compilable.
   `workflow-instance-views.md` Phoenix deferral.)
 
 **Slice 6 — CI wiring + an example.**
-- Add `phoenix-vanilla-build.yml` (+ obs-e2e vanilla variant); add one
+- Add `elixir-vanilla-build.yml` (+ obs-e2e vanilla variant); add one
   `examples/*-vanilla.ddd` so the example matrix exercises it; strict-parity e2e
   entry for a vanilla deployable.
 
@@ -131,7 +137,7 @@ problem-details) + an `ecto-postgres-persistence` adapter advertising
 3. **`timestamps()` / inserted_at-updated_at** must not leak into the wire shape
    (they're not in `wireShape`) — parity will catch it, but expect it.
 4. **CI-only compile** means a slice can be green locally yet fail `mix`. Keep
-   slices small; push each; read `phoenix-vanilla-build.yml` logs as the truth.
+   slices small; push each; read `elixir-vanilla-build.yml` logs as the truth.
 
 ## Parallelization
 
