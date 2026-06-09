@@ -230,11 +230,64 @@ export function isReservedStub(family: Platform, axis: RealizationAxis, dslValue
  *  — setting an owned axis alongside the foundation is an error (R4).
  *  `vanilla` owns nothing; a rung-3/4 framework owns the application +
  *  HTTP surface.  Data-driven: growing the foundation menu activates the
- *  rule with no code change.  (`ash` does NOT own `persistence:` in v1 —
- *  `ashPostgres`/`ashSqlite` stay selectable; menu-narrowing deferred.) */
+ *  rule with no code change.  (`ash` does NOT own `persistence:` — both
+ *  `ashPostgres` and the plain `ecto` data layer stay on the persistence
+ *  axis; which of them is legal under a given foundation is the
+ *  compatibility rule R6 below, not ownership.) */
 export const FOUNDATION_OWNED_AXES: Record<string, readonly RealizationAxis[]> = {
   vanilla: [],
   ash: ["application", "transport"],
   abp: ["application", "transport"],
   nestjs: ["application", "transport"],
 };
+
+/** Adapters BOUND to a specific opinionated foundation framework — its data
+ *  layer (`persistence`) and architectural style (`application`, in DSL
+ *  spelling).  A *named* foundation admits ONLY its own family on these axes;
+ *  `vanilla` admits the rest (the non-framework libraries).  Drives R6
+ *  (foundation↔axis compatibility) + the foundation-narrowed menu.
+ *
+ *  Ash's data layer is per-DB (`ash_postgres` / `ash_sqlite` — not drop-in;
+ *  see docs/plans/realization-axes-alignment.md §3.1), so its family lists
+ *  the per-DB adapters; `ecto` is the DB-agnostic vanilla library and is NOT
+ *  a framework adapter.  `abp` / `nestjs` gain entries when those foundations
+ *  are wired. */
+export const FOUNDATION_FAMILY_ADAPTERS: Record<
+  string,
+  { readonly persistence?: readonly string[]; readonly application?: readonly string[] }
+> = {
+  ash: { persistence: ["ashPostgres", "ashSqlite"], application: ["ash"] },
+};
+
+/** The platform's DEFAULT foundation — the primary (first) entry of its
+ *  foundation menu (`elixir` → `ash`, every other backend → `vanilla`).
+ *  Used by R6 to resolve the effective foundation when the knob is omitted.
+ *  (Mirror of the `foundation` default in `greenfieldAxisDefaults`, kept here
+ *  in the language layer so the validator need not reach into lowering.) */
+export function defaultFoundationFor(family: Platform): string | undefined {
+  return greenfieldMenu(family, "foundation")[0];
+}
+
+/** The values legal for `persistence:` / `application:` under a foundation on
+ *  a platform (R6).  Named foundation → its framework family ∩ the platform
+ *  menu.  `vanilla` (or any non-framework foundation) → the platform menu
+ *  minus every framework family (the non-framework libraries).  Returns the
+ *  axis values in DSL spelling, matching `realizationAxisMenu`. */
+export function foundationCompatibleMenu(
+  family: Platform,
+  foundation: string,
+  axis: "persistence" | "application",
+): string[] {
+  const full = realizationAxisMenu(family, axis);
+  const own = FOUNDATION_FAMILY_ADAPTERS[foundation]?.[axis];
+  if (own !== undefined) {
+    // Named foundation: only its own family that the platform actually ships.
+    return full.filter((v) => own.includes(v));
+  }
+  // vanilla / non-framework: everything that is NOT bound to a framework.
+  const frameworkBound = new Set<string>();
+  for (const fam of Object.values(FOUNDATION_FAMILY_ADAPTERS)) {
+    for (const v of fam[axis] ?? []) frameworkBound.add(v);
+  }
+  return full.filter((v) => !frameworkBound.has(v));
+}

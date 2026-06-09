@@ -168,3 +168,64 @@ describe("realization axes — foundation: vanilla on elixir is accepted (Slice 
     expect(errors).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// R6 — persistence / application must be compatible with the foundation
+// (docs/plans/realization-axes-alignment.md).  `ash` admits only its
+// framework family (`ashPostgres`); `vanilla` admits the non-framework
+// libraries (`ecto`).  The effective foundation is the explicit value or the
+// platform default, so a cross pair is rejected either way.
+// ---------------------------------------------------------------------------
+describe("realization axes — R6 foundation ↔ persistence/application compatibility", () => {
+  it("rejects `foundation: ash` + `persistence: ecto` (ash wants its own data layer)", async () => {
+    const { errors } = await parse(sys("elixir { foundation: ash, persistence: ecto }"));
+    expect(
+      errors.some((e) =>
+        /persistence: ecto.*incompatible with 'foundation: ash'.*'ashPostgres'/.test(e),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects `foundation: vanilla` + `persistence: ashPostgres` (plain Ecto only)", async () => {
+    const { errors } = await parse(sys("elixir { foundation: vanilla, persistence: ashPostgres }"));
+    expect(
+      errors.some((e) =>
+        /persistence: ashPostgres.*incompatible with 'foundation: vanilla'.*'ecto'/.test(e),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects `persistence: ecto` with NO foundation on elixir (defaults to ash)", async () => {
+    const { errors } = await parse(sys("elixir { persistence: ecto }"));
+    expect(
+      errors.some((e) =>
+        /persistence: ecto.*incompatible with 'foundation: ash'.*default on 'elixir'/.test(e),
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts `foundation: vanilla` + `persistence: ecto` (the aligned pair)", async () => {
+    const { errors } = await parse(sys("elixir { foundation: vanilla, persistence: ecto }"));
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects `foundation: vanilla` + `application: ash` (Ash style needs Ash)", async () => {
+    const { errors } = await parse(sys("elixir { foundation: vanilla, application: ash }"));
+    expect(
+      errors.some((e) =>
+        /application: ash.*incompatible with 'foundation: vanilla'.*'vanilla'/.test(e),
+      ),
+    ).toBe(true);
+  });
+
+  it("no R6 error for a foundation without an explicit data layer", async () => {
+    expect((await parse(sys("elixir { foundation: ash }"))).errors).toEqual([]);
+    expect((await parse(sys("elixir { foundation: vanilla }"))).errors).toEqual([]);
+    expect((await parse(sys("elixir"))).errors).toEqual([]);
+  });
+
+  it("dotnet persistence (vanilla foundation) is unaffected — no framework binding", async () => {
+    expect((await parse(sys("dotnet { persistence: efcore }"))).errors).toEqual([]);
+    expect((await parse(sys("dotnet { persistence: dapper }"))).errors).toEqual([]);
+  });
+});
