@@ -1,6 +1,15 @@
 # Domain service — the missing third construct (options)
 
-> Status: proposal (exploratory — **options, not a pinned design**).
+> Status: **SUPERSEDED by [`domain-services.md`](./domain-services.md)**
+> (plural). This doc remains as the exploratory options-menu — six
+> design axes and three assembled shapes (A pure-calculator, B
+> coordinator, C unified function family) — that the successor pins.
+> The successor adopts this doc's framework, commits to a single answer
+> on every axis (v1 = Shape A; Shape B = Phase 2; Shape C deferred),
+> and adds the grammar / IR / validator / emission / test spec. Read
+> this doc for the *design-space*; read the successor for *what
+> ships*.
+>
 > **Companion**: [`failure-taxonomy.md`](./failure-taxonomy.md). This
 > doc fills a row that doc's error-placement table left empty: a
 > cross-aggregate **domain** rule that can fail with a domain error.
