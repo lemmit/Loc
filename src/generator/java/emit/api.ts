@@ -38,8 +38,10 @@ export function renderJavaController(
   const imports = new Set<string>(["java.util.List"]);
   if (idJava === "UUID") imports.add("java.util.UUID");
 
+  // Extern ops route identically — the service dispatches to the
+  // user-supplied handler instead of an aggregate method.
   const opRoutes = agg.operations
-    .filter((op) => op.visibility === "public" && !op.extern)
+    .filter((op) => op.visibility === "public")
     .flatMap((op) => {
       const hasParams = op.params.length > 0;
       const reqType = `${upperFirst(op.name)}${agg.name}Request`;

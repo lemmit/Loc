@@ -1,0 +1,579 @@
+// showcase.ddd — the Loom "tech showcase" conformance fixture.
+//
+// A single coherent platform-engineering / DevTools-SaaS system that
+// exercises EVERY language feature so the cross-generator harness has one
+// example touching the whole surface.  Domain: a developer platform that
+// manages projects, build pipelines, deployments, and the engineers who
+// operate them.
+//
+// Parses + validates with zero errors; warnings (provenance / match
+// exhaustiveness) are acceptable.
+
+// ---------------------------------------------------------------------------
+// Traceability artifacts (sit above the model).
+// ---------------------------------------------------------------------------
+requirement US-001 {
+    type: UserStory
+    title: "An engineer can register a project and run a pipeline"
+    status: InProgress
+    priority: 1
+}
+
+requirement AC-001 parent US-001 {
+    type: AcceptanceCriteria
+    title: "A pipeline can only run when the project is active"
+}
+
+requirement US-002 {
+    type: UserStory
+    title: "An operator can promote a build to a deployment environment"
+    status: Approved
+}
+
+requirement AC-002 parent US-002 {
+    type: AcceptanceCriteria
+    title: "Builds are uniquely identified by commit sha"
+}
+
+system DevPlatform {
+
+    // System-wide visual identity.
+    theme {
+        primary: "#6366f1"
+        neutral: "#64748b"
+        radius: "md"
+        fontFamily: "Inter, system-ui, sans-serif"
+    }
+
+    // Strongly-typed JWT claim shape; `currentUser` types against this.
+    user {
+        id: guid
+        role: string
+        permissions: string[]
+    }
+
+    // -----------------------------------------------------------------
+    // Projects module — registry of projects + their build pipelines.
+    // -----------------------------------------------------------------
+    subdomain Projects {
+
+        permissions { manageProjects, viewReports }
+
+        context Catalog {
+
+            enum Visibility { Private, Internal, Public }
+
+            valueobject Slug {
+                value: string
+                invariant value.length > 0
+                invariant value.matches("^[a-z][a-z0-9-]*$")
+                derived label: string = value + " (slug)"
+            }
+
+            event ProjectArchived { project: Project id, at: datetime }
+
+            aggregate Project ids guid with crudish {
+                name: string
+                description: string?
+                visibility: Visibility
+                active: bool
+                sequence: long
+                externalId: guid?
+                tags: string[]?
+                budget: decimal
+                createdAt: datetime
+                contains pipelines: Pipeline[]
+
+                invariant name.length > 0
+                invariant pipelines.count >= 0 when active == true
+
+                // derived prop with match + ternary + unary + paren + literals
+                derived headline: string = match {
+                    (visibility == Public) => "public: " + name,
+                    (visibility == Internal) => "internal",
+                    else => (active ? "active" : "archived")
+                }
+
+                derived pipelineCount: int = pipelines.count
+
+                // DecLit + NullLit literal coverage.
+                derived overBudget: bool = budget > 100.0
+                derived hasDescription: bool = description != null
+
+                function isActive(): bool = active == true
+
+                function badge(): string = !active ? "off" : "on"
+
+                operation rename(newName: string) {
+                    requires currentUser.role == "admin"
+                    precondition newName.length > 0
+                    name := newName
+                }
+
+                operation archive() {
+                    requires currentUser.role == "admin"
+                    precondition active == true
+                    active := false
+                    emit ProjectArchived { project: id, at: now() }
+                }
+
+                operation addPipeline(label: string) {
+                    precondition isActive()
+                    pipelines += Pipeline { label: label, runCount: 0 }
+                }
+
+                // extern operation — the user-supplied handler owns the
+                // logic; the .ddd body may only carry preconditions (gates
+                // that run before the handler).
+                operation syncFromVcs() extern {
+                    precondition active == true
+                }
+
+                // private operation
+                private operation touch() {
+                    createdAt := now()
+                }
+
+                entity Pipeline {
+                    label: string
+                    runCount: int
+                    invariant runCount >= 0
+                    derived displayLabel: string = label + " #" + "x"
+                }
+
+                test "renaming to empty is rejected" verifies TC-001 {
+                    let p = Project.create({
+                        name: "demo",
+                        visibility: Public,
+                        active: true,
+                        sequence: 1,
+                        budget: 0.0,
+                        createdAt: now()
+                    })
+                    expectThrows p.rename("")
+                }
+                derived display: string = name
+            }
+
+            repository Projects for Project {
+                find byName(name: string): Project? where this.name == name
+                find active(): Project[] where this.active == true
+            }
+
+            // Non-transactional workflow.
+            workflow registerProject {
+              create(name: string, visibility: Visibility) {
+                requires currentUser.permissions.length > 0
+                  precondition name.length > 0
+                  let proj = Project.create({
+                      name: name,
+                      visibility: visibility,
+                      active: true,
+                      sequence: 0,
+                          budget: 0.0,
+                      createdAt: now()
+                  })
+                  proj.addPipeline("default")
+              }
+            }
+
+            // View — shorthand form.
+            view ActiveProjects = Project where active == true
+
+            // View — full form with bind expressions.
+            view ProjectSummary {
+                projectId: Project id
+                name: string
+                pipelines: int
+
+                from Project where visibility != Private
+                bind projectId = id,
+                     name = name,
+                     pipelines = pipelines.count
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Delivery module — builds + deployments.
+    // -----------------------------------------------------------------
+    subdomain Delivery {
+        context Builds {
+
+            enum BuildState { Queued, Running, Passed, Failed }
+
+            valueobject Duration {
+                seconds: int
+                invariant seconds >= 0
+            }
+
+            event BuildPromoted { build: Build id, env: string, at: datetime }
+
+            aggregate Build with crudish {
+                commitSha: string
+                buildState: BuildState
+                // `total` is a plain field here: the Builds context is hosted on
+                // dotnet + phoenix as well as hono for OpenAPI parity, and the
+                // provenance runtime is emitted on hono only (loom.provenanced-
+                // backend-unsupported gates the mismatch).  The `provenanced`
+                // modifier is demonstrated in examples/provenance.ddd (hono-only).
+                total: int
+                startedAt: datetime
+
+                invariant commitSha.length > 0
+
+                function passed(): bool = buildState == Passed
+
+                operation promote(env: string) {
+                    requires currentUser.role == "admin"
+                    precondition passed()
+                    total := total + 1
+                    emit BuildPromoted { build: id, env: env, at: now() }
+                }
+                derived display: string = commitSha
+            }
+
+            repository Builds for Build {
+                find bySha(commitSha: string): Build? where this.commitSha == commitSha
+            }
+
+            // Transactional workflow with explicit isolation level.
+            workflow promoteToProduction transactional(serializable) {
+              create(buildId: Build id) {
+                requires currentUser.role == "admin"
+                  let b = Builds.getById(buildId)
+                  b.promote("production")
+              }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Accounts module — engineers (wire-validation showcase).
+    // -----------------------------------------------------------------
+    subdomain Accounts {
+        context People {
+
+            aggregate Engineer with crudish {
+                handle: string
+                  check handle.length >= 3 && handle.length <= 32
+                email: string
+                  check email.matches("^[^@]+@[^@]+\\.[^@]+$") && email.length <= 120
+                level: int check level >= 1 && level <= 10
+                onCall: bool
+
+                invariant handle != email
+                private invariant handle.matches("^[a-z][a-z0-9_]*$")
+                derived display: string = handle
+            }
+
+            repository Engineers for Engineer {
+                find byHandle(handle: string): Engineer? where this.handle == handle
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Layered architecture: api / storage / ui / deployable.
+    // -----------------------------------------------------------------
+    api ProjectsApi from Projects
+    api DeliveryApi from Delivery
+    api AccountsApi from Accounts
+
+    storage primarySql { type: postgres }
+    storage hotCache    { type: redis }
+
+    // ----- UI 1: rich explicit pages (covers walker primitives) -----
+    ui Console {
+        api Projects: ProjectsApi
+        api Delivery: DeliveryApi
+        api Accounts: AccountsApi
+
+        // Project list — Stack / Breadcrumbs / Anchor / Text / Toolbar /
+        // Heading / Button / QueryView / Skeleton / Alert / Empty / Paper /
+        // Table / Column / IdLink / EnumBadge / DateDisplay.
+        page ProjectList {
+            route: "/projects"
+            title: "Projects"
+            requires currentUser.role == "admin"
+            body: Stack {
+                Breadcrumbs {
+                    Anchor { "Home", to: "/" },
+                    Text { "Projects" }
+                },
+                Toolbar {
+                    Heading { "Projects", level: 2 },
+                    Button { "New project", to: "/projects/new", testid: "projects-create" }
+                },
+                QueryView {
+                    of: Projects.Project.all,
+                    loading: Skeleton { count: 5 },
+                    error: Alert { "Couldn't load projects" },
+                    empty: Empty { "No projects yet." },
+                    data: rows => Paper {
+                        Table {
+                            rows: rows,
+                            striped: true,
+                            highlight: true,
+                            rowTestid: r => "projects-row-" + r.id,
+                            Column { "ID", o => IdLink { o.id, of: Project } },
+                            Column { "Name", o => Text { o.name } },
+                            Column { "Visibility", o => EnumBadge { o.visibility } },
+                            Column { "Created", o => DateDisplay { o.createdAt } }
+                        },
+                        padding: "none"
+                    },
+                    testid: "projects-query"
+                },
+                testid: "projects-list"
+            }
+        }
+
+        // Project create — Form.
+        page ProjectNew {
+            route: "/projects/new"
+            title: "New project"
+            body: Stack {
+                Breadcrumbs {
+                    Anchor { "Home", to: "/" },
+                    Anchor { "Projects", to: "/projects" },
+                    Text { "New" }
+                },
+                Heading { "Create project", level: 2 },
+                Card { CreateForm { of: Project, testid: "projects-new" } },
+                testid: "projects-new-page"
+            }
+        }
+
+        // Project detail — covers the remaining layout primitives:
+        // Group / Grid / Container / Tabs / Field / NumberField /
+        // PasswordField / Toggle / Loader / Image / Avatar / Slot / Card /
+        // Stat / Badge / Divider / Money / KeyValueRow / Modal.
+        page ProjectDetail(id: Project id) {
+            route: "/projects/:id"
+            title: "Project"
+            state {
+                editing: bool = false
+                draftName: string = ""
+                level: int = 1
+            }
+            body: Container {
+                Grid {
+                    Group {
+                        Avatar { "P" },
+                        Image { "/logo.png" },
+                        Heading { "Project detail", level: 2 }
+                    },
+                    Tabs {
+                        Card {
+                            Stack {
+                                Stat { "Pipelines", 3 },
+                                Badge { "active" },
+                                Divider {},
+                                Money { 1999, currency: "USD" },
+                                KeyValueRow { "Owner", Text { "platform-team" } },
+                                Loader {}
+                            }
+                        },
+                        Card {
+                            Stack {
+                                Field { "Name", value: draftName },
+                                NumberField { "Level", value: level },
+                                PasswordField { "Token" },
+                                Toggle { "Editing", value: editing },
+                                Anchor { "Docs", to: "/docs" },
+                                Button { "Save", to: "/projects" }
+                            }
+                        }
+                    }
+                },
+                Modal {
+                    Text { "Confirm archive?" },
+                    open: editing,
+                    title: "Archive"
+                },
+                testid: "projects-detail"
+            }
+        }
+
+        // A reusable component (covers Component + its state block).
+        // `Slot {}` belongs in a component body (it emits `{children}`
+        // and marks the Props interface with `children?`), so the
+        // showcase exercises it here rather than in a page.
+        component StatusPill(label: string) {
+            state {
+                hovered: bool = false
+            }
+            body: Stack { Badge { label }, Slot { "extra" } }
+        }
+
+        // UI-level sidebar menu — internal link + external link.
+        menu {
+            section "Platform" {
+                link ProjectList { label: "All projects", order: 0 },
+                link ProjectNew,
+                link "Status page" -> "https://status.example.com"
+            }
+        }
+    }
+
+    // ----- UI 2: legacy block-binding form (no api params) + per-page
+    //             menu meta.  A plain page body with no api dependency. -----
+    ui Ops {
+        page BuildBoard {
+            route: "/builds"
+            title: "Builds"
+            menu { section: "Ops", label: "Builds", order: 0 }
+            body: Stack {
+                Heading { "Build board", level: 2 },
+                Text { "Build status overview" },
+                testid: "builds-board"
+            }
+        }
+    }
+
+    // ----- UI 3: scaffold-only (sugar binding target, no api params) -----
+    ui Admin with scaffold(subdomains: [Accounts]) {
+    }
+
+    // ----- DataSources: per-(context, kind) bindings to physical storages -----
+    resource catalogState  { for: Catalog, kind: state, use: primarySql }
+    resource catalogCache  { for: Catalog, kind: cache, use: hotCache }
+    resource buildsState   { for: Builds,  kind: state, use: primarySql }
+    resource peopleState   { for: People,  kind: state, use: primarySql }
+
+    // ----- Backend deployables (same contexts for OpenAPI parity) -----
+    deployable dotnetApi {
+        platform: java
+        contexts: [Catalog, Builds, People]
+        dataSources: [catalogState, catalogCache, buildsState, peopleState]
+        serves: ProjectsApi, DeliveryApi, AccountsApi
+        port: 8080
+        auth: required
+    }
+
+    deployable honoApi {
+        platform: hono
+        contexts: [Catalog, Builds, People]
+        dataSources: [catalogState, buildsState, peopleState]
+        serves: ProjectsApi, DeliveryApi, AccountsApi
+        port: 3000
+        auth: required
+    }
+
+    deployable phoenixApi {
+        platform: phoenix
+        contexts: [Catalog, Builds, People]
+        dataSources: [catalogState, buildsState, peopleState]
+        serves: ProjectsApi, DeliveryApi, AccountsApi
+        port: 4000
+        auth: required
+    }
+
+    // ----- Frontend deployables: all three ui-binding forms -----
+
+    // Compose-block binding form.
+    deployable consoleWeb {
+        platform: static
+        targets: dotnetApi
+        ui: Console { Projects: dotnetApi, Delivery: dotnetApi, Accounts: dotnetApi }
+        port: 3001
+        auth: required
+        design: mantine
+    }
+
+    // Legacy block-binding form (UiBlockBinding).
+    deployable opsWeb {
+        platform: static
+        targets: honoApi
+        ui Ops { framework: react }
+        port: 3002
+        design: mantine
+    }
+
+    // Sugar binding form (UiSugarBinding), no api params on the ui.
+    deployable adminWeb {
+        platform: static
+        targets: honoApi
+        ui: Admin
+        port: 3003
+        design: shadcn
+    }
+
+    // -----------------------------------------------------------------
+    // End-to-end tests.
+    // -----------------------------------------------------------------
+    test e2e "create a project then read it back" against dotnetApi verifies TC-002 {
+        let p = api.projects.create({ name: "Atlas", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", createdAt: "2024-01-01T00:00:00Z" })
+        let read = api.projects.getById(p)
+        expect read.name == "Atlas"
+    }
+
+    test e2e "create and read a build" against honoApi {
+        let b = api.builds.create({ commitSha: "abc1234", buildState: "Passed", startedAt: "2024-01-01T00:00:00Z" })
+        let read = api.builds.getById(b)
+        expect read.commitSha == "abc1234"
+    }
+
+    test e2e "browse projects via the console UI" against consoleWeb {
+        let rows = ui.views.activeProjects()
+        expect rows.length >= 0
+    }
+
+    // ----- Negative-path conformance (cross-backend) -------------------
+    // These replay against every backend serving the referenced module
+    // (Hono / .NET / Phoenix).  `expectThrows` lowers to a non-2xx HTTP
+    // assertion, so each block pins "every backend rejects the same bad
+    // input" at runtime — the behavioral complement to the static
+    // `errorResponseDiffs` OpenAPI parity gate.  Payloads mirror the
+    // happy-path creates above so the *only* reason to fail is the one
+    // field under test.
+
+    // 422 — invariant `name.length > 0` (Catalog.Project) must reject.
+    test e2e "creating a project with an empty name is rejected" against dotnetApi {
+        expectThrows api.projects.create({ name: "", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", createdAt: "2024-01-01T00:00:00Z" })
+    }
+
+    // 422 — invariant `commitSha.length > 0` (Builds.Build) must reject.
+    test e2e "creating a build with an empty commitSha is rejected" against honoApi {
+        expectThrows api.builds.create({ commitSha: "", buildState: "Passed", startedAt: "2024-01-01T00:00:00Z" })
+    }
+
+    // 404 — reading an id that was never created must error, not 200.
+    test e2e "reading a non-existent project is rejected" against dotnetApi {
+        expectThrows api.projects.getById("ffffffff-ffff-ffff-ffff-ffffffffffff")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Solutions + test cases (below the model).
+// ---------------------------------------------------------------------------
+solution SOL-001 for US-001 {
+    title: "Projects own their pipelines; registerProject orchestrates setup"
+    entitles [
+        Projects.Catalog.Project.rename,
+        Projects.Catalog.Project.archive,
+        Projects.Catalog.registerProject,
+        dotnetApi
+    ]
+}
+
+solution SOL-002 for US-002 {
+    title: "Builds promote through the Delivery context"
+    entitles [
+        Delivery.Builds.Build.promote,
+        DeliveryApi
+    ]
+}
+
+testCase TC-001 verifies AC-001 {
+    title: "Renaming a project to empty is rejected"
+    covers [ Projects.Catalog.Project.rename ]
+}
+
+testCase TC-002 verifies US-002 {
+    title: "Promote a passing build"
+    covers [
+        Delivery.Builds.Build.promote
+    ]
+}

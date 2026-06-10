@@ -6,13 +6,14 @@ import type {
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  RepositoryIR,
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
 import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
-import { plural, snake } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import { byFeatureLayoutAdapter } from "./adapters/by-feature-layout.js";
@@ -22,6 +23,7 @@ import type {
   JavaLayoutAdapter,
 } from "./adapters/by-layer-layout.js";
 import { renderApiExceptionAdvice, renderJavaController } from "./emit/api.js";
+import { renderAuthFiles } from "./emit/auth.js";
 import {
   renderAggregateNotFoundException,
   renderDomainEventInterface,
@@ -34,6 +36,7 @@ import { renderDtoFiles } from "./emit/dto.js";
 import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
 import { renderJavaEvent } from "./emit/events.js";
+import { renderExternHandlerInterface, renderExternHandlerStub } from "./emit/extern.js";
 import { renderJavaId } from "./emit/ids.js";
 import { emitJavaMigrations } from "./emit/migrations.js";
 import {
@@ -52,6 +55,8 @@ import {
 } from "./emit/repository.js";
 import { renderJavaService } from "./emit/service.js";
 import { renderJavaValidators } from "./emit/validator.js";
+import { renderJavaViews, viewFindsFor } from "./emit/view.js";
+import { renderJavaWorkflows } from "./emit/workflow.js";
 import { basePackageFor, javaPackageSegment, mainSourcePath } from "./naming.js";
 
 // ---------------------------------------------------------------------------
@@ -154,6 +159,8 @@ function emitProjectFromContexts(
   const pkgFor = (category: JavaArtifactCategory, aggregateName?: string): string =>
     layout.packageFor(category, basePkg, aggregateName);
 
+  const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
+
   // Shared domain types + the package markers that keep the entity files'
   // wildcard imports valid even when a package would otherwise be empty.
   place("DomainException.java", "domain-common", renderDomainException(basePkg));
@@ -190,14 +197,52 @@ function emitProjectFromContexts(
       place(`${ev.name}.java`, "event", renderJavaEvent(ev, basePkg));
     }
     for (const agg of ctx.aggregates) {
-      emitAggregate(agg, ctx, basePkg, place, pkgFor, emitTrace, system?.sys);
+      emitAggregate(agg, ctx, basePkg, place, pkgFor, emitTrace, system?.sys, authRequired);
+    }
+    // Workflows + views — per-context controllers under /workflows and
+    // /views, services in the shared application packages.
+    const workflowFiles = renderJavaWorkflows(
+      ctx,
+      {
+        basePkg,
+        pkg: pkgFor("workflow-service"),
+        entityPkgOf: (a) => pkgFor("entity", a),
+        repoPkgOf: (a) => pkgFor("repository-interface", a),
+      },
+      authRequired,
+    );
+    if (workflowFiles) {
+      for (const [name, f] of workflowFiles) {
+        place(name, f.category === "controller" ? "api-common" : "workflow-service", f.content);
+      }
+    }
+    const viewFiles = renderJavaViews(ctx, {
+      basePkg,
+      pkg: pkgFor("view-service"),
+      applicationPkgOf: (a) => pkgFor("service", a),
+      entityPkgOf: (a) => pkgFor("entity", a),
+      repoPkgOf: (a) => pkgFor("repository-interface", a),
+    });
+    if (viewFiles) {
+      for (const [name, f] of viewFiles) place(name, f.category, f.content);
+    }
+  }
+
+  // Auth surface — only when the deployable opts in via auth: required
+  // and the system declares a user block.
+  if (authRequired && system?.sys) {
+    for (const [name, content] of renderAuthFiles(system.sys, basePkg)) {
+      out.set(mainSourcePath(`${basePkg}.auth`, name), content);
     }
   }
 
   // Per-module Flyway migrations — empty (non-system entry points) → no-op.
-  const migrations = (system?.migrations ?? []).filter((m) => m.steps.length > 0);
-  emitJavaMigrations(migrations, out);
-  const hasMigrations = migrations.length > 0;
+  // The flyway deps stay as long as ANY migration history exists (a regen
+  // with an unchanged schema emits no new steps, but the previously
+  // emitted V*.sql files still need Flyway to run).
+  const allMigrations = system?.migrations ?? [];
+  emitJavaMigrations(allMigrations, out);
+  const hasMigrations = allMigrations.some((m) => m.steps.length > 0 || m.baseline !== null);
 
   // Project shell — stable from S1 on.
   out.set("pom.xml", renderPom(ns, slug, { flyway: hasMigrations }));
@@ -224,6 +269,7 @@ function emitAggregate(
   pkgFor: (category: JavaArtifactCategory, aggregateName?: string) => string,
   emitTrace: boolean,
   sys?: SystemIR,
+  authRequired = false,
 ): void {
   const eventFields = new Map(ctx.events.map((e) => [e.name, e.fields.map((f) => f.name)]));
   // The JPA mapping mirrors `schemaFromModule`: binding-resolved schema +
@@ -319,7 +365,17 @@ function emitAggregate(
   );
 
   // Repository triple: domain port + Spring Data JPA interface + impl.
+  // Views sourced from this aggregate ride synthesized parameterless
+  // finds (the mergeViewsAsFinds analog) — repository-level only; the
+  // aggregate controller doesn't route them (the views controller does).
   const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+  const viewFinds = viewFindsFor(agg.name, ctx) as unknown as RepositoryIR["finds"];
+  const repoWithViews: RepositoryIR =
+    viewFinds.length > 0
+      ? repo
+        ? { ...repo, finds: [...repo.finds, ...viewFinds] }
+        : { name: `${agg.name}Repository`, aggregateName: agg.name, finds: viewFinds }
+      : (repo ?? { name: `${agg.name}Repository`, aggregateName: agg.name, finds: [] });
   const idClass = `${ownerName}Id`;
   const repoCtx: JavaRepoCtx = {
     basePkg,
@@ -330,19 +386,19 @@ function emitAggregate(
   place(
     `${agg.name}Repository.java`,
     "repository-interface",
-    renderJavaRepositoryInterface(agg, repo, repoCtx, idClass),
+    renderJavaRepositoryInterface(agg, repoWithViews, repoCtx, idClass),
     agg.name,
   );
   place(
     `${agg.name}JpaRepository.java`,
     "spring-data-repository",
-    renderJavaSpringDataRepository(agg, repo, repoCtx, idClass),
+    renderJavaSpringDataRepository(agg, repoWithViews, repoCtx, idClass),
     agg.name,
   );
   place(
     `${agg.name}RepositoryImpl.java`,
     "repository-impl",
-    renderJavaRepositoryImpl(agg, repo, repoCtx, idClass),
+    renderJavaRepositoryImpl(agg, repoWithViews, repoCtx, idClass),
     agg.name,
   );
 
@@ -370,9 +426,24 @@ function emitAggregate(
       pkg: applicationPkg,
       entityPkg: pkgFor("entity", agg.name),
       domainRepoPkg: pkgFor("repository-interface", agg.name),
+      authed: authRequired,
     }),
     agg.name,
   );
+  for (const op of agg.operations.filter((o) => o.extern)) {
+    place(
+      `${upperFirst(op.name)}${agg.name}Handler.java`,
+      "extern-handler-interface",
+      renderExternHandlerInterface(agg, op, applicationPkg, basePkg, pkgFor("entity", agg.name)),
+      agg.name,
+    );
+    place(
+      `DevStub${upperFirst(op.name)}${agg.name}Handler.java`,
+      "extern-handler-stub",
+      renderExternHandlerStub(agg, op, applicationPkg, basePkg, pkgFor("entity", agg.name)),
+      agg.name,
+    );
+  }
   place(
     `${plural(agg.name)}Controller.java`,
     "controller",

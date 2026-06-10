@@ -55,6 +55,11 @@ export interface JavaRenderContext {
    *  canonical-constructor parameters carry the values and `this` is not
    *  yet available. */
   bareProps?: boolean;
+  /** Render `this`-rooted property / id refs through the public
+   *  accessors (`a.name()`, `a.id()`).  Needed when the receiver is an
+   *  aggregate read from OUTSIDE its package (view binds in the views
+   *  service) — package-private fields are unreachable there. */
+  accessorProps?: boolean;
 }
 
 const DEFAULT: JavaRenderContext = { thisName: "this" };
@@ -175,7 +180,8 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
   literal: renderLiteral,
   // Within the owning class the id is a direct field read; lambda-param
   // receivers (`x.id`) read the package-visible field the same way.
-  id: (ctx) => `${ctx.thisName}.id`,
+  // Cross-package contexts (view binds) go through the accessor.
+  id: (ctx) => (ctx.accessorProps ? `${ctx.thisName}.id()` : `${ctx.thisName}.id`),
   ref: renderRef,
   member: renderMember,
   methodCall: renderMethodCall,
@@ -227,7 +233,9 @@ function renderRef(e: RefExpr, ctx: JavaRenderContext): string {
       return e.name;
     case "this-prop":
     case "this-vo-prop":
-      return ctx.bareProps ? e.name : `${ctx.thisName}.${e.name}`;
+      if (ctx.bareProps) return e.name;
+      if (ctx.accessorProps) return `${ctx.thisName}.${e.name}()`;
+      return `${ctx.thisName}.${e.name}`;
     case "this-derived":
       // Derived properties are methods on the Java side.
       return `${ctx.thisName}.${e.name}()`;

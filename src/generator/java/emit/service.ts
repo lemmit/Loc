@@ -5,8 +5,9 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { upperFirst } from "../../../util/naming.js";
+import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
 import { declaredFinds } from "./repository.js";
 import { aggHasAnyWireValidator, renderJavaValidators } from "./validator.js";
@@ -25,6 +26,8 @@ export interface ServiceCtx {
   pkg: string;
   entityPkg: string;
   domainRepoPkg: string;
+  /** auth: required + system user block — gates currentUser threading. */
+  authed?: boolean;
 }
 
 export function renderJavaService(
@@ -99,8 +102,11 @@ export function renderJavaService(
   });
 
   // --- operations ----------------------------------------------------------------
+  const anyOpUsesUser =
+    !!ctx.authed &&
+    agg.operations.some((op) => op.visibility === "public" && operationUsesCurrentUser(op));
   const opLines = agg.operations
-    .filter((op) => op.visibility === "public" && !op.extern)
+    .filter((op) => op.visibility === "public")
     .flatMap((op) => {
       const hasParams = op.params.length > 0;
       const reqType = `${upperFirst(op.name)}${agg.name}Request`;
@@ -109,12 +115,37 @@ export function renderJavaService(
         (p) => `        var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`)};`,
       );
       for (const p of op.params) collectWireToDomainImports(p.type, imports);
-      const args = op.params.map((p) => p.name).join(", ");
+      const usesUser = !!ctx.authed && operationUsesCurrentUser(op);
+      const args = [...op.params.map((p) => p.name), ...(usesUser ? ["currentUser"] : [])].join(
+        ", ",
+      );
       const opHasValidator = opHasWireValidator(agg, op.name);
+      if (op.extern) {
+        // Extern op: preconditions gate (check<Op>), then the
+        // user-supplied handler owns the business decision, then the
+        // invariants re-assert before save.
+        const handlerArgs = ["aggregate", ...op.params.map((p) => p.name)].join(", ");
+        return [
+          `    public void ${op.name}(${paramSig}) {`,
+          ...lets,
+          usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
+          `        var aggregate = repository.getById(id);`,
+          `        aggregate.check${upperFirst(op.name)}(${args});`,
+          `        ${lowerFirst(op.name)}Handler.handle(${handlerArgs});`,
+          `        aggregate._assertInvariants();`,
+          `        repository.save(aggregate);`,
+          `        publishEvents(aggregate);`,
+          `    }`,
+          ``,
+        ].filter((l): l is string => l !== null);
+      }
       return [
         `    public void ${op.name}(${paramSig}) {`,
         ...lets,
-        opHasValidator ? `        ${agg.name}Validators.${op.name}(${args});` : null,
+        usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
+        opHasValidator
+          ? `        ${agg.name}Validators.${op.name}(${op.params.map((p) => p.name).join(", ")});`
+          : null,
         `        var aggregate = repository.getById(id);`,
         `        aggregate.${op.name}(${args});`,
         `        repository.save(aggregate);`,
@@ -123,6 +154,7 @@ export function renderJavaService(
         ``,
       ].filter((l): l is string => l !== null);
     });
+  const externOps = agg.operations.filter((op) => op.extern);
 
   // --- destroy (lifecycle) ----------------------------------------------------------
   const destroyLines =
@@ -166,6 +198,8 @@ export function renderJavaService(
     ``,
     ctx.entityPkg !== ctx.pkg ? `import ${ctx.entityPkg}.${agg.name};` : null,
     ctx.domainRepoPkg !== ctx.pkg ? `import ${ctx.domainRepoPkg}.${agg.name}Repository;` : null,
+    anyOpUsesUser ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
+    anyOpUsesUser ? `import ${ctx.basePkg}.auth.User;` : null,
     `import ${ctx.basePkg}.domain.enums.*;`,
     `import ${ctx.basePkg}.domain.ids.*;`,
     `import ${ctx.basePkg}.domain.valueobjects.*;`,
@@ -176,9 +210,24 @@ export function renderJavaService(
     `    private static final Logger log = LoggerFactory.getLogger(${agg.name}Service.class);`,
     ``,
     `    private final ${agg.name}Repository repository;`,
+    ...externOps.map(
+      (op) =>
+        `    private final ${upperFirst(op.name)}${agg.name}Handler ${lowerFirst(op.name)}Handler;`,
+    ),
+    anyOpUsesUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
     ``,
-    `    public ${agg.name}Service(${agg.name}Repository repository) {`,
+    `    public ${agg.name}Service(${[
+      `${agg.name}Repository repository`,
+      ...externOps.map(
+        (op) => `${upperFirst(op.name)}${agg.name}Handler ${lowerFirst(op.name)}Handler`,
+      ),
+      ...(anyOpUsesUser ? ["CurrentUserAccessor currentUserAccessor"] : []),
+    ].join(", ")}) {`,
     `        this.repository = repository;`,
+    ...externOps.map(
+      (op) => `        this.${lowerFirst(op.name)}Handler = ${lowerFirst(op.name)}Handler;`,
+    ),
+    anyOpUsesUser ? `        this.currentUserAccessor = currentUserAccessor;` : null,
     `    }`,
     ``,
     ...createLines,
