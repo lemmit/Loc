@@ -71,7 +71,7 @@ export function emitSlot(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   void call;
   void depth;
   ctx.usesChildren = true;
-  return `{children}`;
+  return ctx.target.renderChildrenSlot();
 }
 
 export function emitDivider(

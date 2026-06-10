@@ -1,0 +1,5 @@
+<div class="flex flex-col gap-2">
+          <label class="loom-label" for="{{testId}}">{{label}}</label>
+          <input id="{{testId}}" class="loom-input" data-testid="{{testId}}" bind:value={form.values.{{path}} } />
+          {#if form.errors["{{path}}"]}<p class="text-sm text-destructive">{form.errors["{{path}}"]}</p>{/if}
+        </div>

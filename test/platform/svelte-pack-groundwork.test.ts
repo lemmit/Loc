@@ -56,11 +56,15 @@ describe("svelte pack format groundwork", () => {
     expect(rendered).toContain('"@tanstack/svelte-query"');
     expect(rendered).toContain('"svelte": "^5.0.0"');
     expect(rendered).toContain('"@sveltejs/adapter-static"');
-    // The svelte format reads `sveltekit/` + `docker/` shared dirs —
-    // docker's dockerfile template must be visible as a shared source.
+    // The svelte format reads only the `sveltekit/` shared dir — its
+    // own dockerfile + api-client (the SvelteKit preview server needs
+    // the kit project context; the client throws ApiError with the
+    // parsed problem body for the runes form helper).
     expect(pack.templates.has("dockerfile")).toBe(true);
-    // …and the TSX-only shared dirs must NOT leak in (vite/ + api/).
+    expect(pack.templates.has("api-client")).toBe(true);
+    expect(pack.render("dockerfile", {})).toContain("vite preview");
+    // …and the TSX-only shared dirs must NOT leak in (vite/).
     expect(pack.templates.has("index-html")).toBe(false);
-    expect(pack.templates.has("api-client")).toBe(false);
+    expect(pack.templates.has("error-boundary")).toBe(false);
   });
 });

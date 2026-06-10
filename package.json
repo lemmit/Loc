@@ -16,13 +16,13 @@
   "main": "./out/language/main.js",
   "scripts": {
     "build": "tsc -b tsconfig.json",
-    "build:web": "test -d web/node_modules && tsc -p web/tsconfig.json --noEmit || echo 'web/node_modules not present — run (cd web && npm install) once to enable the web tsc gate'",
+    "build:web": "test -d web/node_modules && tsc -p web/tsconfig.json --noEmit || echo 'web/node_modules not present \u2014 run (cd web && npm install) once to enable the web tsc gate'",
     "watch": "tsc -b tsconfig.json --watch",
     "langium:generate": "langium generate",
     "langium:watch": "langium generate --watch",
-    "test": "vitest run --exclude '**/e2e.test.ts' --exclude '**/generated-build.test.ts' --exclude '**/generated-react-build.test.ts' --exclude '**/generated-dotnet-build.test.ts' --exclude '**/generated-dotnet-format.test.ts' --exclude '**/generated-phoenix-build.test.ts' --exclude '**/generated-phoenix-format.test.ts' --exclude '**/generated-phoenix-dialyzer.test.ts' --exclude '**/generated-biome.test.ts' --exclude '**/observability-events.test.ts' --exclude '**/observability-events-dotnet.test.ts' --exclude '**/observability-events-phoenix.test.ts'",
-    "test:watch": "vitest --exclude '**/e2e.test.ts' --exclude '**/generated-build.test.ts' --exclude '**/generated-react-build.test.ts' --exclude '**/generated-dotnet-build.test.ts' --exclude '**/generated-dotnet-format.test.ts' --exclude '**/generated-phoenix-build.test.ts' --exclude '**/generated-phoenix-format.test.ts' --exclude '**/generated-phoenix-dialyzer.test.ts' --exclude '**/generated-biome.test.ts' --exclude '**/observability-events.test.ts' --exclude '**/observability-events-dotnet.test.ts' --exclude '**/observability-events-phoenix.test.ts'",
-    "test:coverage": "vitest run --coverage --exclude '**/e2e.test.ts' --exclude '**/generated-build.test.ts' --exclude '**/generated-react-build.test.ts' --exclude '**/generated-dotnet-build.test.ts' --exclude '**/generated-dotnet-format.test.ts' --exclude '**/generated-phoenix-build.test.ts' --exclude '**/generated-phoenix-format.test.ts' --exclude '**/generated-phoenix-dialyzer.test.ts' --exclude '**/generated-biome.test.ts' --exclude '**/observability-events.test.ts' --exclude '**/observability-events-dotnet.test.ts' --exclude '**/observability-events-phoenix.test.ts'",
+    "test": "vitest run --exclude '**/e2e.test.ts' --exclude '**/generated-build.test.ts' --exclude '**/generated-react-build.test.ts' --exclude '**/generated-svelte-build.test.ts' --exclude '**/generated-dotnet-build.test.ts' --exclude '**/generated-dotnet-format.test.ts' --exclude '**/generated-phoenix-build.test.ts' --exclude '**/generated-phoenix-format.test.ts' --exclude '**/generated-phoenix-dialyzer.test.ts' --exclude '**/generated-biome.test.ts' --exclude '**/observability-events.test.ts' --exclude '**/observability-events-dotnet.test.ts' --exclude '**/observability-events-phoenix.test.ts'",
+    "test:watch": "vitest --exclude '**/e2e.test.ts' --exclude '**/generated-build.test.ts' --exclude '**/generated-react-build.test.ts' --exclude '**/generated-svelte-build.test.ts' --exclude '**/generated-dotnet-build.test.ts' --exclude '**/generated-dotnet-format.test.ts' --exclude '**/generated-phoenix-build.test.ts' --exclude '**/generated-phoenix-format.test.ts' --exclude '**/generated-phoenix-dialyzer.test.ts' --exclude '**/generated-biome.test.ts' --exclude '**/observability-events.test.ts' --exclude '**/observability-events-dotnet.test.ts' --exclude '**/observability-events-phoenix.test.ts'",
+    "test:coverage": "vitest run --coverage --exclude '**/e2e.test.ts' --exclude '**/generated-build.test.ts' --exclude '**/generated-react-build.test.ts' --exclude '**/generated-svelte-build.test.ts' --exclude '**/generated-dotnet-build.test.ts' --exclude '**/generated-dotnet-format.test.ts' --exclude '**/generated-phoenix-build.test.ts' --exclude '**/generated-phoenix-format.test.ts' --exclude '**/generated-phoenix-dialyzer.test.ts' --exclude '**/generated-biome.test.ts' --exclude '**/observability-events.test.ts' --exclude '**/observability-events-dotnet.test.ts' --exclude '**/observability-events-phoenix.test.ts'",
     "test:e2e": "LOOM_E2E=1 vitest run test/e2e/e2e.test.ts",
     "test:tsc": "LOOM_TS_BUILD=1 vitest run test/e2e/generated-build.test.ts",
     "test:tsc-react": "LOOM_REACT_BUILD=1 vitest run test/e2e/generated-react-build.test.ts",
@@ -43,7 +43,8 @@
     "prepare": "npm run langium:generate && npm run build && npm run build:web",
     "lint": "biome ci .",
     "format": "biome format --write .",
-    "cli": "node bin/cli.js"
+    "cli": "node bin/cli.js",
+    "test:svelte-build": "LOOM_SVELTE_BUILD=1 vitest run test/e2e/generated-svelte-build.test.ts"
   },
   "dependencies": {
     "chalk": "~5.3.0",

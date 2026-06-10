@@ -1,0 +1,21 @@
+{
+  "name": "loom-svelte-app",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 3000",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+{{> stack-package-deps}}{{#if usesMoney}},
+    "decimal.js": "^10.4.3"{{/if}}
+  },
+  "devDependencies": {
+{{> stack-package-devdeps}},
+    "tailwindcss": "^4.0.0",
+    "@tailwindcss/vite": "^4.0.0"
+  }
+}

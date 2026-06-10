@@ -245,13 +245,15 @@ function prepareFormFields(
       aggregatesByNameMut,
     ),
   );
-  // RHF + zodResolver are universal across all React packs; the
-  // per-idTarget hook paths are dynamic per-aggregate.  Per-field input
-  // components come from each `field-input-*` template's import
-  // declaration in pack.json (recursing into value-object children).
-  addImport(ctx, "react-hook-form", "useForm");
-  if (useController) addImport(ctx, "react-hook-form", "Controller");
-  addImport(ctx, "@hookform/resolvers/zod", "zodResolver");
+  // Form-runtime imports are framework-shaped (react-hook-form +
+  // zodResolver on TSX; none on Svelte, whose `createForm` rides the
+  // pack's imports map) — delegated to the target.  Per-idTarget hook
+  // paths are dynamic per-aggregate; per-field input components come
+  // from each `field-input-*` template's import declaration in
+  // pack.json (recursing into value-object children).
+  for (const spec of ctx.target.formRuntimeImports(useController)) {
+    addImport(ctx, spec.from, ...spec.named);
+  }
   for (const t of idTargets) {
     addImport(ctx, `../api/${lowerFirst(t.name)}`, `useAll${plural(t.name)}`);
   }

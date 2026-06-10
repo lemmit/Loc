@@ -248,6 +248,24 @@ export const tsxTarget: WalkerTarget = {
     return ` style={{ ${parts.join(", ")} }}`;
   },
 
+  /** React children prop — `{children}`. */
+  renderChildrenSlot(): string {
+    return "{children}";
+  },
+
+  /** react-hook-form + zodResolver — universal across the TSX packs;
+   *  `Controller` joins when any field needs controlled binding.
+   *  Verbatim lift of the imports the form preparer used to add
+   *  inline. */
+  formRuntimeImports(
+    useController: boolean,
+  ): ReadonlyArray<{ from: string; named: readonly string[] }> {
+    return [
+      { from: "react-hook-form", named: useController ? ["useForm", "Controller"] : ["useForm"] },
+      { from: "@hookform/resolvers/zod", named: ["zodResolver"] },
+    ];
+  },
+
   /** JSX text escaping — entity-escape the expression / tag
    *  delimiters (and `&` first so entity refs don't double-escape).
    *  Behaviour-identical to `walker/shared/args.ts:escapeJsxText`

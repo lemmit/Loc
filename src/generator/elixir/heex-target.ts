@@ -176,6 +176,16 @@ export const heexTarget: WalkerTarget = {
     return ` style="${css}"`;
   },
 
+  /** LiveView inner-block slot. */
+  renderChildrenSlot(): string {
+    return "<%= render_slot(@inner_block) %>";
+  },
+
+  /** AshPhoenix.Form needs no page-side import lines. */
+  formRuntimeImports(): ReadonlyArray<{ from: string; named: readonly string[] }> {
+    return [];
+  },
+
   /** HEEx text escaping — entity-escape the HTML-significant
    *  punctuation.  (HEEx interpolation is `<%= %>`/`{ }`-free in text
    *  position, but `<` / `&` still open tags / entities.) */

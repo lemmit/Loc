@@ -1,0 +1,100 @@
+system SvelteShop {
+
+    theme {
+        primary: "#3b82f6"
+        radius: "md"
+    }
+
+    subdomain Sales {
+        context Orders {
+
+            enum OrderStatus { Draft, Confirmed, Cancelled }
+
+            aggregate Customer with crudish {
+                name: string
+                email: string
+                invariant name.length > 0
+                derived display: string = name
+            }
+
+            aggregate Order {
+                customerId: Customer id
+                status: OrderStatus
+                placedAt: datetime
+                operation confirm() {
+                    precondition status == OrderStatus.Draft
+                    status := OrderStatus.Confirmed
+                }
+                derived display: string = "Order"
+            }
+
+            repository Customers for Customer { }
+            repository Orders for Order {
+                find byStatus(status: OrderStatus): Order[] where this.status == status
+            }
+
+            workflow placeOrder {
+                create(customerId: Customer id) {
+                    let order = Order.create({
+                        customerId: customerId,
+                        status: Draft,
+                        placedAt: now()
+                    })
+                }
+            }
+
+            view ActiveOrders = Order where status == Confirmed
+        }
+    }
+
+    api SalesApi from Sales
+
+    storage primarySql { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primarySql }
+
+    ui WebApp with scaffold(subdomains: [Sales]) {
+        api Sales: SalesApi
+
+        component WelcomeCard(name: string) {
+            body: Card { "Welcome", Stack { Text { name }, Slot {} } }
+        }
+
+        page Welcome {
+            route: "/welcome"
+            title: "Welcome"
+            state {
+                count: int = 0
+                showDetails: bool = false
+            }
+            body: Stack {
+                Heading { "Svelte shop", level: 1 },
+                WelcomeCard { "friend", Text { "(slot content)" } },
+                Group {
+                    Button { "Bump", onClick: e => { count := count + 1 }, testid: "bump" },
+                    Toggle { "Show details", bind: showDetails },
+                    Stat { "Count", count }
+                },
+                Tabs {
+                    Tab { "Customers", Text { "Manage customers from the sidebar." } },
+                    Tab { "Orders", Text { "Orders tab body." } }
+                },
+                Anchor { "Go to customers", to: "/customers", testid: "go-customers" }
+            }
+        }
+    }
+
+    deployable api {
+        platform: hono
+        contexts: [Orders]
+        dataSources: [ordersState]
+        serves: SalesApi
+        port: 8080
+    }
+
+    deployable web {
+        platform: svelte
+        targets: api
+        ui: WebApp { Sales: api }
+        port: 3002
+    }
+}

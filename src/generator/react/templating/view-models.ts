@@ -87,29 +87,12 @@ export interface RouteVM {
   elementJsx: string;
 }
 
-/** A single sidebar nav entry. */
-export interface NavEntryVM {
-  /** React-Router target path. */
-  to: string;
-  /** Visible link text. */
-  label: string;
-  /** Stable testid for Playwright drivers. */
-  testId: string;
-  /** Argument list (verbatim) to splice into `isActive(...)` —
-   *  e.g. `"/orders"` or `"/workflows", { exact: true }`.  The
-   *  exact form is used for index pages whose slug prefix would
-   *  otherwise match every per-item child route. */
-  activeArgs: string;
-}
+// Nav view-models moved to `src/generator/_frontend/menu-emitter.ts`
+// (shared with the Svelte app shell); re-exported here so the React
+// templates' import path stays stable.
+import type { NavSectionVM } from "../../_frontend/menu-emitter.js";
 
-/** A grouped sidebar section.  Renders as a Divider with the
- *  section label followed by `entries`.  Sections with zero
- *  entries are omitted from the VM (preparer skips them) so
- *  templates don't need empty-guards. */
-export interface NavSectionVM {
-  label: string;
-  entries: NavEntryVM[];
-}
+export type { NavEntryVM, NavSectionVM } from "../../_frontend/menu-emitter.js";
 
 /** Top-level view-model for the App.tsx shell. */
 export interface AppShellVM {

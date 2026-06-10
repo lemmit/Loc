@@ -312,4 +312,21 @@ export interface WalkerTarget {
    *  entities; Svelte's template grammar shares the same significant
    *  set, so the entity escape carries over; HEEx escapes its own. */
   escapeText(text: string): string;
+
+  /** Render the `Slot()` children placeholder inside a user
+   *  component's body.  TSX: `{children}` (the React children prop);
+   *  Svelte 5: `{@render children?.()}` (children is a snippet);
+   *  HEEx: `<%= render_slot(@inner_block) %>`. */
+  renderChildrenSlot(): string;
+
+  /** Form-runtime imports the shared form primitives must register
+   *  when a `Form(of:/runs:/op:)` renders.  TSX returns the
+   *  react-hook-form + zodResolver set (`Controller` joins when any
+   *  field needs controlled binding); Svelte returns [] — its form
+   *  runtime (`createForm` from `$lib/forms.svelte`) rides the pack's
+   *  `imports["form-of-decls"]` declarations instead; HEEx returns []
+   *  (AshPhoenix.Form needs no page-side import). */
+  formRuntimeImports(
+    useController: boolean,
+  ): ReadonlyArray<{ from: string; named: readonly string[] }>;
 }

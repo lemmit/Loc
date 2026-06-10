@@ -1,3 +1,4 @@
+import { generateSvelteForContexts } from "../generator/svelte/index.js";
 import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 
 // ---------------------------------------------------------------------------
@@ -28,17 +29,8 @@ const sveltePlatform: PlatformSurface = {
   // Svelte generator only emits API call factories — no per-aggregate
   // repository class.  No find-name collisions are possible.
   reservedRepositoryFindNames: new Set(),
-  emitProject({ contexts, sys, deployable }): Map<string, string> {
-    // Stub until the Svelte generator lands (svelte-frontend-plan.md
-    // Slice 4).  Emitting a README keeps `generate system` total over
-    // every registered platform without pretending to build.
-    void contexts;
-    return new Map([
-      [
-        "README.md",
-        `# ${deployable.name}\n\nSvelte frontend deployable for system ${sys.name} — generator not yet implemented (see docs/plans/svelte-frontend-plan.md).\n`,
-      ],
-    ]);
+  emitProject({ contexts, sys, deployable, topLevelComponents }): Map<string, string> {
+    return generateSvelteForContexts(contexts, sys, deployable, { topLevelComponents });
   },
   composeService({ deployable, sys }): ComposeServiceShape {
     const target = sys.deployables.find((t) => t.name === deployable.targetName);
