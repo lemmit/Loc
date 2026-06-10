@@ -22,7 +22,6 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EntityPartIR,
-  ExprIR,
   FindIR,
   RetrievalIR,
   TypeIR,
@@ -41,7 +40,13 @@ import {
   hydrateRootForFindAllExpr,
   valueCollectionElementExpr,
 } from "./repository-find-hydrate.js";
-import { combinePredicate, lowerToDrizzle } from "./repository-find-predicate.js";
+import {
+  combinePredicate,
+  criterionFnName,
+  lowerToDrizzle,
+  reifiableCriterion,
+  renderCriterionArg,
+} from "./repository-find-predicate.js";
 
 // Re-export the leaf modules' externally-consumed surface so the sibling
 // repository builders (and the queryable-subset-parity test) keep importing
@@ -50,6 +55,7 @@ export { hydrateConcreteFromSharedRow, hydrateRootExpr } from "./repository-find
 export {
   contextFilterPredicate,
   lowerToDrizzle,
+  nonPrincipalContextFilterEntries,
   nonPrincipalContextFilters,
 } from "./repository-find-predicate.js";
 
@@ -68,23 +74,11 @@ export function repoTableName(agg: EnrichedAggregateIR, ctx: BoundedContextIR): 
 // holds) — composition is just function calls.
 // ---------------------------------------------------------------------------
 
-/** Module-level fn name for a reified criterion (`inRegionCriterion`). */
-export function criterionFnName(name: string): string {
-  return `${lowerFirst(name)}Criterion`;
-}
-
-/** The criterion a use-site `criterionRef` reifies to — present in the context
- *  and with a Drizzle-lowerable body — or `undefined` (fall back to inline). */
-export function reifiableCriterion(
-  ref: { name: string; args: ExprIR[] } | undefined,
-  ctx: EnrichedBoundedContextIR,
-  tableName: string,
-): CriterionIR | undefined {
-  if (!ref) return undefined;
-  const c = ctx.criteria.find((x) => x.name === ref.name);
-  if (!c) return undefined;
-  return lowerToDrizzle(c.body, tableName, ctx) ? c : undefined;
-}
+// criterionFnName / reifiableCriterion / renderCriterionArg moved to
+// repository-find-predicate.ts (the lower layer — the capability-filter
+// predicate builder reifies through them too); re-exported here so the
+// existing import sites (repository-builder.ts) keep working.
+export { criterionFnName, reifiableCriterion, renderCriterionArg };
 
 /** `const <name>Criterion = (params) => <drizzle predicate>;` — the criterion's
  *  own body (its parameters in scope), lowered against the candidate table. */
@@ -96,15 +90,6 @@ export function renderCriterionFn(
   const lowered = lowerToDrizzle(c.body, tableName, ctx)!;
   const params = c.params.map((p) => `${p.name}: ${tsTypeForReturn(p.type)}`).join(", ");
   return `const ${criterionFnName(c.name)} = (${params}) => ${lowered.expr};`;
-}
-
-/** Render a criterion-call argument (the value passed at the use-site) — a
- *  parameter/let reference renders as its name, a literal as its value. */
-export function renderCriterionArg(e: ExprIR): string {
-  if (e.kind === "ref") return e.name;
-  if (e.kind === "literal") return e.lit === "string" ? JSON.stringify(e.value) : e.value;
-  // Criterion call args are values (param refs / literals) in v1.
-  return "undefined as never";
 }
 
 /** A `kind` discriminator predicate scoping reads to this concrete's rows in

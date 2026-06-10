@@ -87,7 +87,7 @@ context Sales {
     }
 
     test "negative money rejected" {
-      expectThrows Money { amount: -1.0, currency: "USD" }
+      expect(Money { amount: -1.0, currency: "USD" }).toThrow()
     }
   }
 

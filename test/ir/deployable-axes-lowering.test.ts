@@ -33,7 +33,7 @@ describe("realization axes — lowering defaults", () => {
     expect(d.application).toBe("cqrs");
     expect(d.persistence).toBe("efcore");
     expect(d.directoryLayout).toBe("byLayer");
-    expect(d.transport).toBe("minimalApi");
+    expect(d.transport).toBe("controllers");
     expect(d.runtime).toBe("transactional");
   });
 

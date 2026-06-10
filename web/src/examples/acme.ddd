@@ -29,7 +29,7 @@ system Acme {
                 }
 
                 test "money rejects a negative amount" {
-                    expectThrows Money { amount: -1.0, currency: "USD" }
+                    expect(Money { amount: -1.0, currency: "USD" }).toThrow()
                 }
                 derived display: string = sku
             }

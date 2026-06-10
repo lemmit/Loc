@@ -62,6 +62,10 @@ interface ControllerShape {
     paramNames: string[];
     /** Has a `requires` guard → declares 403 (authorization denied). */
     guarded: boolean;
+    /** Has a `when` canCommand gate → declares 409 (Disallowed) on the
+     *  action and emits the side-effect-free `GET {id}/can_<op>` companion
+     *  returning `CanResponse { allowed }` (criterion.md use site 2). */
+    whenGated?: boolean;
     /** Exception-less return-typed op: the Domain-union → HTTP translation spec.
      *  When set, the action returns the mapped ProblemDetails / wire DTO instead
      *  of 204 (exception-less.md). */
@@ -159,15 +163,21 @@ export function renderController(
     // DTO (cast to the polymorphic base so it serializes with the `type` tag).
     const ru = op.returnUnion;
     const STD = new Set<number>([400, 422, 404, ...(op.guarded ? [403] : [])]);
+    const when409 = op.whenGated ? ["    [ProducesResponseType(typeof(ProblemDetails), 409)]"] : [];
     const responseDecls = ru
       ? [
           `    [ProducesResponseType(typeof(${ru.appNs}.${ru.unionName}), 200)]`,
           ...producesProblem("operation", op.guarded),
+          ...when409,
           ...ru.errorStatuses
             .filter((s) => !STD.has(s))
             .map((s) => `    [ProducesResponseType(${s})]`),
         ]
-      : ["    [ProducesResponseType(204)]", ...producesProblem("operation", op.guarded)];
+      : [
+          "    [ProducesResponseType(204)]",
+          ...producesProblem("operation", op.guarded),
+          ...when409,
+        ];
     const dispatchTail = ru
       ? [
           "        var result = await _mediator.Send(cmd);",
@@ -193,7 +203,24 @@ export function renderController(
           "        }",
         ]
       : ["        await _mediator.Send(cmd);", "        return NoContent();"];
+    // The side-effect-free can_<op> companion (criterion.md use site 2):
+    // GET → loads the aggregate, evaluates the `when` predicate, returns
+    // `{ allowed }` so a UI can enable/disable the action without invoking it.
+    const canBlock = op.whenGated
+      ? [
+          `    [HttpGet("{id}/can_${snake(op.routeSlug ?? op.name)}")]`,
+          `    [ProducesResponseType(typeof(CanResponse), 200)]`,
+          `    [ProducesResponseType(typeof(ProblemDetails), 404)]`,
+          `    public async Task<ActionResult<CanResponse>> ${actionName(opOperation(agg.name, `can_${op.name}`))}([FromRoute] ${shape.idClrType} id)`,
+          "    {",
+          `        var result = await _mediator.Send(new Can${upperFirst(op.name)}Query(new ${idClass}(id)));`,
+          "        return Ok(result);",
+          "    }",
+          "",
+        ]
+      : [];
     return [
+      ...canBlock,
       `    [HttpPost("{id}/${snake(op.routeSlug ?? op.name)}")]`,
       // Declare the success response explicitly — once any
       // [ProducesResponseType] is present, Swashbuckle stops inferring the
@@ -474,6 +501,12 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         if (context.Exception is ForbiddenException fe)
         {
             context.Result = Problem(context, 403, "Forbidden", fe.Message, trace_id);
+            context.ExceptionHandled = true;
+            return;
+        }
+        if (context.Exception is DisallowedException dx)
+        {
+            context.Result = Problem(context, 409, "Disallowed", dx.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }

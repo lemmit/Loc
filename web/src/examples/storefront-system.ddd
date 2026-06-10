@@ -175,7 +175,7 @@ system StorefrontSystem {
           })
           order.addLine("00000000-0000-0000-0000-000000000002", Money { amount: 5.00, currency: "USD" }, 2)
           order.confirm()
-          expectThrows order.addLine("00000000-0000-0000-0000-000000000002", Money { amount: 5.00, currency: "USD" }, 1)
+          expect(order.addLine("00000000-0000-0000-0000-000000000002", Money { amount: 5.00, currency: "USD" }, 1)).toThrow()
         }
       }
 

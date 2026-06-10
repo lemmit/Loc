@@ -88,7 +88,6 @@ runtime trap, silently degrades, or misleads.
 
 | # | Item | Where | Owning proposal |
 |---|---|---|---|
-| T1.3 | **React renderers for `Switch` / `MultilineField` / `SelectField`** — registered as `admissibleInSource` with **no renderer on any target** (`src/generator/_walker/registry.ts:~249-255`); they fall through to an "unknown layout component" comment. Either implement the TSX (+ HEEx) renderers or stop admitting them in source. | react walker | [page-metamodel](../page-metamodel.md) |
 | T1.4 | **Docs/comment honesty debt** — keep proposal status headers, the README table, and this plan in sync per the maintenance rule above (the 2026-06-10 pass fixed the then-known liars: seed emitter headers, the TPH validator comment, `ddd patch` missing from `tools.md`, and seven stale proposal headers). | docs | — |
 
 ## Tier 2 — nearly done: finish what's in flight
@@ -102,9 +101,8 @@ elixir items form one coherent track (a→e order).
 | T2.b | **Event sourcing under vanilla** (D-VANILLA-ES-HOME) — `EVENT_SOURCING_BACKENDS` still `{node, dotnet}` (`system-checks.ts:~853`). The blocker (no state-based vanilla emitter) is gone; this is the headline elixir item. | elixir/vanilla | [workflow-and-applier](./workflow-and-applier.md) |
 | T2.c | **Operation `or`-union returns on elixir** — `SUPPORTED_RETURN_BACKENDS = {node, dotnet}` (`structural-checks.ts:~381`). Vanilla's `{:ok,_} \| {:error,_}` controllers are the natural carrier; Ash stays gated. Includes the **union-find absence producer**: `validateUnionFindShapes` exempts elixir-only hosts (the P4d tagger is success-side only; absence raises) — align it with the node/dotnet absence translation and drop the exemption. | elixir | [exception-less](./exception-less.md) / [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) |
 | T2.d | **Vanilla/ecto as first-class adapters** — today `elixir/index.ts:~88-94` short-circuits `if (foundation === "vanilla")` instead of routing through the `PersistenceAdapter`/`StyleAdapter` registry like node/dotnet; the headline divergence named by [`../plans/realization-axes-alignment.md`](../plans/realization-axes-alignment.md) (slices #1061–#1064 landed the plan + compatibility rules + transport axis; the rewire itself remains). | elixir, platform | [platform-realization-axes](./platform-realization-axes.md) |
-| T2.e | **HEEx walker primitive backfill** — 32 of ~53 primitives have HEEx renderers; missing: `List`, `Detail`, `MasterDetail`, `Tabs`, `Toggle`, `Field`/`NumberField`/`PasswordField`, `For`, `Stat`, `Money`, `Avatar`, `Image`, `Divider`, `Loader`, `Slot`, `Bold`/`Italic`/`InlineCode`, `Switch`/`MultilineField`/`SelectField` (also missing on React — T1.3). Unsupported ones render visible `<!-- not supported -->` stubs (`heex-walker-core.ts`). Prioritise `List`/`Detail`/`MasterDetail`/`Tabs` + the form inputs. | elixir/heex | [phase-a platform expansion](../plans/phase-a-platform-expansion-prereqs.md) |
-| T2.f | **`routeSlug` consumption** — `urlStyle:` grammar + `OperationIR.routeSlug` enrichment shipped (#722 + D-URLSTYLE), but **no backend route emitter reads it** (`loom-ir.ts:~289-294` says so explicitly). One slice across the three backends' route builders. | all backends | [lifecycle-url-style](./lifecycle-url-style.md) |
-| T2.g | **Reified-criteria tail** — anonymous capability-`filter` predicates still inline; the principal/tenancy constructor factory (`currentUser.<field>` as ctor arg) and ambient (`of bool`) criteria are skipped (`src/generator/dotnet/criteria-emit.ts:~64-70`). | all backends | [reified-criteria](./reified-criteria.md) |
+| T2.e | **HEEx walker primitive backfill** — 32 of ~53 primitives have HEEx renderers; missing: `List`, `Detail`, `MasterDetail`, `Tabs`, `Toggle`, `Field`/`NumberField`/`PasswordField`/`MultilineField`/`SelectField` (inputs are HEEx-form-level by design; pack templates exist, walker dispatch doesn't), `For`, `Stat`, `Money`, `Avatar`, `Image`, `Divider`, `Loader`, `Slot`, `Bold`/`Italic`/`InlineCode` (`Switch` left the stdlib — page-metamodel.md subsumed it under `match`). Unsupported ones render visible `<!-- not supported -->` stubs (`heex-walker-core.ts`). Prioritise `List`/`Detail`/`MasterDetail`/`Tabs` + the form inputs. | elixir/heex | [phase-a platform expansion](../plans/phase-a-platform-expansion-prereqs.md) |
+| T2.g | **Reified-criteria tail** — capability-`filter` reification: **Hono shipped** (`contextFilterRefs` in the IR; the repo calls the module-level criterion fn); Phoenix/Ash remains (elixir track). The principal/tenancy constructor factory (`currentUser.<field>` as ctor arg — gates T2.j, **excluded from the current run per maintainer**) and ambient (`of bool`) criteria (`src/generator/dotnet/criteria-emit.ts:~64-70`) remain. | elixir + principal factory | [reified-criteria](./reified-criteria.md) |
 | T2.h | **`shape(document)` on elixir** — `PLATFORM_SAVING_SHAPES` allows `relational`+`embedded` only (`src/util/platform-axes.ts:~127`). | elixir | [document-and-json-hierarchies](./document-and-json-hierarchies.md) |
 | T2.i | **IR field-constraint metadata** — `FieldIR` carries no length/format/range, which blocks per-field `validate_*` on elixir (`vanilla/changeset-emit.ts:~8`) and richer Zod/.NET annotations. Land the IR carrier once, consume per backend. | ir, then all backends | [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) §validators |
 | T2.j | **Principal-referencing context filters on node/elixir** — `LIMITED_FAMILIES = {node, elixir}` in `validateContextFilterSupport` (`system-checks.ts:~365-407`); only .NET (`HasQueryFilter`) supports principal/tenancy filters today. Prereq for multi-tenancy (T4). | node, elixir | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
@@ -115,19 +113,19 @@ elixir items form one coherent track (a→e order).
 | # | Item | Notes | Owning proposal |
 |---|---|---|---|
 | T3.1 | **Explicit `loads:` plans** — gated `loom.retrieval-loads-unsupported` (`query-checks.ts:~199`); retrievals load the whole aggregate; no backend consumes a load plan. Explicit narrowing first; auto-inference later. | needs per-backend query emit | [load-specifications](./load-specifications.md) / [retrieval](./retrieval.md) |
-| T3.2 | **Criterion selectability tail** — `from <Criterion>(args)` binding, `when <Criterion>` + auto-exposed `can-<op>`, `Repo.findAll(criterion, …)`, `private workflow` (`criterion.ts:~77` reserves the surface). | rides on reified criteria (T2.g) | [criterion](./criterion.md) |
+| T3.2 | **Criterion selectability tail** — **`when <pred>` + auto-exposed `can-<op>` SHIPPED on Hono + .NET** (409 Disallowed gate + side-effect-free `GET /{id}/can_<op>`; elixir gated `loom.when-unsupported`). Remaining: `from <Criterion>(args)` binding, `Repo.findAll(criterion, …)`, `private workflow`, the elixir gate/can emit. | rides on reified criteria (T2.g) | [criterion](./criterion.md) |
 | T3.3 | **Payload P3-full + P5** — nested carriers `P<Q<T>>` (gated `loom.generic-arg-not-carrier`, `generics.ts:~66`); `validate for X` / `authorize for X` (no surface at all). Plus the `unpaged` opt-out + page-aware React hooks. | | [payload-transport-layer](./payload-transport-layer.md) |
 | T3.4 | **Exception-less remainder, re-grounded** — with `?` dropped, follow [`failure-taxonomy.md`](./failure-taxonomy.md): route VO-invariant construction failures to 422, `Repo.getById` re-shape (`T or NotFound`, A4 — the one true coordinated-rebaseline moment, old M3), parse/extern as `or` (A5). | A4 = coordinated fixture rebaseline | [exception-less](./exception-less.md) + [failure-taxonomy](./failure-taxonomy.md) |
 | T3.5 | **Workflow `repo-let` arrays/nullables** — gated `loom.workflow-load-array-unsupported` / `-nullable-unsupported` (`workflow-checks.ts:~520/~529`). | | [workflow-and-applier](./workflow-and-applier.md) |
 | T3.6 | **ES projections + snapshots; workflow-as-aggregate `on(...)`** | after T2.b for elixir parity | [workflow-and-applier](./workflow-and-applier.md) |
-| T3.7 | **Channels: realtime wire** — `channel`/`channelSource` surface + IR + in-process dispatch ship on all three backends (#970/#1012/#1020); **no SSE/WebSocket emission anywhere**. Part II (caching/invalidation) unstarted. | | [channels](./channels.md) |
-| T3.8 | **Transactional outbox** — deferred comments only (`efcore-persistence.ts:~161`, `ash-postgres-persistence.ts:~181`); no writer/relay on any backend. | upgrade path for at-most-once dispatch | [dispatch-delivery-semantics](./dispatch-delivery-semantics.md) |
-| T3.9 | **Dapper/MikroORM beyond minimal-v1** — each rejects ~11 model features (`loom.dapper-unsupported` `system-checks.ts:~420-475`, `loom.mikroorm-unsupported` `~487-543`); complex find-WHERE throws at runtime (`dapper.ts:~204-248`, `mikroorm.ts:~305-402`). Either expand or accept-and-document as permanent minimal adapters. | decision needed | [storage-and-platform-config](./storage-and-platform-config.md) |
+| T3.7 | **Channels: realtime wire** — **v1 SSE wire SHIPPED on Hono + React** (`delivery: broadcast` → `http/realtime.ts`: `GET /realtime/events` via streamSSE + `realtimeTee` dispatcher decorator composing under the outbox so relayed durable events stream too; React emits the `src/api/realtime.ts` EventSource client when its target backend is Hono). Remaining: the `channel <p>: <Ctx>.<Ch>` / `on <p>.<Event>` ui handler surface, .NET/Phoenix wire, rooms + edge relay + policy-derived router (layer on authorization), external brokers via `channelSource`, `delivery: queue` competing consumers, Part II caching/invalidation. | router blocked on authorization | [channels](./channels.md) |
+| T3.8 | **Transactional outbox** — **Hono + .NET tiers shipped** (`retention: log \| work` → `__loom_outbox` + polling relay/BackgroundService + `event_dead_lettered`; ephemeral stays at-most-once). Remaining: Phoenix/Oban relay (elixir track), Dapper-persistence outbox, idempotent-consumer markers on the saga row, LISTEN/NOTIFY over polling. | dotnet, elixir, idempotency | [dispatch-delivery-semantics](./dispatch-delivery-semantics.md) |
+| T3.9 | **Dapper/MikroORM beyond minimal-v1** — expansion in progress on Dapper (maintainer-prioritised): **capability filters + lifecycle stamps + `X id[]` associations + managed-access fields shipped** (filters splice into every SELECT's WHERE; stamps: onUpdate mutates pre-save / onCreate INSERT-only; associations: ordinal-ordered join table + bulk LoadRefsAsync + full-list-replace save; access modifiers are wire-projection concerns — no gate; principal-referencing values stay gated). Remaining dapper gates: nested parts, inheritance, document/embedded shapes, seeds, provenanced fields. MikroORM: decision still needed (expand vs document-as-minimal). | dotnet, node | [storage-and-platform-config](./storage-and-platform-config.md) |
 | T3.10 | **Storage tail** — logical `dataSource` bindings (D-STORAGE-SPLIT/D-GRANULARITY), `STORAGE_CAPABILITIES` matrix, reserved `marten`/`layered` stubs. | | [storage-and-platform-config](./storage-and-platform-config.md) |
-| T3.11 | **F5d per-operation style decomposition** — `cqrs-style.ts:~99-114` per-op methods throw `AdapterNotImplementedError`; per-aggregate path works. Plus the reserved `transport: controllers` (ASP.NET MVC) stub (`src/platform/dotnet.ts:~131-142`). | dotnet | [platform-realization-axes](./platform-realization-axes.md) |
+| T3.11 | **F5d per-operation style decomposition** — `cqrs-style.ts:~99-114` per-op methods throw `AdapterNotImplementedError`; per-aggregate path works. (The 'MVC controllers transport' half of this item dissolved 2026-06-10: the backend has always emitted attribute-routed controllers — the transport labels were inverted and are now swapped, with `minimalApi` as the honest reserved stub.) | dotnet | [platform-realization-axes](./platform-realization-axes.md) |
 | T3.12 | **Sensitivity phases 2–4** — `sensitive(tag)` + propagation shipped; `authorized(<tag>,…)` declassification, `mask:` DTOs, sink-call classification absent. | | [sensitivity-and-compliance](./sensitivity-and-compliance.md) |
 | T3.13 | **Audit promotion** — `audited` is a boolean (`loom-ir.ts:~314`); promote to `audited(actions \| access \| events \| off)` + `AuditRecord` shape + before/after snapshots + .NET Mediator behaviour. | after T4 execution-context | [audit-and-logging](./audit-and-logging.md) |
-| T3.14 | **React frontend remainders** — list-page filter UI for user-`where` finds (hook-only v1); multi-segment / compound state assignment in page handlers (throws — `body-walker.ts:~954-1032`); `DestroyForm` (CreateForm/OperationForm exist in the registry); frontend-ACL Phase 3 (flat-key schema restructure + per-action FieldMaps). | react | [retrieval](./retrieval.md), [loom-forms](./loom-forms.md), [frontend-acl](./frontend-acl.md) |
+| T3.14 | **React frontend remainders** — list-page filter UI for user-`where` finds (hook-only v1); frontend-ACL Phase 3 (flat-key schema restructure + per-action FieldMaps). **Multi-segment / compound state assignment shipped** (nested-spread immutable updates — `order.shipping.zip := v` → `setOrder({ ...order, shipping: { ...order.shipping, zip: v } })`; unlowerable roots still fail loud). **`DestroyForm { of: <Agg> }` shipped** (canonical-destroy confirmation: window.confirm → `useDelete<Agg>` with the route id → navigate to the list; `then:` override; named destroys `for: <inst>.<name>` are a follow-up). | react | [retrieval](./retrieval.md), [loom-forms](./loom-forms.md), [frontend-acl](./frontend-acl.md) |
 | T3.15 | **Extern family** — component hatch Tier 2 (`action` behaviour params — Loom's first function type) + LiveView; `function`/`hook … extern` (the logic twin, unstarted). | | [extern-component-escape-hatch](./extern-component-escape-hatch.md), [extern-function-hook-escape-hatch](./extern-function-hook-escape-hatch.md) |
 | T3.16 | **Resource-kind codegen** — `resource` grammar parses `objectStore \| queue \| api` kinds, but only state/eventLog/replica kinds are actively emitted; the workflow call surface is unstarted. | | [resource-model-and-source-types](./resource-model-and-source-types.md), [workflow-resource-consumption](./workflow-resource-consumption.md) |
 | T3.17 | **`hosts:` codegen** — the grammar relation shipped; the embedded-frontend hosting emit (framework moved onto `ui`, host capability check) has not. | | [embedded-frontend-composition](./embedded-frontend-composition.md) |
@@ -156,7 +154,8 @@ Ordered by the dependency spine, not by size.
 5. **loom-forms** (typed-action `CreateForm`/`OperationForm`/
    `DestroyForm` binding — fixes the form/API create-contract layering
    bug; lifecycle Phase 1 prereq is done) + **lifecycle-operations
-   Phase 2+** (full action surface, `crudish` reframe) on top of T2.f.
+   Phase 2+** (full action surface, `crudish` reframe) — the
+   `urlStyle`/`routeSlug` base is shipped.
 6. **i18n-strings → i18n** phases 1–7 (ICU catalogs, content-hash
    keys, `ddd i18n sync`; D-I18N-KEY pinned).
 7. **quickstart-and-day-one-batteries** — `ddd dev` / `ddd deploy`,
@@ -187,20 +186,18 @@ retired: P4 and most of A1/A3 shipped independently, and A2 is dropped.
 
 ## Suggested near-term order
 
-A pragmatic next-8, dependency-consistent:
+A pragmatic next-6, dependency-consistent:
 
 1. **T2.a** vanilla workflow statement kinds (slices already cut).
 2. **T2.b → T2.c** event sourcing + `or`-union returns under vanilla —
    closes the two biggest elixir parity gates.
-3. **T1.3 + T2.e** walker primitive backfill (React trio + HEEx
-   priority set).
-4. **T2.f** `routeSlug` consumption (one slice, three backends).
-5. **T2.g** capability-`filter` reification + principal factory —
-   unblocks T2.j → multi-tenancy.
-6. **T2.i** IR field-constraint metadata (+ elixir validators, Zod/.NET
+3. **T2.e** HEEx walker primitive backfill (priority set).
+4. **T2.g residue** — Phoenix capability-`filter` reification (elixir
+   track); principal factory excluded per maintainer.
+5. **T2.i** IR field-constraint metadata (+ elixir validators, Zod/.NET
    enrichment).
-7. **T3.1** explicit `loads:` plans.
-8. **Tier 4 #1–#3** execution-context → multi-tenancy → authorization
+6. **T3.1** explicit `loads:` plans.
+7. **Tier 4 #1–#3** execution-context → multi-tenancy → authorization
     — the governance spine.
 
 ## Parallelisation
@@ -209,7 +206,7 @@ Three loosely-coupled tracks (one agent each):
 
 - **Track A (type-system & queries):** T2.g → T3.1/T3.2 → T3.4.
 - **Track B (elixir parity):** T2.a → T2.b → T2.c → T2.d → T2.e/T2.h.
-- **Track C (governance & product):** T1.3 → T2.f/T2.i →
+- **Track C (governance & product):** T2.i →
   execution-context → multi-tenancy → authorization; loom-forms +
   frontend remainders interleave.
 

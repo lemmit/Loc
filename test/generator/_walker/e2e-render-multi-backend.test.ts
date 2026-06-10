@@ -57,12 +57,12 @@ const BANK_THREE_BACKEND = `
     test e2e "create an account" against honoApi {
       let a = api.accounts.create({ balance: 0 });
       let read = api.accounts.getById(a);
-      expect(read.balance == 0);
+      expect(read.balance).toBe(0);
     }
 
     test e2e "create a campaign" against marketingApi {
       let c = api.campaigns.create({ name: "Spring" });
-      expect(c.name == "Spring");
+      expect(c.name).toBe("Spring");
     }
   }
 `;
@@ -129,6 +129,57 @@ describe("e2e expansion — multi-backend replay", () => {
     // but isBackendPlatform skips frontends, so no `against web_app`
     // it() emits.
     expect(e2e).not.toMatch(/it\("create an account against web_app"/);
+  });
+});
+
+const TO_THROW = `
+  system Pay {
+    subdomain Accounts {
+      context Banking {
+        aggregate Account {
+          balance: int
+          invariant balance >= 0
+          derived display: string = "acct"
+        }
+        repository Accounts for Account { }
+      }
+    }
+    deployable honoApi { platform: hono, contexts: [Banking], port: 3000 }
+
+    test e2e "negative balance is rejected" against honoApi {
+      expect(api.accounts.create({ balance: -1 })).toThrow(400)
+    }
+    test e2e "missing account is 404" against honoApi {
+      expect(api.accounts.getById("nope")).toThrow(404)
+    }
+    test e2e "bare toThrow keeps an unconstrained throw" against honoApi {
+      expect(api.accounts.create({ balance: -1 })).toThrow()
+    }
+  }
+`;
+
+describe("e2e expansion — toThrow status matcher", () => {
+  it("lowers expect(call).toThrow(N) into a /→ N\\b/ regex on rejects.toThrow", async () => {
+    const files = await generateSystemFiles(TO_THROW);
+    const e2e = files.get("e2e/Pay.e2e.test.ts")!;
+    expect(e2e, "e2e file missing").toBeDefined();
+    // The create rejection pins 400; the missing-getById pins 404.
+    expect(e2e).toMatch(/rejects\.toThrow\(\/→ 400\\b\/\)/);
+    expect(e2e).toMatch(/rejects\.toThrow\(\/→ 404\\b\/\)/);
+  });
+
+  it("renders the inner throwing call (the matcher is peeled, not emitted on the fetch)", async () => {
+    const files = await generateSystemFiles(TO_THROW);
+    const e2e = files.get("e2e/Pay.e2e.test.ts")!;
+    // The throwing call is wrapped in the rejects-assertion lambda; the status
+    // never leaks onto the fetch call itself.
+    expect(e2e).toMatch(/await expect\(async \(\) => \{ await __post\(`\$\{base\}\/accounts`/);
+  });
+
+  it("a bare toThrow() (no status) emits an unconstrained rejects.toThrow()", async () => {
+    const files = await generateSystemFiles(TO_THROW);
+    const e2e = files.get("e2e/Pay.e2e.test.ts")!;
+    expect(e2e).toMatch(/rejects\.toThrow\(\);/);
   });
 });
 

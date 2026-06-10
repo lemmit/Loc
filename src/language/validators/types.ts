@@ -3,6 +3,7 @@
 // invariants, derived fields, and function bodies.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { intrinsicMatcherSig } from "../../util/intrinsic-matchers.js";
 import type {
   Aggregate,
   BinaryChain,
@@ -138,6 +139,11 @@ export function checkUnknownMemberAccess(model: Model, accept: ValidationAccepto
     for (const suffix of chain.suffixes) {
       if (isMemberSuffix(suffix)) {
         const ms = suffix as MemberSuffix;
+        // Test-assertion matchers (`expect(x).toThrow()` / `.toBe(…)`) are an
+        // intrinsic surface, not domain members — they may sit on any receiver
+        // type (a value-object `expect(Money{…}).toThrow()` included), so the
+        // matcher terminates the chain rather than reporting an unknown member.
+        if (intrinsicMatcherSig(ms.member)) break;
         const record = absentRecordMember(recvType, ms.member);
         if (record) {
           accept("error", `'${ms.member}' is not a member of '${record}'.`, {

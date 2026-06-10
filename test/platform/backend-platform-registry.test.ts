@@ -73,6 +73,7 @@ describe("platformFor — byte-identity guarantee", () => {
     expect(Object.keys(BUILTIN_PLATFORM_LATEST).sort()).toEqual([
       "dotnet",
       "elixir",
+      "java",
       "node",
       "python",
     ]);

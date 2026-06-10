@@ -28,6 +28,15 @@ const INTRINSIC_MATCHER_SIGNATURES: ReadonlyArray<MatcherSig> = [
   { name: "toHaveText", arity: 1, on: "locator", negatable: true },
   { name: "toHaveCount", arity: 1, on: "locator", negatable: true },
   { name: "toBeVisible", arity: 0, on: "locator", negatable: true },
+  // `expect(call).toThrow()` / `.toThrow(404)` — the method-based throw
+  // assertion (replaces the old `expectThrows` statement keyword).  It is
+  // special: the *lowering* recognises it and rewrites the `expect` into the
+  // `expect-throws` IR node (so every backend renders it as a throw the way it
+  // always has), and the optional single argument pins the HTTP status of a
+  // live rejection in an e2e body.  Its arity is therefore variable (0 or 1)
+  // and is enforced by `checkToThrowMatcher`, which `checkMatcherArity` skips;
+  // the `arity: 0` below is the bare-form default and is never strict-checked.
+  { name: "toThrow", arity: 0, on: "value", negatable: false },
 ];
 
 const INTRINSIC_MATCHERS = new Map(INTRINSIC_MATCHER_SIGNATURES.map((m) => [m.name, m]));

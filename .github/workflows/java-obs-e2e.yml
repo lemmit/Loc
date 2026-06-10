@@ -1,0 +1,62 @@
+name: Java observability e2e
+
+# Boots a generated Spring Boot backend against a postgres sidecar and
+# asserts the observability catalog envelope appears on stdout
+# (server_starting → server_listening → request_start/request_end →
+# server_shutdown → server_drained).  Mirrors `dotnet-obs-e2e.yml`.
+#
+# Push-to-main only (regression net, not a PR gate) — docker pull +
+# gradle cold start cost ~3-5min.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/java/**'
+      - 'src/platform/java.ts'
+      - '.github/workflows/java-obs-e2e.yml'
+      - 'test/e2e/observability-events-java.test.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java-obs-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('src/generator/java/emit/program.ts') }}
+          restore-keys: |
+            gradle-
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Type-check
+        run: npm run build
+
+      - name: Boot generated backend + assert catalog envelope
+        run: npm run test:obs-java

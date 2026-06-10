@@ -826,7 +826,7 @@ menu+default exposed off the backend's `PlatformSurface` (D-ADAPTER-HOME); a bar
 | `application:` | application-layer orchestration topology | `flat` · `serviceLayer` · `cqrs` | `cqrs` |
 | `persistence:` | data-access library only | `efcore` · `dapper` · `marten` | `efcore` |
 | `directoryLayout:` | source-tree organization | `byLayer` · `byFeature` | `byLayer` |
-| `transport:` | HTTP surface | `minimalApi` · `controllers` | `minimalApi` |
+| `transport:` | HTTP surface | `controllers` · `minimalApi` | `controllers` (the attribute-routed `[ApiController]` surface the backend has always emitted; the labels were historically inverted and swapped 2026-06-10 — `minimalApi` is the reserved/unbuilt alternative) |
 | `runtime:` | aggregate execution / concurrency model | `transactional` · `orleans` · `akka` (phoenix: `transactional` · `genserver`) | `transactional` |
 
 **Rulings folded in:**

@@ -119,7 +119,9 @@ export function expectedFrameworkFor(
   const fam = platformFamily(platform);
   if (fam === "react" || fam === "static") return "react";
   if (fam === "elixir") return "phoenixLiveView";
-  if (fam === "dotnet" && hasUi) return "react";
+  // dotnet and java are dual-mode: backend-only without `ui:`, embedded
+  // React SPA host with it.
+  if ((fam === "dotnet" || fam === "java") && hasUi) return "react";
   return undefined;
 }
 

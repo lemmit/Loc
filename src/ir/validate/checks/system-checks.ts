@@ -362,6 +362,67 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 // Non-principal capability filters on a relational aggregate
 // (`filter !this.isDeleted`) ARE emitted on both backends.
 // ---------------------------------------------------------------------------
+// Java/JPA gate: a SINGLE (non-collection) containment has no clean
+// unidirectional JPA mapping with the FK on the part table (the shared
+// schema's shape) — @OneToOne + @JoinColumn puts the FK on the owner,
+// and mappedBy needs an entity-typed back-reference the domain model
+// doesn't carry.  Fail fast (the parity contract: never silently
+// downgrade) until the shadow-parent mapping lands.  Collection
+// containments (the overwhelmingly common case) are fully supported via
+// unidirectional @OneToMany.
+// ---------------------------------------------------------------------------
+// Java gate: the fullstack `ui:` mount (embedded React SPA from Spring
+// static resources, the dotnet wwwroot analog) is not yet implemented —
+// fail fast rather than silently serving no UI.
+export function validateJavaFullstackSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "java") continue;
+    if (!dep.uiName && (dep.hostedUiNames ?? []).length === 0) continue;
+    diags.push({
+      severity: "error",
+      message:
+        `Deployable '${dep.name}' (platform java) declares a 'ui:'/'hosts:' binding, but the ` +
+        `embedded-SPA fullstack mount is not yet implemented on the java backend. ` +
+        `Serve the UI from a separate 'platform: react' deployable targeting '${dep.name}', ` +
+        `or host it on a dotnet / elixir deployable.`,
+      source: `${sys.name}/${dep.name}`,
+      code: "loom.java-fullstack-unsupported",
+    });
+  }
+}
+
+export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "java") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const owners = [agg, ...agg.parts];
+        for (const owner of owners) {
+          for (const c of owner.contains) {
+            if (c.collection) continue;
+            diags.push({
+              severity: "error",
+              message:
+                `Deployable '${dep.name}' (platform java) hosts aggregate '${ctxName}.${agg.name}' ` +
+                `whose '${owner.name}' declares a single containment 'contains ${c.name}: ${c.partName}' — ` +
+                `single (non-collection) containments are not yet mapped on the java backend ` +
+                `(JPA has no unidirectional one-to-one with the FK on the part table). ` +
+                `Use a collection containment ('contains ${c.name}: ${c.partName}[]'), fold the part's ` +
+                `fields into a value object, or host the context on a node / dotnet deployable.`,
+              source: `${sys.name}/${dep.name}`,
+              code: "loom.java-single-containment-unsupported",
+            });
+          }
+        }
+      }
+    }
+  }
+}
+
 export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
@@ -420,7 +481,6 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
-  const MANAGED_ACCESS = new Set(["managed", "token", "internal", "secret"]);
 
   for (const dep of sys.deployables) {
     if (dep.persistence !== "dapper") continue;
@@ -457,17 +517,33 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
           reject(where, `is persisted as shape(${shape})`);
         if (a.isAbstract || a.extendsAggregate)
           reject(where, "participates in aggregate inheritance");
-        if ((a.associations ?? []).length > 0)
-          reject(where, "has reference-collection associations (Id[] join tables)");
+        // Reference-collection associations (`X id[]`) are supported: one
+        // ordinal-ordered join table each (DbSchema), bulk-loaded on every
+        // read and full-list-replaced on save by the Dapper repository.
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
           reject(where, "contains nested entity parts");
-        if ((a.contextStamps ?? []).length > 0) reject(where, "uses audit stamping");
-        if ((a.contextFilters ?? []).length > 0)
-          reject(where, "uses a 'filter' capability predicate");
+        // Lifecycle stamping is supported (onUpdate mutates the aggregate
+        // pre-save; onCreate binds INSERT-only parameters excluded from the
+        // upsert SET).  Principal-referencing stamp values stay rejected —
+        // no request-scoped principal accessor on the Dapper repository.
+        if (
+          (a.contextStamps ?? []).some((r) =>
+            r.assignments.some((asg) => exprUsesCurrentUser(asg.value)),
+          )
+        )
+          reject(where, "uses a principal-referencing stamp value");
+        // Non-principal capability filters are supported (spliced into every
+        // SELECT's WHERE by the Dapper emitter); principal-referencing ones
+        // (tenancy: currentUser.<field>) stay rejected — there is no
+        // request-scoped principal accessor on the Dapper repository.
+        if ((a.contextFilters ?? []).some((p) => exprUsesCurrentUser(p)))
+          reject(where, "uses a principal-referencing 'filter' capability predicate");
         for (const f of a.fields) {
+          // Access modifiers (`managed` / `token` / `internal` / `secret`)
+          // are wire-projection concerns handled by the shared Domain/CQRS
+          // layers (create-input shaping, `forApiRead` response stripping) —
+          // the Dapper column round-trips like any other field, so no gate.
           if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
-          else if (f.access && MANAGED_ACCESS.has(f.access))
-            reject(`field '${agg.name}.${f.name}'`, `has server-managed access '${f.access}'`);
         }
       }
     }

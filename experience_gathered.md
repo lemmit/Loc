@@ -312,11 +312,20 @@ argument to a collection op.  Wire receiver-element type into the
 lambda's local env at type-check time (not in the IR per se), and the
 body validates correctly.
 
-### Test DSL: `expectThrows <expression>`, not `<statement>`
-Statements like `:=`, `+=`, `emit` only make sense inside an aggregate
-operation, not in free-standing tests.  Use `expectThrows <expression>`
-so users naturally write `expectThrows Money { -1, "USD" }` and the
-expression renderer (`new Money { -1, "USD" }`) just works.
+### Test DSL: assertions are method-based (`expect(x).toThrow()`)
+Originally throws were a `expectThrows <expression>` statement keyword.  That
+was later unified into the method-matcher surface every other assertion uses:
+`expect(<call>).toThrow()` (optionally `.toThrow(<status>)` for an e2e HTTP
+status).  A bare `expect <bool>` is likewise rejected — every `expect` carries
+a matcher.  The key implementation trick: the *surface* is method-based, but
+`toThrow` is recognised in **lowering** and rewritten into the existing
+`expect-throws` IR node, so no backend renderer changed (a throw still needs
+structurally different codegen than a value matcher — lambda-wrapping /
+`rejects` / `Assert.Throws` — which is exactly why it keeps a dedicated IR node
+while value matchers ride a flag on a `method-call`).  Matchers are a closed
+catalogue (`src/util/intrinsic-matchers.ts`); they're type-check-exempt
+(`checkUnknownMemberAccess` skips them, so `expect(Money{…}).toThrow()` is legal
+even though `toThrow` is not a member of `Money`).
 
 ### Templates split → small, single-purpose modules
 Once the scope crossed ~500 lines per template-file, lookups and edits

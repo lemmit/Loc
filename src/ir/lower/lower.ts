@@ -58,7 +58,6 @@ import {
   isEnumDecl,
   isEventDecl,
   isExpectStmt,
-  isExpectThrowsStmt,
   isFunctionDecl,
   isInvariant,
   isLayout,
@@ -781,20 +780,10 @@ function lowerE2E(block: TestE2E, env: Env, kind: "api" | "ui"): TestE2EIR {
   const statements: TestStmtIR[] = [];
   for (const s of inner) {
     if (isExpectStmt(s)) {
-      statements.push({
-        kind: "expect",
-        expr: lowerExpr(s.expr, curEnv),
-        source: cstText(s.expr),
-      });
-    } else if (isExpectThrowsStmt(s)) {
-      statements.push({
-        kind: "expect-throws",
-        expr: lowerExpr(s.expr, curEnv),
-        source: cstText(s.expr),
-      });
+      statements.push(expectStmtIR(lowerExpr(s.expr, curEnv), cstText(s.expr)));
     } else {
-      // `expect` / `expectThrows` are filtered above; the remaining
-      // shapes are exactly `Statement`.
+      // `expect` is filtered above; the remaining shapes are exactly
+      // `Statement`.
       const r = lowerStatement(s as Statement, curEnv);
       statements.push(r.stmt);
       curEnv = r.envAfter;
@@ -1156,7 +1145,10 @@ function lowerAggregate(
     canonicalDestroy,
     parts,
     tests,
-    contextFilters: filters.length > 0 ? filters : undefined,
+    contextFilters: filters.length > 0 ? filters.map((f) => f.predicate) : undefined,
+    contextFilterRefs: filters.some((f) => f.criterionRef)
+      ? filters.map((f) => f.criterionRef)
+      : undefined,
     contextStamps: stamps.length > 0 ? stamps : undefined,
     implementsCapabilities: implementsCaps.length > 0 ? implementsCaps : undefined,
     persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,
@@ -1175,17 +1167,7 @@ function lowerTest(block: TestBlock, env: Env): TestIR {
   const statements: TestStmtIR[] = [];
   for (const s of block.body) {
     if (isExpectStmt(s)) {
-      statements.push({
-        kind: "expect",
-        expr: lowerExpr(s.expr, inner),
-        source: cstText(s.expr),
-      });
-    } else if (isExpectThrowsStmt(s)) {
-      statements.push({
-        kind: "expect-throws",
-        expr: lowerExpr(s.expr, inner),
-        source: cstText(s.expr),
-      });
+      statements.push(expectStmtIR(lowerExpr(s.expr, inner), cstText(s.expr)));
     } else {
       const r = lowerStatement(s as Statement, inner);
       statements.push(r.stmt);
@@ -1193,6 +1175,26 @@ function lowerTest(block: TestBlock, env: Env): TestIR {
     }
   }
   return { name: block.name, statements, verifiesTestCase: block.verifies?.ref?.name };
+}
+
+/** Build the `TestStmtIR` for an `expect(...)` test statement.  The
+ *  method-based throw assertion `expect(call).toThrow(N?)` is recognised here
+ *  and rewritten into the platform-neutral `expect-throws` IR node — so every
+ *  backend renders it as a throw exactly as before — with the optional integer
+ *  pinning the rejected HTTP status in an e2e api body.  Every other
+ *  `expect(...)` carries a value/locator matcher (`toBe`, `toHaveText`, …); a
+ *  bare-boolean `expect` is rejected by the validator (`checkExpectMatcher`). */
+function expectStmtIR(e: ExprIR, source: string): TestStmtIR {
+  if (e.kind === "method-call" && e.isIntrinsicMatcher && e.member === "toThrow") {
+    const inner = e.receiver.kind === "paren" ? e.receiver.inner : e.receiver;
+    const arg = e.args[0];
+    const status =
+      arg && arg.kind === "literal" && arg.lit === "int" ? Number(arg.value) : undefined;
+    return status != null
+      ? { kind: "expect-throws", expr: inner, source, status }
+      : { kind: "expect-throws", expr: inner, source };
+  }
+  return { kind: "expect", expr: e, source };
 }
 
 function lowerRepository(

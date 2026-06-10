@@ -129,10 +129,14 @@ describe("+= / -= in onClick mutations", () => {
     );
   });
 
-  it("fails loud on an unlowerable multi-segment assignment (no silent drop)", async () => {
+  it("fails loud on an unlowerable assignment target (no silent drop)", async () => {
     // A handler statement the walker can't lower used to emit a
     // `/* unsupported assign */` comment — compiling fine but silently
     // doing nothing at runtime (a dead button).  It must now throw.
+    // (Multi-segment targets rooted at a STATE field lower to nested
+    // spreads now — see walker-multiseg-state.test.ts — so the
+    // unlowerable case is a target whose root is not a state field,
+    // e.g. the event lambda param.)
     const build = buildAndGenerate(`
       system S {
         subdomain M { context C { } }
@@ -140,7 +144,7 @@ describe("+= / -= in onClick mutations", () => {
           page P {
             route: "/p"
             state { draft: int = 0 }
-            body:  Button { "x", onClick: e => { draft.note := 1 } }
+            body:  Button { "x", onClick: e => { e.note := 1 } }
           }
         }
         deployable api { platform: hono, contexts: [C], port: 3000 }
@@ -153,7 +157,7 @@ describe("+= / -= in onClick mutations", () => {
       }
     `);
     await expect(build).rejects.toThrow(
-      /unsupported assignment to 'draft\.note' in a page event handler/,
+      /unsupported assignment to 'e\.note' in a page event handler/,
     );
   });
 });

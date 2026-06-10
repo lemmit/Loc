@@ -68,7 +68,9 @@
     "primitive-code-block": "primitive-code-block.hbs",
     "primitive-icon": "primitive-icon.hbs",
     "form-op-decls": "form-op-decls.hbs",
-    "form-op-module": "form-op-module.hbs"
+    "form-op-module": "form-op-module.hbs",
+    "primitive-multiline-field": "primitive-multiline-field.hbs",
+    "primitive-select-field": "primitive-select-field.hbs"
   },
   "shellFiles": {
     "toaster": "src/lib/toaster.tsx"
@@ -514,6 +516,24 @@
         "from": "@chakra-ui/react",
         "named": [
           "Box"
+        ]
+      }
+    ],
+    "primitive-multiline-field": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "Textarea"
+        ]
+      }
+    ],
+    "primitive-select-field": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "NativeSelect"
         ]
       }
     ]

@@ -47,4 +47,5 @@ export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingSha
   // Python emits relational state (+ the eventLog stream table, which is
   // not a SavingShape); embedded / document emission is future work.
   python: ["relational"],
+  java: ["relational"],
 };

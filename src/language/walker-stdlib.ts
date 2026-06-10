@@ -44,12 +44,12 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
   // Phase 6 — semantic anchor target + sticky-position wrapper.
   "Section",
   "Sticky",
-  // Inputs.
+  // Inputs.  (`Switch` is deliberately absent: page-metamodel.md removed it —
+  // control-flow Switch is subsumed by `match`; the boolean input is Toggle.)
   "Field",
   "NumberField",
   "PasswordField",
   "Toggle",
-  "Switch",
   "MultilineField",
   "SelectField",
   // Display.
@@ -84,6 +84,7 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
   "CreateForm",
   "OperationForm",
   "WorkflowForm",
+  "DestroyForm",
   // Legacy archetype names — admissible in user pages, lower as
   // `custom` page origins post-#515.
   "List",

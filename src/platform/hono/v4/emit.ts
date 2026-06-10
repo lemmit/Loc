@@ -54,6 +54,7 @@ import {
   type UserIR,
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
+import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
 import {
   isTpcBase,
   isTphBase,
@@ -78,6 +79,7 @@ import { layeredStyleAdapter } from "./adapters/layered-style.js";
 import { resourceAdapterFor } from "./adapters/resource-clients.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitObservabilityFiles } from "./observability-builder.js";
+import { buildRealtimeFile } from "./realtime-builder.js";
 import { buildRoutesFile } from "./routes-builder.js";
 import { buildViewsRoutesFile } from "./view-routes-builder.js";
 import { buildWorkflowsFile } from "./workflow-builder.js";
@@ -95,6 +97,14 @@ export class AggregateNotFoundError extends Error {
  *  HTTP 403 (Forbidden). */
 export class ForbiddenError extends Error {
   constructor(message: string) { super(message); this.name = "ForbiddenError"; }
+}
+/** State-gate failure — raised when an operation's 'when' predicate
+ *  (the canCommand gate, criterion.md use site 2) evaluates false
+ *  against the loaded aggregate.  The per-route catch maps this to
+ *  HTTP 409 (Conflict — the request is well-formed and authorized,
+ *  but the aggregate's current state disallows it). */
+export class DisallowedError extends Error {
+  constructor(message: string) { super(message); this.name = "DisallowedError"; }
 }
 /** Wraps an exception thrown by a user-supplied extern handler.  The
  *  per-router \`app.onError\` maps this to a 500 envelope that names
@@ -375,6 +385,14 @@ export function generateTypeScriptForContexts(
     "http/index.ts",
     renderHttpIndex(merged, { authRequired, persistence: usingMikro ? "mikroorm" : "drizzle" }),
   );
+  // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`
+  // channel makes its carried events UI-observable at GET /realtime/events;
+  // createApp's dispatcher tee (see routes emit) copies dispatched events
+  // onto the stream.
+  if (!usingMikro) {
+    const realtimeFile = buildRealtimeFile(merged);
+    if (realtimeFile) out.set("http/realtime.ts", realtimeFile);
+  }
 
   // Adapter dispatch context — present only in system-mode emit so
   // routes-file emission can route through the layered StyleAdapter +
@@ -594,6 +612,14 @@ export function generateTypeScriptForContexts(
       resourceImports,
       hasSeeds,
       usingMikro,
+      // Outbox relay (dispatch-delivery-semantics.md): started at boot when
+      // any context carries a durable channel AND the in-process dispatcher
+      // is wired (subscriptions exist; drizzle persistence).
+      !usingMikro &&
+        contexts.some((c) => c.eventSubscriptions.length > 0 && durableEventTypes(c).size > 0),
+      // Realtime tee: the relay's inner dispatcher rides through it so
+      // relayed (durable) events reach the SSE wire too.
+      !usingMikro && contexts.some((c) => realtimeEventTypes(c).size > 0),
     ),
   );
   if (!usingMikro) out.set("drizzle.config.ts", DRIZZLE_CONFIG);
@@ -801,6 +827,8 @@ function renderProjectIndexTs(
   resourceImports: readonly string[] = [],
   runSeedsAtBoot = false,
   usingMikro = false,
+  outboxRelay = false,
+  hasRealtime = false,
 ): string {
   // Side-effect imports for the resource-client modules (objectStore /
   // queue / api) so their clients instantiate at boot.  Empty for
@@ -839,7 +867,13 @@ import pg from "pg";
 import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
-${migImport}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";`;
+${
+  outboxRelay
+    ? `import { createInProcessDispatcher, createOutboxDispatcher, startOutboxRelay } from "./http/workflows";\n${
+        hasRealtime ? `import { realtimeTee } from "./http/realtime";\n` : ""
+      }`
+    : ""
+}${migImport}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";`;
   const connectionBlock = usingMikro
     ? `// Persistence connection — owned by the mikroorm PersistenceAdapter\n// (MikroORM.init → dev schema bootstrap → EntityManager as \`db\`).\n${mikroConnectionSetup().join("\n")}`
     : `// Persistence connection — owned by the drizzle PersistenceAdapter\n// (DATABASE_URL guard → pg pool → pool-error logging → drizzle db).\n${DRIZZLE_CONNECTION_SETUP.join("\n")}`;
@@ -853,8 +887,19 @@ ${connectionBlock}
 
 const port = Number(process.env.PORT ?? 3000);
 baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
-${effectiveMigCall}${seedCall}${authStubCall}const app = createApp(db);
-const server = serve({ fetch: app.fetch, port });
+${effectiveMigCall}${seedCall}${authStubCall}${
+  outboxRelay
+    ? `// Transactional outbox (dispatch-delivery-semantics.md): durable events
+// (channels with retention: log | work) are recorded in __loom_outbox by
+// the app's dispatcher; the relay drains them through the in-process
+// dispatcher at-least-once.  Consumers must tolerate redelivery.
+const inProcessEvents = ${hasRealtime ? "realtimeTee(createInProcessDispatcher(db))" : "createInProcessDispatcher(db)"};
+const app = createApp(db, createOutboxDispatcher(db, inProcessEvents));
+const stopOutboxRelay = startOutboxRelay(db, inProcessEvents);
+`
+    : `const app = createApp(db);
+`
+}const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });
 
 // Graceful shutdown — close the HTTP server (stops accepting,
@@ -862,7 +907,12 @@ baseLogger.info({ event: "server_listening", port });
 // drops in-flight work and leaves pg connections lingering.  Both
 // SIGTERM (orchestrator) and SIGINT (Ctrl-C) are handled.
 async function shutdown(signal: string): Promise<void> {
-  baseLogger.info({ event: "server_shutdown", signal });
+  baseLogger.info({ event: "server_shutdown", signal });${
+    outboxRelay
+      ? `
+  stopOutboxRelay();`
+      : ""
+  }
   await new Promise<void>((resolve) => server.close(() => resolve()));
   baseLogger.info({ event: "server_drained" });
   ${usingMikro ? "await orm.close();" : "await pool.end();"}

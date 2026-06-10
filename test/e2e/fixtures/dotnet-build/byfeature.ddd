@@ -1,0 +1,87 @@
+// Compile-gate fixture for the dotnet `directoryLayout: byFeature` layout
+// (D-REALIZATION-AXES Phase 5a/5b) + its namespace-by-feature rewrite
+// (Phase 5e).  `directoryLayout:` is a SYSTEM-MODE selection (on a
+// deployable), so this is generated via `ddd generate system` and the
+// project is built under `dotnet build /warnaserror` — proving the
+// relocation + namespace/using/qualified-reference rewrite produce a
+// COMPILING project (the lesson from node's first byFeature attempt:
+// a layout MUST have a compile gate).
+//
+// Deliberately exercises the name-resolution hot spots:
+//   - TPH inheritance: `class Customer : Party` is a CROSS-FEATURE simple-name
+//     reference (the case the plural `Features/<Plural>/` folder exists for),
+//     and the base's discriminator config references the concretes back.
+//   - An extern operation: Program.cs verifies the handler interface by its
+//     FULLY-QUALIFIED name, which the rewrite must follow.
+//   - A reference-collection association: the join entity + its EF config move
+//     into the feature while AppDbContext wires them via global::-anchored
+//     references.
+//   - An event-sourced aggregate: the event-record POCO + config join the
+//     feature folder.
+//   - A view: a CROSS-CUTTING artifact that stays layered but imports the
+//     relocated aggregate.
+
+system ByFeatureNet {
+  subdomain Registry {
+    context Parties {
+      event Deposited { ledger: Ledger id, amount: int }
+
+      abstract aggregate Party inheritanceUsing(sharedTable) {
+        name: string
+        email: string
+      }
+      aggregate Customer extends Party {
+        creditLimit: int
+        operation raiseLimit(by: int) {
+          creditLimit := creditLimit + by
+        }
+        operation syncScore() extern { }
+      }
+      aggregate Vendor extends Party {
+        rating: int
+      }
+      aggregate Tag {
+        label: string
+      }
+      aggregate Profile {
+        bio: string
+        tagIds: Tag id[]
+      }
+      aggregate Ledger persistedAs(eventLog) {
+        balance: int
+        create open() {
+          emit Deposited { ledger: id, amount: 0 }
+        }
+        operation deposit(amount: int) {
+          precondition amount > 0
+          emit Deposited { ledger: id, amount: amount }
+        }
+        apply(e: Deposited) {
+          balance := balance + e.amount
+        }
+      }
+
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.email == email
+      }
+      repository Vendors for Vendor { }
+      repository Tags for Tag { }
+      repository Profiles for Profile { }
+      repository Ledgers for Ledger { }
+
+      view ActiveVendors = Vendor where rating > 0
+    }
+  }
+
+  storage pg { type: postgres }
+
+  resource partiesState { for: Parties, kind: state, use: pg }
+  resource ledgerLog { for: Parties, kind: eventLog, use: pg }
+
+  deployable api {
+    platform: dotnet { directoryLayout: byFeature }
+    contexts: [Parties]
+    dataSources: [partiesState, ledgerLog]
+    port: 8080
+  }
+}

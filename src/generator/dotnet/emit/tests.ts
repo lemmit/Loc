@@ -22,8 +22,9 @@ import { renderCsExpr } from "../render-expr.js";
 //   expect(x).toBeGreaterThan(0)          → x.Should().BeGreaterThan(0);
 //   expect(x).not.toBeLessThanOrEqual(0)  → x.Should().NotBeLessThanOrEqualTo(0);
 //
-// A bare boolean falls back to `Assert.True(<expr>)`; `expectThrows` stays
-// on `Assert.Throws<DomainException>` (xUnit + AwesomeAssertions coexist).
+// Every `expect` carries a matcher (no bare-boolean fallback);
+// `expect(call).toThrow()` emits `Assert.Throws<DomainException>` (xUnit +
+// AwesomeAssertions coexist).
 // ---------------------------------------------------------------------------
 
 export function renderTestsFile(
@@ -147,7 +148,9 @@ function renderTestStmt(s: TestStmtIR, ctx: BoundedContextIR): string {
   if (s.kind === "expect") {
     const explicit = renderExplicitMatcherToAwesome(s.expr);
     if (explicit) return `    ${explicit}`;
-    return `    Assert.True(${renderCsExpr(s.expr)});`;
+    // Every `expect` carries a matcher (validator: checkExpectMatcher); a bare
+    // boolean reaching codegen is an invariant violation, not user input.
+    throw new Error("expect requires a matcher (e.g. expect(x).toBe(y)); got a bare expression.");
   }
   if (s.kind === "expect-throws") {
     const expr = renderCreateCall(s.expr, ctx) ?? renderCsExpr(s.expr);

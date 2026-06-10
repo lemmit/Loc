@@ -9,7 +9,8 @@ import {
   type SystemIR,
   type UiIR,
 } from "../../ir/types/loom-ir.js";
-import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { realtimeEventTypes } from "../../ir/util/channels.js";
+import { lowerFirst, plural } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { buildApiModule } from "./api-builder.js";
@@ -170,7 +171,7 @@ export function generateReactForContexts(
     out.set("src/api/views.ts", buildViewsApiModule(contexts));
   }
 
-  out.set("e2e/smoke.spec.ts", smokeSpec(aggregates.map((a) => a.agg)));
+  out.set("e2e/smoke.spec.ts", smokeSpec(ui));
   out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
   out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
@@ -182,6 +183,18 @@ export function generateReactForContexts(
   const hasDelete = aggregates.some((a) => !!a.agg.canonicalDestroy);
   out.set("src/api/client.ts", renderShellFile("api-client", { hasDelete }, pack));
   out.set("src/api/config.ts", renderShellFile("api-config", { apiBaseUrl }, pack));
+  // Realtime SSE client (channels.md Part I): when the targeted backend
+  // exposes the realtime wire (any `delivery: broadcast` channel; Hono is
+  // the only backend serving GET /realtime/events so far), emit the
+  // EventSource subscription helper.  Pack-agnostic shared shell file —
+  // user code (and the future `on <channel>.<Event>` handlers) consume it.
+  const realtimeTypes =
+    target?.platform === "node"
+      ? [...new Set(contexts.flatMap((c) => [...realtimeEventTypes(c)]))].sort()
+      : [];
+  if (realtimeTypes.length > 0) {
+    out.set("src/api/realtime.ts", renderRealtimeClient(realtimeTypes));
+  }
   // Frontend observability: a namespaced loglevel logger + a top-level
   // error boundary.  Both are pack-agnostic shared shell files; main.tsx
   // (per pack) mounts the boundary and the api client logs through the
@@ -354,6 +367,43 @@ export function generateReactForContexts(
   return prefixed;
 }
 
+/** The realtime SSE client — one EventSource against the backend's
+ *  `GET /realtime/events`, fanning typed events out to subscribers
+ *  (channels.md Part I).  v1 is broadcast-to-all: the authorized read
+ *  stays the gate, so consumers typically refetch/invalidate rather
+ *  than trust payloads for anything privileged. */
+function renderRealtimeClient(eventTypes: readonly string[]): string {
+  const typeList = eventTypes.map((t) => JSON.stringify(t)).join(", ");
+  return `// Auto-generated.  Do not edit by hand.
+// Realtime SSE client (channels.md Part I) — subscribes to the backend's
+// GET /realtime/events stream.  Events carried by a \`delivery: broadcast\`
+// channel arrive as \`{ type, ...fields }\`; the connection auto-reconnects
+// (EventSource semantics).  The authorized read remains the gate — refetch
+// through the API for anything privileged.
+import { API_BASE } from "./config";
+
+export type RealtimeEvent = { type: string } & Record<string, unknown>;
+
+/** Event types the backend's broadcast channels carry. */
+export const REALTIME_EVENT_TYPES = [${typeList}] as const;
+
+/** Subscribe to the realtime stream.  Returns an unsubscribe fn that
+ *  closes the EventSource.  \`onEvent\` fires once per carried event. */
+export function subscribeRealtime(onEvent: (event: RealtimeEvent) => void): () => void {
+  const source = new EventSource(\`\${API_BASE}/realtime/events\`);
+  const handler = (m: MessageEvent) => {
+    try {
+      onEvent(JSON.parse(m.data as string) as RealtimeEvent);
+    } catch {
+      // Malformed frame — skip (keep the stream alive).
+    }
+  };
+  for (const t of REALTIME_EVENT_TYPES) source.addEventListener(t, handler);
+  return () => source.close();
+}
+`;
+}
+
 /** Emit each entry in the pack manifest's `shellFiles` map (logical
  *  template name → output path).  Throws if a declared template name
  *  isn't registered in `emits`, naming the offending key — this keeps
@@ -461,23 +511,48 @@ function staticTitleOf(page: PageIR | undefined): string | undefined {
   return undefined;
 }
 
-function smokeSpec(aggregates: AggregateIR[]): string {
-  // Auto-generated minimal Playwright smoke: every aggregate's list
-  // page loads.  Users add per-aggregate scenarios using the page
-  // objects under e2e/pages/.
-  const imports = aggregates
-    .map((a) => `import { ${upperFirst(a.name)}ListPage } from "./pages/${lowerFirst(a.name)}";`)
-    .join("\n");
-  const cases = aggregates
-    .map(
-      (a) =>
-        `test("${snake(plural(a.name))} list loads", async ({ page }) => {\n  const p = await new ${upperFirst(a.name)}ListPage(page).goto();\n  await expect(p.page).toHaveURL(/${snake(plural(a.name))}$/);\n});`,
-    )
-    .join("\n\n");
+function smokeSpec(ui: UiIR): string {
+  // Auto-generated minimal Playwright smoke: every param-less page this
+  // ui declares navigates and loads.  Driven by route (not by importing
+  // the page objects) so it stays correct regardless of how the ui's
+  // pages map onto page-object files — a custom-page ui emits
+  // `pages/<page>.ts` (class `<Page>Page`), a scaffold ui emits
+  // `pages/<aggregate>.ts` (class `<Agg>ListPage`), and a ui covers only
+  // the aggregates it actually shows.  The old per-served-aggregate
+  // `import { <Agg>ListPage } from "./pages/<agg>"` assumed the scaffold
+  // shape for every served aggregate and broke (module-not-found →
+  // Playwright "No tests found" → non-zero exit) on any ui with custom or
+  // partial pages.  Richer per-page scenarios live in the page objects
+  // under e2e/pages/ and the generated `*.ui.spec.ts`.
+  const cases: string[] = [];
+  for (const page of ui.pages) {
+    // Parameterised routes (`/x/:id`) need a seeded entity — out of scope
+    // for a smoke; they're exercised by the per-page specs.
+    if (page.params.length > 0) continue;
+    const route = page.route;
+    if (!route || route.includes(":")) continue;
+    const routeRe = `${route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`;
+    cases.push(
+      `test(${JSON.stringify(`${page.name} loads`)}, async ({ page }) => {\n` +
+        `  await page.goto(${JSON.stringify(route)});\n` +
+        `  await expect(page).toHaveURL(new RegExp(${JSON.stringify(routeRe)}));\n` +
+        `});`,
+    );
+  }
+  // A ui made up entirely of parameterised pages would otherwise produce a
+  // spec with zero tests — which Playwright reports as "No tests found"
+  // and exits non-zero.  Fall back to loading the SPA root.
+  if (cases.length === 0) {
+    cases.push(
+      `test("app root loads", async ({ page }) => {\n` +
+        `  await page.goto("/");\n` +
+        `  await expect(page.locator("body")).toBeVisible();\n` +
+        `});`,
+    );
+  }
   return `// Auto-generated smoke spec.
 import { test, expect } from "./fixtures";
-${imports}
 
-${cases}
+${cases.join("\n\n")}
 `;
 }

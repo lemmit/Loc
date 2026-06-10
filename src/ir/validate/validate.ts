@@ -14,6 +14,7 @@ import {
   validateUnionFindShapes,
   validateUnionsUnimplemented,
   validateUnmappedErrorStatuses,
+  validateWhenGateSupport,
   validateWorkspaceUniqueness,
 } from "./checks/structural-checks.js";
 import {
@@ -26,6 +27,8 @@ import {
   validateDataSourceUnwiredKnobs,
   validateEventSourcedStorage,
   validateInheritanceStorage,
+  validateJavaContainmentSupport,
+  validateJavaFullstackSupport,
   validateMikroOrmSupport,
   validateNeedCapabilities,
   validatePermissions,
@@ -94,6 +97,8 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDataSourceCoverage(sys, diags);
     validateSavingShapeSupport(sys, diags);
     validateContextFilterSupport(sys, diags);
+    validateJavaContainmentSupport(sys, diags);
+    validateJavaFullstackSupport(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
@@ -137,6 +142,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     );
     validateUnionsUnimplemented(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateUnionFindShapes(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateWhenGateSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateOperationReturnsUnimplemented(
       c,
       diags,

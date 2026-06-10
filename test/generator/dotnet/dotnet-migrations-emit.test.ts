@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { emitDotnetMigrations } from "../../../src/generator/dotnet/emit/migrations.js";
 import type { MigrationsIR, SchemaSnapshot } from "../../../src/ir/types/migrations-ir.js";
+import { generateSystems } from "../../../src/system/index.js";
+import { parseString } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // .NET migrations emitter — one Migration class per MigrationsIR, plus
@@ -65,6 +67,17 @@ describe("dotnet migrations emitter", () => {
 
     const mig = out.get("Migrations/20260101000000_Sales_Initial.cs")!;
     expect(mig).toMatch(/namespace Api\.Migrations/);
+    // EF's MigrationsAssembly only discovers Migration subclasses whose
+    // [DbContext] attribute matches the context handed to Migrate() —
+    // without this attribute Database.Migrate() silently applies nothing
+    // (only __EFMigrationsHistory appears; first INSERT dies with 42P01).
+    // global:: qualifies from the root namespace — required because some
+    // layouts (byFeature, TPH) nest a same-named child namespace, against
+    // which a relative `Api.Infrastructure…` would mis-resolve (CS0234).
+    expect(mig).toMatch(
+      /\[DbContext\(typeof\(global::Api\.Infrastructure\.Persistence\.AppDbContext\)\)\]/,
+    );
+    expect(mig).toMatch(/using Microsoft\.EntityFrameworkCore\.Infrastructure;/);
     expect(mig).toMatch(/\[Migration\("20260101000000_Sales_Initial"\)\]/);
     expect(mig).toMatch(/public partial class M20260101000000_Sales_Initial : Migration/);
     expect(mig).toMatch(/migrationBuilder\.Sql\(@"CREATE TABLE orders \(/);
@@ -120,6 +133,38 @@ describe("dotnet migrations emitter", () => {
     const out = new Map<string, string>();
     emitDotnetMigrations([ir([], { name: "NoOp" })], "Api", out);
     expect(out.size).toBe(0);
+  });
+
+  it("a migrations-bearing deployable migrates at startup and never calls EnsureCreated", async () => {
+    // Mixing Migrate() with EnsureCreated() is the classic EF trap:
+    // whichever runs first creates *a* table, the other sees a non-empty
+    // database and no-ops — so a Migrate() that discovered zero migrations
+    // (the missing-[DbContext] bug) left __EFMigrationsHistory behind and
+    // EnsureCreated() then silently skipped creating the entity tables.
+    const { model, errors } = await parseString(`system Mig {
+      subdomain Shop {
+        context Catalog {
+          aggregate Product with crudish { sku: string derived display: string = sku }
+          repository Products for Product { }
+        }
+      }
+      storage db { type: postgres }
+      resource catalogState { for: Catalog, kind: state, use: db }
+      deployable api { platform: dotnet contexts: [Catalog] dataSources: [catalogState] port: 8080 }
+    }`);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const files = generateSystems(model).files;
+    const program = [...files.entries()].find(([k]) => /api\/Program\.cs$/.test(k))?.[1];
+    expect(program, "Program.cs missing").toBeDefined();
+    expect(program).toContain("db.Database.Migrate()");
+    expect(program).not.toContain("EnsureCreated");
+
+    // And the migration class itself is discoverable by that Migrate() call.
+    const mig = [...files.entries()].find(([k]) => /api\/Migrations\/.*\.cs$/.test(k))?.[1];
+    expect(mig, "migration class missing").toBeDefined();
+    expect(mig).toContain(
+      "[DbContext(typeof(global::Api.Infrastructure.Persistence.AppDbContext))]",
+    );
   });
 
   it("escapes embedded double-quotes in SQL for the verbatim string literal", () => {

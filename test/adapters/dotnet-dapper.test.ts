@@ -125,6 +125,67 @@ system D {
   });
 });
 
+// Reference collections (`X id[]`) on Dapper: one ordinal-ordered join table
+// per association (DbSchema), bulk-loaded on every read via LoadRefsAsync,
+// full-list-replaced on save (DELETE + re-INSERT — semantically identical to
+// EF's diff-sync for a full-list replace).
+describe("dapper reference-collection associations", () => {
+  const SRC = `
+system D {
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Tag with crudish { label: string  derived display: string = this.label }
+      aggregate Order with crudish {
+        customer: string
+        tags: Tag id[]
+      }
+      repository Orders for Order { }
+      repository Tags for Tag { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("emits the join table, bulk loader, and save sync", async () => {
+    const { files, errors } = await emit(SRC);
+    expect(errors).toEqual([]);
+    const repo = files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    // The root row carries no tags column; the join table does.
+    expect(repo).not.toContain("tags { get; set; }");
+    expect(files.get("api/Infrastructure/Persistence/DbSchema.cs")).toContain(
+      "CREATE TABLE IF NOT EXISTS order_tags",
+    );
+    // Reads funnel through the ordinal-ordered bulk loader.
+    expect(repo).toContain(
+      "SELECT order_id, tag_id FROM order_tags WHERE order_id = ANY(@ids) ORDER BY order_id, ordinal",
+    );
+    expect(repo).toContain("await LoadRefsAsync(conn, __one, cancellationToken);"); // GetById
+    expect(repo).toContain("await LoadRefsAsync(conn, __roots, cancellationToken);"); // findAll
+    // Save replaces the full list with ordinals.
+    expect(repo).toContain('DELETE FROM order_tags WHERE order_id = @id"');
+    expect(repo).toContain(
+      "INSERT INTO order_tags (order_id, tag_id, ordinal) VALUES (@o, @t, @i)",
+    );
+  });
+
+  it("accepts managed-access fields (wire-projection concern, no gate)", async () => {
+    const { files, errors } = await emit(
+      sys("dapper", "passwordHash: string secret\n        version: int token"),
+    );
+    expect(errors).toEqual([]);
+    const repo = [...files.entries()].find(([k]) =>
+      k.endsWith("Repositories/OrderRepository.cs"),
+    )![1];
+    // The columns persist like any field; the shared CQRS layer owns the
+    // wire stripping.
+    expect(repo).toContain("password_hash");
+    expect(repo).toContain("version");
+  });
+});
+
 describe("dapper capability gating (loom.dapper-unsupported)", () => {
   const rejects = async (body: string, needle: RegExp) => {
     const { errors } = await emit(sys("dapper", body));
@@ -151,6 +212,60 @@ describe("dapper capability gating (loom.dapper-unsupported)", () => {
   it("accepts the supported subset (scalar / enum / VO / optional)", async () => {
     const { errors } = await emit(sys("dapper"));
     expect(errors).toEqual([]);
+  });
+});
+
+// Capability filters on Dapper: a non-principal `filter <expr>` is spliced
+// into every SELECT's WHERE (Dapper has no EF HasQueryFilter); the gate only
+// rejects principal-referencing predicates (no request-scoped principal
+// accessor on the Dapper repository).
+describe("dapper capability filters", () => {
+  it("ANDs a non-principal filter into every read", async () => {
+    const { files, errors } = await emit(
+      sys("dapper", "archived: bool\n        filter !this.archived"),
+    );
+    expect(errors).toEqual([]);
+    const repo = [...files.entries()].find(([k]) =>
+      k.endsWith("Repositories/OrderRepository.cs"),
+    )![1];
+    // GetById + FindManyByIds + findAll + the named find all carry it.
+    expect(repo).toContain("WHERE id = @id AND (NOT archived)");
+    expect(repo).toContain("WHERE id = ANY(@ids) AND (NOT archived)");
+    expect(repo).toContain("FROM orders WHERE (NOT archived)");
+    expect(repo).toContain("WHERE (customer = @customer) AND (NOT archived)");
+  });
+
+  it("applies lifecycle stamps: onUpdate mutates pre-save, onCreate is INSERT-only", async () => {
+    const body = `createdAt: datetime
+        updatedAt: datetime
+        stamp onCreate { createdAt := now() }
+        stamp onUpdate { updatedAt := now() }`;
+    const { files, errors } = await emit(sys("dapper", body));
+    expect(errors).toEqual([]);
+    const repo = [...files.entries()].find(([k]) =>
+      k.endsWith("Repositories/OrderRepository.cs"),
+    )![1];
+    // onUpdate mutates the in-memory aggregate (EF-interceptor parity) so
+    // both the row and the projected response carry the stamp.
+    expect(repo).toContain("aggregate.UpdatedAt = DateTime.UtcNow;");
+    // onCreate binds an INSERT-only local …
+    expect(repo).toContain("var __create_created_at = DateTime.UtcNow;");
+    expect(repo).toContain("created_at = __create_created_at");
+    // … and the upsert SET excludes it (an existing row keeps its value)
+    // while still updating the onUpdate column.
+    expect(repo).toMatch(
+      /ON CONFLICT \(id\) DO UPDATE SET (?!.*created_at = excluded).*updated_at = excluded\.updated_at/,
+    );
+  });
+
+  it("never emits a silent principal-referencing filter (model errors out upstream)", async () => {
+    // The selectability validator already rejects `currentUser.<field>` in
+    // this fixture shape; the dapper gate's principal check is the
+    // defense-in-depth layer behind it.  Either way: errors, no silent drop.
+    const { errors } = await emit(
+      sys("dapper", "owner: string\n        filter this.owner == currentUser.email"),
+    );
+    expect(errors.length).toBeGreaterThan(0);
   });
 });
 

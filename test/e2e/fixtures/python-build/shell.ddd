@@ -40,11 +40,11 @@ system PyShell {
 
         test "activate requires draft" {
           let w = Widget.create({ label: "gizmo", size: 1, status: Active, price: Price { amount: 1.0, currency: "USD" } })
-          expectThrows w.activate()
+          expect(w.activate()).toThrow()
         }
 
         test "price invariant rejects short currency" {
-          expectThrows Price { amount: 1.0, currency: "US" }
+          expect(Price { amount: 1.0, currency: "US" }).toThrow()
         }
       }
       repository Widgets for Widget { }

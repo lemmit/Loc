@@ -93,7 +93,7 @@ describe("typescript generator", () => {
           test "count on a local lowers to length" {
             let order = Order.create({ status: Draft })
             order.addLine(2)
-            expect order.lines.count == 1
+            expect(order.lines.count).toBe(1)
           }
         }
         repository Orders for Order { }
@@ -104,7 +104,7 @@ describe("typescript generator", () => {
     expect((doc.diagnostics ?? []).filter((d) => d.severity === 1)).toEqual([]);
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const tests = files.get("domain/order.test.ts")!;
-    expect(tests).toMatch(/order\.lines\.length === 1/);
+    expect(tests).toMatch(/expect\(order\.lines\.length\)\.toBe\(1\)/);
     expect(tests).not.toMatch(/order\.lines\.count/);
   });
 
@@ -750,7 +750,7 @@ describe("typescript generator", () => {
       const routes = files.get("http/order.routes.ts")!;
       // Imports the new error type.
       expect(routes).toMatch(
-        /import \{ DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors"/,
+        /import \{ DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors"/,
       );
       // Wraps the handler call in try/catch.
       expect(routes).toMatch(/try \{\s+await handler\(aggregate, body\);/);

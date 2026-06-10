@@ -147,6 +147,9 @@ export function emitController(
           // (default ASP.NET JsonNamingPolicy.CamelCase).
           paramNames: op.params.map((p) => p.name),
           guarded: operationIsGuarded(op),
+          // `when` canCommand gate: 409 on the action + the GET can_<op>
+          // companion (criterion.md use site 2).
+          whenGated: !!op.when,
           // Exception-less return-typed op: the controller-side translation spec
           // (Domain union → ProblemDetails / Ok-wrapped wire DTO).
           returnUnion: buildReturnUnionSpec(op, agg, ctx, ns),

@@ -227,7 +227,7 @@ export function validateGenericInstancesUnimplemented(
   // (the legacy `phoenix` / `phoenixLiveView` platform aliases canonicalize
   // to `elixir` per D-ELIXIR-PLATFORM).  All four backends now emit
   // generic carriers.
-  const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir", "python"]);
+  const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir", "python", "java"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_PAGED_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 
@@ -453,6 +453,41 @@ export function validateUnionsUnimplemented(
 // return-typed operation stays a hard error while any of them serve the
 // context — mirroring the P3a/P4a/P4c surface-first staging.
 // ---------------------------------------------------------------------------
+
+/**
+ * `when` canCommand gate (criterion.md, use site 2) — backend support.
+ * Hono + .NET evaluate the predicate before the body (409 Disallowed) and
+ * expose the side-effect-free `GET /{id}/can_<op>`; the elixir emitters
+ * don't yet, so a `when`-gated operation is a hard error while an elixir
+ * backend serves the context (surfacing it beats silently skipping the
+ * gate — an unenforced state gate is a correctness hole).
+ */
+export function validateWhenGateSupport(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  const SUPPORTED_WHEN_BACKENDS = new Set(["node", "dotnet"]);
+  const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_WHEN_BACKENDS.has(p));
+  if (unsupported.length === 0) return;
+
+  for (const agg of ctx.aggregates) {
+    for (const op of agg.operations) {
+      if (!op.when) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.when-unsupported",
+        message:
+          `operation '${agg.name}.${op.name}' declares a \`when\` gate, but the backend(s) ` +
+          `serving this context (${unsupported.sort().join(", ")}) don't emit the gate or the ` +
+          `can-${op.name} query yet. It's supported on: ${[...SUPPORTED_WHEN_BACKENDS]
+            .sort()
+            .join(", ")}.`,
+        source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
+      });
+    }
+  }
+}
 
 export function validateOperationReturnsUnimplemented(
   ctx: BoundedContextIR,

@@ -113,6 +113,14 @@ export const LogEvents = {
     level: "warn",
     fields: ["workflow", "event_type", "key"],
   },
+  /** The outbox relay exhausted its retries for a durable event — the row
+   *  stays in __loom_outbox (attempts ≥ max) for manual inspection
+   *  (dispatch-delivery-semantics.md, the dead-letter surface). */
+  eventDeadLettered: {
+    event: "event_dead_lettered",
+    level: "warn",
+    fields: ["type", "attempts", "error"],
+  },
 
   // ─── domain — warn (client/domain fault, recoverable) ────────────────
   domainError: {
@@ -124,6 +132,13 @@ export const LogEvents = {
     event: "forbidden",
     level: "warn",
     fields: ["aggregate", "op", "message", "status"],
+  },
+  /** A `when` canCommand gate rejected the operation — the aggregate's
+   *  current state disallows it (criterion.md use site 2; HTTP 409). */
+  disallowed: {
+    event: "disallowed",
+    level: "warn",
+    fields: ["aggregate", "message", "status"],
   },
   notFound: { event: "not_found", level: "warn", fields: ["aggregate", "id", "status"] },
 
