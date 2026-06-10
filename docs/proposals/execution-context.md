@@ -97,12 +97,16 @@ build with tracing disabled pays nothing.
   (the `AsyncLocalStorage` twin), surfaced via a scoped `IRequestContext`
   accessor for DI ergonomics; the frame-local tier *must* be `AsyncLocal`,
   not a scoped singleton (which cannot isolate parallel branches) and not
-  `ThreadLocal` (which is lost across `await`). The frame is pushed by a
-  Mediator pipeline behaviour — the existing `DomainLogBehavior` generalised
-  and renamed (e.g. `ExecutionContextBehavior`), widening its payload from
-  `ILogger` to the frame; see
-  [`../architecture/request-context.md`](../architecture/request-context.md).
-  That is the whole mechanism — no `Activity`/`ActivitySource` and no
+  `ThreadLocal` (which is lost across `await`). Establishment is **two
+  seams** (see [`../architecture/request-context.md`](../architecture/request-context.md)
+  § Two seams): boundary **middleware** births the request-stable tier and
+  the root frame (HTTP), or a non-HTTP entrypoint opens a root explicitly;
+  the per-boundary `enterScope`/`exitScope` pushes above lower to emitted
+  inline `using` scopes, and the **command/query** subset can ride a
+  Mediator pipeline behaviour (`DomainLogBehavior` generalised and renamed,
+  e.g. `ExecutionContextBehavior`, widening its payload from `ILogger` to
+  the frame). The behaviour is a convenience for `Send`-shaped frames, not
+  the whole mechanism. Either way: no `Activity`/`ActivitySource` and no
   OpenTelemetry dependency. The backbone mints its own ids; whether the
   **observability** layer later *projects* a frame onto an OTel span is its
   concern, owned by [`observability.md`](./observability.md), not a
