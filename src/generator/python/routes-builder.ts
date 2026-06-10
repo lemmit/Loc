@@ -1,0 +1,307 @@
+import { wireShapeFor } from "../../ir/enrich/enrichments.js";
+import { forApiRead, forCreateInput, hasCreate } from "../../ir/enrich/wire-projection.js";
+import type {
+  BoundedContextIR,
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+  EnrichedEntityPartIR,
+  OperationIR,
+  RepositoryIR,
+  TypeIR,
+} from "../../ir/types/loom-ir.js";
+import { camelId, opCreate, opDestroy, opGetById, opOperation } from "../../ir/util/openapi-ids.js";
+import { lines } from "../../util/code-builder.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
+import { requestPyType, responsePyType } from "./emit/http-models.js";
+
+// ---------------------------------------------------------------------------
+// Routes emission — `app/http/<snake(agg)>_routes.py`.  One APIRouter
+// per aggregate with the canonical route set (parity with the Hono
+// routes file):
+//   POST   ""              → create (201, {id})           [hasCreate]
+//   GET    ""              → all (200, list response)
+//   GET    "/{id}"         → byId (200 / 404)
+//   DELETE "/{id}"         → canonical destroy (204/404/409)
+//   POST   "/{id}/<op>"    → public operation (204/400/404[/403])
+//
+// DTOs are Pydantic models named for OpenAPI parity
+// (`<Agg>Response`, `Create<Agg>Request`, `<Op><Agg>Request`, …) with
+// wire-cased (camelCase) attribute names — the DTO layer is
+// wire-shaped; handlers coerce into the snake_case domain.
+// operationIds use the shared token vocabulary (camelId — compared
+// case-insensitively by the conformance gate).
+//
+// User-declared finds land in S8; returning ops / unions / paged in
+// S12; currentUser threading in S16.
+// ---------------------------------------------------------------------------
+
+export function buildPyRoutesFile(
+  agg: EnrichedAggregateIR,
+  _repo: RepositoryIR | undefined,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const slug = snake(plural(agg.name));
+  const parts: EnrichedEntityPartIR[] = agg.parts;
+  const publicOps = agg.operations.filter((o) => o.visibility === "public" && !o.extern);
+
+  const models = lines(
+    ...parts.map((p) => responseModel(p.name, p, ctx)),
+    responseModel(agg.name, agg, ctx),
+    hasCreateFactory(agg) ? createModels(agg, ctx) : null,
+    ...publicOps.map((op) => opRequestModel(agg, op, ctx)),
+  );
+
+  const routes = lines(
+    `router = APIRouter(prefix="/${slug}", tags=["${slug}"])`,
+    "",
+    "",
+    "def _repo(session: AsyncSession) -> " + `${agg.name}Repository:`,
+    `    return ${agg.name}Repository(session, NoopDomainEventDispatcher())`,
+    hasCreateFactory(agg) ? ["", "", createRoute(agg, ctx)] : null,
+    "",
+    "",
+    allRoute(agg),
+    "",
+    "",
+    byIdRoute(agg),
+    agg.canonicalDestroy ? ["", "", destroyRoute(agg)] : null,
+    ...publicOps.map((op) => ["", "", operationRoute(agg, op, ctx)]),
+  );
+
+  const body = `${models}\n\n\n${routes}`;
+  const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
+  const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
+  const enumNames = ctx.enums
+    .map((e) => e.name)
+    .filter(refersTo)
+    .sort();
+  const voDomainNames = ctx.valueObjects
+    .map((v) => v.name)
+    .filter(refersTo)
+    .sort();
+  const voModelImports = ctx.valueObjects
+    .map((v) => v.name)
+    .filter((n) => refersTo(`${n}Model`))
+    .sort();
+  const idNames = [agg.name, ...agg.fields.map(idTargetOf).filter((n): n is string => n != null)]
+    .map((n) => `${n}Id`)
+    .filter((n, i, arr) => refersTo(n) && arr.indexOf(n) === i)
+    .sort();
+
+  return lines(
+    `"""${agg.name} HTTP routes + wire DTOs.  Auto-generated."""`,
+    "",
+    refersTo("datetime") ? "from datetime import datetime" : null,
+    refersTo("Decimal") ? "from decimal import Decimal" : null,
+    refersTo("datetime") || refersTo("Decimal") ? "" : null,
+    `from fastapi import ${["APIRouter", "Depends", refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
+    "from pydantic import BaseModel",
+    refersTo("IntegrityError") ? "from sqlalchemy.exc import IntegrityError" : null,
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+    "from typing import Annotated",
+    "",
+    "from app.db.engine import get_session",
+    `from app.db.repositories.${snake(agg.name)}_repository import ${agg.name}Repository`,
+    // Only the create route constructs the domain class directly.
+    refersTo(agg.name) ? `from app.domain.${snake(agg.name)} import ${agg.name}` : null,
+    "from app.domain.events import NoopDomainEventDispatcher",
+    idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
+    [...enumNames, ...voDomainNames].length > 0
+      ? `from app.domain.value_objects import ${[...enumNames, ...voDomainNames].sort().join(", ")}`
+      : null,
+    refersTo("problem") ? "from app.http.problem import problem" : null,
+    voModelImports.length > 0
+      ? `from app.http.wire_models import ${voModelImports.map((n) => `${n} as ${n}Model`).join(", ")}`
+      : null,
+    "",
+    "SessionDep = Annotated[AsyncSession, Depends(get_session)]",
+    "",
+    "",
+    body,
+    "",
+  );
+}
+
+/** Same constructibility gate the domain emitter uses — no `create`
+ *  factory ⇒ no POST route (parity with Hono's `emitCreate`). */
+function hasCreateFactory(agg: EnrichedAggregateIR): boolean {
+  return hasCreate(agg);
+}
+
+function idTargetOf(f: { type: TypeIR }): string | null {
+  const t = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (t.kind === "id") return t.targetName;
+  if (t.kind === "array" && t.element.kind === "id") return t.element.targetName;
+  return null;
+}
+
+// --- DTO models ---------------------------------------------------------------
+
+function responseModel(
+  name: string,
+  ent: EnrichedAggregateIR | EnrichedEntityPartIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const fields = forApiRead(wireShapeFor(ent));
+  return lines(
+    `class ${name}Response(BaseModel):`,
+    fields.map((wf) => {
+      const t =
+        wf.source === "containment"
+          ? containmentResponseType(wf.type)
+          : responsePyType(wf.type, ctx);
+      const optional = wf.optional || wf.type.kind === "optional";
+      const suffix =
+        optional && !t.endsWith("| None") ? " | None = None" : optional ? " = None" : "";
+      return `    ${wf.name}: ${t}${suffix}`;
+    }),
+    "",
+    "",
+  );
+}
+
+function containmentResponseType(t: TypeIR): string {
+  if (t.kind === "array" && t.element.kind === "entity") return `list[${t.element.name}Response]`;
+  if (t.kind === "entity") return `${t.name}Response | None`;
+  return "object";
+}
+
+function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
+  const inputs = forCreateInput(agg.fields);
+  return lines(
+    `class Create${agg.name}Request(BaseModel):`,
+    inputs.length > 0
+      ? inputs.map((f) => {
+          const t = requestPyType(f.type, ctx);
+          const suffix =
+            f.optional && !t.endsWith("| None") ? " | None = None" : f.optional ? " = None" : "";
+          return `    ${f.name}: ${t}${suffix}`;
+        })
+      : ["    pass"],
+    "",
+    "",
+    `class Create${agg.name}Response(BaseModel):`,
+    "    id: str",
+    "",
+    "",
+  );
+}
+
+function opRequestModel(
+  agg: EnrichedAggregateIR,
+  op: OperationIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  return lines(
+    `class ${upperFirst(op.name)}${agg.name}Request(BaseModel):`,
+    op.params.length > 0
+      ? op.params.map((p) => `    ${p.name}: ${requestPyType(p.type, ctx)}`)
+      : ["    pass"],
+    "",
+    "",
+  );
+}
+
+// --- wire → domain coercion -----------------------------------------------------
+
+/** Coerce one validated request value into the domain argument shape:
+ *  brand ids, construct VOs positionally, pass parsed scalars through. */
+export function pyWireToDomain(expr: string, t: TypeIR, ctx: BoundedContextIR): string {
+  switch (t.kind) {
+    case "id":
+      return `${t.targetName}Id(${expr})`;
+    case "valueobject": {
+      const vo = ctx.valueObjects.find((v) => v.name === t.name);
+      if (!vo) return expr;
+      const args = vo.fields
+        .map((vf) => pyWireToDomain(`${expr}.${vf.name}`, vf.type, ctx))
+        .join(", ");
+      return `${t.name}(${args})`;
+    }
+    case "array": {
+      const inner = pyWireToDomain("__v", t.element, ctx);
+      return inner === "__v" ? `list(${expr})` : `[${inner} for __v in ${expr}]`;
+    }
+    case "optional": {
+      const inner = pyWireToDomain(expr, t.inner, ctx);
+      return inner === expr ? expr : `(${inner} if ${expr} is not None else None)`;
+    }
+    case "primitive":
+      if (t.name === "money") return expr;
+      return expr;
+    default:
+      return expr;
+  }
+}
+
+// --- routes ---------------------------------------------------------------------
+
+function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
+  const inputs = forCreateInput(agg.fields);
+  const args = inputs
+    .map((f) => `${snake(f.name)}=${pyWireToDomain(`body.${f.name}`, f.type, ctx)}`)
+    .join(", ");
+  return lines(
+    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}")`,
+    `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
+    `    created = ${agg.name}.create(${args})`,
+    "    await _repo(session).save(created)",
+    `    return {"id": created.id}`,
+  );
+}
+
+function allRoute(agg: EnrichedAggregateIR): string {
+  return lines(
+    `@router.get("", response_model=list[${agg.name}Response], operation_id="all${agg.name}")`,
+    `async def all_${snake(plural(agg.name))}(session: SessionDep) -> list[dict[str, object]]:`,
+    "    repo = _repo(session)",
+    "    return [repo.to_wire(root) for root in await repo.all()]",
+  );
+}
+
+function byIdRoute(agg: EnrichedAggregateIR): string {
+  return lines(
+    `@router.get("/{id}", response_model=${agg.name}Response, operation_id="${camelId(opGetById(agg.name))}")`,
+    `async def get_${snake(agg.name)}_by_id(id: str, session: SessionDep) -> dict[str, object]:`,
+    "    repo = _repo(session)",
+    `    return repo.to_wire(await repo.get_by_id(${agg.name}Id(id)))`,
+  );
+}
+
+function destroyRoute(agg: EnrichedAggregateIR): string {
+  return lines(
+    `@router.delete("/{id}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}")`,
+    `async def destroy_${snake(agg.name)}(id: str, request: Request, session: SessionDep) -> Response:`,
+    "    repo = _repo(session)",
+    `    await repo.get_by_id(${agg.name}Id(id))`,
+    "    try:",
+    `        await repo.delete(${agg.name}Id(id))`,
+    "    except IntegrityError:",
+    "        await session.rollback()",
+    "        return problem(",
+    "            request,",
+    "            409,",
+    `            "Conflict",`,
+    `            "${agg.name} is still referenced and cannot be deleted.",`,
+    "        )",
+    "    return Response(status_code=204)",
+  );
+}
+
+function operationRoute(
+  agg: EnrichedAggregateIR,
+  op: OperationIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const opSnake = snake(op.routeSlug ?? op.name);
+  const args = op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx)).join(", ");
+  return lines(
+    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}")`,
+    `async def ${snake(op.name)}_${snake(agg.name)}(id: str, body: ${upperFirst(op.name)}${agg.name}Request, session: SessionDep) -> Response:`,
+    "    repo = _repo(session)",
+    `    found = await repo.get_by_id(${agg.name}Id(id))`,
+    `    found.${snake(op.name)}(${args})`,
+    "    await repo.save(found)",
+    "    return Response(status_code=204)",
+  );
+}

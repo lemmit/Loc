@@ -5,12 +5,14 @@ import { snake } from "../../util/naming.js";
 import { renderPyAggregate } from "./emit/aggregate.js";
 import { ERRORS_PY } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
+import { renderPyWireModels } from "./emit/http-models.js";
 import { renderPyIds } from "./emit/ids.js";
 import { renderPySchema } from "./emit/schema.js";
 import { renderPyTestsFile } from "./emit/tests.js";
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
+import { buildPyRoutesFile } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
 // Python / FastAPI generator orchestrator.
@@ -57,7 +59,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/settings.py", renderSettings(slug));
   out.set("app/db/__init__.py", "");
   out.set("app/db/engine.py", ENGINE_PY);
-  out.set("app/main.py", renderMain(args.sys.name));
+  const routedAggs = args.contexts.flatMap((c) =>
+    c.aggregates.filter((a) => !a.isAbstract && a.persistedAs !== "eventLog").map((a) => a.name),
+  );
+  out.set("app/main.py", renderMain(args.sys.name, routedAggs));
 
   out.set("app/domain/__init__.py", "");
   out.set("app/domain/ids.py", renderPyIds(merged));
@@ -68,6 +73,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/db/schema.py", renderPySchema(merged));
   out.set("app/db/wire.py", WIRE_PY);
   out.set("app/db/repositories/__init__.py", "");
+
+  out.set("app/http/__init__.py", "");
+  out.set("app/http/problem.py", PROBLEM_PY);
+  out.set("app/http/wire_models.py", renderPyWireModels(merged));
 
   // Per-aggregate emission stays per-context — each aggregate module is
   // emitted in the context that owns it.  A TPH/TPC abstract base owns
@@ -82,6 +91,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
           `app/db/repositories/${snake(agg.name)}_repository.py`,
           buildPyRepositoryFile(agg, repo, ctx),
         );
+        out.set(`app/http/${snake(agg.name)}_routes.py`, buildPyRoutesFile(agg, repo, ctx));
       }
       const tests = renderPyTestsFile(agg, ctx);
       if (tests != null) out.set(`tests/test_${snake(agg.name)}.py`, tests);
@@ -211,7 +221,7 @@ const ENGINE_PY = lines(
   "",
 );
 
-function renderMain(systemName: string): string {
+function renderMain(systemName: string, routerAggs: string[]): string {
   return lines(
     `"""FastAPI application entrypoint.`,
     "",
@@ -223,8 +233,13 @@ function renderMain(systemName: string): string {
     "from sqlalchemy import text",
     "",
     "from app.db.engine import engine",
+    ...routerAggs.map(
+      (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
+    ),
+    "from app.http.problem import install_error_handlers",
     "",
     `app = FastAPI(title=${JSON.stringify(systemName)}, version="0.1.0")`,
+    "install_error_handlers(app)",
     "",
     "# Permissive CORS for development — pin via .loomignore to tighten.",
     "app.add_middleware(",
@@ -233,6 +248,7 @@ function renderMain(systemName: string): string {
     `    allow_methods=["*"],`,
     `    allow_headers=["*"],`,
     ")",
+    ...routerAggs.map((name) => `app.include_router(${snake(name)}_router)`),
     "",
     "",
     `@app.get("/health")`,
@@ -304,4 +320,65 @@ from datetime import UTC, datetime
 def iso(dt: datetime) -> str:
     """ISO-8601 UTC with a Z suffix — wire parity with the other backends."""
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+`;
+
+// RFC 7807 problem responder + exception handlers — DomainError → 400,
+// ForbiddenError → 403, AggregateNotFoundError → 404, and FastAPI's
+// RequestValidationError → 422 with the §3.2 `errors[]` extension
+// (RFC 6901 pointers), matching the other backends' ProblemDetails.
+const PROBLEM_PY = `"""RFC 7807 problem responses + exception handlers.  Auto-generated."""
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+from app.domain.errors import AggregateNotFoundError, DomainError, ForbiddenError
+
+
+def problem(
+    request: Request,
+    status: int,
+    title: str,
+    detail: str,
+    errors: list[dict[str, str]] | None = None,
+) -> JSONResponse:
+    body: dict[str, object] = {
+        "type": "about:blank",
+        "title": title,
+        "status": status,
+        "detail": detail,
+        "instance": request.url.path,
+    }
+    if errors is not None:
+        body["errors"] = errors
+    return JSONResponse(body, status_code=status, media_type="application/problem+json")
+
+
+def _pointer(loc: tuple[object, ...]) -> str:
+    """RFC 6901 pointer from a validation-error location (the leading
+    source segment — body/query/path — is dropped)."""
+    segments = [str(p).replace("~", "~0").replace("/", "~1") for p in loc[1:]]
+    return "/" + "/".join(segments) if segments else ""
+
+
+def install_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(ForbiddenError)
+    async def _forbidden(request: Request, err: ForbiddenError) -> JSONResponse:
+        return problem(request, 403, "Forbidden", str(err))
+
+    @app.exception_handler(DomainError)
+    async def _domain(request: Request, err: DomainError) -> JSONResponse:
+        return problem(request, 400, "Bad Request", str(err))
+
+    @app.exception_handler(AggregateNotFoundError)
+    async def _not_found(request: Request, err: AggregateNotFoundError) -> JSONResponse:
+        return problem(request, 404, "Not Found", str(err))
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation(request: Request, err: RequestValidationError) -> JSONResponse:
+        errors = [
+            {"pointer": _pointer(tuple(e["loc"])), "message": str(e["msg"])}
+            for e in err.errors()
+        ]
+        return problem(request, 422, "Unprocessable Entity", "Request validation failed.", errors)
 `;
