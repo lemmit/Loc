@@ -1,5 +1,10 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
 import { forApiRead, forCreateInput, hasCreate } from "../../ir/enrich/wire-projection.js";
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../ir/stdlib/generics.js";
 import type {
   BoundedContextIR,
   EnrichedAggregateIR,
@@ -52,9 +57,30 @@ export function buildPyRoutesFile(
   const parts: EnrichedEntityPartIR[] = agg.parts;
   const publicOps = agg.operations.filter((o) => o.visibility === "public" && !o.extern);
 
+  // One <Name>Paged response model per distinct paged carrier.
+  const pagedNames = new Set<string>();
+  const pagedModels: string[] = [];
+  for (const f of emittableFinds(repo)) {
+    const paged = pagedReturn(f.returnType);
+    if (!paged || pagedNames.has(paged.name)) continue;
+    pagedNames.add(paged.name);
+    pagedModels.push(
+      lines(
+        `class ${paged.name}(BaseModel):`,
+        `    items: list[${agg.name}Response]`,
+        "    page: int",
+        "    pageSize: int",
+        "    total: int",
+        "    totalPages: int",
+        "",
+        "",
+      ),
+    );
+  }
   const models = lines(
     ...parts.map((p) => responseModel(p.name, p, ctx)),
     responseModel(agg.name, agg, ctx),
+    ...pagedModels,
     hasCreateFactory(agg) ? createModels(agg, ctx) : null,
     ...publicOps.map((op) => opRequestModel(agg, op, ctx)),
   );
@@ -331,6 +357,34 @@ function findRoute(
   const sig = [...params, "session: SessionDep"].join(", ");
   const args = find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)).join(", ");
   const opId = camelId(opFind(agg.name, find.name));
+  const paged = pagedReturn(find.returnType);
+  if (paged) {
+    // Defaulted params last (python syntax) — FastAPI is order-agnostic.
+    const pagedSig = [
+      ...params,
+      "session: SessionDep",
+      `page: int = ${PAGED_DEFAULT_PAGE}`,
+      `pageSize: int = ${PAGED_DEFAULT_PAGE_SIZE}`,
+    ].join(", ");
+    const callArgs = [
+      ...find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)),
+      "page",
+      "pageSize",
+    ];
+    return lines(
+      `@router.get("/${findSnake}", response_model=${paged.name}, operation_id="${opId}")`,
+      `async def ${findSnake}_${snake(plural(agg.name))}(${pagedSig}) -> dict[str, object]:`,
+      "    repo = _repo(session)",
+      `    result = await repo.${findSnake}(${callArgs.join(", ")})`,
+      "    return {",
+      '        "items": [repo.to_wire(r) for r in result.items],',
+      '        "page": result.page,',
+      '        "pageSize": result.page_size,',
+      '        "total": result.total,',
+      '        "totalPages": result.total_pages,',
+      "    }",
+    );
+  }
   if (isList) {
     return lines(
       `@router.get("/${findSnake}", response_model=list[${agg.name}Response], operation_id="${opId}")`,

@@ -70,6 +70,7 @@ system PySales {
         }
       }
       repository Orders for Order {
+        find recent(): Order paged
         find byStatus(status: OrderStatus): Order[] where this.status == status
         find cheaperThan(limit: money): Order[] where this.unitBudget <= limit
         find watchedBy(customerId: Customer id): Order[] where this.watchers.contains(customerId)

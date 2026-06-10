@@ -47,9 +47,7 @@ import { renderPyType } from "./render-expr.js";
 /** User-declared finds the v1 surface emits — the auto `all` is the
  *  dedicated method/route pair; paged + union returns land in S12. */
 export function emittableFinds(repo: RepositoryIR | undefined): FindIR[] {
-  return (repo?.finds ?? []).filter(
-    (f) => f.name !== "all" && !pagedReturn(f.returnType) && f.returnType.kind !== "union",
-  );
+  return (repo?.finds ?? []).filter((f) => f.name !== "all" && f.returnType.kind !== "union");
 }
 
 export function buildPyRepositoryFile(
@@ -127,7 +125,7 @@ export function buildPyRepositoryFile(
   ]
     .filter(refersTo)
     .sort();
-  const saNames = ["and_", "delete", "not_", "or_", "select"].filter(refersTo);
+  const saNames = ["and_", "delete", "func", "not_", "or_", "select"].filter(refersTo);
 
   return lines(
     `"""${agg.name} repository.  Auto-generated."""`,
@@ -138,6 +136,7 @@ export function buildPyRepositoryFile(
     refersTo("insert") ? "from sqlalchemy.dialects.postgresql import insert" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
+    refersTo("PagedResult") ? "from app.db.paging import PagedResult" : null,
     rowNames.length > 0 ? `from app.db.schema import ${rowNames.join(", ")}` : null,
     refersTo("iso") ? "from app.db.wire import iso" : null,
     "from app.domain.errors import AggregateNotFoundError",
@@ -175,6 +174,24 @@ function findMethod(agg: EnrichedAggregateIR, find: FindIR, ctx: EnrichedBounded
     : conventionPredicate(agg, find);
   const where = pred ? `.where(${pred.expr})` : "";
   const isList = find.returnType.kind === "array";
+  // Paged find (P3b): count + limit/offset against the same predicate,
+  // returning the shared PagedResult carrier (1-based page).
+  if (pagedReturn(find.returnType)) {
+    const sig = ["self", ...params, "page: int", "page_size: int"].join(", ");
+    return lines(
+      `    async def ${snake(find.name)}(${sig}) -> PagedResult[${agg.name}]:`,
+      "        offset = (page - 1) * page_size",
+      `        total = (`,
+      `            await self._session.execute(select(func.count()).select_from(${root})${where})`,
+      "        ).scalar_one()",
+      "        total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0",
+      `        rows = (`,
+      `            await self._session.execute(select(${root})${where}.limit(page_size).offset(offset))`,
+      "        ).scalars().all()",
+      "        items = [await self._hydrate(row) for row in rows]",
+      "        return PagedResult(items=items, page=page, page_size=page_size, total=total, total_pages=total_pages)",
+    );
+  }
   const sig = ["self", ...params].join(", ");
   if (isList) {
     return lines(

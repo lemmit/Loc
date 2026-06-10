@@ -1,3 +1,4 @@
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   DeployableIR,
   EnrichedAggregateIR,
@@ -88,6 +89,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/db/schema.py", renderPySchema(merged, resolveDs));
   out.set("app/db/wire.py", WIRE_PY);
   out.set("app/db/migrate.py", MIGRATE_PY);
+  const hasPaged = merged.repositories.some((r) =>
+    r.finds.some((f) => pagedReturn(f.returnType) != null),
+  );
+  if (hasPaged) out.set("app/db/paging.py", PAGING_PY);
   out.set("app/db/repositories/__init__.py", "");
   // The runner globs migrations/ at boot; .gitkeep keeps the Docker
   // COPY valid on systems whose snapshot is already up to date.
@@ -418,4 +423,20 @@ def install_error_handlers(app: FastAPI) -> None:
             for e in err.errors()
         ]
         return problem(request, 422, "Unprocessable Entity", "Request validation failed.", errors)
+`;
+
+// Shared paged-result carrier (P3b) — the domain-side mirror of the
+// wire `<Arg>Paged` payload, generic over the item type (PEP 695).
+const PAGING_PY = `"""Paged-result carrier shared by repositories.  Auto-generated."""
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class PagedResult[T]:
+    items: list[T]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
 `;
