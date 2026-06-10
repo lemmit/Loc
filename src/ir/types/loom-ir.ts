@@ -290,7 +290,9 @@ export interface OperationIR {
    * surfacing api's `urlStyle` (D-URLSTYLE).  `undefined` ⇒ a canonical
    * action ⇒ the bare collection / canonical-id URL.  Otherwise the
    * action `name` (`urlStyle: literal`) or its plural (`resource`).
-   * Consumed by Phase-3 route emitters; no backend reads it yet. */
+   * Consumed by every backend's route emitter (`snake(op.routeSlug ??
+   * op.name)` on Hono / .NET / elixir, plus the React API client and
+   * the OpenAPI emitters). */
   routeSlug?: string;
   visibility: "public" | "private";
   params: ParamIR[];
