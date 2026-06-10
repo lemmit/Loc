@@ -25,11 +25,22 @@
 //                    short-circuits and the broadcast is skipped.  The
 //                    `Events.<Name>` struct module is emitted by the
 //                    orchestrator's `emitVanillaEventModules` hook.
+//   ✓ resource-call → `_ = <App>.Resources.<Type>.<res>_<verb>(args)` —
+//                     bare side-effect call (Phase 4), rendered INSIDE
+//                     the with-chain's do-branch like `emit`.  The
+//                     adapter helper modules are emitted by the
+//                     orchestrator's `emitPhoenixResourceFiles` reuse
+//                     (foundation-agnostic; the same Phoenix adapter set
+//                     the Ash path uses).
 //   ✓ default     → preserved as `# TODO:<kind>` comment; the workflow
 //                   still compiles and the route is exercisable.
-// Remaining kinds (for-each / repo-run / resource-call, plus non-getById
-// repo-let) land as their own focused slices each validated by the
-// elixir-vanilla-build.yml mix-compile gate.
+// Remaining kinds (for-each + repo-run; non-getById repo-let) need
+// upstream vanilla emit infrastructure they don't have yet — repo-run
+// needs a `Repo.run(<Retrieval>)` code interface (vanilla doesn't emit
+// Retrievals), and the for-each validator requires its iterable to be a
+// repo-run binding.  Those slices land on a separate Retrieval-emit
+// follow-up; this file's per-kind status stays in lock-step with
+// `collectWorkflowStmtParamRefs`.
 //
 // Param surfacing: a workflow body that references a declared
 // create-param (`create(initialTitle: string) { … initialTitle … }`)
@@ -61,6 +72,7 @@ export function emitVanillaWorkflowExecution(
   appModule: string,
   ctx: BoundedContextIR,
   out: Map<string, string>,
+  resourceModules: Map<string, string> = new Map(),
 ): VanillaWorkflowExecResult {
   if (ctx.workflows.length === 0) return { routes: [] };
 
@@ -76,7 +88,7 @@ export function emitVanillaWorkflowExecution(
     const wfSnake = snake(wf.name);
     out.set(
       `lib/${appSnake}/${ctxSnake}/workflows/${wfSnake}.ex`,
-      renderWorkflowModule(appModule, ctxModule, wf),
+      renderWorkflowModule(appModule, ctxModule, wf, resourceModules),
     );
   }
 
@@ -257,6 +269,29 @@ function lowerStatement(
       ];
     }
 
+    case "resource-call": {
+      // `files.put(k, v)` (bare statement form, Phase 4) →
+      // `<App>.Resources.<ResourceType>.<resource>_<verb>(args)`.
+      // The expression renderer routes the call through `resourceModules`
+      // (threaded into renderCtx by the orchestrator).  A bare resource-op
+      // returns the adapter's raw result — most are `:ok | {:error, _}`
+      // shapes; we wrap as a fire-and-forget side-effect line (no with-clause
+      // binding) since the statement form discards the result anyway.
+      //
+      // Lives in the with-chain's `do`-branch (`kind = "emit"`) so a
+      // preceding rollback skips the side effect — matches the emit
+      // semantics (skipped on with-chain failure).  The validator
+      // (loom.workflow-tx-effect) keeps a transactional workflow from
+      // mixing resource calls with DB ops, so the in-tx broadcast caveat
+      // doesn't apply here.
+      return [
+        {
+          kind: "emit",
+          text: `_ = ${renderExpr(st.call, renderCtx)}`,
+        },
+      ];
+    }
+
     default:
       // Unsupported kind today — preserved as a TODO comment so the
       // workflow still compiles.  Future slices add per-kind lowering
@@ -399,9 +434,12 @@ function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): voi
       // Gated to the lowered form — see the `repo-let` arm in lowerStatement.
       if (st.method === "getById") for (const a of st.args) collectParamRefs(a, acc);
       return;
+    case "resource-call":
+      collectParamRefs(st.call, acc);
+      return;
     default:
-      // repo-run / for-each / resource-call — not yet lowered to
-      // param-referencing code (see lowerStatement default arm).
+      // repo-run / for-each — not yet lowered to param-referencing code
+      // (see lowerStatement default arm).
       return;
   }
 }
@@ -488,7 +526,12 @@ ${doBody}
     end`;
 }
 
-function renderWorkflowModule(appModule: string, ctxModule: string, wf: WorkflowIR): string {
+function renderWorkflowModule(
+  appModule: string,
+  ctxModule: string,
+  wf: WorkflowIR,
+  resourceModules: Map<string, string>,
+): string {
   const wfPascal = upperFirst(wf.name);
   const moduleName = `${appModule}.${ctxModule}.Workflows.${wfPascal}`;
   const contextModuleFq = `${appModule}.${ctxModule}`;
@@ -499,6 +542,7 @@ function renderWorkflowModule(appModule: string, ctxModule: string, wf: Workflow
     thisName: "record",
     contextModule: contextModuleFq,
     foundation: "vanilla",
+    resourceModules,
   };
   const lines = lowerStatements(wf.statements ?? [], contextModuleFq, renderCtx);
   const body = assembleBody(lines);
