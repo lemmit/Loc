@@ -185,8 +185,16 @@ describe("react generator", () => {
     expect(config).toMatch(/E2E_BASE_URL/);
     expect(config).toMatch(/http:\/\/localhost:3001/);
     const smoke = files.get("web_app/e2e/smoke.spec.ts")!;
-    expect(smoke).toMatch(/orders list loads/);
-    expect(smoke).toMatch(/products list loads/);
+    // Smoke navigates by ROUTE per param-less page (no page-object imports
+    // — those broke on uis with custom/partial pages, see smokeSpec).
+    expect(smoke).toMatch(/OrderList loads/);
+    expect(smoke).toMatch(/ProductList loads/);
+    expect(smoke).toMatch(/await page\.goto\("\/orders"\)/);
+    expect(smoke).toMatch(/await page\.goto\("\/products"\)/);
+    // Parameterised detail pages (`/orders/:id`) are excluded from the smoke.
+    expect(smoke).not.toMatch(/:id/);
+    // No coupling to e2e/pages/* — the old shape imported <Agg>ListPage.
+    expect(smoke).not.toMatch(/from "\.\/pages\//);
     // e2e package.json is independent so the runtime image stays slim.
     const e2ePkg = JSON.parse(files.get("web_app/e2e/package.json")!);
     expect(e2ePkg.devDependencies["@playwright/test"]).toBeTruthy();
