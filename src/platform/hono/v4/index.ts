@@ -143,17 +143,18 @@ const honoPlatform: PlatformSurface = {
       runtimes: {
         // DB-transaction consistency — the only real runtime today.
         transactional: { name: "transactional" },
-        // `nact` — Node's Akka-inspired actor library (an actor/process per
-        // aggregate).  Reserved (the actor-runtime emit is future work;
-        // realization-axes-alignment.md) — Node's analogue of `orleans`
-        // (dotnet) / `genserver` (elixir).
-        nact: stubAdapter<RuntimeAdapter>(
+        // `worker` — Node's built-in `worker_threads` concurrency primitive
+        // (the idiomatic Node story; there is no mainstream actor runtime).
+        // Reserved — the per-runtime emit is future work
+        // (realization-axes-alignment.md).  Node's stand-in on the runtime
+        // axis where dotnet has `orleans` and elixir `genserver`.
+        worker: stubAdapter<RuntimeAdapter>(
           "runtime",
-          "nact",
+          "worker",
           "node",
           () => Object.keys(menu.runtimes),
           {
-            name: "nact",
+            name: "worker",
           },
         ),
       },

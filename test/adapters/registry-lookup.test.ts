@@ -189,10 +189,10 @@ describe("runtime — adapter-backed axis (realization-axes-alignment.md slice 5
     expect(availableAdapterNames("phoenixLiveView", "runtime")).toEqual(["transactional"]);
     // Actor runtimes are registered stubs — present in allAdapterNames,
     // excluded from the real menu: orleans (dotnet), genserver (elixir),
-    // nact (node).
+    // worker (node — worker_threads).
     expect(allAdapterNames("dotnet", "runtime")).toEqual(["orleans", "transactional"]);
     expect(allAdapterNames("phoenixLiveView", "runtime")).toEqual(["genserver", "transactional"]);
-    expect(allAdapterNames("hono", "runtime")).toEqual(["nact", "transactional"]);
+    expect(allAdapterNames("hono", "runtime")).toEqual(["transactional", "worker"]);
   });
 
   it("exposes the runtime default per backend (transactional)", () => {
@@ -206,6 +206,6 @@ describe("runtime — adapter-backed axis (realization-axes-alignment.md slice 5
     expect(resolveRuntime("elixir", "transactional").name).toBe("transactional");
     expect(resolveRuntime("dotnet", "orleans").name).toBe("orleans");
     expect(resolveRuntime("elixir", "genserver").name).toBe("genserver");
-    expect(resolveRuntime("hono", "nact").name).toBe("nact");
+    expect(resolveRuntime("hono", "worker").name).toBe("worker");
   });
 });
