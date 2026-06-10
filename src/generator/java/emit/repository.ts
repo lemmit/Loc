@@ -34,6 +34,18 @@ export interface JavaRepoCtx {
   entityPkg: string;
 }
 
+/** The enrichment-injected parameterless `all` find — already covered by
+ *  the canonical `findAll()` surface (and the GET / route), so every
+ *  emitter skips it. */
+export function isAutoAllFind(f: FindIR): boolean {
+  return f.name === "all" && f.params.length === 0 && !f.filter;
+}
+
+/** The declared finds an emitter should surface. */
+export function declaredFinds(repo: RepositoryIR | undefined): FindIR[] {
+  return (repo?.finds ?? []).filter((f) => !isAutoAllFind(f));
+}
+
 /** Finds keep their DSL name; a find returning `T[]` → `List<T>`,
  *  a single `T` → `T` (nullable). */
 function findSignature(find: FindIR, imports: Set<string>): string {
@@ -63,7 +75,7 @@ export function renderJavaRepositoryInterface(
   idClass: string,
 ): string {
   const imports = new Set<string>(["java.util.List", "java.util.Optional"]);
-  const findLines = (repo?.finds ?? []).map((f) => `    ${findSignature(f, imports)};`);
+  const findLines = declaredFinds(repo).map((f) => `    ${findSignature(f, imports)};`);
   return lines(
     `package ${ctx.domainPkg};`,
     ``,
@@ -97,7 +109,7 @@ export function renderJavaSpringDataRepository(
   idClass: string,
 ): string {
   const imports = new Set<string>(["org.springframework.data.jpa.repository.JpaRepository"]);
-  const finds = repo?.finds ?? [];
+  const finds = declaredFinds(repo);
   const enumsPkg = `${ctx.basePkg}.domain.enums`;
   const methodLines = finds.flatMap((f) => {
     if (f.params.length > 0) imports.add("org.springframework.data.repository.query.Param");
@@ -139,7 +151,7 @@ export function renderJavaRepositoryImpl(
   idClass: string,
 ): string {
   const imports = new Set<string>(["java.util.List", "java.util.Optional"]);
-  const finds = repo?.finds ?? [];
+  const finds = declaredFinds(repo);
   const delegateLines = finds.flatMap((f) => {
     const sig = findSignature(f, imports);
     const args = f.params.map((p) => p.name).join(", ");

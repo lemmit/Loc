@@ -109,7 +109,9 @@ describe("java generator — JPA mapping (S4)", () => {
     expect(order).toContain(
       "    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)",
     );
-    expect(order).toContain('    @JoinColumn(name = "order_id")');
+    // nullable=false is load-bearing: it makes Hibernate write the FK in
+    // the child INSERT (the DDL's NOT NULL would reject insert-then-update).
+    expect(order).toContain('    @JoinColumn(name = "order_id", nullable = false)');
     const part = files_.get(`${ROOT}/features/orders/LineItem.java`)!;
     expect(part).toContain('@Table(name = "line_items", schema = "orders")');
     expect(part).toContain(

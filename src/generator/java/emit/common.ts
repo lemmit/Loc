@@ -51,6 +51,40 @@ export function renderAggregateNotFoundException(basePkg: string): string {
   );
 }
 
+export function renderWireValidationException(basePkg: string): string {
+  return lines(
+    `package ${basePkg}.domain.common;`,
+    ``,
+    `import java.util.List;`,
+    ``,
+    `/**`,
+    ` * Wire-boundary validation failure — maps to the cross-backend 422`,
+    ` * problem envelope with the {@code errors[]} extension`,
+    ` * ({@code [{ pointer, message }]}).`,
+    ` */`,
+    `public class WireValidationException extends RuntimeException {`,
+    `    public record WireError(String pointer, String message) {`,
+    `    }`,
+    ``,
+    `    private final List<WireError> errors;`,
+    ``,
+    `    public WireValidationException(List<WireError> errors) {`,
+    `        super("Validation failed");`,
+    `        this.errors = List.copyOf(errors);`,
+    `    }`,
+    ``,
+    `    public List<WireError> errors() {`,
+    `        return errors;`,
+    `    }`,
+    ``,
+    `    public static WireError error(String pointer, String message) {`,
+    `        return new WireError(pointer, message);`,
+    `    }`,
+    `}`,
+    ``,
+  );
+}
+
 export function renderDomainEventInterface(basePkg: string): string {
   return lines(
     `package ${basePkg}.domain.events;`,

@@ -20,6 +20,10 @@ export const JAVA_VERSION = "21";
  *  @ValueObject / @DomainEvent) and enable ArchUnit verification. */
 export const JMOLECULES_VERSION = "1.10.0";
 
+/** springdoc serves the OpenAPI document (`/openapi.json`) the
+ *  cross-backend conformance harness diffs. */
+export const SPRINGDOC_VERSION = "2.8.17";
+
 export function renderPom(
   ns: string,
   artifactId: string,
@@ -72,6 +76,11 @@ export function renderPom(
     `      <groupId>org.jmolecules</groupId>`,
     `      <artifactId>jmolecules-events</artifactId>`,
     `      <version>${JMOLECULES_VERSION}</version>`,
+    `    </dependency>`,
+    `    <dependency>`,
+    `      <groupId>org.springdoc</groupId>`,
+    `      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>`,
+    `      <version>${SPRINGDOC_VERSION}</version>`,
     `    </dependency>`,
     // Flyway runs the emitted db/migration/V*.sql on boot (Boot
     // auto-configures it from the classpath; versions managed by the
@@ -136,6 +145,9 @@ export function renderApplicationYml(slug: string): string {
     `    hibernate:`,
     `      ddl-auto: none`,
     `    open-in-view: false`,
+    `springdoc:`,
+    `  api-docs:`,
+    `    path: /openapi.json`,
     ``,
   );
 }

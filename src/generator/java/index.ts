@@ -1,4 +1,5 @@
 import { enrichLoomModel } from "../../ir/enrich/enrichments.js";
+import { hasCreate } from "../../ir/enrich/wire-projection.js";
 import { lowerModel } from "../../ir/lower/lower.js";
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type {
@@ -20,13 +21,16 @@ import type {
   JavaArtifactCategory,
   JavaLayoutAdapter,
 } from "./adapters/by-layer-layout.js";
+import { renderApiExceptionAdvice, renderJavaController } from "./emit/api.js";
 import {
   renderAggregateNotFoundException,
   renderDomainEventInterface,
   renderDomainException,
   renderForbiddenException,
   renderPackageMarker,
+  renderWireValidationException,
 } from "./emit/common.js";
+import { renderDtoFiles } from "./emit/dto.js";
 import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
 import { renderJavaEvent } from "./emit/events.js";
@@ -46,6 +50,8 @@ import {
   renderJavaRepositoryInterface,
   renderJavaSpringDataRepository,
 } from "./emit/repository.js";
+import { renderJavaService } from "./emit/service.js";
+import { renderJavaValidators } from "./emit/validator.js";
 import { basePackageFor, javaPackageSegment, mainSourcePath } from "./naming.js";
 
 // ---------------------------------------------------------------------------
@@ -157,10 +163,12 @@ function emitProjectFromContexts(
     "domain-common",
     renderAggregateNotFoundException(basePkg),
   );
+  place("WireValidationException.java", "domain-common", renderWireValidationException(basePkg));
   place("DomainEvent.java", "event", renderDomainEventInterface(basePkg));
   place("_Namespace.java", "enum", renderPackageMarker(pkgFor("enum")));
   place("_Namespace.java", "valueobject", renderPackageMarker(pkgFor("valueobject")));
   place("_Namespace.java", "id", renderPackageMarker(pkgFor("id")));
+  place("ApiExceptionAdvice.java", "api-common", renderApiExceptionAdvice(basePkg));
 
   for (const ctx of contexts) {
     // Ids — an abstract TPC base keeps no identity (each concrete owns a
@@ -335,6 +343,44 @@ function emitAggregate(
     `${agg.name}RepositoryImpl.java`,
     "repository-impl",
     renderJavaRepositoryImpl(agg, repo, repoCtx, idClass),
+    agg.name,
+  );
+
+  // API layer: DTO records, wire validators, the layered service, and
+  // the controller.
+  const applicationPkg = pkgFor("service", agg.name);
+  for (const dto of renderDtoFiles(
+    agg,
+    voLookup,
+    applicationPkg,
+    basePkg,
+    pkgFor("entity", agg.name),
+  )) {
+    place(dto.name, dto.category, dto.content, agg.name);
+  }
+  const validators = renderJavaValidators(agg, applicationPkg, basePkg);
+  if (validators) {
+    place(`${agg.name}Validators.java`, "service", validators, agg.name);
+  }
+  place(
+    `${agg.name}Service.java`,
+    "service",
+    renderJavaService(agg, repo, voLookup, {
+      basePkg,
+      pkg: applicationPkg,
+      entityPkg: pkgFor("entity", agg.name),
+      domainRepoPkg: pkgFor("repository-interface", agg.name),
+    }),
+    agg.name,
+  );
+  place(
+    `${plural(agg.name)}Controller.java`,
+    "controller",
+    renderJavaController(agg, repo, {
+      basePkg,
+      pkg: pkgFor("controller", agg.name),
+      applicationPkg,
+    }),
     agg.name,
   );
 }

@@ -1,0 +1,252 @@
+import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
+import type {
+  EnrichedAggregateIR,
+  EnrichedEntityPartIR,
+  FieldIR,
+  OperationIR,
+  TypeIR,
+  WireField,
+} from "../../../ir/types/loom-ir.js";
+import { lines } from "../../../util/code-builder.js";
+import { upperFirst } from "../../../util/naming.js";
+import { javaValueTypeForId } from "../render-expr.js";
+import {
+  collectWireImports,
+  domainToWire,
+  referencedValueObjects,
+  type WireDir,
+  wireJavaType,
+} from "./wire.js";
+
+// ---------------------------------------------------------------------------
+// Request / response DTO records.  One record per file (Java's rule);
+// component order is wireShape order, so the JSON property order matches
+// every other backend by construction.  Response records carry a static
+// `from(<domain>)` mapper; request mapping to domain values lives in the
+// service (it needs the VO constructors).
+// ---------------------------------------------------------------------------
+
+export interface DtoFile {
+  name: string;
+  category: "request-dto" | "response-dto";
+  content: string;
+}
+
+/** Normalise the optional flag into the type so wire helpers see one
+ *  canonical shape. */
+function eff(t: TypeIR, optional: boolean): TypeIR {
+  return optional && t.kind !== "optional" ? { kind: "optional", inner: t } : t;
+}
+
+function recordFile(
+  pkg: string,
+  basePkg: string,
+  name: string,
+  components: string[],
+  body: string[],
+  imports: Set<string>,
+  entityImport?: string,
+): string {
+  return lines(
+    `package ${pkg};`,
+    ``,
+    ...[...imports].sort().map((i) => `import ${i};`),
+    imports.size > 0 ? `` : null,
+    `import ${basePkg}.domain.enums.*;`,
+    `import ${basePkg}.domain.ids.*;`,
+    `import ${basePkg}.domain.valueobjects.*;`,
+    entityImport ? entityImport : null,
+    ``,
+    `public record ${name}(${components.join(", ")}) {`,
+    ...body,
+    `}`,
+    ``,
+  );
+}
+
+/** All DTO files for one aggregate: nested VO request/response records,
+ *  the create request, per-op requests, part responses, the aggregate
+ *  response, and the `{ id }` create response. */
+export function renderDtoFiles(
+  agg: EnrichedAggregateIR,
+  voLookup: ReadonlyMap<string, readonly FieldIR[]>,
+  pkg: string,
+  basePkg: string,
+  entityPkg: string,
+): DtoFile[] {
+  const out: DtoFile[] = [];
+  const entityImport = entityPkg !== pkg ? `import ${entityPkg}.${agg.name};` : undefined;
+  const partImport = (partName: string): string | undefined =>
+    entityPkg !== pkg ? `import ${entityPkg}.${partName};` : undefined;
+
+  // --- nested value-object records ------------------------------------------
+  const voNames = new Set<string>();
+  referencedValueObjects(
+    forCreateInput(agg.fields).map((f) => f.type),
+    voNames,
+  );
+  for (const op of agg.operations) {
+    referencedValueObjects(
+      op.params.map((p) => p.type),
+      voNames,
+    );
+  }
+  referencedValueObjects(
+    (agg.wireShape ?? []).map((w) => w.type),
+    voNames,
+  );
+  for (const part of agg.parts) {
+    referencedValueObjects(
+      (part.wireShape ?? []).map((w) => w.type),
+      voNames,
+    );
+  }
+  // Close over nested VOs (a VO field may itself be a VO).
+  const queue = [...voNames];
+  while (queue.length > 0) {
+    const vo = queue.pop()!;
+    const before = voNames.size;
+    referencedValueObjects(
+      (voLookup.get(vo) ?? []).map((f) => f.type),
+      voNames,
+    );
+    if (voNames.size > before) {
+      for (const v of voNames) if (!queue.includes(v)) queue.push(v);
+    }
+  }
+  for (const vo of [...voNames].sort()) {
+    const fields = voLookup.get(vo) ?? [];
+    out.push(voRecord(vo, fields, "Request", pkg, basePkg));
+    out.push(voRecord(vo, fields, "Response", pkg, basePkg));
+  }
+
+  // --- create request (constructible aggregates only) ----------------------------
+  const createInputs = forCreateInput(agg.fields);
+  if (hasCreate(agg)) {
+    const imports = new Set<string>();
+    const components = createInputs.map((f) => {
+      const t = eff(f.type, f.optional);
+      collectWireImports(t, imports);
+      return `${wireJavaType(t, "Request")} ${f.name}`;
+    });
+    out.push({
+      name: `Create${agg.name}Request.java`,
+      category: "request-dto",
+      content: recordFile(pkg, basePkg, `Create${agg.name}Request`, components, [], imports),
+    });
+  }
+
+  // --- per-operation requests (ops with params only) ----------------------------
+  for (const op of agg.operations) {
+    if (op.params.length === 0) continue;
+    const imports = new Set<string>();
+    const components = op.params.map((p) => {
+      collectWireImports(p.type, imports);
+      return `${wireJavaType(p.type, "Request")} ${p.name}`;
+    });
+    out.push({
+      name: `${upperFirst(op.name)}${agg.name}Request.java`,
+      category: "request-dto",
+      content: recordFile(
+        pkg,
+        basePkg,
+        `${upperFirst(op.name)}${agg.name}Request`,
+        components,
+        [],
+        imports,
+      ),
+    });
+  }
+
+  // --- part responses ------------------------------------------------------------
+  for (const part of agg.parts) {
+    out.push(wireRecord(part, `${part.name}Response`, pkg, basePkg, partImport(part.name)));
+  }
+
+  // --- aggregate response ----------------------------------------------------------
+  out.push(wireRecord(agg, `${agg.name}Response`, pkg, basePkg, entityImport));
+
+  // --- create response (`{ id }`) ---------------------------------------------------
+  if (hasCreate(agg)) {
+    const idJava = javaValueTypeForId(agg.idValueType);
+    const imports = new Set<string>();
+    if (idJava === "UUID") imports.add("java.util.UUID");
+    out.push({
+      name: `Create${agg.name}Response.java`,
+      category: "response-dto",
+      content: recordFile(pkg, basePkg, `Create${agg.name}Response`, [`${idJava} id`], [], imports),
+    });
+  }
+
+  return out;
+}
+
+function voRecord(
+  vo: string,
+  fields: readonly FieldIR[],
+  dir: WireDir,
+  pkg: string,
+  basePkg: string,
+): DtoFile {
+  const imports = new Set<string>();
+  const components = fields.map((f) => {
+    const t = eff(f.type, f.optional);
+    collectWireImports(t, imports);
+    return `${wireJavaType(t, dir)} ${f.name}`;
+  });
+  const body =
+    dir === "Response"
+      ? [
+          `    public static ${vo}Response from(${vo} value) {`,
+          `        return new ${vo}Response(${fields
+            .map((f) => domainToWire(eff(f.type, f.optional), `value.${f.name}()`))
+            .join(", ")});`,
+          `    }`,
+        ]
+      : [];
+  return {
+    name: `${vo}${dir}.java`,
+    category: dir === "Request" ? "request-dto" : "response-dto",
+    content: recordFile(pkg, basePkg, `${vo}${dir}`, components, body, imports),
+  };
+}
+
+/** Response record over an entity's wireShape (aggregate root or part). */
+function wireRecord(
+  entity: EnrichedAggregateIR | EnrichedEntityPartIR,
+  recordName: string,
+  pkg: string,
+  basePkg: string,
+  entityImport?: string,
+): DtoFile {
+  const shape = entity.wireShape ?? [];
+  const imports = new Set<string>();
+  const components = shape.map((w) => {
+    const t = wireFieldType(w);
+    collectWireImports(t, imports);
+    return `${wireJavaType(t, "Response")} ${w.name}`;
+  });
+  const args = shape.map((w) => domainToWire(wireFieldType(w), `value.${accessor(w)}`));
+  const body = [
+    `    public static ${recordName} from(${entity.name} value) {`,
+    `        return new ${recordName}(${args.join(", ")});`,
+    `    }`,
+  ];
+  return {
+    name: `${recordName}.java`,
+    category: "response-dto",
+    content: recordFile(pkg, basePkg, recordName, components, body, imports, entityImport),
+  };
+}
+
+function wireFieldType(w: WireField): TypeIR {
+  if (w.source === "id") {
+    // The id wire field carries the bare value type.
+    return w.type;
+  }
+  return eff(w.type, w.optional);
+}
+
+function accessor(w: WireField): string {
+  return `${w.name}()`;
+}

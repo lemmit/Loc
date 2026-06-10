@@ -56,11 +56,14 @@ export function jpaParentIdAnnotations(parentFkColumn: string): string[] {
 }
 
 /** Containment collection — unidirectional one-to-many owning the part
- *  table's parent-FK column (`<snake(owner)>_id`). */
+ *  table's parent-FK column (`<snake(owner)>_id`).  `nullable = false`
+ *  is load-bearing: it makes Hibernate write the FK in the child INSERT
+ *  instead of the insert-then-update dance, which the Flyway DDL's
+ *  NOT NULL constraint would reject. */
 export function jpaContainmentAnnotations(ownerName: string): string[] {
   return [
     `    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)`,
-    `    @JoinColumn(name = "${snake(ownerName)}_id")`,
+    `    @JoinColumn(name = "${snake(ownerName)}_id", nullable = false)`,
   ];
 }
 
