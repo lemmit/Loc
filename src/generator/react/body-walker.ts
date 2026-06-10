@@ -220,10 +220,11 @@ const NON_PAGE_BODY_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
   "List",
   "Detail",
   "MasterDetail",
-  // Form-field inputs that are not meaningful as top-level page bodies.
-  "MultilineField",
-  "SelectField",
-  "Switch",
+  // (MultilineField / SelectField used to sit here while they had no
+  // renderer; they are real controlled inputs now — page-body-eligible
+  // exactly like Field / Toggle.  `Switch` left the stdlib entirely:
+  // page-metamodel.md subsumed it under `match`, Toggle is the bool
+  // input.)
 ]);
 
 export const STDLIB_LAYOUT_COMPONENTS: ReadonlySet<string> = new Set(
@@ -842,6 +843,9 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       return `/* unresolved: ${expr.name} */ undefined`;
     case "binary":
       return `(${emitExpr(expr.left, ctx)} ${expr.op} ${emitExpr(expr.right, ctx)})`;
+    case "list":
+      // List literal (`["EU", "US"]`) — e.g. a SelectField's `options:`.
+      return `[${expr.elements.map((it) => emitExpr(it, ctx)).join(", ")}]`;
     case "convert": {
       // Mirrors `generator/typescript/render-expr.ts`'s renderTsConvert.
       // Implicit-string-concat in page bodies (`"Active: " + count`)
