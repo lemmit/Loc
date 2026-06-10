@@ -71,8 +71,11 @@ describe("dotnet migrations emitter", () => {
     // [DbContext] attribute matches the context handed to Migrate() —
     // without this attribute Database.Migrate() silently applies nothing
     // (only __EFMigrationsHistory appears; first INSERT dies with 42P01).
+    // global:: qualifies from the root namespace — required because some
+    // layouts (byFeature, TPH) nest a same-named child namespace, against
+    // which a relative `Api.Infrastructure…` would mis-resolve (CS0234).
     expect(mig).toMatch(
-      /\[DbContext\(typeof\(Api\.Infrastructure\.Persistence\.AppDbContext\)\)\]/,
+      /\[DbContext\(typeof\(global::Api\.Infrastructure\.Persistence\.AppDbContext\)\)\]/,
     );
     expect(mig).toMatch(/using Microsoft\.EntityFrameworkCore\.Infrastructure;/);
     expect(mig).toMatch(/\[Migration\("20260101000000_Sales_Initial"\)\]/);
@@ -159,7 +162,9 @@ describe("dotnet migrations emitter", () => {
     // And the migration class itself is discoverable by that Migrate() call.
     const mig = [...files.entries()].find(([k]) => /api\/Migrations\/.*\.cs$/.test(k))?.[1];
     expect(mig, "migration class missing").toBeDefined();
-    expect(mig).toContain("[DbContext(typeof(Api.Infrastructure.Persistence.AppDbContext))]");
+    expect(mig).toContain(
+      "[DbContext(typeof(global::Api.Infrastructure.Persistence.AppDbContext))]",
+    );
   });
 
   it("escapes embedded double-quotes in SQL for the verbatim string literal", () => {

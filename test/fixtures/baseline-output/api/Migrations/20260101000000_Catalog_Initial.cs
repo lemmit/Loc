@@ -9,8 +9,12 @@ namespace Api.Migrations
     // DbContextAttribute matches the context passed to Migrate().
     // Without it, Database.Migrate() finds zero migrations, creates
     // only __EFMigrationsHistory, and every table is silently missing
-    // (42P01 at first INSERT/SELECT).
-    [DbContext(typeof(Api.Infrastructure.Persistence.AppDbContext))]
+    // (42P01 at first INSERT/SELECT).  global:: qualifies from the root
+    // namespace: this file's namespace ends in .Migrations and some
+    // layouts (byFeature, TPH) nest a same-named child namespace, so a
+    // relative reference resolves against the wrong scope (CS0234);
+    // global:: sidesteps the ambiguity for every namespace.
+    [DbContext(typeof(global::Api.Infrastructure.Persistence.AppDbContext))]
     [Migration("20260101000000_Catalog_Initial")]
     public partial class M20260101000000_Catalog_Initial : Migration
     {
