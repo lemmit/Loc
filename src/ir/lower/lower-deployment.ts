@@ -119,7 +119,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
             persistence: d.persistence ?? fdn.persistence ?? adapterDefaults.persistence.state,
             directoryLayout: d.directoryLayout ?? adapterDefaults.layout,
             transport: d.transport ?? adapterDefaults.transport,
-            runtime: d.runtime ?? gf.runtime,
+            runtime: d.runtime ?? adapterDefaults.runtime,
           };
         })()
       : {

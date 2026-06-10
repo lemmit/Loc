@@ -13,6 +13,7 @@ import {
   type PersistenceAdapter,
   type PlatformAdapterDefaults,
   type PlatformAdapters,
+  type RuntimeAdapter,
   type StyleAdapter,
   stubAdapter,
 } from "../../../generator/_adapters/index.js";
@@ -118,6 +119,23 @@ const honoPlatform: PlatformSurface = {
       },
       // The Hono router — the Node backend's only HTTP surface today.
       transports: { hono: { name: "hono" } },
+      runtimes: {
+        // DB-transaction consistency — the only real runtime today.
+        transactional: { name: "transactional" },
+        // `nact` — Node's Akka-inspired actor library (an actor/process per
+        // aggregate).  Reserved (the actor-runtime emit is future work;
+        // realization-axes-alignment.md) — Node's analogue of `orleans`
+        // (dotnet) / `genserver` (elixir).
+        nact: stubAdapter<RuntimeAdapter>(
+          "runtime",
+          "nact",
+          "node",
+          () => Object.keys(menu.runtimes),
+          {
+            name: "nact",
+          },
+        ),
+      },
     };
     return menu;
   },
@@ -127,6 +145,7 @@ const honoPlatform: PlatformSurface = {
       style: "layered",
       layout: "byLayer",
       transport: "hono",
+      runtime: "transactional",
     };
   },
 };

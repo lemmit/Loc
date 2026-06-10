@@ -30,14 +30,14 @@ export function qualifyDesign(raw: string | undefined, fallback: BuiltinPackFami
 
 /** Default values for the three greenfield realization axes
  *  (D-REALIZATION-AXES) — the axes with no adapter infra yet, so each has
- *  a single current value per platform.  `application`/`persistence`/
- *  `directoryLayout`/`transport` are NOT here: they source their defaults from
- *  the live adapter menu (`defaultsFor`) — `transport` joined them when it was
- *  promoted to an adapter axis (realization-axes-alignment.md).  Only ever
- *  called for backends (frontends carry no realization axes). */
+ *  a single current value per platform.  Only `foundation` remains greenfield;
+ *  `application`/`persistence`/`directoryLayout`/`transport`/`runtime` source
+ *  their defaults from the live adapter menu (`defaultsFor`) — `transport` and
+ *  `runtime` joined them when promoted to adapter axes
+ *  (realization-axes-alignment.md).  Only ever called for backends (frontends
+ *  carry no realization axes). */
 export function greenfieldAxisDefaults(platform: Platform): {
   foundation: string;
-  runtime: string;
 } {
   return {
     // Elixir's domain framework defaults to Ash (matches today's
@@ -45,9 +45,6 @@ export function greenfieldAxisDefaults(platform: Platform): {
     // open-item 2, renamed to elixir by D-ELIXIR-PLATFORM); every other
     // backend is `vanilla` (no framework).
     foundation: platform === "elixir" ? "ash" : "vanilla",
-    // Repository-loaded, DB-transaction consistency — the only runtime
-    // shipped today (actor runtimes land per-backend later).
-    runtime: "transactional",
   };
 }
 

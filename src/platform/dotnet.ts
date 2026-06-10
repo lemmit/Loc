@@ -2,6 +2,7 @@ import {
   type PersistenceAdapter,
   type PlatformAdapterDefaults,
   type PlatformAdapters,
+  type RuntimeAdapter,
   type StyleAdapter,
   stubAdapter,
   type TransportAdapter,
@@ -150,6 +151,19 @@ const dotnetPlatform: PlatformSurface = {
           { name: "controllers" },
         ),
       },
+      runtimes: {
+        // DB-transaction consistency — the only real runtime today.
+        transactional: { name: "transactional" },
+        // Orleans virtual-actor runtime — reserved (the actor-runtime emit is
+        // future work; realization-axes-alignment.md).
+        orleans: stubAdapter<RuntimeAdapter>(
+          "runtime",
+          "orleans",
+          "dotnet",
+          () => Object.keys(menu.runtimes),
+          { name: "orleans" },
+        ),
+      },
     };
     return menu;
   },
@@ -159,6 +173,7 @@ const dotnetPlatform: PlatformSurface = {
       style: "cqrs",
       layout: "byLayer",
       transport: "minimalApi",
+      runtime: "transactional",
     };
   },
 };

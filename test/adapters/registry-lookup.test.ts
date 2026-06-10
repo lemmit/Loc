@@ -12,6 +12,7 @@ import {
   hasAdapters,
   resolveLayout,
   resolvePersistence,
+  resolveRuntime,
   resolveStyle,
   resolveTransport,
 } from "../../src/platform/resolve-adapters.js";
@@ -177,5 +178,33 @@ describe("transport — adapter-backed axis (realization-axes-alignment.md slice
 
   it("frontends expose no transport", () => {
     expect(availableAdapterNames("react", "transport")).toEqual([]);
+  });
+});
+
+describe("runtime — adapter-backed axis (realization-axes-alignment.md slice 5)", () => {
+  it("each backend exposes `transactional`; actor runtimes are reserved stubs", () => {
+    expect(availableAdapterNames("dotnet", "runtime")).toEqual(["transactional"]);
+    expect(availableAdapterNames("hono", "runtime")).toEqual(["transactional"]);
+    expect(availableAdapterNames("phoenixLiveView", "runtime")).toEqual(["transactional"]);
+    // Actor runtimes are registered stubs — present in allAdapterNames,
+    // excluded from the real menu: orleans (dotnet), genserver (elixir),
+    // nact (node).
+    expect(allAdapterNames("dotnet", "runtime")).toEqual(["orleans", "transactional"]);
+    expect(allAdapterNames("phoenixLiveView", "runtime")).toEqual(["genserver", "transactional"]);
+    expect(allAdapterNames("hono", "runtime")).toEqual(["nact", "transactional"]);
+  });
+
+  it("exposes the runtime default per backend (transactional)", () => {
+    expect(defaultsFor("dotnet")!.runtime).toBe("transactional");
+    expect(defaultsFor("hono")!.runtime).toBe("transactional");
+    expect(defaultsFor("phoenixLiveView")!.runtime).toBe("transactional");
+  });
+
+  it("resolves the default + an explicit runtime; reserved stubs resolve cleanly", () => {
+    expect(resolveRuntime("dotnet", null).name).toBe("transactional");
+    expect(resolveRuntime("elixir", "transactional").name).toBe("transactional");
+    expect(resolveRuntime("dotnet", "orleans").name).toBe("orleans");
+    expect(resolveRuntime("elixir", "genserver").name).toBe("genserver");
+    expect(resolveRuntime("hono", "nact").name).toBe("nact");
   });
 });

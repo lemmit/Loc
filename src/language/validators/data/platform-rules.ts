@@ -167,32 +167,33 @@ export type RealizationAxis =
 // `applicationDslToAdapter` / `applicationAdapterToDsl` live in
 // `util/platform-axes.ts` (shared with lowering) — imported above.
 
-/** Adapter kind backing each axis, or undefined for the greenfield axes
- *  (`foundation` / `runtime`).  `transport` joined the adapter-backed set
- *  when it was promoted from greenfield (realization-axes-alignment.md). */
+/** Adapter kind backing each axis, or undefined for the one remaining
+ *  greenfield axis (`foundation`).  `transport` + `runtime` joined the
+ *  adapter-backed set when they were promoted from greenfield
+ *  (realization-axes-alignment.md). */
 const ADAPTER_KIND_BY_AXIS: Partial<
-  Record<RealizationAxis, "persistence" | "style" | "layout" | "transport">
+  Record<RealizationAxis, "persistence" | "style" | "layout" | "transport" | "runtime">
 > = {
   persistence: "persistence",
   application: "style",
   directoryLayout: "layout",
   transport: "transport",
+  runtime: "runtime",
 };
 
 function adapterKindForAxis(
   axis: RealizationAxis,
-): "persistence" | "style" | "layout" | "transport" | undefined {
+): "persistence" | "style" | "layout" | "transport" | "runtime" | undefined {
   return ADAPTER_KIND_BY_AXIS[axis];
 }
 
-/** Single current value for a greenfield axis on a backend family
- *  (`foundation` / `runtime`).  `transport` is no longer greenfield — it is an
- *  adapter-backed axis (realization-axes-alignment.md), resolved via
- *  `availableAdapterNames(family, "transport")` in `realizationAxisMenu`. */
-function greenfieldMenu(family: Platform, axis: "foundation" | "runtime"): string[] {
-  if (axis === "runtime") return ["transactional"];
-  // Elixir carries a two-element foundation menu: today's `ash` (the
-  // current emitter) and `vanilla` (D-VANILLA-PHOENIX-FOUNDATION).
+/** Menu for the one remaining greenfield axis, `foundation`.  `transport` and
+ *  `runtime` are now adapter-backed (realization-axes-alignment.md), resolved
+ *  via `availableAdapterNames(family, …)` in `realizationAxisMenu`.  Elixir
+ *  carries a two-element foundation menu: today's `ash` and `vanilla`
+ *  (D-VANILLA-PHOENIX-FOUNDATION); every other backend is `vanilla` only. */
+function greenfieldMenu(family: Platform, axis: "foundation"): string[] {
+  void axis;
   return family === "elixir" ? ["ash", "vanilla"] : ["vanilla"];
 }
 
@@ -211,6 +212,8 @@ export function realizationAxisMenu(family: Platform, axis: RealizationAxis): st
       return availableAdapterNames(family, "style").map(applicationAdapterToDsl);
     case "transport":
       return availableAdapterNames(family, "transport");
+    case "runtime":
+      return availableAdapterNames(family, "runtime");
     default:
       return greenfieldMenu(family, axis);
   }

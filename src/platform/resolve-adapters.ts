@@ -24,6 +24,7 @@ import {
   type PersistenceAdapter,
   type PlatformAdapterDefaults,
   type PlatformAdapters,
+  type RuntimeAdapter,
   type StyleAdapter,
   type TransportAdapter,
 } from "../generator/_adapters/index.js";
@@ -73,7 +74,7 @@ export function allAdapterNames(platform: Platform, kind: AdapterAxisKind): stri
 /** The adapter-backed realization axes (each maps 1:1 to a `PlatformAdapters`
  *  record).  `transport` joined the set when it was promoted from a greenfield
  *  axis (realization-axes-alignment.md). */
-type AdapterAxisKind = "persistence" | "style" | "layout" | "transport";
+type AdapterAxisKind = "persistence" | "style" | "layout" | "transport" | "runtime";
 
 /** The adapter record for one axis on a platform, or undefined for
  *  frontends / unknown platforms (no menu). */
@@ -92,6 +93,8 @@ function adapterBagFor(
       return adapters.layouts;
     case "transport":
       return adapters.transports;
+    case "runtime":
+      return adapters.runtimes;
   }
 }
 
@@ -179,6 +182,29 @@ export function resolveTransport(
       resolved,
       platform,
       Object.keys(adapters.transports),
+    );
+  }
+  return adapter;
+}
+
+export function resolveRuntime(
+  platform: Platform,
+  name: string | null | undefined,
+): RuntimeAdapter {
+  const surface = platformFor(platform);
+  const adapters = surface.adapters?.();
+  const defaults = surface.adapterDefaults?.();
+  if (!adapters || !defaults) {
+    throw new AdapterNotImplementedError("runtime", name ?? "<default>", platform, []);
+  }
+  const resolved = name && name.length > 0 ? name : defaults.runtime;
+  const adapter = adapters.runtimes[resolved];
+  if (!adapter) {
+    throw new AdapterNotImplementedError(
+      "runtime",
+      resolved,
+      platform,
+      Object.keys(adapters.runtimes),
     );
   }
   return adapter;
