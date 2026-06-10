@@ -81,7 +81,7 @@ describe("python project shell", () => {
   it("main.py exposes the app with /health and a DB-aware /ready", async () => {
     const files = await build();
     const main = files.get("api/app/main.py")!;
-    expect(main).toContain('app = FastAPI(title="PyShell", version="0.1.0")');
+    expect(main).toContain('app = FastAPI(title="PyShell", version="0.1.0", lifespan=lifespan)');
     expect(main).toContain("CORSMiddleware");
     expect(main).toContain('@app.get("/health")');
     expect(main).toContain('@app.get("/ready")');

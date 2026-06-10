@@ -99,7 +99,9 @@ export function columnsFor(
           return [{ attr, pyType: "str", saType: "Text", optional: opt }];
       }
     case "id":
-      return [{ attr, pyType: "str", saType: "Text", optional: opt }];
+      // The shared DDL types id columns UUID — `Uuid(as_uuid=False)`
+      // keeps the python side str while binding/reading uuid cleanly.
+      return [{ attr, pyType: "str", saType: "Uuid(as_uuid=False)", optional: opt }];
     case "enum":
       // Stored as the value text (parity with pgEnum's stored form).
       return [{ attr, pyType: "str", saType: "Text", optional: opt }];

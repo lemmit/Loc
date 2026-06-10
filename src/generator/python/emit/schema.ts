@@ -5,6 +5,7 @@ import type {
   EnrichedBoundedContextIR,
 } from "../../../ir/types/loom-ir.js";
 import { isTphBase, isTphConcrete } from "../../../ir/util/inheritance.js";
+import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
 import { columnsForFields, joinRowClassName, type PyColumn, rowClassName } from "../py-columns.js";
@@ -22,19 +23,30 @@ import { columnsForFields, joinRowClassName, type PyColumn, rowClassName } from 
 // (S14), `<VO>[]` value-collection child tables, workflow state (S15).
 // ---------------------------------------------------------------------------
 
-export function renderPySchema(ctx: EnrichedBoundedContextIR): string {
+export type PyDataSourceLookup = (agg: AggregateIR) => ResolvedDataSource | undefined;
+
+export function renderPySchema(
+  ctx: EnrichedBoundedContextIR,
+  resolveDataSource?: PyDataSourceLookup,
+): string {
   const models: string[] = [];
   for (const agg of ctx.aggregates) {
     if (agg.isAbstract || isTphBase(agg, ctx.aggregates) || isTphConcrete(agg, ctx.aggregates)) {
       continue; // inheritance lands in S13
     }
     if (agg.persistedAs === "eventLog") continue; // S14
-    models.push(renderModel(agg.name, agg, undefined, ctx));
+    // dataSource-driven routing — the table lives in the binding's
+    // schema (default `snake(context)`), exactly where the shared DDL
+    // (sql-pg) creates it.
+    const ds = resolveDataSource?.(agg);
+    const schema = ds?.schema;
+    const prefix = ds?.tablePrefix;
+    models.push(renderModel(agg.name, agg, undefined, ctx, schema, prefix));
     for (const part of agg.parts) {
-      models.push(renderModel(part.name, part, agg.name, ctx));
+      models.push(renderModel(part.name, part, agg.name, ctx, schema, prefix));
     }
     for (const assoc of (agg as EnrichedAggregateIR).associations ?? []) {
-      models.push(renderJoinModel(assoc));
+      models.push(renderJoinModel(assoc, schema, prefix));
     }
   }
   const body = models.join("\n\n\n");
@@ -84,26 +96,31 @@ function renderModel(
   owner: FieldOwner,
   parentName: string | undefined,
   ctx: EnrichedBoundedContextIR,
+  schema?: string,
+  prefix?: string,
 ): string {
-  const tableName = snake(plural(name));
+  const tableName = `${prefix ?? ""}${snake(plural(name))}`;
   const cols: PyColumn[] = [
-    { attr: "id", pyType: "str", saType: "Text", optional: false, primaryKey: true },
+    { attr: "id", pyType: "str", saType: "Uuid(as_uuid=False)", optional: false, primaryKey: true },
     ...(parentName
       ? [
           {
             attr: "parent_id",
             sqlName: `${snake(parentName)}_id`,
             pyType: "str",
-            saType: "Text",
+            saType: "Uuid(as_uuid=False)",
             optional: false,
           },
         ]
       : []),
     ...columnsForFields(owner.fields, ctx),
   ];
-  const tableArgs = parentName
-    ? [`        Index("${tableName}_parent_id_idx", "${snake(parentName)}_id"),`]
-    : [];
+  const tableArgs = [
+    ...(parentName
+      ? [`        Index("${tableName}_parent_id_idx", "${snake(parentName)}_id"),`]
+      : []),
+    ...(schema ? [`        {"schema": "${schema}"},`] : []),
+  ];
   return lines(
     `class ${rowClassName(name)}(Base):`,
     `    __tablename__ = "${tableName}"`,
@@ -125,17 +142,19 @@ function renderColumn(c: PyColumn): string {
 
 /** Many-to-many join table for a `T id[]` reference collection — two
  *  FK columns + ordinal, composite PK, reverse-membership index. */
-function renderJoinModel(assoc: AssociationIR): string {
+function renderJoinModel(assoc: AssociationIR, schema?: string, prefix?: string): string {
+  const tableName = `${prefix ?? ""}${assoc.joinTable}`;
   return lines(
     `class ${joinRowClassName(assoc)}(Base):`,
-    `    __tablename__ = "${assoc.joinTable}"`,
+    `    __tablename__ = "${tableName}"`,
     "    __table_args__ = (",
     `        PrimaryKeyConstraint("${assoc.ownerFk}", "${assoc.targetFk}"),`,
     `        Index("${assoc.joinTable}_${assoc.targetFk}_idx", "${assoc.targetFk}"),`,
+    ...(schema ? [`        {"schema": "${schema}"},`] : []),
     "    )",
     "",
-    `    ${assoc.ownerFk}: Mapped[str] = mapped_column(Text)`,
-    `    ${assoc.targetFk}: Mapped[str] = mapped_column(Text)`,
+    `    ${assoc.ownerFk}: Mapped[str] = mapped_column(Uuid(as_uuid=False))`,
+    `    ${assoc.targetFk}: Mapped[str] = mapped_column(Uuid(as_uuid=False))`,
     "    ordinal: Mapped[int] = mapped_column(Integer)",
   );
 }

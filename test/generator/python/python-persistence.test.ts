@@ -31,7 +31,9 @@ describe("python schema emission", () => {
     const schema = files.get("api/app/db/schema.py")!;
     expect(schema).toContain("class OrderRow(Base):");
     expect(schema).toContain('    __tablename__ = "orders"');
-    expect(schema).toContain("    id: Mapped[str] = mapped_column(Text, primary_key=True)");
+    expect(schema).toContain(
+      "    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)",
+    );
     // money → NUMERIC(19,4); datetime → timezone-aware.
     expect(schema).toContain("    unit_budget: Mapped[Decimal] = mapped_column(Numeric(19, 4))");
     expect(schema).toContain(
@@ -43,7 +45,9 @@ describe("python schema emission", () => {
     const files = await build();
     const schema = files.get("api/app/db/schema.py")!;
     expect(schema).toContain('    __tablename__ = "order_lines"');
-    expect(schema).toContain('    parent_id: Mapped[str] = mapped_column("order_id", Text)');
+    expect(schema).toContain(
+      '    parent_id: Mapped[str] = mapped_column("order_id", Uuid(as_uuid=False))',
+    );
     expect(schema).toContain('Index("order_lines_parent_id_idx", "order_id")');
     // VO fields flatten to prefixed columns.
     expect(schema).toContain("    unit_price_amount: Mapped[Decimal] = mapped_column(Numeric)");
