@@ -141,12 +141,22 @@ function renderWorkflowStmt(
       if (targetOp && operationUsesCurrentUser(targetOp)) rendered.push("currentUser");
       return [`        ${s.target}.${s.op}(${rendered.join(", ")});`];
     }
-    case "emit":
-      // Workflow-level event emission has no aggregate stream to ride —
-      // tracked with the dispatch-delivery proposal; surface loudly.
-      throw new Error(
-        "java workflows: workflow-level `emit` is not yet implemented on the java backend.",
-      );
+    case "emit": {
+      // Workflow-level emission has no aggregate stream to ride: the
+      // event record is constructed (so its shape stays compile-checked)
+      // and logged with the same `domain_event` envelope the per-aggregate
+      // publishEvents uses.  Java events are positional records — order
+      // the emit site's `name: value` pairs by the declared field order.
+      for (const f of s.fields) collectJavaExprImports(f.value, imports);
+      const declared = ctx.events.find((e) => e.name === s.eventName);
+      const rendered = new Map(s.fields.map((f) => [f.name, renderJavaExpr(f.value, renderCtx)]));
+      const args = declared
+        ? declared.fields.map((f) => rendered.get(f.name) ?? "null").join(", ")
+        : [...rendered.values()].join(", ");
+      return [
+        `        { var __ev = new ${s.eventName}(${args}); log.info("domain_event type={}", __ev.getClass().getSimpleName()); }`,
+      ];
+    }
     case "repo-run": {
       for (const a of s.retrievalArgs) collectJavaExprImports(a, imports);
       const args = s.retrievalArgs.map((a) => renderJavaExpr(a, renderCtx));
@@ -249,6 +259,11 @@ export function renderJavaWorkflows(
 
   const repoFields = [...repoAggs].sort();
   const anyUser = authed && ctx.workflows.some(workflowUsesCurrentUser);
+  const hasEmit = ctx.workflows.some((wf) => {
+    const walk = (ss: WorkflowStmtIR[]): boolean =>
+      ss.some((s) => s.kind === "emit" || (s.kind === "for-each" && walk(s.body)));
+    return walk(wf.statements);
+  });
   const serviceName = `${ctx.name}Workflows`;
   const ctorParams = [
     ...repoFields.map((a) => `${a}Repository ${repoField(a)}`),
@@ -261,6 +276,8 @@ export function renderJavaWorkflows(
       ``,
       ...[...imports].sort().map((i) => `import ${i};`),
       imports.size > 0 ? `` : null,
+      hasEmit ? `import org.slf4j.Logger;` : null,
+      hasEmit ? `import org.slf4j.LoggerFactory;` : null,
       `import org.springframework.stereotype.Service;`,
       `import org.springframework.transaction.annotation.Transactional;`,
       ``,
@@ -274,6 +291,7 @@ export function renderJavaWorkflows(
       }),
       anyUser ? `import ${wctx.basePkg}.auth.CurrentUserAccessor;` : null,
       anyUser ? `import ${wctx.basePkg}.auth.User;` : null,
+      hasEmit ? `import ${wctx.basePkg}.domain.events.*;` : null,
       `import ${wctx.basePkg}.domain.common.*;`,
       `import ${wctx.basePkg}.domain.enums.*;`,
       `import ${wctx.basePkg}.domain.ids.*;`,
@@ -282,6 +300,9 @@ export function renderJavaWorkflows(
       `@Service`,
       `@Transactional`,
       `public class ${serviceName} {`,
+      hasEmit
+        ? `    private static final Logger log = LoggerFactory.getLogger(${serviceName}.class);`
+        : null,
       ...repoFields.map((a) => `    private final ${a}Repository ${repoField(a)};`),
       anyUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
       ``,

@@ -24,6 +24,8 @@ system RetrievalShop {
       }
       repository Customers for Customer { }
 
+      event RegionDeactivated { region: string, at: datetime }
+
       criterion ActiveCustomer of Customer = active
       criterion InRegion(rgn: string) of Customer = region == rgn
       criterion HighScore(min: int) of Customer = score >= min
@@ -43,6 +45,7 @@ system RetrievalShop {
           for c in matched {
             c.deactivate()
           }
+          emit RegionDeactivated { region: rgn, at: now() }
         }
       }
 
@@ -181,5 +184,16 @@ describe("java generator — workflow Repo.run + for loop", () => {
   it("lowers a paged repo-run to the offset/limit overload", async () => {
     const wf = (await files()).get(`${ROOT}/application/workflows/CrmWorkflows.java`)!;
     expect(wf).toContain("        var top = customersRepository.runByRegion(rgn, 1, 5);");
+  });
+
+  it("workflow-level emit constructs the event record (declared field order) and logs it", async () => {
+    const wf = (await files()).get(`${ROOT}/application/workflows/CrmWorkflows.java`)!;
+    expect(wf).toContain(
+      '{ var __ev = new RegionDeactivated(rgn, Instant.now()); log.info("domain_event type={}", __ev.getClass().getSimpleName()); }',
+    );
+    expect(wf).toContain(
+      "    private static final Logger log = LoggerFactory.getLogger(CrmWorkflows.class);",
+    );
+    expect(wf).toContain("import com.loom.crmapi.domain.events.*;");
   });
 });

@@ -11,6 +11,8 @@ system RetrievalShop {
       }
       repository Customers for Customer { }
 
+      event RegionDeactivated { region: string, at: datetime }
+
       criterion ActiveCustomer of Customer = active
       criterion InRegion(rgn: string) of Customer = region == rgn
       criterion HighScore(min: int) of Customer = score >= min
@@ -30,6 +32,7 @@ system RetrievalShop {
           for c in matched {
             c.deactivate()
           }
+          emit RegionDeactivated { region: rgn, at: now() }
         }
       }
 
