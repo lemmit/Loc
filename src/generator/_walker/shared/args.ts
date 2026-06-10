@@ -88,16 +88,16 @@ export function firstPositionalText(call: ExprIR & { kind: "call" }): string | u
 /** `firstPositionalContent` returns either a `"quoted string"` or a
  *  `{paramRef}` markup expression.  Components
  *  embedding the result in markup text need quoted strings unwrapped
- *  to bare text; markup expressions stay verbatim.  `escape` is the
+ *  to bare text; markup expressions stay verbatim.  `escapeFn` is the
  *  active target's text escaper (`ctx.target.escapeText`) — defaults
  *  to the JSX escape so framework-free callers keep the v0
  *  behaviour. */
 export function unwrapTextLiteral(
   s: string,
-  escape: (text: string) => string = escapeJsxText,
+  escapeFn: (text: string) => string = escapeJsxText,
 ): string {
   if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
-    return escape(JSON.parse(s) as string);
+    return escapeFn(JSON.parse(s) as string);
   }
   return s;
 }

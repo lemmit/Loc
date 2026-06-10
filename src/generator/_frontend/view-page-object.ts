@@ -5,7 +5,6 @@
 import type { BoundedContextIR, TypeIR, ViewIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 
-
 export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string {
   const slug = snake(view.name);
   const className = `${upperFirst(view.name)}ViewPage`;
@@ -69,7 +68,6 @@ function collectColumnNames(view: ViewIR, ctx: BoundedContextIR): string[] {
   }
   return cols;
 }
-
 
 function unwrapOpt(t: TypeIR): TypeIR {
   return t.kind === "optional" ? t.inner : t;

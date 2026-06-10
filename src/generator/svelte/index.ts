@@ -8,9 +8,16 @@ import {
   type SystemIR,
 } from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
+import {
+  E2E_FIXTURES_TS,
+  E2E_PACKAGE_JSON,
+  E2E_TSCONFIG_JSON,
+  PLAYWRIGHT_CONFIG_TS,
+} from "../_frontend/e2e-harness.js";
+import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { smokeSpec } from "../_frontend/smoke-spec.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
-import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { buildSvelteApiModule } from "./api-builder.js";
 import {
   SVELTE_APP_DTS,
@@ -19,13 +26,6 @@ import {
   SVELTE_LIB_SCHEMAS_MONEY,
   SVELTE_LIB_TOAST,
 } from "./emit-templates.js";
-import { smokeSpec } from "../_frontend/smoke-spec.js";
-import {
-  E2E_FIXTURES_TS,
-  E2E_PACKAGE_JSON,
-  E2E_TSCONFIG_JSON,
-  PLAYWRIGHT_CONFIG_TS,
-} from "../_frontend/e2e-harness.js";
 import {
   defaultNavSections,
   emitSveltePageObjectsForUi,

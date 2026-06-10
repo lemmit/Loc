@@ -1,5 +1,9 @@
 import { createInputFields } from "../../ir/enrich/wire-projection.js";
-import { PAGED_DEFAULT_PAGE, PAGED_DEFAULT_PAGE_SIZE, pagedReturn } from "../../ir/stdlib/generics.js";
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../ir/stdlib/generics.js";
 import {
   aggregateUsesMoney,
   type BoundedContextIR,
@@ -17,7 +21,6 @@ import {
   preconditionsAsInvariants,
   unionForFind,
   zodForRequest,
-  zodForResponse,
   zodForResponseInner,
 } from "../_frontend/zod-schemas.js";
 
@@ -281,4 +284,3 @@ export function buildApiModule(
 
   return lines.join("\n");
 }
-

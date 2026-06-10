@@ -9,20 +9,19 @@
 // ---------------------------------------------------------------------------
 
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { PAGED_DEFAULT_PAGE, PAGED_DEFAULT_PAGE_SIZE, pagedReturn } from "../../ir/stdlib/generics.js";
+import { forApiRead } from "../../ir/enrich/wire-projection.js";
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
-import {
-  type AggregateIR,
-  type BoundedContextIR,
-  type EnrichedAggregateIR,
-  type EnrichedEntityPartIR,
-  type EnumIR,
-  type FindIR,
-  type InvariantIR,
-  type OperationIR,
-  type RepositoryIR,
-  type TypeIR,
-  type ValueObjectIR,
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  EnrichedAggregateIR,
+  EnrichedEntityPartIR,
+  EnumIR,
+  InvariantIR,
+  OperationIR,
+  RepositoryIR,
+  TypeIR,
+  ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
 import {
   peelCollection,
@@ -32,8 +31,6 @@ import {
 } from "../../ir/types/wire-types.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
-import { forApiRead } from "../../ir/enrich/wire-projection.js";
-import { upperFirst } from "../../util/naming.js";
 import {
   discriminatedUnionZod,
   type UnionMemberField,

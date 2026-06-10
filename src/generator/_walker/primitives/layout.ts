@@ -4,6 +4,15 @@
 // via the shared walk helpers.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { renderPrimitive } from "../render-primitive.js";
+import {
+  namedArgValue,
+  numericNamed,
+  positionalArgs,
+  slugify,
+  stringNamed,
+  unwrapTextLiteral,
+} from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import {
   positionalChildren,
@@ -12,16 +21,6 @@ import {
   testidAttr,
   walk,
 } from "../walker-core.js";
-import { renderPrimitive } from "../render-primitive.js";
-import {
-  escapeJsxText,
-  namedArgValue,
-  numericNamed,
-  positionalArgs,
-  slugify,
-  stringNamed,
-  unwrapTextLiteral,
-} from "../shared/args.js";
 
 export function emitStack(
   call: ExprIR & { kind: "call" },
@@ -229,7 +228,9 @@ export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     return {
       value: slugify(labelStr) || `tab-${i + 1}`,
       label: ctx.target.escapeText(labelStr),
-      bodyJsx: bodyArg ? walk(bodyArg, ctx, depth + 2) : ctx.target.renderComment("missing tab body"),
+      bodyJsx: bodyArg
+        ? walk(bodyArg, ctx, depth + 2)
+        : ctx.target.renderComment("missing tab body"),
     };
   });
   return renderPrimitive(ctx, "primitive-tabs", {

@@ -16,7 +16,7 @@ import type {
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import type { LoadedPack } from "../_packs/loader.js";
-import { walkBody, type WalkResult } from "../_walker/walker-core.js";
+import { type WalkResult, walkBody } from "../_walker/walker-core.js";
 import { tsxTarget } from "./walker/tsx-target.js";
 
 export * from "../_walker/walker-core.js";

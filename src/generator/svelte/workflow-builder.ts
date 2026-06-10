@@ -223,4 +223,3 @@ function walkType(t: TypeIR, visit: (t: TypeIR) => void): void {
   if (t.kind === "array") walkType(t.element, visit);
   else if (t.kind === "optional") walkType(t.inner, visit);
 }
-

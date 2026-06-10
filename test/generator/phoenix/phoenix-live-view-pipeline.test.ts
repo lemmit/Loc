@@ -417,10 +417,10 @@ describe("phoenixLiveView pipeline", () => {
       const file = path.join(dir, "fw.ddd");
       fs.writeFileSync(
         file,
-        FIXTURE_SOURCE.replace("ui: SalesAdmin,", `ui SalesAdmin { framework: ${framework} }`).replace(
-          "port: 4000",
-          "",
-        ),
+        FIXTURE_SOURCE.replace(
+          "ui: SalesAdmin,",
+          `ui SalesAdmin { framework: ${framework} }`,
+        ).replace("port: 4000", ""),
       );
       const services = createDddServices(NodeFileSystem);
       const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(

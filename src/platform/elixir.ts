@@ -10,11 +10,7 @@ import { byFeatureLayoutAdapter } from "../generator/elixir/adapters/by-feature-
 import { ectoPersistenceAdapter } from "../generator/elixir/adapters/ecto-persistence.js";
 import { vanillaStyleAdapter } from "../generator/elixir/adapters/vanilla-style.js";
 import { generateElixirProject } from "../generator/elixir/index.js";
-import {
-  type ComposeServiceShape,
-  type PlatformSurface,
-  STATIC_BUNDLE_FRAMEWORKS,
-} from "./surface.js";
+import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 
 // ---------------------------------------------------------------------------
 // Elixir platform — fullstack Elixir/Ash + Phoenix deployable

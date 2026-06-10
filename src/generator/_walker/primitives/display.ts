@@ -4,14 +4,6 @@
 // recurse via the shared `positionalChildren`).
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import type { WalkContext } from "../walker-core.js";
-import {
-  firstPositionalContent,
-  positionalChildren,
-  renderTextContent,
-  styleAttr,
-  testidAttr,
-} from "../walker-core.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   numericNamed,
@@ -20,6 +12,14 @@ import {
   unwrapAsAttr,
   unwrapTextLiteral,
 } from "../shared/args.js";
+import type { WalkContext } from "../walker-core.js";
+import {
+  firstPositionalContent,
+  positionalChildren,
+  renderTextContent,
+  styleAttr,
+  testidAttr,
+} from "../walker-core.js";
 
 export function emitStat(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Stat(label, value) — small headline-stat card.  No dedicated

@@ -201,7 +201,7 @@ function findFirstAggregateWith(
 // helpers
 // ---------------------------------------------------------------------------
 
-function unwrapOpt(t: TypeIR): TypeIR {
+function _unwrapOpt(t: TypeIR): TypeIR {
   return t.kind === "optional" ? t.inner : t;
 }
 

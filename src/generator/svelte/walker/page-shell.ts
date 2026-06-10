@@ -31,7 +31,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import type { LoadedPack } from "../../_packs/loader.js";
-import { idTargetHookVar } from "../../react/form-helpers.js";
+import { indentJsx } from "../../_walker/shared/args.js";
 import type {
   ActionMutationState,
   FormOfState,
@@ -40,7 +40,7 @@ import type {
   WorkflowFormState,
 } from "../../_walker/walker-core.js";
 import { emitExpr, walkBody } from "../../_walker/walker-core.js";
-import { indentJsx } from "../../_walker/shared/args.js";
+import { idTargetHookVar } from "../../react/form-helpers.js";
 import { renderSvelteApiHookImports, renderSvelteImportLines } from "./import-lines.js";
 import { svelteTarget } from "./svelte-target.js";
 
@@ -406,9 +406,7 @@ export function renderSvelteComponentFile(
     if (!isSlotShape(p.type)) continue;
     markup = markup.split(`{${p.name}}`).join(`{@render ${p.name}?.()}`);
   }
-  const stateLines = usesState
-    ? state.map((f) => `  ${renderRunesState(f, pack)}\n`).join("")
-    : "";
+  const stateLines = usesState ? state.map((f) => `  ${renderRunesState(f, pack)}\n`).join("") : "";
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">

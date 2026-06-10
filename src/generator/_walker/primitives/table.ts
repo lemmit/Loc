@@ -4,6 +4,15 @@
 // the shared lambda-scope helpers. emitColumn is private to this module.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { renderPrimitive } from "../render-primitive.js";
+import {
+  boolNamed,
+  lambdaArg,
+  namedArgValue,
+  positionalArgs,
+  slugify,
+  stringNamed,
+} from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import {
   emitExpr,
@@ -14,16 +23,6 @@ import {
   testidAttr,
   walk,
 } from "../walker-core.js";
-import { renderPrimitive } from "../render-primitive.js";
-import {
-  boolNamed,
-  escapeJsxText,
-  lambdaArg,
-  namedArgValue,
-  positionalArgs,
-  slugify,
-  stringNamed,
-} from "../shared/args.js";
 
 export function emitTable(
   call: ExprIR & { kind: "call" },

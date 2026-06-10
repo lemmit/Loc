@@ -57,9 +57,7 @@ describe.skipIf(!ENABLED)("generated svelte project builds (svelte-check + vite 
       cases.push({ ddd, pack });
     }
   }
-  const active = SHARD
-    ? cases.filter((c) => `${c.ddd}:${c.pack}` === SHARD)
-    : cases;
+  const active = SHARD ? cases.filter((c) => `${c.ddd}:${c.pack}` === SHARD) : cases;
   if (SHARD && active.length === 0) {
     throw new Error(
       `LOOM_SVELTE_BUILD_CASE="${SHARD}" matches no case. Known: ${cases.map((c) => `${c.ddd}:${c.pack}`).join(", ")}`,
@@ -67,27 +65,23 @@ describe.skipIf(!ENABLED)("generated svelte project builds (svelte-check + vite 
   }
 
   for (const { ddd, pack } of active) {
-    it(
-      `${ddd} × ${pack}`,
-      { timeout: 600_000 },
-      () => {
-        const work = fs.mkdtempSync(path.join(os.tmpdir(), "loom-svelte-build-"));
-        const src = fs.readFileSync(path.join(repoRoot, ddd), "utf-8");
-        const dddPath = path.join(work, "main.ddd");
-        fs.writeFileSync(dddPath, injectDesign(src, pack));
-        run(`node ${cli} generate system ${dddPath} -o ${work}/out`, repoRoot);
+    it(`${ddd} × ${pack}`, { timeout: 600_000 }, () => {
+      const work = fs.mkdtempSync(path.join(os.tmpdir(), "loom-svelte-build-"));
+      const src = fs.readFileSync(path.join(repoRoot, ddd), "utf-8");
+      const dddPath = path.join(work, "main.ddd");
+      fs.writeFileSync(dddPath, injectDesign(src, pack));
+      run(`node ${cli} generate system ${dddPath} -o ${work}/out`, repoRoot);
 
-        const project = path.join(work, "out", "web");
-        expect(fs.existsSync(path.join(project, "svelte.config.js"))).toBe(true);
-        run("npm install --no-audit --no-fund", project);
-        run("npx svelte-kit sync", project);
-        // The type gate — fails on any svelte-check error (warnings
-        // pass; the templates are kept warning-clean separately).
-        run("npx svelte-check --tsconfig ./tsconfig.json --fail-on-warnings", project);
-        // The compile + adapter gate.
-        run("npx vite build", project);
-        expect(fs.existsSync(path.join(project, "build", "index.html"))).toBe(true);
-      },
-    );
+      const project = path.join(work, "out", "web");
+      expect(fs.existsSync(path.join(project, "svelte.config.js"))).toBe(true);
+      run("npm install --no-audit --no-fund", project);
+      run("npx svelte-kit sync", project);
+      // The type gate — fails on any svelte-check error (warnings
+      // pass; the templates are kept warning-clean separately).
+      run("npx svelte-check --tsconfig ./tsconfig.json --fail-on-warnings", project);
+      // The compile + adapter gate.
+      run("npx vite build", project);
+      expect(fs.existsSync(path.join(project, "build", "index.html"))).toBe(true);
+    });
   }
 });

@@ -11,7 +11,6 @@ import { zodForResponse } from "./api-builder.js";
 // `src/generator/_frontend/workflow-page-object.ts` (shared with
 // Svelte); re-exported so consumers keep this import path.
 export { buildWorkflowPageObject } from "../_frontend/workflow-page-object.js";
-import { fillBlock } from "./page-objects-builder.js";
 
 // ---------------------------------------------------------------------------
 // Workflow API module + Playwright page object emission.

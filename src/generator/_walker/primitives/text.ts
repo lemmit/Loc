@@ -4,6 +4,14 @@
 // value child via the shared `walk`.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { renderPrimitive } from "../render-primitive.js";
+import {
+  namedArgValue,
+  numericNamed,
+  positionalArgs,
+  stringNamed,
+  unwrapTextLiteral,
+} from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import {
   emitExpr,
@@ -13,15 +21,6 @@ import {
   testidAttr,
   walk,
 } from "../walker-core.js";
-import { renderPrimitive } from "../render-primitive.js";
-import {
-  escapeJsxText,
-  namedArgValue,
-  numericNamed,
-  positionalArgs,
-  stringNamed,
-  unwrapTextLiteral,
-} from "../shared/args.js";
 
 export function emitMoney(
   call: ExprIR & { kind: "call" },
@@ -275,7 +274,9 @@ export function emitKeyValueRow(
   const childArg = positionals[1];
   const labelStr =
     labelArg && labelArg.kind === "literal" && labelArg.lit === "string" ? labelArg.value : "";
-  const childJsx = childArg ? walk(childArg, ctx, depth + 2) : ctx.target.renderComment("missing value");
+  const childJsx = childArg
+    ? walk(childArg, ctx, depth + 2)
+    : ctx.target.renderComment("missing value");
   return renderPrimitive(ctx, "primitive-key-value-row", {
     label: ctx.target.escapeText(labelStr),
     childJsx,

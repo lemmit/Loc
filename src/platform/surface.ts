@@ -33,11 +33,7 @@ import type { MigrationsIR } from "../ir/types/migrations-ir.js";
  *  exception — it serves embedded SPAs under the `/app` path prefix,
  *  which SvelteKit needs `paths.base` wiring for; its surface lists
  *  its hostable set explicitly until that lands.) */
-export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set([
-  "react",
-  "static",
-  "svelte",
-]);
+export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set(["react", "static", "svelte"]);
 
 // ---------------------------------------------------------------------------
 // Platform surface contract.

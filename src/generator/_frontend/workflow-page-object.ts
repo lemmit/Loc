@@ -6,7 +6,6 @@ import type { BoundedContextIR, WorkflowIR } from "../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { fillBlock } from "./page-objects-builder.js";
 
-
 export function buildWorkflowPageObject(
   wf: WorkflowIR,
   ctx: BoundedContextIR,
@@ -54,4 +53,3 @@ export function buildWorkflowPageObject(
   lines.push(`}`);
   return lines.join("\n") + "\n";
 }
-

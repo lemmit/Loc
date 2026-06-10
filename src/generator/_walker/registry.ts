@@ -83,16 +83,10 @@ import {
   renderText as renderTextHeex,
   renderToolbar as renderToolbarHeex,
 } from "../elixir/heex-walker.js";
-import type { WalkContext as TsxWalkContext } from "./walker-core.js";
 import { emitCodeBlock } from "./primitives/code-block.js";
 // Re-exported emitters from the React/TSX walker.  Each function
 // takes `(call, ctx, depth)` and returns the JSX fragment.
-import {
-  emitAction,
-  emitButton,
-  emitIdLink,
-  emitQueryView,
-} from "./primitives/controls.js";
+import { emitAction, emitButton, emitIdLink, emitQueryView } from "./primitives/controls.js";
 import {
   emitAlert,
   emitBadge,
@@ -147,6 +141,7 @@ import {
   emitMoney,
   emitText,
 } from "./primitives/text.js";
+import type { WalkContext as TsxWalkContext } from "./walker-core.js";
 
 /** Renderer signature for the React/TSX target.  Returns the
  *  rendered JSX fragment.  Reads/writes pass through `ctx` (the

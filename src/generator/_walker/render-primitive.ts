@@ -6,8 +6,8 @@
 // reuse them without dragging the rest of the walker.
 
 import type { ImportSpec } from "../_packs/loader.js";
-import type { ImportMap, WalkContext } from "./walker-core.js";
 import type { FormFieldVM } from "../react/templating/view-models.js";
+import type { ImportMap, WalkContext } from "./walker-core.js";
 
 export type { ImportMap };
 

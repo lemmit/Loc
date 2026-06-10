@@ -5,23 +5,8 @@
 // trigger surface onto the operation state its Form child just pushed,
 // so it must share the same sink and live alongside the form emitters.
 
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  ExprIR,
-  TypeIR,
-} from "../../../ir/types/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import type { WalkContext } from "../walker-core.js";
-import {
-  emitExpr,
-  emitStmt,
-  extendLambdaParams,
-  firstPositionalContent,
-  propagateChildFlags,
-  testidAttr,
-  walk,
-} from "../walker-core.js";
 import {
   idTargetHookVar,
   idTargetsInFields,
@@ -43,6 +28,16 @@ import {
   stringNamed,
   unwrapTextLiteral,
 } from "../shared/args.js";
+import type { WalkContext } from "../walker-core.js";
+import {
+  emitExpr,
+  emitStmt,
+  extendLambdaParams,
+  firstPositionalContent,
+  propagateChildFlags,
+  testidAttr,
+  walk,
+} from "../walker-core.js";
 import { emitActionThen } from "./controls.js";
 
 /** `CreateForm(of: <Agg>)` — named-leaf entry for the create-form
@@ -77,7 +72,9 @@ export function emitOperationForm(
   if (opRef && opRef.kind === "member" && opRef.receiver.kind === "ref") {
     return emitFormOfOperation(call, ctx, opRef);
   }
-  return ctx.target.renderComment(`OperationForm: expected (of: <Agg>, op: <opName>) or (<instance>.<op>)`);
+  return ctx.target.renderComment(
+    `OperationForm: expected (of: <Agg>, op: <opName>) or (<instance>.<op>)`,
+  );
 }
 
 /** `DestroyForm(of: <Agg>, then?: navigate(...))` — the named-leaf
@@ -103,7 +100,9 @@ export function emitDestroyForm(
     return ctx.target.renderComment(`DestroyForm(of: ${ofArg.name}): aggregate not found`);
   }
   if (!agg.canonicalDestroy) {
-    return ctx.target.renderComment(`DestroyForm(of: ${agg.name}): no canonical destroy — declare 'destroy { }' (or use 'with crudish')`);
+    return ctx.target.renderComment(
+      `DestroyForm(of: ${agg.name}): no canonical destroy — declare 'destroy { }' (or use 'with crudish')`,
+    );
   }
   // Hoist the delete-mutation hook to function top.  `useDelete<Agg>()`
   // takes no hook-time args (the id goes to `mutateAsync`).
@@ -175,7 +174,9 @@ function emitFormOfOperationByName(
   }
   const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
   if (!op) {
-    return ctx.target.renderComment(`Form(of: ${aggName}, op: ${opName}): no public operation '${opName}' on ${aggName}`);
+    return ctx.target.renderComment(
+      `Form(of: ${aggName}, op: ${opName}): no public operation '${opName}' on ${aggName}`,
+    );
   }
   const fields = op.params;
   const fieldsForHelpers = fields.map((f) => ({ ...f, optional: false }));
@@ -372,7 +373,9 @@ function emitFormOfAggregate(
   const agg = ctx.aggregatesByName.get(aggName);
   const bc = ctx.bcByAggregate.get(aggName);
   if (!agg || !bc) {
-    return ctx.target.renderComment(`Form(of: ${aggName}): aggregate not found in this UI's reachable contexts`);
+    return ctx.target.renderComment(
+      `Form(of: ${aggName}): aggregate not found in this UI's reachable contexts`,
+    );
   }
   // Optional fields are excluded from create forms — same rule as
   // the scaffold New-page builder (`!f.optional`).  This keeps the
@@ -437,7 +440,9 @@ function emitFormRuns(
   const workflow = ctx.workflowsByName.get(wfName);
   const bc = ctx.bcByWorkflow.get(wfName);
   if (!workflow || !bc) {
-    return ctx.target.renderComment(`Form(runs: ${wfName}): workflow not found in this UI's reachable contexts`);
+    return ctx.target.renderComment(
+      `Form(runs: ${wfName}): workflow not found in this UI's reachable contexts`,
+    );
   }
   const fields = workflow.params;
   // form-helpers expect `{ name, type, optional }` rows; workflow
@@ -494,16 +499,22 @@ function emitFormOfOperation(
   const opName = opRef.member;
   const aggName = instanceName ? ctx.paramTypes?.get(instanceName) : undefined;
   if (!instanceName || !aggName) {
-    return ctx.target.renderComment(`Form(${instanceName ?? "?"}.${opName}): '${instanceName ?? "?"}' is not an in-scope aggregate instance`);
+    return ctx.target.renderComment(
+      `Form(${instanceName ?? "?"}.${opName}): '${instanceName ?? "?"}' is not an in-scope aggregate instance`,
+    );
   }
   const agg = ctx.aggregatesByName.get(aggName);
   const bc = ctx.bcByAggregate.get(aggName);
   if (!agg || !bc) {
-    return ctx.target.renderComment(`Form(${instanceName}.${opName}): aggregate ${aggName} not found`);
+    return ctx.target.renderComment(
+      `Form(${instanceName}.${opName}): aggregate ${aggName} not found`,
+    );
   }
   const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
   if (!op) {
-    return ctx.target.renderComment(`Form(${instanceName}.${opName}): no public operation '${opName}' on ${agg.name}`);
+    return ctx.target.renderComment(
+      `Form(${instanceName}.${opName}): no public operation '${opName}' on ${agg.name}`,
+    );
   }
   // The mutation hook is declared at function-top.  When the instance
   // is a function-top param (a component prop), target `<instance>.id`;
@@ -565,7 +576,9 @@ export function emitModal(
   );
   const triggerArg = namedArgValue(call, "trigger");
   if (!formChild || !triggerArg || triggerArg.kind !== "call") {
-    return ctx.target.renderComment(`Modal: expects trigger: Button(...) and a Form(<instance>.<operation>) child`);
+    return ctx.target.renderComment(
+      `Modal: expects trigger: Button(...) and a Form(<instance>.<operation>) child`,
+    );
   }
   // Walk the form child first — records the OperationFormState
   // (and returns "" — the form has no inline JSX).
@@ -583,7 +596,9 @@ export function emitModal(
   })();
   const opName = opRef && opRef.kind === "member" ? opRef.member : opNameNamed;
   if (!opName) {
-    return ctx.target.renderComment(`Modal: child Form must be Form(<instance>.<op>) or Form(of:, op:)`);
+    return ctx.target.renderComment(
+      `Modal: child Form must be Form(<instance>.<op>) or Form(of:, op:)`,
+    );
   }
   const label = unwrapTextLiteral(
     firstPositionalContent(triggerArg, ctx) ?? '"Action"',

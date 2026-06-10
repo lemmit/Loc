@@ -6,8 +6,8 @@ import javaPlatform from "./java.js";
 import type { LoomBackendManifest } from "./manifest.js";
 import pythonPlatform from "./python.js";
 import reactPlatform from "./react.js";
-import sveltePlatform from "./svelte.js";
 import type { PlatformSurface } from "./surface.js";
+import sveltePlatform from "./svelte.js";
 
 // ---------------------------------------------------------------------------
 // Single source of truth for which platforms exist + how the system

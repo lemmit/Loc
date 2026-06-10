@@ -10,7 +10,8 @@ import {
   type UiIR,
 } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
-import { lowerFirst, plural } from "../../util/naming.js";
+import { lowerFirst } from "../../util/naming.js";
+import { smokeSpec } from "../_frontend/smoke-spec.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { buildApiModule } from "./api-builder.js";
@@ -24,7 +25,6 @@ import {
   REACT_LIB_STRICT_FIELD_MAP_TS,
 } from "./emit-templates.js";
 import { prepareNamedLayouts } from "./layouts-emitter.js";
-import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { deriveSidebarFromUi } from "./menu-emitter.js";
 import {
   deriveExtraRoutesFromUi,
@@ -523,4 +523,3 @@ function staticTitleOf(page: PageIR | undefined): string | undefined {
 
 // smokeSpec moved to src/generator/_frontend/smoke-spec.ts (shared
 // with the Svelte frontend — it drives routes, not framework code).
-
