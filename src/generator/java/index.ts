@@ -59,6 +59,7 @@ import {
   renderJavaRepositoryImpl,
   renderJavaRepositoryInterface,
   renderJavaSpringDataRepository,
+  renderOffsetLimitPageRequest,
 } from "./emit/repository.js";
 import { renderJavaService } from "./emit/service.js";
 import { renderJavaTestsFile } from "./emit/tests.js";
@@ -252,6 +253,14 @@ function emitProjectFromContexts(
     )) {
       place(file.name, "criteria", file.content);
     }
+    // Offset/limit Pageable behind the call-site `page:` on `Repo.run`.
+    if ((ctx.retrievals ?? []).length > 0) {
+      place(
+        "OffsetLimitPageRequest.java",
+        "infra-persistence",
+        renderOffsetLimitPageRequest(pkgFor("infra-persistence")),
+      );
+    }
   }
 
   // Auth surface — only when the deployable opts in via auth: required
@@ -421,6 +430,7 @@ function emitAggregate(
     infraPkg: pkgFor("repository-impl", agg.name),
     entityPkg: pkgFor("entity", agg.name),
     criteriaPkg: pkgFor("criteria"),
+    persistencePkg: pkgFor("infra-persistence"),
     retrievals: aggRetrievals,
     isReified,
   };

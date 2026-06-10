@@ -35,7 +35,7 @@ system RetrievalShop {
 
       workflow boostTopScorers {
         create(min: int) {
-          let top = Customers.run(ActiveHighScorers(min))
+          let top = Customers.run(ActiveHighScorers(min), page: { offset: 1, limit: 1 })
           for c in top {
             c.boost()
           }

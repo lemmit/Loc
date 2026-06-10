@@ -148,15 +148,20 @@ function renderWorkflowStmt(
         "java workflows: workflow-level `emit` is not yet implemented on the java backend.",
       );
     case "repo-run": {
+      for (const a of s.retrievalArgs) collectJavaExprImports(a, imports);
+      const args = s.retrievalArgs.map((a) => renderJavaExpr(a, renderCtx));
+      // Call-site page rides the `(…, Integer offset, Integer limit)`
+      // port overload; absent halves pass null (no skip / no cap).
       if (s.page) {
-        throw new Error(
-          "java workflows: paged `Repo.run(..., page)` is not yet implemented on the java backend.",
+        if (s.page.offset) collectJavaExprImports(s.page.offset, imports);
+        if (s.page.limit) collectJavaExprImports(s.page.limit, imports);
+        args.push(
+          s.page.offset ? renderJavaExpr(s.page.offset, renderCtx) : "null",
+          s.page.limit ? renderJavaExpr(s.page.limit, renderCtx) : "null",
         );
       }
-      for (const a of s.retrievalArgs) collectJavaExprImports(a, imports);
-      const args = s.retrievalArgs.map((a) => renderJavaExpr(a, renderCtx)).join(", ");
       return [
-        `        var ${s.name} = ${repoField(s.aggName)}.run${upperFirst(s.retrievalName)}(${args});`,
+        `        var ${s.name} = ${repoField(s.aggName)}.run${upperFirst(s.retrievalName)}(${args.join(", ")});`,
       ];
     }
     case "for-each": {

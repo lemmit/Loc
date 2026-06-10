@@ -42,6 +42,8 @@ export interface JavaRepoCtx {
   entityPkg: string;
   /** Package the reified `<Agg>Criteria` factories live in. */
   criteriaPkg?: string;
+  /** Package `OffsetLimitPageRequest` lives in (infrastructure.persistence). */
+  persistencePkg?: string;
   /** Retrievals targeting this aggregate (named query bundles). */
   retrievals?: RetrievalIR[];
   /** True when the retrieval's `where` is exactly an eligible criterion
@@ -116,14 +118,22 @@ export function renderJavaRepositoryInterface(
 ): string {
   const imports = new Set<string>(["java.util.List", "java.util.Optional"]);
   const findLines = declaredFinds(repo).map((f) => `    ${findSignature(f, imports)};`);
-  const retrievalLines = (ctx.retrievals ?? []).map((r) => {
+  // Two overloads per retrieval, mirroring .NET's optional call-site
+  // `page` tuple: the bare run plus `(…, Integer offset, Integer limit)`
+  // (either may be null — partial pages are legal in the DSL).
+  const retrievalLines = (ctx.retrievals ?? []).flatMap((r) => {
     const params = r.params
       .map((p) => {
         collectJavaTypeImports(p.type, imports);
         return `${renderJavaType(p.type)} ${p.name}`;
       })
       .join(", ");
-    return `    List<${agg.name}> run${upperFirst(r.name)}(${params});`;
+    const pagedParams = [params, "Integer offset, Integer limit"].filter(Boolean).join(", ");
+    return [
+      `    List<${agg.name}> run${upperFirst(r.name)}(${params});`,
+      ``,
+      `    List<${agg.name}> run${upperFirst(r.name)}(${pagedParams});`,
+    ];
   });
   const anyPaged = declaredFinds(repo).some(isPagedFind);
   return lines(
@@ -203,6 +213,10 @@ export function renderJavaSpringDataRepository(
       imports.add("org.springframework.data.jpa.repository.Query");
       if (r.params.length > 0) imports.add("org.springframework.data.repository.query.Param");
       imports.add("java.util.List");
+      // Trailing Pageable carries the call-site offset/limit page; the
+      // impl passes Pageable.unpaged() for the bare run.  The `order by`
+      // is baked into the JPQL (an unsorted Pageable leaves it alone).
+      imports.add("org.springframework.data.domain.Pageable");
       const where = ` where ${renderJpqlWhere(r.where, { alias: "e", enumsPkg })}`;
       const params = r.params
         .map((p) => {
@@ -210,9 +224,10 @@ export function renderJavaSpringDataRepository(
           return `@Param("${p.name}") ${renderJavaType(p.type)} ${p.name}`;
         })
         .join(", ");
+      const sigParams = [params, "Pageable pageable"].filter(Boolean).join(", ");
       return [
         `    @Query("select e from ${agg.name} e${where}${jpqlOrderBy(r.sort)}")`,
-        `    List<${agg.name}> run${upperFirst(r.name)}(${params});`,
+        `    List<${agg.name}> run${upperFirst(r.name)}(${sigParams});`,
         ``,
       ];
     });
@@ -251,25 +266,40 @@ export function renderJavaRepositoryImpl(
         return `${renderJavaType(p.type)} ${p.name}`;
       })
       .join(", ");
+    const pagedParams = [params, "Integer offset, Integer limit"].filter(Boolean).join(", ");
+    const bareArgs = r.params.map((p) => p.name).join(", ");
     if (ctx.isReified?.(r) && r.criterionRef) {
       imports.add("org.springframework.data.domain.Sort");
       const args = r.criterionRef.args.map((a) => {
         collectJavaExprImports(a, imports);
         return renderJavaExpr(a);
       });
+      const spec = `${agg.name}Criteria.${r.criterionRef.name}(${args.join(", ")})`;
       return [
         `    @Override`,
         `    public List<${agg.name}> run${upperFirst(r.name)}(${params}) {`,
-        `        return jpa.findAll(${agg.name}Criteria.${r.criterionRef.name}(${args.join(", ")}), ${springSort(r.sort)});`,
+        `        return jpa.findAll(${spec}, ${springSort(r.sort)});`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public List<${agg.name}> run${upperFirst(r.name)}(${pagedParams}) {`,
+        `        return jpa.findAll(${spec}, new OffsetLimitPageRequest(offset, limit, ${springSort(r.sort)})).getContent();`,
         `    }`,
         ``,
       ];
     }
-    const args = r.params.map((p) => p.name).join(", ");
+    imports.add("org.springframework.data.domain.Pageable");
+    imports.add("org.springframework.data.domain.Sort");
+    const jpaArgs = (pageable: string): string => [bareArgs, pageable].filter(Boolean).join(", ");
     return [
       `    @Override`,
       `    public List<${agg.name}> run${upperFirst(r.name)}(${params}) {`,
-      `        return jpa.run${upperFirst(r.name)}(${args});`,
+      `        return jpa.run${upperFirst(r.name)}(${jpaArgs("Pageable.unpaged()")});`,
+      `    }`,
+      ``,
+      `    @Override`,
+      `    public List<${agg.name}> run${upperFirst(r.name)}(${pagedParams}) {`,
+      `        return jpa.run${upperFirst(r.name)}(${jpaArgs("new OffsetLimitPageRequest(offset, limit, Sort.unsorted())")});`,
       `    }`,
       ``,
     ];
@@ -315,6 +345,9 @@ export function renderJavaRepositoryImpl(
     anyReified && ctx.criteriaPkg && ctx.criteriaPkg !== ctx.infraPkg
       ? `import ${ctx.criteriaPkg}.${agg.name}Criteria;`
       : null,
+    retrievals.length > 0 && ctx.persistencePkg && ctx.persistencePkg !== ctx.infraPkg
+      ? `import ${ctx.persistencePkg}.OffsetLimitPageRequest;`
+      : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
     ``,
     `@Repository`,
@@ -354,6 +387,78 @@ export function renderJavaRepositoryImpl(
     ...delegateLines,
     ...(retrievalDelegates.length > 0 ? [``] : []),
     ...retrievalDelegates,
+    `}`,
+    ``,
+  );
+}
+
+/** The offset/limit `Pageable` behind the call-site `page:` tuple on
+ *  `Repo.run(...)` — Spring's `PageRequest` is page-number based, so an
+ *  arbitrary offset needs its own implementation (the analog of .NET's
+ *  `ApplyPaging` Skip/Take extension).  Null offset → 0, null limit →
+ *  unbounded.  Emitted once per project when any retrieval exists. */
+export function renderOffsetLimitPageRequest(pkg: string): string {
+  return lines(
+    `package ${pkg};`,
+    ``,
+    `import org.springframework.data.domain.Pageable;`,
+    `import org.springframework.data.domain.Sort;`,
+    ``,
+    `public final class OffsetLimitPageRequest implements Pageable {`,
+    `    private final long offset;`,
+    `    private final int limit;`,
+    `    private final Sort sort;`,
+    ``,
+    `    public OffsetLimitPageRequest(Integer offset, Integer limit, Sort sort) {`,
+    `        this.offset = offset == null ? 0L : offset.longValue();`,
+    `        this.limit = limit == null ? Integer.MAX_VALUE : limit;`,
+    `        this.sort = sort == null ? Sort.unsorted() : sort;`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public int getPageNumber() {`,
+    `        return limit == 0 ? 0 : (int) (offset / limit);`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public int getPageSize() {`,
+    `        return limit;`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public long getOffset() {`,
+    `        return offset;`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public Sort getSort() {`,
+    `        return sort;`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public Pageable next() {`,
+    `        return new OffsetLimitPageRequest((int) (offset + limit), limit, sort);`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public Pageable previousOrFirst() {`,
+    `        return new OffsetLimitPageRequest((int) Math.max(0L, offset - limit), limit, sort);`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public Pageable first() {`,
+    `        return new OffsetLimitPageRequest(0, limit, sort);`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public Pageable withPage(int pageNumber) {`,
+    `        return new OffsetLimitPageRequest(pageNumber * limit, limit, sort);`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public boolean hasPrevious() {`,
+    `        return offset > 0;`,
+    `    }`,
     `}`,
     ``,
   );

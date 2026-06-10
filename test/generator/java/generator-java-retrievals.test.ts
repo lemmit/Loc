@@ -45,6 +45,15 @@ system RetrievalShop {
           }
         }
       }
+
+      workflow deactivateTopOfRegion {
+        create(rgn: string) {
+          let top = Customers.run(ByRegion(rgn), page: { offset: 1, limit: 5 })
+          for c in top {
+            c.deactivate()
+          }
+        }
+      }
     }
   }
   api CrmApi from Sales
@@ -111,7 +120,52 @@ describe("java generator — retrieval repository surface", () => {
     expect(jpa).toContain(
       '@Query("select e from Customer e where e.active and e.score >= :min order by e.score desc, e.name asc")',
     );
-    expect(jpa).toContain('    List<Customer> runActiveHighScorers(@Param("min") int min);');
+    expect(jpa).toContain(
+      '    List<Customer> runActiveHighScorers(@Param("min") int min, Pageable pageable);',
+    );
+  });
+});
+
+describe("java generator — paged Repo.run (offset/limit overloads)", () => {
+  it("adds an `(…, Integer offset, Integer limit)` overload per retrieval to the port", async () => {
+    const port = (await files()).get(`${ROOT}/features/customers/CustomerRepository.java`)!;
+    expect(port).toContain(
+      "    List<Customer> runByRegion(String rgn, Integer offset, Integer limit);",
+    );
+    expect(port).toContain(
+      "    List<Customer> runActiveHighScorers(int min, Integer offset, Integer limit);",
+    );
+  });
+
+  it("reified paged run rides findAll(spec, OffsetLimitPageRequest).getContent()", async () => {
+    const impl = (await files()).get(`${ROOT}/features/customers/CustomerRepositoryImpl.java`)!;
+    expect(impl).toContain(
+      'return jpa.findAll(CustomerCriteria.InRegion(rgn), new OffsetLimitPageRequest(offset, limit, Sort.by(Sort.Order.asc("name")))).getContent();',
+    );
+    expect(impl).toContain(
+      "import com.loom.crmapi.infrastructure.persistence.OffsetLimitPageRequest;",
+    );
+  });
+
+  it("JPQL retrieval takes a trailing Pageable; bare run passes Pageable.unpaged()", async () => {
+    const files_ = await files();
+    const jpa = files_.get(`${ROOT}/features/customers/CustomerJpaRepository.java`)!;
+    expect(jpa).toContain(
+      'List<Customer> runActiveHighScorers(@Param("min") int min, Pageable pageable);',
+    );
+    const impl = files_.get(`${ROOT}/features/customers/CustomerRepositoryImpl.java`)!;
+    expect(impl).toContain("return jpa.runActiveHighScorers(min, Pageable.unpaged());");
+    expect(impl).toContain(
+      "return jpa.runActiveHighScorers(min, new OffsetLimitPageRequest(offset, limit, Sort.unsorted()));",
+    );
+  });
+
+  it("emits the OffsetLimitPageRequest Pageable once per project", async () => {
+    const pageable = (await files()).get(
+      `${ROOT}/infrastructure/persistence/OffsetLimitPageRequest.java`,
+    )!;
+    expect(pageable).toContain("public final class OffsetLimitPageRequest implements Pageable {");
+    expect(pageable).toContain("this.limit = limit == null ? Integer.MAX_VALUE : limit;");
   });
 });
 
@@ -122,5 +176,10 @@ describe("java generator — workflow Repo.run + for loop", () => {
     expect(wf).toContain("        for (var c : matched) {");
     expect(wf).toContain("            c.deactivate();");
     expect(wf).toContain("            customersRepository.save(c);");
+  });
+
+  it("lowers a paged repo-run to the offset/limit overload", async () => {
+    const wf = (await files()).get(`${ROOT}/application/workflows/CrmWorkflows.java`)!;
+    expect(wf).toContain("        var top = customersRepository.runByRegion(rgn, 1, 5);");
   });
 });
