@@ -215,6 +215,19 @@ visible alignment; later phases are parity/idiom polish.
   so the vocabulary matches the spec spectrum `flat`→`serviceLayer`→`cqrs`.
 - elixir `byLayer`: **defer** (idiom, §3.2).
 
+**Cross-knob validation (the "nonsensical combination errors" surface).** The
+validator enforces: **R1** out-of-menu (incl. reserved stubs), **R4** foundation
+owns axes, **R6** foundation ↔ persistence/application, and **R3** ✅ application
+style ↔ `directoryLayout` (`StyleAdapter.supportedLayouts`). Note R3 is a
+*forward guard*: style and layout are **orthogonal by design** — the
+`LayoutAdapter` only remaps file paths (`layout-surface.ts`), so every real
+style supports every real layout on its platform, and R3 has no reachable
+rejection today. (Wiring it surfaced and fixed one stale capability: node
+`layered` declared `byLayer`-only despite generating `byFeature` end-to-end.)
+Still unwired: the `runtime` ↔ `application` advisory (`flat` × actor = warning)
+and the persistence-adapter `supports()` storage check (handled on a separate
+ES path), both deferred.
+
 ## 5. Definition of done
 - elixir exposes `persistence: { ashPostgres, ecto }` and `application: { ash,
   vanilla }`; the `index.ts` foundation branch is gone; vanilla emits via the

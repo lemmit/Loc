@@ -16,8 +16,10 @@
 import type { Platform, SavingShape } from "../../../ir/types/loom-ir.js";
 import { parseBuiltinPlatformRef, platformFor } from "../../../platform/registry.js";
 import {
+  adaptersFor,
   allAdapterNames,
   availableAdapterNames,
+  defaultsFor,
   hasAdapters,
 } from "../../../platform/resolve-adapters.js";
 import { BUILTIN_PACK_LATEST, packFormatForBuiltin } from "../../../util/builtin-formats.js";
@@ -272,6 +274,39 @@ export const FOUNDATION_FAMILY_ADAPTERS: Record<
  *  in the language layer so the validator need not reach into lowering.) */
 export function defaultFoundationFor(family: Platform): string | undefined {
   return greenfieldMenu(family, "foundation")[0];
+}
+
+/** R3 support — does the resolved application *style* accept the resolved
+ *  `directoryLayout`?  A `StyleAdapter` declares `supportedLayouts`; the
+ *  validator pairs it with the chosen layout to reject combinations the style
+ *  can't fit (e.g. node's `layered` only supports `byLayer`, so `byFeature`
+ *  is rejected).
+ *
+ *  `applicationDsl` / `layout` may be undefined (knob omitted) → the platform
+ *  default applies.  Returns `undefined` when the check doesn't apply: a
+ *  frontend / unknown family, or a style / layout that isn't a REAL adapter
+ *  (a stub or unknown value already errored under R1 — R3 stays quiet to
+ *  avoid a double diagnostic). */
+export function resolveStyleLayoutCompat(
+  family: Platform,
+  applicationDsl: string | undefined,
+  layout: string | undefined,
+): { style: string; layout: string; supported: readonly string[]; ok: boolean } | undefined {
+  const adapters = adaptersFor(family);
+  const defaults = defaultsFor(family);
+  if (!adapters || !defaults) return undefined;
+  const styleKey = applicationDsl ? applicationDslToAdapter(applicationDsl) : defaults.style;
+  const style = adapters.styles[styleKey];
+  if (!style || !availableAdapterNames(family, "style").includes(styleKey)) return undefined;
+  const resolvedLayout = layout ?? defaults.layout;
+  if (!availableAdapterNames(family, "layout").includes(resolvedLayout)) return undefined;
+  const supported = style.supportedLayouts as readonly string[];
+  return {
+    style: styleKey,
+    layout: resolvedLayout,
+    supported,
+    ok: supported.includes(resolvedLayout),
+  };
 }
 
 /** The values legal for `persistence:` / `application:` under a foundation on
