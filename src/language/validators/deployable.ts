@@ -77,7 +77,7 @@ export function checkDeployable(
   if (hasUiBinding && !platformMountsUi(d.platform)) {
     accept(
       "error",
-      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenix', 'dotnet'); got '${d.platform}'.`,
+      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenix', 'dotnet', 'java'); got '${d.platform}'.`,
       {
         node: d,
         property: d.uiSugar
@@ -198,7 +198,7 @@ export function checkDeployable(
     if (isFrontendPlatform(target.platform)) {
       accept(
         "error",
-        `Frontend deployable '${d.name}' cannot target another frontend ('${target.name}'). Pick a 'dotnet' or 'node' deployable.`,
+        `Frontend deployable '${d.name}' cannot target another frontend ('${target.name}'). Pick a 'dotnet', 'node', or 'java' deployable.`,
         { node: d, property: "targets" },
       );
     }
@@ -247,7 +247,7 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
     if (!FRONTEND_KEYWORDS.has(raw)) {
       accept(
         "error",
-        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'react', 'static', 'phoenix' (backends also accept a pinned form, e.g. 'node@v4').`,
+        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'static', 'phoenix' (backends also accept a pinned form, e.g. 'node@v4').`,
         { node: d, property: "platform" },
       );
     }
@@ -509,7 +509,7 @@ export function checkDeployableServes(d: Deployable, accept: ValidationAcceptor)
   if (!platformOwnsBackend(d.platform)) {
     accept(
       "error",
-      `'serves:' is only valid on a backend deployable (dotnet, hono, phoenixLiveView).  Got platform '${d.platform}'.`,
+      `'serves:' is only valid on a backend deployable (dotnet, hono, java, phoenixLiveView).  Got platform '${d.platform}'.`,
       { node: d, property: "serves" },
     );
     return;

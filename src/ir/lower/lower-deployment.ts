@@ -60,7 +60,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     (uiName
       ? platform === "elixir"
         ? "phoenixLiveView"
-        : platformFor(platform).isFrontend || platform === "dotnet"
+        : platformFor(platform).isFrontend || platform === "dotnet" || platform === "java"
           ? "react"
           : undefined
       : undefined);
@@ -74,7 +74,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     ? qualifyDesign(d.design, "mantine")
     : platform === "elixir"
       ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
-      : platform === "dotnet" && uiName
+      : (platform === "dotnet" || platform === "java") && uiName
         ? qualifyDesign(d.design, "mantine")
         : undefined;
   // Explicit api composition.

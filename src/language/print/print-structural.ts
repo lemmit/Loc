@@ -111,6 +111,7 @@ const PLATFORM_KEYWORDS = new Set([
   "elixir",
   "phoenix",
   "phoenixLiveView",
+  "java",
 ]);
 const DESIGN_KEYWORDS = new Set(["mantine", "shadcn", "mui", "chakra", "ashPhoenix"]);
 

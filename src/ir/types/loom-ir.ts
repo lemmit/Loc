@@ -1922,7 +1922,10 @@ export interface NeedIR {
 // `ashPhoenix` HEEx pack.  Unlike `react`/`static` it owns its own
 // database (`needsDb: true`) and never declares `targets:` —
 // validator enforces both.
-export type Platform = "dotnet" | "node" | "react" | "static" | "elixir";
+// `java` is the Spring Boot / Spring Data JPA backend (backend-only,
+// like `dotnet`; mounts an embedded React SPA when the deployable
+// declares `ui:`).
+export type Platform = "dotnet" | "node" | "react" | "static" | "elixir" | "java";
 
 // The `application:`/`shape(…)` platform-axes lookups
 // (`applicationDslToAdapter`, `applicationAdapterToDsl`,
