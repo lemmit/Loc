@@ -88,7 +88,6 @@ runtime trap, silently degrades, or misleads.
 
 | # | Item | Where | Owning proposal |
 |---|---|---|---|
-| T1.3 | **React renderers for `Switch` / `MultilineField` / `SelectField`** — registered as `admissibleInSource` with **no renderer on any target** (`src/generator/_walker/registry.ts:~249-255`); they fall through to an "unknown layout component" comment. Either implement the TSX (+ HEEx) renderers or stop admitting them in source. | react walker | [page-metamodel](../page-metamodel.md) |
 | T1.4 | **Docs/comment honesty debt** — keep proposal status headers, the README table, and this plan in sync per the maintenance rule above (the 2026-06-10 pass fixed the then-known liars: seed emitter headers, the TPH validator comment, `ddd patch` missing from `tools.md`, and seven stale proposal headers). | docs | — |
 
 ## Tier 2 — nearly done: finish what's in flight
@@ -102,7 +101,7 @@ elixir items form one coherent track (a→e order).
 | T2.b | **Event sourcing under vanilla** (D-VANILLA-ES-HOME) — `EVENT_SOURCING_BACKENDS` still `{node, dotnet}` (`system-checks.ts:~853`). The blocker (no state-based vanilla emitter) is gone; this is the headline elixir item. | elixir/vanilla | [workflow-and-applier](./workflow-and-applier.md) |
 | T2.c | **Operation `or`-union returns on elixir** — `SUPPORTED_RETURN_BACKENDS = {node, dotnet}` (`structural-checks.ts:~381`). Vanilla's `{:ok,_} \| {:error,_}` controllers are the natural carrier; Ash stays gated. Includes the **union-find absence producer**: `validateUnionFindShapes` exempts elixir-only hosts (the P4d tagger is success-side only; absence raises) — align it with the node/dotnet absence translation and drop the exemption. | elixir | [exception-less](./exception-less.md) / [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) |
 | T2.d | **Vanilla/ecto as first-class adapters** — today `elixir/index.ts:~88-94` short-circuits `if (foundation === "vanilla")` instead of routing through the `PersistenceAdapter`/`StyleAdapter` registry like node/dotnet; the headline divergence named by [`../plans/realization-axes-alignment.md`](../plans/realization-axes-alignment.md) (slices #1061–#1064 landed the plan + compatibility rules + transport axis; the rewire itself remains). | elixir, platform | [platform-realization-axes](./platform-realization-axes.md) |
-| T2.e | **HEEx walker primitive backfill** — 32 of ~53 primitives have HEEx renderers; missing: `List`, `Detail`, `MasterDetail`, `Tabs`, `Toggle`, `Field`/`NumberField`/`PasswordField`, `For`, `Stat`, `Money`, `Avatar`, `Image`, `Divider`, `Loader`, `Slot`, `Bold`/`Italic`/`InlineCode`, `Switch`/`MultilineField`/`SelectField` (also missing on React — T1.3). Unsupported ones render visible `<!-- not supported -->` stubs (`heex-walker-core.ts`). Prioritise `List`/`Detail`/`MasterDetail`/`Tabs` + the form inputs. | elixir/heex | [phase-a platform expansion](../plans/phase-a-platform-expansion-prereqs.md) |
+| T2.e | **HEEx walker primitive backfill** — 32 of ~53 primitives have HEEx renderers; missing: `List`, `Detail`, `MasterDetail`, `Tabs`, `Toggle`, `Field`/`NumberField`/`PasswordField`/`MultilineField`/`SelectField` (inputs are HEEx-form-level by design; pack templates exist, walker dispatch doesn't), `For`, `Stat`, `Money`, `Avatar`, `Image`, `Divider`, `Loader`, `Slot`, `Bold`/`Italic`/`InlineCode` (`Switch` left the stdlib — page-metamodel.md subsumed it under `match`). Unsupported ones render visible `<!-- not supported -->` stubs (`heex-walker-core.ts`). Prioritise `List`/`Detail`/`MasterDetail`/`Tabs` + the form inputs. | elixir/heex | [phase-a platform expansion](../plans/phase-a-platform-expansion-prereqs.md) |
 | T2.f | **`routeSlug` consumption** — `urlStyle:` grammar + `OperationIR.routeSlug` enrichment shipped (#722 + D-URLSTYLE), but **no backend route emitter reads it** (`loom-ir.ts:~289-294` says so explicitly). One slice across the three backends' route builders. | all backends | [lifecycle-url-style](./lifecycle-url-style.md) |
 | T2.g | **Reified-criteria tail** — anonymous capability-`filter` predicates still inline; the principal/tenancy constructor factory (`currentUser.<field>` as ctor arg) and ambient (`of bool`) criteria are skipped (`src/generator/dotnet/criteria-emit.ts:~64-70`). | all backends | [reified-criteria](./reified-criteria.md) |
 | T2.h | **`shape(document)` on elixir** — `PLATFORM_SAVING_SHAPES` allows `relational`+`embedded` only (`src/util/platform-axes.ts:~127`). | elixir | [document-and-json-hierarchies](./document-and-json-hierarchies.md) |
@@ -187,13 +186,12 @@ retired: P4 and most of A1/A3 shipped independently, and A2 is dropped.
 
 ## Suggested near-term order
 
-A pragmatic next-8, dependency-consistent:
+A pragmatic next-7, dependency-consistent:
 
 1. **T2.a** vanilla workflow statement kinds (slices already cut).
 2. **T2.b → T2.c** event sourcing + `or`-union returns under vanilla —
    closes the two biggest elixir parity gates.
-3. **T1.3 + T2.e** walker primitive backfill (React trio + HEEx
-   priority set).
+3. **T2.e** HEEx walker primitive backfill (priority set).
 4. **T2.f** `routeSlug` consumption (one slice, three backends).
 5. **T2.g** capability-`filter` reification + principal factory —
    unblocks T2.j → multi-tenancy.
@@ -209,7 +207,7 @@ Three loosely-coupled tracks (one agent each):
 
 - **Track A (type-system & queries):** T2.g → T3.1/T3.2 → T3.4.
 - **Track B (elixir parity):** T2.a → T2.b → T2.c → T2.d → T2.e/T2.h.
-- **Track C (governance & product):** T1.3 → T2.f/T2.i →
+- **Track C (governance & product):** T2.f/T2.i →
   execution-context → multi-tenancy → authorization; loom-forms +
   frontend remainders interleave.
 

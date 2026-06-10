@@ -1,13 +1,13 @@
 // Controlled input primitives: Field, Toggle, NumberField,
-// PasswordField. Each binds to a state field via `bind:` and renders
-// the per-pack input. The label/bind helpers are private to this
-// module.
+// PasswordField, MultilineField, SelectField. Each binds to a state
+// field via `bind:` and renders the per-pack input. The label/bind
+// helpers are private to this module.
 
 import type { ExprIR } from "../../../../ir/types/loom-ir.js";
 import type { WalkContext } from "../../body-walker.js";
-import { firstPositionalContent, testidAttr } from "../../body-walker.js";
+import { emitExpr, firstPositionalContent, testidAttr } from "../../body-walker.js";
 import { renderPrimitive } from "../context.js";
-import { unwrapAsAttr, unwrapTextLiteral } from "../shared/args.js";
+import { namedArgValue, unwrapAsAttr, unwrapTextLiteral } from "../shared/args.js";
 
 function inputLabelForms(
   call: ExprIR & { kind: "call" },
@@ -102,6 +102,53 @@ export function emitNumberField(
     bind,
     setter,
     hasBind: bind !== undefined,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+export function emitMultilineField(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // MultilineField("Label", bind: <string state>) — controlled
+  // multi-line text input (textarea).  Same bind-shape as Field.
+  void depth;
+  const { labelAttr, labelText } = inputLabelForms(call, ctx);
+  const bind = stateBindArg(call, "bind", ctx);
+  const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
+  return renderPrimitive(ctx, "primitive-multiline-field", {
+    labelAttr,
+    labelText,
+    bind,
+    setter,
+    hasBind: bind !== undefined,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+export function emitSelectField(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // SelectField("Label", bind: <string state>, options: [...]) —
+  // controlled single-select over a string-array `options:`
+  // expression (a list literal, a state field, or any expression
+  // rendering to `string[]`).  Same bind-shape as Field.
+  void depth;
+  const { labelAttr, labelText } = inputLabelForms(call, ctx);
+  const bind = stateBindArg(call, "bind", ctx);
+  const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
+  const optionsArg = namedArgValue(call, "options");
+  const optionsExpr = optionsArg ? emitExpr(optionsArg, ctx) : "[]";
+  return renderPrimitive(ctx, "primitive-select-field", {
+    labelAttr,
+    labelText,
+    bind,
+    setter,
+    hasBind: bind !== undefined,
+    optionsExpr,
     testidAttr: testidAttr(call, ctx),
   });
 }

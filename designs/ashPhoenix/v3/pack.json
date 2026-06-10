@@ -46,6 +46,8 @@
     "primitive-skeleton": "primitive-skeleton.heex.hbs",
     "primitive-alert": "primitive-alert.heex.hbs",
     "primitive-query-view": "primitive-query-view.heex.hbs",
-    "primitive-key-value-row": "primitive-key-value-row.heex.hbs"
+    "primitive-key-value-row": "primitive-key-value-row.heex.hbs",
+    "primitive-multiline-field": "primitive-multiline-field.heex.hbs",
+    "primitive-select-field": "primitive-select-field.heex.hbs"
   }
 }

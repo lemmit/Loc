@@ -112,8 +112,10 @@ import {
 import { emitIcon } from "../react/walker/primitives/icon.js";
 import {
   emitField,
+  emitMultilineField,
   emitNumberField,
   emitPasswordField,
+  emitSelectField,
   emitToggle,
 } from "../react/walker/primitives/inputs.js";
 import {
@@ -242,17 +244,15 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     heex: renderStickyHeex,
   },
   // --- Inputs (TSX-only; HEEx renders inputs via Form-level dispatch) ----
+  // (`Switch` is deliberately absent: docs/page-metamodel.md removed it from
+  // the closed set — control-flow `Switch` is subsumed by `match`, and the
+  // boolean input is `Toggle`.)
   Field: { group: "layout", admissibleInSource: true, tsx: emitField },
   NumberField: { group: "layout", admissibleInSource: true, tsx: emitNumberField },
   PasswordField: { group: "layout", admissibleInSource: true, tsx: emitPasswordField },
   Toggle: { group: "layout", admissibleInSource: true, tsx: emitToggle },
-  // `Switch`, `MultilineField`, `SelectField` are source-admissible
-  // for future extension but no renderer is wired up yet on either
-  // target.  Today they fall through to "unknown layout component" —
-  // that path stays unchanged.
-  Switch: { group: "layout", admissibleInSource: true },
-  MultilineField: { group: "layout", admissibleInSource: true },
-  SelectField: { group: "layout", admissibleInSource: true },
+  MultilineField: { group: "layout", admissibleInSource: true, tsx: emitMultilineField },
+  SelectField: { group: "layout", admissibleInSource: true, tsx: emitSelectField },
   // --- Display -----------------------------------------------------------
   Loader: { group: "layout", admissibleInSource: true, tsx: emitLoader },
   Anchor: { group: "layout", admissibleInSource: true, tsx: emitAnchor, heex: renderAnchorHeex },

@@ -316,7 +316,7 @@ Reuses the existing `Statement` rule (covers `let`, `:=`, calls, `emit`).
 | `Review(of: T, onSubmit)` | Read-only summary view of a typed value, with a submit action. |
 | `Stack`, `Group`, `Grid`, `Tabs`, `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider` | Layout primitives. |
 | `Heading`, `Text`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow` | Display primitives. |
-| `Field`, `NumberField`, `PasswordField`, `Toggle`, `Select`, `Fieldset` | Bindable inputs. |
+| `Field`, `NumberField`, `PasswordField`, `MultilineField`, `Toggle`, `SelectField { label, bind, options }`, `Select`, `Fieldset` | Bindable inputs. `MultilineField` is the textarea twin of `Field`; `SelectField` is a controlled single-select over a string-array `options:` expression. |
 | `Action(operation, then?)`, `Button { label, on? }` | Action primitives. |
 | `Money`, `DateDisplay`, `EnumBadge`, `IdLink` | Formatter primitives. |
 | `Table`, `Column` | Tabular display (data lambda accessors). |

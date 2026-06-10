@@ -67,7 +67,9 @@
     "primitive-section": "primitive-section.hbs",
     "primitive-sticky": "primitive-sticky.hbs",
     "form-op-decls": "form-op-decls.hbs",
-    "form-op-module": "form-op-module.hbs"
+    "form-op-module": "form-op-module.hbs",
+    "primitive-multiline-field": "primitive-multiline-field.hbs",
+    "primitive-select-field": "primitive-select-field.hbs"
   },
   "helpers": {
     "muiRadius": {
@@ -553,6 +555,23 @@
         "from": "@mui/material",
         "named": [
           "Box"
+        ]
+      }
+    ],
+    "primitive-multiline-field": [
+      {
+        "from": "@mui/material",
+        "named": [
+          "TextField"
+        ]
+      }
+    ],
+    "primitive-select-field": [
+      {
+        "from": "@mui/material",
+        "named": [
+          "TextField",
+          "MenuItem"
         ]
       }
     ]

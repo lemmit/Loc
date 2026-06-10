@@ -67,7 +67,9 @@
     "primitive-section": "primitive-section.hbs",
     "primitive-sticky": "primitive-sticky.hbs",
     "form-op-decls": "form-op-decls.hbs",
-    "form-op-module": "form-op-module.hbs"
+    "form-op-module": "form-op-module.hbs",
+    "primitive-multiline-field": "primitive-multiline-field.hbs",
+    "primitive-select-field": "primitive-select-field.hbs"
   },
   "imports": {
     "primitive-heading": [
@@ -484,6 +486,22 @@
         "from": "../lib/apply-server-errors",
         "named": [
           "applyServerErrors"
+        ]
+      }
+    ],
+    "primitive-multiline-field": [
+      {
+        "from": "@mantine/core",
+        "named": [
+          "Textarea"
+        ]
+      }
+    ],
+    "primitive-select-field": [
+      {
+        "from": "@mantine/core",
+        "named": [
+          "Select"
         ]
       }
     ]

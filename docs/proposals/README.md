@@ -225,10 +225,10 @@ The rewritten [`global-implementation-plan.md`](./global-implementation-plan.md)
 replaces the old Phase-0…5 structure with four code-verified tiers:
 
 ```
-Tier 1 — broken or misleading surface (fix first)
-  React renderers for Switch/MultilineField/SelectField; docs honesty
-  (status headers kept in sync with code).
-  [DONE: `?` operator removal; union-find producer path on Hono+.NET]
+Tier 1 — broken or misleading surface — DONE
+  [`?` operator removed; union-find producer path on Hono+.NET;
+  MultilineField/SelectField implemented (Switch dropped per
+  page-metamodel.md); docs-honesty maintenance rule stays live]
 
 Tier 2 — nearly done (per-backend completion)
   Elixir track: vanilla workflow stmt kinds → event sourcing under

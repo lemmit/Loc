@@ -83,7 +83,10 @@
     "primitive-section": "primitive-section.hbs",
     "primitive-sticky": "primitive-sticky.hbs",
     "form-op-decls": "form-op-decls.hbs",
-    "form-op-module": "form-op-module.hbs"
+    "form-op-module": "form-op-module.hbs",
+    "primitive-multiline-field": "primitive-multiline-field.hbs",
+    "primitive-select-field": "primitive-select-field.hbs",
+    "components-ui-textarea": "components-ui-textarea.hbs"
   },
   "imports": {
     "primitive-button": [
@@ -431,6 +434,38 @@
         "from": "../lib/apply-server-errors",
         "named": [
           "applyServerErrors"
+        ]
+      }
+    ],
+    "primitive-multiline-field": [
+      {
+        "from": "@/components/ui/textarea",
+        "named": [
+          "Textarea"
+        ]
+      },
+      {
+        "from": "@/components/ui/label",
+        "named": [
+          "Label"
+        ]
+      }
+    ],
+    "primitive-select-field": [
+      {
+        "from": "@/components/ui/select",
+        "named": [
+          "Select",
+          "SelectContent",
+          "SelectItem",
+          "SelectTrigger",
+          "SelectValue"
+        ]
+      },
+      {
+        "from": "@/components/ui/label",
+        "named": [
+          "Label"
         ]
       }
     ]
