@@ -1,5 +1,5 @@
 import type { EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
-import { durableEventTypes } from "../../../ir/util/channels.js";
+import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
@@ -78,6 +78,23 @@ export function renderHttpIndex(
   // recorded in __loom_outbox and the relay (started by index.ts) delivers
   // them; ephemeral events keep the inline at-most-once path.
   const wireOutbox = wireDispatcher && durableEventTypes(ctx).size > 0;
+  // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`
+  // channel makes its carried events UI-observable — createApp wraps its
+  // default dispatcher with the realtime tee and mounts GET /realtime/events.
+  const wireRealtime = !usingMikro && realtimeEventTypes(ctx).size > 0;
+  const realtimeImport = wireRealtime
+    ? `import { realtimeRoutes, realtimeTee } from "./realtime";`
+    : null;
+  const realtimeMount = wireRealtime ? `  app.route("/realtime", realtimeRoutes());` : null;
+  // Compose the default dispatcher chain: outbox short-circuits durable
+  // events to the table (the relay re-enters through the tee), the tee
+  // copies every dispatched event onto the SSE wire, the in-process
+  // dispatcher (or Noop) does the actual handler fan-out.
+  const inProcessExpr = wireDispatcher
+    ? "createInProcessDispatcher(db)"
+    : "NoopDomainEventDispatcher";
+  const innerExpr = wireRealtime ? `realtimeTee(${inProcessExpr})` : inProcessExpr;
+  const defaultEventsExpr = wireOutbox ? `createOutboxDispatcher(db, ${innerExpr})` : innerExpr;
   const workflowImport = hasWorkflows
     ? wireDispatcher
       ? wireOutbox
@@ -117,6 +134,7 @@ export function renderHttpIndex(
       ...aggregateImports,
       ...externImports,
       workflowImport,
+      realtimeImport,
       viewImport,
       usingMikro
         ? 'import { EntityManager } from "@mikro-orm/postgresql";'
@@ -125,17 +143,15 @@ export function renderHttpIndex(
       wireDispatcher
         ? 'import { type DomainEventDispatcher } from "../domain/events";'
         : 'import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events";',
+      // (NoopDomainEventDispatcher stays imported on the no-dispatch path —
+      // the realtime tee wraps it there.)
       "",
       "export function createApp(",
       usingMikro ? "  db: EntityManager," : "  db: NodePgDatabase<typeof schema>,",
       // When dispatch is wired, the default builds the in-process dispatcher
       // from `db` (a later default param may reference an earlier one); a caller
       // can still pass an explicit dispatcher (e.g. a broker publisher).
-      wireDispatcher
-        ? wireOutbox
-          ? "  events: DomainEventDispatcher = createOutboxDispatcher(db, createInProcessDispatcher(db)),"
-          : "  events: DomainEventDispatcher = createInProcessDispatcher(db),"
-        : "  events: DomainEventDispatcher = NoopDomainEventDispatcher,",
+      `  events: DomainEventDispatcher = ${defaultEventsExpr},`,
       "): OpenAPIHono {",
       externAggs.length > 0
         ? "  // Verify every extern operation has a registered handler.  Fails\n  // fast at startup so a missing user implementation surfaces here\n  // instead of as a 500 on the first request."
@@ -185,6 +201,7 @@ export function renderHttpIndex(
       "  });",
       ...aggregateRoutes,
       workflowMount,
+      realtimeMount,
       viewMount,
       "  // OpenAPI 3.1 spec assembled from every sub-router's createRoute()",
       "  // calls.  Diffed against the .NET-emitted /swagger/v1/swagger.json by",

@@ -20,3 +20,17 @@ export function durableEventTypes(ctx: BoundedContextIR): ReadonlySet<string> {
   }
   return out;
 }
+
+/** Event types carried by a `delivery: broadcast` channel — the
+ *  UI-observable set (channels.md, Part I realtime).  The backend exposes
+ *  these on the SSE wire (`GET /realtime/events`); `queue` channels are
+ *  work distribution, never browser-observable. */
+export function realtimeEventTypes(ctx: BoundedContextIR): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const ch of ctx.channels ?? []) {
+    if (ch.delivery === "broadcast") {
+      for (const ev of ch.carries) out.add(ev);
+    }
+  }
+  return out;
+}

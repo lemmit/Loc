@@ -14,10 +14,21 @@
 > modules.  All three **persist** workflow correlation — a saga-state row keyed
 > by the correlation field, with load-or-allocate (`create`) and
 > route-or-drop+log (`on`); Phoenix stores it as a plain `Ecto.Schema` over the
-> canonical migration's table, read/written through the app `Repo`.  Still
-> unstarted: external brokers via `channelSource` (redis /
+> canonical migration's table, read/written through the app `Repo`.
+> **Realtime wire v1 shipped (Hono + React):** events carried by a
+> `delivery: broadcast` channel stream over SSE — the Hono backend emits
+> `http/realtime.ts` (`GET /realtime/events` + a `realtimeTee` dispatcher
+> decorator that createApp wraps its default with, composing *inside* the
+> outbox so relayed durable events reach the wire too) and the React
+> generator emits a matching `src/api/realtime.ts` EventSource client
+> (`subscribeRealtime(onEvent)`) when its target backend is Hono.  v1 is
+> broadcast-to-all: no rooms, no edge relay, no policy-derived router —
+> those layer on the authorization work; the authorized read stays the
+> gate (clients refetch, payloads carry no privilege).  Still
+> unstarted: the ui-surface `channel`/`on <p>.<Event>` handlers, the
+> .NET / Phoenix realtime wire, external brokers via `channelSource` (redis /
 > kafka / nats), the `delivery: queue`
-> competing-consumer semantics, the realtime wire (SSE/WebSocket + edge relay
+> competing-consumer semantics, the realtime topology (rooms + edge relay
 > + router), and **Part II** caching / invalidation. The async-messaging / realtime **and** the
 > read-side caching tiers, designed together. Fills the "async messaging/outbox"
 > and "caching & invalidation" gaps in `production-readiness.md` (§3.3–3.4).
