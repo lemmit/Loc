@@ -22,9 +22,8 @@ system Tasks {
         create() { }
       }
 
-      // Body-lowering exercise — factory-let + op-call.  Param-reference
-      // lowering (workflow create-params surfacing inside the body) is
-      // a separate follow-up slice; today the create body uses literals.
+      // Body-lowering exercise — factory-let + op-call with literal
+      // create-fields (the simplest mutating shape).
       workflow createAndComplete transactional {
         create() {
           let t = Task.create({ title: "Untitled", done: false })
@@ -32,16 +31,19 @@ system Tasks {
         }
       }
 
-      // Guard + expr-let exercise — covers `precondition`, `requires`,
-      // and `expr-let` lowering.  Each becomes a `with`-clause in the
-      // lowered `run_inner/1` chain; the failure tags propagate through
-      // the with-chain to the controller (422 / 403 RFC 7807 responses).
+      // Guard + expr-let + param-surfacing exercise — covers
+      // `precondition`, `requires`, `expr-let`, AND a referenced
+      // create-param.  The `initialTitle` param surfaces as a leading
+      // `%{"initial_title" => initial_title} = params` destructure off the
+      // run/1 map, then flows into the precondition guard and the factory
+      // create — proving the bound local compiles under
+      // `--warnings-as-errors` (a bare unbound ref would not).
       workflow guardedCreate transactional {
-        create() {
-          precondition true
+        create(initialTitle: string) {
+          precondition initialTitle.length > 0
           requires true
-          let placeholder = "Untitled"
-          let t = Task.create({ title: placeholder, done: false })
+          let normalised = initialTitle
+          let t = Task.create({ title: normalised, done: false })
           t.markDone()
         }
       }
