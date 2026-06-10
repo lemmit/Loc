@@ -1,0 +1,70 @@
+name: Python build verification
+
+# Statically gates a Python/FastAPI project generated from each
+# test-fixture .ddd by `ddd generate system`: `uv sync` (the pinned dep
+# set must resolve), `ruff check` + `ruff format --check` (emitted
+# source must be lint- and format-clean — the Python analogue of the
+# Biome gate on emitted TS), and `mypy --strict` (the same bar
+# `/warnaserror` sets for .NET).  Catches emission bugs in the Python
+# generator that the string-match unit tests cannot see.
+#
+# Mirrors `dotnet-build.yml`.  See docs/plans/python-backend-plan.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/python/**'
+      - 'src/platform/python.ts'
+      - 'examples/**'
+      - 'package.json'
+      - '.github/workflows/python-build.yml'
+      - 'test/e2e/generated-python-build.test.ts'
+      - 'test/e2e/fixtures/python-build/**'
+  pull_request:
+    paths:
+      - 'src/generator/python/**'
+      - 'src/platform/python.ts'
+      - 'examples/**'
+      - 'package.json'
+      - '.github/workflows/python-build.yml'
+      - 'test/e2e/generated-python-build.test.ts'
+      - 'test/e2e/fixtures/python-build/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-generated-python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # uv provisions Python 3.12 itself; the cache keys on the pinned
+      # dep set (encoded in pins.ts) so warm runs skip the resolve.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          cache-dependency-glob: 'src/generator/python/pins.ts'
+
+      # Build the Loom toolchain.  `prepare` lifecycle runs
+      # `langium:generate` which populates src/language/generated/.
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Type-check
+        run: npm run build
+
+      - name: uv sync + ruff + mypy --strict against each fixture
+        run: npm run test:python

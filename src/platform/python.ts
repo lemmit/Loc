@@ -1,3 +1,4 @@
+import { generatePythonForContexts } from "../generator/python/index.js";
 import {
   type ComposeServiceShape,
   type PlatformSurface,
@@ -43,12 +44,14 @@ const pythonPlatform: PlatformSurface = {
   // `_to_wire`; a user find named `all` merges with the auto reader
   // the same way Hono's does).
   reservedRepositoryFindNames: new Set(["save", "findById", "getById", "delete"]),
-  emitProject(): Map<string, string> {
-    // Project emission lands with the generator slice
-    // (`src/generator/python/`).  Until then a python deployable
-    // contributes no files — the compose stanza below already
-    // describes its service shape.
-    return new Map();
+  emitProject({ contexts, deployable, sys, migrations, emitTrace }): Map<string, string> {
+    return generatePythonForContexts({
+      contexts,
+      deployable,
+      sys,
+      migrations,
+      emitTrace,
+    });
   },
   composeService({ slug }): ComposeServiceShape {
     return {

@@ -1,0 +1,26 @@
+// Minimal python-backend system — the LOOM_PYTHON_BUILD shell gate.
+// Grows alongside the generator slices (docs/plans/python-backend-plan.md).
+system PyShell {
+  subdomain Ops {
+    context Ops {
+      aggregate Widget {
+        label: string
+        size: int
+      }
+      repository Widgets for Widget { }
+    }
+  }
+
+  api OpsApi from Ops
+
+  storage pg { type: postgres }
+  resource opsState { for: Ops, kind: state, use: pg }
+
+  deployable api {
+    platform: python
+    contexts: [Ops]
+    dataSources: [opsState]
+    serves: OpsApi
+    port: 8000
+  }
+}
