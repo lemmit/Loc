@@ -84,17 +84,102 @@ across concurrent tasks, which is what keeps a fan-out/fan-in trace
 well-formed. The request-stable tier is copied by reference into every
 child frame.
 
+**Ambient shape vs frame record.** `execution-context.md` lists richer
+per-frame fields (`operationId`, `nodeId`, `kind`, `timestamp`) than the
+shape above. That is deliberate: the pinned ambient `RequestContext`
+(this doc, D-CTX-SHAPE) surfaces only the **governance-relevant** ids
+every feature reads — `correlationId`, `scopeId`, `parentId` (plus the
+request-stable `currentUser`/`locale`/`startedAt`). The extra fields are
+recorded on the emitted **scope event** (the trace/provenance channel),
+not carried in the ambient value. The ambient carrier stays small; the
+scope event is where the genealogy detail lives.
+
 ## Per-backend realisation (target)
 
 The shape is platform-neutral; each backend threads it natively. No
 backend re-derives a field another backend computes differently — the
-table above is the single source of truth.
+table above is the single source of truth. **The carrier is keyed by
+`(platform × foundation)`, not by platform name** (D-REALIZATION-AXES): a
+`node` deployable realises the context differently under the minimal
+foundation than under `foundation: nest`, exactly as `elixir` does under
+`ash` vs `vanilla`.
 
-| Backend | Carrier | Frame open |
-|---|---|---|
-| Hono / TS | `AsyncLocalStorage<RequestContext>` | `als.run(childFrame, …)` around a tagged boundary |
-| .NET | `IRequestContext` scoped service + Mediator behaviour | new frame pushed in a pipeline behaviour |
-| Phoenix | process dictionary / `Logger.metadata` + explicit struct | new frame per `with`-scoped step |
+Two **realization classes** cover every target:
+
+- **Ambient** — the context lives in a per-flow slot the runtime carries
+  implicitly (async-local, scoped DI, process metadata). Frame open is
+  "push a child frame onto the slot." This is the JS / .NET / BEAM /
+  Python shape, and the one the rest of this doc assumes.
+- **Explicit-threading** — there is no ambient slot; the context is an
+  ordinary value threaded through call signatures. Frame open is "derive
+  a child value and pass it down." **Go** is the canonical case
+  (`context.Context` is idiomatic *because* it is explicit), and it is a
+  different *lowering* shape: the compiler threads a context parameter
+  into every generated call site (`render-stmt` / `render-expr` call
+  emission), not just the boundary middleware. A backend in this class is
+  the real test of the "ambient" framing — see
+  [`../proposals/execution-context.md`](../proposals/execution-context.md)
+  § Lowering & generation.
+
+| Platform × foundation | Class | Carrier | Frame open |
+|---|---|---|---|
+| `node` (minimal / Hono) | ambient | `AsyncLocalStorage<RequestContext>` | `als.run(childFrame, …)` around a tagged boundary |
+| `node` + `foundation: nest` | ambient | request-scoped DI provider (`nestjs-cls`, an `AsyncLocalStorage` wrapper) | interceptor/guard at the boundary; the `@nestjs/cqrs` bus is the frame-open seam for command/query handlers (the Mediator-behaviour analog) |
+| `.NET` | ambient | **`AsyncLocal<RequestContext>`** (the direct `AsyncLocalStorage` twin), surfaced through a scoped `IRequestContext` accessor; `Activity.Current` is the trace-channel projection (itself `AsyncLocal`-backed) | child frame set in a Mediator pipeline behaviour, popped on `using var` |
+| `elixir` + `foundation: ash` | ambient | process dictionary / `Logger.metadata`, surfaced into the Ash action context | new frame per Ash action invocation |
+| `elixir` + `foundation: vanilla` | ambient | process dictionary / `Logger.metadata` + explicit struct | new frame per `with`-scoped step |
+| `Go` (proposed) | **explicit-threading** | `context.Context` (request-stable in `ctx.Value`; frame-local derived per call) | `ctx := context.WithValue(parent, …)` threaded into every call |
+| Java / Spring (deferred) | ambient | MVC: `ThreadLocal` / MDC / Micrometer `Observation` (or JDK 21 `ScopedValue`). **WebFlux: Reactor `Context`** (`ThreadLocal` does not propagate across reactive operators) | per-request thread scope, or `contextWrite` on the reactive chain |
+
+**Within the ambient class, the two tiers want two mechanisms — and a
+scoped/thread-bound slot alone is not enough for the frame-local tier.**
+A per-request *scoped DI service* (`AddScoped<IRequestContext>`) carries
+the **request-stable** tier cleanly — set once at the boundary, injected
+everywhere. But it is a *single instance per request*, so it cannot
+isolate the **frame-local** tier (`scopeId`/`parentId`) across parallel
+branches: two `Task.WhenAll` branches resolving the same scoped service
+would clobber each other's current frame. The frame-local tier must live
+in a **flow-local** slot whose copy-on-write-down-the-async-flow
+semantics give each branch its own frame:
+
+- **.NET → `AsyncLocal<T>`, not `ThreadLocal<T>`.** A request hops threads
+  across every `await`, so a `ThreadLocal` frame would be lost (or leak
+  onto a pooled thread). `AsyncLocal<T>` flows with `ExecutionContext`
+  across `await` and `Task` — which is exactly why `Activity.Current` and
+  `IHttpContextAccessor` are themselves `AsyncLocal`-backed. The scoped
+  `IRequestContext` is a DI-ergonomic *accessor over* the `AsyncLocal`,
+  not a substitute for it.
+- **node → `AsyncLocalStorage.run`** already copies-on-write down the
+  async flow, so parallel branches are isolated for free.
+- **BEAM → spawn-time copy** (the `Task.async` caveat below); **Java →
+  `ScopedValue`/Reactor `Context`** for the same reason `ThreadLocal`
+  fails under `@Async`/WebFlux.
+
+The rule generalises: request-stable may sit in a scoped/DI slot;
+frame-local must be flow-local.
+
+**Subsume the existing channel — do not add a second.** The Hono backend
+already ships an `AsyncLocalStorage` for the observability request logger
+(`requestLogStore`, `src/platform/hono/v4/observability-builder.ts`) plus
+a `correlationId`/request id bound by the request-id middleware. The
+backbone's whole premise — *one ambient value, every feature reads its
+slice* — makes that the seam to **refactor into** the `RequestContext`
+carrier: the existing obs ALS *becomes* the `RequestContext` ALS, not a
+sibling of it. The same applies to the .NET observability correlation and
+the elixir `Logger.metadata` already in use. Growing a second ambient
+channel here is the exact drift this doc exists to prevent.
+
+**BEAM fan-out caveat.** On elixir the process dictionary and
+`Logger.metadata` are **not** inherited by `Task.async`/spawned
+processes — precisely the parallel-branch case § Frame semantics
+describes. The child frame "sharing the parent's `scopeId`" must be
+**copied explicitly into the spawned process**; the "copied by reference"
+phrasing in § Frame semantics is a within-process heap share only.
+
+**Frontends are out of scope of the carrier.** React/Angular hold no
+`RequestContext`; their only tie to the backbone is propagating an
+inbound `correlationId` header across the wire boundary (and reading
+`locale`). No frame, no ambient slot.
 
 The PlatformSurface lifecycle hooks listed in global-plan §0.3
 (`emitAuthGate`, `emitAuditInit`, `emitTenancyFilter`, `emitI18nAdapter`)

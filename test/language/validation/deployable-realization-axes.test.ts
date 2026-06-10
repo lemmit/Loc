@@ -35,7 +35,7 @@ describe("realization axes — grammar admits the block", () => {
   it("parses a full six-axis block (values gated by validator, not parser)", async () => {
     const { errors, model } = await parse(
       sys(
-        "dotnet { foundation: vanilla, application: cqrs, persistence: efcore, directoryLayout: byLayer, transport: minimalApi, runtime: transactional }",
+        "dotnet { foundation: vanilla, application: cqrs, persistence: efcore, directoryLayout: byLayer, transport: controllers, runtime: transactional }",
       ),
     );
     expect(errors).toEqual([]);
@@ -280,22 +280,26 @@ describe("realization axes — R6 foundation ↔ persistence/application compati
 // ---------------------------------------------------------------------------
 // transport: is now an adapter-backed axis (realization-axes-alignment.md
 // slice 3), not a greenfield single value.  Each backend ships one real
-// transport; dotnet additionally reserves `controllers` as a stub.
+// transport; dotnet additionally reserves `minimalApi` as a stub.  (The
+// labels were historically inverted — the backend has always emitted
+// attribute-routed `[ApiController]` controllers, so `controllers` is the
+// real surface and the unbuilt `app.MapGet/MapPost` endpoint mapping is
+// the reserved one.  Swapped 2026-06-10.)
 // ---------------------------------------------------------------------------
 describe("realization axes — transport is adapter-backed", () => {
-  it("accepts the real transport (dotnet `minimalApi`)", async () => {
+  it("accepts the real transport (dotnet `controllers`)", async () => {
     // The canonical node/elixir transports (`hono` / `phoenix`) are hard
     // platform keywords, so they aren't user-writable axis values — they're
-    // set by the lowering default.  dotnet's `minimalApi` is a plain ID.
-    expect((await parse(sys("dotnet { transport: minimalApi }"))).errors).toEqual([]);
+    // set by the lowering default.  dotnet's `controllers` is a plain ID.
+    expect((await parse(sys("dotnet { transport: controllers }"))).errors).toEqual([]);
   });
 
-  it("rejects `transport: controllers` on dotnet as reserved-but-unimplemented", async () => {
-    const { errors } = await parse(sys("dotnet { transport: controllers }"));
-    expect(
-      errors.some((e) => /transport: controllers.*reserved.*not yet implemented/.test(e)),
-    ).toBe(true);
-    expect(errors.some((e) => /'minimalApi'/.test(e))).toBe(true);
+  it("rejects `transport: minimalApi` on dotnet as reserved-but-unimplemented", async () => {
+    const { errors } = await parse(sys("dotnet { transport: minimalApi }"));
+    expect(errors.some((e) => /transport: minimalApi.*reserved.*not yet implemented/.test(e))).toBe(
+      true,
+    );
+    expect(errors.some((e) => /'controllers'/.test(e))).toBe(true);
   });
 
   it("rejects a wholly-unknown transport as unknown, not reserved", async () => {
@@ -313,8 +317,8 @@ describe("realization axes — transport is adapter-backed", () => {
   });
 
   it("rejects a cross-platform transport (`minimalApi` on elixir)", async () => {
-    const { errors } = await parse(sys("elixir { transport: minimalApi }"));
-    expect(errors.some((e) => /transport: minimalApi.*is not available/.test(e))).toBe(true);
+    const { errors } = await parse(sys("elixir { transport: controllers }"));
+    expect(errors.some((e) => /transport: controllers.*is not available/.test(e))).toBe(true);
   });
 });
 

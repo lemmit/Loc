@@ -64,7 +64,7 @@ neutral.
 | DB | **Postgres** | Same sidecar story as .NET/Hono (`composeService`); `MigrationsIR` → golang-migrate, reusing `sql-pg.ts`. |
 | Build | **Go modules** (`go.mod`) | One templated `go.mod` + `go.sum`; mirrors `stacks/v*` for the dependency manifest. No build-tool fork (Gradle/Maven, npm/pnpm) to choose. |
 
-## The two structural pivots (where Go diverges)
+## The three structural pivots (where Go diverges)
 
 These are the parts a Go target must decide before writing emitters —
 they are the language-specific judgement calls the shared IR can't make:
@@ -90,6 +90,20 @@ they are the language-specific judgement calls the shared IR can't make:
    to **explicit `for` loops** (pre-generics idiom) or `slices`/`maps`
    stdlib generics (Go 1.21+) — the main per-language decision in the
    expression renderer.
+3. **Context is threaded, not ambient.** The other backends carry the
+   execution-context / `RequestContext` backbone in an *ambient* slot
+   (`AsyncLocalStorage`, `Activity.Current`, the BEAM process
+   dictionary). Go's idiom is the opposite — an explicit `context.Context`
+   passed as the first parameter of every call — and that is a *lowering*
+   decision, not just a middleware one: the compiler must thread a `ctx`
+   parameter through every generated call site
+   (`render-stmt`/`render-expr` call emission), so a Go backend is the
+   **explicit-threading** realization class of
+   [`execution-context.md`](./execution-context.md). Decide the
+   `ctx`-threading convention up front, alongside the error strategy — it
+   touches the same statement/expression emitters. Until the
+   execution-context backbone lands, `ctx` is plumbed as a thin carrier
+   (request id / cancellation only).
 
 ## What gets written (anchored to Hono ≈ 7.2k / .NET ≈ 13.7k LOC)
 
@@ -190,5 +204,8 @@ toolchain — Go's build is fast and dependency-light).
   — the `ExprTarget` seam Go plugs a `GO_TARGET` table into.
 - [`exception-less.md`](./exception-less.md) — A4's `or`-union returns;
   Go's `(T, error)` is the natural carrier (the Phoenix-vanilla parallel).
+- [`execution-context.md`](./execution-context.md) — the scope-frame
+  backbone; Go is its **explicit-threading** realization class
+  (`context.Context`), the third structural pivot above.
 - [`java-backend.md`](./java-backend.md) /
   [`php-backend.md`](./php-backend.md) — sibling new-backend studies.

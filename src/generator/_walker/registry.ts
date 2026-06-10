@@ -105,6 +105,7 @@ import {
 } from "../react/walker/primitives/display.js";
 import {
   emitCreateForm,
+  emitDestroyForm,
   emitModal,
   emitOperationForm,
   emitWorkflowForm,
@@ -338,6 +339,14 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     admissibleInSource: true,
     tsx: emitWorkflowForm,
     heex: renderFormHeex,
+  },
+  // Confirmation-only destroy form (loom-forms.md).  No HEEx renderer yet
+  // — `renderFormHeex` assumes the of:/runs: form shapes; the LiveView
+  // destroy confirm is the elixir track's.
+  DestroyForm: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitDestroyForm,
   },
   // --- Legacy archetype names (admissible, lower as `custom` page
   //     origins post-#515; no walker renderer needed) -------------------
