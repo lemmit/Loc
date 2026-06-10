@@ -1,0 +1,60 @@
+import type { TypeIR } from "../../ir/types/loom-ir.js";
+
+// ---------------------------------------------------------------------------
+// Type-graph import collection for Python emitters — which names a set
+// of `TypeIR`s pulls into a module (Decimal, datetime, id NewTypes,
+// VO / enum classes).  The type-side companion of render-expr.ts's
+// `collectPyExprImports` (which covers expression-triggered imports).
+// ---------------------------------------------------------------------------
+
+export interface PyTypeImports {
+  usesDecimal: boolean;
+  usesDatetime: boolean;
+  /** Aggregate / part target names whose `<Name>Id` NewType is used. */
+  idNames: Set<string>;
+  voNames: Set<string>;
+  enumNames: Set<string>;
+}
+
+export function emptyPyTypeImports(): PyTypeImports {
+  return {
+    usesDecimal: false,
+    usesDatetime: false,
+    idNames: new Set(),
+    voNames: new Set(),
+    enumNames: new Set(),
+  };
+}
+
+export function visitPyTypeImports(t: TypeIR, acc: PyTypeImports): void {
+  switch (t.kind) {
+    case "primitive":
+      if (t.name === "money") acc.usesDecimal = true;
+      if (t.name === "datetime") acc.usesDatetime = true;
+      return;
+    case "id":
+      acc.idNames.add(t.targetName);
+      return;
+    case "valueobject":
+      acc.voNames.add(t.name);
+      return;
+    case "enum":
+      acc.enumNames.add(t.name);
+      return;
+    case "array":
+      visitPyTypeImports(t.element, acc);
+      return;
+    case "optional":
+      visitPyTypeImports(t.inner, acc);
+      return;
+    case "genericInstance":
+      visitPyTypeImports(t.arg, acc);
+      return;
+    case "union":
+      for (const v of t.variants) visitPyTypeImports(v, acc);
+      return;
+    default:
+      // entity | slot | none — nothing importable at this layer.
+      return;
+  }
+}

@@ -33,6 +33,13 @@ import {
 export interface PyRenderContext {
   /** Rendered name for the implicit receiver (`self` by default). */
   thisName: string;
+  /** Method-name prefix for `function` / `private-operation` call
+   *  targets and `helper-fn` refs.  Defaults to `_` (aggregate
+   *  functions are private).  Value-object emission passes `""` —
+   *  VO functions are public surface, invoked across aggregate
+   *  boundaries (`probability.as_fraction()`), so their internal
+   *  spelling must match the public method name. */
+  fnPrefix?: string;
 }
 
 const DEFAULT: PyRenderContext = { thisName: "self" };
@@ -200,7 +207,7 @@ function renderRef(e: RefExpr, ctx: PyRenderContext): string {
     case "this-derived":
       return `${ctx.thisName}.${snake(e.name)}`;
     case "helper-fn":
-      return `${ctx.thisName}._${snake(e.name)}`;
+      return `${ctx.thisName}.${ctx.fnPrefix ?? "_"}${snake(e.name)}`;
     case "enum-value":
       return `${e.enumName}.${e.name}`;
     case "current-user":
@@ -283,7 +290,7 @@ function renderCall(args: string[], e: CallExpr, ctx: PyRenderContext): string {
       return `${e.name}(${argList})`;
     case "function":
     case "private-operation":
-      return `${ctx.thisName}._${snake(e.name)}(${argList})`;
+      return `${ctx.thisName}.${ctx.fnPrefix ?? "_"}${snake(e.name)}(${argList})`;
     case "resource-op": {
       // Resource adapters land with the extern/auth slice (S16); the
       // call shape mirrors TS's awaited helper.

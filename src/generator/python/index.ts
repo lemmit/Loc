@@ -1,6 +1,10 @@
 import type { DeployableIR, EnrichedBoundedContextIR, SystemIR } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { lines } from "../../util/code-builder.js";
+import { ERRORS_PY } from "./emit/errors.js";
+import { renderPyEvents } from "./emit/events.js";
+import { renderPyIds } from "./emit/ids.js";
+import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { PYTHON_PINS } from "./pins.js";
 
 // ---------------------------------------------------------------------------
@@ -38,6 +42,7 @@ export interface GeneratePythonArgs {
 export function generatePythonForContexts(args: GeneratePythonArgs): Map<string, string> {
   const out = new Map<string, string>();
   const slug = pythonProjectName(args.deployable.name);
+  const merged = mergeContexts(args.contexts);
 
   out.set("pyproject.toml", renderPyproject(slug));
   out.set("Dockerfile", DOCKERFILE_PY);
@@ -48,7 +53,48 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/db/__init__.py", "");
   out.set("app/db/engine.py", ENGINE_PY);
   out.set("app/main.py", renderMain(args.sys.name));
+
+  out.set("app/domain/__init__.py", "");
+  out.set("app/domain/ids.py", renderPyIds(merged));
+  out.set("app/domain/errors.py", ERRORS_PY);
+  out.set("app/domain/value_objects.py", renderPyEnumsAndValueObjects(merged));
+  out.set("app/domain/events.py", renderPyEvents(merged));
   return out;
+}
+
+/** Multi-context deployables need the shared domain modules to UNION
+ *  every context's content rather than overwrite per-context — same
+ *  synthetic-merged-context pattern the Hono/.NET orchestrators use.
+ *  Ambient root-level enums / VOs are folded into every context by
+ *  enrichment, so those dedupe by name. */
+function mergeContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBoundedContextIR {
+  return {
+    name: contexts[0]?.name ?? "merged",
+    enums: dedupeByName(contexts.flatMap((c) => c.enums)),
+    valueObjects: dedupeByName(contexts.flatMap((c) => c.valueObjects)),
+    events: contexts.flatMap((c) => c.events),
+    payloads: contexts.flatMap((c) => c.payloads),
+    aggregates: contexts.flatMap((c) => c.aggregates),
+    repositories: contexts.flatMap((c) => c.repositories),
+    workflows: contexts.flatMap((c) => c.workflows),
+    views: contexts.flatMap((c) => c.views),
+    criteria: contexts.flatMap((c) => c.criteria),
+    channels: contexts.flatMap((c) => c.channels),
+    retrievals: contexts.flatMap((c) => c.retrievals),
+    seeds: contexts.flatMap((c) => c.seeds),
+    // Re-derived over the merged union when event-triggered workflows
+    // land (S15) — mirrors the Hono orchestrator.
+    eventSubscriptions: contexts.flatMap((c) => c.eventSubscriptions),
+  };
+}
+
+function dedupeByName<T extends { name: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((x) => {
+    if (seen.has(x.name)) return false;
+    seen.add(x.name);
+    return true;
+  });
 }
 
 /** PEP 508-safe project name — same camelCase→snake folding the system

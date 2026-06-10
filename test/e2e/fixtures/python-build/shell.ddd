@@ -1,11 +1,35 @@
-// Minimal python-backend system — the LOOM_PYTHON_BUILD shell gate.
+// Minimal python-backend system — the LOOM_PYTHON_BUILD gate corpus.
 // Grows alongside the generator slices (docs/plans/python-backend-plan.md).
 system PyShell {
   subdomain Ops {
     context Ops {
+      enum WidgetStatus { Draft, Active, Retired }
+
+      valueobject Price {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+        invariant currency.length == 3
+        derived shortLabel: string = currency + " " + string(amount)
+        function doubled(): decimal = amount * 2
+      }
+
+      event WidgetActivated {
+        widget: Widget id,
+        at: datetime
+      }
+
       aggregate Widget {
         label: string
         size: int
+        status: WidgetStatus
+        price: Price
+        invariant label.length > 0
+        operation activate() {
+          precondition status == Draft
+          status := Active
+          emit WidgetActivated { widget: id, at: now() }
+        }
       }
       repository Widgets for Widget { }
     }
