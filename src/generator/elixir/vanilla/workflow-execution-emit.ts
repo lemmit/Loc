@@ -19,11 +19,17 @@
 //   ✓ expr-let     → `<name> <- (<expr>)` (always succeeds; binds `name`)
 //   ✓ repo-let     → `{:ok, <name>} <- Context.get_<agg>(id)` (getById only;
 //                    custom finds aren't yet exposed via the vanilla context)
+//   ✓ emit         → `Phoenix.PubSub.broadcast(App.PubSub, "events",
+//                     %App.Ctx.Events.<Name>{...})` — rendered INSIDE the
+//                    with-chain's do-branch so a failed precondition / op
+//                    short-circuits and the broadcast is skipped.  The
+//                    `Events.<Name>` struct module is emitted by the
+//                    orchestrator's `emitVanillaEventModules` hook.
 //   ✓ default     → preserved as `# TODO:<kind>` comment; the workflow
 //                   still compiles and the route is exercisable.
-// Remaining kinds (emit / for-each / repo-run / resource-call, plus
-// non-getById repo-let) land as their own focused slices each validated
-// by the elixir-vanilla-build.yml mix-compile gate.
+// Remaining kinds (for-each / repo-run / resource-call, plus non-getById
+// repo-let) land as their own focused slices each validated by the
+// elixir-vanilla-build.yml mix-compile gate.
 //
 // Param surfacing: a workflow body that references a declared
 // create-param (`create(initialTitle: string) { … initialTitle … }`)
@@ -97,9 +103,11 @@ export function emitVanillaWorkflowExecution(
 
 interface BodyLine {
   /** `with-clause` lines stack into the `with ... do ... end` chain.
-   *  `pre` lines run before the `with` (preconditions / requires).
-   *  `post` lines run after a successful `with` body (e.g. `emit`). */
-  kind: "with-clause" | "pre" | "post" | "stmt";
+   *  `emit` lines render INSIDE the `do`-branch before the success result,
+   *  so they fire only when the with-chain succeeds (a rolled-back
+   *  transaction skips them).  `stmt` is the `# TODO` fallthrough — runs
+   *  as a leading statement before the `with`. */
+  kind: "with-clause" | "emit" | "stmt";
   text: string;
   /** Bind name for `with-clause` lines — used to pick the final result
    *  of `run/1` (last bound name, or `:ok` if no binds). */
@@ -225,6 +233,30 @@ function lowerStatement(
       ];
     }
 
+    case "emit": {
+      // `emit OrderConfirmed { order: id, at: now() }` →
+      // `Phoenix.PubSub.broadcast(App.PubSub, "events",
+      //                           %App.Ctx.Events.OrderConfirmed{order: id, at: ...})`
+      // Renders INSIDE the with-chain's `do`-branch (`BodyLine.kind = "emit"`)
+      // so a failed precondition / op short-circuits the chain and the
+      // broadcast is skipped — listeners only see events for successful
+      // workflows.  Inside `Repo.transaction(fn -> ...)` the broadcast
+      // fires before commit; that matches the standard Phoenix pattern
+      // (a separate "after-commit" hook is out of scope for this slice
+      // and matches the Ash path's behaviour anyway).
+      const fields = st.fields
+        .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
+        .join(", ");
+      const appModule = contextModule.split(".")[0]!;
+      const struct = `%${contextModule}.Events.${upperFirst(st.eventName)}{${fields}}`;
+      return [
+        {
+          kind: "emit",
+          text: `Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${struct})`,
+        },
+      ];
+    }
+
     default:
       // Unsupported kind today — preserved as a TODO comment so the
       // workflow still compiles.  Future slices add per-kind lowering
@@ -340,8 +372,8 @@ function collectParamRefsInStmt(s: StmtIR, acc: Set<string>): void {
 
 /** Collect referenced create-params, but ONLY from the statement kinds
  *  that today lower to real code emitting the param ref (precondition /
- *  requires / expr-let / factory-let / op-call, plus a `getById` repo-let).
- *  The kinds still on the `# TODO` fallthrough (`emit` / non-getById
+ *  requires / expr-let / factory-let / op-call / emit, plus a `getById`
+ *  repo-let).  The kinds still on the `# TODO` fallthrough (non-getById
  *  `repo-let` / `repo-run` / `for-each` / `resource-call`) don't render
  *  their param refs yet — binding a param only those reference would leave
  *  an unused local that trips `--warnings-as-errors`.  When a future slice
@@ -360,12 +392,15 @@ function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): voi
     case "op-call":
       for (const a of st.args) collectParamRefs(a, acc);
       return;
+    case "emit":
+      for (const f of st.fields) collectParamRefs(f.value, acc);
+      return;
     case "repo-let":
       // Gated to the lowered form — see the `repo-let` arm in lowerStatement.
       if (st.method === "getById") for (const a of st.args) collectParamRefs(a, acc);
       return;
     default:
-      // emit / repo-run / for-each / resource-call — not yet lowered to
+      // repo-run / for-each / resource-call — not yet lowered to
       // param-referencing code (see lowerStatement default arm).
       return;
   }
@@ -381,29 +416,47 @@ function referencedParams(wf: WorkflowIR): string[] {
 
 /** Compose lowered body lines into the inner-function body that the
  *  workflow module's `run_inner` (transactional) or inline body
- *  (non-transactional) executes.  Two assembly modes:
+ *  (non-transactional) executes.  Three line kinds:
  *
- *  - Pure `with`-chain when every line is a `with-clause`:
- *      with {:ok, x} <- ...,
- *           {:ok, _} <- ...,
- *           do: {:ok, x}
- *  - Sequential when stmt lines are mixed in:
- *      stmt
- *      with {:ok, x} <- ..., do: {:ok, x}
+ *  - `with-clause` → stacks into the `with ... do ... end` chain.
+ *  - `emit`        → renders INSIDE the `do`-branch before the success
+ *                    return, so it fires only on with-chain success.
+ *  - `stmt`        → leading statement before the `with` (the `# TODO`
+ *                    fallthrough form).
  *
  *  The final result is `{:ok, <last-bound-name>}` or `{:ok, params}`
  *  if no binds were produced — matching the contract `run/1` returns
- *  `{:ok, _} | {:error, _}`. */
+ *  `{:ok, _} | {:error, _}`.  An emit-only `do`-branch ends with
+ *  `:ok` so the workflow still satisfies the `{:ok, _} | {:error, _}`
+ *  contract. */
 function assembleBody(lines: BodyLine[]): string {
   const withClauses = lines.filter((l) => l.kind === "with-clause");
+  const emitLines = lines.filter((l) => l.kind === "emit");
   const stmtLines = lines.filter((l) => l.kind === "stmt");
-  const lastBind = withClauses.reverse().find((l) => l.bindName)?.bindName;
-  withClauses.reverse(); // restore order
+  const lastBind = [...withClauses].reverse().find((l) => l.bindName)?.bindName;
 
   const resultExpr = lastBind ? `{:ok, ${lastBind}}` : "{:ok, params}";
+  // The `do`-branch body: emits first (only run on with-chain success),
+  // then the success result.  Indented to match the `with ... do ... end`
+  // shape — 6 spaces under `run_inner`.
+  const doBody =
+    emitLines.length > 0
+      ? `${emitLines.map((l) => `      ${l.text}`).join("\n")}\n      ${resultExpr}`
+      : `      ${resultExpr}`;
+
+  if (stmtLines.length === 0 && withClauses.length === 0 && emitLines.length === 0) {
+    // Empty body — keep the stub semantics.
+    return `    {:ok, params}`;
+  }
+
+  if (stmtLines.length === 0 && withClauses.length === 0 && emitLines.length > 0) {
+    // Emit-only body — no with-chain to gate on, broadcasts run
+    // unconditionally then return :ok.
+    return `${emitLines.map((l) => `    ${l.text}`).join("\n")}\n    {:ok, :emitted}`;
+  }
 
   if (stmtLines.length === 0 && withClauses.length > 0) {
-    // Pure with-chain.
+    // Pure with-chain (optionally with emits in the do-branch).
     return `    with ${withClauses[0]!.text.trimStart()}${
       withClauses.length > 1
         ? `,\n${withClauses
@@ -412,29 +465,26 @@ function assembleBody(lines: BodyLine[]): string {
             .join(",\n")}`
         : ""
     } do
-      ${resultExpr}
+${doBody}
     end`;
   }
 
   if (withClauses.length === 0 && stmtLines.length > 0) {
     return `    # Workflow body — incremental lowering (see workflow-execution-emit.ts).
-${stmtLines.map((l) => `    ${l.text}`).join("\n")}
+${stmtLines.map((l) => `    ${l.text}`).join("\n")}${
+  emitLines.length > 0 ? `\n${emitLines.map((l) => `    ${l.text}`).join("\n")}` : ""
+}
     ${resultExpr}`;
   }
 
-  if (withClauses.length === 0 && stmtLines.length === 0) {
-    // Empty body — keep the stub semantics.
-    return `    {:ok, params}`;
-  }
-
-  // Mixed: stmt lines first, then with-chain.
+  // Mixed: stmt lines first, then with-chain (emits in its do-branch).
   const stmtBlock = stmtLines.map((l) => `    ${l.text}`).join("\n");
   const withBlock = withClauses
     .map((l, i) => (i === 0 ? `with ${l.text}` : `         ${l.text}`))
     .join(",\n");
   return `${stmtBlock}
     ${withBlock} do
-      ${resultExpr}
+${doBody}
     end`;
 }
 

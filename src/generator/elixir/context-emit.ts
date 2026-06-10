@@ -9,6 +9,7 @@ import { effectiveSavingShape } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { crudOpNames } from "./api-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
+import { renderEventModule } from "./events-emit.js";
 import { renderJasonEncoderImpl } from "./jason-camel-emit.js";
 import { joinEntityName, renderJoinResource } from "./join-resource-emit.js";
 import { renderAshType, renderTypespec } from "./render-expr.js";
@@ -192,35 +193,10 @@ ${jasonImpl}`;
 }
 
 // ---------------------------------------------------------------------------
-// Event module
+// Event modules — `renderEventModule` is now sibling-shared (see
+// ./events-emit.ts).  Foundation-agnostic; the vanilla orchestrator
+// reuses the same renderer.
 // ---------------------------------------------------------------------------
-
-function renderEventModule(
-  ev: import("../../ir/types/loom-ir.js").EventIR,
-  contextModule: string,
-  typesModule: string,
-): string {
-  const moduleName = `${contextModule}.Events.${upperFirst(ev.name)}`;
-  void renderAshType; // used in sibling fns
-  // FieldIR carries `optional` separately from TypeIR — preserve it in
-  // the spec so a nullable event field is `T | nil`, not `T`.
-  // `typesModule` lets the IDs lower to `<App>.Types.id()` (the shared
-  // vocabulary) instead of bare `String.t()`.
-  const typeFor = (f: { type: import("../../ir/types/loom-ir.js").TypeIR; optional: boolean }) => {
-    const base = renderTypespec(f.type, contextModule, typesModule);
-    return f.optional && !base.endsWith("| nil") ? `${base} | nil` : base;
-  };
-  return `# Auto-generated.
-defmodule ${moduleName} do
-  @moduledoc "Domain event: ${upperFirst(ev.name)}"
-
-  defstruct [${ev.fields.map((f) => `:${snake(f.name)}`).join(", ")}]
-  @type t :: %__MODULE__{
-${ev.fields.map((f) => `    ${snake(f.name)}: ${typeFor(f)}`).join(",\n")}
-  }
-end
-`;
-}
 
 // ---------------------------------------------------------------------------
 // Ash.Domain rendering (per context)
