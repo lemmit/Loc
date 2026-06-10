@@ -240,8 +240,11 @@ Framework returns string:
 // `elixir` is the D-ELIXIR-PLATFORM canonical name for the
 // language-ecosystem platform; legacy `phoenix` and `phoenixLiveView`
 // desugar to `elixir` (the latter through a `phoenix → elixir` chain).
+// `python` is the canonical language-ecosystem name for the
+// FastAPI + SQLAlchemy backend; `fastapi` is its framework-spelled
+// alias and desugars to `python` (mirrors `hono` → `node`).
 Platform returns string:
-    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'java' | STRING;
+    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'python' | 'fastapi' | 'java' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,

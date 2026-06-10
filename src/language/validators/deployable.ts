@@ -247,7 +247,7 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
     if (!FRONTEND_KEYWORDS.has(raw)) {
       accept(
         "error",
-        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'static', 'phoenix' (backends also accept a pinned form, e.g. 'node@v4').`,
+        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'static', 'phoenix', 'python' (backends also accept a pinned form, e.g. 'node@v4').`,
         { node: d, property: "platform" },
       );
     }

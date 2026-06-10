@@ -227,7 +227,7 @@ export function validateGenericInstancesUnimplemented(
   // (the legacy `phoenix` / `phoenixLiveView` platform aliases canonicalize
   // to `elixir` per D-ELIXIR-PLATFORM).  All four backends now emit
   // generic carriers.
-  const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir", "java"]);
+  const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir", "python", "java"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_PAGED_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 
@@ -399,7 +399,7 @@ export function validateUnionsUnimplemented(
   // backend serves.  `"node"` is the hono/TS backend's platform identity.
   // When a context is served only by these (or by no backend at all — the
   // legacy single-context path), unions are emittable and the gate stays quiet.
-  const SUPPORTED_UNION_BACKENDS = new Set(["node", "dotnet", "elixir"]);
+  const SUPPORTED_UNION_BACKENDS = new Set(["node", "dotnet", "elixir", "python"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_UNION_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 
@@ -498,7 +498,7 @@ export function validateOperationReturnsUnimplemented(
   // `"node"` is the Hono/TS backend (exception-less.md spike); the others land
   // in later slices.  No backend (legacy single-context path) → emittable, gate
   // stays quiet.
-  const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet"]);
+  const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_RETURN_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 

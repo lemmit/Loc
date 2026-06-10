@@ -75,6 +75,7 @@ describe("platformFor — byte-identity guarantee", () => {
       "elixir",
       "java",
       "node",
+      "python",
     ]);
   });
 

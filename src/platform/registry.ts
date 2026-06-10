@@ -4,6 +4,7 @@ import elixirPlatform from "./elixir.js";
 import honoPlatform, { loomManifest as honoV4Manifest } from "./hono/v4/index.js";
 import javaPlatform from "./java.js";
 import type { LoomBackendManifest } from "./manifest.js";
+import pythonPlatform from "./python.js";
 import reactPlatform from "./react.js";
 import type { PlatformSurface } from "./surface.js";
 
@@ -40,6 +41,10 @@ const platforms: Record<Platform, PlatformSurface> = {
   // Ash-derived API.  Legacy `platform: phoenix` / `phoenixLiveView`
   // desugar to `elixir` at the lowering boundary (D-ELIXIR-PLATFORM).
   elixir: elixirPlatform,
+  // FastAPI + SQLAlchemy 2 backend.  The `fastapi` framework spelling
+  // desugars to `python` at the lowering boundary (mirrors `hono` →
+  // `node`).
+  python: pythonPlatform,
   // Spring Boot / Spring Data JPA backend (backend-only; embeds a React
   // SPA when the deployable declares `ui:`, like dotnet).
   java: javaPlatform,
@@ -57,6 +62,7 @@ export const BUILTIN_PLATFORM_LATEST = {
   node: "v4",
   dotnet: "v8",
   elixir: "v1",
+  python: "v1",
   java: "v1",
 } as const satisfies Partial<Record<Platform, string>>;
 
@@ -101,6 +107,15 @@ const inTreeBackends: DiscoveredBackend[] = [
       core: "^1.0.0",
     },
     surface: elixirPlatform,
+  },
+  {
+    manifest: {
+      kind: "backend",
+      family: "python",
+      loomVersion: "v1",
+      core: "^1.0.0",
+    },
+    surface: pythonPlatform,
   },
   {
     manifest: {
@@ -173,11 +188,14 @@ export interface ParsedBuiltinPlatformRef {
  *  (D-ELIXIR-PLATFORM: the language-ecosystem platform is Elixir; the
  *  Phoenix *web framework* lives on as the `transport: phoenix` value);
  *  `hono` → `node` (D-NODE-PLATFORM; the Hono *web framework* lives
- *  on as the `transport: hono` value). */
+ *  on as the `transport: hono` value); `fastapi` → `python` (same
+ *  pattern — FastAPI names the web framework, the platform is the
+ *  Python language ecosystem). */
 const LEGACY_PLATFORM_ALIASES: Record<string, string> = {
   phoenixLiveView: "elixir",
   phoenix: "elixir",
   hono: "node",
+  fastapi: "python",
 };
 
 /** Desugar a legacy platform name to its canonical family, preserving any

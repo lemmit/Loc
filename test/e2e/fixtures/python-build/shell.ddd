@@ -1,0 +1,66 @@
+// Minimal python-backend system — the LOOM_PYTHON_BUILD gate corpus.
+// Grows alongside the generator slices (docs/plans/python-backend-plan.md).
+system PyShell {
+  subdomain Ops {
+    context Ops {
+      enum WidgetStatus { Draft, Active, Retired }
+
+      valueobject Price {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+        invariant currency.length == 3
+        derived shortLabel: string = currency + " " + string(amount)
+        function doubled(): decimal = amount * 2
+      }
+
+      event WidgetActivated {
+        widget: Widget id,
+        at: datetime
+      }
+
+      aggregate Widget {
+        label: string
+        size: int
+        status: WidgetStatus
+        price: Price
+        invariant label.length > 0
+        operation activate() {
+          precondition status == Draft
+          status := Active
+          emit WidgetActivated { widget: id, at: now() }
+        }
+
+        test "widget activates from draft" {
+          let w = Widget.create({ label: "gizmo", size: 1, status: Draft, price: Price { amount: 1.0, currency: "USD" } })
+          w.activate()
+          expect(w.status).toBe(Active)
+          expect(w.size).toBeGreaterThan(0)
+        }
+
+        test "activate requires draft" {
+          let w = Widget.create({ label: "gizmo", size: 1, status: Active, price: Price { amount: 1.0, currency: "USD" } })
+          expect(w.activate()).toThrow()
+        }
+
+        test "price invariant rejects short currency" {
+          expect(Price { amount: 1.0, currency: "US" }).toThrow()
+        }
+      }
+      repository Widgets for Widget { }
+    }
+  }
+
+  api OpsApi from Ops
+
+  storage pg { type: postgres }
+  resource opsState { for: Ops, kind: state, use: pg }
+
+  deployable api {
+    platform: python
+    contexts: [Ops]
+    dataSources: [opsState]
+    serves: OpsApi
+    port: 8000
+  }
+}

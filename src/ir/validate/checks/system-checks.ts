@@ -876,7 +876,7 @@ export function validateInheritanceStorage(
   // TPH storage emission ships on Hono (Drizzle shared table + `kind`), .NET
   // (EF Core native `HasDiscriminator`), and Phoenix (Ash shared-table
   // multi-resource + `base_filter` on `kind`).
-  const TPH_CAPABLE = new Set(["node", "dotnet", "elixir"]);
+  const TPH_CAPABLE = new Set(["node", "dotnet", "elixir", "python"]);
   const hostedByCapable = [...backendPlatforms].some((p) => TPH_CAPABLE.has(p));
   for (const agg of ctx.aggregates) {
     if (!agg.isAbstract && !agg.extendsAggregate) continue;
@@ -927,7 +927,7 @@ export function validateInheritanceStorage(
 // `foundation: vanilla` (D-VANILLA-PHOENIX-FOUNDATION + D-VANILLA-ES-HOME)
 // will host pure ES on Phoenix; until it ships the diagnostic names the Ash
 // foundation as the constraint and points at the proposal.
-const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet"]);
+const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet", "python"]);
 export function validateEventSourcedStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],

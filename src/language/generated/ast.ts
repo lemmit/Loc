@@ -119,6 +119,7 @@ export type DddKeywordNames =
     | "extends"
     | "extern"
     | "false"
+    | "fastapi"
     | "favicon"
     | "filter"
     | "find"
@@ -200,6 +201,7 @@ export type DddKeywordNames =
     | "precondition"
     | "private"
     | "provenanced"
+    | "python"
     | "query"
     | "queue"
     | "rabbitmq"
@@ -504,10 +506,10 @@ export function isPayloadKind(item: unknown): item is PayloadKind {
     return item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error';
 }
 
-export type Platform = 'dotnet' | 'elixir' | 'hono' | 'java' | 'node' | 'phoenix' | 'phoenixLiveView' | 'react' | 'static' | string;
+export type Platform = 'dotnet' | 'elixir' | 'fastapi' | 'hono' | 'java' | 'node' | 'phoenix' | 'phoenixLiveView' | 'python' | 'react' | 'static' | string;
 
 export function isPlatform(item: unknown): item is Platform {
-    return item === 'dotnet' || item === 'hono' || item === 'node' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || item === 'elixir' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'dotnet' || item === 'hono' || item === 'node' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || item === 'elixir' || item === 'python' || item === 'fastapi' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export type PostfixSuffix = CallSuffix | MemberSuffix;
