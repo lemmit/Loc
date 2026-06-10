@@ -750,7 +750,7 @@ describe("typescript generator", () => {
       const routes = files.get("http/order.routes.ts")!;
       // Imports the new error type.
       expect(routes).toMatch(
-        /import \{ DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors"/,
+        /import \{ DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors"/,
       );
       // Wraps the handler call in try/catch.
       expect(routes).toMatch(/try \{\s+await handler\(aggregate, body\);/);

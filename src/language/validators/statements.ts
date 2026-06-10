@@ -65,6 +65,43 @@ export function checkOperation(op: Operation, agg: Aggregate, accept: Validation
     );
   }
 
+  // `when Expr` (canCommand state gate, criterion.md use site 2): a pure
+  // bool predicate over the aggregate's OWN state.  It type-checks in the
+  // aggregate env — operation parameters are deliberately out of scope
+  // (the NakedObjects-style split: arg-aware checks go through
+  // `from <Criterion>(args)` on the parameters, not through `when`).
+  if (op.when) {
+    const paramNames = new Set(op.params.map((p) => p.name));
+    for (const node of AstUtils.streamAst(op.when)) {
+      const name = (node as { $type: string; name?: string }).name;
+      if (
+        (node.$type === "NameRef" || node.$type === "ThisRef") &&
+        name !== undefined &&
+        paramNames.has(name)
+      ) {
+        accept(
+          "error",
+          `'when' on operation '${op.name}' references parameter '${name}' — a 'when' gate is a predicate over the aggregate's state only (its can-${op.name} query has no arguments). Move argument-aware checks into a 'precondition' in the body.`,
+          { node: op, property: "when" },
+        );
+      }
+    }
+    const t = typeOf(op.when, envForAggregate(agg));
+    if (t.kind !== "primitive" || t.name !== "bool") {
+      accept("error", `'when' must be of type 'bool', got '${typeToString(t)}'.`, {
+        node: op,
+        property: "when",
+      });
+    }
+    if (op.private) {
+      accept(
+        "warning",
+        `'when' has no effect on private operation '${op.name}' — it has no HTTP entry point, so no gate or can-${op.name} query is emitted.`,
+        { node: op, property: "when" },
+      );
+    }
+  }
+
   // Build env with parameters and walk body
   const bindings = new Map<string, { type: DddType; origin: AstNode }>();
   for (const p of op.params) bindings.set(p.name, { type: paramType(p), origin: p });
