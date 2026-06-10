@@ -290,6 +290,7 @@ describe("py renderPyExpr — operators / ternary / match / convert", () => {
       renderPyExpr({
         kind: "ternary",
         cond: refParam("ok"),
+        // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then`
         then: litInt("1"),
         otherwise: litInt("2"),
       }),
