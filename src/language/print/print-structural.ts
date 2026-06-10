@@ -787,8 +787,11 @@ function printOperation(node: Operation): string {
   // Exception-less `or`-union return (exception-less.md): `: X or NotFound`,
   // grammar-positioned after extern/audited.
   const ret = node.returnType ? `: ${printTypeRef(node.returnType)}` : "";
+  // canCommand state gate (criterion.md use site 2) — after the return type,
+  // before the body, matching the grammar.
+  const when = node.when ? ` when ${printExpr(node.when)}` : "";
   return block(
-    `${priv}operation ${node.name}(${params})${extern}${audited}${ret}`,
+    `${priv}operation ${node.name}(${params})${extern}${audited}${ret}${when}`,
     node.body.map(printStmt),
   );
 }

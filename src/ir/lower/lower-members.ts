@@ -202,7 +202,7 @@ export function lowerFunction(f: FunctionDecl, env: Env): FunctionIR {
 }
 
 export function lowerOperation(op: Operation, env: Env): OperationIR {
-  return lowerActionBody(
+  const ir = lowerActionBody(
     {
       kind: "mutate",
       name: op.name,
@@ -216,6 +216,12 @@ export function lowerOperation(op: Operation, env: Env): OperationIR {
     },
     env,
   );
+  // `when Expr` lowers in the AGGREGATE env (not the body env) — operation
+  // params are deliberately out of scope (criterion.md: arg-aware checks
+  // belong to `from <Criterion>(args)`, not `when`); the validator reports
+  // a param reference rather than letting it lower as a free name.
+  if (op.when) ir.when = lowerExpr(op.when, env);
+  return ir;
 }
 
 // `create` / `destroy` share `operation`'s param + body shape; the

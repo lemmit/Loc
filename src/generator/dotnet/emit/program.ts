@@ -486,9 +486,13 @@ app.MapFallbackToFile("index.html");
     : ""
 }
 ${
-  usingDapper
-    ? // Dapper applied its schema via DbSchema.EnsureAsync at startup (above);
-      // no EF EnsureCreated block.
+  usingDapper || hasMigrations
+    ? // Dapper applied its schema via DbSchema.EnsureAsync at startup; a
+      // migrations-bearing deployable applied them via Database.Migrate().
+      // Either way EnsureCreated must NOT also run: mixing it with
+      // Migrate() is the classic EF trap — whichever runs first creates
+      // *a* table, and the other then sees a non-empty database and
+      // no-ops, leaving the schema half-built with no error.
       ""
     : `// Dev-friendly schema bootstrap: create the schema from the model on
 // first boot.  System-mode compose isolates each deployable to its own

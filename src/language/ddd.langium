@@ -1207,8 +1207,13 @@ Invariant:
 FunctionDecl:
     'function' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef '=' body=Expression;
 
+// `when Expr` — the canCommand state gate (criterion.md, use site 2): the
+// route evaluates the predicate against the loaded aggregate before the
+// body runs (false → 409 Disallowed) and auto-exposes a side-effect-free
+// `GET /{id}/can_<op>` returning `{ allowed }`.  Distinct from `requires`
+// (auth, 403) and `precondition` (argument validation inside the body, 400).
 Operation:
-    (private?='private')? 'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' (extern?='extern')? (audited?='audited')? (':' returnType=TypeRef)? '{'
+    (private?='private')? 'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' (extern?='extern')? (audited?='audited')? (':' returnType=TypeRef)? ('when' when=Expression)? '{'
         body+=Statement*
     '}';
 

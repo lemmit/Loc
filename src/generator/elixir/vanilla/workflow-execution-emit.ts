@@ -17,11 +17,13 @@
 //   ✓ precondition → `:ok <- (if <cond>, do: :ok, else: {:error, :precondition_failed})`
 //   ✓ requires     → `:ok <- (if <cond>, do: :ok, else: {:error, :forbidden})`
 //   ✓ expr-let     → `<name> <- (<expr>)` (always succeeds; binds `name`)
+//   ✓ repo-let     → `{:ok, <name>} <- Context.get_<agg>(id)` (getById only;
+//                    custom finds aren't yet exposed via the vanilla context)
 //   ✓ default     → preserved as `# TODO:<kind>` comment; the workflow
 //                   still compiles and the route is exercisable.
-// Remaining kinds (emit / repo-let / for-each / repo-run) land as their
-// own focused slices each validated by the elixir-vanilla-build.yml
-// mix-compile gate.
+// Remaining kinds (emit / for-each / repo-run / resource-call, plus
+// non-getById repo-let) land as their own focused slices each validated
+// by the elixir-vanilla-build.yml mix-compile gate.
 //
 // Param surfacing: a workflow body that references a declared
 // create-param (`create(initialTitle: string) { … initialTitle … }`)
@@ -201,18 +203,46 @@ function lowerStatement(
       ];
     }
 
+    case "repo-let": {
+      // `let wallet = Wallets.getById(walletId)` →
+      // `{:ok, wallet} <- Context.get_wallet(wallet_id)`.
+      // Only the auto-generated `getById` finder is supported on vanilla
+      // today — it maps to the context's `get_<agg>/1` (find_by_id)
+      // facade.  Custom repository finds aren't yet exposed through the
+      // vanilla context, so a non-getById repo-let stays on the TODO
+      // fallthrough (a call to a non-existent fn would fail mix compile).
+      // The matching arm in `collectWorkflowStmtParamRefs` is likewise
+      // gated to getById.
+      if (st.method !== "getById") return todoLine(st.kind);
+      const argList = st.args.map((a) => renderExpr(a, renderCtx)).join(", ");
+      const call = `${contextModule}.get_${snake(st.aggName)}(${argList})`;
+      return [
+        {
+          kind: "with-clause",
+          text: `{:ok, ${snake(st.name)}} <- ${call}`,
+          bindName: snake(st.name),
+        },
+      ];
+    }
+
     default:
       // Unsupported kind today — preserved as a TODO comment so the
       // workflow still compiles.  Future slices add per-kind lowering
       // and remove this fallthrough as each kind moves into a real
       // BodyLine.
-      return [
-        {
-          kind: "stmt",
-          text: `# TODO: lower workflow statement kind '${st.kind}' (vanilla-foundation-tdd-plan.md follow-up)`,
-        },
-      ];
+      return todoLine(st.kind);
   }
+}
+
+/** The `# TODO` fallthrough BodyLine for a not-yet-lowered statement kind —
+ *  keeps the workflow compiling while the per-kind lowering is pending. */
+function todoLine(kind: string): BodyLine[] {
+  return [
+    {
+      kind: "stmt",
+      text: `# TODO: lower workflow statement kind '${kind}' (vanilla-foundation-tdd-plan.md follow-up)`,
+    },
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -310,12 +340,13 @@ function collectParamRefsInStmt(s: StmtIR, acc: Set<string>): void {
 
 /** Collect referenced create-params, but ONLY from the statement kinds
  *  that today lower to real code emitting the param ref (precondition /
- *  requires / expr-let / factory-let / op-call).  The kinds still on the
- *  `# TODO` fallthrough (`emit` / `repo-let` / `repo-run` / `for-each` /
- *  `resource-call`) don't render their param refs yet — binding a param
- *  only those reference would leave an unused local that trips
- *  `--warnings-as-errors`.  When a future slice lowers one of those kinds,
- *  it adds the matching arm here in the same change. */
+ *  requires / expr-let / factory-let / op-call, plus a `getById` repo-let).
+ *  The kinds still on the `# TODO` fallthrough (`emit` / non-getById
+ *  `repo-let` / `repo-run` / `for-each` / `resource-call`) don't render
+ *  their param refs yet — binding a param only those reference would leave
+ *  an unused local that trips `--warnings-as-errors`.  When a future slice
+ *  lowers one of those kinds, it adds the matching arm here in the same
+ *  change.  This MUST stay in lock-step with `lowerStatement`. */
 function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): void {
   switch (st.kind) {
     case "precondition":
@@ -329,9 +360,13 @@ function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): voi
     case "op-call":
       for (const a of st.args) collectParamRefs(a, acc);
       return;
+    case "repo-let":
+      // Gated to the lowered form — see the `repo-let` arm in lowerStatement.
+      if (st.method === "getById") for (const a of st.args) collectParamRefs(a, acc);
+      return;
     default:
-      // emit / repo-let / repo-run / for-each / resource-call — not yet
-      // lowered to param-referencing code (see lowerStatement default arm).
+      // emit / repo-run / for-each / resource-call — not yet lowered to
+      // param-referencing code (see lowerStatement default arm).
       return;
   }
 }
@@ -369,7 +404,6 @@ function assembleBody(lines: BodyLine[]): string {
 
   if (stmtLines.length === 0 && withClauses.length > 0) {
     // Pure with-chain.
-    const clauses = withClauses.map((l) => `      ${l.text}`).join(",\n");
     return `    with ${withClauses[0]!.text.trimStart()}${
       withClauses.length > 1
         ? `,\n${withClauses

@@ -71,6 +71,12 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }
+        if (context.Exception is DisallowedException dx)
+        {
+            context.Result = Problem(context, 409, "Disallowed", dx.Message, trace_id);
+            context.ExceptionHandled = true;
+            return;
+        }
         if (context.Exception is DomainException de)
         {
             context.Result = Problem(context, 400, "Bad Request", de.Message, trace_id);

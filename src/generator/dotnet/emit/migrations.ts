@@ -56,10 +56,22 @@ function renderMigrationClass(
   // and identifiers stay bare), but escape defensively.
   const escaped = sql.replace(/"/g, '""');
   return `// Auto-generated.
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace ${ns}.Migrations
 {
+    // The [DbContext] attribute is REQUIRED for runtime discovery:
+    // EF's MigrationsAssembly only surfaces Migration subclasses whose
+    // DbContextAttribute matches the context passed to Migrate().
+    // Without it, Database.Migrate() finds zero migrations, creates
+    // only __EFMigrationsHistory, and every table is silently missing
+    // (42P01 at first INSERT/SELECT).  global:: qualifies from the root
+    // namespace: this file's namespace ends in .Migrations and some
+    // layouts (byFeature, TPH) nest a same-named child namespace, so a
+    // relative reference resolves against the wrong scope (CS0234);
+    // global:: sidesteps the ambiguity for every namespace.
+    [DbContext(typeof(global::${ns}.Infrastructure.Persistence.AppDbContext))]
     [Migration("${migrationId}")]
     public partial class ${className} : Migration
     {

@@ -4,8 +4,18 @@ import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { domainToRequestExpr } from "../dto-mapping.js";
 import { renderCommand, renderCommandHandler } from "../emit.js";
-import { renderCsType } from "../render-expr.js";
+import { renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderCreateValidator, renderOperationValidator } from "../validator-emit.js";
+
+/** The `when` canCommand gate (criterion.md use site 2): evaluate the
+ *  predicate against the loaded aggregate before the body runs; false →
+ *  DisallowedException, which DomainExceptionFilter maps to a 409
+ *  ProblemDetails ("Disallowed").  Empty string when the op has no gate. */
+function whenGate(agg: AggregateIR, op: AggregateIR["operations"][number]): string {
+  if (!op.when) return "";
+  const pred = renderCsExpr(op.when, { thisName: "aggregate" });
+  return `        if (!(${pred})) throw new DisallowedException("operation '${op.name}' is not allowed in the current state of ${agg.name}.");\n`;
+}
 
 // ---------------------------------------------------------------------------
 // Create command + handler
@@ -220,6 +230,7 @@ export function emitOperationCommandsAndHandlers(
           body:
             `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
             `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+            whenGate(agg, op) +
             `        aggregate.Check${upperFirst(op.name)}(${callArgs});\n` +
             `        var request = new ${reqName}(${reqArgs});\n` +
             `        try\n` +
@@ -246,11 +257,13 @@ export function emitOperationCommandsAndHandlers(
     const handlerBody = returnUnion
       ? `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
         `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+        whenGate(agg, op) +
         `        var result = aggregate.${upperFirst(op.name)}(${callArgs});\n` +
         `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
         `        return result;\n`
       : `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
         `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+        whenGate(agg, op) +
         `        aggregate.${upperFirst(op.name)}(${callArgs});\n` +
         `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
         `        return Unit.Value;\n`;

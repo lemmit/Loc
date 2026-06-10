@@ -14,7 +14,11 @@ import {
 } from "./cqrs/commands.js";
 import { emitController } from "./cqrs/controller.js";
 import { emitRequestDtos, emitResponseDtos, emitUnionDtos } from "./cqrs/dtos.js";
-import { emitFindQueriesAndHandlers, emitGetByIdQueryAndHandler } from "./cqrs/queries.js";
+import {
+  emitCanOpQueriesAndHandlers,
+  emitFindQueriesAndHandlers,
+  emitGetByIdQueryAndHandler,
+} from "./cqrs/queries.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate CQRS file emission.  This module is the orchestrator: it
@@ -89,6 +93,7 @@ export function emitCqrs(
   if (agg.canonicalDestroy) emitDestroyCommandAndHandler(agg, ns, aggFolder, out, idClass);
   emitOperationCommandsAndHandlers(agg, ctx, ns, aggFolder, out, idClass);
   emitGetByIdQueryAndHandler(agg, ctx, ns, aggFolder, out, idClass);
+  emitCanOpQueriesAndHandlers(agg, ns, aggFolder, out, idClass);
   emitFindQueriesAndHandlers(agg, repo, ctx, ns, aggFolder, out);
   emitController(
     agg,
