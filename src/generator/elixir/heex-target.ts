@@ -137,6 +137,51 @@ export const heexTarget: WalkerTarget = {
   defaultInitFor(type: TypeIR): string {
     return defaultInitForHeex(type);
   },
+
+  // --- Markup seams ---------------------------------------------------------
+  //
+  // The HEEx walker is a parallel sibling (heex-walker.ts) that never
+  // routes through the shared markup walker, so these exist for
+  // contract completeness.  `renderComment` / `renderStyleAttr` /
+  // `escapeText` return the HEEx forms the inline walker uses;
+  // `renderConditionalChild` is unreachable (the heex walker has its
+  // own ternary path) and throws, mirroring `buildHookUse`.
+
+  /** HEEx template comment. */
+  renderComment(text: string): string {
+    return `<%!-- ${text} --%>`;
+  },
+
+  /** Unreachable for HEEx — the parallel heex-walker renders
+   *  conditional children through its own position-aware path. */
+  renderConditionalChild(): never {
+    throw new Error(
+      "heexTarget.renderConditionalChild: the HEEx walker renders conditionals inline; this should never be called.",
+    );
+  },
+
+  /** Flat quoted CSS string — the HEEx spelling of the `style: {…}`
+   *  escape hatch.  Behaviour-identical to the old body-walker
+   *  `styleAttrHeex` helper: string-literal values verbatim, other
+   *  values via their rendered expression, `"` entity-escaped so the
+   *  attribute stays well-formed. */
+  renderStyleAttr(
+    entries: ReadonlyArray<{ key: string; rendered: string; literal?: string }>,
+  ): string {
+    if (entries.length === 0) return "";
+    const css = entries
+      .map(({ key, rendered, literal }) => `${key}: ${literal ?? rendered}`)
+      .join("; ")
+      .replace(/"/g, "&quot;");
+    return ` style="${css}"`;
+  },
+
+  /** HEEx text escaping — entity-escape the HTML-significant
+   *  punctuation.  (HEEx interpolation is `<%= %>`/`{ }`-free in text
+   *  position, but `<` / `&` still open tags / entities.) */
+  escapeText(text: string): string {
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  },
 };
 
 // ---------------------------------------------------------------------------

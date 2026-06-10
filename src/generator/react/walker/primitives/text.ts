@@ -98,7 +98,7 @@ export function emitEmpty(
   const msg = firstPositionalContent(call, ctx) ?? '"No results."';
   void depth;
   return renderPrimitive(ctx, "primitive-empty", {
-    text: unwrapTextLiteral(msg),
+    text: unwrapTextLiteral(msg, ctx.target.escapeText),
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });
@@ -133,7 +133,7 @@ export function emitAnchor(
   const to = stringOrRefArgValue(call, "to", ctx);
   if (to) ctx.usesRouterLink = true;
   return renderPrimitive(ctx, "primitive-anchor", {
-    label: unwrapTextLiteral(label),
+    label: unwrapTextLiteral(label, ctx.target.escapeText),
     to,
     hasTo: to !== undefined,
     testidAttr: testidAttr(call, ctx),
@@ -201,7 +201,7 @@ export function emitHeading(
   const weight = numericNamed(call, "weight");
   const gradient = stringNamed(call, "gradient");
   return renderPrimitive(ctx, "primitive-heading", {
-    text: unwrapTextLiteral(text),
+    text: unwrapTextLiteral(text, ctx.target.escapeText),
     level,
     size,
     hasSize: size !== undefined,
@@ -218,7 +218,7 @@ export function emitText(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   const text = firstPositionalContent(call, ctx) ?? '""';
   void depth;
   return renderPrimitive(ctx, "primitive-text", {
-    text: unwrapTextLiteral(text),
+    text: unwrapTextLiteral(text, ctx.target.escapeText),
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });
@@ -230,7 +230,7 @@ export function emitBold(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   const text = firstPositionalContent(call, ctx) ?? '""';
   void depth;
   return renderPrimitive(ctx, "primitive-bold", {
-    text: unwrapTextLiteral(text),
+    text: unwrapTextLiteral(text, ctx.target.escapeText),
     testidAttr: testidAttr(call, ctx),
   });
 }
@@ -245,7 +245,7 @@ export function emitItalic(
   const text = firstPositionalContent(call, ctx) ?? '""';
   void depth;
   return renderPrimitive(ctx, "primitive-italic", {
-    text: unwrapTextLiteral(text),
+    text: unwrapTextLiteral(text, ctx.target.escapeText),
     testidAttr: testidAttr(call, ctx),
   });
 }
@@ -260,7 +260,7 @@ export function emitInlineCode(
   const text = firstPositionalContent(call, ctx) ?? '""';
   void depth;
   return renderPrimitive(ctx, "primitive-inline-code", {
-    text: unwrapTextLiteral(text),
+    text: unwrapTextLiteral(text, ctx.target.escapeText),
     testidAttr: testidAttr(call, ctx),
   });
 }
@@ -275,9 +275,9 @@ export function emitKeyValueRow(
   const childArg = positionals[1];
   const labelStr =
     labelArg && labelArg.kind === "literal" && labelArg.lit === "string" ? labelArg.value : "";
-  const childJsx = childArg ? walk(childArg, ctx, depth + 2) : "{/* missing value */}";
+  const childJsx = childArg ? walk(childArg, ctx, depth + 2) : ctx.target.renderComment("missing value");
   return renderPrimitive(ctx, "primitive-key-value-row", {
-    label: escapeJsxText(labelStr),
+    label: ctx.target.escapeText(labelStr),
     childJsx,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),

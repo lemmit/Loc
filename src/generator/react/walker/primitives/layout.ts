@@ -228,8 +228,8 @@ export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
         : `Tab ${i + 1}`;
     return {
       value: slugify(labelStr) || `tab-${i + 1}`,
-      label: escapeJsxText(labelStr),
-      bodyJsx: bodyArg ? walk(bodyArg, ctx, depth + 2) : "{/* missing tab body */}",
+      label: ctx.target.escapeText(labelStr),
+      bodyJsx: bodyArg ? walk(bodyArg, ctx, depth + 2) : ctx.target.renderComment("missing tab body"),
     };
   });
   return renderPrimitive(ctx, "primitive-tabs", {
@@ -278,7 +278,7 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   const closeIndent = "  ".repeat(depth);
   const titleText =
     titleIsTextLike && titleArg
-      ? unwrapTextLiteral(renderTextContent(titleArg, ctx) ?? '""')
+      ? unwrapTextLiteral(renderTextContent(titleArg, ctx) ?? '""', ctx.target.escapeText)
       : undefined;
   const contentJsx = contentExpr ? walk(contentExpr, ctx, depth + 1) : undefined;
   // Phase 5 — visual rank.  `variant: "raised" | "flat" | "outline"`

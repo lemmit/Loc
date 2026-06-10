@@ -45,7 +45,7 @@ export function emitIdLink(
         ? ofArg.value
         : undefined;
   if (!aggName) {
-    return `{/* IdLink: missing 'of:' aggregate ref */}`;
+    return ctx.target.renderComment(`IdLink: missing 'of:' aggregate ref`);
   }
   // When aggregate IR is in scope, prefer the official
   // aggregate's plural-snake slug over our local pluralisation
@@ -111,7 +111,7 @@ export function emitButton(
     resolvedIconSvg = lookupBuiltinIcon(icon);
   }
   return renderPrimitive(ctx, "primitive-button", {
-    label: unwrapTextLiteral(label),
+    label: unwrapTextLiteral(label, ctx.target.escapeText),
     onClick: onClickHandler,
     hasOnClick: onClickHandler !== undefined,
     disabled,
@@ -144,21 +144,21 @@ export function emitAction(
   void depth;
   const opRef = positionalArgs(call)[0];
   if (!opRef || opRef.kind !== "member" || opRef.receiver.kind !== "ref") {
-    return `{/* Action: first argument must be <instance>.<operation> (e.g. order.confirm) */}`;
+    return ctx.target.renderComment(`Action: first argument must be <instance>.<operation> (e.g. order.confirm)`);
   }
   const instanceName = opRef.receiver.name;
   const opName = opRef.member;
   const aggName = ctx.paramTypes?.get(instanceName);
   if (!aggName) {
-    return `{/* Action(${instanceName}.${opName}): '${instanceName}' is not an in-scope aggregate instance */}`;
+    return ctx.target.renderComment(`Action(${instanceName}.${opName}): '${instanceName}' is not an in-scope aggregate instance`);
   }
   const agg = ctx.aggregatesByName.get(aggName);
   if (!agg) {
-    return `{/* Action(${instanceName}.${opName}): aggregate ${aggName} not found */}`;
+    return ctx.target.renderComment(`Action(${instanceName}.${opName}): aggregate ${aggName} not found`);
   }
   const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
   if (!op) {
-    return `{/* Action(${instanceName}.${opName}): no public operation '${opName}' on ${agg.name} */}`;
+    return ctx.target.renderComment(`Action(${instanceName}.${opName}): no public operation '${opName}' on ${agg.name}`);
   }
   // Hoist the mutation hook to function top (React requires hooks at
   // component scope, not inside the onClick handler).
@@ -218,7 +218,7 @@ export function emitActionThen(then: ExprIR, ctx: WalkContext): string {
     // `state:` value verbatim; the args[] path is reserved for the
     // future kv-decomposed shape.
     const stateExpr = stateArg ? emitExpr(stateArg, ctx) : undefined;
-    return tsxTarget.renderNavigate(route, [], stateExpr);
+    return ctx.target.renderNavigate(route, [], stateExpr);
   }
   return emitExpr(then, ctx);
 }
@@ -271,7 +271,7 @@ export function emitQueryView(
 ): string {
   const ofArg = namedArgValue(call, "of");
   if (!ofArg) {
-    return `{/* QueryView: missing 'of:' query expression */}`;
+    return ctx.target.renderComment(`QueryView: missing 'of:' query expression`);
   }
   // Render the query expression; this triggers `tryDetectApiHook`
   // so the page-shell registers the matching `useAll<X>()` (or
