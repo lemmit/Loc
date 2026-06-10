@@ -22,7 +22,6 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EntityPartIR,
-  ExprIR,
   FindIR,
   RetrievalIR,
   TypeIR,
