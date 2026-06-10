@@ -1,104 +1,119 @@
-# Next.js frontend — considered, parked
+# Next.js — a full-stack node foundation (deferred)
 
-> Status: **PROPOSED (parked — considered, not pursued).** Records *why*
-> a Next.js target is not on the roadmap despite Next.js being the
-> dominant choice for new React projects, so the question isn't
-> re-litigated cold. Sibling of [`angular-frontend.md`](./angular-frontend.md)
-> (the frontend that *is* prioritised) and
+> Status: **PROPOSED (deferred).** Reframed from an earlier "parked React
+> shell" note: the interesting version of a Next.js target is **not** a
+> second React frontend, it is a **full-stack `node` foundation** — one
+> deployable owning TS domain logic *and* its React UI, the TypeScript
+> analogue of the Phoenix+LiveView foundation. **Deferred**, gated behind
 > [`embedded-frontend-composition.md`](./embedded-frontend-composition.md)
-> (the host/framework decoupling any non-React frontend depends on).
+> (the host-embeds-framework machinery it reuses) and the realization-axes
+> `foundation:` work ([`platform-realization-axes.md`](./platform-realization-axes.md),
+> [`vanilla-phoenix-foundation.md`](./vanilla-phoenix-foundation.md)).
+> Sibling of [`angular-frontend.md`](./angular-frontend.md) (the
+> prioritised, clean-fit frontend).
 
 ## TL;DR
 
-**Do not target Next.js now.** It is tempting on adoption — `create-next-app`
-is the de-facto new-React starter — but it is a poor architectural fit for
-Loom and adds little marginal value for the kind of app Loom generates.
-If it is ever pursued, scope it as a **second React *project-shell*
-variant** (app-router + optional SSR, wire boundary preserved), **not** a
-full-stack target. Ranked below Angular and below the in-flight Vue/Svelte.
+There are two ways to read "target Next.js," and the first is a trap:
 
-## The core problem: Next.js isn't a new framework, it's React
+1. **As a React *project shell*** (app-router + optional SSR, still
+   calling a separate Loom backend over the wire) — adopts Next.js while
+   bypassing the entire reason people choose it (RSC/server actions). The
+   "Next.js as a glorified Vite SPA" anti-pattern. Low value; skip.
+2. **As a full-stack `node` foundation** — one deployable that owns *both*
+   the TS domain logic (server actions / route handlers) *and* the
+   server-rendered React UI. This is the **TypeScript analogue of
+   Phoenix+LiveView**, and it is the only framing worth keeping.
 
-Loom **already targets React** (Vite + the body-walker + the
-Mantine/shadcn/MUI/Chakra design packs). Next.js is a *meta-framework* on
-top of React, so "target Next.js" really means *render the same
-body-walker components into a Next.js project shell instead of a Vite
-one*. The React component output, the design packs, and `wireShape`
-consumption are largely reusable. What changes is the shell: file-based
-app-router instead of React Router, server vs client components, the
-data-fetching model, and the build/deploy story.
+Reading 2 is coherent and reuses two pieces Loom already has, but it is a
+**foundation-level** decision (a collapsed domain+UI deployable), not a
+frontend — so it is **deferred behind the Phoenix-foundation +
+embedded-frontend work that is already untangling exactly this shape.**
 
-That makes the value proposition thin **and** the architectural fit
-hostile at the same time.
+## Next.js is *not* LiveView mechanically — but it can play the same role
 
-## Why it fights Loom's architecture
+To be precise: LiveView is a stateful-server / persistent-WebSocket /
+server-pushes-HTML-diffs model. Next.js is a client-side React framework
+with server rendering + RPC-style server actions — a different paradigm
+(the literal "LiveView for TS" is LiveViewJS; the real LiveView twins are
+**Blazor Server** for .NET and **Livewire** for PHP).
 
-Next.js's reason for existing is **React Server Components (RSC) +
-Server Actions** — it deliberately *blurs* the frontend/backend boundary.
-A Next.js app can *be* the backend: server components fetch domain data
-server-side; server actions invoke operations directly.
+What Next.js *can* do is occupy the same **place in Loom's topology** that
+Phoenix+LiveView occupies: a **single deployable that owns domain logic
+and its own UI**. That topological role — not the diff-over-socket
+mechanism — is what makes the analogy useful.
 
-Loom's architecture is the **opposite**, and the opposition is enforced,
-not stylistic:
+## Why Phoenix+LiveView fits Loom — and what the Next.js parallel requires
 
-- The pipeline is a strict `frontend` deployable talking to a `backend`
-  deployable over a **versioned wire contract** (`.loom/wire-spec.json`).
-- `test/platform/pipeline-layering.test.ts` enforces one-directional
-  layering; the frontend **runs no domain logic** (React skips
-  `render-expr`/`render-stmt` precisely because of this).
+LiveView does not break Loom's frontend/backend separation, because in
+Loom's model **Phoenix+LiveView is one deployable**: the Elixir backend
+owns the domain logic (Ash/Ecto) *and* renders its own UI (the HEEx
+walker). There is no wire boundary to cross because there is no separate
+frontend. Loom models this as the **`foundation:` axis** on the `elixir`
+platform (`ash` | `vanilla`).
 
-So there are only two ways to target Next.js, and both are unsatisfying:
+The Next.js parallel is a **`node` foundation** that does the same:
 
-| Approach | What it is | Why it disappoints |
+| Piece | Phoenix+LiveView | Next.js full-stack node |
 |---|---|---|
-| **A. Conservative** (wire preserved) | Next.js in client/SSR mode, app-router, still calling a separate Loom backend over the wire | Adopts Next.js while **bypassing the entire reason people choose it** (RSC/server actions) — the "Next.js as a glorified Vite SPA" pattern the Next team discourages. You fight the framework's grain for a different project shell. |
-| **B. Idiomatic** (full-stack) | Server components fetch domain data server-side; server actions call domain operations | Puts a Node server in front of / instead of the backend and forces the page-DSL to lower domain calls into server actions — **breaking the "frontend runs no domain logic" invariant** the wire-spec contract rests on. |
+| Domain logic | Elixir (Ash/Ecto) — `render-expr`/`render-stmt` for Elixir | **TS — `render-expr`/`render-stmt` already exist (the Hono backend)** |
+| UI rendering | HEEx walker (`heex-target.ts`) | **React body-walker — already exists** |
+| Deployable shape | one app: domain + UI | one app: domain (server actions / route handlers) + React UI |
+| Loom axis | `platform: elixir, foundation: …` | `platform: node, foundation: nextjs` (web-framework + structural foundation in one, like Phoenix) |
 
-## Why the marginal value is low *for Loom's app shape*
+The reuse is the headline: **both halves already exist** — the TS domain
+emission (`TS_TARGET` for `ExprTarget`, `render-stmt.ts`) and the React
+body-walker + design packs. A full-stack node foundation *glues them into
+the Next.js app-router / server-actions shape*, rather than emitting two
+separate deployables with a wire contract between them.
 
-Next.js's headline wins are **SSR/SEO** and **server-side data fetching**.
-Loom's sweet spot is internal, CRUD-over-aggregates line-of-business apps,
-where SSR/SEO matters little and the existing client-rendered React/Vite
-target already serves the need. So you would pay to fight your own
-architecture for benefits the target apps mostly don't want.
+## Why it is still deferred (not now, maybe not soon)
 
-## Where it ranks
+1. **It is a `foundation` decision, not a frontend.** Collapsing domain+UI
+   into one deployable re-introduces the **two-axis-freezing** complexity
+   that `vanilla-phoenix-foundation.md` + `embedded-frontend-composition.md`
+   are *currently untangling* for Phoenix (Phoenix froze domain *and*
+   hosted-framework; the fix decomposes it). A node foundation should land
+   **on top of** that machinery, reusing it, not reinventing it.
+2. **The idiomaticity asymmetry.** LiveView *is* the blessed, dominant way
+   to build Phoenix apps — the foundation pays for itself. In TS-land the
+   collapsed full-stack model (server actions) is *one* popular option, and
+   the **separated SPA-talks-to-API model Loom already does well** is at
+   least as common for structured apps. The foundation chases a model that
+   is not clearly the ecosystem default.
+3. **It forfeits what the split buys.** A collapsed deployable loses the
+   versioned wire contract (`.loom/wire-spec.json`), backend-swappability,
+   and cross-backend conformance verification. Phoenix accepts that loss
+   because LiveView is *the* idiom; Next.js has a weaker claim.
 
-Below Angular and below the in-flight Vue/Svelte:
+## If/when pursued — scope
 
-- **Angular / Vue / Svelte** are genuinely *distinct* frameworks used
-  idiomatically — each is a clean new `WalkerTarget` + design pack with no
-  conflict with the wire boundary.
-- **Next.js** is "React you already have, plus a paradigm that opposes
-  your wire boundary." The distinct-framework expansion budget is better
-  spent on the three above.
+- A **`foundation: nextjs` on `platform: node`**, decided on top of
+  `embedded-frontend-composition`'s host-embeds-framework model (the node
+  deployable hosts + SSRs the React UI, embedded — the `phoenix-embeds-…`
+  twin) plus a server-actions/route-handler transport for the domain calls.
+- **Reuse, don't fork:** the React body-walker output and the TS
+  `render-expr`/`render-stmt` are consumed verbatim; only the
+  project-shell + the domain-call-lowering (operation → server action /
+  route handler) are new.
+- Gate it like the other generated targets: a `generated-nextjs-build.yml`
+  matrix doing `next build`.
 
-## If it is ever pursued
-
-Scope it explicitly and narrowly:
-
-1. **A React project-shell variant, not a full-stack target.** Reuse the
-   existing React body-walker output verbatim; swap React Router for the
-   app-router; keep `'use client'` components calling the generated API
-   client over the wire. Optional SSR for the shell only.
-2. **No server actions, no RSC-fetches-domain.** The wire boundary stays;
-   `wire-spec.json` remains the contract.
-3. **Gate it like React** — a `generated-nextjs-build.yml` matrix
-   (`example × pack`) doing `next build`.
-
-Success test (mirroring `embedded-frontend-composition.md`): adding the
-Next.js shell touches the React generator's project-scaffold layer and a
-capability set — **never** the body-walker, the design packs, or the wire
-contract. If a Next.js target would require touching any of those, it has
-drifted into approach B and should stop.
+Success test: the foundation touches the node project-scaffold layer + a
+domain-call-lowering seam + a capability set — **never** the React
+body-walker, the design packs, the TS expression renderers, or the IR. If
+it would, it has drifted into a bespoke backend and should stop.
 
 ## Cross-references
 
-- [`angular-frontend.md`](./angular-frontend.md) — the prioritised
-  frontend; a clean distinct-framework fit (the contrast that makes the
-  Next.js case weak).
 - [`embedded-frontend-composition.md`](./embedded-frontend-composition.md)
-  — host/framework decoupling; a static-export Next.js shell would host
-  like React does today.
+  — **prerequisite**: host-embeds-framework decoupling; the node
+  deployable hosting React is the `phoenix-embeds-react` twin.
+- [`vanilla-phoenix-foundation.md`](./vanilla-phoenix-foundation.md) /
+  [`platform-realization-axes.md`](./platform-realization-axes.md) — the
+  `foundation:` axis precedent a `node` foundation copies.
+- [`angular-frontend.md`](./angular-frontend.md) — the prioritised
+  frontend; a clean distinct-framework fit (the contrast: Next.js is a
+  *foundation* question, Angular is a *frontend* one).
 - [`docs/page-metamodel.md`](../page-metamodel.md) — the framework-neutral
-  page-DSL a shell variant would reuse unchanged.
+  page-DSL both reuse unchanged.
