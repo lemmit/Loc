@@ -44,4 +44,8 @@ export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingSha
   // `document` (a single opaque `:map` — non-idiomatic for Ash) is a
   // future allowed-but-warned addition.
   elixir: ["relational", "embedded"],
+  // Java/JPA starts relational-only; `embedded` (JSONB via Hibernate
+  // `@JdbcTypeCode(SqlTypes.JSON)`) and `document` land with the
+  // persistence slices of the Java backend plan.
+  java: ["relational"],
 };

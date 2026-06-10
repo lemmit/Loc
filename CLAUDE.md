@@ -36,10 +36,12 @@ npm run test:tsc          # LOOM_TS_BUILD=1 — emits TS projects and runs `tsc 
 npm run test:tsc-react    # LOOM_REACT_BUILD=1 — emits React projects for every example × design pack and tscs them
                           # CI shards via LOOM_REACT_BUILD_CASE=<ddd-path>:<pack>
 npm run test:dotnet       # LOOM_DOTNET_BUILD=1 — `dotnet build /warnaserror` against generated .NET projects
+npm run test:java         # LOOM_JAVA_BUILD=1 — `gradle testClasses bootJar` against generated Spring Boot projects (JDK 21 + Gradle)
 npm run test:phoenix      # LOOM_PHOENIX_BUILD=1 — `mix compile --warnings-as-errors` against real Ash 3.x in Elixir docker
 npm run test:obs          # LOOM_OBS_E2E=1 — boots generated Hono backend, asserts catalog envelope on stdout
 npm run test:obs-dotnet   # LOOM_OBS_E2E_DOTNET=1 — same for the .NET backend (postgres sidecar via docker)
 npm run test:obs-phoenix  # LOOM_OBS_E2E_PHOENIX=1 — same for the Phoenix backend (postgres sidecar via docker)
+npm run test:obs-java     # LOOM_OBS_E2E_JAVA=1 — same for the Java backend (docker postgres, or LOOM_OBS_PG_URL override)
 npm run test:biome-gen    # LOOM_BIOME=1 — Biome lint against emitted TS/TSX (already run in `test.yml`)
 ```
 
@@ -114,7 +116,7 @@ Every backend has the same shape:
 | `*-builder.ts` | Larger procedural builders for per-aggregate-variable content (Hono routes, repositories, React pages, page-objects). |
 | `render-expr.ts` / `render-stmt.ts` | IR-expression-/IR-statement-to-source renderers. Present on platforms that execute domain logic (TS, .NET, Phoenix LiveView). React skips these — the frontend doesn't run domain logic, only consumes the wire shape. **Each `render-expr.ts` is now a leaf-only `ExprTarget` table** — the 17-arm `ExprIR.kind` dispatch + all recursion live once in `src/generator/_expr/target.ts` (see below). `render-stmt.ts` stays per-backend (flat dispatch, shape-divergent arms — deliberately not extracted). |
 
-The four backends and their entry points are registered in `src/platform/registry.ts`; each implements the `PlatformSurface` contract in `src/platform/surface.ts` (`emitProject`, `composeService`, `needsDb`, `defaultPort`, `mountsUi`).
+The backends (Hono/node, .NET, Phoenix/elixir, Spring Boot/java) and their entry points are registered in `src/platform/registry.ts`; each implements the `PlatformSurface` contract in `src/platform/surface.ts` (`emitProject`, `composeService`, `needsDb`, `defaultPort`, `mountsUi`).
 
 The three expression renderers share one dispatcher: `src/generator/_expr/target.ts` **defines** the `ExprTarget` contract (the eight leaf-divergence axes — operators, naming, money arithmetic, collection ops, `refColl.contains` membership, regex, `ref` role, `callKind` call syntax) and `renderExprWith(e, target, ctx)`, which owns the 17-arm `ExprIR.kind` dispatch + recursion. Each backend's `render-expr.ts` supplies only the leaf table (`TS_TARGET` / `CS_TARGET` / `ELIXIR_TARGET`); a 5th domain-logic backend writes one target, not a 4th dispatcher. Expression-side analogue of the `WalkerTarget` seam below; byte-identical-output gated (PR #843). Per-`ExprIR.kind` arm tests live alongside each backend (`render-expr-kinds.test.ts` for TS/.NET, `phoenix-render-expr.test.ts`).
 
@@ -192,8 +194,9 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `generated-react-build.yml` — matrix `{example × pack}`, generates the React project, `npm install`, `tsc --noEmit`. Catches generator drift invisible to IR-level tests.
 - `hono-build.yml` — fast `tsc --noEmit` + `tsup` gate against the Hono backend output.
 - `dotnet-build.yml` — `dotnet build /warnaserror` against the .NET output.
+- `java-build.yml` — `gradle testClasses bootJar` (main + emitted JUnit sources) against the Java output.
 - `elixir-ash-build.yml` — `mix deps.get && mix compile --warnings-as-errors` against the real Ash 3.x dep set in an Elixir docker image.
-- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-ash-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout).
+- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-ash-obs-e2e.yml` / `java-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout).
 - `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview).
 - `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader run).
 - `cleanup-artifacts.yml` — scheduled tidy of test artefacts.

@@ -70,7 +70,12 @@ describe("platformFor — byte-identity guarantee", () => {
   });
 
   it("the defaults map covers exactly the backend families", () => {
-    expect(Object.keys(BUILTIN_PLATFORM_LATEST).sort()).toEqual(["dotnet", "elixir", "node"]);
+    expect(Object.keys(BUILTIN_PLATFORM_LATEST).sort()).toEqual([
+      "dotnet",
+      "elixir",
+      "java",
+      "node",
+    ]);
   });
 
   it("throws a clear error for an unregistered backend version", () => {

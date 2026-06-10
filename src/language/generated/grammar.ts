@@ -2548,6 +2548,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "value": "elixir"
           },
           {
+            "$type": "Keyword",
+            "value": "java"
+          },
+          {
             "$type": "RuleCall",
             "rule": {
               "$ref": "#/rules@187"

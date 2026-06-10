@@ -241,7 +241,7 @@ Framework returns string:
 // language-ecosystem platform; legacy `phoenix` and `phoenixLiveView`
 // desugar to `elixir` (the latter through a `phoenix → elixir` chain).
 Platform returns string:
-    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | STRING;
+    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'java' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,

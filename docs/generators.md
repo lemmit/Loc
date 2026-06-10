@@ -660,6 +660,52 @@ for the full mapping table.
 
 ---
 
+## Java backend (`platform: java`)
+
+Spring Boot 3.5 / Spring Data JPA (Hibernate) / Postgres, built with
+Gradle (Kotlin DSL, Boot plugin + BOM import, Java 21 toolchain; no
+wrapper jar is committed — the generator emits text only, and the
+Dockerfile/CI/dev environments provide Gradle ≥ 8, or run
+`gradle wrapper` once).  Emission
+lives in `src/generator/java/`; the surface is `src/platform/java.ts`
+(`java@v1`).  Per-aggregate placement routes through the layout adapter
+(`byFeature` default — package-by-feature; `byLayer` — package-by-layer),
+which owns BOTH the package and the file path.
+
+Per deployable it emits:
+
+| Piece | Files |
+|---|---|
+| Project shell | `build.gradle.kts` + `settings.gradle.kts` (Boot plugin; jMolecules, springdoc, Flyway when migrations exist), `Application.java`, `application.yml` (datasource via `SPRING_DATASOURCE_*` env), multi-stage Gradle `Dockerfile` |
+| Domain | typed-id records (`@Embeddable`, `newId()`), enums (DSL-cased constants — the wire), VO records running invariants in the compact constructor, event records implementing a `DomainEvent` marker (jMolecules-annotated), aggregate/part classes with package-private fields + record-style accessors, `create(...)` factory, `pullEvents()`, positional part `_create` factories |
+| Persistence | JPA annotations mirroring the shared `MigrationsIR` schema (`@EmbeddedId` typed ids, flattened-VO `@AttributeOverride`s, unidirectional `@OneToMany` containments with `nullable = false` join columns, `@ElementCollection` join tables for `X id[]` + value collections, `@MappedSuperclass` TPC bases); repository triple — domain port (`save`/`findById`/`getById`/`findAll`/`delete` + declared finds), Spring Data interface with `@Query` JPQL finds, `@Repository` impl mapping misses to 404 |
+| Migrations | `MigrationsIR` → Flyway `db/migration/V<ts>.<n>__*.sql` via the shared Postgres-SQL renderer |
+| API | `@RestController` per aggregate (`POST /` 201 `{id}`+Location, `GET /{id}`, `GET /`, `POST /{id}/<op_snake>` 204, `GET /<find_snake>`, `DELETE /{id}`), DTO records in `wireShape` order (money/datetime as strings), wire validators from the shared invariant classifier → 422 RFC 7807 with `errors[]`, `@RestControllerAdvice` (400/403/404/422/500 problem+json), springdoc `/openapi.json` |
+| Auth | `auth: required` + `user {}` → typed `User` record, `UserVerifier` boundary + accept-all dev stub, 401 filter, ThreadLocal accessor; `currentUser` threads into ops as a trailing parameter |
+| Workflows / views | `POST /workflows/<snake>` via a per-context `@Service`; `GET /views/<snake>` (shorthand reuses `<Agg>Response`; full form gets a `<View>Row` from bind expressions) |
+| Extern ops | per-op handler interface + throwing dev-stub `@Component`; service runs `check<Op>` → handler → invariants → save |
+| Tests | `test "…"` → JUnit 5 classes under `src/test/java` |
+| Observability | always-on catalog envelope as flat JSON on stdout (`server_starting` … `server_drained`, request bracket) |
+
+Expression rendering is the `JAVA_TARGET` leaf table over the shared
+`ExprTarget` dispatcher: BigDecimal method arithmetic with `compareTo`
+comparisons, `Objects.equals` reference equality, `Instant` ordering via
+`isBefore`/`isAfter`, find-anywhere regex via `Pattern…find()`, Streams
+collection ops with type-directed `sum` reduction.
+
+**Not yet implemented — every gap fails fast at validate time** (never a
+silent downgrade): paged carriers / discriminated unions / exception-less
+operation returns (java is absent from the `SUPPORTED_*` backend sets),
+TPH `sharedTable` inheritance, `persistedAs(eventLog)`, `shape(document|
+embedded)` (`PLATFORM_SAVING_SHAPES.java` is relational-only), single
+(non-collection) containments (`loom.java-single-containment-unsupported`),
+the embedded-SPA fullstack mount (`loom.java-fullstack-unsupported`),
+retrieval-driven workflow loops, reified-criteria `Specification<T>`
+consumption, and provenance/audited (gated like .NET).  See
+`docs/plans/java-backend-implementation.md` for the follow-up plan.
+
+---
+
 ## System orchestration
 
 `generate system` (in `src/system/index.ts`) runs each deployable

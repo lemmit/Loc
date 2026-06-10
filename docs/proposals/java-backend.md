@@ -1,16 +1,20 @@
 # Java backend — Spring Boot / JPA generator
 
-> Status: **VISION / not scheduled.** Captures the design and effort
-> shape for a fourth domain-logic backend (after Hono, .NET, Phoenix).
-> **Deliberately deferred** behind
-> [`criterion-everywhere.md`](./criterion-everywhere.md): the Java
-> backend's headline differentiator (reusable `Specification<T>`
-> emission) consumes the selectability model that proposal defines, so
-> criterion-everywhere ships first. No grammar/IR change is required for
-> the backend itself — it is purely additive codegen. Builds on
-> [`docs/platforms.md`](../platforms.md) (the `PlatformSurface`
-> contract) and [`docs/generators.md`](../generators.md) (per-backend
-> feature matrix).
+> Status: **SHIPPING (core landed).** The backend exists in-tree
+> (`platform: java`, `java@v1` — `src/platform/java.ts` +
+> `src/generator/java/`); the execution record and the remaining
+> follow-ups (paged/unions, TPH, event sourcing, document shapes,
+> `Specification<T>`, fullstack mount, conformance-stack integration)
+> live in
+> [`../plans/java-backend-implementation.md`](../plans/java-backend-implementation.md).
+> The criterion-everywhere prerequisite this proposal originally
+> deferred behind has since shipped (selectability oracle + reified
+> criteria), so the `Specification<T>` path is unblocked.  The original
+> design rationale below is retained for context; where it disagrees
+> with the shipped code, the code (and `docs/generators.md`'s Java
+> section) wins — notably the build is **Gradle (Kotlin DSL)** as the proposal
+> envisioned (an interim Maven shell was revised out), and the default
+> application style is **layered**.
 
 ## TL;DR
 
