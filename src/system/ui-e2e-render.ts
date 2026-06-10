@@ -412,10 +412,6 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
     }
     case "ternary":
       return `${renderUIExpr(e.cond, ctx)} ? ${renderUIExpr(e.then, ctx)} : ${renderUIExpr(e.otherwise, ctx)}`;
-    case "propagate":
-      // `?` propagation is an operation/workflow-body construct, not a test
-      // expression; defensive (exception-less.md A2).
-      throw new Error("renderUIExpr: unexpected '?' propagation.");
     case "lambda":
       // Lambda body is now optional (block-body lambdas were
       // added for page event handlers).  UI E2E tests don't currently

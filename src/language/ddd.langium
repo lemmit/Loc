@@ -1548,7 +1548,6 @@ MatchArm:
 TernaryExpr infers Expression:
     OrExpr (
         {infer TernaryExpr.cond=current} '?' thenExpr=Expression ':' elseExpr=Expression
-      | {infer PropagateExpr.operand=current} '?'
     )?;
 
 OrExpr infers Expression:

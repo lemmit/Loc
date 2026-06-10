@@ -46,7 +46,6 @@ import {
   isParenExpr,
   isPostfixChain,
   isPrimitiveConversion,
-  isPropagateExpr,
   isProperty,
   isStringLit,
   isTernaryExpr,
@@ -57,7 +56,6 @@ import {
 import { isCollectionOp } from "../../util/collection-ops.js";
 import { isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
 import { findVerb, type ResourceVerbDef } from "../resource-verbs.js";
-import { variantTag } from "../stdlib/unions.js";
 import type {
   ExprIR,
   IdValueType,
@@ -426,33 +424,6 @@ function applySuffixToRecv(
 // `?` propagation helpers (exception-less.md A2).
 // ---------------------------------------------------------------------------
 
-/** True when a union variant is `error`-marked for `?` purposes: the `none`
- *  unit (an `option`'s empty case) or an `entity` referencing an `error`
- *  payload.  Everything else is a success variant the `?` unwraps to. */
-function isErrorVariantType(v: TypeIR, env: Env): boolean {
-  if (v.kind === "none") return true;
-  if (v.kind === "entity") return findPayloadByName(env, v.name)?.kind === "error";
-  return false;
-}
-
-/** The discriminator tags of an operand union's error variants — the set `?`
- *  short-circuits on.  A non-union operand has none (the validator flags it). */
-function errorTagsOf(type: TypeIR, env: Env): string[] {
-  if (type.kind !== "union") return [];
-  return type.variants.filter((v) => isErrorVariantType(v, env)).map(variantTag);
-}
-
-/** The unwrapped type of `operand?` — the operand union's non-error variants,
- *  as a single type when one remains, else their `or`-join.  A non-union
- *  operand passes through unchanged (the validator reports the misuse). */
-function successTypeOf(type: TypeIR, env: Env): TypeIR {
-  if (type.kind !== "union") return type;
-  const successes = type.variants.filter((v) => !isErrorVariantType(v, env));
-  if (successes.length === 1) return successes[0]!;
-  if (successes.length === 0) return { kind: "primitive", name: "string" };
-  return { kind: "union", variants: successes };
-}
-
 export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (!expr) return lit("null", "null");
   if (isStringLit(expr)) return lit("string", expr.value);
@@ -510,14 +481,6 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
       then: lowerExpr(expr.thenExpr, env),
       otherwise: lowerExpr(expr.elseExpr, env),
     };
-  }
-  if (isPropagateExpr(expr)) {
-    // `expr?` (exception-less.md A2): lower the operand, then record which of
-    // its `or`-union variants are error-marked (the short-circuit set).  A
-    // non-union operand yields no error tags — the validator flags it.
-    const operand = lowerExpr(expr.operand, env);
-    const operandType = inferExprType(expr.operand, env);
-    return { kind: "propagate", operand, errorTags: errorTagsOf(operandType, env) };
   }
   if (isLambda(expr)) {
     const inner = withLocal(env, expr.param, "lambda", { kind: "primitive", name: "string" });
@@ -1003,7 +966,6 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     return acc;
   }
   if (isTernaryExpr(expr)) return inferExprType(expr.thenExpr, env);
-  if (isPropagateExpr(expr)) return successTypeOf(inferExprType(expr.operand, env), env);
   if (isMatchExpr(expr)) {
     // Match expressions return one arm's value (or the `else`).
     // Same posture as ternary — inspect the first arm's value type;

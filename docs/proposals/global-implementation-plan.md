@@ -71,8 +71,10 @@ mature. Recent waves the older docs had not absorbed:
 
 - **The `?` propagation operator** (exception-less A2). Maintainer
   decision 2026-06-10: resigned from completely. Surface + validation
-  shipped in #1030 with **zero backend codegen**; removal is work item
-  **T1.2** below. The old M2 milestone (A1+A2+A3) is obsolete.
+  shipped in #1030 with **zero backend codegen**; the surface has since
+  been **removed** (grammar rule, `ExprIR` kind, lowering, gates,
+  print arm, tests — T1.2, done). The old M2 milestone (A1+A2+A3) is
+  obsolete.
 - **`@handle` seed cross-row refs** — D-SEED-XREF pinned explicit ids
   instead. (Stale "not yet handled" emitter comments fixed 2026-06-10.)
 - **`mutation-testing.md`** — out of scope per maintainer.
@@ -87,7 +89,6 @@ runtime trap, silently degrades, or misleads.
 | # | Item | Where | Owning proposal |
 |---|---|---|---|
 | T1.1 | **Union-returning `find` producer path** — .NET stubs the handler with `NotImplementedException` (`src/generator/dotnet/cqrs/queries.ts:131-142`, pinned by `union-emit.test.ts`); Hono falls back to an `unknown` return type (`repository-find-builder.ts:~608`). Wire DTOs are fully generated; only variant *selection* is missing. | dotnet, node | [payload-transport-layer](./payload-transport-layer.md) (P4 producer side) |
-| T1.2 | **Remove the `?` propagation operator** — delete the grammar `PropagateExpr` rule (+ `langium:generate`), the `ExprIR` `propagate` kind, its lowering arm, the `loom.propagate-unsupported` / `loom.propagate-incompatible-error` gates (`structural-checks.ts:~486/~500`), the print-expr arm, and the #1030 tests. Cheap now — nothing downstream consumes it. | language, ir | [exception-less](./exception-less.md) (dropped A2) |
 | T1.3 | **React renderers for `Switch` / `MultilineField` / `SelectField`** — registered as `admissibleInSource` with **no renderer on any target** (`src/generator/_walker/registry.ts:~249-255`); they fall through to an "unknown layout component" comment. Either implement the TSX (+ HEEx) renderers or stop admitting them in source. | react walker | [page-metamodel](../page-metamodel.md) |
 | T1.4 | **Docs/comment honesty debt** — keep proposal status headers, the README table, and this plan in sync per the maintenance rule above (the 2026-06-10 pass fixed the then-known liars: seed emitter headers, the TPH validator comment, `ddd patch` missing from `tools.md`, and seven stale proposal headers). | docs | — |
 
@@ -187,24 +188,23 @@ retired: P4 and most of A1/A3 shipped independently, and A2 is dropped.
 
 ## Suggested near-term order
 
-A pragmatic next-10, dependency-consistent:
+A pragmatic next-9, dependency-consistent:
 
 1. **T1.1** union-find variant selection (.NET runtime trap + Hono
    `unknown`) — small, removes the only `NotImplementedException` a
    modeller can hit from valid source.
-2. **T1.2** remove the `?` operator surface.
-3. **T2.a** vanilla workflow statement kinds (slices already cut).
-4. **T2.b → T2.c** event sourcing + `or`-union returns under vanilla —
+2. **T2.a** vanilla workflow statement kinds (slices already cut).
+3. **T2.b → T2.c** event sourcing + `or`-union returns under vanilla —
    closes the two biggest elixir parity gates.
-5. **T1.3 + T2.e** walker primitive backfill (React trio + HEEx
+4. **T1.3 + T2.e** walker primitive backfill (React trio + HEEx
    priority set).
-6. **T2.f** `routeSlug` consumption (one slice, three backends).
-7. **T2.g** capability-`filter` reification + principal factory —
+5. **T2.f** `routeSlug` consumption (one slice, three backends).
+6. **T2.g** capability-`filter` reification + principal factory —
    unblocks T2.j → multi-tenancy.
-8. **T2.i** IR field-constraint metadata (+ elixir validators, Zod/.NET
+7. **T2.i** IR field-constraint metadata (+ elixir validators, Zod/.NET
    enrichment).
-9. **T3.1** explicit `loads:` plans.
-10. **Tier 4 #1–#3** execution-context → multi-tenancy → authorization
+8. **T3.1** explicit `loads:` plans.
+9. **Tier 4 #1–#3** execution-context → multi-tenancy → authorization
     — the governance spine.
 
 ## Parallelisation
@@ -213,7 +213,7 @@ Three loosely-coupled tracks (one agent each):
 
 - **Track A (type-system & queries):** T1.1 → T2.g → T3.1/T3.2 → T3.4.
 - **Track B (elixir parity):** T2.a → T2.b → T2.c → T2.d → T2.e/T2.h.
-- **Track C (governance & product):** T1.2/T1.3 → T2.f/T2.i →
+- **Track C (governance & product):** T1.3 → T2.f/T2.i →
   execution-context → multi-tenancy → authorization; loom-forms +
   frontend remainders interleave.
 

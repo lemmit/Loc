@@ -53,8 +53,6 @@ export function printExpr(node: Expression): string {
       return printBinaryChain(node);
     case "TernaryExpr":
       return `${printExpr(node.cond)} ? ${printExpr(node.thenExpr)} : ${printExpr(node.elseExpr)}`;
-    case "PropagateExpr":
-      return `${printExpr(node.operand)}?`;
     case "PostfixChain":
       return printPostfixChain(node);
     case "Lambda":
