@@ -1,10 +1,9 @@
-// Slice 5c fixture — exercises vanilla workflow EXECUTION emission.
-// Drives the workflow module emitter (vanilla/workflow-execution-emit.ts)
-// + the named-operation context-emit prerequisite + the
-// WorkflowsController + spliced routes through the elixir-vanilla-build
-// mix-compile gate.  Body lowering for individual statement kinds is
-// incremental; this fixture verifies the SHAPE compiles under
-// --warnings-as-errors.
+// Slice 5c body-lowering follow-up — exercises `factory-let` and
+// `op-call` body lowering on a vanilla workflow.  The fixture's
+// `createAndComplete` workflow creates a Task then immediately calls
+// its `markDone` operation, so the body lowers to a `with`-chain over
+// `Context.create_task(%{...})` + `Context.mark_done_task(t, %{})`.
+// Validated by the elixir-vanilla-build.yml mix-compile gate.
 system Tasks {
   subdomain Productivity {
     context Tracker {
@@ -18,8 +17,19 @@ system Tasks {
       }
       repository Tasks for Task { }
 
+      // Empty body — exercises the SHAPE-only emit path.
       workflow markAllDone transactional {
         create() { }
+      }
+
+      // Body-lowering exercise — factory-let + op-call.  Param-reference
+      // lowering (workflow create-params surfacing inside the body) is
+      // a separate follow-up slice; today the create body uses literals.
+      workflow createAndComplete transactional {
+        create() {
+          let t = Task.create({ title: "Untitled", done: false })
+          t.markDone()
+        }
       }
     }
   }
