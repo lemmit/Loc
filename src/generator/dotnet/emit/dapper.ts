@@ -33,7 +33,7 @@ import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { unionFindAsOptionalTwin } from "../find-emit.js";
-import { csValueTypeForId, renderCsType } from "../render-expr.js";
+import { csValueTypeForId, renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderRetrievalParamsWithCt } from "./repository.js";
 
 /** Postgres table for an aggregate — lowercase plural (e.g. `orders`). */
@@ -268,11 +268,43 @@ export function renderDapperRepository(
   const cols = columnsOf(agg);
   const colList = cols.map((c) => c.col).join(", ");
   const insertVals = cols.map((c) => `@${c.col}${c.cast}`).join(", ");
+  // Lifecycle stamps (`stamp onCreate/onUpdate { field: expr }` →
+  // `contextStamps`).  EF applies these via SaveChangesInterceptor; the
+  // Dapper upsert can't see Added-vs-Modified, so:
+  //   - onUpdate assignments MUTATE the in-memory aggregate before the
+  //     upsert (EF parity — EF applies onUpdate at Added too), so both the
+  //     row and the projected response carry the stamp;
+  //   - onCreate assignments are INSERT-only: computed into locals, bound
+  //     as that column's parameter, and EXCLUDED from the ON CONFLICT
+  //     UPDATE SET — an existing row keeps its original value.  (The
+  //     in-memory aggregate is not mutated for onCreate; existence is
+  //     unknowable without an extra round-trip.)
+  const stampRules = agg.contextStamps ?? [];
+  const onCreateStamps = stampRules
+    .filter((r) => r.event === "create")
+    .flatMap((r) => r.assignments);
+  const onUpdateStamps = stampRules
+    .filter((r) => r.event === "update")
+    .flatMap((r) => r.assignments);
+  const onCreateCols = new Set(onCreateStamps.map((a) => snake(a.field)));
   const upsertSet = cols
-    .filter((c) => c.col !== "id")
+    .filter((c) => c.col !== "id" && !onCreateCols.has(c.col))
     .map((c) => `${c.col} = excluded.${c.col}`)
     .join(", ");
-  const saveParams = cols.map((c) => `${c.col} = ${c.save}`).join(", ");
+  const createLocal = (col: string): string => `__create_${col}`;
+  const saveParams = cols
+    .map((c) => `${c.col} = ${onCreateCols.has(c.col) ? createLocal(c.col) : c.save}`)
+    .join(", ");
+  const stampLines: string[] = [
+    ...onUpdateStamps.map(
+      (a) =>
+        `        aggregate.${upperFirst(a.field)} = ${renderCsExpr(a.value, { thisName: "aggregate" })};`,
+    ),
+    ...onCreateStamps.map(
+      (a) =>
+        `        var ${createLocal(snake(a.field))} = ${renderCsExpr(a.value, { thisName: "aggregate" })};`,
+    ),
+  ];
 
   // Non-principal capability filters (`filter !this.isDeleted`) AND into
   // every read (GetById / FindManyByIds / finds / retrievals) — Dapper has
@@ -465,6 +497,7 @@ export function renderDapperRepository(
       "",
       `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
       "    {",
+      ...stampLines,
       "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
       `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${colList}) VALUES (${insertVals}) ON CONFLICT (id) DO UPDATE SET ${upsertSet}", new { ${saveParams} }, cancellationToken: cancellationToken));`,
       "        foreach (var ev in aggregate.PullEvents())",

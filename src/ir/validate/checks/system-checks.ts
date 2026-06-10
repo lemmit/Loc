@@ -461,7 +461,16 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
           reject(where, "has reference-collection associations (Id[] join tables)");
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
           reject(where, "contains nested entity parts");
-        if ((a.contextStamps ?? []).length > 0) reject(where, "uses audit stamping");
+        // Lifecycle stamping is supported (onUpdate mutates the aggregate
+        // pre-save; onCreate binds INSERT-only parameters excluded from the
+        // upsert SET).  Principal-referencing stamp values stay rejected —
+        // no request-scoped principal accessor on the Dapper repository.
+        if (
+          (a.contextStamps ?? []).some((r) =>
+            r.assignments.some((asg) => exprUsesCurrentUser(asg.value)),
+          )
+        )
+          reject(where, "uses a principal-referencing stamp value");
         // Non-principal capability filters are supported (spliced into every
         // SELECT's WHERE by the Dapper emitter); principal-referencing ones
         // (tenancy: currentUser.<field>) stay rejected — there is no

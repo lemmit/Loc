@@ -174,6 +174,29 @@ describe("dapper capability filters", () => {
     expect(repo).toContain("WHERE (customer = @customer) AND (NOT archived)");
   });
 
+  it("applies lifecycle stamps: onUpdate mutates pre-save, onCreate is INSERT-only", async () => {
+    const body = `createdAt: datetime
+        updatedAt: datetime
+        stamp onCreate { createdAt := now() }
+        stamp onUpdate { updatedAt := now() }`;
+    const { files, errors } = await emit(sys("dapper", body));
+    expect(errors).toEqual([]);
+    const repo = [...files.entries()].find(([k]) =>
+      k.endsWith("Repositories/OrderRepository.cs"),
+    )![1];
+    // onUpdate mutates the in-memory aggregate (EF-interceptor parity) so
+    // both the row and the projected response carry the stamp.
+    expect(repo).toContain("aggregate.UpdatedAt = DateTime.UtcNow;");
+    // onCreate binds an INSERT-only local …
+    expect(repo).toContain("var __create_created_at = DateTime.UtcNow;");
+    expect(repo).toContain("created_at = __create_created_at");
+    // … and the upsert SET excludes it (an existing row keeps its value)
+    // while still updating the onUpdate column.
+    expect(repo).toMatch(
+      /ON CONFLICT \(id\) DO UPDATE SET (?!.*created_at = excluded).*updated_at = excluded\.updated_at/,
+    );
+  });
+
   it("never emits a silent principal-referencing filter (model errors out upstream)", async () => {
     // The selectability validator already rejects `currentUser.<field>` in
     // this fixture shape; the dapper gate's principal check is the
