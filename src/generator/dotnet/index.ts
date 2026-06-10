@@ -10,6 +10,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import { durableEventTypes } from "../../ir/util/channels.js";
 import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
 import {
   effectiveSavingShape,
@@ -50,6 +51,7 @@ import {
 } from "./emit/dapper.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
 import { emitDotnetMigrations } from "./emit/migrations.js";
+import { renderOutboxDispatcher, renderOutboxMessage, renderOutboxRelay } from "./emit/outbox.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import { emitDotnetSeeds } from "./emit/seed.js";
 import {
@@ -277,6 +279,22 @@ function emitProjectFromContexts(
   if (hasSubscriptions) {
     emitDispatchHandlers(merged, ns, out, system?.sys);
   }
+  // Transactional outbox (dispatch-delivery-semantics.md): durable channels
+  // (`retention: log | work`) record their events in __loom_outbox (EF
+  // entity over the MigrationsIR-owned table) and a relay BackgroundService
+  // delivers them at-least-once.  EF persistence only — the Dapper outbox is
+  // a follow-up slice.
+  const durableTypes = [...new Set(contexts.flatMap((c) => [...durableEventTypes(c)]))].sort();
+  const hasOutbox =
+    hasSubscriptions && system?.deployable.persistence !== "dapper" && durableTypes.length > 0;
+  if (hasOutbox) {
+    out.set("Infrastructure/Persistence/OutboxMessage.cs", renderOutboxMessage(ns));
+    out.set(
+      "Infrastructure/Events/OutboxDomainEventDispatcher.cs",
+      renderOutboxDispatcher(ns, durableTypes),
+    );
+    out.set("Infrastructure/Events/OutboxRelayService.cs", renderOutboxRelay(ns, durableTypes));
+  }
   // Auth files — emitted only when the deployable opts in
   // via `auth: required` AND the system declares a user block (the
   // validator already rejects the half-state).  Computed first
@@ -312,6 +330,7 @@ function emitProjectFromContexts(
         ns,
         documentAggNames(contexts, system?.sys),
         eventSourcedAggNames(contexts),
+        hasOutbox,
       ),
     );
     // Persisted workflow-correlation state POCOs + EF configs (one per
@@ -371,6 +390,7 @@ function emitProjectFromContexts(
     emitTrace,
     usingDapper,
     hasSubscriptions,
+    hasOutbox,
     resourceNugetDeps: resourceEmission.nugetDeps,
   });
   emitTestProject(merged, ns, out);
@@ -447,6 +467,18 @@ function emitContext(
   emitTrace = false,
 ): void {
   const hasSubscriptions = ctx.eventSubscriptions.length > 0;
+  // Transactional outbox (dispatch-delivery-semantics.md) — see the
+  // system-mode twin above for the design.
+  const durableTypes = [...durableEventTypes(ctx)].sort();
+  const hasOutbox = hasSubscriptions && durableTypes.length > 0;
+  if (hasOutbox) {
+    out.set("Infrastructure/Persistence/OutboxMessage.cs", renderOutboxMessage(ns));
+    out.set(
+      "Infrastructure/Events/OutboxDomainEventDispatcher.cs",
+      renderOutboxDispatcher(ns, durableTypes),
+    );
+    out.set("Infrastructure/Events/OutboxRelayService.cs", renderOutboxRelay(ns, durableTypes));
+  }
   emitIds(ctx, ns, out);
   emitEnums(ctx, ns, out);
   emitValueObjects(ctx, ns, out);
@@ -488,6 +520,7 @@ function emitContext(
     emitTrace,
     hasSeeds,
     hasSubscriptions,
+    hasOutbox,
   });
   emitTestProject(ctx, ns, out);
 }
@@ -802,9 +835,10 @@ function emitInfrastructure(
   out: Map<string, string>,
   usesValidators: boolean,
 ): void {
+  const hasOutbox = ctx.eventSubscriptions.length > 0 && durableEventTypes(ctx).size > 0;
   out.set(
     "Infrastructure/Persistence/AppDbContext.cs",
-    renderDbContext(ctx, ns, documentAggNames([ctx]), eventSourcedAggNames([ctx])),
+    renderDbContext(ctx, ns, documentAggNames([ctx]), eventSourcedAggNames([ctx]), hasOutbox),
   );
   emitWorkflowStatePersistence(ctx.workflows, ns, out);
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
@@ -827,6 +861,9 @@ function emitProject(
     emitTrace?: boolean;
     usingDapper?: boolean;
     hasSubscriptions?: boolean;
+    /** Transactional outbox (dispatch-delivery-semantics.md): registers the
+     *  outbox-wrapping dispatcher + the relay BackgroundService. */
+    hasOutbox?: boolean;
     resourceNugetDeps?: Record<string, string>;
   },
 ): void {
@@ -850,6 +887,7 @@ function emitProject(
       emitTrace,
       usingDapper,
       hasSubscriptions: !!options?.hasSubscriptions,
+      hasOutbox: !!options?.hasOutbox,
     }),
   );
   // Ardalis.Specification ships only when a retrieval exists (EF Core path;

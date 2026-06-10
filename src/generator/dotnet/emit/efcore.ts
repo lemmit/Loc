@@ -51,6 +51,11 @@ export function renderDbContext(
    *  normalised entity DbSet/config; its reference-collection join tables
    *  are skipped (state lives in the stream).  Empty ⇒ byte-identical. */
   eventSourcedAggs: ReadonlySet<string> = new Set(),
+  /** Transactional outbox (dispatch-delivery-semantics.md): when the
+   *  context carries any durable channel (`retention: log | work`), the
+   *  AppDbContext maps the shared `__loom_outbox` table (OutboxMessage
+   *  entity + configuration).  False ⇒ byte-identical. */
+  hasOutbox = false,
 ): string {
   const isDoc = (name: string) => documentAggs.has(name);
   const isEs = (name: string) => eventSourcedAggs.has(name);
@@ -132,6 +137,12 @@ export function renderDbContext(
     (wf) =>
       `        modelBuilder.ApplyConfiguration(new Configurations.${workflowStateClass(wf)}Configuration());`,
   );
+  const outboxDbSets = hasOutbox
+    ? ["    public DbSet<OutboxMessage> LoomOutbox => Set<OutboxMessage>();"]
+    : [];
+  const outboxApplyConfigs = hasOutbox
+    ? ["        modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());"]
+    : [];
   // Capability filter installation is per-EntityConfiguration —
   // see `renderConfiguration` below, which emits one
   // `builder.HasQueryFilter(...)` per `agg.contextFilters` entry.  No
@@ -157,6 +168,7 @@ export function renderDbContext(
       ...tphBaseDbSets,
       ...joinDbSets,
       ...wfStateDbSets,
+      ...outboxDbSets,
       "    protected override void OnModelCreating(ModelBuilder modelBuilder)",
       "    {",
       ...ignoreBases,
@@ -164,6 +176,7 @@ export function renderDbContext(
       ...applyConfigs,
       ...joinApplyConfigs,
       ...wfStateApplyConfigs,
+      ...outboxApplyConfigs,
       "    }",
       "}",
     ) + "\n"
