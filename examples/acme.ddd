@@ -121,7 +121,7 @@ system Acme {
                         status: Draft,
                         placedAt: now()
                     })
-                    expectThrows order.confirm()
+                    expect(order.confirm()).toThrow()
                 }
             }
 

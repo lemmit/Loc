@@ -31,7 +31,7 @@ system AuthArray {
         }
         test "deactivating requires admin" {
           let i = Item.create({ name: "x", active: true })
-          expectThrows i.deactivate()
+          expect(i.deactivate()).toThrow()
         }
       }
       repository Items for Item { }

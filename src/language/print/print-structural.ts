@@ -822,10 +822,10 @@ function printTestBlock(node: TestBlock): string {
   return block(`test ${quote(node.name)}${verifies}`, node.body.map(printTestStatement));
 }
 
-/** TestStatement adds `expect` / `expectThrows` over the ordinary Statement set. */
+/** TestStatement adds `expect` (with a method matcher) over the ordinary
+ *  Statement set. */
 function printTestStatement(node: TestStatement): string {
   if (node.$type === "ExpectStmt") return `expect ${printExpr(node.expr)}`;
-  if (node.$type === "ExpectThrowsStmt") return `expectThrows ${printExpr(node.expr)}`;
   return printStmt(node as Statement);
 }
 

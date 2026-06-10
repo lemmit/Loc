@@ -132,7 +132,7 @@ system BankingSystem {
             balance: { amount: 100.0, currency: "USD" },
             openedAt: "2024-01-01T00:00:00Z"
           })
-          expectThrows acct.withdraw(Money { amount: 1000.0, currency: "USD" })
+          expect(acct.withdraw(Money { amount: 1000.0, currency: "USD" })).toThrow()
         }
 
         test "a frozen account rejects deposits and withdrawals" verifies TC-002 {
@@ -143,8 +143,8 @@ system BankingSystem {
             openedAt: "2024-01-01T00:00:00Z"
           })
           acct.freeze("fraud review")
-          expectThrows acct.deposit(Money { amount: 10.0, currency: "USD" })
-          expectThrows acct.withdraw(Money { amount: 10.0, currency: "USD" })
+          expect(acct.deposit(Money { amount: 10.0, currency: "USD" })).toThrow()
+          expect(acct.withdraw(Money { amount: 10.0, currency: "USD" })).toThrow()
         }
       }
 

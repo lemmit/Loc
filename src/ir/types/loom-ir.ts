@@ -565,7 +565,7 @@ export interface TestIR {
 export type TestStmtIR =
   | StmtIR
   | { kind: "expect"; expr: ExprIR; source: string }
-  | { kind: "expect-throws"; expr: ExprIR; source: string };
+  | { kind: "expect-throws"; expr: ExprIR; source: string; status?: number };
 
 export interface EnumIR {
   name: string;

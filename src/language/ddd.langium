@@ -78,8 +78,8 @@ UserFieldName returns string:
     ID | 'id' | 'permissions';
 
 // E2E test against a running deployable.  The body reuses the per-
-// aggregate TestStatement vocabulary (let / expect / expectThrows /
-// bare-call), but expressions can additionally reference the magic
+// aggregate TestStatement vocabulary (let / expect / bare-call), but
+// expressions can additionally reference the magic
 // `api` identifier rooted at the named deployable's HTTP surface
 // (e.g., `api.orders.create({...})`).  Renders to a vitest test file
 // at the system output root.
@@ -809,13 +809,16 @@ TestBlock:
     '}';
 
 TestStatement:
-    ExpectThrowsStmt | ExpectStmt | PreconditionStmt | LetStmt | EmitStmt | AssignOrCallStmt;
+    ExpectStmt | PreconditionStmt | LetStmt | EmitStmt | AssignOrCallStmt;
 
+// Assertions are method-based: `expect(<actual>).<matcher>(…)`.  The matcher
+// is an intrinsic (`toBe` / `toThrow` / `toHaveText` / …) recognised by the
+// lowering + validator — a bare-boolean `expect <x>` is rejected
+// (`checkExpectMatcher`).  The throw assertion is `expect(<call>).toThrow()`
+// (optionally `.toThrow(<status>)` in an e2e api body); it replaces the old
+// `expectThrows` statement keyword.
 ExpectStmt:
     'expect' expr=Expression;
-
-ExpectThrowsStmt:
-    'expectThrows' expr=Expression;
 
 EntityPart:
     'entity' name=ID '{'

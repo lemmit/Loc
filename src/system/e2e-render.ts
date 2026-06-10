@@ -296,7 +296,16 @@ function renderE2EStmt(s: TestStmtIR, ctx: RenderCtx): string {
     return renderExpectStmt(s.expr, (e) => renderE2EExpr(e, ctx));
   }
   if (s.kind === "expect-throws") {
-    return `await expect(async () => { ${renderE2EExpr(s.expr, ctx)}; }).rejects.toThrow();`;
+    // `expect(call).toThrow(N)` — the optional integer status (carried on the
+    // IR from the lowering) pins the HTTP status the rejection must carry.
+    // The `__post`/`__get` helpers throw `Error("… → <status> <text>: …")`, so
+    // a `/→ N\b/` regex matcher pins the status without coupling to the
+    // backend-specific status text or body.  This is the behavioral
+    // complement to the static OpenAPI `errorResponseDiffs` parity gate:
+    // because the block replays against every backend serving the module, it
+    // asserts they all reject with the *same* status.
+    const matcher = s.status != null ? `/→ ${s.status}\\b/` : "";
+    return `await expect(async () => { ${renderE2EExpr(s.expr, ctx)}; }).rejects.toThrow(${matcher});`;
   }
   if (s.kind === "let") {
     ctx.locals.add(s.name);

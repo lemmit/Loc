@@ -52,7 +52,7 @@ const FIXTURE_SOURCE = `system PhoenixShop {
   test e2e "create an item, look it up" against shopBackend {
     let it = api.items.create({ name: "Gadget", price: 19.99 })
     let read = api.items.getById(it)
-    expect read.name == "Gadget"
+    expect(read.name).toBe("Gadget")
   }
 
   test e2e "archive an item via operation" against shopBackend {

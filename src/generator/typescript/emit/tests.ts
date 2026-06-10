@@ -28,9 +28,7 @@ const TEST_ACTOR =
 //
 //   expect(x).toBe(y)       → vitest `expect(x).toBe(y)` (explicit matcher,
 //                              including `.not.<matcher>` negation)
-//   expect <bool-expr>      → vitest `expect(<bool-expr>).toBe(true)`
-//                              (fallback for bare boolean assertions)
-//   expectThrows <call>     → vitest `expect(() => <call>).toThrow()`
+//   expect(call).toThrow()  → vitest `expect(() => <call>).toThrow()`
 //
 // The container is a plain test file colocated next to the domain class;
 // it imports the aggregate / parts / value objects directly.
@@ -191,7 +189,9 @@ function renderTestStmt(s: TestStmtIR, ctx: BoundedContextIR): string {
   if (s.kind === "expect") {
     const explicit = renderExplicitMatcher(s.expr, ctx);
     if (explicit) return explicit;
-    return `  expect(${renderTestExpr(s.expr, ctx)}).toBe(true);`;
+    // Every `expect` carries a matcher (validator: checkExpectMatcher); a bare
+    // boolean reaching codegen is an invariant violation, not user input.
+    throw new Error("expect requires a matcher (e.g. expect(x).toBe(y)); got a bare expression.");
   }
   if (s.kind === "expect-throws") {
     return `  expect(() => { ${renderTestExpr(s.expr, ctx)}; }).toThrow();`;

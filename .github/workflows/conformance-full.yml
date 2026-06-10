@@ -18,14 +18,31 @@ on:
     # 03:42 UTC nightly — off-peak, after most merges have landed.
     - cron: '42 3 * * *'
   workflow_dispatch:
+  # On-demand per-PR run: apply the `run-conformance` label to a PR to boot
+  # the full stack and run the behavioral + UI + parity suite against that
+  # branch — the same job the nightly runs, but opt-in.  This is how the
+  # behavioral negative-path conformance blocks (the cross-backend
+  # `expect(<call>).toThrow(N)` replays in examples/showcase.ddd) get
+  # exercised before merge instead of waiting for the next nightly.  The
+  # job-level `if` below restricts the labeled trigger to that one label so
+  # other labels don't kick off an hour-long build.
+  pull_request:
+    types: [labeled]
 
 concurrency:
-  group: conformance-full-${{ github.ref }}
+  # Per-PR runs key off the PR ref; scheduled/dispatch runs off the branch
+  # ref.  Either way a newer trigger cancels the older in-flight run.
+  group: conformance-full-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   full:
     runs-on: ubuntu-latest
+    # Skip the labeled trigger unless it's specifically `run-conformance`;
+    # scheduled and manual (`workflow_dispatch`) runs always proceed.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.label.name == 'run-conformance'
     timeout-minutes: 60
     env:
       # Keep Playwright's browser download in a cacheable location; the

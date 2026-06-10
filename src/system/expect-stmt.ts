@@ -1,22 +1,29 @@
 import type { ExprIR } from "../ir/types/loom-ir.js";
 import { intrinsicMatcherSig } from "../util/intrinsic-matchers.js";
 
-// Shared lowering for `expect <expr>` statements in the generated e2e (api)
+// Shared lowering for `expect(...)` statements in the generated e2e (api)
 // and UI specs.
 //
 // Assertions are written as **explicit, typed matchers** —
 // `expect(read.sku).toBe("WIDGET-1")`, `expect(list.length).toBeGreaterThanOrEqual(1)` —
 // which the IR resolves into `method-call.isIntrinsicMatcher`. The renderer
 // unwraps the asserted expression (and an optional `.not.`) and emits the
-// native matcher. A bare boolean expression falls back to
-// `expect(<x>).toBe(true)` — no operator-from-shape inference any more.
+// native matcher. There is no bare-boolean fallback: the validator
+// (`checkExpectMatcher`) requires every `expect` to carry a matcher, so a
+// non-matcher reaching here is a compiler invariant violation, not user input.
 
-/** Render one `expect <expr>` to an assertion statement (no trailing
- *  newline). `render` lowers a sub-expression to target source. */
+/** Render one `expect(<x>).<matcher>(…)` to an assertion statement (no
+ *  trailing newline). `render` lowers a sub-expression to target source. */
 export function renderExpectStmt(expr: ExprIR, render: (e: ExprIR) => string): string {
   const explicit = renderExplicitValueMatcher(expr, render);
   if (explicit) return explicit;
-  return `expect(${render(expr)}).toBe(true);`;
+  // Locator matchers are peeled by the caller before this point; reaching here
+  // means a bare-boolean `expect`, which the validator rejects.  Fail loudly
+  // rather than silently emitting `.toBe(true)`.
+  throw new Error(
+    "expect requires a matcher (e.g. expect(x).toBe(y) / expect(call).toThrow()); " +
+      "got a bare expression with no matcher.",
+  );
 }
 
 /** When `expr` is an explicit intrinsic value-matcher (`expect(x).toBe(y)`,

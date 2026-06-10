@@ -30,6 +30,65 @@ describe("validation", () => {
     expect(errors.some((e) => /matcher/i.test(e) && /argument/i.test(e))).toBe(true);
   });
 
+  it("flags a bare-boolean 'expect' with no matcher", async () => {
+    // Assertions are method-based: `expect` must carry a matcher.  The bare
+    // `expect <bool>` form is rejected (use `expect(x).toBe(y)`).
+    const { errors } = await parse(`
+      context T {
+        aggregate A {
+          name: string
+          derived display: string = name
+          test "name is set" {
+            let a = A.create({ name: "y" })
+            expect a.name == "y"
+          }
+        }
+      }
+    `);
+    expect(errors.some((e) => /expect/i.test(e) && /matcher/i.test(e))).toBe(true);
+  });
+
+  it("flags 'toThrow(<status>)' used outside a 'test e2e' block", async () => {
+    // The status argument pins a live HTTP rejection, so it is only valid in an
+    // e2e block; an in-process unit test must use a bare `toThrow()`.
+    const { errors } = await parse(`
+      context T {
+        aggregate A {
+          name: string
+          derived display: string = name
+          operation rename(n: string) { name := n }
+          test "rename to empty is rejected" {
+            let a = A.create({ name: "y" })
+            expect(a.rename("")).toThrow(400)
+          }
+        }
+      }
+    `);
+    expect(errors.some((e) => /toThrow/.test(e) && /e2e/i.test(e))).toBe(true);
+  });
+
+  it("flags a non-integer-literal 'toThrow' status argument", async () => {
+    const { errors } = await parse(`
+      system S {
+        subdomain M {
+          context C {
+            aggregate Account {
+              balance: int
+              invariant balance >= 0
+              derived display: string = "acct"
+            }
+            repository Accounts for Account { }
+          }
+        }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
+        test e2e "negative balance is rejected" against api {
+          expect(api.accounts.create({ balance: -1 })).toThrow("400")
+        }
+      }
+    `);
+    expect(errors.some((e) => /toThrow/.test(e) && /integer/i.test(e))).toBe(true);
+  });
+
   it("flags non-bool preconditions", async () => {
     const { errors } = await parse(`
       context T {
