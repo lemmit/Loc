@@ -25,6 +25,9 @@ system PySales {
 
       aggregate Customer {
         name: string
+        operation rename(newName: string) {
+          name := newName
+        }
       }
 
       aggregate Order {
@@ -91,6 +94,15 @@ system PySales {
       retrieval ByStatusSorted(s: OrderStatus) of Order {
         where: StatusIs(s)
         sort: [placedAt desc]
+      }
+
+      // Command workflow — load, mutate via an operation, save at exit
+      // (one transaction per request).
+      workflow renameCustomer transactional {
+        create(customerId: Customer id, newName: string) {
+          let c = Customers.getById(customerId)
+          c.rename(newName)
+        }
       }
 
       // Shorthand view — filtered list of the source wire shape.

@@ -29,6 +29,7 @@ import { buildPyRepositoryFile } from "./repository-builder.js";
 import { buildPyEventSourcedRepositoryFile } from "./repository-eventsourced-builder.js";
 import { buildPyRoutesFile } from "./routes-builder.js";
 import { buildPyViewsFile } from "./views-builder.js";
+import { buildPyWorkflowsFile, commandWorkflowsOf } from "./workflows-builder.js";
 
 // ---------------------------------------------------------------------------
 // Python / FastAPI generator orchestrator.
@@ -79,7 +80,8 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     c.aggregates.filter((a) => !a.isAbstract).map((a) => a.name),
   );
   const hasViews = merged.views.some((v) => v.source.kind === "aggregate");
-  out.set("app/main.py", renderMain(args.sys.name, routedAggs, hasViews));
+  const hasWorkflows = commandWorkflowsOf(merged).length > 0;
+  out.set("app/main.py", renderMain(args.sys.name, routedAggs, hasViews, hasWorkflows));
 
   out.set("app/domain/__init__.py", "");
   out.set("app/domain/ids.py", renderPyIds(merged));
@@ -111,6 +113,8 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
   const viewsFile = buildPyViewsFile(merged);
   if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
+  const workflowsFile = buildPyWorkflowsFile(merged);
+  if (workflowsFile != null) out.set("app/http/workflows_routes.py", workflowsFile);
 
   // Per-aggregate emission stays per-context — each aggregate module is
   // emitted in the context that owns it.  An abstract base owns no
@@ -259,13 +263,23 @@ const ENGINE_PY = lines(
   "",
   "",
   "async def get_session() -> AsyncIterator[AsyncSession]:",
-  `    """FastAPI dependency yielding one session per request."""`,
+  `    """One session — and exactly one transaction — per request.`,
+  "",
+  "    Repositories flush; the commit happens here once the handler",
+  "    returns, so multi-save workflows stay atomic.",
+  `    """`,
   "    async with session_factory() as session:",
   "        yield session",
+  "        await session.commit()",
   "",
 );
 
-function renderMain(systemName: string, routerAggs: string[], hasViews = false): string {
+function renderMain(
+  systemName: string,
+  routerAggs: string[],
+  hasViews = false,
+  hasWorkflows = false,
+): string {
   return lines(
     `"""FastAPI application entrypoint.`,
     "",
@@ -286,6 +300,7 @@ function renderMain(systemName: string, routerAggs: string[], hasViews = false):
     ),
     "from app.http.problem import install_error_handlers",
     hasViews ? "from app.http.views_routes import router as views_router" : null,
+    hasWorkflows ? "from app.http.workflows_routes import router as workflows_router" : null,
     "",
     "",
     "",
@@ -307,6 +322,7 @@ function renderMain(systemName: string, routerAggs: string[], hasViews = false):
     ")",
     ...routerAggs.map((name) => `app.include_router(${snake(name)}_router)`),
     hasViews ? "app.include_router(views_router)" : null,
+    hasWorkflows ? "app.include_router(workflows_router)" : null,
     "",
     "",
     `@app.get("/health")`,

@@ -135,7 +135,11 @@ diff-sync semantics under SQLAlchemy.
 | S7 HTTP layer | ✅ | DTOs, routers, RFC 7807 (+422 errors[]); verified live |
 | S8 finds | ✅ | predicate lowering incl. EXISTS membership; verified live |
 | S9 migrations | ✅ | shared sql-pg DDL + tracked boot runner (Alembic dropped — runtime-migrator pattern); schema-qualified UUID models |
-| S11–S17 | next | feature slices |
+| S11 criteria/retrievals/views | ✅ | incl. full-form binds + follows; verified live |
+| S12 payloads/unions/paged | ✅ | PagedResult carrier, union finds, exception-less ops; envelope rides with S15 |
+| S13 inheritance | ✅ | TPH shared table + kind scoping, TPC, base readers; verified live |
+| S14 event sourcing | ✅ | stream table + appliers fold + ES create; verified live; document shape stays gated |
+| S15–S17 | next | workflows, auth/seed/extern, observability |
 | **S10 conformance** | **moved after S17** | showcase.ddd (the parity fixture) declares `auth: required` and exercises every feature — joining it requires S11–S17 first.  Matches the roadmap's Phase E exit criterion ("showcase passes the multi-backend suite") being terminal. |
 | S18, S19 | after S10 | |
 

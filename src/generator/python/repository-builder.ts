@@ -549,7 +549,8 @@ function saveMethod(
     out.push("        for event in aggregate.pull_events():");
     out.push("            await self._events.dispatch(event)");
   }
-  out.push("        await self._session.commit()");
+  // One transaction per request: the session dependency commits.
+  out.push("        await self._session.flush()");
   return out.join("\n");
 }
 
@@ -641,7 +642,7 @@ function deleteMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
   }
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   out.push(`        await self._session.execute(delete(${root}).where(${root}.id == id))`);
-  out.push("        await self._session.commit()");
+  out.push("        await self._session.flush()");
   return out.join("\n");
 }
 

@@ -92,7 +92,7 @@ export function buildPyEventSourcedRepositoryFile(
     "                    )",
     "                )",
     "                await self._events.dispatch(ev)",
-    "        await self._session.commit()",
+    "        await self._session.flush()",
     "",
     rowToEvent(agg, events, row),
     "",

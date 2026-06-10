@@ -100,7 +100,7 @@ describe("python repository emission", () => {
     expect(repo).toContain('pair = {"order_id": aggregate.id, "customer_id": __t, "ordinal": __i}');
     expect(repo).toContain("for event in aggregate.pull_events():");
     expect(repo).toContain("await self._events.dispatch(event)");
-    expect(repo).toContain("await self._session.commit()");
+    expect(repo).toContain("await self._session.flush()");
   });
 
   it("decimal domain floats persist via a Decimal(str(…)) round-trip", async () => {
