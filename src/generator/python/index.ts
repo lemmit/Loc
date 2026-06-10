@@ -6,9 +6,11 @@ import { renderPyAggregate } from "./emit/aggregate.js";
 import { ERRORS_PY } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
 import { renderPyIds } from "./emit/ids.js";
+import { renderPySchema } from "./emit/schema.js";
 import { renderPyTestsFile } from "./emit/tests.js";
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { PYTHON_PINS } from "./pins.js";
+import { buildPyRepositoryFile } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
 // Python / FastAPI generator orchestrator.
@@ -63,6 +65,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/domain/value_objects.py", renderPyEnumsAndValueObjects(merged));
   out.set("app/domain/events.py", renderPyEvents(merged));
 
+  out.set("app/db/schema.py", renderPySchema(merged));
+  out.set("app/db/wire.py", WIRE_PY);
+  out.set("app/db/repositories/__init__.py", "");
+
   // Per-aggregate emission stays per-context — each aggregate module is
   // emitted in the context that owns it.  A TPH/TPC abstract base owns
   // no instantiable domain module (inheritance lands in S13).
@@ -70,6 +76,13 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract) continue;
       out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx));
+      if (agg.persistedAs !== "eventLog") {
+        const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+        out.set(
+          `app/db/repositories/${snake(agg.name)}_repository.py`,
+          buildPyRepositoryFile(agg, repo, ctx),
+        );
+      }
       const tests = renderPyTestsFile(agg, ctx);
       if (tests != null) out.set(`tests/test_${snake(agg.name)}.py`, tests);
     }
@@ -279,4 +292,16 @@ __pycache__
 .pytest_cache
 .mypy_cache
 .ruff_cache
+`;
+
+// Shared wire-format helpers consumed by every repository's
+// `to_wire` projection.
+const WIRE_PY = `"""Wire-format helpers shared by repositories.  Auto-generated."""
+
+from datetime import UTC, datetime
+
+
+def iso(dt: datetime) -> str:
+    """ISO-8601 UTC with a Z suffix — wire parity with the other backends."""
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 `;

@@ -39,7 +39,7 @@ describe("python aggregate emission", () => {
     const files = await build();
     const order = files.get("api/app/domain/order.py")!;
     expect(order).toContain(
-      "def __init__(self, *, id: OrderId, status: OrderStatus, placed_at: datetime, unit_budget: Decimal, lines: list[OrderLine]) -> None:",
+      "def __init__(self, *, id: OrderId, status: OrderStatus, placed_at: datetime, unit_budget: Decimal, watchers: list[CustomerId], lines: list[OrderLine]) -> None:",
     );
     expect(order).toContain("        self._assert_invariants()");
     expect(order).toContain("        self._events: list[DomainEvent] = []");
