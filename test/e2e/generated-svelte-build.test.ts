@@ -30,7 +30,7 @@ const ENABLED = process.env.LOOM_SVELTE_BUILD === "1" || SHARD !== undefined;
 /** Single-file examples with a svelte deployable named `web`. */
 export const svelteBuildExamples = ["examples/svelte-shop.ddd"] as const;
 
-export const sveltePacks = ["shadcnSvelte@v1"] as const;
+export const sveltePacks = ["shadcnSvelte@v1", "flowbite@v1"] as const;
 
 /** Inject `design: "<family>@<version>"` into the `deployable web
  *  { ... }` block — mirrors the react harness's injectDesign so the

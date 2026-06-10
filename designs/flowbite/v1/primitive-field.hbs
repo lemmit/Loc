@@ -1,0 +1,1 @@
+<Label class="flex flex-col gap-2"><span>{{{labelText}}}</span><Input value={{expr bind}}{{#if hasBind}} oninput={(e) => { {{bind}} = (e.currentTarget as HTMLInputElement).value; }}{{/if}}{{{testidAttr}}} /></Label>

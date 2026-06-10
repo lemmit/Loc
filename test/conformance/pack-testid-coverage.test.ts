@@ -78,6 +78,7 @@ const BUILT_IN_PACKS: ReadonlyArray<PackUnderTest> = [
   // Svelte packs share the TSX contract — same walker, same
   // testidAttr helper expansion in the templates.
   { dir: "designs/shadcnSvelte/v1", label: "shadcnSvelte@v1", format: "svelte" },
+  { dir: "designs/flowbite/v1", label: "flowbite@v1", format: "svelte" },
 ];
 
 // Phoenix testid emission is split between templates and the

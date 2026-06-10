@@ -1,0 +1,5 @@
+{{#if hasTabs}}<div{{{testidAttr}}}><Tabs>
+{{#each tabs}}{{../indent}}<TabItem {{#if @first}}open {{/if}}title={{json this.label}}>
+{{../innerIndent}}{{{this.bodyJsx}}}
+{{../indent}}</TabItem>
+{{/each}}{{closeIndent}}</Tabs></div>{{else}}<div{{{testidAttr}}}></div>{{/if}}

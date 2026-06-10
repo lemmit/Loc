@@ -39,6 +39,7 @@ const BUILTIN_PACKS: ReadonlyArray<{ name: string; format: "tsx" | "heex" | "sve
   { name: "chakra@v3", format: "tsx" },
   { name: "ashPhoenix@v3", format: "heex" },
   { name: "shadcnSvelte@v1", format: "svelte" },
+  { name: "flowbite@v1", format: "svelte" },
 ];
 
 describe("required-primitives gate — built-in packs", () => {

@@ -1,0 +1,1 @@
+<Label class="flex flex-col gap-2"><span>{{{labelText}}}</span><Textarea value={{expr bind}}{{#if hasBind}} oninput={(e) => { {{bind}} = (e.currentTarget as HTMLTextAreaElement).value; }}{{/if}}{{{testidAttr}}} /></Label>

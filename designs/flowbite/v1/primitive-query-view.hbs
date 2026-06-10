@@ -1,0 +1,13 @@
+{#if {{{queryExpr}}}.isLoading}
+{{branchIndent}}{{{loadingJsx}}}
+{{indent}}{:else if {{{queryExpr}}}.isError}
+{{branchIndent}}{{{errorJsx}}}
+{{#if single}}{{indent}}{:else if !{{{queryExpr}}}.data}
+{{branchIndent}}{{{emptyJsx}}}
+{{indent}}{:else}
+{{branchIndent}}{{{dataJsx}}}
+{{else}}{{indent}}{:else if ({{{queryExpr}}}.data ?? []).length === 0}
+{{branchIndent}}{{{emptyJsx}}}
+{{indent}}{:else}
+{{branchIndent}}{{{dataJsx}}}
+{{/if}}{{closeIndent}}{/if}
