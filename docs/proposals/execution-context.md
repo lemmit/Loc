@@ -21,11 +21,11 @@ boundary emission**; provenance/audit/logging are then thin consumers.
 ## The model
 
 A logical **stack of context frames**. The compiler recognises a
-semantic boundary and emits *enter scope* on the way in and *exit
-scope* on the way out (in .NET this maps cleanly onto
-`Activity`/`ActivitySource` + `ILogger.BeginScope`; `Activity.Current`
-is the top of the stack, `Dispose` pops it). It is a *logical* stack,
-not a literal runtime one.
+semantic boundary and emits *enter scope* on the way in and *exit scope*
+on the way out — concretely, a push/restore around the boundary (the
+ambient slot is set to a child frame on entry and restored in `finally`),
+so nested and reentrant calls stack. It is a *logical* stack: the "stack"
+is the frames' own `parentId` chain, not a literal runtime object.
 
 Each frame carries:
 
@@ -102,15 +102,11 @@ build with tracing disabled pays nothing.
   and renamed (e.g. `ExecutionContextBehavior`), widening its payload from
   `ILogger` to the frame; see
   [`../architecture/request-context.md`](../architecture/request-context.md).
-  `Activity`/`ActivitySource` is an **optional one-way export, not the
-  carrier**: `StartActivity` returns `null` on unsampled requests, and
-  `Baggage` (the only field that propagates across frames/processes) leaks
-  to downstream services — so governance never reads from it. When tracing
-  is on, the behaviour *also* starts a child `Activity` and tags it with
-  `correlationId`/`scopeId`; the governance `correlationId` is minted by
-  the backbone, not taken from a sampled `TraceId`. No hard OpenTelemetry
-  dependency — a lightweight internal context that mints ids/relations is
-  enough.
+  That is the whole mechanism — no `Activity`/`ActivitySource` and no
+  OpenTelemetry dependency. The backbone mints its own ids; whether the
+  **observability** layer later *projects* a frame onto an OTel span is its
+  concern, owned by [`observability.md`](./observability.md), not a
+  component of (or dependency of) this backbone.
 - **Other backends** divide into two *realization classes* (see the
   table in
   [`../architecture/request-context.md`](../architecture/request-context.md)
