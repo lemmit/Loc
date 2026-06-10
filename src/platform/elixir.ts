@@ -45,7 +45,13 @@ const elixirPlatform: PlatformSurface = {
   // AND a static-asset host (`priv/static`), so it serves its own
   // runtime-coupled framework UNIONED with every static-bundle framework.
   // Richest `hostableFrameworks` of any platform.
-  hostableFrameworks: new Set(["phoenixLiveView", ...STATIC_BUNDLE_FRAMEWORKS]),
+  // Phoenix hosts its runtime-coupled LiveView plus the React static
+  // bundles.  `svelte` is deliberately ABSENT: Phoenix serves embedded
+  // SPAs under the `/app` path prefix, and a SvelteKit bundle needs
+  // `paths.base` threading (nav hrefs, goto, asset URLs) to live
+  // there — a follow-up (docs/plans/svelte-frontend-plan.md).  Root-
+  // origin hosts (dotnet wwwroot) serve svelte today.
+  hostableFrameworks: new Set(["phoenixLiveView", "react", "static"]),
   // Ash code-interface conventions.  A user-declared find named one
   // of these would collide with the auto-generated CRUD action of
   // the same name on the resource module.

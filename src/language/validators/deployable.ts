@@ -115,13 +115,20 @@ export function checkDeployable(
   // mounts the `phoenixLiveView` framework.  The grammar enum admits
   // both values; this rule rejects cross-pairing
   // (e.g. `platform: react` + `framework: phoenixLiveView`).
+  // Membership in the platform's hostable set (D-PHOENIX-SURFACE) —
+  // the host serves a framework iff it provides its runtime.  Replaces
+  // the old single-expected-value check so a dotnet host can declare
+  // `framework: svelte` (any static bundle on a static root) while a
+  // LiveView override on a react host still errors.
   const framework = d.uiBlock?.framework;
   if (framework && d.uiBlock) {
     const expected = expectedFrameworkFor(d.platform, hasUiBinding);
-    if (expected && framework !== expected) {
+    const hostable = hostableFrameworksFor(d.platform);
+    const canonical = canonicalFramework(framework);
+    if (canonical && hostable.size > 0 && !hostable.has(canonical)) {
       accept(
         "error",
-        `Framework '${framework}' does not match platform '${d.platform}' (expected '${expected}'). Drop the framework override or align it with the platform.`,
+        `Framework '${framework}' does not match platform '${d.platform}' (expected '${expected ?? [...hostable].sort().join("' | '")}'). Drop the framework override or align it with the platform.`,
         {
           node: d.uiBlock,
           property: "framework",

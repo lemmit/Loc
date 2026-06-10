@@ -1,5 +1,10 @@
+import { generateReactForContexts } from "../generator/react/index.js";
 import { generateSvelteForContexts } from "../generator/svelte/index.js";
-import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
+import {
+  type ComposeServiceShape,
+  type PlatformSurface,
+  STATIC_BUNDLE_FRAMEWORKS,
+} from "./surface.js";
 
 // ---------------------------------------------------------------------------
 // Svelte frontend platform — the second frontend-only platform after
@@ -20,16 +25,19 @@ const sveltePlatform: PlatformSurface = {
   needsDb: false,
   mountsUi: true,
   isFrontend: true,
-  // Standalone static-asset host for its own Svelte bundle.  Joins
-  // `STATIC_BUNDLE_FRAMEWORKS` (making svelte bundles hostable on any
-  // static-asset host, and react bundles on this one) in the
-  // backend-host-embedding slice — until then the surface hosts only
-  // its own framework.
-  hostableFrameworks: new Set(["svelte"]),
+  // Standalone static-asset host (vite preview over a built bundle):
+  // serves any static-bundle framework.  D-PHOENIX-SURFACE.
+  hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
   // Svelte generator only emits API call factories — no per-aggregate
   // repository class.  No find-name collisions are possible.
   reservedRepositoryFindNames: new Set(),
   emitProject({ contexts, sys, deployable, topLevelComponents }): Map<string, string> {
+    // Frontend hosts dispatch by the UI's framework, not the platform
+    // keyword — a svelte host can serve a `framework: react` ui (any
+    // static bundle runs on a static host).
+    if (deployable.uiFramework === "react") {
+      return generateReactForContexts(contexts, sys, deployable, { topLevelComponents });
+    }
     return generateSvelteForContexts(contexts, sys, deployable, { topLevelComponents });
   },
   composeService({ deployable, sys }): ComposeServiceShape {

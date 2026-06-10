@@ -74,11 +74,14 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   //    needs a tsx pack → `mantine`;
   //  - backends without a `ui:` mount carry no design.
   const design = platformFor(platform).isFrontend
-    ? qualifyDesign(d.design, platform === "svelte" ? "shadcnSvelte" : "mantine")
+    ? qualifyDesign(d.design, uiFramework === "svelte" ? "shadcnSvelte" : "mantine")
     : platform === "elixir"
       ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
       : (platform === "dotnet" || platform === "java") && uiName
-        ? qualifyDesign(d.design, "mantine")
+        ? qualifyDesign(
+            d.design,
+            platform === "dotnet" && uiFramework === "svelte" ? "shadcnSvelte" : "mantine",
+          )
         : undefined;
   // Explicit api composition.
   const serves = (d.serves ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);

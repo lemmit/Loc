@@ -403,26 +403,39 @@ describe("phoenixLiveView pipeline", () => {
     expect(parsed.lastVersion).toBe("20260101000000");
   });
 
-  it("rejects platform: phoenix paired with framework: react", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pliv-fw-"));
-    const file = path.join(dir, "fw.ddd");
-    fs.writeFileSync(
-      file,
-      FIXTURE_SOURCE.replace("ui: SalesAdmin,", `ui SalesAdmin { framework: react }`).replace(
-        "port: 4000",
-        "",
-      ),
-    );
-    const services = createDddServices(NodeFileSystem);
-    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-      URI.file(file),
-    );
-    await services.shared.workspace.DocumentBuilder.build([doc], {
-      validation: true,
-    });
-    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+  it("framework overrides on phoenix follow the hostable set: react embeds, svelte rejects", async () => {
+    // `framework: react` on a phoenix host is the embedded-SPA mode
+    // (D-PHOENIX-SURFACE phase 6a/6b — React project under assets/,
+    // served from priv/static).  Rule 13 used to hard-reject the
+    // legacy block-binding spelling while the hosts:-declared form
+    // was allowed; it now consults `hostableFrameworks` so both
+    // spellings agree.  `svelte` stays rejected — a SvelteKit bundle
+    // under the /app path prefix needs `paths.base` wiring
+    // (docs/plans/svelte-frontend-plan.md follow-up).
+    const check = async (framework: string): Promise<string[]> => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pliv-fw-"));
+      const file = path.join(dir, "fw.ddd");
+      fs.writeFileSync(
+        file,
+        FIXTURE_SOURCE.replace("ui: SalesAdmin,", `ui SalesAdmin { framework: ${framework} }`).replace(
+          "port: 4000",
+          "",
+        ),
+      );
+      const services = createDddServices(NodeFileSystem);
+      const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+        URI.file(file),
+      );
+      await services.shared.workspace.DocumentBuilder.build([doc], {
+        validation: true,
+      });
+      return (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message);
+    };
+    const reactErrors = await check("react");
+    expect(reactErrors.some((e) => /Framework 'react' does not match/.test(e))).toBe(false);
+    const svelteErrors = await check("svelte");
     expect(
-      errors.some((e) => /Framework 'react' does not match platform 'phoenix'/.test(e.message)),
+      svelteErrors.some((e) => /Framework 'svelte' does not match platform 'phoenix'/.test(e)),
     ).toBe(true);
   });
 });

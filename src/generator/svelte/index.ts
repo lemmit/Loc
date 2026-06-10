@@ -48,7 +48,13 @@ import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflo
 // ---------------------------------------------------------------------------
 
 export interface GenerateSvelteOptions {
+  /** Overrides the computed `http://localhost:<port>` API target —
+   *  fullstack hosts pass `"/api"` for same-origin fetches. */
   apiBaseUrl?: string;
+  /** Prepended to every emitted path — the dotnet fullstack embed
+   *  passes `"ClientApp/"` so the SvelteKit project lands inside the
+   *  host project's tree.  Mirrors GenerateReactOptions.pathPrefix. */
+  pathPrefix?: string;
   topLevelComponents?: import("../../ir/types/loom-ir.js").ComponentIR[];
 }
 
@@ -195,7 +201,16 @@ export function generateSvelteForContexts(
 
   emitShellFiles(pack, out);
   emitShellGlobs(pack, out);
-  return out;
+
+  // Path-prefix transform — applied once at the end so every emitter
+  // above stays path-agnostic (same shape as the react generator's).
+  const pathPrefix = options.pathPrefix ?? "";
+  if (pathPrefix === "") return out;
+  const prefixed = new Map<string, string>();
+  for (const [path, content] of out) {
+    prefixed.set(`${pathPrefix}${path}`, content);
+  }
+  return prefixed;
 }
 
 /** Theme tokens for the pack's `theme` template (CSS custom props).
