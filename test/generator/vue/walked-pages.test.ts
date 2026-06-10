@@ -1,0 +1,99 @@
+import { describe, expect, it } from "vitest";
+import { generateSystemFiles } from "../../_helpers/generate.js";
+
+// ---------------------------------------------------------------------------
+// Vue walker — walked-page output pins (vue-frontend-plan.md Slice 4).
+// The scaffold pages walk through the SHARED markup walker with
+// `vueTarget` + the vuetify pack; these tests pin the load-bearing
+// Vue-isms: mustache interpolation, v-for/v-if control flow from the
+// pack templates, single-quoted JS-splicing attributes, reactive()-
+// wrapped vue-query handles, and the op-form stub wiring.  They are
+// the fast-suite mirror of the LOOM_VUE_BUILD vue-tsc gate.
+// ---------------------------------------------------------------------------
+
+const SOURCE = `
+  system Shop {
+    subdomain Sales {
+      context Orders {
+        aggregate Customer with crudish {
+          name: string
+          email: string
+        }
+      }
+    }
+    ui WebApp with scaffold(subdomains: [Sales]) { }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 3000 }
+    deployable web { platform: vue, targets: api, ui: WebApp, port: 3003 }
+  }
+`;
+
+async function vueFiles(): Promise<Map<string, string>> {
+  const all = await generateSystemFiles(SOURCE);
+  const out = new Map<string, string>();
+  for (const [p, c] of all) {
+    if (p.startsWith("web/")) out.set(p.slice("web/".length), c);
+  }
+  return out;
+}
+
+describe("vue walker — scaffold pages", () => {
+  it("list page: reactive() vue-query hoist + mustache cells + v-for rows", async () => {
+    const files = await vueFiles();
+    const list = files.get("src/pages/customers/list.vue")!;
+    // Script: composable hoisted once, wrapped in reactive() so
+    // nested refs (`.data`, `.isLoading`) unwrap in template position.
+    expect(list).toContain(`import { reactive } from "vue";`);
+    expect(list).toContain("const customerAll = reactive(useAllCustomers());");
+    // Template: pack-owned v-if query arms + v-for rows + mustaches.
+    expect(list).toContain('<template v-if="customerAll.isLoading">');
+    expect(list).toContain('v-for="(row) in customerAll.data"');
+    expect(list).toContain("{{ row.name }}");
+    expect(list).toContain("{{ shortId(row.id) }}");
+    // JS-splicing attributes are single-quoted (the rendered JS
+    // carries double-quoted string literals).
+    expect(list).toContain(`@click='() => navigate("/customers/new")'`);
+    expect(list).toContain(`:data-testid='("customers-row-" + row.id)'`);
+    // The navigate adapter bridges the walker's Button(to:) contract.
+    expect(list).toContain("const navigate = (to: string) => { void router.push(to); };");
+  });
+
+  it("detail page: route param + byId handle + op-form stub wiring", async () => {
+    const files = await vueFiles();
+    const detail = files.get("src/pages/customers/detail.vue")!;
+    expect(detail).toContain("const route = useRoute();");
+    expect(detail).toContain("const id = route.params.id as string;");
+    expect(detail).toContain("const customerById = reactive(useCustomerById(id));");
+    // Operation trigger compiles against the real mutation handle +
+    // a TODO-alert open-fn until the forms runtime lands.
+    expect(detail).toContain(`const update = reactive(useUpdateCustomer(id ?? ""));`);
+    expect(detail).toContain("const openUpdateModal = (_mut: unknown)");
+    expect(detail).toContain("TODO(vue-forms)");
+    expect(detail).toContain("{{ customerById.data.name }}");
+  });
+
+  it("new page: form placeholder markup, no dangling identifiers", async () => {
+    const files = await vueFiles();
+    const newPage = files.get("src/pages/customers/new.vue")!;
+    expect(newPage).toContain("TODO(vue-forms)");
+    // The aggregate create-form is the placeholder — no RHF-style
+    // identifiers may leak into the script.
+    expect(newPage).not.toContain("useForm");
+    expect(newPage).not.toContain("register");
+  });
+
+  it("no JSX artifacts leak into any emitted .vue file", async () => {
+    const files = await vueFiles();
+    for (const [path, content] of files) {
+      if (!path.endsWith(".vue")) continue;
+      // JSX expression-comments and JSX attr-binding braces are the
+      // tell-tale signs of a template or seam that missed the Vue
+      // translation (the plan's Handlebars/Vue collision risk).
+      expect(content, `${path} carries a JSX comment`).not.toContain("{/*");
+      expect(content, `${path} carries a JSX attr binding`).not.toMatch(/ [a-zA-Z-]+=\{[^{]/);
+      // Unrendered Handlebars artifacts (the pack-authoring lint).
+      expect(content, `${path} carries an unrendered Handlebars tag`).not.toMatch(/\{\{[#/^]/);
+    }
+  });
+});

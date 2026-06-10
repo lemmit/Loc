@@ -1,22 +1,28 @@
 import type {
+  AggregateIR,
+  BoundedContextIR,
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   PageIR,
   SystemIR,
   UiIR,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { contextUsesMoney } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
+import { walkBody } from "../_walker/walker-core.js";
 // Framework-neutral TS constant (zod moneySchema over decimal.js) that
 // happens to live with the React emit templates; shared the same way
 // the elixir theme-emit shares `prepareThemeVM`.  Candidate for a
 // later move into `_frontend/`.
 import { REACT_LIB_SCHEMAS_MONEY_TS } from "../react/emit-templates.js";
 import { prepareThemeVM } from "../react/templating/preparers/theme.js";
+import { renderVuePage } from "./walker/page-shell.js";
+import { vueTarget } from "./walker/vue-target.js";
 
 // ---------------------------------------------------------------------------
 // Vue 3 + vue-query + Zod + Vuetify generator.
@@ -80,10 +86,53 @@ export function generateVueForContexts(
     );
   }
 
-  // Pages — stub SFC per declared page until the walker slice.
+  // Pages — bodies walk through the SHARED markup walker with
+  // `vueTarget`; the vuetify pack templates own the Vue markup the
+  // primitives emit.  A page with no body (legal but unusual) keeps
+  // the stub shell so the route still mounts.
   const pages = ui.pages.filter((p) => p.route);
+  const aggregatesIRByName = new Map<string, AggregateIR>();
+  const bcByAggregate = new Map<string, BoundedContextIR>();
+  const workflowsByName = new Map<string, WorkflowIR>();
+  const bcByWorkflow = new Map<string, BoundedContextIR>();
+  for (const ctx of contexts) {
+    for (const agg of ctx.aggregates) {
+      aggregatesIRByName.set(agg.name, agg);
+      bcByAggregate.set(agg.name, ctx);
+    }
+    for (const wf of ctx.workflows) {
+      workflowsByName.set(wf.name, wf);
+      bcByWorkflow.set(wf.name, ctx);
+    }
+  }
+  const pageRoutes = new Map<string, string>();
+  for (const page of pages) pageRoutes.set(page.name, page.route!);
   for (const page of pages) {
-    out.set(pagePath(page), renderPageStub(page));
+    if (!page.body) {
+      out.set(pagePath(page), renderPageStub(page));
+      continue;
+    }
+    const paramNames = new Set(page.params.map((p) => p.name));
+    const stateNames = new Set(page.state.map((s) => s.name));
+    const result = walkBody(
+      page.body,
+      vueTarget,
+      pack,
+      paramNames,
+      stateNames,
+      new Map(), // user components — vue support lands with the parity slice
+      ui.apiParams,
+      aggregatesIRByName,
+      bcByAggregate,
+      workflowsByName,
+      bcByWorkflow,
+      new Map(),
+      pageRoutes,
+    );
+    out.set(
+      pagePath(page),
+      renderVuePage({ page, routeParams: page.params.map((p) => p.name), result }),
+    );
   }
   out.set("src/pages/NotFound.vue", renderShell(pack, "not-found-page", {}));
   out.set("src/router.ts", renderRouter(pages));
