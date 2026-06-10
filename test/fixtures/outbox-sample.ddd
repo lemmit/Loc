@@ -1,0 +1,41 @@
+// Fixture for the transactional-outbox tier (dispatch-delivery-semantics.md):
+// the dispatch-sample saga with `retention: log` on the channel, so both
+// carried events are durable — recorded in __loom_outbox by the outbox
+// dispatcher and delivered by the relay (at-least-once) instead of the
+// inline in-process dispatch.
+context Fulfillment {
+  aggregate Order { customerId: string  status: string  total: int }
+  repository Orders for Order { }
+  aggregate Shipment {
+    orderRef: Order id
+    status: string
+    operation markTracked() { status := "Tracked" }
+  }
+  repository Shipments for Shipment { }
+
+  event OrderPlaced { order: Order id, at: datetime }
+  event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+
+  channel Lifecycle {
+    carries: OrderPlaced, ShipmentRequested
+    delivery: broadcast
+    retention: log
+  }
+
+  workflow OrderFulfillment {
+    orderId: Order id          // correlation field — one instance per order
+    attempts: int              // saga state — exercises typed allocate defaults
+
+    // Starter: allocates the instance, requests a shipment.
+    create(p: OrderPlaced) by p.order {
+      let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+      emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+    }
+
+    // Continuation: routes to the started instance by order; marks the shipment.
+    on(s: ShipmentRequested) by s.order {
+      let ship = Shipments.getById(s.shipment)
+      ship.markTracked()
+    }
+  }
+}

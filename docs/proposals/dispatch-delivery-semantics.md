@@ -1,8 +1,19 @@
 # In-process dispatch delivery semantics — at-most-once → transactional outbox
 
-> Status: **PROPOSED** — design note. Records the delivery property of the
-> in-process dispatcher that shipped on all three backends (Hono #970,
-> .NET #1012, Phoenix #1020) and sketches the reliability upgrade path.
+> Status: **PARTIAL** — the in-process dispatcher shipped on all three
+> backends (Hono #970, .NET #1012, Phoenix #1020), and the **transactional
+> outbox tier is now live on Hono** (2026-06-10): a channel with
+> `retention: log | work` makes its carried events durable — `createApp`'s
+> default dispatcher records them in `__loom_outbox` (schema + MigrationsIR
+> table) instead of dispatching inline, and `index.ts` starts a polling
+> relay (`startOutboxRelay`) that drains undispatched rows through the
+> in-process dispatcher at-least-once, dead-lettering after N attempts
+> (`event_dead_lettered` catalog event); an `ephemeral` channel keeps the
+> at-most-once path byte-identically.  Remaining: the .NET
+> `BackgroundService` relay, the Phoenix/Oban relay (elixir track),
+> idempotent-consumer markers on the saga row (§3 — consumers must
+> tolerate redelivery until then), and the LISTEN/NOTIFY upgrade over
+> polling.
 > Companion to [`channels.md`](./channels.md), which owns the **transport**
 > surface (`channelSource` → broker) but only *names* the "async
 > messaging/outbox" gap without designing it. This doc designs that gap for

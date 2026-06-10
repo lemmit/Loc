@@ -54,6 +54,7 @@ import {
   type UserIR,
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
+import { durableEventTypes } from "../../../ir/util/channels.js";
 import {
   isTpcBase,
   isTphBase,
@@ -602,6 +603,11 @@ export function generateTypeScriptForContexts(
       resourceImports,
       hasSeeds,
       usingMikro,
+      // Outbox relay (dispatch-delivery-semantics.md): started at boot when
+      // any context carries a durable channel AND the in-process dispatcher
+      // is wired (subscriptions exist; drizzle persistence).
+      !usingMikro &&
+        contexts.some((c) => c.eventSubscriptions.length > 0 && durableEventTypes(c).size > 0),
     ),
   );
   if (!usingMikro) out.set("drizzle.config.ts", DRIZZLE_CONFIG);
@@ -809,6 +815,7 @@ function renderProjectIndexTs(
   resourceImports: readonly string[] = [],
   runSeedsAtBoot = false,
   usingMikro = false,
+  outboxRelay = false,
 ): string {
   // Side-effect imports for the resource-client modules (objectStore /
   // queue / api) so their clients instantiate at boot.  Empty for
@@ -847,7 +854,11 @@ import pg from "pg";
 import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
-${migImport}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";`;
+${
+  outboxRelay
+    ? `import { createInProcessDispatcher, createOutboxDispatcher, startOutboxRelay } from "./http/workflows";\n`
+    : ""
+}${migImport}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";`;
   const connectionBlock = usingMikro
     ? `// Persistence connection — owned by the mikroorm PersistenceAdapter\n// (MikroORM.init → dev schema bootstrap → EntityManager as \`db\`).\n${mikroConnectionSetup().join("\n")}`
     : `// Persistence connection — owned by the drizzle PersistenceAdapter\n// (DATABASE_URL guard → pg pool → pool-error logging → drizzle db).\n${DRIZZLE_CONNECTION_SETUP.join("\n")}`;
@@ -861,8 +872,19 @@ ${connectionBlock}
 
 const port = Number(process.env.PORT ?? 3000);
 baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
-${effectiveMigCall}${seedCall}${authStubCall}const app = createApp(db);
-const server = serve({ fetch: app.fetch, port });
+${effectiveMigCall}${seedCall}${authStubCall}${
+  outboxRelay
+    ? `// Transactional outbox (dispatch-delivery-semantics.md): durable events
+// (channels with retention: log | work) are recorded in __loom_outbox by
+// the app's dispatcher; the relay drains them through the in-process
+// dispatcher at-least-once.  Consumers must tolerate redelivery.
+const inProcessEvents = createInProcessDispatcher(db);
+const app = createApp(db, createOutboxDispatcher(db, inProcessEvents));
+const stopOutboxRelay = startOutboxRelay(db, inProcessEvents);
+`
+    : `const app = createApp(db);
+`
+}const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });
 
 // Graceful shutdown — close the HTTP server (stops accepting,
@@ -870,7 +892,12 @@ baseLogger.info({ event: "server_listening", port });
 // drops in-flight work and leaves pg connections lingering.  Both
 // SIGTERM (orchestrator) and SIGINT (Ctrl-C) are handled.
 async function shutdown(signal: string): Promise<void> {
-  baseLogger.info({ event: "server_shutdown", signal });
+  baseLogger.info({ event: "server_shutdown", signal });${
+    outboxRelay
+      ? `
+  stopOutboxRelay();`
+      : ""
+  }
   await new Promise<void>((resolve) => server.close(() => resolve()));
   baseLogger.info({ event: "server_drained" });
   ${usingMikro ? "await orm.close();" : "await pool.end();"}

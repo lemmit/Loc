@@ -8,6 +8,7 @@ import type {
   TypeIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
+import { durableEventTypes } from "../../../ir/util/channels.js";
 import {
   isTphBase,
   isTphConcrete,
@@ -169,6 +170,11 @@ export function renderSchema(
   }
   if (opts.audit) tables.push(AUDIT_TABLE);
   if (opts.provenance) tables.push(PROVENANCE_TABLE);
+  // Transactional outbox (dispatch-delivery-semantics.md): emitted when any
+  // channel asks for durability (`retention: log | work`).  The dispatcher
+  // records durable events here; the relay drains undispatched rows in
+  // insert order (serial id) through the in-process dispatcher.
+  if (durableEventTypes(ctx).size > 0) tables.push(OUTBOX_TABLE);
   // Persisted workflow-correlation state (workflow-and-applier.md A2-S2):
   // one row per running workflow instance, keyed by the correlation field, with
   // the saga state fields as columns.  Emitted for any workflow that declares a
@@ -276,6 +282,15 @@ function camelizeSnake(s: string): string {
 // in the same transaction as the operation's aggregate save (atomic — the
 // row and the state change commit or roll back together).  See
 // `docs/proposals/audit-and-logging.md`.
+const OUTBOX_TABLE = `export const loomOutbox = pgTable("__loom_outbox", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  type: text("type").notNull(),
+  payload: jsonb("payload").notNull(),
+  dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
+  attempts: integer("attempts").notNull().default(0),
+});`;
+
 const AUDIT_TABLE = `export const auditRecords = pgTable("audit_records", {
   auditId: text("audit_id").primaryKey(),
   operationId: text("operation_id").notNull(),
