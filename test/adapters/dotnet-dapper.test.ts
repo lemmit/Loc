@@ -192,7 +192,9 @@ describe("dapper capability filters", () => {
     expect(repo).toContain("created_at = __create_created_at");
     // … and the upsert SET excludes it (an existing row keeps its value)
     // while still updating the onUpdate column.
-    expect(repo).toMatch(/ON CONFLICT \(id\) DO UPDATE SET (?!.*created_at = excluded).*updated_at = excluded\.updated_at/);
+    expect(repo).toMatch(
+      /ON CONFLICT \(id\) DO UPDATE SET (?!.*created_at = excluded).*updated_at = excluded\.updated_at/,
+    );
   });
 
   it("never emits a silent principal-referencing filter (model errors out upstream)", async () => {

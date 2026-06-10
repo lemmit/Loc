@@ -280,8 +280,12 @@ export function renderDapperRepository(
   //     in-memory aggregate is not mutated for onCreate; existence is
   //     unknowable without an extra round-trip.)
   const stampRules = agg.contextStamps ?? [];
-  const onCreateStamps = stampRules.filter((r) => r.event === "create").flatMap((r) => r.assignments);
-  const onUpdateStamps = stampRules.filter((r) => r.event === "update").flatMap((r) => r.assignments);
+  const onCreateStamps = stampRules
+    .filter((r) => r.event === "create")
+    .flatMap((r) => r.assignments);
+  const onUpdateStamps = stampRules
+    .filter((r) => r.event === "update")
+    .flatMap((r) => r.assignments);
   const onCreateCols = new Set(onCreateStamps.map((a) => snake(a.field)));
   const upsertSet = cols
     .filter((c) => c.col !== "id" && !onCreateCols.has(c.col))
