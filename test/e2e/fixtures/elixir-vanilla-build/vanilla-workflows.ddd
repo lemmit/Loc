@@ -47,6 +47,19 @@ system Tasks {
           t.markDone()
         }
       }
+
+      // repo-let exercise — loads an existing aggregate by id then mutates
+      // it.  `Tasks.getById(taskId)` lowers to a
+      // `{:ok, t} <- Context.get_task(task_id)` with-clause off the
+      // find_by_id facade; a missing record short-circuits to
+      // `{:error, :not_found}` (controller → 404).  Proves the loaded
+      // local + the id param-surfacing compile under --warnings-as-errors.
+      workflow completeExisting transactional {
+        create(taskId: Task id) {
+          let t = Tasks.getById(taskId)
+          t.markDone()
+        }
+      }
     }
   }
   api TrackerApi from Productivity
