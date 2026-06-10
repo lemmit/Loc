@@ -139,7 +139,10 @@ diff-sync semantics under SQLAlchemy.
 | S12 payloads/unions/paged | ✅ | PagedResult carrier, union finds, exception-less ops; envelope rides with S15 |
 | S13 inheritance | ✅ | TPH shared table + kind scoping, TPC, base readers; verified live |
 | S14 event sourcing | ✅ | stream table + appliers fold + ES create; verified live; document shape stays gated |
-| S15–S17 | next | workflows, auth/seed/extern, observability |
+| S15a command workflows | ✅ | POST /workflows/<wf>, one-transaction-per-request (repos flush, session dependency commits); verified live |
+| S15b sagas/dispatcher | next | event-triggered creates + on(...) reactors, correlation state tables |
+| S16 auth/seed/extern | next | |
+| S17 observability | next | |
 | **S10 conformance** | **moved after S17** | showcase.ddd (the parity fixture) declares `auth: required` and exercises every feature — joining it requires S11–S17 first.  Matches the roadmap's Phase E exit criterion ("showcase passes the multi-backend suite") being terminal. |
 | S18, S19 | after S10 | |
 
