@@ -141,7 +141,7 @@ export function buildRoutesFile(
   );
   lines.push(`import * as Ids from "../domain/ids";`);
   lines.push(
-    `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
+    `import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
   );
   // Extern handler registry — the per-aggregate file is always emitted
   // when the aggregate has at least one extern op, never imported when
@@ -543,6 +543,10 @@ export function buildRoutesFile(
         emitTrace,
       ).map((l) => `  ${l}`),
     );
+    if (op.when) {
+      lines.push("");
+      lines.push(...emitCanOpRoute(agg, op, emitTrace).map((l) => `  ${l}`));
+    }
     lines.push("");
   }
 
@@ -582,13 +586,19 @@ export function buildRoutesFile(
   // .NET / Phoenix).  `instance` is the request path; `type` is `about:blank`
   // (no per-error type registry).  Shared shape across all error arms.
   lines.push(
-    `    const problem = (status: 400 | 403 | 404 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
+    `    const problem = (status: 400 | 403 | 404 | 409 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
   );
   lines.push(`    if (err instanceof ForbiddenError) {`);
   lines.push(
     `      ${renderHonoLogCall("forbidden", `aggregate: "${agg.name}", message: err.message, status: 403`)}`,
   );
   lines.push(`      return problem(403, "Forbidden", err.message);`);
+  lines.push(`    }`);
+  lines.push(`    if (err instanceof DisallowedError) {`);
+  lines.push(
+    `      ${renderHonoLogCall("disallowed", `aggregate: "${agg.name}", message: err.message, status: 409`)}`,
+  );
+  lines.push(`      return problem(409, "Disallowed", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof DomainError) {`);
   lines.push(
@@ -645,6 +655,58 @@ export function buildRoutesFile(
   return assembled + "\n";
 }
 
+/** The `when` canCommand gate (criterion.md use site 2): evaluate the
+ *  predicate against the loaded aggregate; false → DisallowedError,
+ *  which the shared onError maps to a 409 ProblemDetails.  Throwing
+ *  (rather than an inline `return c.json`) keeps one shape across the
+ *  plain, returning, and transactional (audit/prov) paths. */
+function whenGateLine(agg: AggregateIR, op: OperationIR, pad: string): string[] {
+  if (!op.when) return [];
+  const pred = renderTsExpr(op.when, { thisName: "aggregate" });
+  return [
+    `${pad}if (!(${pred})) throw new DisallowedError(${JSON.stringify(
+      `operation '${op.name}' is not allowed in the current state of ${agg.name}.`,
+    )});`,
+  ];
+}
+
+/** The auto-exposed, side-effect-free `GET /{id}/can_<op>` companion of a
+ *  `when`-gated operation — returns `{ allowed }` so a UI can enable or
+ *  disable the action without invoking it (the canCommand pattern). */
+function emitCanOpRoute(agg: AggregateIR, op: OperationIR, emitTrace: boolean): string[] {
+  if (!op.when) return [];
+  void emitTrace;
+  const aggSlug = snake(plural(agg.name));
+  const opSnake = snake(op.routeSlug ?? op.name);
+  const pred = renderTsExpr(op.when, { thisName: "aggregate" });
+  const out: string[] = [];
+  out.push(`app.openapi(`);
+  out.push(`  createRoute({`);
+  out.push(`    method: "get",`);
+  out.push(`    path: "/{id}/can_${opSnake}",`);
+  out.push(`    tags: ["${aggSlug}"],`);
+  out.push(`    operationId: "${camelId(opOperation(agg.name, `can_${op.name}`))}",`);
+  out.push(`    request: {`);
+  out.push(`      params: z.object({ id: z.string().uuid() }),`);
+  out.push(`    },`);
+  out.push(`    responses: {`);
+  out.push(
+    `      200: { description: "OK", content: { "application/json": { schema: z.object({ allowed: z.boolean() }) } } },`,
+  );
+  out.push(
+    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  out.push(`    },`);
+  out.push(`  }),`);
+  out.push(`  async (c) => {`);
+  out.push(`    const { id } = c.req.valid("param");`);
+  out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
+  out.push(`    return c.json({ allowed: ${pred} }, 200);`);
+  out.push(`  },`);
+  out.push(`);`);
+  return out;
+}
+
 function emitOperationRoute(
   agg: AggregateIR,
   op: OperationIR,
@@ -692,6 +754,12 @@ function emitOperationRoute(
   out.push(
     `      422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
+  // A `when` state gate denies with 409 (DisallowedError → onError).
+  if (op.when) {
+    out.push(
+      `      409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+  }
   // A `requires` guard denies with 403 (ForbiddenError → onError) — declare
   // it so the published contract documents the authorization outcome.
   if (operationIsGuarded(op)) {
@@ -768,6 +836,7 @@ function emitOperationRoute(
 
   if (!audit && !prov) {
     out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
+    out.push(...whenGateLine(agg, op, "    "));
     out.push(...mutation("    "));
     out.push(`    await repo.save(aggregate);`);
   } else {
@@ -786,6 +855,7 @@ function emitOperationRoute(
     out.push(`    await db.transaction(async (tx) => {`);
     out.push(`      const repoTx = new ${agg.name}Repository(tx, events);`);
     out.push(`      const aggregate = await repoTx.getById(Ids.${agg.name}Id(id));`);
+    out.push(...whenGateLine(agg, op, "      "));
     if (audit) out.push(`      const before = repoTx.toWire(aggregate);`);
     out.push(...mutation("      "));
     out.push(`      await repoTx.save(aggregate);`);
@@ -876,6 +946,7 @@ function emitReturningOperationRoute(
   // guarded, plus each error variant's mapped status.
   const problemStatuses = new Set<number>([400, 422, 404]);
   if (operationIsGuarded(op)) problemStatuses.add(403);
+  if (op.when) problemStatuses.add(409);
   for (const v of errorVariants) problemStatuses.add(statusFor(variantTag(v)));
   const out: string[] = [];
   out.push(`app.openapi(`);
@@ -924,6 +995,7 @@ function emitReturningOperationRoute(
   const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
   out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
+  out.push(...whenGateLine(agg, op, "    "));
   out.push(`    const result = aggregate.${lowerFirst(op.name)}(${callArgs});`);
   out.push(`    await repo.save(aggregate);`);
   // Translate each error variant to a ProblemDetails before the success path.

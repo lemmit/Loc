@@ -23,6 +23,7 @@ import type {
   SchemaSnapshot,
   TableShape,
 } from "../ir/types/migrations-ir.js";
+import { durableEventTypes } from "../ir/util/channels.js";
 import {
   isTphBase,
   isTphConcrete,
@@ -173,6 +174,13 @@ export function schemaFromModule(
       if (wf.correlationField) tables.push(workflowStateTableShape(wf, module.name, voLookup));
     }
   }
+  // Transactional outbox (dispatch-delivery-semantics.md): one shared table
+  // when any context's channel asks for durability (`retention: log | work`).
+  // The dispatcher records durable events here; the relay drains rows in
+  // insert order (the serial id) through the in-process dispatcher.
+  if (module.contexts.some((c) => durableEventTypes(c).size > 0)) {
+    tables.push(outboxTableShape(module.name));
+  }
   // The snapshot stays alphabetical (a stable, diff-friendly record);
   // `diffSchema` reorders the emitted `createTable` steps by FK
   // dependency so the SQL applies cleanly.
@@ -186,6 +194,27 @@ export function schemaFromModule(
  *  Saga `X id` references are stored as plain columns without a foreign key —
  *  the workflow row is a standalone routing record, not a child of those
  *  aggregates, so it must not constrain their delete order. */
+/** The transactional-outbox table (dispatch-delivery-semantics.md) — one per
+ *  module whose contexts carry any durable channel (`retention: log | work`).
+ *  Fixed shape; the relay drains undispatched rows ordered by `occurred_at`. */
+function outboxTableShape(ownerModule: string): TableShape {
+  return {
+    name: "__loom_outbox",
+    ownerModule,
+    columns: [
+      { name: "id", type: { kind: "uuid" }, nullable: false, default: "gen_random_uuid()" },
+      { name: "occurred_at", type: { kind: "datetime" }, nullable: false, default: "now()" },
+      { name: "type", type: { kind: "text" }, nullable: false },
+      { name: "payload", type: { kind: "json" }, nullable: false },
+      { name: "dispatched_at", type: { kind: "datetime" }, nullable: true },
+      { name: "attempts", type: { kind: "int" }, nullable: false, default: "0" },
+    ],
+    primaryKey: ["id"],
+    foreignKeys: [],
+    indexes: [],
+  };
+}
+
 function workflowStateTableShape(
   wf: WorkflowIR,
   ownerModule: string,

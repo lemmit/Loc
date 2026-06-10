@@ -12,6 +12,7 @@ import {
   workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
+import { durableEventTypes } from "../../../ir/util/channels.js";
 import {
   camelId,
   opWorkflow,
@@ -248,7 +249,13 @@ export function buildWorkflowsFile(
   if (usesEvents) imports.push(`import type * as Events from "../domain/events";`);
   if (usesDb) imports.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   // The persisted-workflow load helper filters by the correlation column.
-  if (/(?<!\.)\beq\(/.test(bodyStr)) imports.push(`import { eq } from "drizzle-orm";`);
+  const drizzleOps = ["and", "asc", "eq", "isNull", "lt"].filter((op) =>
+    new RegExp(`(?<!\\.)\\b${op}\\(`).test(bodyStr),
+  );
+  if (drizzleOps.length > 0)
+    imports.push(`import { ${drizzleOps.join(", ")} } from "drizzle-orm";`);
+  // The outbox relay logs event_dead_lettered on the module-scope logger.
+  if (/\bbaseLogger\./.test(bodyStr)) imports.push(`import { baseLogger } from "../obs/log";`);
   // The `on`-reactor drop+log path logs `event_unrouted` via the ALS logger.
   if (/(?<!\.)\brequestLog\(/.test(bodyStr))
     imports.push(`import { requestLog } from "../obs/als";`);
@@ -258,7 +265,7 @@ export function buildWorkflowsFile(
   // a superset — but stick to `import type` when there are no value uses to
   // keep subscription-free files byte-identical.
   if (usesSchema) {
-    const schemaAsValue = /db\.(?:select|insert)\(/.test(bodyStr);
+    const schemaAsValue = /db\.(?:select|insert|update)\(/.test(bodyStr);
     imports.push(
       schemaAsValue
         ? `import * as schema from "../db/schema";`
@@ -612,6 +619,91 @@ function emitSubscriptionHandlers(ctx: EnrichedBoundedContextIR): string[] {
     byEvent.set(sub.event, list);
   }
   out.push(...emitDispatcherFactory(byEvent));
+  const durable = durableEventTypes(ctx);
+  if (durable.size > 0) {
+    out.push("");
+    out.push(...emitOutboxMachinery(durable));
+  }
+  return out;
+}
+
+/** Transactional-outbox tier (dispatch-delivery-semantics.md): events carried
+ *  by a channel with `retention: log | work` are recorded in `__loom_outbox`
+ *  (same control-flow point the inline dispatch sat at) instead of being
+ *  dispatched in-process; `startOutboxRelay` drains undispatched rows through
+ *  the in-process dispatcher — at-least-once, so consumers must tolerate
+ *  redelivery.  Exhausted rows (attempts ≥ maxAttempts) stay in the table and
+ *  log `event_dead_lettered` once. */
+function emitOutboxMachinery(durable: ReadonlySet<string>): string[] {
+  const types = [...durable].sort().map((t) => JSON.stringify(t));
+  const out: string[] = [];
+  out.push(
+    `export const DURABLE_EVENT_TYPES: ReadonlySet<string> = new Set([${types.join(", ")}]);`,
+  );
+  out.push(``);
+  out.push(`export function createOutboxDispatcher(`);
+  out.push(`  db: NodePgDatabase<typeof schema>,`);
+  out.push(`  inner: DomainEventDispatcher,`);
+  out.push(`): DomainEventDispatcher {`);
+  out.push(`  return {`);
+  out.push(`    async dispatch(event: Events.DomainEvent): Promise<void> {`);
+  out.push(`      if (DURABLE_EVENT_TYPES.has(event.type)) {`);
+  out.push(
+    `        await db.insert(schema.loomOutbox).values({ type: event.type, payload: event });`,
+  );
+  out.push(`        return; // the relay delivers`);
+  out.push(`      }`);
+  out.push(`      await inner.dispatch(event);`);
+  out.push(`    },`);
+  out.push(`  };`);
+  out.push(`}`);
+  out.push(``);
+  out.push(`export function startOutboxRelay(`);
+  out.push(`  db: NodePgDatabase<typeof schema>,`);
+  out.push(`  inner: DomainEventDispatcher,`);
+  out.push(`  opts: { intervalMs?: number; maxAttempts?: number; batchSize?: number } = {},`);
+  out.push(`): () => void {`);
+  out.push(`  const intervalMs = opts.intervalMs ?? 500;`);
+  out.push(`  const maxAttempts = opts.maxAttempts ?? 5;`);
+  out.push(`  const batchSize = opts.batchSize ?? 50;`);
+  out.push(`  let draining = false;`);
+  out.push(`  const drain = async (): Promise<void> => {`);
+  out.push(`    if (draining) return;`);
+  out.push(`    draining = true;`);
+  out.push(`    try {`);
+  out.push(`      const rows = await db`);
+  out.push(`        .select()`);
+  out.push(`        .from(schema.loomOutbox)`);
+  out.push(
+    `        .where(and(isNull(schema.loomOutbox.dispatchedAt), lt(schema.loomOutbox.attempts, maxAttempts)))`,
+  );
+  out.push(`        .orderBy(asc(schema.loomOutbox.occurredAt))`);
+  out.push(`        .limit(batchSize);`);
+  out.push(`      for (const row of rows) {`);
+  out.push(`        try {`);
+  out.push(`          await inner.dispatch(row.payload as Events.DomainEvent);`);
+  out.push(
+    `          await db.update(schema.loomOutbox).set({ dispatchedAt: new Date() }).where(eq(schema.loomOutbox.id, row.id));`,
+  );
+  out.push(`        } catch (err) {`);
+  out.push(`          const attempts = row.attempts + 1;`);
+  out.push(
+    `          await db.update(schema.loomOutbox).set({ attempts }).where(eq(schema.loomOutbox.id, row.id));`,
+  );
+  out.push(`          if (attempts >= maxAttempts) {`);
+  out.push(
+    `            baseLogger.warn({ event: "event_dead_lettered", type: row.type, attempts, error: err instanceof Error ? err.message : String(err) });`,
+  );
+  out.push(`          }`);
+  out.push(`        }`);
+  out.push(`      }`);
+  out.push(`    } finally {`);
+  out.push(`      draining = false;`);
+  out.push(`    }`);
+  out.push(`  };`);
+  out.push(`  const timer = setInterval(() => void drain(), intervalMs);`);
+  out.push(`  return () => clearInterval(timer);`);
+  out.push(`}`);
   return out;
 }
 

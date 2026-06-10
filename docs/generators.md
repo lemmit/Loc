@@ -801,9 +801,9 @@ A `test e2e "name" against <deployable> { … }` block lowers via
 | `api.<aggregate>.<op>(idExpr, body?)` | `__post(\`${base}/<plural>/${idExpr}.id/<op_snake>\`, body ?? {})` |
 | `api.<aggregate>.<find>(args)` | `__getQuery(\`${base}/<plural>/<find_snake>\`, args)` |
 
-`expect <expr>` becomes `expect(<expr>).toBe(true)`;
-`expectThrows <expr>` becomes
-`expect(() => <expr>).toThrow()`.
+`expect(<x>).<matcher>(…)` lowers to the native matcher;
+`expect(<call>).toThrow()` becomes
+`expect(() => <call>).toThrow()`.
 
 ---
 

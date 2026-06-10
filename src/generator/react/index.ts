@@ -9,7 +9,7 @@ import {
   type SystemIR,
   type UiIR,
 } from "../../ir/types/loom-ir.js";
-import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { lowerFirst, plural } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { buildApiModule } from "./api-builder.js";
@@ -170,7 +170,7 @@ export function generateReactForContexts(
     out.set("src/api/views.ts", buildViewsApiModule(contexts));
   }
 
-  out.set("e2e/smoke.spec.ts", smokeSpec(aggregates.map((a) => a.agg)));
+  out.set("e2e/smoke.spec.ts", smokeSpec(ui));
   out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
   out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
@@ -461,23 +461,48 @@ function staticTitleOf(page: PageIR | undefined): string | undefined {
   return undefined;
 }
 
-function smokeSpec(aggregates: AggregateIR[]): string {
-  // Auto-generated minimal Playwright smoke: every aggregate's list
-  // page loads.  Users add per-aggregate scenarios using the page
-  // objects under e2e/pages/.
-  const imports = aggregates
-    .map((a) => `import { ${upperFirst(a.name)}ListPage } from "./pages/${lowerFirst(a.name)}";`)
-    .join("\n");
-  const cases = aggregates
-    .map(
-      (a) =>
-        `test("${snake(plural(a.name))} list loads", async ({ page }) => {\n  const p = await new ${upperFirst(a.name)}ListPage(page).goto();\n  await expect(p.page).toHaveURL(/${snake(plural(a.name))}$/);\n});`,
-    )
-    .join("\n\n");
+function smokeSpec(ui: UiIR): string {
+  // Auto-generated minimal Playwright smoke: every param-less page this
+  // ui declares navigates and loads.  Driven by route (not by importing
+  // the page objects) so it stays correct regardless of how the ui's
+  // pages map onto page-object files — a custom-page ui emits
+  // `pages/<page>.ts` (class `<Page>Page`), a scaffold ui emits
+  // `pages/<aggregate>.ts` (class `<Agg>ListPage`), and a ui covers only
+  // the aggregates it actually shows.  The old per-served-aggregate
+  // `import { <Agg>ListPage } from "./pages/<agg>"` assumed the scaffold
+  // shape for every served aggregate and broke (module-not-found →
+  // Playwright "No tests found" → non-zero exit) on any ui with custom or
+  // partial pages.  Richer per-page scenarios live in the page objects
+  // under e2e/pages/ and the generated `*.ui.spec.ts`.
+  const cases: string[] = [];
+  for (const page of ui.pages) {
+    // Parameterised routes (`/x/:id`) need a seeded entity — out of scope
+    // for a smoke; they're exercised by the per-page specs.
+    if (page.params.length > 0) continue;
+    const route = page.route;
+    if (!route || route.includes(":")) continue;
+    const routeRe = `${route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`;
+    cases.push(
+      `test(${JSON.stringify(`${page.name} loads`)}, async ({ page }) => {\n` +
+        `  await page.goto(${JSON.stringify(route)});\n` +
+        `  await expect(page).toHaveURL(new RegExp(${JSON.stringify(routeRe)}));\n` +
+        `});`,
+    );
+  }
+  // A ui made up entirely of parameterised pages would otherwise produce a
+  // spec with zero tests — which Playwright reports as "No tests found"
+  // and exits non-zero.  Fall back to loading the SPA root.
+  if (cases.length === 0) {
+    cases.push(
+      `test("app root loads", async ({ page }) => {\n` +
+        `  await page.goto("/");\n` +
+        `  await expect(page.locator("body")).toBeVisible();\n` +
+        `});`,
+    );
+  }
   return `// Auto-generated smoke spec.
 import { test, expect } from "./fixtures";
-${imports}
 
-${cases}
+${cases.join("\n\n")}
 `;
 }

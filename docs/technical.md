@@ -900,9 +900,10 @@ calls.  Per-call dispatch:
 | `ui.<aggregate>.getById(idExpr)` | `<Agg>DetailPage.goto(idExpr.id)` plus eager `field("…")` reads + `<containment>.length` accessors. |
 | `ui.<aggregate>.<op>(idExpr, body?)` | `<Agg>DetailPage.goto(idExpr.id) → <op>(body ?? {})`. |
 
-`expect <expr>` becomes `expect(<expr>).toBe(true)`;
-`expectThrows <expr>` becomes
-`await expect(async () => { <expr>; }).rejects.toThrow()`.
+`expect(<x>).<matcher>(…)` lowers to the native matcher;
+`expect(<call>).toThrow()` becomes
+`await expect(async () => { <call>; }).rejects.toThrow()` (and
+`toThrow(<status>)` adds a `/→ <status>\b/` matcher).
 
 The UI / api split is determined automatically from the target
 deployable's platform — no DSL keyword required.  This is why the

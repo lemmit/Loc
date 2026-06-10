@@ -131,7 +131,7 @@ system SalesSystem {
           })
           order.addLine("00000000-0000-0000-0000-000000000002", 2)
           order.confirm()
-          expectThrows order.addLine("00000000-0000-0000-0000-000000000002", 1)
+          expect(order.addLine("00000000-0000-0000-0000-000000000002", 1)).toThrow()
         }
       }
 

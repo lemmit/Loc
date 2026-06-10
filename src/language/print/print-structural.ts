@@ -788,8 +788,11 @@ function printOperation(node: Operation): string {
   // Exception-less `or`-union return (exception-less.md): `: X or NotFound`,
   // grammar-positioned after extern/audited.
   const ret = node.returnType ? `: ${printTypeRef(node.returnType)}` : "";
+  // canCommand state gate (criterion.md use site 2) — after the return type,
+  // before the body, matching the grammar.
+  const when = node.when ? ` when ${printExpr(node.when)}` : "";
   return block(
-    `${priv}operation ${node.name}(${params})${extern}${audited}${ret}`,
+    `${priv}operation ${node.name}(${params})${extern}${audited}${ret}${when}`,
     node.body.map(printStmt),
   );
 }
@@ -823,10 +826,10 @@ function printTestBlock(node: TestBlock): string {
   return block(`test ${quote(node.name)}${verifies}`, node.body.map(printTestStatement));
 }
 
-/** TestStatement adds `expect` / `expectThrows` over the ordinary Statement set. */
+/** TestStatement adds `expect` (with a method matcher) over the ordinary
+ *  Statement set. */
 function printTestStatement(node: TestStatement): string {
   if (node.$type === "ExpectStmt") return `expect ${printExpr(node.expr)}`;
-  if (node.$type === "ExpectThrowsStmt") return `expectThrows ${printExpr(node.expr)}`;
   return printStmt(node as Statement);
 }
 

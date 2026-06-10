@@ -28,6 +28,7 @@ import {
   checkCriteria,
   checkDataSource,
   checkDeployable,
+  checkExpectMatcher,
   checkGenericCarriers,
   checkInheritance,
   checkLayout,
@@ -83,6 +84,9 @@ export class DddValidator {
     // Test-assertion matchers (`toBe`/`toHaveText`/…) are a known builtin
     // surface — enforce their fixed argument arity.
     checkMatcherArity(model, accept);
+    // Assertions are method-based: every `expect(...)` must end in a matcher
+    // (no bare boolean), and `toThrow`'s optional status arg is e2e-only.
+    checkExpectMatcher(model, accept);
     // Match expressions: warn on a missing `else` arm.
     // Type-checking arm conditions is best-effort here (the lowering's
     // type system is the source of truth); structural checks run

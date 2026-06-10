@@ -13,11 +13,62 @@ import { upperFirst } from "../../../util/naming.js";
 import { findUnionSpec } from "../../_payload/union-wire.js";
 import { projectEntityArgs, projectEntityExpr } from "../dto-mapping.js";
 import { renderQuery, renderQueryHandler } from "../emit.js";
-import { renderCsType } from "../render-expr.js";
+import { renderCsExpr, renderCsType } from "../render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Get-by-id query (returns Response | null)
 // ---------------------------------------------------------------------------
+
+/** The side-effect-free companions of `when`-gated operations: per op a
+ *  `Can<Op>Query(Id) : IQuery<CanResponse>` + handler (load → evaluate the
+ *  predicate → `{ allowed }`), plus one `CanResponse` record per aggregate
+ *  folder.  The canCommand pattern, criterion.md use site 2. */
+export function emitCanOpQueriesAndHandlers(
+  agg: EnrichedAggregateIR,
+  ns: string,
+  aggFolder: string,
+  out: Map<string, string>,
+  idClass: string = `${agg.name}Id`,
+): void {
+  const gated = agg.operations.filter((op) => op.when && op.visibility === "public");
+  if (gated.length === 0) return;
+  out.set(
+    `Application/${aggFolder}/Responses/CanResponse.cs`,
+    `// Auto-generated.\n` +
+      `using System.ComponentModel.DataAnnotations;\n\n` +
+      `namespace ${ns}.Application.${aggFolder}.Responses;\n\n` +
+      `public sealed record CanResponse([property: Required] bool Allowed);\n`,
+  );
+  for (const op of gated) {
+    const opName = upperFirst(op.name);
+    const pred = renderCsExpr(op.when!, { thisName: "aggregate" });
+    out.set(
+      `Application/${aggFolder}/Queries/Can${opName}Query.cs`,
+      renderQuery({
+        ns,
+        aggName: agg.name,
+        queryName: `Can${opName}Query`,
+        queryParams: `${idClass} Id`,
+        returnType: "CanResponse",
+      }),
+    );
+    out.set(
+      `Application/${aggFolder}/Queries/Can${opName}Handler.cs`,
+      renderQueryHandler({
+        ns,
+        aggName: agg.name,
+        handlerName: `Can${opName}Handler`,
+        queryName: `Can${opName}Query`,
+        returnType: "CanResponse",
+        extraUsings: [`${ns}.Domain.Common`],
+        body:
+          `        var aggregate = await _repo.GetByIdAsync(query.Id, cancellationToken)\n` +
+          `            ?? throw new AggregateNotFoundException($"${agg.name} {query.Id} not found");\n` +
+          `        return new CanResponse(${pred});\n`,
+      }),
+    );
+  }
+}
 
 export function emitGetByIdQueryAndHandler(
   agg: EnrichedAggregateIR,

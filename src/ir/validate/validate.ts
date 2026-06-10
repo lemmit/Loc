@@ -14,6 +14,7 @@ import {
   validateUnionFindShapes,
   validateUnionsUnimplemented,
   validateUnmappedErrorStatuses,
+  validateWhenGateSupport,
   validateWorkspaceUniqueness,
 } from "./checks/structural-checks.js";
 import {
@@ -141,6 +142,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     );
     validateUnionsUnimplemented(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateUnionFindShapes(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateWhenGateSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateOperationReturnsUnimplemented(
       c,
       diags,

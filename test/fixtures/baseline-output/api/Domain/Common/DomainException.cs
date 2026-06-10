@@ -12,6 +12,14 @@ public sealed class DomainException : Exception
     public DomainException(string message) : base(message) { }
 }
 
+/// <summary>State-gate failure — an operation's 'when' predicate (the
+/// canCommand gate) evaluated false against the loaded aggregate.
+/// DomainExceptionFilter maps this to HTTP 409.</summary>
+public sealed class DisallowedException : Exception
+{
+    public DisallowedException(string message) : base(message) { }
+}
+
 public sealed class AggregateNotFoundException : Exception
 {
     public AggregateNotFoundException(string message) : base(message) { }

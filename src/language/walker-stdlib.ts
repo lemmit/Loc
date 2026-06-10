@@ -84,6 +84,7 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
   "CreateForm",
   "OperationForm",
   "WorkflowForm",
+  "DestroyForm",
   // Legacy archetype names — admissible in user pages, lower as
   // `custom` page origins post-#515.
   "List",

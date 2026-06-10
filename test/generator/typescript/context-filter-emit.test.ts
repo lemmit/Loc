@@ -48,6 +48,40 @@ describe("typescript generator — capability filter (contextFilters)", () => {
     expect(repo).toMatch(/import \{[^}]*\bnot\b[^}]*\} from "drizzle-orm";/);
   });
 
+  it("reifies a filter that is exactly one named criterion (module-level fn)", async () => {
+    // reified-criteria.md, the anonymous-`filter` row: `filter NotDeleted`
+    // calls the criterion's module-level predicate fn instead of re-inlining
+    // its body — deduped with find/retrieval consumers of the same criterion.
+    const { model, errors } = await parseString(`
+      context Sales {
+        criterion NotDeleted of Doc = !this.isDeleted
+        aggregate Doc {
+          subject: string
+          isDeleted: bool
+          filter NotDeleted
+        }
+        repository Docs for Doc {
+          find bySubject(s: string): Doc[] where subject == s
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+    const repo = generateHono(model).get("db/repositories/doc-repository.ts")!;
+    // One module-level predicate fn, body = the lowered criterion.
+    expect(repo).toContain(
+      "const notDeletedCriterion = () => not(eq(schema.docs.isDeleted, true));",
+    );
+    // Every root read calls the fn (no re-inlined body at the use sites).
+    expect(repo).toMatch(
+      /findById[\s\S]*?\.where\(and\(eq\(schema\.docs\.id, id\), notDeletedCriterion\(\)\)\)/,
+    );
+    expect(repo).toMatch(
+      /bySubject[\s\S]*?\.where\(and\(eq\(schema\.docs\.subject, s\), notDeletedCriterion\(\)\)\)/,
+    );
+    // The criterion body appears exactly once (the fn) — use sites call it.
+    expect(repo.match(/not\(eq\(schema\.docs\.isDeleted, true\)\)/g)).toHaveLength(1);
+  });
+
   it("emits no capability predicate when the aggregate has no filter", async () => {
     const { model } = await parseString(`
       context Sales {

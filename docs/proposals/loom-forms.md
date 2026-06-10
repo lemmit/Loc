@@ -1,6 +1,19 @@
 # Loom forms — declarative form generation from aggregate actions
 
-> Status: design agreed in conversation, not yet implemented. **Depends on** [`lifecycle-operations.md`](./lifecycle-operations.md) — forms bind to typed actions (create / operation / destroy) defined there. Phase 0 implementation was started and then halted when the underlying lifecycle-operations design problem surfaced; this proposal is the redirected and expanded form of that Phase 0 work.
+> Status: **PARTIAL** — the named-leaf trio is live in the walker registry
+> (code-verified 2026-06-10): `CreateForm { of: }` and
+> `OperationForm { of:, op: | <inst>.<op> }` shipped post-#512 (delegating
+> to the shared form machinery), `WorkflowForm { runs: }` alongside, and
+> **`DestroyForm { of: <Agg> }` shipped 2026-06-10** — the
+> confirmation-only canonical-destroy form (window.confirm →
+> `useDelete<Agg>` with the route id → navigate to the aggregate's list;
+> `then: navigate(<Page>)` override).  Remaining: named destroys
+> (`for: <inst>.<destroyName>`), F2 binding-validation codes
+> (`loom.form-binding-*`), and the field-derivation alignment this
+> proposal designs.  **Depends on**
+> [`lifecycle-operations.md`](./lifecycle-operations.md) — forms bind to
+> typed actions (create / operation / destroy) defined there (Phase 1
+> kind-tags shipped #722).
 
 ## Background — why this proposal exists
 

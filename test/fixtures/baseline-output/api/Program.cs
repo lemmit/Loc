@@ -217,15 +217,5 @@ app.UseCors();
 app.UseSwagger();
 app.MapControllers();
 
-// Dev-friendly schema bootstrap: create the schema from the model on
-// first boot.  System-mode compose isolates each deployable to its own
-// database (see db-init/), so EnsureCreated runs cleanly without
-// racing peers.  For production, replace this with
-// 'dotnet ef database update' and remove the block.
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.EnsureCreated();
-}
 
 app.Run();

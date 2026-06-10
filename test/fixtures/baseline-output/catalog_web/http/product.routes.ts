@@ -4,7 +4,7 @@ import { ProblemDetails, newApp } from "./problem-details";
 import { Product } from "../domain/product";
 import type { ProductRepository } from "../db/repositories/product-repository";
 import * as Ids from "../domain/ids";
-import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";
+import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError } from "../domain/errors";
 import { Money } from "../domain/value-objects";
 
 const MoneySchema = z.object({
@@ -178,10 +178,14 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
 
   app.onError((err, c) => {
     const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
-    const problem = (status: 400 | 403 | 404 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
+    const problem = (status: 400 | 403 | 404 | 409 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
     if (err instanceof ForbiddenError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "forbidden", aggregate: "Product", message: err.message, status: 403 });
       return problem(403, "Forbidden", err.message);
+    }
+    if (err instanceof DisallowedError) {
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "disallowed", aggregate: "Product", message: err.message, status: 409 });
+      return problem(409, "Disallowed", err.message);
     }
     if (err instanceof DomainError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "domain_error", aggregate: "Product", message: err.message, status: 400 });

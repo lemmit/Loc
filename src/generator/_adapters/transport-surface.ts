@@ -10,10 +10,12 @@
 //
 // The contract is intentionally THIN — just the registry name — because no
 // backend branches its emit on the transport yet (each platform ships exactly
-// one real transport today; the per-transport request-pipeline emit, e.g.
-// emitting ASP.NET MVC controllers instead of Minimal APIs, is future work).
-// Keeping it thin lets the axis become adapter-backed (menu / validation /
-// `transport: controllers` recognized as reserved) without committing to an
+// one real transport today; dotnet's is `controllers` — the attribute-routed
+// `[ApiController]` classes the backend has always emitted — and the
+// per-transport request-pipeline emit, e.g. ASP.NET Minimal APIs
+// (`app.MapGet/MapPost`) as an alternative, is future work).  Keeping it thin
+// lets the axis become adapter-backed (menu / validation /
+// `transport: minimalApi` recognized as reserved) without committing to an
 // emit decomposition.
 // ---------------------------------------------------------------------------
 

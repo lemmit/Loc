@@ -153,7 +153,7 @@ describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 me
 
 describe("transport — adapter-backed axis (realization-axes-alignment.md slice 3)", () => {
   it("each backend exposes its real transport (alternatives are stubs)", () => {
-    expect(availableAdapterNames("dotnet", "transport")).toEqual(["minimalApi"]);
+    expect(availableAdapterNames("dotnet", "transport")).toEqual(["controllers"]);
     expect(availableAdapterNames("hono", "transport")).toEqual(["hono"]);
     expect(availableAdapterNames("phoenixLiveView", "transport")).toEqual(["phoenix"]);
     // Reserved stubs — present in allAdapterNames, excluded from the real menu:
@@ -163,14 +163,14 @@ describe("transport — adapter-backed axis (realization-axes-alignment.md slice
   });
 
   it("exposes the transport default per backend", () => {
-    expect(defaultsFor("dotnet")!.transport).toBe("minimalApi");
+    expect(defaultsFor("dotnet")!.transport).toBe("controllers");
     expect(defaultsFor("hono")!.transport).toBe("hono");
     expect(defaultsFor("phoenixLiveView")!.transport).toBe("phoenix");
   });
 
   it("resolves a bareword default + an explicit transport; throws on unknown", () => {
-    expect(resolveTransport("dotnet", null).name).toBe("minimalApi");
-    expect(resolveTransport("dotnet", "minimalApi").name).toBe("minimalApi");
+    expect(resolveTransport("dotnet", null).name).toBe("controllers");
+    expect(resolveTransport("dotnet", "controllers").name).toBe("controllers");
     expect(resolveTransport("elixir", null).name).toBe("phoenix");
     // controllers is a registered stub: capability fields answer (name), so
     // resolution returns it cleanly (emit-time is where stubs throw).

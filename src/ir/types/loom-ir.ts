@@ -314,6 +314,16 @@ export interface OperationIR {
    * `validateAuditedOperationSupport`) rather than silently recording
    * nothing.  See `docs/proposals/audit-and-logging.md`. */
   audited: boolean;
+  /** The `when Expr` canCommand state gate (criterion.md, use site 2):
+   * a pure predicate over the aggregate's own state, evaluated against
+   * the loaded instance before the body runs.  False → 409 Disallowed
+   * ProblemDetails; an auto-exposed side-effect-free
+   * `GET /{id}/can_<op>` returns `{ allowed }` for UI enablement.
+   * Lowered in the aggregate env (operation params are out of scope —
+   * `loom.when-references-op-param`); named criteria / aggregate
+   * functions inline like any boolean position.  Emission: Hono +
+   * .NET; gated on elixir (`loom.when-unsupported`). */
+  when?: ExprIR;
 }
 
 /** Event-fold applier — the lowered form of an `apply(e: Event) { … }`
@@ -430,6 +440,15 @@ export interface AggregateIR {
    * Composes additively — N filters become N conjunctively-applied
    * predicates at the storage layer. */
   contextFilters?: ExprIR[];
+  /** Per-`contextFilters` entry: set when that filter expression is
+   * *exactly* one named `criterion` reference — index-aligned with
+   * `contextFilters`, `undefined` for composed/anonymous predicates.
+   * Mirrors `FindIR.criterionRef` (the predicate itself stays inlined in
+   * `contextFilters`, so non-reifying consumers are unaffected).  Backends
+   * that reify capability filters consume this — the Hono repository calls
+   * the module-level `<name>Criterion` predicate fn instead of re-inlining
+   * the body (reified-criteria.md, the anonymous-`filter` row). */
+  contextFilterRefs?: ({ name: string; args: ExprIR[] } | undefined)[];
   /** Lifecycle stamping rules contributed by `stamp onCreate { ... }`
    * / `stamp onUpdate { ... }` declarations (hand-written or
    * macro-emitted) on the aggregate, plus any propagated from the
@@ -567,7 +586,7 @@ export interface TestIR {
 export type TestStmtIR =
   | StmtIR
   | { kind: "expect"; expr: ExprIR; source: string }
-  | { kind: "expect-throws"; expr: ExprIR; source: string };
+  | { kind: "expect-throws"; expr: ExprIR; source: string; status?: number };
 
 export interface EnumIR {
   name: string;

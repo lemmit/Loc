@@ -20,6 +20,7 @@ import { toModulePrefix, toSnakeApp } from "../shell-emit.js";
 import { emitVanillaApiControllers } from "./api-emit.js";
 import { emitVanillaChangesets } from "./changeset-emit.js";
 import { emitVanillaContextModule } from "./context-emit.js";
+import { emitVanillaEventModules } from "./events-emit.js";
 import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
 import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaSchemas } from "./schema-emit.js";
@@ -51,6 +52,11 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     emitVanillaChangesets(appModule, ctx, out);
     emitVanillaRepositories(appModule, ctx, out);
     emitVanillaContextModule(appModule, ctx, out);
+    // Event struct modules — `lib/<app>/<ctx>/events/<event>.ex`.  The
+    // workflow-execution `emit` lowering builds `%Context.Events.<Name>{...}`
+    // structs against these (PubSub broadcast), and a future channel-on-
+    // vanilla slice reuses the same module path.
+    emitVanillaEventModules(appModule, ctx, out);
     const { routes } = emitVanillaApiControllers(appName, appModule, ctx, out);
     apiRoutes.push(...routes);
     // Views — per-context Ecto query modules; controller + routes collected

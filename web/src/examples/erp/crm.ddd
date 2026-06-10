@@ -68,7 +68,7 @@ subdomain Crm {
         let l = Lead.create({
           name: "Acme Co", company: "Acme", status: New, source: "Web", score: 10
         })
-        expectThrows l.convert()
+        expect(l.convert()).toThrow()
         l.qualify()
         l.convert()
         expect(l.status).toBe(Converted)

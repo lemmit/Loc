@@ -115,7 +115,7 @@ subdomain Sales {
         })
         order.addLine("PRD-1", "Widget", Money { amount: 5.00, currency: "USD" }, 2)
         order.confirm()
-        expectThrows order.addLine("PRD-2", "Gadget", Money { amount: 9.00, currency: "USD" }, 1)
+        expect(order.addLine("PRD-2", "Gadget", Money { amount: 9.00, currency: "USD" }, 1)).toThrow()
       }
     }
 
