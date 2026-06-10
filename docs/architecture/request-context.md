@@ -165,8 +165,30 @@ a `correlationId`/request id bound by the request-id middleware. The
 backbone's whole premise — *one ambient value, every feature reads its
 slice* — makes that the seam to **refactor into** the `RequestContext`
 carrier: the existing obs ALS *becomes* the `RequestContext` ALS, not a
-sibling of it. The same applies to the .NET observability correlation and
-the elixir `Logger.metadata` already in use. Growing a second ambient
+sibling of it.
+
+On **.NET the groundwork is further along, and the refactor
+correspondingly larger** — there are *two* channels to fold, not one. The
+backend already emits:
+
+- **`DomainLog.Current`** — a static `AsyncLocal<ILogger?>`
+  (`src/generator/dotnet/emit/domain-log.ts`) pushed/popped by
+  **`DomainLogBehavior`**, a Mediator pipeline behaviour that saves the
+  previous value and restores it in `finally` (so reentrant `Send`s
+  stack). That behaviour *already is* the enter/exit-scope seam this
+  backbone needs — it just carries a logger instead of the full frame.
+- **`ICurrentUserAccessor`** / `HttpContextCurrentUserAccessor`
+  (`auth-emit.ts`) — a scoped accessor over `HttpContext.Items["currentUser"]`,
+  i.e. a *second* ambient channel for the very principal this doc pins as
+  `RequestContext.currentUser`.
+
+The backbone generalises `DomainLog.Current` → `AsyncLocal<RequestContext>`
+(the logger becomes one slice), **reuses `DomainLogBehavior` as the
+frame-open behaviour**, and folds `ICurrentUserAccessor` into the
+`currentUser` slice rather than leaving it parallel; `Activity.Current`
+(its `TraceId` is already wired into log scopes in `emit/program.ts`) is
+the trace projection sharing that spine. The elixir `Logger.metadata`
+already in use is the same story a third time. Growing a second ambient
 channel here is the exact drift this doc exists to prevent.
 
 **BEAM fan-out caveat.** On elixir the process dictionary and
