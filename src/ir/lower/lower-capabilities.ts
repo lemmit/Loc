@@ -1,7 +1,20 @@
 import type { Aggregate, BoundedContext, Expression } from "../../language/generated/ast.js";
 import type { ContextStampIR, ExprIR } from "../types/loom-ir.js";
-import { lowerExpr } from "./lower-expr.js";
+import { criterionRefOf, lowerExpr } from "./lower-expr.js";
 import type { Env } from "./lower-types.js";
+
+/** A lowered capability-filter predicate plus, when the source expression is
+ *  *exactly* one named `criterion` reference, that reference (mirrors
+ *  `FindIR.criterionRef`) — so reifying backends can call the criterion's
+ *  module-level predicate fn instead of re-inlining its body. */
+export interface FilterEntry {
+  predicate: ExprIR;
+  criterionRef?: { name: string; args: ExprIR[] };
+}
+
+function filterEntry(expr: Expression, env: Env): FilterEntry {
+  return { predicate: lowerExpr(expr, env), criterionRef: criterionRefOf(expr, env) };
+}
 
 // ---------------------------------------------------------------------------
 // Capability collection — reads structurally from `members[]` (no side
@@ -13,10 +26,10 @@ import type { Env } from "./lower-types.js";
 export interface ContextLevelCapabilities {
   /** Unqualified filters — propagate to every aggregate in the
    * context, regardless of `implements`. */
-  unqualifiedFilters: ExprIR[];
+  unqualifiedFilters: FilterEntry[];
   /** Capability-qualified filters — propagate only to aggregates
    * whose `implementsCapabilities` includes the matching name. */
-  qualifiedFilters: Array<{ capability: string; predicate: ExprIR }>;
+  qualifiedFilters: Array<{ capability: string; entry: FilterEntry }>;
   /** Unqualified stamps — propagate to every aggregate. */
   unqualifiedStamps: ContextStampIR[];
   /** Capability-qualified stamps — propagate only to opt-ins. */
@@ -45,19 +58,19 @@ export function collectContextLevelCapabilities(
   ctx: BoundedContext,
   env: Env,
 ): ContextLevelCapabilities {
-  const unqualifiedFilters: ExprIR[] = [];
-  const qualifiedFilters: Array<{ capability: string; predicate: ExprIR }> = [];
+  const unqualifiedFilters: FilterEntry[] = [];
+  const qualifiedFilters: Array<{ capability: string; entry: FilterEntry }> = [];
   const unqualifiedStamps: ContextStampIR[] = [];
   const qualifiedStamps: Array<{ capability: string; stamp: ContextStampIR }> = [];
   const implementsCaps: string[] = [];
   for (const m of ctx.members ?? []) {
     if (m.$type === "FilterDecl") {
       const f = m as { expr: Expression; capability?: string };
-      const predicate = lowerExpr(f.expr, env);
+      const entry = filterEntry(f.expr, env);
       if (f.capability) {
-        qualifiedFilters.push({ capability: f.capability, predicate });
+        qualifiedFilters.push({ capability: f.capability, entry });
       } else {
-        unqualifiedFilters.push(predicate);
+        unqualifiedFilters.push(entry);
       }
     } else if (m.$type === "StampDecl") {
       const s = m as unknown as StampDeclLike & { capability?: string };
@@ -85,15 +98,15 @@ export function collectFilters(
   env: Env,
   ctxCaps: ContextLevelCapabilities,
   aggImplementsCaps: readonly string[],
-): ExprIR[] {
+): FilterEntry[] {
   const own = (agg.members ?? [])
     .filter((m) => m.$type === "FilterDecl")
-    .map((m) => lowerExpr((m as { expr: Expression }).expr, env));
+    .map((m) => filterEntry((m as { expr: Expression }).expr, env));
   // Qualified context filters propagate only to aggregates whose
   // implements set includes the qualifier name.
   const matchingQualified = ctxCaps.qualifiedFilters
     .filter((q) => aggImplementsCaps.includes(q.capability))
-    .map((q) => q.predicate);
+    .map((q) => q.entry);
   return [...ctxCaps.unqualifiedFilters, ...matchingQualified, ...own];
 }
 

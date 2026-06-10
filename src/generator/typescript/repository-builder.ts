@@ -19,6 +19,7 @@ import {
   findManyByIdsMethod,
   findQueryMethod,
   lowerToDrizzle,
+  nonPrincipalContextFilterEntries,
   nonPrincipalContextFilters,
   reifiableCriterion,
   renderCriterionFn,
@@ -102,6 +103,11 @@ export function buildRepositoryFile(
   const reifyingRefs = [
     ...aggRetrievals.map((r) => r.criterionRef),
     ...(repo?.finds ?? []).map((f) => f.criterionRef),
+    // Capability `filter` declarations that are exactly one named criterion
+    // (reified-criteria.md, the anonymous-`filter` row) — the predicate
+    // builder calls the same module-level fn (non-principal entries only;
+    // principal filters are validator-rejected on Hono).
+    ...nonPrincipalContextFilterEntries(agg).map((e) => e.criterionRef),
   ];
   for (const ref of reifyingRefs) {
     const c = reifiableCriterion(ref, ctx, retrievalTable);

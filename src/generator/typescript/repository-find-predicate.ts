@@ -11,6 +11,7 @@
 // Pure leaf — the find method builders depend on these, never the reverse.
 
 import type {
+  CriterionIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
@@ -244,6 +245,53 @@ export function nonPrincipalContextFilters(agg: EnrichedAggregateIR): ExprIR[] {
   return (agg.contextFilters ?? []).filter((p) => !exprUsesCurrentUser(p));
 }
 
+/** Same set, paired with the per-entry `criterionRef` (index-aligned in the
+ *  IR) so the predicate builder can reify a filter that is exactly one named
+ *  criterion (reified-criteria.md, the anonymous-`filter` row). */
+export function nonPrincipalContextFilterEntries(
+  agg: EnrichedAggregateIR,
+): { predicate: ExprIR; criterionRef?: { name: string; args: ExprIR[] } }[] {
+  return (agg.contextFilters ?? [])
+    .map((predicate, i) => ({ predicate, criterionRef: agg.contextFilterRefs?.[i] }))
+    .filter((e) => !exprUsesCurrentUser(e.predicate));
+}
+
+// ---------------------------------------------------------------------------
+// Reified criteria (reified-criteria.md) — the module-level predicate fn a
+// `criterionRef` use-site (find / retrieval `where`, capability `filter`)
+// calls instead of re-inlining the criterion's body.  The fn rendering
+// itself (`renderCriterionFn`) lives in repository-find-builder.ts (it needs
+// the TS param-type mapping); these three are the lower-layer pieces the
+// capability-filter builder below shares with it.
+// ---------------------------------------------------------------------------
+
+/** Module-level fn name for a reified criterion (`inRegionCriterion`). */
+export function criterionFnName(name: string): string {
+  return `${lowerFirst(name)}Criterion`;
+}
+
+/** The criterion a use-site `criterionRef` reifies to — present in the context
+ *  and with a Drizzle-lowerable body — or `undefined` (fall back to inline). */
+export function reifiableCriterion(
+  ref: { name: string; args: ExprIR[] } | undefined,
+  ctx: EnrichedBoundedContextIR,
+  tableName: string,
+): CriterionIR | undefined {
+  if (!ref) return undefined;
+  const c = ctx.criteria.find((x) => x.name === ref.name);
+  if (!c) return undefined;
+  return lowerToDrizzle(c.body, tableName, ctx) ? c : undefined;
+}
+
+/** Render a criterion-call argument (the value passed at the use-site) — a
+ *  parameter/let reference renders as its name, a literal as its value. */
+export function renderCriterionArg(e: ExprIR): string {
+  if (e.kind === "ref") return e.name;
+  if (e.kind === "literal") return e.lit === "string" ? JSON.stringify(e.value) : e.value;
+  // Criterion call args are values (param refs / literals) in v1.
+  return "undefined as never";
+}
+
 /** Lower an aggregate's capability filters to a single Drizzle predicate
  *  string (conjoined with `and(...)` when there is more than one), or
  *  null when the aggregate has none.  Adds the Drizzle ops it uses to
@@ -257,11 +305,24 @@ export function contextFilterPredicate(
   ctx: EnrichedBoundedContextIR,
   ops: Set<string>,
 ): string | null {
-  const predicates = nonPrincipalContextFilters(agg);
-  if (predicates.length === 0) return null;
+  const entries = nonPrincipalContextFilterEntries(agg);
+  if (entries.length === 0) return null;
   const lowered: string[] = [];
-  for (const p of predicates) {
-    const l = lowerToDrizzle(p, tableName, ctx);
+  for (const e of entries) {
+    // A filter that is exactly one named criterion reifies: call the
+    // module-level `<name>Criterion(...)` fn (emitted by
+    // repository-builder, deduped with find/retrieval consumers) instead
+    // of re-inlining the body.  Behaviour-identical — the fn body IS the
+    // lowered predicate.  Its Drizzle ops still join the import walk.
+    const c = reifiableCriterion(e.criterionRef, ctx, tableName);
+    if (c) {
+      const body = lowerToDrizzle(c.body, tableName, ctx)!;
+      for (const op of body.ops) ops.add(op);
+      const args = (e.criterionRef?.args ?? []).map(renderCriterionArg).join(", ");
+      lowered.push(`${criterionFnName(c.name)}(${args})`);
+      continue;
+    }
+    const l = lowerToDrizzle(e.predicate, tableName, ctx);
     if (!l) return null;
     for (const op of l.ops) ops.add(op);
     lowered.push(l.expr);

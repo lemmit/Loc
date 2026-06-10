@@ -1156,7 +1156,10 @@ function lowerAggregate(
     canonicalDestroy,
     parts,
     tests,
-    contextFilters: filters.length > 0 ? filters : undefined,
+    contextFilters: filters.length > 0 ? filters.map((f) => f.predicate) : undefined,
+    contextFilterRefs: filters.some((f) => f.criterionRef)
+      ? filters.map((f) => f.criterionRef)
+      : undefined,
     contextStamps: stamps.length > 0 ? stamps : undefined,
     implementsCapabilities: implementsCaps.length > 0 ? implementsCaps : undefined,
     persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,

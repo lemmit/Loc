@@ -430,6 +430,15 @@ export interface AggregateIR {
    * Composes additively — N filters become N conjunctively-applied
    * predicates at the storage layer. */
   contextFilters?: ExprIR[];
+  /** Per-`contextFilters` entry: set when that filter expression is
+   * *exactly* one named `criterion` reference — index-aligned with
+   * `contextFilters`, `undefined` for composed/anonymous predicates.
+   * Mirrors `FindIR.criterionRef` (the predicate itself stays inlined in
+   * `contextFilters`, so non-reifying consumers are unaffected).  Backends
+   * that reify capability filters consume this — the Hono repository calls
+   * the module-level `<name>Criterion` predicate fn instead of re-inlining
+   * the body (reified-criteria.md, the anonymous-`filter` row). */
+  contextFilterRefs?: ({ name: string; args: ExprIR[] } | undefined)[];
   /** Lifecycle stamping rules contributed by `stamp onCreate { ... }`
    * / `stamp onUpdate { ... }` declarations (hand-written or
    * macro-emitted) on the aggregate, plus any propagated from the
