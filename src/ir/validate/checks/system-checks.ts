@@ -462,8 +462,12 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
           reject(where, "contains nested entity parts");
         if ((a.contextStamps ?? []).length > 0) reject(where, "uses audit stamping");
-        if ((a.contextFilters ?? []).length > 0)
-          reject(where, "uses a 'filter' capability predicate");
+        // Non-principal capability filters are supported (spliced into every
+        // SELECT's WHERE by the Dapper emitter); principal-referencing ones
+        // (tenancy: currentUser.<field>) stay rejected — there is no
+        // request-scoped principal accessor on the Dapper repository.
+        if ((a.contextFilters ?? []).some((p) => exprUsesCurrentUser(p)))
+          reject(where, "uses a principal-referencing 'filter' capability predicate");
         for (const f of a.fields) {
           if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
           else if (f.access && MANAGED_ACCESS.has(f.access))
