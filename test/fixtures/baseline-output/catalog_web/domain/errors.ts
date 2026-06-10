@@ -12,6 +12,14 @@ export class AggregateNotFoundError extends Error {
 export class ForbiddenError extends Error {
   constructor(message: string) { super(message); this.name = "ForbiddenError"; }
 }
+/** State-gate failure — raised when an operation's 'when' predicate
+ *  (the canCommand gate, criterion.md use site 2) evaluates false
+ *  against the loaded aggregate.  The per-route catch maps this to
+ *  HTTP 409 (Conflict — the request is well-formed and authorized,
+ *  but the aggregate's current state disallows it). */
+export class DisallowedError extends Error {
+  constructor(message: string) { super(message); this.name = "DisallowedError"; }
+}
 /** Wraps an exception thrown by a user-supplied extern handler.  The
  *  per-router `app.onError` maps this to a 500 envelope that names
  *  the offending op + aggregate, instead of the bare

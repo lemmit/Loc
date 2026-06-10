@@ -314,6 +314,16 @@ export interface OperationIR {
    * `validateAuditedOperationSupport`) rather than silently recording
    * nothing.  See `docs/proposals/audit-and-logging.md`. */
   audited: boolean;
+  /** The `when Expr` canCommand state gate (criterion.md, use site 2):
+   * a pure predicate over the aggregate's own state, evaluated against
+   * the loaded instance before the body runs.  False → 409 Disallowed
+   * ProblemDetails; an auto-exposed side-effect-free
+   * `GET /{id}/can_<op>` returns `{ allowed }` for UI enablement.
+   * Lowered in the aggregate env (operation params are out of scope —
+   * `loom.when-references-op-param`); named criteria / aggregate
+   * functions inline like any boolean position.  Emission: Hono +
+   * .NET; gated on elixir (`loom.when-unsupported`). */
+  when?: ExprIR;
 }
 
 /** Event-fold applier — the lowered form of an `apply(e: Event) { … }`

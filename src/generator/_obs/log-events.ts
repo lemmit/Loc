@@ -125,6 +125,13 @@ export const LogEvents = {
     level: "warn",
     fields: ["aggregate", "op", "message", "status"],
   },
+  /** A `when` canCommand gate rejected the operation — the aggregate's
+   *  current state disallows it (criterion.md use site 2; HTTP 409). */
+  disallowed: {
+    event: "disallowed",
+    level: "warn",
+    fields: ["aggregate", "message", "status"],
+  },
   notFound: { event: "not_found", level: "warn", fields: ["aggregate", "id", "status"] },
 
   // ─── domain — error (system fault) ───────────────────────────────────
