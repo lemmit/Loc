@@ -69,7 +69,9 @@
     "form-op-decls": "form-op-decls.hbs",
     "form-op-module": "form-op-module.hbs",
     "primitive-multiline-field": "primitive-multiline-field.hbs",
-    "primitive-select-field": "primitive-select-field.hbs"
+    "primitive-select-field": "primitive-select-field.hbs",
+    "realtime-toast": "realtime-toast.hbs",
+    "realtime-toast-setup": "realtime-toast-setup.hbs"
   },
   "helpers": {
     "chakraRadius": {
@@ -576,6 +578,14 @@
           "FormControl",
           "FormLabel",
           "Select"
+        ]
+      }
+    ],
+    "realtime-toast": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "useToast"
         ]
       }
     ]

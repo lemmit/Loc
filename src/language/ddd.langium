@@ -288,7 +288,7 @@ Ui:
     '}';
 
 UiMember:
-    UiApiParam | Page | Component | MenuBlock;
+    UiApiParam | UiChannelParam | UiNotification | Page | Component | MenuBlock;
 
 // ---- api declaration (system-level) ----------------------------
 //
@@ -379,6 +379,30 @@ ConnectionSource:
 //   api Sales: SalesApi
 UiApiParam:
     'api' name=ID ':' apiRef=[Api:ID];
+
+// ---- channel subscription (channels.md Part I, ui surface) --------
+//
+//   channel Orders: Sales.Lifecycle
+//
+// Subscribes this UI to a context's `delivery: broadcast` channel.
+// The wire format (SSE vs WebSocket) is an infra fact derived from
+// the frontend's platform — never stated here; the scope provider
+// resolves `channel` within the named context.
+UiChannelParam:
+    'channel' name=ID ':' context=[BoundedContext:ID] '.' channel=[Channel:ID];
+
+// ---- live-event handler --------------------------------------------
+//
+//   on Orders.OrderShipped(e) { toast("Order " + e.order + " shipped") }
+//
+// Renders the event itself (toast / feed / badge) when it arrives on
+// the subscribed channel's realtime wire.  v1 restricts the body to
+// `toast(<expr>)` calls (validator rule `loom.ui-handler-unsupported`).
+// A live READ needs no marker — an ordinary cached query auto-freshens
+// (channels.md Part II).
+UiNotification:
+    'on' param=[UiChannelParam:ID] '.' event=[EventDecl:ID]
+        '(' bind=ID ')' '{' body+=AssignOrCallStmt* '}';
 
 // ---- page ---------------------------------------------------------------
 

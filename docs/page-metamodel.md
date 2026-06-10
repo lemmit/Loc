@@ -54,6 +54,15 @@ Three rules:
 
 **Soft keywords inside their parent block:** `section`, `link` (inside `menu`).
 
+**Channel subscription (channels.md Part I):** two further `ui` members —
+`channel <name>: <Ctx>.<Channel>` subscribes the UI to a context's
+`delivery: broadcast` channel, and `on <name>.<Event>(e) { toast(<expr>) }`
+renders the arriving event as a toast (v1 handler bodies are toast-only;
+`loom.ui-handler-unsupported`).  The handlers compile to one renderless
+`RealtimeHandlers` component mounted by the App shell, fed by the
+`src/api/realtime.ts` SSE client; the toast call routes through each design
+pack's `realtime-toast` micro-template.
+
 ---
 
 ## 3. Where `ui` lives

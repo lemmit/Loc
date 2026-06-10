@@ -292,6 +292,12 @@ Each wraps the pack's `<TableCell>`-equivalent.
 | `part-table` | Table rendering aggregate "parts" (collection-of-X on the detail page). |
 | `op-button` | A single operation-trigger button on the detail page. |
 
+### Realtime templates (1, tsx only)
+
+| Name | Purpose |
+|---|---|
+| `realtime-toast` | One toast statement rendered into `RealtimeHandlers.tsx` per `on <channel>.<Event> { toast(…) }` handler (channels.md Part I).  Receives `{{{message}}}` (a TS expression).  Declare the toast lib under `imports["realtime-toast"]`.  Packs whose toast is hook-based may ship an optional `realtime-toast-setup` line rendered inside the component body (chakra v2's `const toast = useToast();`). |
+
 ### Walker primitives (22)
 
 The body-walker dispatches every page-metamodel node through these

@@ -4,7 +4,8 @@ import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button
 import { useDisclosure } from "@mantine/hooks";
 import React from "react";
 {{#each imports}}import {{specifier}} from "{{from}}";
-{{/each}}
+{{/each}}{{#if hasRealtimeHandlers}}import { RealtimeHandlers } from "./components/RealtimeHandlers";
+{{/if}}
 
 // App-level error boundary catches render-time crashes from any
 // page component.  Without it, an unhandled exception inside
@@ -150,7 +151,9 @@ function {{name}}Layout() {
 
 {{/each}}export default function App() {
   return (
-    <Routes>
+{{#if hasRealtimeHandlers}}    <>
+      <RealtimeHandlers />
+{{/if}}    <Routes>
 {{#each outOfShellRoutes}}      <Route path="{{path}}" element={{expr elementJsx}} />
 {{/each}}{{#each namedLayouts}}      <Route element={<{{name}}Layout />}>
 {{#each routes}}        <Route path="{{path}}" element={{expr elementJsx}} />
@@ -160,5 +163,6 @@ function {{name}}Layout() {
 {{/each}}        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
-  );
+{{#if hasRealtimeHandlers}}    </>
+{{/if}}  );
 }

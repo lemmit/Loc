@@ -8,7 +8,8 @@ import {
 } from "@chakra-ui/react";
 import React from "react";
 {{#each imports}}import {{specifier}} from "{{from}}";
-{{/each}}
+{{/each}}{{#if hasRealtimeHandlers}}import { RealtimeHandlers } from "./components/RealtimeHandlers";
+{{/if}}
 
 // `@chakra-ui/icons` is intentionally NOT a dep here: its v2 release
 // (the only one that ships HamburgerIcon under that import name)
@@ -226,7 +227,9 @@ function {{name}}Layout() {
 
 {{/each}}export default function App() {
   return (
-    <Routes>
+{{#if hasRealtimeHandlers}}    <>
+      <RealtimeHandlers />
+{{/if}}    <Routes>
 {{#each outOfShellRoutes}}      <Route path="{{path}}" element={{expr elementJsx}} />
 {{/each}}{{#each namedLayouts}}      <Route element={<{{name}}Layout />}>
 {{#each routes}}        <Route path="{{path}}" element={{expr elementJsx}} />
@@ -236,5 +239,6 @@ function {{name}}Layout() {
 {{/each}}        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
-  );
+{{#if hasRealtimeHandlers}}    </>
+{{/if}}  );
 }

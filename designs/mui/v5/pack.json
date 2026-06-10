@@ -69,7 +69,8 @@
     "form-op-decls": "form-op-decls.hbs",
     "form-op-module": "form-op-module.hbs",
     "primitive-multiline-field": "primitive-multiline-field.hbs",
-    "primitive-select-field": "primitive-select-field.hbs"
+    "primitive-select-field": "primitive-select-field.hbs",
+    "realtime-toast": "realtime-toast.hbs"
   },
   "helpers": {
     "muiRadius": {
@@ -572,6 +573,14 @@
         "named": [
           "TextField",
           "MenuItem"
+        ]
+      }
+    ],
+    "realtime-toast": [
+      {
+        "from": "notistack",
+        "named": [
+          "enqueueSnackbar"
         ]
       }
     ]

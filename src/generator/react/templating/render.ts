@@ -75,8 +75,13 @@ export function renderAppShell(
   /** Observable workflows (workflow-instance-visibility.md) — get read-only
    *  instance list/detail routes. */
   observableWorkflows: WorkflowIR[] = [],
+  /** True when the ui declares `on <channel>.<Event>` live-event handlers
+   *  and the realtime wire exists — App imports and mounts the renderless
+   *  `<RealtimeHandlers />` component (channels.md Part I). */
+  hasRealtimeHandlers = false,
 ): string {
   return pack.render("app-shell", {
+    hasRealtimeHandlers,
     ...prepareAppShellVM(
       aggs,
       workflows,

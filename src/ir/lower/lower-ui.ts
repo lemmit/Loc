@@ -26,7 +26,9 @@ import type {
   PageOriginIR,
   StateFieldIR,
   UiApiParamIR,
+  UiChannelParamIR,
   UiIR,
+  UiNotificationIR,
 } from "../types/loom-ir.js";
 import { lowerExpr } from "./lower-expr.js";
 import { canonicalFramework } from "./lower-platform.js";
@@ -84,6 +86,8 @@ export function lowerUi(ui: Ui): UiIR {
   const pages: PageIR[] = [];
   const components: ComponentIR[] = [];
   const apiParams: UiApiParamIR[] = [];
+  const channelParams: UiChannelParamIR[] = [];
+  const notifications: UiNotificationIR[] = [];
   let menu: MenuBlockIR | undefined;
   for (const m of ui.members) {
     if (m.$type === "Page") pages.push(lowerPage(m));
@@ -92,6 +96,31 @@ export function lowerUi(ui: Ui): UiIR {
       apiParams.push({
         name: m.name,
         apiName: m.apiRef?.$refText ?? "",
+      });
+    } else if (m.$type === "UiChannelParam") {
+      channelParams.push({
+        name: m.name,
+        contextName: m.context?.$refText ?? "",
+        channelName: m.channel?.$refText ?? "",
+      });
+    } else if (m.$type === "UiNotification") {
+      // The bind types as the carried event (entity-kind, like a
+      // workflow's `create(e: Event)` param); each body statement is a
+      // `toast(<expr>)` call (validator `loom.ui-handler-unsupported`
+      // rejects everything else), so only the message expr lowers.
+      const eventName = m.event?.$refText ?? "";
+      const env: Env = { locals: new Map(), user: undefined };
+      const inner = withLocal(env, m.bind, "param", { kind: "entity", name: eventName });
+      const toasts: ExprIR[] = [];
+      for (const stmt of m.body) {
+        const arg = stmt.target?.args?.[0];
+        if (arg) toasts.push(lowerExpr(arg, inner));
+      }
+      notifications.push({
+        paramName: m.param?.$refText ?? "",
+        eventType: eventName,
+        bind: m.bind,
+        toasts,
       });
     } else if (m.$type === "MenuBlock") {
       // First menu block wins.  Validator flags a duplicate
@@ -106,6 +135,8 @@ export function lowerUi(ui: Ui): UiIR {
     components,
     menu,
     apiParams,
+    ...(channelParams.length > 0 ? { channelParams } : {}),
+    ...(notifications.length > 0 ? { notifications } : {}),
   };
 }
 
