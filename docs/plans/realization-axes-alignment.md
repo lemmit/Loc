@@ -187,9 +187,10 @@ visible alignment; later phases are parity/idiom polish.
   (`realizationAxisMenu` routes it to `availableAdapterNames(family,
   "transport")`; `greenfieldMenu` is now `foundation`/`runtime` only).
 - Registered the real transports (`minimalApi` dotnet, `hono` node, `phoenix`
-  elixir) + **`controllers` as a dotnet stub** (reserved-not-implemented, like
-  `marten`). The actual MVC-controllers *emit* is future work — the stub makes
-  `transport: controllers` a recognized reserved value, not a runnable one.
+  elixir) + reserved stubs: **`controllers`** (dotnet) and **`express` /
+  `fastify`** (node — the most widely-used Node web frameworks). The
+  per-transport *emit* is future work — the stubs make those values recognized-
+  reserved, not runnable.
 - Behavior-preserving: the menu values match the old greenfield defaults, so
   lowering/resolution are unchanged.
 - *Caveat:* the canonical node/elixir transports (`hono` / `phoenix`) are hard

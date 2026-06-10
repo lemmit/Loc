@@ -152,13 +152,14 @@ describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 me
 });
 
 describe("transport — adapter-backed axis (realization-axes-alignment.md slice 3)", () => {
-  it("each backend exposes its real transport (controllers is a dotnet stub)", () => {
+  it("each backend exposes its real transport (alternatives are stubs)", () => {
     expect(availableAdapterNames("dotnet", "transport")).toEqual(["minimalApi"]);
     expect(availableAdapterNames("hono", "transport")).toEqual(["hono"]);
     expect(availableAdapterNames("phoenixLiveView", "transport")).toEqual(["phoenix"]);
-    // controllers is reserved (a stub) — present in allAdapterNames, excluded
-    // from the real menu.
+    // Reserved stubs — present in allAdapterNames, excluded from the real menu:
+    // controllers (dotnet); express + fastify (node).
     expect(allAdapterNames("dotnet", "transport")).toEqual(["controllers", "minimalApi"]);
+    expect(allAdapterNames("hono", "transport")).toEqual(["express", "fastify", "hono"]);
   });
 
   it("exposes the transport default per backend", () => {
