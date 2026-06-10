@@ -209,6 +209,10 @@ CI standup is **days, not the ~1 week a fresh language toolchain costs.**
   NestJS is the *depth* sibling (cheap, reuses TS emission, no new platform).
 - [`angular-frontend.md`](./angular-frontend.md) — the Angular pairing that
   makes NestJS the enterprise-TS full-stack completion.
+- [`nextjs-frontend.md`](./nextjs-frontend.md) — the Next.js pairing: a
+  `foundation: nest` backend owns the domain while Next is the frontend,
+  and—being a node runtime—Nest can *host* Next's SSR in one process
+  (`nest hosts: next`), the node twin of phoenix-embeds-React.
 - [`render-expr-target-unification.md`](./render-expr-target-unification.md)
   — the `TS_TARGET` the `nest` foundation inherits **verbatim** (the saving).
 - [`docs/platforms.md`](../platforms.md) / [`docs/generators.md`](../generators.md)
