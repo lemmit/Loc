@@ -5,9 +5,12 @@
 > shipped: Hono/Drizzle `db/seed.ts` (Phase 2, #804), .NET/EF `Seed.cs`
 > (Phase 3a, #805), Phoenix/Ash `seeds.exs` (Phase 3b, #806), CI build
 > gates compiling the generated seeders (#808), and `D-SEED-XREF`
-> explicit-id cross-references (#828). Remaining phases (the `__loom_seed`
-> ship-once marker + compose wiring, the imperative body, per-row
-> natural-key upsert) tracked in §11.
+> explicit-id cross-references (#828). The `__loom_seed` ship-once
+> marker (D-SEED-IDEMPOTENCY) and the `raw` direct-INSERT path are
+> **emitted on all three backends** (see `emit/seed.ts` on TS/.NET and
+> `seeds-emit.ts` on elixir). Remaining phases (the imperative
+> workflow-shaped body, per-row natural-key upsert, create-shape
+> validation of seed rows) tracked in §11.
 > Graduates the `seed {}` sketch from
 > [`quickstart-and-day-one-batteries.md` §5.4](./quickstart-and-day-one-batteries.md)
 > into a full, platform-neutral design that mirrors the migrations

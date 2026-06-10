@@ -13,10 +13,11 @@ When a proposal's body conflicts with a PINNED decision here, the
 decision wins; the proposal text needs a rewrite (tracked per entry
 under "Affects").
 
-Decision tags are introduced in
+Decision tags were introduced by the original
 [`proposals/global-implementation-plan.md`](./proposals/global-implementation-plan.md)
-§0.1 ("Decisions to pin before any grammar edit") and elaborated in
-the per-proposal docs.
+("Decisions to pin before any grammar edit"; that plan was rewritten
+2026-06-10 — this log is now the sole home of the tags) and are
+elaborated in the per-proposal docs.
 
 ---
 

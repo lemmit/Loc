@@ -759,20 +759,21 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
 // each concrete emits as a standalone table carrying the merged base + own
 // fields (the `wireShape` merge in enrichContext).
 //
-// `sharedTable` (TPH) is implemented for the Hono backend only (v1): the
-// hierarchy lives in one shared table named for the base, with a `kind`
-// discriminator and per-concrete columns made nullable; each concrete's repo
-// filters/stamps `kind`. So a TPH hierarchy is allowed iff its context is
-// hosted by a Hono backend deployable. Otherwise it's an error (not a
-// warning) — TPH on .NET/Phoenix isn't built, and a context with no Hono host
-// has no implemented emission target. `sharedTable` is the omitted-modifier
+// `sharedTable` (TPH) is implemented on all three DB backends: Hono/Drizzle
+// (hand-rolled shared table + `kind` discriminator, per-concrete columns
+// nullable, repos filter/stamp `kind`), .NET/EF Core (native
+// `HasDiscriminator`), and Phoenix/Ash (shared-table multi-resource +
+// `base_filter` on `kind`). So a TPH hierarchy is allowed iff its context is
+// hosted by at least one of those backends; otherwise it's an error (not a
+// warning) — there is no implemented emission target.
+// `sharedTable` is the omitted-modifier
 // default, so an inheritance hierarchy with no `inheritanceUsing(…)` is TPH
 // too. Polymorphic `Party id` refs and `find all Party` remain deferred (the
 // language validator rejects the former); document / TPT shapes are later.
 const DEFAULT_INHERITANCE_LAYOUT = "sharedTable" as const;
 
 /** Map each context name to the set of backend (needsDb) platforms that host
- *  it — a context is TPH-capable iff that set includes `hono`. */
+ *  it — a context is TPH-capable iff that set intersects TPH_CAPABLE. */
 export function backendPlatformsHostingEachContext(
   loom: EnrichedLoomModel,
 ): Map<string, Set<string>> {
@@ -810,7 +811,7 @@ export function validateInheritanceStorage(
     const base = agg.extendsAggregate ? byName.get(agg.extendsAggregate) : undefined;
     const effective = agg.inheritanceUsing ?? base?.inheritanceUsing ?? DEFAULT_INHERITANCE_LAYOUT;
     if (effective !== "sharedTable") continue;
-    // Implemented when a TPH-capable backend (Hono / .NET) hosts the context.
+    // Implemented when a TPH-capable backend (Hono / .NET / Phoenix) hosts the context.
     if (hostedByCapable) continue;
     const role = agg.isAbstract ? "abstract base" : `extends ${agg.extendsAggregate}`;
     const how = agg.inheritanceUsing

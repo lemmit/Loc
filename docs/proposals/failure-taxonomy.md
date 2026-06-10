@@ -3,12 +3,14 @@
 > Status: proposal (design note). **Revisits**:
 > [`exception-less.md`](./exception-less.md). That proposal shipped in
 > slices A1–A3 (`or`-unions, the `error` payload keyword, root-level
-> payloads, `httpStatus` edge mapping, the `?` propagation operator,
-> Hono + .NET producer translation). This note steps back from those
-> slices and asks what the *whole* error story should be, not just the
-> next increment. It does **not** retract what shipped; it reframes it,
-> and marks one shipped piece (`?`) as the thing to reconsider before
-> building further.
+> payloads, `httpStatus` edge mapping, the `?` propagation operator
+> surface, Hono + .NET producer translation). This note steps back from
+> those slices and asks what the *whole* error story should be, not
+> just the next increment. The reconsideration of `?` it called for has
+> since been **decided: the `?` operator is dropped** (maintainer,
+> 2026-06-10 — its shipped surface-only slice is slated for removal;
+> see the exception-less status header and the global plan's T1.2).
+> Everything else that shipped stands; this note reframes it.
 
 ## TL;DR
 

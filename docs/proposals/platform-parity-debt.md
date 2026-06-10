@@ -21,13 +21,13 @@ Legend: ✓ implemented · ✗ gated (fail-fast validator error) · ⚠ partial 
 | `shape(document)` persistence | ✓ | ✓ | ✗ | N/A | [document-and-json-hierarchies](./document-and-json-hierarchies.md) |
 | Principal `filter` (`currentUser`/tenancy) | ✗ | ✓ | ✗ | N/A | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
 | Provenanced fields (runtime trace) | ✓ | ✗ gated | ✗ gated | N/A | [provenance](./provenance.md) |
-| Generic carriers (`paged<T>`) | ✓ | ✓ | ✓ | ✗ | [payload-transport-layer](./payload-transport-layer.md) |
+| Generic carriers (`paged<T>`) | ✓ | ✓ | ✓ | ✓ (#898) | [payload-transport-layer](./payload-transport-layer.md) |
 | Ordered `X id[]` collections | ✓ | ✓ | ✗ | display | [load-specifications](./load-specifications.md) |
 | Per-op `audited` flag | ✓ | ✗ gated | ✗ gated | N/A | [audit-and-logging](./audit-and-logging.md) |
 | Audit stamping (`with audit`) | ✓ | ⚠ | ⚠ | N/A | [audit-and-logging](./audit-and-logging.md) |
 | Non-constructible aggregates | ✓ | ✓ | ⚠ | ⚠ | [lifecycle-operations](./lifecycle-operations.md) |
 | React `where`/list-page filter | — | — | — | ⚠ | [retrieval](./retrieval.md) |
-| Page `requires <pred>` (Phoenix) | N/A | N/A | ⚠ | N/A | [frontend-acl](./frontend-acl.md) |
+| Page `requires <pred>` (Phoenix) | N/A | N/A | ✓ (guard enforced in `handle_params/3`, `liveview-emit.ts`) | N/A | [frontend-acl](./frontend-acl.md) |
 
 Adapter sub-matrix: `dapper` (dotnet) and `mikroorm` (node) are minimal-v1 and
 reject ~11 model features each; `marten` (dotnet), `style: cqrs` (node), and

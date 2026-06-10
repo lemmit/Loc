@@ -1,669 +1,234 @@
 # Global Implementation Plan — `docs/proposals/`
 
-> **Status:** Reference document. Reads the live design corpus +
-> existing `implementation-plan.md` /
-> `storage-and-platform-config-micro-plan.md`, then audits the
-> codebase against `origin/main` to determine current state before
-> ordering. The kitchen-sink example at the end contains draft syntax
-> with **known undecided issues** — see the note above that example.
+> **Status:** REFERENCE — the authoritative "what's next" for the whole
+> proposal corpus. **Rewritten 2026-06-10 from a code-verified audit**:
+> every claim below was checked directly against the grammar
+> (`src/language/ddd.langium`), the IR (`src/ir/types/loom-ir.ts`), the
+> validator gates (`src/ir/validate/checks/*`), and the per-backend
+> emitters — not against prior doc text, which had drifted badly.
+>
+> This document **supersedes** two earlier ones:
+>
+> - the previous `global-implementation-plan.md` (drafted before the
+>   #700 wave and patched incrementally since — its audit tables,
+>   phase structure, and kitchen-sink appendix are retired; recover
+>   them from git history if needed);
+> - `remaining-work-plan.md`, the separate carry-over digest, which is
+>   **deleted** — its role (a one-page "what's left") is §"Suggested
+>   near-term order" below.
+>
+> Division of labour: per-proposal status lives in the
+> [`README.md`](./README.md) status table; binding design decisions in
+> [`../decisions.md`](../decisions.md); the cross-backend gate matrix in
+> [`platform-parity-debt.md`](./platform-parity-debt.md). This plan owns
+> the **gap inventory, ordering, and dependencies**. When this plan and
+> cited code disagree, the code wins — refresh this doc.
 
-## Context
+## Maintenance rule
 
-`docs/proposals/` is the live design corpus for Loom. This plan owns
-the **topological ordering** across the in-scope proposals and verifies
-state against `origin/main`. For the **live per-proposal status** (every
-doc, including the newer corpus that postdates this plan's original
-scope), the refreshed [`README.md`](./README.md) status table is the
-companion source of truth; this plan's audit tables below are kept in
-sync with it.
+When a batch of work lands, update three places in one PR: the item
+here (delete it — the git log is the record of what shipped), the
+proposal's own status header, and the README row. A status header that
+says "not yet started" while the emitter exists costs the next agent
+hours of re-verification — that is the failure mode this rewrite fixes.
 
-For a short, dated digest of **only the carry-over work** (what's left,
-grouped by family, with a suggested near-term order), see
-[`remaining-work-plan.md`](./remaining-work-plan.md) — refreshed alongside this
-plan's audit tables.
+---
 
-The goal is a single topological order across the in-scope proposals
-that:
+## Current state on `origin/main` (2026-06-10, condensed)
 
-1. Lands a small set of mechanical refactors / seam extractions first.
-2. Resolves cross-proposal collisions before any grammar lands.
-3. Sequences features so downstream consumers do not undo upstream
-   choices.
-4. Skips or shrinks work already shipped on main.
+The ten-phase pipeline, three DB backends (node/Hono, .NET, elixir —
+both `ash` and `vanilla` foundations), and the React frontend are
+mature. Recent waves the older docs had not absorbed:
 
-## Audit summary — current state on `origin/main`
+- **Elixir platform rename** (#1043) — `platform: elixir` canonical;
+  back-compat aliases for `phoenix`/`phoenixLiveView`.
+- **Vanilla Elixir foundation, state-based** (#1046–#1062, slices 0–6
+  incl. 5a views / 5b workflow instances / 5c workflow execution) —
+  plain Ecto/Phoenix project, RFC 7807 parity, CI fixture.
+- **Workflow instances as view sources** on all backends
+  (#1035/#1037).
+- **TPH inheritance on all three DB backends**
+  (`TPH_CAPABLE = {node, dotnet, elixir}`,
+  `src/ir/validate/checks/system-checks.ts`); TPC everywhere.
+- **Payload transport**: P1 kinds + file-scope declarations (#1024),
+  P2 synthesised `<Agg>Wire`, P3b `Paged<T>` everywhere, P4 named +
+  anonymous `or` unions on node/dotnet/elixir.
+- **Reified criteria consumed at use-sites** on all four backends
+  (`criterionRef` in the IR; .NET `find-emit.ts`/`spec-emit.ts` emit
+  `.Where(new XCriterion(args).ToExpression())`).
+- **Retrieval emission on all four backends** (#810/#952/#955).
+- **RFC 7807 `errors[]`** on all three backends (#782/#829/#836).
+- **Seeding**: `__loom_seed` ship-once marker + `raw` direct-INSERT
+  path on all three backends; D-SEED-XREF explicit ids.
+- **Event sourcing** on node (Drizzle + MikroORM) and .NET (EF +
+  Dapper) (#914/#941).
+- **Realization-axes alignment slices 1–3** (#1061–#1064): plan +
+  ecto/vanilla adapter direction, foundation↔persistence compatibility
+  (R6), `transport:` promoted to an adapter axis.
+- **C# nullable** in csproj templates + `dotnet build /warnaserror` CI.
 
-Major landings since the original plan was drafted:
+## Dropped — do not build on these
 
-| Landed on main | Effect on plan |
-|---|---|
-| WalkerTarget extraction (#607–#627; tsxTarget + heexTarget standalone; 7 seams delegated — `renderStateRead/Write`, `renderApiCall`, `renderApiHoisting`, `renderHelperImports`, `renderNavigate`, `renderMatch`) | Drop from Phase 0 — done end-to-end |
-| `src/ir/wire-types.ts` (#605) — centralised wire-type dispatch | Reuse in Phase 1 / Phase 2 generators |
-| named `layout` SystemMember (#609, #611) + multi-pack ports (#620) | Layouts now first-class — relevant to forms & i18n chrome |
-| `component` as ModelMember (#629) + slot-typed params (#632, validator #643) | Workspace-wide components — consumed by loom-forms |
-| HEEx form primitives, Phase D Slices A–D (#631, #634, #635, #636, #637) | Phoenix form primitives partially landed — slots into loom-forms backend work |
-| `react: require ui:` (#606) — legacy archetype fallback removed | No more dual codepaths in later UI proposals |
-| Storage adapter taxonomy + orchestrator rewire (#681–#691: F3 contracts, F5/F6/F7 real persistence/style/layout adapters + dispatch) | `persistence`/`style`/`layout` adapter seam is real on all three backends; emit dispatches through it |
-| **D-ADAPTER-HOME dissolve** — central `adapter-registry.ts` removed; each backend carries its menu on its `PlatformSurface`; `resolve-adapters.ts` reads the discovered surface | Adapter contracts done. The per-deployable adapter-selection consumer has since SHIPPED (D-REALIZATION-AXES 5a–5d — backends read the `DeployableIR` axis fields directly); `resolve*` remains available for resolved-adapter callers |
-| **Lifecycle Phase 1** (#722) — kind-tagged `create`/`destroy` + `creates`/`destroys`/`canonical*` IR; `urlStyle:`/`routeSlug` pinned **D-URLSTYLE** (`lifecycle-url-style.md`) | Phase 1B foundation landed; remaining lifecycle/forms phases carry over |
-| **Criterion core** — declaration + body validation + compile-time inline into every bool position; **filter-capability targeting** on Hono/Drizzle (#760) + Phoenix/Ash (#762) | `criterion.md` core shipped; reified/retrieval deferred tail per its doc |
-| **Aggregate inheritance I1** — abstract aggregates + `inheritanceUsing(…)` surface/IR/validators (no emission); `contains` on a TPH concrete (#768) | Track I started; I2/I3/I4 emission carry over |
-| **Database seeding** — Phase 1 surface→IR→lowering (#803) + all three emitters: Drizzle (#804), EF (#805), Ash (#806) + CI gates (#808) + **D-SEED-PATH**/**D-SEED-IDEMPOTENCY**/**D-SEED-XREF** | `database-seeding.md` mostly shipped; ship-once marker + imperative body carry over |
-| **Platform realization axes** — `platform:` decomposed into `transport`/`foundation`/`style`/`layout`/`persistence` (**D-REALIZATION-AXES**, phases 1–5a #809, 5b real hono/node + .NET `byFeature` #825/#830); `node` is the platform, `hono` a `transport:` value (**D-NODE-PLATFORM**); **D-PHOENIX-SURFACE** decomposed + `platform: phoenix` migration (#831) | Supersedes the framework-version-axis framing of `platform-directory-layout.md` for the realization knobs |
-| **RFC 7807 `errors[]`** (`validation-error-extension.md`) — Hono (#782) + .NET (#829) emit per-field `errors[]` on 422; **frontend-acl** Phases 1+2 (#769) decoder consumes it | Phoenix `errors[]` + the `exception-less` language surface carry over |
-| **extern-component Tier 1 (React)** (#802) — `component … extern` typed leaf | `extern-component-escape-hatch.md` Tier 1 shipped; Tier 2 (`action`) + LiveView carry over |
-| **channels Slice 1** (#797) — `channel`/`channelSource` surface → `ChannelIR`/`ChannelSourceIR` | `channels.md` realtime wire + caching carry over |
-| **retrieval** (#794 surface+IR+lowering; #810 .NET `Run<Name>Async` + workflow `foreach`; #952 Hono `run<Name>`; #955 Phoenix/Ash read action) | `retrieval.md` `Repo.run` emission shipped on all four backends; `loads` plan carries over |
-| **Pagination / payload P3b** — `Paged<T>` carrier + functional paged finds on **all four backends** (#898 React, #916 .NET CQRS+EF, #925 Phoenix/Ash offset, #927 Hono nullish, #933 cross-backend wire-parity closeout) | `pagination-design-note.md` now SHIPPED (offset); `payload-transport-layer.md` P3b done — the rest of P1–P4 carry over |
-| **Reified criteria (retrieval *and* find, all four backends)** — Specification reframe: .NET/EF `Criterion<T>`+`IsSatisfiedBy` (#890), `ToExpression` query face (#901), retrieval/find consume it (#910/#926), Ardalis `Specification<T>` bundle EF-only (#936); Dapper parameterised SQL (#943); Hono module-level predicate fn (retrieval #952, find #963); Phoenix/Ash `:boolean` calculation (retrieval #955, find #964) | `reified-criteria.md` now PARTIAL — retrieval + find criteria reified everywhere; capability-`filter` reification + the principal/tenancy factory carry over. Graduates `criterion.md`'s deferred selectability tail for retrievals + finds |
-| **Event-sourcing appliers** — Hono create-from-event (A2.2a, #895) + **.NET/EF appliers + event store** (A2.2b, #914); members-only workflow body with `create()` starter (#889); event/payload names as workflow command param types (#932) | `workflow-and-applier.md` now PARTIAL (Hono + .NET); Phoenix backend + projections/snapshots carry over |
-| **Agent tooling** — `ddd-mcp` stdio server over the tool catalog (#934) + navigational read trio (#937) + **rewrite trio** `loom_rename`/`loom_quickfix`/`loom_unfold_macro` (#940) + a **transport-neutral agent loop** (#946), riding a wave of LSP rename/references/hover correctness fixes (#913–#929) | `agent-tools-and-mcp.md` now PARTIAL (generative + MCP + full nav family + agent loop); LSP-provider correctness + playground chat UI carry over |
-| **Cross-stack static analysis (Phoenix arm)** — Elixir `@spec` emission on event/VO/view/workflow modules + shared `<App>.Types` (#902/#904/#906/#911), Dialyzer CI behind `LOOM_PHOENIX_DIALYZER` (#907/#918), `LOOM_DOTNET_FORMAT`/`LOOM_PHOENIX_FORMAT` gates (#903) | `cross-stack-static-analysis.md` now PARTIAL; C# nullable + .NET analyzer + repo-content lint carry over |
-| **Value-object array persistence** — `Money[]` etc. flatten to child tables across all backends (#908); migrations flatten value objects into columns (#891) | Folded into `document-and-json-hierarchies.md`'s shape axis |
-| **ir/lower + ir/validate decomposition** — `lower.ts` split into per-declaration-kind leaves (#921/#923/#930/#935) + `lower-expr`/`-stmt`/`-types`; `validate.ts` split into `checks/*` (#900); .NET `cqrs-emit`→`cqrs/*` (#869), Phoenix `domain-emit`→`domain/*` (#912) | Phase 0.3 seam extractions DONE — supersedes the 0.3 split-list below |
+- **The `?` propagation operator** (exception-less A2). Maintainer
+  decision 2026-06-10: resigned from completely. Surface + validation
+  shipped in #1030 with **zero backend codegen**; removal is work item
+  **T1.2** below. The old M2 milestone (A1+A2+A3) is obsolete.
+- **`@handle` seed cross-row refs** — D-SEED-XREF pinned explicit ids
+  instead. (Stale "not yet handled" emitter comments fixed 2026-06-10.)
+- **`mutation-testing.md`** — out of scope per maintainer.
 
-Per-proposal state on `origin/main`:
+---
 
-| Proposal | State | Carry-over |
-|---|---|---|
-| `provenance.md` | SHIPPED (TS/Hono v1) | Deferred items only |
-| `observability.md` | SHIPPED (catalog + 3 backends + `LOOM_OBS_E2E_*` gates) | None in scope |
-| `audit-and-logging.md` | PARTIAL — `audited` boolean lands; Hono emits load→mutate→save→audit | Promote to `audited(actions \| access \| events \| off)`; `AuditRecord` shape; before/after snapshots; .NET Mediator behaviour; access-audit query pipeline |
-| `sensitivity-and-compliance.md` | PARTIAL — phases 1 + 2-lite shipped | Phase 2 full (`authorized(<tag>,…)`); Phase 3 (`mask:` DTOs + React); Phase 4 (sink-call classification) |
-| `storage-and-platform-config.md` | PARTIAL — top-level `storage` + `dataSource` + role-keyed slots + the persistence/style/layout **adapter taxonomy** (F3–F7) exist; adapters live on the `PlatformSurface` (D-ADAPTER-HOME) | **Per-deployable `persistence:` / `style:` / `layout:` selection is SHIPPED** (D-REALIZATION-AXES 5a–5d): the grammar + `DeployableIR` fields are populated and the backends consume them — .NET reads `deployable.persistence` directly (`efcore`/`dapper`), hono carries `drizzle`/`mikroorm`, plus `cqrs` style + `byLayer`/`byFeature` layout, all behind `loom.dapper-unsupported` / `loom.mikroorm-unsupported` capability gates. (Backends read the IR field directly rather than threading `resolvePersistence`, which stays available for callers that want a resolved adapter.) **Remaining tail:** logical `dataSource` bindings (`dataSources:`), the `STORAGE_CAPABILITIES` matrix, the reserved `marten` / `layered` stubs, outbox + per-deployable overrides; per-aggregate `for:` deferred to v2 (D-GRANULARITY) |
-| `criterion.md` | PARTIAL — core (declaration + validation + compile-time inline) + filter-capability targeting on all SQL backends; retrieval + find criteria reified on all four backends (below) | retrieval `loads` plan/`from`/`when`/auto-`can-<op>`/`private workflow` deferred tail |
-| `reified-criteria.md` | PARTIAL — retrieval + find criteria reified on all four backends: .NET/EF `Criterion<T>`+`IsSatisfiedBy` (#890), `ToExpression` (#901), find/retrieval consume it (#910/#926), Ardalis bundle (#936); Dapper SQL (#943); Hono predicate fn (retrieval #952, find #963); Phoenix/Ash calculation (retrieval #955, find #964) | capability-`filter` reification; principal/tenancy factory; `isSatisfiedBy` duality |
-| `payload-transport-layer.md` / `pagination-design-note.md` | PARTIAL — `Paged<T>` carrier + paged finds on all 4 backends (P3b #898/#916/#925, #933 closeout); pagination SHIPPED for offset | P1–P4 carrier-generic surface, tagged unions, `<Agg>Wire`; `unpaged` opt-out + page-aware hooks |
-| `workflow-and-applier.md` | PARTIAL — appliers (A1) + event-sourced emission on Hono (A2.1/A2.2a) and **.NET/EF (A2.2b #914)**; members-only body + `create()` (#889) | Phoenix event-sourced backend, snapshots, projections, workflow-as-aggregate `on(...)` |
-| `cross-stack-static-analysis.md` | PARTIAL — Phoenix `@spec` (#902/#904/#906/#911) + Dialyzer CI (#907/#918) + format gates (#903) | C# nullable enable, .NET analyzer gate, repo-content lint |
-| `agent-tools-and-mcp.md` | PARTIAL — catalog (10 tools) + MCP stdio server (#934) + read trio (#937) + rewrite trio (#940) + agent loop (#946) | LSP-provider correctness + playground agentic chat UI |
-| `implicit-system-composition.md` | PARTIAL — Tiers 1 & 2 (top-level domain + deployment members compose via `lowerProject`) | per `multi-file-source.md` tail |
-| `lifecycle-operations.md` | PARTIAL — Phase 1 (kind-tagged `create`/`destroy` IR, #722) + D-URLSTYLE | Phase 2+ action surface + `urlStyle:`/`routeSlug` slice |
-| `aggregate-inheritance.md` | PARTIAL — I1 (surface + IR + validators, no emission) | I2 (TPH emit), I3 (TPC emit), I4 (override + TPT docs) |
-| `database-seeding.md` | PARTIAL — Phase 1 + all three backend emitters + CI gates | ship-once `__loom_seed` marker + compose wiring, imperative body, per-row upsert |
-| `frontend-acl.md` | PARTIAL — Phases 1+2 (#769): `applyServerErrors` + `StrictFieldMap` in every React project | schema restructure + per-action FieldMap + `option`-field rendering |
-| Everything else in scope | NOT STARTED | Full per each doc's internal phasing |
+## Tier 1 — broken or misleading surface (fix first)
 
-## New proposals on main
+Small, high-leverage items where the toolchain currently emits a
+runtime trap, silently degrades, or misleads.
 
-| Proposal | One-line | Hard prereq | Effort |
+| # | Item | Where | Owning proposal |
 |---|---|---|---|
-| `lifecycle-operations.md` | `create` / `operation` / `destroy` keywords with kind tags on `OperationIR`; fixes the "form/API generators invent create contracts from `aggregate.fields`" layering bug | None | 5 phases, ~13 d / ~7 d parallel |
-| `loom-forms.md` | `CreateForm` / `OperationForm` / `DestroyForm` walker primitives bound strictly to typed-action IR | lifecycle-operations Phase 1 | 3 phases, ~5 d |
-| `i18n-strings.md` | Bans `+` in user-visible slots; mandates template literals; ICU placeholder lowering with stable content-hash keys | None | ~5 d, folds into i18n |
-| `i18n.md` | First-class i18n: ICU catalogs, content-hash keys, named `text { }` entries, `ddd i18n sync` three-way merge, per-backend adapters | i18n-strings | 7 phases, ~4 weeks |
-| `workflow-and-applier.md` | Ash-style `create` actions, applier separation, sagas deferred | None | TBD per proposal phasing |
-| `platform-directory-layout.md` | Framework-version axis for backend code. **Option A rejected (D-BACKEND-PKG)**; backend layout follows the packaging-split (per-version packages); hono hoist stays as package-staging | packaging-split lands; gated on F-series + `node` rename | per backend, after F-series |
-| `per-package-output-tree.md` | Per-layer **output** packages ("Loom as ORM"). Output-side twin of packaging-split; expressible as a `LayoutAdapter` | playground workspace support | deferred — large one-time bill |
+| T1.1 | **Union-returning `find` producer path** — .NET stubs the handler with `NotImplementedException` (`src/generator/dotnet/cqrs/queries.ts:131-142`, pinned by `union-emit.test.ts`); Hono falls back to an `unknown` return type (`repository-find-builder.ts:~608`). Wire DTOs are fully generated; only variant *selection* is missing. | dotnet, node | [payload-transport-layer](./payload-transport-layer.md) (P4 producer side) |
+| T1.2 | **Remove the `?` propagation operator** — delete the grammar `PropagateExpr` rule (+ `langium:generate`), the `ExprIR` `propagate` kind, its lowering arm, the `loom.propagate-unsupported` / `loom.propagate-incompatible-error` gates (`structural-checks.ts:~486/~500`), the print-expr arm, and the #1030 tests. Cheap now — nothing downstream consumes it. | language, ir | [exception-less](./exception-less.md) (dropped A2) |
+| T1.3 | **React renderers for `Switch` / `MultilineField` / `SelectField`** — registered as `admissibleInSource` with **no renderer on any target** (`src/generator/_walker/registry.ts:~249-255`); they fall through to an "unknown layout component" comment. Either implement the TSX (+ HEEx) renderers or stop admitting them in source. | react walker | [page-metamodel](../page-metamodel.md) |
+| T1.4 | **Docs/comment honesty debt** — keep proposal status headers, the README table, and this plan in sync per the maintenance rule above (the 2026-06-10 pass fixed the then-known liars: seed emitter headers, the TPH validator comment, `ddd patch` missing from `tools.md`, and seven stale proposal headers). | docs | — |
 
-## Newer corpus (postdates this plan's topological scope)
+## Tier 2 — nearly done: finish what's in flight
 
-These proposals were authored **after** this plan's in-scope set was
-frozen and are **not yet woven into the topological order** above. Their
-shipped/partial state is already reflected in the audit tables; full
-per-doc status lives in the refreshed [`README.md`](./README.md). They
-are listed here so the plan's audit is complete, not because they have
-been sequenced.
+Per-backend completion of features that already ship somewhere. The
+elixir items form one coherent track (a→e order).
 
-| Proposal | State on main | Sequencing note |
-|---|---|---|
-| `platform-realization-axes.md` | PARTIAL (phases 1–5b) — see Major landings | Pinned D-REALIZATION-AXES; supersedes the realization-knob framing of `platform-directory-layout.md` |
-| `validation-error-extension.md` | PARTIAL (Hono + .NET) | Decoupled wire-format slice of `exception-less.md`; Phoenix tail remains |
-| `channels.md` | PARTIAL (Slice 1) | Fills the async-messaging/caching gap; realtime + Part II caching unsequenced |
-| `retrieval.md` | PARTIAL (surface+IR; emit on all four backends) | `loads` load-plan; graduates the `reified-criteria` seam |
-| `database-seeding.md` | PARTIAL (Phase 1 + 3 emitters) | Mirrors the migrations pipeline; near-complete |
-| `extern-component-escape-hatch.md` | PARTIAL (Tier 1, React, #802) | Open-library seam; Tier 2 / LiveView deferred |
-| `extern-function-hook-escape-hatch.md` | PROPOSED | Logic twin of the component hatch; staged after it |
-| `reified-criteria.md` / `criterion-everywhere.md` | PARTIAL (retrieval + find, all 4 backends) / SUPERSEDED-mechanism | The Specification-object reframe of criterion selectability — retrieval + find criteria reified everywhere; capability-`filter` reification + the principal/tenancy factory carry over |
-| `render-expr-target-unification.md` | SHIPPED — `ExprTarget` contract + shared `renderExprWith` dispatcher; all three backends are leaf-only target tables (byte-identical gated) | Brought forward of A4 so A4 authors its new arms once behind the contract |
-| `resource-model-and-source-types.md` + `workflow-resource-consumption.md` | PROPOSED | Generalises the data layer (object stores / queues / external APIs) |
-| `bounded-context-model.md`, `embedded-frontend-composition.md`, `elixir-ecto-and-api-only-backends.md`, `document-and-json-hierarchies.md` | PROPOSED / PARTIAL | Structural / backend-matrix reframes; coordinate with storage + realization axes |
-| `multi-target-proxy.md`, `deployable-networking.md`, `kubernetes-helm.md`, `terraform-iac-target.md`, `java-backend.md` | PROPOSED / DEFERRED | Deployment, networking, and backend-matrix follow-ons |
-
-## In scope
-
-- Type-system family: aggregate-inheritance, payload-transport-layer,
-  exception-less, criterion, partial-update, load-specifications,
-  type-system-overview, implementation-plan.
-- Storage & platform-config + plan + micro-plan.
-- Layout housekeeping: src-ir-phase-reveal,
-  test-layout-and-macro-consolidation.
-- Access control: authorization, multi-tenancy-design-note,
-  policies-supplementary-note (background).
-- Provenance / governance backbone: execution-context, provenance
-  (extend), audit-and-logging (promote), sensitivity-and-compliance
-  (phases 2/3/4), observability (no work), encrypted-at-rest
-  (deferred final).
-- UX / output: pagination-design-note, lifecycle-operations,
-  loom-forms, i18n-strings, i18n.
-- Workflow: workflow-and-applier (new on main).
-
-Out of scope (per maintainer): `mutation-testing.md`.
-
-## Known undecided issues (block grammar work, not this plan)
-
-- **Storage keyword overload.** The storage proposal currently uses
-  `storage` for **two** distinct concerns: physical resources
-  (`storage pg { type: postgres }`) and logical
-  aggregate-to-physical bindings (`storage orderEvents { use: pg,
-  for: [Sales.Order] }`). The maintainer has flagged this as a
-  design issue — one of them should likely be a different keyword
-  (candidates: `dataSource`, `persistenceBinding`). Resolved in the
-  decisions conversation before Phase 1A starts.
-- **i18n `defaultLocale`.** The example below writes
-  `defaultLocale en` at system level. `i18n.md` does not pin this
-  syntax — placeholder pending the i18n decisions phase.
-- **`mask: strategy: <name>`** placeholder syntax. The sensitivity
-  proposal lists masking strategies but does not pin the syntax for
-  selecting one per field. Placeholder pending phase 3 of the
-  sensitivity proposal.
-
----
-
-## Phase 0 — Convenience & Architectural Groundwork
-
-Strictly housekeeping + cross-cutting design specs + test scaffolding.
-No new language features.
-
-### 0.1 Decisions to pin before any grammar edit
-
-> **Status: all RATIFIED.** Every tag below is now PINNED in
-> [`../decisions.md`](../decisions.md) (D1–D4 + D14–D15 cover the
-> type-system grammar surface; the rest of the type-system D-table,
-> D5–D37, keeps its recommended answers in `implementation-plan.md` and
-> is taken per-phase). Grammar work on the dependent proposals is
-> unblocked.
-
-- D-RENAME — header paren modifier `inheritanceUsing(sharedTable |
-  ownTable)` (was `inheritanceStrategy: shareTable | ownTable`).
-  Amended by D-DOCUMENT-AXIS §4 — **PINNED** in `decisions.md`.
-- D-ES-TPH — Force `inheritanceUsing(ownTable)` for a
-  `persistedAs(eventLog)` concrete subtype of a `sharedTable` abstract.
-- D-DOCUMENT-AXIS — **PINNED**. Two per-aggregate header axes
-  `persistedAs(eventLog | state)` (renames body `persistenceStrategy:`,
-  hard cutover) and `normalised(true | false)` (document vs relational
-  saving); `json` field type; document is not a declaration kind. See
-  `decisions.md` + `document-and-json-hierarchies.md`. Depends on
-  D-STORAGE-SPLIT (shares the `dataSource` `kind` set).
-- D-STORAGE-SPLIT — Split the `storage` keyword overload (see "Known
-  issues" above).
-- Type-system D1–D4 + D14–D15 — carrier name, discriminator name,
-  postfix-vs-prefix ML syntax — pinned per `implementation-plan.md`,
-  locked before P3.
-- D-POLICY-STYLE — Pin `policy { }` reachability over function-style.
-- D-LIFECYCLE-VERB — Pin `urlStyle: literal | resource` default.
-- D-I18N-KEY — Pin Option B (positional hash + named render).
-- D-CTX-SHAPE — Pin the ambient `RequestContext` field set
-  (see §0.4).
-- D-ENVELOPE — Pin the wire envelope rule (entity | `Paged<T>` |
-  ProblemDetails | event-frame).
-
-### 0.2 Mechanical file-tree reorgs — DONE on main
-
-- ~~`src-ir-phase-reveal.md`~~ — SHIPPED. `src/ir/` is `types/` / `lower/` /
-  `enrich/` / `validate/` / `util/`; `migrations-builder.ts` moved to
-  `src/system/`. `lower/` and `validate/` were further decomposed into
-  per-declaration-kind / per-theme leaves (#921/#923/#930/#935, #900).
-- ~~`test-layout-and-macro-consolidation.md`~~ — SHIPPED. `test/` mirrors
-  `src/` phases; macros consolidated under `src/macros/`.
-
-### 0.3 Seam extractions
-
-- ~~Walker-target extraction~~ — DONE on main; cite for reuse.
-- ~~Split `src/ir/lower-expr.ts`~~ — DONE. Now `lower-expr.ts` /
-  `lower-stmt.ts` / `lower-types.ts` under `src/ir/lower/`, alongside the
-  per-declaration-kind leaves.
-- ~~`render-expr.ts` unification~~ — DONE (`render-expr-target-unification.md`;
-  `ExprTarget` + `renderExprWith`). Backend emit monoliths also split:
-  .NET `cqrs-emit`→`cqrs/{dtos,commands,queries,controller}` (#869),
-  Phoenix `domain-emit`→`domain/{predicates,actions}` (#912).
-- Split `src/generator/typescript/repository-builder.ts` (~1,125 LOC) into
-  `eager-load-builder.ts`, `transaction-boundary-builder.ts`,
-  `change-events-builder.ts`, `repository-imports-builder.ts`. *(still open)*
-- PlatformSurface lifecycle hooks — extend `src/platform/surface.ts`
-  with optional `emitAuthGate`, `emitAuditInit`,
-  `emitCompliancePolicy`, `emitTenancyFilter`, `emitI18nAdapter`. *(still open)*
-
-### 0.4 Cross-cutting design specs (`docs/architecture/*.md`)
-
-> **Status: WRITTEN.** All six specs live under
-> [`../architecture/`](../architecture/) (index at
-> `architecture/README.md`). They are design intent; each notes its
-> current-vs-target implementation state inline.
-
-- `request-context.md` (D-CTX-SHAPE) — single ambient `RequestContext`
-  shape consumed by execution-context, multi-tenancy, authorization,
-  sensitivity declassification, i18n, audit, observability.
-- `wire-envelope.md` (D-ENVELOPE) — entity | `Paged<T>` |
-  ProblemDetails | event-frame.
-- `modifier-propagation.md` — propagation rules for aggregate-level
-  modifiers (`sensitive`, `provenanced`, `audited`, tenant-scope,
-  `mask:`, `authorized`).
-- `diagnostic-catalog.md` — central error code registry.
-- `cli-surface.md` — `ddd` sub-command extension model.
-- `coordinated-rebaseline.md` — operational guide for M1 / M2 / M3 /
-  Lifecycle-1 / Inheritance fixture rebaselines.
-
-### 0.5 Test infrastructure
-
-(Deferred — judged not worth the ceremony for the structural work
-that 0.2 / 0.3 cover. Per-PR verification is "run the suites; no
-fixture drift".)
-
-### 0.6 Process
-
-- Decision-log file at `docs/decisions.md` covering all D-tags.
-- PR-type taxonomy: `grammar:`, `ir:`, `gen-<platform>:`,
-  `rebaseline-<tag>:`, `docs:`, `infra:`.
-
----
-
-## Phase 1 — Three parallel foundation tracks
-
-### 1A. Storage & platform-config foundation
-
-`storage-and-platform-config-micro-plan.md` F1–F8, scoped as delta on
-top of already-landed top-level `storage { type }`. F1 (six small
-PRs, non-emitting), F2 (validator + capability matrix), F3 (adapter
-contracts — pivot point), F4–F7 (downstream + per-backend seam
-refactors), F8 (override + outbox).
-
-Depends on D-STORAGE-SPLIT resolved in §0.1.
-
-### 1B. Lifecycle-operations + loom-forms
-
-`OperationIR` reshape — explicit `kind ∈ {create, operation, destroy}`
-tag. Phase 1 grammar+IR+validator → Phase 2 urlStyle+enrichment →
-Phase 3 per-backend route emission (parallel across 4 backends) →
-Phase 4 crudish reframing → Phase 5 scaffold alignment. Then forms
-F1 (primitives bound to typed actions) → F2 (API client wiring) →
-F3 (design-pack polish). Reuses already-shipped `component`
-ModelMember, slot-typed params, and HEEx form primitive slices A–D.
-
-### 1C. Aggregate inheritance (Track I)
-
-Independent. Uses renamed `inheritanceStrategy:` from §0.1.
-
----
-
-## Phase 2 — Type-system family
-
-Follows `docs/proposals/implementation-plan.md`. Three serial
-sub-tracks + parallel-able fourth, gated by M1, M2, M3.
-
-- 2.1 Payload-transport (P-track) — P1, P2, P3, P4, P5. **M1**: P3 +
-  P4 ship together.
-- 2.2 Exception-less (A-track) — A1, A2, A3, A4, A5, A6, A7a.
-  **M2**: A1+A2+A3 together. **M3**: A4 alone with coordinated
-  fixture re-baseline.
-- 2.3 Criterion (Crit-track) — Crit1–4 + Crit5 (private workflow +
-  workflow-calls-workflow).
-- 2.4 Folded: `partial-update.md` into A1; `load-specifications.md`
-  into P3.
-
----
-
-## Phase 3 — Provenance & Governance Family
-
-Audit-driven — deltas only for already-shipped pieces.
-
-- 3.0 `execution-context.md` (Tier 0) — compiler-emitted scope
-  frames. Backbone for audit + future provenance/log extensions.
-- 3.1 Tier 1 — audit promotion (`audited(actions|access|events|off)`,
-  `AuditRecord`, before/after, Mediator behaviour, access-audit
-  pipeline) + sensitivity phases 2/3/4 (`authorized(<tag>,…)`,
-  `mask:` DTOs, sink-call classification).
-- 3.2 Tier 2 — `multi-tenancy-design-note.md` then
-  `authorization.md` phases 1–4 (DataKey infra → `policy { data { } }` reachability → operation/view/workflow gates → backend parity).
-  Wires `policyDecisionId` into Tier 1 audit records.
-
----
-
-## Phase 4 — i18n + Pagination
-
-- 4.1 `i18n-strings.md` → `i18n.md` phases 1–7.
-- 4.2 `pagination-design-note.md` — `Paged<T>` + `unpaged` +
-  page-aware React hooks.
-
----
-
-## Phase 5 — Deferred tail
-
-- Authorization phases 5–7 (`exists`, field rules, `implies`).
-- Provenance v1 across .NET / Phoenix.
-- Audit module-wide config.
-- `encrypted-at-rest.md`.
-
----
-
-## Coordinated single-PR moments
-
-| Tag | What | Phase | Reason |
+| # | Item | Where / gate | Owning proposal |
 |---|---|---|---|
-| D-RENAME | `inheritanceStrategy:` rename | 0.1 | Removes only lexical collision |
-| D-STORAGE-SPLIT | `storage` keyword overload split | 0.1 | Disambiguates physical vs logical |
-| D-POLICY-STYLE | `policy {}` over function-style | 0.1 | Locks auth grammar shape |
-| D-LIFECYCLE-VERB | `urlStyle:` default | 0.1 | Locks lifecycle route shape |
-| D-I18N-KEY | Option B placeholder lowering | 0.1 | Locks i18n key stability |
-| F1-PR-5 | `STORAGE_CAPABILITIES` + adapter stubs | 1A | Lock for downstream streams |
-| F3 | Adapter contract publication | 1A | Enables parallel streams |
-| Lifecycle-1 | Grammar + `OperationIR.kind` | 1B | Locks form-binding semantics |
-| M1 | P3 + P4 | 2.1 | Half-built type system otherwise |
-| M2 | A1 + A2 + A3 | 2.2 | Authors need all three together |
-| M3 | A4 alone | 2.2 | One coordinated fixture re-baseline |
-| Tier-0 | execution-context before tiers 1–2 | 3.0 | Audit-record backbone |
-| Auth-gate | multi-tenancy before authorization phase 1 | 3.2 | DataKey leftmost = TenantId |
+| T2.a | **Vanilla workflow body lowering** — only `factory-let` + `op-call` lower (#1062); `precondition` / `requires` / `emit` / `repo-let` / `expr-let` / `for-each` / `repo-run` emit `# TODO` comments (`src/generator/elixir/vanilla/workflow-execution-emit.ts:~147-157`). The TDD slices are already cut in [`../plans/vanilla-foundation-tdd-plan.md`](../plans/vanilla-foundation-tdd-plan.md). | elixir/vanilla | [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) |
+| T2.b | **Event sourcing under vanilla** (D-VANILLA-ES-HOME) — `EVENT_SOURCING_BACKENDS` still `{node, dotnet}` (`system-checks.ts:~853`). The blocker (no state-based vanilla emitter) is gone; this is the headline elixir item. | elixir/vanilla | [workflow-and-applier](./workflow-and-applier.md) |
+| T2.c | **Operation `or`-union returns on elixir** — `SUPPORTED_RETURN_BACKENDS = {node, dotnet}` (`structural-checks.ts:~381`). Vanilla's `{:ok,_} \| {:error,_}` controllers are the natural carrier; Ash stays gated. | elixir | [exception-less](./exception-less.md) / [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) |
+| T2.d | **Vanilla/ecto as first-class adapters** — today `elixir/index.ts:~88-94` short-circuits `if (foundation === "vanilla")` instead of routing through the `PersistenceAdapter`/`StyleAdapter` registry like node/dotnet; the headline divergence named by [`../plans/realization-axes-alignment.md`](../plans/realization-axes-alignment.md) (slices #1061–#1064 landed the plan + compatibility rules + transport axis; the rewire itself remains). | elixir, platform | [platform-realization-axes](./platform-realization-axes.md) |
+| T2.e | **HEEx walker primitive backfill** — 32 of ~53 primitives have HEEx renderers; missing: `List`, `Detail`, `MasterDetail`, `Tabs`, `Toggle`, `Field`/`NumberField`/`PasswordField`, `For`, `Stat`, `Money`, `Avatar`, `Image`, `Divider`, `Loader`, `Slot`, `Bold`/`Italic`/`InlineCode`, `Switch`/`MultilineField`/`SelectField` (also missing on React — T1.3). Unsupported ones render visible `<!-- not supported -->` stubs (`heex-walker-core.ts`). Prioritise `List`/`Detail`/`MasterDetail`/`Tabs` + the form inputs. | elixir/heex | [phase-a platform expansion](../plans/phase-a-platform-expansion-prereqs.md) |
+| T2.f | **`routeSlug` consumption** — `urlStyle:` grammar + `OperationIR.routeSlug` enrichment shipped (#722 + D-URLSTYLE), but **no backend route emitter reads it** (`loom-ir.ts:~289-294` says so explicitly). One slice across the three backends' route builders. | all backends | [lifecycle-url-style](./lifecycle-url-style.md) |
+| T2.g | **Reified-criteria tail** — anonymous capability-`filter` predicates still inline; the principal/tenancy constructor factory (`currentUser.<field>` as ctor arg) and ambient (`of bool`) criteria are skipped (`src/generator/dotnet/criteria-emit.ts:~64-70`). | all backends | [reified-criteria](./reified-criteria.md) |
+| T2.h | **`shape(document)` on elixir** — `PLATFORM_SAVING_SHAPES` allows `relational`+`embedded` only (`src/util/platform-axes.ts:~127`). | elixir | [document-and-json-hierarchies](./document-and-json-hierarchies.md) |
+| T2.i | **IR field-constraint metadata** — `FieldIR` carries no length/format/range, which blocks per-field `validate_*` on elixir (`vanilla/changeset-emit.ts:~8`) and richer Zod/.NET annotations. Land the IR carrier once, consume per backend. | ir, then all backends | [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) §validators |
+| T2.j | **Principal-referencing context filters on node/elixir** — `LIMITED_FAMILIES = {node, elixir}` in `validateContextFilterSupport` (`system-checks.ts:~365-407`); only .NET (`HasQueryFilter`) supports principal/tenancy filters today. Prereq for multi-tenancy (T4). | node, elixir | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
+| T2.k | **Provenance + audit runtimes on dotnet/elixir** — `PROVENANCE_BACKENDS = AUDIT_BACKENDS = {node}` (`system-checks.ts:~912/~949`); both fail fast elsewhere (honest, but parity is owed). | dotnet, elixir | [provenance](./provenance.md), [audit-and-logging](./audit-and-logging.md) |
 
----
+## Tier 3 — partially-shipped families (the bigger remainders)
+
+| # | Item | Notes | Owning proposal |
+|---|---|---|---|
+| T3.1 | **Explicit `loads:` plans** — gated `loom.retrieval-loads-unsupported` (`query-checks.ts:~199`); retrievals load the whole aggregate; no backend consumes a load plan. Explicit narrowing first; auto-inference later. | needs per-backend query emit | [load-specifications](./load-specifications.md) / [retrieval](./retrieval.md) |
+| T3.2 | **Criterion selectability tail** — `from <Criterion>(args)` binding, `when <Criterion>` + auto-exposed `can-<op>`, `Repo.findAll(criterion, …)`, `private workflow` (`criterion.ts:~77` reserves the surface). | rides on reified criteria (T2.g) | [criterion](./criterion.md) |
+| T3.3 | **Payload P3-full + P5** — nested carriers `P<Q<T>>` (gated `loom.generic-arg-not-carrier`, `generics.ts:~66`); `validate for X` / `authorize for X` (no surface at all). Plus the `unpaged` opt-out + page-aware React hooks. | | [payload-transport-layer](./payload-transport-layer.md) |
+| T3.4 | **Exception-less remainder, re-grounded** — with `?` dropped, follow [`failure-taxonomy.md`](./failure-taxonomy.md): route VO-invariant construction failures to 422, `Repo.getById` re-shape (`T or NotFound`, A4 — the one true coordinated-rebaseline moment, old M3), parse/extern as `or` (A5). | A4 = coordinated fixture rebaseline | [exception-less](./exception-less.md) + [failure-taxonomy](./failure-taxonomy.md) |
+| T3.5 | **Workflow `repo-let` arrays/nullables** — gated `loom.workflow-load-array-unsupported` / `-nullable-unsupported` (`workflow-checks.ts:~520/~529`). | | [workflow-and-applier](./workflow-and-applier.md) |
+| T3.6 | **ES projections + snapshots; workflow-as-aggregate `on(...)`** | after T2.b for elixir parity | [workflow-and-applier](./workflow-and-applier.md) |
+| T3.7 | **Channels: realtime wire** — `channel`/`channelSource` surface + IR + in-process dispatch ship on all three backends (#970/#1012/#1020); **no SSE/WebSocket emission anywhere**. Part II (caching/invalidation) unstarted. | | [channels](./channels.md) |
+| T3.8 | **Transactional outbox** — deferred comments only (`efcore-persistence.ts:~161`, `ash-postgres-persistence.ts:~181`); no writer/relay on any backend. | upgrade path for at-most-once dispatch | [dispatch-delivery-semantics](./dispatch-delivery-semantics.md) |
+| T3.9 | **Dapper/MikroORM beyond minimal-v1** — each rejects ~11 model features (`loom.dapper-unsupported` `system-checks.ts:~420-475`, `loom.mikroorm-unsupported` `~487-543`); complex find-WHERE throws at runtime (`dapper.ts:~204-248`, `mikroorm.ts:~305-402`). Either expand or accept-and-document as permanent minimal adapters. | decision needed | [storage-and-platform-config](./storage-and-platform-config.md) |
+| T3.10 | **Storage tail** — logical `dataSource` bindings (D-STORAGE-SPLIT/D-GRANULARITY), `STORAGE_CAPABILITIES` matrix, reserved `marten`/`layered` stubs. | | [storage-and-platform-config](./storage-and-platform-config.md) |
+| T3.11 | **F5d per-operation style decomposition** — `cqrs-style.ts:~99-114` per-op methods throw `AdapterNotImplementedError`; per-aggregate path works. Plus the reserved `transport: controllers` (ASP.NET MVC) stub (`src/platform/dotnet.ts:~131-142`). | dotnet | [platform-realization-axes](./platform-realization-axes.md) |
+| T3.12 | **Sensitivity phases 2–4** — `sensitive(tag)` + propagation shipped; `authorized(<tag>,…)` declassification, `mask:` DTOs, sink-call classification absent. | | [sensitivity-and-compliance](./sensitivity-and-compliance.md) |
+| T3.13 | **Audit promotion** — `audited` is a boolean (`loom-ir.ts:~314`); promote to `audited(actions \| access \| events \| off)` + `AuditRecord` shape + before/after snapshots + .NET Mediator behaviour. | after T4 execution-context | [audit-and-logging](./audit-and-logging.md) |
+| T3.14 | **React frontend remainders** — list-page filter UI for user-`where` finds (hook-only v1); multi-segment / compound state assignment in page handlers (throws — `body-walker.ts:~954-1032`); `DestroyForm` (CreateForm/OperationForm exist in the registry); frontend-ACL Phase 3 (flat-key schema restructure + per-action FieldMaps). | react | [retrieval](./retrieval.md), [loom-forms](./loom-forms.md), [frontend-acl](./frontend-acl.md) |
+| T3.15 | **Extern family** — component hatch Tier 2 (`action` behaviour params — Loom's first function type) + LiveView; `function`/`hook … extern` (the logic twin, unstarted). | | [extern-component-escape-hatch](./extern-component-escape-hatch.md), [extern-function-hook-escape-hatch](./extern-function-hook-escape-hatch.md) |
+| T3.16 | **Resource-kind codegen** — `resource` grammar parses `objectStore \| queue \| api` kinds, but only state/eventLog/replica kinds are actively emitted; the workflow call surface is unstarted. | | [resource-model-and-source-types](./resource-model-and-source-types.md), [workflow-resource-consumption](./workflow-resource-consumption.md) |
+| T3.17 | **`hosts:` codegen** — the grammar relation shipped; the embedded-frontend hosting emit (framework moved onto `ui`, host capability check) has not. | | [embedded-frontend-composition](./embedded-frontend-composition.md) |
+| T3.18 | **Agent tooling tail** — LSP-provider correctness (§4c) + the playground agentic chat UI (engine fully shipped). | web | [agent-tools-and-mcp](./agent-tools-and-mcp.md) |
+| T3.19 | **Seeding tail** — imperative (workflow-shaped) body, per-row natural-key upsert, create-shape validation. | | [database-seeding](./database-seeding.md) |
+| T3.20 | **Inheritance I4** — per-concrete storage override / mixed strategy (needs the UNION-ALL read; gated in `validators/inheritance.ts:~137`), polymorphic `<Base> id` refs + `find all <Base>` over TPC. | | [aggregate-inheritance](./aggregate-inheritance.md) |
+
+## Tier 4 — unstarted families (code-verified: no grammar/IR/emit artifacts)
+
+Ordered by the dependency spine, not by size.
+
+1. **execution-context** (Tier-0 backbone) — compiler-emitted scope
+   frames (`correlationId`/`scopeId`/`parentId`). **Lands before any
+   governance tier**; audit promotion (T3.13), provenance parity
+   (T2.k), and authorization all reference it.
+2. **multi-tenancy** (`tenancy by user.tenantId`, auto-stamped
+   `TenantId`, query filters) — ships **before** authorization Phase 1
+   (DataKey leftmost = TenantId). Prereq: principal context filters on
+   node/elixir (T2.j).
+3. **authorization** phases 1–4 (`DataKey`, `policy { data /
+   operations / fields }`, gates; D-POLICY-STYLE pinned). Phases 5–7
+   deferred tail.
+4. **domain-services** (`domainService`, design pinned #1058 —
+   `DomainServiceIR`, `callKind: "domain-service"`, Shape A pure
+   calculator first).
+5. **loom-forms** (typed-action `CreateForm`/`OperationForm`/
+   `DestroyForm` binding — fixes the form/API create-contract layering
+   bug; lifecycle Phase 1 prereq is done) + **lifecycle-operations
+   Phase 2+** (full action surface, `crudish` reframe) on top of T2.f.
+6. **i18n-strings → i18n** phases 1–7 (ICU catalogs, content-hash
+   keys, `ddd i18n sync`; D-I18N-KEY pinned).
+7. **quickstart-and-day-one-batteries** — `ddd dev` / `ddd deploy`,
+   turnkey OIDC `auth` (D-AUTH-OIDC; replaces the per-backend
+   `verify_token`/verifier stubs), `job` / `email` / object `storage`.
+8. **Deployment & networking** — deployable-networking (`serves … at`
+   address binding), multi-target-proxy (approved, impl pending),
+   kubernetes-helm, terraform-iac (research).
+9. **Structural reframes** — bounded-context-model,
+   per-package-output-tree (deferred on fixture/CI cost),
+   unfoldable-api-derivation (coordinate with payload P2 before
+   building more on `wireShape`).
+10. **java-backend** — deliberately last; consumes the reified
+    `Specification<T>` model (T2.g) and the `ExprTarget`/`WalkerTarget`
+    seams.
+
+## Coordinated single-PR moments (surviving set)
+
+| Tag | What | Why one PR |
+|---|---|---|
+| A4 rebaseline | `Repo.getById` re-shape to `T or NotFound` (T3.4) | One coordinated fixture re-baseline across all backends (the old "M3") |
+| Tier-0 | execution-context before audit/auth tiers | Audit-record backbone |
+| Auth-gate | multi-tenancy before authorization Phase 1 | DataKey leftmost = TenantId |
+| ES-vanilla | T2.b lands as one slice over the vanilla repo seam | Stream table + fold + create-from-event must agree |
+
+The old **M1** (P3+P4 together) and **M2** (A1+A2+A3 together) are
+retired: P4 and most of A1/A3 shipped independently, and A2 is dropped.
+
+## Suggested near-term order
+
+A pragmatic next-10, dependency-consistent:
+
+1. **T1.1** union-find variant selection (.NET runtime trap + Hono
+   `unknown`) — small, removes the only `NotImplementedException` a
+   modeller can hit from valid source.
+2. **T1.2** remove the `?` operator surface.
+3. **T2.a** vanilla workflow statement kinds (slices already cut).
+4. **T2.b → T2.c** event sourcing + `or`-union returns under vanilla —
+   closes the two biggest elixir parity gates.
+5. **T1.3 + T2.e** walker primitive backfill (React trio + HEEx
+   priority set).
+6. **T2.f** `routeSlug` consumption (one slice, three backends).
+7. **T2.g** capability-`filter` reification + principal factory —
+   unblocks T2.j → multi-tenancy.
+8. **T2.i** IR field-constraint metadata (+ elixir validators, Zod/.NET
+   enrichment).
+9. **T3.1** explicit `loads:` plans.
+10. **Tier 4 #1–#3** execution-context → multi-tenancy → authorization
+    — the governance spine.
 
 ## Parallelisation
 
-Two-agent split:
+Three loosely-coupled tracks (one agent each):
 
-- Agent A — Phase 0 seams → Phase 1A (storage) → Phase 2 → Phase 3.2 (auth).
-- Agent B — Phase 0 reorgs → Phase 1B (lifecycle + forms) and/or 1C (inheritance) → Phase 3.0 → Phase 3.1 → Phase 4.
-
-Storage post-foundation streams (A–O) absorb additional implementers
-after F3.
-
----
-
-## Critical files (cross-phase)
-
-- Grammar: `src/language/ddd.langium`.
-- Validators: `src/language/ddd-validator.ts`,
-  `src/language/validators/*`.
-- Type system: `src/language/type-system.ts`.
-- IR: `src/ir/types/loom-ir.ts` (post-reorg), `src/ir/lower/*`,
-  `src/ir/enrich/enrichments.ts`, `src/ir/validate/validate.ts`,
-  recently-landed `src/ir/wire-types.ts`.
-- Generators: `src/generator/<platform>/render-expr.ts`,
-  `render-stmt.ts`, `emit/*.ts`, `*-builder.ts`. Reuse
-  `tsxTarget` / `heexTarget`.
-- Platform surface: `src/platform/surface.ts`, `registry.ts`,
-  `<backend>.ts`.
-- Already-shipped seams to extend, not rebuild:
-  `src/generator/_obs/log-events.ts`,
-  `src/generator/_obs/render-{hono,dotnet,phoenix}.ts`,
-  `src/platform/hono/v4/observability-builder.ts`,
-  `src/system/loomsnap.ts`, `src/ir/prov-id.ts`,
-  `src/cli/main.ts` (`ddd snapshot`),
-  `src/generator/_walker/target.ts` + `tsxTarget` + `heexTarget`.
-
----
+- **Track A (type-system & queries):** T1.1 → T2.g → T3.1/T3.2 → T3.4.
+- **Track B (elixir parity):** T2.a → T2.b → T2.c → T2.d → T2.e/T2.h.
+- **Track C (governance & product):** T1.2/T1.3 → T2.f/T2.i →
+  execution-context → multi-tenancy → authorization; loom-forms +
+  frontend remainders interleave.
 
 ## Verification
 
-- Phase 0 — `npm test` + every `LOOM_*_BUILD=1` gate green; fixtures
-  byte-identical.
-- Phase 1A — F1/F2 parser+validator tests; F3–F8 byte-identical.
-- Phase 1B — lifecycle parser+validator+per-backend route tests;
-  forms walker-target-contract; coordinated fixture re-baseline.
-- Phase 1C — inheritance parser+per-backend repository tests.
-- Phase 2 — M3 coordinated re-baseline; OpenAPI parity; wire-spec
-  diff reviewed.
-- Phase 3 — extend `LOOM_OBS_E2E_*=1`; integration tests for
-  audit-record shape, policy-decision-id linking, sensitivity
-  narrowing, tenancy isolation.
-- Phase 4.1 — `ddd i18n sync` round-trip on a fixture catalog.
-- Phase 4.2 — pagination list-endpoint + React hook + cache test.
-- Phase 5 — encrypted-at-rest gated on storage capability matrix.
-
----
-
-## Appendix — Kitchen-sink example (DRAFT)
-
-> **Known issues** (must be resolved before this example compiles):
->
-> - The `storage` keyword is used for both physical declarations and
->   logical bindings. Per "Known undecided issues" above, one of them
->   will be renamed (likely the logical binding to `dataSource` or
->   similar).
-> - `defaultLocale en` is placeholder syntax not pinned in `i18n.md`.
-> - `mask … strategy: partial / redact` is placeholder syntax for
->   sensitivity phase 3.
-> - `text "Country name"` and `text PromoBanner = "…"` follow draft
->   `i18n.md` syntax that has not been pinned.
->
-> The example is illustrative — review it as a target shape for what
-> the assembled system looks like, not as compilable Loom.
-
-Demonstrates every in-scope feature with the recommended decision
-outcomes baked in. Once the issues above are resolved, lives at
-`examples/kitchen-sink.ddd`.
-
-```loom
-// Order management for a multi-tenant SaaS.
-
-system AcmeOrders {
-  tenancy by user.tenantId
-  locales en, es, fr
-  defaultLocale en                     // DRAFT
-  modules Identity, Catalog, Sales
-}
-
-// Physical resources
-storage pg           { type: postgres }
-storage redisCache   { type: redis }
-// Logical binding — keyword TBD (see Known issues)
-storage orderEvents  { use: pg, for: [Sales.Order], kind: eventLog }
-
-module Identity {
-  aggregate User {
-    persistenceStrategy: stateBased
-    id: UserId
-    email: Email                sensitive(pii)
-    displayName: string
-    tenantId: TenantId
-    role: enum { admin | manager | viewer }
-    audited(actions)
-  }
-
-  policy User {
-    data    { reachable when self.tenantId = currentUser.tenantId }
-    fields  { mask self.email for currentUser.role != admin
-              strategy: partial }                 // DRAFT
-    operations { promote when currentUser.role = admin }
-  }
-}
-
-module Catalog {
-  unpaged aggregate Country {
-    crossTenant
-    id: CountryCode
-    name: text "Country name"                    // DRAFT
-  }
-
-  aggregate Product {
-    persistenceStrategy: stateBased
-    id: ProductId
-    sku: string
-    name: string
-    price: Money
-  }
-}
-
-module Sales {
-  abstract aggregate Order {
-    inheritanceStrategy: shareTable
-    persistenceStrategy: eventSourced
-    id: OrderId
-    customerId: CustomerId
-    items: OrderItem[]
-    total: Money provenanced
-    status: enum { draft | placed | fulfilled | cancelled }
-    audited(actions, access)
-
-    create place {
-      params: customerId: CustomerId, items: OrderItem[]
-      requires self.items.length > 0
-        reject ValidationFailed "Order must have at least one item"
-      this.status = .draft
-    }
-
-    operation cancel {
-      params: reason: string
-      when fromActiveStatus
-      this.status = .cancelled
-    }
-
-    destroy archive {
-      when self.status = .cancelled
-    }
-  }
-
-  aggregate RetailOrder extends Order { deliveryAddress: Address }
-  aggregate WholesaleOrder extends Order {
-    purchaseOrderNumber: string
-    netTerms: int
-  }
-
-  criterion fromActiveStatus of Order
-    = self.status = .draft or self.status = .placed
-  criterion havingTotalAbove(threshold: Money) of Order
-    = self.total > threshold
-
-  command updateShipping of RetailOrder {
-    deliveryAddress: Address option
-    expedited: bool option
-  }
-
-  payload OrderActivity =
-      OrderPlaced
-    | OrderCancelled(reason: string)
-    | OrderFulfilled
-
-  error AlreadyCancelled
-  error InventoryUnavailable(sku: string)
-
-  workflow fulfillOrder {
-    on Order.placed
-      reserveInventory ?
-      chargePayment ?
-      shipOrder
-  }
-
-  private workflow chargePayment { }
-
-  policy Order {
-    data    { reachable when self.tenantId = currentUser.tenantId }
-    operations {
-      place    when currentUser.role in [admin, manager, viewer]
-      cancel   when currentUser.role in [admin, manager]
-      archive  when currentUser.role = admin
-    }
-    fields {
-      mask self.customerId.taxId for currentUser.role != admin
-        strategy: redact                          // DRAFT
-    }
-  }
-}
-
-api SalesApi {
-  expose Sales.Order, Sales.RetailOrder, Sales.WholesaleOrder
-  urlStyle: resource
-
-  query listOrders(
-        filter: Order from fromActiveStatus,
-        minTotal: Money from havingTotalAbove)
-    -> Paged<Order>
-    loads: self.customerId, self.items
-
-  status NotFound            code 404
-  status ValidationFailed    code 422
-  status AlreadyCancelled    code 409
-  status InventoryUnavailable code 409
-}
-
-// Aggregate-to-physical bindings (keyword TBD)
-storage SalesApiBindings {
-  use pg          for [Identity.User, Catalog.Product,
-                       Sales.RetailOrder, Sales.WholesaleOrder]
-  use orderEvents for [Sales.Order]
-}
-
-deployable salesBackend {
-  platform: node { framework: hono }
-  api: SalesApi
-  style: layered
-  persistence: drizzle
-}
-
-deployable salesAdmin {
-  platform: dotnet
-  api: SalesApi
-  style: cqrs
-  persistence: efCore
-}
-
-deployable salesUi {
-  platform: react
-  ui: SalesUi
-  layout: standard
-  i18n { runtime: react-intl }
-}
-
-ui SalesUi {
-  layout AppShell {
-    header  AppHeader
-    sidebar AppNav
-    main    sentinel
-  }
-
-  pages
-    OrdersList {
-      route: "/orders"
-      layout: AppShell
-      Heading "Orders"
-      List of Order via listOrders(fromActiveStatus)
-    }
-
-    OrderDetail {
-      route: "/orders/:id"
-      layout: AppShell
-      MasterDetail of Order
-      OperationForm for cancel
-    }
-
-    NewRetailOrder {
-      route: "/orders/new"
-      layout: AppShell
-      CreateForm of RetailOrder.place
-    }
-}
-
-text PromoBanner =                                // DRAFT
-  "Get 10% off your next ${count, plural, one {order} other {orders}}"
-  notes: "Homepage banner — explicit named entry"
-
-text EmptyOrders =                                // DRAFT
-  "No orders yet. ${link, link, {Start one}}"
-  notes: "Empty state on /orders"
-```
-
-### Feature → location map
-
-| Feature (proposal) | Where in example |
-|---|---|
-| Multi-tenancy | `system.tenancy by user.tenantId`; `crossTenant` on `Country` |
-| Aggregate inheritance + D-RENAME | `abstract aggregate Order { inheritanceStrategy: shareTable }`; `RetailOrder extends Order` |
-| Per-aggregate persistence | `persistenceStrategy: eventSourced / stateBased` |
-| Logical binding (keyword TBD) | `storage orderEvents { use: pg, for: [Sales.Order] }`; `storage SalesApiBindings` |
-| Per-deployable `style` / `persistence` / `layout` | each `deployable { … }` |
-| Lifecycle-operations + D-LIFECYCLE-VERB | `create place`, `operation cancel`, `destroy archive`; `urlStyle: resource` |
-| Loom-forms | `CreateForm of RetailOrder.place`, `OperationForm for cancel` |
-| Criterion | `criterion fromActiveStatus`, `criterion havingTotalAbove(...)`; `when fromActiveStatus`; `from fromActiveStatus` |
-| Payload-transport (tagged union) | `payload OrderActivity = OrderPlaced \| …` |
-| Exception-less (`error`, `?`, status mapping) | `error AlreadyCancelled`; `reserveInventory ?`; `status … code …` |
-| Partial-update | `command updateShipping … option` |
-| Load-specifications | `query listOrders(...) loads: self.customerId, self.items` |
-| Pagination | `Paged<Order>` return; `unpaged` on `Country` |
-| Provenance | `total: Money provenanced` |
-| Audit (promoted) | `audited(actions, access)` |
-| Sensitivity + masking | `sensitive(pii)`; `mask … strategy:` (DRAFT) |
-| Authorization | each `policy { data, operations, fields }` block |
-| i18n (DRAFT) | user-visible strings + `text PromoBanner = …`; `locales en, es, fr` |
-| Private workflow + workflow-calls-workflow | `private workflow chargePayment`; `chargePayment ?` |
-| Execution-context | compiler-emitted |
-| Observability | compiler-emitted |
-| Encrypted-at-rest | not authored — Phase 5 deferred |
+- Every tier-1/2 item: the fast suite (`npm test`) + the owning
+  backend's build gate (`LOOM_TS_BUILD` / `LOOM_DOTNET_BUILD` /
+  `LOOM_PHOENIX_BUILD` / `LOOM_REACT_BUILD`) + byte-identical fixtures
+  unless the item *is* a rebaseline.
+- Cross-backend wire items (T1.1, T2.c, T3.4): the conformance parity
+  gate (`conformance-parity.yml`) is the decisive check.
+- Elixir items: `mix compile --warnings-as-errors` runs in CI only
+  (no local toolchain) — keep slices small, push often, treat
+  `elixir-ash-build.yml` / the vanilla fixture job as the acceptance
+  gate.
+- Gate removals (e.g. T2.b/T2.c widening a `*_BACKENDS` set): the
+  negative validator test moves, it does not disappear — assert the
+  remaining unsupported backends still fail fast.

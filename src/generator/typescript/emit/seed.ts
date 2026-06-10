@@ -13,9 +13,11 @@
 // whose marker is present.  `default` always runs; other datasets run only
 // when named in `LOOM_SEED` (comma-separated).
 //
-// Not yet handled (later slices): the `raw` table-insert path (`raw` blocks
-// currently still route through the domain `create`), `@handle` cross-row id
-// refs, and create-shape validation.
+// The `raw` table-insert path is wired too: `raw` rows bypass the domain
+// `create` and emit a direct `db.execute(sql.raw(INSERT …))` via the shared
+// `renderSeedRowInsert`.  Cross-row references use explicit ids per
+// D-SEED-XREF (an `@handle` indirection was considered and not adopted).
+// Not yet handled (later slices): create-shape validation.
 
 import type { EnrichedBoundedContextIR, ExprIR, SeedRowIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";

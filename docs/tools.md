@@ -27,7 +27,22 @@ ddd generate dotnet <file.ddd> -o <outdir>        # emit a single .NET project (
 ddd generate system <file.ddd> -o <outdir>        # emit every deployable + docker-compose.yml
 ddd verify <file.ddd> --results <results.json>    # join test results onto the requirements graph
 ddd snapshot <file.ddd> -o <outdir>               # capture provenance rule snapshots
+ddd patch <file.ddd> --patches <patches.json>     # apply node-addressed model patches
 ```
+
+### `patch` — apply node-addressed model patches
+
+`ddd patch <file.ddd> --patches <patches.json>` applies a list of
+node-addressed model patches (the protocol from
+[`proposals/ai-authoring-loop.md`](proposals/ai-authoring-loop.md) §4 —
+the same patch shape that `parse --json` / `generate --json`
+diagnostics carry in their `fixHint`). `--patches -` reads the JSON
+from stdin; the file may be a bare array or `{ "patches": [...] }`.
+
+By default the **patched source is printed to stdout** so the command
+composes (`ddd patch m.ddd --patches p.json > m2.ddd`); `--json` emits
+the structured `PatchResult` instead. Exits non-zero if any patch fails
+to apply.
 
 ### `new` — scaffold a starter project
 

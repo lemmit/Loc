@@ -5,10 +5,11 @@ Cross-cutting design specs that several proposals depend on. Unlike
 **shared shape** that multiple features consume, so they are written
 once here and referenced from every proposal that touches them.
 
-They correspond to Phase 0.4 of
+They were written as the cross-cutting groundwork phase of the
+original global implementation plan (the plan at
 [`../proposals/global-implementation-plan.md`](../proposals/global-implementation-plan.md)
-and back the matching `D-*` decisions in
-[`../decisions.md`](../decisions.md). Where a doc pins a decision, the
+was rewritten 2026-06-10; these specs stand on their own) and back the
+matching `D-*` decisions in [`../decisions.md`](../decisions.md). Where a doc pins a decision, the
 binding answer lives in `decisions.md`; the spec here elaborates it.
 
 | Spec | Pins | Consumed by |

@@ -1,23 +1,26 @@
 # .NET TPH emission — design note
 
-> Status: **SHIPPED** (this PR). [`aggregate-inheritance.md`](./aggregate-inheritance.md)
+> Status: **SHIPPED**. [`aggregate-inheritance.md`](./aggregate-inheritance.md)
 > **I2** — TPH (`sharedTable`) storage on the **.NET / EF Core** backend.
-> Phoenix/Ash TPH remains the one ✗ row.
+> Phoenix/Ash TPH has since shipped too (see
+> [`phoenix-tph-emission.md`](./phoenix-tph-emission.md)) — TPH is now
+> live on all three DB backends (`TPH_CAPABLE = {node, dotnet, elixir}`
+> in `src/ir/validate/checks/system-checks.ts`).
 >
 > Prereq (PR #975): the TPH/TPC predicates are consolidated in the
 > platform-neutral `src/ir/util/inheritance.ts`, so the .NET generator
 > imports them without crossing platform folders. This doc records the
 > design that landed; the per-file plan below maps 1:1 onto the diff.
 
-## What ships today (verified against code)
+## What shipped (the pre-landing state this note was written against)
 
-| Backend | TPC (`ownTable`) | TPH (`sharedTable`) |
-|---|:---:|:---:|
-| Hono / Drizzle | ✓ | ✓ (`src/generator/typescript/emit/schema.ts:emitTphTable`) |
-| .NET / EF Core | ✓ (`emit/entity.ts:renderAbstractBaseEntity` + `efcore.ts:Ignore<Base>()`) | ✗ — gated `loom.tph-backend-unsupported` |
-| Phoenix / Ash | ✗ | ✗ |
+At the time this note was written, TPH existed on Hono/Drizzle only
+(`src/generator/typescript/emit/schema.ts:emitTphTable`); .NET had TPC
+(`emit/entity.ts:renderAbstractBaseEntity` + `efcore.ts:Ignore<Base>()`)
+but TPH was gated by `loom.tph-backend-unsupported`, and Phoenix had
+neither. **Today TPC and TPH both ship on all three DB backends.**
 
-So the .NET frontier is **TPH only** (TPC already ships). EF Core has
+So the .NET frontier was **TPH only** (TPC already shipped). EF Core has
 native TPH (`HasDiscriminator`), so EF derives the single wide table from
 the model — no hand-built DDL (`.NET` uses the EF model via
 `EnsureCreated`, not `MigrationsIR`).

@@ -1,13 +1,15 @@
 # Rename `platform: phoenix` → `platform: elixir`; `transport: phoenixRouter` → `transport: phoenix`
 
-> Status: **proposal**. Pending decisions D-ELIXIR-PLATFORM (the
-> rename), D-PHOENIX-TRANSPORT (the transport-value rename), and
-> D-PHOENIX-DIR (the generator-directory + platform-module rename
-> absorbed here). Mirrors **D-NODE-PLATFORM**'s rename pattern exactly,
-> completing the language-ecosystem-as-platform principle for the
-> Elixir half. Lands **before** P2 of
-> [`vanilla-phoenix-foundation.md`](./vanilla-phoenix-foundation.md)
-> so the vanilla emit subtree lands under the right name first time.
+> Status: **SHIPPED** (#1043, R1–R6). `platform: elixir` is the
+> canonical platform name (`Platform` in `src/ir/types/loom-ir.ts` is
+> `"dotnet" | "node" | "react" | "static" | "elixir"`); the generator
+> lives at `src/generator/elixir/`, the platform module at
+> `src/platform/elixir.ts`. Back-compat aliases (`platform: phoenix`,
+> `platform: phoenixLiveView`) keep existing `.ddd` sources working.
+> D-ELIXIR-PLATFORM / D-PHOENIX-TRANSPORT / D-PHOENIX-DIR are pinned in
+> [`decisions.md`](../decisions.md). It landed before the vanilla emit
+> subtree, which therefore lives at `src/generator/elixir/vanilla/` as
+> planned. The design discussion below is retained for rationale.
 
 ## TL;DR
 
