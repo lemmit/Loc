@@ -1997,7 +1997,20 @@ export interface NeedIR {
 // `python` is the FastAPI + SQLAlchemy 2 backend (backend-only, like
 // `node`/`dotnet`); the legacy-style `fastapi` spelling desugars to it
 // at the lowering boundary (mirrors `hono` → `node`).
-export type Platform = "dotnet" | "node" | "react" | "static" | "elixir" | "python" | "java";
+//
+// `svelte` is the second frontend-only platform: a Svelte 5 /
+// SvelteKit static SPA rendered against a svelte-format design pack
+// (`shadcnSvelte`/`flowbite`).  Same deployable contract as `react`:
+// `targets:` a backend, inherits its contexts, owns no database.
+export type Platform =
+  | "dotnet"
+  | "node"
+  | "react"
+  | "svelte"
+  | "static"
+  | "elixir"
+  | "python"
+  | "java";
 
 // The `application:`/`shape(…)` platform-axes lookups
 // (`applicationDslToAdapter`, `applicationAdapterToDsl`,

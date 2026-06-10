@@ -17,7 +17,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseBuiltinDesignRef } from "../../util/builtin-formats.js";
-import { compilePack, type LoadedPack, type PackManifest } from "./loader.js";
+import { compilePack, type LoadedPack, type PackFormat, type PackManifest } from "./loader.js";
 
 /** Names of the repo-root template directories that supply
  *  pack-agnostic Handlebars sources, keyed by pack format.  TSX packs
@@ -28,6 +28,10 @@ import { compilePack, type LoadedPack, type PackManifest } from "./loader.js";
  *  into a single shared-sources map keyed by logical name. */
 const SHARED_SOURCE_DIRS_TSX = ["vite", "api", "docker"] as const;
 const SHARED_SOURCE_DIRS_HEEX: readonly string[] = ["phoenix"];
+// Svelte packs share the framework-neutral `docker/` scaffold (the
+// dockerfile is a generic vite-build/vite-preview two-stage) plus a
+// SvelteKit-specific shared layer.
+const SHARED_SOURCE_DIRS_SVELTE: readonly string[] = ["sveltekit", "docker"];
 
 /** Resolve the repo-root directory by walking up from this file
  *  until a `designs/` sibling is found.  Used to anchor both the
@@ -78,10 +82,15 @@ export function resolvePackDir(ui: string, referenceDir?: string): string {
  *  to them by logical name and they emit identically regardless of
  *  which design pack of that format is active.  Missing directories
  *  are silently skipped — keeps the contract opt-in. */
-function readSharedSources(format: "tsx" | "heex"): Record<string, string> {
+function readSharedSources(format: PackFormat): Record<string, string> {
   const root = repoRoot();
   const out: Record<string, string> = {};
-  const dirs = format === "heex" ? SHARED_SOURCE_DIRS_HEEX : SHARED_SOURCE_DIRS_TSX;
+  const dirs =
+    format === "heex"
+      ? SHARED_SOURCE_DIRS_HEEX
+      : format === "svelte"
+        ? SHARED_SOURCE_DIRS_SVELTE
+        : SHARED_SOURCE_DIRS_TSX;
   for (const dirName of dirs) {
     const dir = path.join(root, dirName);
     if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) continue;

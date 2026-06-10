@@ -77,7 +77,7 @@ export function checkDeployable(
   if (hasUiBinding && !platformMountsUi(d.platform)) {
     accept(
       "error",
-      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenix', 'dotnet', 'java'); got '${d.platform}'.`,
+      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'svelte', 'static', 'phoenix', 'dotnet', 'java'); got '${d.platform}'.`,
       {
         node: d,
         property: d.uiSugar
@@ -97,11 +97,17 @@ export function checkDeployable(
       { node: d, property: "name" },
     );
   }
-  if (d.platform === "react" && !hasUiBinding) {
+  // Rule 4b generalises to every frontend SPA platform (`react`,
+  // `svelte`) — a frontend deployable without a `ui:` has no pages to
+  // render.  `static` keeps its own wording above.  The diagnostic
+  // code stays per-platform (`loom.react-deployable-missing-ui`,
+  // `loom.svelte-deployable-missing-ui`) so quick-fixes can dispatch.
+  if ((d.platform === "react" || d.platform === "svelte") && !hasUiBinding) {
+    const label = d.platform === "react" ? "React" : "Svelte";
     accept(
       "error",
-      `React deployable '${d.name}' must declare a 'ui:' binding — every page now flows through the page metamodel. Add 'ui: <UiName>' (use 'ui <UiName> { with scaffold(subdomains: [...]) }' for the bulk-CRUD case).`,
-      { node: d, property: "name", code: "loom.react-deployable-missing-ui" },
+      `${label} deployable '${d.name}' must declare a 'ui:' binding — every page now flows through the page metamodel. Add 'ui: <UiName>' (use 'ui <UiName> { with scaffold(subdomains: [...]) }' for the bulk-CRUD case).`,
+      { node: d, property: "name", code: `loom.${d.platform}-deployable-missing-ui` },
     );
   }
   // Rule 13: framework values must match the deployable's platform.
@@ -214,7 +220,7 @@ export function checkDeployable(
     if (d.targets) {
       accept(
         "error",
-        `'targets:' is only valid on a 'platform: react' or 'platform: static' deployable.`,
+        `'targets:' is only valid on a frontend deployable ('platform: react', 'svelte', or 'static').`,
         { node: d, property: "targets" },
       );
     }
@@ -247,7 +253,7 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
     if (!FRONTEND_KEYWORDS.has(raw)) {
       accept(
         "error",
-        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'static', 'phoenix', 'python' (backends also accept a pinned form, e.g. 'node@v4').`,
+        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'svelte', 'static', 'phoenix', 'python' (backends also accept a pinned form, e.g. 'node@v4').`,
         { node: d, property: "platform" },
       );
     }
