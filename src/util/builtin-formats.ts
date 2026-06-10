@@ -22,6 +22,13 @@
 // automatically; no other code edits required.
 // ---------------------------------------------------------------------------
 
+/** Output format a design pack produces.  `tsx` packs render React
+ *  (JSX) markup, `heex` packs render Phoenix LiveView templates, and
+ *  `svelte` packs render Svelte 5 component markup.  Canonical home of
+ *  the union — the pack loader re-exports it so `generator/` consumers
+ *  keep their import path. */
+export type PackFormat = "tsx" | "heex" | "svelte";
+
 export const BUILTIN_PACK_FORMATS = {
   "mantine@v7": "tsx",
   "mantine@v9": "tsx",
@@ -32,7 +39,9 @@ export const BUILTIN_PACK_FORMATS = {
   "shadcn@v3": "tsx",
   "shadcn@v4": "tsx",
   "ashPhoenix@v3": "heex",
-} as const satisfies Record<string, "tsx" | "heex">;
+  "shadcnSvelte@v1": "svelte",
+  "flowbite@v1": "svelte",
+} as const satisfies Record<string, PackFormat>;
 
 /** What bareword `design: mantine` (no `@version`) resolves to in
  *  this toolchain build.  When we ship a new major version of a pack,
@@ -70,6 +79,10 @@ export const BUILTIN_PACK_LATEST = {
   // this doesn't touch test/fixtures/baseline-output/.
   shadcn: "v4",
   ashPhoenix: "v3",
+  // Svelte packs ship a single version each so far; barewords resolve
+  // straight to v1.
+  shadcnSvelte: "v1",
+  flowbite: "v1",
 } as const satisfies Record<string, string>;
 
 export type BuiltinPackFamily = keyof typeof BUILTIN_PACK_LATEST;
@@ -118,10 +131,10 @@ export function parseBuiltinDesignRef(s: string): ParsedBuiltinDesignRef | null 
  *  version.  Used by the validator to cross-check a deployable's
  *  `design:` against its framework's expected pack format, and to
  *  emit "no such version" errors. */
-export function packFormatForBuiltin(name: string): "tsx" | "heex" | undefined {
+export function packFormatForBuiltin(name: string): PackFormat | undefined {
   const parsed = parseBuiltinDesignRef(name);
   if (!parsed) return undefined;
-  return (BUILTIN_PACK_FORMATS as Record<string, "tsx" | "heex">)[parsed.qualified];
+  return (BUILTIN_PACK_FORMATS as Record<string, PackFormat>)[parsed.qualified];
 }
 
 /** Every version registered for a given built-in family.  Used by

@@ -6,6 +6,7 @@ import javaPlatform from "./java.js";
 import type { LoomBackendManifest } from "./manifest.js";
 import pythonPlatform from "./python.js";
 import reactPlatform from "./react.js";
+import sveltePlatform from "./svelte.js";
 import type { PlatformSurface } from "./surface.js";
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,9 @@ const platforms: Record<Platform, PlatformSurface> = {
   dotnet: dotnetPlatform,
   node: honoPlatform,
   react: reactPlatform,
+  // Second frontend-only platform — Svelte 5 / SvelteKit static SPA.
+  // Same deployable contract as `react` (targets a backend, no DB).
+  svelte: sveltePlatform,
   // `static` is the page-metamodel's UI-only deployable kind.  It
   // shares the React surface — a deployable declared as
   // `platform: static` lowers through the same code path a

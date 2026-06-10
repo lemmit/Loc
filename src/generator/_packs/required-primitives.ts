@@ -165,6 +165,17 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat, RequiredSet> = {
     core: SHARED_PRIMITIVES,
     shell: SHARED_SHELL,
   },
+  // Svelte packs own forms + field inputs exactly the way TSX packs do
+  // (hand-rolled runes + zod form helper; no AshPhoenix.Form analogue),
+  // so the required surface mirrors TSX.  The one delta: SvelteKit
+  // projects need a `svelte-config` shell template (svelte.config.js)
+  // that the TSX/Vite world has no counterpart for.
+  svelte: {
+    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES],
+    shell: [...SHARED_SHELL, "svelte-config"],
+    fieldInput: TSX_FIELD_INPUT,
+    form: TSX_FORM,
+  },
 };
 
 /** Flatten a `RequiredSet` to a single list — every name a pack must
