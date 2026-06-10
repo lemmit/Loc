@@ -10,6 +10,7 @@ import type {
   BoundedContextIR,
   EnrichedLoomModel,
   ExprIR,
+  FindIR,
   FunctionIR,
   StmtIR,
   TypeIR,
@@ -299,6 +300,91 @@ function containsUnion(type: TypeIR): boolean {
       return containsUnion(type.arg);
     default:
       return false;
+  }
+}
+
+/**
+ * Union-returning finds — producer shape gate (payload-transport-layer.md P4
+ * producer side; absence semantics per exception-less.md).
+ *
+ * A find is declarative (predicate, no body), so the only producer logic a
+ * backend can derive is *absence*: row found → the aggregate variant, no row →
+ * the absent variant.  The supported v1 shape is therefore exactly two inline
+ * variants — the repository's aggregate plus one absent variant, where the
+ * absent variant is `none` (the `T option` sugar, mapped to 404) or an `error`
+ * payload whose only permitted field is `resource: string` (filled with the
+ * aggregate name; other fields can't be derived from absence).  Anything else
+ * (aggregate-or-aggregate, three-plus variants, scalar variants, named payload
+ * unions) has no derivable selection and is rejected here — previously these
+ * shapes generated runtime stubs (`NotImplementedException` on .NET, an
+ * untagged body on Hono).
+ *
+ * Backend scope: enforced for node/dotnet hosts and for the legacy
+ * no-deployable path (`generate ts` / `generate dotnet`).  A context hosted
+ * *exclusively* by elixir backends is exempt — Phoenix's P4d emission tags
+ * whatever struct the single-get read yields (success-side only; absence
+ * raises), and error payloads have no Elixir struct yet, so enforcing the
+ * absence shape would regress the shipped tagger there.  The elixir producer
+ * alignment is tracked in the global plan's elixir track.
+ */
+export function validateUnionFindShapes(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  if (backendPlatforms.size > 0 && [...backendPlatforms].every((p) => p === "elixir")) return;
+  const supported = (find: FindIR, aggName: string): string | null => {
+    const t = find.returnType;
+    // (A named `payload Foo = A | B` reference in find-return position never
+    // reaches here — lowering doesn't resolve payload names as types there,
+    // a pre-existing gap independent of this gate.)
+    if (t.kind !== "union") return null;
+    const variants = t.variants;
+    const success = variants.filter((v) => v.kind === "entity" && v.name === aggName);
+    if (variants.length !== 2 || success.length !== 1) {
+      return (
+        `a union find must have exactly two variants — the repository's aggregate ` +
+        `('${aggName}') and one absent variant (\`none\` or an \`error\` payload)`
+      );
+    }
+    const other = variants.find((v) => !(v.kind === "entity" && v.name === aggName))!;
+    if (other.kind === "none") return null;
+    if (other.kind !== "entity") {
+      return `the absent variant must be \`none\` or an \`error\` payload, not a ${other.kind}`;
+    }
+    const payload = ctx.payloads.find((p) => p.name === other.name && p.kind === "error");
+    if (!payload) {
+      return (
+        `'${other.name}' is not an \`error\` payload — the absent variant of a union find must ` +
+        `be \`none\` or an \`error\` payload (an aggregate/record variant has no derivable producer)`
+      );
+    }
+    const badField = payload.fields.find(
+      (f) => !(f.name === "resource" && f.type.kind === "primitive" && f.type.name === "string"),
+    );
+    if (badField) {
+      return (
+        `error payload '${payload.name}' declares field '${badField.name}' — an absence-mapped ` +
+        `error may only carry \`resource: string\` (filled with the aggregate name); other ` +
+        `fields can't be derived from an absent row`
+      );
+    }
+    return null;
+  };
+  for (const repo of ctx.repositories) {
+    for (const find of repo.finds) {
+      const why = supported(find, repo.aggregateName);
+      if (!why) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.union-find-shape-unsupported",
+        message:
+          `find '${find.name}' on repository '${repo.name}': ${why}. Supported v1 shape: ` +
+          `\`find ${find.name}(...): ${repo.aggregateName} or <Error>\` (absence → the error's ` +
+          `HTTP status) or \`: ${repo.aggregateName} option\` (absence → 404).`,
+        source: `${ctx.name}/repository ${repo.name}.${find.name}`,
+      });
+    }
   }
 }
 

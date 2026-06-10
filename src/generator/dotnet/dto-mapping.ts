@@ -347,7 +347,11 @@ function csIsValueType(t: TypeIR): boolean {
   }
 }
 
-export function projectEntityExpr(
+/** The positional constructor arguments of an entity's wire projection —
+ *  shared by `projectEntityExpr` (the `<Ent>Response` DTO) and the union
+ *  variant records (`<Union>_<Agg>`, whose parameter list is the same
+ *  `forApiRead(wireShape)` field set via `unionMembers`). */
+export function projectEntityArgs(
   domainExpr: string,
   entity: EnrichedAggregateIR | EnrichedEntityPartIR,
   ctx: EnrichedBoundedContextIR,
@@ -377,7 +381,15 @@ export function projectEntityExpr(
       args.push(projectToResponse(`${domainExpr}.${upperFirst(wf.name)}`, wf.type, ctx));
     }
   }
-  return `new ${entity.name}Response(${args.join(", ")})`;
+  return args.join(", ");
+}
+
+export function projectEntityExpr(
+  domainExpr: string,
+  entity: EnrichedAggregateIR | EnrichedEntityPartIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  return `new ${entity.name}Response(${projectEntityArgs(domainExpr, entity, ctx)})`;
 }
 
 export function aggregateResponseParams(

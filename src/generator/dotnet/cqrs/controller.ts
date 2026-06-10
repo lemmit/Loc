@@ -10,7 +10,7 @@ import type {
 import { operationIsGuarded } from "../../../ir/types/loom-ir.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, upperFirst } from "../../../util/naming.js";
-import { unionMembers } from "../../_payload/union-wire.js";
+import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
 import {
   collectWireUsings,
   csIdValueClrType,
@@ -159,7 +159,27 @@ export function emitController(
           find.returnType.kind === "union"
             ? unionInstanceName(find.returnType.variants)
             : undefined;
+        // Producer-side absence translation (validator-pinned shape): the
+        // absent variant record maps to its HTTP edge — `none` rides the
+        // optional-find 404, an `error` payload becomes ProblemDetails at its
+        // mapped status (api `httpStatus` override or the stdlib default).
+        const spec =
+          find.returnType.kind === "union" ? findUnionSpec(find.returnType, agg.name, ctx) : null;
+        const unionAbsent = spec
+          ? spec.absent.kind === "none"
+            ? ({ record: `${spec.name}_${spec.absent.tag}`, kind: "none" } as const)
+            : ({
+                record: `${spec.name}_${spec.absent.tag}`,
+                kind: "error",
+                status:
+                  ctx.errorStatusOverrides?.[spec.absent.tag] ??
+                  defaultErrorStatus(spec.absent.tag),
+                title: errorTitle(spec.absent.tag),
+                typeUri: errorTypeUri(spec.absent.tag),
+              } as const)
+          : undefined;
         return {
+          unionAbsent,
           name: find.name,
           isRoot: find.name === "all",
           responseType: unionType,
