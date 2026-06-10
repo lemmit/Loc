@@ -11,6 +11,8 @@ system PySales {
         invariant amount >= 0
       }
 
+      error NotFound { resource: string }
+
       event LineAdded {
         order: Order id,
         quantity: int
@@ -50,6 +52,10 @@ system PySales {
           emit LineAdded { order: id, quantity: qty }
         }
 
+        operation reserve(): Order or NotFound {
+          return NotFound { resource: "order" }
+        }
+
         operation confirm() {
           precondition isMutable()
           precondition lines.count > 0
@@ -71,6 +77,7 @@ system PySales {
       }
       repository Orders for Order {
         find recent(): Order paged
+        find firstDraft(): Order or NotFound where this.status == Draft
         find byStatus(status: OrderStatus): Order[] where this.status == status
         find cheaperThan(limit: money): Order[] where this.unitBudget <= limit
         find watchedBy(customerId: Customer id): Order[] where this.watchers.contains(customerId)

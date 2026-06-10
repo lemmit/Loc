@@ -5,6 +5,7 @@ import {
   PAGED_DEFAULT_PAGE_SIZE,
   pagedReturn,
 } from "../../ir/stdlib/generics.js";
+import { variantTag } from "../../ir/stdlib/unions.js";
 import type {
   BoundedContextIR,
   EnrichedAggregateIR,
@@ -23,7 +24,9 @@ import {
   opOperation,
 } from "../../ir/util/openapi-ids.js";
 import { lines } from "../../util/code-builder.js";
+import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import { findUnionSpec } from "../_payload/union-wire.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
 import { emittableFinds } from "./repository-builder.js";
 
@@ -132,6 +135,7 @@ export function buildPyRoutesFile(
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     refersTo("datetime") || refersTo("Decimal") ? "" : null,
     `from fastapi import ${["APIRouter", "Depends", refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
+    refersTo("JSONResponse") ? "from fastapi.responses import JSONResponse" : null,
     "from pydantic import BaseModel",
     refersTo("IntegrityError") ? "from sqlalchemy.exc import IntegrityError" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
@@ -335,6 +339,36 @@ function operationRoute(
 ): string {
   const opSnake = snake(op.routeSlug ?? op.name);
   const args = op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx)).join(", ");
+  // Exception-less operation (`operation foo(): X or NotFound`): the
+  // route intercepts each error variant and translates it to an
+  // RFC-7807 ProblemDetails at its mapped status; success rides as the
+  // tagged dict the statement renderer produced (exception-less.md).
+  if (op.returnType?.kind === "union") {
+    const errorTags = op.returnType.variants
+      .map((v) => variantTag(v))
+      .filter((tag) => ctx.payloads.some((pl) => pl.name === tag && pl.kind === "error"));
+    const translations = errorTags.flatMap((tag) => {
+      const st = ctx.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag);
+      return [
+        `    if result["type"] == ${JSON.stringify(tag)}:`,
+        "        return JSONResponse(",
+        `            {**result, "type": ${JSON.stringify(errorTypeUri(tag))}, "title": ${JSON.stringify(errorTitle(tag))}, "status": ${st}, "detail": ${JSON.stringify(errorTitle(tag))}, "instance": request.url.path},`,
+        `            status_code=${st},`,
+        '            media_type="application/problem+json",',
+        "        )",
+      ];
+    });
+    return lines(
+      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}")`,
+      `async def ${snake(op.name)}_${snake(agg.name)}(id: str, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
+      "    repo = _repo(session)",
+      `    found = await repo.get_by_id(${agg.name}Id(id))`,
+      `    result = found.${snake(op.name)}(${args})`,
+      "    await repo.save(found)",
+      ...translations,
+      "    return result",
+    );
+  }
   return lines(
     `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}")`,
     `async def ${snake(op.name)}_${snake(agg.name)}(id: str, body: ${upperFirst(op.name)}${agg.name}Request, session: SessionDep) -> Response:`,
@@ -357,6 +391,47 @@ function findRoute(
   const sig = [...params, "session: SessionDep"].join(", ");
   const args = find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)).join(", ");
   const opId = camelId(opFind(agg.name, find.name));
+  const unionSpec = findUnionSpec(find.returnType, agg.name, ctx);
+  if (unionSpec) {
+    const sig = [...params, "request: Request", "session: SessionDep"].join(", ");
+    const absent =
+      unionSpec.absent.kind === "none"
+        ? [
+            "    if (found := await repo." +
+              findSnake +
+              "(" +
+              find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)).join(", ") +
+              ")) is None:",
+            '        raise AggregateNotFoundError("not_found")',
+          ]
+        : (() => {
+            const tag = unionSpec.absent.tag;
+            const st = ctx.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag);
+            const resourceExt = unionSpec.absent.hasResource
+              ? `"resource": ${JSON.stringify(agg.name)}, `
+              : "";
+            return [
+              "    if (found := await repo." +
+                findSnake +
+                "(" +
+                find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)).join(", ") +
+                ")) is None:",
+              "        return JSONResponse(",
+              `            {${resourceExt}"type": ${JSON.stringify(errorTypeUri(tag))}, "title": ${JSON.stringify(errorTitle(tag))}, "status": ${st}, "detail": ${JSON.stringify(errorTitle(tag))}, "instance": request.url.path},`,
+              `            status_code=${st},`,
+              '            media_type="application/problem+json",',
+              "        )",
+            ];
+          })();
+    return lines(
+      `@router.get("/${findSnake}", response_model=None, operation_id="${opId}")`,
+      `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object] | JSONResponse:`,
+      "    repo = _repo(session)",
+      ...absent,
+      // Found → the tagged success variant ({type: "<Agg>", …wire}).
+      `    return {"type": ${JSON.stringify(unionSpec.successTag)}, **repo.to_wire(found)}`,
+    );
+  }
   const paged = pagedReturn(find.returnType);
   if (paged) {
     // Defaulted params last (python syntax) — FastAPI is order-agnostic.

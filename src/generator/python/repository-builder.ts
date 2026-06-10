@@ -47,7 +47,7 @@ import { renderPyType } from "./render-expr.js";
 /** User-declared finds the v1 surface emits — the auto `all` is the
  *  dedicated method/route pair; paged + union returns land in S12. */
 export function emittableFinds(repo: RepositoryIR | undefined): FindIR[] {
-  return (repo?.finds ?? []).filter((f) => f.name !== "all" && f.returnType.kind !== "union");
+  return (repo?.finds ?? []).filter((f) => f.name !== "all");
 }
 
 export function buildPyRepositoryFile(

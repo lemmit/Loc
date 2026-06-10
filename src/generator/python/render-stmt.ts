@@ -90,7 +90,7 @@ function renderPyStatement(s: StmtIR, i: string, ctx: PyStmtCtx): string {
           ? `{"type": ${tag}}`
           : s.variantShape === "scalar"
             ? `{"type": ${tag}, "value": ${v}}`
-            : `{"type": ${tag}, **vars(${v})}`;
+            : `{"type": ${tag}, **${v}}`;
       return `${i}return ${tagged}`;
     }
   }
