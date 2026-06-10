@@ -15,6 +15,11 @@ export const SPRING_BOOT_VERSION = "3.5.14";
 /** Java language level for the generated projects. */
 export const JAVA_VERSION = "21";
 
+/** jMolecules DDD/event annotation libraries — metadata-only deps that
+ *  make the generated domain idiomatically DDD (@AggregateRoot /
+ *  @ValueObject / @DomainEvent) and enable ArchUnit verification. */
+export const JMOLECULES_VERSION = "1.10.0";
+
 export function renderPom(ns: string, artifactId: string): string {
   return lines(
     `<?xml version="1.0" encoding="UTF-8"?>`,
@@ -53,6 +58,16 @@ export function renderPom(ns: string, artifactId: string): string {
     `      <groupId>org.postgresql</groupId>`,
     `      <artifactId>postgresql</artifactId>`,
     `      <scope>runtime</scope>`,
+    `    </dependency>`,
+    `    <dependency>`,
+    `      <groupId>org.jmolecules</groupId>`,
+    `      <artifactId>jmolecules-ddd</artifactId>`,
+    `      <version>${JMOLECULES_VERSION}</version>`,
+    `    </dependency>`,
+    `    <dependency>`,
+    `      <groupId>org.jmolecules</groupId>`,
+    `      <artifactId>jmolecules-events</artifactId>`,
+    `      <version>${JMOLECULES_VERSION}</version>`,
     `    </dependency>`,
     `    <dependency>`,
     `      <groupId>org.springframework.boot</groupId>`,

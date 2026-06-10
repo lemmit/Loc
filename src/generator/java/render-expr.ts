@@ -50,6 +50,11 @@ export interface JavaRenderContext {
    *  event declaration, not the emit-site spelling.  Set by the entity
    *  emitter; absent in contexts that never render an `emit`. */
   eventFields?: Map<string, readonly string[]>;
+  /** Render `this`-rooted property refs as bare names.  Needed inside a
+   *  record's compact constructor (value-object invariants), where the
+   *  canonical-constructor parameters carry the values and `this` is not
+   *  yet available. */
+  bareProps?: boolean;
 }
 
 const DEFAULT: JavaRenderContext = { thisName: "this" };
@@ -222,7 +227,7 @@ function renderRef(e: RefExpr, ctx: JavaRenderContext): string {
       return e.name;
     case "this-prop":
     case "this-vo-prop":
-      return `${ctx.thisName}.${e.name}`;
+      return ctx.bareProps ? e.name : `${ctx.thisName}.${e.name}`;
     case "this-derived":
       // Derived properties are methods on the Java side.
       return `${ctx.thisName}.${e.name}()`;
@@ -261,10 +266,10 @@ function renderMethodCall(
   recv: string,
   args: string[],
   e: MethodCallExpr,
-  _ctx: JavaRenderContext,
+  ctx: JavaRenderContext,
 ): string {
   if (e.isCollectionOp) {
-    return renderCollectionOp(recv, e.member, args, e);
+    return renderCollectionOp(recv, e.member, args, e, ctx);
   }
   // In-memory membership over a reference collection (`List<XId>`):
   // plain `.contains`.  (Find-filter membership renders to JPQL via the
@@ -282,18 +287,34 @@ function renderMethodCall(
 }
 
 /** Element type a `sum` reduces over: the receiver's element type for a
- *  bare `sum()`, or the lambda body's type for `sum(x -> …)` (member
- *  projections carry `memberType`; binaries carry `leftType`).  Falls
- *  back to `int` — the generated-project compile gate catches a wrong
- *  guess loudly. */
-function sumElementType(e: MethodCallExpr): TypeIR | undefined {
+ *  bare `sum()`, or the projected type for `sum(x -> …)`.  The lambda
+ *  body's own `memberType` is NOT always populated by lowering (C#'s
+ *  generic `Sum` never needed it), so a member projection over the
+ *  receiver's element entity resolves the field / derived type from the
+ *  aggregate IR first.  Falls back to `int` — the generated-project
+ *  compile gate catches a wrong guess loudly. */
+function sumElementType(e: MethodCallExpr, ctx: JavaRenderContext): TypeIR | undefined {
   if (e.args.length === 0) {
     return e.receiverType.kind === "array" ? e.receiverType.element : undefined;
   }
   const arg = e.args[0];
   if (arg?.kind !== "lambda" || !arg.body) return undefined;
   const body = arg.body;
-  if (body.kind === "member") return body.memberType;
+  if (body.kind === "member") {
+    // Authoritative path: the receiver collection's element entity is a
+    // part of (or is) the rendering aggregate — read the projected
+    // member's declared type straight off the IR.
+    const elem = e.receiverType.kind === "array" ? e.receiverType.element : undefined;
+    if (elem?.kind === "entity" && ctx.agg) {
+      const owner =
+        ctx.agg.name === elem.name ? ctx.agg : ctx.agg.parts.find((p) => p.name === elem.name);
+      const declared =
+        owner?.fields.find((f) => f.name === body.member)?.type ??
+        owner?.derived.find((d) => d.name === body.member)?.type;
+      if (declared) return declared;
+    }
+    return body.memberType;
+  }
   if (body.kind === "binary") return body.leftType;
   if (body.kind === "convert") return { kind: "primitive", name: body.target };
   if (body.kind === "literal") {
@@ -303,12 +324,18 @@ function sumElementType(e: MethodCallExpr): TypeIR | undefined {
   return undefined;
 }
 
-function renderCollectionOp(recv: string, name: string, args: string[], e: MethodCallExpr): string {
+function renderCollectionOp(
+  recv: string,
+  name: string,
+  args: string[],
+  e: MethodCallExpr,
+  ctx: JavaRenderContext,
+): string {
   switch (name) {
     case "count":
       return `${recv}.size()`;
     case "sum": {
-      const elem = unwrapOptional(sumElementType(e));
+      const elem = unwrapOptional(sumElementType(e, ctx));
       const stream = args.length === 1 ? `${recv}.stream().map(${args[0]})` : `${recv}.stream()`;
       if (isMoneyLike(elem)) {
         return `${stream}.reduce(BigDecimal.ZERO, BigDecimal::add)`;
