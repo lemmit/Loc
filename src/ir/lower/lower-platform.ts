@@ -109,6 +109,9 @@ export function canonicalPlatform(value: string): string {
   if (value === "phoenixLiveView") return "elixir";
   if (value === "phoenix") return "elixir";
   if (value === "hono") return "node";
+  // The FastAPI *web framework* spelling desugars to the canonical
+  // `python` language-ecosystem platform (mirrors `hono` → `node`).
+  if (value === "fastapi") return "python";
   return value;
 }
 

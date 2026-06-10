@@ -37,12 +37,12 @@ describe("in-tree discovery (default source)", () => {
     expect(node?.manifest.core).toMatch(/^\^?\d/);
   });
 
-  it("discovers exactly the three backend families", () => {
+  it("discovers exactly the four backend families", () => {
     expect(
       discoverBackends()
         .map((b) => `${b.manifest.family}@${b.manifest.loomVersion}`)
         .sort(),
-    ).toEqual(["dotnet@v8", "elixir@v1", "node@v4"]);
+    ).toEqual(["dotnet@v8", "elixir@v1", "node@v4", "python@v1"]);
   });
 
   it("resolution is byte-identical: bareword/pin yield the SAME surface", () => {
