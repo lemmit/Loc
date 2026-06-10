@@ -3,6 +3,7 @@ import type {
   EnrichedBoundedContextIR,
   ExprIR,
 } from "../../ir/types/loom-ir.js";
+import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { snake } from "../../util/naming.js";
 import { joinRowClassName, rowClassName } from "./py-columns.js";
 import { renderPyExpr } from "./render-expr.js";
@@ -44,7 +45,8 @@ function lower(
   ctx: EnrichedBoundedContextIR,
   ops: Set<string>,
 ): string | null {
-  const row = rowClassName(agg.name);
+  // TPH concretes query the base's shared table.
+  const row = rowClassName(tableOwnerName(agg, ctx.aggregates));
   switch (e.kind) {
     case "binary": {
       const l = lower(e.left, agg, ctx, ops);

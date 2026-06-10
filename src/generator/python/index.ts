@@ -9,6 +9,12 @@ import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import {
+  abstractBasesOf,
+  buildPyBaseReaderFile,
+  buildPyBaseUnionFile,
+  concretesOf,
+} from "./base-reader-builder.js";
 import { renderPyAggregate } from "./emit/aggregate.js";
 import { ERRORS_PY } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
@@ -106,9 +112,19 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
 
   // Per-aggregate emission stays per-context — each aggregate module is
-  // emitted in the context that owns it.  A TPH/TPC abstract base owns
-  // no instantiable domain module (inheritance lands in S13).
+  // emitted in the context that owns it.  An abstract base owns no
+  // instantiable domain module; it gets the polymorphic union alias +
+  // read-only reader instead.
   for (const ctx of args.contexts) {
+    for (const base of abstractBasesOf(ctx)) {
+      const concretes = concretesOf(base, ctx);
+      if (concretes.length === 0) continue;
+      out.set(`app/domain/${snake(base.name)}.py`, buildPyBaseUnionFile(base, concretes));
+      out.set(
+        `app/db/repositories/${snake(base.name)}_repository.py`,
+        buildPyBaseReaderFile(base, concretes, ctx),
+      );
+    }
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract) continue;
       out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx));

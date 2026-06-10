@@ -14,10 +14,17 @@ import type {
   TypeIR,
   ViewIR,
 } from "../../ir/types/loom-ir.js";
+import {
+  baseOf,
+  discriminatorValue,
+  ownFieldsOf,
+  tableOwnerName,
+} from "../../ir/util/inheritance.js";
 import { lines } from "../../util/code-builder.js";
 import { plural, snake } from "../../util/naming.js";
 import { lowerToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
 import {
+  columnsForFields,
   isRefCollectionField,
   isValueCollectionField,
   joinRowClassName,
@@ -56,7 +63,10 @@ export function buildPyRepositoryFile(
   ctx: EnrichedBoundedContextIR,
 ): string {
   const aggVar = "aggregate";
-  const root = rowClassName(agg.name);
+  // TPH concretes share the base's table; everyone else owns theirs.
+  const owner = tableOwnerName(agg, ctx.aggregates);
+  const root = rowClassName(owner);
+  const kind = discriminatorValue(agg, ctx.aggregates);
   const refColls = agg.fields.filter(isRefCollectionField);
   const assocs = agg.associations ?? [];
   // Pin the enriched element type — the AggregateIR ∩ Enriched
@@ -70,7 +80,9 @@ export function buildPyRepositoryFile(
     "        self._events = events",
     "",
     `    async def find_by_id(self, id: ${agg.name}Id) -> ${agg.name} | None:`,
-    `        row = await self._session.get(${root}, id)`,
+    kind
+      ? `        row = (await self._session.execute(select(${root}).where(${root}.id == id, ${root}.kind == ${JSON.stringify(kind)}))).scalars().first()`
+      : `        row = await self._session.get(${root}, id)`,
     "        if row is None:",
     "            return None",
     "        return await self._hydrate(row)",
@@ -82,7 +94,7 @@ export function buildPyRepositoryFile(
     "        return found",
     "",
     `    async def all(self) -> list[${agg.name}]:`,
-    `        rows = (await self._session.execute(select(${root}))).scalars().all()`,
+    `        rows = (await self._session.execute(select(${root})${kindWhere(root, kind)})).scalars().all()`,
     "        return [await self._hydrate(row) for row in rows]",
     ...emittableFinds(repo).flatMap((f) => ["", findMethod(agg, f, ctx)]),
     "",
@@ -93,7 +105,7 @@ export function buildPyRepositoryFile(
     ...aggregateRetrievals(agg, ctx).flatMap((r) => ["", runMethod(agg, r, ctx)]),
     "",
     saveMethod(agg, ctx, aggVar),
-    agg.canonicalDestroy ? ["", deleteMethod(agg)] : null,
+    agg.canonicalDestroy ? ["", deleteMethod(agg, ctx)] : null,
     "",
     hydrateMethod(agg, ctx),
     ...parts.flatMap((p) => ["", partHydrateMethod(p, agg, ctx)]),
@@ -167,12 +179,13 @@ function refTarget(f: FieldIR): string {
  *  lowers to a SQLAlchemy predicate; a clause-less find falls back to
  *  convention-matching its params to columns. */
 function findMethod(agg: EnrichedAggregateIR, find: FindIR, ctx: EnrichedBoundedContextIR): string {
-  const root = rowClassName(agg.name);
+  const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
+  const kind = discriminatorValue(agg, ctx.aggregates);
   const params = find.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`);
   const pred = find.filter
     ? lowerToSqlAlchemy(find.filter, agg, ctx)
     : conventionPredicate(agg, find);
-  const where = pred ? `.where(${pred.expr})` : "";
+  const where = withKind(pred, root, kind);
   const isList = find.returnType.kind === "array";
   // Paged find (P3b): count + limit/offset against the same predicate,
   // returning the shared PagedResult carrier (1-based page).
@@ -225,6 +238,18 @@ function conventionPredicate(agg: EnrichedAggregateIR, find: FindIR): PyPredicat
   return { expr: `and_(${clauses.join(", ")})`, ops: new Set(["and_"]) };
 }
 
+/** `.where(kind == …)` suffix for TPH concretes; empty otherwise. */
+function kindWhere(root: string, kind: string | undefined): string {
+  return kind ? `.where(${root}.kind == ${JSON.stringify(kind)})` : "";
+}
+
+/** AND a lowered predicate with the TPH kind scope. */
+function withKind(pred: PyPredicate | null, root: string, kind: string | undefined): string {
+  if (pred && kind) return `.where(and_(${pred.expr}, ${root}.kind == ${JSON.stringify(kind)}))`;
+  if (pred) return `.where(${pred.expr})`;
+  return kindWhere(root, kind);
+}
+
 // --- views + retrievals --------------------------------------------------------
 
 /** Aggregate-sourced views over this aggregate (workflow views: S15). */
@@ -248,9 +273,10 @@ function viewFindMethod(
   view: ViewIR,
   ctx: EnrichedBoundedContextIR,
 ): string {
-  const root = rowClassName(agg.name);
+  const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
+  const kind = discriminatorValue(agg, ctx.aggregates);
   const pred = view.filter ? lowerToSqlAlchemy(view.filter, agg, ctx) : null;
-  const where = pred ? `.where(${pred.expr})` : "";
+  const where = withKind(pred, root, kind);
   return lines(
     `    async def ${snake(view.name)}(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${root})${where})).scalars().all()`,
@@ -267,7 +293,8 @@ function runMethod(
   retrieval: RetrievalIR,
   ctx: EnrichedBoundedContextIR,
 ): string {
-  const root = rowClassName(agg.name);
+  const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
+  const kind = discriminatorValue(agg, ctx.aggregates);
   const pred = lowerToSqlAlchemy(retrieval.where, agg, ctx);
   if (!pred) {
     throw new Error(
@@ -289,7 +316,7 @@ function runMethod(
   ];
   return lines(
     `    async def run_${snake(retrieval.name)}(${params.join(", ")}) -> list[${agg.name}]:`,
-    `        query = select(${root}).where(${pred.expr})${orderBy}`,
+    `        query = select(${root})${withKind(pred, root, kind)}${orderBy}`,
     "        if offset is not None:",
     "            query = query.offset(offset)",
     "        if limit is not None:",
@@ -345,8 +372,22 @@ function hydrateField(rowVar: string, f: FieldIR, ctx: EnrichedBoundedContextIR)
 }
 
 function hydrateMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
-  const root = rowClassName(agg.name);
+  const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const out: string[] = [`    async def _hydrate(self, row: ${root}) -> ${agg.name}:`];
+  // TPH concrete: its OWN columns are nullable on the shared table (only
+  // rows of this kind populate them) — assert-narrow before hydration so
+  // the non-optional domain fields type-check.
+  if (discriminatorValue(agg, ctx.aggregates)) {
+    const base = baseOf(agg, ctx.aggregates);
+    const own = base ? ownFieldsOf(agg, base) : [];
+    for (const f of own) {
+      if (f.optional || f.type.kind === "optional") continue;
+      if (isRefCollectionField(f) || isValueCollectionField(f)) continue;
+      for (const col of columnsForFields([f], ctx)) {
+        out.push(`        assert row.${col.attr} is not None`);
+      }
+    }
+  }
   // Load contained collections…
   for (const c of agg.contains) {
     const partRow = rowClassName(c.partName);
@@ -477,9 +518,11 @@ function saveMethod(
   ctx: EnrichedBoundedContextIR,
   aggVar: string,
 ): string {
-  const root = rowClassName(agg.name);
+  const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
+  const kind = discriminatorValue(agg, ctx.aggregates);
   const out: string[] = [`    async def save(self, ${aggVar}: ${agg.name}) -> None:`];
   const rootPairs: Array<[string, string]> = [["id", `${aggVar}.id`]];
+  if (kind) rootPairs.push(["kind", JSON.stringify(kind)]);
   for (const f of agg.fields) {
     if (isRefCollectionField(f) || isValueCollectionField(f)) continue;
     rootPairs.push(...persistField(aggVar, f, ctx));
@@ -502,8 +545,10 @@ function saveMethod(
     const assoc = assocFor(agg, f.name);
     if (assoc) out.push(...syncJoinTable(assoc, f, aggVar));
   }
-  out.push("        for event in aggregate.pull_events():");
-  out.push("            await self._events.dispatch(event)");
+  if (ctx.events.length > 0) {
+    out.push("        for event in aggregate.pull_events():");
+    out.push("            await self._events.dispatch(event)");
+  }
   out.push("        await self._session.commit()");
   return out.join("\n");
 }
@@ -519,7 +564,7 @@ function syncContainment(
   const v = snake(c.name);
   const childPairs: Array<[string, string]> = [
     ["id", "child.id"],
-    [`${snake(agg.name)}_id`, "child.parent_id"],
+    [`${snake(tableOwnerName(agg, ctx.aggregates))}_id`, "child.parent_id"],
   ];
   for (const f of part?.fields ?? []) {
     if (isRefCollectionField(f) || isValueCollectionField(f)) continue;
@@ -580,7 +625,7 @@ function syncJoinTable(assoc: AssociationIR, f: FieldIR, aggVar: string): string
   ];
 }
 
-function deleteMethod(agg: EnrichedAggregateIR): string {
+function deleteMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
   const out: string[] = [`    async def delete(self, id: ${agg.name}Id) -> None:`];
   for (const c of agg.contains) {
     const partRow = rowClassName(c.partName);
@@ -594,7 +639,7 @@ function deleteMethod(agg: EnrichedAggregateIR): string {
       `        await self._session.execute(delete(${joinRow}).where(${joinRow}.${assoc.ownerFk} == id))`,
     );
   }
-  const root = rowClassName(agg.name);
+  const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   out.push(`        await self._session.execute(delete(${root}).where(${root}.id == id))`);
   out.push("        await self._session.commit()");
   return out.join("\n");

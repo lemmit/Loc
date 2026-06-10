@@ -800,7 +800,7 @@ export function validateInheritanceStorage(
   // TPH storage emission ships on Hono (Drizzle shared table + `kind`), .NET
   // (EF Core native `HasDiscriminator`), and Phoenix (Ash shared-table
   // multi-resource + `base_filter` on `kind`).
-  const TPH_CAPABLE = new Set(["node", "dotnet", "elixir"]);
+  const TPH_CAPABLE = new Set(["node", "dotnet", "elixir", "python"]);
   const hostedByCapable = [...backendPlatforms].some((p) => TPH_CAPABLE.has(p));
   for (const agg of ctx.aggregates) {
     if (!agg.isAbstract && !agg.extendsAggregate) continue;

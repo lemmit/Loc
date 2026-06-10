@@ -4,7 +4,13 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
 } from "../../../ir/types/loom-ir.js";
-import { isTphBase, isTphConcrete } from "../../../ir/util/inheritance.js";
+import {
+  isTphBase,
+  isTphConcrete,
+  ownFieldsOf,
+  tableOwnerName,
+  tphConcretesOf,
+} from "../../../ir/util/inheritance.js";
 import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
@@ -31,9 +37,6 @@ export function renderPySchema(
 ): string {
   const models: string[] = [];
   for (const agg of ctx.aggregates) {
-    if (agg.isAbstract || isTphBase(agg, ctx.aggregates) || isTphConcrete(agg, ctx.aggregates)) {
-      continue; // inheritance lands in S13
-    }
     if (agg.persistedAs === "eventLog") continue; // S14
     // dataSource-driven routing — the table lives in the binding's
     // schema (default `snake(context)`), exactly where the shared DDL
@@ -41,6 +44,28 @@ export function renderPySchema(
     const ds = resolveDataSource?.(agg);
     const schema = ds?.schema;
     const prefix = ds?.tablePrefix;
+    // TPH base: ONE shared table named for the base — id + kind
+    // discriminator + base columns + every concrete's own columns
+    // (forced nullable: only rows of that kind populate them).
+    if (isTphBase(agg, ctx.aggregates)) {
+      models.push(renderTphModel(agg, ctx, schema, prefix));
+      continue;
+    }
+    // TPH concrete: shares the base's table (no model of its own), but
+    // its contained parts still need tables — each FKs the SHARED
+    // table, so the parent column is `<base>_id`.
+    if (isTphConcrete(agg, ctx.aggregates)) {
+      const owner = tableOwnerName(agg, ctx.aggregates);
+      for (const part of agg.parts) {
+        models.push(renderModel(part.name, part, owner, ctx, schema, prefix));
+      }
+      for (const assoc of (agg as EnrichedAggregateIR).associations ?? []) {
+        models.push(renderJoinModel(assoc, schema, prefix));
+      }
+      continue;
+    }
+    // TPC base: owns no table (each concrete is standalone).
+    if (agg.isAbstract) continue;
     models.push(renderModel(agg.name, agg, undefined, ctx, schema, prefix));
     for (const part of agg.parts) {
       models.push(renderModel(part.name, part, agg.name, ctx, schema, prefix));
@@ -138,6 +163,38 @@ function renderColumn(c: PyColumn): string {
     c.primaryKey ? "primary_key=True" : null,
   ].filter((a): a is string => a != null);
   return `    ${c.attr}: Mapped[${annotation}] = mapped_column(${args.join(", ")})`;
+}
+
+/** TPH shared-table model — the whole hierarchy in one table named for
+ *  the abstract base (aggregate-inheritance.md). */
+function renderTphModel(
+  base: EnrichedBoundedContextIR["aggregates"][number],
+  ctx: EnrichedBoundedContextIR,
+  schema?: string,
+  prefix?: string,
+): string {
+  const tableName = `${prefix ?? ""}${snake(plural(base.name))}`;
+  const cols: PyColumn[] = [
+    { attr: "id", pyType: "str", saType: "Uuid(as_uuid=False)", optional: false, primaryKey: true },
+    { attr: "kind", pyType: "str", saType: "Text", optional: false },
+    ...columnsForFields(base.fields, ctx),
+  ];
+  const seen = new Set(base.fields.map((f) => f.name));
+  for (const concrete of tphConcretesOf(base, ctx.aggregates)) {
+    for (const f of ownFieldsOf(concrete, base)) {
+      if (seen.has(f.name)) continue;
+      seen.add(f.name);
+      // Force nullable: only rows of this concrete's kind populate it.
+      cols.push(...columnsForFields([{ ...f, optional: true }], ctx));
+    }
+  }
+  return lines(
+    `class ${rowClassName(base.name)}(Base):`,
+    `    __tablename__ = "${tableName}"`,
+    schema ? ["    __table_args__ = (", `        {"schema": "${schema}"},`, "    )"] : null,
+    "",
+    cols.map(renderColumn),
+  );
 }
 
 /** Many-to-many join table for a `T id[]` reference collection — two

@@ -91,7 +91,7 @@ export function renderPyWireModels(ctx: BoundedContextIR): string {
     uses("datetime") ? "from datetime import datetime" : null,
     uses("Decimal") ? "from decimal import Decimal" : null,
     uses("datetime") || uses("Decimal") ? "" : null,
-    "from pydantic import BaseModel",
+    ctx.valueObjects.length > 0 ? "from pydantic import BaseModel" : null,
     enumNames.length > 0 ? "" : null,
     enumNames.length > 0 ? `from app.domain.value_objects import ${enumNames.join(", ")}` : null,
     ctx.valueObjects.length === 0 ? "\n__all__: list[str] = []" : body,

@@ -31,6 +31,9 @@ const CASES: Array<[fixture: string, project: string]> = [
   ["test/e2e/fixtures/python-build/shell.ddd", "api"],
   // Entity parts + containment + collection ops + money domain logic.
   ["test/e2e/fixtures/python-build/domain.ddd", "api"],
+  // TPH (shared kind-discriminated table) + TPC (per-concrete tables)
+  // hierarchies with polymorphic base readers.
+  ["test/e2e/fixtures/python-build/inheritance.ddd", "api"],
 ];
 
 describe.skipIf(!ENABLED)(
