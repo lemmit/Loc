@@ -11,6 +11,7 @@ import {
   validateGenericInstancesUnimplemented,
   validateOperationReturnsUnimplemented,
   validatePermissionRefs,
+  validateUnionFindShapes,
   validateUnionsUnimplemented,
   validateUnmappedErrorStatuses,
   validateWorkspaceUniqueness,
@@ -135,6 +136,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       backendPlatformsByContext.get(c.name) ?? new Set(),
     );
     validateUnionsUnimplemented(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateUnionFindShapes(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateOperationReturnsUnimplemented(
       c,
       diags,

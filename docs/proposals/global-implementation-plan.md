@@ -88,7 +88,6 @@ runtime trap, silently degrades, or misleads.
 
 | # | Item | Where | Owning proposal |
 |---|---|---|---|
-| T1.1 | **Union-returning `find` producer path** — .NET stubs the handler with `NotImplementedException` (`src/generator/dotnet/cqrs/queries.ts:131-142`, pinned by `union-emit.test.ts`); Hono falls back to an `unknown` return type (`repository-find-builder.ts:~608`). Wire DTOs are fully generated; only variant *selection* is missing. | dotnet, node | [payload-transport-layer](./payload-transport-layer.md) (P4 producer side) |
 | T1.3 | **React renderers for `Switch` / `MultilineField` / `SelectField`** — registered as `admissibleInSource` with **no renderer on any target** (`src/generator/_walker/registry.ts:~249-255`); they fall through to an "unknown layout component" comment. Either implement the TSX (+ HEEx) renderers or stop admitting them in source. | react walker | [page-metamodel](../page-metamodel.md) |
 | T1.4 | **Docs/comment honesty debt** — keep proposal status headers, the README table, and this plan in sync per the maintenance rule above (the 2026-06-10 pass fixed the then-known liars: seed emitter headers, the TPH validator comment, `ddd patch` missing from `tools.md`, and seven stale proposal headers). | docs | — |
 
@@ -101,7 +100,7 @@ elixir items form one coherent track (a→e order).
 |---|---|---|---|
 | T2.a | **Vanilla workflow body lowering** — only `factory-let` + `op-call` lower (#1062); `precondition` / `requires` / `emit` / `repo-let` / `expr-let` / `for-each` / `repo-run` emit `# TODO` comments (`src/generator/elixir/vanilla/workflow-execution-emit.ts:~147-157`). The TDD slices are already cut in [`../plans/vanilla-foundation-tdd-plan.md`](../plans/vanilla-foundation-tdd-plan.md). | elixir/vanilla | [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) |
 | T2.b | **Event sourcing under vanilla** (D-VANILLA-ES-HOME) — `EVENT_SOURCING_BACKENDS` still `{node, dotnet}` (`system-checks.ts:~853`). The blocker (no state-based vanilla emitter) is gone; this is the headline elixir item. | elixir/vanilla | [workflow-and-applier](./workflow-and-applier.md) |
-| T2.c | **Operation `or`-union returns on elixir** — `SUPPORTED_RETURN_BACKENDS = {node, dotnet}` (`structural-checks.ts:~381`). Vanilla's `{:ok,_} \| {:error,_}` controllers are the natural carrier; Ash stays gated. | elixir | [exception-less](./exception-less.md) / [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) |
+| T2.c | **Operation `or`-union returns on elixir** — `SUPPORTED_RETURN_BACKENDS = {node, dotnet}` (`structural-checks.ts:~381`). Vanilla's `{:ok,_} \| {:error,_}` controllers are the natural carrier; Ash stays gated. Includes the **union-find absence producer**: `validateUnionFindShapes` exempts elixir-only hosts (the P4d tagger is success-side only; absence raises) — align it with the node/dotnet absence translation and drop the exemption. | elixir | [exception-less](./exception-less.md) / [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) |
 | T2.d | **Vanilla/ecto as first-class adapters** — today `elixir/index.ts:~88-94` short-circuits `if (foundation === "vanilla")` instead of routing through the `PersistenceAdapter`/`StyleAdapter` registry like node/dotnet; the headline divergence named by [`../plans/realization-axes-alignment.md`](../plans/realization-axes-alignment.md) (slices #1061–#1064 landed the plan + compatibility rules + transport axis; the rewire itself remains). | elixir, platform | [platform-realization-axes](./platform-realization-axes.md) |
 | T2.e | **HEEx walker primitive backfill** — 32 of ~53 primitives have HEEx renderers; missing: `List`, `Detail`, `MasterDetail`, `Tabs`, `Toggle`, `Field`/`NumberField`/`PasswordField`, `For`, `Stat`, `Money`, `Avatar`, `Image`, `Divider`, `Loader`, `Slot`, `Bold`/`Italic`/`InlineCode`, `Switch`/`MultilineField`/`SelectField` (also missing on React — T1.3). Unsupported ones render visible `<!-- not supported -->` stubs (`heex-walker-core.ts`). Prioritise `List`/`Detail`/`MasterDetail`/`Tabs` + the form inputs. | elixir/heex | [phase-a platform expansion](../plans/phase-a-platform-expansion-prereqs.md) |
 | T2.f | **`routeSlug` consumption** — `urlStyle:` grammar + `OperationIR.routeSlug` enrichment shipped (#722 + D-URLSTYLE), but **no backend route emitter reads it** (`loom-ir.ts:~289-294` says so explicitly). One slice across the three backends' route builders. | all backends | [lifecycle-url-style](./lifecycle-url-style.md) |
@@ -188,30 +187,27 @@ retired: P4 and most of A1/A3 shipped independently, and A2 is dropped.
 
 ## Suggested near-term order
 
-A pragmatic next-9, dependency-consistent:
+A pragmatic next-8, dependency-consistent:
 
-1. **T1.1** union-find variant selection (.NET runtime trap + Hono
-   `unknown`) — small, removes the only `NotImplementedException` a
-   modeller can hit from valid source.
-2. **T2.a** vanilla workflow statement kinds (slices already cut).
-3. **T2.b → T2.c** event sourcing + `or`-union returns under vanilla —
+1. **T2.a** vanilla workflow statement kinds (slices already cut).
+2. **T2.b → T2.c** event sourcing + `or`-union returns under vanilla —
    closes the two biggest elixir parity gates.
-4. **T1.3 + T2.e** walker primitive backfill (React trio + HEEx
+3. **T1.3 + T2.e** walker primitive backfill (React trio + HEEx
    priority set).
-5. **T2.f** `routeSlug` consumption (one slice, three backends).
-6. **T2.g** capability-`filter` reification + principal factory —
+4. **T2.f** `routeSlug` consumption (one slice, three backends).
+5. **T2.g** capability-`filter` reification + principal factory —
    unblocks T2.j → multi-tenancy.
-7. **T2.i** IR field-constraint metadata (+ elixir validators, Zod/.NET
+6. **T2.i** IR field-constraint metadata (+ elixir validators, Zod/.NET
    enrichment).
-8. **T3.1** explicit `loads:` plans.
-9. **Tier 4 #1–#3** execution-context → multi-tenancy → authorization
+7. **T3.1** explicit `loads:` plans.
+8. **Tier 4 #1–#3** execution-context → multi-tenancy → authorization
     — the governance spine.
 
 ## Parallelisation
 
 Three loosely-coupled tracks (one agent each):
 
-- **Track A (type-system & queries):** T1.1 → T2.g → T3.1/T3.2 → T3.4.
+- **Track A (type-system & queries):** T2.g → T3.1/T3.2 → T3.4.
 - **Track B (elixir parity):** T2.a → T2.b → T2.c → T2.d → T2.e/T2.h.
 - **Track C (governance & product):** T1.3 → T2.f/T2.i →
   execution-context → multi-tenancy → authorization; loom-forms +
@@ -223,7 +219,7 @@ Three loosely-coupled tracks (one agent each):
   backend's build gate (`LOOM_TS_BUILD` / `LOOM_DOTNET_BUILD` /
   `LOOM_PHOENIX_BUILD` / `LOOM_REACT_BUILD`) + byte-identical fixtures
   unless the item *is* a rebaseline.
-- Cross-backend wire items (T1.1, T2.c, T3.4): the conformance parity
+- Cross-backend wire items (T2.c, T3.4): the conformance parity
   gate (`conformance-parity.yml`) is the decisive check.
 - Elixir items: `mix compile --warnings-as-errors` runs in CI only
   (no local toolchain) — keep slices small, push often, treat

@@ -1,6 +1,7 @@
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import {
   discriminatedUnionZod,
+  findUnionSpec,
   type UnionMemberField,
   unionMemberObjects,
   unionMembers,
@@ -994,9 +995,20 @@ function emitFindRoute(
   out.push(
     `      200: { description: "OK", content: { "application/json": { schema: ${responseSchema} } } },`,
   );
-  if (find.returnType.kind === "optional") {
+  // Union finds (`Agg or NotFound` / `Agg option`) translate absence to a
+  // ProblemDetails at the absent variant's status — same edge translation as
+  // the exception-less operation routes (exception-less.md).
+  const unionSpec = findUnionSpec(find.returnType, agg.name, ctx);
+  const unionAbsentStatus = unionSpec
+    ? unionSpec.absent.kind === "none"
+      ? 404
+      : (ctx.errorStatusOverrides?.[unionSpec.absent.tag] ??
+        defaultErrorStatus(unionSpec.absent.tag))
+    : undefined;
+  if (find.returnType.kind === "optional" || unionAbsentStatus !== undefined) {
+    const st = unionAbsentStatus ?? 404;
     out.push(
-      `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+      `      ${st}: { description: ${JSON.stringify(httpStatusText(st))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
   }
   out.push(`    },`);
@@ -1032,7 +1044,32 @@ function emitFindRoute(
   }
   const argList = (usesUser ? [...baseArgs, "currentUser"] : baseArgs).join(", ");
   out.push(`    const result = await repo.${find.name}(${argList});`);
-  if (isList) {
+  if (unionSpec) {
+    // Absence → the absent variant's edge translation: `none` rides the same
+    // AggregateNotFoundError → 404 path optional finds use; an `error` payload
+    // becomes an RFC-7807 ProblemDetails at its mapped status (title/type from
+    // the stdlib defaults), carrying `resource: "<Agg>"` when declared.
+    if (unionSpec.absent.kind === "none") {
+      out.push(`    if (result == null) throw new AggregateNotFoundError("not_found");`);
+    } else {
+      const tag = unionSpec.absent.tag;
+      const st = unionAbsentStatus ?? defaultErrorStatus(tag);
+      const resourceExt = unionSpec.absent.hasResource
+        ? `resource: ${JSON.stringify(agg.name)}, `
+        : "";
+      out.push(`    if (result == null) {`);
+      out.push(
+        `      return c.json({ ${resourceExt}type: ${JSON.stringify(errorTypeUri(tag))}, title: ${JSON.stringify(errorTitle(tag))}, status: ${st}, detail: ${JSON.stringify(errorTitle(tag))}, instance: c.req.path }, ${st}, { "content-type": "application/problem+json" });`,
+      );
+      out.push(`    }`);
+    }
+    // Found → the tagged success variant (`{ type: "<Agg>", …wire }`) — the
+    // discriminated-union 200 schema both Hono's zod DTO and the React client
+    // pin (P4b).
+    out.push(
+      `    return c.json({ type: ${JSON.stringify(unionSpec.successTag)}, ...repo.toWire(result) } as z.infer<typeof ${unionSpec.name}>, 200);`,
+    );
+  } else if (isList) {
     // Array responses skip wire_out — `Object.keys` over an array
     // returns positional indices, which aren't a useful shape signal.
     // (The catalog's `wire_out` is a key-set marker, not a length one.)

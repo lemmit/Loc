@@ -31,6 +31,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { unionFindAsOptionalTwin } from "../find-emit.js";
 import { csValueTypeForId, renderCsType } from "../render-expr.js";
 import { renderRetrievalParamsWithCt } from "./repository.js";
 
@@ -274,7 +275,8 @@ export function renderDapperRepository(
 
   const mapBody = cols.map((c) => `            ${c.stateProp} = ${c.hydrate},`);
 
-  const findMethods = (repo?.finds ?? []).map((f) => {
+  const findMethods = (repo?.finds ?? []).map((raw) => {
+    const f = unionFindAsOptionalTwin(raw, agg.name);
     const name = upperFirst(f.name);
     const ret = renderCsType(f.returnType);
     const isList = f.returnType.kind === "array";
@@ -482,7 +484,8 @@ export function renderDapperEventSourcedRepository(
     (e) =>
       `            "${e}" => System.Text.Json.JsonSerializer.Deserialize<${e}>(__r.data, __json)!,`,
   );
-  const findMethods = (repo?.finds ?? []).flatMap((f) => {
+  const findMethods = (repo?.finds ?? []).flatMap((raw) => {
+    const f = unionFindAsOptionalTwin(raw, agg.name);
     const body = findBodies.find((b) => b.name === f.name);
     const filter = body?.filterClause ?? "";
     // ES finds load every stream in-memory, so strip the async EF terminal

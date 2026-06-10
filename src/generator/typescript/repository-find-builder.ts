@@ -406,8 +406,11 @@ export function findQueryMethod(
     );
   }
 
-  // Optional / single result variants
-  const optional = find.returnType.kind === "optional";
+  // Optional / single result variants.  A union find (`Agg or NotFound` /
+  // `Agg option`, validator-pinned to the absence shape) is the optional
+  // single-row select — the route maps `null` to the absent variant
+  // (ProblemDetails / 404) and tags the found row on the wire.
+  const optional = find.returnType.kind === "optional" || find.returnType.kind === "union";
   return lines(
     optional
       ? `  async ${find.name}(${params}): Promise<${agg.name} | null> {`

@@ -16,7 +16,7 @@
 // only resolves *which* fields each variant contributes.
 
 import { forApiRead } from "../../ir/enrich/wire-projection.js";
-import { variantTag } from "../../ir/stdlib/unions.js";
+import { unionInstanceName, variantTag } from "../../ir/stdlib/unions.js";
 import type { BoundedContextIR, TypeIR, WireField } from "../../ir/types/loom-ir.js";
 
 /** A normalized field contributed by a record-shaped union variant. */
@@ -83,6 +83,53 @@ function wireToMembers(wire: readonly WireField[] | undefined): UnionMemberField
     optional: wf.optional,
     isId: wf.source === "id",
   }));
+}
+
+/** Producer-side spec for a union-returning find (payload-transport-layer.md
+ *  P4 producer side; absence semantics per exception-less.md).  The IR
+ *  validator (`loom.union-find-shape-unsupported`) pins the supported v1
+ *  shape — exactly two inline variants: the repository's aggregate plus one
+ *  *absent* variant (`none`, or an `error` payload whose only permitted field
+ *  is `resource: string`) — so by emission time this resolves for every union
+ *  find that reaches a backend.  Returns null for non-union returns. */
+export interface FindUnionSpec {
+  /** Polymorphic DTO / zod schema name (`OrderOrNotFound`). */
+  name: string;
+  variants: TypeIR[];
+  /** The aggregate success variant's wire tag (the aggregate name). */
+  successTag: string;
+  /** The absent variant: the `none` unit (stdlib 404) or an error payload. */
+  absent: { kind: "none"; tag: "none" } | { kind: "error"; tag: string; hasResource: boolean };
+}
+
+export function findUnionSpec(
+  returnType: TypeIR,
+  aggName: string,
+  ctx: BoundedContextIR,
+): FindUnionSpec | null {
+  if (returnType.kind !== "union") return null;
+  const variants = returnType.variants;
+  const success = variants.find((v) => v.kind === "entity" && v.name === aggName);
+  const other = variants.find((v) => v !== success);
+  if (!success || !other || variants.length !== 2) return null;
+  const name = unionInstanceName(variants);
+  const successTag = variantTag(success);
+  if (other.kind === "none") {
+    return { name, variants, successTag, absent: { kind: "none", tag: "none" } };
+  }
+  if (other.kind !== "entity") return null;
+  const payload = ctx.payloads.find((p) => p.name === other.name && p.kind === "error");
+  if (!payload) return null;
+  return {
+    name,
+    variants,
+    successTag,
+    absent: {
+      kind: "error",
+      tag: other.name,
+      hasResource: payload.fields.some((f) => f.name === "resource"),
+    },
+  };
 }
 
 /** Render each member as a `z.object({ type: z.literal("tag"), … })` literal,

@@ -82,6 +82,13 @@ interface ControllerShape {
      *  polymorphic base record (P4c).  Other shapes derive their type from the
      *  aggregate name. */
     responseType?: string;
+    /** Union-find absence translation (P4c producer side, validator-pinned
+     *  shape): the absent variant record + its HTTP edge — `none` maps to the
+     *  optional-find 404, an `error` payload to ProblemDetails at its mapped
+     *  status. */
+    unionAbsent?:
+      | { record: string; kind: "none" }
+      | { record: string; kind: "error"; status: number; title: string; typeUri: string };
   }>;
   /** Prefix prepended to the controller's `[Route(...)]` (e.g.
    *  `"api/"` for fullstack-dotnet — leaves `/orders/*` paths free
@@ -225,11 +232,24 @@ export function renderController(
               ? `${agg.name}Response?`
               : `${agg.name}Response`;
     // Optional finds map a null result to 404 — same convention as
-    // GetById.  List / paged / single / union return Ok(result) directly.
-    const returnLine =
+    // GetById.  A union find translates its absent variant at the edge
+    // (P4c producer side): the `none` unit → 404 (the optional convention),
+    // an `error` payload → RFC-7807 ProblemDetails at its mapped status.
+    // List / paged / single (and the union success variant) return
+    // Ok(result) directly.
+    const ua = f.unionAbsent;
+    const returnLines =
       f.returnShape === "optional"
-        ? "        return result is null ? NotFound() : Ok(result);"
-        : "        return Ok(result);";
+        ? ["        return result is null ? NotFound() : Ok(result);"]
+        : ua
+          ? [
+              `        if (result is ${ua.record})`,
+              ua.kind === "none"
+                ? "            return NotFound();"
+                : `            return Problem(statusCode: ${ua.status}, title: ${JSON.stringify(ua.title)}, type: ${JSON.stringify(ua.typeUri)}, detail: ${JSON.stringify(ua.title)});`,
+              "        return Ok(result);",
+            ]
+          : ["        return Ok(result);"];
     // Non-nullable success type for [ProducesResponseType] (typeof can't
     // carry a `?` nullable annotation).
     const successType =
@@ -240,20 +260,26 @@ export function renderController(
           : f.returnShape === "list"
             ? `IReadOnlyList<${agg.name}Response>`
             : `${agg.name}Response`;
+    // The OpenAPI error set: optional finds (and union-`none`) declare the
+    // 404; a union-`error` declares its mapped ProblemDetails status.
+    const problemDecls =
+      ua?.kind === "error"
+        ? [`    [ProducesResponseType(typeof(ProblemDetails), ${ua.status})]`]
+        : producesProblem(
+            f.returnShape === "optional" || ua?.kind === "none"
+              ? "findOptional"
+              : f.returnShape === "list" || f.returnShape === "paged"
+                ? "findList"
+                : "findSingle",
+          );
     return [
       `    [HttpGet${f.isRoot ? "" : `("${snake(f.name)}")`}]`,
       `    [ProducesResponseType(typeof(${successType}), 200)]`,
-      ...producesProblem(
-        f.returnShape === "optional"
-          ? "findOptional"
-          : f.returnShape === "list" || f.returnShape === "paged"
-            ? "findList"
-            : "findSingle",
-      ),
+      ...problemDecls,
       `    public async Task<ActionResult<${responseType}>> ${actionName(opFind(agg.name, f.name))}(${f.queryRouteParams})`,
       "    {",
       `        var result = await _mediator.Send(new ${upperFirst(f.name)}Query(${f.queryConstructorArgs}));`,
-      returnLine,
+      ...returnLines,
       "    }",
       "",
     ];

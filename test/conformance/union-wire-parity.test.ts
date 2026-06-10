@@ -4,10 +4,11 @@
 // The tagged-union wire is identical *by construction* — every backend derives
 // it from the single `unionMembers` resolver — but "identical by construction"
 // is exactly the invariant that drifts later without a test pinning it.  This
-// generates the same `find recent(): Order or Cancel` for Hono, .NET, and
+// generates the same `find recent(): Order or NotFound` (the validator-pinned
+// absence shape, `loom.union-find-shape-unsupported`) for Hono, .NET, and
 // Phoenix and asserts each emits the same per-variant tagged shape: the `type`
-// discriminator, the same variant tags (`Order`, `Cancel`), and the same wire
-// field keys under each tag.
+// discriminator, the same variant tags (`Order`, `NotFound`), and the same
+// wire field keys under each tag.
 //
 // Lives in the always-on `test` gate (no docker) — the discriminated-union
 // complement to `paged-wire-parity.test.ts`.
@@ -24,8 +25,8 @@ import { parseString, parseValid } from "../_helpers/parse.js";
 const CONTEXT = `
   context Orders {
     aggregate Order ids guid { code: string  region: string }
-    aggregate Cancel ids guid { reason: string }
-    repository Orders for Order { find recent(): Order or Cancel }
+    error NotFound { resource: string }
+    repository Orders for Order { find recent(): Order or NotFound }
   }
 `;
 
@@ -34,8 +35,8 @@ const PHX_SYSTEM = `
     subdomain Sales {
       context Orders {
         aggregate Order ids guid { code: string  region: string }
-        aggregate Cancel ids guid { reason: string }
-        repository Orders for Order { find recent(): Order or Cancel }
+        error NotFound { resource: string }
+        repository Orders for Order { find recent(): Order or NotFound }
       }
     }
     api OrdersApi from Sales
@@ -76,7 +77,7 @@ async function honoShape(): Promise<Shape> {
   const files = generateHono(await parseValid(CONTEXT));
   const routes = files.get("http/order.routes.ts")!;
   const body = routes.match(
-    /export const OrderOrCancel = z\.discriminatedUnion\("type", \[([\s\S]*?)\]\)/,
+    /export const OrderOrNotFound = z\.discriminatedUnion\("type", \[([\s\S]*?)\]\)/,
   )![1]!;
   const out: Shape = {};
   for (const m of body.matchAll(/z\.object\(\{([^}]*)\}\)/g)) {
@@ -91,11 +92,11 @@ async function honoShape(): Promise<Shape> {
  *  wire via System.Text.Json). */
 async function dotnetShape(): Promise<Shape> {
   const files = generateDotnet(await parseValid(CONTEXT));
-  const key = [...files.keys()].find((k) => k.endsWith("Responses/OrderOrCancel.cs"))!;
+  const key = [...files.keys()].find((k) => k.endsWith("Responses/OrderOrNotFound.cs"))!;
   const dto = files.get(key)!;
   const out: Shape = {};
   for (const m of dto.matchAll(
-    /public sealed record OrderOrCancel_(\w+)\(([^)]*)\) : OrderOrCancel;/g,
+    /public sealed record OrderOrNotFound_(\w+)\(([^)]*)\) : OrderOrNotFound;/g,
   )) {
     const tag = m[1]!;
     const params = m[2]!.trim();
@@ -111,7 +112,7 @@ async function phoenixShape(): Promise<Shape> {
   const ctrl = files.get(key)!;
   const out: Shape = {};
   for (const m of ctrl.matchAll(
-    /defp tag_order_or_cancel\(%[\w.]+\.(\w+)\{\} = v\), do: %\{([^}]*)\}/g,
+    /defp tag_order_or_not_found\(%[\w.]+\.(\w+)\{\} = v\), do: %\{([^}]*)\}/g,
   )) {
     const tag = m[1]!;
     // Field pairs are `key: v.field`; the discriminator (`type: "Tag"`) has no `v.`.
@@ -121,10 +122,10 @@ async function phoenixShape(): Promise<Shape> {
 }
 
 describe("discriminated unions — cross-backend wire parity (P4e)", () => {
-  it("the canonical shape tags Order/Cancel with their wire fields", async () => {
+  it("the canonical shape tags Order/NotFound with their wire fields", async () => {
     expect(await canonical()).toEqual({
       Order: ["id", "code", "region"],
-      Cancel: ["id", "reason"],
+      NotFound: ["resource"],
     });
   });
 
@@ -149,7 +150,7 @@ describe("discriminated unions — cross-backend wire parity (P4e)", () => {
   it("every backend uses the `type` discriminator", async () => {
     const honoSrc = generateHono(await parseValid(CONTEXT)).get("http/order.routes.ts")!;
     const dotnet = generateDotnet(await parseValid(CONTEXT));
-    const dotnetSrc = dotnet.get([...dotnet.keys()].find((k) => k.endsWith("OrderOrCancel.cs"))!)!;
+    const dotnetSrc = dotnet.get([...dotnet.keys()].find((k) => k.endsWith("OrderOrNotFound.cs"))!)!;
     expect(honoSrc).toContain('z.discriminatedUnion("type"');
     expect(dotnetSrc).toContain('[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]');
   });
