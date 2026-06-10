@@ -32,10 +32,12 @@ const SHARED_SOURCE_DIRS_HEEX: readonly string[] = ["phoenix"];
 // dockerfile is a generic vite-build/vite-preview two-stage) plus a
 // SvelteKit-specific shared layer.
 const SHARED_SOURCE_DIRS_SVELTE: readonly string[] = ["sveltekit", "docker"];
-// Vue packs share the same neutral `docker/` scaffold plus a
-// Vue-specific shared layer (index.html, main.ts bootstrap, router
-// scaffold, api client, config, logger).
-const SHARED_SOURCE_DIRS_VUE: readonly string[] = ["vue", "docker"];
+// Vue packs share a Vue-specific layer (`vue/`: index.html,
+// tsconfig-node, the NotFound page) plus the framework-neutral `api/`
+// fetch-client/config/logger sources (plain TS, no JSX — the React
+// `error-boundary` template rides along unused) and the neutral
+// `docker/` vite-build/vite-preview two-stage scaffold.
+const SHARED_SOURCE_DIRS_VUE: readonly string[] = ["vue", "api", "docker"];
 
 /** Resolve the repo-root directory by walking up from this file
  *  until a `designs/` sibling is found.  Used to anchor both the

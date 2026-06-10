@@ -59,11 +59,16 @@ describe("vue pack format groundwork", () => {
     expect(rendered).toContain('"vue-router"');
     expect(rendered).toContain('"@vitejs/plugin-vue"');
     expect(rendered).toContain('"vue-tsc"');
-    // The vue format reads `vue/` + `docker/` shared dirs — docker's
-    // dockerfile template must be visible as a shared source.
+    // The vue format reads `vue/` + `api/` + `docker/` shared dirs —
+    // docker's dockerfile and the framework-neutral api fetch client
+    // must both be visible as shared sources.
     expect(pack.templates.has("dockerfile")).toBe(true);
-    // …and the TSX-only shared dirs must NOT leak in (vite/ + api/).
-    expect(pack.templates.has("index-html")).toBe(false);
-    expect(pack.templates.has("api-client")).toBe(false);
+    expect(pack.templates.has("api-client")).toBe(true);
+    // index-html resolves to the VUE shared layer (mounts /src/main.ts
+    // into #app), not the React `vite/` one (/src/main.tsx into #root).
+    const indexHtml = pack.render("index-html", { title: "t" });
+    expect(indexHtml).toContain('<div id="app">');
+    expect(indexHtml).toContain("/src/main.ts");
+    expect(indexHtml).not.toContain("main.tsx");
   });
 });

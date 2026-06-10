@@ -1,3 +1,4 @@
+import { generateVueForContexts } from "../generator/vue/index.js";
 import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 
 // ---------------------------------------------------------------------------
@@ -30,16 +31,7 @@ const vuePlatform: PlatformSurface = {
   // repository class.  No find-name collisions are possible.
   reservedRepositoryFindNames: new Set(),
   emitProject({ contexts, sys, deployable }): Map<string, string> {
-    // Stub until the Vue generator lands (vue-frontend-plan.md
-    // Slice 3).  Emitting a README keeps `generate system` total over
-    // every registered platform without pretending to build.
-    void contexts;
-    return new Map([
-      [
-        "README.md",
-        `# ${deployable.name}\n\nVue frontend deployable for system ${sys.name} — generator not yet implemented (see docs/plans/vue-frontend-plan.md).\n`,
-      ],
-    ]);
+    return generateVueForContexts(contexts, sys, deployable);
   },
   composeService({ deployable, sys }): ComposeServiceShape {
     const target = sys.deployables.find((t) => t.name === deployable.targetName);

@@ -1,0 +1,5 @@
+{{#if hasSize}}{{#if hasChildren}}<v-container style="max-width: {{#if (eq size "xs")}}540px{{else}}{{#if (eq size "sm")}}720px{{else}}{{#if (eq size "md")}}960px{{else}}{{#if (eq size "lg")}}1140px{{else}}1320px{{/if}}{{/if}}{{/if}}{{/if}}"{{{testidAttr}}}{{{styleAttr}}}>
+{{indent}}{{{childrenBlock}}}
+{{closeIndent}}</v-container>{{else}}<v-container style="max-width: {{#if (eq size "xs")}}540px{{else}}{{#if (eq size "sm")}}720px{{else}}{{#if (eq size "md")}}960px{{else}}{{#if (eq size "lg")}}1140px{{else}}1320px{{/if}}{{/if}}{{/if}}{{/if}}"{{{testidAttr}}}{{{styleAttr}}} />{{/if}}{{else}}{{#if hasChildren}}<v-container{{{testidAttr}}}{{{styleAttr}}}>
+{{indent}}{{{childrenBlock}}}
+{{closeIndent}}</v-container>{{else}}<v-container{{{testidAttr}}}{{{styleAttr}}} />{{/if}}{{/if}}
