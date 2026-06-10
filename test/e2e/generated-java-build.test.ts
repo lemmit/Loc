@@ -35,6 +35,8 @@ const FIXTURES: Array<[string, string]> = [
   // The full showcase surface on java: auth (user block + requires),
   // extern operations, workflows, both view forms, finds, value objects.
   ["test/e2e/fixtures/java-build/showcase-java.ddd", "dotnet_api"],
+  // Paged finds: Paged<T> envelope, Spring Data Pageable count derivation.
+  ["test/e2e/fixtures/java-build/paged.ddd", "paged_api"],
 ];
 
 describe.skipIf(!ENABLED)(

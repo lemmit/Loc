@@ -3,7 +3,7 @@ import type { EnrichedAggregateIR, RepositoryIR } from "../../../ir/types/loom-i
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
-import { declaredFinds } from "./repository.js";
+import { declaredFinds, isPagedFind } from "./repository.js";
 
 // ---------------------------------------------------------------------------
 // REST controllers + the shared exception advice.  Route shape mirrors
@@ -60,10 +60,24 @@ export function renderJavaController(
     });
 
   const findRoutes = declaredFinds(repo).flatMap((f) => {
-    const params = f.params
-      .map((p) => `@RequestParam ${renderJavaType(p.type)} ${p.name}`)
-      .join(", ");
+    const declared = f.params.map((p) => `@RequestParam ${renderJavaType(p.type)} ${p.name}`);
+    const params = declared.join(", ");
     const args = f.params.map((p) => p.name).join(", ");
+    if (isPagedFind(f)) {
+      const pagedParams = [
+        ...declared,
+        `@RequestParam(defaultValue = "1") int page`,
+        `@RequestParam(defaultValue = "20") int pageSize`,
+      ].join(", ");
+      const pagedArgs = [args, "page, pageSize"].filter(Boolean).join(", ");
+      return [
+        `    @GetMapping("/${snake(f.name)}")`,
+        `    public Paged<${agg.name}Response> ${f.name}${agg.name}(${pagedParams}) {`,
+        `        return service.${f.name}(${pagedArgs});`,
+        `    }`,
+        ``,
+      ];
+    }
     const single = f.returnType.kind !== "array";
     const retType = single ? `ResponseEntity<${agg.name}Response>` : `List<${agg.name}Response>`;
     return [
@@ -136,6 +150,7 @@ export function renderJavaController(
     `import org.springframework.web.bind.annotation.*;`,
     ``,
     ctx.applicationPkg !== ctx.pkg ? `import ${ctx.applicationPkg}.*;` : null,
+    declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
     ``,
     `@RestController`,

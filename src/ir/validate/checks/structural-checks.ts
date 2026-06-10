@@ -227,7 +227,7 @@ export function validateGenericInstancesUnimplemented(
   // (the legacy `phoenix` / `phoenixLiveView` platform aliases canonicalize
   // to `elixir` per D-ELIXIR-PLATFORM).  All four backends now emit
   // generic carriers.
-  const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir"]);
+  const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir", "java"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_PAGED_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 

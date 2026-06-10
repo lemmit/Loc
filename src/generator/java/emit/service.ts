@@ -9,7 +9,7 @@ import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
-import { declaredFinds } from "./repository.js";
+import { declaredFinds, isPagedFind } from "./repository.js";
 import { aggHasAnyWireValidator, renderJavaValidators } from "./validator.js";
 import { collectWireToDomainImports, wireToDomain } from "./wire.js";
 
@@ -82,6 +82,19 @@ export function renderJavaService(
     const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", ");
     const args = f.params.map((p) => p.name).join(", ");
     for (const p of f.params) collectWireToDomainImports(p.type, imports);
+    if (isPagedFind(f)) {
+      const pagedParams = [params, "int page, int pageSize"].filter(Boolean).join(", ");
+      const pagedArgs = [args, "page, pageSize"].filter(Boolean).join(", ");
+      return [
+        `    @Transactional(readOnly = true)`,
+        `    public Paged<${agg.name}Response> ${f.name}(${pagedParams}) {`,
+        `        var result = repository.${f.name}(${pagedArgs});`,
+        `        return new Paged<>(result.items().stream().map(${agg.name}Response::from).toList(),`,
+        `            result.page(), result.pageSize(), result.total(), result.totalPages());`,
+        `    }`,
+        ``,
+      ];
+    }
     if (f.returnType.kind !== "array") {
       return [
         `    @Transactional(readOnly = true)`,
@@ -200,6 +213,7 @@ export function renderJavaService(
     ctx.domainRepoPkg !== ctx.pkg ? `import ${ctx.domainRepoPkg}.${agg.name}Repository;` : null,
     anyOpUsesUser ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     anyOpUsesUser ? `import ${ctx.basePkg}.auth.User;` : null,
+    declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     `import ${ctx.basePkg}.domain.enums.*;`,
     `import ${ctx.basePkg}.domain.ids.*;`,
     `import ${ctx.basePkg}.domain.valueobjects.*;`,

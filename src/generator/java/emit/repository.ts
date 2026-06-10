@@ -46,15 +46,22 @@ export function declaredFinds(repo: RepositoryIR | undefined): FindIR[] {
   return (repo?.finds ?? []).filter((f) => !isAutoAllFind(f));
 }
 
+/** `find x(): T paged` — the carrier-bounded paged find. */
+export function isPagedFind(f: FindIR): boolean {
+  return f.returnType.kind === "genericInstance" && f.returnType.ctor === "paged";
+}
+
 /** Finds keep their DSL name; a find returning `T[]` → `List<T>`,
- *  a single `T` → `T` (nullable). */
+ *  a single `T` → `T` (nullable); `T paged` → `Paged<T>` with trailing
+ *  `int page, int pageSize` parameters (1-based, cross-backend). */
 function findSignature(find: FindIR, imports: Set<string>): string {
-  const params = find.params
-    .map((p) => {
+  const params = [
+    ...find.params.map((p) => {
       collectJavaTypeImports(p.type, imports);
       return `${renderJavaType(p.type)} ${p.name}`;
-    })
-    .join(", ");
+    }),
+    ...(isPagedFind(find) ? ["int page", "int pageSize"] : []),
+  ].join(", ");
   const ret = findReturn(find.returnType, imports);
   return `${ret} ${find.name}(${params})`;
 }
@@ -63,6 +70,9 @@ function findReturn(t: TypeIR, imports: Set<string>): string {
   if (t.kind === "array") {
     imports.add("java.util.List");
     return `List<${boxedJavaType(t.element)}>`;
+  }
+  if (t.kind === "genericInstance" && t.ctor === "paged") {
+    return `Paged<${boxedJavaType(t.arg)}>`;
   }
   collectJavaTypeImports(t, imports);
   return renderJavaType(t);
@@ -76,11 +86,13 @@ export function renderJavaRepositoryInterface(
 ): string {
   const imports = new Set<string>(["java.util.List", "java.util.Optional"]);
   const findLines = declaredFinds(repo).map((f) => `    ${findSignature(f, imports)};`);
+  const anyPaged = declaredFinds(repo).some(isPagedFind);
   return lines(
     `package ${ctx.domainPkg};`,
     ``,
     ...[...imports].sort().map((i) => `import ${i};`),
     ``,
+    anyPaged ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
     ``,
     `@org.jmolecules.ddd.annotation.Repository`,
@@ -115,16 +127,25 @@ export function renderJavaSpringDataRepository(
     if (f.params.length > 0) imports.add("org.springframework.data.repository.query.Param");
     imports.add("org.springframework.data.jpa.repository.Query");
     const where = f.filter ? ` where ${renderJpqlWhere(f.filter, { alias: "e", enumsPkg })}` : "";
-    const params = f.params
-      .map((p) => {
-        collectJavaTypeImports(p.type, imports);
-        return `@Param("${p.name}") ${renderJavaType(p.type)} ${p.name}`;
-      })
-      .join(", ");
+    const declaredParams = f.params.map((p) => {
+      collectJavaTypeImports(p.type, imports);
+      return `@Param("${p.name}") ${renderJavaType(p.type)} ${p.name}`;
+    });
+    if (isPagedFind(f)) {
+      // Spring Data derives the count query from the @Query + Pageable.
+      imports.add("org.springframework.data.domain.Page");
+      imports.add("org.springframework.data.domain.Pageable");
+      const arg = f.returnType.kind === "genericInstance" ? f.returnType.arg : f.returnType;
+      return [
+        `    @Query("select e from ${agg.name} e${where}")`,
+        `    Page<${boxedJavaType(arg)}> ${f.name}(${[...declaredParams, "Pageable pageable"].join(", ")});`,
+        ``,
+      ];
+    }
     const ret = findReturn(f.returnType, imports);
     return [
       `    @Query("select e from ${agg.name} e${where}")`,
-      `    ${ret} ${f.name}(${params});`,
+      `    ${ret} ${f.name}(${declaredParams.join(", ")});`,
       ``,
     ];
   });
@@ -154,6 +175,21 @@ export function renderJavaRepositoryImpl(
   const finds = declaredFinds(repo);
   const delegateLines = finds.flatMap((f) => {
     const sig = findSignature(f, imports);
+    if (isPagedFind(f)) {
+      imports.add("org.springframework.data.domain.PageRequest");
+      const arg = f.returnType.kind === "genericInstance" ? f.returnType.arg : f.returnType;
+      const args = [...f.params.map((p) => p.name), "PageRequest.of(page - 1, pageSize)"].join(
+        ", ",
+      );
+      return [
+        `    @Override`,
+        `    public ${sig} {`,
+        `        var result = jpa.${f.name}(${args});`,
+        `        return new Paged<>(result.getContent(), page, pageSize, (int) result.getTotalElements(), result.getTotalPages());`,
+        `    }`,
+        ``,
+      ];
+    }
     const args = f.params.map((p) => p.name).join(", ");
     return [
       `    @Override`,
@@ -175,6 +211,7 @@ export function renderJavaRepositoryImpl(
     ctx.entityPkg !== ctx.infraPkg ? `import ${ctx.entityPkg}.${agg.name};` : null,
     ctx.domainPkg !== ctx.infraPkg ? `import ${ctx.domainPkg}.${agg.name}Repository;` : null,
     `import ${ctx.basePkg}.domain.common.AggregateNotFoundException;`,
+    finds.some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
     ``,
     `@Repository`,

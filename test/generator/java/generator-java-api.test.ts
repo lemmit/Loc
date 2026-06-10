@@ -137,6 +137,33 @@ describe("java generator — layered service (S5)", () => {
   });
 });
 
+describe("java generator — paged finds", () => {
+  const PAGED_SRC = SRC.replace(
+    "find byCode(code: string): Order[] where this.code == code",
+    "find byCode(code: string): Order[] where this.code == code\n        find recent(): Order paged",
+  );
+
+  it("emits the Paged<T> envelope, Pageable repository path, and the paged route", async () => {
+    const f = await generateSystemFiles(PAGED_SRC);
+    expect(f.get(`${ROOT}/domain/common/Paged.java`)).toContain(
+      "public record Paged<T>(List<T> items, int page, int pageSize, int total, int totalPages) {",
+    );
+    const port = f.get(`${ROOT}/features/orders/OrderRepository.java`)!;
+    expect(port).toContain("Paged<Order> recent(int page, int pageSize);");
+    const jpa = f.get(`${ROOT}/features/orders/OrderJpaRepository.java`)!;
+    expect(jpa).toContain("Page<Order> recent(Pageable pageable);");
+    const impl = f.get(`${ROOT}/features/orders/OrderRepositoryImpl.java`)!;
+    expect(impl).toContain("var result = jpa.recent(PageRequest.of(page - 1, pageSize));");
+    expect(impl).toContain(
+      "return new Paged<>(result.getContent(), page, pageSize, (int) result.getTotalElements(), result.getTotalPages());",
+    );
+    const ctrl = f.get(`${ROOT}/features/orders/OrdersController.java`)!;
+    expect(ctrl).toContain(
+      'public Paged<OrderResponse> recentOrder(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize) {',
+    );
+  });
+});
+
 describe("java generator — wire validators + advice (S5)", () => {
   it("translates classified invariants into 422 checks via the shared classifier", async () => {
     const v = (await files()).get(`${ROOT}/features/orders/OrderValidators.java`)!;

@@ -30,6 +30,7 @@ import {
   renderDomainException,
   renderForbiddenException,
   renderPackageMarker,
+  renderPagedRecord,
   renderWireValidationException,
 } from "./emit/common.js";
 import { renderDtoFiles } from "./emit/dto.js";
@@ -178,6 +179,7 @@ function emitProjectFromContexts(
     renderAggregateNotFoundException(basePkg),
   );
   place("WireValidationException.java", "domain-common", renderWireValidationException(basePkg));
+  place("Paged.java", "domain-common", renderPagedRecord(basePkg));
   place("DomainEvent.java", "event", renderDomainEventInterface(basePkg));
   place("_Namespace.java", "enum", renderPackageMarker(pkgFor("enum")));
   place("_Namespace.java", "valueobject", renderPackageMarker(pkgFor("valueobject")));

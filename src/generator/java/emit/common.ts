@@ -85,6 +85,20 @@ export function renderWireValidationException(basePkg: string): string {
   );
 }
 
+export function renderPagedRecord(basePkg: string): string {
+  return lines(
+    `package ${basePkg}.domain.common;`,
+    ``,
+    `import java.util.List;`,
+    ``,
+    `/** Cross-backend paged envelope — items/page/pageSize/total/totalPages`,
+    ` *  (1-based page), identical wire shape on every backend. */`,
+    `public record Paged<T>(List<T> items, int page, int pageSize, int total, int totalPages) {`,
+    `}`,
+    ``,
+  );
+}
+
 export function renderDomainEventInterface(basePkg: string): string {
   return lines(
     `package ${basePkg}.domain.events;`,
