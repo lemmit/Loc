@@ -95,7 +95,7 @@ the menus go size-1 → size-N:
 - **5a — dotnet `byFeature` layout — DONE.** First real dotnet layout: the
   `directoryLayout: byFeature` selection relocates each aggregate's application +
   API artifacts (commands / queries / handlers / DTOs / controller) under
-  `Features/<Aggregate>/` (vertical-slice), delegating the rest to `byLayer`.
+  `Features/<Plural>/` (vertical-slice), delegating the rest to `byLayer`.
   `availableAdapterNames("dotnet","layout")` now `["byFeature","byLayer"]`; the
   R1 "reserved stub" rejection for `byFeature` flips to accepted. **R2 stays
   unreachable** (every real style supports both layouts).
@@ -104,15 +104,40 @@ the menus go size-1 → size-N:
   abstract base / snapshots), repository interface + impl, EF config (relational +
   document), join tables, document POCO — through the threaded layout adapter, so
   `byFeature` now colocates the WHOLE vertical slice (domain + persistence +
-  application + API) under `Features/<Aggregate>/`. Cross-cutting / shared
+  application + API) under `Features/<Plural>/`. Cross-cutting / shared
   artifacts (context-level Domain primitives, shared Infrastructure like the
   DbContext / dispatcher / migrations, per-context views / workflows, the Tests
   project, the root) stay layered. Added one byLayer category (`document-poco`);
-  snapshots reuse `entity`, the document config reuses `ef-configuration`. Pure
-  relocation — identical file CONTENTS, only paths differ (namespaces stay
-  layered; namespace-by-feature is a later slice). `byLayer` default stays
-  byte-identical (baseline fixture unchanged); compiles by construction (C#
-  namespaces are path-independent, `.csproj` globs `**/*.cs`).
+  snapshots reuse `entity`, the document config reuses `ef-configuration`.
+  As 5b shipped this was a pure relocation (contents identical, namespaces
+  still layered — path-independent C# namespaces + the `**/*.cs` csproj glob
+  made it compile by construction); 5e below made the namespaces follow.
+- **5e — dotnet namespace-by-feature — DONE.** A relocated file's C# namespace
+  now MIRRORS its feature folder (`Features/Orders/Commands/CreateOrder.cs` →
+  `namespace <Ns>.Features.Orders.Commands;`) instead of keeping the byLayer
+  shape, making the output idiomatic vertical-slice C#. The emitters stay
+  layout-agnostic (they always author byLayer namespaces); a post-emit pass
+  (`src/generator/dotnet/layout-namespaces.ts`, the dotnet analogue of the TS
+  `layout-imports.ts` relative-import rewrite) rewrites the namespace
+  declarations plus every reference project-wide: `using` directives —
+  including SPLIT namespaces like `Infrastructure.Repositories` that scatter
+  across features (expansion is reference-tested per file; surviving old
+  namespaces are kept; duplicates collapse — CS0105 is fatal under
+  `/warnaserror`) — fully-qualified references (Program.cs DI registrations,
+  extern-handler startup checks), and namespace-RELATIVE references
+  (AppDbContext's `Configurations.X`, re-anchored `global::` because a bare
+  `<Ns>.…` inside a namespaced file mis-binds against `<Ns>.Api`). The feature
+  folder switched singular → PLURAL (`Features/Orders/`) as the load-bearing
+  precondition: C# resolves simple names against enclosing namespaces before
+  `using`s, so a singular segment (`namespace <Ns>.Features.Order` + `class
+  Order`) would break cross-feature references like `class Customer : Party`
+  with CS0118; plural segments keep namespace segments and type names disjoint
+  (same reason byLayer's plural folders never collided). byLayer remains
+  byte-identical (the pass no-ops when nothing relocated). **Compile-gated**
+  (the node lesson applied): `test/e2e/fixtures/dotnet-build/byfeature.ddd` —
+  packing TPH inheritance, an extern handler, a join-table association, an
+  event-sourced aggregate, and a view — builds under `dotnet build
+  /warnaserror` in `build-generated-dotnet`.
 - **5c — dotnet `dapper` persistence (minimal-v1) — DONE.** First alternate
   persistence adapter: `persistence: dapper` emits an Npgsql/Dapper Infrastructure
   (per-aggregate repository with hand-built SQL — upsert / getById / findManyByIds

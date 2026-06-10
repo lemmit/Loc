@@ -27,7 +27,8 @@
 //
 // `byFeature` (the real sibling adapter, `./by-feature-layout.ts`)
 // colocates one aggregate's application + API artifacts under
-// `Features/<Aggregate>/` — same artifacts, different on-disk arrangement.
+// `Features/<Plural>/` — same artifacts, different on-disk arrangement
+// (plus a post-emit namespace rewrite, `../layout-namespaces.ts`).
 // ---------------------------------------------------------------------------
 
 import { plural, upperFirst } from "../../../util/naming.js";
