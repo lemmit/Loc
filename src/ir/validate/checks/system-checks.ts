@@ -420,7 +420,6 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
-  const MANAGED_ACCESS = new Set(["managed", "token", "internal", "secret"]);
 
   for (const dep of sys.deployables) {
     if (dep.persistence !== "dapper") continue;
@@ -457,8 +456,9 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
           reject(where, `is persisted as shape(${shape})`);
         if (a.isAbstract || a.extendsAggregate)
           reject(where, "participates in aggregate inheritance");
-        if ((a.associations ?? []).length > 0)
-          reject(where, "has reference-collection associations (Id[] join tables)");
+        // Reference-collection associations (`X id[]`) are supported: one
+        // ordinal-ordered join table each (DbSchema), bulk-loaded on every
+        // read and full-list-replaced on save by the Dapper repository.
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
           reject(where, "contains nested entity parts");
         // Lifecycle stamping is supported (onUpdate mutates the aggregate
@@ -478,9 +478,11 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         if ((a.contextFilters ?? []).some((p) => exprUsesCurrentUser(p)))
           reject(where, "uses a principal-referencing 'filter' capability predicate");
         for (const f of a.fields) {
+          // Access modifiers (`managed` / `token` / `internal` / `secret`)
+          // are wire-projection concerns handled by the shared Domain/CQRS
+          // layers (create-input shaping, `forApiRead` response stripping) —
+          // the Dapper column round-trips like any other field, so no gate.
           if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
-          else if (f.access && MANAGED_ACCESS.has(f.access))
-            reject(`field '${agg.name}.${f.name}'`, `has server-managed access '${f.access}'`);
         }
       }
     }
