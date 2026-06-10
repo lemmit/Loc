@@ -446,6 +446,10 @@ function attrValue(expr: ExprIR, ctx: WalkContext, depth: number, paramType?: Ty
     const jsx = walk(expr, ctx, depth + 1);
     return `{${jsx}}`;
   }
+  // User-component attr values stay JSX-shaped (`{expr}`) — the
+  // user-component invocation path is JSX-only until the Vue
+  // user-component slice; renderAttrBinding owns the cross-framework
+  // dynamic-attr form for the seam-routed call sites.
   return `{${emitExpr(expr, ctx)}}`;
 }
 

@@ -285,6 +285,23 @@ export interface WalkerTarget {
    *  HEEx: `<%!-- text --%>`. */
   renderComment(text: string): string;
 
+  /** Render a JS expression in markup TEXT/child position — the
+   *  framework's inline interpolation.  TSX and Svelte share JSX's
+   *  `{expr}`; Vue uses the mustache `\{\{ expr \}\}`; HEEx's own
+   *  walker never reaches this (modern HEEx `{expr}` returned for
+   *  contract completeness).  The expression is already rendered
+   *  JS — the target only supplies the delimiters. */
+  renderInterpolation(jsExpr: string): string;
+
+  /** Render a DYNAMIC attribute bound to a JS expression, leading
+   *  space included (` name={expr}` on TSX/Svelte; ` :name="expr"`
+   *  on Vue — Vue quotes the expression, so the target picks a
+   *  quote character the rendered JS doesn't collide with).
+   *  Static string-literal attributes don't come through here —
+   *  every framework spells those ` name="value"` and the call
+   *  sites keep them inline. */
+  renderAttrBinding(name: string, jsExpr: string): string;
+
   /** Render a conditional CHILD — a ternary whose arms are markup
    *  (`body: cond ? Stack(…) : Empty(…)`).  `cond` is a rendered JS
    *  expression; `thenS` / `elseS` are rendered markup fragments.

@@ -152,6 +152,19 @@ export const heexTarget: WalkerTarget = {
     return `<%!-- ${text} --%>`;
   },
 
+  /** Modern HEEx body interpolation (`{expr}`) — unreachable in
+   *  practice (the parallel heex-walker emits `<%= %>` / `{}` forms
+   *  inline); returned for contract completeness. */
+  renderInterpolation(jsExpr: string): string {
+    return `{${jsExpr}}`;
+  },
+
+  /** HEEx dynamic attribute (`attr={expr}`) — unreachable in
+   *  practice, contract completeness. */
+  renderAttrBinding(name: string, jsExpr: string): string {
+    return ` ${name}={${jsExpr}}`;
+  },
+
   /** Unreachable for HEEx — the parallel heex-walker renders
    *  conditional children through its own position-aware path. */
   renderConditionalChild(): never {

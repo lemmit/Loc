@@ -79,6 +79,8 @@ describe("WalkerTarget — every shipped target conforms", () => {
       expect(typeof target.renderMatch).toBe("function");
       expect(typeof target.renderNavigate).toBe("function");
       expect(typeof target.defaultInitFor).toBe("function");
+      expect(typeof target.renderInterpolation).toBe("function");
+      expect(typeof target.renderAttrBinding).toBe("function");
     });
 
     it(`${name}: every method produces a string (or string[]) on a canned input`, () => {
@@ -432,5 +434,22 @@ describe("WalkerTarget — vueTarget (vue-frontend-plan.md)", () => {
     expect(vueTarget.escapeText("a {{ b }} <c> & d")).toBe(
       "a &#123;&#123; b &#125;&#125; &lt;c&gt; &amp; d",
     );
+  });
+
+  it("renderInterpolation diverges: TSX braces, Vue mustaches", () => {
+    expect(tsxTarget.renderInterpolation("count + 1")).toBe("{count + 1}");
+    expect(vueTarget.renderInterpolation("count + 1")).toBe("{{ count + 1 }}");
+  });
+
+  it("renderAttrBinding diverges: TSX `name={e}`, Vue `:name` with collision-free quoting", () => {
+    expect(tsxTarget.renderAttrBinding("data-testid", "id")).toBe(" data-testid={id}");
+    expect(vueTarget.renderAttrBinding("data-testid", "id")).toBe(' :data-testid="id"');
+    // A double-quote-bearing expression flips to single-quoted.
+    expect(vueTarget.renderAttrBinding("data-testid", '"row-" + id')).toBe(
+      " :data-testid='\"row-\" + id'",
+    );
+    // Both quote kinds present — fail loud rather than emit a
+    // template Vue can't parse.
+    expect(() => vueTarget.renderAttrBinding("x", `"a" + 'b'`)).toThrow(/mixes single and double/);
   });
 });

@@ -628,36 +628,36 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       },
       "",
     );
-    return `{${rendered}}`;
+    return ctx.target.renderInterpolation(rendered);
   }
   switch (expr.kind) {
     case "call":
       return emitComponent(expr, ctx, depth);
     case "literal":
-      // String literal in a child position becomes a JSX text node.
+      // String literal in a child position becomes a markup text node.
       // Other literal kinds (int / decimal / bool) stay as
-      // expression-bracketed JS literals.
+      // interpolated JS literals.
       if (expr.lit === "string") return ctx.target.escapeText(expr.value);
-      if (expr.lit === "bool") return `{${expr.value}}`;
-      if (expr.lit === "null") return `{null}`;
-      return `{${expr.value}}`;
+      if (expr.lit === "bool") return ctx.target.renderInterpolation(expr.value);
+      if (expr.lit === "null") return ctx.target.renderInterpolation("null");
+      return ctx.target.renderInterpolation(expr.value);
     case "ref":
       // Refs to a lambda-bound param resolve to its
       // emitted JS name (e.g. `o.id` inside `o => …` walks with
-      // `o → "row"`).  Brace-wrap as a JSX child.
+      // `o → "row"`).  Interpolate as a markup child.
       {
         const jsName = ctx.lambdaParams.get(expr.name);
-        if (jsName) return `{${jsName}}`;
+        if (jsName) return ctx.target.renderInterpolation(jsName);
       }
       // Refs that match a route param name emit as
-      // JSX expressions (`{name}`).  React Router's `useParams()`
-      // brings these into scope at render time; the page-shell
-      // generator destructures the used names.  Refs that don't
-      // match a param emit as a placeholder JSX comment so the
+      // interpolated expressions (`{name}`).  React Router's
+      // `useParams()` brings these into scope at render time; the
+      // page-shell generator destructures the used names.  Refs that
+      // don't match a param emit as a placeholder comment so the
       // build error stays visible.
       if (ctx.paramNames.has(expr.name)) {
         ctx.usedParams.add(expr.name);
-        return `{${expr.name}}`;
+        return ctx.target.renderInterpolation(expr.name);
       }
       // Refs that match a state field name emit the
       // same way; the shell brings them into scope via `useState`.
@@ -672,7 +672,7 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
           field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
           name: expr.name,
         };
-        return `{${ctx.target.renderStateRead(stateRef, "template")}}`;
+        return ctx.target.renderInterpolation(ctx.target.renderStateRead(stateRef, "template"));
       }
       return ctx.target.renderComment(`ref: ${expr.name}`);
     case "match": {
@@ -700,12 +700,12 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       return ctx.target.renderConditionalChild(cond, thenS, elseS, depth);
     }
     case "member":
-      // Member access in JSX-child position (e.g. an
+      // Member access in markup-child position (e.g. an
       // accessor lambda body `o => o.id` walks `o.id` as the body
-      // of a `<Table.Td>` cell).  Emit as a brace-wrapped JS
+      // of a `<Table.Td>` cell).  Emit as an interpolated JS
       // expression; `emitExpr` resolves the receiver (lambda
       // param, hook, state) and concatenates the member name.
-      return `{${emitExpr(expr, ctx)}}`;
+      return ctx.target.renderInterpolation(emitExpr(expr, ctx));
     default:
       return ctx.target.renderComment(`unsupported expr: ${expr.kind}`);
   }
@@ -1221,11 +1221,11 @@ export function testidAttr(call: ExprIR & { kind: "call" }, ctx: WalkContext): s
       ctx.collectedTestids.add(a.value);
       return ` data-testid=${JSON.stringify(a.value)}`;
     }
-    // Anything else → run through emitExpr; brace-wrap as a
-    // JSX expression.  Refs to params/state, binary ops, calls,
-    // etc. all compose.
+    // Anything else → run through emitExpr; bind as a dynamic
+    // attribute through the target.  Refs to params/state, binary
+    // ops, calls, etc. all compose.
     const expr = emitExpr(a, ctx);
-    return ` data-testid={${expr}}`;
+    return ctx.target.renderAttrBinding("data-testid", expr);
   }
   return "";
 }
@@ -1302,17 +1302,17 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
   if (expr.kind === "ref") {
     if (ctx.paramNames.has(expr.name)) {
       ctx.usedParams.add(expr.name);
-      return `{${expr.name}}`;
+      return ctx.target.renderInterpolation(expr.name);
     }
     if (ctx.stateNames.has(expr.name)) {
       ctx.usesState = true;
-      // Delegated to tsxTarget.renderStateRead — JSX text position
-      // (brace-wrapped for inline interpolation).
+      // Delegated to the target's renderStateRead — markup text
+      // position (interpolated inline).
       const stateRef = {
         field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
         name: expr.name,
       };
-      return `{${ctx.target.renderStateRead(stateRef, "template")}}`;
+      return ctx.target.renderInterpolation(ctx.target.renderStateRead(stateRef, "template"));
     }
     // Unresolved ref in text position emits a JSX
     // comment so the user sees the unresolved name in the
@@ -1321,8 +1321,8 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
     return ctx.target.renderComment(`ref: ${expr.name}`);
   }
   // Anything else (binary op, unary, non-string
-  // literal): emit the JS-expression form wrapped as a JSX
-  // expression.  Powers patterns like `Heading("Welcome, " +
+  // literal): emit the JS-expression form as an inline
+  // interpolation.  Powers patterns like `Heading("Welcome, " +
   // name)`, `Text(count + 1)`, `Stat("Count", count * step)`.
   //
   // A bare `call` in text position is a stdlib-primitive / user-
@@ -1337,7 +1337,7 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
     }
     return undefined;
   }
-  return `{${emitExpr(expr, ctx)}}`;
+  return ctx.target.renderInterpolation(emitExpr(expr, ctx));
 }
 
 // The page-file shell (renderCustomLayoutPage, the form-wiring renderers,

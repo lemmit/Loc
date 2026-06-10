@@ -191,6 +191,27 @@ export const vueTarget: WalkerTarget = {
     return `<!-- ${text} -->`;
   },
 
+  /** Vue mustache interpolation in text/child position. */
+  renderInterpolation(jsExpr: string): string {
+    return `{{ ${jsExpr} }}`;
+  },
+
+  /** Vue dynamic attribute — `:name="expr"`, leading space included.
+   *  The expression is quoted, so pick the quote character the
+   *  rendered JS doesn't use: JS string literals render double-quoted
+   *  (JSON.stringify), so a `"`-bearing expression binds single-
+   *  quoted.  An expression carrying BOTH quote kinds can't be
+   *  attribute-quoted at all — fail loud rather than emit a template
+   *  that won't compile (handler hoisting is the structural fix,
+   *  tracked for the forms/handlers slice). */
+  renderAttrBinding(name: string, jsExpr: string): string {
+    if (!jsExpr.includes('"')) return ` :${name}="${jsExpr}"`;
+    if (!jsExpr.includes("'")) return ` :${name}='${jsExpr}'`;
+    throw new Error(
+      `vueTarget.renderAttrBinding: expression for ':${name}' mixes single and double quotes — cannot be attribute-quoted. Simplify the expression (e.g. avoid apostrophes inside string literals used in bindings).`,
+    );
+  },
+
   /** `<template v-if>` / `<template v-else>` block pair.  Vue
    *  template expressions cannot evaluate to markup (no JSX-style
    *  markup-valued ternary), so conditional children render as

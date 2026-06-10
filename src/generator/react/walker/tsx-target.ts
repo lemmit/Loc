@@ -227,6 +227,16 @@ export const tsxTarget: WalkerTarget = {
     return `{/* ${text} */}`;
   },
 
+  /** JSX child-position interpolation — the brace wrap. */
+  renderInterpolation(jsExpr: string): string {
+    return `{${jsExpr}}`;
+  },
+
+  /** JSX dynamic attribute — `name={expr}`, leading space included. */
+  renderAttrBinding(name: string, jsExpr: string): string {
+    return ` ${name}={${jsExpr}}`;
+  },
+
   /** Parenthesised ternary.  Depth 0 sits directly inside the
    *  component's `return ( … )` parens; nested child positions need
    *  the JSX brace wrap.  Verbatim lift of the walk()-ternary case. */
