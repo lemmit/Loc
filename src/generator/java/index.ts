@@ -40,6 +40,11 @@ import { renderExternHandlerInterface, renderExternHandlerStub } from "./emit/ex
 import { renderJavaId } from "./emit/ids.js";
 import { emitJavaMigrations } from "./emit/migrations.js";
 import {
+  renderCatalogLogger,
+  renderLifecycleCatalog,
+  renderRequestCatalogFilter,
+} from "./emit/observability.js";
+import {
   renderApplication,
   renderApplicationYml,
   renderDockerfile,
@@ -54,6 +59,7 @@ import {
   renderJavaSpringDataRepository,
 } from "./emit/repository.js";
 import { renderJavaService } from "./emit/service.js";
+import { renderJavaTestsFile } from "./emit/tests.js";
 import { renderJavaValidators } from "./emit/validator.js";
 import { renderJavaViews, viewFindsFor } from "./emit/view.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
@@ -176,6 +182,11 @@ function emitProjectFromContexts(
   place("_Namespace.java", "valueobject", renderPackageMarker(pkgFor("valueobject")));
   place("_Namespace.java", "id", renderPackageMarker(pkgFor("id")));
   place("ApiExceptionAdvice.java", "api-common", renderApiExceptionAdvice(basePkg));
+  // Observability catalog — always-on, like dotnet's request log +
+  // Hono's pino lines (the obs e2e suites assert this envelope).
+  place("CatalogLog.java", "config", renderCatalogLogger(basePkg));
+  place("LifecycleCatalog.java", "config", renderLifecycleCatalog(basePkg));
+  place("RequestCatalogFilter.java", "config", renderRequestCatalogFilter(basePkg));
 
   for (const ctx of contexts) {
     // Ids — an abstract TPC base keeps no identity (each concrete owns a
@@ -454,4 +465,16 @@ function emitAggregate(
     }),
     agg.name,
   );
+
+  // `test "name"` blocks → JUnit classes (pure domain, `mvn test`).
+  const testsFile = renderJavaTestsFile(
+    agg,
+    ctx,
+    basePkg,
+    pkgFor("test-class", agg.name),
+    sys?.user?.fields,
+  );
+  if (testsFile) {
+    place(`${agg.name}Tests.java`, "test-class", testsFile, agg.name);
+  }
 }

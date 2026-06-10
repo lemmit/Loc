@@ -197,7 +197,12 @@ function collectAuthImports(t: TypeIR, into: Set<string>): void {
 }
 
 /** Dev-stub claim values — mirrors the .NET DevStubUserVerifier:
- *  Guid.Empty / "admin" / empty list / zeroes. */
+ *  Guid.Empty / "admin" / empty list / zeroes.  Exported for the JUnit
+ *  test emitter's stub test user. */
+export function stubUserValue(t: TypeIR): string {
+  return stubValue(t);
+}
+
 function stubValue(t: TypeIR): string {
   if (t.kind === "primitive") {
     switch (t.name) {
