@@ -12,6 +12,8 @@ import type {
 import { contextUsesMoney } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
+import { buildViewsApiModule, hasAnyView } from "../_frontend/views-module.js";
+import { buildWorkflowsApiModule, hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { walkBody } from "../_walker/walker-core.js";
@@ -136,6 +138,21 @@ export function generateVueForContexts(
   }
   out.set("src/pages/NotFound.vue", renderShell(pack, "not-found-page", {}));
   out.set("src/router.ts", renderRouter(pages));
+
+  // Shared views / workflows api modules — 1:1 with the inventory,
+  // same builders as React with the vue-query import.
+  if (hasAnyWorkflow(contexts)) {
+    out.set(
+      "src/api/workflows.ts",
+      buildWorkflowsApiModule(contexts, { queryPackage: "@tanstack/vue-query" }),
+    );
+  }
+  if (hasAnyView(contexts)) {
+    out.set(
+      "src/api/views.ts",
+      buildViewsApiModule(contexts, { queryPackage: "@tanstack/vue-query" }),
+    );
+  }
 
   // Shared shell files (api/ + vue/ + docker/ shared-source layers).
   const hasDelete = aggregates.some((a) => !!a.agg.canonicalDestroy);

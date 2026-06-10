@@ -1,0 +1,435 @@
+// Vue showcase — the acme system with the frontend deployable on
+// `platform: vue` (Vuetify pack).  Kept SEPARATE from acme.ddd so the
+// React/Phoenix baseline fixtures don't recapture
+// (vue-frontend-plan.md Slice 5); content otherwise tracks acme.ddd:
+// three modules, .NET + Hono backends, views, workflows, enums,
+// value objects, id-selects, scaffolded ui.
+// Acme system — exercises system / module / deployable.
+//
+// Two modules group bounded contexts; two deployables ship subsets of
+// them on different platforms.  `ddd generate system` emits each
+// deployable as its own project alongside a docker-compose.yml that
+// wires them together with a shared postgres.
+
+// Traceability artifacts (see docs/traceability.md).  Requirements sit
+// above the model; solutions/testCases below reference code symbols by
+// qualified name.  `ddd generate system` emits the coverage + gaps
+// reports under `.loom/`.
+requirement US-001 {
+    type: UserStory
+    title: "A customer can place an order"
+    status: InProgress
+    priority: 1
+}
+
+requirement AC-001 parent US-001 {
+    type: AcceptanceCriteria
+    title: "An order can only be confirmed when it has at least one line"
+}
+
+requirement AC-002 parent US-001 {
+    type: AcceptanceCriteria
+    title: "Lines can only be added while the order is a draft"
+}
+
+requirement US-002 {
+    type: UserStory
+    title: "A user can browse the product catalog"
+    status: Approved
+}
+
+requirement AC-003 parent US-002 {
+    type: AcceptanceCriteria
+    title: "Products are uniquely identified by SKU"
+}
+
+system AcmeVue {
+
+    // System-wide visual identity — design tokens consumed by every
+    // React deployable in this system (slice 19).  Tokens are
+    // semantic so the same source applies whether the React
+    // generator targets Mantine (today) or shadcn/ui (future).
+    theme {
+        primary: "#3b82f6"
+        neutral: "#64748b"
+        radius: "md"
+        fontFamily: "Inter, system-ui, sans-serif"
+    }
+
+    subdomain Catalog {
+        context Products {
+
+            valueobject Money {
+                amount: decimal
+                currency: string
+                invariant amount >= 0
+                invariant currency.length == 3
+            }
+
+            aggregate Product with crudish {
+                sku: string
+                price: Money
+                invariant sku.length > 0
+                derived display: string = sku
+            }
+
+            repository Products for Product {
+                find bySku(sku: string): Product? where this.sku == sku
+            }
+        }
+    }
+
+    subdomain Sales {
+        context Orders {
+
+            enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+
+            event OrderConfirmed { order: Order id, at: datetime }
+
+            aggregate Order with crudish {
+                customerId: string
+                status: OrderStatus
+                placedAt: datetime
+                contains lines: OrderLine[]
+
+                invariant lines.count > 0 when status == Confirmed
+
+                function isMutable(): bool = status == Draft
+
+                operation addLine(productId: Product id, qty: int) {
+                    precondition isMutable()
+                    precondition qty > 0
+                    lines += OrderLine {
+                        productId: productId, quantity: qty
+                    }
+                }
+
+                operation confirm() {
+                    precondition isMutable()
+                    precondition lines.count > 0
+                    status := Confirmed
+                    emit OrderConfirmed { order: id, at: now() }
+                }
+
+                entity OrderLine {
+                    productId: Product id
+                    quantity: int
+                    invariant quantity > 0
+                }
+
+                // Aggregate-level unit test (the e2e tests further down
+                // exercise the same behaviour through HTTP).  Linked to
+                // TC-001 via `verifies`, so the traceability report shows
+                // both a unit and an e2e test backing the test case.
+                test "confirming an order with no lines is rejected" verifies TC-001 {
+                    let order = Order.create({
+                        customerId: "cust-001",
+                        status: Draft,
+                        placedAt: now()
+                    })
+                    expect(order.confirm()).toThrow()
+                }
+            }
+
+            repository Orders for Order {
+                find byCustomer(customerId: string): Order[]
+                    where this.customerId == customerId
+            }
+
+            // Workflow surfacing — exercises the React generator's
+            // workflow UI (slice 18.A) end-to-end: a draft order +
+            // initial line in one orchestration.  The frontend
+            // emits a /workflows/place_order page from this; the
+            // backend (api / catalogApi) emits the matching
+            // POST /workflows/place_order route.
+            workflow placeOrder {
+              create(customerId: string, productId: Product id, quantity: int) {
+                precondition quantity > 0
+                  let order = Order.create({
+                      customerId: customerId,
+                      status: Draft,
+                      placedAt: now()
+                  })
+                  order.addLine(productId, quantity)
+              }
+            }
+
+            // View surfacing — exercises the React generator's view
+            // UI (slice 18.B).  Two shapes: shorthand reuses Order's
+            // wire response; full-form declares a custom row.
+            view ActiveOrders = Order where status == Confirmed
+
+            view OrderSummary {
+                orderId: Order id
+                status: OrderStatus
+                lineCount: int
+
+                from Order where status != Cancelled
+                bind orderId = id,
+                     status = status,
+                     lineCount = lines.count
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // CustomerMgmt — showcase for slice v21 wire-boundary validation.
+    //
+    // Every rule below flows through ONE classifier to FOUR enforcement
+    // layers:
+    //
+    //   1. Frontend Zod refines on the React form (per-field red text
+    //      before submit, no server round-trip).
+    //   2. Hono per-route Zod refines (catalogWeb deployable rejects
+    //      malformed bodies at the route boundary).
+    //   3. .NET FluentValidation rules on the Mediator command (api +
+    //      customerApi catch failures via the pipeline behavior;
+    //      DomainExceptionFilter converts to a structured 400 with
+    //      `{ error, trace_id, failures }`).
+    //   4. Domain `AssertInvariants()` — the floor.  Always runs
+    //      after every mutation, regardless of which wire layer
+    //      fired (defence in depth).
+    //
+    // The classifier decides per-rule which of the four layers it
+    // FITS — rules that reference `currentUser`, `now()`, or
+    // cross-aggregate state stay domain-only.  The user can also
+    // explicitly opt out of the wire layers via `private invariant`.
+    // ------------------------------------------------------------------
+    subdomain CustomerMgmt {
+        context Customers {
+
+            aggregate Customer with crudish {
+
+                // Inline `check` per-property sugar — desugars to an
+                // invariant on the parent.  Single-field shapes get
+                // idiomatic native chains: this `length >= N && length
+                // <= M` becomes `z.string().min(3).max(32)` /
+                // `RuleFor(x => x.Username).Length(3, 32)`.
+                username: string
+                  check username.length >= 3 && username.length <= 32
+
+                // `string.matches(literal)` — pattern is validated at
+                // codegen time.  Single-field detection produces
+                // `z.string().regex(/.../)` / `RuleFor(...).Matches("…")`;
+                // domain code uses `new RegExp(...).test(...)` /
+                // `Regex.IsMatch(...)`.
+                email: string
+                  check email.matches("^[^@]+@[^@]+\\.[^@]+$")
+                     && email.length <= 120
+
+                // Numeric range — recognised as a `between` shape;
+                // emits `z.number().int().min(18).max(150)` /
+                // `RuleFor(x => x.Age).InclusiveBetween(18, 150)`.
+                age: int check age >= 18 && age <= 150
+
+                // Cross-field rule still uses the regular `invariant`
+                // form.  Doesn't fit a single-field native chain so
+                // it lowers to a generic `.refine((data) => ...,
+                // { path })` on Zod and `RuleFor(x => x).Must(x =>
+                // ...).WithName("Username")` on FluentValidation.
+                // The path attribution puts the error inline next to
+                // the username input on the form.
+                invariant username != email
+
+                // `private invariant` — slice 21.C's escape hatch.
+                // The classifier short-circuits on the server-only
+                // scope, so this rule is SKIPPED from the Zod
+                // refines, the Hono per-route schema, AND the
+                // FluentValidation pipeline.  The domain
+                // `AssertInvariants()` floor still enforces it.
+                // Useful for sensitive checks the user doesn't want
+                // disclosed via OpenAPI (the literal pattern doesn't
+                // appear in the published spec).
+                private invariant username.matches("^[a-z][a-z0-9_]*$")
+                derived display: string = username
+            }
+
+            repository Customers for Customer {
+                find byEmail(email: string): Customer? where this.email == email
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Layered architecture (slices 11.24–11.27).
+    //
+    // - `api X from M` declares a contract derived from a module.
+    // - `storage X { type: T }` declares a typed storage instance
+    //   reusable across deployables.
+    // - `ui WebApp { api X: Y }` declares the UI's api dependencies.
+    // - Deployables compose: backends `serves:` contracts + bind
+    //   modules to storages; frontends bind UI params to backends.
+    //
+    // The legacy `scaffold modules: Catalog, Sales, CustomerMgmt`
+    // below in `ui WebApp` keeps emitting via the archetype path —
+    // these declarations are the explicit-form scaffolding that
+    // future `page` declarations on the same UI can use directly
+    // (e.g. `body: Sales.Customer.all.data`).
+    // ──────────────────────────────────────────────────────────────
+
+    api CatalogApi      from Catalog
+    api SalesApi        from Sales
+    api CustomerMgmtApi from CustomerMgmt
+
+    storage primarySql { type: postgres }
+    resource productsState  { for: Products, kind: state, use: primarySql }
+    resource ordersState    { for: Orders, kind: state, use: primarySql }
+    resource customersState { for: Customers, kind: state, use: primarySql }
+
+    // Public API on .NET — hosts every bounded context behind one EF
+    // DbContext, exposes the full HTTP surface for the platform.
+    deployable api {
+        platform: dotnet
+        contexts: [Products, Orders, Customers]
+        dataSources: [productsState, ordersState, customersState]
+        serves: CatalogApi, SalesApi, CustomerMgmtApi
+        port: 8080
+    }
+
+    // Lightweight read-API on Hono — Catalog data + Customers (for
+    // the v21 wire-validation showcase across both backends).
+    deployable catalogWeb {
+        platform: hono
+        contexts: [Products, Customers]
+        dataSources: [productsState, customersState]
+        serves: CatalogApi, CustomerMgmtApi
+        port: 3000
+    }
+
+    // Same Catalog + Customers surface on .NET — exists so the
+    // OpenAPI cross-check can diff `catalogApi` (.NET) against
+    // `catalogWeb` (Hono) and surface any drift between the
+    // platforms' route emission.
+    deployable catalogApi {
+        platform: dotnet
+        contexts: [Products, Customers]
+        dataSources: [productsState, customersState]
+        serves: CatalogApi, CustomerMgmtApi
+        port: 8081
+    }
+
+    // Page metamodel — explicit and concise.  One-liner scaffold per
+    // module set produces today's CRUD shape verbatim; richer pages
+    // (master-detail, wizards, dashboards) are added as further `page`
+    // declarations inside this block.  See examples/sales-ui.ddd for
+    // the rich form.
+    //
+    // The `api X: Y` parameters declare the UI's api dependencies.
+    // Scaffold-synthesised pages (List/Detail/Form archetypes) emit
+    // through the legacy path and don't reference these params yet;
+    // future explicit `page` declarations on the same UI can use
+    // them directly (e.g. `body: Sales.Customer.all.data`).
+    ui WebApp with scaffold(subdomains: [Catalog, Sales, CustomerMgmt]) {
+        api Catalog:      CatalogApi
+        api Sales:        SalesApi
+        api CustomerMgmt: CustomerMgmtApi
+    }
+
+    // React + React Query + Zod + Mantine frontend.  References the
+    // `WebApp` ui above; inherits its module set from the `api`
+    // backend, so pages cover Catalog + Sales + CustomerMgmt
+    // aggregates against the same wire shape.
+    deployable webApp {
+        platform: vue
+        targets: api
+        ui: WebApp { Catalog: api, Sales: api, CustomerMgmt: api }
+        port: 3003
+    }
+
+    // ------------------------------------------------------------------
+    // End-to-end tests — exercise the deployable through HTTP.  The
+    // `api` magic identifier resolves to the named deployable's HTTP
+    // surface; method calls on `api.<aggregate>.<verb>(…)` lower to
+    // typed fetch + JSON.
+    // ------------------------------------------------------------------
+
+    test e2e "create a product, look it up by id" against api verifies TC-003 {
+        let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
+        let read = api.products.getById(p)
+        expect(read.sku).toBe("WIDGET-1")
+    }
+
+    test e2e "create then confirm an order with one line" against api verifies TC-002 {
+        let prod = api.products.create({ sku: "WIDGET-2", price: { amount: 5.00, currency: "USD" } })
+        let ord = api.orders.create({ customerId: "cust-001", status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+        api.orders.addLine(ord, { productId: prod.id, qty: 3 })
+        api.orders.confirm(ord)
+        let read = api.orders.getById(ord)
+        expect(read.status).toBe("Confirmed")
+        expect(read.lines.length).toBe(1)
+    }
+
+    test e2e "by_customer query returns matching orders" against api {
+        let ord = api.orders.create({ customerId: "cust-002", status: "Draft", placedAt: "2024-01-02T00:00:00Z" })
+        let list = api.orders.byCustomer({ customerId: "cust-002" })
+        expect(list.length).toBeGreaterThanOrEqual(1)
+    }
+
+    // ------------------------------------------------------------------
+    // UI e2e — the test kind is implied by the target deployable's
+    // platform.  When the target is a `react` deployable the body's
+    // `ui.<aggregate>.<verb>(...)` calls route through the
+    // auto-generated page objects in <react-deployable>/e2e/pages/
+    // and the test lowers to a Playwright spec at
+    // web_app/e2e/Acme.ui.spec.ts.
+    // ------------------------------------------------------------------
+
+    test e2e "create then confirm an order via UI" against webApp {
+        let prod = ui.products.create({ sku: "WIDGET-UI-1", price: { amount: 5.0, currency: "USD" } })
+        let ord = ui.orders.create({ customerId: "cust-ui", status: "Draft", placedAt: "2024-01-01T00:00" })
+        ui.orders.addLine(ord, { productId: prod.id, qty: 3 })
+        ui.orders.confirm(ord)
+        let read = ui.orders.getById(ord)
+        expect(read.status).toHaveText("Confirmed")
+        expect(read.lines).toHaveCount(1)
+    }
+
+    // Slice 18.C — `ui.workflows.<name>(...)` lowers via the
+    // generated workflow page object; `ui.views.<name>()` reads the
+    // rendered table back as typed strings.
+    test e2e "place an order via the workflow UI" against webApp {
+        let prod = ui.products.create({ sku: "WIDGET-UI-2", price: { amount: 7.5, currency: "USD" } })
+        ui.workflows.placeOrder({ customerId: "cust-wf", productId: prod.id, quantity: 2 })
+    }
+
+    test e2e "active orders view renders the rendered rows" against webApp {
+        let rows = ui.views.activeOrders()
+        expect(rows.length).toBeGreaterThanOrEqual(0)
+    }
+}
+
+solution SOL-001 for US-001 {
+    title: "Ordering is driven by the Order aggregate and the placeOrder workflow"
+    entitles [
+        Sales.Orders.Order.addLine,
+        Sales.Orders.Order.confirm,
+        Sales.Orders.placeOrder,
+        api
+    ]
+}
+
+solution SOL-002 for US-002 {
+    title: "The catalog is served by the Product aggregate on its own deployable"
+    entitles [
+        Catalog.Products.Product,
+        catalogApi
+    ]
+}
+
+testCase TC-001 verifies AC-001 {
+    title: "Confirming an empty order is rejected"
+    covers [ Sales.Orders.Order.confirm ]
+}
+
+testCase TC-002 verifies US-001 {
+    title: "Add a line then confirm the order"
+    covers [
+        Sales.Orders.Order.addLine,
+        Sales.Orders.Order.confirm
+    ]
+}
+
+testCase TC-003 verifies AC-003 {
+    title: "Create a product and look it up by SKU"
+    covers [ Catalog.Products.Product ]
+}

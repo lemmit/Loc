@@ -27,7 +27,11 @@ export interface LoomForm<T extends Record<string, unknown>> {
 
 export function useLoomForm<T extends Record<string, unknown>>(
   schema: z.ZodType<T>,
-  initialValues: T,
+  // DRAFT values, deliberately looser than T: an enum field starts
+  // as "" and a user is mid-typing until submit — only the zod parse
+  // produces a real T.  `values` is exposed AS T so template
+  // bindings type-check against the wire shape.
+  initialValues: Record<string, unknown>,
 ): LoomForm<T> {
   const values = reactive(initialValues) as T;
   const errors = reactive<Record<string, string | undefined>>({});

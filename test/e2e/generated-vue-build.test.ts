@@ -28,7 +28,10 @@ const ENABLED = process.env.LOOM_VUE_BUILD === "1" || SHARD !== undefined;
 
 interface Case {
   name: string;
-  source: string;
+  /** Inline .ddd source, or — when `fromFile` is set — the repo-
+   *  relative path of a checked-in example to copy. */
+  source?: string;
+  fromFile?: string;
   vueDir: string;
 }
 
@@ -88,7 +91,16 @@ const SCAFFOLD: Case = {
   `,
 };
 
-const allCases: Case[] = [MINIMAL, SCAFFOLD];
+/** Showcase-scale example (vue-frontend-plan.md Slice 5): the acme
+ *  system with the frontend on `platform: vue` — three modules,
+ *  views, workflows, money, enums, value objects, id-selects. */
+const SHOWCASE: Case = {
+  name: "showcase",
+  vueDir: "web_app",
+  fromFile: "examples/vue-showcase.ddd",
+};
+
+const allCases: Case[] = [MINIMAL, SCAFFOLD, SHOWCASE];
 
 function selectCases(): Case[] {
   if (SHARD === undefined) return allCases;
@@ -104,11 +116,14 @@ function selectCases(): Case[] {
 const cases = ENABLED ? selectCases() : [];
 
 describe.skipIf(!ENABLED)("generated Vue project compiles + bundles (vue-tsc + vite build)", () => {
-  it.each(cases)("$name → vue-tsc --noEmit + vite build pass", ({ source, vueDir }) => {
+  it.each(cases)("$name → vue-tsc --noEmit + vite build pass", ({ source, fromFile, vueDir }) => {
     const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-vue-build-"));
     try {
       const dddPath = path.join(outDir, "_case.ddd");
-      fs.writeFileSync(dddPath, source);
+      fs.writeFileSync(
+        dddPath,
+        fromFile ? fs.readFileSync(path.join(repoRoot, fromFile), "utf-8") : (source ?? ""),
+      );
       execSync(`node ${cli} generate system ${dddPath} -o ${outDir}`, {
         stdio: "inherit",
         cwd: repoRoot,

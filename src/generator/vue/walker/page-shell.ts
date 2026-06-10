@@ -61,8 +61,12 @@ export function renderVuePage(input: VuePageShellInput): string {
     (f): f is OperationFormState => f.kind === "operation",
   );
   const aggFormState = result.formOfs.find((f) => f.kind === "aggregate");
-  const usesLoomForm = aggFormState !== undefined || opFormStates.length > 0;
-  const needsNavigate = result.usesNavigate || aggFormState !== undefined;
+  const wfFormState = result.formOfs.find((f) => f.kind === "workflow");
+  const usesLoomForm =
+    aggFormState !== undefined || wfFormState !== undefined || opFormStates.length > 0;
+  // Create + workflow forms' default submit bodies navigate.
+  const needsNavigate =
+    result.usesNavigate || aggFormState !== undefined || wfFormState !== undefined;
   const idExprParams = new Set<string>();
   for (const state of opFormStates) {
     for (const p of routeParams) {
@@ -117,6 +121,24 @@ export function renderVuePage(input: VuePageShellInput): string {
     const names = apiImports.get(from) ?? new Set<string>();
     names.add(`useCreate${agg}`);
     names.add(`Create${agg}Request`);
+    apiImports.set(from, names);
+  }
+  // Workflow run-form wiring — the pack markup references `form` +
+  // `run` (the workflow mutation handle); default submit navigates
+  // to /workflows.  Mutually exclusive with an aggregate form on the
+  // same page in practice (one `form` instance per page).
+  if (wfFormState && wfFormState.kind === "workflow") {
+    const wf = upperFirst(wfFormState.workflow.name);
+    if (!seenVars.has("run")) {
+      seenVars.add("run");
+      opFormLines.push(`const run = reactive(use${wf}Workflow());`);
+      vueImports.add("reactive");
+    }
+    opFormLines.push(`const form = useLoomForm(${wf}Request, ${wfFormState.defaultValuesTs});`);
+    const from = "../api/workflows";
+    const names = apiImports.get(from) ?? new Set<string>();
+    names.add(`use${wf}Workflow`);
+    names.add(`${wf}Request`);
     apiImports.set(from, names);
   }
   // Operation forms — dialog state + open-fn + per-op LoomForm.
@@ -248,9 +270,6 @@ export function renderVuePage(input: VuePageShellInput): string {
   script.push(...stateLines);
   script.push(...hookLines);
   script.push(...opFormLines);
-  if (result.formOfs.some((f) => f.kind === "workflow")) {
-    script.push("// TODO(vue-forms): workflow-form wiring lands with the workflow parity slice");
-  }
   if (result.usedUserComponents.size > 0) {
     script.push(
       `// TODO(vue-components): user components not yet supported by the Vue walker (${[...result.usedUserComponents].join(", ")})`,
