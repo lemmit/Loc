@@ -54,10 +54,7 @@ describe("MultilineField + SelectField with bind: state binding", () => {
 
   it("SelectField { 'Label', bind: region, options: [...] } wires a controlled Select", async () => {
     const files = await generateSystemFiles(
-      page(
-        `SelectField { "Region", bind: region, options: ["EU", "US"] }`,
-        `region: string = ""`,
-      ),
+      page(`SelectField { "Region", bind: region, options: ["EU", "US"] }`, `region: string = ""`),
     );
     const content = files.get("web/src/pages/form.tsx")!;
     expect(content).toMatch(/import \{ Select \} from "@mantine\/core";/);
