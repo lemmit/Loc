@@ -267,6 +267,15 @@ describe("realization axes — transport is adapter-backed", () => {
     expect(errors.some((e) => /transport: grpc.*is not available/.test(e))).toBe(true);
   });
 
+  it("recognises node transport alternatives as reserved (`express` / `fastify`)", async () => {
+    for (const t of ["express", "fastify"]) {
+      const { errors } = await parse(sys(`hono { transport: ${t} }`));
+      expect(
+        errors.some((e) => new RegExp(`transport: ${t}.*reserved.*not yet implemented`).test(e)),
+      ).toBe(true);
+    }
+  });
+
   it("rejects a cross-platform transport (`minimalApi` on elixir)", async () => {
     const { errors } = await parse(sys("elixir { transport: minimalApi }"));
     expect(errors.some((e) => /transport: minimalApi.*is not available/.test(e))).toBe(true);

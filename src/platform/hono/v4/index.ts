@@ -16,6 +16,7 @@ import {
   type RuntimeAdapter,
   type StyleAdapter,
   stubAdapter,
+  type TransportAdapter,
 } from "../../../generator/_adapters/index.js";
 import type { LoomBackendManifest } from "../../manifest.js";
 import {
@@ -117,8 +118,28 @@ const honoPlatform: PlatformSurface = {
         byLayer: byLayerLayoutAdapter,
         byFeature: byFeatureLayoutAdapter,
       },
-      // The Hono router — the Node backend's only HTTP surface today.
-      transports: { hono: { name: "hono" } },
+      transports: {
+        // The Hono router — the only real HTTP surface today.
+        hono: { name: "hono" },
+        // Reserved alternatives (the per-transport emit is future work;
+        // realization-axes-alignment.md): `express` (the canonical, most
+        // widely-used Node web framework) and `fastify` (the popular modern
+        // one).  `transport: controllers` is the dotnet analogue.
+        express: stubAdapter<TransportAdapter>(
+          "transport",
+          "express",
+          "node",
+          () => Object.keys(menu.transports),
+          { name: "express" },
+        ),
+        fastify: stubAdapter<TransportAdapter>(
+          "transport",
+          "fastify",
+          "node",
+          () => Object.keys(menu.transports),
+          { name: "fastify" },
+        ),
+      },
       runtimes: {
         // DB-transaction consistency — the only real runtime today.
         transactional: { name: "transactional" },
