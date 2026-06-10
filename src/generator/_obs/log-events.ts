@@ -113,6 +113,14 @@ export const LogEvents = {
     level: "warn",
     fields: ["workflow", "event_type", "key"],
   },
+  /** The outbox relay exhausted its retries for a durable event — the row
+   *  stays in __loom_outbox (attempts ≥ max) for manual inspection
+   *  (dispatch-delivery-semantics.md, the dead-letter surface). */
+  eventDeadLettered: {
+    event: "event_dead_lettered",
+    level: "warn",
+    fields: ["type", "attempts", "error"],
+  },
 
   // ─── domain — warn (client/domain fault, recoverable) ────────────────
   domainError: {

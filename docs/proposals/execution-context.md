@@ -93,16 +93,24 @@ build with tracing disabled pays nothing.
 - **Lowering** inserts `enterScope(...)` / `exitScope()` (or the
   platform equivalent) around tagged boundaries and threads the frame
   into provenance-node / audit-record / log-scope construction.
-- **.NET**: the governance carrier is an **`AsyncLocal<RequestContext>`**
+- **.NET**: the governance carrier is a **dedicated `AsyncLocal<RequestContext>`**
   (the `AsyncLocalStorage` twin), surfaced via a scoped `IRequestContext`
   accessor for DI ergonomics; the frame-local tier *must* be `AsyncLocal`,
   not a scoped singleton (which cannot isolate parallel branches) and not
-  `ThreadLocal` (which is lost across `await`). The **trace channel** is
-  `ActivitySource.StartActivity(...)` per boundary, `using var _ = …` for
-  automatic pop, child activity per parallel branch — and `Activity.Current`
-  is itself `AsyncLocal`-backed, so the two share one flow-local spine. No
-  hard OpenTelemetry dependency — a lightweight internal context that mints
-  ids/relations is enough; OTel export is an optional channel.
+  `ThreadLocal` (which is lost across `await`). The frame is pushed by a
+  Mediator pipeline behaviour — the existing `DomainLogBehavior` generalised
+  and renamed (e.g. `ExecutionContextBehavior`), widening its payload from
+  `ILogger` to the frame; see
+  [`../architecture/request-context.md`](../architecture/request-context.md).
+  `Activity`/`ActivitySource` is an **optional one-way export, not the
+  carrier**: `StartActivity` returns `null` on unsampled requests, and
+  `Baggage` (the only field that propagates across frames/processes) leaks
+  to downstream services — so governance never reads from it. When tracing
+  is on, the behaviour *also* starts a child `Activity` and tags it with
+  `correlationId`/`scopeId`; the governance `correlationId` is minted by
+  the backbone, not taken from a sampled `TraceId`. No hard OpenTelemetry
+  dependency — a lightweight internal context that mints ids/relations is
+  enough.
 - **Other backends** divide into two *realization classes* (see the
   table in
   [`../architecture/request-context.md`](../architecture/request-context.md)

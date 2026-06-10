@@ -1,4 +1,5 @@
 import type { EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
+import { durableEventTypes } from "../../../ir/util/channels.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
@@ -71,9 +72,17 @@ export function renderHttpIndex(
   // event-creates) instead of the no-op.  Mikro and channel-less projects keep
   // the Noop default — byte-identical output.
   const wireDispatcher = ctx.eventSubscriptions.length > 0 && !usingMikro;
+  // Transactional-outbox tier (dispatch-delivery-semantics.md): when any
+  // channel asks for durability (`retention: log | work`), createApp's
+  // default dispatcher wraps the in-process one — durable events are
+  // recorded in __loom_outbox and the relay (started by index.ts) delivers
+  // them; ephemeral events keep the inline at-most-once path.
+  const wireOutbox = wireDispatcher && durableEventTypes(ctx).size > 0;
   const workflowImport = hasWorkflows
     ? wireDispatcher
-      ? `import { createInProcessDispatcher, workflowsRoutes } from "./workflows";`
+      ? wireOutbox
+        ? `import { createInProcessDispatcher, createOutboxDispatcher, workflowsRoutes } from "./workflows";`
+        : `import { createInProcessDispatcher, workflowsRoutes } from "./workflows";`
       : `import { workflowsRoutes } from "./workflows";`
     : null;
   const workflowMount = hasWorkflows
@@ -123,7 +132,9 @@ export function renderHttpIndex(
       // from `db` (a later default param may reference an earlier one); a caller
       // can still pass an explicit dispatcher (e.g. a broker publisher).
       wireDispatcher
-        ? "  events: DomainEventDispatcher = createInProcessDispatcher(db),"
+        ? wireOutbox
+          ? "  events: DomainEventDispatcher = createOutboxDispatcher(db, createInProcessDispatcher(db)),"
+          : "  events: DomainEventDispatcher = createInProcessDispatcher(db),"
         : "  events: DomainEventDispatcher = NoopDomainEventDispatcher,",
       "): OpenAPIHono {",
       externAggs.length > 0

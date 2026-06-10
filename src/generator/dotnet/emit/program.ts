@@ -59,6 +59,10 @@ export function renderProgram(
      *  Program.cs registers the in-process Mediator-notification dispatcher
      *  (instead of the no-op) and `IDomainEvent` is a Mediator notification. */
     hasSubscriptions?: boolean;
+    /** Transactional outbox (dispatch-delivery-semantics.md): registers the
+     *  outbox-wrapping dispatcher + the relay BackgroundService.  Implies
+     *  hasSubscriptions. */
+    hasOutbox?: boolean;
     /** Persistence selection (D-REALIZATION-AXES `persistence:`): when true,
      *  the deployable uses Dapper — Program.cs registers an `NpgsqlDataSource`
      *  (not a `DbContext`) and applies the self-contained `DbSchema` at
@@ -75,9 +79,11 @@ export function renderProgram(
   // subscriptions, register the Mediator-notification dispatcher (Scoped — it
   // depends on the scoped IMediator) so emitted events reach their reactor /
   // starter handlers.  Otherwise the default no-op stands (byte-identical).
-  const dispatcherRegistration = options?.hasSubscriptions
-    ? `// Domain event dispatch — in-process Mediator-notification dispatcher.\nbuilder.Services.AddScoped<IDomainEventDispatcher, InProcessDomainEventDispatcher>();`
-    : `// Domain event dispatch — default no-op; replace in tests / production.\nbuilder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();`;
+  const dispatcherRegistration = options?.hasOutbox
+    ? `// Domain event dispatch — durable events (channels with retention: log | work)\n// are recorded in __loom_outbox by the outbox dispatcher and delivered by the\n// relay BackgroundService (at-least-once); ephemeral events dispatch inline.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, OutboxDomainEventDispatcher>();\nbuilder.Services.AddHostedService<OutboxRelayService>();`
+    : options?.hasSubscriptions
+      ? `// Domain event dispatch — in-process Mediator-notification dispatcher.\nbuilder.Services.AddScoped<IDomainEventDispatcher, InProcessDomainEventDispatcher>();`
+      : `// Domain event dispatch — default no-op; replace in tests / production.\nbuilder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();`;
   const hasSeeds = !!options?.hasSeeds;
   const usingDapper = !!options?.usingDapper;
   const seedBlock = hasSeeds

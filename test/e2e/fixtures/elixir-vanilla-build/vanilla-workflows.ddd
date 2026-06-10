@@ -60,6 +60,20 @@ system Tasks {
           t.markDone()
         }
       }
+
+      // emit exercise — broadcasts a domain event over Phoenix.PubSub
+      // INSIDE the with-chain's do-branch (skipped on rollback).  Proves
+      // the `Events.<Name>` struct module + the broadcast line compile
+      // cleanly against the real Phoenix.PubSub + the orchestrator-emitted
+      // event struct.
+      event TaskFinished { task: Task id, at: datetime }
+      workflow finishExisting transactional {
+        create(taskId: Task id) {
+          let t = Tasks.getById(taskId)
+          t.markDone()
+          emit TaskFinished { task: taskId, at: now() }
+        }
+      }
     }
   }
   api TrackerApi from Productivity

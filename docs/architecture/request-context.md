@@ -125,7 +125,7 @@ Two **realization classes** cover every target:
 |---|---|---|---|
 | `node` (minimal / Hono) | ambient | `AsyncLocalStorage<RequestContext>` | `als.run(childFrame, …)` around a tagged boundary |
 | `node` + `foundation: nest` | ambient | request-scoped DI provider (`nestjs-cls`, an `AsyncLocalStorage` wrapper) | interceptor/guard at the boundary; the `@nestjs/cqrs` bus is the frame-open seam for command/query handlers (the Mediator-behaviour analog) |
-| `.NET` | ambient | **`AsyncLocal<RequestContext>`** (the direct `AsyncLocalStorage` twin), surfaced through a scoped `IRequestContext` accessor; `Activity.Current` is the trace-channel projection (itself `AsyncLocal`-backed) | child frame set in a Mediator pipeline behaviour, popped on `using var` |
+| `.NET` | ambient | **`AsyncLocal<RequestContext>`** — a dedicated slot the backbone owns (the direct `AsyncLocalStorage` twin), surfaced through a scoped `IRequestContext` accessor. **Not** `Activity.Current`: tracing is sampled, so a span is `null` on unsampled requests — governance state must never be sampleable | child frame set in a Mediator pipeline behaviour, popped on `using var` |
 | `elixir` + `foundation: ash` | ambient | process dictionary / `Logger.metadata`, surfaced into the Ash action context | new frame per Ash action invocation |
 | `elixir` + `foundation: vanilla` | ambient | process dictionary / `Logger.metadata` + explicit struct | new frame per `with`-scoped step |
 | `Go` (proposed) | **explicit-threading** | `context.Context` (request-stable in `ctx.Value`; frame-local derived per call) | `ctx := context.WithValue(parent, …)` threaded into every call |
@@ -165,9 +165,56 @@ a `correlationId`/request id bound by the request-id middleware. The
 backbone's whole premise — *one ambient value, every feature reads its
 slice* — makes that the seam to **refactor into** the `RequestContext`
 carrier: the existing obs ALS *becomes* the `RequestContext` ALS, not a
-sibling of it. The same applies to the .NET observability correlation and
-the elixir `Logger.metadata` already in use. Growing a second ambient
-channel here is the exact drift this doc exists to prevent.
+sibling of it.
+
+On **.NET the groundwork is further along, and the refactor
+correspondingly larger** — there are *two* channels to fold, not one. The
+backend already emits:
+
+- **`DomainLog.Current`** — a static `AsyncLocal<ILogger?>`
+  (`src/generator/dotnet/emit/domain-log.ts`) pushed/popped by
+  **`DomainLogBehavior`**, a Mediator pipeline behaviour that saves the
+  previous value and restores it in `finally` (so reentrant `Send`s
+  stack). That push/restore *shape* is exactly the enter/exit-scope
+  mechanism this backbone needs — it just carries a logger today instead
+  of the full frame (the convergence below widens it).
+- **`ICurrentUserAccessor`** / `HttpContextCurrentUserAccessor`
+  (`auth-emit.ts`) — a scoped accessor over `HttpContext.Items["currentUser"]`,
+  i.e. a *second* ambient channel for the very principal this doc pins as
+  `RequestContext.currentUser`.
+
+The backbone converges these to **one slot and one behaviour**:
+`DomainLog.Current` widens to a single `AsyncLocal<RequestContext>` (the
+request logger demoted to a *slice* read via `RequestContext.Current`),
+and `DomainLogBehavior` is **generalised and renamed** — *not* kept
+alongside a new behaviour — to push that frame. Its structure already
+fits exactly: set on entry, restore the previous value in `finally` so
+reentrant `Send`s stack; only the payload widens from `ILogger` to the
+frame, and the work it does widens from "bind logger" to "open scope
+frame" (derive child `scopeId`, `parentId` = parent's `scopeId`). Give it
+a frame-shaped name — `ExecutionContextBehavior` (or
+`RequestContextBehavior`). Keeping *both* `DomainLogBehavior` and a
+separate frame behaviour would itself be the two-channel drift this doc
+rejects, so it is **one behaviour, renamed, not two**. `ICurrentUserAccessor`
+then becomes a thin accessor over `RequestContext.Current.CurrentUser`,
+not a parallel scoped service. The elixir `Logger.metadata` already in use
+is the same convergence a third time. Growing a second ambient channel
+here is the exact drift this doc exists to prevent.
+
+**`Activity`/OpenTelemetry is an export, not the carrier** (see the `.NET`
+row). When tracing is on, the frame-open behaviour *may also* start an
+`Activity` and copy `correlationId`/`scopeId` onto it as **tags** for
+log↔trace correlation and OTel export — but governance never reads back
+from it. `ActivitySource.StartActivity` returns **`null`** on unsampled
+requests, and the only part of an `Activity` that propagates to child
+frames/processes is `Baggage`, which serialises to the W3C `baggage`
+header — so a `currentUser`/`tenantId`/`dataKey` stored there would leak
+the principal to every downstream service and telemetry sink. The
+governance `correlationId` is **minted by the backbone** (and surfaced
+onto the span/logs for correlation), not adopted from a sampled
+`TraceId`. The `Activity.Current?.TraceId` already wired into log scopes
+in `emit/program.ts` stays — as the obs-side correlation tag, not a
+governance read.
 
 **BEAM fan-out caveat.** On elixir the process dictionary and
 `Logger.metadata` are **not** inherited by `Task.async`/spawned
