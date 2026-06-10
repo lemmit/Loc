@@ -135,4 +135,55 @@ describe("efcore PersistenceAdapter (real)", () => {
     expect(joined).toContain("public sealed class AppDbContext : DbContext");
     expect(joined).toContain("DbSet<Order>");
   });
+
+  // Regression: EF column names MUST match the snake_case migration DDL.
+  // EF's default is the PascalCase CLR property name, which produced
+  // `42703: column "Id"/"CreatedAt" does not exist` on every INSERT/SELECT —
+  // invisible to the compile-only dotnet-build gate, caught only by the
+  // behavioral conformance run.
+  it("maps every column to the migration's snake_case (scalars, PK, enum, containment FK)", async () => {
+    const RICH = `
+      system S {
+        subdomain Cat {
+          context Catalog {
+            enum Vis { Private, Public }
+            aggregate Project {
+              displayName: string
+              visibility: Vis
+              createdAt: datetime
+              contains pipelines: Pipeline[]
+              entity Pipeline {
+                runCount: int
+                derived label: string = "p"
+              }
+              derived display: string = displayName
+            }
+            repository Projects for Project { }
+          }
+        }
+        storage primary { type: postgres }
+        resource catState { for: Catalog, kind: state, use: primary }
+        deployable api { platform: dotnet contexts: [Catalog] dataSources: [catState] port: 5000 }
+      }`;
+    const loom = enrichLoomModel(lowerModel(await parseValid(RICH)));
+    const sys = loom.systems[0]!;
+    const deployable = sys.deployables.find((d) => d.platform === "dotnet")!;
+    const contexts: EnrichedBoundedContextIR[] = sys.subdomains
+      .flatMap((s) => s.contexts)
+      .filter((c) => deployable.contextNames.includes(c.name));
+    const ctx: EmitCtx = { deployable, contexts, sys, migrations: [] };
+    const agg = contexts[0]!.aggregates.find((a) => a.name === "Project")!;
+    const cfg = emitConfiguration(agg, ctx).join("\n");
+
+    // PK + camelCase scalar + enum all carry an explicit snake column name.
+    expect(cfg).toContain('.HasColumnName("id")');
+    expect(cfg).toContain('builder.Property(x => x.DisplayName).HasColumnName("display_name")');
+    expect(cfg).toContain('.HasConversion<string>().HasColumnName("visibility")');
+    expect(cfg).toContain('builder.Property(x => x.CreatedAt).HasColumnName("created_at")');
+    // Containment FK maps to the migration's `<owner>_id`, not EF's ParentId.
+    expect(cfg).toContain('o.Property("ParentId").HasColumnName("project_id")');
+    expect(cfg).toContain('o.Property(x => x.RunCount).HasColumnName("run_count")');
+    // No column is left at its PascalCase default.
+    expect(cfg).not.toMatch(/HasColumnName\("[A-Z]/);
+  });
 });
