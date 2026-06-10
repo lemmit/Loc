@@ -1,0 +1,180 @@
+// Realtime SSE wire (channels.md, Part I): events carried by a
+// `delivery: broadcast` channel stream to connected browsers.  The Hono
+// backend emits `http/realtime.ts` (REALTIME_EVENT_TYPES + publishRealtime +
+// realtimeTee + GET /realtime/events via streamSSE) and createApp wraps its
+// default dispatcher in the tee; the React generator emits the matching
+// `src/api/realtime.ts` EventSource client when the targeted backend is
+// Hono.  A project with no broadcast channel keeps its output byte-identical
+// (no realtime file, no tee, no mount).
+//
+// v1 topology is broadcast-to-all (no rooms / edge relay / policy router —
+// those layer on the authorization work).  The authorized read remains the
+// gate: clients refetch through the API rather than trust payloads.
+
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { URI } from "langium";
+import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
+import { createDddServices } from "../../../src/language/ddd-module.js";
+import type { Model } from "../../../src/language/generated/ast.js";
+import { generateTypeScript } from "../../../src/platform/hono/v4/emit.js";
+import { BACKEND_PINS } from "../../../src/platform/hono/v4/pins.js";
+import { generateSystems } from "../../../src/system/index.js";
+import { parseValid } from "../../_helpers/parse.js";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, "..", "..", "..");
+
+async function generate(file: string): Promise<Map<string, string>> {
+  const services = createDddServices(NodeFileSystem);
+  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+    URI.file(path.join(root, file)),
+  );
+  await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+  const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+  expect(
+    errors.map((d) => d.message),
+    "fixture validation errors",
+  ).toEqual([]);
+  return generateTypeScript(doc.parseResult.value as Model, BACKEND_PINS);
+}
+
+describe("realtime SSE wire — Hono (delivery: broadcast)", () => {
+  it("emits http/realtime.ts with the event-type set, the tee, and the SSE route", async () => {
+    const files = await generate("test/fixtures/dispatch-sample.ddd");
+    const rt = files.get("http/realtime.ts") ?? "";
+    expect(rt).toContain(
+      'export const REALTIME_EVENT_TYPES: ReadonlySet<string> = new Set(["OrderPlaced", "ShipmentRequested"]);',
+    );
+    expect(rt).toContain("export function publishRealtime(event: Events.DomainEvent): void {");
+    expect(rt).toContain("if (!REALTIME_EVENT_TYPES.has(event.type)) return;");
+    expect(rt).toContain(
+      "export function realtimeTee(inner: DomainEventDispatcher): DomainEventDispatcher {",
+    );
+    expect(rt).toContain('import { streamSSE } from "hono/streaming";');
+    expect(rt).toContain("stream.writeSSE({ data: JSON.stringify(event), event: event.type })");
+    expect(rt).toContain('await stream.writeSSE({ data: "", event: "ping" });');
+  });
+
+  it("createApp tees its default dispatcher and mounts /realtime", async () => {
+    const files = await generate("test/fixtures/dispatch-sample.ddd");
+    const idx = files.get("http/index.ts") ?? "";
+    expect(idx).toContain('import { realtimeRoutes, realtimeTee } from "./realtime";');
+    expect(idx).toContain(
+      "events: DomainEventDispatcher = realtimeTee(createInProcessDispatcher(db)),",
+    );
+    expect(idx).toContain('app.route("/realtime", realtimeRoutes());');
+  });
+
+  it("a durable broadcast channel composes outbox → tee → in-process (relay included)", async () => {
+    const files = await generate("test/fixtures/outbox-sample.ddd");
+    expect(files.get("http/index.ts") ?? "").toContain(
+      "events: DomainEventDispatcher = createOutboxDispatcher(db, realtimeTee(createInProcessDispatcher(db))),",
+    );
+    // The relay's inner dispatcher rides through the tee too, so relayed
+    // (durable) events also reach connected SSE subscribers.
+    const boot = files.get("index.ts") ?? "";
+    expect(boot).toContain('import { realtimeTee } from "./http/realtime";');
+    expect(boot).toContain("const inProcessEvents = realtimeTee(createInProcessDispatcher(db));");
+    expect(boot).toContain("const stopOutboxRelay = startOutboxRelay(db, inProcessEvents);");
+  });
+
+  it("a project with no broadcast channel keeps the wire-free output", async () => {
+    const files = await generate("examples/sales.ddd");
+    expect(files.has("http/realtime.ts")).toBe(false);
+    const idx = files.get("http/index.ts") ?? "";
+    expect(idx).not.toContain("realtimeTee");
+    expect(idx).not.toContain("/realtime");
+  });
+});
+
+// ─── React client ────────────────────────────────────────────────────────────
+
+const REALTIME_SYSTEM = `
+system RealtimeShop {
+  subdomain Shipping {
+  context Fulfillment {
+    aggregate Order { customerId: string  status: string  total: int }
+    repository Orders for Order { }
+    aggregate Shipment {
+      orderRef: Order id
+      status: string
+      operation markTracked() { status := "Tracked" }
+    }
+    repository Shipments for Shipment { }
+
+    event OrderPlaced { order: Order id, at: datetime }
+    event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+
+    channel Lifecycle {
+      carries: OrderPlaced, ShipmentRequested
+      delivery: broadcast
+      retention: ephemeral
+    }
+
+    workflow OrderFulfillment {
+      orderId: Order id
+      create(p: OrderPlaced) by p.order {
+        let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+        emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+      }
+      on(s: ShipmentRequested) by s.order {
+        let ship = Shipments.getById(s.shipment)
+        ship.markTracked()
+      }
+    }
+  }
+  }
+  api FulfillmentApi from Shipping
+  ui WebApp {
+    api Fulfillment: FulfillmentApi
+    page Home { route: "/" body: Heading { "hi" } }
+  }
+  deployable backend {
+    platform: hono
+    contexts: [Fulfillment]
+    serves: FulfillmentApi
+    port: 3000
+  }
+  deployable webApp {
+    platform: static
+    targets: backend
+    ui: WebApp { Fulfillment: backend }
+    port: 3001
+  }
+}
+`;
+
+describe("realtime SSE client — React", () => {
+  it("emits src/api/realtime.ts when the targeted Hono backend has a broadcast channel", async () => {
+    const model = await parseValid(REALTIME_SYSTEM);
+    const { files } = generateSystems(model);
+    const key = [...files.keys()].find((k) => k.endsWith("web_app/src/api/realtime.ts"));
+    expect(key, "react realtime client emitted").toBeTruthy();
+    const client = files.get(key ?? "") ?? "";
+    expect(client).toContain(
+      'export const REALTIME_EVENT_TYPES = ["OrderPlaced", "ShipmentRequested"] as const;',
+    );
+    expect(client).toContain(
+      "export function subscribeRealtime(onEvent: (event: RealtimeEvent) => void): () => void {",
+    );
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates `${API_BASE}` in the generated client, not here
+    expect(client).toContain("new EventSource(`${API_BASE}/realtime/events`)");
+    expect(client).toContain(
+      "for (const t of REALTIME_EVENT_TYPES) source.addEventListener(t, handler);",
+    );
+    expect(client).toContain("return () => source.close();");
+    // The backend side of the same system carries the wire.
+    expect([...files.keys()].some((k) => k.endsWith("backend/http/realtime.ts"))).toBe(true);
+  });
+
+  it("emits no client when the system has no broadcast channel", async () => {
+    const model = await parseValid(
+      REALTIME_SYSTEM.replace("delivery: broadcast", "delivery: queue"),
+    );
+    const { files } = generateSystems(model);
+    expect([...files.keys()].some((k) => k.endsWith("/src/api/realtime.ts"))).toBe(false);
+    expect([...files.keys()].some((k) => k.endsWith("/http/realtime.ts"))).toBe(false);
+  });
+});
