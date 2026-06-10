@@ -125,11 +125,38 @@ Two **realization classes** cover every target:
 |---|---|---|---|
 | `node` (minimal / Hono) | ambient | `AsyncLocalStorage<RequestContext>` | `als.run(childFrame, …)` around a tagged boundary |
 | `node` + `foundation: nest` | ambient | request-scoped DI provider (`nestjs-cls`, an `AsyncLocalStorage` wrapper) | interceptor/guard at the boundary; the `@nestjs/cqrs` bus is the frame-open seam for command/query handlers (the Mediator-behaviour analog) |
-| `.NET` | ambient | `Activity.Current` + scoped `IRequestContext` service | new frame pushed in a Mediator pipeline behaviour |
+| `.NET` | ambient | **`AsyncLocal<RequestContext>`** (the direct `AsyncLocalStorage` twin), surfaced through a scoped `IRequestContext` accessor; `Activity.Current` is the trace-channel projection (itself `AsyncLocal`-backed) | child frame set in a Mediator pipeline behaviour, popped on `using var` |
 | `elixir` + `foundation: ash` | ambient | process dictionary / `Logger.metadata`, surfaced into the Ash action context | new frame per Ash action invocation |
 | `elixir` + `foundation: vanilla` | ambient | process dictionary / `Logger.metadata` + explicit struct | new frame per `with`-scoped step |
 | `Go` (proposed) | **explicit-threading** | `context.Context` (request-stable in `ctx.Value`; frame-local derived per call) | `ctx := context.WithValue(parent, …)` threaded into every call |
-| Java / Spring (deferred) | ambient | MVC: `ThreadLocal` / MDC / Micrometer `Observation`. **WebFlux: Reactor `Context`** (`ThreadLocal` does not propagate across reactive operators) | per-request thread scope, or `contextWrite` on the reactive chain |
+| Java / Spring (deferred) | ambient | MVC: `ThreadLocal` / MDC / Micrometer `Observation` (or JDK 21 `ScopedValue`). **WebFlux: Reactor `Context`** (`ThreadLocal` does not propagate across reactive operators) | per-request thread scope, or `contextWrite` on the reactive chain |
+
+**Within the ambient class, the two tiers want two mechanisms — and a
+scoped/thread-bound slot alone is not enough for the frame-local tier.**
+A per-request *scoped DI service* (`AddScoped<IRequestContext>`) carries
+the **request-stable** tier cleanly — set once at the boundary, injected
+everywhere. But it is a *single instance per request*, so it cannot
+isolate the **frame-local** tier (`scopeId`/`parentId`) across parallel
+branches: two `Task.WhenAll` branches resolving the same scoped service
+would clobber each other's current frame. The frame-local tier must live
+in a **flow-local** slot whose copy-on-write-down-the-async-flow
+semantics give each branch its own frame:
+
+- **.NET → `AsyncLocal<T>`, not `ThreadLocal<T>`.** A request hops threads
+  across every `await`, so a `ThreadLocal` frame would be lost (or leak
+  onto a pooled thread). `AsyncLocal<T>` flows with `ExecutionContext`
+  across `await` and `Task` — which is exactly why `Activity.Current` and
+  `IHttpContextAccessor` are themselves `AsyncLocal`-backed. The scoped
+  `IRequestContext` is a DI-ergonomic *accessor over* the `AsyncLocal`,
+  not a substitute for it.
+- **node → `AsyncLocalStorage.run`** already copies-on-write down the
+  async flow, so parallel branches are isolated for free.
+- **BEAM → spawn-time copy** (the `Task.async` caveat below); **Java →
+  `ScopedValue`/Reactor `Context`** for the same reason `ThreadLocal`
+  fails under `@Async`/WebFlux.
+
+The rule generalises: request-stable may sit in a scoped/DI slot;
+frame-local must be flow-local.
 
 **Subsume the existing channel — do not add a second.** The Hono backend
 already ships an `AsyncLocalStorage` for the observability request logger
