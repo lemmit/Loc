@@ -22,10 +22,20 @@
 // Remaining kinds (emit / repo-let / for-each / repo-run) land as their
 // own focused slices each validated by the elixir-vanilla-build.yml
 // mix-compile gate.
+//
+// Param surfacing: a workflow body that references a declared
+// create-param (`create(initialTitle: string) { … initialTitle … }`)
+// gets a leading destructure of exactly the referenced params off the
+// `run/1` map — `%{"initial_title" => initial_title} = params` — so the
+// bare-local rendering of a `param` ref resolves.  Params arrive as a
+// string-keyed snake_case map (the wire shape).  Only referenced params
+// are bound: an unused binding would trip `--warnings-as-errors`.
 // ---------------------------------------------------------------------------
 
 import {
   type BoundedContextIR,
+  type ExprIR,
+  type StmtIR,
   type WorkflowIR,
   type WorkflowStmtIR,
   workflowEmitsCommandRoute,
@@ -205,6 +215,135 @@ function lowerStatement(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Param surfacing — collect the declared create-params a workflow body
+// actually references, so exactly those (and no unused ones) are
+// destructured off the `run/1` map.
+// ---------------------------------------------------------------------------
+
+/** Add every `refKind: "param"` name reachable from `e` into `acc`.
+ *  Exhaustive over the child-bearing `ExprIR` kinds (a stricter superset
+ *  of the validate-layer `walkExpr` — it also descends `list` / `convert`
+ *  / `match`, which can appear in a workflow create-body). */
+function collectParamRefs(e: ExprIR | undefined, acc: Set<string>): void {
+  if (!e) return;
+  switch (e.kind) {
+    case "ref":
+      if (e.refKind === "param") acc.add(e.name);
+      return;
+    case "member":
+      collectParamRefs(e.receiver, acc);
+      return;
+    case "method-call":
+      collectParamRefs(e.receiver, acc);
+      for (const a of e.args) collectParamRefs(a, acc);
+      return;
+    case "call":
+      for (const a of e.args) collectParamRefs(a, acc);
+      return;
+    case "lambda":
+      collectParamRefs(e.body, acc);
+      if (e.block) for (const s of e.block) collectParamRefsInStmt(s, acc);
+      return;
+    case "new":
+    case "object":
+      for (const f of e.fields) collectParamRefs(f.value, acc);
+      return;
+    case "list":
+      for (const el of e.elements) collectParamRefs(el, acc);
+      return;
+    case "paren":
+      collectParamRefs(e.inner, acc);
+      return;
+    case "unary":
+      collectParamRefs(e.operand, acc);
+      return;
+    case "binary":
+      collectParamRefs(e.left, acc);
+      collectParamRefs(e.right, acc);
+      return;
+    case "ternary":
+      collectParamRefs(e.cond, acc);
+      collectParamRefs(e.then, acc);
+      collectParamRefs(e.otherwise, acc);
+      return;
+    case "convert":
+      collectParamRefs(e.value, acc);
+      return;
+    case "match":
+      for (const arm of e.arms) {
+        collectParamRefs(arm.cond, acc);
+        collectParamRefs(arm.value, acc);
+      }
+      collectParamRefs(e.otherwise, acc);
+      return;
+    default:
+      // Leaf kinds (`literal` / `this` / `id`) bind no params.
+      return;
+  }
+}
+
+/** A `StmtIR` (lambda block body) — only the expression-bearing arms can
+ *  carry a param reference; collect from each. */
+function collectParamRefsInStmt(s: StmtIR, acc: Set<string>): void {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+    case "let":
+    case "expression":
+      collectParamRefs(s.expr, acc);
+      return;
+    case "assign":
+    case "add":
+    case "remove":
+    case "return":
+      collectParamRefs(s.value, acc);
+      return;
+    case "emit":
+      for (const f of s.fields) collectParamRefs(f.value, acc);
+      return;
+    case "call":
+      for (const a of s.args) collectParamRefs(a, acc);
+      return;
+  }
+}
+
+/** Collect referenced create-params, but ONLY from the statement kinds
+ *  that today lower to real code emitting the param ref (precondition /
+ *  requires / expr-let / factory-let / op-call).  The kinds still on the
+ *  `# TODO` fallthrough (`emit` / `repo-let` / `repo-run` / `for-each` /
+ *  `resource-call`) don't render their param refs yet — binding a param
+ *  only those reference would leave an unused local that trips
+ *  `--warnings-as-errors`.  When a future slice lowers one of those kinds,
+ *  it adds the matching arm here in the same change. */
+function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): void {
+  switch (st.kind) {
+    case "precondition":
+    case "requires":
+    case "expr-let":
+      collectParamRefs(st.expr, acc);
+      return;
+    case "factory-let":
+      for (const f of st.fields) collectParamRefs(f.value, acc);
+      return;
+    case "op-call":
+      for (const a of st.args) collectParamRefs(a, acc);
+      return;
+    default:
+      // emit / repo-let / repo-run / for-each / resource-call — not yet
+      // lowered to param-referencing code (see lowerStatement default arm).
+      return;
+  }
+}
+
+/** The declared create-params referenced anywhere in the body, in
+ *  declaration order (stable output). */
+function referencedParams(wf: WorkflowIR): string[] {
+  const refs = new Set<string>();
+  for (const st of wf.statements ?? []) collectWorkflowStmtParamRefs(st, refs);
+  return (wf.params ?? []).map((p) => p.name).filter((n) => refs.has(n));
+}
+
 /** Compose lowered body lines into the inner-function body that the
  *  workflow module's `run_inner` (transactional) or inline body
  *  (non-transactional) executes.  Two assembly modes:
@@ -284,6 +423,16 @@ function renderWorkflowModule(appModule: string, ctxModule: string, wf: Workflow
   // Rewrite the body's fully-qualified context module to the `Context`
   // alias to keep the rendered Elixir tidy and avoid long-line warnings.
   const aliasedBody = hasContextCall ? body.replaceAll(contextModuleFq, "Context") : body;
+  // Surface referenced create-params as locals via a leading map
+  // destructure — the body's bare `param` refs (`initial_title`) bind off
+  // the `run/1` map.  Empty when no params are referenced, so a
+  // param-free workflow renders byte-identically to before.
+  const params = referencedParams(wf);
+  const paramDestructure =
+    params.length > 0
+      ? `    %{${params.map((n) => `"${snake(n)}" => ${snake(n)}`).join(", ")}} = params\n`
+      : "";
+  const finalBody = paramDestructure + aliasedBody;
 
   const transactionalDoc = transactional
     ? "\n\n  Marked `transactional` — the body runs inside `Repo.transaction/1`;\n  a rejection result rolls the transaction back."
@@ -312,7 +461,7 @@ defmodule ${moduleName} do
   end
 
   defp run_inner(params) when is_map(params) do
-${aliasedBody}
+${finalBody}
   end
 end
 `;
@@ -329,7 +478,7 @@ defmodule ${moduleName} do
 
   @spec run(map()) :: {:ok, term()} | {:error, term()}
   def run(params) when is_map(params) do
-${aliasedBody}
+${finalBody}
   end
 end
 `;
