@@ -201,20 +201,21 @@ not a parallel scoped service. The elixir `Logger.metadata` already in use
 is the same convergence a third time. Growing a second ambient channel
 here is the exact drift this doc exists to prevent.
 
-**`Activity`/OpenTelemetry is an export, not the carrier** (see the `.NET`
-row). When tracing is on, the frame-open behaviour *may also* start an
-`Activity` and copy `correlationId`/`scopeId` onto it as **tags** for
-log↔trace correlation and OTel export — but governance never reads back
-from it. `ActivitySource.StartActivity` returns **`null`** on unsampled
-requests, and the only part of an `Activity` that propagates to child
-frames/processes is `Baggage`, which serialises to the W3C `baggage`
-header — so a `currentUser`/`tenantId`/`dataKey` stored there would leak
-the principal to every downstream service and telemetry sink. The
-governance `correlationId` is **minted by the backbone** (and surfaced
-onto the span/logs for correlation), not adopted from a sampled
-`TraceId`. The `Activity.Current?.TraceId` already wired into log scopes
-in `emit/program.ts` stays — as the obs-side correlation tag, not a
-governance read.
+**`Activity`/OpenTelemetry is not part of the backbone.** The carrier is
+the dedicated `AsyncLocal` above and the push/restore is the renamed
+behaviour's `finally` — there is no role left for `Activity` in the
+mechanism, and nothing in the backbone takes an OTel dependency. The
+governance `correlationId` is **minted by the backbone**, not adopted
+from a `TraceId` (`ActivitySource.StartActivity` returns `null` on
+unsampled requests, so trace state is not a place governance can live).
+*If* the observability layer later wants to project a frame onto a span
+for log↔trace correlation, that is its concern (owned by
+[`../proposals/observability.md`](../proposals/observability.md), which
+already wires `Activity.Current?.TraceId` into log scopes in
+`emit/program.ts`) — a one-way read of the frame, never a write governance
+reads back, and never via `Baggage` (it serialises to the W3C `baggage`
+header, leaking any `currentUser`/`tenantId`/`dataKey` to every downstream
+service).
 
 **BEAM fan-out caveat.** On elixir the process dictionary and
 `Logger.metadata` are **not** inherited by `Task.async`/spawned
