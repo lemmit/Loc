@@ -1,61 +1,67 @@
-# Next.js — a node-hosted frontend, or a full-stack node foundation
+# Next.js — a wire-separated frontend, or the node LiveView (server-coupled UI)
 
-> Status: **PROPOSED (deferred).** Two *coherent* framings, and the choice
-> of backend decides which applies:
+> Status: **PROPOSED (deferred).** Next.js is a **`ui` framework**, like
+> React and LiveView — it **never owns the domain**. A node **foundation**
+> (the "vanilla node" domain that Hono runs today, or `foundation: nest`)
+> owns the domain; Next.js is a UI *coupled* to it. The only question is
+> **how the UI reaches the domain**, which gives two modes:
 >
-> - **(A) Next.js as a frontend paired with — or hosted by — a
->   domain-owning node backend (`foundation: nest` / Hono).** The concrete,
->   recommended path. It **rehabilitates the "React shell" reading**: with
->   the domain living in the backend, Next's server tier becomes a
->   legitimate BFF/SSR layer rather than a bypassed feature.
-> - **(B) Next.js as a standalone full-stack `node` foundation** — one
->   deployable owning TS domain logic *and* its React UI, the TypeScript
->   analogue of Phoenix+LiveView. Heavier and contentious; deferred.
+> - **(A) wire-separated** — like React: hosted standalone or co-hosted,
+>   talks to the backend over the wire. Concrete, recommended.
+> - **(B) server-coupled** — the **node twin of LiveView**: RSC /
+>   server-actions call the domain **in-process**. Coupled to (not owner
+>   of) whichever node foundation owns the domain, *exactly as LiveView
+>   couples to `ash` or `vanilla`*. Deferred on ROI/sequencing, **not
+>   architecture**.
 >
-> Both are gated behind
+> So there is **no `foundation: nextjs`** — that earlier framing conflated
+> the UI with the foundation. Both are gated behind
 > [`embedded-frontend-composition.md`](./embedded-frontend-composition.md)
-> (the host-embeds-framework machinery) and the realization-axes
-> `foundation:` work ([`platform-realization-axes.md`](./platform-realization-axes.md),
-> [`vanilla-phoenix-foundation.md`](./vanilla-phoenix-foundation.md)).
+> (framework + host-runtime capability) and informed by the `foundation:`
+> precedent ([`vanilla-phoenix-foundation.md`](./vanilla-phoenix-foundation.md),
+> [`platform-realization-axes.md`](./platform-realization-axes.md)).
 > Sibling of [`angular-frontend.md`](./angular-frontend.md) (the
 > prioritised, clean-fit frontend) and
-> [`nestjs-backend.md`](./nestjs-backend.md) (the natural pairing).
+> [`nestjs-backend.md`](./nestjs-backend.md) (a node foundation it can
+> couple to).
 
-## TL;DR — the framing depends on who owns the domain
+## TL;DR — the domain is always a foundation's; Next is always a UI
 
-The earlier draft of this note called the "React project shell" reading a
-*trap*. That is only true **standalone**. The correcting insight:
+The question is never "does Next own the domain" (it doesn't); it is "how
+does the UI **reach** the domain." That gives Next two modes:
 
-| Reading | Standalone | Paired with a domain-owning backend (Nest/Hono) |
-|---|---|---|
-| **Shell** (Next as a frontend; wire preserved) | **anti-pattern** — adopts Next.js while bypassing RSC/server-actions, the reason it exists | **correct** — the backend owns the domain, so Next's server tier is a real **BFF/SSR** layer, not a bypassed feature |
-| **Full-stack foundation** (Next's server actions own the domain) | coherent but heavy (Path B); breaks the wire boundary | **redundant** — two domain owners fight; don't |
+| Next.js mode | Analogue | UI → domain | Domain owned by |
+|---|---|---|---|
+| **wire-separated** (shell / static export) | React | over the wire (HTTP) | a node foundation — separate *or* co-hosted deployable |
+| **server-coupled** (RSC / server actions) | **LiveView** | **in-process call** | the node foundation it is **embedded in** |
 
-So the trap is only the *combination* of "standalone" + "shell." Add a
-domain-owning backend and the shell reading becomes the cleanest Next.js
-path Loom has. The one inviolable rule across everything below:
+The one inviolable rule, stated correctly:
 
-> **Exactly one domain owner.** When a Nest/Hono backend is present, *it*
-> owns the domain; Next.js stays a frontend (its server tier = BFF/SSR,
-> never `server-action → domain-operation`). The moment Next reaches into
-> domain logic, the wire contract is broken.
+> **The domain lives in exactly one place — a foundation — and the UI
+> *calls* it, never reimplements it.** Both Next modes obey this: mode A
+> calls over the wire, mode B calls in-process. The only way to break it is
+> a wire-separated Next that *also* runs domain logic in its server tier —
+> then two places own the domain. Don't do that.
 
-## Path A — Next paired with a domain-owning node backend (recommended)
+This corrects the earlier "shell is a trap / Next owns the domain" framing
+on two counts: the **shell** reading is correct whenever a domain-owning
+backend is present (mode A, below), and the **full-stack** reading does not
+make Next a domain *owner* — it makes Next a *coupled UI*, the node
+LiveView (mode B, below).
 
-This is the mainstream real-world stack (NestJS API + Next.js frontend),
-and it drops straight into Loom's default frontend/backend split:
+## Path A — wire-separated (recommended)
 
-- a **`foundation: nest`** (or Hono) backend deployable owns the domain
-  and serves the API;
-- a **Next.js frontend** owns the UI and talks to that API over Loom's
-  versioned wire contract — even when co-hosted, the calls stay on the
-  contract.
+The mainstream real-world stack (e.g. a NestJS API + a Next.js frontend).
+It drops straight into Loom's default frontend/backend split:
 
-Because the backend owns the domain, Next's server-side capabilities
-(SSR + a thin BFF that proxies/aggregates the backend API, handles the
-session) have a legitimate job. Nothing about Next is "bypassed," and the
-domain-ownership conflict that makes standalone full-stack Next awkward
-(Path B) simply never arises.
+- a node foundation deployable (`foundation: nest`, or Hono's vanilla node
+  domain) owns the domain and serves the API;
+- a **Next.js frontend** renders the UI and reaches the domain **over the
+  wire** — even when co-hosted, the calls stay on the contract.
+
+Because the domain is owned by the foundation, Next's server-side
+capabilities (SSR + a thin BFF that proxies/aggregates the API, handles the
+session) have a legitimate job — nothing is "bypassed."
 
 ### Two topologies — separate, or co-hosted
 
@@ -66,29 +72,27 @@ domain-ownership conflict that makes standalone full-stack Next awkward
 
 ### Co-hosting: a node backend can host Next's SSR (others can only host static)
 
-This is the elegant part, and it falls straight out of
-`embedded-frontend-composition`'s capability principle — *a host can serve
-a `ui` iff it provides the runtime that framework requires*:
+Falls straight out of `embedded-frontend-composition`'s capability
+principle — *a host can serve a `ui` iff it provides the runtime that
+framework requires*:
 
 | Host | Embed Next (static `output: export`) | Embed Next (**SSR**, e.g. `nest-next`) |
 |---|---|---|
-| **`foundation: nest` / Hono (node)** | ✅ (`ServeStaticModule`) | ✅ — *because it is a node runtime* (Nest's Express hosts Next's request handler; one process, one port) |
+| **`foundation: nest` / Hono (node)** | ✅ (`ServeStaticModule`) | ✅ — *because it is a node runtime* (the host's Express serves Next's request handler; one process) |
 | dotnet / elixir | ✅ (serves the static assets) | ❌ — no node runtime to run Next's server |
 
-So `nest hosts: <next-ui>` is the **node-runtime twin of
-phoenix-embeds-React**, and the SSR capability is *derived* from the host
-being node — not special-cased. Hosting is a **deployment-topology**
-choice; it does **not** change the layering (domain in the backend, UI in
-Next fetching the API), so the one-domain-owner rule is untouched even in a
-single process.
+`nest hosts: <next-ui>` is the **node-runtime twin of phoenix-embeds-React**,
+the SSR capability *derived* from the host being node. Co-hosting is a
+**deployment-topology** choice; the layering is unchanged (domain in the
+foundation, Next fetching it over the wire), so the one-rule above holds
+even in a single process.
 
-**Caveat to pin:** in the co-hosted SSR case, keep Next → backend as the
-wire contract (localhost/in-process client), never an in-process reach
-into domain services. And note Next's custom-server mode (the SSR
-integration) disables some Next optimizations and is mildly discouraged by
-the Next team — so offer SSR co-hosting as an opt-in (`hosts: next { ssr }`),
-with **static embed as the clean default** and **two deployables** as the
-scale-out option.
+**Caveat:** in co-hosted SSR, keep Next → backend on the wire
+(localhost/in-process *client*), never a direct import of domain functions
+— that would silently flip you into mode B. Next's custom-server mode also
+disables some optimizations and is mildly discouraged by the Next team, so
+offer SSR co-hosting as opt-in (`hosts: next { ssr }`), with **static embed
+as the clean default** and **two deployables** as the scale-out option.
 
 ### Why Path A is cheap
 
@@ -97,72 +101,101 @@ Next-as-frontend reuses the React body-walker + design packs verbatim (it
 static-export or custom-server scaffold) and a **node-running frontend
 deployable shape** — `isFrontend: true`, `needsDb: false`, but *not static*
 (unlike React/Vite), so it carries its own `composeService`. No domain
-logic, no new IR. Gated behind `embedded-frontend-composition` like any
-frontend.
+logic, no new IR.
 
-## Path B — standalone full-stack node foundation (deferred)
+## Path B — server-coupled: the node LiveView (deferred)
 
-The heavier framing: **no separate backend**; one Next.js deployable owns
-*both* the TS domain logic and the React UI — the topological analogue of
-Phoenix+LiveView.
+The fused framing, **stated correctly**: there is no separate frontend;
+Next's RSC / server actions call the domain **in-process**. Next does
+**not** own the domain — it is a server-rendered UI **coupled** to the node
+foundation that owns it, *exactly as LiveView is a UI coupled to the Ash or
+vanilla foundation*. This is the role parallel that matters:
 
-To be precise, Next.js is **not** LiveView *mechanically* (LiveView is
-stateful-server / persistent-WebSocket / HTML-diffs; Next is client-React +
-SSR + RPC-style server actions — the literal "LiveView for TS" is
-LiveViewJS; the real twins are **Blazor Server** for .NET, **Livewire** for
-PHP). What it shares is the **topological role**: a single deployable that
-owns domain *and* UI.
+| | Domain-owning **foundation** | Coupled in-process **server UI** | Wire-separated **client UI** |
+|---|---|---|---|
+| **Elixir** | `ash` / `vanilla` | **LiveView** | — |
+| **Node** | vanilla-node (Hono's domain) / `nest` | **full-stack Next.js** (RSC + server actions) | React / Vue / Svelte / Angular (+ Next, mode A) |
 
-| Piece | Phoenix+LiveView | Next.js full-stack node |
-|---|---|---|
-| Domain logic | Elixir (Ash/Ecto) | **TS — `render-expr`/`render-stmt` already exist (Hono)** |
-| UI rendering | HEEx walker | **React body-walker — already exists** |
-| Deployable shape | one app: domain + UI | one app: domain (server actions) + React UI |
-| Loom axis | `platform: elixir, foundation: …` | `platform: node, foundation: nextjs` |
+Like LiveView — which couples to *either* Elixir foundation — Next's
+server-coupled mode would couple to *either* node foundation (vanilla node
+*or* `nest`). It is **not** a foundation; it is a `ui` framework whose
+server-coupled mode **requires a node domain runtime** to call in-process,
+so it is embedded in the foundation's deployable — the precise capability
+shape `embedded-frontend-composition` already gives LiveView ("requires the
+phoenix runtime").
 
-Both halves already exist; a full-stack node foundation would glue them
-into Next's app-router/server-actions shape. **Why it stays deferred:**
+### Mechanism (why it's *coupled*, not *owning*)
 
-1. **It is a `foundation` decision, not a frontend** — collapsing
-   domain+UI re-introduces the two-axis-freezing complexity
-   `vanilla-phoenix-foundation.md` + `embedded-frontend-composition.md` are
-   *currently untangling* for Phoenix. Land on top of that machinery, not
-   beside it.
-2. **Idiomaticity asymmetry** — LiveView *is* the blessed Phoenix way; the
-   foundation pays for itself there. In TS-land the collapsed full-stack
-   model is *one* option, and the separated model (Path A, which Loom
-   already does well) is at least as common.
-3. **It forfeits the split's value** — the versioned wire contract,
-   backend-swappability, cross-backend conformance. Path A keeps all of it;
-   Path B trades it away for a weaker idiomatic claim than LiveView's.
+The domain functions are the **same TS Loom already emits** (operations /
+invariants / appliers / repositories — `render-expr`/`render-stmt` output).
+Server-coupled Next just calls them:
 
-If pursued: `foundation: nextjs` on `node`, on top of
-`embedded-frontend-composition`, reusing the React body-walker and TS
-`render-expr`/`render-stmt` verbatim; only the project-shell + the
-domain-call-lowering (operation → server action) are new. Success test: it
-touches the node scaffold + a domain-call-lowering seam + a capability set
+```ts
+// app/orders/actions.ts        — command
+'use server'
+import { placeOrder } from '@/domain/order/operations'   // generated
+export const placeOrderAction = (cmd: PlaceOrderCommand) =>
+  placeOrder(orderRepo, cmd)                              // in-process call
+```
+```tsx
+// app/orders/page.tsx          — query, a server component
+import { findAllOrders } from '@/domain/order/queries'    // generated
+export default async () => <OrderList orders={await findAllOrders(orderRepo)} />
+```
+
+`placeOrder` / `findAllOrders` are the very functions a Hono route would
+call. The **only new Loom work is the domain-call-lowering seam** (operation
+→ server action, query → RSC fetch) + the project shell — *not* a new
+foundation. The domain layer is whatever node foundation you already have.
+
+### Why it's deferred — ROI/sequencing, not architecture
+
+The earlier draft over-stated this as "breaks the wire boundary." It does
+not *break* a rule; like LiveView it **foregoes** the wire boundary — a
+trade Loom already takes for Elixir. The honest reasons it waits:
+
+1. **Sequencing.** It rides on the embedded-frontend / `foundation:`
+   machinery still being untangled for Phoenix. Build it *on top of* that,
+   reusing the same framework-requires-runtime capability, not beside it.
+2. **Marginal value / fit.** LiveView is *the* singular blessed Phoenix
+   idiom, so its coupled UI pays for itself. Next's server-coupled mode is
+   *one* TS option among several, and **Path A (wire-separated, cheaper,
+   reuses the React frontend) already covers most of the same need** — so
+   it overlaps heavily with machinery Loom already has. Lower marginal
+   value, not wrongness.
+
+If pursued: a server-coupled **mode of the Next `ui` framework** (the node
+LiveView), on top of `embedded-frontend-composition`, reusing the React
+body-walker and the existing node-foundation domain verbatim; only the
+domain-call-lowering seam + project shell are new. Success test: it touches
+the node scaffold + a domain-call-lowering seam + a host-runtime capability
 — **never** the body-walker, design packs, TS expression renderers, or IR.
 
 ## Recommendation
 
-Pursue **Path A** when Next.js is wanted — it is concrete, cheap, reuses
-the React frontend, and is *rehabilitated* by any domain-owning backend
-(the Nest pairing especially). Keep **Path B** on ice behind the Phoenix
-foundation work. Either way, **one domain owner**, and Next.js earns its
-place through SSR/SEO + a BFF tier, not by owning domain logic.
+Pursue **Path A (wire-separated)** when Next.js is wanted — concrete, cheap,
+reuses the React frontend, rehabilitated by any domain-owning node backend
+(the Nest pairing especially). Keep **Path B (the node LiveView)** on ice
+behind the Phoenix foundation work; it is legitimate (the LiveView twin),
+just lower-ROI than Path A. Either way Next.js is a **UI** — it earns its
+place through SSR/SEO + a BFF tier or, in mode B, as the coupled server UI;
+**never** by owning the domain.
 
 ## Cross-references
 
-- [`nestjs-backend.md`](./nestjs-backend.md) — the natural Path-A pairing;
-  a node backend that can *host* Next's SSR (the node-runtime capability).
+- [`nestjs-backend.md`](./nestjs-backend.md) — a node foundation Next can
+  pair with (Path A) or couple to (Path B); and a host that can embed Next's
+  SSR (the node-runtime capability).
 - [`embedded-frontend-composition.md`](./embedded-frontend-composition.md)
-  — **prerequisite**: host-embeds-framework decoupling + the
-  runtime-capability derivation that makes "node hosts SSR Next" fall out.
+  — **prerequisite**: the framework + host-runtime capability model that
+  makes both "node hosts SSR Next" (A) and "server-coupled Next requires a
+  node runtime" (B) fall out — the same machinery that types LiveView.
 - [`vanilla-phoenix-foundation.md`](./vanilla-phoenix-foundation.md) /
   [`platform-realization-axes.md`](./platform-realization-axes.md) — the
-  `foundation:` precedent Path B copies.
+  `foundation:` precedent: LiveView couples to `ash`/`vanilla` just as
+  server-coupled Next would couple to the node foundations.
 - [`angular-frontend.md`](./angular-frontend.md) — the prioritised frontend
-  (a clean distinct-framework fit; Next is a *topology/foundation*
-  question, Angular a *frontend* one).
+  (a clean distinct-framework fit; Next is a *coupling-mode* question,
+  Angular a *frontend* one).
 - [`docs/page-metamodel.md`](../page-metamodel.md) — the framework-neutral
-  page-DSL both paths reuse unchanged.
+  page-DSL both modes reuse unchanged.
