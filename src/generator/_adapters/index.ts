@@ -4,6 +4,7 @@
 
 import type { LayoutAdapter } from "./layout-surface.js";
 import type { PersistenceAdapter } from "./persistence-surface.js";
+import type { RuntimeAdapter } from "./runtime-surface.js";
 import type { StyleAdapter } from "./style-surface.js";
 import type { TransportAdapter } from "./transport-surface.js";
 
@@ -26,6 +27,10 @@ export type {
   ResourceAdapter,
   ResourceCapabilities,
 } from "./resource-surface.js";
+export type {
+  RuntimeAdapter,
+  RuntimeCapabilities,
+} from "./runtime-surface.js";
 export type {
   LayoutShape,
   StyleAdapter,
@@ -50,13 +55,18 @@ export interface PlatformAdapters {
    *  per backend (the per-transport emit is future work); the menu may
    *  carry reserved stubs (`controllers` on dotnet). */
   transports: Record<string, TransportAdapter>;
+  /** Aggregate execution model (`runtime:` axis).  Thin today — every
+   *  backend ships `transactional`; actor runtimes (`genserver` /
+   *  `orleans` / `akka`) are registered as reserved stubs. */
+  runtimes: Record<string, RuntimeAdapter>;
 }
 
 /** Defaults a platform falls back to when the source doesn't pin one
- *  via `persistence:` / `style:` / `layout:` / `transport:`. */
+ *  via `persistence:` / `style:` / `layout:` / `transport:` / `runtime:`. */
 export interface PlatformAdapterDefaults {
   persistence: { state: string; eventLog: string };
   style: string;
   layout: string;
   transport: string;
+  runtime: string;
 }

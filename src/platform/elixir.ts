@@ -1,4 +1,9 @@
-import type { PlatformAdapterDefaults, PlatformAdapters } from "../generator/_adapters/index.js";
+import {
+  type PlatformAdapterDefaults,
+  type PlatformAdapters,
+  type RuntimeAdapter,
+  stubAdapter,
+} from "../generator/_adapters/index.js";
 import { ashPostgresPersistenceAdapter } from "../generator/elixir/adapters/ash-postgres-persistence.js";
 import { ashStyleAdapter } from "../generator/elixir/adapters/ash-style.js";
 import { byFeatureLayoutAdapter } from "../generator/elixir/adapters/by-feature-layout.js";
@@ -90,16 +95,32 @@ const elixirPlatform: PlatformSurface = {
   // plain Phoenix) and both styles on the application axis (`ash`, `vanilla`).
   // The defaults below describe elixir's DEFAULT foundation (ash); a
   // `foundation: vanilla` deployable overrides them to `ecto` / `vanilla` in
-  // lowering (`foundationAdapterOverride`).  All real (F7a/b/c); no stubs.
+  // lowering (`foundationAdapterOverride`).  The resource/style/transport
+  // adapters are real; `genserver` (process-per-aggregate runtime) is a
+  // reserved stub.
   adapters(): PlatformAdapters {
-    return {
+    const menu: PlatformAdapters = {
       persistence: { ashPostgres: ashPostgresPersistenceAdapter, ecto: ectoPersistenceAdapter },
       styles: { ash: ashStyleAdapter, vanilla: vanillaStyleAdapter },
       layouts: { byFeature: byFeatureLayoutAdapter },
       // Phoenix (Router + controllers) — the Elixir backend's HTTP surface,
       // shared by both foundations (D-PHOENIX-TRANSPORT).
       transports: { phoenix: { name: "phoenix" } },
+      runtimes: {
+        // DB-transaction consistency — the only real runtime today.
+        transactional: { name: "transactional" },
+        // A BEAM process per aggregate — reserved (the GenServer-runtime emit
+        // is future work; realization-axes-alignment.md).
+        genserver: stubAdapter<RuntimeAdapter>(
+          "runtime",
+          "genserver",
+          "elixir",
+          () => Object.keys(menu.runtimes),
+          { name: "genserver" },
+        ),
+      },
     };
+    return menu;
   },
   adapterDefaults(): PlatformAdapterDefaults {
     return {
@@ -107,6 +128,7 @@ const elixirPlatform: PlatformSurface = {
       style: "ash",
       layout: "byFeature",
       transport: "phoenix",
+      runtime: "transactional",
     };
   },
 };

@@ -197,15 +197,20 @@ visible alignment; later phases are parity/idiom polish.
   lowering default). dotnet's `minimalApi` / `controllers` are plain IDs and
   are writable.
 
-**Phase 3 — `runtime:` axis (defer-leaning).**
-- Today every backend is `transactional` size-1. Realizing `genserver` (elixir),
-  `orleans`/`akka` (dotnet) is a large, separate effort. **Document as a known
-  greenfield axis; defer** unless prioritized.
+**Phase 3 — `runtime:` axis. ✅ (slice 5 — promoted to adapter-backed with stubs)**
+- Added a thin `RuntimeAdapter` contract + a `runtimes` slot / `runtime` default,
+  mirroring transport. `runtime` left the greenfield set (`greenfieldMenu` is now
+  `foundation`-only; `greenfieldAxisDefaults` returns just `foundation`).
+- `transactional` real on every backend (the default); the actor runtimes are
+  registered as reserved stubs so they're recognized, not unknown — **`orleans`
+  (dotnet), `genserver` (elixir), `nact` (node — the Akka-inspired actor
+  library)**. The actor-runtime *emit* is future work (no `akka` for now).
+- Behavior-preserving (menu/defaults match the prior greenfield values).
 
-**Phase 4 — layout / application value-name parity (polish).**
+**Phase 4 — value-name parity (polish).**
+- `application: flat` ✅ (slice 4) — registered as a reserved stub on dotnet/node
+  so the vocabulary matches the spec spectrum `flat`→`serviceLayer`→`cqrs`.
 - elixir `byLayer`: **defer** (idiom, §3.2).
-- Reconcile `application:` value names (impl `layered`/`cqrs` vs spec
-  `flat`/`serviceLayer`/`cqrs`) — a naming-only pass; low risk, do last.
 
 ## 5. Definition of done
 - elixir exposes `persistence: { ashPostgres, ecto }` and `application: { ash,
