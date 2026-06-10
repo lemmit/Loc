@@ -9,8 +9,6 @@
 // `event_dead_lettered`.  Ephemeral channels keep the inline at-most-once
 // path byte-identically.
 
-import { lines } from "../../../util/code-builder.js";
-
 /** The EF entity + configuration mapped onto `__loom_outbox` (the table
  *  itself ships via the shared MigrationsIR — EF only maps it). */
 export function renderOutboxMessage(ns: string): string {
