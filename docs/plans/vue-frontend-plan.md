@@ -90,6 +90,14 @@ output through any refactor touched.
 
 Bring the shared-walker extraction into this branch's base.
 
+> **Status (2026-06-10): satisfied by stacking.** This branch is rebased onto
+> `claude/dazzling-ride-6r2ux7` (Svelte Slices 1–2), so the shared core is in
+> the base. It landed entirely under `src/generator/_walker/` (`walker-core.ts`,
+> `render-primitive.ts`, `primitives/*`, `shared/args.ts`) — the tentative
+> `src/generator/_frontend/` split below did not materialize; read those
+> references as `_walker/`. Gate verified on the stacked base: full fast suite
+> green (4341 passed), baseline fixture re-capture zero-drift.
+
 - **Preferred path:** the Svelte effort's Slice 2 has merged to main — rebase
   and proceed straight to Slice 1.
 - **Fallback path:** execute the extraction here, exactly as specified in
