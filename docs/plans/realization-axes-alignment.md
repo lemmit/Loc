@@ -202,10 +202,12 @@ visible alignment; later phases are parity/idiom polish.
 - Added a thin `RuntimeAdapter` contract + a `runtimes` slot / `runtime` default,
   mirroring transport. `runtime` left the greenfield set (`greenfieldMenu` is now
   `foundation`-only; `greenfieldAxisDefaults` returns just `foundation`).
-- `transactional` real on every backend (the default); the actor runtimes are
-  registered as reserved stubs so they're recognized, not unknown — **`orleans`
-  (dotnet), `genserver` (elixir), `nact` (node — the Akka-inspired actor
-  library)**. The actor-runtime *emit* is future work (no `akka` for now).
+- `transactional` real on every backend (the default); the non-transactional
+  runtimes are registered as reserved stubs so they're recognized, not unknown
+  — **`orleans`** (dotnet, virtual actors), **`genserver`** (elixir, BEAM
+  process per aggregate), **`worker`** (node — `worker_threads`; Node has no
+  mainstream actor runtime, so its built-in concurrency primitive stands in).
+  The per-runtime *emit* is future work (no `akka` for now).
 - Behavior-preserving (menu/defaults match the prior greenfield values).
 
 **Phase 4 — value-name parity (polish).**

@@ -294,7 +294,7 @@ describe("realization axes — runtime is adapter-backed", () => {
     expect((await parse(sys("elixir { runtime: transactional }"))).errors).toEqual([]);
   });
 
-  it("recognises actor runtimes as reserved (`orleans` dotnet, `genserver` elixir, `nact` node)", async () => {
+  it("recognises non-transactional runtimes as reserved (`orleans` dotnet, `genserver` elixir, `worker` node)", async () => {
     const d = await parse(sys("dotnet { runtime: orleans }"));
     expect(d.errors.some((e) => /runtime: orleans.*reserved.*not yet implemented/.test(e))).toBe(
       true,
@@ -303,8 +303,10 @@ describe("realization axes — runtime is adapter-backed", () => {
     expect(e.errors.some((m) => /runtime: genserver.*reserved.*not yet implemented/.test(m))).toBe(
       true,
     );
-    const n = await parse(sys("hono { runtime: nact }"));
-    expect(n.errors.some((m) => /runtime: nact.*reserved.*not yet implemented/.test(m))).toBe(true);
+    const n = await parse(sys("hono { runtime: worker }"));
+    expect(n.errors.some((m) => /runtime: worker.*reserved.*not yet implemented/.test(m))).toBe(
+      true,
+    );
   });
 
   it("rejects an actor runtime on a backend that doesn't reserve it (`orleans` on hono)", async () => {
