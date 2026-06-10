@@ -1,0 +1,93 @@
+name: Java build verification
+
+# Compiles a Java project generated from each test-fixture .ddd by
+# `ddd generate system`, then runs `mvn package` (compiles main + test
+# sources, including the emitted JUnit classes).  Catches emission bugs
+# in the Java generator that the string-match unit tests cannot see
+# (missing imports, JPA mapping shapes Hibernate rejects, Spring Data
+# signature drift, record/embeddable mismatches).
+#
+# Mirrors `dotnet-build.yml` (.NET → dotnet build /warnaserror) and
+# `elixir-ash-build.yml` (Phoenix → mix compile --warnings-as-errors).
+#
+# Triggers:
+#   - PRs that touch the Java generator, the java platform module, or
+#     the java build fixtures.
+#   - Pushes to main (full regression check).
+#   - Manual dispatch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/java/**'
+      - 'src/platform/java.ts'
+      - 'examples/**'
+      - 'package.json'
+      - '.github/workflows/java-build.yml'
+      - 'test/e2e/generated-java-build.test.ts'
+      - 'test/e2e/fixtures/java-build/**'
+  pull_request:
+    paths:
+      - 'src/generator/java/**'
+      - 'src/platform/java.ts'
+      - 'examples/**'
+      - 'package.json'
+      - '.github/workflows/java-build.yml'
+      - 'test/e2e/generated-java-build.test.ts'
+      - 'test/e2e/fixtures/java-build/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-generated-java:
+    runs-on: ubuntu-latest
+    # Cold Maven runs download the Spring Boot dependency tree (~2min);
+    # warm runs with the ~/.m2 cache below are ~30s per fixture.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # Cache the Maven repository across runs.  Keyed on the pom
+      # template (the generated dependency set only moves when the
+      # pinned versions in emit/program.ts move).
+      - name: Cache Maven packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ hashFiles('src/generator/java/emit/program.ts') }}
+          restore-keys: |
+            maven-
+
+      # Build the Loom toolchain.  `prepare` lifecycle runs
+      # `langium:generate` which populates src/language/generated/.
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Type-check
+        run: npm run build
+
+      - name: mvn package against each fixture
+        run: npm run test:java
+
+      - name: Surface maven output on failure
+        if: failure()
+        run: |
+          echo '## Tail of test:java output' >> $GITHUB_STEP_SUMMARY
+          echo 'See the previous step log for full `mvn package` diagnostics — the test inherits stdio so per-file errors appear there as `[ERROR]` lines.' >> $GITHUB_STEP_SUMMARY

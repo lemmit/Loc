@@ -1,15 +1,44 @@
 # Java backend (Spring Boot + JPA) — implementation plan
 
-> **Status:** APPROVED PLAN / in flight. Supersedes the effort-shape sketch in
-> [`../proposals/java-backend.md`](../proposals/java-backend.md) (status there:
-> VISION). This is the slice-by-slice execution plan; each slice is one commit
-> (or a few), lands green on `npm test`, and never breaks an existing backend.
+> **Status:** S0–S7 + S9 SHIPPED; S8 partially shipped (see the execution
+> record below). Supersedes the effort-shape sketch in
+> [`../proposals/java-backend.md`](../proposals/java-backend.md). Each slice
+> landed as one commit on `npm test`-green trees; the generated output was
+> additionally verified at runtime against a local Postgres 16 (boot, Flyway,
+> full CRUD/op/find/workflow/view/auth/422 behaviour, observability envelope).
 >
-> The proposal's stated blocker — criterion-everywhere — has **shipped** since
-> it was written: the selectability oracle (`firstNonQueryableNode`) gates
-> queryability at IR-validate time and all three backends emit reified
-> criteria (`criteria-emit.ts` on .NET). The `Specification<T>` emission is
-> therefore in-scope for this delivery, not a fast-follow.
+> ## Execution record
+>
+> - **S0–S7, S9 — done.** Wiring + skeleton, `JAVA_TARGET` renderers, domain
+>   layer, JPA persistence + Flyway, the REST/wire layer, auth/extern/
+>   workflows/views, JUnit test emission + observability + the
+>   `LOOM_JAVA_BUILD` / `LOOM_OBS_E2E_JAVA` opt-in suites
+>   (`npm run test:java` / `test:obs-java`), CI workflows
+>   (`java-build.yml`, `java-obs-e2e.yml`), docs.
+> - **S8 — partial.** The build fixtures include the full java-variant
+>   showcase, and validation gates keep every unsupported combination
+>   fail-fast. **Follow-up:** add a java deployable to the canonical
+>   `examples/showcase.ddd` and wire the 4-way OpenAPI diff into
+>   `test/e2e/e2e.test.ts` — deliberately deferred because the compose
+>   harness needs a docker host to iterate against (this session's
+>   environment has none) and touching the canonical showcase fans out
+>   into every other backend's gates.
+> - **Deferred features — all fail-fast gated, never silent:** paged
+>   carriers, discriminated unions, exception-less operation returns
+>   (java absent from the `SUPPORTED_*` sets), TPH `sharedTable`,
+>   `persistedAs(eventLog)`, `shape(document|embedded)`, single
+>   containments (`loom.java-single-containment-unsupported`), the
+>   embedded-SPA fullstack mount (`loom.java-fullstack-unsupported`),
+>   retrieval-driven workflow loops / `repo-run`, workflow-level `emit`,
+>   resource-op clients, reified-criteria `Specification<T>` consumption,
+>   provenance + per-op audited (gated like .NET), `ddd new` starter
+>   template.
+>
+> The proposal's stated blocker — criterion-everywhere — had **shipped**
+> before this work started: the selectability oracle
+> (`firstNonQueryableNode`) gates queryability at IR-validate time and all
+> backends emit reified criteria. The `Specification<T>` emission therefore
+> needs no model work, only the emitter follow-up.
 
 ## Pinned decisions
 
