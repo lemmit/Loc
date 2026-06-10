@@ -211,6 +211,23 @@ function containmentResponseType(t: TypeIR): string {
 }
 
 function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
+  // Event-sourced create: the request shape is the create ACTION's
+  // params (the command), not the field set (appliers A2.2).
+  const esCreate = agg.persistedAs === "eventLog" ? agg.creates?.[0] : undefined;
+  if (esCreate) {
+    return lines(
+      `class Create${agg.name}Request(BaseModel):`,
+      esCreate.params.length > 0
+        ? esCreate.params.map((p) => `    ${p.name}: ${requestPyType(p.type, ctx)}`)
+        : ["    pass"],
+      "",
+      "",
+      `class Create${agg.name}Response(BaseModel):`,
+      "    id: str",
+      "",
+      "",
+    );
+  }
   const inputs = forCreateInput(agg.fields);
   return lines(
     `class Create${agg.name}Request(BaseModel):`,
@@ -281,6 +298,19 @@ export function pyWireToDomain(expr: string, t: TypeIR, ctx: BoundedContextIR): 
 // --- routes ---------------------------------------------------------------------
 
 function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
+  const esCreate = agg.persistedAs === "eventLog" ? agg.creates?.[0] : undefined;
+  if (esCreate) {
+    const args = esCreate.params
+      .map((p) => `${snake(p.name)}=${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`)
+      .join(", ");
+    return lines(
+      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}")`,
+      `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
+      `    created = ${agg.name}.create(${args})`,
+      "    await _repo(session).save(created)",
+      `    return {"id": created.id}`,
+    );
+  }
   const inputs = forCreateInput(agg.fields);
   const args = inputs
     .map((f) => `${snake(f.name)}=${pyWireToDomain(`body.${f.name}`, f.type, ctx)}`)

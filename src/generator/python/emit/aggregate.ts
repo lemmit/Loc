@@ -51,6 +51,12 @@ interface EntityShape {
   invariants: InvariantIR[];
   functions: FunctionIR[];
   operations: OperationIR[];
+  /** Root-only, `persistedAs(eventLog)`: fold appliers + the single
+   *  create lifecycle action whose emit-only body drives the
+   *  event-sourced factory (appliers A2). */
+  eventSourced?: boolean;
+  appliers?: import("../../../ir/types/loom-ir.js").ApplyIR[];
+  esCreate?: OperationIR;
 }
 
 export function renderPyAggregate(agg: AggregateIR, ctx: BoundedContextIR): string {
@@ -87,6 +93,10 @@ export function renderPyAggregate(agg: AggregateIR, ctx: BoundedContextIR): stri
         collectStmtExprImports(st, exprImports);
       }
     }
+    for (const ap of s.appliers ?? []) {
+      for (const st of ap.statements) collectStmtExprImports(st, exprImports);
+    }
+    for (const st of s.esCreate?.statements ?? []) collectStmtExprImports(st, exprImports);
   }
   // Server-init seeds in the create factory can stamp `datetime.now(UTC)`.
   const root = rootShape(agg);
@@ -133,19 +143,25 @@ export function renderPyAggregate(agg: AggregateIR, ctx: BoundedContextIR): stri
 
   const emittedEvents = [
     ...new Set(
-      shapes.flatMap((s) =>
-        s.operations.flatMap((op) =>
+      shapes.flatMap((s) => [
+        ...s.operations.flatMap((op) =>
           op.statements.filter((st) => st.kind === "emit").map((st) => st.eventName),
         ),
-      ),
+        ...(s.appliers ?? []).map((ap) => ap.event),
+        ...(s.esCreate?.statements ?? [])
+          .filter((st) => st.kind === "emit")
+          .map((st) => (st as { eventName: string }).eventName),
+      ]),
     ),
   ].sort();
   const eventImports = ["DomainEvent", ...emittedEvents];
 
+  const bodyUsesCast = /\bcast\(/.test(body);
   return lines(
     `"""${agg.name} aggregate.  Auto-generated."""`,
     "",
     exprImports.has("re") ? "import re" : null,
+    bodyUsesCast ? "from typing import cast" : null,
     usesDatetime ? "from datetime import UTC, datetime" : null,
     usesDecimal ? "from decimal import Decimal" : null,
     exprImports.has("re") || usesDatetime || usesDecimal ? "" : null,
@@ -203,6 +219,9 @@ function rootShape(a: AggregateIR): EntityShape {
     invariants: a.invariants,
     functions: a.functions,
     operations: a.operations,
+    eventSourced: a.persistedAs === "eventLog",
+    appliers: a.appliers,
+    esCreate: a.creates?.[0],
   };
 }
 
@@ -315,7 +334,7 @@ function renderEntity(e: EntityShape): string {
     const prefix = op.visibility === "public" ? "" : "_";
     const params = ["self", ...op.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`)];
     const retType = op.returnType ? renderPyOperationReturnType(op.returnType) : "None";
-    const body = renderPyStatements(op.statements);
+    const body = renderPyStatements(op.statements, undefined, { eventSourced: e.eventSourced });
     return [
       "",
       `    def ${prefix}${snake(op.name)}(${params.join(", ")}) -> ${retType}:`,
@@ -359,10 +378,67 @@ function renderEntity(e: EntityShape): string {
     `        return cls(${stateArgs.join(", ")})`,
   ];
 
+  // Event-sourcing (appliers A2): per-event fold methods, the
+  // isinstance `_apply` dispatch, the `_from_events` rehydrator
+  // (fold-from-zero over a __new__ shell), and the event-sourced
+  // `create` factory running the create action's emit-only body.
+  const esBlocks: string[] = [];
+  if (e.isRoot && e.eventSourced) {
+    const shellSeeds = [
+      `        inst = cls.__new__(cls)`,
+      ...e.fields.map((f) => `        inst._${snake(f.name)} = ${shellSeed(f)}`),
+      "        inst._events = []",
+    ];
+    for (const ap of e.appliers ?? []) {
+      esBlocks.push(
+        "",
+        `    def _apply_${snake(ap.event)}(self, ${snake(ap.param)}: ${ap.event}) -> None:`,
+        renderPyStatements(ap.statements) || "        pass",
+      );
+    }
+    esBlocks.push(
+      "",
+      "    def _apply(self, ev: DomainEvent) -> None:",
+      ...(e.appliers ?? []).flatMap((ap, i) => [
+        `        ${i === 0 ? "if" : "elif"} isinstance(ev, ${ap.event}):`,
+        `            self._apply_${snake(ap.event)}(ev)`,
+      ]),
+      "",
+      "    @classmethod",
+      `    def _from_events(cls, id: ${e.name}Id, events: list[DomainEvent]) -> ${self}:`,
+      `        inst = cls.__new__(cls)`,
+      `        inst._id = id`,
+      ...e.fields.map((f) => `        inst._${snake(f.name)} = ${shellSeed(f)}`),
+      "        inst._events = []",
+      "        for ev in events:",
+      "            inst._apply(ev)",
+      "        return inst",
+    );
+    if (e.esCreate) {
+      const params = e.esCreate.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`);
+      esBlocks.push(
+        "",
+        "    @classmethod",
+        `    def create(cls${params.length > 0 ? `, *, ${params.join(", ")}` : ""}) -> ${self}:`,
+        `        inst = cls.__new__(cls)`,
+        `        inst._id = new_${snake(e.name)}_id()`,
+        ...e.fields.map((f) => `        inst._${snake(f.name)} = ${shellSeed(f)}`),
+        "        inst._events = []",
+        `        inst._init(${e.esCreate.params.map((p) => snake(p.name)).join(", ")})`,
+        "        return inst",
+        "",
+        `    def _init(self${params.length > 0 ? `, ${params.join(", ")}` : ""}) -> None:`,
+        renderPyStatements(e.esCreate.statements, undefined, { eventSourced: true }) ||
+          "        pass",
+      );
+    }
+    void shellSeeds;
+  }
+
   // Public `create(...)` factory — constructible roots only.  Inputs are
   // the wire create set (incl. optionals); server-owned fields seed.
   let createFactory: string[] = [];
-  if (e.isRoot && e.hasCreate) {
+  if (e.isRoot && e.hasCreate && !e.eventSourced) {
     const inputs = forCreateInput(e.fields);
     const inputNames = new Set(inputs.map((f) => f.name));
     const factoryParams = inputs.map((f) =>
@@ -394,10 +470,41 @@ function renderEntity(e: EntityShape): string {
     ...fns,
     ...ops,
     ...pullEvents,
+    ...esBlocks,
     ...assertInvariants,
     ...createAlias,
     ...createFactory,
   );
+}
+
+/** Type-correct fold-from-zero shell seed — like `serverInitSeed`, but
+ *  enum / VO shapes cast a None through so mypy accepts the shell (the
+ *  appliers populate them before any read). */
+function shellSeed(f: FieldIR): string {
+  const t = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (f.optional || f.type.kind === "optional") return "None";
+  if (t.kind === "primitive") {
+    switch (t.name) {
+      case "int":
+      case "long":
+        return "0";
+      case "decimal":
+        return "0.0";
+      case "money":
+        return 'Decimal("0")';
+      case "bool":
+        return "False";
+      case "string":
+      case "guid":
+        return '""';
+      case "datetime":
+        return "datetime.now(UTC)";
+      default:
+        return "None";
+    }
+  }
+  if (t.kind === "array") return "[]";
+  return `cast(${renderPyType(f.type)}, None)`;
 }
 
 /** Exception-less `or`-union returns get their proper variant classes in

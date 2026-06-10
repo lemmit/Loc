@@ -44,4 +44,7 @@ export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingSha
   // `document` (a single opaque `:map` — non-idiomatic for Ash) is a
   // future allowed-but-warned addition.
   elixir: ["relational", "embedded"],
+  // Python emits relational state (+ the eventLog stream table, which is
+  // not a SavingShape); embedded / document emission is future work.
+  python: ["relational"],
 };

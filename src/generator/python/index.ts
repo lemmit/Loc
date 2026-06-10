@@ -26,6 +26,7 @@ import { renderPyTestsFile } from "./emit/tests.js";
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
+import { buildPyEventSourcedRepositoryFile } from "./repository-eventsourced-builder.js";
 import { buildPyRoutesFile } from "./routes-builder.js";
 import { buildPyViewsFile } from "./views-builder.js";
 
@@ -75,7 +76,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/db/__init__.py", "");
   out.set("app/db/engine.py", ENGINE_PY);
   const routedAggs = args.contexts.flatMap((c) =>
-    c.aggregates.filter((a) => !a.isAbstract && a.persistedAs !== "eventLog").map((a) => a.name),
+    c.aggregates.filter((a) => !a.isAbstract).map((a) => a.name),
   );
   const hasViews = merged.views.some((v) => v.source.kind === "aggregate");
   out.set("app/main.py", renderMain(args.sys.name, routedAggs, hasViews));
@@ -128,14 +129,14 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract) continue;
       out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx));
-      if (agg.persistedAs !== "eventLog") {
-        const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
-        out.set(
-          `app/db/repositories/${snake(agg.name)}_repository.py`,
-          buildPyRepositoryFile(agg, repo, ctx),
-        );
-        out.set(`app/http/${snake(agg.name)}_routes.py`, buildPyRoutesFile(agg, repo, ctx));
-      }
+      const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+      out.set(
+        `app/db/repositories/${snake(agg.name)}_repository.py`,
+        agg.persistedAs === "eventLog"
+          ? buildPyEventSourcedRepositoryFile(agg, repo, ctx)
+          : buildPyRepositoryFile(agg, repo, ctx),
+      );
+      out.set(`app/http/${snake(agg.name)}_routes.py`, buildPyRoutesFile(agg, repo, ctx));
       const tests = renderPyTestsFile(agg, ctx);
       if (tests != null) out.set(`tests/test_${snake(agg.name)}.py`, tests);
     }

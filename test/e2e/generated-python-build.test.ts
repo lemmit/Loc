@@ -34,6 +34,8 @@ const CASES: Array<[fixture: string, project: string]> = [
   // TPH (shared kind-discriminated table) + TPC (per-concrete tables)
   // hierarchies with polymorphic base readers.
   ["test/e2e/fixtures/python-build/inheritance.ddd", "api"],
+  // persistedAs(eventLog): append-only stream + appliers fold.
+  ["test/e2e/fixtures/python-build/eventlog.ddd", "api"],
 ];
 
 describe.skipIf(!ENABLED)(

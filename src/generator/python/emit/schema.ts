@@ -37,7 +37,11 @@ export function renderPySchema(
 ): string {
   const models: string[] = [];
   for (const agg of ctx.aggregates) {
-    if (agg.persistedAs === "eventLog") continue; // S14
+    if (agg.persistedAs === "eventLog") {
+      const ds14 = resolveDataSource?.(agg);
+      models.push(renderEventLogModel(agg.name, ds14?.schema, ds14?.tablePrefix));
+      continue;
+    }
     // dataSource-driven routing — the table lives in the binding's
     // schema (default `snake(context)`), exactly where the shared DDL
     // (sql-pg) creates it.
@@ -163,6 +167,27 @@ function renderColumn(c: PyColumn): string {
     c.primaryKey ? "primary_key=True" : null,
   ].filter((a): a is string => a != null);
   return `    ${c.attr}: Mapped[${annotation}] = mapped_column(${args.join(", ")})`;
+}
+
+/** Append-only event stream for a `persistedAs(eventLog)` aggregate —
+ *  `(stream_id, version)`-keyed; state rehydrates by folding. */
+function renderEventLogModel(name: string, schema?: string, prefix?: string): string {
+  const tableName = `${prefix ?? ""}${snake(name)}_events`;
+  return lines(
+    `class ${name}EventRow(Base):`,
+    `    __tablename__ = "${tableName}"`,
+    "    __table_args__ = (",
+    `        PrimaryKeyConstraint("stream_id", "version"),`,
+    ...(schema ? [`        {"schema": "${schema}"},`] : []),
+    "    )",
+    "",
+    // The shared DDL types stream_id TEXT (Drizzle parity), not UUID.
+    "    stream_id: Mapped[str] = mapped_column(Text)",
+    "    version: Mapped[int] = mapped_column(Integer)",
+    "    type: Mapped[str] = mapped_column(Text)",
+    "    data: Mapped[object] = mapped_column(JSONB)",
+    "    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))",
+  );
 }
 
 /** TPH shared-table model — the whole hierarchy in one table named for
