@@ -1,0 +1,83 @@
+// Entity parts + containment + collection ops + money on the python
+// backend — the sales-shaped cell of the LOOM_PYTHON_BUILD corpus.
+system PySales {
+  subdomain Sales {
+    context Sales {
+      enum OrderStatus { Draft, Confirmed, Shipped }
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+      }
+
+      event LineAdded {
+        order: Order id,
+        quantity: int
+      }
+
+      event OrderConfirmed {
+        order: Order id,
+        at: datetime
+      }
+
+      aggregate Order {
+        status: OrderStatus
+        placedAt: datetime
+        unitBudget: money
+        contains lines: OrderLine[]
+
+        derived total: Money =
+          Money { amount: lines.sum(l => l.subtotal.amount), currency: "USD" }
+
+        invariant lines.count > 0 when status == Confirmed
+
+        function isMutable(): bool = status == Draft
+
+        private operation requireMutable() {
+          precondition isMutable()
+        }
+
+        operation addLine(qty: int, price: Money) {
+          precondition isMutable()
+          precondition qty > 0
+          lines += OrderLine { quantity: qty, unitPrice: price }
+          emit LineAdded { order: id, quantity: qty }
+        }
+
+        operation confirm() {
+          precondition isMutable()
+          precondition lines.count > 0
+          status := Confirmed
+          emit OrderConfirmed { order: id, at: now() }
+        }
+
+        entity OrderLine {
+          quantity: int
+          unitPrice: Money
+
+          function subtotalAmount(): decimal = unitPrice.amount * quantity
+
+          derived subtotal: Money =
+            Money { amount: subtotalAmount(), currency: unitPrice.currency }
+
+          invariant quantity > 0
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+
+  api SalesApi from Sales
+
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
+
+  deployable api {
+    platform: python
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 8000
+  }
+}

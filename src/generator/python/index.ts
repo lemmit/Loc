@@ -1,6 +1,8 @@
 import type { DeployableIR, EnrichedBoundedContextIR, SystemIR } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { lines } from "../../util/code-builder.js";
+import { snake } from "../../util/naming.js";
+import { renderPyAggregate } from "./emit/aggregate.js";
 import { ERRORS_PY } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
 import { renderPyIds } from "./emit/ids.js";
@@ -59,6 +61,16 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/domain/errors.py", ERRORS_PY);
   out.set("app/domain/value_objects.py", renderPyEnumsAndValueObjects(merged));
   out.set("app/domain/events.py", renderPyEvents(merged));
+
+  // Per-aggregate emission stays per-context — each aggregate module is
+  // emitted in the context that owns it.  A TPH/TPC abstract base owns
+  // no instantiable domain module (inheritance lands in S13).
+  for (const ctx of args.contexts) {
+    for (const agg of ctx.aggregates) {
+      if (agg.isAbstract) continue;
+      out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx));
+    }
+  }
   return out;
 }
 
@@ -129,6 +141,11 @@ function renderPyproject(slug: string): string {
     "[tool.ruff]",
     "line-length = 100",
     `target-version = "py312"`,
+    "",
+    "# E741: DSL-authored lambda params (idiomatically `l` for lines)",
+    "# flow into the generated source verbatim.",
+    "[tool.ruff.lint]",
+    `ignore = ["E741"]`,
     "",
     "[tool.mypy]",
     `python_version = "3.12"`,
