@@ -32,6 +32,10 @@ const SHARED_SOURCE_DIRS_HEEX: readonly string[] = ["phoenix"];
 // dockerfile is a generic vite-build/vite-preview two-stage) plus a
 // SvelteKit-specific shared layer.
 const SHARED_SOURCE_DIRS_SVELTE: readonly string[] = ["sveltekit", "docker"];
+// Vue packs share the same neutral `docker/` scaffold plus a
+// Vue-specific shared layer (index.html, main.ts bootstrap, router
+// scaffold, api client, config, logger).
+const SHARED_SOURCE_DIRS_VUE: readonly string[] = ["vue", "docker"];
 
 /** Resolve the repo-root directory by walking up from this file
  *  until a `designs/` sibling is found.  Used to anchor both the
@@ -90,7 +94,9 @@ function readSharedSources(format: PackFormat): Record<string, string> {
       ? SHARED_SOURCE_DIRS_HEEX
       : format === "svelte"
         ? SHARED_SOURCE_DIRS_SVELTE
-        : SHARED_SOURCE_DIRS_TSX;
+        : format === "vue"
+          ? SHARED_SOURCE_DIRS_VUE
+          : SHARED_SOURCE_DIRS_TSX;
   for (const dirName of dirs) {
     const dir = path.join(root, dirName);
     if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) continue;

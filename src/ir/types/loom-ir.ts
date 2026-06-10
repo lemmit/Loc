@@ -2006,7 +2006,20 @@ export interface NeedIR {
 // SvelteKit static SPA rendered against a svelte-format design pack
 // (`shadcnSvelte`/`flowbite`).  Same deployable contract as `react`:
 // `targets:` a backend, inherits its contexts, owns no database.
-export type Platform = "dotnet" | "node" | "react" | "svelte" | "static" | "elixir" | "python" | "java";
+//
+// `vue` is the third frontend-only platform: a Vue 3 Vite SPA
+// (vue-router, SFC pages) rendered against a vue-format design pack
+// (`vuetify`/`shadcnVue`).  Same deployable contract as `react`.
+export type Platform =
+  | "dotnet"
+  | "node"
+  | "react"
+  | "svelte"
+  | "vue"
+  | "static"
+  | "elixir"
+  | "python"
+  | "java";
 
 // The `application:`/`shape(…)` platform-axes lookups
 // (`applicationDslToAdapter`, `applicationAdapterToDsl`,

@@ -62,19 +62,25 @@ export function lowerDeployable(d: Deployable): DeployableIR {
         ? "phoenixLiveView"
         : platform === "svelte"
           ? "svelte"
-          : platformFor(platform).isFrontend || platform === "dotnet" || platform === "java"
-            ? "react"
-            : undefined
+          : platform === "vue"
+            ? "vue"
+            : platformFor(platform).isFrontend || platform === "dotnet" || platform === "java"
+              ? "react"
+              : undefined
       : undefined);
   // Design pack default depends on what actually renders:
   //  - react/static frontends + fullstack-dotnet render React → `mantine`;
   //  - svelte frontends render Svelte → `shadcnSvelte`;
+  //  - vue frontends render Vue → `vuetify`;
   //  - phoenixLiveView renders HEEx → `ashPhoenix`, UNLESS it embeds a
   //    `framework: react` ui (D-PHOENIX-SURFACE), in which case the SPA
   //    needs a tsx pack → `mantine`;
   //  - backends without a `ui:` mount carry no design.
   const design = platformFor(platform).isFrontend
-    ? qualifyDesign(d.design, platform === "svelte" ? "shadcnSvelte" : "mantine")
+    ? qualifyDesign(
+        d.design,
+        platform === "svelte" ? "shadcnSvelte" : platform === "vue" ? "vuetify" : "mantine",
+      )
     : platform === "elixir"
       ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
       : (platform === "dotnet" || platform === "java") && uiName

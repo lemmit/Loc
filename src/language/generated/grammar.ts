@@ -2497,6 +2497,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
+            "value": "vue"
+          },
+          {
+            "$type": "Keyword",
             "value": "phoenixLiveView"
           },
           {
@@ -2538,6 +2542,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "svelte"
+          },
+          {
+            "$type": "Keyword",
+            "value": "vue"
           },
           {
             "$type": "Keyword",
@@ -2617,6 +2625,14 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "flowbite"
+          },
+          {
+            "$type": "Keyword",
+            "value": "vuetify"
+          },
+          {
+            "$type": "Keyword",
+            "value": "shadcnVue"
           },
           {
             "$type": "RuleCall",
