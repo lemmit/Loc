@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { svelteBuildExamples, sveltePacks } from "./svelte-build-cases.js";
 
 // ---------------------------------------------------------------------------
 // Generator regression test for the Svelte frontend: for each example
@@ -26,11 +27,6 @@ const cli = path.join(repoRoot, "bin", "cli.js");
 
 const SHARD = process.env.LOOM_SVELTE_BUILD_CASE;
 const ENABLED = process.env.LOOM_SVELTE_BUILD === "1" || SHARD !== undefined;
-
-/** Single-file examples with a svelte deployable named `web`. */
-export const svelteBuildExamples = ["examples/svelte-shop.ddd"] as const;
-
-export const sveltePacks = ["shadcnSvelte@v1", "flowbite@v1"] as const;
 
 /** Inject `design: "<family>@<version>"` into the `deployable web
  *  { ... }` block — mirrors the react harness's injectDesign so the

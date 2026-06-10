@@ -28,7 +28,7 @@ push more into the IR — not to flatten the backends.
 | F | Typed-pair contracts for shared-language stacks | Sketch | This doc |
 | G | Blazor (WASM + Server) | Sketch | This doc |
 | H | Project-shell abstraction | Conditional | This doc |
-| I | Svelte / Rails | Sketch | This doc |
+| I | Svelte / Rails | **Svelte: SHIPPED** (executed ahead of Vue — see [`svelte-frontend-plan.md`](svelte-frontend-plan.md)); Rails: sketch | This doc |
 
 Phase B onward is **provisional ordering**. Calibration data from Phase A
 (Item 2's behavioral conformance run) and from Phase B (first WalkerTarget
@@ -53,6 +53,15 @@ Four items, independent, suggested merge order 4 → 3 → 2 → 1:
 `LOOM_DOTNET_BUILD=1` green.
 
 ---
+
+> **Status note (2026-06):** the Svelte frontend shipped FIRST (Phase I
+> pulled ahead of Phase B) — see [`svelte-frontend-plan.md`](svelte-frontend-plan.md).
+> It answered Phase B's calibration questions: the `WalkerTarget`
+> contract needed six additional methods (4 markup seams +
+> `renderChildrenSlot` + `formRuntimeImports`); walker reuse was
+> total (the core moved to `src/generator/_walker/walker-core.ts` and
+> both TSX and Svelte consume it — no fork); no IR gaps surfaced.
+> Vue, when it comes, inherits all of that.
 
 ## Phase B — First new frontend (Vue)
 
