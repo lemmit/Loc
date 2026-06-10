@@ -91,15 +91,21 @@ defmodule ${webModule}.Auth do
     if bypass_path?(conn.request_path) do
       conn
     else
-      case get_req_header(conn, "authorization") do
-        ["Bearer " <> token | _] ->
-          case verify_token(token) do
-            {:ok, claims} ->
-              assign(conn, :current_user, build_user(claims))
+      # The verifier owns the WHOLE decision — including the missing-header
+      # case (it receives nil then).  This matches the Hono
+      # (registerUserVerifier) and .NET (IUserVerifier) contract, whose dev
+      # stubs accept headerless requests so a freshly generated stack is
+      # callable out of the box.  A real verify_token/1 implementation
+      # returns {:error, _} for nil and restores strict 401 behaviour.
+      token =
+        case get_req_header(conn, "authorization") do
+          ["Bearer " <> token | _] -> token
+          _ -> nil
+        end
 
-            _ ->
-              send_unauthorized(conn)
-          end
+      case verify_token(token) do
+        {:ok, claims} ->
+          assign(conn, :current_user, build_user(claims))
 
         _ ->
           send_unauthorized(conn)
@@ -128,11 +134,13 @@ defmodule ${webModule}.Auth do
   end
 
   # ---------------------------------------------------------------------------
-  # User-supplied JWT verifier hook — the user implements this.
-  # Default stub returns a built-in admin user so a generated stack boots
-  # end-to-end and the parity OpenAPI fetch works.  REPLACE for production
+  # User-supplied JWT verifier hook — the user implements this.  Receives the
+  # raw Bearer token, or nil when the request carried no Authorization header.
+  # Default DEV STUB accepts every request (nil included) as a built-in admin
+  # user so a generated stack boots end-to-end — the same out-of-the-box
+  # behaviour as the Hono and .NET dev-stub verifiers.  REPLACE for production
   # with a real JWT decoder (e.g. JOSE / joken) — return {:ok, claims_map}
-  # or {:error, reason}.
+  # or {:error, reason}; reject nil to require the header.
   # ---------------------------------------------------------------------------
 
   defp verify_token(token) do

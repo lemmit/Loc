@@ -924,6 +924,27 @@ describe("JWT auth emission (auth-emit unit)", () => {
     expect(authEx).toMatch(/halt\(\)/);
   });
 
+  it("auth.ex routes the missing-header case through verify_token(nil) — verifier owns the decision", () => {
+    // Cross-backend dev-auth parity: the Hono and .NET dev-stub verifiers
+    // accept headerless requests, so the Phoenix plug must not 401 before
+    // consulting verify_token.  The plug extracts the Bearer token (or nil)
+    // and hands the WHOLE decision to the verifier; a real implementation
+    // rejects nil and restores strict 401s.
+    const authDeployable: DeployableIR = { ...baseDeployable, auth: { required: true } };
+    const { files } = emitAuth({
+      sys: baseSys,
+      deployable: authDeployable,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const authEx = files.get("lib/phoenix_app_web/auth.ex")!;
+    // The no-header arm yields nil into the token binding (instead of
+    // 401-ing straight from the match arm, the pre-fix shape)…
+    expect(authEx).toMatch(/_ -> nil/);
+    // …and verify_token is called once on that binding, outside the header match.
+    expect(authEx).toMatch(/case verify_token\(token\) do/);
+  });
+
   it("auth.ex maps UserIR fields to claims extractions in build_user/1", () => {
     const sysWithUser: SystemIR = {
       ...baseSys,
