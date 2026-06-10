@@ -122,6 +122,23 @@ diff-sync semantics under SQLAlchemy.
 
 ---
 
+## Progress (updated as slices land)
+
+| Slice | State | Notes |
+|---|---|---|
+| S1 platform wiring | ✅ | `python` + `fastapi` alias, registry `python@v1` |
+| S2 shell + CI gate | ✅ | `python-build.yml`, `LOOM_PYTHON_BUILD` (uv sync + ruff + mypy --strict + pytest) |
+| S4 renderers | ✅ | landed before S3 (the primitives emitters consume them) |
+| S3 domain primitives | ✅ | ids / StrEnum / VO / events / errors |
+| S5 aggregates + tests | ✅ | full behavior + pytest emission |
+| S6 persistence | ✅ | schema.py + async repos; verified against live Postgres |
+| S7 HTTP layer | ✅ | DTOs, routers, RFC 7807 (+422 errors[]); verified live |
+| S8 finds | ✅ | predicate lowering incl. EXISTS membership; verified live |
+| S9 migrations | ✅ | shared sql-pg DDL + tracked boot runner (Alembic dropped — runtime-migrator pattern); schema-qualified UUID models |
+| S11–S17 | next | feature slices |
+| **S10 conformance** | **moved after S17** | showcase.ddd (the parity fixture) declares `auth: required` and exercises every feature — joining it requires S11–S17 first.  Matches the roadmap's Phase E exit criterion ("showcase passes the multi-backend suite") being terminal. |
+| S18, S19 | after S10 | |
+
 ## Slices
 
 Every slice ends with: `npm test` green, Biome clean, committed and
