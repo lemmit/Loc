@@ -97,4 +97,10 @@ system SvelteShop {
         ui: WebApp { Sales: api }
         port: 3002
     }
+
+    test e2e "create a customer through the UI" against web {
+        let c = ui.customers.create({ name: "Ada", email: "ada@example.com" })
+        let read = ui.customers.getById(c)
+        expect(read.name).toHaveText("Ada")
+    }
 }

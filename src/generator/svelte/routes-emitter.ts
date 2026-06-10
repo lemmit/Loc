@@ -32,10 +32,15 @@ import type {
   UiIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
-import { plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake } from "../../util/naming.js";
+import { buildPageObjectModule } from "../_frontend/page-objects-builder.js";
+import { buildViewPageObject } from "../_frontend/view-page-object.js";
+import { buildWalkerPageObject } from "../_frontend/walker-page-objects.js";
+import { buildWorkflowPageObject } from "../_frontend/workflow-page-object.js";
 import type { LoadedPack } from "../_packs/loader.js";
-import { isWalkableLayoutBody } from "../_walker/walker-core.js";
+import { isWalkableLayoutBody, walkBody } from "../_walker/walker-core.js";
 import { renderSvelteComponentFile, renderSveltePage } from "./walker/page-shell.js";
+import { svelteTarget } from "./walker/svelte-target.js";
 
 export interface SveltePageEmitContext {
   sys: SystemIR;
@@ -215,3 +220,128 @@ export function defaultNavSections(
   return sections;
 }
 
+/** Playwright page-object emission — same dispatch rules as the
+ *  react pages-emitter (scaffold-origin pages route to the shared
+ *  per-aggregate / per-workflow / per-view builders; custom walker
+ *  pages get a per-page class from their collected testids).  Only
+ *  the api-module import root differs (`src/lib/api` in SvelteKit
+ *  projects). */
+export function emitSveltePageObjectsForUi(
+  ui: UiIR,
+  ctx: SveltePageEmitContext,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  const seenAggregates = new Set<string>();
+  const seenWorkflows = new Set<string>();
+  const seenViews = new Set<string>();
+
+  for (const page of ui.pages) {
+    const origin = page.origin;
+    if (!origin || origin.kind === "custom") continue;
+    switch (origin.kind) {
+      case "aggregate-list":
+      case "aggregate-new":
+      case "aggregate-detail": {
+        if (seenAggregates.has(origin.aggregateName)) break;
+        seenAggregates.add(origin.aggregateName);
+        const agg = ctx.aggregatesByName.get(origin.aggregateName);
+        let ctxIR = ctx.contextsByName.get(origin.contextName);
+        if (!ctxIR && agg) {
+          for (const c of ctx.contextsByName.values()) {
+            if (c.aggregates.some((a) => a.name === agg.name)) {
+              ctxIR = c;
+              break;
+            }
+          }
+        }
+        if (!agg || !ctxIR) break;
+        out.set(
+          `e2e/pages/${lowerFirst(agg.name)}.ts`,
+          buildPageObjectModule(agg, ctxIR, "../../src/lib/api"),
+        );
+        break;
+      }
+      case "workflow-form": {
+        if (seenWorkflows.has(origin.workflowName)) break;
+        seenWorkflows.add(origin.workflowName);
+        let ctxIR = ctx.contextsByName.get(origin.contextName);
+        let wf = ctxIR?.workflows.find((w) => w.name === origin.workflowName);
+        if (!wf) {
+          for (const c of ctx.contextsByName.values()) {
+            const found = c.workflows.find((w) => w.name === origin.workflowName);
+            if (found) {
+              ctxIR = c;
+              wf = found;
+              break;
+            }
+          }
+        }
+        if (!ctxIR || !wf) break;
+        out.set(
+          `e2e/pages/workflows/${snake(wf.name)}.ts`,
+          buildWorkflowPageObject(wf, ctxIR, "../../../src/lib/api"),
+        );
+        break;
+      }
+      case "view-list": {
+        if (seenViews.has(origin.viewName)) break;
+        seenViews.add(origin.viewName);
+        let ctxIR = ctx.contextsByName.get(origin.contextName);
+        let view = ctxIR?.views.find((v) => v.name === origin.viewName);
+        if (!view) {
+          for (const c of ctx.contextsByName.values()) {
+            const found = c.views.find((v) => v.name === origin.viewName);
+            if (found) {
+              ctxIR = c;
+              view = found;
+              break;
+            }
+          }
+        }
+        if (!ctxIR || !view) break;
+        out.set(`e2e/pages/views/${snake(view.name)}.ts`, buildViewPageObject(view, ctxIR));
+        break;
+      }
+      case "workflows-index":
+      case "views-index":
+      case "home":
+        break;
+    }
+  }
+
+  // Custom walker pages — per-page class over the collected testids.
+  const userComponents = new Map<string, readonly ParamIR[]>();
+  for (const c of ctx.topLevelComponents) userComponents.set(c.name, c.params);
+  for (const c of ui.components) userComponents.set(c.name, c.params);
+  const bcByAggregate = buildBcByAggregate(ctx);
+  for (const page of ui.pages) {
+    if (page.origin && page.origin.kind !== "custom") continue;
+    if (!isWalkableLayoutBody(page.body, userComponents)) continue;
+    if (!page.body) continue;
+    const paramNames = new Set(page.params.map((p) => p.name));
+    const stateNames = new Set(page.state.map((st) => st.name));
+    const { collectedTestids } = walkBody(
+      page.body,
+      svelteTarget,
+      ctx.pack,
+      paramNames,
+      stateNames,
+      userComponents,
+      ui.apiParams,
+      ctx.aggregatesByName,
+      bcByAggregate,
+    );
+    const path = `e2e/pages/${snake(page.name)}.ts`;
+    if (out.has(path)) continue;
+    out.set(
+      path,
+      buildWalkerPageObject({
+        pageName: page.name,
+        params: page.params,
+        route: page.route ?? "",
+        testids: collectedTestids,
+      }),
+    );
+  }
+  return out;
+}

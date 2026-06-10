@@ -19,7 +19,18 @@ import {
   SVELTE_LIB_SCHEMAS_MONEY,
   SVELTE_LIB_TOAST,
 } from "./emit-templates.js";
-import { defaultNavSections, emitSveltePagesForUi } from "./routes-emitter.js";
+import { smokeSpec } from "../_frontend/smoke-spec.js";
+import {
+  E2E_FIXTURES_TS,
+  E2E_PACKAGE_JSON,
+  E2E_TSCONFIG_JSON,
+  PLAYWRIGHT_CONFIG_TS,
+} from "../_frontend/e2e-harness.js";
+import {
+  defaultNavSections,
+  emitSveltePageObjectsForUi,
+  emitSveltePagesForUi,
+} from "./routes-emitter.js";
 import { allViews, buildViewsApiModule, hasAnyView } from "./view-builder.js";
 import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflow-builder.js";
 
@@ -98,6 +109,16 @@ export function generateSvelteForContexts(
     topLevelComponents: options.topLevelComponents ?? [],
   };
   for (const [path, content] of emitSveltePagesForUi(ui, emitCtx)) out.set(path, content);
+  for (const [path, content] of emitSveltePageObjectsForUi(ui, emitCtx)) out.set(path, content);
+
+  // Playwright e2e harness — same testid-keyed page-object surface
+  // the react projects ship; the ui-e2e spec renderer (system layer)
+  // adds the per-system `<sys>.ui.spec.ts` next to these.
+  out.set("e2e/smoke.spec.ts", smokeSpec(ui));
+  out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
+  out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
+  out.set("e2e/package.json", E2E_PACKAGE_JSON);
+  out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
   // Shared lib surface.
   const hasDelete = aggregates.some((a) => !!a.agg.canonicalDestroy);
