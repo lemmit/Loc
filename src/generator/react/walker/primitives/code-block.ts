@@ -53,7 +53,7 @@ export function emitCodeBlock(
   // The `<code>` block holds raw source — JSX-escape every
   // significant character so a `>` arrow, `{` brace, or `&` in the
   // code text doesn't open a JSX expression / tag at render time.
-  const source = escapeJsxText(sourceRaw);
+  const source = ctx.target.escapeText(sourceRaw);
   return renderPrimitive(ctx, "primitive-code-block", {
     language,
     source,

@@ -34,7 +34,7 @@ export function emitIcon(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     // Unknown name + no `svg:` literal — emit a visible comment so
     // the gap is loud at review time.  Pages still compile.
     const hint = name ? `unknown icon name '${name}'` : `Icon needs name: or svg:`;
-    return `{/* ${hint} */}`;
+    return ctx.target.renderComment(`${hint}`);
   }
   return renderPrimitive(ctx, "primitive-icon", {
     svg,

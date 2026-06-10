@@ -16,7 +16,7 @@ function inputLabelForms(
   const raw = firstPositionalContent(call, ctx) ?? '""';
   return {
     labelAttr: unwrapAsAttr(raw),
-    labelText: unwrapTextLiteral(raw),
+    labelText: unwrapTextLiteral(raw, ctx.target.escapeText),
   };
 }
 

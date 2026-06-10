@@ -146,7 +146,7 @@ function emitColumn(
   const key = slugify(headerStr) || `col-${index + 1}`;
 
   const rowVar = "row";
-  let cellJsx = "{/* missing accessor */}";
+  let cellJsx = ctx.target.renderComment("missing accessor");
   if (accessorArg && accessorArg.kind === "lambda") {
     const childCtx: WalkContext = {
       ...ctx,
@@ -157,7 +157,7 @@ function emitColumn(
       if (body.kind === "call") {
         cellJsx = walk(body, childCtx, depth);
       } else if (body.kind === "literal" && body.lit === "string") {
-        cellJsx = escapeJsxText(body.value);
+        cellJsx = ctx.target.escapeText(body.value);
       } else {
         cellJsx = `{${emitExpr(body, childCtx)}}`;
       }
@@ -165,7 +165,7 @@ function emitColumn(
     propagateChildFlags(ctx, childCtx);
   }
   return {
-    header: escapeJsxText(headerStr),
+    header: ctx.target.escapeText(headerStr),
     cellJsx,
     key,
   };

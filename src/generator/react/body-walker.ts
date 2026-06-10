@@ -62,9 +62,10 @@ import { WALKER_LAYOUT_PRIMITIVES } from "../../language/walker-stdlib.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
+import type { WalkerTarget } from "../_walker/target.js";
 import { registerApiHook } from "./walker/api-hooks.js";
 import { emitUserComponent } from "./walker/primitives/controls.js";
-import { describeReceiver, escapeJsxText, positionalArgs } from "./walker/shared/args.js";
+import { describeReceiver, positionalArgs } from "./walker/shared/args.js";
 import { tsxTarget } from "./walker/tsx-target.js";
 
 /** Per-source named-import map — `from` module → set of named
@@ -315,6 +316,7 @@ export function walkBodyToTsx(
   const apiParamNames = new Map<string, string>();
   for (const p of apiParams) apiParamNames.set(p.name, p.apiName);
   const ctx: WalkContext = {
+    target: tsxTarget,
     imports: new Map(),
     pack,
     paramNames,
@@ -381,6 +383,13 @@ export function walkBodyToTsx(
 
 /** Read-only lookups threaded through the walk. */
 export interface WalkEnv {
+  /** The framework target the walk renders against.  Owns every
+   *  framework-divergent seam (state / api / match / navigate plus
+   *  the markup seams — comments, conditional children, style
+   *  attribute, text escaping); the shared walker consults it
+   *  instead of hardcoding TSX forms.  `walkBodyToTsx` threads
+   *  `tsxTarget`; the Svelte walker threads `svelteTarget`. */
+  target: WalkerTarget;
   pack: LoadedPack;
   paramNames: ReadonlySet<string>;
   stateNames: ReadonlySet<string>;
@@ -596,11 +605,11 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
   if (detected) {
     const hookUse = adjustFindHookArgs(
       detected,
-      tsxTarget.buildHookUse(detected, (e) => emitExpr(e, ctx)),
+      ctx.target.buildHookUse(detected, (e) => emitExpr(e, ctx)),
       ctx,
     );
     registerApiHook(hookUse, ctx);
-    const rendered = tsxTarget.renderApiCall(
+    const rendered = ctx.target.renderApiCall(
       {
         apiHandle: "",
         aggregateName: "",
@@ -620,7 +629,7 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       // String literal in a child position becomes a JSX text node.
       // Other literal kinds (int / decimal / bool) stay as
       // expression-bracketed JS literals.
-      if (expr.lit === "string") return escapeJsxText(expr.value);
+      if (expr.lit === "string") return ctx.target.escapeText(expr.value);
       if (expr.lit === "bool") return `{${expr.value}}`;
       if (expr.lit === "null") return `{null}`;
       return `{${expr.value}}`;
@@ -655,21 +664,21 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
           field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
           name: expr.name,
         };
-        return `{${tsxTarget.renderStateRead(stateRef, "template")}}`;
+        return `{${ctx.target.renderStateRead(stateRef, "template")}}`;
       }
-      return `{/* ref: ${expr.name} */}`;
+      return ctx.target.renderComment(`ref: ${expr.name}`);
     case "match": {
       // Predicate-arms conditional rendering (page-metamodel §7).
-      // Each arm's value walks as JSX in the caller's scope; the
-      // chained-ternary shape comes from the target seam
-      // (tsxTarget.renderMatch).  Brace-wrap in child position,
+      // Each arm's value walks as markup in the caller's scope; the
+      // value-expression shape comes from the target seam
+      // (renderMatch).  Interpolation-wrap in child position,
       // exactly as the ternary arm below.
       const arms = expr.arms.map((arm) => ({
         predicate: emitExpr(arm.cond, ctx),
         value: walk(arm.value, ctx, depth + 1),
       }));
       const elseArm = expr.otherwise ? walk(expr.otherwise, ctx, depth + 1) : undefined;
-      const inner = tsxTarget.renderMatch(arms, elseArm);
+      const inner = ctx.target.renderMatch(arms, elseArm);
       return depth === 0 ? inner : `{${inner}}`;
     }
     case "ternary": {
@@ -680,8 +689,7 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       const cond = emitExpr(expr.cond, ctx);
       const thenS = walk(expr.then, ctx, depth + 1);
       const elseS = walk(expr.otherwise, ctx, depth + 1);
-      const inner = `${cond} ? (\n${"  ".repeat(depth + 1)}${thenS}\n${"  ".repeat(depth)}) : (\n${"  ".repeat(depth + 1)}${elseS}\n${"  ".repeat(depth)})`;
-      return depth === 0 ? inner : `{${inner}}`;
+      return ctx.target.renderConditionalChild(cond, thenS, elseS, depth);
     }
     case "member":
       // Member access in JSX-child position (e.g. an
@@ -691,7 +699,7 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       // param, hook, state) and concatenates the member name.
       return `{${emitExpr(expr, ctx)}}`;
     default:
-      return `{/* unsupported expr: ${expr.kind} */}`;
+      return ctx.target.renderComment(`unsupported expr: ${expr.kind}`);
   }
 }
 
@@ -713,9 +721,9 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
   // walker).  Surface a comment so the gap is visible in generated
   // output rather than silently producing nothing useful.
   if (def) {
-    return `{/* ${call.name}: not supported by the React walker yet */}`;
+    return ctx.target.renderComment(`${call.name}: not supported by the React walker yet`);
   }
-  return `{/* unknown layout component: ${call.name} */}`;
+  return ctx.target.renderComment(`unknown layout component: ${call.name}`);
 }
 
 // Layout primitives (Stack, Group, Grid, Container, Tabs) live in
@@ -858,11 +866,11 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
   if (detected) {
     const hookUse = adjustFindHookArgs(
       detected,
-      tsxTarget.buildHookUse(detected, (e) => emitExpr(e, ctx)),
+      ctx.target.buildHookUse(detected, (e) => emitExpr(e, ctx)),
       ctx,
     );
     registerApiHook(hookUse, ctx);
-    return tsxTarget.renderApiCall(
+    return ctx.target.renderApiCall(
       {
         apiHandle: "",
         aggregateName: "",
@@ -896,7 +904,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
           field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
           name: expr.name,
         };
-        return tsxTarget.renderStateRead(stateRef, "handler");
+        return ctx.target.renderStateRead(stateRef, "handler");
       }
       if (ctx.paramNames.has(expr.name)) {
         ctx.usedParams.add(expr.name);
@@ -978,7 +986,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // `customerCreate.mutate({...})`).
       const recvDetected = tryDetectApiHook(expr.receiver, ctx);
       if (recvDetected) {
-        const recvHookUse = tsxTarget.buildHookUse(recvDetected, (e) => emitExpr(e, ctx));
+        const recvHookUse = ctx.target.buildHookUse(recvDetected, (e) => emitExpr(e, ctx));
         registerApiHook(recvHookUse, ctx);
         const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
         return `${recvHookUse.varName}.${expr.member}(${args})`;
@@ -1057,7 +1065,18 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       const seg = stmt.target.segments;
       if (ctx.stateNames.has(seg[0]!)) {
         const op = stmt.kind === "add" ? "+" : "-";
-        const value = `${seg.join(".")} ${op} ${emitExpr(stmt.value, ctx)}`;
+        // Single-segment current-value reads delegate to the target
+        // (position-aware — HEEx/Vue diverge in handler position);
+        // a nested target reads the plain member chain.  TSX-identical
+        // either way (its handler-position read IS the bare name).
+        const root = seg[0]!;
+        const stateRef = {
+          field: { name: root, type: { kind: "primitive" as const, name: "string" as const } },
+          name: root,
+        };
+        const read =
+          seg.length === 1 ? ctx.target.renderStateRead(stateRef, "handler") : seg.join(".");
+        const value = `${read} ${op} ${emitExpr(stmt.value, ctx)}`;
         return stateWrite(seg, value, ctx);
       }
       return unsupportedPageStmt(
@@ -1107,7 +1126,7 @@ function stateWrite(seg: readonly string[], valueJs: string, ctx: WalkContext): 
     const prefix = seg.slice(0, i).join(".");
     value = `{ ...${prefix}, ${seg[i]!}: ${value} }`;
   }
-  return `${tsxTarget.renderStateWrite(stateRef, value)};`;
+  return `${ctx.target.renderStateWrite(stateRef, value)};`;
 }
 
 /** A page event-handler statement the React walker can't lower.  We throw
@@ -1158,34 +1177,16 @@ export function stringOrRefArgValue(
  *  Templates splice via `{{{styleAttr}}}` mirroring `{{{testidAttr}}}`. */
 export function styleAttr(call: ExprIR & { kind: "call" }, ctx: WalkContext): string {
   if (!call.style || call.style.entries.length === 0) return "";
-  const parts = call.style.entries.map(({ key, value }) => {
-    const camelKey = key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
-    return `${JSON.stringify(camelKey)}: ${emitExpr(value, ctx)}`;
-  });
-  return ` style={{ ${parts.join(", ")} }}`;
-}
-
-/** Same payload as `styleAttr` but emitted as a Phoenix HEEx
- *  `style="…"` attribute — a flat semicolon-separated CSS string.
- *  Source keys are preserved verbatim (kebab-case is the HTML CSS
- *  spelling).  Non-string-literal values are emitted as bare text
- *  via `emitExpr`; templates wrap the whole attribute in HEEx
- *  syntax (`style={"..."}`) when interpolation is needed.  For v1
- *  we restrict to string-literal values to keep HEEx output
- *  static-safe — non-string values fall back to their `emitExpr`
- *  rendering. */
-export function styleAttrHeex(call: ExprIR & { kind: "call" }, ctx: WalkContext): string {
-  if (!call.style || call.style.entries.length === 0) return "";
-  const parts = call.style.entries.map(({ key, value }) => {
-    let v: string;
-    if (value.kind === "literal" && value.lit === "string") v = value.value;
-    else v = emitExpr(value, ctx);
-    return `${key}: ${v}`;
-  });
-  // Escape `"` in the joined string so it stays inside the HEEx
-  // attribute quotes.  Semicolon-separates entries.
-  const css = parts.join("; ").replace(/"/g, "&quot;");
-  return ` style="${css}"`;
+  // Render each entry's value through the walker (refs / param
+  // interpolation compose), then hand the framework-shaped attribute
+  // rendering to the target (TSX camel-cases keys into a JSX object;
+  // Svelte emits a CSS string with `{}` interpolation).
+  const entries = call.style.entries.map(({ key, value }) => ({
+    key,
+    rendered: emitExpr(value, ctx),
+    literal: value.kind === "literal" && value.lit === "string" ? value.value : undefined,
+  }));
+  return ctx.target.renderStyleAttr(entries);
 }
 
 /** Read the `testid:` named arg from any primitive call
@@ -1300,13 +1301,13 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
         field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
         name: expr.name,
       };
-      return `{${tsxTarget.renderStateRead(stateRef, "template")}}`;
+      return `{${ctx.target.renderStateRead(stateRef, "template")}}`;
     }
     // Unresolved ref in text position emits a JSX
     // comment so the user sees the unresolved name in the
     // generated file (the page still compiles; the comment makes
     // the gap visible).
-    return `{/* ref: ${expr.name} */}`;
+    return ctx.target.renderComment(`ref: ${expr.name}`);
   }
   // Anything else (binary op, unary, non-string
   // literal): emit the JS-expression form wrapped as a JSX

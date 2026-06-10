@@ -33,8 +33,8 @@ export function emitStat(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-stat", {
-    label: unwrapTextLiteral(label),
-    value: unwrapTextLiteral(value),
+    label: unwrapTextLiteral(label, ctx.target.escapeText),
+    value: unwrapTextLiteral(value, ctx.target.escapeText),
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
@@ -55,7 +55,7 @@ export function emitBadge(
     // `labelAttr` is the JSX-attribute form — quotes preserved on
     // literals, JS expressions left as-is (MUI's `<Chip label=…/>`
     // needs either `label="X"` or `label={expr}`).
-    label: unwrapTextLiteral(raw),
+    label: unwrapTextLiteral(raw, ctx.target.escapeText),
     labelAttr: unwrapAsAttr(raw),
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
@@ -175,7 +175,7 @@ export function emitAlert(
   const color = stringNamed(call, "color");
   const title = stringNamed(call, "title");
   return renderPrimitive(ctx, "primitive-alert", {
-    message: unwrapTextLiteral(message),
+    message: unwrapTextLiteral(message, ctx.target.escapeText),
     hasColor: color !== undefined,
     color: color ?? "red",
     hasTitle: title !== undefined,
