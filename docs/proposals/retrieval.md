@@ -1,8 +1,11 @@
 # Retrieval — the named query bundle (`criterion` + sort + page + loads)
 
 > Status: **PARTIAL.** Surface + IR + lowering + validation shipped (#794);
-> .NET `Run<Name>Async` emission + workflow `foreach` shipped (#810). Remaining:
-> Hono/Drizzle + Phoenix/Ash emission and the `loads:` load-plan. Adds one source
+> emission shipped on **all four backends** — .NET `Run<Name>Async` + workflow
+> `foreach` (#810), Hono `run<Name>` (#952), Phoenix/Ash read action (#955).
+> Remaining: the explicit `loads:` load-plan (gated
+> `loom.retrieval-loads-unsupported` — retrievals load the whole aggregate;
+> no backend consumes a load plan yet). Adds one source
 > keyword, `retrieval`, and one repository builtin, `Repo.run(...)`. A
 > `retrieval` names a reusable, pre-shaped query: a composed `criterion`
 > predicate plus `sort` and `loads` shaping. It is the *bundle* layer the

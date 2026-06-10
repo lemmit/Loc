@@ -1,15 +1,32 @@
 # Vanilla Phoenix foundation — `foundation: vanilla` for `platform: phoenix`
 
-> Status: **PROPOSED — decisions pinned**. The four decisions in §"Decisions
-> to pin" below are now recorded in [`decisions.md`](../decisions.md) as
-> **D-VANILLA-PHOENIX-FOUNDATION**, **D-VANILLA-ES-HOME**,
-> **D-NO-MIXED-FOUNDATION**, **D-VANILLA-DEFAULT** — implementation is
-> unblocked but not yet started. The menu slot exists
-> (`platform-rules.ts:184` lists `vanilla` as a future Phoenix
-> `foundation:` value) and `lower-platform.ts:46` defaults to `ash`;
-> there is no second emitter today. Builds on **D-REALIZATION-AXES**
-> (which already names this axis), supersedes the framing —
-> not the substance — of [`elixir-ecto-and-api-only-backends.md`](./elixir-ecto-and-api-only-backends.md)
+> Status: **PARTIAL — state-based emitter SHIPPED** (slices 0–6,
+> #1046–#1051 + #1053/#1054/#1059; TDD plan in
+> [`../plans/vanilla-foundation-tdd-plan.md`](../plans/vanilla-foundation-tdd-plan.md)).
+> `foundation: vanilla` emits a real second Elixir project from
+> `src/generator/elixir/vanilla/` (11 emit modules): plain
+> `Phoenix.Endpoint`/`Router` shell, `Ecto.Schema` + `Ecto.Changeset`
+> CRUD (read #1047, write #1048; enums/VOs/relations #1049), RFC 7807
+> ProblemDetails parity incl. `errors[]` on 422 (#1050),
+> aggregate-sourced views (5a, #1053), workflow-instance read endpoints
+> (5b, #1054), and workflow execution on plain Ecto (5c, #1059) — with a
+> CI fixture (#1051) and slice tests under `test/generator/elixir-vanilla/`.
+> **Remaining:** (a) workflow body lowering covers `factory-let` +
+> `op-call` only (#1062) — `precondition`/`requires`/`emit`/`repo-let`/
+> `expr-let`/`for-each`/`repo-run` still emit `# TODO` comments
+> (`vanilla/workflow-execution-emit.ts`); (b) **event sourcing under
+> vanilla** (D-VANILLA-ES-HOME) is not started —
+> `EVENT_SOURCING_BACKENDS` still excludes `elixir`; (c) per-field
+> `validate_*` constraints (blocked on IR constraint metadata); (d)
+> vanilla is selected via a hardwired bypass in `elixir/index.ts`, not
+> as a first-class adapter (see
+> [`../plans/realization-axes-alignment.md`](../plans/realization-axes-alignment.md),
+> slices #1061–#1064); (e) `or`-union operation returns + the D-VANILLA-DEFAULT
+> warn-then-flip. The four pinned decisions
+> (**D-VANILLA-PHOENIX-FOUNDATION**, **D-VANILLA-ES-HOME**,
+> **D-NO-MIXED-FOUNDATION**, **D-VANILLA-DEFAULT**) stand. Builds on
+> **D-REALIZATION-AXES**, supersedes the framing — not the substance —
+> of [`elixir-ecto-and-api-only-backends.md`](./elixir-ecto-and-api-only-backends.md)
 > §4, and unblocks one half of
 > [`workflow-and-applier.md`](./workflow-and-applier.md)'s deferred-ES gap.
 

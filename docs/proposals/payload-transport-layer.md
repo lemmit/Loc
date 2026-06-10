@@ -1,13 +1,24 @@
 # Payload — a structural transport layer
 
-> Status: **PARTIAL** — the first real consumer of the carrier-generic
-> machinery has shipped: the `Paged<T>` page carrier + functional **paged
-> finds** emit across all four backends (the P3b slice — #898 React, #916 .NET,
-> #925 Phoenix, #933 cross-backend wire-parity closeout; see
-> [`pagination-design-note.md`](./pagination-design-note.md)). The full
-> `payload` keyword, ML-postfix carrier-generic surface (P1–P4), tagged unions,
-> and `<Agg>Wire` auto-synthesis remain proposal-stage; see
-> [`implementation-plan.md`](./implementation-plan.md). **Sister proposal**:
+> Status: **PARTIAL — most of P1–P4 shipped** (code-verified 2026-06-10):
+> **P1** — the `payload` umbrella with all six kinds
+> (`payload | event | command | query | response | error`) parses,
+> lowers (`PayloadKind` in `loom-ir.ts`), and is declarable at file
+> scope (root-level payload declarations, A1, #1024); per-error
+> `httpStatus` overrides live on the api body. **P2** — compiler-
+> synthesised `<Agg>Wire` payloads exist (`PayloadIR.synthesized`).
+> **P3b** — the `Paged<T>` carrier + functional **paged finds** emit
+> across all four backends (#898 React, #916 .NET, #925 Phoenix, #933
+> wire-parity closeout; see
+> [`pagination-design-note.md`](./pagination-design-note.md)).
+> **P4** — named (`payload Foo = A | B`) and anonymous (`A or B`)
+> unions lower to a tagged `type` wire and emit on node/dotnet/elixir
+> (`SUPPORTED_UNION_BACKENDS` in `structural-checks.ts`; see
+> [`../payloads.md`](../payloads.md)). **Remaining:** P3 full (nested
+> carriers `P<Q<T>>` — gated `loom.generic-arg-not-carrier`), P5
+> (`validate for X` / `authorize for X` — no surface at all), the
+> union-returning **find** producer path (stubbed on .NET and Hono),
+> and the `unpaged` opt-out. **Sister proposal**:
 > [`aggregate-inheritance.md`](./aggregate-inheritance.md) — they together
 > split the type system along two axes (state vs transport). Read both
 > before implementing either.

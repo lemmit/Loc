@@ -1,13 +1,31 @@
 # Exception-less flow — `or` unions, `option`, `?` propagation, `error` payloads
 
-> Status: proposal. **Revisited by**:
+> Status: proposal — **partially landed, and partially walked back**.
+> Shipped already: `error` payloads (a `PayloadKind`), the anonymous
+> `or`-union return surface on operations (emitting on node/dotnet;
+> gated on elixir — `loom.operation-return-unsupported`), and per-error
+> `httpStatus` mapping on the api body feeding RFC 7807 ProblemDetails
+> ([`validation-error-extension.md`](./validation-error-extension.md)
+> is fully shipped on all three backends).
+>
+> **The `?` propagation operator (A2) is DROPPED** (maintainer
+> decision, 2026-06-10). Its surface + validation shipped in #1030
+> (grammar `PropagateExpr`, `ExprIR` kind `propagate`, gates
+> `loom.propagate-unsupported` / `loom.propagate-incompatible-error`)
+> but no backend ever emitted it; the feature is resigned from
+> completely and the shipped surface is slated for **removal** (grammar
+> rule + IR kind + lowering arm + both gates + print-expr arm + tests).
+> Do not build on it.
+>
+> **Revisited by**:
 > [`failure-taxonomy.md`](./failure-taxonomy.md) — a step-back design
 > note that keeps this proposal's structural core (errors-as-data,
 > HTTP-blind domain + edge `httpStatus`, two-regime throw/return) and
-> reconsiders its ergonomics (the `?` operator, the carrier-monad
-> stdlib), and grounds the validation story in the shipped value-object
-> `invariant` (routed to 422 — not a new `validate` keyword). Read that
-> for the current thinking on the overall error story.
+> reconsiders its ergonomics (the `?` operator — now dropped, see
+> above — and the carrier-monad stdlib), and grounds the validation
+> story in the shipped value-object `invariant` (routed to 422 — not a
+> new `validate` keyword). Read that for the current thinking on the
+> overall error story.
 >
 > **Upstream proposal**:
 > [`payload-transport-layer.md`](./payload-transport-layer.md) — this

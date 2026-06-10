@@ -25,6 +25,31 @@
 > Read all of these before starting. This doc covers ordering,
 > coordination points, risk management, and decision pins.
 
+> **⚠ 2026-06-10 update — read before following the tracks below.**
+> Code-verified status moved substantially past the 2026-06-03 refresh
+> (see the rewritten
+> [`global-implementation-plan.md`](./global-implementation-plan.md)):
+>
+> - **The `?` propagation operator (A2) is DROPPED** (maintainer
+>   decision). Its surface-only slice (#1030) is slated for removal —
+>   skip every A2 step below and do not build A-track work on `?`.
+>   The **M2 milestone (A1+A2+A3 together) is retired**; much of
+>   A1/A3 shipped independently (root-level `payload`/`error`
+>   declarations #1024, per-error `httpStatus` mapping, RFC 7807
+>   `errors[]` on all three backends).
+> - **P4 unions shipped** (named + anonymous `or` on
+>   node/dotnet/elixir), so the **M1 milestone (P3+P4 together) is
+>   retired** too; what's left of P3 is nested carriers, plus P5.
+> - **Aggregate inheritance I1–I3 shipped** (TPC everywhere; TPH on
+>   all three DB backends).
+> - **Reified criteria are consumed at find/retrieval use-sites on
+>   all four backends**; the remaining tail is capability-`filter`
+>   reification + the principal factory.
+>
+> The A4 find-variant re-shape (one coordinated fixture rebaseline)
+> remains the live coordinated moment. Direction for the remaining
+> error-story work is [`failure-taxonomy.md`](./failure-taxonomy.md).
+
 > **Landed since this plan was written (2026-06-03 refresh)** — adjust the
 > tracks below accordingly; full PR detail in
 > [`global-implementation-plan.md`](./global-implementation-plan.md):

@@ -15,8 +15,10 @@
 // marker table holds one row per applied dataset; a dataset whose marker is
 // present is skipped.  `default` always runs; others opt in via `LOOM_SEED`.
 //
-// Not yet handled (later slices): the `raw` table-insert path (`raw` blocks
-// still route through `Create`) and `@handle` cross-row id refs.
+// The `raw` table-insert path is wired too: `raw` rows bypass the domain
+// `Create` and emit direct SQL via the shared `renderSeedRowInsert`.
+// Cross-row references use explicit ids per D-SEED-XREF (an `@handle`
+// indirection was considered and not adopted).
 
 import type {
   EnrichedAggregateIR,
