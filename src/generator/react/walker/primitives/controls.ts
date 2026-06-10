@@ -203,7 +203,7 @@ export function emitAction(
  *  consumes a pre-resolved route template.  The `usesNavigate`
  *  side-effect (drives the shell's `useNavigate` import) also stays
  *  walker-local. */
-function emitActionThen(then: ExprIR, ctx: WalkContext): string {
+export function emitActionThen(then: ExprIR, ctx: WalkContext): string {
   if (then.kind === "call" && then.name === "navigate") {
     const pageRef = then.args[0];
     const route =

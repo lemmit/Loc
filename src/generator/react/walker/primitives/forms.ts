@@ -43,6 +43,7 @@ import {
   stringNamed,
   unwrapTextLiteral,
 } from "../shared/args.js";
+import { emitActionThen } from "./controls.js";
 
 /** `CreateForm(of: <Agg>)` — named-leaf entry for the create-form
  *  variant.  Same shared codegen as `Form(of:)` / `Form(creates:)`:
@@ -77,6 +78,68 @@ export function emitOperationForm(
     return emitFormOfOperation(call, ctx, opRef);
   }
   return `{/* OperationForm: expected (of: <Agg>, op: <opName>) or (<instance>.<op>) */}`;
+}
+
+/** `DestroyForm(of: <Agg>, then?: navigate(...))` — the named-leaf
+ *  confirmation form for the aggregate's CANONICAL destroy
+ *  (loom-forms.md).  Confirmation-only v1 (the canonical destroy takes
+ *  no params): a destructive button that `window.confirm()`s, then
+ *  dispatches `useDelete<Agg>` with the route id and navigates —
+ *  default: the aggregate's list route; override via `then:
+ *  navigate(<Page>)`.  Named destroys (`for: <inst>.<name>`) are a
+ *  follow-up. */
+export function emitDestroyForm(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const ofArg = namedArgValue(call, "of");
+  if (!ofArg || ofArg.kind !== "ref") {
+    return `{/* DestroyForm: expected (of: <Agg>) */}`;
+  }
+  const agg = ctx.aggregatesByName.get(ofArg.name);
+  if (!agg) {
+    return `{/* DestroyForm(of: ${ofArg.name}): aggregate not found */}`;
+  }
+  if (!agg.canonicalDestroy) {
+    return `{/* DestroyForm(of: ${agg.name}): no canonical destroy — declare 'destroy { }' (or use 'with crudish') */}`;
+  }
+  // Hoist the delete-mutation hook to function top.  `useDelete<Agg>()`
+  // takes no hook-time args (the id goes to `mutateAsync`).
+  const localVar = `delete${agg.name}`;
+  const hookName = `useDelete${agg.name}`;
+  if (!ctx.actionMutations.some((m) => m.localVar === localVar)) {
+    ctx.actionMutations.push({ localVar, hookName, aggCamel: lowerFirst(agg.name), idExpr: "" });
+  }
+  // The confirm handler reads the route `id` — mark it used so the shell
+  // emits the `useParams` destructure (same param the detail pages bind).
+  ctx.usedParams.add("id");
+  // After a successful delete the record is gone, so the default `then:`
+  // navigates to the aggregate's list route (loom-forms.md §submission).
+  const thenArg = namedArgValue(call, "then");
+  let thenJs: string;
+  if (thenArg) {
+    thenJs = emitActionThen(thenArg, ctx);
+  } else {
+    ctx.usesNavigate = true;
+    thenJs = `navigate(${JSON.stringify(`/${snake(plural(agg.name))}`)})`;
+  }
+  const confirmMsg = JSON.stringify(`Delete this ${humanize(agg.name).toLowerCase()}?`);
+  const onClick = `() => { if (window.confirm(${confirmMsg})) void ${localVar}.mutateAsync(id ?? "").then(() => { ${thenJs}; }); }`;
+  const testidNamespace = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-destroy`;
+  ctx.collectedTestids.add(testidNamespace);
+  return renderPrimitive(ctx, "primitive-button", {
+    label: `Delete ${humanize(agg.name)}`,
+    onClick,
+    hasOnClick: true,
+    disabled: undefined,
+    hasDisabled: false,
+    loading: `${localVar}.isPending`,
+    hasLoading: true,
+    testidAttr: ` data-testid="${testidNamespace}"`,
+    styleAttr: "",
+  });
 }
 
 /** `WorkflowForm(runs: <Wf>)` — named-leaf entry for the

@@ -320,7 +320,7 @@ Reuses the existing `Statement` rule (covers `let`, `:=`, calls, `emit`).
 | `Action(operation, then?)`, `Button { label, on? }` | Action primitives. |
 | `Money`, `DateDisplay`, `EnumBadge`, `IdLink` | Formatter primitives. |
 | `Table`, `Column` | Tabular display (data lambda accessors). |
-| `Form { of: <Agg> }`, `Form { runs: <wf> }`, `Form { <instance>.<operation> }` | RHF-bound form auto-dispatched off the aggregate / workflow / operation IR. The operation form references the op through an in-scope aggregate instance (like `Action`). |
+| `Form { of: <Agg> }`, `Form { runs: <wf> }`, `Form { <instance>.<operation> }` | RHF-bound form auto-dispatched off the aggregate / workflow / operation IR. The operation form references the op through an in-scope aggregate instance (like `Action`). Named-leaf twins: `CreateForm { of: }`, `OperationForm { of:, op: }`, `WorkflowForm { runs: }`, and `DestroyForm { of: <Agg>, then? }` — the confirmation-only canonical-destroy form (confirm → delete → navigate to the list). |
 | `QueryView { of:, loading:, error:, empty:, data:, single?: }` | 4-arm query-state branching (collection or single-record). |
 
 The set is closed in v0. **Removed from earlier drafts:** `Wizard`, `Stage`,
