@@ -1,8 +1,16 @@
 // Auto-generated.
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Api.Migrations
 {
+    // The [DbContext] attribute is REQUIRED for runtime discovery:
+    // EF's MigrationsAssembly only surfaces Migration subclasses whose
+    // DbContextAttribute matches the context passed to Migrate().
+    // Without it, Database.Migrate() finds zero migrations, creates
+    // only __EFMigrationsHistory, and every table is silently missing
+    // (42P01 at first INSERT/SELECT).
+    [DbContext(typeof(Api.Infrastructure.Persistence.AppDbContext))]
     [Migration("20260101000000_Catalog_Initial")]
     public partial class M20260101000000_Catalog_Initial : Migration
     {
