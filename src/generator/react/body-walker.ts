@@ -959,23 +959,12 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
   switch (stmt.kind) {
     case "assign": {
       const seg = stmt.target.segments;
-      if (seg.length === 1 && ctx.stateNames.has(seg[0]!)) {
-        ctx.usesState = true;
-        const name = seg[0]!;
-        // Delegate the `setName(value)` shape to tsxTarget — see
-        // `src/generator/_walker/target.ts` for the contract.  The
-        // trailing `;` is statement-position context that lives at
-        // the call site (target produces the expression form so
-        // other callers can compose).
-        const stateRef = {
-          field: { name, type: { kind: "primitive" as const, name: "string" as const } },
-          name,
-        };
-        return `${tsxTarget.renderStateWrite(stateRef, emitExpr(stmt.value, ctx))};`;
+      if (ctx.stateNames.has(seg[0]!)) {
+        return stateWrite(seg, emitExpr(stmt.value, ctx), ctx);
       }
       return unsupportedPageStmt(
         `assignment to '${seg.join(".")}'`,
-        "the React backend only mutates single-segment page-state fields",
+        "the React backend only mutates page-state fields (declare the root in `state { … }`)",
       );
     }
     case "add":
@@ -984,25 +973,17 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       // `kind: "add"` / `kind: "remove"` in the IR (the same
       // kinds collection-mutations use; for scalar state fields
       // they're compound additions/subtractions).  Walker emits
-      // `setCount(count + 1)` / `setCount(count - 1)` — compose
-      // tsxTarget.renderStateRead (the bare name `count`) with
-      // renderStateWrite (the `setCount(...)` shape).
+      // `setCount(count + 1)` — for a nested target the current value
+      // reads as the plain member chain (the state root is in scope).
       const seg = stmt.target.segments;
-      if (seg.length === 1 && ctx.stateNames.has(seg[0]!)) {
-        ctx.usesState = true;
-        const name = seg[0]!;
+      if (ctx.stateNames.has(seg[0]!)) {
         const op = stmt.kind === "add" ? "+" : "-";
-        const stateRef = {
-          field: { name, type: { kind: "primitive" as const, name: "string" as const } },
-          name,
-        };
-        const read = tsxTarget.renderStateRead(stateRef, "handler");
-        const value = `${read} ${op} ${emitExpr(stmt.value, ctx)}`;
-        return `${tsxTarget.renderStateWrite(stateRef, value)};`;
+        const value = `${seg.join(".")} ${op} ${emitExpr(stmt.value, ctx)}`;
+        return stateWrite(seg, value, ctx);
       }
       return unsupportedPageStmt(
         `'${stmt.kind === "add" ? "+=" : "-="}' on '${seg.join(".")}'`,
-        "the React backend only mutates single-segment page-state fields",
+        "the React backend only mutates page-state fields (declare the root in `state { … }`)",
       );
     }
     case "let":
@@ -1024,6 +1005,29 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
         "it has no meaning in a React page event handler",
       );
   }
+}
+
+/** Immutable React state write for a (possibly nested) `state` target.
+ *  Single segment delegates the `setName(value)` shape to tsxTarget (see
+ *  `src/generator/_walker/target.ts`).  A multi-segment target
+ *  (`order.shipping.zip := v`) builds the standard nested-spread update
+ *  from the inside out:
+ *  `setOrder({ ...order, shipping: { ...order.shipping, zip: v } })` —
+ *  React state is immutable, so in-place member assignment would not
+ *  re-render.  The trailing `;` is statement-position context. */
+function stateWrite(seg: readonly string[], valueJs: string, ctx: WalkContext): string {
+  ctx.usesState = true;
+  const root = seg[0]!;
+  const stateRef = {
+    field: { name: root, type: { kind: "primitive" as const, name: "string" as const } },
+    name: root,
+  };
+  let value = valueJs;
+  for (let i = seg.length - 1; i >= 1; i--) {
+    const prefix = seg.slice(0, i).join(".");
+    value = `{ ...${prefix}, ${seg[i]!}: ${value} }`;
+  }
+  return `${tsxTarget.renderStateWrite(stateRef, value)};`;
 }
 
 /** A page event-handler statement the React walker can't lower.  We throw
