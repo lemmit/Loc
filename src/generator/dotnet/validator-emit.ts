@@ -232,10 +232,6 @@ function renderFluentPredicate(e: ExprIR): string {
       return `${renderFluentPredicate(e.left)} ${e.op} ${renderFluentPredicate(e.right)}`;
     case "ternary":
       return `${renderFluentPredicate(e.cond)} ? ${renderFluentPredicate(e.then)} : ${renderFluentPredicate(e.otherwise)}`;
-    case "propagate":
-      // `?` propagation is an operation-body construct, never a validator
-      // predicate; defensive (exception-less.md A2).
-      throw new Error("renderFluentPredicate: unexpected '?' propagation.");
     case "lambda":
       // Lambda body is now optional.  Wire-boundary refines
       // never see block-body lambdas (`classifyForWire` only admits

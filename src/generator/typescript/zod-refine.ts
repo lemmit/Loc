@@ -112,10 +112,6 @@ function renderRefineExpr(e: ExprIR): string {
       return renderBinary(e.op, e.left, e.right);
     case "ternary":
       return `${renderRefineExpr(e.cond)} ? ${renderRefineExpr(e.then)} : ${renderRefineExpr(e.otherwise)}`;
-    case "propagate":
-      // `?` propagation is an operation-body construct, never a Zod refine
-      // predicate; defensive (exception-less.md A2).
-      throw new Error("renderRefineExpr: unexpected '?' propagation.");
     case "lambda":
       // Lambda body is now optional.  Wire-boundary refines
       // never see block-body lambdas (`classifyForWire` only admits

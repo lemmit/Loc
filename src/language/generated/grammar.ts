@@ -12491,71 +12491,48 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "arguments": []
           },
           {
-            "$type": "Alternatives",
+            "$type": "Group",
             "elements": [
               {
-                "$type": "Group",
-                "elements": [
-                  {
-                    "$type": "Action",
-                    "inferredType": {
-                      "$type": "InferredType",
-                      "name": "TernaryExpr"
-                    },
-                    "feature": "cond",
-                    "operator": "="
-                  },
-                  {
-                    "$type": "Keyword",
-                    "value": "?"
-                  },
-                  {
-                    "$type": "Assignment",
-                    "feature": "thenExpr",
-                    "operator": "=",
-                    "terminal": {
-                      "$type": "RuleCall",
-                      "rule": {
-                        "$ref": "#/rules@154"
-                      },
-                      "arguments": []
-                    }
-                  },
-                  {
-                    "$type": "Keyword",
-                    "value": ":"
-                  },
-                  {
-                    "$type": "Assignment",
-                    "feature": "elseExpr",
-                    "operator": "=",
-                    "terminal": {
-                      "$type": "RuleCall",
-                      "rule": {
-                        "$ref": "#/rules@154"
-                      },
-                      "arguments": []
-                    }
-                  }
-                ]
+                "$type": "Action",
+                "inferredType": {
+                  "$type": "InferredType",
+                  "name": "TernaryExpr"
+                },
+                "feature": "cond",
+                "operator": "="
               },
               {
-                "$type": "Group",
-                "elements": [
-                  {
-                    "$type": "Action",
-                    "inferredType": {
-                      "$type": "InferredType",
-                      "name": "PropagateExpr"
-                    },
-                    "feature": "operand",
-                    "operator": "="
+                "$type": "Keyword",
+                "value": "?"
+              },
+              {
+                "$type": "Assignment",
+                "feature": "thenExpr",
+                "operator": "=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@154"
                   },
-                  {
-                    "$type": "Keyword",
-                    "value": "?"
-                  }
-                ]
+                  "arguments": []
+                }
+              },
+              {
+                "$type": "Keyword",
+                "value": ":"
+              },
+              {
+                "$type": "Assignment",
+                "feature": "elseExpr",
+                "operator": "=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@154"
+                  },
+                  "arguments": []
+                }
               }
             ],
             "cardinality": "?"

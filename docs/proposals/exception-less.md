@@ -8,14 +8,14 @@
 > ([`validation-error-extension.md`](./validation-error-extension.md)
 > is fully shipped on all three backends).
 >
-> **The `?` propagation operator (A2) is DROPPED** (maintainer
-> decision, 2026-06-10). Its surface + validation shipped in #1030
-> (grammar `PropagateExpr`, `ExprIR` kind `propagate`, gates
-> `loom.propagate-unsupported` / `loom.propagate-incompatible-error`)
-> but no backend ever emitted it; the feature is resigned from
-> completely and the shipped surface is slated for **removal** (grammar
-> rule + IR kind + lowering arm + both gates + print-expr arm + tests).
-> Do not build on it.
+> **The `?` propagation operator (A2) is DROPPED and its surface
+> REMOVED** (maintainer decision, 2026-06-10). The surface + validation
+> had shipped in #1030 (grammar `PropagateExpr`, `ExprIR` kind
+> `propagate`, gates `loom.propagate-unsupported` /
+> `loom.propagate-incompatible-error`) but no backend ever emitted it;
+> the grammar rule, IR kind, lowering arm, both gates, print-expr arm,
+> and tests have since been deleted. `expr ? then : else` (the ternary)
+> is unaffected. Do not re-introduce.
 >
 > **Revisited by**:
 > [`failure-taxonomy.md`](./failure-taxonomy.md) — a step-back design
