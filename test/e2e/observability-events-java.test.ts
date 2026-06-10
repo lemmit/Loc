@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Observability e2e for the Java backend (LOOM_OBS_E2E_JAVA=1): generate a
-// system, `mvn package` the deployable, boot the jar against Postgres,
+// system, `gradle bootJar` the deployable, boot the jar against Postgres,
 // hit /health, shut down, and assert the catalog envelope appeared on
 // stdout:
 //
@@ -58,9 +58,9 @@ function hasDocker(): boolean {
   }
 }
 
-function hasMaven(): boolean {
+function hasGradle(): boolean {
   try {
-    execSync("mvn --version", { stdio: "pipe", timeout: 10_000 });
+    execSync("gradle --version", { stdio: "pipe", timeout: 30_000 });
     return true;
   } catch {
     return false;
@@ -114,7 +114,7 @@ describe.skipIf(!ENABLED)(
     it("boot + /health round-trip emits the catalog lifecycle + request bracket", async () => {
       // Prerequisite checks INSIDE the test so a misconfigured CI
       // environment fails loudly instead of skipping silently.
-      if (!hasMaven()) throw new Error("LOOM_OBS_E2E_JAVA=1 requires Maven on PATH");
+      if (!hasGradle()) throw new Error("LOOM_OBS_E2E_JAVA=1 requires Gradle on PATH");
       if (!PG_URL_OVERRIDE && !hasDocker()) {
         throw new Error("LOOM_OBS_E2E_JAVA=1 requires docker (or LOOM_OBS_PG_URL)");
       }
@@ -133,7 +133,7 @@ describe.skipIf(!ENABLED)(
           cwd: repoRoot,
         });
         const projectDir = path.join(outDir, "obs_api");
-        execSync("mvn -q -B -DskipTests package", {
+        execSync("gradle --no-daemon -q bootJar", {
           cwd: projectDir,
           stdio: "inherit",
           timeout: 600_000,
@@ -166,10 +166,10 @@ describe.skipIf(!ENABLED)(
 
         // 3. Boot the jar, capturing stdout.
         const jar = fs
-          .readdirSync(path.join(projectDir, "target"))
-          .find((f) => f.endsWith(".jar") && !f.endsWith(".jar.original"));
-        if (!jar) throw new Error("no jar produced by mvn package");
-        app = spawn("java", ["-jar", path.join("target", jar)], {
+          .readdirSync(path.join(projectDir, "build", "libs"))
+          .find((f) => f.endsWith(".jar") && !f.endsWith("-plain.jar"));
+        if (!jar) throw new Error("no jar produced by gradle bootJar");
+        app = spawn("java", ["-jar", path.join("build", "libs", jar)], {
           cwd: projectDir,
           env: {
             ...process.env,

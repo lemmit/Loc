@@ -36,14 +36,17 @@ async function files(): Promise<Map<string, string>> {
 }
 
 describe("java generator — project shell (S1)", () => {
-  it("emits a Maven pom with the Spring Boot parent and JPA/Web/Postgres deps", async () => {
-    const pom = (await files()).get("shop_api/pom.xml")!;
-    expect(pom).toContain("<artifactId>spring-boot-starter-parent</artifactId>");
-    expect(pom).toContain("<artifactId>shopapi</artifactId>");
-    expect(pom).toContain("<artifactId>spring-boot-starter-web</artifactId>");
-    expect(pom).toContain("<artifactId>spring-boot-starter-data-jpa</artifactId>");
-    expect(pom).toContain("<artifactId>postgresql</artifactId>");
-    expect(pom).toContain("<java.version>21</java.version>");
+  it("emits a Gradle (Kotlin DSL) build with the Boot plugin and JPA/Web/Postgres deps", async () => {
+    const f = await files();
+    const build = f.get("shop_api/build.gradle.kts")!;
+    expect(build).toContain('id("org.springframework.boot") version');
+    expect(build).toContain('implementation("org.springframework.boot:spring-boot-starter-web")');
+    expect(build).toContain(
+      'implementation("org.springframework.boot:spring-boot-starter-data-jpa")',
+    );
+    expect(build).toContain('runtimeOnly("org.postgresql:postgresql")');
+    expect(build).toContain("JavaLanguageVersion.of(21)");
+    expect(f.get("shop_api/settings.gradle.kts")).toContain('rootProject.name = "shopapi"');
   });
 
   it("emits Application.java under the base package", async () => {
@@ -70,10 +73,10 @@ describe("java generator — project shell (S1)", () => {
     expect(yml).toContain("open-in-view: false");
   });
 
-  it("emits a multi-stage Maven Dockerfile", async () => {
+  it("emits a multi-stage Gradle Dockerfile", async () => {
     const docker = (await files()).get("shop_api/Dockerfile")!;
-    expect(docker).toContain("FROM maven:3.9-eclipse-temurin-21 AS build");
-    expect(docker).toContain("RUN mvn -q -B -DskipTests package");
+    expect(docker).toContain("FROM gradle:8-jdk21 AS build");
+    expect(docker).toContain("RUN gradle --no-daemon -q bootJar");
     expect(docker).toContain("FROM eclipse-temurin:21-jre");
     expect(docker).toContain('ENTRYPOINT ["java", "-jar", "app.jar"]');
   });

@@ -663,7 +663,10 @@ for the full mapping table.
 ## Java backend (`platform: java`)
 
 Spring Boot 3.5 / Spring Data JPA (Hibernate) / Postgres, built with
-Maven (single `pom.xml` on the Boot parent POM, Java 21).  Emission
+Gradle (Kotlin DSL, Boot plugin + BOM import, Java 21 toolchain; no
+wrapper jar is committed — the generator emits text only, and the
+Dockerfile/CI/dev environments provide Gradle ≥ 8, or run
+`gradle wrapper` once).  Emission
 lives in `src/generator/java/`; the surface is `src/platform/java.ts`
 (`java@v1`).  Per-aggregate placement routes through the layout adapter
 (`byFeature` default — package-by-feature; `byLayer` — package-by-layer),
@@ -673,7 +676,7 @@ Per deployable it emits:
 
 | Piece | Files |
 |---|---|
-| Project shell | `pom.xml` (Boot parent; jMolecules, springdoc, Flyway when migrations exist), `Application.java`, `application.yml` (datasource via `SPRING_DATASOURCE_*` env), multi-stage Maven `Dockerfile` |
+| Project shell | `build.gradle.kts` + `settings.gradle.kts` (Boot plugin; jMolecules, springdoc, Flyway when migrations exist), `Application.java`, `application.yml` (datasource via `SPRING_DATASOURCE_*` env), multi-stage Gradle `Dockerfile` |
 | Domain | typed-id records (`@Embeddable`, `newId()`), enums (DSL-cased constants — the wire), VO records running invariants in the compact constructor, event records implementing a `DomainEvent` marker (jMolecules-annotated), aggregate/part classes with package-private fields + record-style accessors, `create(...)` factory, `pullEvents()`, positional part `_create` factories |
 | Persistence | JPA annotations mirroring the shared `MigrationsIR` schema (`@EmbeddedId` typed ids, flattened-VO `@AttributeOverride`s, unidirectional `@OneToMany` containments with `nullable = false` join columns, `@ElementCollection` join tables for `X id[]` + value collections, `@MappedSuperclass` TPC bases); repository triple — domain port (`save`/`findById`/`getById`/`findAll`/`delete` + declared finds), Spring Data interface with `@Query` JPQL finds, `@Repository` impl mapping misses to 404 |
 | Migrations | `MigrationsIR` → Flyway `db/migration/V<ts>.<n>__*.sql` via the shared Postgres-SQL renderer |

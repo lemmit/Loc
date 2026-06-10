@@ -7,16 +7,17 @@ import { describe, it } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Generator regression test: emit each fixture via `ddd generate system`,
-// then run `mvn package` against the java deployable.  Catches generator
+// then run `gradle testClasses bootJar` against the java deployable
+// (compiles main + the emitted JUnit test sources, packages the boot jar).  Catches generator
 // drift that breaks the generated Java (bad imports, JPA mapping shapes
 // the annotation processor rejects, signature mismatches against Spring
 // Data / Jackson) without booting the docker stack.
 //
 // Mirrors `generated-dotnet-build.test.ts`.  Slow (~60s cold per fixture,
-// dominated by the Maven dependency download; warm runs reuse ~/.m2).
+// dominated by the Gradle dependency download; warm runs reuse ~/.gradle).
 // Opt-in via LOOM_JAVA_BUILD=1 so the default `npm test` stays fast.
 //
-// Requires JDK 21 + Maven on PATH (matching the generated pom).
+// Requires JDK 21 + Gradle ≥ 8 on PATH (matching the generated build).
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -37,7 +38,7 @@ const FIXTURES: Array<[string, string]> = [
 ];
 
 describe.skipIf(!ENABLED)(
-  "generated Java project compiles under `mvn package` (LOOM_JAVA_BUILD=1)",
+  "generated Java project compiles under `gradle testClasses bootJar` (LOOM_JAVA_BUILD=1)",
   () => {
     it.each(FIXTURES)(
       "%s — `ddd generate system` output builds",
@@ -48,7 +49,7 @@ describe.skipIf(!ENABLED)(
             stdio: "inherit",
             cwd: repoRoot,
           });
-          execSync(`mvn -q -B -DskipTests package`, {
+          execSync(`gradle --no-daemon -q testClasses bootJar`, {
             cwd: path.join(outDir, slug),
             stdio: "inherit",
             timeout: 600_000,

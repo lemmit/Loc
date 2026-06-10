@@ -1,8 +1,8 @@
 name: Java build verification
 
 # Compiles a Java project generated from each test-fixture .ddd by
-# `ddd generate system`, then runs `mvn package` (compiles main + test
-# sources, including the emitted JUnit classes).  Catches emission bugs
+# `ddd generate system`, then runs `gradle testClasses bootJar`
+# (compiles main + the emitted JUnit test sources, packages the jar).  Catches emission bugs
 # in the Java generator that the string-match unit tests cannot see
 # (missing imports, JPA mapping shapes Hibernate rejects, Spring Data
 # signature drift, record/embeddable mismatches).
@@ -48,8 +48,8 @@ concurrency:
 jobs:
   build-generated-java:
     runs-on: ubuntu-latest
-    # Cold Maven runs download the Spring Boot dependency tree (~2min);
-    # warm runs with the ~/.m2 cache below are ~30s per fixture.
+    # Cold Gradle runs download the Spring Boot dependency tree (~2min);
+    # warm runs with the ~/.gradle cache below are ~30s per fixture.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
@@ -64,16 +64,19 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      # Cache the Maven repository across runs.  Keyed on the pom
+      # Cache the Gradle caches across runs.  Keyed on the build
       # template (the generated dependency set only moves when the
-      # pinned versions in emit/program.ts move).
-      - name: Cache Maven packages
+      # pinned versions in emit/program.ts move).  ubuntu-latest
+      # runners ship Gradle ≥ 8.
+      - name: Cache Gradle packages
         uses: actions/cache@v5
         with:
-          path: ~/.m2/repository
-          key: maven-${{ hashFiles('src/generator/java/emit/program.ts') }}
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('src/generator/java/emit/program.ts') }}
           restore-keys: |
-            maven-
+            gradle-
 
       # Build the Loom toolchain.  `prepare` lifecycle runs
       # `langium:generate` which populates src/language/generated/.
@@ -83,11 +86,11 @@ jobs:
       - name: Type-check
         run: npm run build
 
-      - name: mvn package against each fixture
+      - name: gradle testClasses bootJar against each fixture
         run: npm run test:java
 
-      - name: Surface maven output on failure
+      - name: Surface gradle output on failure
         if: failure()
         run: |
           echo '## Tail of test:java output' >> $GITHUB_STEP_SUMMARY
-          echo 'See the previous step log for full `mvn package` diagnostics — the test inherits stdio so per-file errors appear there as `[ERROR]` lines.' >> $GITHUB_STEP_SUMMARY
+          echo 'See the previous step log for full `gradle` diagnostics — the test inherits stdio so per-file errors appear there as `[ERROR]` lines.' >> $GITHUB_STEP_SUMMARY

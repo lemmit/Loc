@@ -6,7 +6,7 @@ name: Java observability e2e
 # server_shutdown → server_drained).  Mirrors `dotnet-obs-e2e.yml`.
 #
 # Push-to-main only (regression net, not a PR gate) — docker pull +
-# maven cold start cost ~3-5min.
+# gradle cold start cost ~3-5min.
 
 on:
   push:
@@ -42,13 +42,15 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Cache Maven packages
+      - name: Cache Gradle packages
         uses: actions/cache@v5
         with:
-          path: ~/.m2/repository
-          key: maven-${{ hashFiles('src/generator/java/emit/program.ts') }}
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('src/generator/java/emit/program.ts') }}
           restore-keys: |
-            maven-
+            gradle-
 
       - name: Install Loom toolchain
         run: npm ci

@@ -12,8 +12,9 @@
 > criteria), so the `Specification<T>` path is unblocked.  The original
 > design rationale below is retained for context; where it disagrees
 > with the shipped code, the code (and `docs/generators.md`'s Java
-> section) wins — notably the build tool decision landed on **Maven**,
-> not Gradle, and the default application style on **layered**.
+> section) wins — notably the build is **Gradle (Kotlin DSL)** as the proposal
+> envisioned (an interim Maven shell was revised out), and the default
+> application style is **layered**.
 
 ## TL;DR
 

@@ -49,8 +49,9 @@ import {
   renderApplicationYml,
   renderDockerfile,
   renderDockerignore,
+  renderGradleBuild,
+  renderGradleSettings,
   renderHealthController,
-  renderPom,
 } from "./emit/program.js";
 import {
   type JavaRepoCtx,
@@ -69,9 +70,9 @@ import { basePackageFor, javaPackageSegment, mainSourcePath } from "./naming.js"
 // Java backend entry point — Spring Boot 3 / Spring Data JPA / Postgres.
 //
 // `generateJavaForContexts(...)` returns a Map of relative paths → file
-// contents for one deployable's Maven project:
+// contents for one deployable's Gradle project:
 //
-//   pom.xml                                  — Maven shell (Boot parent POM)
+//   build.gradle.kts, settings.gradle.kts    — Gradle (Kotlin DSL) shell
 //   src/main/java/<base>/Application.java    — @SpringBootApplication entry
 //   src/main/java/<base>/api/...             — controllers (+ health/ready)
 //   src/main/java/<base>/domain/...          — ids, enums, VOs, events,
@@ -79,7 +80,7 @@ import { basePackageFor, javaPackageSegment, mainSourcePath } from "./naming.js"
 //   src/main/java/<base>/infrastructure/...  — JPA repositories, persistence
 //   src/main/resources/application.yml       — config (datasource via env)
 //   src/main/resources/db/migration/         — Flyway-style versioned SQL
-//   Dockerfile, .dockerignore                — multi-stage Maven build
+//   Dockerfile, .dockerignore                — multi-stage Gradle build
 //
 // `<base>` is `com.loom.<deployable>` (see naming.ts).  Per-aggregate file
 // placement routes through the deployable's resolved layout adapter
@@ -112,7 +113,7 @@ export function generateJava(
 }
 
 /**
- * System-mode entry: emits a single Maven project from a pre-filtered
+ * System-mode entry: emits a single Gradle project from a pre-filtered
  * list of contexts under the deployable's name (`ns`).
  */
 export function generateJavaForContexts(
@@ -256,7 +257,8 @@ function emitProjectFromContexts(
   const hasMigrations = allMigrations.some((m) => m.steps.length > 0 || m.baseline !== null);
 
   // Project shell — stable from S1 on.
-  out.set("pom.xml", renderPom(ns, slug, { flyway: hasMigrations }));
+  out.set("build.gradle.kts", renderGradleBuild({ flyway: hasMigrations }));
+  out.set("settings.gradle.kts", renderGradleSettings(slug));
   out.set("src/main/resources/application.yml", renderApplicationYml(slug));
   out.set(mainSourcePath(basePkg, "Application.java"), renderApplication(basePkg));
   out.set(

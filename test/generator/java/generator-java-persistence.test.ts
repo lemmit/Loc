@@ -174,9 +174,9 @@ describe("java generator — Flyway migrations (S4)", () => {
     expect(sql).toContain("CREATE SCHEMA IF NOT EXISTS orders;");
     expect(sql).toContain("CREATE TABLE orders.orders (");
     expect(sql).toContain("CREATE TABLE orders.order_tag_ids (");
-    const pom = files_.get("shop_api/pom.xml")!;
-    expect(pom).toContain("<artifactId>flyway-core</artifactId>");
-    expect(pom).toContain("<artifactId>flyway-database-postgresql</artifactId>");
+    const build = files_.get("shop_api/build.gradle.kts")!;
+    expect(build).toContain('implementation("org.flywaydb:flyway-core")');
+    expect(build).toContain('implementation("org.flywaydb:flyway-database-postgresql")');
   });
 });
 

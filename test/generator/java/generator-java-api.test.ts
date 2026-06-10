@@ -164,8 +164,8 @@ describe("java generator — wire validators + advice (S5)", () => {
     expect(files_.get("shop_api/src/main/resources/application.yml")).toContain(
       "path: /openapi.json",
     );
-    expect(files_.get("shop_api/pom.xml")).toContain(
-      "<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>",
+    expect(files_.get("shop_api/build.gradle.kts")).toContain(
+      "org.springdoc:springdoc-openapi-starter-webmvc-ui",
     );
   });
 });
