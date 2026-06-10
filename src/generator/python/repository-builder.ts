@@ -10,7 +10,9 @@ import type {
   FieldIR,
   FindIR,
   RepositoryIR,
+  RetrievalIR,
   TypeIR,
+  ViewIR,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { plural, snake } from "../../util/naming.js";
@@ -85,6 +87,12 @@ export function buildPyRepositoryFile(
     `        rows = (await self._session.execute(select(${root}))).scalars().all()`,
     "        return [await self._hydrate(row) for row in rows]",
     ...emittableFinds(repo).flatMap((f) => ["", findMethod(agg, f, ctx)]),
+    "",
+    `    async def find_many_by_ids(self, ids: list[${agg.name}Id]) -> list[${agg.name}]:`,
+    `        rows = (await self._session.execute(select(${root}).where(${root}.id.in_(list(ids))))).scalars().all()`,
+    "        return [await self._hydrate(row) for row in rows]",
+    ...aggregateViews(agg, ctx).flatMap((v) => ["", viewFindMethod(agg, v, ctx)]),
+    ...aggregateRetrievals(agg, ctx).flatMap((r) => ["", runMethod(agg, r, ctx)]),
     "",
     saveMethod(agg, ctx, aggVar),
     agg.canonicalDestroy ? ["", deleteMethod(agg)] : null,
@@ -198,6 +206,80 @@ function conventionPredicate(agg: EnrichedAggregateIR, find: FindIR): PyPredicat
   if (clauses.length === 0) return null;
   if (clauses.length === 1) return { expr: clauses[0]!, ops: new Set() };
   return { expr: `and_(${clauses.join(", ")})`, ops: new Set(["and_"]) };
+}
+
+// --- views + retrievals --------------------------------------------------------
+
+/** Aggregate-sourced views over this aggregate (workflow views: S15). */
+export function aggregateViews(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): ViewIR[] {
+  return ctx.views.filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name);
+}
+
+function aggregateRetrievals(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): RetrievalIR[] {
+  return (ctx.retrievals ?? []).filter(
+    (r) => r.targetType.kind === "entity" && r.targetType.name === agg.name,
+  );
+}
+
+/** Per-view repository find — the lowered filter over the source
+ *  aggregate (no filter → all).  The views router calls this. */
+function viewFindMethod(
+  agg: EnrichedAggregateIR,
+  view: ViewIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const root = rowClassName(agg.name);
+  const pred = view.filter ? lowerToSqlAlchemy(view.filter, agg, ctx) : null;
+  const where = pred ? `.where(${pred.expr})` : "";
+  return lines(
+    `    async def ${snake(view.name)}(self) -> list[${agg.name}]:`,
+    `        rows = (await self._session.execute(select(${root})${where})).scalars().all()`,
+    "        return [await self._hydrate(row) for row in rows]",
+  );
+}
+
+/** Retrieval runner — `where` + `sort` + call-site offset/limit paging
+ *  (retrieval.md: page is never part of the declaration).  The
+ *  criterion is inlined (`where` carries the substituted predicate) —
+ *  the IR contract explicitly supports non-reifying backends. */
+function runMethod(
+  agg: EnrichedAggregateIR,
+  retrieval: RetrievalIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const root = rowClassName(agg.name);
+  const pred = lowerToSqlAlchemy(retrieval.where, agg, ctx);
+  if (!pred) {
+    throw new Error(
+      `internal: where-clause for retrieval '${retrieval.name}' on '${agg.name}' could not ` +
+        "lower to SQLAlchemy, but validateRetrievals should have caught this.",
+    );
+  }
+  const orderBy =
+    retrieval.sort.length > 0
+      ? `.order_by(${retrieval.sort
+          .map((t) => `${root}.${snake(t.path[0]!.name)}.${t.direction}()`)
+          .join(", ")})`
+      : "";
+  const params = [
+    "self",
+    ...retrieval.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`),
+    "offset: int | None = None",
+    "limit: int | None = None",
+  ];
+  return lines(
+    `    async def run_${snake(retrieval.name)}(${params.join(", ")}) -> list[${agg.name}]:`,
+    `        query = select(${root}).where(${pred.expr})${orderBy}`,
+    "        if offset is not None:",
+    "            query = query.offset(offset)",
+    "        if limit is not None:",
+    "            query = query.limit(limit)",
+    "        rows = (await self._session.execute(query)).scalars().all()",
+    "        return [await self._hydrate(row) for row in rows]",
+  );
 }
 
 // --- hydration (row → domain) ----------------------------------------------

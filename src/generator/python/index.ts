@@ -20,6 +20,7 @@ import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
 import { buildPyRoutesFile } from "./routes-builder.js";
+import { buildPyViewsFile } from "./views-builder.js";
 
 // ---------------------------------------------------------------------------
 // Python / FastAPI generator orchestrator.
@@ -69,7 +70,8 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   const routedAggs = args.contexts.flatMap((c) =>
     c.aggregates.filter((a) => !a.isAbstract && a.persistedAs !== "eventLog").map((a) => a.name),
   );
-  out.set("app/main.py", renderMain(args.sys.name, routedAggs));
+  const hasViews = merged.views.some((v) => v.source.kind === "aggregate");
+  out.set("app/main.py", renderMain(args.sys.name, routedAggs, hasViews));
 
   out.set("app/domain/__init__.py", "");
   out.set("app/domain/ids.py", renderPyIds(merged));
@@ -95,6 +97,8 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/http/__init__.py", "");
   out.set("app/http/problem.py", PROBLEM_PY);
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
+  const viewsFile = buildPyViewsFile(merged);
+  if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
 
   // Per-aggregate emission stays per-context — each aggregate module is
   // emitted in the context that owns it.  A TPH/TPC abstract base owns
@@ -239,7 +243,7 @@ const ENGINE_PY = lines(
   "",
 );
 
-function renderMain(systemName: string, routerAggs: string[]): string {
+function renderMain(systemName: string, routerAggs: string[], hasViews = false): string {
   return lines(
     `"""FastAPI application entrypoint.`,
     "",
@@ -259,6 +263,7 @@ function renderMain(systemName: string, routerAggs: string[]): string {
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
     "from app.http.problem import install_error_handlers",
+    hasViews ? "from app.http.views_routes import router as views_router" : null,
     "",
     "",
     "",
@@ -279,6 +284,7 @@ function renderMain(systemName: string, routerAggs: string[]): string {
     `    allow_headers=["*"],`,
     ")",
     ...routerAggs.map((name) => `app.include_router(${snake(name)}_router)`),
+    hasViews ? "app.include_router(views_router)" : null,
     "",
     "",
     `@app.get("/health")`,
