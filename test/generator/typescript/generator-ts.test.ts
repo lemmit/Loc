@@ -93,7 +93,7 @@ describe("typescript generator", () => {
           test "count on a local lowers to length" {
             let order = Order.create({ status: Draft })
             order.addLine(2)
-            expect order.lines.count == 1
+            expect(order.lines.count).toBe(1)
           }
         }
         repository Orders for Order { }
@@ -104,7 +104,7 @@ describe("typescript generator", () => {
     expect((doc.diagnostics ?? []).filter((d) => d.severity === 1)).toEqual([]);
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const tests = files.get("domain/order.test.ts")!;
-    expect(tests).toMatch(/order\.lines\.length === 1/);
+    expect(tests).toMatch(/expect\(order\.lines\.length\)\.toBe\(1\)/);
     expect(tests).not.toMatch(/order\.lines\.count/);
   });
 

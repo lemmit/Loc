@@ -82,7 +82,7 @@ subdomain Inventory {
           reorderPoint: 1
         })
         s.receive(Quantity { value: 10, unit: Each })
-        expectThrows s.issue(Quantity { value: 100, unit: Each })
+        expect(s.issue(Quantity { value: 100, unit: Each })).toThrow()
       }
     }
 

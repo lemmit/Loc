@@ -26,7 +26,7 @@ Reserved keywords:
 context  enum  valueobject  aggregate  entity  contains  ids
 event  repository  for  find  where
 derived  invariant  when  function  operation  private
-precondition  emit  let  expect  expectThrows  test  new
+precondition  emit  let  expect  test  new
 true  false  null  this  id
 int  long  decimal  money  string  bool  datetime  guid  json
 ```
@@ -676,21 +676,28 @@ Each aggregate may declare zero or more `test` blocks at the root level:
 ```ddd
 test "money literal builds" {
     let m = Money { 10.5, "USD" }
-    expect m.amount == 10.5
-    expect m.currency == "USD"
+    expect(m.amount).toBe(10.5)
+    expect(m.currency).toBe("USD")
 }
 
 test "negative money rejected" {
-    expectThrows Money { -1.0, "USD" }
+    expect(Money { -1.0, "USD" }).toThrow()
 }
 ```
 
-Inside a test body the standard operation statements are allowed plus:
+Assertions are **method-based**: every `expect` carries a matcher — a bare
+`expect <bool>` is a validation error.  The matcher set is a closed,
+compiler-known catalogue (`toBe` / `toBeGreaterThan(OrEqual)` /
+`toBeLessThan(OrEqual)` / `toHaveText` / `toHaveCount` / `toBeVisible` /
+`toThrow`); they are not methods on a domain type but intrinsic assertions the
+compiler type-checks and lowers per backend.  Inside a test body the standard
+operation statements are allowed plus:
 
 | Form | Lowers to |
 | --- | --- |
-| `expect Expression` | vitest `expect(<expr>).toBe(true)` / xUnit `Assert.True(<expr>)`. |
-| `expectThrows Expression` | vitest `expect(() => <expr>).toThrow()` / xUnit `Assert.Throws<DomainException>(() => <expr>)`. |
+| `expect(<actual>).<matcher>(…)` | vitest `expect(<actual>).<matcher>(…)` / xUnit `Assert.*` / Playwright matcher. |
+| `expect(<call>).toThrow()` | vitest `expect(() => <call>).toThrow()` / xUnit `Assert.Throws<DomainException>(() => <call>)`. |
+| `expect(<api-call>).toThrow(<status>)` | e2e only — `.rejects.toThrow(/→ <status>\b/)` (pins the rejected HTTP status). |
 
 Test blocks emit one file per aggregate:
 - TS: `domain/<aggregate>.test.ts` (vitest).
@@ -732,6 +739,32 @@ becomes `GET /x/{p.id}`.
 Bare object literals `{ a: 1, b: "x" }` are allowed inside test bodies
 (elsewhere in the DSL only `new <PartName> { … }` is permitted).  They
 serialize to JSON as the request body.
+
+#### Negative-path assertions — `expect(<call>).toThrow(<status>)`
+
+`expect(<api-call>).toThrow()` asserts the call rejects (any non-2xx). To pin
+the *exact* HTTP status — turning a one-backend test into a cross-backend
+status **parity** assertion — pass the status to `toThrow`:
+
+```ddd
+test e2e "creating a project with an empty name is rejected" against api {
+    expect(api.projects.create({ name: "" })).toThrow(400)
+}
+test e2e "reading a non-existent project is 404" against api {
+    expect(api.projects.getById("…")).toThrow(404)
+}
+```
+
+The lowering recognises `toThrow` and rewrites the `expect` into a throw
+assertion, lowering to `.rejects.toThrow(/→ N\b/)` — matching the status the
+generated fetch helper surfaces in the thrown error message.  The status
+argument is **e2e-only** (an in-process `test` has no wire status — the
+validator rejects it there) and must be an integer literal.  The status
+contract is identical across every backend: an `invariant` / `check` violation
+rejects with **400** (DomainError), a missing aggregate with **404**.  Because
+every `test e2e` block replays against each backend serving the referenced
+module, `toThrow(N)` asserts they all reject with the same status — the
+behavioral complement to the static OpenAPI `errorResponseDiffs` parity gate.
 
 The generated vitest file lives at `<system>/e2e/<SystemName>.e2e.test.ts`
 in the output directory.  Endpoints default to the docker-compose ports;
