@@ -6,6 +6,7 @@ import { renderPyAggregate } from "./emit/aggregate.js";
 import { ERRORS_PY } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
 import { renderPyIds } from "./emit/ids.js";
+import { renderPyTestsFile } from "./emit/tests.js";
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { PYTHON_PINS } from "./pins.js";
 
@@ -69,6 +70,8 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract) continue;
       out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx));
+      const tests = renderPyTestsFile(agg, ctx);
+      if (tests != null) out.set(`tests/test_${snake(agg.name)}.py`, tests);
     }
   }
   return out;
@@ -153,6 +156,7 @@ function renderPyproject(slug: string): string {
     "",
     "[tool.pytest.ini_options]",
     `asyncio_mode = "auto"`,
+    `pythonpath = ["."]`,
     "",
   );
 }

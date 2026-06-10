@@ -55,8 +55,9 @@ describe.skipIf(!ENABLED)(
           // separate opt-in suites rather than the build gate.
           run("uv sync");
           run("uv run ruff check .");
-          run("uv run mypy --strict app");
-          if (fs.existsSync(path.join(proj, "tests"))) {
+          const hasTests = fs.existsSync(path.join(proj, "tests"));
+          run(`uv run mypy --strict app${hasTests ? " tests" : ""}`);
+          if (hasTests) {
             run("uv run pytest -q");
           }
         } finally {

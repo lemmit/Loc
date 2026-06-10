@@ -30,6 +30,22 @@ system PyShell {
           status := Active
           emit WidgetActivated { widget: id, at: now() }
         }
+
+        test "widget activates from draft" {
+          let w = Widget.create({ label: "gizmo", size: 1, status: Draft, price: Price { amount: 1.0, currency: "USD" } })
+          w.activate()
+          expect(w.status).toBe(Active)
+          expect(w.size).toBeGreaterThan(0)
+        }
+
+        test "activate requires draft" {
+          let w = Widget.create({ label: "gizmo", size: 1, status: Active, price: Price { amount: 1.0, currency: "USD" } })
+          expectThrows w.activate()
+        }
+
+        test "price invariant rejects short currency" {
+          expectThrows Price { amount: 1.0, currency: "US" }
+        }
       }
       repository Widgets for Widget { }
     }
