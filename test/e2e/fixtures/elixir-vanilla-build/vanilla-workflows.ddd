@@ -74,15 +74,31 @@ system Tasks {
           emit TaskFinished { task: taskId, at: now() }
         }
       }
+
+      // resource-call exercise — a bare resource-op statement form
+      // (`files.put(key, body)`).  Lowers to a discarded adapter call
+      // (`_ = Api.Resources.S3.files_put(...)`) inside the with-chain's
+      // do-branch, against the shared Phoenix resource adapter module.
+      // Validates that the resource helper module + its ex_aws_s3 hex dep
+      // pipeline compile under --warnings-as-errors.  Non-transactional
+      // because the validator (loom.workflow-tx-effect) forbids external
+      // side effects inside a transactional span.
+      workflow archiveTask {
+        create(taskId: Task id) {
+          files.put("archive/seed", "{}")
+        }
+      }
     }
   }
   api TrackerApi from Productivity
   storage primary { type: postgres }
+  storage objects { type: s3, config: { bucket: "loom-test" } }
   resource trackerState { for: Tracker, kind: state, use: primary }
+  resource files       { for: Tracker, kind: objectStore, use: objects }
   deployable api {
     platform: elixir { foundation: vanilla }
     contexts: [Tracker]
-    dataSources: [trackerState]
+    dataSources: [trackerState, files]
     serves: TrackerApi
     port: 4000
   }

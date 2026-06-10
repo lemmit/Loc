@@ -14,6 +14,10 @@
 //   Later slices: policies, ProblemDetails parity, workflows + views, CI.
 // ---------------------------------------------------------------------------
 
+import {
+  buildPhoenixResourceModules,
+  emitPhoenixResourceFiles,
+} from "../adapters/resource-clients.js";
 import type { ApiRoute } from "../api-emit.js";
 import type { GenerateElixirArgs } from "../index.js";
 import { toModulePrefix, toSnakeApp } from "../shell-emit.js";
@@ -34,7 +38,7 @@ import { emitVanillaWorkflowExecution } from "./workflow-execution-emit.js";
 import { emitVanillaWorkflowInstances } from "./workflow-instances-emit.js";
 
 export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<string, string> {
-  const { contexts, deployable } = args;
+  const { contexts, deployable, sys } = args;
   const out = new Map<string, string>();
   const appName = toSnakeApp(deployable.name);
   const appModule = toModulePrefix(appName);
@@ -42,6 +46,21 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // Shared cross-controller helper modules (Slice 4).  Emitted once
   // per project; controllers `alias` the public functions.
   out.set(`lib/${appName}_web/problem_details.ex`, renderVanillaProblemDetailsModule(appModule));
+
+  // Resource-adapter helper modules — `lib/<app>/resources/<source_type>.ex`.
+  // Foundation-agnostic (just plain Elixir helper fns); reused from the
+  // shared Phoenix adapter set.  Workflows' `resource-call` lowering
+  // resolves `<resource>.verb(args)` against the per-resource module map.
+  // Some legacy test paths construct a SystemIR without `dataSources`/`storages`
+  // populated; guard the call so an under-shaped sys yields an empty resource
+  // set rather than throwing.
+  const sysWithSources =
+    sys?.dataSources && sys?.storages
+      ? { dataSources: sys.dataSources, storages: sys.storages }
+      : undefined;
+  const resourceEmission = emitPhoenixResourceFiles(sysWithSources, appName, appModule);
+  for (const [path, content] of resourceEmission.files) out.set(path, content);
+  const resourceModules = buildPhoenixResourceModules(sysWithSources, appModule);
 
   // Per-context emit: schema, changeset, repository, context module,
   // controllers.  Changeset before Repository so the latter can alias it.
@@ -71,13 +90,16 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // routes.  Body lowering for individual statement kinds is incremental;
     // this slice ships the shape (run/1 + optional Repo.transaction wrap) so
     // every workflow compiles and its route is wired end-to-end.
-    apiRoutes.push(...emitVanillaWorkflowExecution(appName, appModule, ctx, out).routes);
+    apiRoutes.push(
+      ...emitVanillaWorkflowExecution(appName, appModule, ctx, out, resourceModules).routes,
+    );
   }
   apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
 
   // Shell files — emitted AFTER per-context emit so the router has the
-  // collected `apiRoutes` to splice into the `/api` scope.
-  emitVanillaShellFiles(appName, appModule, out, apiRoutes);
+  // collected `apiRoutes` to splice into the `/api` scope.  Resource-adapter
+  // hex deps (ex_aws_s3, amqp, req) ride into `mix.exs`.
+  emitVanillaShellFiles(appName, appModule, out, apiRoutes, resourceEmission.hexDeps);
 
   return out;
 }
