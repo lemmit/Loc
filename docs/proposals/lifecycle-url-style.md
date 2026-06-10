@@ -1,11 +1,16 @@
 # Lifecycle URL style — Phase 2 design (`urlStyle` + `routeSlug`)
 
-> **Status:** PINNED ([D-URLSTYLE](../decisions.md#d-urlstyle--lifecycle-url-style-on-the-api-body--per-action-routeslug)).
+> **Status:** **SHIPPED** ([D-URLSTYLE](../decisions.md#d-urlstyle--lifecycle-url-style-on-the-api-body--per-action-routeslug)).
 > Reconciles [`lifecycle-operations.md`](./lifecycle-operations.md) Phase 2
 > with the **actual** `api` grammar, which differs from that proposal's
 > assumption. Phase 1 (kind-tagged `create`/`destroy`, the
-> `creates`/`destroys`/`canonical*` IR) shipped in #722; this slice
-> implements the design below.
+> `creates`/`destroys`/`canonical*` IR) shipped in #722; the slice this
+> doc designs is live end-to-end (verified 2026-06-10): `urlStyle:` on
+> the api body parses + lowers, enrichment stamps `OperationIR.routeSlug`
+> per action (`routeSlugFor` in `src/ir/enrich/enrichments.ts`), and
+> every backend route emitter consumes it (`snake(op.routeSlug ??
+> op.name)` on Hono / .NET / elixir, plus the React API client and the
+> OpenAPI emitters) — pinned by `test/ir/lifecycle-url-style.test.ts`.
 
 ## Why this doc exists — the proposal is written against a grammar that doesn't exist
 
