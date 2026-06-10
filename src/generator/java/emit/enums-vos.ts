@@ -78,12 +78,17 @@ export function renderJavaValueObject(vo: ValueObjectIR, basePkg: string): strin
     ``,
     ...[...javaImports].sort().map((i) => `import ${i};`),
     javaImports.size > 0 ? `` : null,
+    `import jakarta.persistence.Embeddable;`,
     `import org.jmolecules.ddd.annotation.ValueObject;`,
     ``,
     `import ${basePkg}.domain.common.DomainException;`,
     `import ${basePkg}.domain.enums.*;`,
     `import ${basePkg}.domain.ids.*;`,
     ``,
+    // @Embeddable: Hibernate 6.2+ maps records as embedded components,
+    // running the compact constructor (and so the invariants) on
+    // hydration — same behaviour as the .NET explicit-ctor records.
+    `@Embeddable`,
     `@ValueObject`,
     `public record ${vo.name}(${params}) {`,
     vo.invariants.length > 0 ? `    public ${vo.name} {` : null,

@@ -8,8 +8,10 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
-import { isTpcBase, isTphBase, tphConcretesOf } from "../../ir/util/inheritance.js";
+import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
+import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
+import { plural, snake } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import { byFeatureLayoutAdapter } from "./adapters/by-feature-layout.js";
@@ -29,6 +31,7 @@ import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
 import { renderJavaEvent } from "./emit/events.js";
 import { renderJavaId } from "./emit/ids.js";
+import { emitJavaMigrations } from "./emit/migrations.js";
 import {
   renderApplication,
   renderApplicationYml,
@@ -37,6 +40,12 @@ import {
   renderHealthController,
   renderPom,
 } from "./emit/program.js";
+import {
+  type JavaRepoCtx,
+  renderJavaRepositoryImpl,
+  renderJavaRepositoryInterface,
+  renderJavaSpringDataRepository,
+} from "./emit/repository.js";
 import { basePackageFor, javaPackageSegment, mainSourcePath } from "./naming.js";
 
 // ---------------------------------------------------------------------------
@@ -173,12 +182,17 @@ function emitProjectFromContexts(
       place(`${ev.name}.java`, "event", renderJavaEvent(ev, basePkg));
     }
     for (const agg of ctx.aggregates) {
-      emitAggregate(agg, ctx, basePkg, place, pkgFor, emitTrace);
+      emitAggregate(agg, ctx, basePkg, place, pkgFor, emitTrace, system?.sys);
     }
   }
 
+  // Per-module Flyway migrations — empty (non-system entry points) → no-op.
+  const migrations = (system?.migrations ?? []).filter((m) => m.steps.length > 0);
+  emitJavaMigrations(migrations, out);
+  const hasMigrations = migrations.length > 0;
+
   // Project shell — stable from S1 on.
-  out.set("pom.xml", renderPom(ns, slug));
+  out.set("pom.xml", renderPom(ns, slug, { flyway: hasMigrations }));
   out.set("src/main/resources/application.yml", renderApplicationYml(slug));
   out.set(mainSourcePath(basePkg, "Application.java"), renderApplication(basePkg));
   out.set(
@@ -201,22 +215,28 @@ function emitAggregate(
   ) => void,
   pkgFor: (category: JavaArtifactCategory, aggregateName?: string) => string,
   emitTrace: boolean,
+  sys?: SystemIR,
 ): void {
   const eventFields = new Map(ctx.events.map((e) => [e.name, e.fields.map((f) => f.name)]));
+  // The JPA mapping mirrors `schemaFromModule`: binding-resolved schema +
+  // flattened-VO column names (voLookup covers ambient VOs — enrichment
+  // folds them into every context).
+  const voLookup = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
+  const schema = sys ? resolveDataSourceConfig(agg, ctx, sys)?.schema : undefined;
 
-  // Abstract bases: TPC (`ownTable`) emits the shared Java base only; a
-  // TPH (`sharedTable`) base additionally owns the hierarchy's table —
-  // its persistence mapping lands with the inheritance slice.
+  // Abstract bases: TPC (`ownTable`) emits a @MappedSuperclass (columns
+  // flatten into each concrete's table); a TPH (`sharedTable`) base owns
+  // the hierarchy's table — its mapping lands with the inheritance slice.
   if (agg.isAbstract) {
     place(
       `${agg.name}.java`,
       "entity",
       renderJavaAbstractBaseEntity(agg, basePkg, pkgFor("entity", agg.name), {
         tph: isTphBase(agg, ctx.aggregates),
+        persistence: { schema, voLookup },
       }),
       agg.name,
     );
-    void tphConcretesOf;
     return;
   }
 
@@ -252,6 +272,9 @@ function emitAggregate(
     });
   }
 
+  // The aggregate that physically owns the parent table (the TPH base
+  // for shared-table concretes) names containment / part FK columns.
+  const ownerName = tableOwnerName(agg, ctx.aggregates);
   for (const part of agg.parts) {
     place(
       `${part.name}.java`,
@@ -259,6 +282,12 @@ function emitAggregate(
       renderJavaEntity(part, false, basePkg, pkgFor("entity", agg.name), agg.name, {
         emitTrace,
         eventFields,
+        persistence: {
+          tableName: plural(snake(part.name)),
+          schema,
+          parentFkColumn: `${snake(ownerName)}_id`,
+          voLookup,
+        },
       }),
       agg.name,
     );
@@ -271,7 +300,41 @@ function emitAggregate(
       superType,
       operationReturnUnions,
       eventFields,
+      persistence: {
+        tableName: plural(snake(agg.name)),
+        schema,
+        containmentOwnerName: ownerName,
+        voLookup,
+      },
     }),
+    agg.name,
+  );
+
+  // Repository triple: domain port + Spring Data JPA interface + impl.
+  const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+  const idClass = `${ownerName}Id`;
+  const repoCtx: JavaRepoCtx = {
+    basePkg,
+    domainPkg: pkgFor("repository-interface", agg.name),
+    infraPkg: pkgFor("repository-impl", agg.name),
+    entityPkg: pkgFor("entity", agg.name),
+  };
+  place(
+    `${agg.name}Repository.java`,
+    "repository-interface",
+    renderJavaRepositoryInterface(agg, repo, repoCtx, idClass),
+    agg.name,
+  );
+  place(
+    `${agg.name}JpaRepository.java`,
+    "spring-data-repository",
+    renderJavaSpringDataRepository(agg, repo, repoCtx, idClass),
+    agg.name,
+  );
+  place(
+    `${agg.name}RepositoryImpl.java`,
+    "repository-impl",
+    renderJavaRepositoryImpl(agg, repo, repoCtx, idClass),
     agg.name,
   );
 }

@@ -362,6 +362,47 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 // Non-principal capability filters on a relational aggregate
 // (`filter !this.isDeleted`) ARE emitted on both backends.
 // ---------------------------------------------------------------------------
+// Java/JPA gate: a SINGLE (non-collection) containment has no clean
+// unidirectional JPA mapping with the FK on the part table (the shared
+// schema's shape) — @OneToOne + @JoinColumn puts the FK on the owner,
+// and mappedBy needs an entity-typed back-reference the domain model
+// doesn't carry.  Fail fast (the parity contract: never silently
+// downgrade) until the shadow-parent mapping lands.  Collection
+// containments (the overwhelmingly common case) are fully supported via
+// unidirectional @OneToMany.
+// ---------------------------------------------------------------------------
+export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "java") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const owners = [agg, ...agg.parts];
+        for (const owner of owners) {
+          for (const c of owner.contains) {
+            if (c.collection) continue;
+            diags.push({
+              severity: "error",
+              message:
+                `Deployable '${dep.name}' (platform java) hosts aggregate '${ctxName}.${agg.name}' ` +
+                `whose '${owner.name}' declares a single containment 'contains ${c.name}: ${c.partName}' — ` +
+                `single (non-collection) containments are not yet mapped on the java backend ` +
+                `(JPA has no unidirectional one-to-one with the FK on the part table). ` +
+                `Use a collection containment ('contains ${c.name}: ${c.partName}[]'), fold the part's ` +
+                `fields into a value object, or host the context on a node / dotnet deployable.`,
+              source: `${sys.name}/${dep.name}`,
+              code: "loom.java-single-containment-unsupported",
+            });
+          }
+        }
+      }
+    }
+  }
+}
+
 export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);

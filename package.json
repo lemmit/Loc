@@ -28,6 +28,7 @@
     "test:tsc-react": "LOOM_REACT_BUILD=1 vitest run test/e2e/generated-react-build.test.ts",
     "test:tsc-react-extern": "LOOM_REACT_BUILD=1 vitest run test/e2e/extern-component-build.test.ts",
     "test:dotnet": "LOOM_DOTNET_BUILD=1 vitest run test/e2e/generated-dotnet-build.test.ts",
+    "test:java": "LOOM_JAVA_BUILD=1 vitest run test/e2e/generated-java-build.test.ts",
     "test:format-dotnet": "LOOM_DOTNET_FORMAT=1 vitest run test/e2e/generated-dotnet-format.test.ts",
     "test:phoenix": "LOOM_PHOENIX_BUILD=1 vitest run test/e2e/generated-phoenix-build.test.ts",
     "test:phoenix-vanilla": "LOOM_PHOENIX_VANILLA_BUILD=1 vitest run test/e2e/generated-elixir-vanilla-build.test.ts",

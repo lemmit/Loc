@@ -26,6 +26,7 @@ import {
   validateDataSourceUnwiredKnobs,
   validateEventSourcedStorage,
   validateInheritanceStorage,
+  validateJavaContainmentSupport,
   validateMikroOrmSupport,
   validateNeedCapabilities,
   validatePermissions,
@@ -94,6 +95,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDataSourceCoverage(sys, diags);
     validateSavingShapeSupport(sys, diags);
     validateContextFilterSupport(sys, diags);
+    validateJavaContainmentSupport(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);
     validateNeedCapabilities(sys, diags);

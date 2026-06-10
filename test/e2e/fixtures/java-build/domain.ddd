@@ -1,0 +1,59 @@
+system Shop {
+  subdomain Sales {
+    context Orders {
+      enum Status { pending, confirmed, shipped }
+      valueobject Address {
+        city: string
+        zip: string
+        invariant zip.length > 0
+      }
+      event OrderConfirmed { order: Order id, at: datetime }
+      aggregate Order {
+        code: string
+        status: Status
+        shipTo: Address
+        notes: string?
+        total: money
+        placedAt: datetime
+        contains lineItems: LineItem[]
+
+        entity LineItem {
+          sku: string
+          qty: int
+          price: money
+          invariant qty > 0
+        }
+
+        derived itemCount: int = lineItems.count
+        derived lineTotal: money = lineItems.sum(i => i.price)
+        invariant code.length > 0
+        function isMutable(): bool = status == pending
+
+        operation confirm() {
+          precondition isMutable()
+          precondition lineItems.count > 0
+          status := confirmed
+          emit OrderConfirmed { order: id, at: now() }
+        }
+
+        operation addItem(sku: string, qty: int, price: money) {
+          precondition qty > 0
+          lineItems += LineItem { sku: sku, qty: qty, price: price }
+        }
+      }
+      repository Orders for Order {
+        find byCode(code: string): Order[] where this.code == code
+      }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable shopApi {
+    platform: java
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 8081
+  }
+}

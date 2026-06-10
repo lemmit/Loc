@@ -80,7 +80,7 @@ async function byFeatureFiles(): Promise<Map<string, string>> {
 describe("java generator — domain layer (S3)", () => {
   it("emits the typed id record with a newId factory", async () => {
     const id = (await byFeatureFiles()).get(`${ROOT}/domain/ids/OrderId.java`)!;
-    expect(id).toContain("public record OrderId(UUID value) {");
+    expect(id).toContain("public record OrderId(UUID value) implements Serializable {");
     expect(id).toContain("return new OrderId(UUID.randomUUID());");
   });
 

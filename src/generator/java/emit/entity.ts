@@ -2,6 +2,7 @@ import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js
 import type {
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
+  FieldIR,
   IdValueType,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
@@ -17,6 +18,14 @@ import {
   renderJavaType,
 } from "../render-expr.js";
 import { collectJavaStmtImports, renderJavaStatements } from "../render-stmt.js";
+import {
+  jpaClassAnnotations,
+  jpaContainmentAnnotations,
+  jpaFieldAnnotations,
+  jpaIdAnnotations,
+  jpaParentIdAnnotations,
+  needsHibernateTypes,
+} from "./jpa-annotations.js";
 
 /** True for a field type that is a collection of references
  * (`Id<T>[]`) — persisted via a join table, not a column. */
@@ -65,6 +74,20 @@ export interface JavaEntityOptions {
    *  threaded into the statement renderer so `emit` constructs records
    *  positionally in declaration order. */
   eventFields?: Map<string, readonly string[]>;
+  /** JPA mapping inputs — when present the class is annotated against
+   *  the Flyway-owned schema (`schemaFromModule` naming).  The
+   *  orchestrator always passes it; absent only in focused unit tests. */
+  persistence?: {
+    /** This entity's table — `plural(snake(name))`. */
+    tableName: string;
+    schema?: string;
+    /** Parts: the parent-FK column (`<snake(owner)>_id`). */
+    parentFkColumn?: string;
+    /** The aggregate that physically owns the parent table (differs from
+     *  the root name for TPH concretes) — names containment FK columns. */
+    containmentOwnerName?: string;
+    voLookup: ReadonlyMap<string, readonly FieldIR[]>;
+  };
 }
 
 export function renderJavaEntity(
@@ -130,15 +153,21 @@ export function renderJavaEntity(
   const anyOpUsesCurrentUser = operations.some(operationUsesCurrentUser);
 
   // --- fields --------------------------------------------------------------
+  const persistence = options.persistence;
   const fieldLines: string[] = [];
   if (!superType?.sharesIdentity) {
+    if (persistence) fieldLines.push(...jpaIdAnnotations());
     fieldLines.push(`    ${idClass} id;`);
   }
   if (!isRoot) {
+    if (persistence?.parentFkColumn) {
+      fieldLines.push(...jpaParentIdAnnotations(persistence.parentFkColumn));
+    }
     fieldLines.push(`    ${rootName}Id parentId;`);
   }
   for (const f of entity.fields) {
     if (superType?.fieldNames.has(f.name)) continue;
+    if (persistence) fieldLines.push(...jpaFieldAnnotations(f, entity, persistence));
     if (isRefCollection(f.type)) {
       fieldLines.push(`    ${renderJavaType(f.type)} ${f.name} = new ArrayList<>();`);
     } else {
@@ -147,8 +176,14 @@ export function renderJavaEntity(
   }
   for (const c of entity.contains) {
     if (c.collection) {
+      if (persistence) {
+        fieldLines.push(
+          ...jpaContainmentAnnotations(persistence.containmentOwnerName ?? entity.name),
+        );
+      }
       fieldLines.push(`    List<${c.partName}> ${c.name} = new ArrayList<>();`);
     } else {
+      // Gated upstream: loom.java-single-containment-unsupported.
       fieldLines.push(`    ${c.partName} ${c.name};`);
     }
   }
@@ -431,11 +466,16 @@ export function renderJavaEntity(
   ];
   while (body.length > 0 && body[body.length - 1] === "") body.pop();
 
+  const usesHibernateTypes = persistence && needsHibernateTypes(entity.fields);
   return lines(
     `package ${pkg};`,
     ``,
     ...[...javaImports].sort().map((i) => `import ${i};`),
     ``,
+    persistence ? `import jakarta.persistence.*;` : null,
+    usesHibernateTypes ? `import org.hibernate.annotations.JdbcTypeCode;` : null,
+    usesHibernateTypes ? `import org.hibernate.type.SqlTypes;` : null,
+    persistence ? `` : null,
     `import ${basePkg}.domain.common.*;`,
     `import ${basePkg}.domain.enums.*;`,
     `import ${basePkg}.domain.events.*;`,
@@ -444,6 +484,12 @@ export function renderJavaEntity(
     anyOpUsesCurrentUser ? `import ${basePkg}.auth.User;` : null,
     superType?.pkg && superType.pkg !== pkg ? `import ${superType.pkg}.${superType.name};` : null,
     ``,
+    persistence
+      ? jpaClassAnnotations(persistence.tableName, {
+          schema: persistence.schema,
+          voLookup: persistence.voLookup,
+        })
+      : null,
     jmolecules,
     `public class ${entity.name}${superType ? ` extends ${superType.name}` : ""} {`,
     ...fieldLines,
@@ -466,9 +512,13 @@ export function renderJavaAbstractBaseEntity(
   base: EnrichedAggregateIR,
   basePkg: string,
   pkg: string,
-  options: { tph?: boolean } = {},
+  options: {
+    tph?: boolean;
+    persistence?: { schema?: string; voLookup: ReadonlyMap<string, readonly FieldIR[]> };
+  } = {},
 ): string {
   const renderCtx: JavaRenderContext = { thisName: "this", agg: base };
+  const persistence = options.persistence;
   const javaImports = new Set<string>();
   for (const f of base.fields) collectJavaTypeImports(f.type, javaImports);
   for (const d of base.derived) {
@@ -481,7 +531,15 @@ export function renderJavaAbstractBaseEntity(
   const idAccessor = options.tph
     ? [`    public ${base.name}Id id() {`, `        return id;`, `    }`, ``]
     : [];
-  const fieldLines = base.fields.map((f) => `    protected ${renderJavaType(f.type)} ${f.name};`);
+  const fieldLines = base.fields.flatMap((f) => [
+    // TPC bases are @MappedSuperclass — their column mappings flatten
+    // into each concrete's own table (the schema merges base + own
+    // fields per concrete), so annotate here and the concretes inherit.
+    ...(persistence && !options.tph
+      ? jpaFieldAnnotations(f, base, { schema: persistence.schema, voLookup: persistence.voLookup })
+      : []),
+    `    protected ${renderJavaType(f.type)} ${f.name};`,
+  ]);
   const accessorLines = base.fields.flatMap((f) => [
     `    public ${renderJavaType(f.type)} ${f.name}() {`,
     `        return ${f.name};`,
@@ -501,6 +559,12 @@ export function renderJavaAbstractBaseEntity(
     ``,
     ...[...javaImports].sort().map((i) => `import ${i};`),
     javaImports.size > 0 ? `` : null,
+    persistence ? `import jakarta.persistence.*;` : null,
+    persistence && needsHibernateTypes(base.fields)
+      ? `import org.hibernate.annotations.JdbcTypeCode;`
+      : null,
+    persistence && needsHibernateTypes(base.fields) ? `import org.hibernate.type.SqlTypes;` : null,
+    persistence ? `` : null,
     `import ${basePkg}.domain.common.*;`,
     `import ${basePkg}.domain.enums.*;`,
     `import ${basePkg}.domain.ids.*;`,
@@ -508,7 +572,9 @@ export function renderJavaAbstractBaseEntity(
     ``,
     options.tph
       ? `// Abstract TPH base — the hierarchy maps to one shared table owning the id.`
-      : `// Abstract TPC base — never instantiated; each concrete subtype owns its table.`,
+      : `// Abstract TPC base — never instantiated; each concrete maps base + own`,
+    options.tph ? null : `// columns onto its own table (JPA @MappedSuperclass).`,
+    persistence && !options.tph ? `@MappedSuperclass` : null,
     `public abstract class ${base.name} {`,
     ...idLines,
     ...fieldLines,

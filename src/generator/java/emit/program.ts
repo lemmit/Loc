@@ -20,7 +20,11 @@ export const JAVA_VERSION = "21";
  *  @ValueObject / @DomainEvent) and enable ArchUnit verification. */
 export const JMOLECULES_VERSION = "1.10.0";
 
-export function renderPom(ns: string, artifactId: string): string {
+export function renderPom(
+  ns: string,
+  artifactId: string,
+  options: { flyway?: boolean } = {},
+): string {
   return lines(
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<project xmlns="http://maven.apache.org/POM/4.0.0"`,
@@ -69,6 +73,17 @@ export function renderPom(ns: string, artifactId: string): string {
     `      <artifactId>jmolecules-events</artifactId>`,
     `      <version>${JMOLECULES_VERSION}</version>`,
     `    </dependency>`,
+    // Flyway runs the emitted db/migration/V*.sql on boot (Boot
+    // auto-configures it from the classpath; versions managed by the
+    // parent POM).  Only shipped when the deployable owns migrations.
+    options.flyway ? `    <dependency>` : null,
+    options.flyway ? `      <groupId>org.flywaydb</groupId>` : null,
+    options.flyway ? `      <artifactId>flyway-core</artifactId>` : null,
+    options.flyway ? `    </dependency>` : null,
+    options.flyway ? `    <dependency>` : null,
+    options.flyway ? `      <groupId>org.flywaydb</groupId>` : null,
+    options.flyway ? `      <artifactId>flyway-database-postgresql</artifactId>` : null,
+    options.flyway ? `    </dependency>` : null,
     `    <dependency>`,
     `      <groupId>org.springframework.boot</groupId>`,
     `      <artifactId>spring-boot-starter-test</artifactId>`,
