@@ -184,7 +184,10 @@ function fieldColumn(f: FieldIR): DapperColumn {
 }
 
 function columnsOf(agg: EnrichedAggregateIR): DapperColumn[] {
-  return [idColumn(agg), ...agg.fields.map(fieldColumn)];
+  // Reference-collection fields (`X id[]`) live in their join tables, not as
+  // root columns — see the association load/save blocks in the repository.
+  const assocFields = new Set((agg.associations ?? []).map((a) => a.fieldName));
+  return [idColumn(agg), ...agg.fields.filter((f) => !assocFields.has(f.name)).map(fieldColumn)];
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +337,52 @@ export function renderDapperRepository(
 
   const mapBody = cols.map((c) => `            ${c.stateProp} = ${c.hydrate},`);
 
+  // Reference collections (`X id[]` → AssociationIR, one join table each).
+  // Loads: a private LoadRefsAsync bulk-fills every root's list (ordered by
+  // ordinal); GetById funnels its single root through it too.  Saves:
+  // full-list replace — DELETE owner rows + re-INSERT with ordinals (EF
+  // diff-syncs; delete+insert is semantically identical for a full-list
+  // replace and keeps the SQL trivial).  Deletes: join rows go first (the
+  // Dapper schema emits no FK cascade).
+  const associations = agg.associations ?? [];
+  const hasAssoc = associations.length > 0;
+  const loadRefsMethod = hasAssoc
+    ? lines(
+        `    private static async Task LoadRefsAsync(NpgsqlConnection conn, List<${agg.name}> roots, CancellationToken cancellationToken)`,
+        "    {",
+        "        if (roots.Count == 0) return;",
+        "        var __ids = roots.Select(x => x.Id.Value).ToArray();",
+        ...associations.flatMap((a) => {
+          const ownerCs = idTypes(agg.idValueType).cs;
+          const targetCs = idTypes(a.valueType).cs;
+          const prop = upperFirst(a.fieldName);
+          return [
+            `        var __${a.fieldName}Rows = (await conn.QueryAsync<(${ownerCs} owner, ${targetCs} target)>(new CommandDefinition("SELECT ${a.ownerFk}, ${a.targetFk} FROM ${a.joinTable} WHERE ${a.ownerFk} = ANY(@ids) ORDER BY ${a.ownerFk}, ordinal", new { ids = __ids }, cancellationToken: cancellationToken))).ToList();`,
+            `        var __${a.fieldName}ByOwner = __${a.fieldName}Rows.GroupBy(t => t.owner).ToDictionary(g => g.Key, g => g.Select(t => new ${a.targetAgg}Id(t.target)).ToList());`,
+            `        foreach (var __root in roots)`,
+            `        {`,
+            `            __root.${prop} = __${a.fieldName}ByOwner.TryGetValue(__root.Id.Value, out var __${a.fieldName}List) ? __${a.fieldName}List : new List<${a.targetAgg}Id>();`,
+            `        }`,
+          ];
+        }),
+        "    }",
+      )
+    : "";
+  const assocSaveLines = associations.flatMap((a) => {
+    const prop = upperFirst(a.fieldName);
+    return [
+      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
+      `        for (var __i = 0; __i < aggregate.${prop}.Count; __i++)`,
+      "        {",
+      `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${a.joinTable} (${a.ownerFk}, ${a.targetFk}, ordinal) VALUES (@o, @t, @i)", new { o = aggregate.Id.Value, t = aggregate.${prop}[__i].Value, i = __i }, cancellationToken: cancellationToken));`,
+      "        }",
+    ];
+  });
+  const assocDeleteLines = associations.map(
+    (a) =>
+      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
+  );
+
   const findMethods = (repo?.finds ?? []).map((raw) => {
     const f = unionFindAsOptionalTwin(raw, agg.name);
     const name = upperFirst(f.name);
@@ -363,7 +412,13 @@ export function renderDapperRepository(
         `    {`,
         `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
         `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
-        `        return rows.Select(Map).ToList();`,
+        ...(hasAssoc
+          ? [
+              `        var __roots = rows.Select(Map).ToList();`,
+              `        await LoadRefsAsync(conn, __roots, cancellationToken);`,
+              `        return __roots;`,
+            ]
+          : [`        return rows.Select(Map).ToList();`]),
         `    }`,
       );
     }
@@ -372,7 +427,14 @@ export function renderDapperRepository(
       `    {`,
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
       `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
-      `        return r is null ? null : Map(r);`,
+      ...(hasAssoc
+        ? [
+            `        if (r is null) return null;`,
+            `        var __one = new List<${agg.name}> { Map(r) };`,
+            `        await LoadRefsAsync(conn, __one, cancellationToken);`,
+            `        return __one[0];`,
+          ]
+        : [`        return r is null ? null : Map(r);`]),
       `    }`,
     );
   });
@@ -427,6 +489,7 @@ export function renderDapperRepository(
         `    public async Task DeleteAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
         `    {`,
         `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
+        ...assocDeleteLines,
         `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${table} WHERE id = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
         `    }`,
       )
@@ -484,7 +547,14 @@ export function renderDapperRepository(
       "    {",
       "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
       `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = @id${andFilter(true)}", new { id = id.Value }, cancellationToken: cancellationToken));`,
-      "        return r is null ? null : Map(r);",
+      ...(hasAssoc
+        ? [
+            "        if (r is null) return null;",
+            "        var __one = new List<" + agg.name + "> { Map(r) };",
+            "        await LoadRefsAsync(conn, __one, cancellationToken);",
+            "        return __one[0];",
+          ]
+        : ["        return r is null ? null : Map(r);"]),
       "    }",
       "",
       `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
@@ -492,7 +562,13 @@ export function renderDapperRepository(
       "        if (ids.Count == 0) return Array.Empty<" + agg.name + ">();",
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
       `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = ANY(@ids)${andFilter(true)}", new { ids = ids.Select(x => x.Value).ToArray() }, cancellationToken: cancellationToken));`,
-      "        return rows.Select(Map).ToList();",
+      ...(hasAssoc
+        ? [
+            "        var __roots = rows.Select(Map).ToList();",
+            "        await LoadRefsAsync(conn, __roots, cancellationToken);",
+            "        return __roots;",
+          ]
+        : ["        return rows.Select(Map).ToList();"]),
       "    }",
       "",
       `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
@@ -500,6 +576,7 @@ export function renderDapperRepository(
       ...stampLines,
       "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
       `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (${colList}) VALUES (${insertVals}) ON CONFLICT (id) DO UPDATE SET ${upsertSet}", new { ${saveParams} }, cancellationToken: cancellationToken));`,
+      ...assocSaveLines,
       "        foreach (var ev in aggregate.PullEvents())",
       "        {",
       "            await _events.DispatchAsync(ev, cancellationToken);",
@@ -507,6 +584,8 @@ export function renderDapperRepository(
       "    }",
       deleteMethod ? "" : null,
       deleteMethod || null,
+      loadRefsMethod ? "" : null,
+      loadRefsMethod || null,
       ...findMethods.flatMap((m) => ["", m]),
       ...retrievalMethods.flatMap((m) => ["", m]),
       "}",
@@ -690,7 +769,19 @@ export function renderDapperSchema(aggs: readonly EnrichedAggregateIR[], ns: str
       const nn = c.nullable || i === 0 ? "" : " not null";
       return `    ${c.col} ${c.sql}${pk}${nn}`;
     });
-    return `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (\n${cols.join(",\n")}\n);`;
+    const root = `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (\n${cols.join(",\n")}\n);`;
+    // One join table per reference collection (`X id[]`), ordinal-ordered.
+    const joins = (agg.associations ?? []).map((a) =>
+      [
+        `CREATE TABLE IF NOT EXISTS ${a.joinTable} (`,
+        `    ${a.ownerFk} ${idTypes(agg.idValueType).sql} not null,`,
+        `    ${a.targetFk} ${idTypes(a.valueType).sql} not null,`,
+        "    ordinal integer not null,",
+        `    primary key (${a.ownerFk}, ${a.targetFk})`,
+        ");",
+      ].join("\n"),
+    );
+    return [root, ...joins].join("\n\n");
   });
   const ddl = tables.join("\n\n");
   return (
