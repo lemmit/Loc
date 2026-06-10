@@ -32,6 +32,7 @@ import {
   platformOwnsBackend,
   type RealizationAxis,
   realizationAxisMenu,
+  resolveStyleLayoutCompat,
 } from "./data/platform-rules.js";
 
 void BUILTIN_PACK_LATEST;
@@ -272,10 +273,11 @@ function resolveAxisFamily(platform: string): Platform {
   return (parseBuiltinPlatformRef(platform)?.family ?? platform) as Platform;
 }
 
-/** D-REALIZATION-AXES gating.  This PR ships **R1** (out-of-menu) and
- *  **R4** (foundation owns layers); R2/R3/R5/R7 have no reachable trigger
- *  until the menus grow (stubs become real / actor runtimes land) and are
- *  deferred to the PRs that add those values (see
+/** D-REALIZATION-AXES gating.  Ships **R1** (out-of-menu, incl. reserved
+ *  stubs), **R3** (application style ↔ directoryLayout compatibility), **R4**
+ *  (foundation owns layers), and **R6** (foundation ↔ persistence/application
+ *  compatibility — realization-axes-alignment.md).  R2/R7 still have no
+ *  reachable trigger and are deferred (see
  *  `docs/proposals/platform-realization-axes.md` §7). */
 export function checkDeployableRealizationAxes(d: Deployable, accept: ValidationAcceptor): void {
   if (d.platform == null) return;
@@ -352,6 +354,30 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
         { node: d, property: axis, code: "loom.platform-knob-foundation-mismatch" },
       );
     }
+  }
+
+  // R3 — the resolved application STYLE must support the resolved
+  // directoryLayout (StyleAdapter.supportedLayouts; realization-axes
+  // -alignment.md).  Uses effective values (explicit knob or platform
+  // default) and only fires for a REAL style + REAL layout — a stub/unknown
+  // value already errored under R1.  Reachable today via node
+  // `application: serviceLayer` (= `layered`, byLayer-only) + `directoryLayout:
+  // byFeature`.
+  const styleLayout = resolveStyleLayoutCompat(
+    family,
+    d.application ?? undefined,
+    d.directoryLayout ?? undefined,
+  );
+  if (styleLayout && !styleLayout.ok) {
+    accept(
+      "error",
+      `'directoryLayout: ${styleLayout.layout}' on deployable '${d.name}' is not supported by application style '${styleLayout.style}'. Supported: ${styleLayout.supported.map((v) => `'${v}'`).join(", ")}.`,
+      {
+        node: d,
+        property: d.directoryLayout != null ? "directoryLayout" : "application",
+        code: "loom.platform-knob-style-layout-mismatch",
+      },
+    );
   }
 }
 

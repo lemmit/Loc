@@ -54,7 +54,10 @@ const realSiblings = (): readonly string[] => ["layered"];
 export const layeredStyleAdapter: StyleAdapter = {
   name: "layered",
   supportedStrategies: ["state"],
-  supportedLayouts: ["byLayer"],
+  // Both layouts: the layout adapter only remaps file paths (it's decoupled
+  // from the style — layout-surface.ts), so `layered` emits identically into
+  // `byLayer` or `byFeature`.  Exercised end-to-end by hono-by-feature.test.ts.
+  supportedLayouts: ["byLayer", "byFeature"],
 
   emitEndpoint(_op: OperationIR, _ctx: EmitCtx): Lines {
     // Per-op extraction requires splitting `buildRoutesFile` into a

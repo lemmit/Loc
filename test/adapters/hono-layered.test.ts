@@ -54,7 +54,9 @@ describe("layered StyleAdapter — hono (real)", () => {
 
   it("answers capability fields directly", () => {
     expect(layeredStyleAdapter.supportedStrategies).toEqual(["state"]);
-    expect(layeredStyleAdapter.supportedLayouts).toEqual(["byLayer"]);
+    // Both layouts — style/layout are orthogonal (the layout adapter only
+    // remaps paths); `layered` emits identically into either.
+    expect(layeredStyleAdapter.supportedLayouts).toEqual(["byLayer", "byFeature"]);
   });
 
   it("emitDi returns no lines (hono wiring lives inline in createApp)", async () => {

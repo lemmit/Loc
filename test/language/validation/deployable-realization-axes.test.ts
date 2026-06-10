@@ -127,6 +127,42 @@ describe("realization axes — R1 out-of-menu", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// R3 — the resolved application STYLE must support the resolved
+// directoryLayout (StyleAdapter.supportedLayouts; realization-axes-alignment
+// .md).  The rule is wired, but style and layout are ORTHOGONAL by design (the
+// LayoutAdapter only remaps file paths — layout-surface.ts), so every real
+// style supports every real layout on its platform: R3 is a forward guard with
+// no reachable rejection today.  These tests pin that it does NOT false-fire on
+// the valid combinations (incl. the node `layered` + `byFeature` regression
+// that a too-narrow `supportedLayouts` would have broken).
+// ---------------------------------------------------------------------------
+describe("realization axes — R3 style ↔ directoryLayout compatibility", () => {
+  it("accepts node `serviceLayer` (layered) + either layout — style/layout orthogonal", async () => {
+    expect(
+      (await parse(sys("hono { application: serviceLayer, directoryLayout: byLayer }"))).errors,
+    ).toEqual([]);
+    expect(
+      (await parse(sys("hono { application: serviceLayer, directoryLayout: byFeature }"))).errors,
+    ).toEqual([]);
+  });
+
+  it("accepts dotnet `cqrs` + either layout", async () => {
+    expect(
+      (await parse(sys("dotnet { application: cqrs, directoryLayout: byLayer }"))).errors,
+    ).toEqual([]);
+    expect(
+      (await parse(sys("dotnet { application: cqrs, directoryLayout: byFeature }"))).errors,
+    ).toEqual([]);
+  });
+
+  it("bare platforms (default style × default layout) never trip R3", async () => {
+    expect((await parse(sys("hono"))).errors).toEqual([]);
+    expect((await parse(sys("dotnet"))).errors).toEqual([]);
+    expect((await parse(sys("elixir"))).errors).toEqual([]);
+  });
+});
+
 describe("realization axes — R4 foundation owns layers", () => {
   it("rejects `foundation: ash` + `application:` on phoenix (Ash supplies it)", async () => {
     const { errors } = await parse(sys("phoenix { foundation: ash, application: serviceLayer }"));
