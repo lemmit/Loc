@@ -1625,6 +1625,37 @@ export interface UiIR {
    *  declares.  Composition is supplied by the deployable that
    *  deploys this UI. */
   apiParams: UiApiParamIR[];
+  /** Channel subscriptions (`channel Orders: Sales.Lifecycle`) — each
+   *  binds a local handle to a context's broadcast channel (channels.md
+   *  Part I, ui surface).  Omitted when the ui declares none. */
+  channelParams?: UiChannelParamIR[];
+  /** Live-event handlers (`on Orders.OrderShipped(e) { toast(…) }`).
+   *  Omitted when the ui declares none. */
+  notifications?: UiNotificationIR[];
+}
+
+/** `channel <name>: <Ctx>.<Channel>` — a UI's subscription to a
+ *  broadcast channel.  The wire format (SSE/WebSocket) is derived from
+ *  the frontend's platform, never stated here. */
+export interface UiChannelParamIR {
+  name: string;
+  contextName: string;
+  channelName: string;
+}
+
+/** `on <param>.<Event>(e) { toast(…) }` — render a carried event as it
+ *  arrives on the realtime wire.  v1's only action is `toast`; each
+ *  handler statement lowers to one message expression with `bind` in
+ *  scope as the event payload. */
+export interface UiNotificationIR {
+  /** The channel-param handle the handler subscribes through. */
+  paramName: string;
+  /** The carried event's type tag on the wire (`event.type`). */
+  eventType: string;
+  /** Handler binding name (`e` in `on Orders.OrderShipped(e)`). */
+  bind: string;
+  /** One toast message expression per handler statement. */
+  toasts: ExprIR[];
 }
 
 /** API declaration — first-class contract derived from a module's

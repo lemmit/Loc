@@ -15,6 +15,7 @@ import {
   type EntityPart,
   isAggregate,
   isBoundedContext,
+  isChannel,
   isComponent,
   isContainment,
   isEntityPart,
@@ -23,9 +24,13 @@ import {
   isPayloadDecl,
   isSystem,
   isTargetable,
+  isUi,
+  isUiChannelParam,
   isValueObject,
   isWorkflow,
   type Model,
+  type UiChannelParam,
+  type UiNotification,
 } from "./generated/ast.js";
 
 /**
@@ -59,6 +64,31 @@ export class DddScopeProvider extends DefaultScopeProvider {
     // enums / value objects still resolve via the default global scope.
     if (context.container.$type === "IdType" && context.property === "target") {
       return this.filterScope(super.getScope(context), (d) => !isTransportType(d.type));
+    }
+    // `channel Orders: Sales.Lifecycle` — the channel segment resolves only
+    // within the named context (channels are context members, never exported
+    // to the global scope).
+    if (context.container.$type === "UiChannelParam" && context.property === "channel") {
+      const param = context.container as UiChannelParam;
+      const ctx = param.context?.ref;
+      if (!ctx) return EMPTY_SCOPE;
+      return this.createScopeForNodes(ctx.members.filter(isChannel));
+    }
+    // `on Orders.OrderShipped(e) { … }` — the param resolves to a channel
+    // param of the containing ui; the event to one carried by that
+    // param's channel (so an un-carried event is "could not resolve", not
+    // a later semantic error).
+    if (context.container.$type === "UiNotification" && context.property === "param") {
+      const ui = AstUtils.getContainerOfType(context.container, isUi);
+      if (!ui) return EMPTY_SCOPE;
+      return this.createScopeForNodes(ui.members.filter(isUiChannelParam));
+    }
+    if (context.container.$type === "UiNotification" && context.property === "event") {
+      const n = context.container as UiNotification;
+      const ch = n.param?.ref?.channel?.ref;
+      if (!ch) return EMPTY_SCOPE;
+      const events = ch.carries.map((c) => c.ref).filter((e) => e !== undefined);
+      return this.createScopeForNodes(events);
     }
     return super.getScope(context);
   }

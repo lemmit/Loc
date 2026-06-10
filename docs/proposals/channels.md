@@ -24,8 +24,15 @@
 > (`subscribeRealtime(onEvent)`) when its target backend is Hono.  v1 is
 > broadcast-to-all: no rooms, no edge relay, no policy-derived router —
 > those layer on the authorization work; the authorized read stays the
-> gate (clients refetch, payloads carry no privilege).  Still
-> unstarted: the ui-surface `channel`/`on <p>.<Event>` handlers, the
+> gate (clients refetch, payloads carry no privilege).
+> **The ui surface shipped too:** `channel <p>: <Ctx>.<Channel>` +
+> `on <p>.<Event>(e) { toast(…) }` ui members (scope-checked: the event
+> must be carried, the channel must be `delivery: broadcast`) lower to
+> `UiChannelParamIR`/`UiNotificationIR` and render a renderless
+> `RealtimeHandlers` component every design pack's App shell mounts;
+> the toast call is pack-shaped (`realtime-toast` micro-template ×8
+> packs).  v1 handler bodies are toast-only
+> (`loom.ui-handler-unsupported`).  Still unstarted: the
 > .NET / Phoenix realtime wire, external brokers via `channelSource` (redis /
 > kafka / nats), the `delivery: queue`
 > competing-consumer semantics, the realtime topology (rooms + edge relay

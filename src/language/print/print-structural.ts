@@ -218,6 +218,10 @@ export function printStructural(node: AstNode): string {
       return printPermissionsBlock(node as PermissionsBlock);
     case "UiApiParam":
       return printUiApiParam(node as UiApiParam);
+    case "UiChannelParam":
+      return printUiChannelParam(node as import("../generated/ast.js").UiChannelParam);
+    case "UiNotification":
+      return printUiNotification(node as import("../generated/ast.js").UiNotification);
     case "FindDecl":
       return printFindDecl(node as FindDecl);
     case "Criterion":
@@ -405,6 +409,17 @@ function printUi(node: Ui): string {
 
 function printUiApiParam(node: UiApiParam): string {
   return `api ${node.name}: ${node.apiRef.$refText}`;
+}
+
+function printUiChannelParam(node: import("../generated/ast.js").UiChannelParam): string {
+  return `channel ${node.name}: ${node.context.$refText}.${node.channel.$refText}`;
+}
+
+function printUiNotification(node: import("../generated/ast.js").UiNotification): string {
+  return block(
+    `on ${node.param.$refText}.${node.event.$refText}(${node.bind})`,
+    node.body.map(printStmt),
+  );
 }
 
 function printPage(node: Page): string {

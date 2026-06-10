@@ -31,6 +31,7 @@ import {
   emitPagesForUi,
   uiUsesCodeBlock,
 } from "./pages-emitter.js";
+import { buildRealtimeHandlers } from "./realtime-handlers-builder.js";
 import { renderAppShell, renderMain, renderShellFile, renderTheme } from "./templating/render.js";
 import { allViews, buildViewsApiModule, hasAnyView } from "./view-builder.js";
 import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflow-builder.js";
@@ -195,6 +196,13 @@ export function generateReactForContexts(
   if (realtimeTypes.length > 0) {
     out.set("src/api/realtime.ts", renderRealtimeClient(realtimeTypes));
   }
+  // Live-event handlers (`on <channel>.<Event>(e) { toast(…) }`) —
+  // rendered as one renderless component App mounts at its root.
+  // Gated on the wire actually existing for this deployable.
+  const hasRealtimeHandlers = realtimeTypes.length > 0 && (ui.notifications?.length ?? 0) > 0;
+  if (hasRealtimeHandlers) {
+    out.set("src/components/RealtimeHandlers.tsx", buildRealtimeHandlers(ui, pack));
+  }
   // Frontend observability: a namespaced loglevel logger + a top-level
   // error boundary.  Both are pack-agnostic shared shell files; main.tsx
   // (per pack) mounts the boundary and the api client logs through the
@@ -299,6 +307,7 @@ export function generateReactForContexts(
       namedLayouts,
       layoutImports,
       observableWorkflows.map((w) => w.wf),
+      hasRealtimeHandlers,
     ),
   );
   // Home is synthesised by the scaffold expander whenever the

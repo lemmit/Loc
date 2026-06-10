@@ -13,6 +13,8 @@ import type {
   ThemeBlock,
   Ui,
   UiApiParam,
+  UiChannelParam,
+  UiNotification,
 } from "../generated/ast.js";
 import { isComponent, isMemberSuffix, isPostfixChain } from "../generated/ast.js";
 import {
@@ -208,14 +210,68 @@ export function checkUi(ui: Ui, sys: System, accept: ValidationAcceptor): void {
     }
   }
 
+  // UI channel parameter checks (channels.md Part I, ui surface).
+  //   - Param names unique within the ui (shared namespace with api
+  //     params — `channel Sales: …` next to `api Sales: …` would make
+  //     `on Sales.X` ambiguous to a reader even though the cross-ref
+  //     type disambiguates).
+  //   - The subscribed channel must be `delivery: broadcast` — `queue`
+  //     is competing-consumer work distribution, never UI-observable.
+  const channelParamSeen = new Map<string, UiChannelParam>();
+  for (const m of ui.members) {
+    if (m.$type !== "UiChannelParam") continue;
+    const prior = channelParamSeen.get(m.name) ?? apiParamSeen.get(m.name);
+    if (prior) {
+      accept("error", `ui '${ui.name}' declares parameter '${m.name}' more than once.`, {
+        node: m,
+        property: "name",
+      });
+    } else {
+      channelParamSeen.set(m.name, m);
+    }
+    const ch = m.channel?.ref;
+    if (ch && (ch.delivery ?? "broadcast") !== "broadcast") {
+      accept(
+        "error",
+        `ui '${ui.name}' subscribes to channel '${ch.name}', but its delivery is '${ch.delivery}'.  Only 'delivery: broadcast' channels are UI-observable; 'queue' is work distribution.`,
+        { node: m, property: "channel", code: "loom.ui-channel-not-broadcast" },
+      );
+    }
+  }
+
   // Per-member walks.  `Scaffold` is gone — its arg-resolution
   // diagnostics now live in the macro expander, which surfaces
   // them through the same accept() pipeline.
   for (const m of ui.members) {
     if (m.$type === "Page") checkPage(m, ui, accept);
     else if (m.$type === "MenuBlock") checkMenuBlock(m, ui, accept);
+    else if (m.$type === "UiNotification") checkUiNotification(m, ui, accept);
   }
   void sys;
+}
+
+/** `on <param>.<Event>(e) { … }` live-event handler (channels.md Part I).
+ *  v1 restricts the body to `toast(<one expr>)` statements — the toast
+ *  is the only notification action the React generator renders; an
+ *  assignment or any other call has nowhere to lower (there is no
+ *  ui-level state).  Code `loom.ui-handler-unsupported`. */
+export function checkUiNotification(n: UiNotification, ui: Ui, accept: ValidationAcceptor): void {
+  void ui;
+  for (const stmt of n.body) {
+    const isBareToastCall =
+      !stmt.op &&
+      stmt.target.call === true &&
+      stmt.target.head === "toast" &&
+      stmt.target.tail.length === 0 &&
+      stmt.target.args.length === 1;
+    if (!isBareToastCall) {
+      accept(
+        "error",
+        `Unsupported statement in 'on ${n.param?.$refText}.${n.event?.$refText}' handler.  v1 supports only 'toast(<message expression>)' (one argument).`,
+        { node: stmt, code: "loom.ui-handler-unsupported" },
+      );
+    }
+  }
 }
 
 export function checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
