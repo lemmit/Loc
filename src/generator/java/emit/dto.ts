@@ -3,7 +3,6 @@ import type {
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
   FieldIR,
-  OperationIR,
   TypeIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";

@@ -23,14 +23,23 @@
 >   harness needs a docker host to iterate against (this session's
 >   environment has none) and touching the canonical showcase fans out
 >   into every other backend's gates.
-> - **Deferred features — all fail-fast gated, never silent:** paged
->   carriers, discriminated unions, exception-less operation returns
+> - **Shipped post-merge (PR #1110 follow-ups):** paged carriers
+>   (`Paged<T>` over Spring Data `Pageable`), retrievals (`run<Name>`
+>   port methods: reified criterion-ref retrievals ride
+>   `JpaSpecificationExecutor` + `Sort`, composed `where`s fall back to
+>   `@Query` JPQL with `order by`), reified criteria →
+>   `<Agg>Criteria` `Specification<T>` factories (java is the first
+>   backend consuming `CriterionIR` directly), retrieval-driven
+>   workflow loops (`repo-run` + `for-each`). Boot-verified end-to-end
+>   against Postgres (`test/e2e/fixtures/java-build/retrieval.ddd`).
+> - **Deferred features — all fail-fast gated, never silent:**
+>   discriminated unions, exception-less operation returns
 >   (java absent from the `SUPPORTED_*` sets), TPH `sharedTable`,
 >   `persistedAs(eventLog)`, `shape(document|embedded)`, single
 >   containments (`loom.java-single-containment-unsupported`), the
 >   embedded-SPA fullstack mount (`loom.java-fullstack-unsupported`),
->   retrieval-driven workflow loops / `repo-run`, workflow-level `emit`,
->   resource-op clients, reified-criteria `Specification<T>` consumption,
+>   workflow-level `emit`, paged `Repo.run(..., page:)` in workflows,
+>   resource-op clients, seeding (`seed` blocks),
 >   provenance + per-op audited (gated like .NET), `ddd new` starter
 >   template.
 >

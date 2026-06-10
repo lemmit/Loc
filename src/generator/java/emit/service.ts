@@ -272,5 +272,5 @@ function opHasWireValidator(agg: EnrichedAggregateIR, opName: string): boolean {
   // Cheap re-derivation through the validator emitter: render once and
   // check the method exists.  Validators are small; clarity wins.
   const rendered = renderJavaValidators(agg, "p", "b");
-  return rendered !== null && rendered.includes(` ${opName}(`);
+  return rendered?.includes(` ${opName}(`) ?? false;
 }

@@ -1,0 +1,56 @@
+system RetrievalShop {
+  subdomain Sales {
+    context Crm {
+      aggregate Customer {
+        active: bool
+        region: string
+        name: string
+        score: int
+        operation deactivate() { active := false }
+        operation boost() { score := score + 1 }
+      }
+      repository Customers for Customer { }
+
+      criterion ActiveCustomer of Customer = active
+      criterion InRegion(rgn: string) of Customer = region == rgn
+      criterion HighScore(min: int) of Customer = score >= min
+
+      retrieval ByRegion(rgn: string) of Customer {
+        where: InRegion(rgn)
+        sort:  [name asc]
+      }
+      retrieval ActiveHighScorers(min: int) of Customer {
+        where: ActiveCustomer && HighScore(min)
+        sort:  [score desc, name asc]
+      }
+
+      workflow deactivateRegion {
+        create(rgn: string) {
+          let matched = Customers.run(ByRegion(rgn))
+          for c in matched {
+            c.deactivate()
+          }
+        }
+      }
+
+      workflow boostTopScorers {
+        create(min: int) {
+          let top = Customers.run(ActiveHighScorers(min))
+          for c in top {
+            c.boost()
+          }
+        }
+      }
+    }
+  }
+  api CrmApi from Sales
+  storage primary { type: postgres }
+  resource crmState { for: Crm, kind: state, use: primary }
+  deployable crmApi {
+    platform: java
+    contexts: [Crm]
+    dataSources: [crmState]
+    serves: CrmApi
+    port: 8081
+  }
+}

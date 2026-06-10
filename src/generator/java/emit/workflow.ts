@@ -8,7 +8,7 @@ import type {
 import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { collectJavaExprImports, renderJavaExpr, renderJavaType } from "../render-expr.js";
+import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import {
   collectWireImports,
   collectWireToDomainImports,
@@ -78,7 +78,11 @@ function reposUsed(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
   const visit = (s: WorkflowStmtIR): void => {
     if (s.kind === "factory-let") aggs.add(s.aggName);
     if (s.kind === "repo-let") aggs.add(s.aggName);
-    if (s.kind === "for-each") for (const b of s.body) visit(b);
+    if (s.kind === "repo-run") aggs.add(s.aggName);
+    if (s.kind === "for-each") {
+      for (const save of s.savesPerIteration) aggs.add(save.aggName);
+      for (const b of s.body) visit(b);
+    }
   };
   for (const s of wf.statements) visit(s);
   for (const save of wf.savesAtExit) aggs.add(save.aggName);
@@ -143,11 +147,30 @@ function renderWorkflowStmt(
       throw new Error(
         "java workflows: workflow-level `emit` is not yet implemented on the java backend.",
       );
-    case "repo-run":
-    case "for-each":
-      throw new Error(
-        "java workflows: retrieval-driven `for` loops are not yet implemented on the java backend.",
+    case "repo-run": {
+      if (s.page) {
+        throw new Error(
+          "java workflows: paged `Repo.run(..., page)` is not yet implemented on the java backend.",
+        );
+      }
+      for (const a of s.retrievalArgs) collectJavaExprImports(a, imports);
+      const args = s.retrievalArgs.map((a) => renderJavaExpr(a, renderCtx)).join(", ");
+      return [
+        `        var ${s.name} = ${repoField(s.aggName)}.run${upperFirst(s.retrievalName)}(${args});`,
+      ];
+    }
+    case "for-each": {
+      collectJavaExprImports(s.iterable, imports);
+      const body = s.body.flatMap((b) => renderWorkflowStmt(b, ctx, imports));
+      const saves = s.savesPerIteration.map(
+        (save) => `        ${repoField(save.aggName)}.save(${save.name});`,
       );
+      return [
+        `        for (var ${s.var} : ${renderJavaExpr(s.iterable, renderCtx)}) {`,
+        ...[...body, ...saves].map((l) => `    ${l}`),
+        `        }`,
+      ];
+    }
     case "resource-call":
       throw new Error(
         "java workflows: resource-op calls in workflows are not yet implemented on the java backend.",
