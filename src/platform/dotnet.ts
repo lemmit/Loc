@@ -123,6 +123,15 @@ const dotnetPlatform: PlatformSurface = {
             supportedLayouts: ["byLayer"],
           },
         ),
+        // `flat` (DSL `flat`) — the simplest application topology (a thin
+        // service per aggregate, no CQRS dispatch).  Reserved-not-implemented
+        // so the `application:` vocabulary matches the spec spectrum
+        // `flat` → `serviceLayer` → `cqrs` (realization-axes-alignment.md).
+        flat: stubAdapter<StyleAdapter>("style", "flat", "dotnet", () => Object.keys(menu.styles), {
+          name: "flat",
+          supportedStrategies: ["state"],
+          supportedLayouts: ["byLayer", "byFeature"],
+        }),
       },
       layouts: {
         byLayer: byLayerLayoutAdapter,

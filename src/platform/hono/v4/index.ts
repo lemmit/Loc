@@ -103,6 +103,14 @@ const honoPlatform: PlatformSurface = {
           supportedStrategies: ["state"],
           supportedLayouts: ["byLayer", "byFeature"],
         }),
+        // `flat` — reserved-not-implemented, completing the `application:`
+        // vocabulary `flat` → `serviceLayer` (= `layered`) → `cqrs`
+        // (realization-axes-alignment.md).
+        flat: stubAdapter<StyleAdapter>("style", "flat", "node", () => Object.keys(menu.styles), {
+          name: "flat",
+          supportedStrategies: ["state"],
+          supportedLayouts: ["byLayer", "byFeature"],
+        }),
       },
       layouts: {
         byLayer: byLayerLayoutAdapter,
