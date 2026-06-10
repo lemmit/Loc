@@ -296,9 +296,9 @@ describe("realization axes — transport is adapter-backed", () => {
 
   it("rejects `transport: minimalApi` on dotnet as reserved-but-unimplemented", async () => {
     const { errors } = await parse(sys("dotnet { transport: minimalApi }"));
-    expect(
-      errors.some((e) => /transport: minimalApi.*reserved.*not yet implemented/.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /transport: minimalApi.*reserved.*not yet implemented/.test(e))).toBe(
+      true,
+    );
     expect(errors.some((e) => /'controllers'/.test(e))).toBe(true);
   });
 
