@@ -38,6 +38,18 @@ Each frame carries:
 | `nodeId` | this concrete call instance |
 | `timestamp`, `kind` | when; `helper` / `workflow-step` / `subworkflow` |
 
+> **Ambient shape vs frame record.** The pinned ambient `RequestContext`
+> (D-CTX-SHAPE,
+> [`../architecture/request-context.md`](../architecture/request-context.md))
+> surfaces only the **governance-relevant** subset every feature reads
+> ambiently — `correlationId`, `scopeId`, `parentId` (plus the
+> request-stable `currentUser`/`locale`/`startedAt`). The richer fields
+> above (`operationId`, `nodeId`, `kind`, `timestamp`) are recorded on
+> the emitted **scope event** — the trace/provenance channel — not
+> carried in the value features read ambiently. Keep the two lists
+> distinct: the ambient carrier stays small; the scope event holds the
+> genealogy detail.
+
 The two axes that are easy to conflate:
 
 - **`parentId`** is *call structure* — who invoked me.
@@ -86,8 +98,35 @@ build with tracing disabled pays nothing.
   branch. No hard OpenTelemetry dependency — a lightweight internal
   context that mints ids/relations is enough; OTel export is an
   optional channel.
-- **Other backends**: an equivalent ambient context (async-local /
-  request-scoped) carrying the same five ids.
+- **Other backends** divide into two *realization classes* (see the
+  table in
+  [`../architecture/request-context.md`](../architecture/request-context.md)
+  § Per-backend realisation):
+  - **Ambient** (node/Hono `AsyncLocalStorage`, node/`nest` request-scoped
+    DI, elixir process dictionary, Java/Spring MVC `ThreadLocal`, Python
+    `contextvars`) — a per-flow slot the runtime carries implicitly;
+    `enterScope`/`exitScope` push/pop a child frame on it. Realisation is
+    **foundation-sensitive**: the frame-open seam differs under
+    `foundation: ash` (Ash action context) vs `vanilla` (`with`-block
+    step), and under the minimal node foundation (middleware) vs
+    `foundation: nest` (interceptor / `@nestjs/cqrs` handler). On the BEAM
+    the child frame must be **copied explicitly into a spawned `Task`** —
+    process state is not inherited across the fan-out.
+  - **Explicit-threading** (**Go** `context.Context`; Java/Spring WebFlux
+    Reactor `Context`) — there is no ambient slot. The context is an
+    ordinary value and the compiler threads a context *parameter* into
+    every generated call site (operation / repo / workflow /
+    domain-service calls in `render-stmt`/`render-expr`), deriving a child
+    value at each boundary instead of pushing onto an ambient stack. This
+    is a distinct *lowering* shape, and the strongest test that the IR's
+    boundary tags are realisation-neutral — a Go target carries
+    context-threading as a structural pivot on a par with
+    errors-as-values and no-classes (see
+    [`go-backend.md`](./go-backend.md)).
+
+When emission is off, the ambient class returns a null/no-op handle and
+the explicit-threading class threads a no-op context (request id /
+cancellation only), so a tracing-off build pays nothing on either.
 
 ## Why a shared backbone
 
