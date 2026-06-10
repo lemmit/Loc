@@ -125,7 +125,7 @@ Two **realization classes** cover every target:
 |---|---|---|---|
 | `node` (minimal / Hono) | ambient | `AsyncLocalStorage<RequestContext>` | `als.run(childFrame, …)` around a tagged boundary |
 | `node` + `foundation: nest` | ambient | request-scoped DI provider (`nestjs-cls`, an `AsyncLocalStorage` wrapper) | interceptor/guard at the boundary; the `@nestjs/cqrs` bus is the frame-open seam for command/query handlers (the Mediator-behaviour analog) |
-| `.NET` | ambient | **`AsyncLocal<RequestContext>`** — a dedicated slot the backbone owns (the direct `AsyncLocalStorage` twin), surfaced through a scoped `IRequestContext` accessor. **Not** `Activity.Current`: tracing is sampled, so a span is `null` on unsampled requests — governance state must never be sampleable | child frame set in a Mediator pipeline behaviour, popped on `using var` |
+| `.NET` | ambient | **`AsyncLocal<RequestContext>`** — a dedicated slot the backbone owns (the direct `AsyncLocalStorage` twin), surfaced through a scoped `IRequestContext` accessor. **Not** `Activity.Current`: tracing is sampled, so a span is `null` on unsampled requests — governance state must never be sampleable | root + request-stable via boundary middleware; per-boundary child frames via emitted inline `using` scopes — the Mediator behaviour covers only the `Send`-shaped subset (see § Two seams) |
 | `elixir` + `foundation: ash` | ambient | process dictionary / `Logger.metadata`, surfaced into the Ash action context | new frame per Ash action invocation |
 | `elixir` + `foundation: vanilla` | ambient | process dictionary / `Logger.metadata` + explicit struct | new frame per `with`-scoped step |
 | `Go` (proposed) | **explicit-threading** | `context.Context` (request-stable in `ctx.Value`; frame-local derived per call) | `ctx := context.WithValue(parent, …)` threaded into every call |
@@ -216,6 +216,50 @@ already wires `Activity.Current?.TraceId` into log scopes in
 reads back, and never via `Baggage` (it serialises to the W3C `baggage`
 header, leaking any `currentUser`/`tenantId`/`dataKey` to every downstream
 service).
+
+### Two seams — and why a Mediator behaviour is not sufficient alone
+
+Setting the ambient context is **two seams**, not one; the table's *Frame
+open* column is only the second. A Mediator pipeline behaviour is the
+convenient hook for *part* of the second seam on .NET — not the whole
+mechanism.
+
+1. **Boundary establishment** — where the *request-stable* tier is born
+   and the **root frame** opened. For HTTP this is **middleware** at the
+   request edge (the .NET `UserMiddleware` and the Hono request-id
+   middleware are already half of it): `correlationId` from the inbound
+   header or freshly minted, `currentUser` from the token, `locale` from
+   `Accept-Language`, `startedAt` now. It must be middleware, **not** a
+   Mediator behaviour — code that runs *before* dispatch (authorization
+   filters, model binding, other middleware) already needs the context,
+   and there must be exactly one birthplace. **Non-HTTP entrypoints have
+   no such middleware**: a `BackgroundService`/scheduled job, a
+   queue/`channelSource` consumer, and the outbox relay each open their
+   **own root frame** explicitly — and a consumer takes `correlationId`
+   from the *message envelope*, not a fresh mint, so a producer's run and
+   its consumer's join up.
+2. **Frame open** — the per-boundary push as frames nest (operation →
+   workflow → sub-workflow → helper / `domainService` / parallel branch).
+   On .NET the **command/query frame** can ride the renamed
+   `ExecutionContextBehavior` *because handlers are invoked through
+   `Send`* — but that frames only `Send`-shaped boundaries. Boundaries the
+   model wants framed that are **not** a `Send` — a `domainService` call,
+   a plain helper, a parallel `foreach` branch — get a generator-**emitted
+   inline scope** (`using var _ = ctx.EnterScope(...)`, the
+   `enterScope`/`exitScope` of `execution-context.md` § Lowering), not the
+   behaviour. node/Hono has no Mediator at all: every frame is an emitted
+   inline scope inside the boundary `als.run`.
+
+Consequences for the Mediator-behaviour hook specifically: it must be
+registered **first** in the pipeline (so authz / validation / audit
+behaviours observe the frame), and — because it restores the frame in
+`finally` — **work that escapes the `Send` keeps nothing**. An event
+emitted in a transaction and relayed later by the outbox must **capture
+the frame ids into the persisted record** (`correlationId`/`causationId`),
+not read `AsyncLocal` at relay time (see
+[`../proposals/dispatch-delivery-semantics.md`](../proposals/dispatch-delivery-semantics.md)).
+The behaviour is a convenience for one subset on one backend; the carrier,
+boundary middleware, and emitted inline scopes are the actual mechanism.
 
 **BEAM fan-out caveat.** On elixir the process dictionary and
 `Logger.metadata` are **not** inherited by `Task.async`/spawned
