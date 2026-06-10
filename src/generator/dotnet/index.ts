@@ -88,6 +88,7 @@ import {
   collectFindBodyUsings,
   collectRetrievalBodyUsings,
 } from "./find-emit.js";
+import { rewriteNamespacesForLayout } from "./layout-namespaces.js";
 import { emitRetrievalSpecs, renderPagingExtension } from "./spec-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
@@ -404,6 +405,12 @@ function emitProjectFromContexts(
     }
     out.set("ClientApp/.gitignore", "node_modules\ndist\n");
   }
+  // Layout-aware namespace rewrite (D-REALIZATION-AXES `directoryLayout:`):
+  // when the layout adapter relocated files under `Features/`, make each
+  // relocated file's C# namespace mirror its folder and fix every
+  // `using` / qualified reference project-wide.  No relocation (the
+  // byLayer default) → guaranteed no-op, so byLayer stays byte-identical.
+  rewriteNamespacesForLayout(out, ns);
 }
 
 /** Element-schema → named-wrapper pairs for the list-response document
@@ -510,7 +517,8 @@ function emitAggregate(
   // aggregate's domain + persistence files through the deployable's RESOLVED
   // layout adapter (threaded via emitCtx), falling back to byLayer in the
   // legacy single-context path.  byLayer reproduces the historical inline
-  // paths byte-for-byte; byFeature rehomes them under `Features/<Agg>/`.  The
+  // paths byte-for-byte; byFeature rehomes them under `Features/<Plural>/`
+  // (namespaces follow via `rewriteNamespacesForLayout`, post-emit).  The
   // adapters ignore the EmitCtx arg for path routing, so an empty stand-in is
   // fine when there's no system context.
   const layout = emitCtx?.layoutAdapter ?? byLayerLayoutAdapter;

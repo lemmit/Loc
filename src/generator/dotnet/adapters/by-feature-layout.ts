@@ -4,11 +4,11 @@
 // arrangement.  Where `byLayer` groups by ARCHITECTURAL LAYER
 // (`Application/<Plural>/Commands`, `Api/<Agg>Controller.cs`, …), `byFeature`
 // colocates everything for ONE aggregate's application + API surface under a
-// single `Features/<Aggregate>/` folder — the "vertical slice" / feature-folders
+// single `Features/<Plural>/` folder — the "vertical slice" / feature-folders
 // arrangement many .NET teams prefer.
 //
 // SCOPE: every PER-AGGREGATE artifact flows through the threaded layout
-// dispatch and rehomes under `Features/<Aggregate>/` — the CQRS + controller
+// dispatch and rehomes under `Features/<Plural>/` — the CQRS + controller
 // surface (via `cqrsStyleAdapter.emitForAggregate`) PLUS the aggregate's domain
 // model + persistence (entity / repository / EF config / join tables / document
 // POCO, routed from `emitAggregate`).  CROSS-CUTTING artifacts stay layered
@@ -18,26 +18,37 @@
 // project, and the project root.  That is the intended vertical-slice shape:
 // one folder per feature for its own code; shared scaffolding stays central.
 //
-// NAMESPACE NOTE: this adapter relocates FILES only; the C# `namespace`
-// declarations baked into each artifact's content by the style emitter are
-// unchanged (a file under `Features/Order/Commands/` still declares
-// `namespace <Ns>.Application.Orders.Commands`).  C# namespaces are independent
-// of file paths and the `.csproj` globs `**/*.cs`, so the project compiles
-// unchanged — the `LOOM_DOTNET_BUILD` gate proves it.  Namespace-by-feature is a
-// later slice (it requires the style emitter to vary its content by layout).
+// NAMESPACE NOTE: this adapter relocates FILES only; the matching C#
+// `namespace` rewrite (a relocated file declares the namespace that mirrors
+// its feature folder, e.g. `<Ns>.Features.Orders.Commands`, and every
+// `using` / qualified reference across the project follows) is the sibling
+// post-emit pass `../layout-namespaces.ts`, run by the orchestrator after all
+// files are placed.  Compile-gated end to end by the `LOOM_DOTNET_BUILD`
+// fixture `test/e2e/fixtures/dotnet-build/byfeature.ddd`.
+//
+// FOLDER PLURALITY: the feature folder is the PLURAL aggregate name
+// (`Features/Orders/`), matching byLayer's per-aggregate folders.  This is
+// load-bearing for the namespace mirror, not cosmetic: a singular folder
+// would put `class Order` inside `namespace <Ns>.Features.Order`, and C#
+// resolves simple names against ENCLOSING namespaces before `using`
+// directives — so any cross-feature reference to `Order` (inheritance bases,
+// TPH discriminator configs, polymorphic finds) would resolve the NAMESPACE
+// `<Ns>.Features.Order` instead of the type (CS0118).  Plural segments vs
+// singular type names keep the two name spaces disjoint by construction.
 // ---------------------------------------------------------------------------
 
-import { upperFirst } from "../../../util/naming.js";
+import { plural, upperFirst } from "../../../util/naming.js";
 import type { EmitCtx, EmittedArtifact, LayoutAdapter } from "../../_adapters/index.js";
 import { byLayerLayoutAdapter, type DotnetArtifact } from "./by-layer-layout.js";
 
-/** Feature folder for an aggregate — the singular PascalCase aggregate
- *  name (`Order`), distinct from `byLayer`'s plural layer folder
- *  (`Orders`).  Single source of truth for every feature placement. */
-const featureFolder = (name: string): string => upperFirst(name);
+/** Feature folder for an aggregate — the plural PascalCase aggregate
+ *  name (`Orders`), same convention as `byLayer`'s per-aggregate layer
+ *  folders.  Single source of truth for every feature placement.  Plural
+ *  on purpose — see the FOLDER PLURALITY note above. */
+const featureFolder = (name: string): string => plural(upperFirst(name));
 
 /** Route the per-aggregate application + controller categories under
- *  `Features/<Aggregate>/`.  Returns `null` for any category this layout
+ *  `Features/<Plural>/`.  Returns `null` for any category this layout
  *  doesn't reposition — the caller then delegates to `byLayer`. */
 function featurePathFor(artifact: DotnetArtifact): string | null {
   const { category: cat, name, aggregateName: agg } = artifact;
@@ -102,7 +113,7 @@ export const byFeatureLayoutAdapter: LayoutAdapter = {
       );
     }
     const featurePath = featurePathFor(artifact as DotnetArtifact);
-    // Application/API categories rehome under Features/<Agg>/; everything
+    // Application/API categories rehome under Features/<Plural>/; everything
     // else stays layered (delegated to byLayer) so the tree is coherent.
     return featurePath ?? byLayerLayoutAdapter.pathFor(artifact, ctx);
   },

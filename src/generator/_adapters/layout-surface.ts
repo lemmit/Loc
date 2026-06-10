@@ -4,10 +4,14 @@
 // Layouts decide the on-disk shape of the generated project: `byLayer`
 // puts every controller under `Controllers/`, every repository under
 // `Infrastructure/`, …; `byFeature` colocates each aggregate's
-// controller / handler / repository under `Features/<Aggregate>/`.
+// controller / handler / repository under `Features/<Plural>/`.
 // Decoupled from `StyleAdapter` because the same style (cqrs) renders
 // into either layout without changing its emission shape — only the
-// destination paths shift.
+// destination paths shift.  (Language-level reference fixups that a
+// relocation entails stay OUTSIDE this contract, as platform-local
+// post-emit passes over the final file map: relative-import rewriting
+// on TS (`typescript/layout-imports.ts`), namespace rewriting on
+// dotnet (`dotnet/layout-namespaces.ts`).)
 // ---------------------------------------------------------------------------
 
 import type { EmitCtx, EmittedArtifact } from "./types.js";

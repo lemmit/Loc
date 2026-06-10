@@ -140,6 +140,51 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // D-REALIZATION-AXES Phase 5a/5b/5e: `directoryLayout: byFeature` is a
+    // SYSTEM-MODE selection, so `generate dotnet` above never sees it.  Generate
+    // the SYSTEM and build the byFeature deployable's project under /warnaserror
+    // — proving the Features/<Plural>/ relocation + the namespace-by-feature
+    // rewrite (namespace decls, usings, DI/DbContext qualified references)
+    // produce a COMPILING project.  The fixture deliberately packs the
+    // name-resolution hot spots: TPH inheritance (cross-feature `: Party`),
+    // an extern handler (FQN startup verification), a join-table association,
+    // an event-sourced aggregate, and a view that imports a relocated type.
+    it("system `directoryLayout: byFeature` (dotnet) — relocated + renamespaced project builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-byfeature-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/byfeature.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        // Sanity: the slice moved AND its namespace mirrors the folder.
+        const entity = fs.readFileSync(
+          path.join(proj, "Features", "Customers", "Customer.cs"),
+          "utf8",
+        );
+        expect(entity).toContain("namespace Api.Features.Customers;");
+        expect(entity).toContain("using Api.Features.Parties;");
+        expect(fs.existsSync(path.join(proj, "Domain", "Customers"))).toBe(false);
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net8.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // TPH (sharedTable) inheritance on EF Core (aggregate-inheritance.md I2):
     // the whole hierarchy maps to one table via `HasDiscriminator`.  This is a
     // SYSTEM-mode feature (the deployable host gates it), so generate the system
