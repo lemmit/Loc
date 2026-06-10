@@ -1,2 +1,2 @@
-<v-text-field label="{{label}}" data-testid="{{testId}}" type="number" step="1" :model-value="form.{{path}}" @update:model-value="(v) => form.{{path}} = Math.trunc(Number(v)) || 0" :error-messages="{{errorExpr}}" />
+<v-text-field label="{{label}}" data-testid="{{testId}}" type="number" step="1" :model-value="form.values.{{path}}" @update:model-value="(v) => form.values.{{path}} = Math.trunc(Number(v)) || 0" :error-messages='form.errors["{{path}}"]' />
 

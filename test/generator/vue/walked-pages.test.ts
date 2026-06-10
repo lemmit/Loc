@@ -59,28 +59,59 @@ describe("vue walker — scaffold pages", () => {
     expect(list).toContain("const navigate = (to: string) => { void router.push(to); };");
   });
 
-  it("detail page: route param + byId handle + op-form stub wiring", async () => {
+  it("detail page: route param + byId handle + operation dialog wiring", async () => {
     const files = await vueFiles();
     const detail = files.get("src/pages/customers/detail.vue")!;
     expect(detail).toContain("const route = useRoute();");
     expect(detail).toContain("const id = route.params.id as string;");
     expect(detail).toContain("const customerById = reactive(useCustomerById(id));");
-    // Operation trigger compiles against the real mutation handle +
-    // a TODO-alert open-fn until the forms runtime lands.
-    expect(detail).toContain(`const update = reactive(useUpdateCustomer(id ?? ""));`);
-    expect(detail).toContain("const openUpdateModal = (_mut: unknown)");
-    expect(detail).toContain("TODO(vue-forms)");
     expect(detail).toContain("{{ customerById.data.name }}");
+    // Operation form: real mutation handle, dialog state, per-op
+    // LoomForm instance, and the appended v-dialog.
+    expect(detail).toContain(`const update = reactive(useUpdateCustomer(id ?? ""));`);
+    expect(detail).toContain("const updateOpen = ref(false);");
+    expect(detail).toContain(
+      "const openUpdateModal = (_mut: unknown) => { updateOpen.value = true; };",
+    );
+    expect(detail).toContain(
+      'const updateForm = useLoomForm(UpdateCustomerRequest, { name: "", email: "" });',
+    );
+    expect(detail).toContain('<v-dialog v-model="updateOpen"');
+    // Field markup re-pointed at the dialog's form instance.
+    expect(detail).toContain('v-model="updateForm.values.name"');
+    expect(detail).toContain(`:error-messages='updateForm.errors["name"]'`);
+    expect(detail).toContain('data-testid="customers-op-update-form"');
+    expect(detail).toContain('data-testid="customers-op-update-submit"');
   });
 
-  it("new page: form placeholder markup, no dangling identifiers", async () => {
+  it("new page: create form wired through useLoomForm + reactive mutation handle", async () => {
     const files = await vueFiles();
     const newPage = files.get("src/pages/customers/new.vue")!;
-    expect(newPage).toContain("TODO(vue-forms)");
-    // The aggregate create-form is the placeholder — no RHF-style
-    // identifiers may leak into the script.
-    expect(newPage).not.toContain("useForm");
-    expect(newPage).not.toContain("register");
+    expect(newPage).toContain(`import { useLoomForm } from "../../lib/form";`);
+    expect(newPage).toContain("const create = reactive(useCreateCustomer());");
+    expect(newPage).toContain(
+      'const form = useLoomForm(CreateCustomerRequest, { name: "", email: "" });',
+    );
+    // The pack's v-form markup: zod-parsed submit with the default
+    // create-then-redirect body, single-quoted handler attr.
+    expect(newPage).toContain(
+      "@submit.prevent='form.handleSubmit(async (vals) => { const out = await create.mutateAsync(vals); navigate(`/customers/${out.id}`); })($event)'",
+    );
+    expect(newPage).toContain('v-model="form.values.name"');
+    expect(newPage).toContain(`:error-messages='form.errors["name"]'`);
+    expect(newPage).toContain(':loading="create.isPending"');
+    // No RHF identifiers may leak into the Vue project.
+    expect(newPage).not.toContain("useForm(");
+    expect(newPage).not.toContain("register(");
+  });
+
+  it("the form runtime emits at src/lib/form.ts with the zod-parse submit shape", async () => {
+    const files = await vueFiles();
+    const form = files.get("src/lib/form.ts")!;
+    expect(form).toContain("export function useLoomForm");
+    expect(form).toContain("schema.safeParse(values)");
+    expect(form).toContain("issue.path.join(");
+    expect(form).toContain("__global");
   });
 
   it("no JSX artifacts leak into any emitted .vue file", async () => {

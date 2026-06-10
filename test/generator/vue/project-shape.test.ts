@@ -60,6 +60,7 @@ describe("vue generator — project shape", () => {
       "src/api/config.ts",
       "src/api/customer.ts",
       "src/lib/format.ts",
+      "src/lib/form.ts",
       "src/pages/NotFound.vue",
       "src/pages/customer_home.vue",
     ]) {

@@ -1,6 +1,7 @@
 import type { PageIR } from "../../../ir/types/loom-ir.js";
-import { humanize, lowerFirst, snake, upperFirst } from "../../../util/naming.js";
-import type { WalkResult } from "../../_walker/walker-core.js";
+import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import type { OperationFormState, WalkResult } from "../../_walker/walker-core.js";
+import { idTargetHookVar } from "../../react/form-helpers.js";
 import { vueTarget } from "./vue-target.js";
 
 // ---------------------------------------------------------------------------
@@ -21,10 +22,13 @@ import { vueTarget } from "./vue-target.js";
 //   - the walker emits `navigate("/path")` for `Button(to:)` — a
 //     local `const navigate = (to: string) => { void router.push(to) }`
 //     adapter keeps that contract without a new WalkerTarget seam.
-//   - form wiring (`formOfs`) is NOT assembled yet — the reactive()+
-//     zod forms runtime is the next sub-slice; pages that walked a
-//     Form primitive carry the pack's TODO placeholder markup and a
-//     script-side TODO marker.
+//   - form wiring assembles from the FormOfState records: an
+//     aggregate create-form gets the `form` LoomForm instance + the
+//     `create` mutation handle the pack's primitive-form-of markup
+//     references; each operation form gets a v-dialog appended after
+//     the walked body, dialog state, an open-fn, and its own
+//     `<op>Form` instance.  Workflow forms are the workflow parity
+//     slice's TODO.
 // ---------------------------------------------------------------------------
 
 /** Everything the SFC assembler needs beyond the walk result. */
@@ -45,14 +49,20 @@ export function renderVuePage(input: VuePageShellInput): string {
   // the bare name (`id`), so bind plain consts off `useRoute()`; a
   // param change remounts via the router's default behaviour for
   // generated CRUD pages.
-  // Operation-form trigger wiring (`openUpdateModal(update)` in the
-  // walked markup) references hook handles + open-fns the React shell
-  // gets from its form runtime.  Until the Vue forms runtime lands,
-  // declare the hook handle (real — the mutation exists) and a
-  // TODO-alert open-fn so the page compiles and the gap is visible
-  // at click time rather than build time.
+  // Form wiring (the reactive()+zod runtime, D-VUE-FRONTEND):
+  //   - an aggregate create-form gets `const form = useLoomForm(...)`
+  //     + the `create` mutation handle the pack's primitive-form-of
+  //     markup references;
+  //   - each operation form gets a v-dialog appended after the walked
+  //     body, an open-fn the trigger button calls, its own
+  //     `<op>Form` instance, and the mutation handle.
   const opFormLines: string[] = [];
-  const opFormStates = result.formOfs.filter((f) => f.kind === "operation");
+  const opFormStates = result.formOfs.filter(
+    (f): f is OperationFormState => f.kind === "operation",
+  );
+  const aggFormState = result.formOfs.find((f) => f.kind === "aggregate");
+  const usesLoomForm = aggFormState !== undefined || opFormStates.length > 0;
+  const needsNavigate = result.usesNavigate || aggFormState !== undefined;
   const idExprParams = new Set<string>();
   for (const state of opFormStates) {
     for (const p of routeParams) {
@@ -90,25 +100,99 @@ export function renderVuePage(input: VuePageShellInput): string {
     names.add(use.hookName);
     apiImports.set(use.importFrom, names);
   }
+  // Aggregate create-form wiring — the pack's primitive-form-of
+  // markup references `form` (the LoomForm instance) and `create`
+  // (the mutation handle); its default submit body navigates.
+  if (aggFormState && aggFormState.kind === "aggregate") {
+    const agg = aggFormState.agg.name;
+    if (!seenVars.has("create")) {
+      seenVars.add("create");
+      opFormLines.push(`const create = reactive(useCreate${agg}());`);
+      vueImports.add("reactive");
+    }
+    opFormLines.push(
+      `const form = useLoomForm(Create${agg}Request, ${aggFormState.defaultValuesTs});`,
+    );
+    const from = `../api/${lowerFirst(agg)}`;
+    const names = apiImports.get(from) ?? new Set<string>();
+    names.add(`useCreate${agg}`);
+    names.add(`Create${agg}Request`);
+    apiImports.set(from, names);
+  }
+  // Operation forms — dialog state + open-fn + per-op LoomForm.
+  const dialogBlocks: string[] = [];
   for (const state of opFormStates) {
+    if (state.kind !== "operation") continue;
     const opCamel = lowerFirst(state.op.name);
     const opPascal = upperFirst(state.op.name);
+    const agg = state.agg.name;
+    const from = `../api/${lowerFirst(agg)}`;
+    const names = apiImports.get(from) ?? new Set<string>();
     if (!seenVars.has(opCamel)) {
       seenVars.add(opCamel);
-      const hookName = `use${opPascal}${state.agg.name}`;
+      const hookName = `use${opPascal}${agg}`;
       opFormLines.push(`const ${opCamel} = reactive(${hookName}(${state.idExpr}));`);
       vueImports.add("reactive");
-      const from = `../api/${lowerFirst(state.agg.name)}`;
-      const names = apiImports.get(from) ?? new Set<string>();
       names.add(hookName);
-      apiImports.set(from, names);
     }
     const openFn = `open${opPascal}Modal`;
-    if (!seenVars.has(openFn)) {
-      seenVars.add(openFn);
-      opFormLines.push(
-        `const ${openFn} = (_mut: unknown) => { window.alert("TODO(vue-forms): the ${opPascal} form lands with the Vue forms runtime"); };`,
-      );
+    if (seenVars.has(openFn)) {
+      apiImports.set(from, names);
+      continue;
+    }
+    seenVars.add(openFn);
+    names.add(`${opPascal}${agg}Request`);
+    apiImports.set(from, names);
+    opFormLines.push(`const ${opCamel}Open = ref(false);`);
+    vueImports.add("ref");
+    opFormLines.push(`const ${openFn} = (_mut: unknown) => { ${opCamel}Open.value = true; };`);
+    opFormLines.push(
+      `const ${opCamel}Form = useLoomForm(${opPascal}${agg}Request, ${state.defaultValuesTs});`,
+    );
+    // Field markup was walked with the create-form instance name
+    // (`form.`) — re-point it at this dialog's instance.  Provisional
+    // until the field VM carries a `formVar` slot.
+    const fields = state.fieldHtmls
+      .map((h) => h.replaceAll("form.values.", `${opCamel}Form.values.`))
+      .map((h) => h.replaceAll("form.errors[", `${opCamel}Form.errors[`))
+      .map((h) => `            ${h}`)
+      .join("\n");
+    const ns = state.testidNamespace;
+    dialogBlocks.push(
+      [
+        `  <v-dialog v-model="${opCamel}Open" max-width="560">`,
+        `    <v-card title="${humanize(state.op.name)}">`,
+        `      <v-card-text>`,
+        `        <v-form data-testid="${ns}-form" @submit.prevent='${opCamel}Form.handleSubmit(async (vals) => { await ${opCamel}.mutateAsync(vals); ${opCamel}Open = false; })($event)'>`,
+        `          <div class="d-flex flex-column ga-4">`,
+        fields,
+        `            <v-alert v-if='${opCamel}Form.errors["__global"]' type="error" variant="tonal" :text='${opCamel}Form.errors["__global"]' />`,
+        `            <div class="d-flex justify-end mt-2">`,
+        `              <v-btn type="submit" color="primary" variant="flat" :loading="${opCamel}.isPending" data-testid="${ns}-submit">${humanize(state.op.name)}</v-btn>`,
+        `            </div>`,
+        `          </div>`,
+        `        </v-form>`,
+        `      </v-card-text>`,
+        `    </v-card>`,
+        `  </v-dialog>`,
+      ].join("\n"),
+    );
+  }
+  // Id-target lookup hooks (`X id` form fields render as selects fed
+  // by `useAll<Target>()` — the field templates reference the
+  // `idTargetHookVar` name baked in at walk time), deduped across
+  // all form states.
+  for (const state of result.formOfs) {
+    for (const t of state.idTargets) {
+      const hookVar = idTargetHookVar(t);
+      if (seenVars.has(hookVar)) continue;
+      seenVars.add(hookVar);
+      opFormLines.push(`const ${hookVar} = reactive(useAll${plural(t.name)}());`);
+      vueImports.add("reactive");
+      const from = `../api/${lowerFirst(t.name)}`;
+      const names = apiImports.get(from) ?? new Set<string>();
+      names.add(`useAll${plural(t.name)}`);
+      apiImports.set(from, names);
     }
   }
   // `Action(<inst>.<op>)` mutation hoists — same reactive() wrapper.
@@ -127,11 +211,11 @@ export function renderVuePage(input: VuePageShellInput): string {
   if (vueImports.size > 0) {
     script.push(`import { ${[...vueImports].sort().join(", ")} } from "vue";`);
   }
-  if (needsRoute && result.usesNavigate) {
+  if (needsRoute && needsNavigate) {
     script.push(`import { useRoute, useRouter } from "vue-router";`);
   } else if (needsRoute) {
     script.push(`import { useRoute } from "vue-router";`);
-  } else if (result.usesNavigate) {
+  } else if (needsNavigate) {
     script.push(`import { useRouter } from "vue-router";`);
   }
   // Format helpers — imported unconditionally (generated tsconfig
@@ -140,6 +224,9 @@ export function renderVuePage(input: VuePageShellInput): string {
   script.push(
     `import { EMPTY, formatBool, formatDateTime, formatMoney, formatNumber, formatPlain, isEmpty, shortId } from "${relPrefix(input)}lib/format";`,
   );
+  if (usesLoomForm) {
+    script.push(`import { useLoomForm } from "${relPrefix(input)}lib/form";`);
+  }
   for (const [from, names] of [...apiImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const adjusted = adjustDepth(from, input);
     script.push(`import { ${[...names].sort().join(", ")} } from "${adjusted}";`);
@@ -151,17 +238,18 @@ export function renderVuePage(input: VuePageShellInput): string {
       script.push(`const ${p} = route.params.${p} as string;`);
     }
   }
-  if (result.usesNavigate) {
+  if (needsNavigate) {
     script.push("const router = useRouter();");
-    // The walker's `Button(to:)` contract references a bare
-    // `navigate(path)` — adapt it onto vue-router locally.
+    // The walker's `Button(to:)` contract (and the create-form's
+    // default redirect) reference a bare `navigate(path)` — adapt it
+    // onto vue-router locally.
     script.push("const navigate = (to: string) => { void router.push(to); };");
   }
   script.push(...stateLines);
   script.push(...hookLines);
   script.push(...opFormLines);
-  if (result.formOfs.some((f) => f.kind !== "operation")) {
-    script.push("// TODO(vue-forms): form wiring lands with the reactive()+zod forms runtime");
+  if (result.formOfs.some((f) => f.kind === "workflow")) {
+    script.push("// TODO(vue-forms): workflow-form wiring lands with the workflow parity slice");
   }
   if (result.usedUserComponents.size > 0) {
     script.push(
@@ -172,13 +260,14 @@ export function renderVuePage(input: VuePageShellInput): string {
   while (script.length > 0 && script[script.length - 1] === "") script.pop();
 
   const title = humanize(page.name);
+  const dialogs = dialogBlocks.length > 0 ? `\n${dialogBlocks.join("\n")}` : "";
   return `<!-- Auto-generated.  Do not edit by hand.  (${title}) -->
 <script setup lang="ts">
 ${script.join("\n")}
 </script>
 
 <template>
-${indent(result.tsx, "  ")}
+${indent(result.tsx, "  ")}${dialogs}
 </template>
 `;
 }

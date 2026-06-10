@@ -143,6 +143,9 @@ export function generateVueForContexts(
   out.set("src/api/config.ts", renderShell(pack, "api-config", { apiBaseUrl }));
   out.set("src/logger.ts", renderShell(pack, "logger", {}));
   out.set("src/lib/format.ts", renderShell(pack, "format-helpers", {}));
+  // The reactive()+zod form runtime (vue/ shared source) — the
+  // generated pages' field inputs and v-form handlers bind to it.
+  out.set("src/lib/form.ts", renderShell(pack, "loom-form", {}));
 
   // Pack shell tier.
   out.set("src/theme.ts", renderShell(pack, "theme", prepareThemeVM(sys.theme)));

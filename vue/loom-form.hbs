@@ -1,0 +1,99 @@
+// Auto-generated.  Do not edit by hand.
+// Loom form runtime — the Vue analogue of the React packs'
+// react-hook-form + zodResolver stack, hand-rolled per
+// D-VUE-FRONTEND: a reactive() form object, zod parse on submit, and
+// a per-field error map the generated field inputs bind to.
+import { reactive } from "vue";
+import type { z } from "zod";
+
+export interface LoomForm<T extends Record<string, unknown>> {
+  /** Reactive form values — field inputs bind `v-model="form.values.x"`. */
+  values: T;
+  /** Per-field error messages keyed by dot-path; `__global` carries
+   *  whole-form failures (server rejections that don't map to a
+   *  field).  Inputs bind `:error-messages='form.errors["x"]'`. */
+  errors: Record<string, string | undefined>;
+  /** True while an async submit handler is in flight. */
+  submitting: boolean;
+  /** Build a form `@submit.prevent` handler: clears errors, zod-
+   *  parses `values`, maps issues onto `errors`, and only then runs
+   *  the supplied handler with the PARSED data.  A handler throw is
+   *  captured as a server error (field map when the error carries a
+   *  ProblemDetails-style `errors` record, `__global` otherwise). */
+  handleSubmit(handler: (vals: T) => Promise<void> | void): (e?: Event) => Promise<void>;
+  setError(path: string, message: string): void;
+  clearErrors(): void;
+}
+
+export function useLoomForm<T extends Record<string, unknown>>(
+  schema: z.ZodType<T>,
+  initialValues: T,
+): LoomForm<T> {
+  const values = reactive(initialValues) as T;
+  const errors = reactive<Record<string, string | undefined>>({});
+  const state = reactive({ submitting: false });
+
+  function clearErrors(): void {
+    for (const k of Object.keys(errors)) errors[k] = undefined;
+  }
+  function setError(path: string, message: string): void {
+    errors[path] = message;
+  }
+
+  function handleSubmit(handler: (vals: T) => Promise<void> | void) {
+    return async (e?: Event): Promise<void> => {
+      e?.preventDefault();
+      clearErrors();
+      const parsed = schema.safeParse(values);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          const path = issue.path.join(".") || "__global";
+          if (errors[path] === undefined) errors[path] = issue.message;
+        }
+        return;
+      }
+      state.submitting = true;
+      try {
+        await handler(parsed.data);
+      } catch (err) {
+        applyServerError(err, setError);
+      } finally {
+        state.submitting = false;
+      }
+    };
+  }
+
+  return {
+    values,
+    errors,
+    get submitting() {
+      return state.submitting;
+    },
+    handleSubmit,
+    setError,
+    clearErrors,
+  };
+}
+
+/** Map a thrown server error onto the form: a ProblemDetails-style
+ *  `errors` record (RFC 7807 validation shape) lands per-field;
+ *  anything else lands on `__global`.  Mirrors the React projects'
+ *  `apply-server-errors.ts` semantics at the granularity the shared
+ *  fetch client surfaces. */
+function applyServerError(err: unknown, setError: (p: string, m: string) => void): void {
+  if (err && typeof err === "object" && "errors" in err) {
+    const fieldErrors = (err as { errors: unknown }).errors;
+    if (fieldErrors && typeof fieldErrors === "object") {
+      let mapped = false;
+      for (const [field, msgs] of Object.entries(fieldErrors as Record<string, unknown>)) {
+        const msg = Array.isArray(msgs) ? String(msgs[0] ?? "") : String(msgs);
+        if (msg) {
+          setError(field, msg);
+          mapped = true;
+        }
+      }
+      if (mapped) return;
+    }
+  }
+  setError("__global", err instanceof Error ? err.message : String(err));
+}
