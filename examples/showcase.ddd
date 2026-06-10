@@ -504,13 +504,13 @@ system DevPlatform {
     // End-to-end tests.
     // -----------------------------------------------------------------
     test e2e "create a project then read it back" against dotnetApi verifies TC-002 {
-        let p = api.projects.create({ name: "Atlas", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", createdAt: "2024-01-01T00:00:00Z" })
+        let p = api.projects.create({ name: "Atlas", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", budget: 100.0, createdAt: "2024-01-01T00:00:00Z" })
         let read = api.projects.getById(p)
         expect(read.name).toBe("Atlas")
     }
 
     test e2e "create and read a build" against honoApi {
-        let b = api.builds.create({ commitSha: "abc1234", buildState: "Passed", startedAt: "2024-01-01T00:00:00Z" })
+        let b = api.builds.create({ commitSha: "abc1234", buildState: "Passed", total: 0, startedAt: "2024-01-01T00:00:00Z" })
         let read = api.builds.getById(b)
         expect(read.commitSha).toBe("abc1234")
     }
@@ -534,12 +534,12 @@ system DevPlatform {
 
     // 400 — invariant `name.length > 0` (Catalog.Project) must reject.
     test e2e "creating a project with an empty name is rejected" against dotnetApi {
-        expect(api.projects.create({ name: "", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", createdAt: "2024-01-01T00:00:00Z" })).toThrow(400)
+        expect(api.projects.create({ name: "", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", budget: 100.0, createdAt: "2024-01-01T00:00:00Z" })).toThrow(400)
     }
 
     // 400 — invariant `commitSha.length > 0` (Builds.Build) must reject.
     test e2e "creating a build with an empty commitSha is rejected" against honoApi {
-        expect(api.builds.create({ commitSha: "", buildState: "Passed", startedAt: "2024-01-01T00:00:00Z" })).toThrow(400)
+        expect(api.builds.create({ commitSha: "", buildState: "Passed", total: 0, startedAt: "2024-01-01T00:00:00Z" })).toThrow(400)
     }
 
     // 404 — reading an id that was never created must error, not 200.
