@@ -142,18 +142,9 @@ describe("vanilla — workflow create-param surfacing", () => {
     expect(wf).toContain("def run(params) when is_map(params) do");
   });
 
-  it("does NOT bind a param referenced only by a not-yet-lowered kind (emit)", async () => {
-    // `emit` is still on the TODO fallthrough — its param ref is not
-    // rendered into code, so binding `at` would be an unused local.
-    const wf = await workflowFor(
-      `event Started { at: datetime }
-      workflow kickoff transactional {
-        create(startedAt: datetime) {
-          emit Started { at: startedAt }
-        }
-      }`,
-      "kickoff",
-    );
-    expect(wf).not.toContain("started_at");
-  });
+  // The "still-TODO kind doesn't surface its param" invariant moved to
+  // `vanilla-workflow-repo-let.test.ts` (non-getById repo-let arg stays
+  // unbound).  This test originally targeted `emit`, which is now lowered;
+  // re-asserting against the new still-TODO kinds (for-each / repo-run /
+  // resource-call) is covered structurally there.
 });
