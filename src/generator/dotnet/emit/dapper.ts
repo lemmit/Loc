@@ -29,6 +29,7 @@ import type {
   RetrievalIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { unionFindAsOptionalTwin } from "../find-emit.js";
@@ -273,6 +274,32 @@ export function renderDapperRepository(
     .join(", ");
   const saveParams = cols.map((c) => `${c.col} = ${c.save}`).join(", ");
 
+  // Non-principal capability filters (`filter !this.isDeleted`) AND into
+  // every read (GetById / FindManyByIds / finds / retrievals) — Dapper has
+  // no EF HasQueryFilter, so the predicate is spliced into each SELECT's
+  // WHERE.  Principal-referencing filters are validator-rejected on Dapper
+  // (`loom.dapper-unsupported`).  A predicate outside the Dapper SQL subset
+  // throws here (loud) rather than silently dropping the filter — half-
+  // applying a soft-delete filter would be a correctness hole.
+  const capabilityFilters = (agg.contextFilters ?? []).filter((p) => !exprUsesCurrentUser(p));
+  const filterSql: string | null =
+    capabilityFilters.length > 0
+      ? capabilityFilters
+          .map((p) => {
+            try {
+              return whereToSql(p);
+            } catch {
+              throw new Error(
+                `dapper: capability filter on '${agg.name}' is outside the Dapper SQL subset; ` +
+                  `use 'persistence: efcore' or simplify the predicate.`,
+              );
+            }
+          })
+          .join(" AND ")
+      : null;
+  const andFilter = (existingWhere: boolean): string =>
+    filterSql ? `${existingWhere ? " AND " : " WHERE "}${filterSql}` : "";
+
   const mapBody = cols.map((c) => `            ${c.stateProp} = ${c.hydrate},`);
 
   const findMethods = (repo?.finds ?? []).map((raw) => {
@@ -297,7 +324,7 @@ export function renderDapperRepository(
         `        => throw new NotImplementedException("Dapper v1 does not support this find's predicate.");`,
       );
     }
-    const sql = `SELECT ${colList} FROM ${table}${where}`;
+    const sql = `SELECT ${colList} FROM ${table}${where}${andFilter(where !== "")}`;
     if (isList) {
       return lines(
         `    public async Task<${ret}> ${name}(${renderParams(f.params)})`,
@@ -339,7 +366,7 @@ export function renderDapperRepository(
             .map((s) => `${snake(s.path[0]!.name)} ${s.direction === "desc" ? "DESC" : "ASC"}`)
             .join(", ")}`
         : "";
-    const baseSql = `SELECT ${colList} FROM ${table} WHERE ${whereSql}${orderSql}`;
+    const baseSql = `SELECT ${colList} FROM ${table} WHERE ${whereSql}${filterSql ? ` AND ${filterSql}` : ""}${orderSql}`;
     const paramAdds = r.params.map((p) => {
       const pt = p.type.kind === "optional" ? p.type.inner : p.type;
       const val = pt.kind === "id" ? `${p.name}.Value` : p.name;
@@ -424,7 +451,7 @@ export function renderDapperRepository(
       `    public async Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
       "    {",
       "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-      `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = @id", new { id = id.Value }, cancellationToken: cancellationToken));`,
+      `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = @id${andFilter(true)}", new { id = id.Value }, cancellationToken: cancellationToken));`,
       "        return r is null ? null : Map(r);",
       "    }",
       "",
@@ -432,7 +459,7 @@ export function renderDapperRepository(
       "    {",
       "        if (ids.Count == 0) return Array.Empty<" + agg.name + ">();",
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
-      `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = ANY(@ids)", new { ids = ids.Select(x => x.Value).ToArray() }, cancellationToken: cancellationToken));`,
+      `        var rows = await conn.QueryAsync<Row>(new CommandDefinition("SELECT ${colList} FROM ${table} WHERE id = ANY(@ids)${andFilter(true)}", new { ids = ids.Select(x => x.Value).ToArray() }, cancellationToken: cancellationToken));`,
       "        return rows.Select(Map).ToList();",
       "    }",
       "",

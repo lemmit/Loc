@@ -154,6 +154,37 @@ describe("dapper capability gating (loom.dapper-unsupported)", () => {
   });
 });
 
+// Capability filters on Dapper: a non-principal `filter <expr>` is spliced
+// into every SELECT's WHERE (Dapper has no EF HasQueryFilter); the gate only
+// rejects principal-referencing predicates (no request-scoped principal
+// accessor on the Dapper repository).
+describe("dapper capability filters", () => {
+  it("ANDs a non-principal filter into every read", async () => {
+    const { files, errors } = await emit(
+      sys("dapper", "archived: bool\n        filter !this.archived"),
+    );
+    expect(errors).toEqual([]);
+    const repo = [...files.entries()].find(([k]) =>
+      k.endsWith("Repositories/OrderRepository.cs"),
+    )![1];
+    // GetById + FindManyByIds + findAll + the named find all carry it.
+    expect(repo).toContain("WHERE id = @id AND (NOT archived)");
+    expect(repo).toContain("WHERE id = ANY(@ids) AND (NOT archived)");
+    expect(repo).toContain("FROM orders WHERE (NOT archived)");
+    expect(repo).toContain("WHERE (customer = @customer) AND (NOT archived)");
+  });
+
+  it("never emits a silent principal-referencing filter (model errors out upstream)", async () => {
+    // The selectability validator already rejects `currentUser.<field>` in
+    // this fixture shape; the dapper gate's principal check is the
+    // defense-in-depth layer behind it.  Either way: errors, no silent drop.
+    const { errors } = await emit(
+      sys("dapper", "owner: string\n        filter this.owner == currentUser.email"),
+    );
+    expect(errors.length).toBeGreaterThan(0);
+  });
+});
+
 // Reified-criteria parity: Dapper now supports `retrieval` bundles — the gate
 // is lifted and Run<Name>Async renders as parameterised SQL (where + sort +
 // offset/limit paging), with criterion candidate-fields as columns. No Ardalis
