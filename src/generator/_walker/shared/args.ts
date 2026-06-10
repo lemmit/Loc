@@ -94,10 +94,10 @@ export function firstPositionalText(call: ExprIR & { kind: "call" }): string | u
  *  behaviour. */
 export function unwrapTextLiteral(
   s: string,
-  escape: (text: string) => string = escapeJsxText,
+  escapeFn: (text: string) => string = escapeJsxText,
 ): string {
   if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
-    return escape(JSON.parse(s) as string);
+    return escapeFn(JSON.parse(s) as string);
   }
   return s;
 }

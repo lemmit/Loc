@@ -5,6 +5,16 @@
 
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { lookupBuiltinIcon } from "../../react/walker/icons.js";
+import { renderPrimitive } from "../render-primitive.js";
+import {
+  boolNamed,
+  lambdaArg,
+  namedArgValue,
+  positionalArgs,
+  stringNamed,
+  unwrapTextLiteral,
+} from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import {
   emitExpr,
@@ -17,16 +27,6 @@ import {
   testidAttr,
   walk,
 } from "../walker-core.js";
-import { renderPrimitive } from "../render-primitive.js";
-import { lookupBuiltinIcon } from "../../react/walker/icons.js";
-import {
-  boolNamed,
-  lambdaArg,
-  namedArgValue,
-  positionalArgs,
-  stringNamed,
-  unwrapTextLiteral,
-} from "../shared/args.js";
 
 export function emitIdLink(
   call: ExprIR & { kind: "call" },
@@ -143,21 +143,29 @@ export function emitAction(
   void depth;
   const opRef = positionalArgs(call)[0];
   if (!opRef || opRef.kind !== "member" || opRef.receiver.kind !== "ref") {
-    return ctx.target.renderComment(`Action: first argument must be <instance>.<operation> (e.g. order.confirm)`);
+    return ctx.target.renderComment(
+      `Action: first argument must be <instance>.<operation> (e.g. order.confirm)`,
+    );
   }
   const instanceName = opRef.receiver.name;
   const opName = opRef.member;
   const aggName = ctx.paramTypes?.get(instanceName);
   if (!aggName) {
-    return ctx.target.renderComment(`Action(${instanceName}.${opName}): '${instanceName}' is not an in-scope aggregate instance`);
+    return ctx.target.renderComment(
+      `Action(${instanceName}.${opName}): '${instanceName}' is not an in-scope aggregate instance`,
+    );
   }
   const agg = ctx.aggregatesByName.get(aggName);
   if (!agg) {
-    return ctx.target.renderComment(`Action(${instanceName}.${opName}): aggregate ${aggName} not found`);
+    return ctx.target.renderComment(
+      `Action(${instanceName}.${opName}): aggregate ${aggName} not found`,
+    );
   }
   const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
   if (!op) {
-    return ctx.target.renderComment(`Action(${instanceName}.${opName}): no public operation '${opName}' on ${agg.name}`);
+    return ctx.target.renderComment(
+      `Action(${instanceName}.${opName}): no public operation '${opName}' on ${agg.name}`,
+    );
   }
   // Hoist the mutation hook to function top (React requires hooks at
   // component scope, not inside the onClick handler).

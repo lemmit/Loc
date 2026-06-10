@@ -14,11 +14,11 @@
 // icon's intrinsic dimensions.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { lookupBuiltinIcon } from "../../react/walker/icons.js";
+import { renderPrimitive } from "../render-primitive.js";
+import { stringNamed } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { testidAttr } from "../walker-core.js";
-import { renderPrimitive } from "../render-primitive.js";
-import { lookupBuiltinIcon } from "../../react/walker/icons.js";
-import { stringNamed } from "../shared/args.js";
 
 export function emitIcon(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   void depth;

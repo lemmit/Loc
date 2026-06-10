@@ -30,10 +30,10 @@
 // this case — arbitrary code text round-trips cleanly.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import type { WalkContext } from "../walker-core.js";
-import { testidAttr } from "../walker-core.js";
 import { renderPrimitive } from "../render-primitive.js";
 import { escapeJsxText, firstPositionalText, stringNamed } from "../shared/args.js";
+import type { WalkContext } from "../walker-core.js";
+import { testidAttr } from "../walker-core.js";
 
 export function emitCodeBlock(
   call: ExprIR & { kind: "call" },

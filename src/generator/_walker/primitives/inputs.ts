@@ -4,10 +4,10 @@
 // helpers are private to this module.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import type { WalkContext } from "../walker-core.js";
-import { emitExpr, firstPositionalContent, testidAttr } from "../walker-core.js";
 import { renderPrimitive } from "../render-primitive.js";
 import { namedArgValue, unwrapAsAttr, unwrapTextLiteral } from "../shared/args.js";
+import type { WalkContext } from "../walker-core.js";
+import { emitExpr, firstPositionalContent, testidAttr } from "../walker-core.js";
 
 function inputLabelForms(
   call: ExprIR & { kind: "call" },
