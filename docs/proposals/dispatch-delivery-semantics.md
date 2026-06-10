@@ -9,8 +9,13 @@
 > relay (`startOutboxRelay`) that drains undispatched rows through the
 > in-process dispatcher at-least-once, dead-lettering after N attempts
 > (`event_dead_lettered` catalog event); an `ephemeral` channel keeps the
-> at-most-once path byte-identically.  Remaining: the .NET
-> `BackgroundService` relay, the Phoenix/Oban relay (elixir track),
+> at-most-once path byte-identically.  The **.NET tier shipped alongside**
+> (same day): `OutboxDomainEventDispatcher` records durable events in the
+> EF-mapped `__loom_outbox` (the MigrationsIR-owned table) and the
+> `OutboxRelayService` BackgroundService drains them through the
+> in-process Mediator dispatcher with the same retry/dead-letter
+> contract.  Remaining: the Phoenix/Oban relay (elixir track), the
+> Dapper-persistence outbox,
 > idempotent-consumer markers on the saga row (§3 — consumers must
 > tolerate redelivery until then), and the LISTEN/NOTIFY upgrade over
 > polling.

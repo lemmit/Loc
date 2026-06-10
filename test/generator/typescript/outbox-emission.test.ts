@@ -77,3 +77,49 @@ describe("transactional outbox emission (retention: log)", () => {
     expect(files.get("index.ts") ?? "").not.toContain("startOutboxRelay");
   });
 });
+
+// ─── .NET slice (T3.8 slice 2) ──────────────────────────────────────────────
+import { generateDotnet } from "../../_helpers/generate.js";
+
+describe("transactional outbox emission — .NET (retention: log)", () => {
+  async function dotnetFiles(file: string): Promise<Map<string, string>> {
+    const services = createDddServices(NodeFileSystem);
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(path.join(root, file)),
+    );
+    await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+    return generateDotnet(doc.parseResult.value as Model);
+  }
+
+  it("emits the OutboxMessage entity, dispatcher, relay, DbSet, and registrations", async () => {
+    const files = await dotnetFiles("test/fixtures/outbox-sample.ddd");
+    expect(files.get("Infrastructure/Persistence/OutboxMessage.cs")).toContain(
+      'builder.ToTable("__loom_outbox");',
+    );
+    const disp = files.get("Infrastructure/Events/OutboxDomainEventDispatcher.cs") ?? "";
+    expect(disp).toContain(
+      'private static readonly HashSet<string> DurableEventTypes = new() { "OrderPlaced", "ShipmentRequested" };',
+    );
+    expect(disp).toContain("_db.LoomOutbox.Add(new OutboxMessage");
+    const relay = files.get("Infrastructure/Events/OutboxRelayService.cs") ?? "";
+    expect(relay).toContain("public sealed class OutboxRelayService : BackgroundService");
+    expect(relay).toContain('"OrderPlaced" => JsonSerializer.Deserialize<OrderPlaced>(payload),');
+    expect(relay).toContain('"event_dead_lettered"');
+    expect(files.get("Infrastructure/Persistence/AppDbContext.cs")).toContain(
+      "DbSet<OutboxMessage> LoomOutbox",
+    );
+    const prog = files.get("Program.cs") ?? "";
+    expect(prog).toContain(
+      "builder.Services.AddScoped<IDomainEventDispatcher, OutboxDomainEventDispatcher>();",
+    );
+    expect(prog).toContain("builder.Services.AddHostedService<OutboxRelayService>();");
+  });
+
+  it("an ephemeral channel keeps the plain in-process registration (no outbox)", async () => {
+    const files = await dotnetFiles("test/fixtures/dispatch-sample.ddd");
+    expect(files.has("Infrastructure/Events/OutboxDomainEventDispatcher.cs")).toBe(false);
+    expect(files.get("Program.cs") ?? "").toContain(
+      "builder.Services.AddScoped<IDomainEventDispatcher, InProcessDomainEventDispatcher>();",
+    );
+  });
+});
