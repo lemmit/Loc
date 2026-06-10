@@ -101,6 +101,17 @@ describe("realization axes — R1 out-of-menu", () => {
     expect(errors).toEqual([]);
   });
 
+  it("recognises `application: flat` as reserved (vocabulary parity flat→serviceLayer→cqrs)", async () => {
+    // `flat` is the spec's simplest application topology — registered as a stub
+    // so it's reserved-not-implemented (not 'unknown') on dotnet and node.
+    for (const plat of ["dotnet", "hono"]) {
+      const { errors } = await parse(sys(`${plat} { application: flat }`));
+      expect(errors.some((e) => /application: flat.*reserved.*not yet implemented/.test(e))).toBe(
+        true,
+      );
+    }
+  });
+
   it("rejects any axis on a frontend platform (no realization axes there)", async () => {
     const { errors } = await parse(`
       system S {
