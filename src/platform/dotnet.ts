@@ -139,16 +139,22 @@ const dotnetPlatform: PlatformSurface = {
         byFeature: byFeatureLayoutAdapter,
       },
       transports: {
-        // ASP.NET Minimal APIs — the only real HTTP surface today.
-        minimalApi: { name: "minimalApi" },
-        // ASP.NET MVC controllers — reserved; the per-transport
-        // request-pipeline emit is future work (realization-axes-alignment.md).
-        controllers: stubAdapter<TransportAdapter>(
+        // Attribute-routed ASP.NET controllers — the real HTTP surface the
+        // backend has emitted all along (`[ApiController] class X :
+        // ControllerBase` with `[HttpGet]`/`[HttpPost]` actions — see
+        // emit/api.ts `renderController`).  This slot was historically
+        // mislabelled `minimalApi`; the labels were swapped 2026-06-10 to
+        // match the emitted code.
+        controllers: { name: "controllers" },
+        // ASP.NET Minimal APIs (`app.MapGet/MapPost` endpoint mapping) —
+        // reserved; that request-pipeline emit is future work
+        // (realization-axes-alignment.md).
+        minimalApi: stubAdapter<TransportAdapter>(
           "transport",
-          "controllers",
+          "minimalApi",
           "dotnet",
           () => Object.keys(menu.transports),
-          { name: "controllers" },
+          { name: "minimalApi" },
         ),
       },
       runtimes: {
@@ -172,7 +178,7 @@ const dotnetPlatform: PlatformSurface = {
       persistence: { state: "efcore", eventLog: "marten" },
       style: "cqrs",
       layout: "byLayer",
-      transport: "minimalApi",
+      transport: "controllers",
       runtime: "transactional",
     };
   },
