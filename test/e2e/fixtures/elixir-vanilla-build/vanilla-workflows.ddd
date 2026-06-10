@@ -31,6 +31,20 @@ system Tasks {
           t.markDone()
         }
       }
+
+      // Guard + expr-let exercise — covers `precondition`, `requires`,
+      // and `expr-let` lowering.  Each becomes a `with`-clause in the
+      // lowered `run_inner/1` chain; the failure tags propagate through
+      // the with-chain to the controller (422 / 403 RFC 7807 responses).
+      workflow guardedCreate transactional {
+        create() {
+          precondition true
+          requires true
+          let placeholder = "Untitled"
+          let t = Task.create({ title: placeholder, done: false })
+          t.markDone()
+        }
+      }
     }
   }
   api TrackerApi from Productivity
