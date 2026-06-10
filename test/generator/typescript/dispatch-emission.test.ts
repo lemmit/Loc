@@ -60,7 +60,11 @@ describe("in-process event dispatch emission", () => {
     expect(idx).toContain(
       'import { createInProcessDispatcher, workflowsRoutes } from "./workflows";',
     );
-    expect(idx).toContain("events: DomainEventDispatcher = createInProcessDispatcher(db),");
+    // The fixture's channel is `delivery: broadcast`, so the default
+    // dispatcher rides through the realtime SSE tee.
+    expect(idx).toContain(
+      "events: DomainEventDispatcher = realtimeTee(createInProcessDispatcher(db)),",
+    );
     // Noop import is dropped when the in-process dispatcher is wired.
     expect(idx).not.toContain("NoopDomainEventDispatcher");
   });

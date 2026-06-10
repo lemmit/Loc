@@ -54,7 +54,7 @@ import {
   type UserIR,
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
-import { durableEventTypes } from "../../../ir/util/channels.js";
+import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
 import {
   isTpcBase,
   isTphBase,
@@ -79,6 +79,7 @@ import { layeredStyleAdapter } from "./adapters/layered-style.js";
 import { resourceAdapterFor } from "./adapters/resource-clients.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitObservabilityFiles } from "./observability-builder.js";
+import { buildRealtimeFile } from "./realtime-builder.js";
 import { buildRoutesFile } from "./routes-builder.js";
 import { buildViewsRoutesFile } from "./view-routes-builder.js";
 import { buildWorkflowsFile } from "./workflow-builder.js";
@@ -384,6 +385,14 @@ export function generateTypeScriptForContexts(
     "http/index.ts",
     renderHttpIndex(merged, { authRequired, persistence: usingMikro ? "mikroorm" : "drizzle" }),
   );
+  // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`
+  // channel makes its carried events UI-observable at GET /realtime/events;
+  // createApp's dispatcher tee (see routes emit) copies dispatched events
+  // onto the stream.
+  if (!usingMikro) {
+    const realtimeFile = buildRealtimeFile(merged);
+    if (realtimeFile) out.set("http/realtime.ts", realtimeFile);
+  }
 
   // Adapter dispatch context — present only in system-mode emit so
   // routes-file emission can route through the layered StyleAdapter +
@@ -608,6 +617,9 @@ export function generateTypeScriptForContexts(
       // is wired (subscriptions exist; drizzle persistence).
       !usingMikro &&
         contexts.some((c) => c.eventSubscriptions.length > 0 && durableEventTypes(c).size > 0),
+      // Realtime tee: the relay's inner dispatcher rides through it so
+      // relayed (durable) events reach the SSE wire too.
+      !usingMikro && contexts.some((c) => realtimeEventTypes(c).size > 0),
     ),
   );
   if (!usingMikro) out.set("drizzle.config.ts", DRIZZLE_CONFIG);
@@ -816,6 +828,7 @@ function renderProjectIndexTs(
   runSeedsAtBoot = false,
   usingMikro = false,
   outboxRelay = false,
+  hasRealtime = false,
 ): string {
   // Side-effect imports for the resource-client modules (objectStore /
   // queue / api) so their clients instantiate at boot.  Empty for
@@ -856,7 +869,9 @@ import * as schema from "./db/schema";
 import { createApp } from "./http/index";
 ${
   outboxRelay
-    ? `import { createInProcessDispatcher, createOutboxDispatcher, startOutboxRelay } from "./http/workflows";\n`
+    ? `import { createInProcessDispatcher, createOutboxDispatcher, startOutboxRelay } from "./http/workflows";\n${
+        hasRealtime ? `import { realtimeTee } from "./http/realtime";\n` : ""
+      }`
     : ""
 }${migImport}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";`;
   const connectionBlock = usingMikro
@@ -878,7 +893,7 @@ ${effectiveMigCall}${seedCall}${authStubCall}${
 // (channels with retention: log | work) are recorded in __loom_outbox by
 // the app's dispatcher; the relay drains them through the in-process
 // dispatcher at-least-once.  Consumers must tolerate redelivery.
-const inProcessEvents = createInProcessDispatcher(db);
+const inProcessEvents = ${hasRealtime ? "realtimeTee(createInProcessDispatcher(db))" : "createInProcessDispatcher(db)"};
 const app = createApp(db, createOutboxDispatcher(db, inProcessEvents));
 const stopOutboxRelay = startOutboxRelay(db, inProcessEvents);
 `

@@ -58,11 +58,13 @@ describe("transactional outbox emission (retention: log)", () => {
   it("createApp defaults to the outbox-wrapped dispatcher; index starts/stops the relay", async () => {
     const files = await generate("test/fixtures/outbox-sample.ddd");
     const idx = files.get("http/index.ts") ?? "";
+    // The fixture's channel is `delivery: broadcast`, so the in-process leg
+    // rides through the realtime tee (durable events reach SSE via the relay).
     expect(idx).toContain(
-      "events: DomainEventDispatcher = createOutboxDispatcher(db, createInProcessDispatcher(db)),",
+      "events: DomainEventDispatcher = createOutboxDispatcher(db, realtimeTee(createInProcessDispatcher(db))),",
     );
     const boot = files.get("index.ts") ?? "";
-    expect(boot).toContain("const inProcessEvents = createInProcessDispatcher(db);");
+    expect(boot).toContain("const inProcessEvents = realtimeTee(createInProcessDispatcher(db));");
     expect(boot).toContain("const stopOutboxRelay = startOutboxRelay(db, inProcessEvents);");
     expect(boot).toContain("stopOutboxRelay();");
   });
@@ -72,7 +74,7 @@ describe("transactional outbox emission (retention: log)", () => {
     expect(files.get("db/schema.ts") ?? "").not.toContain("__loom_outbox");
     expect(files.get("http/workflows.ts") ?? "").not.toContain("createOutboxDispatcher");
     expect(files.get("http/index.ts") ?? "").toContain(
-      "events: DomainEventDispatcher = createInProcessDispatcher(db),",
+      "events: DomainEventDispatcher = realtimeTee(createInProcessDispatcher(db)),",
     );
     expect(files.get("index.ts") ?? "").not.toContain("startOutboxRelay");
   });
