@@ -1,5 +1,6 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
 import { forApiRead } from "../../ir/enrich/wire-projection.js";
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   AssociationIR,
   ContainmentIR,
@@ -7,17 +8,20 @@ import type {
   EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
   FieldIR,
+  FindIR,
   RepositoryIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { plural, snake } from "../../util/naming.js";
+import { lowerToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
 import {
   isRefCollectionField,
   isValueCollectionField,
   joinRowClassName,
   rowClassName,
 } from "./py-columns.js";
+import { renderPyType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Repository emission — `app/db/repositories/<snake(agg)>_repository.py`.
@@ -38,9 +42,17 @@ import {
 // User-declared finds (`find byX(...) where …`) land in S8.
 // ---------------------------------------------------------------------------
 
+/** User-declared finds the v1 surface emits — the auto `all` is the
+ *  dedicated method/route pair; paged + union returns land in S12. */
+export function emittableFinds(repo: RepositoryIR | undefined): FindIR[] {
+  return (repo?.finds ?? []).filter(
+    (f) => f.name !== "all" && !pagedReturn(f.returnType) && f.returnType.kind !== "union",
+  );
+}
+
 export function buildPyRepositoryFile(
   agg: EnrichedAggregateIR,
-  _repo: RepositoryIR | undefined,
+  repo: RepositoryIR | undefined,
   ctx: EnrichedBoundedContextIR,
 ): string {
   const aggVar = "aggregate";
@@ -72,6 +84,7 @@ export function buildPyRepositoryFile(
     `    async def all(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${root}))).scalars().all()`,
     "        return [await self._hydrate(row) for row in rows]",
+    ...emittableFinds(repo).flatMap((f) => ["", findMethod(agg, f, ctx)]),
     "",
     saveMethod(agg, ctx, aggVar),
     agg.canonicalDestroy ? ["", deleteMethod(agg)] : null,
@@ -106,7 +119,7 @@ export function buildPyRepositoryFile(
   ]
     .filter(refersTo)
     .sort();
-  const saNames = ["delete", "select"].filter(refersTo);
+  const saNames = ["and_", "delete", "not_", "or_", "select"].filter(refersTo);
 
   return lines(
     `"""${agg.name} repository.  Auto-generated."""`,
@@ -139,6 +152,52 @@ function refTarget(f: FieldIR): string {
   const t = f.type.kind === "optional" ? f.type.inner : f.type;
   if (t.kind === "array" && t.element.kind === "id") return t.element.targetName;
   return "";
+}
+
+// --- finds -------------------------------------------------------------------
+
+/** One repository method per user-declared find.  A `where` clause
+ *  lowers to a SQLAlchemy predicate; a clause-less find falls back to
+ *  convention-matching its params to columns. */
+function findMethod(agg: EnrichedAggregateIR, find: FindIR, ctx: EnrichedBoundedContextIR): string {
+  const root = rowClassName(agg.name);
+  const params = find.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`);
+  const pred = find.filter
+    ? lowerToSqlAlchemy(find.filter, agg, ctx)
+    : conventionPredicate(agg, find);
+  const where = pred ? `.where(${pred.expr})` : "";
+  const isList = find.returnType.kind === "array";
+  const sig = ["self", ...params].join(", ");
+  if (isList) {
+    return lines(
+      `    async def ${snake(find.name)}(${sig}) -> list[${agg.name}]:`,
+      `        rows = (await self._session.execute(select(${root})${where})).scalars().all()`,
+      "        return [await self._hydrate(row) for row in rows]",
+    );
+  }
+  return lines(
+    `    async def ${snake(find.name)}(${sig}) -> ${agg.name} | None:`,
+    `        row = (await self._session.execute(select(${root})${where})).scalars().first()`,
+    "        if row is None:",
+    "            return None",
+    "        return await self._hydrate(row)",
+  );
+}
+
+/** Convention matching for clause-less finds: each param pairs with the
+ *  column of the same name (or its `<field>Id` spelling). */
+function conventionPredicate(agg: EnrichedAggregateIR, find: FindIR): PyPredicate | null {
+  const root = rowClassName(agg.name);
+  const clauses: string[] = [];
+  for (const p of find.params) {
+    const matched = agg.fields.find(
+      (f) => f.name === p.name || `${f.name.replace(/Id$/, "")}Id` === p.name,
+    );
+    if (matched) clauses.push(`${root}.${snake(matched.name)} == ${snake(p.name)}`);
+  }
+  if (clauses.length === 0) return null;
+  if (clauses.length === 1) return { expr: clauses[0]!, ops: new Set() };
+  return { expr: `and_(${clauses.join(", ")})`, ops: new Set(["and_"]) };
 }
 
 // --- hydration (row → domain) ----------------------------------------------

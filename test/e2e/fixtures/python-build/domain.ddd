@@ -69,8 +69,14 @@ system PySales {
           invariant quantity > 0
         }
       }
-      repository Orders for Order { }
-      repository Customers for Customer { }
+      repository Orders for Order {
+        find byStatus(status: OrderStatus): Order[] where this.status == status
+        find cheaperThan(limit: money): Order[] where this.unitBudget <= limit
+        find watchedBy(customerId: Customer id): Order[] where this.watchers.contains(customerId)
+      }
+      repository Customers for Customer {
+        find byName(name: string): Customer[] where this.name == name
+      }
     }
   }
 

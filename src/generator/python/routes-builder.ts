@@ -9,10 +9,18 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
-import { camelId, opCreate, opDestroy, opGetById, opOperation } from "../../ir/util/openapi-ids.js";
+import {
+  camelId,
+  opCreate,
+  opDestroy,
+  opFind,
+  opGetById,
+  opOperation,
+} from "../../ir/util/openapi-ids.js";
 import { lines } from "../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
+import { emittableFinds } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
 // Routes emission — `app/http/<snake(agg)>_routes.py`.  One APIRouter
@@ -37,7 +45,7 @@ import { requestPyType, responsePyType } from "./emit/http-models.js";
 
 export function buildPyRoutesFile(
   agg: EnrichedAggregateIR,
-  _repo: RepositoryIR | undefined,
+  repo: RepositoryIR | undefined,
   ctx: EnrichedBoundedContextIR,
 ): string {
   const slug = snake(plural(agg.name));
@@ -61,6 +69,9 @@ export function buildPyRoutesFile(
     "",
     "",
     allRoute(agg),
+    // Finds register before /{id}: Starlette matches in declaration
+    // order, so the static find paths must win over the id pattern.
+    ...emittableFinds(repo).flatMap((f) => ["", "", findRoute(agg, f, ctx)]),
     "",
     "",
     byIdRoute(agg),
@@ -102,6 +113,9 @@ export function buildPyRoutesFile(
     "",
     "from app.db.engine import get_session",
     `from app.db.repositories.${snake(agg.name)}_repository import ${agg.name}Repository`,
+    refersTo("AggregateNotFoundError")
+      ? "from app.domain.errors import AggregateNotFoundError"
+      : null,
     // Only the create route constructs the domain class directly.
     refersTo(agg.name) ? `from app.domain.${snake(agg.name)} import ${agg.name}` : null,
     "from app.domain.events import NoopDomainEventDispatcher",
@@ -303,5 +317,35 @@ function operationRoute(
     `    found.${snake(op.name)}(${args})`,
     "    await repo.save(found)",
     "    return Response(status_code=204)",
+  );
+}
+
+function findRoute(
+  agg: EnrichedAggregateIR,
+  find: import("../../ir/types/loom-ir.js").FindIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const findSnake = snake(find.name);
+  const isList = find.returnType.kind === "array";
+  const params = find.params.map((p) => `${p.name}: ${requestPyType(p.type, ctx)}`);
+  const sig = [...params, "session: SessionDep"].join(", ");
+  const args = find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)).join(", ");
+  const opId = camelId(opFind(agg.name, find.name));
+  if (isList) {
+    return lines(
+      `@router.get("/${findSnake}", response_model=list[${agg.name}Response], operation_id="${opId}")`,
+      `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> list[dict[str, object]]:`,
+      "    repo = _repo(session)",
+      `    return [repo.to_wire(r) for r in await repo.${findSnake}(${args})]`,
+    );
+  }
+  return lines(
+    `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}")`,
+    `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object]:`,
+    "    repo = _repo(session)",
+    `    found = await repo.${findSnake}(${args})`,
+    "    if found is None:",
+    `        raise AggregateNotFoundError("not_found")`,
+    "    return repo.to_wire(found)",
   );
 }
