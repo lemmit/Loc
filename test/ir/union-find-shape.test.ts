@@ -54,9 +54,9 @@ describe("union finds — producer shape gate", () => {
   });
 
   it("accepts `Agg or NotFound` with the conventional resource field", async () => {
-    expect(await codesFor(loose("error NotFound { resource: string }", "Order or NotFound"))).toEqual(
-      [],
-    );
+    expect(
+      await codesFor(loose("error NotFound { resource: string }", "Order or NotFound")),
+    ).toEqual([]);
   });
 
   it("accepts `Agg option` (none → 404)", async () => {

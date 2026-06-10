@@ -150,7 +150,9 @@ describe("discriminated unions — cross-backend wire parity (P4e)", () => {
   it("every backend uses the `type` discriminator", async () => {
     const honoSrc = generateHono(await parseValid(CONTEXT)).get("http/order.routes.ts")!;
     const dotnet = generateDotnet(await parseValid(CONTEXT));
-    const dotnetSrc = dotnet.get([...dotnet.keys()].find((k) => k.endsWith("OrderOrNotFound.cs"))!)!;
+    const dotnetSrc = dotnet.get(
+      [...dotnet.keys()].find((k) => k.endsWith("OrderOrNotFound.cs"))!,
+    )!;
     expect(honoSrc).toContain('z.discriminatedUnion("type"');
     expect(dotnetSrc).toContain('[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]');
   });
