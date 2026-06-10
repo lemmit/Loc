@@ -14,11 +14,14 @@
 // Body lowering by WorkflowStmtIR kind (incremental):
 //   ✓ factory-let → `{:ok, <name>} <- Context.create_<agg>(%{...})`
 //   ✓ op-call     → `{:ok, _}      <- Context.<op>_<agg>(target, %{...})`
+//   ✓ precondition → `:ok <- (if <cond>, do: :ok, else: {:error, :precondition_failed})`
+//   ✓ requires     → `:ok <- (if <cond>, do: :ok, else: {:error, :forbidden})`
+//   ✓ expr-let     → `<name> <- (<expr>)` (always succeeds; binds `name`)
 //   ✓ default     → preserved as `# TODO:<kind>` comment; the workflow
 //                   still compiles and the route is exercisable.
-// Remaining kinds (precondition / requires / emit / repo-let /
-// expr-let / for-each / repo-run) land as their own focused slices
-// each validated by the elixir-vanilla-build.yml mix-compile gate.
+// Remaining kinds (emit / repo-let / for-each / repo-run) land as their
+// own focused slices each validated by the elixir-vanilla-build.yml
+// mix-compile gate.
 // ---------------------------------------------------------------------------
 
 import {
@@ -139,6 +142,50 @@ function lowerStatement(
         {
           kind: "with-clause",
           text: `{:ok, _} <- ${call}`,
+          bindName: undefined,
+        },
+      ];
+    }
+
+    case "precondition": {
+      // `precondition <expr>` →
+      // `:ok <- (if <cond>, do: :ok, else: {:error, :precondition_failed})`
+      // A failure tag flows naturally through the with-chain to
+      // `{:error, :precondition_failed}` → controller maps to 422.
+      const cond = renderExpr(st.expr, renderCtx);
+      return [
+        {
+          kind: "with-clause",
+          text: `:ok <- (if ${cond}, do: :ok, else: {:error, :precondition_failed})`,
+          bindName: undefined,
+        },
+      ];
+    }
+
+    case "requires": {
+      // `requires <expr>` (authorisation guard) →
+      // `:ok <- (if <cond>, do: :ok, else: {:error, :forbidden})`
+      // A failure tag flows to `{:error, :forbidden}` → controller maps to 403.
+      const cond = renderExpr(st.expr, renderCtx);
+      return [
+        {
+          kind: "with-clause",
+          text: `:ok <- (if ${cond}, do: :ok, else: {:error, :forbidden})`,
+          bindName: undefined,
+        },
+      ];
+    }
+
+    case "expr-let": {
+      // `let foo = <expr>` (pure binding inside a workflow body) →
+      // `foo <- (<expr>)` — a with-clause binding always succeeds.
+      // `bindName` is undefined so a subsequent `factory-let` (an
+      // aggregate-shaped value) wins the `{:ok, <last>}` result slot.
+      const expr = renderExpr(st.expr, renderCtx);
+      return [
+        {
+          kind: "with-clause",
+          text: `${snake(st.name)} <- (${expr})`,
           bindName: undefined,
         },
       ];
@@ -314,6 +361,9 @@ function renderWorkflowsController(
 
       {:error, :forbidden} ->
         ProblemDetails.problem_response(conn, 403, "Forbidden", "Workflow guard rejected the request")
+
+      {:error, :precondition_failed} ->
+        ProblemDetails.problem_response(conn, 422, "Precondition Failed", "Workflow precondition rejected the request")
 
       {:error, reason} ->
         ProblemDetails.problem_response(conn, 400, "Bad Request", inspect(reason))
