@@ -30,6 +30,7 @@ import type { DetectedApiCall } from "../../../src/generator/_walker/api-hook-de
 import type { ApiCallSite, StateRef, WalkerTarget } from "../../../src/generator/_walker/target.js";
 import { heexTarget } from "../../../src/generator/elixir/heex-target.js";
 import { tsxTarget } from "../../../src/generator/react/walker/tsx-target.js";
+import { vueTarget } from "../../../src/generator/vue/walker/vue-target.js";
 
 const SAMPLE_STATE_REF: StateRef = {
   field: { name: "step", type: { kind: "primitive", name: "int" } },
@@ -55,6 +56,7 @@ const SAMPLE_API_CALL_QUERY: ApiCallSite = {
 const TARGETS: ReadonlyArray<{ name: string; target: WalkerTarget }> = [
   { name: "tsxTarget", target: tsxTarget },
   { name: "heexTarget", target: heexTarget },
+  { name: "vueTarget", target: vueTarget },
 ];
 
 describe("WalkerTarget — every shipped target conforms", () => {
@@ -338,5 +340,97 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
     const ty = { kind: "optional" as const, inner: { kind: "primitive" as const, name: "string" } };
     expect(tsxTarget.defaultInitFor(ty)).toBe("undefined");
     expect(heexTarget.defaultInitFor(ty)).toBe("nil");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vue target — the ref-position seams, the vue-router navigation shape,
+// and the structural `<template v-if>` conditional that distinguish
+// `vueTarget` from TSX, plus the naming parities that are DELIBERATE
+// (composable naming matches React so the api-builder is shareable).
+// ---------------------------------------------------------------------------
+
+describe("WalkerTarget — vueTarget (vue-frontend-plan.md)", () => {
+  it("renderStateRead is position-dependent: bare name in template, `.value` in handler", () => {
+    // Vue auto-unwraps top-level refs in template position only;
+    // script-position code (hoisted handlers) sees the raw Ref.
+    expect(vueTarget.renderStateRead(SAMPLE_STATE_REF, "template")).toBe("step");
+    expect(vueTarget.renderStateRead(SAMPLE_STATE_REF, "handler")).toBe("step.value");
+  });
+
+  it("renderStateWrite assigns through `.value` (writes hoist to script position)", () => {
+    expect(vueTarget.renderStateWrite(SAMPLE_STATE_REF, "value")).toBe("step.value = value");
+  });
+
+  it("renderApiCall is var-only, like TSX (composable handle hoisted once)", () => {
+    expect(vueTarget.renderApiCall(SAMPLE_API_CALL_MUTATION, "{}")).toBe("customerCreate");
+    expect(vueTarget.renderApiCall(SAMPLE_API_CALL_QUERY, "")).toBe("customerAll");
+  });
+
+  it("renderApiHoisting emits script-position const-decls with TSX-identical shape", () => {
+    const lines = vueTarget.renderApiHoisting([SAMPLE_API_CALL_MUTATION, SAMPLE_API_CALL_QUERY]);
+    expect(lines).toEqual([
+      "const customerCreate = useCreateCustomer();",
+      "const customerAll = useAllCustomers();",
+    ]);
+  });
+
+  it("buildHookUse naming deliberately matches TSX (shared api-module surface)", () => {
+    const detected: DetectedApiCall = {
+      aggregateName: "Customer",
+      operation: "all",
+      args: [],
+      kind: "aggregate",
+    };
+    const vue = vueTarget.buildHookUse(detected, () => "");
+    const tsx = tsxTarget.buildHookUse(detected, () => "");
+    expect(vue).toEqual(tsx);
+  });
+
+  it("renderNavigate is vue-router push: bare path, history-state args, stateExpr precedence", () => {
+    expect(vueTarget.renderNavigate("/orders", [])).toBe('router.push("/orders")');
+    expect(vueTarget.renderNavigate("/orders", [{ name: "id", value: "x" }])).toBe(
+      'router.push({ path: "/orders", state: { id: x } })',
+    );
+    expect(
+      vueTarget.renderNavigate("/orders", [{ name: "ignored", value: "1" }], "myStateObj"),
+    ).toBe('router.push({ path: "/orders", state: myStateObj })');
+  });
+
+  it("renderComment is an HTML comment (diverges from TSX's JSX expression-comment)", () => {
+    expect(vueTarget.renderComment("todo")).toBe("<!-- todo -->");
+    expect(tsxTarget.renderComment("todo")).toBe("{/* todo */}");
+  });
+
+  it("renderConditionalChild is a structural `<template v-if>` block pair", () => {
+    const out = vueTarget.renderConditionalChild("ok", "<A />", "<B />", 1);
+    expect(out).toContain('<template v-if="ok">');
+    expect(out).toContain("<template v-else>");
+    expect(out).toContain("<A />");
+    expect(out).toContain("<B />");
+    // Structural — never the JSX-style markup ternary.
+    expect(out).not.toContain("?");
+  });
+
+  it("renderStyleAttr: all-literal entries collapse to a flat CSS string", () => {
+    const out = vueTarget.renderStyleAttr([
+      { key: "background-color", rendered: '"red"', literal: "red" },
+      { key: "margin-top", rendered: '"4px"', literal: "4px" },
+    ]);
+    expect(out).toBe(' style="background-color: red; margin-top: 4px"');
+  });
+
+  it("renderStyleAttr: a dynamic entry forces the single-quoted `:style` object binding", () => {
+    const out = vueTarget.renderStyleAttr([
+      { key: "background-color", rendered: "color" },
+      { key: "margin-top", rendered: '"4px"', literal: "4px" },
+    ]);
+    expect(out).toBe(" :style='{ backgroundColor: color, marginTop: \"4px\" }'");
+  });
+
+  it("escapeText entity-escapes mustache braces so literal `{{` never interpolates", () => {
+    expect(vueTarget.escapeText("a {{ b }} <c> & d")).toBe(
+      "a &#123;&#123; b &#125;&#125; &lt;c&gt; &amp; d",
+    );
   });
 });
