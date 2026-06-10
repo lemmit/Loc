@@ -228,7 +228,7 @@ export function renderConfiguration(
         // Both default to undefined → byte-identical single-arg `ToTable`.
         `        builder.ToTable(${renderTableArgs(plural(agg.name), options)});`,
         "        builder.HasKey(x => x.Id);",
-        `        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new ${agg.name}Id(v));`,
+        `        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new ${agg.name}Id(v)).HasColumnName("id");`,
       ];
   // The TPH base maps the hierarchy: a `kind` discriminator column whose value
   // for each concrete is that concrete's name (the cross-backend contract —
@@ -386,13 +386,21 @@ function fieldConfigLines(
   if (voLookup && ownerName && !embedded && isValueCollectionType(f.type)) {
     return ownedVoArrayLines(f, ownerName, voLookup, indent, builder);
   }
+  // Column name = the migration's snake_case (`created_at`, `external_id`).
+  // EF's default is the PascalCase CLR property name, which does NOT match
+  // the migration DDL → 42703 on every INSERT/SELECT.  Suppressed in the
+  // embedded (`ToJson`) shape, where members are JSON keys, not columns.
+  const col = snake(f.name);
+  const colName = embedded ? "" : `.HasColumnName("${col}")`;
   if (f.type.kind === "id") {
     return [
-      `${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v));`,
+      `${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v))${colName};`,
     ];
   }
   if (f.type.kind === "enum") {
-    return [`${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion<string>();`];
+    return [
+      `${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion<string>()${colName};`,
+    ];
   }
   if (f.type.kind === "valueobject") {
     // Relational root: the value object flattens into the owner table's
@@ -412,7 +420,12 @@ function fieldConfigLines(
     }
     return [`${indent}${builder}.OwnsOne<${f.type.name}>(x => x.${upperFirst(f.name)});`];
   }
-  return [];
+  // Plain scalar (string / int / bool / datetime / decimal / primitive
+  // collection): EF needs an explicit column-name mapping to the migration's
+  // snake_case, otherwise it defaults to the PascalCase property name.  In the
+  // embedded shape the field is a JSON key, so emit nothing (the default).
+  if (embedded) return [];
+  return [`${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasColumnName("${col}");`];
 }
 
 /** Configure an owned value object so its (recursively-flattened) columns
@@ -502,7 +515,11 @@ function containmentConfigLines(
   // `HasConversion` on their id/enum/VO fields still applies inside JSON.
   if (options.embedded) {
     const jsonCol = snake(c.name);
-    const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, "            ", "o"));
+    // embedded=true: members are JSON keys inside the ToJson document, not
+    // table columns, so HasColumnName must not be emitted here.
+    const partFieldLines = partFields.flatMap((f) =>
+      fieldConfigLines(f, "            ", "o", undefined, true),
+    );
     if (!c.collection) {
       return [
         `        builder.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)}, o => {`,
@@ -533,8 +550,12 @@ function containmentConfigLines(
     // the same physical store.
     `            o.ToTable(${renderTableArgs(plural(c.partName), options)});`,
     '            o.WithOwner().HasForeignKey("ParentId");',
+    // The owner FK column is the migration's `<owner>_id` (tableForPart in
+    // migrations-builder), not EF's default `ParentId` — map the shadow
+    // property's column so the child INSERT/SELECT lines up with the DDL.
+    `            o.Property("ParentId").HasColumnName("${snake(agg.name)}_id");`,
     "            o.HasKey(x => x.Id);",
-    `            o.Property(x => x.Id).HasConversion(v => v.Value, v => new ${c.partName}Id(v));`,
+    `            o.Property(x => x.Id).HasConversion(v => v.Value, v => new ${c.partName}Id(v)).HasColumnName("id");`,
     ...partFieldLines,
     "        });",
   ];
