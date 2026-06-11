@@ -26,10 +26,14 @@ import type { MigrationsIR } from "../ir/types/migrations-ir.js";
 
 /** Frameworks that compile to static assets and are therefore hostable
  *  by any platform that serves a static root.  `static` is React's
- *  UI-only alias (same Vite-built bundle).  Future static-bundle
- *  frameworks (`angular`, `vue`) join here and become embeddable in
- *  every static-asset host with no per-host edit. */
-export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set(["react", "static"]);
+ *  UI-only alias (same Vite-built bundle); `svelte` is the SvelteKit
+ *  adapter-static bundle.  Future static-bundle frameworks
+ *  (`angular`, `vue`) join here and become embeddable in every
+ *  static-asset host with no per-host edit.  (Phoenix is the one
+ *  exception — it serves embedded SPAs under the `/app` path prefix,
+ *  which SvelteKit needs `paths.base` wiring for; its surface lists
+ *  its hostable set explicitly until that lands.) */
+export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set(["react", "static", "svelte"]);
 
 // ---------------------------------------------------------------------------
 // Platform surface contract.

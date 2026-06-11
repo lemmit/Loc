@@ -1,0 +1,424 @@
+{
+  "name": "flowbite",
+  "version": "v1",
+  "format": "svelte",
+  "stack": "sv1",
+  "emits": {
+    "app-shell": "app-shell.hbs",
+    "field-input-array": "field-input-array.hbs",
+    "field-input-bool": "field-input-bool.hbs",
+    "field-input-datetime": "field-input-datetime.hbs",
+    "field-input-decimal": "field-input-decimal.hbs",
+    "field-input-enum-select": "field-input-enum-select.hbs",
+    "field-input-id-select": "field-input-id-select.hbs",
+    "field-input-id-text": "field-input-id-text.hbs",
+    "field-input-int": "field-input-int.hbs",
+    "field-input-money": "field-input-money.hbs",
+    "field-input-string": "field-input-string.hbs",
+    "field-input-valueobject": "field-input-valueobject.hbs",
+    "form-default-onsubmit": "form-default-onsubmit.hbs",
+    "form-of-decls": "form-of-decls.hbs",
+    "form-op-decls": "form-op-decls.hbs",
+    "form-op-module": "form-op-module.hbs",
+    "form-runs-decls": "form-runs-decls.hbs",
+    "format-helpers": "format-helpers.hbs",
+    "globals-css": "globals-css.hbs",
+    "main": "main.hbs",
+    "package-json": "package-json.hbs",
+    "primitive-alert": "primitive-alert.hbs",
+    "primitive-anchor": "primitive-anchor.hbs",
+    "primitive-avatar": "primitive-avatar.hbs",
+    "primitive-badge": "primitive-badge.hbs",
+    "primitive-bold": "primitive-bold.hbs",
+    "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
+    "primitive-button": "primitive-button.hbs",
+    "primitive-card": "primitive-card.hbs",
+    "primitive-code-block": "primitive-code-block.hbs",
+    "primitive-container": "primitive-container.hbs",
+    "primitive-date-display": "primitive-date-display.hbs",
+    "primitive-divider": "primitive-divider.hbs",
+    "primitive-empty": "primitive-empty.hbs",
+    "primitive-enum-badge": "primitive-enum-badge.hbs",
+    "primitive-field": "primitive-field.hbs",
+    "primitive-form-of": "primitive-form-of.hbs",
+    "primitive-grid": "primitive-grid.hbs",
+    "primitive-group": "primitive-group.hbs",
+    "primitive-heading": "primitive-heading.hbs",
+    "primitive-icon": "primitive-icon.hbs",
+    "primitive-id-link": "primitive-id-link.hbs",
+    "primitive-image": "primitive-image.hbs",
+    "primitive-inline-code": "primitive-inline-code.hbs",
+    "primitive-italic": "primitive-italic.hbs",
+    "primitive-key-value-row": "primitive-key-value-row.hbs",
+    "primitive-loader": "primitive-loader.hbs",
+    "primitive-modal": "primitive-modal.hbs",
+    "primitive-money": "primitive-money.hbs",
+    "primitive-multiline-field": "primitive-multiline-field.hbs",
+    "primitive-number-field": "primitive-number-field.hbs",
+    "primitive-paper": "primitive-paper.hbs",
+    "primitive-password-field": "primitive-password-field.hbs",
+    "primitive-query-view": "primitive-query-view.hbs",
+    "primitive-section": "primitive-section.hbs",
+    "primitive-select-field": "primitive-select-field.hbs",
+    "primitive-skeleton": "primitive-skeleton.hbs",
+    "primitive-stack": "primitive-stack.hbs",
+    "primitive-stat": "primitive-stat.hbs",
+    "primitive-sticky": "primitive-sticky.hbs",
+    "primitive-table": "primitive-table.hbs",
+    "primitive-tabs": "primitive-tabs.hbs",
+    "primitive-text": "primitive-text.hbs",
+    "primitive-toggle": "primitive-toggle.hbs",
+    "primitive-toolbar": "primitive-toolbar.hbs",
+    "svelte-config": "svelte-config.hbs",
+    "theme": "theme.hbs",
+    "tsconfig": "tsconfig.hbs",
+    "vite-config": "vite-config.hbs"
+  },
+  "imports": {
+    "primitive-button": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Button"
+        ]
+      }
+    ],
+    "primitive-badge": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Badge"
+        ]
+      }
+    ],
+    "primitive-enum-badge": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Badge"
+        ]
+      }
+    ],
+    "primitive-loader": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Spinner"
+        ]
+      }
+    ],
+    "primitive-alert": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Alert"
+        ]
+      }
+    ],
+    "primitive-avatar": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Avatar"
+        ]
+      }
+    ],
+    "primitive-skeleton": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Skeleton"
+        ]
+      }
+    ],
+    "primitive-card": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Card"
+        ]
+      }
+    ],
+    "primitive-tabs": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "TabItem",
+          "Tabs"
+        ]
+      }
+    ],
+    "primitive-table": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Table",
+          "TableBody",
+          "TableBodyCell",
+          "TableBodyRow",
+          "TableHead",
+          "TableHeadCell"
+        ]
+      }
+    ],
+    "primitive-field": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "primitive-toggle": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Toggle"
+        ]
+      }
+    ],
+    "primitive-number-field": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "primitive-password-field": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "primitive-multiline-field": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Label",
+          "Textarea"
+        ]
+      }
+    ],
+    "primitive-select-field": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Label",
+          "Select"
+        ]
+      }
+    ],
+    "field-input-string": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Helper",
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-int": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Helper",
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-decimal": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Helper",
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-money": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Helper",
+          "Input",
+          "Label"
+        ]
+      },
+      {
+        "from": "decimal.js",
+        "named": [
+          "Decimal"
+        ]
+      }
+    ],
+    "field-input-bool": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Helper",
+          "Label",
+          "Toggle"
+        ]
+      }
+    ],
+    "field-input-datetime": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Helper",
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-enum-select": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Helper",
+          "Label",
+          "Select"
+        ]
+      }
+    ],
+    "field-input-id-select": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Helper",
+          "Label",
+          "Select"
+        ]
+      }
+    ],
+    "field-input-id-text": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Helper",
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-valueobject": [],
+    "field-input-array": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Helper",
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "primitive-form-of": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Button"
+        ]
+      },
+      {
+        "from": "$lib/forms.svelte",
+        "named": [
+          "createForm"
+        ]
+      }
+    ],
+    "form-of-decls": [
+      {
+        "from": "$lib/forms.svelte",
+        "named": [
+          "createForm"
+        ]
+      }
+    ],
+    "form-runs-decls": [
+      {
+        "from": "$lib/forms.svelte",
+        "named": [
+          "createForm"
+        ]
+      }
+    ],
+    "form-default-onsubmit": [
+      {
+        "from": "$lib/toast.svelte",
+        "named": [
+          "toast"
+        ]
+      }
+    ],
+    "primitive-modal": [
+      {
+        "from": "flowbite-svelte",
+        "named": [
+          "Button"
+        ]
+      },
+      {
+        "from": "$lib/forms.svelte",
+        "named": [
+          "createForm",
+          "type LoomForm"
+        ]
+      },
+      {
+        "from": "$lib/toast.svelte",
+        "named": [
+          "toast"
+        ]
+      }
+    ],
+    "primitive-money": [
+      {
+        "from": "$lib/format",
+        "named": [
+          "formatMoney"
+        ]
+      }
+    ],
+    "primitive-date-display": [
+      {
+        "from": "$lib/format",
+        "named": [
+          "formatDateTime"
+        ]
+      }
+    ],
+    "primitive-id-link": [
+      {
+        "from": "$lib/format",
+        "named": [
+          "formatId"
+        ]
+      }
+    ]
+  },
+  "helpers": {
+    "alertVariant": {
+      "": "primary",
+      "info": "blue",
+      "success": "green",
+      "warning": "yellow",
+      "error": "red",
+      "red": "red",
+      "green": "green",
+      "yellow": "yellow",
+      "blue": "blue"
+    }
+  },
+  "shellFiles": {
+    "globals-css": "src/app.css"
+  }
+}

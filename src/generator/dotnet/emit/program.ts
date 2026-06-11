@@ -636,7 +636,16 @@ export function renderTestCsproj(ns: string): string {
 `;
 }
 
-export function renderDockerfile(ns: string, options?: { hasEmbeddedSpa?: boolean }): string {
+export function renderDockerfile(
+  ns: string,
+  options?: {
+    hasEmbeddedSpa?: boolean;
+    /** SPA build output dir relative to ClientApp/ — `dist` for the
+     *  React/Vite embed, `build` for the SvelteKit adapter-static
+     *  embed.  Defaults to `dist`. */
+    spaOutDir?: "dist" | "build";
+  },
+): string {
   if (options?.hasEmbeddedSpa) {
     // Fullstack mode — multi-stage build.  Stage 1 builds the React
     // SPA under ClientApp/, stage 2 builds the .NET project, stage 3
@@ -674,7 +683,7 @@ EXPOSE 8080
 COPY --from=dotnet-build /app/publish ./
 # SPA bundle lands under wwwroot/ so UseStaticFiles + MapFallbackToFile
 # can serve it on the same origin as the /api/* controller routes.
-COPY --from=spa-build /spa/dist ./wwwroot
+COPY --from=spa-build /spa/${options?.spaOutDir ?? "dist"} ./wwwroot
 ENTRYPOINT ["dotnet", "${ns}.dll"]
 `;
   }

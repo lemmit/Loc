@@ -5,7 +5,7 @@
 
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { lookupBuiltinIcon } from "../../react/walker/icons.js";
+import { lookupBuiltinIcon } from "../icons.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   boolNamed,

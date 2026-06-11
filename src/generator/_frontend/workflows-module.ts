@@ -5,8 +5,8 @@ import {
   type WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
-import { fillBlock } from "../react/page-objects-builder.js";
 import { zodForResponse } from "./api-module.js";
+import { fillBlock } from "./page-objects-builder.js";
 
 // ---------------------------------------------------------------------------
 // Workflow API module + Playwright page object emission.

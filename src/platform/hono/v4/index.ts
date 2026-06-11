@@ -10,7 +10,6 @@
 // ---------------------------------------------------------------------------
 
 import {
-  type PersistenceAdapter,
   type PlatformAdapterDefaults,
   type PlatformAdapters,
   type RuntimeAdapter,

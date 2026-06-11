@@ -1,0 +1,7 @@
+{{#if hasTabs}}<Tabs tabs={[{{#each tabs}}{ value: {{json this.value}}, label: {{json this.label}} }{{#unless @last}}, {{/unless}}{{/each}}]} defaultValue={{json defaultValue}}{{{testidAttr}}}>
+{{indent}}{#snippet body(active)}
+{{#each tabs}}{{../indent}}{#if active === {{json this.value}} }
+{{../innerIndent}}{{{this.bodyJsx}}}
+{{../indent}}{/if}
+{{/each}}{{indent}}{/snippet}
+{{closeIndent}}</Tabs>{{else}}<div{{{testidAttr}}}></div>{{/if}}

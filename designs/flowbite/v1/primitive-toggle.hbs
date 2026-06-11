@@ -1,0 +1,1 @@
+{{#if hasBind}}<Toggle checked={{expr bind}} onchange={(e) => { {{bind}} = (e.currentTarget as HTMLInputElement).checked; }}{{{testidAttr}}}>{{{labelText}}}</Toggle>{{else}}<Toggle{{{testidAttr}}}>{{{labelText}}}</Toggle>{{/if}}

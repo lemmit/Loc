@@ -1,0 +1,79 @@
+name: Generated Svelte build
+
+# For each {example .ddd × svelte design pack@version} cell, generate
+# the SvelteKit project, `npm install`, `svelte-check
+# --fail-on-warnings` it (the .svelte type gate) and `vite build` it
+# (the compiler + adapter-static gate).  The svelte sibling of
+# generated-react-build.yml — catches generator/pack drift invisible
+# to the IR-level tests.
+#
+# Matrix policy: the svelte example set is small (one feature example
+# × two packs), so every event runs the full Cartesian — no PR slice
+# needed yet.  The list MUST match `svelteBuildExamples` ×
+# `sveltePacks` in test/e2e/generated-svelte-build.test.ts (pinned by
+# the matrix-sync guard there).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'designs/**'
+      - 'examples/**'
+      - 'sveltekit/**'
+      - 'stacks/**'
+      - 'test/e2e/generated-svelte-build.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-svelte-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'designs/**'
+      - 'examples/**'
+      - 'sveltekit/**'
+      - 'stacks/**'
+      - 'test/e2e/generated-svelte-build.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-svelte-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ['examples/svelte-shop.ddd']
+        pack: ['shadcnSvelte@v1', 'flowbite@v1']
+    timeout-minutes: 10
+    name: ${{ matrix.example }} × ${{ matrix.pack }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # Root install runs the `prepare` lifecycle which calls
+      # `langium:generate` to produce src/language/generated/.
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Run svelte-build shard
+        env:
+          LOOM_SVELTE_BUILD_CASE: ${{ matrix.example }}:${{ matrix.pack }}
+        run: npx vitest run test/e2e/generated-svelte-build.test.ts

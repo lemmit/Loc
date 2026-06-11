@@ -1,0 +1,6 @@
+{{#if hasChildren}}<div class="grid gap-4 {{#if hasResponsiveCols}}grid-cols-{{colsMobile}} md:grid-cols-{{colsTablet}} lg:grid-cols-{{colsDesktop}}{{else}}grid-cols-3{{/if}}"{{{testidAttr}}}{{{styleAttr}}}>
+{{colIndent}}{{#each children}}<div>
+{{../childIndent}}{{{this}}}
+{{../colIndent}}</div>{{#unless @last}}
+{{../colIndent}}{{/unless}}{{/each}}
+{{closeIndent}}</div>{{else}}<div class="grid gap-4 grid-cols-3"{{{testidAttr}}}{{{styleAttr}}}></div>{{/if}}

@@ -118,6 +118,30 @@ describe("phoenixLiveView pipeline", () => {
     expect(mix).toMatch(/ignore_warnings: "\.dialyzer_ignore\.exs"/);
   });
 
+  it("runs Ecto migrations on boot via a Release task evaled by bin/server", async () => {
+    // The per-backend database is created empty by the compose db-init SQL;
+    // without a migrate-on-boot step the server starts against a tableless
+    // DB and every query 500s with `42P01 relation does not exist`.  The
+    // release ships a `Release.migrate/0` task and `bin/server` evals it
+    // before `start` (mirrors the .NET backend's migrate-on-startup).
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+
+    const release = files.get("phoenix_app/lib/phoenix_app/release.ex");
+    expect(release, "release.ex is emitted").toBeDefined();
+    expect(release!).toMatch(/defmodule PhoenixApp\.Release do/);
+    expect(release!).toMatch(/def migrate do/);
+    expect(release!).toMatch(/Ecto\.Migrator\.with_repo/);
+    expect(release!).toMatch(/Application\.fetch_env!\(@app, :ecto_repos\)/);
+
+    const server = files.get("phoenix_app/rel/overlays/bin/server")!;
+    // migrate is evaled BEFORE the server starts.
+    expect(server).toMatch(/eval "PhoenixApp\.Release\.migrate\(\)"/);
+    expect(server.indexOf("Release.migrate")).toBeLessThan(
+      server.indexOf('exec "./bin/phoenix_app" start'),
+    );
+  });
+
   it("emits the shared <App>.Types module at lib/<app>/types.ex", async () => {
     // Per the Ash specing discipline in
     // docs/proposals/cross-stack-static-analysis.md — one shared
@@ -405,26 +429,39 @@ describe("phoenixLiveView pipeline", () => {
     expect(parsed.lastVersion).toBe("20260101000000");
   });
 
-  it("rejects platform: phoenix paired with framework: react", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pliv-fw-"));
-    const file = path.join(dir, "fw.ddd");
-    fs.writeFileSync(
-      file,
-      FIXTURE_SOURCE.replace("ui: SalesAdmin,", `ui SalesAdmin { framework: react }`).replace(
-        "port: 4000",
-        "",
-      ),
-    );
-    const services = createDddServices(NodeFileSystem);
-    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-      URI.file(file),
-    );
-    await services.shared.workspace.DocumentBuilder.build([doc], {
-      validation: true,
-    });
-    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+  it("framework overrides on phoenix follow the hostable set: react embeds, svelte rejects", async () => {
+    // `framework: react` on a phoenix host is the embedded-SPA mode
+    // (D-PHOENIX-SURFACE phase 6a/6b — React project under assets/,
+    // served from priv/static).  Rule 13 used to hard-reject the
+    // legacy block-binding spelling while the hosts:-declared form
+    // was allowed; it now consults `hostableFrameworks` so both
+    // spellings agree.  `svelte` stays rejected — a SvelteKit bundle
+    // under the /app path prefix needs `paths.base` wiring
+    // (docs/plans/svelte-frontend-plan.md follow-up).
+    const check = async (framework: string): Promise<string[]> => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pliv-fw-"));
+      const file = path.join(dir, "fw.ddd");
+      fs.writeFileSync(
+        file,
+        FIXTURE_SOURCE.replace(
+          "ui: SalesAdmin,",
+          `ui SalesAdmin { framework: ${framework} }`,
+        ).replace("port: 4000", ""),
+      );
+      const services = createDddServices(NodeFileSystem);
+      const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+        URI.file(file),
+      );
+      await services.shared.workspace.DocumentBuilder.build([doc], {
+        validation: true,
+      });
+      return (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message);
+    };
+    const reactErrors = await check("react");
+    expect(reactErrors.some((e) => /Framework 'react' does not match/.test(e))).toBe(false);
+    const svelteErrors = await check("svelte");
     expect(
-      errors.some((e) => /Framework 'react' does not match platform 'phoenix'/.test(e.message)),
+      svelteErrors.some((e) => /Framework 'svelte' does not match platform 'phoenix'/.test(e)),
     ).toBe(true);
   });
 });

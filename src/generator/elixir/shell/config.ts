@@ -160,10 +160,64 @@ export function renderRelServer(appName: string): string {
   // exec, and the path is rooted relative to the release directory
   // (which the Dockerfile copies into `/app/`, so the binary lives
   // at `/app/bin/<app>`, NOT `/app/<app>/bin/<app>`).
+  //
+  // Run pending Ecto migrations before booting the server.  The
+  // per-backend database is created by the compose `db-init` SQL, but its
+  // schema is empty on first boot — without this `eval` the server starts
+  // against a tableless DB and every query 500s with `42P01 relation does
+  // not exist`.  Mirrors the .NET backend's migrate-on-startup; the SQL
+  // migrations under priv/repo/migrations ship inside the release.
   return `#!/bin/sh
 # Auto-generated.
 set -eu
 
+./bin/${appName} eval "${snakeToModule(appName)}.Release.migrate()"
+
 exec "./bin/${appName}" start
+`;
+}
+
+/** Convert a snake_case OTP app name (`phoenix_api`) to its PascalCase
+ *  module prefix (`PhoenixApi`) — local to keep `renderRelServer`'s single
+ *  `appName` argument unchanged. */
+function snakeToModule(appName: string): string {
+  return appName
+    .split("_")
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join("");
+}
+
+/** `lib/<app>/release.ex` — release task module.  `migrate/0` runs all
+ *  pending Ecto migrations for every configured repo; invoked by
+ *  `rel/overlays/bin/server` before the server starts so the schema exists
+ *  on first boot.  The canonical Phoenix-release migration pattern (mix
+ *  tasks like `ecto.migrate` aren't available in a release). */
+export function renderRelease(appName: string, appModule: string): string {
+  return `defmodule ${appModule}.Release do
+  @moduledoc """
+  Release task entry points.  \`migrate/0\` runs every pending Ecto
+  migration for each configured repo; \`rel/overlays/bin/server\` calls it
+  before booting so a fresh per-backend database gets its schema on first
+  start (the generated SQL migrations under priv/repo/migrations ship inside
+  the release).
+  """
+  @app :${appName}
+
+  def migrate do
+    load_app()
+
+    for repo <- repos() do
+      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
+    end
+  end
+
+  defp repos do
+    Application.fetch_env!(@app, :ecto_repos)
+  end
+
+  defp load_app do
+    Application.load(@app)
+  end
+end
 `;
 }

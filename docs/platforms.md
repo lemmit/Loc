@@ -19,6 +19,7 @@ versioning works.
 | `hono` (default `hono@v4`) | `src/platform/hono/v4/index.ts` | 3000 | ✓ | ✗ |
 | `dotnet` (default `dotnet@v8`) | `src/platform/dotnet.ts` | 8080 | ✓ | ✓ (when `ui:` is declared) |
 | `react` | `src/platform/react.ts` | 3001 | ✗ | ✓ |
+| `svelte` | `src/platform/svelte.ts` | 3002 | ✗ | ✓ |
 | `static` | aliased to `react.ts` | 3001 | ✗ | ✓ |
 | `phoenixLiveView` (default `phoenixLiveView@v1`) | `src/platform/phoenix-live-view.ts` | 4000 | ✓ | ✓ |
 | `java` (default `java@v1`) | `src/platform/java.ts` | 8081 | ✓ | ✓ (`ui:` embedded-SPA mount; `hosts:` gated) |
@@ -48,7 +49,7 @@ Resolution happens in two parts (see `parseBuiltinPlatformRef` in
 1. **Bareword backend** — resolves through `BUILTIN_PLATFORM_LATEST`
    to today's default version.  Currently: `hono → v4`,
    `dotnet → v8`, `phoenixLiveView → v1`.  Frontend platforms
-   (`react`, `static`) intentionally aren't versioned at the
+   (`react`, `svelte`, `static`) intentionally aren't versioned at the
    platform layer — their version lives on the design pack / stack
    axis (see [`design-packs.md`](design-packs.md)).
 2. **Pinned `family@version`** — looked up directly in the

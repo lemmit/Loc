@@ -10,11 +10,7 @@ import { byFeatureLayoutAdapter } from "../generator/elixir/adapters/by-feature-
 import { ectoPersistenceAdapter } from "../generator/elixir/adapters/ecto-persistence.js";
 import { vanillaStyleAdapter } from "../generator/elixir/adapters/vanilla-style.js";
 import { generateElixirProject } from "../generator/elixir/index.js";
-import {
-  type ComposeServiceShape,
-  type PlatformSurface,
-  STATIC_BUNDLE_FRAMEWORKS,
-} from "./surface.js";
+import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 
 // ---------------------------------------------------------------------------
 // Elixir platform — fullstack Elixir/Ash + Phoenix deployable
@@ -42,10 +38,13 @@ const elixirPlatform: PlatformSurface = {
   isFrontend: false,
   // The keystone (D-PHOENIX-SURFACE): Phoenix is the only platform that
   // is BOTH a server-render runtime (LiveView, spelled `phoenixLiveView`)
-  // AND a static-asset host (`priv/static`), so it serves its own
-  // runtime-coupled framework UNIONED with every static-bundle framework.
-  // Richest `hostableFrameworks` of any platform.
-  hostableFrameworks: new Set(["phoenixLiveView", ...STATIC_BUNDLE_FRAMEWORKS]),
+  // AND a static-asset host (`priv/static`) — it hosts its
+  // runtime-coupled LiveView plus the React static bundles.  `svelte` is deliberately ABSENT: Phoenix serves embedded
+  // SPAs under the `/app` path prefix, and a SvelteKit bundle needs
+  // `paths.base` threading (nav hrefs, goto, asset URLs) to live
+  // there — a follow-up (docs/plans/svelte-frontend-plan.md).  Root-
+  // origin hosts (dotnet wwwroot) serve svelte today.
+  hostableFrameworks: new Set(["phoenixLiveView", "react", "static"]),
   // Ash code-interface conventions.  A user-declared find named one
   // of these would collide with the auto-generated CRUD action of
   // the same name on the resource module.

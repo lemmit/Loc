@@ -1,0 +1,5 @@
+<div class="flex flex-row items-center justify-between rounded-lg border p-3">
+          <label class="loom-label" for="{{testId}}">{{label}}</label>
+          <input id="{{testId}}" type="checkbox" role="switch" class="loom-switch" data-testid="{{testId}}" bind:checked={form.values.{{path}} } />
+          {#if form.errors["{{path}}"]}<p class="text-sm text-destructive">{form.errors["{{path}}"]}</p>{/if}
+        </div>

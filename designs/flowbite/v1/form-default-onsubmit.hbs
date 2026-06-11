@@ -1,0 +1,14 @@
+{
+              try {
+                {{{mutationCall}}}
+                toast.success("{{successMessage}}");
+                {{{redirectStmt}}};
+              } catch (e) {
+                const outcome = form.applyServerErrors(e);
+                if (outcome.kind === "global") {
+                  toast.error(outcome.title);
+                } else if (outcome.kind === "unhandled") {
+                  toast.error((e as Error).message);
+                }
+              }
+            }

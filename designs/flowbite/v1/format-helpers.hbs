@@ -1,0 +1,70 @@
+// Auto-generated.  Do not edit by hand.
+//
+// Plain string formatting helpers — the svelte packs' counterpart of
+// the react packs' format components (IdValue / DateTimeValue /
+// MoneyValue).  Svelte templates interpolate the returned strings
+// directly (`{formatMoney(x)}`), so these stay markup-free.
+// Money values arrive as decimal.js instances when the project uses
+// money — typed structurally here so the dep stays conditional.
+
+export function isEmpty(v: unknown): boolean {
+  return v === null || v === undefined || v === "";
+}
+
+/** Short id display: first 8 chars + ellipsis ("—" when empty). */
+export function formatId(id: string | null | undefined): string {
+  if (isEmpty(id)) return "—";
+  const s = String(id);
+  return s.length > 8 ? `${s.slice(0, 8)}…` : s;
+}
+
+/** Locale-formatted datetime; raw value on parse failure. */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (isEmpty(iso)) return "—";
+  const s = String(iso);
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function formatBool(value: boolean | null | undefined): string {
+  if (isEmpty(value)) return "—";
+  return value ? "Yes" : "No";
+}
+
+export function formatNumber(
+  value: number | string | null | undefined,
+  decimals = 0,
+): string {
+  if (isEmpty(value)) return "—";
+  const n = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(n)) return String(value);
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: Math.max(decimals, 2),
+  }).format(n);
+}
+
+/** Currency-formatted value.  Accepts numbers, decimal strings, and
+ *  decimal.js instances (the money wire shape). */
+export function formatMoney(
+  value: number | string | { toString(): string } | null | undefined,
+  currency = "USD",
+  decimals = 2,
+): string {
+  if (isEmpty(value)) return "—";
+  const n = typeof value === "number" ? value : Number(String(value));
+  if (Number.isNaN(n)) return String(value);
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  }).format(n);
+}

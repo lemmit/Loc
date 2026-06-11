@@ -61,7 +61,11 @@ Optional, defaults to `"tsx"`.  Discriminates the output language the
 pack's templates produce — `"tsx"` for React/Mantine/shadcn-style packs
 (Handlebars over `.hbs` files yielding TSX); `"heex"` for Phoenix
 LiveView packs (Handlebars over `.heex.hbs` files yielding HEEx, e.g.
-the built-in `ashPhoenix` pack).
+the built-in `ashPhoenix` pack); `"svelte"` for Svelte 5 / SvelteKit
+packs (Handlebars over `.hbs` files yielding Svelte markup, e.g. the
+built-in `shadcnSvelte` and `flowbite` packs — these declare the
+`sv1` stack and own the full TSX-style required surface incl. forms
+and field inputs, plus a `svelte-config` shell template).
 
 The Handlebars compiler is content-agnostic, so `format` does not
 change template compilation.  It DOES gate which repo-root shared
@@ -71,6 +75,7 @@ template directories the loader pulls in:
 |---|---|
 | `tsx` (default) | `vite/`, `api/`, `docker/` |
 | `heex` | `phoenix/` (future; empty in v0 — `ashPhoenix` ships its shell files directly) |
+| `svelte` | `sveltekit/` (api client + logger + root layout + the SvelteKit dockerfile) |
 
 A pack's filename convention should match its format (`*.hbs` for tsx,
 `*.heex.hbs` for heex), but the loader keys off the manifest's
