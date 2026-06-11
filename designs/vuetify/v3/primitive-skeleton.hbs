@@ -1,0 +1,3 @@
+{{#if isMulti}}<div class="d-flex flex-column ga-2"{{{testidAttr}}}>
+<v-skeleton-loader v-for="__i in {{count}}" :key="__i" type="text" height="{{height}}" />
+</div>{{else}}<v-skeleton-loader type="text" height="{{height}}"{{{testidAttr}}} />{{/if}}

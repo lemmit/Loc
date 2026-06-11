@@ -228,6 +228,8 @@ export function typeLabel(t: TypeIR): string {
       return `${typeLabel(t.inner)}?`;
     case "slot":
       return "slot";
+    case "action":
+      return t.arg ? `action(${typeLabel(t.arg)})` : "action";
     case "genericInstance":
       return `${typeLabel(t.arg)} ${t.ctor}`;
     case "union":

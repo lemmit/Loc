@@ -124,6 +124,7 @@ export type DddKeywordNames =
     | "favicon"
     | "filter"
     | "find"
+    | "flowbite"
     | "footer"
     | "for"
     | "foundation"
@@ -238,6 +239,8 @@ export type DddKeywordNames =
     | "serves"
     | "service"
     | "shadcn"
+    | "shadcnSvelte"
+    | "shadcnVue"
     | "shape"
     | "sharedTable"
     | "sidebar"
@@ -252,6 +255,7 @@ export type DddKeywordNames =
     | "storage"
     | "string"
     | "subdomain"
+    | "svelte"
     | "system"
     | "tablePrefix"
     | "targets"
@@ -274,6 +278,8 @@ export type DddKeywordNames =
     | "verifies"
     | "view"
     | "views"
+    | "vue"
+    | "vuetify"
     | "when"
     | "where"
     | "with"
@@ -365,10 +371,10 @@ export function isDataSourceKind(item: unknown): item is DataSourceKind {
     return item === 'state' || item === 'eventLog' || item === 'snapshot' || item === 'cache' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'api';
 }
 
-export type DesignPack = 'ashPhoenix' | 'chakra' | 'mantine' | 'mui' | 'shadcn' | string;
+export type DesignPack = 'ashPhoenix' | 'chakra' | 'flowbite' | 'mantine' | 'mui' | 'shadcn' | 'shadcnSvelte' | 'shadcnVue' | 'vuetify' | string;
 
 export function isDesignPack(item: unknown): item is DesignPack {
-    return item === 'mantine' || item === 'shadcn' || item === 'mui' || item === 'chakra' || item === 'ashPhoenix' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'mantine' || item === 'shadcn' || item === 'mui' || item === 'chakra' || item === 'ashPhoenix' || item === 'shadcnSvelte' || item === 'flowbite' || item === 'vuetify' || item === 'shadcnVue' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export type EntityPartMember = Containment | DerivedProp | FunctionDecl | Invariant | Property;
@@ -393,10 +399,10 @@ export function isFieldAccess(item: unknown): item is FieldAccess {
     return item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret';
 }
 
-export type Framework = 'liveview' | 'phoenixLiveView' | 'react';
+export type Framework = 'liveview' | 'phoenixLiveView' | 'react' | 'svelte' | 'vue';
 
 export function isFramework(item: unknown): item is Framework {
-    return item === 'react' || item === 'phoenixLiveView' || item === 'liveview';
+    return item === 'react' || item === 'svelte' || item === 'vue' || item === 'phoenixLiveView' || item === 'liveview';
 }
 
 export type GenericCtor = 'envelope' | 'option' | 'paged';
@@ -507,10 +513,10 @@ export function isPayloadKind(item: unknown): item is PayloadKind {
     return item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error';
 }
 
-export type Platform = 'dotnet' | 'elixir' | 'fastapi' | 'hono' | 'java' | 'node' | 'phoenix' | 'phoenixLiveView' | 'python' | 'react' | 'static' | string;
+export type Platform = 'dotnet' | 'elixir' | 'fastapi' | 'hono' | 'java' | 'node' | 'phoenix' | 'phoenixLiveView' | 'python' | 'react' | 'static' | 'svelte' | 'vue' | string;
 
 export function isPlatform(item: unknown): item is Platform {
-    return item === 'dotnet' || item === 'hono' || item === 'node' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || item === 'elixir' || item === 'python' || item === 'fastapi' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'dotnet' || item === 'hono' || item === 'node' || item === 'react' || item === 'svelte' || item === 'vue' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || item === 'elixir' || item === 'python' || item === 'fastapi' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export type PostfixSuffix = CallSuffix | MemberSuffix;

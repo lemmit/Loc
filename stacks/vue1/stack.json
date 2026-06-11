@@ -1,0 +1,18 @@
+{
+  "id": "vue1",
+  "description": "Vue stack — Vue 3.5 + vue-router 4 Vite SPA + Zod 4 family.",
+  "deps": {
+    "vue": "3.5 (^3.5.0 — Composition API, <script setup lang=\"ts\"> SFC pages)",
+    "vue-router": "4 (createWebHistory SPA mode; explicit route table in src/router.ts)",
+    "@vitejs/plugin-vue": "5 (the Vite-5 + Vue-3.5 line)",
+    "@tanstack/vue-query": "5 (role-for-role analog of the react packs' react-query)",
+    "vue-tsc": "2 (carries the .vue type surface — the SFC analogue of svelte-check)",
+    "zod": "4 (^4.0.0 — same family as stack v3 so wire schemas match the react packs)",
+    "typescript": "5.7 (vue-tsc 2 pairs with TS 5.x)",
+    "vite": "5 (matches the TSX stacks)"
+  },
+  "bundler": {
+    "rdcShim": false,
+    "comment": "No in-browser playground bundling for vue packs yet (vue-frontend-plan.md defers playground preview — needs the Vue SFC compiler in the VFS bundler), so no bundler policy beyond the defaults."
+  }
+}

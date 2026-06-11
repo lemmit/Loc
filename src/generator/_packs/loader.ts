@@ -19,22 +19,29 @@
 // ---------------------------------------------------------------------------
 
 import Handlebars from "handlebars";
+import type { PackFormat } from "../../util/builtin-formats.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { flattenRequired, REQUIRED_PRIMITIVES } from "./required-primitives.js";
 
 /** Output format the pack's templates produce.  `tsx` is the v0
  *  React/Mantine/shadcn case (Handlebars over .hbs files yielding
  *  TSX); `heex` is the Phoenix LiveView case (Handlebars over
- *  .heex.hbs files yielding HEEx).  Drives two things:
+ *  .heex.hbs files yielding HEEx); `svelte` is the Svelte 5 /
+ *  SvelteKit case (Handlebars over .hbs files yielding Svelte
+ *  markup).  Drives two things:
  *    1. Which repo-root shared-source directories the loader pulls
- *       in (TSX packs get `vite/`+`api/`+`docker/`; HEEx packs get
- *       a future `phoenix/` once it lands and skip the TSX dirs).
+ *       in (TSX packs get `vite/`+`api/`+`docker/`; svelte packs get
+ *       `sveltekit/`+`docker/`; HEEx packs get a future `phoenix/`
+ *       and skip the TSX dirs).
  *    2. Documentation — pack authors and downstream tooling can
  *       discriminate without parsing template contents.
  *  Handlebars itself is content-agnostic, so the compilation path
  *  doesn't branch on `format`.  Defaults to `"tsx"` for backward
- *  compatibility with existing manifests that omit the field. */
-export type PackFormat = "tsx" | "heex";
+ *  compatibility with existing manifests that omit the field.
+ *  The union itself lives in `src/util/builtin-formats.ts` (shared
+ *  with the language-layer validator); re-exported here so generator
+ *  consumers keep their import path. */
+export type { PackFormat };
 
 /** Manifest schema for `<pack>/pack.json`. */
 export interface PackManifest {

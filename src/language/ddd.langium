@@ -228,9 +228,13 @@ UiBlockBinding:
 // of `phoenixLiveView` (the framework, decoupled from the host
 // platform name); lowering canonicalises it to `phoenixLiveView`.
 // Future values (`blazor-wasm`, `blazor-server`, …) extend this enum
-// when their codegen backends land.
+// when their codegen backends land.  `svelte` renders Svelte 5
+// (SvelteKit static SPA) against a svelte-format design pack
+// (`shadcnSvelte`/`flowbite`); `vue` renders Vue 3 (Vite SPA +
+// vue-router) against a vue-format design pack
+// (`vuetify`/`shadcnVue`).
 Framework returns string:
-    'react' | 'phoenixLiveView' | 'liveview';
+    'react' | 'svelte' | 'vue' | 'phoenixLiveView' | 'liveview';
 
 // Backend platforms accept a quoted `family@version` pin
 // (`platform: "hono@v4"`) via the STRING alternative — symmetric
@@ -244,18 +248,20 @@ Framework returns string:
 // FastAPI + SQLAlchemy backend; `fastapi` is its framework-spelled
 // alias and desugars to `python` (mirrors `hono` → `node`).
 Platform returns string:
-    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'python' | 'fastapi' | 'java' | STRING;
+    'dotnet' | 'hono' | 'node' | 'react' | 'svelte' | 'vue' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'python' | 'fastapi' | 'java' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,
 // and `mui` are React/TSX packs; `ashPhoenix` is the HEEx pack for
-// the Phoenix LiveView platform.  STRING points at a custom pack:
+// the Phoenix LiveView platform; `shadcnSvelte` and `flowbite` are
+// the Svelte packs; `vuetify` and `shadcnVue` are the Vue packs.
+// STRING points at a custom pack:
 // a directory with `pack.json` resolved relative to the .ddd file.
 // Only meaningful when the deployable mounts a UI; ignored
 // otherwise.  Named `design` (not `ui`) to avoid colliding with
 // the test-DSL's `ui.workflows.X(...)` accessor.
 DesignPack returns string:
-    'mantine' | 'shadcn' | 'mui' | 'chakra' | 'ashPhoenix' | STRING;
+    'mantine' | 'shadcn' | 'mui' | 'chakra' | 'ashPhoenix' | 'shadcnSvelte' | 'flowbite' | 'vuetify' | 'shadcnVue' | STRING;
 // Per-deployable auth opt-in.  `required` enables JWT-decode middleware
 // and the user-supplied verifier hook.  Absence keeps the deployable
 // open (existing behaviour).  Future modes (`optional`, `forbidden`)

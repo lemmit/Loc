@@ -164,6 +164,7 @@ export function renderCustomLayoutPage(
   let usesStateForTitle = false;
   if (title !== undefined) {
     const titleCtx: WalkContext = {
+      target: tsxTarget,
       imports,
       pack,
       paramNames,
@@ -799,6 +800,7 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
   // Empty walker context — init expressions don't see state /
   // params (they evaluate before the hooks run).
   const dummy: WalkContext = {
+    target: tsxTarget,
     imports: new Map(),
     pack,
     paramNames: new Set(),
