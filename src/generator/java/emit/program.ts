@@ -35,7 +35,9 @@ export const JMOLECULES_VERSION = "1.10.0";
  *  cross-backend conformance harness diffs. */
 export const SPRINGDOC_VERSION = "2.8.17";
 
-export function renderGradleBuild(options: { flyway?: boolean } = {}): string {
+export function renderGradleBuild(
+  options: { flyway?: boolean; extraDeps?: Record<string, string> } = {},
+): string {
   return lines(
     `plugins {`,
     `    java`,
@@ -69,6 +71,11 @@ export function renderGradleBuild(options: { flyway?: boolean } = {}): string {
     // imported BOM).  Only shipped when the deployable owns migrations.
     options.flyway ? `    implementation("org.flywaydb:flyway-core")` : null,
     options.flyway ? `    implementation("org.flywaydb:flyway-database-postgresql")` : null,
+    // Resource-client deps (objectStore / queue adapters) — empty for
+    // deployables wiring no consumable resources.
+    ...Object.entries(options.extraDeps ?? {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([coord, version]) => `    implementation("${coord}:${version}")`),
     `    testImplementation("org.springframework.boot:spring-boot-starter-test")`,
     `    testRuntimeOnly("org.junit.platform:junit-platform-launcher")`,
     `}`,
