@@ -22,14 +22,20 @@ import Decimal from "decimal.js";
 import { z } from "zod";
 
 /**
- * Wire schema for the \`money\` primitive.
+ * Schema for the \`money\` primitive, on both of its inbound shapes:
  *
- * Inbound JSON: a decimal-formatted string (\`"123.4500"\`).  Parses
- * to a \`decimal.js\` Decimal instance.  Format violations and parse
- * failures both surface as typed Zod issues — invalid input becomes
- * a form-level error attached to the field, not an uncaught throw.
+ *   - Wire JSON: a decimal-formatted string (\`"123.4500"\`) — parsed
+ *     to a \`decimal.js\` Decimal instance.
+ *   - Form state: an already-constructed Decimal — the money input
+ *     control converts on change, so the zod resolver sees the
+ *     instance, not a string.  Passed through unchanged.
+ *
+ * Format violations and parse failures both surface as typed Zod
+ * issues — invalid input becomes a form-level error attached to the
+ * field, not an uncaught throw.
  */
-export const moneySchema = z.string().transform((s, ctx) => {
+export const moneySchema = z.union([z.instanceof(Decimal), z.string()]).transform((s, ctx) => {
+  if (s instanceof Decimal) return s;
   if (!/^-?\\d+(\\.\\d+)?$/.test(s)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
