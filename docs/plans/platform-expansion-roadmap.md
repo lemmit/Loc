@@ -65,6 +65,30 @@ Four items, independent, suggested merge order 4 → 3 → 2 → 1:
 
 ## Phase B — First new frontend (Vue)
 
+> **Status: EXECUTED** (vue-frontend-plan.md, merged via #1117 + the
+> Slice 6–9 follow-ups).  Calibration answers:
+>
+> 1. **The contract needed three extensions**, all true cross-frontend
+>    seams (none framework-private): `renderInterpolation` +
+>    `renderAttrBinding` (Vue's `{{ }}` mustaches / `:attr` bindings
+>    vs the JSX family's braces) and `renderMatchChild` (structural
+>    `<template v-if>` chains — a markup ternary can't live in a
+>    mustache).  The 4 markup seams the Svelte port added were also
+>    consumed.  Verdict: the contract is elastic; extensions were
+>    mechanical and byte-identical for TSX/HEEx.
+> 2. **Walker reuse was effectively total** — the Vue generator ships
+>    zero forked walker code; `vueTarget` (~300 LOC of leaf seams) +
+>    the Vue page shell (~350 LOC, the SFC analogue of
+>    `react/walker/page-shell.ts`) are the only Vue-side walker code.
+>    The api/views/workflows module builders were extracted to
+>    `_frontend/` and shared verbatim (one import-specifier knob).
+> 3. **No IR gaps.**  Vue's reactivity surfaced POSITION questions
+>    (template auto-unwrap vs script `.value` — solved with bare-name
+>    reads everywhere walker output lands plus shell-side `.value`
+>    rewrites for hook hoists), not IR-shape questions.  One parity
+>    follow-up: live-refetch find-filters want `MaybeRefOrGetter` api
+>    params.
+
 **Goal:** prove the post-Phase-A `WalkerTarget` contract by adding a second
 frontend that is *not* HEEx (which has structural exemptions).
 

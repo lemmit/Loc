@@ -1,5 +1,12 @@
 # Vue frontend — implementation plan
 
+> **Status: Slices 0–9 EXECUTED** (merged via #1117 + follow-up
+> commits on this branch).  Remaining tracked gaps: user components /
+> named layouts / extern functions on vue, live-refetch find-filters
+> (MaybeRefOrGetter api params), the channels toast manager, and the
+> docker-boot e2e fold-in once the Svelte effort settles the shared
+> LOOM_E2E gate shape.
+
 Add **Vue 3 as a frontend platform** (`platform: vue`) with feature parity to
 React, plus **two Vue design packs** (`vuetify`, `shadcnVue`) with feature
 parity to `react`/`mantine`. This executes Phase B of

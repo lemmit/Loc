@@ -48,7 +48,7 @@ describe("java platform — surface shape", () => {
     expect(javaPlatform.needsDb).toBe(true);
     expect(javaPlatform.isFrontend).toBe(false);
     expect(javaPlatform.mountsUi).toBe(true);
-    expect([...javaPlatform.hostableFrameworks].sort()).toEqual(["react", "static"]);
+    expect([...javaPlatform.hostableFrameworks].sort()).toEqual(["react", "static", "vue"]);
   });
 
   it("compose service is a Postgres-backed Spring service probing /ready", () => {

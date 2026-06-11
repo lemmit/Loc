@@ -1725,3 +1725,33 @@ surface excludes `svelte` until that lands.  The in-browser playground
 preview is likewise deferred (Svelte compiler in the VFS bundler).
 
 See `docs/plans/svelte-frontend-plan.md` for the slice history.
+## D-VUE-FRONTEND — reuse the shared walker, Vite+vue-router SPA, hand-rolled forms
+
+`platform: vue` (Phase B of the platform-expansion roadmap;
+`docs/plans/vue-frontend-plan.md`) ships as the third frontend with
+three locked choices:
+
+1. **Reuse, not fork.**  Vue pages render through the SHARED markup
+   walker (`src/generator/_walker/`) with `vueTarget` supplying the
+   leaf seams.  Where Vue genuinely diverges from the JSX family the
+   CONTRACT grew (renderInterpolation / renderAttrBinding /
+   renderMatchChild) rather than the walker forking — every extension
+   byte-identical for TSX/HEEx.  The api/views/workflows module
+   builders moved to `src/generator/_frontend/` and are shared
+   verbatim (TanStack Query's call surface is identical across
+   react-query and vue-query; one import-specifier knob).
+2. **Plain Vite SPA + vue-router** — `createWebHistory`, explicit
+   route table in `src/router.ts`, `<script setup lang="ts">` SFC
+   pages, the same two-stage vite-build/vite-preview docker runtime
+   as React.  No Nuxt.
+3. **Hand-rolled `reactive()`+zod forms** (`src/lib/form.ts` —
+   `useLoomForm`): draft values, zod parse on submit, per-field error
+   map, ProblemDetails-style server-error application.  No
+   third-party form dependency — one validation story across packs.
+
+Packs: `vuetify@v3` (npm-package model, the default) and
+`shadcnVue@v1` (source-copy: reka-ui + Tailwind 4 + a components-ui
+barrel; pack-declared `imports` tables flow into page scripts).  Vue
+packs own the `op-dialog` operation-modal wrapper.  `vue` is a
+STATIC_BUNDLE_FRAMEWORK — dotnet/java/phoenix hosts embed a
+`framework: vue` ui exactly like a React one.

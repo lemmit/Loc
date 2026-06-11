@@ -1,5 +1,9 @@
 import { generateVueForContexts } from "../generator/vue/index.js";
-import { type ComposeServiceShape, type PlatformSurface, STATIC_BUNDLE_FRAMEWORKS } from "./surface.js";
+import {
+  type ComposeServiceShape,
+  type PlatformSurface,
+  STATIC_BUNDLE_FRAMEWORKS,
+} from "./surface.js";
 
 // ---------------------------------------------------------------------------
 // Vue frontend platform — the third frontend-only platform after

@@ -109,6 +109,29 @@ describe("ddd new — platform/frontend wiring", () => {
     expect(src).toContain("design: shadcn");
     fs.rmSync(tmp, { recursive: true });
   });
+
+  it("a vue pack scaffolds a `platform: vue` frontend (design implies platform)", () => {
+    const tmp = tmpdir();
+    const out = path.join(tmp, "p");
+    runCli(["new", "app", "-o", out, "--design", "vuetify"]);
+    const src = fs.readFileSync(path.join(out, "main.ddd"), "utf8");
+    expect(src).toContain("platform: vue");
+    expect(src).toContain("design: vuetify");
+    expect(src).toContain("port: 3003");
+    expect(src).not.toContain("platform: react");
+    fs.rmSync(tmp, { recursive: true });
+  });
+
+  it("shadcnVue scaffolds a vue frontend on a dotnet backend", () => {
+    const tmp = tmpdir();
+    const out = path.join(tmp, "p");
+    runCli(["new", "app", "-o", out, "--platform", "dotnet", "--design", "shadcnVue"]);
+    const src = fs.readFileSync(path.join(out, "main.ddd"), "utf8");
+    expect(src).toContain("platform: dotnet");
+    expect(src).toContain("platform: vue");
+    expect(src).toContain("design: shadcnVue");
+    fs.rmSync(tmp, { recursive: true });
+  });
 });
 
 describe("ddd new — guards and ergonomics", () => {

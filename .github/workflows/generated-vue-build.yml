@@ -1,0 +1,99 @@
+name: Generated Vue build
+
+# For each {case × vue pack} cell, generate the Vue project,
+# `npm install`, `vue-tsc --noEmit`, and `vite build` it.  The Vue
+# analogue of generated-react-build.yml — catches generator/pack
+# drift invisible to the IR-level tests (vue-frontend-plan.md
+# Slice 9).
+#
+# Matrix policy:
+#   - pull_request    → 2 cells: the showcase case (the acme-scale
+#                       feature-comprehensive example) × both packs.
+#   - push: main /    → full 6-cell Cartesian
+#     workflow_dispatch  ({minimal, scaffold, showcase} × packs).
+#
+# Cell names MUST match the case labels in
+# test/e2e/generated-vue-build.test.ts (`<case>:<pack>`).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'designs/vuetify/**'
+      - 'designs/shadcnVue/**'
+      - 'examples/vue-showcase.ddd'
+      - 'vue/**'
+      - 'api/**'
+      - 'docker/**'
+      - 'stacks/vue1/**'
+      - 'test/e2e/generated-vue-build.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-vue-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'designs/vuetify/**'
+      - 'designs/shadcnVue/**'
+      - 'examples/vue-showcase.ddd'
+      - 'vue/**'
+      - 'api/**'
+      - 'docker/**'
+      - 'stacks/vue1/**'
+      - 'test/e2e/generated-vue-build.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-vue-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        run: |
+          PACKS='["vuetify@v3","shadcnVue@v1"]'
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CASES='["showcase"]'
+          else
+            CASES='["minimal","scaffold","showcase"]'
+          fi
+          echo "matrix={\"case\":$CASES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
+
+  matrix:
+    needs: configure
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
+    timeout-minutes: 10
+    name: ${{ matrix.case }} × ${{ matrix.pack }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Run vue-build shard
+        env:
+          LOOM_VUE_BUILD_CASE: ${{ matrix.case }}:${{ matrix.pack }}
+        run: npx vitest run test/e2e/generated-vue-build.test.ts
