@@ -33,6 +33,10 @@ import type {
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
+import {
+  buildExternFunctionShim,
+  buildExternFunctionSignature,
+} from "../_frontend/extern-functions.js";
 import { buildPageObjectModule } from "../_frontend/page-objects-builder.js";
 import { buildViewPageObject } from "../_frontend/view-page-object.js";
 import { buildWalkerPageObject } from "../_frontend/walker-page-objects.js";
@@ -110,6 +114,20 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
     if (page.route) pageRoutes.set(page.name, page.route);
   }
 
+  // Extern frontend functions (extern-function-hook-escape-hatch.md §3):
+  // same two machine-owned files as react — the wire-DTO-typed
+  // signature (`src/lib/extern/<name>.signature.ts`, api modules at
+  // `../api` on SvelteKit) and the conformance shim
+  // (`src/lib/<name>.ts`); body calls register through
+  // `externFunctionNames` and the page / component shells import each
+  // used shim as `$lib/<name>`.
+  const externFunctionNames = new Set<string>();
+  for (const fn of ui.functions ?? []) {
+    externFunctionNames.add(fn.name);
+    out.set(`src/lib/extern/${fn.name}.signature.ts`, buildExternFunctionSignature(fn, "../api"));
+    out.set(`src/lib/${fn.name}.ts`, buildExternFunctionShim(fn));
+  }
+
   // User components — `src/lib/components/<Name>.svelte`, ui-scope
   // shadowing top-level on name collision.  Extern components are a
   // follow-up parity slice for svelte; surface loudly rather than
@@ -135,6 +153,7 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
         ctx.aggregatesByName,
         buildBcByAggregate(ctx),
         pageRoutes,
+        externFunctionNames,
       ),
     );
   }
@@ -167,6 +186,7 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
         buildWorkflowsByName(ctx),
         buildBcByWorkflow(ctx),
         pageRoutes,
+        externFunctionNames,
       ),
     );
   }
