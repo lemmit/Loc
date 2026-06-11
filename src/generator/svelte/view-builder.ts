@@ -5,6 +5,7 @@ import {
   type ViewIR,
 } from "../../ir/types/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
+import { zodForViewResponse } from "../_frontend/views-module.js";
 
 // ---------------------------------------------------------------------------
 // View API module — Zod row schemas + svelte-query factories per
@@ -76,7 +77,7 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
     if (view.output) {
       lines.push(`export const ${upperFirst(view.name)}Row = z.object({`);
       for (const f of view.output.fields) {
-        lines.push(`  ${f.name}: ${zodForResponse(f.type, f.optional)},`);
+        lines.push(`  ${f.name}: ${zodForViewResponse(f.type, f.optional)},`);
       }
       lines.push(`});`);
       lines.push(
@@ -200,63 +201,3 @@ function findFirstAggregateWith(
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
-
-function _unwrapOpt(t: TypeIR): TypeIR {
-  return t.kind === "optional" ? t.inner : t;
-}
-
-function zodForResponse(t: TypeIR, optional: boolean): string {
-  const z = zodForResponseInner(t);
-  return optional ? `${z}.nullish()` : z;
-}
-
-function zodForResponseInner(t: TypeIR): string {
-  switch (t.kind) {
-    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
-    case "primitive":
-      switch (t.name) {
-        case "int":
-        case "long":
-          return "z.number().int()";
-        case "decimal":
-          return "z.number()";
-        case "money":
-          return "moneySchema";
-        case "string":
-        case "guid":
-          return "z.string()";
-        case "bool":
-          return "z.boolean()";
-        case "datetime":
-          return "z.string()";
-        case "json":
-          return "z.unknown()";
-      }
-    case "id":
-      return "z.string()";
-    case "enum":
-      return `${t.name}Schema`;
-    case "valueobject":
-      return `${t.name}Schema`;
-    case "entity":
-      return "z.unknown()";
-    case "array":
-      return `z.array(${zodForResponseInner(t.element)})`;
-    case "optional":
-      return `${zodForResponseInner(t.inner)}.nullish()`;
-    case "action":
-    case "slot":
-      throw new Error(
-        "zodForResponseInner: 'slot' type is UI-only and should not reach the response schema.",
-      );
-    case "genericInstance":
-      throw new Error(
-        `zodForResponseInner: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
-      );
-    case "union":
-    case "none":
-      throw new Error(
-        `zodForResponseInner: discriminated unions are not emittable yet (P4); IR-validate should have rejected '${t.kind}'.`,
-      );
-  }
-}

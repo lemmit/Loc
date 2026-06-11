@@ -24,6 +24,16 @@
 
 import type { ExprIR, StateFieldIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
+import {
+  defaultInitForJs,
+  escapeJsFamilyText,
+  hookFnName,
+  hookVarName,
+  lowerFirstName,
+  renderJsMatch,
+  renderJsNavigate,
+  upperFirstName,
+} from "../../_walker/js-target-helpers.js";
 import type {
   ApiCallSite,
   RenderPosition,
@@ -76,9 +86,9 @@ export const tsxTarget: WalkerTarget = {
       // this branch becomes `return walk(init)` — for the
       // standalone target we fall back to the type default so
       // misuse surfaces as "always-default" output, not a crash.
-      return defaultInitForTsx(field.type);
+      return defaultInitForJs(field.type);
     }
-    return defaultInitForTsx(field.type);
+    return defaultInitForJs(field.type);
   },
 
   // --- API binding seam ---------------------------------------------------
@@ -93,9 +103,9 @@ export const tsxTarget: WalkerTarget = {
   buildHookUse(detected: DetectedApiCall, renderArg: (e: ExprIR) => string): TargetHookUse {
     if (detected.kind === "view") {
       const viewName = detected.aggregateName;
-      const viewPascal = upperFirstLocal(viewName);
+      const viewPascal = upperFirstName(viewName);
       return {
-        varName: `${lowerFirstLocal(viewName)}View`,
+        varName: `${lowerFirstName(viewName)}View`,
         hookName: `use${viewPascal}View`,
         importFrom: "../api/views",
         argsRendered: [],
@@ -105,10 +115,10 @@ export const tsxTarget: WalkerTarget = {
       // `Fulfillment.instances.all` → useAllFulfillmentInstances();
       // `Fulfillment.instances.byId(id)` → useFulfillmentInstanceById(id).
       // Both live in the shared `../api/workflows` module.
-      const wf = upperFirstLocal(detected.aggregateName);
+      const wf = upperFirstName(detected.aggregateName);
       const isAll = detected.operation === "all";
       return {
-        varName: isAll ? `all${wf}Instances` : `${lowerFirstLocal(detected.aggregateName)}Instance`,
+        varName: isAll ? `all${wf}Instances` : `${lowerFirstName(detected.aggregateName)}Instance`,
         hookName: isAll ? `useAll${wf}Instances` : `use${wf}InstanceById`,
         importFrom: "../api/workflows",
         argsRendered: detected.args.map(renderArg),
@@ -119,7 +129,7 @@ export const tsxTarget: WalkerTarget = {
     return {
       varName: hookVarName(aggregate, op),
       hookName: hookFnName(aggregate, op),
-      importFrom: `../api/${lowerFirstLocal(upperFirstLocal(aggregate))}`,
+      importFrom: `../api/${lowerFirstName(upperFirstName(aggregate))}`,
       argsRendered: detected.args.map(renderArg),
     };
   },
@@ -179,13 +189,7 @@ export const tsxTarget: WalkerTarget = {
     arms: ReadonlyArray<{ predicate: string; value: string }>,
     elseArm: string | undefined,
   ): string {
-    const terminal = elseArm ?? "null";
-    let out = terminal;
-    for (let i = arms.length - 1; i >= 0; i--) {
-      const a = arms[i]!;
-      out = `(${a.predicate}) ? (${a.value}) : ${out}`;
-    }
-    return out;
+    return renderJsMatch(arms, elseArm);
   },
 
   // --- Navigation seam ----------------------------------------------------
@@ -201,23 +205,13 @@ export const tsxTarget: WalkerTarget = {
     args: ReadonlyArray<{ name: string; value: string }>,
     stateExpr?: string,
   ): string {
-    // Escape hatch: a non-object-literal second arg (the source's
-    // `navigate(Page, someExpr)` shape) flows through pre-rendered.
-    // Takes precedence over `args` — caller picks one path.
-    if (stateExpr !== undefined) {
-      return `navigate(${JSON.stringify(routeTemplate)}, { state: ${stateExpr} })`;
-    }
-    if (args.length === 0) {
-      return `navigate(${JSON.stringify(routeTemplate)})`;
-    }
-    const state = args.map((a) => `${a.name}: ${a.value}`).join(", ");
-    return `navigate(${JSON.stringify(routeTemplate)}, { state: { ${state} } })`;
+    return renderJsNavigate(routeTemplate, args, stateExpr);
   },
 
   // --- Type-default seam --------------------------------------------------
 
   defaultInitFor(type: TypeIR): string {
-    return defaultInitForTsx(type);
+    return defaultInitForJs(type);
   },
 
   // --- Markup seams ---------------------------------------------------------
@@ -263,76 +257,6 @@ export const tsxTarget: WalkerTarget = {
    *  Behaviour-identical to `walker/shared/args.ts:escapeJsxText`
    *  (kept local so this module stays self-contained). */
   escapeText(text: string): string {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/\{/g, "&#123;")
-      .replace(/\}/g, "&#125;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    return escapeJsFamilyText(text);
   },
 };
-
-// ---------------------------------------------------------------------------
-// Internals — verbatim lifts from the inline walker so a delegating
-// walker produces byte-identical output.
-// ---------------------------------------------------------------------------
-
-/** React-side hook variable name: `<aggCamel><OpPascal>`.  Mirrors
- *  `walker/api-hooks.ts:95`. */
-function hookVarName(aggregate: string, op: string): string {
-  return `${lowerFirstLocal(aggregate)}${upperFirstLocal(op)}`;
-}
-
-/** React-side hook fn name.  Mirrors `walker/api-hooks.ts:86-94`. */
-function hookFnName(aggregate: string, op: string): string {
-  const single = upperFirstLocal(aggregate);
-  const pluralName = pluralLocal(single);
-  if (op === "all") return `useAll${pluralName}`;
-  if (op === "byId") return `use${single}ById`;
-  if (op === "create") return `useCreate${single}`;
-  if (op === "update") return `useUpdate${single}`;
-  if (op === "delete") return `useDelete${single}`;
-  return `use${upperFirstLocal(op)}${single}`;
-}
-
-/** Zero value per type.  Mirrors `walker/page-shell.ts:705-725`. */
-function defaultInitForTsx(type: TypeIR): string {
-  if (type.kind === "primitive") {
-    switch (type.name) {
-      case "int":
-      case "long":
-      case "decimal":
-        return "0";
-      case "money":
-        return 'new Decimal("0")';
-      case "bool":
-        return "false";
-      case "string":
-      case "datetime":
-      case "guid":
-        return '""';
-    }
-  }
-  if (type.kind === "id" || type.kind === "enum") return '""';
-  if (type.kind === "optional") return "undefined";
-  return "undefined";
-}
-
-// Local naming helpers — avoid importing from util/naming.ts so this
-// module stays self-contained and easier to refactor.  Verbatim
-// behaviour with the imported versions for the inputs the walker
-// produces.
-function lowerFirstLocal(s: string): string {
-  return s.length === 0 ? s : s[0]!.toLowerCase() + s.slice(1);
-}
-
-function upperFirstLocal(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
-}
-
-function pluralLocal(s: string): string {
-  // Conservative rules matching `src/util/naming.ts:plural`.
-  if (s.endsWith("y") && !/[aeiou]y$/.test(s)) return `${s.slice(0, -1)}ies`;
-  if (/(s|x|z|ch|sh)$/.test(s)) return `${s}es`;
-  return `${s}s`;
-}

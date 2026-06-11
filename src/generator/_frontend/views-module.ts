@@ -87,7 +87,7 @@ export function buildViewsApiModule(
     if (view.output) {
       lines.push(`export const ${upperFirst(view.name)}Row = z.object({`);
       for (const f of view.output.fields) {
-        lines.push(`  ${f.name}: ${zodForResponse(f.type, f.optional)},`);
+        lines.push(`  ${f.name}: ${zodForViewResponse(f.type, f.optional)},`);
       }
       lines.push(`});`);
       lines.push(
@@ -209,56 +209,14 @@ function findFirstAggregateWith(
 }
 
 // ---------------------------------------------------------------------------
-// Playwright page object — one class per view.
+// Playwright page object — moved to `view-page-object.ts` (the
+// selectStyle-aware builder the svelte frontend parameterizes; the
+// defaults reproduce this module's original output byte-for-byte).
 // ---------------------------------------------------------------------------
 
-export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string {
-  const slug = snake(view.name);
-  const className = `${upperFirst(view.name)}ViewPage`;
-  const cols = collectColumnNames(view, ctx);
-  const rowFields = cols.map((c) => `  ${c}: string;`).join("\n");
-  const lines: string[] = [];
-  lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(`import type { Page } from "@playwright/test";`);
-  lines.push("");
-  lines.push(`export interface ${upperFirst(view.name)}RowText {`);
-  lines.push(rowFields);
-  lines.push(`}`);
-  lines.push("");
-  lines.push(`export class ${className} {`);
-  lines.push(`  static readonly url = "/views/${slug}";`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
-  lines.push("");
-  lines.push(`  async goto(): Promise<this> {`);
-  lines.push(`    await this.page.goto(${className}.url);`);
-  lines.push(`    await this.page.getByTestId("view-${slug}").waitFor();`);
-  lines.push(`    return this;`);
-  lines.push(`  }`);
-  lines.push("");
-  lines.push(`  async rows(): Promise<${upperFirst(view.name)}RowText[]> {`);
-  lines.push(`    const out: ${upperFirst(view.name)}RowText[] = [];`);
-  lines.push(`    for (let i = 0; i < 1000; i++) {`);
-  lines.push(`      const row = this.page.getByTestId(\`view-${slug}-row-\${i}\`);`);
-  lines.push(`      if ((await row.count()) === 0) break;`);
-  for (const c of cols) {
-    lines.push(
-      `      const ${lowerFirst("c_" + c)} = await this.page.getByTestId(\`view-${slug}-row-\${i}-${c}\`).innerText();`,
-    );
-  }
-  const rowLiteral = cols.map((c) => `${c}: ${lowerFirst("c_" + c)}`).join(", ");
-  lines.push(`      out.push({ ${rowLiteral} });`);
-  lines.push(`    }`);
-  lines.push(`    return out;`);
-  lines.push(`  }`);
-  lines.push("");
-  lines.push(`  async count(): Promise<number> {`);
-  lines.push(`    return (await this.rows()).length;`);
-  lines.push(`  }`);
-  lines.push(`}`);
-  return lines.join("\n") + "\n";
-}
+export { buildViewPageObject } from "./view-page-object.js";
 
-function collectColumnNames(view: ViewIR, ctx: BoundedContextIR): string[] {
+function _collectColumnNames(view: ViewIR, ctx: BoundedContextIR): string[] {
   if (view.output) return view.output.fields.map((f) => f.name);
   if (view.source.kind === "workflow") {
     const wf = ctx.workflows.find((w) => w.name === view.source.name);
@@ -284,12 +242,16 @@ function unwrapOpt(t: TypeIR): TypeIR {
   return t.kind === "optional" ? t.inner : t;
 }
 
-function zodForResponse(t: TypeIR, optional: boolean): string {
-  const z = zodForResponseInner(t);
+/** View-row zod spellings — the simple per-kind switch the view rows
+ *  need (no unions / generics in view projections).  Shared with the
+ *  svelte views module, which forks the builder for createQuery/$lib
+ *  but emits identical row schemas. */
+export function zodForViewResponse(t: TypeIR, optional: boolean): string {
+  const z = zodForViewResponseInner(t);
   return optional ? `${z}.nullish()` : z;
 }
 
-function zodForResponseInner(t: TypeIR): string {
+export function zodForViewResponseInner(t: TypeIR): string {
   switch (t.kind) {
     // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
@@ -320,9 +282,9 @@ function zodForResponseInner(t: TypeIR): string {
     case "entity":
       return "z.unknown()";
     case "array":
-      return `z.array(${zodForResponseInner(t.element)})`;
+      return `z.array(${zodForViewResponseInner(t.element)})`;
     case "optional":
-      return `${zodForResponseInner(t.inner)}.nullish()`;
+      return `${zodForViewResponseInner(t.inner)}.nullish()`;
     case "action":
     case "slot":
       throw new Error(
