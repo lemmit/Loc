@@ -27,6 +27,7 @@ import { renderPySchema } from "./emit/schema.js";
 import { buildPySeedFile } from "./emit/seed.js";
 import { renderPyTestsFile } from "./emit/tests.js";
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
+import { buildPyExternHandlersFile, externOpsOf } from "./extern-builder.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
 import { buildPyEventSourcedRepositoryFile } from "./repository-eventsourced-builder.js";
@@ -98,6 +99,11 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // First-boot seeding (database-seeding.md): emitted only when a
   // dataset survives filtering (rows on concrete aggregates); the
   // lifespan runs seeds right after migrations (Hono/.NET boot order).
+  // Aggregates with extern ops — the lifespan verifies their handler
+  // registrations at boot (docs/extern.md).
+  const externAggs = merged.aggregates
+    .filter((a) => !a.isAbstract && externOpsOf(a).length > 0)
+    .map((a) => a.name);
   const seedFile = buildPySeedFile(merged, (aggName) => {
     const agg = merged.aggregates.find((a) => a.name === aggName);
     return agg ? resolveDs(agg)?.schema : undefined;
@@ -105,7 +111,15 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   const hasSeeds = seedFile != null;
   out.set(
     "app/main.py",
-    renderMain(args.sys.name, routedAggs, hasViews, hasWorkflows, authRequired, hasSeeds),
+    renderMain(
+      args.sys.name,
+      routedAggs,
+      hasViews,
+      hasWorkflows,
+      authRequired,
+      hasSeeds,
+      externAggs,
+    ),
   );
 
   out.set("app/domain/__init__.py", "");
@@ -161,6 +175,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract) continue;
       out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx));
+      const externFile = buildPyExternHandlersFile(agg);
+      if (externFile != null) {
+        out.set(`app/domain/${snake(agg.name)}_handlers.py`, externFile);
+      }
       const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
       out.set(
         `app/db/repositories/${snake(agg.name)}_repository.py`,
@@ -312,6 +330,7 @@ function renderMain(
   hasWorkflows = false,
   authRequired = false,
   hasSeeds = false,
+  externAggs: string[] = [],
 ): string {
   return lines(
     `"""FastAPI application entrypoint.`,
@@ -331,6 +350,10 @@ function renderMain(
     "from app.db.engine import engine",
     "from app.db.migrate import run_migrations",
     hasSeeds ? "from app.db.seed import run_seeds" : null,
+    ...externAggs.map(
+      (n) =>
+        `from app.domain.${snake(n)}_handlers import verify_${snake(n)}_extern_handlers_registered`,
+    ),
     ...routerAggs.map(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
@@ -345,6 +368,7 @@ function renderMain(
     // A missing verifier registration surfaces as a clear boot error
     // instead of a 401 storm on the first request.
     authRequired ? "    assert_user_verifier_registered()" : null,
+    ...externAggs.map((n) => `    verify_${snake(n)}_extern_handlers_registered()`),
     "    await run_migrations()",
     hasSeeds ? "    await run_seeds()" : null,
     "    yield",
@@ -451,7 +475,12 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.domain.errors import AggregateNotFoundError, DomainError, ForbiddenError
+from app.domain.errors import (
+    AggregateNotFoundError,
+    DomainError,
+    ExternHandlerError,
+    ForbiddenError,
+)
 
 
 def problem(
@@ -481,6 +510,10 @@ def _pointer(loc: tuple[object, ...]) -> str:
 
 
 def install_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(ExternHandlerError)
+    async def _extern(request: Request, err: ExternHandlerError) -> JSONResponse:
+        return problem(request, 500, "Internal Server Error", str(err))
+
     @app.exception_handler(ForbiddenError)
     async def _forbidden(request: Request, err: ForbiddenError) -> JSONResponse:
         return problem(request, 403, "Forbidden", str(err))

@@ -1,0 +1,55 @@
+// Extern operations for the Python backend (docs/extern.md): the .ddd
+// body carries only preconditions; the user-supplied handler owns the
+// mutation.  The generated aggregate opens a controlled mutation
+// surface (field setters, raise_event, assert_invariants), the
+// handlers module carries the typed registry + boot verify (with a
+// no-op dev-stub so a fresh project boots), and the route runs
+// load → check_<op> → handler → assert_invariants → save.
+system ExternSys {
+  subdomain Sales {
+    context Sales {
+      enum OrderStatus { Draft, Confirmed, Cancelled }
+
+      event OrderConfirmed { order: Order id, at: datetime }
+
+      aggregate Order {
+        customerId: string
+        status: OrderStatus
+        riskScore: int
+        invariant riskScore >= 0
+        function isMutable(): bool = status == Draft
+
+        // Extern: preconditions gate the user handler.
+        operation confirm() extern {
+          precondition isMutable()
+          precondition riskScore < 80
+        }
+
+        // Extern with a request param.
+        operation flag(score: int) extern {
+          precondition score >= 0
+        }
+
+        // Regular operation for contrast.
+        operation cancel() {
+          precondition isMutable()
+          status := Cancelled
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+
+  api SalesApi from Sales
+
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
+
+  deployable api {
+    platform: python
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 8000
+  }
+}

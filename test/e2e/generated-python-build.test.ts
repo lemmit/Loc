@@ -44,6 +44,9 @@ const CASES: Array<[fixture: string, project: string]> = [
   ["test/e2e/fixtures/python-build/auth.ddd", "api"],
   // `seed { ... }` — domain-create + raw datasets, __loom_seed marker.
   ["test/e2e/fixtures/python-build/seeds.ddd", "api"],
+  // `operation X() extern` — handler registry + dev-stubs + boot verify,
+  // check_<op> precondition gate, controlled mutation surface.
+  ["test/e2e/fixtures/python-build/extern.ddd", "api"],
 ];
 
 describe.skipIf(!ENABLED)(
