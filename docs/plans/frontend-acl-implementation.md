@@ -17,6 +17,24 @@
 
 ### Phase 3 — Schema restructure: flat-key inputs + transform + dual types
 
+> **RESOLVED 2026-06-12 (maintainer decision: "keep nested, transform only").**
+> The flat-dot-key half of this spec is unimplementable as written:
+> react-hook-form **always interprets dots in field names as nesting**, so
+> `register("price.amount")` produces nested runtime values that a
+> flat-keyed schema (`{ "price.amount": z.number() }`) would reject at
+> validation.  Instead of flat keys, the shipped slice keeps today's
+> nested (RHF-native) form state and emits the dual
+> `<Action>FormState = z.input` / `<Action>Payload = z.output` aliases
+> **only for actions whose request schema carries a real transform** —
+> today exactly the `money` primitive (`moneySchema`: decimal string →
+> Decimal), reached directly or through array/optional/value-object
+> nesting.  Transform-less actions keep the single `<Action>Request`
+> type (structurally identical aliases are the noise this plan's own
+> deferral note warned about).  Per-action FieldMaps stay deferred with
+> the flat-key restructure; `pointerToFlat` + RHF's nested `setError`
+> paths already route server errors without them.  Gated by
+> `test/generator/react/dual-form-types.test.ts`.
+
 **Goal:** make `<Action>FormState` (`z.input`) and `<Action>Payload` (`z.output`) diverge meaningfully. Today they're identical because there's no `.transform()` in the schema chain. The proposal's vocabulary distinction only becomes real after this.
 
 **Concretely:** restructure each `Create<Agg>Request` / `<Op>Request` in `src/api/<agg>.ts` so that:
