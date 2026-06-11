@@ -38,6 +38,7 @@ import { criterionEligible, renderJavaCriteriaClasses } from "./emit/criteria.js
 import { renderDtoFiles } from "./emit/dto.js";
 import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
+import { renderJavaEventSourcedRepositoryImpl } from "./emit/event-store.js";
 import { renderJavaEvent } from "./emit/events.js";
 import { renderExternHandlerInterface, renderExternHandlerStub } from "./emit/extern.js";
 import { renderJavaId } from "./emit/ids.js";
@@ -474,12 +475,17 @@ function emitAggregate(
       superType,
       operationReturnUnions,
       eventFields,
-      persistence: {
-        tableName: plural(snake(agg.name)),
-        schema,
-        containmentOwnerName: ownerName,
-        voLookup,
-      },
+      // Event-sourced aggregates have no state table — the entity is a
+      // plain domain class folded from the stream (no JPA bindings).
+      persistence:
+        agg.persistedAs === "eventLog"
+          ? undefined
+          : {
+              tableName: plural(snake(agg.name)),
+              schema,
+              containmentOwnerName: ownerName,
+              voLookup,
+            },
     }),
     agg.name,
   );
@@ -524,28 +530,41 @@ function emitAggregate(
     renderJavaRepositoryInterface(agg, repoWithViews, repoCtx, idClass),
     agg.name,
   );
-  place(
-    `${agg.name}JpaRepository.java`,
-    "spring-data-repository",
-    renderJavaSpringDataRepository(agg, repoWithViews, repoCtx, idClass),
-    agg.name,
-  );
-  place(
-    `${agg.name}RepositoryImpl.java`,
-    "repository-impl",
-    renderJavaRepositoryImpl(agg, repoWithViews, repoCtx, idClass),
-    agg.name,
-  );
+  if (agg.persistedAs === "eventLog") {
+    // Event-sourced: no Spring Data interface — the impl reads/appends
+    // the <agg>_events stream via JdbcTemplate and folds via appliers.
+    place(
+      `${agg.name}RepositoryImpl.java`,
+      "repository-impl",
+      renderJavaEventSourcedRepositoryImpl(agg, repoWithViews, repoCtx, idClass, schema),
+      agg.name,
+    );
+  } else {
+    place(
+      `${agg.name}JpaRepository.java`,
+      "spring-data-repository",
+      renderJavaSpringDataRepository(agg, repoWithViews, repoCtx, idClass),
+      agg.name,
+    );
+    place(
+      `${agg.name}RepositoryImpl.java`,
+      "repository-impl",
+      renderJavaRepositoryImpl(agg, repoWithViews, repoCtx, idClass),
+      agg.name,
+    );
+  }
 
   // API layer: DTO records, wire validators, the layered service, and
   // the controller.
   const applicationPkg = pkgFor("service", agg.name);
+  const esCreateParams = agg.persistedAs === "eventLog" ? agg.creates?.[0]?.params : undefined;
   for (const dto of renderDtoFiles(
     agg,
     voLookup,
     applicationPkg,
     basePkg,
     pkgFor("entity", agg.name),
+    esCreateParams,
   )) {
     place(dto.name, dto.category, dto.content, agg.name);
   }
@@ -564,6 +583,7 @@ function emitAggregate(
       authed: authRequired,
       boundedContext: ctx,
       idClass,
+      esCreateParams,
     }),
     agg.name,
   );
@@ -625,6 +645,7 @@ function emitAggregate(
       boundedContext: ctx,
       idClass,
       routePrefix,
+      esConstructible: !!esCreateParams,
     }),
     agg.name,
   );

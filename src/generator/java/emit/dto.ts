@@ -3,6 +3,7 @@ import type {
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
   FieldIR,
+  ParamIR,
   TypeIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
@@ -72,6 +73,9 @@ export function renderDtoFiles(
   pkg: string,
   basePkg: string,
   entityPkg: string,
+  /** Event-sourced create-input override: the `create` action's params
+   *  (the command shape) replace the field-derived create inputs. */
+  esCreateParams?: readonly ParamIR[],
 ): DtoFile[] {
   const out: DtoFile[] = [];
   const entityImport = entityPkg !== pkg ? `import ${entityPkg}.${agg.name};` : undefined;
@@ -119,14 +123,16 @@ export function renderDtoFiles(
     out.push(voRecord(vo, fields, "Response", pkg, basePkg));
   }
 
-  // --- create request (constructible aggregates only) ----------------------------
+  // --- create request (constructible aggregates; event-sourced ones are
+  // constructible through their `create` action's params) -------------------------
   const createInputs = forCreateInput(agg.fields);
-  if (hasCreate(agg)) {
+  if (hasCreate(agg) || esCreateParams) {
     const imports = new Set<string>();
-    const components = createInputs.map((f) => {
-      const t = eff(f.type, f.optional);
-      collectWireImports(t, imports);
-      return `${wireJavaType(t, "Request")} ${f.name}`;
+    const components = (
+      esCreateParams ?? createInputs.map((f) => ({ name: f.name, type: eff(f.type, f.optional) }))
+    ).map((f) => {
+      collectWireImports(f.type, imports);
+      return `${wireJavaType(f.type, "Request")} ${f.name}`;
     });
     out.push({
       name: `Create${agg.name}Request.java`,
@@ -166,7 +172,7 @@ export function renderDtoFiles(
   out.push(wireRecord(agg, `${agg.name}Response`, pkg, basePkg, entityImport));
 
   // --- create response (`{ id }`) ---------------------------------------------------
-  if (hasCreate(agg)) {
+  if (hasCreate(agg) || esCreateParams) {
     const idJava = javaValueTypeForId(agg.idValueType);
     const imports = new Set<string>();
     if (idJava === "UUID") imports.add("java.util.UUID");
