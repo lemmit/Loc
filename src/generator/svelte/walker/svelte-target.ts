@@ -210,6 +210,12 @@ export const svelteTarget: WalkerTarget = {
     return "{@render children?.()}";
   },
 
+  /** None — the runes form runtime (`createForm` from
+   *  `$lib/forms.svelte`) rides the svelte packs' form templates. */
+  formRuntimeImports(): ReadonlyArray<{ from: string; named: readonly string[] }> {
+    return [];
+  },
+
   /** Svelte 5 shares JSX's `{expr}` interpolation syntax. */
   renderInterpolation(jsExpr: string): string {
     return `{${jsExpr}}`;

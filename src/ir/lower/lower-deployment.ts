@@ -92,7 +92,10 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     : platform === "elixir"
       ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
       : (platform === "dotnet" || platform === "java") && uiName
-        ? qualifyDesign(d.design, "mantine")
+        ? qualifyDesign(
+            d.design,
+            platform === "dotnet" && uiFramework === "svelte" ? "shadcnSvelte" : "mantine",
+          )
         : undefined;
   // Explicit api composition.
   const serves = (d.serves ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);

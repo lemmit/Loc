@@ -250,9 +250,17 @@ function prepareFormFields(
   // per-idTarget hook paths are dynamic per-aggregate.  Per-field input
   // components come from each `field-input-*` template's import
   // declaration in pack.json (recursing into value-object children).
-  addImport(ctx, "react-hook-form", "useForm");
-  if (useController) addImport(ctx, "react-hook-form", "Controller");
-  addImport(ctx, "@hookform/resolvers/zod", "zodResolver");
+  // Form-runtime imports are framework-shaped: RHF for TSX targets,
+  // nothing for runes-based Svelte (the pack's form-of-decls template
+  // imports `createForm` itself).  Optional seam with the RHF fallback
+  // so TSX/Vue output is unchanged.
+  const formImports = ctx.target.formRuntimeImports?.(useController) ?? [
+    { from: "react-hook-form", named: useController ? ["useForm", "Controller"] : ["useForm"] },
+    { from: "@hookform/resolvers/zod", named: ["zodResolver"] },
+  ];
+  for (const imp of formImports) {
+    for (const n of imp.named) addImport(ctx, imp.from, n);
+  }
   for (const t of idTargets) {
     addImport(ctx, `../api/${lowerFirst(t.name)}`, `useAll${plural(t.name)}`);
   }
