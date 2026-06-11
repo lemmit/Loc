@@ -400,17 +400,19 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
       for (const agg of ctx.aggregates) {
-        const owners = [agg, ...agg.parts];
-        for (const owner of owners) {
+        // Root-level single containments are mapped (the part carries a
+        // hidden owning `_parent` @OneToOne); only *part-declared* single
+        // containments stay gated — their parent is another part, and the
+        // part factory / renderNew seam only threads the root entity.
+        for (const owner of agg.parts) {
           for (const c of owner.contains) {
             if (c.collection) continue;
             diags.push({
               severity: "error",
               message:
                 `Deployable '${dep.name}' (platform java) hosts aggregate '${ctxName}.${agg.name}' ` +
-                `whose '${owner.name}' declares a single containment 'contains ${c.name}: ${c.partName}' — ` +
-                `single (non-collection) containments are not yet mapped on the java backend ` +
-                `(JPA has no unidirectional one-to-one with the FK on the part table). ` +
+                `whose nested part '${owner.name}' declares a single containment 'contains ${c.name}: ${c.partName}' — ` +
+                `part-declared single (non-collection) containments are not yet mapped on the java backend. ` +
                 `Use a collection containment ('contains ${c.name}: ${c.partName}[]'), fold the part's ` +
                 `fields into a value object, or host the context on a node / dotnet deployable.`,
               source: `${sys.name}/${dep.name}`,

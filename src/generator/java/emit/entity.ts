@@ -24,6 +24,8 @@ import {
   jpaFieldAnnotations,
   jpaIdAnnotations,
   jpaParentIdAnnotations,
+  jpaSingleContainmentAnnotations,
+  jpaSingleContainmentParentAnnotations,
   needsHibernateTypes,
 } from "./jpa-annotations.js";
 
@@ -86,6 +88,12 @@ export interface JavaEntityOptions {
     /** The aggregate that physically owns the parent table (differs from
      *  the root name for TPH concretes) — names containment FK columns. */
     containmentOwnerName?: string;
+    /** Parts that are the target of a root-level *single* containment:
+     *  the root entity class.  The part then carries the hidden owning
+     *  `_parent` @OneToOne (JPA has no unidirectional one-to-one with
+     *  the FK on the part table) and its `_create` factory takes the
+     *  parent entity instead of the parent id. */
+    oneToOneParentOf?: string;
     voLookup: ReadonlyMap<string, readonly FieldIR[]>;
   };
 }
@@ -160,6 +168,10 @@ export function renderJavaEntity(
     fieldLines.push(`    ${idClass} id;`);
   }
   if (!isRoot) {
+    if (persistence?.oneToOneParentOf && persistence.parentFkColumn) {
+      fieldLines.push(...jpaSingleContainmentParentAnnotations(persistence.parentFkColumn));
+      fieldLines.push(`    ${persistence.oneToOneParentOf} _parent;`);
+    }
     if (persistence?.parentFkColumn) {
       fieldLines.push(...jpaParentIdAnnotations(persistence.parentFkColumn));
     }
@@ -183,7 +195,10 @@ export function renderJavaEntity(
       }
       fieldLines.push(`    List<${c.partName}> ${c.name} = new ArrayList<>();`);
     } else {
-      // Gated upstream: loom.java-single-containment-unsupported.
+      // Inverse side of the part's hidden owning `_parent` @OneToOne
+      // (part-declared single containments stay gated upstream:
+      // loom.java-single-containment-unsupported).
+      if (persistence) fieldLines.push(...jpaSingleContainmentAnnotations());
       fieldLines.push(`    ${c.partName} ${c.name};`);
     }
   }
@@ -427,16 +442,22 @@ export function renderJavaEntity(
         ]
       : [];
   // Part factory — the target of the renderer's `new <Part>` arm:
-  // positional (parentId first, then every declared field in order).
+  // positional (parent first, then every declared field in order).
+  // Single-containment parts take the parent *entity* (the hidden
+  // owning `_parent` @OneToOne needs the instance); collection parts
+  // take the parent id (their FK is written by the root's @JoinColumn).
+  const oneToOneParent = persistence?.oneToOneParentOf;
   const partFactoryLines: string[] = !isRoot
     ? [
         `    public static ${entity.name} _create(${[
-          `${rootName}Id parentId`,
+          oneToOneParent ? `${oneToOneParent} parent` : `${rootName}Id parentId`,
           ...entity.fields.map((f) => `${renderJavaType(f.type)} ${f.name}`),
         ].join(", ")}) {`,
         `        var p = new ${entity.name}();`,
         `        p.id = ${entity.name}Id.newId();`,
-        `        p.parentId = parentId;`,
+        ...(oneToOneParent
+          ? [`        p._parent = parent;`, `        p.parentId = parent.id();`]
+          : [`        p.parentId = parentId;`]),
         ...entity.fields.map((f) => `        p.${f.name} = ${f.name};`),
         emitTrace ? `        p._assertInvariants("<init>");` : `        p._assertInvariants();`,
         `        return p;`,

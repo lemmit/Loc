@@ -391,6 +391,9 @@ function emitAggregate(
           tableName: plural(snake(part.name)),
           schema,
           parentFkColumn: `${snake(ownerName)}_id`,
+          oneToOneParentOf: agg.contains.some((c) => !c.collection && c.partName === part.name)
+            ? agg.name
+            : undefined,
           voLookup,
         },
       }),

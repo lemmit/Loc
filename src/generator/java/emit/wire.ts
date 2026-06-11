@@ -95,7 +95,8 @@ export function domainToWire(t: TypeIR, expr: string): string {
     case "valueobject":
       return `${t.name}Response.from(${expr})`;
     case "entity":
-      return `${t.name}Response.from(${expr})`;
+      // Single containments start null (created empty, filled by an op).
+      return `${expr} == null ? null : ${t.name}Response.from(${expr})`;
     case "array": {
       const mapped = elementMapper(t.element);
       return mapped ? `${expr}.stream().map(${mapped}).toList()` : expr;

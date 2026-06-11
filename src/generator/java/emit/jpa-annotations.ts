@@ -67,6 +67,24 @@ export function jpaContainmentAnnotations(ownerName: string): string[] {
   ];
 }
 
+/** Single containment, parent side — JPA has no unidirectional
+ *  one-to-one with the FK on the part table, so the part carries a
+ *  hidden owning `_parent` relation and the root maps the inverse. */
+export function jpaSingleContainmentAnnotations(): string[] {
+  return [
+    `    @OneToOne(mappedBy = "_parent", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)`,
+  ];
+}
+
+/** Single containment, part side — the hidden owning relation writing
+ *  the parent-FK column (the part's read-only `parentId` mirrors it). */
+export function jpaSingleContainmentParentAnnotations(parentFkColumn: string): string[] {
+  return [
+    `    @OneToOne(fetch = FetchType.LAZY)`,
+    `    @JoinColumn(name = "${parentFkColumn}", nullable = false)`,
+  ];
+}
+
 /** Recursively flatten a value object into attribute overrides:
  *  property path `city` / `inner.zip` → column `<prefix>_city` /
  *  `<prefix>_inner_zip` (matching `flattenValueObject` in the
