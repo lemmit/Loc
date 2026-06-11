@@ -126,7 +126,6 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR): string | nul
   return lines(
     `"""In-process event dispatch (channels.md).  Auto-generated."""`,
     "",
-    "import logging",
     refersTo("datetime") ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     "",
@@ -139,12 +138,10 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR): string | nul
     `from app.domain.events import ${["DomainEvent", ...eventNames].join(", ")}`,
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     ...factoryAggs.map((n) => `from app.domain.${snake(n)} import ${n}`),
+    refersTo("log") ? "from app.obs.log import log" : null,
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
-    "",
-    '_log = logging.getLogger("loom.dispatch")',
-    "",
     "",
     body,
     "",
@@ -284,7 +281,7 @@ function handlerFn(
       out.push(`    state = await _load_${snake(wf.name)}(session, __key)`);
       out.push("    if state is None:");
       out.push(
-        `        _log.warning("event_unrouted workflow=${wf.name} event_type=${sub.event} key=%s", __key)`,
+        `        log("warn", "event_unrouted", workflow=${JSON.stringify(wf.name)}, event_type=${JSON.stringify(sub.event)}, key=__key)`,
       );
       out.push("        return");
     }

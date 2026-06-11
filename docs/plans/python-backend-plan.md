@@ -144,7 +144,7 @@ diff-sync semantics under SQLAlchemy.
 | S16a auth gate | ✅ | User dataclass + verifier registry + middleware (bypass list parity), trailing `current_user` threading (ops/finds/workflows + gated op-calls), 403 declared on guarded routes, synthetic test actor; verified live (401/403/204 + row-level `mine` scoping) |
 | S16b seeds | ✅ | app/db/seed.py — domain-create path (invariants run) + schema-qualified raw INSERTs, __loom_seed ship-once marker, LOOM_SEED gating, lifespan runs seeds after migrations + `python -m app.db.seed`; verified live (3 datasets once, re-boot no-op) |
 | S16c extern ops | ✅ | check_<op> precondition gate + controlled mutation surface (setters/raise_event/assert_invariants), `<agg>_handlers.py` typed registry + dev-stubs + lifespan verify, route dispatch with ExternHandlerError→500; verified live.  Resource verb clients (objectStore/queue/api) deferred — showcase doesn't exercise them (follow-up with Hono parity) |
-| S17 observability | next | |
+| S17 observability | ✅ | app/obs/ (CatalogFormatter flat-JSON envelope + log facade + request-bracket middleware with x-request-id correlation), lifecycle bracket in lifespan, health_ok debug, fault warns in problem handlers, event_unrouted on the catalog stream; `test:obs-python` + LOOM_OBS_E2E_PYTHON e2e (LOOM_OBS_PG_URL override) + python-obs-e2e.yml; passed live.  `--trace` domain instrumentation (invariant/precondition_evaluated) deferred — follow-up with Hono parity |
 | **S10 conformance** | **moved after S17** | showcase.ddd (the parity fixture) declares `auth: required` and exercises every feature — joining it requires S11–S17 first.  Matches the roadmap's Phase E exit criterion ("showcase passes the multi-backend suite") being terminal. |
 | S18, S19 | after S10 | |
 

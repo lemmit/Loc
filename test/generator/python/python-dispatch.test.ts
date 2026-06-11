@@ -68,7 +68,7 @@ describe("python event dispatch (sagas)", () => {
     const dispatch = files.get("api/app/dispatch.py")!;
     expect(dispatch).toContain("async def _order_fulfillment_on_shipment_requested(");
     expect(dispatch).toContain(
-      '_log.warning("event_unrouted workflow=OrderFulfillment event_type=ShipmentRequested key=%s", __key)',
+      'log("warn", "event_unrouted", workflow="OrderFulfillment", event_type="ShipmentRequested", key=__key)',
     );
     expect(dispatch).toContain("ship = await shipments.get_by_id(s.shipment)");
     expect(dispatch).toContain("ship.mark_tracked()");
