@@ -181,7 +181,7 @@ describe("java generator — Flyway migrations (S4)", () => {
 });
 
 describe("java validator — single-containment gate (S4)", () => {
-  it("rejects a non-collection containment on a java deployable, fail-fast", async () => {
+  it("accepts a root-declared non-collection containment (mapped since the @OneToOne slice)", async () => {
     const loom = await buildLoomModel(`
       system S {
         subdomain Core {
@@ -207,6 +207,6 @@ describe("java validator — single-containment gate (S4)", () => {
       }
     `);
     const diags = validateLoomModel(loom);
-    expect(diags.some((d) => d.code === "loom.java-single-containment-unsupported")).toBe(true);
+    expect(diags.some((d) => d.code === "loom.java-single-containment-unsupported")).toBe(false);
   });
 });

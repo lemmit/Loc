@@ -611,6 +611,7 @@ function emitSubscriptionHandlers(ctx: EnrichedBoundedContextIR): string[] {
         statements,
         saves,
         ctx,
+        durableEventTypes(ctx).size > 0,
       ),
     );
     out.push("");
@@ -681,7 +682,12 @@ function emitOutboxMachinery(durable: ReadonlySet<string>): string[] {
   out.push(`        .limit(batchSize);`);
   out.push(`      for (const row of rows) {`);
   out.push(`        try {`);
-  out.push(`          await inner.dispatch(row.payload as Events.DomainEvent);`);
+  // The outbox row id rides on the dispatched event so the saga handler's
+  // idempotent-consumer marker can no-op on redelivery (dispatch-delivery-
+  // semantics.md §3).  Inline (ephemeral) dispatch carries no id.
+  out.push(
+    `          await inner.dispatch({ ...(row.payload as Events.DomainEvent), __loomEventId: row.id } as Events.DomainEvent);`,
+  );
   out.push(
     `          await db.update(schema.loomOutbox).set({ dispatchedAt: new Date() }).where(eq(schema.loomOutbox.id, row.id));`,
   );
@@ -793,6 +799,11 @@ function emitHandlerFn(
   statements: WorkflowStmtIR[],
   saves: { name: string; aggName: string; repoName: string }[],
   ctx: BoundedContextIR,
+  /** Idempotent-consumer marker (dispatch-delivery-semantics.md §3): under a
+   *  durable channel the relay redelivers at-least-once, so the handler
+   *  no-ops when the saga row already records the inbound outbox event id
+   *  and stamps it before save.  Ephemeral contexts stay byte-identical. */
+  durable = false,
 ): string[] {
   const out: string[] = [];
   out.push(`export async function ${fn}(`);
@@ -829,6 +840,14 @@ function emitHandlerFn(
       out.push(`    return;`);
       out.push(`  }`);
     }
+    if (durable) {
+      // The relay threads the outbox row id onto the dispatched event
+      // (`__loomEventId`); inline (ephemeral) dispatch carries none.
+      out.push(`  const __eventId = (${paramName} as { __loomEventId?: string }).__loomEventId;`);
+      out.push(`  if (__eventId !== undefined && state.lastEventId === __eventId) {`);
+      out.push(`    return; // already processed — at-least-once redelivery (idempotent consumer)`);
+      out.push(`  }`);
+    }
     thisName = "state";
   }
   for (const r of collectReposFromStmts(statements, saves)) {
@@ -836,6 +855,9 @@ function emitHandlerFn(
   }
   for (const st of statements) out.push(...renderStmt(st, noParams, "  ", ctx, thisName));
   for (const save of saves) out.push(`  await ${lowerFirst(save.repoName)}.save(${save.name});`);
+  if (persisted && durable) {
+    out.push(`  if (__eventId !== undefined) state.lastEventId = __eventId;`);
+  }
   if (persisted) out.push(`  await save${upperFirst(wf.name)}(db, state);`);
   if (hasEmit) out.push(`  for (const ev of workflowEvents) await events.dispatch(ev);`);
   out.push(`}`);

@@ -5,11 +5,13 @@ import type {
   ExprIR,
   FindIR,
   OperationIR,
+  Platform,
   SubdomainIR,
   SystemIR,
   TestE2EIR,
   TestStmtIR,
 } from "../ir/types/loom-ir.js";
+import { platformFor } from "../platform/registry.js";
 import { lowerFirst, plural, snake } from "../util/naming.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 
@@ -191,10 +193,17 @@ function collectReferencedAggregateSlugs(statements: readonly TestStmtIR[]): Set
   return slugs;
 }
 
-/** A backend platform serves a queryable HTTP API.  Mirrors the
- *  `isFrontend` check in `src/ir/enrich/enrichments.ts:509`. */
+/** A backend platform serves a queryable HTTP API.  Consults the
+ *  platform registry's `isFrontend` flag (mirrors the enrichment
+ *  check in `src/ir/enrich/enrichments.ts`) so new frontend
+ *  platforms (`svelte`) are excluded without an edit here.  Unknown
+ *  platforms count as backends — the validator already errored. */
 function isBackendPlatform(platform: string): boolean {
-  return platform !== "react" && platform !== "static";
+  try {
+    return !platformFor(platform as Platform).isFrontend;
+  } catch {
+    return true;
+  }
 }
 
 /** Resolve `<slug>` (snake_plural of an aggregate name) to the

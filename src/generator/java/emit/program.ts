@@ -169,8 +169,23 @@ export function renderHealthController(basePkg: string): string {
   );
 }
 
-export function renderDockerfile(): string {
+export function renderDockerfile(options: { embeddedSpa?: boolean } = {}): string {
+  // Fullstack: a node stage builds the embedded React SPA (ClientApp/)
+  // and the runtime image serves the bundle from /app/ui on the same
+  // origin as the /api/* controllers (SpaWebConfig).
+  const spaStage = options.embeddedSpa
+    ? [
+        `FROM node:22-alpine AS spa-build`,
+        `WORKDIR /spa`,
+        `COPY ClientApp/package.json ClientApp/package-lock.json* ./`,
+        `RUN npm ci --prefer-offline --no-audit --no-fund || npm install`,
+        `COPY ClientApp/ ./`,
+        `RUN npm run build`,
+        ``,
+      ]
+    : [];
   return lines(
+    ...spaStage,
     `FROM gradle:8-jdk${JAVA_VERSION} AS build`,
     `WORKDIR /src`,
     `COPY build.gradle.kts settings.gradle.kts ./`,
@@ -183,12 +198,72 @@ export function renderDockerfile(): string {
     `FROM eclipse-temurin:${JAVA_VERSION}-jre`,
     `WORKDIR /app`,
     `COPY --from=build /src/build/libs/*.jar app.jar`,
+    options.embeddedSpa ? `COPY --from=spa-build /spa/dist /app/ui` : null,
     `EXPOSE 8080`,
     `ENTRYPOINT ["java", "-jar", "app.jar"]`,
     ``,
   );
 }
 
-export function renderDockerignore(): string {
-  return lines(`build/`, `.gradle/`, `.idea/`, `*.iml`, ``);
+export function renderDockerignore(options: { embeddedSpa?: boolean } = {}): string {
+  return lines(
+    `build/`,
+    `.gradle/`,
+    `.idea/`,
+    `*.iml`,
+    options.embeddedSpa ? `ClientApp/node_modules/` : null,
+    options.embeddedSpa ? `ClientApp/dist/` : null,
+    ``,
+  );
+}
+
+/** Fullstack mode — serve the embedded SPA bundle (UI_DIR, default
+ *  /app/ui) on the same origin as the /api/* controllers, with the
+ *  index.html fallback client-side routers need.  Controller mappings
+ *  take precedence over resource handlers, so /api, /health, /ready
+ *  and /openapi.json are unaffected. */
+export function renderSpaWebConfig(basePkg: string): string {
+  return lines(
+    `package ${basePkg}.config;`,
+    ``,
+    `import java.io.IOException;`,
+    ``,
+    `import org.springframework.context.annotation.Configuration;`,
+    `import org.springframework.core.io.Resource;`,
+    `import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;`,
+    `import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;`,
+    `import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;`,
+    `import org.springframework.web.servlet.resource.PathResourceResolver;`,
+    ``,
+    `@Configuration`,
+    `public class SpaWebConfig implements WebMvcConfigurer {`,
+    `    @Override`,
+    `    public void addViewControllers(ViewControllerRegistry registry) {`,
+    `        // "/" never reaches the resource resolver (empty path) — forward it.`,
+    `        registry.addViewController("/").setViewName("forward:/index.html");`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public void addResourceHandlers(ResourceHandlerRegistry registry) {`,
+    `        var uiDir = System.getenv().getOrDefault("UI_DIR", "/app/ui");`,
+    `        registry.addResourceHandler("/**")`,
+    `            .addResourceLocations("file:" + uiDir + "/")`,
+    `            .resourceChain(true)`,
+    `            .addResolver(new PathResourceResolver() {`,
+    `                @Override`,
+    `                protected Resource getResource(String resourcePath, Resource location) throws IOException {`,
+    `                    if (!resourcePath.isEmpty()) {`,
+    `                        var requested = location.createRelative(resourcePath);`,
+    `                        if (requested.isFile() && requested.exists() && requested.isReadable()) {`,
+    `                            return requested;`,
+    `                        }`,
+    `                    }`,
+    `                    // "/" and client-side routes → the SPA entry point.`,
+    `                    return location.createRelative("index.html");`,
+    `                }`,
+    `            });`,
+    `    }`,
+    `}`,
+    ``,
+  );
 }

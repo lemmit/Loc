@@ -622,7 +622,14 @@ function expandInlineScaffoldPrimitiveCalls(sys: SystemIR): void {
     const ctx = buildExpandContext(sys, ui);
     for (const page of ui.pages) {
       if (!page.body) continue;
+      // Per-page state sink: an expansion may synthesise state fields
+      // onto its host page (the find-filter inputs of
+      // `expandScaffoldList`).  Reset before, drain after.
+      ctx.pendingPageState = [];
       page.body = expandInlineScaffoldPrimitives(page.body, ctx);
+      if (ctx.pendingPageState.length > 0) {
+        page.state = [...page.state, ...ctx.pendingPageState];
+      }
     }
   }
 }

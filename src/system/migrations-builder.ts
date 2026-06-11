@@ -170,8 +170,11 @@ export function schemaFromModule(
   // schema, matching the plain `pgTable(...)` the Drizzle schema emitter uses
   // for these, so the runtime DDL and the ORM mapping line up.
   for (const ctx of module.contexts) {
+    const durable = durableEventTypes(ctx).size > 0;
     for (const wf of ctx.workflows) {
-      if (wf.correlationField) tables.push(workflowStateTableShape(wf, module.name, voLookup));
+      if (wf.correlationField) {
+        tables.push(workflowStateTableShape(wf, module.name, voLookup, durable));
+      }
     }
   }
   // Transactional outbox (dispatch-delivery-semantics.md): one shared table
@@ -219,6 +222,10 @@ function workflowStateTableShape(
   wf: WorkflowIR,
   ownerModule: string,
   voLookup: VoLookup,
+  /** Idempotent-consumer marker (dispatch-delivery-semantics.md §3): a
+   *  durable channel adds `last_event_id` so handlers can no-op on the
+   *  relay's at-least-once redelivery. */
+  durable = false,
 ): TableShape {
   const tableName = plural(snake(wf.name));
   const corr = wf.correlationField as string;
@@ -236,6 +243,9 @@ function workflowStateTableShape(
     for (const mapped of columnsForField(f, voLookup, wf.name)) {
       columns.push(mapped.column);
     }
+  }
+  if (durable) {
+    columns.push({ name: "last_event_id", type: { kind: "text" }, nullable: true });
   }
   return {
     name: tableName,
@@ -883,6 +893,7 @@ function mapTypeToColumn(t: TypeIR): {
     }
     case "optional":
       return mapTypeToColumn(t.inner);
+    case "action":
     case "slot":
       throw new Error(
         "mapTypeToColumn: 'slot' type is UI-only and should not reach the migrations builder.",

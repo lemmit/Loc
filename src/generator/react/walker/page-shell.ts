@@ -120,6 +120,10 @@ export function renderCustomLayoutPage(
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR> = new Map(),
   /** Page name → route path, for `Action`'s `then: navigate(<Page>)`. */
   pageRoutes: ReadonlyMap<string, string> = new Map(),
+  /** Extern frontend functions declared on this ui — body calls
+   *  register a use; the shell imports each used one from its
+   *  `src/lib/<name>` conformance shim. */
+  externFunctions: ReadonlySet<string> = new Set(),
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -134,6 +138,7 @@ export function renderCustomLayoutPage(
     usedApiHooks,
     formOfs,
     actionMutations,
+    usedExternFunctions,
   } = walkBodyToTsx(
     body,
     pack,
@@ -147,6 +152,7 @@ export function renderCustomLayoutPage(
     bcByWorkflow,
     aggregateParamTypes(params, aggregatesByName),
     pageRoutes,
+    externFunctions,
   );
   // Render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
@@ -158,6 +164,7 @@ export function renderCustomLayoutPage(
   let usesStateForTitle = false;
   if (title !== undefined) {
     const titleCtx: WalkContext = {
+      target: tsxTarget,
       imports,
       pack,
       paramNames,
@@ -200,6 +207,13 @@ export function renderCustomLayoutPage(
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((name) => `import ${name} from "${srcImportPrefix}components/${name}";\n`)
+    .join("");
+  // One named-import line per extern function the body calls — the
+  // conformance shim at `src/lib/<name>.ts` (the typed seam; see
+  // extern-function-hook-escape-hatch.md §3).
+  const externFunctionImports = [...(usedExternFunctions ?? [])]
+    .sort()
+    .map((name) => `import { ${name} } from "${srcImportPrefix}lib/${name}";\n`)
     .join("");
   // Api hook imports, grouped per `from` path so
   // multiple ops on the same aggregate dedupe to one import line
@@ -295,7 +309,7 @@ export function renderCustomLayoutPage(
   const navigateLine =
     usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${userComponentImports}${form.moduleScope}
+${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}
 export default function ${pageName}() {
 ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}  return (
     ${indentJsx(tsx, "    ")}
@@ -491,6 +505,9 @@ export function renderUserComponentFile(
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
   /** Page name → route path, for `Action`'s `then: navigate(<Page>)`. */
   pageRoutes: ReadonlyMap<string, string> = new Map(),
+  /** Extern frontend functions declared on this ui (shim imports for
+   *  body calls — same seam as pages). */
+  externFunctions: ReadonlySet<string> = new Set(),
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -505,6 +522,7 @@ export function renderUserComponentFile(
     usesChildren,
     actionMutations,
     formOfs,
+    usedExternFunctions,
   } = walkBodyToTsx(
     body,
     pack,
@@ -518,6 +536,7 @@ export function renderUserComponentFile(
     new Map(),
     aggregateParamTypes(params, aggregatesByName),
     pageRoutes,
+    externFunctions,
   );
   // Components live at `src/components/<Name>.tsx` (one hop to `src/`),
   // so api imports for Action mutation hooks resolve via `../api/<agg>`.
@@ -565,6 +584,12 @@ export function renderUserComponentFile(
     .sort()
     .map((n) => `import ${n} from "./${n}";\n`)
     .join("");
+  // Extern-function shim imports — components live at
+  // `src/components/<Name>.tsx`, one hop from `src/lib/`.
+  const externFunctionImports = [...(usedExternFunctions ?? [])]
+    .sort()
+    .map((n) => `import { ${n} } from "../lib/${n}";\n`)
+    .join("");
   // Props interface — every declared param becomes a typed field;
   // Slot()-using components also get a `children` field.  An
   // aggregate-typed param (`order: Order`) gets the aggregate's wire
@@ -582,12 +607,24 @@ export function renderUserComponentFile(
     if (isSlotShape(p.type)) {
       return "ReactNode";
     }
+    // `action` / `action(Order)` → void callback (Tier 2); the arg
+    // maps by the same wire-DTO rule as a data param.
+    const action = actionShape(p.type);
+    if (action) {
+      if (action.arg?.kind === "entity" && aggregatesByName.has(action.arg.name)) {
+        dtoImports.set(`${action.arg.name}Response`, `../api/${lowerFirst(action.arg.name)}`);
+        return `(arg: ${action.arg.name}Response) => void`;
+      }
+      return action.arg ? "(arg: string) => void" : "() => void";
+    }
     return typeRefAsTsString(p);
   };
   const propLines = params.map((p) => {
-    // `slot?` → optional prop (`name?: ReactNode`) so the caller can
-    // omit it.  Required slot (`name: slot`) stays mandatory.
-    const optional = p.type.kind === "optional" && p.type.inner.kind === "slot";
+    // `slot?` / `action?` → optional prop (`name?: ReactNode`) so the
+    // caller can omit it.  Required (`name: slot`) stays mandatory.
+    const optional =
+      p.type.kind === "optional" &&
+      (p.type.inner.kind === "slot" || p.type.inner.kind === "action");
     const sep = optional ? "?:" : ":";
     return `  ${p.name}${sep} ${propType(p)};`;
   });
@@ -610,7 +647,7 @@ export function renderUserComponentFile(
   // them with a `void` block when none made it into `tsx`.
   void usedParams;
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${userComponentImports}${propsType}${form.moduleScope}
+${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}
 export default function ${name}(${propDestructure}) {
 ${navigateLine}${actionWiring.decls}${form.decls}${stateLines}  return (
     ${indentJsx(tsx, "    ")}
@@ -623,6 +660,16 @@ ${navigateLine}${actionWiring.decls}${form.decls}${stateLines}  return (
  *  `ReactNode` in props. */
 function isSlotShape(t: ParamIR["type"]): boolean {
   return t.kind === "slot" || (t.kind === "optional" && t.inner.kind === "slot");
+}
+
+/** Unwrap an `action` / `action?` param type to the action TypeIR, else
+ *  undefined (extern-component-escape-hatch.md, Tier 2). */
+export function actionShape(
+  t: ParamIR["type"],
+): Extract<ParamIR["type"], { kind: "action" }> | undefined {
+  if (t.kind === "action") return t;
+  if (t.kind === "optional" && t.inner.kind === "action") return t.inner;
+  return undefined;
 }
 
 /** Emit the machine-owned typed-props interface for an `extern`
@@ -639,17 +686,36 @@ export function renderExternComponentProps(
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
 ): string {
   const dtoImports = new Map<string, string>(); // DTO type → api module
+  const wireType = (t: ParamIR["type"]): string => {
+    if (t.kind === "entity" && aggregatesByName.has(t.name)) {
+      dtoImports.set(`${t.name}Response`, `../api/${lowerFirst(t.name)}`);
+      return `${t.name}Response`;
+    }
+    // `orders: Order[]` — the doc's headline extern signature — maps to
+    // the wire-DTO array so the widget sees `OrderResponse[]`.
+    if (t.kind === "array") return `${wireType(t.element)}[]`;
+    return "string";
+  };
   const propType = (p: ParamIR): string => {
-    if (p.type.kind === "entity" && aggregatesByName.has(p.type.name)) {
-      dtoImports.set(`${p.type.name}Response`, `../api/${lowerFirst(p.type.name)}`);
-      return `${p.type.name}Response`;
+    if (p.type.kind === "entity" || (p.type.kind === "array" && p.type.element.kind === "entity")) {
+      return wireType(p.type);
     }
     if (isSlotShape(p.type)) return "ReactNode";
+    // `action` / `action(Order)` → a void callback the component fires
+    // (Tier 2); the arg type maps by the same wire-DTO rule as a data
+    // param, so the hand-written widget sees `(order: OrderResponse) =>
+    // void` and calls it from its own handlers.
+    const action = actionShape(p.type);
+    if (action) {
+      return action.arg ? `(arg: ${wireType(action.arg)}) => void` : "() => void";
+    }
     return typeRefAsTsString(p);
   };
   const propLines = params.map((p) => {
-    // `slot?` → optional prop so the caller can omit it.
-    const optional = p.type.kind === "optional" && p.type.inner.kind === "slot";
+    // `slot?` / `action?` → optional prop so the caller can omit it.
+    const optional =
+      p.type.kind === "optional" &&
+      (p.type.inner.kind === "slot" || p.type.inner.kind === "action");
     return `  ${p.name}${optional ? "?:" : ":"} ${propType(p)};`;
   });
   const needsReactNode = params.some((p) => isSlotShape(p.type));
@@ -734,6 +800,7 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
   // Empty walker context — init expressions don't see state /
   // params (they evaluate before the hooks run).
   const dummy: WalkContext = {
+    target: tsxTarget,
     imports: new Map(),
     pack,
     paramNames: new Set(),

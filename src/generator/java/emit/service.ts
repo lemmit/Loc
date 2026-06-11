@@ -1,6 +1,7 @@
 import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   FieldIR,
   RepositoryIR,
   TypeIR,
@@ -9,7 +10,8 @@ import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
-import { declaredFinds, isPagedFind } from "./repository.js";
+import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
+import { returnUnionSpec } from "./unions.js";
 import { aggHasAnyWireValidator, renderJavaValidators } from "./validator.js";
 import { collectWireToDomainImports, wireToDomain } from "./wire.js";
 
@@ -28,6 +30,11 @@ export interface ServiceCtx {
   domainRepoPkg: string;
   /** auth: required + system user block — gates currentUser threading. */
   authed?: boolean;
+  /** The enclosing context — resolves exception-less return unions. */
+  boundedContext: EnrichedBoundedContextIR;
+  /** Strongly-typed id class (default `<Agg>Id`); a TPH concrete passes
+   *  its base's `<Base>Id` (the shared single-table key). */
+  idClass?: string;
 }
 
 export function renderJavaService(
@@ -37,6 +44,7 @@ export function renderJavaService(
   ctx: ServiceCtx,
 ): string {
   const imports = new Set<string>(["java.util.List"]);
+  const idClass = ctx.idClass ?? `${agg.name}Id`;
   const idJava = javaValueTypeForId(agg.idValueType);
   if (idJava === "UUID") imports.add("java.util.UUID");
   const hasValidators = aggHasAnyWireValidator(agg);
@@ -53,7 +61,7 @@ export function renderJavaService(
   const createArgs = createInputs.map((f) => f.name).join(", ");
   const createLines = hasCreate(agg)
     ? [
-        `    public ${agg.name}Id create${agg.name}(Create${agg.name}Request request) {`,
+        `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
         ...createLets,
         hasValidators ? `        ${agg.name}Validators.create(${createArgs});` : null,
         `        var aggregate = ${agg.name}.create(${createArgs});`,
@@ -68,7 +76,7 @@ export function renderJavaService(
   // --- reads -------------------------------------------------------------------
   const readLines = [
     `    @Transactional(readOnly = true)`,
-    `    public ${agg.name}Response get${agg.name}ById(${agg.name}Id id) {`,
+    `    public ${agg.name}Response get${agg.name}ById(${idClass} id) {`,
     `        return repository.findById(id).map(${agg.name}Response::from).orElse(null);`,
     `    }`,
     ``,
@@ -78,52 +86,55 @@ export function renderJavaService(
     `    }`,
     ``,
   ];
-  const findLines = declaredFinds(repo).flatMap((f) => {
-    const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", ");
-    const args = f.params.map((p) => p.name).join(", ");
-    for (const p of f.params) collectWireToDomainImports(p.type, imports);
-    if (isPagedFind(f)) {
-      const pagedParams = [params, "int page, int pageSize"].filter(Boolean).join(", ");
-      const pagedArgs = [args, "page, pageSize"].filter(Boolean).join(", ");
+  const findLines = declaredFinds(repo)
+    .map((f) => unionFindAsOptionalTwin(f, agg.name))
+    .flatMap((f) => {
+      const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", ");
+      const args = f.params.map((p) => p.name).join(", ");
+      for (const p of f.params) collectWireToDomainImports(p.type, imports);
+      if (isPagedFind(f)) {
+        const pagedParams = [params, "int page, int pageSize"].filter(Boolean).join(", ");
+        const pagedArgs = [args, "page, pageSize"].filter(Boolean).join(", ");
+        return [
+          `    @Transactional(readOnly = true)`,
+          `    public Paged<${agg.name}Response> ${f.name}(${pagedParams}) {`,
+          `        var result = repository.${f.name}(${pagedArgs});`,
+          `        return new Paged<>(result.items().stream().map(${agg.name}Response::from).toList(),`,
+          `            result.page(), result.pageSize(), result.total(), result.totalPages());`,
+          `    }`,
+          ``,
+        ];
+      }
+      if (f.returnType.kind !== "array") {
+        return [
+          `    @Transactional(readOnly = true)`,
+          `    public ${agg.name}Response ${f.name}(${params}) {`,
+          `        var found = repository.${f.name}(${args});`,
+          `        return found == null ? null : ${agg.name}Response.from(found);`,
+          `    }`,
+          ``,
+        ];
+      }
       return [
         `    @Transactional(readOnly = true)`,
-        `    public Paged<${agg.name}Response> ${f.name}(${pagedParams}) {`,
-        `        var result = repository.${f.name}(${pagedArgs});`,
-        `        return new Paged<>(result.items().stream().map(${agg.name}Response::from).toList(),`,
-        `            result.page(), result.pageSize(), result.total(), result.totalPages());`,
+        `    public List<${agg.name}Response> ${f.name}(${params}) {`,
+        `        return repository.${f.name}(${args}).stream().map(${agg.name}Response::from).toList();`,
         `    }`,
         ``,
       ];
-    }
-    if (f.returnType.kind !== "array") {
-      return [
-        `    @Transactional(readOnly = true)`,
-        `    public ${agg.name}Response ${f.name}(${params}) {`,
-        `        var found = repository.${f.name}(${args});`,
-        `        return found == null ? null : ${agg.name}Response.from(found);`,
-        `    }`,
-        ``,
-      ];
-    }
-    return [
-      `    @Transactional(readOnly = true)`,
-      `    public List<${agg.name}Response> ${f.name}(${params}) {`,
-      `        return repository.${f.name}(${args}).stream().map(${agg.name}Response::from).toList();`,
-      `    }`,
-      ``,
-    ];
-  });
+    });
 
   // --- operations ----------------------------------------------------------------
   const anyOpUsesUser =
     !!ctx.authed &&
     agg.operations.some((op) => op.visibility === "public" && operationUsesCurrentUser(op));
+  const unionReturnNames = new Set<string>();
   const opLines = agg.operations
     .filter((op) => op.visibility === "public")
     .flatMap((op) => {
       const hasParams = op.params.length > 0;
       const reqType = `${upperFirst(op.name)}${agg.name}Request`;
-      const paramSig = hasParams ? `${agg.name}Id id, ${reqType} request` : `${agg.name}Id id`;
+      const paramSig = hasParams ? `${idClass} id, ${reqType} request` : `${idClass} id`;
       const lets = op.params.map(
         (p) => `        var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`)};`,
       );
@@ -152,17 +163,25 @@ export function renderJavaService(
           ``,
         ].filter((l): l is string => l !== null);
       }
+      // Exception-less return: the aggregate produces a tagged domain
+      // union — capture, save, return (the controller owns the wire /
+      // ProblemDetail translation).
+      const spec = returnUnionSpec(op, ctx.boundedContext);
+      if (spec) unionReturnNames.add(spec.name);
       return [
-        `    public void ${op.name}(${paramSig}) {`,
+        `    public ${spec ? spec.name : "void"} ${op.name}(${paramSig}) {`,
         ...lets,
         usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
         opHasValidator
           ? `        ${agg.name}Validators.${op.name}(${op.params.map((p) => p.name).join(", ")});`
           : null,
         `        var aggregate = repository.getById(id);`,
-        `        aggregate.${op.name}(${args});`,
+        spec
+          ? `        var result = aggregate.${op.name}(${args});`
+          : `        aggregate.${op.name}(${args});`,
         `        repository.save(aggregate);`,
         `        publishEvents(aggregate);`,
+        spec ? `        return result;` : null,
         `    }`,
         ``,
       ].filter((l): l is string => l !== null);
@@ -173,7 +192,7 @@ export function renderJavaService(
   const destroyLines =
     (agg.destroys?.length ?? 0) > 0
       ? [
-          `    public void destroy${agg.name}(${agg.name}Id id) {`,
+          `    public void destroy${agg.name}(${idClass} id) {`,
           `        var aggregate = repository.getById(id);`,
           `        repository.delete(aggregate);`,
           `    }`,
@@ -210,6 +229,9 @@ export function renderJavaService(
     `import org.springframework.transaction.annotation.Transactional;`,
     ``,
     ctx.entityPkg !== ctx.pkg ? `import ${ctx.entityPkg}.${agg.name};` : null,
+    ...(ctx.entityPkg !== ctx.pkg
+      ? [...unionReturnNames].sort().map((u) => `import ${ctx.entityPkg}.${u};`)
+      : []),
     ctx.domainRepoPkg !== ctx.pkg ? `import ${ctx.domainRepoPkg}.${agg.name}Repository;` : null,
     anyOpUsesUser ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     anyOpUsesUser ? `import ${ctx.basePkg}.auth.User;` : null,
@@ -272,5 +294,5 @@ function opHasWireValidator(agg: EnrichedAggregateIR, opName: string): boolean {
   // Cheap re-derivation through the validator emitter: render once and
   // check the method exists.  Validators are small; clarity wins.
   const rendered = renderJavaValidators(agg, "p", "b");
-  return rendered !== null && rendered.includes(` ${opName}(`);
+  return rendered?.includes(` ${opName}(`) ?? false;
 }

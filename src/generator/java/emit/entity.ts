@@ -8,7 +8,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { upperFirst } from "../../../util/naming.js";
+import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
 import {
   collectJavaExprImports,
@@ -17,6 +17,7 @@ import {
   renderJavaExpr,
   renderJavaType,
 } from "../render-expr.js";
+import { renderSqlRestriction } from "../render-sql-restriction.js";
 import { collectJavaStmtImports, renderJavaStatements } from "../render-stmt.js";
 import {
   jpaClassAnnotations,
@@ -24,6 +25,8 @@ import {
   jpaFieldAnnotations,
   jpaIdAnnotations,
   jpaParentIdAnnotations,
+  jpaSingleContainmentAnnotations,
+  jpaSingleContainmentParentAnnotations,
   needsHibernateTypes,
 } from "./jpa-annotations.js";
 
@@ -86,6 +89,12 @@ export interface JavaEntityOptions {
     /** The aggregate that physically owns the parent table (differs from
      *  the root name for TPH concretes) — names containment FK columns. */
     containmentOwnerName?: string;
+    /** Parts that are the target of a root-level *single* containment:
+     *  the root entity class.  The part then carries the hidden owning
+     *  `_parent` @OneToOne (JPA has no unidirectional one-to-one with
+     *  the FK on the part table) and its `_create` factory takes the
+     *  parent entity instead of the parent id. */
+    oneToOneParentOf?: string;
     voLookup: ReadonlyMap<string, readonly FieldIR[]>;
   };
 }
@@ -102,7 +111,7 @@ export function renderJavaEntity(
   const isAgg = (e: typeof entity): e is EnrichedAggregateIR => "operations" in e;
   const emitTrace = !!options.emitTrace;
   const superType = options.superType;
-  const idValueType = isAgg(entity) ? entity.idValueType : "guid";
+  const _idValueType = isAgg(entity) ? entity.idValueType : "guid";
   const idClass = superType?.sharesIdentity ? `${superType.name}Id` : `${entity.name}Id`;
   const operations = isAgg(entity) ? entity.operations : [];
   const createInputFieldList = isAgg(entity) ? forCreateInput(entity.fields) : [];
@@ -160,6 +169,10 @@ export function renderJavaEntity(
     fieldLines.push(`    ${idClass} id;`);
   }
   if (!isRoot) {
+    if (persistence?.oneToOneParentOf && persistence.parentFkColumn) {
+      fieldLines.push(...jpaSingleContainmentParentAnnotations(persistence.parentFkColumn));
+      fieldLines.push(`    ${persistence.oneToOneParentOf} _parent;`);
+    }
     if (persistence?.parentFkColumn) {
       fieldLines.push(...jpaParentIdAnnotations(persistence.parentFkColumn));
     }
@@ -183,7 +196,10 @@ export function renderJavaEntity(
       }
       fieldLines.push(`    List<${c.partName}> ${c.name} = new ArrayList<>();`);
     } else {
-      // Gated upstream: loom.java-single-containment-unsupported.
+      // Inverse side of the part's hidden owning `_parent` @OneToOne
+      // (part-declared single containments stay gated upstream:
+      // loom.java-single-containment-unsupported).
+      if (persistence) fieldLines.push(...jpaSingleContainmentAnnotations());
       fieldLines.push(`    ${c.partName} ${c.name};`);
     }
   }
@@ -427,16 +443,22 @@ export function renderJavaEntity(
         ]
       : [];
   // Part factory — the target of the renderer's `new <Part>` arm:
-  // positional (parentId first, then every declared field in order).
+  // positional (parent first, then every declared field in order).
+  // Single-containment parts take the parent *entity* (the hidden
+  // owning `_parent` @OneToOne needs the instance); collection parts
+  // take the parent id (their FK is written by the root's @JoinColumn).
+  const oneToOneParent = persistence?.oneToOneParentOf;
   const partFactoryLines: string[] = !isRoot
     ? [
         `    public static ${entity.name} _create(${[
-          `${rootName}Id parentId`,
+          oneToOneParent ? `${oneToOneParent} parent` : `${rootName}Id parentId`,
           ...entity.fields.map((f) => `${renderJavaType(f.type)} ${f.name}`),
         ].join(", ")}) {`,
         `        var p = new ${entity.name}();`,
         `        p.id = ${entity.name}Id.newId();`,
-        `        p.parentId = parentId;`,
+        ...(oneToOneParent
+          ? [`        p._parent = parent;`, `        p.parentId = parent.id();`]
+          : [`        p.parentId = parentId;`]),
         ...entity.fields.map((f) => `        p.${f.name} = ${f.name};`),
         emitTrace ? `        p._assertInvariants("<init>");` : `        p._assertInvariants();`,
         `        return p;`,
@@ -467,6 +489,14 @@ export function renderJavaEntity(
   while (body.length > 0 && body[body.length - 1] === "") body.pop();
 
   const usesHibernateTypes = persistence && needsHibernateTypes(entity.fields);
+  // Capability filters (non-principal, relational — the validator gates
+  // the rest) ride Hibernate's @SQLRestriction: one static WHERE
+  // fragment appended to every SELECT (the HasQueryFilter analog).
+  const contextFilters = isRoot && isAgg(entity) ? (entity.contextFilters ?? []) : [];
+  const sqlRestriction =
+    persistence && contextFilters.length > 0
+      ? `@SQLRestriction(${JSON.stringify(contextFilters.map(renderSqlRestriction).join(" and "))})`
+      : null;
   return lines(
     `package ${pkg};`,
     ``,
@@ -474,6 +504,7 @@ export function renderJavaEntity(
     ``,
     persistence ? `import jakarta.persistence.*;` : null,
     usesHibernateTypes ? `import org.hibernate.annotations.JdbcTypeCode;` : null,
+    sqlRestriction ? `import org.hibernate.annotations.SQLRestriction;` : null,
     usesHibernateTypes ? `import org.hibernate.type.SqlTypes;` : null,
     persistence ? `` : null,
     `import ${basePkg}.domain.common.*;`,
@@ -484,12 +515,18 @@ export function renderJavaEntity(
     anyOpUsesCurrentUser ? `import ${basePkg}.auth.User;` : null,
     superType?.pkg && superType.pkg !== pkg ? `import ${superType.pkg}.${superType.name};` : null,
     ``,
-    persistence
-      ? jpaClassAnnotations(persistence.tableName, {
-          schema: persistence.schema,
-          voLookup: persistence.voLookup,
-        })
-      : null,
+    // TPH concretes (sharesIdentity) inherit the base's shared @Table —
+    // they carry only @Entity + their @DiscriminatorValue (= the kind
+    // value every backend stamps).
+    persistence && superType?.sharesIdentity
+      ? [`@Entity`, `@DiscriminatorValue("${entity.name}")`]
+      : persistence
+        ? jpaClassAnnotations(persistence.tableName, {
+            schema: persistence.schema,
+            voLookup: persistence.voLookup,
+          })
+        : null,
+    sqlRestriction,
     jmolecules,
     `public class ${entity.name}${superType ? ` extends ${superType.name}` : ""} {`,
     ...fieldLines,
@@ -527,15 +564,26 @@ export function renderJavaAbstractBaseEntity(
   }
   // `protected` — concretes may live in a different package (byLayer)
   // and their factories / operations write through these fields.
-  const idLines = options.tph ? [`    protected ${base.name}Id id;`] : [];
+  const idLines = options.tph
+    ? [
+        ...(persistence
+          ? [
+              `    @EmbeddedId`,
+              `    @AttributeOverride(name = "value", column = @Column(name = "id"))`,
+            ]
+          : []),
+        `    protected ${base.name}Id id;`,
+      ]
+    : [];
   const idAccessor = options.tph
     ? [`    public ${base.name}Id id() {`, `        return id;`, `    }`, ``]
     : [];
   const fieldLines = base.fields.flatMap((f) => [
     // TPC bases are @MappedSuperclass — their column mappings flatten
     // into each concrete's own table (the schema merges base + own
-    // fields per concrete), so annotate here and the concretes inherit.
-    ...(persistence && !options.tph
+    // fields per concrete).  TPH bases are real @Entity roots of the
+    // SINGLE_TABLE hierarchy — same per-field bindings, shared table.
+    ...(persistence
       ? jpaFieldAnnotations(f, base, { schema: persistence.schema, voLookup: persistence.voLookup })
       : []),
     `    protected ${renderJavaType(f.type)} ${f.name};`,
@@ -571,9 +619,19 @@ export function renderJavaAbstractBaseEntity(
     `import ${basePkg}.domain.valueobjects.*;`,
     ``,
     options.tph
-      ? `// Abstract TPH base — the hierarchy maps to one shared table owning the id.`
+      ? `// Abstract TPH base — the hierarchy maps to one shared table owning the id`
       : `// Abstract TPC base — never instantiated; each concrete maps base + own`,
-    options.tph ? null : `// columns onto its own table (JPA @MappedSuperclass).`,
+    options.tph
+      ? `// (JPA SINGLE_TABLE; concretes carry @DiscriminatorValue over the kind column).`
+      : `// columns onto its own table (JPA @MappedSuperclass).`,
+    ...(persistence && options.tph
+      ? [
+          `@Entity`,
+          `@Table(name = "${plural(snake(base.name))}"${persistence.schema ? `, schema = "${persistence.schema}"` : ""})`,
+          `@Inheritance(strategy = InheritanceType.SINGLE_TABLE)`,
+          `@DiscriminatorColumn(name = "kind")`,
+        ]
+      : []),
     persistence && !options.tph ? `@MappedSuperclass` : null,
     `public abstract class ${base.name} {`,
     ...idLines,

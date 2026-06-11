@@ -228,12 +228,18 @@ export function typeLabel(t: TypeIR): string {
       return `${typeLabel(t.inner)}?`;
     case "slot":
       return "slot";
+    case "action":
+      return t.arg ? `action(${typeLabel(t.arg)})` : "action";
     case "genericInstance":
       return `${typeLabel(t.arg)} ${t.ctor}`;
     case "union":
       return t.variants.map(typeLabel).join(" or ");
     case "none":
       return "none";
+    case "action":
+      // Function-valued component-param marker; match the source-faithful
+      // `action` / `action(<arg>)` label the AST printer emits.
+      return t.arg ? `action(${typeLabel(t.arg)})` : "action";
   }
 }
 

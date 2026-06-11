@@ -1,0 +1,25 @@
+system SC {
+  subdomain D {
+    context Shop {
+      aggregate Order {
+        code: string
+        contains shipment: Shipment
+        entity Shipment { carrier: string  trackingCode: string }
+        operation ship(carrier: string, tracking: string) {
+          shipment := Shipment { carrier: carrier, trackingCode: tracking }
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable scApi {
+    platform: java
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    port: 8081
+  }
+}

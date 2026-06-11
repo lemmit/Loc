@@ -228,9 +228,13 @@ UiBlockBinding:
 // of `phoenixLiveView` (the framework, decoupled from the host
 // platform name); lowering canonicalises it to `phoenixLiveView`.
 // Future values (`blazor-wasm`, `blazor-server`, …) extend this enum
-// when their codegen backends land.
+// when their codegen backends land.  `svelte` renders Svelte 5
+// (SvelteKit static SPA) against a svelte-format design pack
+// (`shadcnSvelte`/`flowbite`); `vue` renders Vue 3 (Vite SPA +
+// vue-router) against a vue-format design pack
+// (`vuetify`/`shadcnVue`).
 Framework returns string:
-    'react' | 'phoenixLiveView' | 'liveview';
+    'react' | 'svelte' | 'vue' | 'phoenixLiveView' | 'liveview';
 
 // Backend platforms accept a quoted `family@version` pin
 // (`platform: "hono@v4"`) via the STRING alternative — symmetric
@@ -244,18 +248,20 @@ Framework returns string:
 // FastAPI + SQLAlchemy backend; `fastapi` is its framework-spelled
 // alias and desugars to `python` (mirrors `hono` → `node`).
 Platform returns string:
-    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'python' | 'fastapi' | 'java' | STRING;
+    'dotnet' | 'hono' | 'node' | 'react' | 'svelte' | 'vue' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'python' | 'fastapi' | 'java' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,
 // and `mui` are React/TSX packs; `ashPhoenix` is the HEEx pack for
-// the Phoenix LiveView platform.  STRING points at a custom pack:
+// the Phoenix LiveView platform; `shadcnSvelte` and `flowbite` are
+// the Svelte packs; `vuetify` and `shadcnVue` are the Vue packs.
+// STRING points at a custom pack:
 // a directory with `pack.json` resolved relative to the .ddd file.
 // Only meaningful when the deployable mounts a UI; ignored
 // otherwise.  Named `design` (not `ui`) to avoid colliding with
 // the test-DSL's `ui.workflows.X(...)` accessor.
 DesignPack returns string:
-    'mantine' | 'shadcn' | 'mui' | 'chakra' | 'ashPhoenix' | STRING;
+    'mantine' | 'shadcn' | 'mui' | 'chakra' | 'ashPhoenix' | 'shadcnSvelte' | 'flowbite' | 'vuetify' | 'shadcnVue' | STRING;
 // Per-deployable auth opt-in.  `required` enables JWT-decode middleware
 // and the user-supplied verifier hook.  Absence keeps the deployable
 // open (existing behaviour).  Future modes (`optional`, `forbidden`)
@@ -291,7 +297,7 @@ Ui:
     '}';
 
 UiMember:
-    UiApiParam | UiChannelParam | UiNotification | Page | Component | MenuBlock;
+    UiApiParam | UiChannelParam | UiNotification | UiFunction | Page | Component | MenuBlock;
 
 // ---- api declaration (system-level) ----------------------------
 //
@@ -393,6 +399,21 @@ UiApiParam:
 // resolves `channel` within the named context.
 UiChannelParam:
     'channel' name=ID ':' context=[BoundedContext:ID] '.' channel=[Channel:ID];
+
+// Frontend logic escape hatch (extern-function-hook-escape-hatch.md §3):
+//
+//   function initials(name: string): string extern from "./helpers/initials"
+//
+// A typed pure function implemented by a hand-written module.  Loom emits
+// a typed signature (`src/lib/extern/<name>.signature.ts`) + a conformance
+// shim (`src/lib/<name>.ts`, `export const <name>: <Name>Fn = _impl`) so a
+// missing module or mismatched signature fails `tsc` — the fail-fast.
+// Page bodies call it through the shim.  v1 is extern-only (a bodied
+// ui-level function has no walker consumer); the keyword reuses the
+// aggregate-member `function` — ui-member position disambiguates.
+UiFunction:
+    'function' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef
+        'extern' 'from' externPath=STRING;
 
 // ---- live-event handler --------------------------------------------
 //
@@ -1187,6 +1208,10 @@ Property:
         // (`event Bumped { by: int }`) / `handle` (`engineer { handle: string }`)
         // keep parsing — hard only in the reactor clause / workflow handle member.
         | 'by' | 'handle'
+        // `action` soft in property position so audit-shaped fields
+        // (`AuditEntry { action: string }`) keep parsing — hard only in the
+        // `ActionType` type position (Tier 2).
+        | 'action'
         // `state` / `title` / `body` soft in property position so common domain
         // fields by those names (`state: Status`, `title: string`, `body: string`)
         // parse — they are hard keywords only in the page DSL (`state { … }`
@@ -1384,7 +1409,11 @@ LooseName returns string:
     // Retrieval keywords (retrieval.md) admitted as soft so user code can
     // still name a field `retrieval` / `sort` / `loads` / `asc` / `desc`.
     // Hard only inside the `Retrieval` rule's slots.
-    | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc';
+    | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc'
+    // `action` (extern-component-escape-hatch.md, Tier 2) admitted as soft
+    // so user code can still name a field / arg `action`; hard only in the
+    // `ActionType` type position.
+    | 'action';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1423,7 +1452,7 @@ GenericCtor returns string:
     'paged' | 'envelope' | 'option';
 
 BaseType:
-    PrimitiveType | SlotType | IdType | NamedType;
+    PrimitiveType | SlotType | ActionType | IdType | NamedType;
 
 PrimitiveType:
     name=('int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid' | 'json');
@@ -1436,6 +1465,18 @@ PrimitiveType:
 // position.  The validator pins the position restriction.
 SlotType:
     name='slot';
+
+// Function-valued param type for component behaviour injection —
+// `slot` carries elements, `action` carries behaviours
+// (extern-component-escape-hatch.md, Tier 2).  Bare `action` is a
+// zero-arg callback; `action(Order)` declares the callback's single
+// argument type explicitly on the param (argument types are never
+// inferred from call sites — lambda param types flow forward from
+// the expected type).  Valid only on a component's parameter list;
+// the caller passes a (block-body) lambda whose body is walked and
+// hoisted in the caller's scope, exactly as `onSubmit` is.
+ActionType:
+    name='action' ('(' arg=TypeRef ')')?;
 
 IdType:
     target=[NamedDecl:ID] 'id';
@@ -1553,7 +1594,10 @@ LValueIdent returns string:
        // `by` / `handle` soft in l-value position so an assignment target
        // naming a field `by` / `handle` (`handle := handle`) parses — hard only
        // in the reactor clause / workflow handle member (A2-S3/S5c).
-       | 'by' | 'handle';
+       | 'by' | 'handle'
+       // `action` soft in l-value position (Tier 2 `ActionType` is the only
+       // hard position).
+       | 'action';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)
@@ -1665,7 +1709,10 @@ MemberName returns string:
        // after `.` so member access on a field named `paged` / `envelope` /
        // `option` / `or` keeps parsing; hard only in the `GenericCtor`
        // postfix-type slot / the `or` union separator.
-       | 'paged' | 'envelope' | 'option' | 'or';
+       | 'paged' | 'envelope' | 'option' | 'or'
+       // `action` admitted after `.` (Tier 2 `ActionType` is the only hard
+       // position).
+       | 'action';
 
 // Lambdas accept either a single expression body (the only form
 // in v22) or a brace-wrapped block of statements.  Block bodies
@@ -1875,7 +1922,10 @@ NameRefIdent returns string:
        // Retrieval keywords (retrieval.md) admitted as bare NameRefs so an
        // expression can read a field named `retrieval` / `sort` / `loads` /
        // `asc` / `desc`.  Hard only inside the `Retrieval` rule's slots.
-       | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc';
+       | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc'
+       // `action` admitted as a bare NameRef (Tier 2 `ActionType` is the only
+       // hard position).
+       | 'action';
 
 // ---------------------------------------------------------------------------
 // Terminals

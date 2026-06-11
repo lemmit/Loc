@@ -22,7 +22,11 @@ import {
   defaultsFor,
   hasAdapters,
 } from "../../../platform/resolve-adapters.js";
-import { BUILTIN_PACK_LATEST, packFormatForBuiltin } from "../../../util/builtin-formats.js";
+import {
+  BUILTIN_PACK_LATEST,
+  type PackFormat,
+  packFormatForBuiltin,
+} from "../../../util/builtin-formats.js";
 import {
   applicationAdapterToDsl,
   applicationDslToAdapter,
@@ -31,7 +35,7 @@ import {
 
 /** Frontend keyword platforms — those that are valid as bareword
  *  `platform:` values without being registered as a backend family. */
-export const FRONTEND_KEYWORDS: ReadonlySet<string> = new Set(["react", "static"]);
+export const FRONTEND_KEYWORDS: ReadonlySet<string> = new Set(["react", "svelte", "vue", "static"]);
 
 /** True iff this platform mounts a UI (admits a `ui:` binding).
  *  Consults the runtime PlatformSurface registry so adding a new
@@ -118,6 +122,8 @@ export function expectedFrameworkFor(
   // framework as its bareword.
   const fam = platformFamily(platform);
   if (fam === "react" || fam === "static") return "react";
+  if (fam === "svelte") return "svelte";
+  if (fam === "vue") return "vue";
   if (fam === "elixir") return "phoenixLiveView";
   // dotnet and java are dual-mode: backend-only without `ui:`, embedded
   // React SPA host with it.
@@ -128,8 +134,10 @@ export function expectedFrameworkFor(
 /** Format a given framework's design pack must declare.  Mirrors
  *  `expectedFrameworkFor`; used by Rule 14 to cross-check the
  *  deployable's `design:` against its framework. */
-export function expectedPackFormatFor(framework: string | undefined): "tsx" | "heex" | undefined {
+export function expectedPackFormatFor(framework: string | undefined): PackFormat | undefined {
   if (framework === "react") return "tsx";
+  if (framework === "svelte") return "svelte";
+  if (framework === "vue") return "vue";
   if (framework === "phoenixLiveView") return "heex";
   return undefined;
 }
@@ -140,7 +148,7 @@ export function expectedPackFormatFor(framework: string | undefined): "tsx" | "h
  *  shadcn, mui, chakra.").  Reads `BUILTIN_PACK_LATEST` so the
  *  suggestion follows the bareword resolution rule: each family
  *  shows up once, no `@version` noise. */
-export function builtinPackNamesForFormat(format: "tsx" | "heex"): string {
+export function builtinPackNamesForFormat(format: PackFormat): string {
   return (Object.keys(BUILTIN_PACK_LATEST) as Array<keyof typeof BUILTIN_PACK_LATEST>)
     .filter((family) => {
       const f = packFormatForBuiltin(family);

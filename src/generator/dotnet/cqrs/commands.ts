@@ -126,6 +126,26 @@ export function emitOperationCommandsAndHandlers(
   idClass: string = `${agg.name}Id`,
 ): void {
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+    emitOperationCommandAndHandler(agg, op, ctx, ns, aggFolder, out, idClass);
+  }
+}
+
+/** The per-OPERATION slice of the loop above (F5d decomposition): every
+ *  artifact one public mutation operation produces — command, optional
+ *  FluentValidation validator, Mediator handler, and (extern ops) the
+ *  user-implementable interface + dev stub.  `emitOperationCommandsAndHandlers`
+ *  delegates here per op; the cqrs StyleAdapter's `emitHandlerOrService(op)`
+ *  calls it directly for one op. */
+export function emitOperationCommandAndHandler(
+  agg: AggregateIR,
+  op: AggregateIR["operations"][number],
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+  aggFolder: string,
+  out: Map<string, string>,
+  idClass: string = `${agg.name}Id`,
+): void {
+  {
     const params = [
       `${idClass} Id`,
       ...op.params.map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`),
@@ -250,7 +270,7 @@ export function emitOperationCommandsAndHandlers(
             `        return Unit.Value;\n`,
         }),
       );
-      continue;
+      return;
     }
     // A return-typed op threads the union value: capture the method result,
     // save, then return it (the aggregate produces the tagged Domain union).

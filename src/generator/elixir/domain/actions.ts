@@ -23,14 +23,23 @@ import {
   stmtUsesThis,
 } from "./predicates.js";
 
-/** `policies do … end` block — one `policy action(:op)` per guarded
- *  operation, authorizing via the op's generated SimpleCheck.  Idiomatic
- *  Ash authorization: a failed check yields `Ash.Error.Forbidden`, which
- *  the bang code-interface raises and Phoenix maps to HTTP 403 (matching
- *  Hono/.NET).  Returns "" when the aggregate has no guarded operations. */
+/** `policies do … end` block — a base `policy always()` that authorizes
+ *  every action, then one `policy action(:op)` per guarded operation
+ *  authorizing via the op's generated SimpleCheck.  Ash's policy authorizer
+ *  DENIES any action with no matching policy, so without the base allow the
+ *  un-guarded CRUD actions (`:read`/`:create`/`:destroy`/…) would all 403.
+ *  Ash ANDs every applicable policy, so a guarded op is authorized only if
+ *  both the base allow AND its specific check pass — the guard stays
+ *  enforced (a failed check still yields `Ash.Error.Forbidden` → HTTP 403,
+ *  matching Hono/.NET); coarse "must be authenticated" auth is enforced
+ *  separately by the deployable's JWT plug.  Returns "" when the aggregate
+ *  has no guarded operations (no authorizer is attached in that case). */
 export function renderPolicies(agg: AggregateIR, resourceModule: string): string {
   const guarded = agg.operations.filter(isGuardedOperation);
   if (guarded.length === 0) return "";
+  // Base allow: un-guarded actions are authorized for any caller; the
+  // guarded `policy action(:op)` blocks below AND a second check on top.
+  const baseAllow = `    policy always() do\n      authorize_if always()\n    end`;
   const blocks = guarded.map(
     (op) =>
       `    policy action(:${snake(op.name)}) do\n      authorize_if ${policyCheckModule(
@@ -38,7 +47,7 @@ export function renderPolicies(agg: AggregateIR, resourceModule: string): string
         op,
       )}\n    end`,
   );
-  return `\n  policies do\n${blocks.join("\n")}\n  end\n`;
+  return `\n  policies do\n${baseAllow}\n${blocks.join("\n")}\n  end\n`;
 }
 
 /** One `Ash.Policy.SimpleCheck` module per guarded operation.  Reuses the

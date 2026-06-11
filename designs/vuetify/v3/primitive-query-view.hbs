@@ -1,0 +1,20 @@
+<div>
+{{indent}}<template v-if="{{{queryExpr}}}.isLoading">
+{{branchIndent}}{{{loadingJsx}}}
+{{indent}}</template>
+{{indent}}<template v-if="{{{queryExpr}}}.isError">
+{{branchIndent}}{{{errorJsx}}}
+{{indent}}</template>
+{{#if single}}{{indent}}<template v-if="!{{{queryExpr}}}.isLoading && !{{{queryExpr}}}.isError && !{{{queryExpr}}}.data">
+{{branchIndent}}{{{emptyJsx}}}
+{{indent}}</template>
+{{indent}}<template v-if="{{{queryExpr}}}.data">
+{{branchIndent}}{{{dataJsx}}}
+{{indent}}</template>
+{{else}}{{indent}}<template v-if="{{{queryExpr}}}.data && {{{queryExpr}}}.data.length === 0">
+{{branchIndent}}{{{emptyJsx}}}
+{{indent}}</template>
+{{indent}}<template v-if="{{{queryExpr}}}.data && {{{queryExpr}}}.data.length > 0">
+{{branchIndent}}{{{dataJsx}}}
+{{indent}}</template>
+{{/if}}{{closeIndent}}</div>

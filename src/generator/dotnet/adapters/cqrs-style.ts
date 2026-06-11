@@ -4,15 +4,17 @@
 // source stays byte-identical with today's `generateDotnetForContexts`
 // output.
 //
-// Granularity note: the StyleAdapter contract surfaces per-OPERATION
-// emit methods (`emitEndpoint(op)` / `emitHandlerOrService(op)`) as
-// the design target, but today's `emitCqrs` operates per-AGGREGATE —
-// it packages every command / query / handler / controller for one
-// aggregate as a single unit.  The optional `emitForAggregate(agg)`
-// method bridges the gap: real style adapters can land their existing
-// per-aggregate emit shape today, with the per-op methods staying as
-// stubs the F5d orchestrator rewire will fill in when it decomposes
-// the per-aggregate output into per-op artifacts.
+// Granularity note (F5d, done for this style): the per-OPERATION emit
+// methods are REAL here — `emitHandlerOrService(op)` produces one
+// operation's command / validator / handler (+ extern interface & stub)
+// through the exported `emitOperationCommandAndHandler` slice, and
+// `emitEndpoint(op)` produces that operation's controller action block
+// through `buildOperationSpec` + `renderOperationActionBlock`.  Both
+// return the byte-identical content the per-aggregate path packages
+// (gated by `cqrs-style-per-op.test.ts`).  The orchestrator still
+// routes through `emitForAggregate` (the create/destroy/query/DTO
+// surfaces remain aggregate-scoped); per-op dispatch is available for
+// styles and orchestrators that want operation-grained placement.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -22,14 +24,14 @@ import type {
   OperationIR,
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
-import {
-  AdapterNotImplementedError,
-  type EmitCtx,
-  type EmittedArtifact,
-  type Lines,
-  type StyleAdapter,
-} from "../../_adapters/index.js";
+import { tableOwnerName } from "../../../ir/util/inheritance.js";
+import { plural } from "../../../util/naming.js";
+import type { EmitCtx, EmittedArtifact, Lines, StyleAdapter } from "../../_adapters/index.js";
+import { emitOperationCommandAndHandler } from "../cqrs/commands.js";
+import { buildOperationSpec } from "../cqrs/controller.js";
 import { emitCqrs } from "../cqrs-emit.js";
+import { csIdValueClrType } from "../dto-mapping.js";
+import { renderOperationActionBlock } from "../emit/api.js";
 import type { DotnetArtifactCategory } from "./by-layer-layout.js";
 
 /** Namespace string the dotnet emitter threads everywhere as `ns`.
@@ -86,31 +88,73 @@ function categoriseCqrsPath(path: string): DotnetArtifactCategory {
   throw new Error(`cqrsStyleAdapter: unclassifiable CQRS path '${path}'.`);
 }
 
-/** Lazy lookup of sibling style names for the not-yet-implemented
- *  error message — keeps the per-op stubs honest about what's
- *  available without coupling to the registry's stub-throws helper. */
-const realSiblings = (): readonly string[] => ["cqrs"];
+/** Resolve the aggregate (and owning context) that declares `op`.
+ *  `OperationIR` carries no back-pointer, so the per-op adapter methods
+ *  locate the host by reference identity (the IR holds one object per
+ *  operation), falling back to a name match for programmatically
+ *  rebuilt IR. */
+function hostOf(
+  op: OperationIR,
+  ctx: EmitCtx,
+): { agg: EnrichedAggregateIR; owningCtx: EnrichedBoundedContextIR } {
+  for (const c of ctx.contexts) {
+    for (const a of c.aggregates) {
+      if (a.operations.includes(op)) return { agg: a, owningCtx: c };
+    }
+  }
+  for (const c of ctx.contexts) {
+    for (const a of c.aggregates) {
+      if (a.operations.some((o) => o.name === op.name)) return { agg: a, owningCtx: c };
+    }
+  }
+  throw new Error(
+    `cqrsStyleAdapter: operation '${op.name}' is not declared by any aggregate in scope.`,
+  );
+}
 
 export const cqrsStyleAdapter: StyleAdapter = {
   name: "cqrs",
   supportedStrategies: ["state", "eventLog"],
   supportedLayouts: ["byLayer", "byFeature"],
 
-  emitEndpoint(_op: OperationIR, _ctx: EmitCtx): Lines {
-    // Per-op extraction is the F5d rewire's job.  The existing
-    // `emitCqrs` packages all of an aggregate's controller routes in
-    // one file, so a per-op extraction needs the controller emitter
-    // to be split before this method has a clean implementation.
-    throw new AdapterNotImplementedError("style", "cqrs", "dotnet", realSiblings());
+  emitEndpoint(op: OperationIR, ctx: EmitCtx): Lines {
+    // The per-OPERATION controller action block (F5d): the
+    // `[HttpPost("{id}/<slug>")]` action + response declarations +
+    // dispatch (and the `can_<op>` companion when `when`-gated) for one
+    // public operation — the exact lines `renderController` flatMaps
+    // into the per-aggregate controller file.
+    const { agg, owningCtx } = hostOf(op, ctx);
+    const ns = nsOf(ctx);
+    const idClass = `${tableOwnerName(agg, owningCtx.aggregates)}Id`;
+    return renderOperationActionBlock(agg, buildOperationSpec(agg, op, owningCtx, ns), {
+      idClass,
+      idClrType: csIdValueClrType(agg.idValueType),
+      emitTrace: !!ctx.emitTrace,
+    });
   },
 
-  emitHandlerOrService(_op: OperationIR, _ctx: EmitCtx): readonly EmittedArtifact[] {
-    // Same per-op caveat — the per-op handler files DO emit as
-    // separate `.cs` artifacts today (`emitOperationCommandsAndHandlers`
-    // writes one per op), but the helper that produces them is
-    // unexported.  F5d will export the per-op slice; until then the
-    // orchestrator calls `emitForAggregate` below.
-    throw new AdapterNotImplementedError("style", "cqrs", "dotnet", realSiblings());
+  emitHandlerOrService(op: OperationIR, ctx: EmitCtx): readonly EmittedArtifact[] {
+    // Every artifact ONE public operation produces (F5d): the command,
+    // its optional FluentValidation validator, the Mediator handler,
+    // and — extern ops — the user-implementable interface + dev stub.
+    // Same content the per-aggregate path writes; collected through the
+    // exported per-op slice and categorised for the layout adapter.
+    const { agg, owningCtx } = hostOf(op, ctx);
+    const ns = nsOf(ctx);
+    const aggFolder = plural(agg.name);
+    const idClass = `${tableOwnerName(agg, owningCtx.aggregates)}Id`;
+    const collected = new Map<string, string>();
+    emitOperationCommandAndHandler(agg, op, owningCtx, ns, aggFolder, collected, idClass);
+    const out: EmittedArtifact[] = [];
+    for (const [path, content] of [...collected.entries()].sort()) {
+      out.push({
+        name: path.split("/").pop()!,
+        content,
+        category: categoriseCqrsPath(path),
+        aggregateName: agg.name,
+      } as EmittedArtifact);
+    }
+    return out;
   },
 
   emitDi(ctx: EmitCtx): Lines {

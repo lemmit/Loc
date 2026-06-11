@@ -446,6 +446,7 @@ export function renderCsType(t: TypeIR): string {
       return `List<${renderCsType(t.element)}>`;
     case "optional":
       return `${renderCsType(t.inner)}?`;
+    case "action":
     case "slot":
       throw new Error("renderCsType: 'slot' type is UI-only and should not reach the backend.");
     case "genericInstance":

@@ -23,6 +23,7 @@ import type {
   ConfigValueIR,
   DataSourceIR,
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
   SubdomainIR,
@@ -372,19 +373,20 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 // unidirectional @OneToMany.
 // ---------------------------------------------------------------------------
 // Java gate: the fullstack `ui:` mount (embedded React SPA from Spring
-// static resources, the dotnet wwwroot analog) is not yet implemented —
-// fail fast rather than silently serving no UI.
+// static resources, the dotnet wwwroot analog).  `hosts:` (hosting a
+// separately-declared react deployable's bundle) is still gated — only
+// the `ui:` embedded-SPA mount is implemented, mirroring dotnet.
 export function validateJavaFullstackSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const dep of sys.deployables) {
     if (platformFamily(dep.platform) !== "java") continue;
-    if (!dep.uiName && (dep.hostedUiNames ?? []).length === 0) continue;
+    if ((dep.hostedUiNames ?? []).length === 0) continue;
     diags.push({
       severity: "error",
       message:
-        `Deployable '${dep.name}' (platform java) declares a 'ui:'/'hosts:' binding, but the ` +
-        `embedded-SPA fullstack mount is not yet implemented on the java backend. ` +
-        `Serve the UI from a separate 'platform: react' deployable targeting '${dep.name}', ` +
-        `or host it on a dotnet / elixir deployable.`,
+        `Deployable '${dep.name}' (platform java) declares a 'hosts:' binding, but hosting a ` +
+        `separate react deployable's bundle is not yet implemented on the java backend. ` +
+        `Use the embedded-SPA mount ('ui:' on this deployable), serve the UI from a separate ` +
+        `'platform: react' deployable targeting '${dep.name}', or host it on a dotnet deployable.`,
       source: `${sys.name}/${dep.name}`,
       code: "loom.java-fullstack-unsupported",
     });
@@ -400,17 +402,19 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
       for (const agg of ctx.aggregates) {
-        const owners = [agg, ...agg.parts];
-        for (const owner of owners) {
+        // Root-level single containments are mapped (the part carries a
+        // hidden owning `_parent` @OneToOne); only *part-declared* single
+        // containments stay gated — their parent is another part, and the
+        // part factory / renderNew seam only threads the root entity.
+        for (const owner of agg.parts) {
           for (const c of owner.contains) {
             if (c.collection) continue;
             diags.push({
               severity: "error",
               message:
                 `Deployable '${dep.name}' (platform java) hosts aggregate '${ctxName}.${agg.name}' ` +
-                `whose '${owner.name}' declares a single containment 'contains ${c.name}: ${c.partName}' — ` +
-                `single (non-collection) containments are not yet mapped on the java backend ` +
-                `(JPA has no unidirectional one-to-one with the FK on the part table). ` +
+                `whose nested part '${owner.name}' declares a single containment 'contains ${c.name}: ${c.partName}' — ` +
+                `part-declared single (non-collection) containments are not yet mapped on the java backend. ` +
                 `Use a collection containment ('contains ${c.name}: ${c.partName}[]'), fold the part's ` +
                 `fields into a value object, or host the context on a node / dotnet deployable.`,
               source: `${sys.name}/${dep.name}`,
@@ -431,7 +435,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // limitation.  .NET (HasQueryFilter) is deliberately absent — it
   // supports both deferred cases.  Canonical families (D-NODE-PLATFORM /
   // D-ELIXIR-PLATFORM): `node` (was `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
-  const LIMITED_FAMILIES = new Set(["node", "elixir"]);
+  const LIMITED_FAMILIES = new Set(["node", "elixir", "java"]);
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
@@ -505,6 +509,16 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
       // mirroring the find path.  No gate.
       if ((ctx.seeds ?? []).length > 0)
         reject(`context '${ctxName}'`, "declares 'seed' data (the Dapper seed path is not wired)");
+      // Workflow event subscriptions (and therefore channels/outbox): the
+      // saga handlers + outbox dispatcher/relay inject the EF AppDbContext,
+      // which a Dapper deployable does not emit — the project would not
+      // compile.  Reject loudly instead (dispatch-delivery-semantics.md's
+      // Dapper outbox is a follow-up slice).
+      if (((ctx as EnrichedBoundedContextIR).eventSubscriptions ?? []).length > 0)
+        reject(
+          `context '${ctxName}'`,
+          "declares workflow event subscriptions (the Dapper dispatch/outbox path is not wired)",
+        );
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
@@ -876,7 +890,7 @@ export function validateInheritanceStorage(
   // TPH storage emission ships on Hono (Drizzle shared table + `kind`), .NET
   // (EF Core native `HasDiscriminator`), and Phoenix (Ash shared-table
   // multi-resource + `base_filter` on `kind`).
-  const TPH_CAPABLE = new Set(["node", "dotnet", "elixir", "python"]);
+  const TPH_CAPABLE = new Set(["node", "dotnet", "elixir", "python", "java"]);
   const hostedByCapable = [...backendPlatforms].some((p) => TPH_CAPABLE.has(p));
   for (const agg of ctx.aggregates) {
     if (!agg.isAbstract && !agg.extendsAggregate) continue;
@@ -903,7 +917,7 @@ export function validateInheritanceStorage(
       code: "loom.tph-backend-unsupported",
       message:
         `aggregate '${agg.name}' (${role}) resolves to sharedTable (TPH) inheritance via ` +
-        `${how}, but TPH storage emission is implemented for the Hono, .NET, and Phoenix backends only — ` +
+        `${how}, but TPH storage emission is implemented for the Hono, .NET, Phoenix, Python, and Java backends only — ` +
         `${hostNote}. Host the context on a Hono, .NET, or Phoenix deployable, or declare ` +
         `'inheritanceUsing(ownTable)' to use the per-concrete (TPC) layout (all backends). ` +
         `Tracked in aggregate-inheritance.md I2/I3.`,

@@ -83,16 +83,10 @@ import {
   renderText as renderTextHeex,
   renderToolbar as renderToolbarHeex,
 } from "../elixir/heex-walker.js";
-import type { WalkContext as TsxWalkContext } from "../react/body-walker.js";
-import { emitCodeBlock } from "../react/walker/primitives/code-block.js";
+import { emitCodeBlock } from "./primitives/code-block.js";
 // Re-exported emitters from the React/TSX walker.  Each function
 // takes `(call, ctx, depth)` and returns the JSX fragment.
-import {
-  emitAction,
-  emitButton,
-  emitIdLink,
-  emitQueryView,
-} from "../react/walker/primitives/controls.js";
+import { emitAction, emitButton, emitIdLink, emitQueryView } from "./primitives/controls.js";
 import {
   emitAlert,
   emitBadge,
@@ -102,15 +96,15 @@ import {
   emitSkeleton,
   emitSlot,
   emitStat,
-} from "../react/walker/primitives/display.js";
+} from "./primitives/display.js";
 import {
   emitCreateForm,
   emitDestroyForm,
   emitModal,
   emitOperationForm,
   emitWorkflowForm,
-} from "../react/walker/primitives/forms.js";
-import { emitIcon } from "../react/walker/primitives/icon.js";
+} from "./primitives/forms.js";
+import { emitIcon } from "./primitives/icon.js";
 import {
   emitField,
   emitMultilineField,
@@ -118,7 +112,7 @@ import {
   emitPasswordField,
   emitSelectField,
   emitToggle,
-} from "../react/walker/primitives/inputs.js";
+} from "./primitives/inputs.js";
 import {
   emitCard,
   emitContainer,
@@ -129,8 +123,8 @@ import {
   emitSticky,
   emitTabs,
   emitToolbar,
-} from "../react/walker/primitives/layout.js";
-import { emitTable } from "../react/walker/primitives/table.js";
+} from "./primitives/layout.js";
+import { emitTable } from "./primitives/table.js";
 import {
   emitAnchor,
   emitAvatar,
@@ -146,7 +140,8 @@ import {
   emitLoader,
   emitMoney,
   emitText,
-} from "../react/walker/primitives/text.js";
+} from "./primitives/text.js";
+import type { WalkContext as TsxWalkContext } from "./walker-core.js";
 
 /** Renderer signature for the React/TSX target.  Returns the
  *  rendered JSX fragment.  Reads/writes pass through `ctx` (the

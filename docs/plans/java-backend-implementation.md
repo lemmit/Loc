@@ -23,16 +23,43 @@
 >   harness needs a docker host to iterate against (this session's
 >   environment has none) and touching the canonical showcase fans out
 >   into every other backend's gates.
-> - **Deferred features — all fail-fast gated, never silent:** paged
->   carriers, discriminated unions, exception-less operation returns
->   (java absent from the `SUPPORTED_*` sets), TPH `sharedTable`,
->   `persistedAs(eventLog)`, `shape(document|embedded)`, single
->   containments (`loom.java-single-containment-unsupported`), the
->   embedded-SPA fullstack mount (`loom.java-fullstack-unsupported`),
->   retrieval-driven workflow loops / `repo-run`, workflow-level `emit`,
->   resource-op clients, reified-criteria `Specification<T>` consumption,
->   provenance + per-op audited (gated like .NET), `ddd new` starter
->   template.
+> - **Shipped post-merge (PR #1110 follow-ups, each boot-verified
+>   against Postgres):** paged carriers (`Paged<T>` over Spring Data
+>   `Pageable`); retrievals (`run<Name>` port methods: reified
+>   criterion-ref retrievals ride `JpaSpecificationExecutor` + `Sort`,
+>   composed `where`s fall back to `@Query` JPQL with `order by`);
+>   reified criteria → `<Agg>Criteria` `Specification<T>` factories
+>   (java is the first backend consuming `CriterionIR` directly);
+>   retrieval-driven workflow loops (`repo-run` + `for-each`) including
+>   paged `Repo.run(..., page:)` (the `OffsetLimitPageRequest`
+>   Pageable); workflow-level `emit` (event record + `domain_event`
+>   envelope); the `ddd new` java starter; first-boot seeding
+>   (`<Ctx>SeedRunner`, ship-once `__loom_seed` marker, domain + raw
+>   paths); root-level single containments (hidden owning `_parent`
+>   @OneToOne, inverse mappedBy + orphanRemoval); exception-less
+>   operation returns (sealed domain unions + Jackson-polymorphic wire
+>   DTOs + controller ProblemDetail translation — java joined
+>   `SUPPORTED_RETURN_BACKENDS`); capability filters → `@SQLRestriction`
+>   (non-principal relational subset; java joined the limited-families
+>   gate); TPH `sharedTable` inheritance (JPA SINGLE_TABLE +
+>   @DiscriminatorColumn/@DiscriminatorValue, shared `<Base>Id` threaded
+>   through repos / services / controllers — java joined `TPH_CAPABLE`);
+>   the embedded-SPA fullstack mount (`ui:` → /api route prefix,
+>   SpaWebConfig with the index.html fallback, ClientApp/ React project,
+>   node Dockerfile stage — the `hosts:` form stays gated).  Fixtures
+>   under `test/e2e/fixtures/java-build/` pin each in the
+>   `LOOM_JAVA_BUILD` matrix.
+> - **Deferred features — all fail-fast gated, never silent:**
+>   discriminated unions in finds / payload positions
+>   (`SUPPORTED_UNION_BACKENDS`), `persistedAs(eventLog)`,
+>   `shape(document|embedded)` (needs a Jackson strategy for the
+>   package-private-field entity shape), part-declared single
+>   containments (`loom.java-single-containment-unsupported`),
+>   `hosts:` UI hosting (`loom.java-fullstack-unsupported`), resource-op
+>   clients, principal-referencing filters / non-relational filter
+>   shapes (`loom.context-filter-unsupported`), provenance + per-op
+>   audited (gated like .NET).  Lifecycle stamps (`contextStamps`) are
+>   consumed by .NET only today — a cross-backend gap, not java-specific.
 >
 > The proposal's stated blocker — criterion-everywhere — had **shipped**
 > before this work started: the selectability oracle
@@ -48,7 +75,7 @@
 | Web / DI | **Spring Boot 3.x** (Spring MVC `@RestController`) | SpringDoc OpenAPI for the spec endpoint. |
 | Language level | **Java 21** (LTS) | Records, sealed interfaces, switch expressions — all load-bearing for the emit shape. |
 | ORM | **Spring Data JPA over Hibernate** (adapter `jpa`, real) | `jooq` and `axon` registered as honest stubs, mirroring .NET's `marten` stub pattern. |
-| Build | **Maven** (single `pom.xml`) | Chosen over the proposal's Gradle: the generator emits text files only — Gradle's wrapper needs a binary jar; a lone `pom.xml` + `maven:3.9-eclipse-temurin-21` docker image is the simplest reproducible shell. |
+| Build | **Gradle (Kotlin DSL)** — `build.gradle.kts` + `settings.gradle.kts`, no wrapper jar committed | Revised from the original Maven pick on review feedback: the wrapper-jar concern is a practical non-issue (auditable ~43KB, SHA-256 pinned, or `gradle wrapper` on demand), and Gradle wins on build speed, the Kotlin DSL, and multi-module/composite builds.  Docker builds ride the `gradle:8-jdk21` base image; CI uses the runner's Gradle. |
 | App style default | **`layered`** (Controller → Service → Repository), real | Idiomatic Spring, per the proposal. `cqrs` registered as a stub (the inverse of .NET, where `cqrs` is real and `layered` is the stub). |
 | Layouts | `byLayer` + `byFeature`, both real | Mirrors .NET; `byFeature` is package-by-feature, idiomatic Spring/Modulith. |
 | jMolecules | **Yes** | Stamp `@AggregateRoot` / `@ValueObject` / `@Identity` / `@DomainEvent` / `@Repository` on generated types. Metadata-only dep. |
@@ -136,7 +163,8 @@ transports `{ restController: real, webflux?: stub }`, runtimes
 
 ```
 shop-java/
-  pom.xml                      Dockerfile (multi-stage maven build)
+  build.gradle.kts             Dockerfile (multi-stage gradle build)
+  settings.gradle.kts
   src/main/resources/application.yml
   src/main/resources/db/migration/V1__init.sql        ← MigrationsIR → sql-pg
   src/main/resources/static/                          ← fullstack SPA mount
@@ -154,7 +182,7 @@ shop-java/
 ## Slices
 
 Each slice: implement → tests green (`npm test` + the named targeted suites) →
-commit. JDK 21 + Maven are available in the dev environment, so generated-code
+commit. JDK 21 + Gradle are available in the dev environment, so generated-code
 compilation is verified locally from Slice 4 onward, not just in CI.
 
 ### S0 — This plan document
@@ -163,7 +191,7 @@ Commit the plan. *(Exit: doc pushed.)*
 ### S1 — Platform wiring + walking skeleton
 - All wiring-map rows above (grammar regen committed; registry; surface;
   validator messages; likec4; the `"elixir"` branch sweep).
-- `src/generator/java/index.ts` minimal: emits `pom.xml`, `Application.java`,
+- `src/generator/java/index.ts` minimal: emits `build.gradle.kts` / `settings.gradle.kts`, `Application.java`,
   `application.yml`, health/ready endpoints, Dockerfile; `composeService` wired.
 - Tests: registry resolution (`java`, `"java@v1"`, bad-version error), surface
   contract, skeleton snapshot, parse test for `platform: java`.
@@ -201,7 +229,7 @@ Commit the plan. *(Exit: doc pushed.)*
   interfaces + impl finds (typed find-filter `ExprIR` → JPQL `@Query` /
   Criteria), auto-`findAll`/`getById` from the enrichment, datasource-schema
   split, seeding (first-boot data), migrations: `MigrationsIR` →
-  `V<N>__*.sql` via `sql-pg.ts` + `flyway-core` wiring in `pom.xml`/config.
+  `V<N>__*.sql` via `sql-pg.ts` + `flyway-core` wiring in `build.gradle.kts`/config.
 - Adapters made real: `jpa` persistence, `layered` style, `byLayer`/`byFeature`
   layouts; stubs registered for `jooq`/`axon`/`cqrs`.
 - New opt-in build suite: `test/e2e/generated-java-build.test.ts`

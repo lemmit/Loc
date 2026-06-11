@@ -16,7 +16,13 @@ import { renderJavaType } from "../render-expr.js";
 //   CurrentUserAccessor — ThreadLocal holder services read from
 // ---------------------------------------------------------------------------
 
-export function renderAuthFiles(sys: SystemIR, basePkg: string): Map<string, string> {
+export function renderAuthFiles(
+  sys: SystemIR,
+  basePkg: string,
+  /** Fullstack mode: only guard routes under this prefix ("/api"), so
+   *  the SPA bundle + client-side routes stay public. */
+  guardPrefix?: string,
+): Map<string, string> {
   const out = new Map<string, string>();
   const fields = sys.user?.fields ?? [];
   const pkg = `${basePkg}.auth`;
@@ -152,6 +158,16 @@ export function renderAuthFiles(sys: SystemIR, basePkg: string): Map<string, str
       `    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)`,
       `            throws ServletException, IOException {`,
       `        var path = request.getRequestURI();`,
+      ...(guardPrefix
+        ? [
+            `        // Fullstack: only the API surface is guarded — the SPA`,
+            `        // bundle and client-side routes stay public.`,
+            `        if (!path.startsWith("${guardPrefix}/")) {`,
+            `            chain.doFilter(request, response);`,
+            `            return;`,
+            `        }`,
+          ]
+        : []),
       `        for (var prefix : BYPASS_PREFIXES) {`,
       `            if (path.regionMatches(true, 0, prefix, 0, prefix.length())) {`,
       `                chain.doFilter(request, response);`,

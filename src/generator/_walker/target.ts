@@ -36,10 +36,17 @@
 // byte-identical fixture suite (React) and
 // `mix compile --warnings-as-errors` (Phoenix).
 //
-// SCOPE DECISION (kept at 9 methods).  The contract covers the
-// CROSS-FRAMEWORK lowering seams a new frontend (Vue / Svelte /
-// Blazor) must implement to reuse the shared walker core.  Out of
-// scope deliberately:
+// SCOPE DECISION (13 methods: the 9 lowering seams + 4 markup
+// seams).  The contract covers the CROSS-FRAMEWORK seams a new
+// frontend (Vue / Svelte / Blazor) must implement to reuse the
+// shared walker core.  The markup seams (renderComment /
+// renderConditionalChild / renderStyleAttr / escapeText) joined for
+// the Svelte port: Svelte 5 shares JSX's `{expr}` interpolation and
+// `<Comp x={y}/>` invocation syntax (those stay hardcoded in the
+// shared walker), but diverges on comments (`<!-- -->` vs
+// `{/* */}`), conditional CHILD rendering (`{#if}` blocks vs
+// ternaries returning markup), the style attribute (CSS string vs
+// JSX object), and text escaping.  Out of scope deliberately:
 //
 //   - Position-dependent `this`/`id` rendering — HEEx oddity; JSX
 //     frameworks render identically in template + handler.
@@ -260,4 +267,66 @@ export interface WalkerTarget {
    *  `[]`, `{}`); HEEx returns Elixir literals (`0`, `""`, `false`,
    *  `nil`, `[]`, `%{}`). */
   defaultInitFor(type: TypeIR): string;
+
+  // --- Markup seams ---------------------------------------------------------
+  //
+  // The shared markup walker (src/generator/_walker — the walker the
+  // TSX and Svelte frontends share) emits framework markup through
+  // pack templates plus a few inline forms.  Most inline forms are
+  // identical across JSX-family frameworks (`{expr}` interpolation,
+  // `<Comp x={y}/>`, `data-testid={expr}`) and stay hardcoded; the
+  // four below diverge.  HEEx has its own parallel walker
+  // (heex-walker.ts) that never reaches these — its impls exist for
+  // contract completeness (renderConditionalChild throws unreachable,
+  // mirroring buildHookUse).
+
+  /** Render an inline placeholder/diagnostic comment in markup-child
+   *  position.  TSX: `{/* text *​/}`; Svelte: `<!-- text -->`;
+   *  HEEx: `<%!-- text --%>`. */
+  renderComment(text: string): string;
+
+  /** Render a JS expression in markup TEXT/child position — the
+   *  framework's inline interpolation.  TSX and Svelte share JSX's
+   *  `{expr}`; Vue uses the mustache `\{\{ expr \}\}`; HEEx's own
+   *  walker never reaches this (modern HEEx `{expr}` returned for
+   *  contract completeness).  The expression is already rendered
+   *  JS — the target only supplies the delimiters. */
+  renderInterpolation(jsExpr: string): string;
+
+  /** Render a DYNAMIC attribute bound to a JS expression, leading
+   *  space included (` name={expr}` on TSX/Svelte; ` :name="expr"`
+   *  on Vue — Vue quotes the expression, so the target picks a
+   *  quote character the rendered JS doesn't collide with).
+   *  Static string-literal attributes don't come through here —
+   *  every framework spells those ` name="value"` and the call
+   *  sites keep them inline. */
+  renderAttrBinding(name: string, jsExpr: string): string;
+
+  /** Render a conditional CHILD — a ternary whose arms are markup
+   *  (`body: cond ? Stack(…) : Empty(…)`).  `cond` is a rendered JS
+   *  expression; `thenS` / `elseS` are rendered markup fragments.
+   *  `depth` is the walk depth (drives indentation and, for TSX,
+   *  whether the ternary needs a brace wrap — depth 0 sits inside the
+   *  component's `return (…)` parens).  TSX returns the
+   *  parenthesised ternary; Svelte returns an `{#if}{:else}{/if}`
+   *  block (Svelte template expressions cannot evaluate to markup). */
+  renderConditionalChild(cond: string, thenS: string, elseS: string, depth: number): string;
+
+  /** Render the `style: { … }` named arg as a markup attribute
+   *  fragment (leading space included; empty string for no entries).
+   *  Each entry carries the source CSS key plus the rendered value
+   *  expression (`rendered`) and, when the source value was a string
+   *  literal, its raw text (`literal`).  TSX camel-cases keys into a
+   *  JSX object (` style={{ backgroundColor: v }}`); Svelte emits a
+   *  CSS string with `{expr}` interpolation; HEEx emits the flat
+   *  quoted CSS string (lifted from the old styleAttrHeex helper). */
+  renderStyleAttr(
+    entries: ReadonlyArray<{ key: string; rendered: string; literal?: string }>,
+  ): string;
+
+  /** Escape raw text for markup TEXT position.  TSX escapes JSX's
+   *  significant punctuation (`&`, `{`, `}`, `<`, `>`) as HTML
+   *  entities; Svelte's template grammar shares the same significant
+   *  set, so the entity escape carries over; HEEx escapes its own. */
+  escapeText(text: string): string;
 }

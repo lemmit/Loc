@@ -1,0 +1,6 @@
+{{#if hasChildren}}<v-row{{{testidAttr}}}{{{styleAttr}}}>
+{{colIndent}}{{#each children}}{{#if ../hasResponsiveCols}}<v-col cols="12" sm="{{../spanTablet}}" lg="{{../spanDesktop}}">{{else}}<v-col>{{/if}}
+{{../childIndent}}{{{this}}}
+{{../colIndent}}</v-col>{{#unless @last}}
+{{../colIndent}}{{/unless}}{{/each}}
+{{closeIndent}}</v-row>{{else}}<v-row{{{testidAttr}}}{{{styleAttr}}} />{{/if}}

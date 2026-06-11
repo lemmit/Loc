@@ -1,5 +1,4 @@
 import { enrichLoomModel } from "../../ir/enrich/enrichments.js";
-import { hasCreate } from "../../ir/enrich/wire-projection.js";
 import { lowerModel } from "../../ir/lower/lower.js";
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type {
@@ -15,7 +14,8 @@ import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
-import { unionMembers } from "../_payload/union-wire.js";
+import { findUnionSpec, unionMembers } from "../_payload/union-wire.js";
+import { generateReactForContexts } from "../react/index.js";
 import { byFeatureLayoutAdapter } from "./adapters/by-feature-layout.js";
 import type {
   JavaArtifact,
@@ -33,6 +33,7 @@ import {
   renderPagedRecord,
   renderWireValidationException,
 } from "./emit/common.js";
+import { criterionEligible, renderJavaCriteriaClasses } from "./emit/criteria.js";
 import { renderDtoFiles } from "./emit/dto.js";
 import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
@@ -53,15 +54,23 @@ import {
   renderGradleBuild,
   renderGradleSettings,
   renderHealthController,
+  renderSpaWebConfig,
 } from "./emit/program.js";
 import {
   type JavaRepoCtx,
   renderJavaRepositoryImpl,
   renderJavaRepositoryInterface,
   renderJavaSpringDataRepository,
+  renderOffsetLimitPageRequest,
 } from "./emit/repository.js";
+import { renderJavaSeedRunner } from "./emit/seed.js";
 import { renderJavaService } from "./emit/service.js";
 import { renderJavaTestsFile } from "./emit/tests.js";
+import {
+  aggregateReturnUnions,
+  renderJavaDomainUnionFiles,
+  renderJavaUnionWireFiles,
+} from "./emit/unions.js";
 import { renderJavaValidators } from "./emit/validator.js";
 import { renderJavaViews, viewFindsFor } from "./emit/view.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
@@ -168,6 +177,11 @@ function emitProjectFromContexts(
     layout.packageFor(category, basePkg, aggregateName);
 
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
+  // Fullstack mode (`ui:` on a java deployable): the SPA owns the
+  // un-prefixed route space; controllers move under /api (the .NET
+  // embedded-SPA shape).
+  const hasEmbeddedSpa = !!system?.deployable.uiName;
+  const routePrefix = hasEmbeddedSpa ? "/api" : undefined;
 
   // Shared domain types + the package markers that keep the entity files'
   // wildcard imports valid even when a package would otherwise be empty.
@@ -211,7 +225,17 @@ function emitProjectFromContexts(
       place(`${ev.name}.java`, "event", renderJavaEvent(ev, basePkg));
     }
     for (const agg of ctx.aggregates) {
-      emitAggregate(agg, ctx, basePkg, place, pkgFor, emitTrace, system?.sys, authRequired);
+      emitAggregate(
+        agg,
+        ctx,
+        basePkg,
+        place,
+        pkgFor,
+        emitTrace,
+        system?.sys,
+        authRequired,
+        routePrefix,
+      );
     }
     // Workflows + views — per-context controllers under /workflows and
     // /views, services in the shared application packages.
@@ -220,6 +244,7 @@ function emitProjectFromContexts(
       {
         basePkg,
         pkg: pkgFor("workflow-service"),
+        routePrefix,
         entityPkgOf: (a) => pkgFor("entity", a),
         repoPkgOf: (a) => pkgFor("repository-interface", a),
       },
@@ -233,6 +258,7 @@ function emitProjectFromContexts(
     const viewFiles = renderJavaViews(ctx, {
       basePkg,
       pkg: pkgFor("view-service"),
+      routePrefix,
       applicationPkgOf: (a) => pkgFor("service", a),
       entityPkgOf: (a) => pkgFor("entity", a),
       repoPkgOf: (a) => pkgFor("repository-interface", a),
@@ -240,12 +266,46 @@ function emitProjectFromContexts(
     if (viewFiles) {
       for (const [name, f] of viewFiles) place(name, f.category, f.content);
     }
+    // Reified criteria → Specification<T> factories (java consumes the
+    // CriterionIR directly — the proposal's headline differentiator).
+    const voLookupCtx = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
+    for (const file of renderJavaCriteriaClasses(
+      ctx,
+      voLookupCtx,
+      pkgFor("criteria"),
+      basePkg,
+      (a) => pkgFor("entity", a),
+    )) {
+      place(file.name, "criteria", file.content);
+    }
+    // Offset/limit Pageable behind the call-site `page:` on `Repo.run`.
+    if ((ctx.retrievals ?? []).length > 0) {
+      place(
+        "OffsetLimitPageRequest.java",
+        "infra-persistence",
+        renderOffsetLimitPageRequest(pkgFor("infra-persistence")),
+      );
+    }
+    // First-boot seed datasets → an ApplicationRunner per seeded context.
+    const seedRunner = renderJavaSeedRunner(ctx, {
+      basePkg,
+      pkg: pkgFor("infra-persistence"),
+      entityPkgOf: (a) => pkgFor("entity", a),
+      repoPkgOf: (a) => pkgFor("repository-interface", a),
+      schemaOf: (a) => {
+        const agg = ctx.aggregates.find((x) => x.name === a);
+        return agg && system?.sys
+          ? resolveDataSourceConfig(agg, ctx, system.sys)?.schema
+          : undefined;
+      },
+    });
+    if (seedRunner) place(`${ctx.name}SeedRunner.java`, "infra-persistence", seedRunner);
   }
 
   // Auth surface — only when the deployable opts in via auth: required
   // and the system declares a user block.
   if (authRequired && system?.sys) {
-    for (const [name, content] of renderAuthFiles(system.sys, basePkg)) {
+    for (const [name, content] of renderAuthFiles(system.sys, basePkg, routePrefix)) {
       out.set(mainSourcePath(`${basePkg}.auth`, name), content);
     }
   }
@@ -267,8 +327,32 @@ function emitProjectFromContexts(
     mainSourcePath(`${basePkg}.api`, "HealthController.java"),
     renderHealthController(basePkg),
   );
-  out.set("Dockerfile", renderDockerfile());
-  out.set(".dockerignore", renderDockerignore());
+  out.set("Dockerfile", renderDockerfile({ embeddedSpa: hasEmbeddedSpa }));
+  out.set(".dockerignore", renderDockerignore({ embeddedSpa: hasEmbeddedSpa }));
+
+  // Fullstack: the same-origin SPA host (resource handler + index.html
+  // fallback) and the embedded React project under ClientApp/.
+  if (hasEmbeddedSpa && system) {
+    out.set(mainSourcePath(`${basePkg}.config`, "SpaWebConfig.java"), renderSpaWebConfig(basePkg));
+    const spaFiles = generateReactForContexts(contexts, system.sys, system.deployable, {
+      apiBaseUrl: "/api",
+      pathPrefix: "ClientApp/",
+    });
+    for (const [path, content] of spaFiles) {
+      // The React generator also ships project-root files (Dockerfile,
+      // .dockerignore, certs, e2e) — the java project owns those
+      // surfaces in fullstack mode (the multi-stage Dockerfile builds
+      // the SPA), so skip them.
+      if (
+        path === "ClientApp/Dockerfile" ||
+        path === "ClientApp/.dockerignore" ||
+        path === "ClientApp/certs/.gitkeep" ||
+        path.startsWith("ClientApp/e2e/")
+      )
+        continue;
+      out.set(path, content);
+    }
+  }
 }
 
 function emitAggregate(
@@ -285,6 +369,7 @@ function emitAggregate(
   emitTrace: boolean,
   sys?: SystemIR,
   authRequired = false,
+  routePrefix?: string,
 ): void {
   const eventFields = new Map(ctx.events.map((e) => [e.name, e.fields.map((f) => f.name)]));
   // The JPA mapping mirrors `schemaFromModule`: binding-resolved schema +
@@ -355,6 +440,9 @@ function emitAggregate(
           tableName: plural(snake(part.name)),
           schema,
           parentFkColumn: `${snake(ownerName)}_id`,
+          oneToOneParentOf: agg.contains.some((c) => !c.collection && c.partName === part.name)
+            ? agg.name
+            : undefined,
           voLookup,
         },
       }),
@@ -384,6 +472,17 @@ function emitAggregate(
   // finds (the mergeViewsAsFinds analog) — repository-level only; the
   // aggregate controller doesn't route them (the views controller does).
   const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+  // Retrievals targeting this aggregate; a retrieval whose `where` is
+  // exactly an eligible criterion reference consumes the reified
+  // Specification factory instead of a JPQL query.
+  const aggRetrievals = (ctx.retrievals ?? []).filter(
+    (r) => r.targetType.kind === "entity" && r.targetType.name === agg.name,
+  );
+  const isReified = (r: (typeof aggRetrievals)[number]): boolean => {
+    if (!r.criterionRef) return false;
+    const crit = ctx.criteria.find((c) => c.name === r.criterionRef?.name);
+    return !!crit && criterionEligible(crit, ctx)?.name === agg.name;
+  };
   const viewFinds = viewFindsFor(agg.name, ctx) as unknown as RepositoryIR["finds"];
   const repoWithViews: RepositoryIR =
     viewFinds.length > 0
@@ -397,6 +496,10 @@ function emitAggregate(
     domainPkg: pkgFor("repository-interface", agg.name),
     infraPkg: pkgFor("repository-impl", agg.name),
     entityPkg: pkgFor("entity", agg.name),
+    criteriaPkg: pkgFor("criteria"),
+    persistencePkg: pkgFor("infra-persistence"),
+    retrievals: aggRetrievals,
+    isReified,
   };
   place(
     `${agg.name}Repository.java`,
@@ -442,9 +545,44 @@ function emitAggregate(
       entityPkg: pkgFor("entity", agg.name),
       domainRepoPkg: pkgFor("repository-interface", agg.name),
       authed: authRequired,
+      boundedContext: ctx,
+      idClass,
     }),
     agg.name,
   );
+  // Exception-less operation returns: the domain union (sealed interface
+  // + variant records, entity package) and its Jackson-polymorphic wire
+  // twin (response-dto package).
+  const emittedUnionNames = new Set<string>();
+  for (const spec of aggregateReturnUnions(agg, ctx).values()) {
+    emittedUnionNames.add(spec.name);
+    for (const f of renderJavaDomainUnionFiles(spec, pkgFor("entity", agg.name), basePkg)) {
+      place(f.name, "entity", f.content, agg.name);
+    }
+    for (const f of renderJavaUnionWireFiles(spec, pkgFor("response-dto", agg.name), basePkg)) {
+      place(f.name, "response-dto", f.content, agg.name);
+    }
+  }
+  // Union finds (`Order or NotFound` / `Order option`) need only the
+  // wire twin — the repository/service see the optional twin, the
+  // controller builds the tagged record (no domain union exists).
+  for (const f of repo?.finds ?? []) {
+    const spec = findUnionSpec(f.returnType, agg.name, ctx);
+    if (!spec || emittedUnionNames.has(spec.name)) continue;
+    emittedUnionNames.add(spec.name);
+    const wireSpec = {
+      name: spec.name,
+      members: unionMembers(spec.variants, ctx),
+      arms: [],
+    };
+    for (const file of renderJavaUnionWireFiles(
+      wireSpec,
+      pkgFor("response-dto", agg.name),
+      basePkg,
+    )) {
+      place(file.name, "response-dto", file.content, agg.name);
+    }
+  }
   for (const op of agg.operations.filter((o) => o.extern)) {
     place(
       `${upperFirst(op.name)}${agg.name}Handler.java`,
@@ -466,6 +604,10 @@ function emitAggregate(
       basePkg,
       pkg: pkgFor("controller", agg.name),
       applicationPkg,
+      entityPkg: pkgFor("entity", agg.name),
+      boundedContext: ctx,
+      idClass,
+      routePrefix,
     }),
     agg.name,
   );

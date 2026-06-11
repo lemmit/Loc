@@ -16,7 +16,14 @@
 // full expanded body uniformly.
 
 import { humanize, plural, snake } from "../../util/naming.js";
-import type { AggregateIR, BoundedContextIR, ExprIR, SystemIR, UiIR } from "../types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ExprIR,
+  StateFieldIR,
+  SystemIR,
+  UiIR,
+} from "../types/loom-ir.js";
 import { workflowEmitsCommandRoute } from "../types/loom-ir.js";
 
 /** Inputs for the expander.  Carried as a struct so callers don't
@@ -38,6 +45,11 @@ export interface WalkerExpandContext {
   workflowsByName: ReadonlyMap<string, import("../types/loom-ir.js").WorkflowIR>;
   /** View by name + per-view shape lookup. */
   viewsByName: ReadonlyMap<string, import("../types/loom-ir.js").ViewIR>;
+  /** Sink for state fields an expansion synthesises onto the host
+   *  page (the find-filter inputs of `expandScaffoldList`).  The
+   *  per-page expansion loop in `lower.ts` resets it before each
+   *  page and drains it into `page.state` after. */
+  pendingPageState?: StateFieldIR[];
 }
 
 /** Build the expander context from the system + a specific UI.
@@ -326,22 +338,128 @@ function expandScaffoldList(agg: AggregateIR, ctx: WalkerExpandContext): ExprIR 
   const rowVar = "r";
   const cellVar = "o";
 
-  const cols: ExprIR[] = [];
-  cols.push(
-    call("Column", [
-      lit("ID"),
-      lambda(cellVar, call("IdLink", [member(ref(cellVar), "id")], [["of", ref(agg.name)]])),
-    ]),
-  );
-  for (const f of agg.fields) {
-    const inner = f.type.kind === "optional" ? f.type.inner : f.type;
-    if (inner.kind === "valueobject" || inner.kind === "array") continue;
+  const buildCols = (): ExprIR[] => {
+    const cols: ExprIR[] = [];
     cols.push(
       call("Column", [
-        lit(humanize(f.name)),
-        lambda(cellVar, columnAccessorFor(f.name, f.type, cellVar)),
+        lit("ID"),
+        lambda(cellVar, call("IdLink", [member(ref(cellVar), "id")], [["of", ref(agg.name)]])),
       ]),
     );
+    for (const f of agg.fields) {
+      const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+      if (inner.kind === "valueobject" || inner.kind === "array") continue;
+      cols.push(
+        call("Column", [
+          lit(humanize(f.name)),
+          lambda(cellVar, columnAccessorFor(f.name, f.type, cellVar)),
+        ]),
+      );
+    }
+    return cols;
+  };
+
+  // One QueryView per query expression — built per call so the
+  // find-filter arms below never share ExprIR nodes.
+  const queryView = (ofExpr: ExprIR): ExprIR =>
+    call(
+      "QueryView",
+      [],
+      [
+        ["of", ofExpr],
+        ["loading", call("Skeleton", [], [["count", intLit(5)]])],
+        ["error", call("Alert", [lit(`Couldn't load ${humanLower}`)])],
+        ["empty", call("Empty", [lit(`No ${humanLower} yet.`)])],
+        [
+          "data",
+          lambda(
+            "rows",
+            call("Paper", [
+              call(
+                "Table",
+                [...buildCols()],
+                [
+                  ["rows", ref("rows")],
+                  ["striped", boolLit(true)],
+                  ["highlight", boolLit(true)],
+                  ["sticky", boolLit(true)],
+                  [
+                    "rowTestid",
+                    lambda(rowVar, binary(lit(`${slug}-row-`), "+", member(ref(rowVar), "id"))),
+                  ],
+                ],
+              ),
+            ]),
+          ),
+        ],
+      ],
+    );
+
+  // Find-filter bar (T3.14, hook-only v1): each user `find` whose
+  // params are all plain strings and whose return is an unwrapped
+  // list gets one text input per param; when every input of a find
+  // is non-empty the list switches to that find's results (first
+  // matching arm wins), otherwise `all` renders.  The filter state
+  // lands on the page through `ctx.pendingPageState`.
+  const repoIR = ctx.bcByAggregate
+    .get(agg.name)
+    ?.repositories.find((r) => r.aggregateName === agg.name);
+  const filterFinds = (repoIR?.finds ?? []).filter(
+    (f) =>
+      f.name !== "all" &&
+      f.returnType.kind === "array" &&
+      f.params.length > 0 &&
+      f.params.every((p) => p.type.kind === "primitive" && p.type.name === "string"),
+  );
+  const stateNameFor = (findName: string, param: string): string =>
+    `${findName}${param[0]!.toUpperCase()}${param.slice(1)}`;
+  let listRegion: ExprIR = queryView(member(queryRoot, "all"));
+  const filterBar: ExprIR[] = [];
+  if (filterFinds.length > 0) {
+    for (const f of filterFinds) {
+      for (const p of f.params) {
+        const stateName = stateNameFor(f.name, p.name);
+        ctx.pendingPageState?.push({
+          name: stateName,
+          type: { kind: "primitive", name: "string" },
+          init: { kind: "literal", lit: "string", value: "" },
+        });
+        filterBar.push(
+          call(
+            "Field",
+            [lit(humanize(p.name))],
+            [
+              ["bind", ref(stateName)],
+              ["testid", lit(`${slug}-filter-${snake(stateName)}`)],
+            ],
+          ),
+        );
+      }
+    }
+    listRegion = {
+      kind: "match",
+      arms: filterFinds.map((f) => ({
+        cond: f.params
+          .map(
+            (p): ExprIR =>
+              binary(ref(stateNameFor(f.name, p.name)), "!=", {
+                kind: "literal",
+                lit: "string",
+                value: "",
+              }),
+          )
+          .reduce((acc, e) => binary(acc, "&&", e)),
+        value: queryView({
+          kind: "method-call",
+          receiver: queryRoot,
+          member: f.name,
+          args: f.params.map((p) => ref(stateNameFor(f.name, p.name))),
+          receiverType: { kind: "entity", name: agg.name },
+          isCollectionOp: false,
+        }),
+      })),
+      otherwise: queryView(member(queryRoot, "all")),
+    };
   }
 
   return call(
@@ -362,38 +480,8 @@ function expandScaffoldList(agg: AggregateIR, ctx: WalkerExpandContext): ExprIR 
           ],
         ),
       ]),
-      call(
-        "QueryView",
-        [],
-        [
-          ["of", member(queryRoot, "all")],
-          ["loading", call("Skeleton", [], [["count", intLit(5)]])],
-          ["error", call("Alert", [lit(`Couldn't load ${humanLower}`)])],
-          ["empty", call("Empty", [lit(`No ${humanLower} yet.`)])],
-          [
-            "data",
-            lambda(
-              "rows",
-              call("Paper", [
-                call(
-                  "Table",
-                  [...cols],
-                  [
-                    ["rows", ref("rows")],
-                    ["striped", boolLit(true)],
-                    ["highlight", boolLit(true)],
-                    ["sticky", boolLit(true)],
-                    [
-                      "rowTestid",
-                      lambda(rowVar, binary(lit(`${slug}-row-`), "+", member(ref(rowVar), "id"))),
-                    ],
-                  ],
-                ),
-              ]),
-            ),
-          ],
-        ],
-      ),
+      ...(filterBar.length > 0 ? [call("Group", filterBar)] : []),
+      listRegion,
     ],
     [["testid", lit(`${slug}-list`)]],
   );

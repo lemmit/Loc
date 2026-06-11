@@ -120,7 +120,14 @@ export type TypeIR =
    *  the caller's scope into the component body; a bare ref to a
    *  slot-typed param renders the caller's expression at that
    *  position.  See `docs/page-metamodel.md`. */
-  | { kind: "slot"; sensitivity?: SensitivityTags };
+  | { kind: "slot"; sensitivity?: SensitivityTags }
+  /** Function-valued param marker — `slot`'s behavioural sibling
+   *  (extern-component-escape-hatch.md, Tier 2).  Only valid on a
+   *  `component`'s parameter list; the caller passes a (block-body)
+   *  lambda walked + hoisted in the caller's scope, and the React
+   *  props type gains `(arg: TWire) => void`.  `arg` is the declared
+   *  callback argument type; undefined for a bare zero-arg `action`. */
+  | { kind: "action"; arg?: TypeIR; sensitivity?: SensitivityTags };
 
 /** The blessed closed set of generic-payload **record** carriers — the ones
  *  that monomorphize to a `PayloadIR` record.  Kept in lockstep with the
@@ -1632,6 +1639,21 @@ export interface UiIR {
   /** Live-event handlers (`on Orders.OrderShipped(e) { toast(…) }`).
    *  Omitted when the ui declares none. */
   notifications?: UiNotificationIR[];
+  /** Extern frontend functions (`function f(…): T extern from "…"`) —
+   *  the logic escape hatch (extern-function-hook-escape-hatch.md §3).
+   *  Omitted when the ui declares none. */
+  functions?: UiFunctionIR[];
+}
+
+/** `function <name>(params): T extern from "<path>"` — a typed pure
+ *  function implemented by a hand-written module.  The React generator
+ *  emits a typed signature + a conformance shim (`tsc` is the
+ *  fail-fast); page bodies call it through the shim. */
+export interface UiFunctionIR {
+  name: string;
+  params: ParamIR[];
+  returnType: TypeIR;
+  externPath: string;
 }
 
 /** `channel <name>: <Ctx>.<Channel>` — a UI's subscription to a
@@ -1972,10 +1994,32 @@ export interface NeedIR {
 // `ashPhoenix` HEEx pack.  Unlike `react`/`static` it owns its own
 // database (`needsDb: true`) and never declares `targets:` —
 // validator enforces both.
+// `java` is the Spring Boot / Spring Data JPA backend (backend-only,
+// like `dotnet`; mounts an embedded React SPA when the deployable
+// declares `ui:`).
+//
 // `python` is the FastAPI + SQLAlchemy 2 backend (backend-only, like
 // `node`/`dotnet`); the legacy-style `fastapi` spelling desugars to it
 // at the lowering boundary (mirrors `hono` → `node`).
-export type Platform = "dotnet" | "node" | "react" | "static" | "elixir" | "python" | "java";
+//
+// `svelte` is the second frontend-only platform: a Svelte 5 /
+// SvelteKit static SPA rendered against a svelte-format design pack
+// (`shadcnSvelte`/`flowbite`).  Same deployable contract as `react`:
+// `targets:` a backend, inherits its contexts, owns no database.
+//
+// `vue` is the third frontend-only platform: a Vue 3 Vite SPA
+// (vue-router, SFC pages) rendered against a vue-format design pack
+// (`vuetify`/`shadcnVue`).  Same deployable contract as `react`.
+export type Platform =
+  | "dotnet"
+  | "node"
+  | "react"
+  | "svelte"
+  | "vue"
+  | "static"
+  | "elixir"
+  | "python"
+  | "java";
 
 // The `application:`/`shape(…)` platform-axes lookups
 // (`applicationDslToAdapter`, `applicationAdapterToDsl`,

@@ -37,6 +37,31 @@ const FIXTURES: Array<[string, string]> = [
   ["test/e2e/fixtures/java-build/showcase-java.ddd", "dotnet_api"],
   // Paged finds: Paged<T> envelope, Spring Data Pageable count derivation.
   ["test/e2e/fixtures/java-build/paged.ddd", "paged_api"],
+  // Retrievals + reified criteria: Specification factories, the
+  // JpaSpecificationExecutor path, composed-where @Query JPQL fallback,
+  // workflow `Repo.run` + `for` loops.
+  ["test/e2e/fixtures/java-build/retrieval.ddd", "crm_api"],
+  // First-boot seeding: <Ctx>SeedRunner with domain + raw datasets and
+  // the __loom_seed ship-once marker.
+  ["test/e2e/fixtures/java-build/seeding.ddd", "seed_api"],
+  // Single (non-collection) containment: hidden owning `_parent`
+  // @OneToOne on the part, inverse mappedBy on the root, orphanRemoval.
+  ["test/e2e/fixtures/java-build/single-containment.ddd", "sc_api"],
+  // Exception-less operation returns: sealed domain union + Jackson
+  // polymorphic wire DTO + controller ProblemDetail translation.
+  ["test/e2e/fixtures/java-build/operation-returns.ddd", "ru_api"],
+  // Capability filters: @SQLRestriction from the non-principal filter
+  // predicate (softDelete pattern).
+  ["test/e2e/fixtures/java-build/context-filter.ddd", "cf_api"],
+  // TPH (sharedTable) inheritance: JPA SINGLE_TABLE + @DiscriminatorColumn
+  // on the abstract base, @DiscriminatorValue per concrete, shared <Base>Id.
+  ["test/e2e/fixtures/java-build/tph.ddd", "tph_api"],
+  // Embedded-SPA fullstack mount: /api route prefix, SpaWebConfig
+  // (resource handler + index.html fallback), ClientApp/ React project.
+  ["test/e2e/fixtures/java-build/fullstack.ddd", "fs_app"],
+  // Union finds (`Order or NotFound` / `Order option`): optional-twin
+  // repo/service, tagged 200 wire record, problem/bare-404 absence.
+  ["test/e2e/fixtures/java-build/union-finds.ddd", "uf_api"],
 ];
 
 describe.skipIf(!ENABLED)(

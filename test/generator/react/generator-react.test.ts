@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
+import { prepareAppShellVM } from "../../../src/generator/react/templating/preparers/app-shell.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
 import { generateSystems } from "../../../src/system/index.js";
@@ -649,6 +650,44 @@ describe("react generator", () => {
       expect(app).toMatch(
         /<NavLink component=\{RouterLink\} to="\/views\/active_orders" label="Active Orders"[\s\S]*?data-testid="nav-view-active_orders"/,
       );
+    });
+
+    it("gates the /views index import+route on a scaffold ViewsIndex page existing", () => {
+      // The ViewsIndex (and WorkflowsIndex) singleton index page is only
+      // synthesised by the scaffold macro.  An explicit view page in a
+      // non-scaffold ui has none, so the App shell must NOT import
+      // `./pages/views/index` (it would dangle → TS2307) — but the
+      // per-view page still mounts.  Mirrors the `hasScaffoldHome` gate.
+      const views = [{ name: "ActiveProjects" }] as unknown as Parameters<
+        typeof prepareAppShellVM
+      >[2];
+      const args = (hasViewsIndex: boolean) =>
+        prepareAppShellVM(
+          [],
+          [],
+          views,
+          "Sys",
+          undefined,
+          undefined,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          [],
+          hasViewsIndex,
+          true,
+        );
+
+      const noIndex = args(false);
+      expect(noIndex.imports.some((i) => i.from === "./pages/views/index")).toBe(false);
+      expect(noIndex.routes.some((r) => r.path === "/views")).toBe(false);
+      // the per-view page is still wired regardless.
+      expect(noIndex.imports.some((i) => i.from === "./pages/views/active_projects")).toBe(true);
+      expect(noIndex.routes.some((r) => r.path === "/views/active_projects")).toBe(true);
+
+      const withIndex = args(true);
+      expect(withIndex.imports.some((i) => i.from === "./pages/views/index")).toBe(true);
+      expect(withIndex.routes.some((r) => r.path === "/views")).toBe(true);
     });
   });
 

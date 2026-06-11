@@ -47,6 +47,33 @@ defmodule ${appModule}.JasonCamelCase do
     |> Jason.Encode.map(opts)
   end
 
+  @doc """
+  Recursively convert a decoded JSON params map's camelCase string keys to
+  the snake_case names Ash actions accept (\`createdAt\` → \`created_at\`,
+  \`externalId\` → \`external_id\`).  The request-side inverse of the
+  camelCase encoder above: Hono / .NET / the React client all send camelCase
+  bodies, but Ash attribute / argument names are snake_case, so a create or
+  update would otherwise reject every multi-word field as an unknown input.
+
+  Only KEYS are rewritten — values pass through untouched (enum strings,
+  ids, …) — and the walk descends into nested maps and lists so embedded
+  value objects and contained collections are converted too.  Structs are
+  left intact (a JSON params map carries none, but the guard keeps the walk
+  total).
+  """
+  def decamelize_keys(%{__struct__: _} = struct), do: struct
+
+  def decamelize_keys(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {decamelize(k), decamelize_keys(v)} end)
+  end
+
+  def decamelize_keys(list) when is_list(list), do: Enum.map(list, &decamelize_keys/1)
+
+  def decamelize_keys(other), do: other
+
+  defp decamelize(key) when is_binary(key), do: Macro.underscore(key)
+  defp decamelize(key), do: key
+
   defp camelize(key) when is_atom(key) do
     key |> Atom.to_string() |> camelize_string()
   end

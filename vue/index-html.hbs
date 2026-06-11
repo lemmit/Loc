@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{title}}</title>
+{{#if description}}    <meta name="description" content="{{description}}" />
+{{/if}}{{#if ogImage}}    <meta property="og:image" content="{{ogImage}}" />
+{{/if}}{{#if canonical}}    <link rel="canonical" href="{{canonical}}" />
+{{/if}}{{#if favicon}}    <link rel="icon" href="{{favicon}}" />
+{{/if}}{{#if usesCodeBlock}}    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" />
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+    <script>
+      // Vue mounts AFTER DOMContentLoaded, so hljs.highlightAll()
+      // alone would miss the entire app subtree.  Use a
+      // MutationObserver to highlight each `pre code` once it shows
+      // up in the DOM (idempotent via the `data-hljs` marker).
+      (function () {
+        function apply() {
+          if (!window.hljs) return;
+          document.querySelectorAll("pre code:not([data-hljs])").forEach(function (el) {
+            try { window.hljs.highlightElement(el); } catch (e) {}
+            el.setAttribute("data-hljs", "1");
+          });
+        }
+        function arm() {
+          apply();
+          new MutationObserver(apply).observe(document.body, { childList: true, subtree: true });
+        }
+        if (document.body) arm();
+        else document.addEventListener("DOMContentLoaded", arm);
+      })();
+    </script>
+{{/if}}  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

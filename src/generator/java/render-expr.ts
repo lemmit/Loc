@@ -414,7 +414,12 @@ function renderNew(
   }
   const byName = new Map(fields.map((f) => [f.name, f.value]));
   const ordered = part.fields.map((f) => byName.get(f.name) ?? "null");
-  return `${e.partName}._create(${[`${ctx.thisName}.id`, ...ordered].join(", ")})`;
+  // Single-containment parts take the parent entity (their hidden
+  // owning `_parent` @OneToOne needs the instance); collection parts
+  // take the parent id.
+  const isSingle = ctx.agg?.contains?.some((c) => !c.collection && c.partName === e.partName);
+  const parentArg = isSingle ? ctx.thisName : `${ctx.thisName}.id`;
+  return `${e.partName}._create(${[parentArg, ...ordered].join(", ")})`;
 }
 
 function renderBinary(l: string, r: string, e: BinaryExpr): string {
@@ -540,6 +545,7 @@ export function renderJavaType(t: TypeIR): string {
       // Java has no `?` types — optionality is a nullable reference, so
       // primitives box (the emitter documents absence as null).
       return boxedJavaType(t.inner);
+    case "action":
     case "slot":
       throw new Error("renderJavaType: 'slot' type is UI-only and should not reach the backend.");
     case "genericInstance":

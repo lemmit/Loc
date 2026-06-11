@@ -219,6 +219,57 @@ export const tsxTarget: WalkerTarget = {
   defaultInitFor(type: TypeIR): string {
     return defaultInitForTsx(type);
   },
+
+  // --- Markup seams ---------------------------------------------------------
+
+  /** JSX expression-comment in child position. */
+  renderComment(text: string): string {
+    return `{/* ${text} */}`;
+  },
+
+  /** JSX child-position interpolation — the brace wrap. */
+  renderInterpolation(jsExpr: string): string {
+    return `{${jsExpr}}`;
+  },
+
+  /** JSX dynamic attribute — `name={expr}`, leading space included. */
+  renderAttrBinding(name: string, jsExpr: string): string {
+    return ` ${name}={${jsExpr}}`;
+  },
+
+  /** Parenthesised ternary.  Depth 0 sits directly inside the
+   *  component's `return ( … )` parens; nested child positions need
+   *  the JSX brace wrap.  Verbatim lift of the walk()-ternary case. */
+  renderConditionalChild(cond: string, thenS: string, elseS: string, depth: number): string {
+    const inner = `${cond} ? (\n${"  ".repeat(depth + 1)}${thenS}\n${"  ".repeat(depth)}) : (\n${"  ".repeat(depth + 1)}${elseS}\n${"  ".repeat(depth)})`;
+    return depth === 0 ? inner : `{${inner}}`;
+  },
+
+  /** JSX object-literal style attribute with camelCased CSS keys.
+   *  Verbatim lift of the old body-walker styleAttr body. */
+  renderStyleAttr(
+    entries: ReadonlyArray<{ key: string; rendered: string; literal?: string }>,
+  ): string {
+    if (entries.length === 0) return "";
+    const parts = entries.map(({ key, rendered }) => {
+      const camelKey = key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+      return `${JSON.stringify(camelKey)}: ${rendered}`;
+    });
+    return ` style={{ ${parts.join(", ")} }}`;
+  },
+
+  /** JSX text escaping — entity-escape the expression / tag
+   *  delimiters (and `&` first so entity refs don't double-escape).
+   *  Behaviour-identical to `walker/shared/args.ts:escapeJsxText`
+   *  (kept local so this module stays self-contained). */
+  escapeText(text: string): string {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/\{/g, "&#123;")
+      .replace(/\}/g, "&#125;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  },
 };
 
 // ---------------------------------------------------------------------------

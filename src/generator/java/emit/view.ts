@@ -38,6 +38,8 @@ export interface ViewCtx {
   basePkg: string;
   /** Shared views package (`<base>.application.views`). */
   pkg: string;
+  /** Route prefix ("/api" in fullstack mode). */
+  routePrefix?: string;
   applicationPkgOf: (aggName: string) => string;
   entityPkgOf: (aggName: string) => string;
   repoPkgOf: (aggName: string) => string;
@@ -185,7 +187,7 @@ export function renderJavaViews(
         .filter((v, i, arr) => arr.indexOf(v) === i),
       ``,
       `@RestController`,
-      `@RequestMapping("/views")`,
+      `@RequestMapping("${vctx.routePrefix ?? ""}/views")`,
       `public class ${ctx.name}ViewsController {`,
       `    private final ${serviceName} views;`,
       ``,

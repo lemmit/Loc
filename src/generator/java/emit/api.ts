@@ -1,9 +1,16 @@
 import { hasCreate } from "../../../ir/enrich/wire-projection.js";
-import type { EnrichedAggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
+import type {
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+  RepositoryIR,
+} from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
+import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { findUnionSpec } from "../../_payload/union-wire.js";
 import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
 import { declaredFinds, isPagedFind } from "./repository.js";
+import { returnUnionSpec, unionWireCtorArgs } from "./unions.js";
 
 // ---------------------------------------------------------------------------
 // REST controllers + the shared exception advice.  Route shape mirrors
@@ -26,6 +33,16 @@ export interface ControllerCtx {
   pkg: string;
   /** Package of the DTOs + service (imported wildcard when different). */
   applicationPkg: string;
+  /** Package the domain unions live in (entity package). */
+  entityPkg?: string;
+  /** The enclosing context — resolves exception-less return unions. */
+  boundedContext?: EnrichedBoundedContextIR;
+  /** Strongly-typed id class (default `<Agg>Id`); a TPH concrete passes
+   *  its base's `<Base>Id` (the shared single-table key). */
+  idClass?: string;
+  /** Prepended to @RequestMapping (fullstack mode passes "/api" so the
+   *  SPA owns the un-prefixed route space).  Empty for standalone. */
+  routePrefix?: string;
 }
 
 export function renderJavaController(
@@ -34,10 +51,18 @@ export function renderJavaController(
   ctx: ControllerCtx,
 ): string {
   const route = snake(plural(agg.name));
+  const idClass = ctx.idClass ?? `${agg.name}Id`;
   const idJava = javaValueTypeForId(agg.idValueType);
   const imports = new Set<string>(["java.util.List"]);
   if (idJava === "UUID") imports.add("java.util.UUID");
 
+  const unionImports = new Set<string>();
+  let anyUnionProblem = false;
+  const anyReturnUnion =
+    !!ctx.boundedContext &&
+    agg.operations.some(
+      (op) => op.visibility === "public" && returnUnionSpec(op, ctx.boundedContext!),
+    );
   // Extern ops route identically — the service dispatches to the
   // user-supplied handler instead of an aggregate method.
   const opRoutes = agg.operations
@@ -45,6 +70,48 @@ export function renderJavaController(
     .flatMap((op) => {
       const hasParams = op.params.length > 0;
       const reqType = `${upperFirst(op.name)}${agg.name}Request`;
+      const spec = ctx.boundedContext ? returnUnionSpec(op, ctx.boundedContext) : undefined;
+      if (spec) {
+        // Exception-less return: switch the tagged domain union — error
+        // variants → RFC-7807 ProblemDetail at their mapped status,
+        // success variants → 200 with the polymorphic wire record.
+        if (ctx.entityPkg && ctx.entityPkg !== ctx.pkg) {
+          unionImports.add(`${ctx.entityPkg}.${spec.name}`);
+          for (const m of spec.members) unionImports.add(`${ctx.entityPkg}.${spec.name}_${m.tag}`);
+        }
+        const arms = spec.arms.flatMap((a) => {
+          if (a.isError) {
+            return [
+              `            case ${spec.name}_${a.tag} v -> {`,
+              `                var problem = ProblemDetail.forStatus(${a.status});`,
+              `                problem.setTitle(${JSON.stringify(a.title)});`,
+              `                problem.setType(URI.create(${JSON.stringify(a.typeUri)}));`,
+              `                problem.setDetail(${JSON.stringify(a.title)});`,
+              `                yield ResponseEntity.status(${a.status}).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);`,
+              `            }`,
+            ];
+          }
+          const ctor = `new ${spec.name}Response_${a.tag}(${unionWireCtorArgs(a.member).join(", ")})`;
+          return [
+            `            case ${spec.name}_${a.tag} v ->`,
+            `                ResponseEntity.ok((${spec.name}Response) ${ctor});`,
+          ];
+        });
+        return [
+          `    @PostMapping("/{id}/${snake(op.name)}")`,
+          hasParams
+            ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request) {`
+            : `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id) {`,
+          hasParams
+            ? `        var result = service.${op.name}(new ${idClass}(id), request);`
+            : `        var result = service.${op.name}(new ${idClass}(id));`,
+          `        return switch (result) {`,
+          ...arms,
+          `        };`,
+          `    }`,
+          ``,
+        ];
+      }
       return [
         `    @PostMapping("/{id}/${snake(op.name)}")`,
         `    @ResponseStatus(HttpStatus.NO_CONTENT)`,
@@ -52,8 +119,8 @@ export function renderJavaController(
           ? `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request) {`
           : `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id) {`,
         hasParams
-          ? `        service.${op.name}(new ${agg.name}Id(id), request);`
-          : `        service.${op.name}(new ${agg.name}Id(id));`,
+          ? `        service.${op.name}(new ${idClass}(id), request);`
+          : `        service.${op.name}(new ${idClass}(id));`,
         `    }`,
         ``,
       ];
@@ -63,6 +130,48 @@ export function renderJavaController(
     const declared = f.params.map((p) => `@RequestParam ${renderJavaType(p.type)} ${p.name}`);
     const params = declared.join(", ");
     const args = f.params.map((p) => p.name).join(", ");
+    // Union find (`Order or NotFound` / `Order option`): the service
+    // returns the optional twin's `<Agg>Response`; this route owns the
+    // union translation — found → 200 tagged wire record, absent →
+    // bare 404 (`none`) or RFC-7807 ProblemDetail at the error's
+    // mapped status (with the `resource` extension when declared).
+    const spec = ctx.boundedContext
+      ? findUnionSpec(f.returnType, agg.name, ctx.boundedContext)
+      : null;
+    if (spec) {
+      const successCtorArgs = (agg.wireShape ?? []).map((w) => `r.${w.name}()`).join(", ");
+      const successRecord = `${spec.name}Response_${spec.successTag}`;
+      const absent =
+        spec.absent.kind === "none"
+          ? [`            return ResponseEntity.notFound().build();`]
+          : (() => {
+              const tag = spec.absent.tag;
+              const status =
+                ctx.boundedContext?.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag);
+              return [
+                `            var problem = ProblemDetail.forStatus(${status});`,
+                `            problem.setTitle(${JSON.stringify(errorTitle(tag))});`,
+                `            problem.setType(URI.create(${JSON.stringify(errorTypeUri(tag))}));`,
+                `            problem.setDetail(${JSON.stringify(errorTitle(tag))});`,
+                ...(spec.absent.hasResource
+                  ? [`            problem.setProperty("resource", "${agg.name}");`]
+                  : []),
+                `            return ResponseEntity.status(${status}).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);`,
+              ];
+            })();
+      if (spec.absent.kind !== "none") anyUnionProblem = true;
+      return [
+        `    @GetMapping("/${snake(f.name)}")`,
+        `    public ResponseEntity<?> ${f.name}${agg.name}(${params}) {`,
+        `        var r = service.${f.name}(${args});`,
+        `        if (r == null) {`,
+        ...absent,
+        `        }`,
+        `        return ResponseEntity.ok((${spec.name}Response) new ${successRecord}(${successCtorArgs}));`,
+        `    }`,
+        ``,
+      ];
+    }
     if (isPagedFind(f)) {
       const pagedParams = [
         ...declared,
@@ -100,7 +209,7 @@ export function renderJavaController(
           `    @DeleteMapping("/{id}")`,
           `    @ResponseStatus(HttpStatus.NO_CONTENT)`,
           `    public void destroy${agg.name}(@PathVariable ${idJava} id) {`,
-          `        service.destroy${agg.name}(new ${agg.name}Id(id));`,
+          `        service.destroy${agg.name}(new ${idClass}(id));`,
           `    }`,
           ``,
         ]
@@ -112,7 +221,7 @@ export function renderJavaController(
         `    public ResponseEntity<Create${agg.name}Response> create${agg.name}(@RequestBody Create${agg.name}Request request) {`,
         `        var id = service.create${agg.name}(request);`,
         `        log.info("aggregate_created aggregate=${agg.name} id={}", id.value());`,
-        `        return ResponseEntity.created(URI.create("/${route}/" + id.value()))`,
+        `        return ResponseEntity.created(URI.create("${ctx.routePrefix ?? ""}/${route}/" + id.value()))`,
         `            .body(new Create${agg.name}Response(id.value()));`,
         `    }`,
         ``,
@@ -122,7 +231,7 @@ export function renderJavaController(
     ...createRoute,
     `    @GetMapping("/{id}")`,
     `    public ResponseEntity<${agg.name}Response> get${agg.name}ById(@PathVariable ${idJava} id) {`,
-    `        var response = service.get${agg.name}ById(new ${agg.name}Id(id));`,
+    `        var response = service.get${agg.name}ById(new ${idClass}(id));`,
     `        return response == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(response);`,
     `    }`,
     ``,
@@ -146,15 +255,18 @@ export function renderJavaController(
     `import org.slf4j.Logger;`,
     `import org.slf4j.LoggerFactory;`,
     `import org.springframework.http.HttpStatus;`,
+    anyReturnUnion || anyUnionProblem ? `import org.springframework.http.MediaType;` : null,
+    anyReturnUnion || anyUnionProblem ? `import org.springframework.http.ProblemDetail;` : null,
     `import org.springframework.http.ResponseEntity;`,
     `import org.springframework.web.bind.annotation.*;`,
     ``,
     ctx.applicationPkg !== ctx.pkg ? `import ${ctx.applicationPkg}.*;` : null,
+    ...[...unionImports].sort().map((i) => `import ${i};`),
     declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
     ``,
     `@RestController`,
-    `@RequestMapping("/${route}")`,
+    `@RequestMapping("${ctx.routePrefix ?? ""}/${route}")`,
     `public class ${plural(agg.name)}Controller {`,
     `    private static final Logger log = LoggerFactory.getLogger(${plural(agg.name)}Controller.class);`,
     ``,

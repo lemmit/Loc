@@ -13,7 +13,6 @@ import {
   singleFieldShape,
 } from "../../../ir/validate/invariant-classify.js";
 import { lines } from "../../../util/code-builder.js";
-import { upperFirst } from "../../../util/naming.js";
 import {
   collectJavaExprImports,
   collectJavaTypeImports,
