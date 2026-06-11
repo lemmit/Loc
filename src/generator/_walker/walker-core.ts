@@ -1333,7 +1333,7 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
   // an inline interpolation and register the shim import.
   if (expr.kind === "call") {
     if (ctx.externFunctions?.has(expr.name)) {
-      return `{${emitExpr(expr, ctx)}}`;
+      return ctx.target.renderInterpolation(emitExpr(expr, ctx));
     }
     return undefined;
   }
