@@ -47,6 +47,7 @@
 //   - `isWalkableLayoutBody(body)` — predicate the page emitter
 //     uses to decide whether to dispatch to the walker.
 
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -549,6 +550,38 @@ export interface OperationFormState extends FormStateBase {
   triggerPrimary: boolean;
 }
 
+/** Rewrite a detected user-FIND hook's rendered args from positional to
+ *  the object shape the emitted hook signature takes
+ *  (`use<Find><Agg>(query: <Find>Query)` — see api-builder.ts).  The
+ *  find's param names come from the owning context's repository via
+ *  `bcByAggregate`; paged finds gain the backend's page/pageSize
+ *  defaults (P3b) — pagination controls on filtered lists are future
+ *  work.  Standard ops (`all`/`byId`/`create`/`update`/`delete`) and
+ *  unknown names pass through untouched. */
+function adjustFindHookArgs(
+  detected: import("../_walker/api-hook-detector.js").DetectedApiCall,
+  hookUse: import("../_walker/target.js").TargetHookUse,
+  ctx: WalkContext,
+): import("../_walker/target.js").TargetHookUse {
+  if (detected.kind !== "aggregate") return hookUse;
+  if (STANDARD_AGG_OPS.has(detected.operation)) return hookUse;
+  const bc = ctx.bcByAggregate.get(detected.aggregateName);
+  const repo = bc?.repositories.find((r) => r.aggregateName === detected.aggregateName);
+  const find = repo?.finds.find((f) => f.name === detected.operation);
+  if (!find || hookUse.argsRendered.length === 0) return hookUse;
+  const pairs = find.params.map((p, i) => `${p.name}: ${hookUse.argsRendered[i] ?? "undefined"}`);
+  if (pagedReturn(find.returnType)) pairs.push("page: 1", "pageSize: 20");
+  return { ...hookUse, argsRendered: [`{ ${pairs.join(", ")} }`] };
+}
+
+const STANDARD_AGG_OPS: ReadonlySet<string> = new Set([
+  "all",
+  "byId",
+  "create",
+  "update",
+  "delete",
+]);
+
 export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
   // Api hook injection (JSX-child position).  Detect
   // `<param>.<aggregate>.<op>` rooted at a UiApiParam; register
@@ -561,7 +594,11 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
   // JSX-child position wraps the result in braces.
   const detected = tryDetectApiHook(expr, ctx);
   if (detected) {
-    const hookUse = tsxTarget.buildHookUse(detected, (e) => emitExpr(e, ctx));
+    const hookUse = adjustFindHookArgs(
+      detected,
+      tsxTarget.buildHookUse(detected, (e) => emitExpr(e, ctx)),
+      ctx,
+    );
     registerApiHook(hookUse, ctx);
     const rendered = tsxTarget.renderApiCall(
       {
@@ -621,6 +658,20 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
         return `{${tsxTarget.renderStateRead(stateRef, "template")}}`;
       }
       return `{/* ref: ${expr.name} */}`;
+    case "match": {
+      // Predicate-arms conditional rendering (page-metamodel §7).
+      // Each arm's value walks as JSX in the caller's scope; the
+      // chained-ternary shape comes from the target seam
+      // (tsxTarget.renderMatch).  Brace-wrap in child position,
+      // exactly as the ternary arm below.
+      const arms = expr.arms.map((arm) => ({
+        predicate: emitExpr(arm.cond, ctx),
+        value: walk(arm.value, ctx, depth + 1),
+      }));
+      const elseArm = expr.otherwise ? walk(expr.otherwise, ctx, depth + 1) : undefined;
+      const inner = tsxTarget.renderMatch(arms, elseArm);
+      return depth === 0 ? inner : `{${inner}}`;
+    }
     case "ternary": {
       // Conditional rendering.  `cond ? <A /> : <B />`
       // works as a top-level body (depth 0 — JSX-element inside the
@@ -805,7 +856,11 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
   // Expression position — no JSX brace wrap.
   const detected = tryDetectApiHook(expr, ctx);
   if (detected) {
-    const hookUse = tsxTarget.buildHookUse(detected, (e) => emitExpr(e, ctx));
+    const hookUse = adjustFindHookArgs(
+      detected,
+      tsxTarget.buildHookUse(detected, (e) => emitExpr(e, ctx)),
+      ctx,
+    );
     registerApiHook(hookUse, ctx);
     return tsxTarget.renderApiCall(
       {
@@ -857,8 +912,13 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // name so the generated code references the local.
       if (expr.refKind === "let") return expr.name;
       return `/* unresolved: ${expr.name} */ undefined`;
-    case "binary":
-      return `(${emitExpr(expr.left, ctx)} ${expr.op} ${emitExpr(expr.right, ctx)})`;
+    case "binary": {
+      // Strict equality on the wire — mirrors the backend renderer
+      // (`render-expr.ts`: `==` → `===`) and keeps emitted TSX clean
+      // under Biome's recommended `noDoubleEquals`.
+      const op = expr.op === "==" ? "===" : expr.op === "!=" ? "!==" : expr.op;
+      return `(${emitExpr(expr.left, ctx)} ${op} ${emitExpr(expr.right, ctx)})`;
+    }
     case "list":
       // List literal (`["EU", "US"]`) — e.g. a SelectField's `options:`.
       return `[${expr.elements.map((it) => emitExpr(it, ctx)).join(", ")}]`;

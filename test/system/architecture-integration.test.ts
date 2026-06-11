@@ -144,12 +144,15 @@ describe("Architecture integration — full Acme example", () => {
     expect(newPage).toMatch(/customerCreate\.mutate\(\{ name: name \}\)/);
   });
 
-  it("generates Lookup page with parameterized `useByEmailCustomer(email)`", async () => {
+  it("generates Lookup page with parameterized `useByEmailCustomer({ email })`", async () => {
     const { files } = await build(ACME_EXPLICIT);
     const lookup = files.get("web_app/src/pages/lookup.tsx")!;
     expect(lookup).toBeDefined();
     expect(lookup).toMatch(/import \{ useByEmailCustomer \} from "\.\.\/api\/customer";/);
-    expect(lookup).toMatch(/const customerByEmail = useByEmailCustomer\(email\);/);
+    // Object-shaped query arg — the emitted hook signature takes the
+    // find's `<Find>Query` object (api-builder.ts), built from the
+    // positional DSL args by the walker's find-hook adjustment.
+    expect(lookup).toMatch(/const customerByEmail = useByEmailCustomer\(\{ email: email \}\);/);
     // route param destructured from useParams above the hook.
     expect(lookup).toMatch(/const \{ email \} = useParams<\{ email: string \}>\(\);/);
   });
