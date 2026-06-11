@@ -1,4 +1,4 @@
-// Pure argument-reader and string utilities for the shared body walker.
+// Pure argument-reader and string utilities for the React body walker.
 //
 // Everything here is a pure function of its arguments — no WalkContext,
 // no shared-state mutation. Extracted from body-walker.ts so the
@@ -88,7 +88,7 @@ export function firstPositionalText(call: ExprIR & { kind: "call" }): string | u
 /** `firstPositionalContent` returns either a `"quoted string"` or a
  *  `{paramRef}` markup expression.  Components
  *  embedding the result in markup text need quoted strings unwrapped
- *  to bare text; markup expressions stay verbatim.  `escapeFn` is the
+ *  to bare text; markup expressions stay verbatim.  `escape` is the
  *  active target's text escaper (`ctx.target.escapeText`) — defaults
  *  to the JSX escape so framework-free callers keep the v0
  *  behaviour. */

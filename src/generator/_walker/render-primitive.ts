@@ -5,8 +5,8 @@
 // helpers, the active design pack). Kept here so primitive modules can
 // reuse them without dragging the rest of the walker.
 
-import type { FormFieldVM } from "../_frontend/view-models.js";
 import type { ImportSpec } from "../_packs/loader.js";
+import type { FormFieldVM } from "../react/templating/view-models.js";
 import type { ImportMap, WalkContext } from "./walker-core.js";
 
 export type { ImportMap };

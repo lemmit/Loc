@@ -1,14 +1,8 @@
-// Shared markup walker core.
+// Recursive body walker.
 //
-// Walks a page/component body `ExprIR` and emits framework markup
-// (TSX for React, Svelte 5 for SvelteKit) by dispatching every
-// primitive through the active design pack's templates
-// (`_walker/registry.ts` + `_walker/primitives/*`) and every
-// framework-divergent seam (state, api hoisting, navigation, match,
-// comments, escaping, …) through the `WalkerTarget` contract
-// (`_walker/target.ts`).  The page DSL surface it consumes is the
-// closed walker-stdlib primitive set — see docs/page-metamodel.md
-// and `src/language/walker-stdlib.ts` (the validator's mirror).
+// Walks a page's body `ExprIR` and emits TSX for hand-written
+// custom layouts that don't dispatch to one of the scaffold
+// archetypes (List / Detail / Form / etc.).  Unlocks pages like:
 //
 //   page Welcome {
 //     route: "/welcome"
@@ -19,13 +13,32 @@
 //     )
 //   }
 //
-// Each primitive emitter follows the contract:
+// v0 stdlib (closed set):
+//
+//   Stack(...children)            → Mantine <Stack>...</Stack>
+//   Heading("text", level: N)     → Mantine <Title order={N}>text</Title>
+//   Text("text")                  → Mantine <Text>text</Text>
+//   Button("label", ...)          → Mantine <Button>label</Button>
+//   Card("title", content)        → Mantine <Card> with optional title
+//                                    + <Card.Section>{content}</Card.Section>
+//
+// Each emitter follows the contract:
 //   - First positional arg is the component's primary content (text /
 //     label / title), unwrapped from its `ExprIR { kind: "literal" }`
 //     when it's a string literal.
 //   - Subsequent positional args are children (rendered recursively).
 //   - Named args are picked off by hand per emitter (e.g. Heading
 //     reads `level`).
+//
+// What v0 does NOT cover:
+//   - Event handlers (onClick: () => navigate(...)).  Buttons emit
+//     unwired in v0; click handling lands with the action / state
+//     IR threading work.
+//   - Nested arrays as children (e.g. `items: [...]`).  Spec syntax
+//     is positional-only at this layer.
+//   - Per-pack rendering.  v0 hardcodes Mantine output; a future
+//     change opens this through the template-pack layer (one
+//     stdlib emitter per pack).
 //
 // What this module exports:
 //   - `walkBody(body, target, pack, …)` — { tsx, imports } where
@@ -556,8 +569,8 @@ export interface OperationFormState extends FormStateBase {
 
 /** Rewrite a detected user-FIND hook's rendered args from positional to
  *  the object shape the emitted hook signature takes
- *  (`use<Find><Agg>(query: <Find>Query)` — see api-builder.ts).  The
- *  find's param names come from the owning context's repository via
+ *  (`use<Find><Agg>(query: <Find>Query)` — see _frontend/api-module.ts).
+ *  The find's param names come from the owning context's repository via
  *  `bcByAggregate`; paged finds gain the backend's page/pageSize
  *  defaults (P3b) — pagination controls on filtered lists are future
  *  work.  Standard ops (`all`/`byId`/`create`/`update`/`delete`) and
@@ -615,36 +628,36 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       },
       "",
     );
-    return `{${rendered}}`;
+    return ctx.target.renderInterpolation(rendered);
   }
   switch (expr.kind) {
     case "call":
       return emitComponent(expr, ctx, depth);
     case "literal":
-      // String literal in a child position becomes a JSX text node.
+      // String literal in a child position becomes a markup text node.
       // Other literal kinds (int / decimal / bool) stay as
-      // expression-bracketed JS literals.
+      // interpolated JS literals.
       if (expr.lit === "string") return ctx.target.escapeText(expr.value);
-      if (expr.lit === "bool") return `{${expr.value}}`;
-      if (expr.lit === "null") return `{null}`;
-      return `{${expr.value}}`;
+      if (expr.lit === "bool") return ctx.target.renderInterpolation(expr.value);
+      if (expr.lit === "null") return ctx.target.renderInterpolation("null");
+      return ctx.target.renderInterpolation(expr.value);
     case "ref":
       // Refs to a lambda-bound param resolve to its
       // emitted JS name (e.g. `o.id` inside `o => …` walks with
-      // `o → "row"`).  Brace-wrap as a JSX child.
+      // `o → "row"`).  Interpolate as a markup child.
       {
         const jsName = ctx.lambdaParams.get(expr.name);
-        if (jsName) return `{${jsName}}`;
+        if (jsName) return ctx.target.renderInterpolation(jsName);
       }
       // Refs that match a route param name emit as
-      // JSX expressions (`{name}`).  React Router's `useParams()`
-      // brings these into scope at render time; the page-shell
-      // generator destructures the used names.  Refs that don't
-      // match a param emit as a placeholder JSX comment so the
+      // interpolated expressions (`{name}`).  React Router's
+      // `useParams()` brings these into scope at render time; the
+      // page-shell generator destructures the used names.  Refs that
+      // don't match a param emit as a placeholder comment so the
       // build error stays visible.
       if (ctx.paramNames.has(expr.name)) {
         ctx.usedParams.add(expr.name);
-        return `{${expr.name}}`;
+        return ctx.target.renderInterpolation(expr.name);
       }
       // Refs that match a state field name emit the
       // same way; the shell brings them into scope via `useState`.
@@ -659,22 +672,22 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
           field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
           name: expr.name,
         };
-        return `{${ctx.target.renderStateRead(stateRef, "template")}}`;
+        return ctx.target.renderInterpolation(ctx.target.renderStateRead(stateRef, "template"));
       }
       return ctx.target.renderComment(`ref: ${expr.name}`);
     case "match": {
       // Predicate-arms conditional rendering (page-metamodel §7).
       // Each arm's value walks as markup in the caller's scope; the
-      // chained-ternary shape comes from the target seam
-      // (renderMatch).  Brace-wrap in child position, exactly as the
-      // ternary arm below.
+      // value-expression shape comes from the target seam
+      // (renderMatch).  Interpolation-wrap in child position,
+      // exactly as the ternary arm below.
       const arms = expr.arms.map((arm) => ({
         predicate: emitExpr(arm.cond, ctx),
         value: walk(arm.value, ctx, depth + 1),
       }));
       const elseArm = expr.otherwise ? walk(expr.otherwise, ctx, depth + 1) : undefined;
       const inner = ctx.target.renderMatch(arms, elseArm);
-      return depth === 0 ? inner : `{${inner}}`;
+      return depth === 0 ? inner : ctx.target.renderInterpolation(inner);
     }
     case "ternary": {
       // Conditional rendering.  `cond ? <A /> : <B />`
@@ -687,12 +700,12 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       return ctx.target.renderConditionalChild(cond, thenS, elseS, depth);
     }
     case "member":
-      // Member access in JSX-child position (e.g. an
+      // Member access in markup-child position (e.g. an
       // accessor lambda body `o => o.id` walks `o.id` as the body
-      // of a `<Table.Td>` cell).  Emit as a brace-wrapped JS
+      // of a `<Table.Td>` cell).  Emit as an interpolated JS
       // expression; `emitExpr` resolves the receiver (lambda
       // param, hook, state) and concatenates the member name.
-      return `{${emitExpr(expr, ctx)}}`;
+      return ctx.target.renderInterpolation(emitExpr(expr, ctx));
     default:
       return ctx.target.renderComment(`unsupported expr: ${expr.kind}`);
   }
@@ -716,7 +729,7 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
   // walker).  Surface a comment so the gap is visible in generated
   // output rather than silently producing nothing useful.
   if (def) {
-    return ctx.target.renderComment(`${call.name}: not supported by the page walker yet`);
+    return ctx.target.renderComment(`${call.name}: not supported by the React walker yet`);
   }
   return ctx.target.renderComment(`unknown layout component: ${call.name}`);
 }
@@ -1046,7 +1059,7 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       }
       return unsupportedPageStmt(
         `assignment to '${seg.join(".")}'`,
-        "the page walker only mutates page-state fields (declare the root in `state { … }`)",
+        "the React backend only mutates page-state fields (declare the root in `state { … }`)",
       );
     }
     case "add":
@@ -1060,12 +1073,23 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       const seg = stmt.target.segments;
       if (ctx.stateNames.has(seg[0]!)) {
         const op = stmt.kind === "add" ? "+" : "-";
-        const value = `${seg.join(".")} ${op} ${emitExpr(stmt.value, ctx)}`;
+        // Single-segment current-value reads delegate to the target
+        // (position-aware — HEEx/Vue diverge in handler position);
+        // a nested target reads the plain member chain.  TSX-identical
+        // either way (its handler-position read IS the bare name).
+        const root = seg[0]!;
+        const stateRef = {
+          field: { name: root, type: { kind: "primitive" as const, name: "string" as const } },
+          name: root,
+        };
+        const read =
+          seg.length === 1 ? ctx.target.renderStateRead(stateRef, "handler") : seg.join(".");
+        const value = `${read} ${op} ${emitExpr(stmt.value, ctx)}`;
         return stateWrite(seg, value, ctx);
       }
       return unsupportedPageStmt(
         `'${stmt.kind === "add" ? "+=" : "-="}' on '${seg.join(".")}'`,
-        "the page walker only mutates page-state fields (declare the root in `state { … }`)",
+        "the React backend only mutates page-state fields (declare the root in `state { … }`)",
       );
     }
     case "let":
@@ -1085,19 +1109,27 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
     default:
       return unsupportedPageStmt(
         `statement '${stmt.kind}'`,
-        "it has no meaning in a page event handler",
+        "it has no meaning in a React page event handler",
       );
   }
 }
 
+/** A page event-handler statement the React walker can't lower.  We throw
+ *  rather than emit a `/* unsupported *\/` comment: the old comment compiled
+ *  fine but silently dropped the statement at runtime (e.g. a button whose
+ *  handler does nothing).  Failing generation surfaces the gap loudly — see
+ *  the same rationale in src/ir/validate/validate.ts (test-body fallbacks). */
 /** Immutable React state write for a (possibly nested) `state` target.
- *  Single segment delegates the `setName(value)` shape to tsxTarget (see
- *  `src/generator/_walker/target.ts`).  A multi-segment target
- *  (`order.shipping.zip := v`) builds the standard nested-spread update
- *  from the inside out:
+ *  Single segment delegates the `setName(value)` shape to the active
+ *  target (see `src/generator/_walker/target.ts`).  A multi-segment
+ *  target (`order.shipping.zip := v`) builds the standard nested-spread
+ *  update from the inside out:
  *  `setOrder({ ...order, shipping: { ...order.shipping, zip: v } })` —
  *  React state is immutable, so in-place member assignment would not
- *  re-render.  The trailing `;` is statement-position context. */
+ *  re-render.  The spread construction is JS-flavoured by design; a
+ *  target whose nested-write idiom differs (Vue refs mutate in place)
+ *  revisits this seam when its walker integration lands.  The trailing
+ *  `;` is statement-position context. */
 function stateWrite(seg: readonly string[], valueJs: string, ctx: WalkContext): string {
   ctx.usesState = true;
   const root = seg[0]!;
@@ -1113,13 +1145,8 @@ function stateWrite(seg: readonly string[], valueJs: string, ctx: WalkContext): 
   return `${ctx.target.renderStateWrite(stateRef, value)};`;
 }
 
-/** A page event-handler statement the React walker can't lower.  We throw
- *  rather than emit a `/* unsupported *\/` comment: the old comment compiled
- *  fine but silently dropped the statement at runtime (e.g. a button whose
- *  handler does nothing).  Failing generation surfaces the gap loudly — see
- *  the same rationale in src/ir/validate/validate.ts (test-body fallbacks). */
 function unsupportedPageStmt(what: string, why: string): never {
-  throw new Error(`page walker: unsupported ${what} in a page event handler — ${why}.`);
+  throw new Error(`react: unsupported ${what} in a page event handler — ${why}.`);
 }
 
 /** Read a named arg as a navigation target.  String
@@ -1194,11 +1221,11 @@ export function testidAttr(call: ExprIR & { kind: "call" }, ctx: WalkContext): s
       ctx.collectedTestids.add(a.value);
       return ` data-testid=${JSON.stringify(a.value)}`;
     }
-    // Anything else → run through emitExpr; brace-wrap as a
-    // JSX expression.  Refs to params/state, binary ops, calls,
-    // etc. all compose.
+    // Anything else → run through emitExpr; bind as a dynamic
+    // attribute through the target.  Refs to params/state, binary
+    // ops, calls, etc. all compose.
     const expr = emitExpr(a, ctx);
-    return ` data-testid={${expr}}`;
+    return ctx.target.renderAttrBinding("data-testid", expr);
   }
   return "";
 }
@@ -1275,17 +1302,17 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
   if (expr.kind === "ref") {
     if (ctx.paramNames.has(expr.name)) {
       ctx.usedParams.add(expr.name);
-      return `{${expr.name}}`;
+      return ctx.target.renderInterpolation(expr.name);
     }
     if (ctx.stateNames.has(expr.name)) {
       ctx.usesState = true;
-      // Delegated to tsxTarget.renderStateRead — JSX text position
-      // (brace-wrapped for inline interpolation).
+      // Delegated to the target's renderStateRead — markup text
+      // position (interpolated inline).
       const stateRef = {
         field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
         name: expr.name,
       };
-      return `{${ctx.target.renderStateRead(stateRef, "template")}}`;
+      return ctx.target.renderInterpolation(ctx.target.renderStateRead(stateRef, "template"));
     }
     // Unresolved ref in text position emits a JSX
     // comment so the user sees the unresolved name in the
@@ -1294,8 +1321,8 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
     return ctx.target.renderComment(`ref: ${expr.name}`);
   }
   // Anything else (binary op, unary, non-string
-  // literal): emit the JS-expression form wrapped as a JSX
-  // expression.  Powers patterns like `Heading("Welcome, " +
+  // literal): emit the JS-expression form as an inline
+  // interpolation.  Powers patterns like `Heading("Welcome, " +
   // name)`, `Text(count + 1)`, `Stat("Count", count * step)`.
   //
   // A bare `call` in text position is a stdlib-primitive / user-
@@ -1303,14 +1330,14 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
   // `walk`s it as a child component rather than emitting a JS call.
   // EXCEPT a call to an extern frontend function (`function f(…): T
   // extern from "…"`): that is a value-producing JS call — emit it as
-  // a JSX expression (`{initials(name)}`) and register the shim import.
+  // an inline interpolation and register the shim import.
   if (expr.kind === "call") {
     if (ctx.externFunctions?.has(expr.name)) {
-      return `{${emitExpr(expr, ctx)}}`;
+      return ctx.target.renderInterpolation(emitExpr(expr, ctx));
     }
     return undefined;
   }
-  return `{${emitExpr(expr, ctx)}}`;
+  return ctx.target.renderInterpolation(emitExpr(expr, ctx));
 }
 
 // The page-file shell (renderCustomLayoutPage, the form-wiring renderers,

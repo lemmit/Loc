@@ -77,7 +77,7 @@ export function checkDeployable(
   if (hasUiBinding && !platformMountsUi(d.platform)) {
     accept(
       "error",
-      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'svelte', 'static', 'phoenix', 'dotnet', 'java'); got '${d.platform}'.`,
+      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'svelte', 'vue', 'static', 'phoenix', 'dotnet', 'java'); got '${d.platform}'.`,
       {
         node: d,
         property: d.uiSugar
@@ -98,12 +98,17 @@ export function checkDeployable(
     );
   }
   // Rule 4b generalises to every frontend SPA platform (`react`,
-  // `svelte`) — a frontend deployable without a `ui:` has no pages to
-  // render.  `static` keeps its own wording above.  The diagnostic
-  // code stays per-platform (`loom.react-deployable-missing-ui`,
-  // `loom.svelte-deployable-missing-ui`) so quick-fixes can dispatch.
-  if ((d.platform === "react" || d.platform === "svelte") && !hasUiBinding) {
-    const label = d.platform === "react" ? "React" : "Svelte";
+  // `svelte`, `vue`) — a frontend deployable without a `ui:` has no
+  // pages to render.  `static` keeps its own wording above.  The
+  // diagnostic code stays per-platform
+  // (`loom.react-deployable-missing-ui`,
+  // `loom.svelte-deployable-missing-ui`,
+  // `loom.vue-deployable-missing-ui`) so quick-fixes can dispatch.
+  if (
+    (d.platform === "react" || d.platform === "svelte" || d.platform === "vue") &&
+    !hasUiBinding
+  ) {
+    const label = d.platform === "react" ? "React" : d.platform === "svelte" ? "Svelte" : "Vue";
     accept(
       "error",
       `${label} deployable '${d.name}' must declare a 'ui:' binding — every page now flows through the page metamodel. Add 'ui: <UiName>' (use 'ui <UiName> { with scaffold(subdomains: [...]) }' for the bulk-CRUD case).`,
@@ -115,20 +120,13 @@ export function checkDeployable(
   // mounts the `phoenixLiveView` framework.  The grammar enum admits
   // both values; this rule rejects cross-pairing
   // (e.g. `platform: react` + `framework: phoenixLiveView`).
-  // Membership in the platform's hostable set (D-PHOENIX-SURFACE) —
-  // the host serves a framework iff it provides its runtime.  Replaces
-  // the old single-expected-value check so a dotnet host can declare
-  // `framework: svelte` (any static bundle on a static root) while a
-  // LiveView override on a react host still errors.
   const framework = d.uiBlock?.framework;
   if (framework && d.uiBlock) {
     const expected = expectedFrameworkFor(d.platform, hasUiBinding);
-    const hostable = hostableFrameworksFor(d.platform);
-    const canonical = canonicalFramework(framework);
-    if (canonical && hostable.size > 0 && !hostable.has(canonical)) {
+    if (expected && framework !== expected) {
       accept(
         "error",
-        `Framework '${framework}' does not match platform '${d.platform}' (expected '${expected ?? [...hostable].sort().join("' | '")}'). Drop the framework override or align it with the platform.`,
+        `Framework '${framework}' does not match platform '${d.platform}' (expected '${expected}'). Drop the framework override or align it with the platform.`,
         {
           node: d.uiBlock,
           property: "framework",
@@ -227,7 +225,7 @@ export function checkDeployable(
     if (d.targets) {
       accept(
         "error",
-        `'targets:' is only valid on a frontend deployable ('platform: react', 'svelte', or 'static').`,
+        `'targets:' is only valid on a frontend deployable ('platform: react', 'svelte', 'vue', or 'static').`,
         { node: d, property: "targets" },
       );
     }
@@ -260,7 +258,7 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
     if (!FRONTEND_KEYWORDS.has(raw)) {
       accept(
         "error",
-        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'svelte', 'static', 'phoenix', 'python' (backends also accept a pinned form, e.g. 'node@v4').`,
+        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'svelte', 'vue', 'static', 'phoenix', 'python' (backends also accept a pinned form, e.g. 'node@v4').`,
         { node: d, property: "platform" },
       );
     }

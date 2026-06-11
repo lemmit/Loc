@@ -8,6 +8,7 @@ import pythonPlatform from "./python.js";
 import reactPlatform from "./react.js";
 import type { PlatformSurface } from "./surface.js";
 import sveltePlatform from "./svelte.js";
+import vuePlatform from "./vue.js";
 
 // ---------------------------------------------------------------------------
 // Single source of truth for which platforms exist + how the system
@@ -35,6 +36,9 @@ const platforms: Record<Platform, PlatformSurface> = {
   // Second frontend-only platform — Svelte 5 / SvelteKit static SPA.
   // Same deployable contract as `react` (targets a backend, no DB).
   svelte: sveltePlatform,
+  // Third frontend-only platform — Vue 3 Vite SPA (vue-router).
+  // Same deployable contract as `react` (targets a backend, no DB).
+  vue: vuePlatform,
   // `static` is the page-metamodel's UI-only deployable kind.  It
   // shares the React surface — a deployable declared as
   // `platform: static` lowers through the same code path a

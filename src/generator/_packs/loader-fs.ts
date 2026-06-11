@@ -31,8 +31,15 @@ const SHARED_SOURCE_DIRS_HEEX: readonly string[] = ["phoenix"];
 // Svelte packs read their own shared layer only: the SvelteKit
 // dockerfile diverges from the TSX one (the preview server needs the
 // kit project context, not a bare dist/), and duplicate logical names
-// across shared dirs throw — so `docker/` stays TSX-side.
+// across shared dirs throw (sveltekit/ ships its own dockerfile.hbs)
+// — so `docker/` stays TSX/vue-side.
 const SHARED_SOURCE_DIRS_SVELTE: readonly string[] = ["sveltekit"];
+// Vue packs share a Vue-specific layer (`vue/`: index.html,
+// tsconfig-node, the NotFound page) plus the framework-neutral `api/`
+// fetch-client/config/logger sources (plain TS, no JSX — the React
+// `error-boundary` template rides along unused) and the neutral
+// `docker/` vite-build/vite-preview two-stage scaffold.
+const SHARED_SOURCE_DIRS_VUE: readonly string[] = ["vue", "api", "docker"];
 
 /** Resolve the repo-root directory by walking up from this file
  *  until a `designs/` sibling is found.  Used to anchor both the
@@ -91,7 +98,9 @@ function readSharedSources(format: PackFormat): Record<string, string> {
       ? SHARED_SOURCE_DIRS_HEEX
       : format === "svelte"
         ? SHARED_SOURCE_DIRS_SVELTE
-        : SHARED_SOURCE_DIRS_TSX;
+        : format === "vue"
+          ? SHARED_SOURCE_DIRS_VUE
+          : SHARED_SOURCE_DIRS_TSX;
   for (const dirName of dirs) {
     const dir = path.join(root, dirName);
     if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) continue;

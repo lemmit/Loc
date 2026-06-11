@@ -1994,6 +1994,10 @@ export interface NeedIR {
 // `ashPhoenix` HEEx pack.  Unlike `react`/`static` it owns its own
 // database (`needsDb: true`) and never declares `targets:` —
 // validator enforces both.
+// `java` is the Spring Boot / Spring Data JPA backend (backend-only,
+// like `dotnet`; mounts an embedded React SPA when the deployable
+// declares `ui:`).
+//
 // `python` is the FastAPI + SQLAlchemy 2 backend (backend-only, like
 // `node`/`dotnet`); the legacy-style `fastapi` spelling desugars to it
 // at the lowering boundary (mirrors `hono` → `node`).
@@ -2002,11 +2006,16 @@ export interface NeedIR {
 // SvelteKit static SPA rendered against a svelte-format design pack
 // (`shadcnSvelte`/`flowbite`).  Same deployable contract as `react`:
 // `targets:` a backend, inherits its contexts, owns no database.
+//
+// `vue` is the third frontend-only platform: a Vue 3 Vite SPA
+// (vue-router, SFC pages) rendered against a vue-format design pack
+// (`vuetify`/`shadcnVue`).  Same deployable contract as `react`.
 export type Platform =
   | "dotnet"
   | "node"
   | "react"
   | "svelte"
+  | "vue"
   | "static"
   | "elixir"
   | "python"

@@ -1,4 +1,4 @@
-// Api-hook registration utility for the shared walker core.
+// Api-hook registration utility — React-walker-private.
 //
 // The detection logic (`tryDetectApiHook`) moved to the shared
 // `src/generator/_walker/api-hook-detector.ts` so a future Vue /

@@ -7,6 +7,7 @@ import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   boolNamed,
+  escapeJsxText,
   lambdaArg,
   namedArgValue,
   positionalArgs,
@@ -158,7 +159,7 @@ function emitColumn(
       } else if (body.kind === "literal" && body.lit === "string") {
         cellJsx = ctx.target.escapeText(body.value);
       } else {
-        cellJsx = `{${emitExpr(body, childCtx)}}`;
+        cellJsx = ctx.target.renderInterpolation(emitExpr(body, childCtx));
       }
     }
     propagateChildFlags(ctx, childCtx);

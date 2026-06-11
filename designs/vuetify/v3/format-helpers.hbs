@@ -1,0 +1,80 @@
+// Auto-generated.  Do not edit by hand.
+// Formatting helpers — the Vue analogue of the React packs'
+// format-helpers components.  Vue SFC templates interpolate plain
+// strings, so these are functions (not components); cell templates
+// call them inside \{{ … }} interpolations.
+
+/** True when the value should render as the empty placeholder. */
+export function isEmpty(v: unknown): boolean {
+  return v === null || v === undefined || v === "";
+}
+
+/** Em-dash placeholder for null / undefined / "" values — empty
+ *  cells read as "intentionally blank", not a layout glitch. */
+export const EMPTY = "—";
+
+/** Short id display: first 8 chars + ellipsis.  Pair with a
+ *  `:title` binding carrying the full id for hover discovery. */
+export function shortId(id: string | null | undefined): string {
+  if (isEmpty(id)) return EMPTY;
+  const s = String(id);
+  return s.length > 8 ? `${s.slice(0, 8)}…` : s;
+}
+
+/** Locale-formatted datetime from an ISO string. */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (isEmpty(iso)) return EMPTY;
+  const s = String(iso);
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Boolean as Yes / No. */
+export function formatBool(value: boolean | null | undefined): string {
+  if (isEmpty(value)) return EMPTY;
+  return value ? "Yes" : "No";
+}
+
+/** Locale-aware numeric value — 1234567 renders as 1,234,567. */
+export function formatNumber(
+  value: number | string | null | undefined,
+  decimals = 0,
+): string {
+  if (isEmpty(value)) return EMPTY;
+  const n = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(n)) return String(value);
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: Math.max(decimals, 2),
+  }).format(n);
+}
+
+/** Currency-formatted numeric value (USD default). */
+export function formatMoney(
+  value: number | string | null | undefined,
+  currency = "USD",
+  decimals = 2,
+): string {
+  if (isEmpty(value)) return EMPTY;
+  const n = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(n)) return String(value);
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  }).format(n);
+}
+
+/** Generic value display with empty-state handling. */
+export function formatPlain(value: unknown): string {
+  if (isEmpty(value)) return EMPTY;
+  return String(value);
+}

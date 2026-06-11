@@ -417,8 +417,10 @@ export function emitUserComponent(
 /** Render an ExprIR as a JSX attribute value.
  *  String literals → `"text"` (quoted attr); for a slot-typed param,
  *  the arg is walked as JSX in the caller's scope and brace-wrapped
- *  so the JSX element flows in as a `ReactNode` prop value; everything
- *  else → `{<emitExpr>}` (brace-wrapped JS expression). */
+ *  so the JSX element flows in as a `ReactNode` prop value; for an
+ *  action-typed param the arg is a lambda emitted as a typed arrow in
+ *  the caller's scope (Tier 2); everything else → `{<emitExpr>}`
+ *  (brace-wrapped JS expression). */
 function attrValue(expr: ExprIR, ctx: WalkContext, depth: number, paramType?: TypeIR): string {
   const isSlot =
     paramType?.kind === "slot" ||
@@ -429,6 +431,9 @@ function attrValue(expr: ExprIR, ctx: WalkContext, depth: number, paramType?: Ty
       : paramType?.kind === "optional" && paramType.inner.kind === "action"
         ? paramType.inner
         : undefined;
+  if (action && expr.kind === "lambda") {
+    return `{${emitActionLambda(expr, action, ctx)}}`;
+  }
   if (!isSlot && expr.kind === "literal" && expr.lit === "string") {
     return JSON.stringify(expr.value);
   }
@@ -441,9 +446,10 @@ function attrValue(expr: ExprIR, ctx: WalkContext, depth: number, paramType?: Ty
     const jsx = walk(expr, ctx, depth + 1);
     return `{${jsx}}`;
   }
-  if (action && expr.kind === "lambda") {
-    return `{${emitActionLambda(expr, action, ctx)}}`;
-  }
+  // User-component attr values stay JSX-shaped (`{expr}`) — the
+  // user-component invocation path is JSX-only until the Vue
+  // user-component slice; renderAttrBinding owns the cross-framework
+  // dynamic-attr form for the seam-routed call sites.
   return `{${emitExpr(expr, ctx)}}`;
 }
 

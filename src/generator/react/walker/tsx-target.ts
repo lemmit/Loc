@@ -227,6 +227,16 @@ export const tsxTarget: WalkerTarget = {
     return `{/* ${text} */}`;
   },
 
+  /** JSX child-position interpolation — the brace wrap. */
+  renderInterpolation(jsExpr: string): string {
+    return `{${jsExpr}}`;
+  },
+
+  /** JSX dynamic attribute — `name={expr}`, leading space included. */
+  renderAttrBinding(name: string, jsExpr: string): string {
+    return ` ${name}={${jsExpr}}`;
+  },
+
   /** Parenthesised ternary.  Depth 0 sits directly inside the
    *  component's `return ( … )` parens; nested child positions need
    *  the JSX brace wrap.  Verbatim lift of the walk()-ternary case. */
@@ -246,24 +256,6 @@ export const tsxTarget: WalkerTarget = {
       return `${JSON.stringify(camelKey)}: ${rendered}`;
     });
     return ` style={{ ${parts.join(", ")} }}`;
-  },
-
-  /** React children prop — `{children}`. */
-  renderChildrenSlot(): string {
-    return "{children}";
-  },
-
-  /** react-hook-form + zodResolver — universal across the TSX packs;
-   *  `Controller` joins when any field needs controlled binding.
-   *  Verbatim lift of the imports the form preparer used to add
-   *  inline. */
-  formRuntimeImports(
-    useController: boolean,
-  ): ReadonlyArray<{ from: string; named: readonly string[] }> {
-    return [
-      { from: "react-hook-form", named: useController ? ["useForm", "Controller"] : ["useForm"] },
-      { from: "@hookform/resolvers/zod", named: ["zodResolver"] },
-    ];
   },
 
   /** JSX text escaping — entity-escape the expression / tag

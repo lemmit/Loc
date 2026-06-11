@@ -48,15 +48,19 @@ export function emitWorkflowStatePersistence(
   workflows: readonly WorkflowIR[],
   ns: string,
   out: Map<string, string>,
+  /** Idempotent-consumer marker (dispatch-delivery-semantics.md §3): a
+   *  durable channel adds `LastEventId` so handlers can no-op on the
+   *  relay's at-least-once redelivery. */
+  durable = false,
 ): void {
   for (const wf of correlationWorkflows(workflows)) {
     out.set(
       `Infrastructure/Persistence/Workflows/${workflowStateClass(wf)}.cs`,
-      renderWorkflowStateEntity(wf, ns),
+      renderWorkflowStateEntity(wf, ns, durable),
     );
     out.set(
       `Infrastructure/Persistence/Configurations/${workflowStateClass(wf)}Configuration.cs`,
-      renderWorkflowStateConfiguration(wf, ns),
+      renderWorkflowStateConfiguration(wf, ns, durable),
     );
   }
 }
@@ -64,13 +68,19 @@ export function emitWorkflowStatePersistence(
 /** The saga-instance POCO: the correlation field plus every other state field
  *  as a public auto-property (EF maps it; handler bodies read/write
  *  `state.<Prop>` via the `thisName: "state"` seam). */
-export function renderWorkflowStateEntity(wf: WorkflowIR, ns: string): string {
+export function renderWorkflowStateEntity(wf: WorkflowIR, ns: string, durable = false): string {
   const props = (wf.stateFields ?? []).map((f) => {
     // Non-optional reference types need `= default!` to satisfy nullable
     // reference types; value types (int / record-struct ids) accept it too.
     const def = f.optional ? "" : " = default!;";
     return `    public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; set; }${def}`;
   });
+  if (durable) {
+    // Idempotent-consumer marker (dispatch-delivery-semantics.md §3): the
+    // last processed outbox event id — the handler preamble no-ops on a
+    // repeat under the relay's at-least-once redelivery.
+    props.push("    public string? LastEventId { get; set; }");
+  }
   return (
     lines(
       "// Auto-generated.",
@@ -92,7 +102,11 @@ export function renderWorkflowStateEntity(wf: WorkflowIR, ns: string): string {
 /** The state row's EF configuration — mirrors the aggregate configuration's
  *  `ToTable` / `HasKey` / per-field `HasConversion` shape, keyed by the
  *  correlation field instead of `Id`. */
-export function renderWorkflowStateConfiguration(wf: WorkflowIR, ns: string): string {
+export function renderWorkflowStateConfiguration(
+  wf: WorkflowIR,
+  ns: string,
+  durable = false,
+): string {
   const corr = wf.correlationField as string;
   const cls = workflowStateClass(wf);
   const fieldConfigs = (wf.stateFields ?? []).flatMap((f) => {
@@ -125,6 +139,11 @@ export function renderWorkflowStateConfiguration(wf: WorkflowIR, ns: string): st
       `        builder.ToTable("${workflowStateTable(wf)}");`,
       `        builder.HasKey(x => x.${upperFirst(corr)});`,
       ...fieldConfigs,
+      // The marker column name matches the shared migration DDL
+      // (`last_event_id`, dispatch-delivery-semantics.md §3).
+      ...(durable
+        ? [`        builder.Property(x => x.LastEventId).HasColumnName("last_event_id");`]
+        : []),
       "    }",
       "}",
     ) + "\n"

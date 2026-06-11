@@ -64,14 +64,15 @@ export function emitBadge(
 
 export function emitSlot(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Children-prop placeholder.  `Slot()` inside a
-  // component's body emits `{children}`, the React idiom for
-  // rendering whatever JSX the parent passed in.  Marks usesChildren
-  // on the context so the shell adds `children?: React.ReactNode`
-  // to the typed Props interface.
+  // component's body renders whatever markup the parent passed in.
+  // Marks usesChildren on the context so the shell adds the typed
+  // children prop.  Targets whose slot spelling diverges from the
+  // JSX `{children}` idiom (Svelte 5's `{@render children?.()}`)
+  // override via the optional `renderChildrenSlot` seam.
   void call;
   void depth;
   ctx.usesChildren = true;
-  return ctx.target.renderChildrenSlot();
+  return ctx.target.renderChildrenSlot?.() ?? `{children}`;
 }
 
 export function emitDivider(

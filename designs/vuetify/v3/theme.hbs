@@ -1,0 +1,48 @@
+// Auto-generated.  Do not edit by hand.
+// Vuetify instance — single home for the design tokens projected from
+// the system's `theme { … }` block (or the toolchain defaults).
+// Components/directives are imported in full, explicitly: correctness
+// over tree-shaking — no `vite-plugin-vuetify` auto-import resolver
+// dependency (see vue-frontend-plan.md, Risks).
+import { createVuetify } from "vuetify";
+import * as components from "vuetify/components";
+import * as directives from "vuetify/directives";
+import "vuetify/styles";
+
+export const vuetify = createVuetify({
+  components,
+  directives,
+  theme: {
+    defaultTheme: "{{colorScheme}}",
+    themes: {
+      light: {
+        colors: {
+          primary: "{{brandShades.[6]}}",
+          secondary: "{{secondaryShades.[6]}}",
+          accent: "{{accentShades.[6]}}",
+          success: "{{successShades.[6]}}",
+          warning: "{{warningShades.[6]}}",
+          error: "{{errorShades.[6]}}",
+        },
+      },
+      dark: {
+        colors: {
+          primary: "{{brandShades.[5]}}",
+          secondary: "{{secondaryShades.[5]}}",
+          accent: "{{accentShades.[5]}}",
+          success: "{{successShades.[5]}}",
+          warning: "{{warningShades.[5]}}",
+          error: "{{errorShades.[5]}}",
+        },
+      },
+    },
+  },
+  defaults: {
+    VCard: { elevation: 1, rounded: "lg" },
+    VBtn: { rounded: "lg" },
+    VTextField: { variant: "outlined", density: "comfortable" },
+    VTextarea: { variant: "outlined", density: "comfortable" },
+    VSelect: { variant: "outlined", density: "comfortable" },
+    VTable: { density: "comfortable" },
+  },
+});

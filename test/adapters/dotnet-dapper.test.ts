@@ -193,6 +193,27 @@ describe("dapper capability gating (loom.dapper-unsupported)", () => {
   };
 
   it("rejects a provenanced field", () => rejects("provenanced score: int", /provenanced/));
+
+  it("rejects workflow event subscriptions (saga handlers + outbox need the EF AppDbContext)", async () => {
+    const src = `
+      system D {
+        api A from S
+        subdomain S { context O {
+          aggregate Order with crudish { customer: string }
+          repository Orders for Order { }
+          event OrderPlaced { order: Order id }
+          channel Lifecycle { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }
+          workflow W { orderId: Order id  create(p: OrderPlaced) by p.order { } }
+        } }
+        storage pg { type: postgres }
+        resource s { for: O, kind: state, use: pg }
+        deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+      }`;
+    const { errors } = await emit(src);
+    expect(
+      errors.some((e) => /persistence: dapper/.test(e) && /workflow event subscriptions/.test(e)),
+    ).toBe(true);
+  });
   it("rejects a non-relational saving shape (shape(document))", async () => {
     const src = `
       system D {

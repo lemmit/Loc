@@ -1,0 +1,8 @@
+{{#if hasTitle}}{{#if hasContent}}<v-card{{#if (eq variant "outline")}} variant="outlined"{{/if}}{{#if (eq variant "raised")}} variant="elevated" elevation="{{#if hasShadow}}{{#if (eq shadow "sm")}}2{{else}}{{#if (eq shadow "lg")}}8{{else}}{{#if (eq shadow "xl")}}12{{else}}4{{/if}}{{/if}}{{/if}}{{else}}4{{/if}}"{{/if}}{{#unless hasVariant}} variant="outlined"{{/unless}} class="pa-4"{{{testidAttr}}}{{{styleAttr}}}>
+{{indent}}<div class="text-h6 mb-2">{{{titleText}}}</div>
+{{indent}}{{{contentJsx}}}
+{{closeIndent}}</v-card>{{else}}<v-card{{#if (eq variant "outline")}} variant="outlined"{{/if}}{{#if (eq variant "raised")}} variant="elevated" elevation="{{#if hasShadow}}{{#if (eq shadow "sm")}}2{{else}}{{#if (eq shadow "lg")}}8{{else}}{{#if (eq shadow "xl")}}12{{else}}4{{/if}}{{/if}}{{/if}}{{else}}4{{/if}}"{{/if}}{{#unless hasVariant}} variant="outlined"{{/unless}} class="pa-4"{{{testidAttr}}}{{{styleAttr}}}>
+{{indent}}<div class="text-h6 mb-2">{{{titleText}}}</div>
+{{closeIndent}}</v-card>{{/if}}{{else}}{{#if hasContent}}<v-card{{#if (eq variant "outline")}} variant="outlined"{{/if}}{{#if (eq variant "raised")}} variant="elevated" elevation="{{#if hasShadow}}{{#if (eq shadow "sm")}}2{{else}}{{#if (eq shadow "lg")}}8{{else}}{{#if (eq shadow "xl")}}12{{else}}4{{/if}}{{/if}}{{/if}}{{else}}4{{/if}}"{{/if}}{{#unless hasVariant}} variant="outlined"{{/unless}} class="pa-4"{{{testidAttr}}}{{{styleAttr}}}>
+{{indent}}{{{contentJsx}}}
+{{closeIndent}}</v-card>{{else}}<v-card{{{testidAttr}}}{{{styleAttr}}} />{{/if}}{{/if}}

@@ -1,0 +1,12 @@
+{{#if hasColumns}}<v-table{{#if striped}} striped="even"{{/if}}{{#if highlight}} hover{{/if}}{{#if sticky}} fixed-header{{/if}}{{{testidAttr}}}>
+{{indent}}<thead>
+{{headIndent}}<tr>
+{{#each columns}}{{../rowIndent}}<th>{{{this.header}}}</th>
+{{/each}}{{headIndent}}</tr>
+{{indent}}</thead>
+{{indent}}<tbody>
+{{headIndent}}<tr v-for="({{rowVar}}{{#if usesIdx}}, idx{{/if}}) in {{{rowsExpr}}}" :key="{{{keyExpr}}}"{{#if hasRowTestid}} :data-testid='{{{rowTestid}}}'{{/if}}{{#if hasOnRowClick}} @click='{{{onRowClick}}}'{{/if}}>
+{{#each columns}}{{../rowIndent}}<td>{{{this.cellJsx}}}</td>
+{{/each}}{{headIndent}}</tr>
+{{indent}}</tbody>
+{{closeIndent}}</v-table>{{else}}<v-table{{{testidAttr}}} />{{/if}}

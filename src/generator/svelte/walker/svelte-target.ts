@@ -204,17 +204,21 @@ export const svelteTarget: WalkerTarget = {
   },
 
   /** Svelte 5 children snippet — optional-render so components
-   *  invoked without children stay valid. */
+   *  invoked without children stay valid.  (Snippets aren't
+   *  interpolatable, so the JSX `{children}` fallback is wrong here.) */
   renderChildrenSlot(): string {
     return "{@render children?.()}";
   },
 
-  /** None — the runes form runtime (`createForm` from
-   *  `$lib/forms.svelte`) rides the svelte packs'
-   *  `imports["form-of-decls"]` / `imports["primitive-form-of"]`
-   *  declarations. */
-  formRuntimeImports(): ReadonlyArray<{ from: string; named: readonly string[] }> {
-    return [];
+  /** Svelte 5 shares JSX's `{expr}` interpolation syntax. */
+  renderInterpolation(jsExpr: string): string {
+    return `{${jsExpr}}`;
+  },
+
+  /** Svelte dynamic attribute — `name={expr}`, leading space
+   *  included (same spelling as JSX). */
+  renderAttrBinding(name: string, jsExpr: string): string {
+    return ` ${name}={${jsExpr}}`;
   },
 
   /** Svelte text shares JSX's significant set — `{` opens an

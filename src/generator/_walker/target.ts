@@ -18,29 +18,29 @@
 //   6. Cross-page navigation — `useNavigate()` vs `push_navigate(socket, to: ...)`
 //
 // `WalkerTarget` is the contract every framework-specific walker
-// implements.  The shared walker core (`_walker/walker-core.ts`)
-// takes a `WalkerTarget` parameter and consults it at each of the
-// seams above; the rest (pack dispatch, attribute formatting, lambda
-// traversal) stays in the shared walker.
+// implements.  v0 wires the React (TSX) walker through `tsxTarget`
+// and the Phoenix LiveView (HEEx) walker through `heexTarget`.  The
+// walker itself takes a `WalkerTarget` parameter and consults it at
+// each of the seams above; the rest (pack dispatch, attribute
+// formatting, lambda traversal) stays in the shared walker.
 //
-// The contract has three implementations:
+// The contract has two implementations:
 //
-//   - `src/generator/react/walker/tsx-target.ts`     → `tsxTarget`
-//   - `src/generator/svelte/walker/svelte-target.ts` → `svelteTarget`
-//   - `src/generator/elixir/heex-target.ts`          → `heexTarget`
+//   - `src/generator/react/walker/tsx-target.ts`            → `tsxTarget`
+//   - `src/generator/elixir/heex-target.ts`      → `heexTarget`
 //
-// All validate the interface end-to-end through the cross-target
-// conformance test.  tsx/svelte are consumed by the shared walker
-// core; the HEEx walker (`heex-walker.ts`) is a parallel sibling that
-// implements the same contract for conformance but renders through
-// its own walk.
+// Both validate the interface end-to-end through the cross-target
+// conformance test.  The walkers (`body-walker.ts` for React,
+// `heex-walker.ts` for Phoenix) inline their seam implementations
+// directly; extracting them behind these targets is gated on the
+// byte-identical fixture suite (React) and
+// `mix compile --warnings-as-errors` (Phoenix).
 //
-// SCOPE DECISION (15 methods: the 9 lowering seams + 6 markup
+// SCOPE DECISION (13 methods: the 9 lowering seams + 4 markup
 // seams).  The contract covers the CROSS-FRAMEWORK seams a new
 // frontend (Vue / Svelte / Blazor) must implement to reuse the
 // shared walker core.  The markup seams (renderComment /
-// renderConditionalChild / renderStyleAttr / escapeText /
-// renderChildrenSlot / formRuntimeImports) joined for
+// renderConditionalChild / renderStyleAttr / escapeText) joined for
 // the Svelte port: Svelte 5 shares JSX's `{expr}` interpolation and
 // `<Comp x={y}/>` invocation syntax (those stay hardcoded in the
 // shared walker), but diverges on comments (`<!-- -->` vs
@@ -285,6 +285,23 @@ export interface WalkerTarget {
    *  HEEx: `<%!-- text --%>`. */
   renderComment(text: string): string;
 
+  /** Render a JS expression in markup TEXT/child position — the
+   *  framework's inline interpolation.  TSX and Svelte share JSX's
+   *  `{expr}`; Vue uses the mustache `\{\{ expr \}\}`; HEEx's own
+   *  walker never reaches this (modern HEEx `{expr}` returned for
+   *  contract completeness).  The expression is already rendered
+   *  JS — the target only supplies the delimiters. */
+  renderInterpolation(jsExpr: string): string;
+
+  /** Render a DYNAMIC attribute bound to a JS expression, leading
+   *  space included (` name={expr}` on TSX/Svelte; ` :name="expr"`
+   *  on Vue — Vue quotes the expression, so the target picks a
+   *  quote character the rendered JS doesn't collide with).
+   *  Static string-literal attributes don't come through here —
+   *  every framework spells those ` name="value"` and the call
+   *  sites keep them inline. */
+  renderAttrBinding(name: string, jsExpr: string): string;
+
   /** Render a conditional CHILD — a ternary whose arms are markup
    *  (`body: cond ? Stack(…) : Empty(…)`).  `cond` is a rendered JS
    *  expression; `thenS` / `elseS` are rendered markup fragments.
@@ -313,20 +330,9 @@ export interface WalkerTarget {
    *  set, so the entity escape carries over; HEEx escapes its own. */
   escapeText(text: string): string;
 
-  /** Render the `Slot()` children placeholder inside a user
-   *  component's body.  TSX: `{children}` (the React children prop);
-   *  Svelte 5: `{@render children?.()}` (children is a snippet);
-   *  HEEx: `<%= render_slot(@inner_block) %>`. */
-  renderChildrenSlot(): string;
-
-  /** Form-runtime imports the shared form primitives must register
-   *  when a `Form(of:/runs:/op:)` renders.  TSX returns the
-   *  react-hook-form + zodResolver set (`Controller` joins when any
-   *  field needs controlled binding); Svelte returns [] — its form
-   *  runtime (`createForm` from `$lib/forms.svelte`) rides the pack's
-   *  `imports["form-of-decls"]` declarations instead; HEEx returns []
-   *  (AshPhoenix.Form needs no page-side import). */
-  formRuntimeImports(
-    useController: boolean,
-  ): ReadonlyArray<{ from: string; named: readonly string[] }>;
+  /** OPTIONAL — children-slot spelling for the `Slot()` primitive.
+   *  Omitted targets fall back to the JSX `{children}` idiom (TSX,
+   *  Vue's render path); Svelte 5 overrides with
+   *  `{@render children?.()}` (snippets aren't interpolatable). */
+  renderChildrenSlot?(): string;
 }

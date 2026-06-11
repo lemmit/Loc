@@ -180,6 +180,17 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat, RequiredSet> = {
     // would force dead .hbs files into every svelte pack.
     form: TSX_FORM.filter((t) => t !== "realtime-toast"),
   },
+  // Vue packs own forms + field inputs the way TSX packs do
+  // (hand-rolled reactive() + zod form helper), so the required
+  // surface mirrors TSX exactly — the Vite+vue-router SPA shape needs
+  // no shell template beyond the shared set (vite config / theme /
+  // app shell are all covered by SHARED_SHELL names).
+  vue: {
+    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES],
+    shell: SHARED_SHELL,
+    fieldInput: TSX_FIELD_INPUT,
+    form: TSX_FORM,
+  },
 };
 
 /** Flatten a `RequiredSet` to a single list — every name a pack must
