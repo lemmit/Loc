@@ -221,7 +221,8 @@ called production-ready.
 3. Refresh CLAUDE.md + docs/platforms.md + docs/generators.md to the real roster.
 4. Add the missing Python/Vue test + CI gates.
 5. Resolve the `platform/` layout dichotomy (document or migrate).
-6. Extract the `WorkflowChoreographer` seam (largest duplication payoff).
+6. Extract the `WorkflowChoreographer` seam (largest duplication payoff) — design
+   + pilot plan in [`docs/plans/workflow-choreographer-seam.md`](../plans/workflow-choreographer-seam.md).
 7. ~~Migrate React onto `_frontend/api-module.ts`~~ — done (shims removed).
 8. Add a HEEx primitive-parity test + document HEEx as a parallel engine (do
    NOT merge the walkers — the divergence is topological).
