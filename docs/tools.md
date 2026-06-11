@@ -56,6 +56,7 @@ ddd new acme                                   # hono backend + React (mantine),
 ddd new acme --platform dotnet --design shadcn # .NET backend + React (shadcn)
 ddd new acme --platform phoenix                # Phoenix LiveView fullstack (ashPhoenix)
 ddd new acme --platform phoenix --design mui   # Phoenix backend + a React (mui) frontend
+ddd new acme --platform python                 # FastAPI backend + React (mantine)
 ```
 
 | Flag | Default | Meaning |

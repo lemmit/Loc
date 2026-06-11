@@ -580,7 +580,9 @@ async function runNew(name: string, options: NewOptions): Promise<void> {
     `Scaffolded ${files.size} file(s) in ${outDir} (platform: ${platform}, template: ${template}).`,
   );
   if (platformDefaulted) {
-    console.log("  platform: hono (default) — also: dotnet, elixir (re-run with --platform <p>)");
+    console.log(
+      "  platform: hono (default) — also: dotnet, elixir, python (re-run with --platform <p>)",
+    );
   }
   console.log(`  next: cd ${where} && ddd generate system main.ddd -o . && docker compose up`);
 }
@@ -838,7 +840,7 @@ program
   .description(
     "Scaffold a starter .ddd project (main.ddd + README + .loomignore), validated before writing. Pick the backend with --platform and the frontend with --design.",
   )
-  .option("--platform <platform>", "backend: hono | dotnet | elixir (default: hono)")
+  .option("--platform <platform>", "backend: hono | dotnet | elixir | python (default: hono)")
   .option("--template <template>", "starter model: blank | crud (default: crud)")
   .option(
     "--design <pack>",

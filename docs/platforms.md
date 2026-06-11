@@ -22,6 +22,7 @@ versioning works.
 | `static` | aliased to `react.ts` | 3001 | ✗ | ✓ |
 | `phoenixLiveView` (default `phoenixLiveView@v1`) | `src/platform/phoenix-live-view.ts` | 4000 | ✓ | ✓ |
 | `java` (default `java@v1`) | `src/platform/java.ts` | 8081 | ✓ | gated (`ui:` fails fast until the embedded-SPA mount lands) |
+| `python` (default `python@v1`; `fastapi` desugars to it) | `src/platform/python.ts` | 8000 | ✓ | ✓ (when `ui:` is declared — dotnet-style dual mode) |
 
 - **Needs DB** — the system orchestrator (`src/system/index.ts`)
   reads this flag to decide whether to emit a per-deployable
@@ -30,8 +31,8 @@ versioning works.
 - **Mounts UI** — whether the deployable validator allows a `ui:`
   binding on this platform.  `react`/`static` always mount; `dotnet`
   is dual-mode (mounts when `ui:` is declared, otherwise backend-
-  only); `phoenixLiveView` always mounts (fullstack); `hono` never
-  does.
+  only) and `python` mirrors it; `phoenixLiveView` always mounts
+  (fullstack); `hono` never does.
 
 ## Resolving a `platform:` value
 

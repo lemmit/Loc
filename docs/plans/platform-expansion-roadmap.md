@@ -149,7 +149,7 @@ every page archetype TSX serves, with feature parity at the user-facing level
 
 ---
 
-## Phase E — First new backend (FastAPI)
+## Phase E — First new backend (FastAPI) — **SHIPPED** (see [`python-backend-plan.md`](python-backend-plan.md))
 
 **Trigger:** after Phase A; ideally after Phase C reaches steady-state on
 the existing backends.
