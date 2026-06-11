@@ -605,8 +605,11 @@ function renderHandler(
     return renderExprWithCmdParams(e, paramNames, resourceClasses);
   };
 
+  // Guard exactly the getById loads this command handler later dereferences
+  // (op-call targets); loads only read to seed a `create` stay unguarded.
+  const dereffedLoads = collectDereferencedLoads(wf.statements);
   for (const st of wf.statements) {
-    stmtLines.push(...renderStatement(st, renderArg, ctx, usage));
+    stmtLines.push(...renderStatement(st, renderArg, ctx, usage, dereffedLoads));
   }
   // Saves.
   for (const save of wf.savesAtExit) {
@@ -723,12 +726,31 @@ function renderCsOmission(
   }
 }
 
+/**
+ * Walk a workflow body (recursing into `for-each` bodies) and collect the
+ * names that are dereferenced via a method call — i.e. every `op-call`
+ * target.  A `getById` load bound to such a name is load-or-throw: the deref
+ * (`b.Promote(...)`) would be a CS8602 under nullable-reference types unless
+ * the `Task<T?>` result is guarded.  Loads that are never dereferenced (e.g.
+ * `placeOrder`'s `customer`, only read to seed a `create`) stay unguarded.
+ */
+function collectDereferencedLoads(stmts: readonly WorkflowStmtIR[]): Set<string> {
+  const names = new Set<string>();
+  for (const st of stmts) {
+    if (st.kind === "op-call") names.add(st.target);
+    else if (st.kind === "for-each") {
+      for (const n of collectDereferencedLoads(st.body)) names.add(n);
+    }
+  }
+  return names;
+}
+
 function renderStatement(
   st: WorkflowStmtIR,
   renderArg: (e: import("../../ir/types/loom-ir.js").ExprIR) => string,
   ctx: EnrichedBoundedContextIR,
   usage: WorkflowUsage,
-  guardLoads = false,
+  guardLoads: boolean | ReadonlySet<string> = false,
 ): string[] {
   void usage;
   switch (st.kind) {
@@ -778,12 +800,16 @@ function renderStatement(
       const callArgs = argList.length > 0 ? `${argList}, cancellationToken` : `cancellationToken`;
       const call = `await ${fieldName}.${upperFirst(st.method)}Async(${callArgs})`;
       // `getById` is load-or-throw (Hono's returns non-null; the .NET
-      // op-command handler guards the same way).  In a reactor / event-create
-      // body the loaded aggregate is dereferenced (`ship.MarkTracked()`), so
-      // under nullable-reference types the bare `Task<T?>` would be a CS8602
-      // error — guard it.  Command-handler workflows keep the unguarded form
-      // (byte-identical) since they don't dereference the load.
-      if (guardLoads && st.method === "getById") {
+      // op-command handler guards the same way).  Guard the `Task<T?>` result
+      // with `?? throw` whenever the loaded aggregate is dereferenced — a
+      // reactor / event-create body always does (`guardLoads === true`), and a
+      // command-handler workflow does when the load is an `op-call` target
+      // (`b.Promote(...)`; `guardLoads` carries that name set).  Loads that are
+      // never dereferenced (e.g. `placeOrder`'s `customer`) stay unguarded and
+      // byte-identical.  Without the guard the deref is a CS8602 under
+      // /warnaserror.
+      const guardsLoad = typeof guardLoads === "boolean" ? guardLoads : guardLoads.has(st.name);
+      if (guardsLoad && st.method === "getById") {
         return [
           `${INDENT}var ${st.name} = ${call}`,
           `${INDENT}    ?? throw new AggregateNotFoundException($"${st.aggName} {${argList}} not found");`,
