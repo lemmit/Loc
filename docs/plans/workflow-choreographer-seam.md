@@ -216,9 +216,26 @@ Hono + Python workflow test suites and both layering guards green. The new
 `platform/hono/v4 → generator/_workflow` and `generator/python → _workflow`
 edges are legal (shared `_`-dir; `_workflow` imports only the IR type).
 
+## Java leaf — landed
+
+Third adopter. `src/generator/java/emit/workflow.ts` now supplies
+`javaWorkflowStmtTarget(ctx, imports, renderCtx)` and drives the shared
+`renderWorkflowStmts`; its bespoke `renderWorkflowStmt` switch is deleted. Java
+captured the same closure pattern as Hono — plus the `imports` accumulator each
+arm side-effects via `collectJavaExprImports`. The one transform: Java hardcoded
+an 8-space prefix in every arm and post-indented `for-each` bodies by +4; that
+became the threaded `indent` (driver passes the 8-space base; `indentUnit` is
+4 spaces), which reproduces the prior hand-indentation exactly (verified for
+nested loops too).
+
+**Gate:** byte-identical across all three Java workflow-service fixtures
+(features: guards/factory-let/op-call+currentUser/save; retrievals:
+`repo-run`±page/`for-each`/`emit`; resources: `resource-call`) — zero diff —
+plus the full `test/generator/java/` suite and both layering guards green.
+
 ## Next step
 
-Roll the `WorkflowStmtTarget` leaf out to Java and .NET (same byte-identical
-gate, one backend per PR), then assess Elixir last per Risks. The envelope
-(transaction/dispatch/route shell) is explicitly **out of scope** for the seam —
-it stays per-backend.
+Roll the `WorkflowStmtTarget` leaf out to **.NET** (the hardest — explicit
+`BeginTransactionAsync` envelope, largest leaf set), then assess **Elixir** last
+per Risks. The envelope (transaction/dispatch/route shell) is explicitly **out
+of scope** for the seam — it stays per-backend.
