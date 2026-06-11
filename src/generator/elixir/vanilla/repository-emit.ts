@@ -117,7 +117,8 @@ defmodule ${repoMod} do
           {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def persist_change(%Ecto.Changeset{data: %${aggModule}{}} = changeset) do
     Repo.update(changeset)
-  end${findBlock}end
+  end${findBlock}
+end
 `;
 }
 
