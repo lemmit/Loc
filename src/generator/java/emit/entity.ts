@@ -17,6 +17,7 @@ import {
   renderJavaExpr,
   renderJavaType,
 } from "../render-expr.js";
+import { renderSqlRestriction } from "../render-sql-restriction.js";
 import { collectJavaStmtImports, renderJavaStatements } from "../render-stmt.js";
 import {
   jpaClassAnnotations,
@@ -488,6 +489,14 @@ export function renderJavaEntity(
   while (body.length > 0 && body[body.length - 1] === "") body.pop();
 
   const usesHibernateTypes = persistence && needsHibernateTypes(entity.fields);
+  // Capability filters (non-principal, relational — the validator gates
+  // the rest) ride Hibernate's @SQLRestriction: one static WHERE
+  // fragment appended to every SELECT (the HasQueryFilter analog).
+  const contextFilters = isRoot && isAgg(entity) ? (entity.contextFilters ?? []) : [];
+  const sqlRestriction =
+    persistence && contextFilters.length > 0
+      ? `@SQLRestriction(${JSON.stringify(contextFilters.map(renderSqlRestriction).join(" and "))})`
+      : null;
   return lines(
     `package ${pkg};`,
     ``,
@@ -495,6 +504,7 @@ export function renderJavaEntity(
     ``,
     persistence ? `import jakarta.persistence.*;` : null,
     usesHibernateTypes ? `import org.hibernate.annotations.JdbcTypeCode;` : null,
+    sqlRestriction ? `import org.hibernate.annotations.SQLRestriction;` : null,
     usesHibernateTypes ? `import org.hibernate.type.SqlTypes;` : null,
     persistence ? `` : null,
     `import ${basePkg}.domain.common.*;`,
@@ -511,6 +521,7 @@ export function renderJavaEntity(
           voLookup: persistence.voLookup,
         })
       : null,
+    sqlRestriction,
     jmolecules,
     `public class ${entity.name}${superType ? ` extends ${superType.name}` : ""} {`,
     ...fieldLines,

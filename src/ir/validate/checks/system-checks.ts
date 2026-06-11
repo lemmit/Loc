@@ -433,7 +433,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // limitation.  .NET (HasQueryFilter) is deliberately absent — it
   // supports both deferred cases.  Canonical families (D-NODE-PLATFORM /
   // D-ELIXIR-PLATFORM): `node` (was `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
-  const LIMITED_FAMILIES = new Set(["node", "elixir"]);
+  const LIMITED_FAMILIES = new Set(["node", "elixir", "java"]);
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);

@@ -50,6 +50,9 @@ const FIXTURES: Array<[string, string]> = [
   // Exception-less operation returns: sealed domain union + Jackson
   // polymorphic wire DTO + controller ProblemDetail translation.
   ["test/e2e/fixtures/java-build/operation-returns.ddd", "ru_api"],
+  // Capability filters: @SQLRestriction from the non-principal filter
+  // predicate (softDelete pattern).
+  ["test/e2e/fixtures/java-build/context-filter.ddd", "cf_api"],
 ];
 
 describe.skipIf(!ENABLED)(

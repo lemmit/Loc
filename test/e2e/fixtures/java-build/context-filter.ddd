@@ -1,0 +1,24 @@
+system CF {
+  subdomain D {
+    context Docs {
+      filter for "softDeletable" !this.isDeleted
+      aggregate Doc {
+        title: string
+        isDeleted: bool
+        implements "softDeletable"
+        operation softDelete() { isDeleted := true }
+      }
+      repository Docs for Doc { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Docs, kind: state, use: primary }
+  deployable cfApi {
+    platform: java
+    contexts: [Docs]
+    dataSources: [st]
+    serves: A
+    port: 8081
+  }
+}
