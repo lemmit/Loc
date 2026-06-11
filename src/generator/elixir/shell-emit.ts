@@ -19,6 +19,7 @@ import {
   renderDevExs,
   renderProdExs,
   renderRelEnv,
+  renderRelease,
   renderRelServer,
   renderRuntimeExs,
 } from "./shell/config.js";
@@ -205,6 +206,9 @@ export function emitShellFiles(
   // Release
   out.set("rel/env.sh.eex", renderRelEnv(appName));
   out.set("rel/overlays/bin/server", renderRelServer(appName));
+  // Release task module — `bin/server` evals `Release.migrate()` before
+  // booting so the per-backend DB's schema exists on first start.
+  out.set(`lib/${appName}/release.ex`, renderRelease(appName, appModule));
 }
 
 // ---------------------------------------------------------------------------
