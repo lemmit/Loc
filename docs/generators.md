@@ -31,6 +31,13 @@ mikroorm }` — see the "Realization axes" section of [`platforms.md`](platforms
 The alternates (`dapper`, `mikroorm`) share the domain layer below and only
 swap the repository/schema layer (minimal-v1 surface, validator-gated).
 
+> **Scope note.** This matrix tracks the three reference platforms
+> (TypeScript/Hono, .NET, React). The later backends — **Python/FastAPI**
+> and **Java/Spring Boot** — and the **Vue** frontend consume the same
+> `LoomModel` / `wireShape` IR contract and emit the analogous constructs
+> in their own idiom; they are not yet broken out as columns here. See
+> [`platforms.md`](platforms.md) for the full registered set.
+
 | Construct | TypeScript (Hono + Drizzle) | .NET (ASP.NET + EF + Mediator) | React (Vite + RQ + Mantine) |
 | --- | --- | --- | --- |
 | `enum` | `pgEnum`, exported union type | C# enum + EF `HasConversion<string>` | Zod `z.enum([...])` |
