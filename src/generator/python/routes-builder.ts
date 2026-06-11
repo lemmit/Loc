@@ -18,6 +18,7 @@ import {
   type RepositoryIR,
   type TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { errorStatuses, type OpErrorKind, problemTitle } from "../../ir/util/openapi-errors.js";
 import {
   camelId,
   opCreate,
@@ -90,6 +91,13 @@ export function buildPyRoutesFile(
   const models = lines(
     ...parts.map((p) => responseModel(p.name, p, ctx)),
     responseModel(agg.name, agg, ctx),
+    // Named array component for list endpoints (`<Agg>ListResponse`,
+    // RootModel so FastAPI emits a $ref instead of an inline array) —
+    // response-schema parity with the other backends.
+    `class ${agg.name}ListResponse(RootModel[list[${agg.name}Response]]):`,
+    "    pass",
+    "",
+    "",
     ...pagedModels,
     hasCreateFactory(agg) ? createModels(agg, ctx) : null,
     ...publicOps.map((op) => opRequestModel(agg, op, ctx)),
@@ -145,9 +153,9 @@ export function buildPyRoutesFile(
     refersTo("datetime") ? "from datetime import datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     refersTo("datetime") || refersTo("Decimal") ? "" : null,
-    `from fastapi import ${["APIRouter", "Depends", refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
+    `from fastapi import ${["APIRouter", "Depends", refersTo("Path") ? "Path" : null, refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
     refersTo("JSONResponse") ? "from fastapi.responses import JSONResponse" : null,
-    "from pydantic import BaseModel",
+    `from pydantic import BaseModel${refersTo("RootModel") ? ", RootModel" : ""}`,
     refersTo("IntegrityError") ? "from sqlalchemy.exc import IntegrityError" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
@@ -168,7 +176,7 @@ export function buildPyRoutesFile(
     [...enumNames, ...voDomainNames].length > 0
       ? `from app.domain.value_objects import ${[...enumNames, ...voDomainNames].sort().join(", ")}`
       : null,
-    refersTo("problem") ? "from app.http.problem import problem" : null,
+    problemImports(refersTo),
     voModelImports.length > 0
       ? `from app.http.wire_models import ${voModelImports.map((n) => `${n} as ${n}Model`).join(", ")}`
       : null,
@@ -180,6 +188,33 @@ export function buildPyRoutesFile(
     "",
   );
 }
+
+/** `app.http.problem` names this routes file references. */
+function problemImports(refersTo: (n: string) => boolean): string | null {
+  const names = [
+    refersTo("ProblemDetails") ? "ProblemDetails" : null,
+    refersTo("problem") ? "problem" : null,
+  ].filter((n): n is string => n != null);
+  return names.length > 0 ? `from app.http.problem import ${names.join(", ")}` : null;
+}
+
+/** The per-route error-response matrix (openapi-errors.ts) as a
+ *  FastAPI `responses=` kwarg.  Declared via `"model": ProblemDetails`
+ *  (which registers the shared component); `install_openapi` re-keys
+ *  the content to application/problem+json — and routes that declare
+ *  their own 422 here suppress FastAPI's auto HTTPValidationError. */
+export function errorResponsesKwarg(kind: OpErrorKind, guarded = false): string {
+  const statuses = errorStatuses(kind, guarded);
+  if (statuses.length === 0) return "";
+  const entries = statuses.map(
+    (st) => `${st}: {"model": ProblemDetails, "description": "${problemTitle(st)}"}`,
+  );
+  return `, responses={${entries.join(", ")}}`;
+}
+
+/** `{id}` path-param annotation carrying the uuid format every backend
+ *  declares (paramTypeDiffs parity). */
+const ID_PARAM = 'id: Annotated[str, Path(json_schema_extra={"format": "uuid"})]';
 
 /** The domain error names this routes file actually references —
  *  extern dispatch re-raises the domain taxonomy and wraps everything
@@ -260,12 +295,7 @@ function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
   return lines(
     `class Create${agg.name}Request(BaseModel):`,
     inputs.length > 0
-      ? inputs.map((f) => {
-          const t = requestPyType(f.type, ctx);
-          const suffix =
-            f.optional && !t.endsWith("| None") ? " | None = None" : f.optional ? " = None" : "";
-          return `    ${f.name}: ${t}${suffix}`;
-        })
+      ? inputs.map((f) => `    ${f.name}: ${requestFieldDecl(f.type, f.optional, ctx)}`)
       : ["    pass"],
     "",
     "",
@@ -284,11 +314,22 @@ function opRequestModel(
   return lines(
     `class ${upperFirst(op.name)}${agg.name}Request(BaseModel):`,
     op.params.length > 0
-      ? op.params.map((p) => `    ${p.name}: ${requestPyType(p.type, ctx)}`)
+      ? op.params.map((p) => `    ${p.name}: ${requestFieldDecl(p.type, false, ctx)}`)
       : ["    pass"],
     "",
     "",
   );
+}
+
+/** Request-model field declaration with the cross-backend required-set
+ *  semantics: optional-typed values default to None, and bool inputs
+ *  are optional-with-default-false (Hono's zod `.default(false)`). */
+export function requestFieldDecl(t: TypeIR, optional: boolean, ctx: BoundedContextIR): string {
+  const base = requestPyType(t, ctx);
+  const isOpt = optional || t.kind === "optional";
+  if (isOpt) return base.endsWith("| None") ? `${base} = None` : `${base} | None = None`;
+  if (t.kind === "primitive" && t.name === "bool") return `${base} = False`;
+  return base;
 }
 
 // --- wire → domain coercion -----------------------------------------------------
@@ -332,7 +373,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
       .map((p) => `${snake(p.name)}=${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`)
       .join(", ");
     return lines(
-      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}")`,
+      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
       `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
       `    created = ${agg.name}.create(${args})`,
       "    await _repo(session).save(created)",
@@ -344,7 +385,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     .map((f) => `${snake(f.name)}=${pyWireToDomain(`body.${f.name}`, f.type, ctx)}`)
     .join(", ");
   return lines(
-    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}")`,
+    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
     `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
     `    created = ${agg.name}.create(${args})`,
     "    await _repo(session).save(created)",
@@ -354,7 +395,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
 
 function allRoute(agg: EnrichedAggregateIR): string {
   return lines(
-    `@router.get("", response_model=list[${agg.name}Response], operation_id="all${agg.name}")`,
+    `@router.get("", response_model=${agg.name}ListResponse, operation_id="all${agg.name}")`,
     `async def all_${snake(plural(agg.name))}(session: SessionDep) -> list[dict[str, object]]:`,
     "    repo = _repo(session)",
     "    return [repo.to_wire(root) for root in await repo.all()]",
@@ -363,8 +404,8 @@ function allRoute(agg: EnrichedAggregateIR): string {
 
 function byIdRoute(agg: EnrichedAggregateIR): string {
   return lines(
-    `@router.get("/{id}", response_model=${agg.name}Response, operation_id="${camelId(opGetById(agg.name))}")`,
-    `async def get_${snake(agg.name)}_by_id(id: str, session: SessionDep) -> dict[str, object]:`,
+    `@router.get("/{id}", response_model=${agg.name}Response, operation_id="${camelId(opGetById(agg.name))}"${errorResponsesKwarg("getById")})`,
+    `async def get_${snake(agg.name)}_by_id(${ID_PARAM}, session: SessionDep) -> dict[str, object]:`,
     "    repo = _repo(session)",
     `    return repo.to_wire(await repo.get_by_id(${agg.name}Id(id)))`,
   );
@@ -372,8 +413,8 @@ function byIdRoute(agg: EnrichedAggregateIR): string {
 
 function destroyRoute(agg: EnrichedAggregateIR): string {
   return lines(
-    `@router.delete("/{id}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}")`,
-    `async def destroy_${snake(agg.name)}(id: str, request: Request, session: SessionDep) -> Response:`,
+    `@router.delete("/{id}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}"${errorResponsesKwarg("destroy")})`,
+    `async def destroy_${snake(agg.name)}(${ID_PARAM}, request: Request, session: SessionDep) -> Response:`,
     "    repo = _repo(session)",
     `    await repo.get_by_id(${agg.name}Id(id))`,
     "    try:",
@@ -416,14 +457,11 @@ function operationRoute(
       ];
     });
     const usesUser = operationUsesCurrentUser(op);
-    const forbidden = operationIsGuarded(op)
-      ? ', responses={403: {"description": "Forbidden"}}'
-      : "";
     const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
     if (usesUser) callArgs.push("current_user");
     return lines(
-      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${forbidden})`,
-      `async def ${snake(op.name)}_${snake(agg.name)}(id: str, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
+      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
+      `async def ${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
       usesUser ? "    current_user: User = request.state.current_user" : null,
       "    repo = _repo(session)",
       `    found = await repo.get_by_id(${agg.name}Id(id))`,
@@ -437,9 +475,8 @@ function operationRoute(
   // the request scope and thread it as the trailing domain argument; a
   // `requires`-guarded op additionally declares its 403 outcome.
   const usesUser = operationUsesCurrentUser(op);
-  const forbidden = operationIsGuarded(op) ? ', responses={403: {"description": "Forbidden"}}' : "";
   const opSig = [
-    "id: str",
+    ID_PARAM,
     `body: ${upperFirst(op.name)}${agg.name}Request`,
     ...(usesUser ? ["request: Request"] : []),
     "session: SessionDep",
@@ -447,7 +484,7 @@ function operationRoute(
   const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
   if (usesUser) callArgs.push("current_user");
   return lines(
-    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${forbidden})`,
+    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
     usesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
@@ -470,9 +507,8 @@ function externRoute(
 ): string {
   const opSnake = snake(op.routeSlug ?? op.name);
   const usesUser = operationUsesCurrentUser(op);
-  const forbidden = operationIsGuarded(op) ? ', responses={403: {"description": "Forbidden"}}' : "";
   const sig = [
-    "id: str",
+    ID_PARAM,
     `body: ${upperFirst(op.name)}${agg.name}Request`,
     ...(usesUser ? ["request: Request"] : []),
     "session: SessionDep",
@@ -485,7 +521,7 @@ function externRoute(
     (p) => `"${snake(p.name)}": ${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`,
   );
   return lines(
-    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${forbidden})`,
+    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${sig}) -> Response:`,
     usesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
@@ -593,7 +629,7 @@ function findRoute(
   }
   if (isList) {
     return lines(
-      `@router.get("/${findSnake}", response_model=list[${agg.name}Response], operation_id="${opId}")`,
+      `@router.get("/${findSnake}", response_model=${agg.name}ListResponse, operation_id="${opId}")`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> list[dict[str, object]]:`,
       userBind,
       "    repo = _repo(session)",
@@ -601,7 +637,7 @@ function findRoute(
     );
   }
   return lines(
-    `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}")`,
+    `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}"${errorResponsesKwarg("findOptional")})`,
     `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object]:`,
     userBind,
     "    repo = _repo(session)",

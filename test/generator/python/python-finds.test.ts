@@ -49,7 +49,7 @@ describe("python find lowering", () => {
     const files = await build();
     const routes = files.get("api/app/http/order_routes.py")!;
     expect(routes).toContain(
-      '@router.get("/by_status", response_model=list[OrderResponse], operation_id="byStatusOrder")',
+      '@router.get("/by_status", response_model=OrderListResponse, operation_id="byStatusOrder")',
     );
     expect(routes).toContain(
       "async def by_status_orders(status: OrderStatus, session: SessionDep) -> list[dict[str, object]]:",

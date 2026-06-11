@@ -13,7 +13,7 @@ import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { requestPyType } from "./emit/http-models.js";
 import { type PyRenderContext, renderPyExpr } from "./render-expr.js";
-import { pyWireToDomain } from "./routes-builder.js";
+import { errorResponsesKwarg, pyWireToDomain, requestFieldDecl } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
 // Workflow routes — `app/http/workflows_routes.py`, mounted at
@@ -58,7 +58,7 @@ export function buildPyWorkflowsFile(
       lines(
         `class ${upperFirst(wf.name)}Request(BaseModel):`,
         wf.params.length > 0
-          ? wf.params.map((p) => `    ${p.name}: ${requestPyType(p.type, ctx)}`)
+          ? wf.params.map((p) => `    ${p.name}: ${requestFieldDecl(p.type, false, ctx)}`)
           : ["    pass"],
         "",
         "",
@@ -122,6 +122,7 @@ export function buildPyWorkflowsFile(
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
+    refersTo("ProblemDetails") ? "from app.http.problem import ProblemDetails" : null,
     voModelImports.length > 0
       ? `from app.http.wire_models import ${voModelImports.map((n) => `${n} as ${n}Model`).join(", ")}`
       : null,
@@ -223,14 +224,13 @@ function workflowRoute(
   // currentUser-referencing one binds the actor off the request scope
   // before any rendered statement mentions the bare `current_user`.
   const usesUser = workflowUsesCurrentUser(wf) || callsUserGatedOp(wf.statements, ctx);
-  const forbidden = workflowIsGuarded(wf) ? ', responses={403: {"description": "Forbidden"}}' : "";
   const sig = [
     `body: ${upperFirst(wf.name)}Request`,
     ...(usesUser ? ["request: Request"] : []),
     "session: SessionDep",
   ].join(", ");
   const out: string[] = [
-    `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}"${forbidden})`,
+    `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}"${errorResponsesKwarg("workflow", workflowIsGuarded(wf))})`,
     `async def ${snake(wf.name)}_workflow(${sig}) -> Response:`,
     ...(usesUser ? ["    current_user: User = request.state.current_user"] : []),
   ];

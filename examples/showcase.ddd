@@ -470,6 +470,15 @@ system DevPlatform {
         auth: required
     }
 
+    deployable pythonApi {
+        platform: python
+        contexts: [Catalog, Builds, People]
+        dataSources: [catalogState, buildsState, peopleState]
+        serves: ProjectsApi, DeliveryApi, AccountsApi
+        port: 8000
+        auth: required
+    }
+
     // ----- Frontend deployables: all three ui-binding forms -----
 
     // Compose-block binding form.

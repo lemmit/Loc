@@ -40,6 +40,12 @@ export function buildPyViewsFile(
         view.output.fields.map((f) => `    ${f.name}: ${rowFieldType(f.type)}`),
         "",
         "",
+        // Named array component (`<View>Response`, RootModel → $ref) —
+        // response-schema parity with the other backends.
+        `class ${view.name}Response(RootModel[list[${view.name}Row]]):`,
+        "    pass",
+        "",
+        "",
       ),
     );
   }
@@ -56,7 +62,9 @@ export function buildPyViewsFile(
   const repoAggs = [...new Set([...sourceAggs, ...auxAggs])]
     .filter((n) => aggsByName.has(n))
     .sort();
-  const responseAggs = sourceAggs.filter((n) => refersTo(`${n}Response`)).sort();
+  const responseAggs = sourceAggs
+    .filter((n) => refersTo(`${n}Response`) || refersTo(`${n}ListResponse`))
+    .sort();
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
     .filter(refersTo)
     .sort();
@@ -65,7 +73,7 @@ export function buildPyViewsFile(
     `"""Read-model view routes.  Auto-generated."""`,
     "",
     "from fastapi import APIRouter, Depends",
-    models.length > 0 ? "from pydantic import BaseModel" : null,
+    models.length > 0 ? "from pydantic import BaseModel, RootModel" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
@@ -76,7 +84,13 @@ export function buildPyViewsFile(
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
-    ...responseAggs.map((n) => `from app.http.${snake(n)}_routes import ${n}Response`),
+    ...responseAggs.map((n) => {
+      const names = [
+        refersTo(`${n}ListResponse`) ? `${n}ListResponse` : null,
+        refersTo(`${n}Response`) ? `${n}Response` : null,
+      ].filter((x): x is string => x != null);
+      return `from app.http.${snake(n)}_routes import ${names.join(", ")}`;
+    }),
     "",
     "SessionDep = Annotated[AsyncSession, Depends(get_session)]",
     "",
@@ -93,7 +107,7 @@ function viewRoute(view: ViewIR, ctx: EnrichedBoundedContextIR, dispatcherExpr: 
   const repoInit = `    repo = ${src}Repository(session, ${dispatcherExpr})`;
   if (!view.output) {
     return lines(
-      `@router.get("/${fn}", response_model=list[${src}Response], operation_id="${opId}")`,
+      `@router.get("/${fn}", response_model=${src}ListResponse, operation_id="${opId}")`,
       `async def ${fn}_view(session: SessionDep) -> list[dict[str, object]]:`,
       repoInit,
       `    return [repo.to_wire(r) for r in await repo.${fn}()]`,
@@ -102,7 +116,7 @@ function viewRoute(view: ViewIR, ctx: EnrichedBoundedContextIR, dispatcherExpr: 
   // Full form: bulk-load follows (dependency order — shortest path
   // first), then project binds per row.
   const out: string[] = [
-    `@router.get("/${fn}", response_model=list[${view.name}Row], operation_id="${opId}")`,
+    `@router.get("/${fn}", response_model=${view.name}Response, operation_id="${opId}")`,
     `async def ${fn}_view(session: SessionDep) -> list[dict[str, object]]:`,
     repoInit,
     `    rows = await repo.${fn}()`,

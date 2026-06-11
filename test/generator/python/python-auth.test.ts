@@ -70,7 +70,7 @@ describe("python auth gate", () => {
     const routes = files.get("api/app/http/order_routes.py")!;
     expect(routes).toContain("current_user: User = request.state.current_user");
     expect(routes).toContain("found.cancel(current_user)");
-    expect(routes).toContain('responses={403: {"description": "Forbidden"}}');
+    expect(routes).toContain('403: {"model": ProblemDetails, "description": "Forbidden"}');
   });
 
   it("currentUser-scoped find threads the actor into the repository predicate", async () => {
@@ -89,7 +89,7 @@ describe("python auth gate", () => {
     expect(wf).toContain("current_user: User = request.state.current_user");
     // The gated op takes the actor as its trailing argument.
     expect(wf).toContain("o.cancel(current_user)");
-    expect(wf).toContain('responses={403: {"description": "Forbidden"}}');
+    expect(wf).toContain('403: {"model": ProblemDetails, "description": "Forbidden"}');
     expect(wf).toContain("raise ForbiddenError(");
   });
 

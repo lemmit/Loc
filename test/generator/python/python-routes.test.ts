@@ -70,7 +70,7 @@ describe("python routes", () => {
     expect(order).not.toContain("from app.domain.order import Order\n");
     // Customer is — full create route.
     expect(customer).toContain(
-      '@router.post("", status_code=201, response_model=CreateCustomerResponse, operation_id="createCustomer")',
+      '@router.post("", status_code=201, response_model=CreateCustomerResponse, operation_id="createCustomer", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
     );
     expect(customer).toContain("created = Customer.create(name=body.name)");
     expect(customer).toContain('return {"id": created.id}');
@@ -80,7 +80,7 @@ describe("python routes", () => {
     const files = await build("domain.ddd");
     const routes = files.get("api/app/http/order_routes.py")!;
     expect(routes).toContain(
-      '@router.post("/{id}/add_line", status_code=204, operation_id="addLineOrder")',
+      '@router.post("/{id}/add_line", status_code=204, operation_id="addLineOrder", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 404: {"model": ProblemDetails, "description": "Not Found"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
     );
     expect(routes).toContain("found = await repo.get_by_id(OrderId(id))");
     expect(routes).toContain(
@@ -94,10 +94,10 @@ describe("python routes", () => {
     const files = await build("domain.ddd");
     const routes = files.get("api/app/http/order_routes.py")!;
     expect(routes).toContain(
-      '@router.get("", response_model=list[OrderResponse], operation_id="allOrder")',
+      '@router.get("", response_model=OrderListResponse, operation_id="allOrder")',
     );
     expect(routes).toContain(
-      '@router.get("/{id}", response_model=OrderResponse, operation_id="getOrderById")',
+      '@router.get("/{id}", response_model=OrderResponse, operation_id="getOrderById", responses={404: {"model": ProblemDetails, "description": "Not Found"}})',
     );
     expect(routes).toContain("return repo.to_wire(await repo.get_by_id(OrderId(id)))");
   });

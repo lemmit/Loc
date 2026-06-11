@@ -9,7 +9,7 @@ import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
-import { emitPyAuthFiles } from "./auth-emit.js";
+import { emitPyAuthFiles, renderPyStubUserKwargs } from "./auth-emit.js";
 import {
   abstractBasesOf,
   buildPyBaseReaderFile,
@@ -120,7 +120,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       routedAggs,
       hasViews,
       hasWorkflows,
-      authRequired,
+      authRequired ? args.sys.user : undefined,
       hasSeeds,
       externAggs,
     ),
@@ -269,10 +269,13 @@ function renderPyproject(slug: string): string {
     "line-length = 100",
     `target-version = "py312"`,
     "",
-    "# E741: DSL-authored lambda params (idiomatically `l` for lines)",
-    "# flow into the generated source verbatim.",
+    "# E741: DSL-authored lambda params (idiomatically `l` for lines) flow",
+    "# into the generated source verbatim.  E711/E712: DSL equality against",
+    "# null/true renders structurally — and in SQLAlchemy predicates",
+    "# `== True` / `!= None` are the operator-overloaded forms, not style",
+    "# slips.",
     "[tool.ruff.lint]",
-    `ignore = ["E741"]`,
+    `ignore = ["E711", "E712", "E741"]`,
     "",
     "[tool.mypy]",
     `python_version = "3.12"`,
@@ -332,10 +335,17 @@ function renderMain(
   routerAggs: string[],
   hasViews = false,
   hasWorkflows = false,
-  authRequired = false,
+  authUser: import("../../ir/types/loom-ir.js").UserIR | undefined = undefined,
   hasSeeds = false,
   externAggs: string[] = [],
 ): string {
+  const authRequired = authUser != null;
+  // Dev-stub verifier (Hono index.ts parity): accepts every request as
+  // a built-in admin user with EMPTY permissions so the generated
+  // stack boots out of the box, while permission-guarded surfaces
+  // still deny.  REPLACE in production via register_user_verifier.
+  const stubKwargs = authUser ? renderPyStubUserKwargs(authUser) : "";
+  const stubIds = [...new Set(stubKwargs.match(/\b\w+Id(?=\()/g) ?? [])].sort();
   return lines(
     `"""FastAPI application entrypoint.`,
     "",
@@ -345,16 +355,22 @@ function renderMain(
     "import os",
     "from collections.abc import AsyncIterator",
     "from contextlib import asynccontextmanager",
+    stubKwargs.includes("datetime.") ? "from datetime import UTC, datetime" : null,
+    stubKwargs.includes("Decimal(") ? "from decimal import Decimal" : null,
     "",
-    "from fastapi import FastAPI",
+    `from fastapi import FastAPI${authRequired ? ", Request" : ""}`,
     "from fastapi.middleware.cors import CORSMiddleware",
     "from sqlalchemy import text",
     "",
     authRequired ? "from app.auth.middleware import AuthMiddleware" : null,
-    authRequired ? "from app.auth.verifier import assert_user_verifier_registered" : null,
+    authRequired ? "from app.auth.user import User" : null,
+    authRequired
+      ? "from app.auth.verifier import assert_user_verifier_registered, register_user_verifier"
+      : null,
     "from app.db.engine import engine",
     "from app.db.migrate import run_migrations",
     hasSeeds ? "from app.db.seed import run_seeds" : null,
+    stubIds.length > 0 ? `from app.domain.ids import ${stubIds.join(", ")}` : null,
     ...externAggs.map(
       (n) =>
         `from app.domain.${snake(n)}_handlers import verify_${snake(n)}_extern_handlers_registered`,
@@ -362,13 +378,29 @@ function renderMain(
     ...routerAggs.map(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
-    "from app.http.problem import install_error_handlers",
+    "from app.http.problem import install_error_handlers, install_openapi",
     hasViews ? "from app.http.views_routes import router as views_router" : null,
     hasWorkflows ? "from app.http.workflows_routes import router as workflows_router" : null,
     "from app.obs.log import log",
     "from app.obs.middleware import ObservabilityMiddleware",
     "",
     "",
+    ...(authRequired
+      ? [
+          "# Dev-stub verifier — accepts every request as a built-in admin user",
+          "# (EMPTY permissions, so permission-guarded surfaces still deny).",
+          "# REPLACE for production by calling register_user_verifier(...) with a",
+          "# JWT-decoding implementation, ideally from a non-regenerated module.",
+          "async def _dev_stub_verifier(_: Request) -> User:",
+          `    return User(${stubKwargs})`,
+          "",
+          "",
+          "register_user_verifier(_dev_stub_verifier)",
+          'log("warn", "auth_dev_stub_registered")',
+          "",
+          "",
+        ]
+      : []),
     '_PORT = int(os.environ.get("PORT", "8000"))',
     "",
     "",
@@ -389,6 +421,7 @@ function renderMain(
     "",
     `app = FastAPI(title=${JSON.stringify(systemName)}, version="0.1.0", lifespan=lifespan)`,
     "install_error_handlers(app)",
+    "install_openapi(app)",
     "",
     // Starlette runs later-added middleware first, so AuthMiddleware is
     // added BEFORE CORS to keep CORS outermost (auth after CORS — the
@@ -488,9 +521,13 @@ def iso(dt: datetime) -> str:
 // (RFC 6901 pointers), matching the other backends' ProblemDetails.
 const PROBLEM_PY = `"""RFC 7807 problem responses + exception handlers.  Auto-generated."""
 
+from typing import Any, cast
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.domain.errors import (
     AggregateNotFoundError,
@@ -499,6 +536,56 @@ from app.domain.errors import (
     ForbiddenError,
 )
 from app.obs.log import log
+
+
+class ProblemDetails(BaseModel):
+    """RFC 7807 body (+ the §3.2 errors[] extension on 422) — the shared
+    cross-backend error component the conformance gate compares."""
+
+    type: str | None = None
+    title: str | None = None
+    status: int | None = None
+    detail: str | None = None
+    instance: str | None = None
+    errors: list[dict[str, str]] | None = None
+
+
+def install_openapi(app: FastAPI) -> None:
+    """Post-process the generated OpenAPI for cross-backend parity:
+    error responses ride as application/problem+json (the declared
+    \`model\` registers the ProblemDetails component under
+    application/json), and FastAPI's auto-added 422
+    HTTPValidationError responses (+ their components) are dropped —
+    routes declare their own 422 where the shared error matrix
+    (openapi-errors.ts) says so."""
+
+    def custom_openapi() -> dict[str, Any]:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+        for item in cast(dict[str, Any], schema.get("paths", {})).values():
+            for op in item.values():
+                if not isinstance(op, dict):
+                    continue
+                responses = cast(dict[str, Any], op.get("responses", {}))
+                for code in list(responses):
+                    if not (code[:1] in "45" and len(code) == 3):
+                        continue
+                    content = cast(dict[str, Any], responses[code].get("content", {}))
+                    ref = (
+                        content.get("application/json", {}).get("schema", {}).get("$ref", "")
+                    )
+                    if ref.endswith("/HTTPValidationError"):
+                        del responses[code]
+                    elif ref.endswith("/ProblemDetails"):
+                        content["application/problem+json"] = content.pop("application/json")
+        components = cast(dict[str, Any], schema.get("components", {})).get("schemas", {})
+        components.pop("HTTPValidationError", None)
+        components.pop("ValidationError", None)
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = custom_openapi  # type: ignore[method-assign]
 
 
 def problem(

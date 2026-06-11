@@ -1,4 +1,4 @@
-import type { UserIR } from "../../ir/types/loom-ir.js";
+import type { FieldIR, TypeIR, UserIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { renderPyType } from "./render-expr.js";
@@ -24,6 +24,49 @@ export function emitPyAuthFiles(user: UserIR, out: Map<string, string>): void {
   out.set("app/auth/user.py", renderUserModule(user));
   out.set("app/auth/verifier.py", VERIFIER_PY);
   out.set("app/auth/middleware.py", MIDDLEWARE_PY);
+}
+
+/** Python kwargs for the dev-stub User — same defaults as Hono's
+ *  `renderStubUserLiteral` (string claims "admin", arrays EMPTY — so
+ *  permission-guarded surfaces deny by default — optionals None). */
+export function renderPyStubUserKwargs(user: UserIR): string {
+  return user.fields.map((f) => `${snake(f.name)}=${stubValueFor(f)}`).join(", ");
+}
+
+function stubValueFor(f: FieldIR): string {
+  if (f.optional) return "None";
+  return stubValueForType(f.type);
+}
+
+function stubValueForType(t: TypeIR): string {
+  switch (t.kind) {
+    case "primitive":
+      switch (t.name) {
+        case "string":
+          return '"admin"';
+        case "int":
+        case "long":
+          return "0";
+        case "decimal":
+          return "0.0";
+        case "money":
+          return 'Decimal("0")';
+        case "bool":
+          return "False";
+        case "datetime":
+          return "datetime.fromtimestamp(0, tz=UTC)";
+        case "guid":
+          return '"00000000-0000-0000-0000-000000000000"';
+        default:
+          return '""';
+      }
+    case "id":
+      return `${t.targetName}Id("00000000-0000-0000-0000-000000000000")`;
+    case "array":
+      return "[]";
+    default:
+      return "None";
+  }
 }
 
 function renderUserModule(user: UserIR): string {

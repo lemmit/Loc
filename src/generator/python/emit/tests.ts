@@ -70,7 +70,13 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
   const out: string[] = [];
   out.push(`"""Domain tests for ${agg.name}.  Auto-generated."""`);
   if (usesDatetime || usesDecimal || usesPytest || usesActor) out.push("");
-  if (usesDatetime) out.push("from datetime import datetime");
+  if (usesDatetime) {
+    out.push(
+      /\bUTC\b/.test(bodyStr)
+        ? "from datetime import UTC, datetime"
+        : "from datetime import datetime",
+    );
+  }
   if (usesDecimal) out.push("from decimal import Decimal");
   if (usesActor) out.push("from types import SimpleNamespace");
   if (usesActor) out.push("from typing import cast");
@@ -183,7 +189,12 @@ function coerceCreateValue(value: ExprIR, type: TypeIR | undefined, ctx: Bounded
       return `${vo.name}(${args.join(", ")})`;
     }
   }
-  if (type?.kind === "primitive" && type.name === "datetime" && value.kind === "literal") {
+  if (
+    type?.kind === "primitive" &&
+    type.name === "datetime" &&
+    value.kind === "literal" &&
+    value.lit === "string"
+  ) {
     return `datetime.fromisoformat(${renderTestExpr(value, ctx)})`;
   }
   return renderTestExpr(value, ctx);
