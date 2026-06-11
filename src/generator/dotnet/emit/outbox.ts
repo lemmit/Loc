@@ -98,6 +98,33 @@ public sealed class OutboxDomainEventDispatcher : IDomainEventDispatcher
 `;
 }
 
+/** The AsyncLocal carrier for the in-flight outbox row id — set by the
+ *  relay around each dispatch so saga handlers' idempotent-consumer
+ *  markers (dispatch-delivery-semantics.md §3) can compare/stamp
+ *  `LastEventId` without widening the event records. */
+export function renderOutboxDelivery(ns: string): string {
+  return `// Auto-generated.
+using System.Threading;
+
+namespace ${ns}.Domain.Common;
+
+/// <summary>Ambient outbox-delivery context: the id of the outbox row being
+/// relayed, or null for inline (ephemeral) dispatch.  Saga handlers no-op
+/// when their state row already records this id (idempotent consumer —
+/// at-least-once becomes effectively-once).</summary>
+public static class OutboxDelivery
+{
+    private static readonly AsyncLocal<string?> _currentEventId = new();
+
+    public static string? CurrentEventId
+    {
+        get => _currentEventId.Value;
+        set => _currentEventId.Value = value;
+    }
+}
+`;
+}
+
 /** The polling relay: a BackgroundService draining undispatched outbox rows
  *  (ordered by occurred_at) through the in-process dispatcher; failures bump
  *  `attempts` and dead-letter (log only — the row stays) after MaxAttempts. */
@@ -169,7 +196,18 @@ public sealed class OutboxRelayService : BackgroundService
             try
             {
                 var ev = Deserialize(row.Type, row.Payload);
-                if (ev is not null) await inner.DispatchAsync(ev, cancellationToken);
+                // The row id rides on an AsyncLocal so saga handlers'
+                // idempotent-consumer markers can no-op on redelivery
+                // (dispatch-delivery-semantics.md §3).
+                OutboxDelivery.CurrentEventId = row.Id.ToString();
+                try
+                {
+                    if (ev is not null) await inner.DispatchAsync(ev, cancellationToken);
+                }
+                finally
+                {
+                    OutboxDelivery.CurrentEventId = null;
+                }
                 row.DispatchedAt = DateTime.UtcNow;
             }
             catch (OperationCanceledException)

@@ -23,6 +23,7 @@ import type {
   ConfigValueIR,
   DataSourceIR,
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
   SubdomainIR,
@@ -505,6 +506,16 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
       // mirroring the find path.  No gate.
       if ((ctx.seeds ?? []).length > 0)
         reject(`context '${ctxName}'`, "declares 'seed' data (the Dapper seed path is not wired)");
+      // Workflow event subscriptions (and therefore channels/outbox): the
+      // saga handlers + outbox dispatcher/relay inject the EF AppDbContext,
+      // which a Dapper deployable does not emit — the project would not
+      // compile.  Reject loudly instead (dispatch-delivery-semantics.md's
+      // Dapper outbox is a follow-up slice).
+      if (((ctx as EnrichedBoundedContextIR).eventSubscriptions ?? []).length > 0)
+        reject(
+          `context '${ctxName}'`,
+          "declares workflow event subscriptions (the Dapper dispatch/outbox path is not wired)",
+        );
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
