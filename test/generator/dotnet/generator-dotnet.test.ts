@@ -796,8 +796,12 @@ describe(".NET generator", () => {
     // (canonical C# decimal literal) — still valid C#, just more
     // type-honest than the old implicit-conversion form.
     expect(handler).toMatch(/if \(!\(command\.Amount > 0m\)\) throw new DomainException/);
+    // The load is dereferenced (`customer.DeductCredit(...)`), so the nullable
+    // `GetByIdAsync` result is guarded with `?? throw` — otherwise CS8602 under
+    // /warnaserror.  (A load that's only read to seed a `create`, like sales'
+    // `placeOrder`, stays unguarded — see dotnet-dispatch-emission.test.ts.)
     expect(handler).toMatch(
-      /var customer = await _customers\.GetByIdAsync\(command\.CustomerId, cancellationToken\);/,
+      /var customer = await _customers\.GetByIdAsync\(command\.CustomerId, cancellationToken\)\s*\?\? throw new AggregateNotFoundException\(\$"Customer \{command\.CustomerId\} not found"\);/,
     );
     expect(handler).toMatch(/customer\.DeductCredit\(command\.Amount\);/);
     expect(handler).toMatch(

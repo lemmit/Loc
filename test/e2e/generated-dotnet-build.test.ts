@@ -140,6 +140,41 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // The "tech showcase" system (`examples/showcase.ddd`) exercises the whole
+    // language surface across multiple contexts, but it's multi-context — the
+    // single-context `generate dotnet` cases above can't reach it, and no other
+    // gate compiles its .NET backend.  Generate the SYSTEM and build the
+    // `dotnet_api` deployable's project under /warnaserror so the showcase's
+    // generated .NET code is actually compiled (the blind spot that hid the
+    // value-object persistence bugs).
+    it("system showcase (dotnet) — multi-context backend builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-showcase-dn-"));
+      try {
+        execSync(`node ${cli} generate system examples/showcase.ddd -o ${outDir}`, {
+          stdio: "inherit",
+          cwd: repoRoot,
+        });
+        const proj = path.join(outDir, "dotnet_api");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net8.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // D-REALIZATION-AXES Phase 5a/5b/5e: `directoryLayout: byFeature` is a
     // SYSTEM-MODE selection, so `generate dotnet` above never sees it.  Generate
     // the SYSTEM and build the byFeature deployable's project under /warnaserror
