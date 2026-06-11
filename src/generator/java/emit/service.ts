@@ -1,6 +1,7 @@
 import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   FieldIR,
   RepositoryIR,
   TypeIR,
@@ -10,6 +11,7 @@ import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
 import { declaredFinds, isPagedFind } from "./repository.js";
+import { returnUnionSpec } from "./unions.js";
 import { aggHasAnyWireValidator, renderJavaValidators } from "./validator.js";
 import { collectWireToDomainImports, wireToDomain } from "./wire.js";
 
@@ -28,6 +30,8 @@ export interface ServiceCtx {
   domainRepoPkg: string;
   /** auth: required + system user block — gates currentUser threading. */
   authed?: boolean;
+  /** The enclosing context — resolves exception-less return unions. */
+  boundedContext: EnrichedBoundedContextIR;
 }
 
 export function renderJavaService(
@@ -118,6 +122,7 @@ export function renderJavaService(
   const anyOpUsesUser =
     !!ctx.authed &&
     agg.operations.some((op) => op.visibility === "public" && operationUsesCurrentUser(op));
+  const unionReturnNames = new Set<string>();
   const opLines = agg.operations
     .filter((op) => op.visibility === "public")
     .flatMap((op) => {
@@ -152,17 +157,25 @@ export function renderJavaService(
           ``,
         ].filter((l): l is string => l !== null);
       }
+      // Exception-less return: the aggregate produces a tagged domain
+      // union — capture, save, return (the controller owns the wire /
+      // ProblemDetail translation).
+      const spec = returnUnionSpec(op, ctx.boundedContext);
+      if (spec) unionReturnNames.add(spec.name);
       return [
-        `    public void ${op.name}(${paramSig}) {`,
+        `    public ${spec ? spec.name : "void"} ${op.name}(${paramSig}) {`,
         ...lets,
         usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
         opHasValidator
           ? `        ${agg.name}Validators.${op.name}(${op.params.map((p) => p.name).join(", ")});`
           : null,
         `        var aggregate = repository.getById(id);`,
-        `        aggregate.${op.name}(${args});`,
+        spec
+          ? `        var result = aggregate.${op.name}(${args});`
+          : `        aggregate.${op.name}(${args});`,
         `        repository.save(aggregate);`,
         `        publishEvents(aggregate);`,
+        spec ? `        return result;` : null,
         `    }`,
         ``,
       ].filter((l): l is string => l !== null);
@@ -210,6 +223,9 @@ export function renderJavaService(
     `import org.springframework.transaction.annotation.Transactional;`,
     ``,
     ctx.entityPkg !== ctx.pkg ? `import ${ctx.entityPkg}.${agg.name};` : null,
+    ...(ctx.entityPkg !== ctx.pkg
+      ? [...unionReturnNames].sort().map((u) => `import ${ctx.entityPkg}.${u};`)
+      : []),
     ctx.domainRepoPkg !== ctx.pkg ? `import ${ctx.domainRepoPkg}.${agg.name}Repository;` : null,
     anyOpUsesUser ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     anyOpUsesUser ? `import ${ctx.basePkg}.auth.User;` : null,

@@ -1,9 +1,14 @@
 import { hasCreate } from "../../../ir/enrich/wire-projection.js";
-import type { EnrichedAggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
+import type {
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+  RepositoryIR,
+} from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
 import { declaredFinds, isPagedFind } from "./repository.js";
+import { returnUnionSpec, unionWireCtorArgs } from "./unions.js";
 
 // ---------------------------------------------------------------------------
 // REST controllers + the shared exception advice.  Route shape mirrors
@@ -26,6 +31,10 @@ export interface ControllerCtx {
   pkg: string;
   /** Package of the DTOs + service (imported wildcard when different). */
   applicationPkg: string;
+  /** Package the domain unions live in (entity package). */
+  entityPkg?: string;
+  /** The enclosing context — resolves exception-less return unions. */
+  boundedContext?: EnrichedBoundedContextIR;
 }
 
 export function renderJavaController(
@@ -38,6 +47,7 @@ export function renderJavaController(
   const imports = new Set<string>(["java.util.List"]);
   if (idJava === "UUID") imports.add("java.util.UUID");
 
+  const unionImports = new Set<string>();
   // Extern ops route identically — the service dispatches to the
   // user-supplied handler instead of an aggregate method.
   const opRoutes = agg.operations
@@ -45,6 +55,48 @@ export function renderJavaController(
     .flatMap((op) => {
       const hasParams = op.params.length > 0;
       const reqType = `${upperFirst(op.name)}${agg.name}Request`;
+      const spec = ctx.boundedContext ? returnUnionSpec(op, ctx.boundedContext) : undefined;
+      if (spec) {
+        // Exception-less return: switch the tagged domain union — error
+        // variants → RFC-7807 ProblemDetail at their mapped status,
+        // success variants → 200 with the polymorphic wire record.
+        if (ctx.entityPkg && ctx.entityPkg !== ctx.pkg) {
+          unionImports.add(`${ctx.entityPkg}.${spec.name}`);
+          for (const m of spec.members) unionImports.add(`${ctx.entityPkg}.${spec.name}_${m.tag}`);
+        }
+        const arms = spec.arms.flatMap((a) => {
+          if (a.isError) {
+            return [
+              `            case ${spec.name}_${a.tag} v -> {`,
+              `                var problem = ProblemDetail.forStatus(${a.status});`,
+              `                problem.setTitle(${JSON.stringify(a.title)});`,
+              `                problem.setType(URI.create(${JSON.stringify(a.typeUri)}));`,
+              `                problem.setDetail(${JSON.stringify(a.title)});`,
+              `                yield ResponseEntity.status(${a.status}).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);`,
+              `            }`,
+            ];
+          }
+          const ctor = `new ${spec.name}Response_${a.tag}(${unionWireCtorArgs(a.member).join(", ")})`;
+          return [
+            `            case ${spec.name}_${a.tag} v ->`,
+            `                ResponseEntity.ok((${spec.name}Response) ${ctor});`,
+          ];
+        });
+        return [
+          `    @PostMapping("/{id}/${snake(op.name)}")`,
+          hasParams
+            ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request) {`
+            : `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id) {`,
+          hasParams
+            ? `        var result = service.${op.name}(new ${agg.name}Id(id), request);`
+            : `        var result = service.${op.name}(new ${agg.name}Id(id));`,
+          `        return switch (result) {`,
+          ...arms,
+          `        };`,
+          `    }`,
+          ``,
+        ];
+      }
       return [
         `    @PostMapping("/{id}/${snake(op.name)}")`,
         `    @ResponseStatus(HttpStatus.NO_CONTENT)`,
@@ -146,10 +198,13 @@ export function renderJavaController(
     `import org.slf4j.Logger;`,
     `import org.slf4j.LoggerFactory;`,
     `import org.springframework.http.HttpStatus;`,
+    unionImports.size > 0 ? `import org.springframework.http.MediaType;` : null,
+    unionImports.size > 0 ? `import org.springframework.http.ProblemDetail;` : null,
     `import org.springframework.http.ResponseEntity;`,
     `import org.springframework.web.bind.annotation.*;`,
     ``,
     ctx.applicationPkg !== ctx.pkg ? `import ${ctx.applicationPkg}.*;` : null,
+    ...[...unionImports].sort().map((i) => `import ${i};`),
     declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
     ``,

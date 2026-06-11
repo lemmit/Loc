@@ -64,6 +64,11 @@ import {
 import { renderJavaSeedRunner } from "./emit/seed.js";
 import { renderJavaService } from "./emit/service.js";
 import { renderJavaTestsFile } from "./emit/tests.js";
+import {
+  aggregateReturnUnions,
+  renderJavaDomainUnionFiles,
+  renderJavaUnionWireFiles,
+} from "./emit/unions.js";
 import { renderJavaValidators } from "./emit/validator.js";
 import { renderJavaViews, viewFindsFor } from "./emit/view.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
@@ -496,9 +501,21 @@ function emitAggregate(
       entityPkg: pkgFor("entity", agg.name),
       domainRepoPkg: pkgFor("repository-interface", agg.name),
       authed: authRequired,
+      boundedContext: ctx,
     }),
     agg.name,
   );
+  // Exception-less operation returns: the domain union (sealed interface
+  // + variant records, entity package) and its Jackson-polymorphic wire
+  // twin (response-dto package).
+  for (const spec of aggregateReturnUnions(agg, ctx).values()) {
+    for (const f of renderJavaDomainUnionFiles(spec, pkgFor("entity", agg.name), basePkg)) {
+      place(f.name, "entity", f.content, agg.name);
+    }
+    for (const f of renderJavaUnionWireFiles(spec, pkgFor("response-dto", agg.name), basePkg)) {
+      place(f.name, "response-dto", f.content, agg.name);
+    }
+  }
   for (const op of agg.operations.filter((o) => o.extern)) {
     place(
       `${upperFirst(op.name)}${agg.name}Handler.java`,
@@ -520,6 +537,8 @@ function emitAggregate(
       basePkg,
       pkg: pkgFor("controller", agg.name),
       applicationPkg,
+      entityPkg: pkgFor("entity", agg.name),
+      boundedContext: ctx,
     }),
     agg.name,
   );
