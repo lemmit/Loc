@@ -184,7 +184,7 @@ describe("pipeline layering — value imports point one way", () => {
       "Expected to discover the per-platform generator dirs; did the layout change?",
     ).toBeGreaterThanOrEqual(5);
     // Pinned sibling edges (frozen, not license to grow):
-    //   - dotnet/elixir/java → react/svelte index: the fullstack-host embed —
+    //   - dotnet/elixir/java → react/svelte/vue index: the fullstack-host embed —
     //     a backend hosting a frontend SPA calls that frontend's
     //     generator to emit the embedded project (ClientApp/, priv/spa).
     //     This is deliberate composition, not a layering accident.
@@ -196,9 +196,12 @@ describe("pipeline layering — value imports point one way", () => {
     const pinnedSibling = new Set([
       "src/generator/dotnet/index.ts -> generator/react/",
       "src/generator/dotnet/index.ts -> generator/svelte/",
+      "src/generator/dotnet/index.ts -> generator/vue/",
       "src/generator/elixir/index.ts -> generator/react/",
+      "src/generator/elixir/index.ts -> generator/vue/",
       "src/generator/elixir/theme-emit.ts -> generator/react/",
       "src/generator/java/index.ts -> generator/react/",
+      "src/generator/java/index.ts -> generator/vue/",
       "src/generator/python/index.ts -> generator/react/",
       "src/generator/vue/index.ts -> generator/react/",
       "src/generator/vue/walker/page-shell.ts -> generator/react/",
