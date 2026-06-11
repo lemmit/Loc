@@ -291,6 +291,14 @@ export function generateReactForContexts(
   // Whether the scaffold expander synthesised a `Home` page (only
   // happens when the ui declared at least one scaffold).
   const hasScaffoldHome = ui.pages.some((p) => p.origin?.kind === "home");
+  // Same for the `ViewsIndex` / `WorkflowsIndex` singleton index pages:
+  // they are only synthesised by the scaffold macro, so an explicit-page
+  // ui with a view/workflow page but no scaffold has none.  The App shell
+  // must then skip the `/views` (resp. `/workflows`) index import+route or
+  // it dangles against a missing `./pages/views/index` module (TS2307) —
+  // the per-view / per-workflow pages still mount.
+  const hasViewsIndex = ui.pages.some((p) => p.origin?.kind === "views-index");
+  const hasWorkflowsIndex = ui.pages.some((p) => p.origin?.kind === "workflows-index");
 
   out.set(
     "src/App.tsx",
@@ -308,6 +316,8 @@ export function generateReactForContexts(
       layoutImports,
       observableWorkflows.map((w) => w.wf),
       hasRealtimeHandlers,
+      hasViewsIndex,
+      hasWorkflowsIndex,
     ),
   );
   // Home is synthesised by the scaffold expander whenever the
