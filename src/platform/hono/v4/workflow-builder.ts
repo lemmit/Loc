@@ -1,4 +1,8 @@
 import { renderHonoStoreLogCall } from "../../../generator/_obs/render-hono.js";
+import {
+  renderWorkflowStmts,
+  type WorkflowStmtTarget,
+} from "../../../generator/_workflow/stmt-target.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
   type AggregateIR,
@@ -415,9 +419,9 @@ function emitWorkflowRoute(
     for (const r of reposNeeded) {
       out.push(`      const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(tx, events);`);
     }
-    for (const st of wf.statements) {
-      out.push(...renderStmt(st, paramExprs, "      ", ctx));
-    }
+    out.push(
+      ...renderWorkflowStmts(wf.statements, honoWorkflowStmtTarget(ctx, paramExprs), "      "),
+    );
     for (const save of wf.savesAtExit) {
       out.push(`      await ${lowerFirst(save.repoName)}.save(${save.name});`);
     }
@@ -426,9 +430,9 @@ function emitWorkflowRoute(
     for (const r of reposNeeded) {
       out.push(`    const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
     }
-    for (const st of wf.statements) {
-      out.push(...renderStmt(st, paramExprs, "    ", ctx));
-    }
+    out.push(
+      ...renderWorkflowStmts(wf.statements, honoWorkflowStmtTarget(ctx, paramExprs), "    "),
+    );
     for (const save of wf.savesAtExit) {
       out.push(`    await ${lowerFirst(save.repoName)}.save(${save.name});`);
     }
@@ -853,7 +857,9 @@ function emitHandlerFn(
   for (const r of collectReposFromStmts(statements, saves)) {
     out.push(`  const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
   }
-  for (const st of statements) out.push(...renderStmt(st, noParams, "  ", ctx, thisName));
+  out.push(
+    ...renderWorkflowStmts(statements, honoWorkflowStmtTarget(ctx, noParams, thisName), "  "),
+  );
   for (const save of saves) out.push(`  await ${lowerFirst(save.repoName)}.save(${save.name});`);
   if (persisted && durable) {
     out.push(`  if (__eventId !== undefined) state.lastEventId = __eventId;`);
@@ -914,41 +920,43 @@ function collectReposFromStmts(
   return [...seen.entries()].map(([repoName, aggName]) => ({ repoName, aggName }));
 }
 
-function renderStmt(
-  st: WorkflowStmtIR,
-  paramExprs: Map<string, string>,
-  indent: string,
+// The Hono leaf table for the shared workflow statement spine
+// (`_workflow/stmt-target.ts`). Built per render call so it captures the
+// `paramExprs` / `thisName` in scope (the route handler and the saga handler
+// pass different bindings); the dispatch + `for-each` recursion live in the
+// spine.
+function honoWorkflowStmtTarget(
   ctx: BoundedContextIR,
+  paramExprs: Map<string, string>,
   thisName = "this",
-): string[] {
+): WorkflowStmtTarget {
   const renderArg = (e: ExprIR): string => renderExprWithParams(e, paramExprs, thisName);
-  switch (st.kind) {
-    case "precondition":
-      return [
-        `${indent}if (!(${renderArg(st.expr)})) throw new DomainError(${JSON.stringify(`Precondition failed: ${st.source}`)});`,
-      ];
-    case "requires":
-      return [
-        `${indent}if (!(${renderArg(st.expr)})) throw new ForbiddenError(${JSON.stringify(`Forbidden: ${st.source}`)});`,
-      ];
-    case "emit": {
+  return {
+    indentUnit: "  ",
+    precondition: (st, indent) => [
+      `${indent}if (!(${renderArg(st.expr)})) throw new DomainError(${JSON.stringify(`Precondition failed: ${st.source}`)});`,
+    ],
+    requires: (st, indent) => [
+      `${indent}if (!(${renderArg(st.expr)})) throw new ForbiddenError(${JSON.stringify(`Forbidden: ${st.source}`)});`,
+    ],
+    emit: (st, indent) => {
       const fieldList = [
         `type: "${st.eventName}"`,
         ...st.fields.map((f) => `${f.name}: ${renderArg(f.value)}`),
       ].join(", ");
       return [`${indent}workflowEvents.push({ ${fieldList} });`];
-    }
-    case "factory-let": {
+    },
+    factoryLet: (st, indent) => {
       const fields = st.fields.map((f) => `${f.name}: ${renderArg(f.value)}`).join(", ");
       return [`${indent}const ${st.name} = ${st.aggName}.create({ ${fields} });`];
-    }
-    case "repo-let": {
+    },
+    repoLet: (st, indent) => {
       const args = st.args.map(renderArg).join(", ");
       return [
         `${indent}const ${st.name} = await ${lowerFirst(st.repoName)}.${st.method}(${args});`,
       ];
-    }
-    case "op-call": {
+    },
+    opCall: (st, indent) => {
       const args = st.args.map(renderArg).join(", ");
       const op = lookupOp(ctx, st.aggName, st.op);
       if (op?.extern) {
@@ -992,10 +1000,9 @@ function renderStmt(
           ? [args, "currentUser"].filter(Boolean).join(", ")
           : args;
       return [`${indent}${st.target}.${lowerFirst(st.op)}(${callArgs});`];
-    }
-    case "expr-let":
-      return [`${indent}const ${st.name} = ${renderArg(st.expr)};`];
-    case "repo-run": {
+    },
+    exprLet: (st, indent) => [`${indent}const ${st.name} = ${renderArg(st.expr)};`],
+    repoRun: (st, indent) => {
       // `Repo.run(<Retrieval>(args), page?)` → the generated
       // `run<Name>(args, page?)` repository method (retrieval.md / PR3-A).
       const args = st.retrievalArgs.map(renderArg);
@@ -1008,13 +1015,12 @@ function renderStmt(
       return [
         `${indent}const ${st.name} = await ${lowerFirst(st.repoName)}.run${upperFirst(st.retrievalName)}(${args.join(", ")});`,
       ];
-    }
-    case "for-each": {
-      // `for o in xs { … }` → a JS `for…of`; the body renders at +2
-      // indent, then each iteration's dirty bindings save INSIDE the loop
-      // (aggregate events drain through the same save).
+    },
+    forEach: (st, indent, bodyLines) => {
+      // `for o in xs { … }` → a JS `for…of`; the spine renders the body at
+      // +2 indent (`indentUnit`); each iteration's dirty bindings save
+      // INSIDE the loop (aggregate events drain through the same save).
       const inner = `${indent}  `;
-      const bodyLines = st.body.flatMap((s) => renderStmt(s, paramExprs, inner, ctx, thisName));
       const saveLines = st.savesPerIteration.map(
         (sv) => `${inner}await ${lowerFirst(sv.repoName)}.save(${sv.name});`,
       );
@@ -1024,13 +1030,11 @@ function renderStmt(
         ...saveLines,
         `${indent}}`,
       ];
-    }
-    case "resource-call":
-      // Bare resource-op statement (`files.put(k, v)`).  `renderArg`
-      // renders the call as `(await files$put(...))`; emit it as a
-      // statement (Phase 4).
-      return [`${indent}${renderArg(st.call)};`];
-  }
+    },
+    // Bare resource-op statement (`files.put(k, v)`).  `renderArg` renders
+    // the call as `(await files$put(...))`; emit it as a statement (Phase 4).
+    resourceCall: (st, indent) => [`${indent}${renderArg(st.call)};`],
+  };
 }
 
 function lookupOp(

@@ -7,6 +7,7 @@ import type {
 import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
 import { requestPyType } from "./emit/http-models.js";
 import { renderPyExpr } from "./render-expr.js";
 import { pyWireToDomain } from "./routes-builder.js";
@@ -179,9 +180,7 @@ function workflowRoute(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
   }
   const hasEmit = collectEmits(wf.statements).length > 0;
   if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
-  for (const st of wf.statements) {
-    out.push(...renderWorkflowStmt(st, "    "));
-  }
+  out.push(...renderWorkflowStmts(wf.statements, pyWorkflowStmtTarget(), "    "));
   for (const save of wf.savesAtExit) {
     out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
   }
@@ -194,31 +193,33 @@ function workflowRoute(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
   return out.join("\n");
 }
 
-function renderWorkflowStmt(st: WorkflowStmtIR, i: string): string[] {
-  switch (st.kind) {
-    case "precondition":
-      return [
-        `${i}if not (${renderPyExpr(st.expr)}):`,
-        `${i}    raise DomainError(${JSON.stringify(`Precondition failed: ${st.source}`)})`,
-      ];
-    case "requires":
-      return [
-        `${i}if not (${renderPyExpr(st.expr)}):`,
-        `${i}    raise ForbiddenError(${JSON.stringify(`Forbidden: ${st.source}`)})`,
-      ];
-    case "emit": {
+// The Python leaf table for the shared workflow statement spine
+// (`_workflow/stmt-target.ts`). One method per `WorkflowStmtIR` kind; the
+// dispatch + `for-each` recursion live in the spine.
+function pyWorkflowStmtTarget(): WorkflowStmtTarget {
+  return {
+    indentUnit: "    ",
+    precondition: (st, i) => [
+      `${i}if not (${renderPyExpr(st.expr)}):`,
+      `${i}    raise DomainError(${JSON.stringify(`Precondition failed: ${st.source}`)})`,
+    ],
+    requires: (st, i) => [
+      `${i}if not (${renderPyExpr(st.expr)}):`,
+      `${i}    raise ForbiddenError(${JSON.stringify(`Forbidden: ${st.source}`)})`,
+    ],
+    emit: (st, i) => {
       const kwargs = st.fields.map((f) => `${snake(f.name)}=${renderPyExpr(f.value)}`).join(", ");
       return [`${i}workflow_events.append(${st.eventName}(${kwargs}))`];
-    }
-    case "factory-let": {
+    },
+    factoryLet: (st, i) => {
       const kwargs = st.fields.map((f) => `${snake(f.name)}=${renderPyExpr(f.value)}`).join(", ");
       return [`${i}${snake(st.name)} = ${st.aggName}.create(${kwargs})`];
-    }
-    case "repo-let": {
+    },
+    repoLet: (st, i) => {
       const args = st.args.map((a) => renderPyExpr(a)).join(", ");
       return [`${i}${snake(st.name)} = await ${snake(st.repoName)}.${snake(st.method)}(${args})`];
-    }
-    case "repo-run": {
+    },
+    repoRun: (st, i) => {
       const args = [
         ...st.retrievalArgs.map((a) => renderPyExpr(a)),
         ...(st.page?.offset ? [`offset=${renderPyExpr(st.page.offset)}`] : []),
@@ -227,15 +228,13 @@ function renderWorkflowStmt(st: WorkflowStmtIR, i: string): string[] {
       return [
         `${i}${snake(st.name)} = await ${snake(st.repoName)}.run_${snake(st.retrievalName)}(${args})`,
       ];
-    }
-    case "expr-let":
-      return [`${i}${snake(st.name)} = ${renderPyExpr(st.expr)}`];
-    case "op-call": {
+    },
+    exprLet: (st, i) => [`${i}${snake(st.name)} = ${renderPyExpr(st.expr)}`],
+    opCall: (st, i) => {
       const args = st.args.map((a) => renderPyExpr(a)).join(", ");
       return [`${i}${snake(st.target)}.${snake(st.op)}(${args})`];
-    }
-    case "for-each": {
-      const body = st.body.flatMap((s) => renderWorkflowStmt(s, `${i}    `));
+    },
+    forEach: (st, i, body) => {
       const saves = st.savesPerIteration.map(
         (s) => `${i}    await ${snake(s.repoName)}.save(${snake(s.name)})`,
       );
@@ -243,9 +242,10 @@ function renderWorkflowStmt(st: WorkflowStmtIR, i: string): string[] {
         `${i}for ${snake(st.var)} in ${renderPyExpr(st.iterable)}:`,
         ...(body.length + saves.length > 0 ? [...body, ...saves] : [`${i}    pass`]),
       ];
-    }
-    case "resource-call":
-      // Resource adapters land with S16 — surface loudly, not silently.
-      return [`${i}raise NotImplementedError("resource operations land with the extern slice")`];
-  }
+    },
+    // Resource adapters land with S16 — surface loudly, not silently.
+    resourceCall: (_st, i) => [
+      `${i}raise NotImplementedError("resource operations land with the extern slice")`,
+    ],
+  };
 }

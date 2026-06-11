@@ -11,11 +11,17 @@ import {
 } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
 import { lowerFirst } from "../../util/naming.js";
+import { buildApiModule } from "../_frontend/api-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
+import { allViews, buildViewsApiModule, hasAnyView } from "../_frontend/views-module.js";
+import {
+  allWorkflows,
+  buildWorkflowsApiModule,
+  hasAnyWorkflow,
+} from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
-import { buildApiModule } from "./api-builder.js";
 import {
   E2E_FIXTURES_TS,
   E2E_PACKAGE_JSON,
@@ -35,8 +41,6 @@ import {
 } from "./pages-emitter.js";
 import { buildRealtimeHandlers } from "./realtime-handlers-builder.js";
 import { renderAppShell, renderMain, renderShellFile, renderTheme } from "./templating/render.js";
-import { allViews, buildViewsApiModule, hasAnyView } from "./view-builder.js";
-import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflow-builder.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.

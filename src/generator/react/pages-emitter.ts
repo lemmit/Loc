@@ -33,6 +33,8 @@ import type {
   UiIR,
 } from "../../ir/types/loom-ir.js";
 import { lowerFirst, snake } from "../../util/naming.js";
+import { buildViewPageObject } from "../_frontend/views-module.js";
+import { buildWorkflowPageObject } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { isWalkableLayoutBody, walkBodyToTsx } from "./body-walker.js";
 import {
@@ -40,7 +42,6 @@ import {
   buildExternFunctionSignature,
 } from "./extern-function-builder.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
-import { buildViewPageObject } from "./view-builder.js";
 import {
   renderCustomLayoutPage,
   renderExternComponentProps,
@@ -48,7 +49,6 @@ import {
   renderUserComponentFile,
 } from "./walker/page-shell.js";
 import { buildWalkerPageObject } from "./walker-page-objects.js";
-import { buildWorkflowPageObject } from "./workflow-builder.js";
 
 /** Inputs the page emitter needs in addition to the page IR.  Kept as
  *  a struct so additions (theme overrides, design-pack picks, sidebar
