@@ -7,6 +7,7 @@ import {
   type EnrichedBoundedContextIR,
   type SystemIR,
 } from "../../ir/types/loom-ir.js";
+import { realtimeEventTypes } from "../../ir/util/channels.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
 import {
   E2E_FIXTURES_TS,
@@ -15,6 +16,7 @@ import {
   PLAYWRIGHT_CONFIG_TS,
 } from "../_frontend/e2e-harness.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
@@ -26,6 +28,7 @@ import {
   SVELTE_LIB_SCHEMAS_MONEY,
   SVELTE_LIB_TOAST,
 } from "./emit-templates.js";
+import { buildSvelteRealtimeHandlers } from "./realtime-handlers-builder.js";
 import {
   defaultNavSections,
   emitSveltePageObjectsForUi,
@@ -134,6 +137,23 @@ export function generateSvelteForContexts(
   out.set("src/lib/format.ts", pack.render("format-helpers", {}));
   out.set("src/lib/forms.svelte.ts", SVELTE_LIB_FORMS);
   out.set("src/lib/toast.svelte.ts", SVELTE_LIB_TOAST);
+  // Realtime SSE client + live-event handlers (channels.md Part I):
+  // mirrors the react wiring — the client emits when the targeted
+  // backend exposes the realtime wire (Hono is the only backend
+  // serving GET /realtime/events so far); the handlers component
+  // emits when the ui declares `on <channel>.<Event>` members, and
+  // the root layout mounts it (hasRealtimeHandlers below).
+  const realtimeTypes =
+    target?.platform === "node"
+      ? [...new Set(contexts.flatMap((c) => [...realtimeEventTypes(c)]))].sort()
+      : [];
+  if (realtimeTypes.length > 0) {
+    out.set("src/lib/api/realtime.ts", renderRealtimeClient(realtimeTypes, "API_BASE_URL"));
+  }
+  const hasRealtimeHandlers = realtimeTypes.length > 0 && (ui.notifications?.length ?? 0) > 0;
+  if (hasRealtimeHandlers) {
+    out.set("src/lib/components/RealtimeHandlers.svelte", buildSvelteRealtimeHandlers(ui, pack));
+  }
   const usesMoney = contexts.some(contextUsesMoney);
   if (usesMoney) {
     out.set("src/lib/schemas.ts", SVELTE_LIB_SCHEMAS_MONEY);
@@ -184,7 +204,7 @@ export function generateSvelteForContexts(
       hasNav: navSections.length > 0,
     }),
   );
-  out.set("src/routes/+layout.svelte", pack.render("root-layout", {}));
+  out.set("src/routes/+layout.svelte", pack.render("root-layout", { hasRealtimeHandlers }));
   out.set("src/routes/+layout.ts", SVELTE_LAYOUT_TS);
 
   // Project shell.

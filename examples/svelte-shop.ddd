@@ -44,6 +44,14 @@ system SvelteShop {
             }
 
             view ActiveOrders = Order where status == Confirmed
+
+            event OrderConfirmed { order: Order id, at: datetime }
+
+            channel Lifecycle {
+                carries: OrderConfirmed
+                delivery: broadcast
+                retention: ephemeral
+            }
         }
     }
 
@@ -54,6 +62,8 @@ system SvelteShop {
 
     ui WebApp with scaffold(subdomains: [Sales]) {
         api Sales: SalesApi
+        channel Live: Orders.Lifecycle
+        on Live.OrderConfirmed(e) { toast("Order " + e.order + " confirmed") }
 
         component WelcomeCard(name: string) {
             body: Card { "Welcome", Stack { Text { name }, Slot {} } }

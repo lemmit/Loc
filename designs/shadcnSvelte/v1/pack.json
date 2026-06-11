@@ -74,7 +74,8 @@
     "theme": "theme.hbs",
     "tsconfig": "tsconfig.hbs",
     "vite-config": "vite-config.hbs",
-    "ui-barrel": "ui-barrel.hbs"
+    "ui-barrel": "ui-barrel.hbs",
+    "realtime-toast": "realtime-toast.hbs"
   },
   "imports": {
     "primitive-money": [
@@ -161,6 +162,14 @@
         "from": "decimal.js",
         "named": [
           "Decimal"
+        ]
+      }
+    ],
+    "realtime-toast": [
+      {
+        "from": "$lib/toast.svelte",
+        "named": [
+          "toast"
         ]
       }
     ]
