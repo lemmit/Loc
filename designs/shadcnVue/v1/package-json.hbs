@@ -1,0 +1,25 @@
+{
+  "name": "loom-vue-app",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 3000"
+  },
+  "dependencies": {
+{{> stack-package-deps}},
+    "tailwindcss": "^4.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "reka-ui": "^2.0.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.0",
+    "tailwind-merge": "^2.5.0",
+    "lucide-vue-next": "^0.460.0"{{#if usesMoney}},
+    "decimal.js": "^10.4.3"{{/if}}
+  },
+  "devDependencies": {
+{{> stack-package-devdeps}}
+  }
+}

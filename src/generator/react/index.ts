@@ -22,6 +22,7 @@ import {
 } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
+import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
 import {
   E2E_FIXTURES_TS,
   E2E_PACKAGE_JSON,
@@ -392,47 +393,41 @@ export function generateReactForContexts(
   return prefixed;
 }
 
-/** Emit each entry in the pack manifest's `shellFiles` map (logical
- *  template name → output path).  Throws if a declared template name
- *  isn't registered in `emits`, naming the offending key — this keeps
- *  manifest typos loud rather than silently dropping shell files. */
-function emitShellFiles(pack: LoadedPack, out: Map<string, string>): void {
-  const entries = Object.entries(pack.manifest.shellFiles ?? {});
-  for (const [templateName, outputPath] of entries) {
-    if (!pack.templates.has(templateName)) {
-      throw new Error(
-        `pack ${pack.manifest.name}: shellFiles entry "${templateName}" → "${outputPath}" not present in emits map.`,
-      );
-    }
-    out.set(outputPath, renderShellFile(templateName, {}, pack));
-  }
-}
+/** The realtime SSE client — one EventSource against the backend's
+ *  `GET /realtime/events`, fanning typed events out to subscribers
+ *  (channels.md Part I).  v1 is broadcast-to-all: the authorized read
+ *  stays the gate, so consumers typically refetch/invalidate rather
+ *  than trust payloads for anything privileged. */
+function renderRealtimeClient(eventTypes: readonly string[]): string {
+  const typeList = eventTypes.map((t) => JSON.stringify(t)).join(", ");
+  return `// Auto-generated.  Do not edit by hand.
+// Realtime SSE client (channels.md Part I) — subscribes to the backend's
+// GET /realtime/events stream.  Events carried by a \`delivery: broadcast\`
+// channel arrive as \`{ type, ...fields }\`; the connection auto-reconnects
+// (EventSource semantics).  The authorized read remains the gate — refetch
+// through the API for anything privileged.
+import { API_BASE } from "./config";
 
-/** Emit every template matching one of the pack manifest's
- *  `shellGlobs` patterns.  Each pattern uses `*` as a single-segment
- *  capture; the corresponding output-path template references the
- *  captures as `{1}`, `{2}`, etc.  shadcn uses this for its
- *  `components-ui-*` library: pattern `components-ui-*` →
- *  `src/components/ui/{1}.tsx`. */
-function emitShellGlobs(pack: LoadedPack, out: Map<string, string>): void {
-  const entries = Object.entries(pack.manifest.shellGlobs ?? {});
-  for (const [pattern, outputTemplate] of entries) {
-    // Translate `components-ui-*` → /^components-ui-(.+)$/.  Escape
-    // every other regex meta-char so a future pattern like
-    // `cells.*-mobile` can't accidentally interpret `.` as the
-    // any-char metacharacter.
-    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp("^" + escaped.replace(/\*/g, "(.+)") + "$");
-    for (const templateName of pack.templates.keys()) {
-      const m = re.exec(templateName);
-      if (!m) continue;
-      let outputPath = outputTemplate;
-      for (let i = 1; i < m.length; i++) {
-        outputPath = outputPath.replaceAll(`{${i}}`, m[i]);
-      }
-      out.set(outputPath, renderShellFile(templateName, {}, pack));
+export type RealtimeEvent = { type: string } & Record<string, unknown>;
+
+/** Event types the backend's broadcast channels carry. */
+export const REALTIME_EVENT_TYPES = [${typeList}] as const;
+
+/** Subscribe to the realtime stream.  Returns an unsubscribe fn that
+ *  closes the EventSource.  \`onEvent\` fires once per carried event. */
+export function subscribeRealtime(onEvent: (event: RealtimeEvent) => void): () => void {
+  const source = new EventSource(\`\${API_BASE}/realtime/events\`);
+  const handler = (m: MessageEvent) => {
+    try {
+      onEvent(JSON.parse(m.data as string) as RealtimeEvent);
+    } catch {
+      // Malformed frame — skip (keep the stream alive).
     }
-  }
+  };
+  for (const t of REALTIME_EVENT_TYPES) source.addEventListener(t, handler);
+  return () => source.close();
+}
+`;
 }
 
 // ---------------------------------------------------------------------------

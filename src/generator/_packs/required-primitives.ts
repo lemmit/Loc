@@ -185,7 +185,10 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat, RequiredSet> = {
     core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES],
     shell: SHARED_SHELL,
     fieldInput: TSX_FIELD_INPUT,
-    form: TSX_FORM,
+    // Vue packs additionally own the operation-dialog wrapper the
+    // page shell renders around op-form fields (v-dialog on vuetify,
+    // the ui Dialog components on shadcnVue).
+    form: [...TSX_FORM, "op-dialog"],
   },
 };
 

@@ -17,6 +17,7 @@ import { buildViewsApiModule, hasAnyView } from "../_frontend/views-module.js";
 import { buildWorkflowsApiModule, hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
+import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
 import { walkBody } from "../_walker/walker-core.js";
 // Framework-neutral pieces that live react-side today (same sharing
 // pattern as the elixir theme-emit): the e2e harness constants, the
@@ -142,7 +143,7 @@ export function generateVueForContexts(
     );
     out.set(
       pagePath(page),
-      renderVuePage({ page, routeParams: page.params.map((p) => p.name), result }),
+      renderVuePage({ page, routeParams: page.params.map((p) => p.name), result, pack }),
     );
   }
   out.set("src/pages/NotFound.vue", renderShell(pack, "not-found-page", {}));
@@ -218,6 +219,13 @@ export function generateVueForContexts(
   out.set("Dockerfile", renderShell(pack, "dockerfile", {}));
   out.set(".dockerignore", renderShell(pack, "dockerignore", {}));
   out.set("certs/.gitkeep", "");
+
+  // Pack-specific extras — `shellFiles` and `shellGlobs` from
+  // pack.json.  vuetify ships neither; shadcnVue ships globals-css /
+  // lib-utils / the components-ui barrel plus the `components-ui-*`
+  // source-copy glob (`src/components/ui/{1}.vue`).
+  emitShellFiles(pack, out);
+  emitShellGlobs(pack, out);
 
   return out;
 }

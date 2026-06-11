@@ -1,0 +1,22 @@
+<!-- Auto-generated.  shadcn-vue Alert. -->
+<script setup lang="ts">
+import { computed } from "vue";
+import { cn } from "@/lib/utils";
+
+const props = withDefaults(defineProps<{ variant?: "default" | "destructive" }>(), {
+  variant: "default",
+});
+
+const classes = computed(() =>
+  cn(
+    "relative w-full rounded-lg border p-4 [&>svg~*]:pl-7 [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground",
+    props.variant === "destructive"
+      ? "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive"
+      : "bg-background text-foreground",
+  ),
+);
+</script>
+
+<template>
+  <div role="alert" :class="classes"><slot /></div>
+</template>

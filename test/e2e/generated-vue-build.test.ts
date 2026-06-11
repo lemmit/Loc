@@ -100,14 +100,42 @@ const SHOWCASE: Case = {
   fromFile: "examples/vue-showcase.ddd",
 };
 
-const allCases: Case[] = [MINIMAL, SCAFFOLD, SHOWCASE];
+/** The vue pack matrix.  Mirrors the React harness's
+ *  `{example × pack}` sweep: every case runs against each pack via a
+ *  `design:` injection into the vue deployable. */
+const PACKS = ["vuetify@v3", "shadcnVue@v1"] as const;
 
-function selectCases(): Case[] {
+interface MatrixCase extends Case {
+  pack: (typeof PACKS)[number];
+  label: string;
+}
+
+const allCases: MatrixCase[] = [MINIMAL, SCAFFOLD, SHOWCASE].flatMap((c) =>
+  PACKS.map((pack) => ({ ...c, pack, label: `${c.name}:${pack}` })),
+);
+
+/** Inject `design: "<pack>"` into the vue deployable.  Rewrites an
+ *  existing slot in place; otherwise appends to the single-line or
+ *  multi-line `platform: vue` deployable block. */
+function injectDesign(src: string, qualified: string): string {
+  const existing = /(\bdesign:\s*)(?:"[^"]*"|\w+)/;
+  if (existing.test(src)) return src.replace(existing, `$1"${qualified}"`);
+  // Single-line: `deployable web { platform: vue, targets: api, ui: WebApp, port: 3003 }`
+  const singleLine = /(deployable \w+ \{[^}\n]*platform: vue\b[^}\n]*?)(\s*)\}/;
+  if (singleLine.test(src)) return src.replace(singleLine, `$1, design: "${qualified}"$2}`);
+  // Multi-line block containing `platform: vue`.
+  return src.replace(
+    /(deployable \w+ \{[^}]*?platform: vue\b)/,
+    `$1\n        design: "${qualified}"`,
+  );
+}
+
+function selectCases(): MatrixCase[] {
   if (SHARD === undefined) return allCases;
-  const match = allCases.find((c) => c.name === SHARD);
+  const match = allCases.find((c) => c.label === SHARD || c.name === SHARD);
   if (!match) {
     throw new Error(
-      `LOOM_VUE_BUILD_CASE="${SHARD}" did not match any case.  Available: ${allCases.map((c) => c.name).join(", ")}`,
+      `LOOM_VUE_BUILD_CASE="${SHARD}" did not match any case.  Available: ${allCases.map((c) => c.label).join(", ")}`,
     );
   }
   return [match];
@@ -116,14 +144,19 @@ function selectCases(): Case[] {
 const cases = ENABLED ? selectCases() : [];
 
 describe.skipIf(!ENABLED)("generated Vue project compiles + bundles (vue-tsc + vite build)", () => {
-  it.each(cases)("$name → vue-tsc --noEmit + vite build pass", ({ source, fromFile, vueDir }) => {
+  it.each(cases)("$label → vue-tsc --noEmit + vite build pass", ({
+    source,
+    fromFile,
+    vueDir,
+    pack,
+  }) => {
     const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-vue-build-"));
     try {
       const dddPath = path.join(outDir, "_case.ddd");
-      fs.writeFileSync(
-        dddPath,
-        fromFile ? fs.readFileSync(path.join(repoRoot, fromFile), "utf-8") : (source ?? ""),
-      );
+      const raw = fromFile
+        ? fs.readFileSync(path.join(repoRoot, fromFile), "utf-8")
+        : (source ?? "");
+      fs.writeFileSync(dddPath, injectDesign(raw, pack));
       execSync(`node ${cli} generate system ${dddPath} -o ${outDir}`, {
         stdio: "inherit",
         cwd: repoRoot,

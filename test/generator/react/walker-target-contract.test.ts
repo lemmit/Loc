@@ -368,15 +368,17 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
 // ---------------------------------------------------------------------------
 
 describe("WalkerTarget — vueTarget (vue-frontend-plan.md)", () => {
-  it("renderStateRead is position-dependent: bare name in template, `.value` in handler", () => {
-    // Vue auto-unwraps top-level refs in template position only;
-    // script-position code (hoisted handlers) sees the raw Ref.
+  it("renderStateRead is bare in BOTH positions (walker output is template-scoped)", () => {
+    // Everything the shared walker emits lands inside the SFC
+    // <template> — mustaches, directive attrs, inline handlers —
+    // where Vue auto-unwraps top-level refs.  Script-side `.value`
+    // is the page shell's own concern.
     expect(vueTarget.renderStateRead(SAMPLE_STATE_REF, "template")).toBe("step");
-    expect(vueTarget.renderStateRead(SAMPLE_STATE_REF, "handler")).toBe("step.value");
+    expect(vueTarget.renderStateRead(SAMPLE_STATE_REF, "handler")).toBe("step");
   });
 
-  it("renderStateWrite assigns through `.value` (writes hoist to script position)", () => {
-    expect(vueTarget.renderStateWrite(SAMPLE_STATE_REF, "value")).toBe("step.value = value");
+  it("renderStateWrite is a bare assignment (inline handlers compile unwrapped-ref writes)", () => {
+    expect(vueTarget.renderStateWrite(SAMPLE_STATE_REF, "value")).toBe("step = value");
   });
 
   it("renderApiCall is var-only, like TSX (composable handle hoisted once)", () => {

@@ -69,6 +69,7 @@
     "form-op-decls": "form-op-decls.hbs",
     "form-op-module": "form-op-module.hbs",
     "form-runs-decls": "form-runs-decls.hbs",
-    "realtime-toast": "realtime-toast.hbs"
+    "realtime-toast": "realtime-toast.hbs",
+    "op-dialog": "op-dialog.hbs"
   }
 }

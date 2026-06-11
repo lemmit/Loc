@@ -1,0 +1,417 @@
+{
+  "name": "shadcnVue",
+  "version": "v1",
+  "format": "vue",
+  "stack": "vue1",
+  "emits": {
+    "primitive-alert": "primitive-alert.hbs",
+    "primitive-anchor": "primitive-anchor.hbs",
+    "primitive-avatar": "primitive-avatar.hbs",
+    "primitive-badge": "primitive-badge.hbs",
+    "primitive-bold": "primitive-bold.hbs",
+    "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
+    "primitive-button": "primitive-button.hbs",
+    "primitive-card": "primitive-card.hbs",
+    "primitive-container": "primitive-container.hbs",
+    "primitive-date-display": "primitive-date-display.hbs",
+    "primitive-divider": "primitive-divider.hbs",
+    "primitive-empty": "primitive-empty.hbs",
+    "primitive-enum-badge": "primitive-enum-badge.hbs",
+    "primitive-field": "primitive-field.hbs",
+    "primitive-form-of": "primitive-form-of.hbs",
+    "primitive-grid": "primitive-grid.hbs",
+    "primitive-group": "primitive-group.hbs",
+    "primitive-heading": "primitive-heading.hbs",
+    "primitive-id-link": "primitive-id-link.hbs",
+    "primitive-image": "primitive-image.hbs",
+    "primitive-inline-code": "primitive-inline-code.hbs",
+    "primitive-italic": "primitive-italic.hbs",
+    "primitive-key-value-row": "primitive-key-value-row.hbs",
+    "primitive-loader": "primitive-loader.hbs",
+    "primitive-money": "primitive-money.hbs",
+    "primitive-multiline-field": "primitive-multiline-field.hbs",
+    "primitive-number-field": "primitive-number-field.hbs",
+    "primitive-paper": "primitive-paper.hbs",
+    "primitive-password-field": "primitive-password-field.hbs",
+    "primitive-query-view": "primitive-query-view.hbs",
+    "primitive-select-field": "primitive-select-field.hbs",
+    "primitive-skeleton": "primitive-skeleton.hbs",
+    "primitive-stack": "primitive-stack.hbs",
+    "primitive-stat": "primitive-stat.hbs",
+    "primitive-table": "primitive-table.hbs",
+    "primitive-tabs": "primitive-tabs.hbs",
+    "primitive-text": "primitive-text.hbs",
+    "primitive-toggle": "primitive-toggle.hbs",
+    "primitive-toolbar": "primitive-toolbar.hbs",
+    "primitive-code-block": "primitive-code-block.hbs",
+    "primitive-icon": "primitive-icon.hbs",
+    "primitive-modal": "primitive-modal.hbs",
+    "app-shell": "app-shell.hbs",
+    "format-helpers": "format-helpers.hbs",
+    "main": "main.hbs",
+    "package-json": "package-json.hbs",
+    "theme": "theme.hbs",
+    "tsconfig": "tsconfig.hbs",
+    "vite-config": "vite-config.hbs",
+    "globals-css": "globals-css.hbs",
+    "lib-utils": "lib-utils.hbs",
+    "ui-index": "ui-index.hbs",
+    "field-input-array": "field-input-array.hbs",
+    "field-input-bool": "field-input-bool.hbs",
+    "field-input-datetime": "field-input-datetime.hbs",
+    "field-input-decimal": "field-input-decimal.hbs",
+    "field-input-enum-select": "field-input-enum-select.hbs",
+    "field-input-id-select": "field-input-id-select.hbs",
+    "field-input-id-text": "field-input-id-text.hbs",
+    "field-input-int": "field-input-int.hbs",
+    "field-input-money": "field-input-money.hbs",
+    "field-input-string": "field-input-string.hbs",
+    "field-input-valueobject": "field-input-valueobject.hbs",
+    "form-default-onsubmit": "form-default-onsubmit.hbs",
+    "form-of-decls": "form-of-decls.hbs",
+    "form-op-decls": "form-op-decls.hbs",
+    "form-op-module": "form-op-module.hbs",
+    "form-runs-decls": "form-runs-decls.hbs",
+    "realtime-toast": "realtime-toast.hbs",
+    "components-ui-alert": "components-ui-alert.hbs",
+    "components-ui-alert-title": "components-ui-alert-title.hbs",
+    "components-ui-alert-description": "components-ui-alert-description.hbs",
+    "components-ui-badge": "components-ui-badge.hbs",
+    "components-ui-button": "components-ui-button.hbs",
+    "components-ui-card": "components-ui-card.hbs",
+    "components-ui-card-header": "components-ui-card-header.hbs",
+    "components-ui-card-title": "components-ui-card-title.hbs",
+    "components-ui-card-content": "components-ui-card-content.hbs",
+    "components-ui-dialog": "components-ui-dialog.hbs",
+    "components-ui-dialog-content": "components-ui-dialog-content.hbs",
+    "components-ui-dialog-header": "components-ui-dialog-header.hbs",
+    "components-ui-dialog-title": "components-ui-dialog-title.hbs",
+    "components-ui-input": "components-ui-input.hbs",
+    "components-ui-label": "components-ui-label.hbs",
+    "components-ui-select": "components-ui-select.hbs",
+    "components-ui-select-trigger": "components-ui-select-trigger.hbs",
+    "components-ui-select-content": "components-ui-select-content.hbs",
+    "components-ui-select-item": "components-ui-select-item.hbs",
+    "components-ui-skeleton": "components-ui-skeleton.hbs",
+    "components-ui-switch": "components-ui-switch.hbs",
+    "components-ui-table": "components-ui-table.hbs",
+    "components-ui-table-header": "components-ui-table-header.hbs",
+    "components-ui-table-body": "components-ui-table-body.hbs",
+    "components-ui-table-row": "components-ui-table-row.hbs",
+    "components-ui-table-head": "components-ui-table-head.hbs",
+    "components-ui-table-cell": "components-ui-table-cell.hbs",
+    "components-ui-tabs": "components-ui-tabs.hbs",
+    "components-ui-tabs-list": "components-ui-tabs-list.hbs",
+    "components-ui-tabs-trigger": "components-ui-tabs-trigger.hbs",
+    "components-ui-tabs-content": "components-ui-tabs-content.hbs",
+    "components-ui-textarea": "components-ui-textarea.hbs",
+    "components-ui-tooltip": "components-ui-tooltip.hbs",
+    "components-ui-tooltip-content": "components-ui-tooltip-content.hbs",
+    "op-dialog": "op-dialog.hbs"
+  },
+  "imports": {
+    "primitive-button": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Button"
+        ]
+      }
+    ],
+    "primitive-card": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Card",
+          "CardContent",
+          "CardHeader",
+          "CardTitle"
+        ]
+      }
+    ],
+    "primitive-badge": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Badge"
+        ]
+      }
+    ],
+    "primitive-enum-badge": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Badge"
+        ]
+      }
+    ],
+    "primitive-field": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "primitive-toggle": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Switch",
+          "Label"
+        ]
+      }
+    ],
+    "primitive-number-field": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "primitive-password-field": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "primitive-multiline-field": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Textarea",
+          "Label"
+        ]
+      }
+    ],
+    "primitive-select-field": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Label",
+          "Select",
+          "SelectContent",
+          "SelectItem",
+          "SelectTrigger",
+          "SelectValue"
+        ]
+      }
+    ],
+    "primitive-loader": [
+      {
+        "from": "lucide-vue-next",
+        "named": [
+          "Loader2"
+        ]
+      }
+    ],
+    "primitive-tabs": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Tabs",
+          "TabsContent",
+          "TabsList",
+          "TabsTrigger"
+        ]
+      }
+    ],
+    "primitive-table": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Table",
+          "TableBody",
+          "TableCell",
+          "TableHead",
+          "TableHeader",
+          "TableRow"
+        ]
+      }
+    ],
+    "primitive-skeleton": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Skeleton"
+        ]
+      }
+    ],
+    "primitive-alert": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Alert",
+          "AlertDescription",
+          "AlertTitle"
+        ]
+      }
+    ],
+    "primitive-form-of": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Button"
+        ]
+      }
+    ],
+    "primitive-modal": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Button"
+        ]
+      }
+    ],
+    "field-input-string": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-int": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-decimal": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-money": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-bool": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Switch",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-datetime": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-id-text": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-id-select": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Label",
+          "Select",
+          "SelectContent",
+          "SelectItem",
+          "SelectTrigger",
+          "SelectValue"
+        ]
+      }
+    ],
+    "field-input-enum-select": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Label",
+          "Select",
+          "SelectContent",
+          "SelectItem",
+          "SelectTrigger",
+          "SelectValue"
+        ]
+      }
+    ],
+    "field-input-array": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Input",
+          "Label"
+        ]
+      }
+    ],
+    "field-input-valueobject": [],
+    "realtime-toast": [],
+    "op-dialog": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Button",
+          "Dialog",
+          "DialogContent",
+          "DialogHeader",
+          "DialogTitle"
+        ]
+      }
+    ]
+  },
+  "shellFiles": {
+    "globals-css": "src/globals.css",
+    "lib-utils": "src/lib/utils.ts",
+    "ui-index": "src/components/ui/index.ts"
+  },
+  "shellGlobs": {
+    "components-ui-*": "src/components/ui/{1}.vue"
+  },
+  "helpers": {
+    "lucide": {
+      "IconPlus": "Plus",
+      "IconTrash": "Trash2",
+      "IconCheck": "Check",
+      "IconX": "X",
+      "IconTruckDelivery": "Truck",
+      "IconCreditCard": "CreditCard",
+      "IconPlayerPlay": "Play",
+      "IconPlayerStop": "Square",
+      "IconPencil": "Pencil",
+      "IconLink": "Link",
+      "IconAlertCircle": "AlertCircle",
+      "IconAlertTriangle": "AlertTriangle",
+      "IconBolt": "Zap",
+      "IconLayoutList": "LayoutList"
+    },
+    "alertVariant": {
+      "red": "destructive",
+      "yellow": "default",
+      "green": "default",
+      "blue": "default"
+    }
+  }
+}

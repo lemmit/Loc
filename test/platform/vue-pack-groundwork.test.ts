@@ -23,15 +23,17 @@ describe("vue pack format groundwork", () => {
     expect(packFormatForBuiltin("shadcnVue@v1")).toBe("vue");
   });
 
-  it("vue required set mirrors TSX exactly (forms + field inputs owned by the pack)", () => {
+  it("vue required set mirrors TSX plus the op-dialog wrapper", () => {
     const vue = new Set(flattenRequired(REQUIRED_PRIMITIVES.vue));
     const tsx = new Set(flattenRequired(REQUIRED_PRIMITIVES.tsx));
     for (const name of tsx) {
       expect(vue.has(name), `vue set missing tsx-required "${name}"`).toBe(true);
     }
-    // The Vite+vue-router SPA shape needs no shell template beyond the
-    // shared set (no svelte-config analogue), so the sets are equal.
-    expect(vue.size).toBe(tsx.size);
+    // One vue-only addition: the operation-dialog wrapper the page
+    // shell renders around op-form fields (TSX renders modals through
+    // its pack form-op machinery instead).
+    expect(vue.has("op-dialog")).toBe(true);
+    expect(vue.size).toBe(tsx.size + 1);
   });
 
   it("a vue-format pack loads against the vue1 stack and sees its partials + docker shared sources", () => {

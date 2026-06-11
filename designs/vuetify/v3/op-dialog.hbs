@@ -1,0 +1,15 @@
+  <v-dialog v-model="{{openVar}}" max-width="560">
+    <v-card title="{{title}}">
+      <v-card-text>
+        <v-form data-testid="{{ns}}-form" @submit.prevent='{{formVar}}.handleSubmit(async (vals) => { await {{mutVar}}.mutateAsync(vals); {{openVar}} = false; })($event)'>
+          <div class="d-flex flex-column ga-4">
+{{{fieldsHtml}}}
+            <v-alert v-if='{{formVar}}.errors["__global"]' type="error" variant="tonal" :text='{{formVar}}.errors["__global"]' />
+            <div class="d-flex justify-end mt-2">
+              <v-btn type="submit" color="primary" variant="flat" :loading="{{mutVar}}.isPending" data-testid="{{ns}}-submit">{{submitLabel}}</v-btn>
+            </div>
+          </div>
+        </v-form>
+      </v-card-text>
+    </v-card>
+  </v-dialog>

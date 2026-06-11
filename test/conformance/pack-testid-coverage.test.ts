@@ -80,6 +80,7 @@ const BUILT_IN_PACKS: ReadonlyArray<PackUnderTest> = [
   { dir: "designs/shadcnSvelte/v1", label: "shadcnSvelte@v1", format: "svelte" },
   { dir: "designs/flowbite/v1", label: "flowbite@v1", format: "svelte" },
   { dir: "designs/vuetify/v3", label: "vuetify@v3", format: "vue" },
+  { dir: "designs/shadcnVue/v1", label: "shadcnVue@v1", format: "vue" },
 ];
 
 // Phoenix testid emission is split between templates and the

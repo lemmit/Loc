@@ -686,8 +686,7 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
         value: walk(arm.value, ctx, depth + 1),
       }));
       const elseArm = expr.otherwise ? walk(expr.otherwise, ctx, depth + 1) : undefined;
-      const inner = ctx.target.renderMatch(arms, elseArm);
-      return depth === 0 ? inner : ctx.target.renderInterpolation(inner);
+      return ctx.target.renderMatchChild(arms, elseArm, depth);
     }
     case "ternary": {
       // Conditional rendering.  `cond ? <A /> : <B />`
