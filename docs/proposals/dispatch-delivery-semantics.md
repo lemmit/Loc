@@ -14,11 +14,19 @@
 > EF-mapped `__loom_outbox` (the MigrationsIR-owned table) and the
 > `OutboxRelayService` BackgroundService drains them through the
 > in-process Mediator dispatcher with the same retry/dead-letter
-> contract.  Remaining: the Phoenix/Oban relay (elixir track), the
-> Dapper-persistence outbox,
-> idempotent-consumer markers on the saga row (§3 — consumers must
-> tolerate redelivery until then), and the LISTEN/NOTIFY upgrade over
-> polling.
+> contract.  **Idempotent-consumer markers shipped (Hono + .NET, §3):**
+> durable contexts add `last_event_id` to every saga-state row (Drizzle
+> schema + EF entity/mapping + shared migration DDL); the relay threads
+> the outbox row id onto each redelivery (`__loomEventId` on the event in
+> Hono, the `OutboxDelivery.CurrentEventId` AsyncLocal on .NET) and the
+> handler preamble no-ops on a repeat, stamping the id before save —
+> at-least-once becomes effectively-once.  Inline (ephemeral) dispatch
+> carries no id and ephemeral contexts stay marker-free byte-identically.
+> Dapper + event subscriptions now fails loud (`loom.dapper-unsupported`)
+> instead of emitting a project that references the absent EF
+> AppDbContext.  Remaining: the Phoenix/Oban relay (elixir track), the
+> real Dapper dispatch/outbox path (needs Dapper saga-state persistence
+> first), and the LISTEN/NOTIFY upgrade over polling.
 > Companion to [`channels.md`](./channels.md), which owns the **transport**
 > surface (`channelSource` → broker) but only *names* the "async
 > messaging/outbox" gap without designing it. This doc designs that gap for

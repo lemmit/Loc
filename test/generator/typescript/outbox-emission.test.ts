@@ -125,3 +125,67 @@ describe("transactional outbox emission — .NET (retention: log)", () => {
     );
   });
 });
+
+// ─── Idempotent-consumer markers (dispatch-delivery-semantics.md §3) ─────────
+// Under a durable channel the relay redelivers at-least-once, so the saga
+// row records the last processed outbox event id (`last_event_id`); handler
+// preambles no-op on a repeat.  Ephemeral contexts stay marker-free.
+
+describe("idempotent-consumer markers — Hono", () => {
+  it("the saga table gains last_event_id; handlers check + stamp; the relay threads the row id", async () => {
+    const files = await generate("test/fixtures/outbox-sample.ddd");
+    expect(files.get("db/schema.ts") ?? "").toContain('lastEventId: text("last_event_id"),');
+    const wf = files.get("http/workflows.ts") ?? "";
+    expect(wf).toContain("const __eventId = (p as { __loomEventId?: string }).__loomEventId;");
+    expect(wf).toContain("if (__eventId !== undefined && state.lastEventId === __eventId) {");
+    expect(wf).toContain("if (__eventId !== undefined) state.lastEventId = __eventId;");
+    expect(wf).toContain(
+      "await inner.dispatch({ ...(row.payload as Events.DomainEvent), __loomEventId: row.id } as Events.DomainEvent);",
+    );
+  });
+
+  it("an ephemeral channel emits no marker (byte-identical saga shape)", async () => {
+    const files = await generate("test/fixtures/dispatch-sample.ddd");
+    expect(files.get("db/schema.ts") ?? "").not.toContain("last_event_id");
+    expect(files.get("http/workflows.ts") ?? "").not.toContain("__eventId");
+  });
+});
+
+describe("idempotent-consumer markers — .NET", () => {
+  async function dotnetFiles2(file: string): Promise<Map<string, string>> {
+    const services = createDddServices(NodeFileSystem);
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(path.join(root, file)),
+    );
+    await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+    return generateDotnet(doc.parseResult.value as Model);
+  }
+
+  it("state entity + EF mapping + OutboxDelivery AsyncLocal + handler check/stamp", async () => {
+    const files = await dotnetFiles2("test/fixtures/outbox-sample.ddd");
+    expect(files.get("Infrastructure/Persistence/Workflows/OrderFulfillmentState.cs")).toContain(
+      "public string? LastEventId { get; set; }",
+    );
+    expect(
+      files.get("Infrastructure/Persistence/Configurations/OrderFulfillmentStateConfiguration.cs"),
+    ).toContain('builder.Property(x => x.LastEventId).HasColumnName("last_event_id");');
+    const delivery = files.get("Domain/Common/OutboxDelivery.cs") ?? "";
+    expect(delivery).toContain("private static readonly AsyncLocal<string?> _currentEventId");
+    const relay = files.get("Infrastructure/Events/OutboxRelayService.cs") ?? "";
+    expect(relay).toContain("OutboxDelivery.CurrentEventId = row.Id.ToString();");
+    expect(relay).toContain("OutboxDelivery.CurrentEventId = null;");
+    const handler =
+      files.get("Application/Workflows/OrderFulfillmentOnShipmentRequestedHandler.cs") ?? "";
+    expect(handler).toContain("var __eventId = OutboxDelivery.CurrentEventId;");
+    expect(handler).toContain("if (__eventId is not null && state.LastEventId == __eventId)");
+    expect(handler).toContain("if (__eventId is not null) state.LastEventId = __eventId;");
+  });
+
+  it("an ephemeral channel emits no marker nor OutboxDelivery", async () => {
+    const files = await dotnetFiles2("test/fixtures/dispatch-sample.ddd");
+    expect(files.has("Domain/Common/OutboxDelivery.cs")).toBe(false);
+    expect(
+      files.get("Infrastructure/Persistence/Workflows/OrderFulfillmentState.cs"),
+    ).not.toContain("LastEventId");
+  });
+});
