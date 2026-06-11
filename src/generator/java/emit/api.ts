@@ -5,7 +5,9 @@ import type {
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
+import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { findUnionSpec } from "../../_payload/union-wire.js";
 import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
 import { declaredFinds, isPagedFind } from "./repository.js";
 import { returnUnionSpec, unionWireCtorArgs } from "./unions.js";
@@ -55,6 +57,7 @@ export function renderJavaController(
   if (idJava === "UUID") imports.add("java.util.UUID");
 
   const unionImports = new Set<string>();
+  let anyUnionProblem = false;
   const anyReturnUnion =
     !!ctx.boundedContext &&
     agg.operations.some(
@@ -127,6 +130,48 @@ export function renderJavaController(
     const declared = f.params.map((p) => `@RequestParam ${renderJavaType(p.type)} ${p.name}`);
     const params = declared.join(", ");
     const args = f.params.map((p) => p.name).join(", ");
+    // Union find (`Order or NotFound` / `Order option`): the service
+    // returns the optional twin's `<Agg>Response`; this route owns the
+    // union translation — found → 200 tagged wire record, absent →
+    // bare 404 (`none`) or RFC-7807 ProblemDetail at the error's
+    // mapped status (with the `resource` extension when declared).
+    const spec = ctx.boundedContext
+      ? findUnionSpec(f.returnType, agg.name, ctx.boundedContext)
+      : null;
+    if (spec) {
+      const successCtorArgs = (agg.wireShape ?? []).map((w) => `r.${w.name}()`).join(", ");
+      const successRecord = `${spec.name}Response_${spec.successTag}`;
+      const absent =
+        spec.absent.kind === "none"
+          ? [`            return ResponseEntity.notFound().build();`]
+          : (() => {
+              const tag = spec.absent.tag;
+              const status =
+                ctx.boundedContext?.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag);
+              return [
+                `            var problem = ProblemDetail.forStatus(${status});`,
+                `            problem.setTitle(${JSON.stringify(errorTitle(tag))});`,
+                `            problem.setType(URI.create(${JSON.stringify(errorTypeUri(tag))}));`,
+                `            problem.setDetail(${JSON.stringify(errorTitle(tag))});`,
+                ...(spec.absent.hasResource
+                  ? [`            problem.setProperty("resource", "${agg.name}");`]
+                  : []),
+                `            return ResponseEntity.status(${status}).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);`,
+              ];
+            })();
+      if (spec.absent.kind !== "none") anyUnionProblem = true;
+      return [
+        `    @GetMapping("/${snake(f.name)}")`,
+        `    public ResponseEntity<?> ${f.name}${agg.name}(${params}) {`,
+        `        var r = service.${f.name}(${args});`,
+        `        if (r == null) {`,
+        ...absent,
+        `        }`,
+        `        return ResponseEntity.ok((${spec.name}Response) new ${successRecord}(${successCtorArgs}));`,
+        `    }`,
+        ``,
+      ];
+    }
     if (isPagedFind(f)) {
       const pagedParams = [
         ...declared,
@@ -210,8 +255,8 @@ export function renderJavaController(
     `import org.slf4j.Logger;`,
     `import org.slf4j.LoggerFactory;`,
     `import org.springframework.http.HttpStatus;`,
-    anyReturnUnion ? `import org.springframework.http.MediaType;` : null,
-    anyReturnUnion ? `import org.springframework.http.ProblemDetail;` : null,
+    anyReturnUnion || anyUnionProblem ? `import org.springframework.http.MediaType;` : null,
+    anyReturnUnion || anyUnionProblem ? `import org.springframework.http.ProblemDetail;` : null,
     `import org.springframework.http.ResponseEntity;`,
     `import org.springframework.web.bind.annotation.*;`,
     ``,
