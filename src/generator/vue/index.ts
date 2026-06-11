@@ -53,15 +53,26 @@ import { vueTarget } from "./walker/vue-target.js";
 // route table, nav, and build gates are real.
 // ---------------------------------------------------------------------------
 
+/** Options for the Vue generator's secondary entry point — the
+ *  backend-host embedding path (dotnet / java / elixir hosting a
+ *  `framework: vue` ui).  Mirrors `GenerateReactOptions`:
+ *  `apiBaseUrl: "/api"` for same-origin fetches; `pathPrefix`
+ *  relocates the project under the host's SPA dir. */
+export interface GenerateVueOptions {
+  apiBaseUrl?: string;
+  pathPrefix?: string;
+}
+
 export function generateVueForContexts(
   contexts: EnrichedBoundedContextIR[],
   sys: SystemIR,
   deployable: DeployableIR,
+  options: GenerateVueOptions = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
 
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
-  const apiBaseUrl = `http://localhost:${target?.port ?? 8080}`;
+  const apiBaseUrl = options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
 
   const aggregates: Array<{ agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }> = [];
   for (const ctx of contexts) {
@@ -227,7 +238,15 @@ export function generateVueForContexts(
   emitShellFiles(pack, out);
   emitShellGlobs(pack, out);
 
-  return out;
+  // Path-prefix transform — applied once at the end (mirrors the
+  // React generator) so every emitter above stays path-agnostic.
+  const pathPrefix = options.pathPrefix ?? "";
+  if (pathPrefix === "") return out;
+  const prefixed = new Map<string, string>();
+  for (const [path, content] of out) {
+    prefixed.set(`${pathPrefix}${path}`, content);
+  }
+  return prefixed;
 }
 
 function renderShell(pack: LoadedPack, name: string, vm: unknown): string {

@@ -9,6 +9,7 @@ import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { StyleAdapter } from "../_adapters/index.js";
 import { generateReactForContexts } from "../react/index.js";
+import { generateVueForContexts } from "../vue/index.js";
 import { emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitContext } from "./context-emit.js";
@@ -106,7 +107,10 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   // `platform: phoenix` with a `framework: react` ui, so output is
   // unchanged.  The Ash domain + `/api` controllers + OpenAPI are
   // emitted in either mode.
-  const embedReact = deployable.uiFramework === "react";
+  const embedVue = deployable.uiFramework === "vue";
+  // Any static-bundle embed suppresses LiveView page emission and
+  // routes the SPA serving wiring instead.
+  const embedReact = deployable.uiFramework === "react" || embedVue;
 
   // Per-aggregate dataSource lookup — feeds `postgres do schema "…"
   // end` + `tablePrefix` routing in each Ash.Resource's `postgres`
@@ -230,11 +234,16 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   // `apiBaseUrl: "/api"`, same skip of duplicate shell files the
   // Phoenix project owns.  The endpoint/router/Dockerfile wiring that
   // *serves* the built bundle from `priv/static` is phase 6b.
-  if (embedReact) {
-    const spaFiles = generateReactForContexts(contexts, sys, deployable, {
-      apiBaseUrl: "/api",
-      pathPrefix: "assets/",
-    });
+  if (embedReact || embedVue) {
+    const spaFiles = embedVue
+      ? generateVueForContexts(contexts, sys, deployable, {
+          apiBaseUrl: "/api",
+          pathPrefix: "assets/",
+        })
+      : generateReactForContexts(contexts, sys, deployable, {
+          apiBaseUrl: "/api",
+          pathPrefix: "assets/",
+        });
     for (const [path, content] of spaFiles) {
       // Skip the standalone-react shell files the Phoenix project owns
       // (Dockerfile / .dockerignore / certs) or that don't apply in

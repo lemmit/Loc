@@ -90,11 +90,18 @@ export function lowerDeployable(d: Deployable): DeployableIR {
         platform === "svelte" ? "shadcnSvelte" : platform === "vue" ? "vuetify" : "mantine",
       )
     : platform === "elixir"
-      ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
+      ? qualifyDesign(
+          d.design,
+          uiFramework === "react" ? "mantine" : uiFramework === "vue" ? "vuetify" : "ashPhoenix",
+        )
       : (platform === "dotnet" || platform === "java") && uiName
         ? qualifyDesign(
             d.design,
-            platform === "dotnet" && uiFramework === "svelte" ? "shadcnSvelte" : "mantine",
+            platform === "dotnet" && uiFramework === "svelte"
+              ? "shadcnSvelte"
+              : uiFramework === "vue"
+                ? "vuetify"
+                : "mantine",
           )
         : undefined;
   // Explicit api composition.
