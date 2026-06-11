@@ -14,7 +14,7 @@ import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
-import { unionMembers } from "../_payload/union-wire.js";
+import { findUnionSpec, unionMembers } from "../_payload/union-wire.js";
 import { generateReactForContexts } from "../react/index.js";
 import { byFeatureLayoutAdapter } from "./adapters/by-feature-layout.js";
 import type {
@@ -553,12 +553,34 @@ function emitAggregate(
   // Exception-less operation returns: the domain union (sealed interface
   // + variant records, entity package) and its Jackson-polymorphic wire
   // twin (response-dto package).
+  const emittedUnionNames = new Set<string>();
   for (const spec of aggregateReturnUnions(agg, ctx).values()) {
+    emittedUnionNames.add(spec.name);
     for (const f of renderJavaDomainUnionFiles(spec, pkgFor("entity", agg.name), basePkg)) {
       place(f.name, "entity", f.content, agg.name);
     }
     for (const f of renderJavaUnionWireFiles(spec, pkgFor("response-dto", agg.name), basePkg)) {
       place(f.name, "response-dto", f.content, agg.name);
+    }
+  }
+  // Union finds (`Order or NotFound` / `Order option`) need only the
+  // wire twin — the repository/service see the optional twin, the
+  // controller builds the tagged record (no domain union exists).
+  for (const f of repo?.finds ?? []) {
+    const spec = findUnionSpec(f.returnType, agg.name, ctx);
+    if (!spec || emittedUnionNames.has(spec.name)) continue;
+    emittedUnionNames.add(spec.name);
+    const wireSpec = {
+      name: spec.name,
+      members: unionMembers(spec.variants, ctx),
+      arms: [],
+    };
+    for (const file of renderJavaUnionWireFiles(
+      wireSpec,
+      pkgFor("response-dto", agg.name),
+      basePkg,
+    )) {
+      place(file.name, "response-dto", file.content, agg.name);
     }
   }
   for (const op of agg.operations.filter((o) => o.extern)) {

@@ -83,6 +83,20 @@ export function isPagedFind(f: FindIR): boolean {
   return f.returnType.kind === "genericInstance" && f.returnType.ctor === "paged";
 }
 
+/** A union-returning find (`Order or NotFound` / `Order option`) reaches
+ *  the repository/service as its OPTIONAL TWIN — a single nullable row;
+ *  the controller owns the union translation (absent → 404 / problem,
+ *  found → the tagged wire record).  Mirrors .NET's
+ *  `unionFindAsOptionalTwin`; the Domain layer never names the
+ *  Response-side union type. */
+export function unionFindAsOptionalTwin(find: FindIR, aggName: string): FindIR {
+  if (find.returnType.kind !== "union") return find;
+  const success = find.returnType.variants.find(
+    (v) => v.kind === "entity" && v.name === aggName,
+  ) ?? { kind: "entity" as const, name: aggName };
+  return { ...find, returnType: { kind: "optional", inner: success } };
+}
+
 /** Finds keep their DSL name; a find returning `T[]` → `List<T>`,
  *  a single `T` → `T` (nullable); `T paged` → `Paged<T>` with trailing
  *  `int page, int pageSize` parameters (1-based, cross-backend). */
@@ -117,7 +131,9 @@ export function renderJavaRepositoryInterface(
   idClass: string,
 ): string {
   const imports = new Set<string>(["java.util.List", "java.util.Optional"]);
-  const findLines = declaredFinds(repo).map((f) => `    ${findSignature(f, imports)};`);
+  const findLines = declaredFinds(repo).map(
+    (f) => `    ${findSignature(unionFindAsOptionalTwin(f, agg.name), imports)};`,
+  );
   // Two overloads per retrieval, mirroring .NET's optional call-site
   // `page` tuple: the bare run plus `(…, Integer offset, Integer limit)`
   // (either may be null — partial pages are legal in the DSL).
@@ -172,7 +188,7 @@ export function renderJavaSpringDataRepository(
   idClass: string,
 ): string {
   const imports = new Set<string>(["org.springframework.data.jpa.repository.JpaRepository"]);
-  const finds = declaredFinds(repo);
+  const finds = declaredFinds(repo).map((f) => unionFindAsOptionalTwin(f, agg.name));
   const retrievals = ctx.retrievals ?? [];
   const anyReified = retrievals.some((r) => ctx.isReified?.(r));
   if (anyReified) {
@@ -256,7 +272,7 @@ export function renderJavaRepositoryImpl(
   idClass: string,
 ): string {
   const imports = new Set<string>(["java.util.List", "java.util.Optional"]);
-  const finds = declaredFinds(repo);
+  const finds = declaredFinds(repo).map((f) => unionFindAsOptionalTwin(f, agg.name));
   const retrievals = ctx.retrievals ?? [];
   const anyReified = retrievals.some((r) => ctx.isReified?.(r));
   const retrievalDelegates = retrievals.flatMap((r) => {

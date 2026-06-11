@@ -1,0 +1,24 @@
+system UF {
+  subdomain D {
+    context Shop {
+      error NotFound { resource: string }
+      aggregate Order with crudish {
+        code: string
+      }
+      repository Orders for Order {
+        find byCode(code: string): Order or NotFound where this.code == code
+        find maybeFirst(code: string): Order option where this.code == code
+      }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable ufApi {
+    platform: java
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    port: 8081
+  }
+}
