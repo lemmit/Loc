@@ -50,6 +50,26 @@ function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedC
 ${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
   });
 
+  // Retrieval defdelegates — `run_<retrieval>_<agg>(args..., opts \\ [])`
+  // routes to the per-retrieval Ecto query module under
+  // `Retrievals.<Name>`.  Workflow `repo-run` lowerings (follow-up
+  // slice) call through this seam.
+  const retrievalLines = (ctx.retrievals ?? [])
+    .filter((r) => r.targetType.kind === "entity")
+    .map((r) => {
+      const aggName = (r.targetType as { kind: "entity"; name: string }).name;
+      const retSnake = snake(r.name);
+      const aggSnake = snake(aggName);
+      const retMod = `${facadeMod}.Retrievals.${upperFirst(r.name)}`;
+      // `defdelegate` carries the function arity through to the target.
+      // `\\\\ []` is the default for the trailing `opts` arg.
+      const args = r.params.map((p) => snake(p.name));
+      const argList = args.length > 0 ? `${args.join(", ")}, opts \\\\ []` : "opts \\\\ []";
+      return `  defdelegate run_${retSnake}_${aggSnake}(${argList}), to: ${retMod}, as: :run`;
+    });
+  const retrievalBlock =
+    retrievalLines.length > 0 ? `\n  # Retrievals\n${retrievalLines.join("\n")}\n` : "";
+
   return `# Auto-generated.
 defmodule ${facadeMod} do
   @moduledoc """
@@ -60,7 +80,7 @@ defmodule ${facadeMod} do
   workflow body).  Vanilla foundation (no Ash.Domain).
   """
 
-${blocks.join("\n")}end
+${blocks.join("\n")}${retrievalBlock}end
 `;
 }
 
