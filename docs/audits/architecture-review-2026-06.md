@@ -155,14 +155,20 @@ exists or the gap is on an explicit allow-list — turning silent divergence int
 a reviewed list. Also state plainly in CLAUDE.md that HEEx is a parallel engine,
 not a `WalkerTarget` consumer (today's docs imply the seam is universal).
 
-### 6. React still uses its own API builder while Vue uses the shared one *(small, clean-up)*
+### 6. React/Vue API-builder import asymmetry — RESOLVED *(small, clean-up)*
 
-`_frontend/api-module.ts` is explicitly framework-neutral (Zod + TanStack
-Query, parameterised by `queryPackage`). Vue consumes it
-(`vue/index.ts` → `@tanstack/vue-query`). React still imports its own older
-`react/api-builder.ts` (`react/index.ts:16`). Output is equivalent, but React
-should migrate onto the shared module so there's one source of truth — otherwise
-a future API-shape change has to be made twice and kept byte-identical by hand.
+> Correction to the original finding: there was no duplicate React builder.
+> The Zod + TanStack-Query builders were already extracted to the
+> framework-neutral `_frontend/{api,views,workflows}-module.ts` (parameterised
+> by `queryPackage`, default `@tanstack/react-query`). Vue imported the shared
+> paths directly; React reached the *same* shared code through three 4-line
+> re-export shims (`react/{api,view,workflow}-builder.ts`). So the only
+> asymmetry was two import paths to one body of code, not duplicated logic.
+
+Resolved by deleting the three React shims and repointing React's importers
+(`react/index.ts`, `react/pages-emitter.ts`, and five tests) at the shared
+`_frontend/` paths — a zero-output-change refactor (build + all 50 React test
+files green). React and Vue now import the same modules by the same path.
 
 ### 7. Documentation drift across the whole roster *(docs)*
 
@@ -216,6 +222,6 @@ called production-ready.
 4. Add the missing Python/Vue test + CI gates.
 5. Resolve the `platform/` layout dichotomy (document or migrate).
 6. Extract the `WorkflowChoreographer` seam (largest duplication payoff).
-7. Migrate React onto `_frontend/api-module.ts`.
+7. ~~Migrate React onto `_frontend/api-module.ts`~~ — done (shims removed).
 8. Add a HEEx primitive-parity test + document HEEx as a parallel engine (do
    NOT merge the walkers — the divergence is topological).
