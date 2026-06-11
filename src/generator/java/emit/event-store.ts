@@ -1,0 +1,201 @@
+import type { EnrichedAggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
+import { lines } from "../../../util/code-builder.js";
+import { snake } from "../../../util/naming.js";
+import { javaValueTypeForId, renderJavaExpr, renderJavaType } from "../render-expr.js";
+import type { JavaRepoCtx } from "./repository.js";
+import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
+
+// ---------------------------------------------------------------------------
+// Event-sourced persistence (`persistedAs(eventLog)`, appliers A2) — the
+// java counterpart of the Hono / .NET event store.  No state table and
+// no Spring Data interface: the repository impl reads/appends the
+// shared `<agg>_events` stream table (stream_id, version, type, data
+// jsonb, occurred_at — emitted by the shared MigrationsIR) through
+// JdbcTemplate, folds streams via the entity's `_fromEvents` (appliers),
+// and serialises events with Jackson (records round-trip natively; the
+// same mapper writes and reads, so the storage dialect is consistent).
+// Finds fold every stream and filter in memory (the .NET `_LoadAllAsync`
+// shape) — the event log is the source of truth, not a query target.
+// ---------------------------------------------------------------------------
+
+export function renderJavaEventSourcedRepositoryImpl(
+  agg: EnrichedAggregateIR,
+  repo: RepositoryIR | undefined,
+  ctx: JavaRepoCtx,
+  idClass: string,
+  schema: string | undefined,
+): string {
+  if ((ctx.retrievals ?? []).length > 0) {
+    throw new Error(
+      `java event sourcing: retrievals on event-sourced aggregate '${agg.name}' are not implemented (the event log is not a query target).`,
+    );
+  }
+  const table = schema ? `${schema}.${snake(agg.name)}_events` : `${snake(agg.name)}_events`;
+  const idJava = javaValueTypeForId(agg.idValueType);
+  const parseId =
+    idJava === "UUID"
+      ? "UUID.fromString(sid)"
+      : idJava === "int"
+        ? "Integer.parseInt(sid)"
+        : idJava === "long"
+          ? "Long.parseLong(sid)"
+          : "sid";
+  // The event types this stream can contain — the events the appliers fold.
+  const eventNames = [...new Set((agg.appliers ?? []).map((a) => a.event))];
+  const finds = declaredFinds(repo).map((f) => unionFindAsOptionalTwin(f, agg.name));
+
+  const findLines = finds.flatMap((f) => {
+    const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`);
+    const filter = f.filter
+      ? `.filter(x -> ${renderJavaExpr(f.filter, { thisName: "x", agg, accessorProps: true })})`
+      : "";
+    if (isPagedFind(f)) {
+      const sig = [...params, "int page", "int pageSize"].join(", ");
+      return [
+        `    @Override`,
+        `    public Paged<${agg.name}> ${f.name}(${sig}) {`,
+        `        var all = findAll().stream()${filter}.toList();`,
+        `        var items = all.stream().skip((long) (page - 1) * pageSize).limit(pageSize).toList();`,
+        `        return new Paged<>(items, page, pageSize, all.size(), (all.size() + pageSize - 1) / pageSize);`,
+        `    }`,
+        ``,
+      ];
+    }
+    if (f.returnType.kind !== "array") {
+      return [
+        `    @Override`,
+        `    public ${agg.name} ${f.name}(${params.join(", ")}) {`,
+        `        return findAll().stream()${filter}.findFirst().orElse(null);`,
+        `    }`,
+        ``,
+      ];
+    }
+    return [
+      `    @Override`,
+      `    public List<${agg.name}> ${f.name}(${params.join(", ")}) {`,
+      `        return findAll().stream()${filter}.toList();`,
+      `    }`,
+      ``,
+    ];
+  });
+  while (findLines[findLines.length - 1] === "") findLines.pop();
+
+  return lines(
+    `package ${ctx.infraPkg};`,
+    ``,
+    `import java.util.ArrayList;`,
+    `import java.util.LinkedHashMap;`,
+    `import java.util.List;`,
+    `import java.util.Optional;`,
+    idJava === "UUID" ? `import java.util.UUID;` : null,
+    ``,
+    `import com.fasterxml.jackson.databind.ObjectMapper;`,
+    `import org.slf4j.Logger;`,
+    `import org.slf4j.LoggerFactory;`,
+    `import org.springframework.jdbc.core.JdbcTemplate;`,
+    `import org.springframework.stereotype.Repository;`,
+    ``,
+    ctx.entityPkg !== ctx.infraPkg ? `import ${ctx.entityPkg}.${agg.name};` : null,
+    ctx.domainPkg !== ctx.infraPkg ? `import ${ctx.domainPkg}.${agg.name}Repository;` : null,
+    `import ${ctx.basePkg}.domain.common.AggregateNotFoundException;`,
+    finds.some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
+    // DomainEvent rides the events wildcard (it lives in domain.events).
+    `import ${ctx.basePkg}.domain.events.*;`,
+    `import ${ctx.basePkg}.domain.ids.*;`,
+    ``,
+    `/** Event-sourced repository — appends to ${table}, folds on load`,
+    ` *  via ${agg.name}._fromEvents (the appliers). */`,
+    `@Repository`,
+    `public class ${agg.name}RepositoryImpl implements ${agg.name}Repository {`,
+    `    private static final Logger log = LoggerFactory.getLogger(${agg.name}RepositoryImpl.class);`,
+    `    private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();`,
+    ``,
+    `    private final JdbcTemplate jdbc;`,
+    ``,
+    `    public ${agg.name}RepositoryImpl(JdbcTemplate jdbc) {`,
+    `        this.jdbc = jdbc;`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public ${agg.name} save(${agg.name} aggregate) {`,
+    `        var pending = aggregate.pullEvents();`,
+    `        if (!pending.isEmpty()) {`,
+    `            var sid = String.valueOf(aggregate.id().value());`,
+    `            Integer max = jdbc.queryForObject(`,
+    `                "select max(version) from ${table} where stream_id = ?", Integer.class, sid);`,
+    `            int version = max == null ? 0 : max;`,
+    `            for (var ev : pending) {`,
+    `                version++;`,
+    `                try {`,
+    `                    jdbc.update(`,
+    `                        "insert into ${table} (stream_id, version, type, data) values (?, ?, ?, ?::jsonb)",`,
+    `                        sid, version, ev.getClass().getSimpleName(), JSON.writeValueAsString(ev));`,
+    `                } catch (com.fasterxml.jackson.core.JsonProcessingException e) {`,
+    `                    throw new IllegalStateException("event serialization failed", e);`,
+    `                }`,
+    `                log.info("domain_event type={}", ev.getClass().getSimpleName());`,
+    `            }`,
+    `        }`,
+    `        return aggregate;`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public Optional<${agg.name}> findById(${idClass} id) {`,
+    `        var events = loadStream(String.valueOf(id.value()));`,
+    `        return events.isEmpty() ? Optional.empty() : Optional.of(${agg.name}._fromEvents(id, events));`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public ${agg.name} getById(${idClass} id) {`,
+    `        return findById(id).orElseThrow(() ->`,
+    `            new AggregateNotFoundException("${agg.name} " + id + " not found"));`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public List<${agg.name}> findAll() {`,
+    `        var rows = jdbc.queryForList(`,
+    `            "select stream_id, type, data from ${table} order by stream_id, version");`,
+    `        var byStream = new LinkedHashMap<String, List<DomainEvent>>();`,
+    `        for (var row : rows) {`,
+    `            byStream.computeIfAbsent((String) row.get("stream_id"), k -> new ArrayList<>())`,
+    `                .add(rowToEvent((String) row.get("type"), String.valueOf(row.get("data"))));`,
+    `        }`,
+    `        var out = new ArrayList<${agg.name}>();`,
+    `        for (var entry : byStream.entrySet()) {`,
+    `            var sid = entry.getKey();`,
+    `            out.add(${agg.name}._fromEvents(new ${idClass}(${parseId}), entry.getValue()));`,
+    `        }`,
+    `        return out;`,
+    `    }`,
+    ``,
+    `    @Override`,
+    `    public void delete(${agg.name} aggregate) {`,
+    `        jdbc.update("delete from ${table} where stream_id = ?", String.valueOf(aggregate.id().value()));`,
+    `    }`,
+    ``,
+    `    private List<DomainEvent> loadStream(String sid) {`,
+    `        var rows = jdbc.queryForList(`,
+    `            "select type, data from ${table} where stream_id = ? order by version", sid);`,
+    `        var out = new ArrayList<DomainEvent>();`,
+    `        for (var row : rows) {`,
+    `            out.add(rowToEvent((String) row.get("type"), String.valueOf(row.get("data"))));`,
+    `        }`,
+    `        return out;`,
+    `    }`,
+    ``,
+    `    private static DomainEvent rowToEvent(String type, String data) {`,
+    `        try {`,
+    `            return switch (type) {`,
+    ...eventNames.map((e) => `                case "${e}" -> JSON.readValue(data, ${e}.class);`),
+    `                default -> throw new IllegalStateException("unknown event type: " + type);`,
+    `            };`,
+    `        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {`,
+    `            throw new IllegalStateException("event deserialization failed", e);`,
+    `        }`,
+    `    }`,
+    findLines.length > 0 ? `` : null,
+    ...findLines,
+    `}`,
+    ``,
+  );
+}

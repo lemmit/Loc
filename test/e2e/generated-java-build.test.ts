@@ -65,6 +65,9 @@ const FIXTURES: Array<[string, string]> = [
   // Resource clients (objectStore / queue / api): S3 / RabbitMQ /
   // HttpClient classes + workflow resource-op call sites.
   ["test/e2e/fixtures/java-build/resources.ddd", "rc_api"],
+  // Event sourcing (persistedAs(eventLog)): JdbcTemplate stream
+  // append + applier fold, no state table / Spring Data interface.
+  ["test/e2e/fixtures/java-build/event-sourced.ddd", "es_api"],
 ];
 
 describe.skipIf(!ENABLED)(

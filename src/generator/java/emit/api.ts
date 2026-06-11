@@ -43,6 +43,9 @@ export interface ControllerCtx {
   /** Prepended to @RequestMapping (fullstack mode passes "/api" so the
    *  SPA owns the un-prefixed route space).  Empty for standalone. */
   routePrefix?: string;
+  /** Event-sourced aggregates are constructible via their `create`
+   *  action even when `hasCreate` (field constructibility) is false. */
+  esConstructible?: boolean;
 }
 
 export function renderJavaController(
@@ -215,18 +218,19 @@ export function renderJavaController(
         ]
       : [];
 
-  const createRoute = hasCreate(agg)
-    ? [
-        `    @PostMapping`,
-        `    public ResponseEntity<Create${agg.name}Response> create${agg.name}(@RequestBody Create${agg.name}Request request) {`,
-        `        var id = service.create${agg.name}(request);`,
-        `        log.info("aggregate_created aggregate=${agg.name} id={}", id.value());`,
-        `        return ResponseEntity.created(URI.create("${ctx.routePrefix ?? ""}/${route}/" + id.value()))`,
-        `            .body(new Create${agg.name}Response(id.value()));`,
-        `    }`,
-        ``,
-      ]
-    : [];
+  const createRoute =
+    hasCreate(agg) || ctx.esConstructible
+      ? [
+          `    @PostMapping`,
+          `    public ResponseEntity<Create${agg.name}Response> create${agg.name}(@RequestBody Create${agg.name}Request request) {`,
+          `        var id = service.create${agg.name}(request);`,
+          `        log.info("aggregate_created aggregate=${agg.name} id={}", id.value());`,
+          `        return ResponseEntity.created(URI.create("${ctx.routePrefix ?? ""}/${route}/" + id.value()))`,
+          `            .body(new Create${agg.name}Response(id.value()));`,
+          `    }`,
+          ``,
+        ]
+      : [];
   const body = [
     ...createRoute,
     `    @GetMapping("/{id}")`,

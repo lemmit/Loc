@@ -3,6 +3,7 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   FieldIR,
+  ParamIR,
   RepositoryIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
@@ -35,6 +36,8 @@ export interface ServiceCtx {
   /** Strongly-typed id class (default `<Agg>Id`); a TPH concrete passes
    *  its base's `<Base>Id` (the shared single-table key). */
   idClass?: string;
+  /** Event-sourced create-input override: the `create` action's params. */
+  esCreateParams?: readonly ParamIR[];
 }
 
 export function renderJavaService(
@@ -53,25 +56,32 @@ export function renderJavaService(
     optional && t.kind !== "optional" ? { kind: "optional", inner: t } : t;
 
   // --- create -----------------------------------------------------------------
-  for (const f of createInputs) collectWireToDomainImports(f.type, imports);
-  const createLets = createInputs.map(
+  // Event-sourced aggregates are constructible through their `create`
+  // action's params (the command shape) instead of the field set.
+  const createParams: readonly { name: string; type: TypeIR; optional?: boolean }[] =
+    ctx.esCreateParams ?? createInputs;
+  for (const f of createParams) collectWireToDomainImports(f.type, imports);
+  const createLets = createParams.map(
     (f) =>
-      `        var ${f.name} = ${wireToDomain(eff(f.type, f.optional), `request.${f.name}()`)};`,
+      `        var ${f.name} = ${wireToDomain(eff(f.type, !!f.optional), `request.${f.name}()`)};`,
   );
-  const createArgs = createInputs.map((f) => f.name).join(", ");
-  const createLines = hasCreate(agg)
-    ? [
-        `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
-        ...createLets,
-        hasValidators ? `        ${agg.name}Validators.create(${createArgs});` : null,
-        `        var aggregate = ${agg.name}.create(${createArgs});`,
-        `        repository.save(aggregate);`,
-        `        publishEvents(aggregate);`,
-        `        return aggregate.id();`,
-        `    }`,
-        ``,
-      ].filter((l): l is string => l !== null)
-    : [];
+  const createArgs = createParams.map((f) => f.name).join(", ");
+  const createLines =
+    hasCreate(agg) || ctx.esCreateParams
+      ? [
+          `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
+          ...createLets,
+          hasValidators && !ctx.esCreateParams
+            ? `        ${agg.name}Validators.create(${createArgs});`
+            : null,
+          `        var aggregate = ${agg.name}.create(${createArgs});`,
+          `        repository.save(aggregate);`,
+          `        publishEvents(aggregate);`,
+          `        return aggregate.id();`,
+          `    }`,
+          ``,
+        ].filter((l): l is string => l !== null)
+      : [];
 
   // --- reads -------------------------------------------------------------------
   const readLines = [
