@@ -1,5 +1,4 @@
 import { enrichLoomModel } from "../../ir/enrich/enrichments.js";
-import { hasCreate } from "../../ir/enrich/wire-projection.js";
 import { lowerModel } from "../../ir/lower/lower.js";
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type {
@@ -33,6 +32,7 @@ import {
   renderPagedRecord,
   renderWireValidationException,
 } from "./emit/common.js";
+import { criterionEligible, renderJavaCriteriaClasses } from "./emit/criteria.js";
 import { renderDtoFiles } from "./emit/dto.js";
 import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
@@ -59,6 +59,7 @@ import {
   renderJavaRepositoryImpl,
   renderJavaRepositoryInterface,
   renderJavaSpringDataRepository,
+  renderOffsetLimitPageRequest,
 } from "./emit/repository.js";
 import { renderJavaService } from "./emit/service.js";
 import { renderJavaTestsFile } from "./emit/tests.js";
@@ -240,6 +241,26 @@ function emitProjectFromContexts(
     if (viewFiles) {
       for (const [name, f] of viewFiles) place(name, f.category, f.content);
     }
+    // Reified criteria → Specification<T> factories (java consumes the
+    // CriterionIR directly — the proposal's headline differentiator).
+    const voLookupCtx = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
+    for (const file of renderJavaCriteriaClasses(
+      ctx,
+      voLookupCtx,
+      pkgFor("criteria"),
+      basePkg,
+      (a) => pkgFor("entity", a),
+    )) {
+      place(file.name, "criteria", file.content);
+    }
+    // Offset/limit Pageable behind the call-site `page:` on `Repo.run`.
+    if ((ctx.retrievals ?? []).length > 0) {
+      place(
+        "OffsetLimitPageRequest.java",
+        "infra-persistence",
+        renderOffsetLimitPageRequest(pkgFor("infra-persistence")),
+      );
+    }
   }
 
   // Auth surface — only when the deployable opts in via auth: required
@@ -384,6 +405,17 @@ function emitAggregate(
   // finds (the mergeViewsAsFinds analog) — repository-level only; the
   // aggregate controller doesn't route them (the views controller does).
   const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+  // Retrievals targeting this aggregate; a retrieval whose `where` is
+  // exactly an eligible criterion reference consumes the reified
+  // Specification factory instead of a JPQL query.
+  const aggRetrievals = (ctx.retrievals ?? []).filter(
+    (r) => r.targetType.kind === "entity" && r.targetType.name === agg.name,
+  );
+  const isReified = (r: (typeof aggRetrievals)[number]): boolean => {
+    if (!r.criterionRef) return false;
+    const crit = ctx.criteria.find((c) => c.name === r.criterionRef?.name);
+    return !!crit && criterionEligible(crit, ctx)?.name === agg.name;
+  };
   const viewFinds = viewFindsFor(agg.name, ctx) as unknown as RepositoryIR["finds"];
   const repoWithViews: RepositoryIR =
     viewFinds.length > 0
@@ -397,6 +429,10 @@ function emitAggregate(
     domainPkg: pkgFor("repository-interface", agg.name),
     infraPkg: pkgFor("repository-impl", agg.name),
     entityPkg: pkgFor("entity", agg.name),
+    criteriaPkg: pkgFor("criteria"),
+    persistencePkg: pkgFor("infra-persistence"),
+    retrievals: aggRetrievals,
+    isReified,
   };
   place(
     `${agg.name}Repository.java`,

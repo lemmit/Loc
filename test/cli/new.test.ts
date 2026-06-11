@@ -26,9 +26,9 @@ function tmpdir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "loom-new-"));
 }
 
-const platforms = ["hono", "dotnet", "elixir"] as const;
+const platforms = ["hono", "dotnet", "elixir", "java"] as const;
 const templates = ["blank", "crud"] as const;
-const backendPort: Record<string, number> = { hono: 3000, dotnet: 8080, elixir: 4000 };
+const backendPort: Record<string, number> = { hono: 3000, dotnet: 8080, elixir: 4000, java: 8081 };
 
 describe("ddd new — scaffold matrix", () => {
   for (const platform of platforms) {
@@ -139,9 +139,9 @@ describe("ddd new — guards and ergonomics", () => {
 
   it("rejects an unknown platform", () => {
     const tmp = tmpdir();
-    const r = runCli(["new", "app", "-o", path.join(tmp, "p"), "--platform", "java"]);
+    const r = runCli(["new", "app", "-o", path.join(tmp, "p"), "--platform", "rust"]);
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('unknown --platform "java"');
+    expect(r.stderr).toContain('unknown --platform "rust"');
     fs.rmSync(tmp, { recursive: true });
   });
 

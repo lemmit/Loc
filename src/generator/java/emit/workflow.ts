@@ -8,7 +8,7 @@ import type {
 import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { collectJavaExprImports, renderJavaExpr, renderJavaType } from "../render-expr.js";
+import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import {
   collectWireImports,
   collectWireToDomainImports,
@@ -78,7 +78,11 @@ function reposUsed(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
   const visit = (s: WorkflowStmtIR): void => {
     if (s.kind === "factory-let") aggs.add(s.aggName);
     if (s.kind === "repo-let") aggs.add(s.aggName);
-    if (s.kind === "for-each") for (const b of s.body) visit(b);
+    if (s.kind === "repo-run") aggs.add(s.aggName);
+    if (s.kind === "for-each") {
+      for (const save of s.savesPerIteration) aggs.add(save.aggName);
+      for (const b of s.body) visit(b);
+    }
   };
   for (const s of wf.statements) visit(s);
   for (const save of wf.savesAtExit) aggs.add(save.aggName);
@@ -137,17 +141,51 @@ function renderWorkflowStmt(
       if (targetOp && operationUsesCurrentUser(targetOp)) rendered.push("currentUser");
       return [`        ${s.target}.${s.op}(${rendered.join(", ")});`];
     }
-    case "emit":
-      // Workflow-level event emission has no aggregate stream to ride —
-      // tracked with the dispatch-delivery proposal; surface loudly.
-      throw new Error(
-        "java workflows: workflow-level `emit` is not yet implemented on the java backend.",
+    case "emit": {
+      // Workflow-level emission has no aggregate stream to ride: the
+      // event record is constructed (so its shape stays compile-checked)
+      // and logged with the same `domain_event` envelope the per-aggregate
+      // publishEvents uses.  Java events are positional records — order
+      // the emit site's `name: value` pairs by the declared field order.
+      for (const f of s.fields) collectJavaExprImports(f.value, imports);
+      const declared = ctx.events.find((e) => e.name === s.eventName);
+      const rendered = new Map(s.fields.map((f) => [f.name, renderJavaExpr(f.value, renderCtx)]));
+      const args = declared
+        ? declared.fields.map((f) => rendered.get(f.name) ?? "null").join(", ")
+        : [...rendered.values()].join(", ");
+      return [
+        `        { var __ev = new ${s.eventName}(${args}); log.info("domain_event type={}", __ev.getClass().getSimpleName()); }`,
+      ];
+    }
+    case "repo-run": {
+      for (const a of s.retrievalArgs) collectJavaExprImports(a, imports);
+      const args = s.retrievalArgs.map((a) => renderJavaExpr(a, renderCtx));
+      // Call-site page rides the `(…, Integer offset, Integer limit)`
+      // port overload; absent halves pass null (no skip / no cap).
+      if (s.page) {
+        if (s.page.offset) collectJavaExprImports(s.page.offset, imports);
+        if (s.page.limit) collectJavaExprImports(s.page.limit, imports);
+        args.push(
+          s.page.offset ? renderJavaExpr(s.page.offset, renderCtx) : "null",
+          s.page.limit ? renderJavaExpr(s.page.limit, renderCtx) : "null",
+        );
+      }
+      return [
+        `        var ${s.name} = ${repoField(s.aggName)}.run${upperFirst(s.retrievalName)}(${args.join(", ")});`,
+      ];
+    }
+    case "for-each": {
+      collectJavaExprImports(s.iterable, imports);
+      const body = s.body.flatMap((b) => renderWorkflowStmt(b, ctx, imports));
+      const saves = s.savesPerIteration.map(
+        (save) => `        ${repoField(save.aggName)}.save(${save.name});`,
       );
-    case "repo-run":
-    case "for-each":
-      throw new Error(
-        "java workflows: retrieval-driven `for` loops are not yet implemented on the java backend.",
-      );
+      return [
+        `        for (var ${s.var} : ${renderJavaExpr(s.iterable, renderCtx)}) {`,
+        ...[...body, ...saves].map((l) => `    ${l}`),
+        `        }`,
+      ];
+    }
     case "resource-call":
       throw new Error(
         "java workflows: resource-op calls in workflows are not yet implemented on the java backend.",
@@ -221,6 +259,11 @@ export function renderJavaWorkflows(
 
   const repoFields = [...repoAggs].sort();
   const anyUser = authed && ctx.workflows.some(workflowUsesCurrentUser);
+  const hasEmit = ctx.workflows.some((wf) => {
+    const walk = (ss: WorkflowStmtIR[]): boolean =>
+      ss.some((s) => s.kind === "emit" || (s.kind === "for-each" && walk(s.body)));
+    return walk(wf.statements);
+  });
   const serviceName = `${ctx.name}Workflows`;
   const ctorParams = [
     ...repoFields.map((a) => `${a}Repository ${repoField(a)}`),
@@ -233,6 +276,8 @@ export function renderJavaWorkflows(
       ``,
       ...[...imports].sort().map((i) => `import ${i};`),
       imports.size > 0 ? `` : null,
+      hasEmit ? `import org.slf4j.Logger;` : null,
+      hasEmit ? `import org.slf4j.LoggerFactory;` : null,
       `import org.springframework.stereotype.Service;`,
       `import org.springframework.transaction.annotation.Transactional;`,
       ``,
@@ -246,6 +291,7 @@ export function renderJavaWorkflows(
       }),
       anyUser ? `import ${wctx.basePkg}.auth.CurrentUserAccessor;` : null,
       anyUser ? `import ${wctx.basePkg}.auth.User;` : null,
+      hasEmit ? `import ${wctx.basePkg}.domain.events.*;` : null,
       `import ${wctx.basePkg}.domain.common.*;`,
       `import ${wctx.basePkg}.domain.enums.*;`,
       `import ${wctx.basePkg}.domain.ids.*;`,
@@ -254,6 +300,9 @@ export function renderJavaWorkflows(
       `@Service`,
       `@Transactional`,
       `public class ${serviceName} {`,
+      hasEmit
+        ? `    private static final Logger log = LoggerFactory.getLogger(${serviceName}.class);`
+        : null,
       ...repoFields.map((a) => `    private final ${a}Repository ${repoField(a)};`),
       anyUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
       ``,

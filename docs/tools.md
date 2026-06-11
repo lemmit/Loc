@@ -54,15 +54,16 @@ nothing to an editable model without hand-assembling `system` /
 ```bash
 ddd new acme                                   # hono backend + React (mantine), crud template
 ddd new acme --platform dotnet --design shadcn # .NET backend + React (shadcn)
-ddd new acme --platform phoenix                # Phoenix LiveView fullstack (ashPhoenix)
-ddd new acme --platform phoenix --design mui   # Phoenix backend + a React (mui) frontend
+ddd new acme --platform elixir                 # Phoenix LiveView fullstack (ashPhoenix)
+ddd new acme --platform elixir --design mui    # Phoenix backend + a React (mui) frontend
+ddd new acme --platform java                   # Spring Boot backend + React (mantine)
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--platform <hono\|dotnet\|phoenix>` | `hono` | Backend platform (ports: hono 3000, dotnet 8080, phoenix 4000). Prints a hint listing the alternatives when defaulted. |
+| `--platform <hono\|dotnet\|elixir\|java>` | `hono` | Backend platform (ports: hono 3000, dotnet 8080, elixir 4000, java 8081). Prints a hint listing the alternatives when defaulted. |
 | `--template <blank\|crud>` | `crud` | `blank` = one aggregate; `crud` = two aggregates with a repository `find`. |
-| `--design <mantine\|shadcn\|mui\|chakra\|ashPhoenix>` | `mantine` (`ashPhoenix` for phoenix) | Frontend. A React pack scaffolds a separate React deployable; `ashPhoenix` makes Phoenix a single LiveView fullstack. `ashPhoenix` is only valid with `--platform phoenix`. |
+| `--design <mantine\|shadcn\|mui\|chakra\|ashPhoenix>` | `mantine` (`ashPhoenix` for elixir) | Frontend. A React pack scaffolds a separate React deployable; `ashPhoenix` makes Phoenix a single LiveView fullstack. `ashPhoenix` is only valid with `--platform elixir`. |
 | `-o, --out <dir>` | `./<name>` | Output directory. |
 | `--force` | off | Scaffold into an existing, non-empty directory. |
 

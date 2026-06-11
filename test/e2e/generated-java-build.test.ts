@@ -37,6 +37,10 @@ const FIXTURES: Array<[string, string]> = [
   ["test/e2e/fixtures/java-build/showcase-java.ddd", "dotnet_api"],
   // Paged finds: Paged<T> envelope, Spring Data Pageable count derivation.
   ["test/e2e/fixtures/java-build/paged.ddd", "paged_api"],
+  // Retrievals + reified criteria: Specification factories, the
+  // JpaSpecificationExecutor path, composed-where @Query JPQL fallback,
+  // workflow `Repo.run` + `for` loops.
+  ["test/e2e/fixtures/java-build/retrieval.ddd", "crm_api"],
 ];
 
 describe.skipIf(!ENABLED)(
