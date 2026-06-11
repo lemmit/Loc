@@ -917,6 +917,7 @@ function typeShorthand(t: TypeIR): string {
       return `${typeShorthand(t.element)}[]`;
     case "optional":
       return `${typeShorthand(t.inner)}?`;
+    case "action":
     case "slot":
       return "slot";
     case "genericInstance":

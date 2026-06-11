@@ -17,6 +17,7 @@ import type {
   UiNotification,
 } from "../generated/ast.js";
 import { isComponent, isMemberSuffix, isPostfixChain } from "../generated/ast.js";
+import { isWalkerPrimitive } from "../walker-stdlib.js";
 import {
   findAggregateInModule,
   isScaffoldOriginPageBody,
@@ -237,6 +238,30 @@ export function checkUi(ui: Ui, sys: System, accept: ValidationAcceptor): void {
         { node: m, property: "channel", code: "loom.ui-channel-not-broadcast" },
       );
     }
+  }
+
+  // Extern frontend functions (extern-function-hook-escape-hatch.md §3):
+  //   - a name may not shadow a walker-stdlib primitive (the body
+  //     dispatcher would route the call to the primitive, silently
+  //     ignoring the user's module);
+  //   - names unique within the ui.
+  const fnSeen = new Set<string>();
+  for (const m of ui.members) {
+    if (m.$type !== "UiFunction") continue;
+    if (isWalkerPrimitive(m.name)) {
+      accept(
+        "error",
+        `extern function '${m.name}' shadows a walker-stdlib primitive.  Pick a different name.`,
+        { node: m, property: "name", code: "loom.extern-function-shadows-stdlib" },
+      );
+    }
+    if (fnSeen.has(m.name)) {
+      accept("error", `ui '${ui.name}' declares function '${m.name}' more than once.`, {
+        node: m,
+        property: "name",
+      });
+    }
+    fnSeen.add(m.name);
   }
 
   // Per-member walks.  `Scaffold` is gone — its arg-resolution

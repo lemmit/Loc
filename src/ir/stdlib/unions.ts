@@ -45,6 +45,7 @@ export function typeKey(t: TypeIR): string {
       return `union{${t.variants.map(typeKey).sort().join("|")}}`;
     case "none":
       return "none";
+    case "action":
     case "slot":
       return "slot";
   }
@@ -76,6 +77,7 @@ export function variantTag(t: TypeIR): string {
       return `${variantTag(t.arg)}${t.ctor[0]!.toUpperCase()}${t.ctor.slice(1)}`;
     case "union":
       return t.variants.map(variantTag).join("Or");
+    case "action":
     case "slot":
       return "slot";
   }

@@ -20,6 +20,7 @@ import type {
   Ui,
 } from "./generated/ast.js";
 import {
+  checkActionTypePosition,
   checkBinaryOperands,
   checkBuilderCallType,
   checkChannels,
@@ -147,6 +148,9 @@ export class DddValidator {
     // outside a component's parameter list with a clear error rather
     // than letting the backend emitter throw at generate time.
     checkSlotTypePosition(model, accept);
+    // `action` is `slot`'s function-valued sibling (Tier 2) — same
+    // position rule, plus no nested UI-marker as the callback arg.
+    checkActionTypePosition(model, accept);
     // Binary operand compatibility: every binary expression's
     // operands must agree with the operator's semantics.
     // Arithmetic uses `arithmeticResult` (numeric widening, closed

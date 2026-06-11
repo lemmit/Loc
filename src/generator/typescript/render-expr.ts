@@ -351,6 +351,7 @@ export function renderTsType(t: TypeIR): string {
       return `${renderTsType(t.element)}[]`;
     case "optional":
       return `${renderTsType(t.inner)} | null`;
+    case "action":
     case "slot":
       // `slot` is a UI-only param marker; the backend never sees one
       // on an aggregate / VO / entity field.  Validator rejects

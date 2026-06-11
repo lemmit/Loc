@@ -719,6 +719,7 @@ function drizzleColumnLinesForName(
       return [`${fieldName}: text("${colName}")${not}, // non-scalar arrays stored as text`];
     case "optional":
       return drizzleColumnLinesForName(fieldName, inner.inner, true, ctx);
+    case "action":
     case "slot":
       throw new Error(
         "drizzleColumnLinesForName: 'slot' type is UI-only and should not reach the schema emitter.",
