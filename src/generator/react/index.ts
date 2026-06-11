@@ -500,4 +500,4 @@ function staticTitleOf(page: PageIR | undefined): string | undefined {
 }
 
 // smokeSpec moved to src/generator/_frontend/smoke-spec.ts (shared
-// with the Svelte frontend — it drives routes, not framework code).
+// with the Svelte + Vue frontends — it drives routes, not framework code).
