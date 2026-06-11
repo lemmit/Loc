@@ -8,8 +8,8 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
-import { renderPyExpr } from "./render-expr.js";
 import { renderWorkflowStmts } from "../_workflow/stmt-target.js";
+import { renderPyExpr } from "./render-expr.js";
 import { pyWorkflowStmtTarget } from "./workflows-builder.js";
 
 // ---------------------------------------------------------------------------
