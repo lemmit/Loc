@@ -41,6 +41,9 @@ const FIXTURES: Array<[string, string]> = [
   // JpaSpecificationExecutor path, composed-where @Query JPQL fallback,
   // workflow `Repo.run` + `for` loops.
   ["test/e2e/fixtures/java-build/retrieval.ddd", "crm_api"],
+  // First-boot seeding: <Ctx>SeedRunner with domain + raw datasets and
+  // the __loom_seed ship-once marker.
+  ["test/e2e/fixtures/java-build/seeding.ddd", "seed_api"],
 ];
 
 describe.skipIf(!ENABLED)(

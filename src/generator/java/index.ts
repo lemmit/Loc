@@ -61,6 +61,7 @@ import {
   renderJavaSpringDataRepository,
   renderOffsetLimitPageRequest,
 } from "./emit/repository.js";
+import { renderJavaSeedRunner } from "./emit/seed.js";
 import { renderJavaService } from "./emit/service.js";
 import { renderJavaTestsFile } from "./emit/tests.js";
 import { renderJavaValidators } from "./emit/validator.js";
@@ -261,6 +262,20 @@ function emitProjectFromContexts(
         renderOffsetLimitPageRequest(pkgFor("infra-persistence")),
       );
     }
+    // First-boot seed datasets → an ApplicationRunner per seeded context.
+    const seedRunner = renderJavaSeedRunner(ctx, {
+      basePkg,
+      pkg: pkgFor("infra-persistence"),
+      entityPkgOf: (a) => pkgFor("entity", a),
+      repoPkgOf: (a) => pkgFor("repository-interface", a),
+      schemaOf: (a) => {
+        const agg = ctx.aggregates.find((x) => x.name === a);
+        return agg && system?.sys
+          ? resolveDataSourceConfig(agg, ctx, system.sys)?.schema
+          : undefined;
+      },
+    });
+    if (seedRunner) place(`${ctx.name}SeedRunner.java`, "infra-persistence", seedRunner);
   }
 
   // Auth surface — only when the deployable opts in via auth: required

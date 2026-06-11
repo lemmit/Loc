@@ -150,12 +150,16 @@ function ident(name: string): string {
 
 /** INSERT for one `raw` seed row: explicit `id` + literal FK / scalar / enum
  *  columns.  Value objects / containment columns are unsupported in v1 (the
- *  validator reports them before this runs). */
+ *  validator reports them before this runs).  `schema` qualifies the table
+ *  for backends whose tables live outside the connection's search_path
+ *  (java's per-module schemas); omitted, the SQL is unchanged. */
 export function renderSeedRowInsert(
   aggregate: string,
   fields: { name: string; value: ExprIR }[],
+  schema?: string,
 ): string {
-  const table = qIdent(plural(snake(aggregate)));
+  const bare = qIdent(plural(snake(aggregate)));
+  const table = schema ? `${qIdent(schema)}.${bare}` : bare;
   const cols = fields.map((f) => qIdent(snake(f.name))).join(", ");
   const vals = fields.map((f) => seedSqlLiteral(f.value)).join(", ");
   return `INSERT INTO ${table} (${cols}) VALUES (${vals})`;
