@@ -50,6 +50,7 @@ export type JavaArtifactCategory =
   | "spring-data-repository"
   | "join-entity"
   | "infra-persistence"
+  | "resource-client" // objectStore / queue / api client classes
   // api
   | "controller"
   | "api-common" // exception advice, wrappers
@@ -133,6 +134,8 @@ export function byLayerPackage(
     case "join-entity":
     case "infra-persistence":
       return `${basePkg}.infrastructure.persistence`;
+    case "resource-client":
+      return `${basePkg}.resources`;
     case "controller":
     case "api-common":
       return `${basePkg}.api`;

@@ -22,6 +22,7 @@ import type {
   JavaArtifactCategory,
   JavaLayoutAdapter,
 } from "./adapters/by-layer-layout.js";
+import { emitJavaResourceFiles } from "./adapters/resource-clients.js";
 import { renderApiExceptionAdvice, renderJavaController } from "./emit/api.js";
 import { renderAuthFiles } from "./emit/auth.js";
 import {
@@ -177,6 +178,17 @@ function emitProjectFromContexts(
     layout.packageFor(category, basePkg, aggregateName);
 
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
+  // Resource client classes (objectStore / queue / api) + their Gradle
+  // deps (Phase 4c) — empty when the deployable wires no consumable
+  // resources, leaving build.gradle.kts byte-identical.
+  const resourceEmission = emitJavaResourceFiles(
+    system?.sys,
+    new Set(system?.deployable.dataSourceNames ?? []),
+    pkgFor("resource-client"),
+  );
+  for (const [name, content] of resourceEmission.files) {
+    place(name, "resource-client", content);
+  }
   // Fullstack mode (`ui:` on a java deployable): the SPA owns the
   // un-prefixed route space; controllers move under /api (the .NET
   // embedded-SPA shape).
@@ -245,6 +257,8 @@ function emitProjectFromContexts(
         basePkg,
         pkg: pkgFor("workflow-service"),
         routePrefix,
+        resourceClasses: resourceEmission.classes,
+        resourcesPkg: pkgFor("resource-client"),
         entityPkgOf: (a) => pkgFor("entity", a),
         repoPkgOf: (a) => pkgFor("repository-interface", a),
       },
@@ -319,7 +333,10 @@ function emitProjectFromContexts(
   const hasMigrations = allMigrations.some((m) => m.steps.length > 0 || m.baseline !== null);
 
   // Project shell — stable from S1 on.
-  out.set("build.gradle.kts", renderGradleBuild({ flyway: hasMigrations }));
+  out.set(
+    "build.gradle.kts",
+    renderGradleBuild({ flyway: hasMigrations, extraDeps: resourceEmission.deps }),
+  );
   out.set("settings.gradle.kts", renderGradleSettings(slug));
   out.set("src/main/resources/application.yml", renderApplicationYml(slug));
   out.set(mainSourcePath(basePkg, "Application.java"), renderApplication(basePkg));
