@@ -30,6 +30,10 @@ export interface JpaOpts {
   schema?: string;
   /** VO name → field list, for flattening attribute overrides. */
   voLookup: ReadonlyMap<string, readonly FieldIR[]>;
+  /** `shape(embedded)`: reference collections (and containments — see
+   *  the entity emitter) fold into jsonb columns instead of join /
+   *  part tables (the EF owned-types `.ToJson()` analog). */
+  embedded?: boolean;
 }
 
 const schemaAttr = (schema: string | undefined): string => (schema ? `, schema = "${schema}"` : "");
@@ -136,8 +140,15 @@ export function jpaFieldAnnotations(
   const t = unwrap(f.type);
   const col = snake(f.name);
 
-  // Reference collection (`Target id[]`) → the association's join table.
+  // Reference collection (`Target id[]`) → the association's join table
+  // (relational), or a jsonb id-array column under `shape(embedded)`.
   if (t.kind === "array" && t.element.kind === "id") {
+    if (opts.embedded) {
+      return [
+        `    @JdbcTypeCode(SqlTypes.JSON)`,
+        `    @Column(name = "${col}"${f.optional ? "" : ", nullable = false"})`,
+      ];
+    }
     const assoc = associationFor(owner, f.name);
     if (!assoc) {
       throw new Error(

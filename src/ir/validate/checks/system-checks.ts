@@ -401,6 +401,32 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
+      // `shape(embedded)` reference collections: the jsonb id-array
+      // column would route through Hibernate's structured-JSON path for
+      // registered @Embeddable ids (not the Jackson FormatMapper), which
+      // mis-serialises the typed-id list.  Gate until a converter-based
+      // mapping lands; containments-as-json are supported.
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
+        if (shape !== "embedded" || enriched.persistedAs === "eventLog") continue;
+        for (const f of agg.fields) {
+          const t = f.type.kind === "optional" ? f.type.inner : f.type;
+          if (t.kind === "array" && t.element.kind === "id") {
+            diags.push({
+              severity: "error",
+              message:
+                `Deployable '${dep.name}' (platform java) hosts shape(embedded) aggregate ` +
+                `'${ctxName}.${agg.name}' with reference collection '${f.name}' — jsonb id-array ` +
+                `columns are not yet mapped on the java backend (Hibernate's structured-JSON ` +
+                `path bypasses the Jackson FormatMapper for @Embeddable ids). ` +
+                `Use shape(document), the relational shape, or host on a node / dotnet deployable.`,
+              source: `${sys.name}/${dep.name}`,
+              code: "loom.java-embedded-refcoll-unsupported",
+            });
+          }
+        }
+      }
       for (const agg of ctx.aggregates) {
         // Root-level single containments are mapped (the part carries a
         // hidden owning `_parent` @OneToOne); only *part-declared* single

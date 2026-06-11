@@ -10,7 +10,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
-import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
+import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
@@ -35,6 +35,7 @@ import {
   renderWireValidationException,
 } from "./emit/common.js";
 import { criterionEligible, renderJavaCriteriaClasses } from "./emit/criteria.js";
+import { renderJavaDocumentRepositoryImpl } from "./emit/document-store.js";
 import { renderDtoFiles } from "./emit/dto.js";
 import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
@@ -56,6 +57,7 @@ import {
   renderGradleBuild,
   renderGradleSettings,
   renderHealthController,
+  renderJsonFormatMapperConfig,
   renderSpaWebConfig,
 } from "./emit/program.js";
 import {
@@ -301,6 +303,19 @@ function emitProjectFromContexts(
         renderOffsetLimitPageRequest(pkgFor("infra-persistence")),
       );
     }
+    // `shape(embedded)` anywhere → the field-visibility Hibernate JSON
+    // FormatMapper (once per project; the second place() is a no-op).
+    if (
+      ctx.aggregates.some(
+        (a) =>
+          effectiveSavingShape(
+            a,
+            system?.sys ? resolveDataSourceConfig(a, ctx, system.sys) : undefined,
+          ) === "embedded" && a.persistedAs !== "eventLog",
+      )
+    ) {
+      place("LoomJsonFormatMapperConfig.java", "config", renderJsonFormatMapperConfig(basePkg));
+    }
     // First-boot seed datasets → an ApplicationRunner per seeded context.
     const seedRunner = renderJavaSeedRunner(ctx, {
       basePkg,
@@ -395,6 +410,11 @@ function emitAggregate(
   // folds them into every context).
   const voLookup = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
   const schema = sys ? resolveDataSourceConfig(agg, ctx, sys)?.schema : undefined;
+  // Effective saving shape (D-DOCUMENT-AXIS): document aggregates are
+  // plain domain classes round-tripping one jsonb column.
+  const shape = effectiveSavingShape(agg, sys ? resolveDataSourceConfig(agg, ctx, sys) : undefined);
+  const isDocument = shape === "document" && agg.persistedAs !== "eventLog";
+  const isEmbedded = shape === "embedded" && agg.persistedAs !== "eventLog";
 
   // Abstract bases: TPC (`ownTable`) emits a @MappedSuperclass (columns
   // flatten into each concrete's table); a TPH (`sharedTable`) base owns
@@ -454,15 +474,22 @@ function emitAggregate(
       renderJavaEntity(part, false, basePkg, pkgFor("entity", agg.name), agg.name, {
         emitTrace,
         eventFields,
-        persistence: {
-          tableName: plural(snake(part.name)),
-          schema,
-          parentFkColumn: `${snake(ownerName)}_id`,
-          oneToOneParentOf: agg.contains.some((c) => !c.collection && c.partName === part.name)
-            ? agg.name
-            : undefined,
-          voLookup,
-        },
+        // Document / embedded aggregates fold their parts into jsonb —
+        // the part is a plain class (no part table, no JPA bindings).
+        persistence:
+          isDocument || isEmbedded
+            ? undefined
+            : {
+                tableName: plural(snake(part.name)),
+                schema,
+                parentFkColumn: `${snake(ownerName)}_id`,
+                oneToOneParentOf: agg.contains.some(
+                  (c) => !c.collection && c.partName === part.name,
+                )
+                  ? agg.name
+                  : undefined,
+                voLookup,
+              },
       }),
       agg.name,
     );
@@ -475,15 +502,17 @@ function emitAggregate(
       superType,
       operationReturnUnions,
       eventFields,
-      // Event-sourced aggregates have no state table — the entity is a
-      // plain domain class folded from the stream (no JPA bindings).
+      // Event-sourced / document aggregates have no normalised state
+      // tables — the entity is a plain domain class (no JPA bindings;
+      // ES folds the stream, document round-trips one jsonb column).
       persistence:
-        agg.persistedAs === "eventLog"
+        agg.persistedAs === "eventLog" || isDocument
           ? undefined
           : {
               tableName: plural(snake(agg.name)),
               schema,
               containmentOwnerName: ownerName,
+              embedded: isEmbedded,
               voLookup,
             },
     }),
@@ -537,6 +566,15 @@ function emitAggregate(
       `${agg.name}RepositoryImpl.java`,
       "repository-impl",
       renderJavaEventSourcedRepositoryImpl(agg, repoWithViews, repoCtx, idClass, schema),
+      agg.name,
+    );
+  } else if (isDocument) {
+    // Document shape: no Spring Data interface — the impl round-trips
+    // the whole aggregate through one jsonb column via JdbcTemplate.
+    place(
+      `${agg.name}RepositoryImpl.java`,
+      "repository-impl",
+      renderJavaDocumentRepositoryImpl(agg, repoWithViews, repoCtx, idClass, schema),
       agg.name,
     );
   } else {

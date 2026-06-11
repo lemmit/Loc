@@ -60,9 +60,15 @@
 >   create via the action's params; java joined
 >   `EVENT_SOURCING_BACKENDS`; boot-verified incl. preconditions over
 >   folded state).
+>   Post-#1134: `shape(document)` (whole aggregate in one jsonb column
+>   via a field-visibility Jackson mapper, version-bumping upserts,
+>   in-memory find folds) and `shape(embedded)` (containments fold into
+>   jsonb columns via the Hibernate JSON FormatMapper swapped for the
+>   same field-visibility mapper; the root stays a queryable @Entity).
 > - **Deferred features — all fail-fast gated, never silent:**
->   `shape(document|embedded)` (needs a
->   Jackson strategy for the package-private-field entity shape),
+>   reference collections on `shape(embedded)` aggregates
+>   (`loom.java-embedded-refcoll-unsupported` — Hibernate's
+>   structured-JSON path bypasses the FormatMapper for @Embeddable ids),
 >   part-declared single containments
 >   (`loom.java-single-containment-unsupported`), `hosts:` UI hosting
 >   (`loom.java-fullstack-unsupported`), principal-referencing filters /

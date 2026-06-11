@@ -224,6 +224,44 @@ export function renderDockerignore(options: { embeddedSpa?: boolean } = {}): str
   );
 }
 
+/** `shape(embedded)` — Hibernate's default Jackson FormatMapper only
+ *  sees getters; the generated part classes carry package-private
+ *  fields with record-style accessors, so the JSON columns ride a
+ *  field-visibility mapper installed via HibernatePropertiesCustomizer.
+ *  Emitted once per project when any embedded aggregate exists. */
+export function renderJsonFormatMapperConfig(basePkg: string): string {
+  return lines(
+    `package ${basePkg}.config;`,
+    ``,
+    `import com.fasterxml.jackson.annotation.JsonAutoDetect;`,
+    `import com.fasterxml.jackson.annotation.PropertyAccessor;`,
+    `import com.fasterxml.jackson.databind.MapperFeature;`,
+    `import com.fasterxml.jackson.databind.json.JsonMapper;`,
+    `import org.hibernate.cfg.AvailableSettings;`,
+    `import org.hibernate.type.format.jackson.JacksonJsonFormatMapper;`,
+    `import org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer;`,
+    `import org.springframework.context.annotation.Bean;`,
+    `import org.springframework.context.annotation.Configuration;`,
+    ``,
+    `@Configuration`,
+    `public class LoomJsonFormatMapperConfig {`,
+    `    @Bean`,
+    `    public HibernatePropertiesCustomizer loomJsonFormatMapper() {`,
+    `        var mapper = JsonMapper.builder()`,
+    `            .findAndAddModules()`,
+    `            .configure(MapperFeature.PROPAGATE_TRANSIENT_MARKER, true)`,
+    `            .visibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY)`,
+    `            .visibility(PropertyAccessor.GETTER, JsonAutoDetect.Visibility.NONE)`,
+    `            .visibility(PropertyAccessor.IS_GETTER, JsonAutoDetect.Visibility.NONE)`,
+    `            .visibility(PropertyAccessor.CREATOR, JsonAutoDetect.Visibility.ANY)`,
+    `            .build();`,
+    `        return props -> props.put(AvailableSettings.JSON_FORMAT_MAPPER, new JacksonJsonFormatMapper(mapper));`,
+    `    }`,
+    `}`,
+    ``,
+  );
+}
+
 /** Fullstack mode — serve the embedded SPA bundle (UI_DIR, default
  *  /app/ui) on the same origin as the /api/* controllers, with the
  *  index.html fallback client-side routers need.  Controller mappings

@@ -95,6 +95,10 @@ export interface JavaEntityOptions {
      *  the FK on the part table) and its `_create` factory takes the
      *  parent entity instead of the parent id. */
     oneToOneParentOf?: string;
+    /** `shape(embedded)`: containments + reference collections fold
+     *  into jsonb columns (no part / join tables); the Hibernate JSON
+     *  FormatMapper handles the package-private-field part classes. */
+    embedded?: boolean;
     voLookup: ReadonlyMap<string, readonly FieldIR[]>;
   };
 }
@@ -188,6 +192,20 @@ export function renderJavaEntity(
     }
   }
   for (const c of entity.contains) {
+    // `shape(embedded)`: the containment folds into a jsonb column —
+    // the parts serialize inline (no part table, no relation).
+    if (persistence?.embedded) {
+      fieldLines.push(
+        `    @JdbcTypeCode(SqlTypes.JSON)`,
+        `    @Column(name = "${snake(c.name)}", nullable = false)`,
+      );
+      fieldLines.push(
+        c.collection
+          ? `    List<${c.partName}> ${c.name} = new ArrayList<>();`
+          : `    ${c.partName} ${c.name};`,
+      );
+      continue;
+    }
     if (c.collection) {
       if (persistence) {
         fieldLines.push(
@@ -488,7 +506,11 @@ export function renderJavaEntity(
   ];
   while (body.length > 0 && body[body.length - 1] === "") body.pop();
 
-  const usesHibernateTypes = persistence && needsHibernateTypes(entity.fields);
+  const usesHibernateTypes =
+    persistence &&
+    (needsHibernateTypes(entity.fields) ||
+      (persistence.embedded &&
+        (entity.contains.length > 0 || entity.fields.some((f) => isRefCollection(f.type)))));
   // Capability filters (non-principal, relational — the validator gates
   // the rest) ride Hibernate's @SQLRestriction: one static WHERE
   // fragment appended to every SELECT (the HasQueryFilter analog).

@@ -68,6 +68,12 @@ const FIXTURES: Array<[string, string]> = [
   // Event sourcing (persistedAs(eventLog)): JdbcTemplate stream
   // append + applier fold, no state table / Spring Data interface.
   ["test/e2e/fixtures/java-build/event-sourced.ddd", "es_api"],
+  // shape(document): whole aggregate in one jsonb column via the
+  // field-visibility Jackson mapper, version-bumping upserts.
+  ["test/e2e/fixtures/java-build/document.ddd", "doc_api"],
+  // shape(embedded): containments fold into jsonb columns via the
+  // Hibernate JSON FormatMapper; scalar columns stay queryable.
+  ["test/e2e/fixtures/java-build/embedded.ddd", "emb_api"],
 ];
 
 describe.skipIf(!ENABLED)(
