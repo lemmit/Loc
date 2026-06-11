@@ -31,6 +31,8 @@ export interface WorkflowCtx {
   basePkg: string;
   /** Package of the workflow service + request records. */
   pkg: string;
+  /** Route prefix ("/api" in fullstack mode). */
+  routePrefix?: string;
   /** category-resolved package lookups for cross-package imports. */
   entityPkgOf: (aggName: string) => string;
   repoPkgOf: (aggName: string) => string;
@@ -339,7 +341,7 @@ export function renderJavaWorkflows(
       `import ${wctx.pkg}.*;`,
       ``,
       `@RestController`,
-      `@RequestMapping("/workflows")`,
+      `@RequestMapping("${wctx.routePrefix ?? ""}/workflows")`,
       `public class ${ctx.name}WorkflowsController {`,
       `    private final ${serviceName} workflows;`,
       ``,

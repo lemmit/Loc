@@ -106,6 +106,12 @@ export function buildApiModule(
     ),
   );
   lines.push(`export type Create${agg.name}Request = z.infer<typeof Create${agg.name}Request>;`);
+  // Dual FormState/Payload aliases (frontend-acl.md Phase 3) — only when
+  // the schema carries a real transform (a money field somewhere in the
+  // create input), so `z.input` ≠ `z.output`.
+  if (requiredFields.some((f) => typeReachesMoney(f.type, ctx))) {
+    lines.push(...dualTypeAliases(`Create${agg.name}`));
+  }
   lines.push("");
 
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
@@ -121,6 +127,9 @@ export function buildApiModule(
     lines.push(
       `export type ${upperFirst(op.name)}${agg.name}Request = z.infer<typeof ${upperFirst(op.name)}${agg.name}Request>;`,
     );
+    if (op.params.some((p) => typeReachesMoney(p.type, ctx))) {
+      lines.push(...dualTypeAliases(`${upperFirst(op.name)}${agg.name}`));
+    }
   }
   lines.push("");
 
@@ -460,6 +469,37 @@ const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
   guid: "z.string()",
   json: "z.unknown()",
 };
+
+/** True when a request field's type reaches the `money` primitive —
+ *  directly, through array/optional wrappers, or inside a value object.
+ *  Money is the one wire type whose schema TRANSFORMS on parse
+ *  (`moneySchema`: decimal string → Decimal), so it gates the dual
+ *  FormState/Payload aliases (frontend-acl.md Phase 3 — emitted only
+ *  where `z.input` and `z.output` genuinely diverge; structurally
+ *  identical aliases would be noise). */
+function typeReachesMoney(t: TypeIR, ctx: BoundedContextIR): boolean {
+  if (t.kind === "primitive") return t.name === "money";
+  if (t.kind === "array") return typeReachesMoney(t.element, ctx);
+  if (t.kind === "optional") return typeReachesMoney(t.inner, ctx);
+  if (t.kind === "valueobject") {
+    const vo = ctx.valueObjects.find((v) => v.name === t.name);
+    return (vo?.fields ?? []).some((f) => typeReachesMoney(f.type, ctx));
+  }
+  return false;
+}
+
+/** The dual-type aliases for a transform-bearing action schema
+ *  (frontend-acl.md Phase 3): `FormState` is what a form holds
+ *  (`z.input` — money fields are decimal strings pre-parse), `Payload`
+ *  what the API client sends after parse (`z.output` — Decimal). */
+function dualTypeAliases(name: string): string[] {
+  return [
+    `/** Pre-parse form shape (z.input) — money fields are decimal strings. */`,
+    `export type ${name}FormState = z.input<typeof ${name}Request>;`,
+    `/** Post-parse payload shape (z.output) — money fields are Decimal. */`,
+    `export type ${name}Payload = z.output<typeof ${name}Request>;`,
+  ];
+}
 
 function zodForRequest(t: TypeIR): string {
   const info = wireTypeInfo(t, "request");

@@ -22,7 +22,7 @@ versioning works.
 | `svelte` | `src/platform/svelte.ts` | 3002 | ✗ | ✓ |
 | `static` | aliased to `react.ts` | 3001 | ✗ | ✓ |
 | `phoenixLiveView` (default `phoenixLiveView@v1`) | `src/platform/phoenix-live-view.ts` | 4000 | ✓ | ✓ |
-| `java` (default `java@v1`) | `src/platform/java.ts` | 8081 | ✓ | gated (`ui:` fails fast until the embedded-SPA mount lands) |
+| `java` (default `java@v1`) | `src/platform/java.ts` | 8081 | ✓ | ✓ (`ui:` embedded-SPA mount; `hosts:` gated) |
 
 - **Needs DB** — the system orchestrator (`src/system/index.ts`)
   reads this flag to decide whether to emit a per-deployable

@@ -14,7 +14,8 @@ import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
-import { unionMembers } from "../_payload/union-wire.js";
+import { findUnionSpec, unionMembers } from "../_payload/union-wire.js";
+import { generateReactForContexts } from "../react/index.js";
 import { byFeatureLayoutAdapter } from "./adapters/by-feature-layout.js";
 import type {
   JavaArtifact,
@@ -53,6 +54,7 @@ import {
   renderGradleBuild,
   renderGradleSettings,
   renderHealthController,
+  renderSpaWebConfig,
 } from "./emit/program.js";
 import {
   type JavaRepoCtx,
@@ -175,6 +177,11 @@ function emitProjectFromContexts(
     layout.packageFor(category, basePkg, aggregateName);
 
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
+  // Fullstack mode (`ui:` on a java deployable): the SPA owns the
+  // un-prefixed route space; controllers move under /api (the .NET
+  // embedded-SPA shape).
+  const hasEmbeddedSpa = !!system?.deployable.uiName;
+  const routePrefix = hasEmbeddedSpa ? "/api" : undefined;
 
   // Shared domain types + the package markers that keep the entity files'
   // wildcard imports valid even when a package would otherwise be empty.
@@ -218,7 +225,17 @@ function emitProjectFromContexts(
       place(`${ev.name}.java`, "event", renderJavaEvent(ev, basePkg));
     }
     for (const agg of ctx.aggregates) {
-      emitAggregate(agg, ctx, basePkg, place, pkgFor, emitTrace, system?.sys, authRequired);
+      emitAggregate(
+        agg,
+        ctx,
+        basePkg,
+        place,
+        pkgFor,
+        emitTrace,
+        system?.sys,
+        authRequired,
+        routePrefix,
+      );
     }
     // Workflows + views — per-context controllers under /workflows and
     // /views, services in the shared application packages.
@@ -227,6 +244,7 @@ function emitProjectFromContexts(
       {
         basePkg,
         pkg: pkgFor("workflow-service"),
+        routePrefix,
         entityPkgOf: (a) => pkgFor("entity", a),
         repoPkgOf: (a) => pkgFor("repository-interface", a),
       },
@@ -240,6 +258,7 @@ function emitProjectFromContexts(
     const viewFiles = renderJavaViews(ctx, {
       basePkg,
       pkg: pkgFor("view-service"),
+      routePrefix,
       applicationPkgOf: (a) => pkgFor("service", a),
       entityPkgOf: (a) => pkgFor("entity", a),
       repoPkgOf: (a) => pkgFor("repository-interface", a),
@@ -286,7 +305,7 @@ function emitProjectFromContexts(
   // Auth surface — only when the deployable opts in via auth: required
   // and the system declares a user block.
   if (authRequired && system?.sys) {
-    for (const [name, content] of renderAuthFiles(system.sys, basePkg)) {
+    for (const [name, content] of renderAuthFiles(system.sys, basePkg, routePrefix)) {
       out.set(mainSourcePath(`${basePkg}.auth`, name), content);
     }
   }
@@ -308,8 +327,32 @@ function emitProjectFromContexts(
     mainSourcePath(`${basePkg}.api`, "HealthController.java"),
     renderHealthController(basePkg),
   );
-  out.set("Dockerfile", renderDockerfile());
-  out.set(".dockerignore", renderDockerignore());
+  out.set("Dockerfile", renderDockerfile({ embeddedSpa: hasEmbeddedSpa }));
+  out.set(".dockerignore", renderDockerignore({ embeddedSpa: hasEmbeddedSpa }));
+
+  // Fullstack: the same-origin SPA host (resource handler + index.html
+  // fallback) and the embedded React project under ClientApp/.
+  if (hasEmbeddedSpa && system) {
+    out.set(mainSourcePath(`${basePkg}.config`, "SpaWebConfig.java"), renderSpaWebConfig(basePkg));
+    const spaFiles = generateReactForContexts(contexts, system.sys, system.deployable, {
+      apiBaseUrl: "/api",
+      pathPrefix: "ClientApp/",
+    });
+    for (const [path, content] of spaFiles) {
+      // The React generator also ships project-root files (Dockerfile,
+      // .dockerignore, certs, e2e) — the java project owns those
+      // surfaces in fullstack mode (the multi-stage Dockerfile builds
+      // the SPA), so skip them.
+      if (
+        path === "ClientApp/Dockerfile" ||
+        path === "ClientApp/.dockerignore" ||
+        path === "ClientApp/certs/.gitkeep" ||
+        path.startsWith("ClientApp/e2e/")
+      )
+        continue;
+      out.set(path, content);
+    }
+  }
 }
 
 function emitAggregate(
@@ -326,6 +369,7 @@ function emitAggregate(
   emitTrace: boolean,
   sys?: SystemIR,
   authRequired = false,
+  routePrefix?: string,
 ): void {
   const eventFields = new Map(ctx.events.map((e) => [e.name, e.fields.map((f) => f.name)]));
   // The JPA mapping mirrors `schemaFromModule`: binding-resolved schema +
@@ -509,12 +553,34 @@ function emitAggregate(
   // Exception-less operation returns: the domain union (sealed interface
   // + variant records, entity package) and its Jackson-polymorphic wire
   // twin (response-dto package).
+  const emittedUnionNames = new Set<string>();
   for (const spec of aggregateReturnUnions(agg, ctx).values()) {
+    emittedUnionNames.add(spec.name);
     for (const f of renderJavaDomainUnionFiles(spec, pkgFor("entity", agg.name), basePkg)) {
       place(f.name, "entity", f.content, agg.name);
     }
     for (const f of renderJavaUnionWireFiles(spec, pkgFor("response-dto", agg.name), basePkg)) {
       place(f.name, "response-dto", f.content, agg.name);
+    }
+  }
+  // Union finds (`Order or NotFound` / `Order option`) need only the
+  // wire twin — the repository/service see the optional twin, the
+  // controller builds the tagged record (no domain union exists).
+  for (const f of repo?.finds ?? []) {
+    const spec = findUnionSpec(f.returnType, agg.name, ctx);
+    if (!spec || emittedUnionNames.has(spec.name)) continue;
+    emittedUnionNames.add(spec.name);
+    const wireSpec = {
+      name: spec.name,
+      members: unionMembers(spec.variants, ctx),
+      arms: [],
+    };
+    for (const file of renderJavaUnionWireFiles(
+      wireSpec,
+      pkgFor("response-dto", agg.name),
+      basePkg,
+    )) {
+      place(file.name, "response-dto", file.content, agg.name);
     }
   }
   for (const op of agg.operations.filter((o) => o.extern)) {
@@ -541,6 +607,7 @@ function emitAggregate(
       entityPkg: pkgFor("entity", agg.name),
       boundedContext: ctx,
       idClass,
+      routePrefix,
     }),
     agg.name,
   );

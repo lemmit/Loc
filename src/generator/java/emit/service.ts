@@ -10,7 +10,7 @@ import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
-import { declaredFinds, isPagedFind } from "./repository.js";
+import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
 import { aggHasAnyWireValidator, renderJavaValidators } from "./validator.js";
 import { collectWireToDomainImports, wireToDomain } from "./wire.js";
@@ -86,41 +86,43 @@ export function renderJavaService(
     `    }`,
     ``,
   ];
-  const findLines = declaredFinds(repo).flatMap((f) => {
-    const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", ");
-    const args = f.params.map((p) => p.name).join(", ");
-    for (const p of f.params) collectWireToDomainImports(p.type, imports);
-    if (isPagedFind(f)) {
-      const pagedParams = [params, "int page, int pageSize"].filter(Boolean).join(", ");
-      const pagedArgs = [args, "page, pageSize"].filter(Boolean).join(", ");
+  const findLines = declaredFinds(repo)
+    .map((f) => unionFindAsOptionalTwin(f, agg.name))
+    .flatMap((f) => {
+      const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", ");
+      const args = f.params.map((p) => p.name).join(", ");
+      for (const p of f.params) collectWireToDomainImports(p.type, imports);
+      if (isPagedFind(f)) {
+        const pagedParams = [params, "int page, int pageSize"].filter(Boolean).join(", ");
+        const pagedArgs = [args, "page, pageSize"].filter(Boolean).join(", ");
+        return [
+          `    @Transactional(readOnly = true)`,
+          `    public Paged<${agg.name}Response> ${f.name}(${pagedParams}) {`,
+          `        var result = repository.${f.name}(${pagedArgs});`,
+          `        return new Paged<>(result.items().stream().map(${agg.name}Response::from).toList(),`,
+          `            result.page(), result.pageSize(), result.total(), result.totalPages());`,
+          `    }`,
+          ``,
+        ];
+      }
+      if (f.returnType.kind !== "array") {
+        return [
+          `    @Transactional(readOnly = true)`,
+          `    public ${agg.name}Response ${f.name}(${params}) {`,
+          `        var found = repository.${f.name}(${args});`,
+          `        return found == null ? null : ${agg.name}Response.from(found);`,
+          `    }`,
+          ``,
+        ];
+      }
       return [
         `    @Transactional(readOnly = true)`,
-        `    public Paged<${agg.name}Response> ${f.name}(${pagedParams}) {`,
-        `        var result = repository.${f.name}(${pagedArgs});`,
-        `        return new Paged<>(result.items().stream().map(${agg.name}Response::from).toList(),`,
-        `            result.page(), result.pageSize(), result.total(), result.totalPages());`,
+        `    public List<${agg.name}Response> ${f.name}(${params}) {`,
+        `        return repository.${f.name}(${args}).stream().map(${agg.name}Response::from).toList();`,
         `    }`,
         ``,
       ];
-    }
-    if (f.returnType.kind !== "array") {
-      return [
-        `    @Transactional(readOnly = true)`,
-        `    public ${agg.name}Response ${f.name}(${params}) {`,
-        `        var found = repository.${f.name}(${args});`,
-        `        return found == null ? null : ${agg.name}Response.from(found);`,
-        `    }`,
-        ``,
-      ];
-    }
-    return [
-      `    @Transactional(readOnly = true)`,
-      `    public List<${agg.name}Response> ${f.name}(${params}) {`,
-      `        return repository.${f.name}(${args}).stream().map(${agg.name}Response::from).toList();`,
-      `    }`,
-      ``,
-    ];
-  });
+    });
 
   // --- operations ----------------------------------------------------------------
   const anyOpUsesUser =

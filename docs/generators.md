@@ -704,7 +704,15 @@ Per deployable it emits:
 | Migrations | `MigrationsIR` → Flyway `db/migration/V<ts>.<n>__*.sql` via the shared Postgres-SQL renderer |
 | API | `@RestController` per aggregate (`POST /` 201 `{id}`+Location, `GET /{id}`, `GET /`, `POST /{id}/<op_snake>` 204, `GET /<find_snake>`, `DELETE /{id}`), DTO records in `wireShape` order (money/datetime as strings), wire validators from the shared invariant classifier → 422 RFC 7807 with `errors[]`, `@RestControllerAdvice` (400/403/404/422/500 problem+json), springdoc `/openapi.json` |
 | Auth | `auth: required` + `user {}` → typed `User` record, `UserVerifier` boundary + accept-all dev stub, 401 filter, ThreadLocal accessor; `currentUser` threads into ops as a trailing parameter |
-| Workflows / views | `POST /workflows/<snake>` via a per-context `@Service`; `GET /views/<snake>` (shorthand reuses `<Agg>Response`; full form gets a `<View>Row` from bind expressions) |
+| Workflows / views | `POST /workflows/<snake>` via a per-context `@Service` (loops over `Repo.run(...)` retrievals incl. the call-site `page:` tuple, workflow-level `emit` logging the `domain_event` envelope); `GET /views/<snake>` (shorthand reuses `<Agg>Response`; full form gets a `<View>Row` from bind expressions) |
+| Retrievals / criteria | reified criteria → `<Agg>Criteria` `Specification<T>` factories (java consumes `CriterionIR` directly — the first backend to); `run<Name>` port methods: an exact-criterion-ref retrieval rides `JpaSpecificationExecutor.findAll(spec, Sort)`, composed `where`s fall back to `@Query` JPQL with `order by`; paged runs via the `OffsetLimitPageRequest` Pageable |
+| Paged finds | `find x(): T paged` → `Paged<T>` envelope over Spring Data `Pageable` (1-based, `page=1&pageSize=20` defaults) |
+| Exception-less returns | `operation f(): X or NotFound` → sealed domain union + variant records, Jackson-polymorphic `<U>Response` wire DTO (`type` tag), controller switch: error variants → RFC-7807 `ProblemDetail` at their mapped status, success → 200 |
+| Inheritance | TPC via `@MappedSuperclass`; TPH (`sharedTable`) via JPA `SINGLE_TABLE` — the base owns the shared table + `@DiscriminatorColumn("kind")`, concretes carry `@DiscriminatorValue` and share the base `<Base>Id` |
+| Single containments | hidden owning `_parent` `@OneToOne` on the part (JPA has no unidirectional one-to-one with the FK on the part table) + inverse `mappedBy` with cascade/orphanRemoval on the root |
+| Seeding | `seed` blocks → `<Ctx>SeedRunner` `ApplicationRunner`: domain rows through `create(...)` + the port save, raw rows as schema-qualified INSERTs, ship-once `__loom_seed` marker (`default` always, others via `LOOM_SEED`) |
+| Capability filters | non-principal relational `filter` predicates → Hibernate `@SQLRestriction` (static SQL on every SELECT) |
+| Fullstack (`ui:`) | controllers move under `/api`, `SpaWebConfig` serves the SPA bundle (`UI_DIR`, index.html fallback), React project under `ClientApp/`, node stage in the Dockerfile; the auth filter guards `/api/*` only |
 | Extern ops | per-op handler interface + throwing dev-stub `@Component`; service runs `check<Op>` → handler → invariants → save |
 | Tests | `test "…"` → JUnit 5 classes under `src/test/java` |
 | Observability | always-on catalog envelope as flat JSON on stdout (`server_starting` … `server_drained`, request bracket) |
@@ -716,15 +724,16 @@ comparisons, `Objects.equals` reference equality, `Instant` ordering via
 collection ops with type-directed `sum` reduction.
 
 **Not yet implemented — every gap fails fast at validate time** (never a
-silent downgrade): paged carriers / discriminated unions / exception-less
-operation returns (java is absent from the `SUPPORTED_*` backend sets),
-TPH `sharedTable` inheritance, `persistedAs(eventLog)`, `shape(document|
-embedded)` (`PLATFORM_SAVING_SHAPES.java` is relational-only), single
-(non-collection) containments (`loom.java-single-containment-unsupported`),
-the embedded-SPA fullstack mount (`loom.java-fullstack-unsupported`),
-retrieval-driven workflow loops, reified-criteria `Specification<T>`
-consumption, and provenance/audited (gated like .NET).  See
-`docs/plans/java-backend-implementation.md` for the follow-up plan.
+silent downgrade): discriminated unions in find / payload positions
+(java is absent from `SUPPORTED_UNION_BACKENDS`), `persistedAs(eventLog)`,
+`shape(document|embedded)` (`PLATFORM_SAVING_SHAPES.java` is
+relational-only), part-declared (nested) single containments
+(`loom.java-single-containment-unsupported`), `hosts:` UI hosting
+(`loom.java-fullstack-unsupported` — the `ui:` embedded-SPA mount is
+implemented), resource-op clients, principal-referencing / non-relational
+capability filters (`loom.context-filter-unsupported`), and
+provenance/audited (gated like .NET).  See
+`docs/plans/java-backend-implementation.md` for the execution record.
 
 ---
 

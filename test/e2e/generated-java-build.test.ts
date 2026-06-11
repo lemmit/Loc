@@ -56,6 +56,12 @@ const FIXTURES: Array<[string, string]> = [
   // TPH (sharedTable) inheritance: JPA SINGLE_TABLE + @DiscriminatorColumn
   // on the abstract base, @DiscriminatorValue per concrete, shared <Base>Id.
   ["test/e2e/fixtures/java-build/tph.ddd", "tph_api"],
+  // Embedded-SPA fullstack mount: /api route prefix, SpaWebConfig
+  // (resource handler + index.html fallback), ClientApp/ React project.
+  ["test/e2e/fixtures/java-build/fullstack.ddd", "fs_app"],
+  // Union finds (`Order or NotFound` / `Order option`): optional-twin
+  // repo/service, tagged 200 wire record, problem/bare-404 absence.
+  ["test/e2e/fixtures/java-build/union-finds.ddd", "uf_api"],
 ];
 
 describe.skipIf(!ENABLED)(

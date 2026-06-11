@@ -373,19 +373,20 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 // unidirectional @OneToMany.
 // ---------------------------------------------------------------------------
 // Java gate: the fullstack `ui:` mount (embedded React SPA from Spring
-// static resources, the dotnet wwwroot analog) is not yet implemented —
-// fail fast rather than silently serving no UI.
+// static resources, the dotnet wwwroot analog).  `hosts:` (hosting a
+// separately-declared react deployable's bundle) is still gated — only
+// the `ui:` embedded-SPA mount is implemented, mirroring dotnet.
 export function validateJavaFullstackSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const dep of sys.deployables) {
     if (platformFamily(dep.platform) !== "java") continue;
-    if (!dep.uiName && (dep.hostedUiNames ?? []).length === 0) continue;
+    if ((dep.hostedUiNames ?? []).length === 0) continue;
     diags.push({
       severity: "error",
       message:
-        `Deployable '${dep.name}' (platform java) declares a 'ui:'/'hosts:' binding, but the ` +
-        `embedded-SPA fullstack mount is not yet implemented on the java backend. ` +
-        `Serve the UI from a separate 'platform: react' deployable targeting '${dep.name}', ` +
-        `or host it on a dotnet / elixir deployable.`,
+        `Deployable '${dep.name}' (platform java) declares a 'hosts:' binding, but hosting a ` +
+        `separate react deployable's bundle is not yet implemented on the java backend. ` +
+        `Use the embedded-SPA mount ('ui:' on this deployable), serve the UI from a separate ` +
+        `'platform: react' deployable targeting '${dep.name}', or host it on a dotnet deployable.`,
       source: `${sys.name}/${dep.name}`,
       code: "loom.java-fullstack-unsupported",
     });

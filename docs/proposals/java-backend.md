@@ -1,20 +1,29 @@
 # Java backend — Spring Boot / JPA generator
 
-> Status: **SHIPPING (core landed).** The backend exists in-tree
-> (`platform: java`, `java@v1` — `src/platform/java.ts` +
-> `src/generator/java/`); the execution record and the remaining
-> follow-ups (paged/unions, TPH, event sourcing, document shapes,
-> `Specification<T>`, fullstack mount, conformance-stack integration)
-> live in
+> Status: **SHIPPED** (#1110 core; #1113 / #1119 / #1127 follow-ups).
+> The backend exists in-tree (`platform: java`, `java@v1` —
+> `src/platform/java.ts` + `src/generator/java/`); the execution record
+> lives in
 > [`../plans/java-backend-implementation.md`](../plans/java-backend-implementation.md).
-> The criterion-everywhere prerequisite this proposal originally
-> deferred behind has since shipped (selectability oracle + reified
-> criteria), so the `Specification<T>` path is unblocked.  The original
-> design rationale below is retained for context; where it disagrees
-> with the shipped code, the code (and `docs/generators.md`'s Java
-> section) wins — notably the build is **Gradle (Kotlin DSL)** as the proposal
-> envisioned (an interim Maven shell was revised out), and the default
-> application style is **layered**.
+> The headline differentiator landed: java is the first backend
+> consuming `CriterionIR` directly (`<Agg>Criteria` `Specification<T>`
+> factories + `JpaSpecificationExecutor` retrievals) — the
+> criterion-everywhere prerequisite this proposal originally deferred
+> behind shipped first (selectability oracle + reified criteria).
+> Also shipped: paged finds + paged `Repo.run`, workflows (loops +
+> workflow-level `emit`), exception-less returns, TPH (JPA
+> SINGLE_TABLE), single containments, seeding, capability filters
+> (`@SQLRestriction`), the embedded-SPA fullstack mount, the `ddd new`
+> starter, JUnit emission, the observability envelope, and the
+> `java-build.yml` / `java-obs-e2e.yml` CI gates.  Remaining gated
+> tails (unions in find/payload positions, `persistedAs(eventLog)`,
+> `shape(document|embedded)`, resource-op clients, `hosts:` UI
+> hosting, compose-stack conformance) are tracked in the plan doc.
+> The original design rationale below is retained for context; where it
+> disagrees with the shipped code, the code (and `docs/generators.md`'s
+> Java section) wins — notably the build is **Gradle (Kotlin DSL)** as
+> the proposal envisioned (an interim Maven shell was revised out), and
+> the default application style is **layered**.
 
 ## TL;DR
 

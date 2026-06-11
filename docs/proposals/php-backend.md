@@ -6,7 +6,7 @@
 > purely additive codegen on the `PlatformSurface` contract. Builds on
 > [`docs/platforms.md`](../platforms.md) and
 > [`docs/generators.md`](../generators.md). Sibling of
-> [`java-backend.md`](./java-backend.md) and
+> [`java-backend.md`](./java-backend.md) (since **shipped**) and
 > [`go-backend.md`](./go-backend.md) — the three new-backend studies; PHP
 > is the **DDD-idiom** member of that set, where Go is the
 > **microservice-ubiquity** member.

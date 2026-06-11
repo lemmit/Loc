@@ -41,15 +41,21 @@
 >   DTOs + controller ProblemDetail translation — java joined
 >   `SUPPORTED_RETURN_BACKENDS`); capability filters → `@SQLRestriction`
 >   (non-principal relational subset; java joined the limited-families
->   gate).  Fixtures under `test/e2e/fixtures/java-build/` pin each in
->   the `LOOM_JAVA_BUILD` matrix.
+>   gate); TPH `sharedTable` inheritance (JPA SINGLE_TABLE +
+>   @DiscriminatorColumn/@DiscriminatorValue, shared `<Base>Id` threaded
+>   through repos / services / controllers — java joined `TPH_CAPABLE`);
+>   the embedded-SPA fullstack mount (`ui:` → /api route prefix,
+>   SpaWebConfig with the index.html fallback, ClientApp/ React project,
+>   node Dockerfile stage — the `hosts:` form stays gated).  Fixtures
+>   under `test/e2e/fixtures/java-build/` pin each in the
+>   `LOOM_JAVA_BUILD` matrix.
 > - **Deferred features — all fail-fast gated, never silent:**
 >   discriminated unions in finds / payload positions
->   (`SUPPORTED_UNION_BACKENDS`), TPH `sharedTable`,
->   `persistedAs(eventLog)`, `shape(document|embedded)`,
->   part-declared single containments
->   (`loom.java-single-containment-unsupported`), the embedded-SPA
->   fullstack mount (`loom.java-fullstack-unsupported`), resource-op
+>   (`SUPPORTED_UNION_BACKENDS`), `persistedAs(eventLog)`,
+>   `shape(document|embedded)` (needs a Jackson strategy for the
+>   package-private-field entity shape), part-declared single
+>   containments (`loom.java-single-containment-unsupported`),
+>   `hosts:` UI hosting (`loom.java-fullstack-unsupported`), resource-op
 >   clients, principal-referencing filters / non-relational filter
 >   shapes (`loom.context-filter-unsupported`), provenance + per-op
 >   audited (gated like .NET).  Lifecycle stamps (`contextStamps`) are
