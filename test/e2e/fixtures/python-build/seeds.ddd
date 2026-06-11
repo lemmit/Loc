@@ -1,0 +1,65 @@
+// First-boot seeding for the Python backend (database-seeding.md):
+// the default dataset runs unconditionally through the domain `create`
+// (invariants run; bad seed fails at boot), the named dataset gates on
+// LOOM_SEED, the `raw` dataset emits direct INSERTs with explicit ids.
+// Everything is ship-once via the __loom_seed marker table.
+system SeedSys {
+  subdomain Catalog {
+    context Catalog {
+      enum Tier { Free, Pro }
+
+      valueobject Price {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+      }
+
+      aggregate Product {
+        sku: string
+        tier: Tier
+        price: Price
+        stock: int
+        invariant sku.length > 0
+      }
+      repository Products for Product { }
+
+      seed {
+        Product { sku: "BASE-1", tier: Free, price: Price { amount: 1.0, currency: "USD" }, stock: 1 }
+      }
+
+      seed demo {
+        Product { sku: "DEMO-1", tier: Pro, price: Price { amount: 9.99, currency: "USD" }, stock: 10 }
+        Product { sku: "DEMO-2", tier: Pro, price: Price { amount: 19.99, currency: "EUR" }, stock: 5 }
+      }
+
+      aggregate Supplier { name: string }
+      repository Suppliers for Supplier { }
+
+      aggregate Listing {
+        supplierId: Supplier id
+        sku: string
+      }
+      repository Listings for Listing { }
+
+      // Raw path (D-SEED-XREF): explicit ids + literal FK columns,
+      // bypassing the domain create.
+      seed reference raw {
+        Supplier { id: "11111111-1111-1111-1111-111111111111", name: "Acme" }
+        Listing { id: "22222222-2222-2222-2222-222222222222", supplierId: "11111111-1111-1111-1111-111111111111", sku: "RAW-1" }
+      }
+    }
+  }
+
+  api CatalogApi from Catalog
+
+  storage pg { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: pg }
+
+  deployable api {
+    platform: python
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    port: 8000
+  }
+}

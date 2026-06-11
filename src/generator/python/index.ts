@@ -24,6 +24,7 @@ import { renderPyWireModels } from "./emit/http-models.js";
 import { renderPyIds } from "./emit/ids.js";
 import { emitPythonMigrations, MIGRATE_PY } from "./emit/migrations.js";
 import { renderPySchema } from "./emit/schema.js";
+import { buildPySeedFile } from "./emit/seed.js";
 import { renderPyTestsFile } from "./emit/tests.js";
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { PYTHON_PINS } from "./pins.js";
@@ -83,14 +84,28 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   );
   const hasViews = merged.views.some((v) => v.source.kind === "aggregate");
   const hasWorkflows = commandWorkflowsOf(merged).length > 0;
+  const resolveDs = (agg: import("../../ir/types/loom-ir.js").AggregateIR) => {
+    const owning = args.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
+    return owning
+      ? resolveDataSourceConfig(agg as EnrichedAggregateIR, owning, args.sys)
+      : undefined;
+  };
   // Auth scaffolding (docs/auth.md): only an `auth: required` deployable
   // (whose system declares a `user { ... }` block) carries the verifier
   // registry + middleware — anonymous deployables stay byte-identical.
   const authRequired = !!(args.deployable.auth?.required && args.sys.user);
   if (authRequired && args.sys.user) emitPyAuthFiles(args.sys.user, out);
+  // First-boot seeding (database-seeding.md): emitted only when a
+  // dataset survives filtering (rows on concrete aggregates); the
+  // lifespan runs seeds right after migrations (Hono/.NET boot order).
+  const seedFile = buildPySeedFile(merged, (aggName) => {
+    const agg = merged.aggregates.find((a) => a.name === aggName);
+    return agg ? resolveDs(agg)?.schema : undefined;
+  });
+  const hasSeeds = seedFile != null;
   out.set(
     "app/main.py",
-    renderMain(args.sys.name, routedAggs, hasViews, hasWorkflows, authRequired),
+    renderMain(args.sys.name, routedAggs, hasViews, hasWorkflows, authRequired, hasSeeds),
   );
 
   out.set("app/domain/__init__.py", "");
@@ -99,12 +114,6 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/domain/value_objects.py", renderPyEnumsAndValueObjects(merged));
   out.set("app/domain/events.py", renderPyEvents(merged));
 
-  const resolveDs = (agg: import("../../ir/types/loom-ir.js").AggregateIR) => {
-    const owning = args.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
-    return owning
-      ? resolveDataSourceConfig(agg as EnrichedAggregateIR, owning, args.sys)
-      : undefined;
-  };
   out.set("app/db/schema.py", renderPySchema(merged, resolveDs));
   out.set("app/db/wire.py", WIRE_PY);
   out.set("app/db/migrate.py", MIGRATE_PY);
@@ -117,6 +126,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // COPY valid on systems whose snapshot is already up to date.
   out.set("migrations/.gitkeep", "");
   emitPythonMigrations(args.migrations ?? [], out);
+  if (seedFile != null) out.set("app/db/seed.py", seedFile);
 
   // In-process event dispatch (channels.md): only when a channel routes
   // a subscribed event does `app/dispatch.py` exist — and then every
@@ -301,6 +311,7 @@ function renderMain(
   hasViews = false,
   hasWorkflows = false,
   authRequired = false,
+  hasSeeds = false,
 ): string {
   return lines(
     `"""FastAPI application entrypoint.`,
@@ -319,6 +330,7 @@ function renderMain(
     authRequired ? "from app.auth.verifier import assert_user_verifier_registered" : null,
     "from app.db.engine import engine",
     "from app.db.migrate import run_migrations",
+    hasSeeds ? "from app.db.seed import run_seeds" : null,
     ...routerAggs.map(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
@@ -334,6 +346,7 @@ function renderMain(
     // instead of a 401 storm on the first request.
     authRequired ? "    assert_user_verifier_registered()" : null,
     "    await run_migrations()",
+    hasSeeds ? "    await run_seeds()" : null,
     "    yield",
     "",
     "",

@@ -142,7 +142,8 @@ diff-sync semantics under SQLAlchemy.
 | S15a command workflows | ✅ | POST /workflows/<wf>, one-transaction-per-request (repos flush, session dependency commits); verified live |
 | S15b sagas/dispatcher | ✅ | `app/dispatch.py` InProcessDispatcher (create = load-or-allocate, on = route-or-drop + `event_unrouted`), saga-state SQLAlchemy models + migrations, routes/views/workflows repos take `make_dispatcher(session)`; choreography chain verified live (place → saga row + Tracked shipment in one tx); durable-channel outbox tier stays a follow-up |
 | S16a auth gate | ✅ | User dataclass + verifier registry + middleware (bypass list parity), trailing `current_user` threading (ops/finds/workflows + gated op-calls), 403 declared on guarded routes, synthetic test actor; verified live (401/403/204 + row-level `mine` scoping) |
-| S16b seeds, S16c extern/resources | next | |
+| S16b seeds | ✅ | app/db/seed.py — domain-create path (invariants run) + schema-qualified raw INSERTs, __loom_seed ship-once marker, LOOM_SEED gating, lifespan runs seeds after migrations + `python -m app.db.seed`; verified live (3 datasets once, re-boot no-op) |
+| S16c extern/resources | next | |
 | S17 observability | next | |
 | **S10 conformance** | **moved after S17** | showcase.ddd (the parity fixture) declares `auth: required` and exercises every feature — joining it requires S11–S17 first.  Matches the roadmap's Phase E exit criterion ("showcase passes the multi-backend suite") being terminal. |
 | S18, S19 | after S10 | |

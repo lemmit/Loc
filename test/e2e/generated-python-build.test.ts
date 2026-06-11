@@ -42,6 +42,8 @@ const CASES: Array<[fixture: string, project: string]> = [
   // `auth: required` — User dataclass + verifier registry + middleware,
   // requires-guarded op/workflow, currentUser-scoped find.
   ["test/e2e/fixtures/python-build/auth.ddd", "api"],
+  // `seed { ... }` — domain-create + raw datasets, __loom_seed marker.
+  ["test/e2e/fixtures/python-build/seeds.ddd", "api"],
 ];
 
 describe.skipIf(!ENABLED)(
