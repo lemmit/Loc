@@ -585,6 +585,7 @@ function emitAggregate(
       entityPkg: pkgFor("entity", agg.name),
       boundedContext: ctx,
       idClass,
+      routePrefix,
     }),
     agg.name,
   );
