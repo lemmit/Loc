@@ -62,6 +62,7 @@ function typeName(t: TypeIR): string {
       return `${typeName(t.element)}[]`;
     case "optional":
       return `${typeName(t.inner)}?`;
+    case "action":
     case "slot":
       return "slot";
     case "genericInstance":
@@ -99,6 +100,7 @@ function refsOfKind(t: TypeIR, kind: "id" | "valueobject" | "enum", out: Set<str
       return;
     case "primitive":
     case "entity":
+    case "action":
     case "slot":
       return;
   }

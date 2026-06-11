@@ -120,7 +120,14 @@ export type TypeIR =
    *  the caller's scope into the component body; a bare ref to a
    *  slot-typed param renders the caller's expression at that
    *  position.  See `docs/page-metamodel.md`. */
-  | { kind: "slot"; sensitivity?: SensitivityTags };
+  | { kind: "slot"; sensitivity?: SensitivityTags }
+  /** Function-valued param marker — `slot`'s behavioural sibling
+   *  (extern-component-escape-hatch.md, Tier 2).  Only valid on a
+   *  `component`'s parameter list; the caller passes a (block-body)
+   *  lambda walked + hoisted in the caller's scope, and the React
+   *  props type gains `(arg: TWire) => void`.  `arg` is the declared
+   *  callback argument type; undefined for a bare zero-arg `action`. */
+  | { kind: "action"; arg?: TypeIR; sensitivity?: SensitivityTags };
 
 /** The blessed closed set of generic-payload **record** carriers — the ones
  *  that monomorphize to a `PayloadIR` record.  Kept in lockstep with the
@@ -1632,6 +1639,21 @@ export interface UiIR {
   /** Live-event handlers (`on Orders.OrderShipped(e) { toast(…) }`).
    *  Omitted when the ui declares none. */
   notifications?: UiNotificationIR[];
+  /** Extern frontend functions (`function f(…): T extern from "…"`) —
+   *  the logic escape hatch (extern-function-hook-escape-hatch.md §3).
+   *  Omitted when the ui declares none. */
+  functions?: UiFunctionIR[];
+}
+
+/** `function <name>(params): T extern from "<path>"` — a typed pure
+ *  function implemented by a hand-written module.  The React generator
+ *  emits a typed signature + a conformance shim (`tsc` is the
+ *  fail-fast); page bodies call it through the shim. */
+export interface UiFunctionIR {
+  name: string;
+  params: ParamIR[];
+  returnType: TypeIR;
+  externPath: string;
 }
 
 /** `channel <name>: <Ctx>.<Channel>` — a UI's subscription to a

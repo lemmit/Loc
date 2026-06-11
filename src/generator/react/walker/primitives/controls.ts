@@ -3,7 +3,7 @@
 // detection (via emitExpr), navigation, lambda handlers, and aggregate
 // lookups, so they pull the core walk/expr/stmt helpers.
 
-import type { ExprIR } from "../../../../ir/types/loom-ir.js";
+import type { ExprIR, TypeIR } from "../../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../../util/naming.js";
 import type { WalkContext } from "../../body-walker.js";
 import {
@@ -379,7 +379,7 @@ export function emitUserComponent(
     const namedTarget = argNames[i];
     if (namedTarget !== undefined) {
       const param = params.find((p) => p.name === namedTarget);
-      attrs.push(`${namedTarget}=${attrValue(arg, ctx, depth, param?.type.kind === "slot")}`);
+      attrs.push(`${namedTarget}=${attrValue(arg, ctx, depth, param?.type)}`);
       continue;
     }
     // Advance the cursor past any params that were already filled
@@ -390,7 +390,7 @@ export function emitUserComponent(
     const param = params[nextParamCursor];
     if (param) {
       nextParamCursor += 1;
-      attrs.push(`${param.name}=${attrValue(arg, ctx, depth, param.type.kind === "slot")}`);
+      attrs.push(`${param.name}=${attrValue(arg, ctx, depth, param.type)}`);
     } else {
       // No more declared params — extra positional arg becomes a
       // JSX child.
@@ -410,9 +410,20 @@ export function emitUserComponent(
 /** Render an ExprIR as a JSX attribute value.
  *  String literals → `"text"` (quoted attr); for a slot-typed param,
  *  the arg is walked as JSX in the caller's scope and brace-wrapped
- *  so the JSX element flows in as a `ReactNode` prop value; everything
- *  else → `{<emitExpr>}` (brace-wrapped JS expression). */
-function attrValue(expr: ExprIR, ctx: WalkContext, depth: number, isSlot: boolean): string {
+ *  so the JSX element flows in as a `ReactNode` prop value; for an
+ *  action-typed param the arg is a lambda emitted as a typed arrow in
+ *  the caller's scope (Tier 2); everything else → `{<emitExpr>}`
+ *  (brace-wrapped JS expression). */
+function attrValue(expr: ExprIR, ctx: WalkContext, depth: number, paramType?: TypeIR): string {
+  const isSlot =
+    paramType?.kind === "slot" ||
+    (paramType?.kind === "optional" && paramType.inner.kind === "slot");
+  const action =
+    paramType?.kind === "action"
+      ? paramType
+      : paramType?.kind === "optional" && paramType.inner.kind === "action"
+        ? paramType.inner
+        : undefined;
   if (!isSlot && expr.kind === "literal" && expr.lit === "string") {
     return JSON.stringify(expr.value);
   }
@@ -425,5 +436,44 @@ function attrValue(expr: ExprIR, ctx: WalkContext, depth: number, isSlot: boolea
     const jsx = walk(expr, ctx, depth + 1);
     return `{${jsx}}`;
   }
+  if (action && expr.kind === "lambda") {
+    return `{${emitActionLambda(expr, action, ctx)}}`;
+  }
   return `{${emitExpr(expr, ctx)}}`;
+}
+
+/** Render a lambda passed to an `action`-typed component param as a TS
+ *  arrow function (extern-component-escape-hatch.md, Tier 2).  Unlike
+ *  `emitLambdaBody` (event handlers, param dropped), the lambda's param
+ *  stays bound — the component calls the prop with the declared arg —
+ *  and the body statements walk in the *caller's* scope, exactly as
+ *  `onSubmit` does: state writes hit the caller's `state {}` setters,
+ *  `navigate(…)` / `toast(…)` resolve against the caller's imports.
+ *  When the declared arg is an aggregate, the param is typed through
+ *  `paramTypes` so `Action(p.<op>)`-style resolution sees it. */
+function emitActionLambda(
+  lam: ExprIR & { kind: "lambda" },
+  action: TypeIR & { kind: "action" },
+  ctx: WalkContext,
+): string {
+  const argName = lam.param;
+  const childCtx: WalkContext = {
+    ...ctx,
+    lambdaParams: extendLambdaParams(ctx, argName, argName),
+    paramTypes:
+      action.arg?.kind === "entity"
+        ? new Map([...(ctx.paramTypes ?? []), [argName, action.arg.name]])
+        : ctx.paramTypes,
+  };
+  const head = action.arg ? `(${argName})` : "()";
+  let body: string;
+  if (lam.block && lam.block.length > 0) {
+    body = `{ ${lam.block.map((s) => emitStmt(s, childCtx)).join(" ")} }`;
+  } else if (lam.body) {
+    body = emitExpr(lam.body, childCtx);
+  } else {
+    body = "{}";
+  }
+  propagateChildFlags(ctx, childCtx);
+  return `${head} => ${body}`;
 }

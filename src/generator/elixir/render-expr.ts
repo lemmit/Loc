@@ -560,6 +560,7 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
       return `{:array, ${renderAshType(t.element, contextModule)}}`;
     case "optional":
       return renderAshType(t.inner, contextModule);
+    case "action":
     case "slot":
       throw new Error("renderAshType: 'slot' type is UI-only and should not reach the backend.");
     case "genericInstance":
@@ -638,6 +639,7 @@ export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: s
       return `[${renderTypespec(t.element, contextModule, typesModule)}]`;
     case "optional":
       return `${renderTypespec(t.inner, contextModule, typesModule)} | nil`;
+    case "action":
     case "slot":
       throw new Error("renderTypespec: 'slot' type is UI-only and should not reach the backend.");
     case "genericInstance":

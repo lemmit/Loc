@@ -83,6 +83,9 @@ export type ImportMap = Map<string, Set<string>>;
 
 export interface WalkResult {
   tsx: string;
+  /** Extern functions called from the body — the shell emits one
+   *  conformance-shim import line per name. */
+  usedExternFunctions?: Set<string>;
   imports: ImportMap;
   /** Names of route params the walker actually used
    *  while emitting (e.g. `Heading(name)` referenced `name`).  The
@@ -305,6 +308,8 @@ export function walkBodyToTsx(
   paramTypes: ReadonlyMap<string, string> = new Map(),
   /** Page name → route path, for `Action`'s `then: navigate(<Page>)`. */
   pageRoutes: ReadonlyMap<string, string> = new Map(),
+  /** Extern frontend function names declared on this ui. */
+  externFunctions: ReadonlySet<string> = new Set(),
 ): WalkResult {
   const apiParamNames = new Map<string, string>();
   for (const p of apiParams) apiParamNames.set(p.name, p.apiName);
@@ -334,6 +339,8 @@ export function walkBodyToTsx(
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
+    externFunctions,
+    usedExternFunctions: new Set(),
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -350,6 +357,7 @@ export function walkBodyToTsx(
     actionMutations: ctx.actionMutations,
     collectedTestids: ctx.collectedTestids,
     usesCodeBlock: ctx.usesCodeBlock,
+    usedExternFunctions: ctx.usedExternFunctions ?? new Set(),
   };
 }
 
@@ -411,6 +419,11 @@ export interface WalkEnv {
   workflowsByName: ReadonlyMap<string, WorkflowIR>;
   /** Owning bounded context per workflow. */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR>;
+  /** Extern frontend functions declared on this ui
+   *  (`function f(…): T extern from "…"`) — names a body call can
+   *  reference; the shell imports each used one from its
+   *  `src/lib/<name>` conformance shim. */
+  externFunctions?: ReadonlySet<string>;
 }
 
 /** Mutable accumulators written during the walk; read by the page
@@ -437,6 +450,9 @@ export interface Sink {
   /** Accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
   collectedTestids: Set<string>;
+  /** Extern functions actually called from this body — one shim
+   *  import line each (`import { f } from "<hops>lib/f";`). */
+  usedExternFunctions?: Set<string>;
   /** True when a `CodeBlock { … }` primitive emitted from this body.
    *  Read by the React orchestrator (aggregated across all pages)
    *  to drive conditional injection of the highlight.js CDN payload
@@ -870,11 +886,14 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
     case "unary":
       return `(${expr.op}${emitExpr(expr.operand, ctx)})`;
     case "call": {
-      // Bare function call as a JS expression.  The
+      // Bare function call as a JS expression.  An extern frontend
+      // function (`function f(…): T extern from "…"`) registers its
+      // use so the shell imports the conformance shim; any other
       // callee is emitted verbatim — the generated code expects the
       // user to import / declare `<name>` somewhere in their app
       // shell.  Powers patterns like `let n = inc(count)` and the
       // statement form `Button("…", onClick: e => { saveOrder() })`.
+      if (ctx.externFunctions?.has(expr.name)) ctx.usedExternFunctions?.add(expr.name);
       const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
       return `${expr.name}(${args})`;
     }
@@ -996,6 +1015,7 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       // plain `name(args);` line; the generated code expects the
       // user to import / declare `<name>` somewhere in their app
       // shell.
+      if (ctx.externFunctions?.has(stmt.name)) ctx.usedExternFunctions?.add(stmt.name);
       const args = stmt.args.map((a) => emitExpr(a, ctx)).join(", ");
       return `${stmt.name}(${args});`;
     }
@@ -1236,7 +1256,13 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
   // A bare `call` in text position is a stdlib-primitive / user-
   // component invocation — fall through to undefined so the caller
   // `walk`s it as a child component rather than emitting a JS call.
+  // EXCEPT a call to an extern frontend function (`function f(…): T
+  // extern from "…"`): that is a value-producing JS call — emit it as
+  // a JSX expression (`{initials(name)}`) and register the shim import.
   if (expr.kind === "call") {
+    if (ctx.externFunctions?.has(expr.name)) {
+      return `{${emitExpr(expr, ctx)}}`;
+    }
     return undefined;
   }
   return `{${emitExpr(expr, ctx)}}`;

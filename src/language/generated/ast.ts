@@ -51,6 +51,7 @@ export type DddKeywordNames =
     | "[]"
     | "]"
     | "abstract"
+    | "action"
     | "against"
     | "aggregate"
     | "aggregates"
@@ -300,7 +301,7 @@ export function isAuthMode(item: unknown): item is AuthMode {
     return item === 'required';
 }
 
-export type BaseType = IdType | NamedType | PrimitiveType | SlotType;
+export type BaseType = ActionType | IdType | NamedType | PrimitiveType | SlotType;
 
 export const BaseType = 'BaseType';
 
@@ -444,16 +445,16 @@ export function isLiteralExpr(item: unknown): item is LiteralExpr {
     return reflection.isInstance(item, LiteralExpr);
 }
 
-export type LooseName = 'aggregates' | 'api' | 'application' | 'asc' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'desc' | 'description' | 'design' | 'directoryLayout' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'foundation' | 'framework' | 'handle' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'payload' | 'permissions' | 'persistence' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'runtime' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'transactional' | 'transport' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
+export type LooseName = 'action' | 'aggregates' | 'api' | 'application' | 'asc' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'desc' | 'description' | 'design' | 'directoryLayout' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'foundation' | 'framework' | 'handle' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'payload' | 'permissions' | 'persistence' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'runtime' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'transactional' | 'transport' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'by' || item === 'handle' || item === 'cache' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'foundation' || item === 'application' || item === 'persistence' || item === 'directoryLayout' || item === 'transport' || item === 'runtime' || item === 'transactional' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'by' || item === 'handle' || item === 'cache' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'foundation' || item === 'application' || item === 'persistence' || item === 'directoryLayout' || item === 'transport' || item === 'runtime' || item === 'transactional' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type LValueIdent = 'aggregates' | 'api' | 'by' | 'command' | 'contains' | 'contexts' | 'create' | 'destroy' | 'envelope' | 'error' | 'handle' | 'id' | 'modules' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'ui' | 'views' | 'workflows' | string;
+export type LValueIdent = 'action' | 'aggregates' | 'api' | 'by' | 'command' | 'contains' | 'contexts' | 'create' | 'destroy' | 'envelope' | 'error' | 'handle' | 'id' | 'modules' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'ui' | 'views' | 'workflows' | string;
 
 export function isLValueIdent(item: unknown): item is LValueIdent {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'create' || item === 'destroy' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'by' || item === 'handle' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'create' || item === 'destroy' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'by' || item === 'handle' || item === 'action' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type MacroArgValue = MacroArgBool | MacroArgInt | MacroArgRef | MacroArgRefList | MacroArgString;
@@ -464,10 +465,10 @@ export function isMacroArgValue(item: unknown): item is MacroArgValue {
     return reflection.isInstance(item, MacroArgValue);
 }
 
-export type MemberName = 'aggregates' | 'api' | 'by' | 'command' | 'contains' | 'contexts' | 'create' | 'destroy' | 'envelope' | 'error' | 'filter' | 'handle' | 'id' | 'implements' | 'modules' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'stamp' | 'ui' | 'views' | 'where' | 'workflows' | string;
+export type MemberName = 'action' | 'aggregates' | 'api' | 'by' | 'command' | 'contains' | 'contexts' | 'create' | 'destroy' | 'envelope' | 'error' | 'filter' | 'handle' | 'id' | 'implements' | 'modules' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'stamp' | 'ui' | 'views' | 'where' | 'workflows' | string;
 
 export function isMemberName(item: unknown): item is MemberName {
-    return item === 'by' || item === 'handle' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'create' || item === 'destroy' || item === 'where' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'by' || item === 'handle' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'create' || item === 'destroy' || item === 'where' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'action' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type ModelMember = Api | BoundedContext | ChannelSource | Component | Deployable | EnumDecl | Layout | PayloadDecl | Requirement | Resource | Solution | Storage | Subdomain | System | TestCase | TestE2E | ThemeBlock | Ui | UserBlock | ValueObject;
@@ -486,10 +487,10 @@ export function isNamedDecl(item: unknown): item is NamedDecl {
     return reflection.isInstance(item, NamedDecl);
 }
 
-export type NameRefIdent = 'aggregates' | 'api' | 'asc' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'create' | 'dataSources' | 'desc' | 'description' | 'design' | 'destroy' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'framework' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'payload' | 'permissions' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
+export type NameRefIdent = 'action' | 'aggregates' | 'api' | 'asc' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'create' | 'dataSources' | 'desc' | 'description' | 'design' | 'destroy' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'framework' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'payload' | 'permissions' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
 
 export function isNameRefIdent(item: unknown): item is NameRefIdent {
-    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'create' || item === 'destroy' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'by' || item === 'handle' || item === 'cache' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'create' || item === 'destroy' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'by' || item === 'handle' || item === 'cache' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type PageProp = BodyProp | CanonicalProp | DescriptionProp | LayoutProp | OgImageProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
@@ -606,7 +607,7 @@ export function isTruthKind(item: unknown): item is TruthKind {
     return item === 'eventLog' || item === 'state';
 }
 
-export type UiMember = Component | MenuBlock | Page | UiApiParam | UiChannelParam | UiNotification;
+export type UiMember = Component | MenuBlock | Page | UiApiParam | UiChannelParam | UiFunction | UiNotification;
 
 export const UiMember = 'UiMember';
 
@@ -642,6 +643,19 @@ export const WorkflowMember = 'WorkflowMember';
 
 export function isWorkflowMember(item: unknown): item is WorkflowMember {
     return reflection.isInstance(item, WorkflowMember);
+}
+
+export interface ActionType extends AstNode {
+    readonly $container: TypeAtom | TypeRef;
+    readonly $type: 'ActionType';
+    arg?: TypeRef;
+    name: 'action';
+}
+
+export const ActionType = 'ActionType';
+
+export function isActionType(item: unknown): item is ActionType {
+    return reflection.isInstance(item, ActionType);
 }
 
 export interface Aggregate extends AstNode {
@@ -1805,7 +1819,7 @@ export function isPageMenuMeta(item: unknown): item is PageMenuMeta {
 }
 
 export interface Parameter extends AstNode {
-    readonly $container: Component | Create | Criterion | Destroy | FindDecl | FunctionDecl | HandleDecl | Operation | Page | Retrieval | WorkflowCreateDecl;
+    readonly $container: Component | Create | Criterion | Destroy | FindDecl | FunctionDecl | HandleDecl | Operation | Page | Retrieval | UiFunction | WorkflowCreateDecl;
     readonly $type: 'Parameter';
     name: LooseName;
     type: TypeRef;
@@ -1924,7 +1938,7 @@ export interface Property extends AstNode {
     access?: FieldAccess;
     check?: Expression;
     default?: Expression;
-    name: 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'handle' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'service' | 'snapshot' | 'sort' | 'state' | 'tablePrefix' | 'title' | 'token' | 'ttl' | 'use' | string;
+    name: 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'handle' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'service' | 'snapshot' | 'sort' | 'state' | 'tablePrefix' | 'title' | 'token' | 'ttl' | 'use' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;
@@ -2399,7 +2413,7 @@ export function isTypeAtom(item: unknown): item is TypeAtom {
 }
 
 export interface TypeRef extends AstNode {
-    readonly $container: Criterion | DerivedProp | FindDecl | FunctionDecl | Operation | Parameter | Property | Retrieval | StateField | UserField;
+    readonly $container: ActionType | Criterion | DerivedProp | FindDecl | FunctionDecl | Operation | Parameter | Property | Retrieval | StateField | UiFunction | UserField;
     readonly $type: 'TypeRef';
     alternatives: Array<TypeAtom>;
     array: boolean;
@@ -2480,6 +2494,21 @@ export const UiComposeBinding = 'UiComposeBinding';
 
 export function isUiComposeBinding(item: unknown): item is UiComposeBinding {
     return reflection.isInstance(item, UiComposeBinding);
+}
+
+export interface UiFunction extends AstNode {
+    readonly $container: Ui;
+    readonly $type: 'UiFunction';
+    externPath: string;
+    name: string;
+    params: Array<Parameter>;
+    returnType: TypeRef;
+}
+
+export const UiFunction = 'UiFunction';
+
+export function isUiFunction(item: unknown): item is UiFunction {
+    return reflection.isInstance(item, UiFunction);
 }
 
 export interface UiNotification extends AstNode {
@@ -2633,6 +2662,7 @@ export function isWorkflowCreateDecl(item: unknown): item is WorkflowCreateDecl 
 }
 
 export type DddAstType = {
+    ActionType: ActionType
     Aggregate: Aggregate
     AggregateMember: AggregateMember
     Api: Api
@@ -2789,6 +2819,7 @@ export type DddAstType = {
     UiBlockBinding: UiBlockBinding
     UiChannelParam: UiChannelParam
     UiComposeBinding: UiComposeBinding
+    UiFunction: UiFunction
     UiMember: UiMember
     UiNotification: UiNotification
     UiParamBinding: UiParamBinding
@@ -2809,11 +2840,18 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, ApiStatus, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiChannelParam, UiComposeBinding, UiMember, UiNotification, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
+        return [ActionType, Aggregate, AggregateMember, Api, ApiStatus, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiChannelParam, UiComposeBinding, UiFunction, UiMember, UiNotification, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
         switch (subtype) {
+            case ActionType:
+            case IdType:
+            case NamedType:
+            case PrimitiveType:
+            case SlotType: {
+                return this.isSubtype(BaseType, supertype);
+            }
             case Aggregate: {
                 return this.isSubtype(ContextMember, supertype) || this.isSubtype(NamedDecl, supertype) || this.isSubtype(Targetable, supertype) || this.isSubtype(ViewSource, supertype);
             }
@@ -2944,12 +2982,6 @@ export class DddAstReflection extends AbstractAstReflection {
             case WorkflowCreateDecl: {
                 return this.isSubtype(WorkflowMember, supertype);
             }
-            case IdType:
-            case NamedType:
-            case PrimitiveType:
-            case SlotType: {
-                return this.isSubtype(BaseType, supertype);
-            }
             case LayoutMainSlot:
             case LayoutNamedSlot: {
                 return this.isSubtype(LayoutSlot, supertype);
@@ -2965,6 +2997,7 @@ export class DddAstReflection extends AbstractAstReflection {
             case Page:
             case UiApiParam:
             case UiChannelParam:
+            case UiFunction:
             case UiNotification: {
                 return this.isSubtype(UiMember, supertype);
             }
@@ -3084,6 +3117,15 @@ export class DddAstReflection extends AbstractAstReflection {
 
     getTypeMetaData(type: string): TypeMetaData {
         switch (type) {
+            case ActionType: {
+                return {
+                    name: ActionType,
+                    properties: [
+                        { name: 'arg' },
+                        { name: 'name' }
+                    ]
+                };
+            }
             case Aggregate: {
                 return {
                     name: Aggregate,
@@ -4344,6 +4386,17 @@ export class DddAstReflection extends AbstractAstReflection {
                     properties: [
                         { name: 'bindings', defaultValue: [] },
                         { name: 'ref' }
+                    ]
+                };
+            }
+            case UiFunction: {
+                return {
+                    name: UiFunction,
+                    properties: [
+                        { name: 'externPath' },
+                        { name: 'name' },
+                        { name: 'params', defaultValue: [] },
+                        { name: 'returnType' }
                     ]
                 };
             }

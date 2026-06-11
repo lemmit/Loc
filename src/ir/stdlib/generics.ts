@@ -100,6 +100,7 @@ function genericArgName(arg: TypeIR): string {
       return `${arg.variants.map(genericArgName).join("Or")}Union`;
     case "none":
       return "None";
+    case "action":
     case "slot":
       return "Slot";
   }

@@ -27,6 +27,7 @@ import type {
   StateFieldIR,
   UiApiParamIR,
   UiChannelParamIR,
+  UiFunctionIR,
   UiIR,
   UiNotificationIR,
 } from "../types/loom-ir.js";
@@ -88,6 +89,7 @@ export function lowerUi(ui: Ui): UiIR {
   const apiParams: UiApiParamIR[] = [];
   const channelParams: UiChannelParamIR[] = [];
   const notifications: UiNotificationIR[] = [];
+  const functions: UiFunctionIR[] = [];
   let menu: MenuBlockIR | undefined;
   for (const m of ui.members) {
     if (m.$type === "Page") pages.push(lowerPage(m));
@@ -122,6 +124,14 @@ export function lowerUi(ui: Ui): UiIR {
         bind: m.bind,
         toasts,
       });
+    } else if (m.$type === "UiFunction") {
+      const env: Env = { locals: new Map(), user: undefined };
+      functions.push({
+        name: m.name,
+        params: (m.params ?? []).map((p) => ({ name: p.name, type: lowerType(p.type, env) })),
+        returnType: lowerType(m.returnType, env),
+        externPath: m.externPath,
+      });
     } else if (m.$type === "MenuBlock") {
       // First menu block wins.  Validator flags a duplicate
       // `menu { ... }` block at ui scope as an error.
@@ -137,6 +147,7 @@ export function lowerUi(ui: Ui): UiIR {
     apiParams,
     ...(channelParams.length > 0 ? { channelParams } : {}),
     ...(notifications.length > 0 ? { notifications } : {}),
+    ...(functions.length > 0 ? { functions } : {}),
   };
 }
 

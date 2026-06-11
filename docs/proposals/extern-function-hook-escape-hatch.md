@@ -1,6 +1,15 @@
 # Extern functions & hooks — frontend logic escape hatches
 
-> Status: **proposal / problem-framing.** Nothing here is implemented. This
+> Status: **PARTIAL — `function … extern` (React/TS) implemented.**
+> The `function f(params): T extern from "<path>"` ui member ships:
+> grammar + `UiFunctionIR` + printer, the typed signature
+> (`src/lib/extern/<name>.signature.ts`, wire-DTO-typed) + conformance
+> shim (`src/lib/<name>.ts`, `export const f: Fn = _impl` — the §3
+> fail-fast), shim imports + JSX-expression rendering at body call
+> sites, and the stdlib-shadow / duplicate-name validators.  Remaining:
+> Phoenix `@spec` + alias (stage 2), `hook … extern` (stage 3 —
+> deliberately pulled by a concrete use case, not built speculatively),
+> and the void-effect rule (Loom has no `void` type yet). This
 > note extends the `extern` family — already shipped for backend
 > `operation … extern` ([`docs/extern.md`](../extern.md)) and frontend
 > `component … extern`

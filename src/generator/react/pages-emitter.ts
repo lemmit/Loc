@@ -35,6 +35,10 @@ import type {
 import { lowerFirst, snake } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { isWalkableLayoutBody, walkBodyToTsx } from "./body-walker.js";
+import {
+  buildExternFunctionShim,
+  buildExternFunctionSignature,
+} from "./extern-function-builder.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
 import { buildViewPageObject } from "./view-builder.js";
 import {
@@ -200,6 +204,16 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
   for (const page of ui.pages) {
     if (page.route) pageRoutes.set(page.name, page.route);
   }
+  // Extern frontend functions (extern-function-hook-escape-hatch.md §3):
+  // emit the typed signature + conformance shim per declaration; body
+  // calls register through `externFunctionNames` and the page /
+  // component shells import each used shim.
+  const externFunctionNames = new Set<string>();
+  for (const fn of ui.functions ?? []) {
+    externFunctionNames.add(fn.name);
+    out.set(`src/lib/extern/${fn.name}.signature.ts`, buildExternFunctionSignature(fn));
+    out.set(`src/lib/${fn.name}.ts`, buildExternFunctionShim(fn));
+  }
   // Merge top-level + ui-scope components, ui-scope last so it wins
   // by overwriting the earlier entry under the same name.  Both
   // flavours emit identical `src/components/<Name>.tsx` files.
@@ -234,6 +248,7 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
         ctx.aggregatesByName,
         buildBcByAggregate(ctx),
         pageRoutes,
+        externFunctionNames,
       ),
     );
   }
@@ -279,6 +294,7 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
           buildWorkflowsByName(ctx),
           buildBcByWorkflow(ctx),
           pageRoutes,
+          externFunctionNames,
         ),
       );
     }

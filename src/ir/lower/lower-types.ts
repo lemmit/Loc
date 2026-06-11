@@ -16,6 +16,7 @@ import type {
   Workflow,
 } from "../../language/generated/ast.js";
 import {
+  isActionType,
   isAggregate,
   isContainment,
   isDerivedProp,
@@ -258,6 +259,9 @@ function lowerBase(t: TypeRef | TypeAtom, env?: Env): TypeIR {
   const base = t.base;
   if (isPrimitiveType(base)) return { kind: "primitive", name: base.name };
   if (isSlotType(base)) return { kind: "slot" };
+  if (isActionType(base)) {
+    return base.arg ? { kind: "action", arg: lowerType(base.arg, env) } : { kind: "action" };
+  }
   if (isIdType(base)) {
     const target = base.target?.ref;
     let valueType: IdValueType = "guid";

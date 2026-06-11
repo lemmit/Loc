@@ -83,3 +83,82 @@ describe("extern components", () => {
     expect(props).toMatch(/export type SpinnerProps = Record<string, never>;/);
   });
 });
+
+// ─── Tier 2 — `action` behaviour params ──────────────────────────────────────
+// `slot` carries elements, `action` carries behaviours: the caller hands the
+// component a (block-body) lambda, the props type gains a void callback, and
+// the lambda body walks in the CALLER's scope (state writes hit the caller's
+// setters).  See extern-component-escape-hatch.md §3 Tier 2.
+
+describe("extern components — action params (Tier 2)", () => {
+  const SRC = `
+    system S {
+      subdomain M { context C {
+        aggregate Order { status: string }
+        repository Orders for Order { }
+      } }
+      ui WebApp {
+        component OrderGrid(orders: Order[], onPick: action(Order), onRefresh: action?)
+          extern from "widgets/order-grid"
+        page Board {
+          route: "/board"
+          state { note: string = "" }
+          body: OrderGrid { orders: C.Order.all, onPick: o => { note := o.status } }
+        }
+      }
+      deployable api { platform: hono, contexts: [C], port: 3000 }
+      deployable web { platform: static, targets: api, ui: WebApp { C: api }, port: 3001 }
+    }
+  `;
+
+  it("props: action(Order) → (arg: OrderResponse) => void; action? → optional () => void", async () => {
+    const files = await buildAndGenerate(SRC);
+    const props = files.get("web/src/components/OrderGrid.props.ts")!;
+    expect(props).toMatch(/orders: OrderResponse\[\];/);
+    expect(props).toMatch(/onPick: \(arg: OrderResponse\) => void;/);
+    expect(props).toMatch(/onRefresh\?: \(\) => void;/);
+  });
+
+  it("call site: the lambda emits as a typed arrow walked in the caller's scope", async () => {
+    const files = await buildAndGenerate(SRC);
+    const board = files.get("web/src/pages/board.tsx")!;
+    // Param stays bound (not dropped like event-handler lambdas); the
+    // state write resolves against the caller's `state {}` setter.
+    expect(board).toContain("onPick={(o) => { setNote(o.status); }}");
+  });
+
+  it("rejects `action` outside a component parameter list", async () => {
+    const { parseString } = await import("../../_helpers/index.js");
+    const { errors } = await parseString(`
+      system S { subdomain M { context C {
+        aggregate Order { pick: action }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /'action' is only valid on a component's parameter list/.test(e)),
+    ).toBe(true);
+  });
+
+  it("rejects a nested UI marker as the callback argument", async () => {
+    const { parseString } = await import("../../_helpers/index.js");
+    const { errors } = await parseString(`
+      system S { subdomain M { context C { } }
+        ui W {
+          component X(cb: action(slot)) extern from "widgets/x"
+          page Home { route: "/" body: Heading { "hi" } }
+        }
+      }
+    `);
+    expect(errors.some((e) => /loom\.action-nested-marker|not allowed/.test(e))).toBe(true);
+  });
+
+  it("a field named `action` still parses (soft keyword)", async () => {
+    const { parseString } = await import("../../_helpers/index.js");
+    const { errors } = await parseString(`
+      system S { subdomain M { context C {
+        aggregate AuditEntry { action: string  at: datetime }
+      } } }
+    `);
+    expect(errors).toEqual([]);
+  });
+});

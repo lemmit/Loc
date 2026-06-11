@@ -540,6 +540,7 @@ export function renderJavaType(t: TypeIR): string {
       // Java has no `?` types — optionality is a nullable reference, so
       // primitives box (the emitter documents absence as null).
       return boxedJavaType(t.inner);
+    case "action":
     case "slot":
       throw new Error("renderJavaType: 'slot' type is UI-only and should not reach the backend.");
     case "genericInstance":

@@ -319,6 +319,7 @@ function zodForResponseInner(t: TypeIR): string {
       return `z.array(${zodForResponseInner(t.element)})`;
     case "optional":
       return `${zodForResponseInner(t.inner)}.nullish()`;
+    case "action":
     case "slot":
       throw new Error(
         "zodForResponseInner: 'slot' type is UI-only and should not reach the response schema.",
