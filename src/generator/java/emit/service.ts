@@ -32,6 +32,9 @@ export interface ServiceCtx {
   authed?: boolean;
   /** The enclosing context — resolves exception-less return unions. */
   boundedContext: EnrichedBoundedContextIR;
+  /** Strongly-typed id class (default `<Agg>Id`); a TPH concrete passes
+   *  its base's `<Base>Id` (the shared single-table key). */
+  idClass?: string;
 }
 
 export function renderJavaService(
@@ -41,6 +44,7 @@ export function renderJavaService(
   ctx: ServiceCtx,
 ): string {
   const imports = new Set<string>(["java.util.List"]);
+  const idClass = ctx.idClass ?? `${agg.name}Id`;
   const idJava = javaValueTypeForId(agg.idValueType);
   if (idJava === "UUID") imports.add("java.util.UUID");
   const hasValidators = aggHasAnyWireValidator(agg);
@@ -57,7 +61,7 @@ export function renderJavaService(
   const createArgs = createInputs.map((f) => f.name).join(", ");
   const createLines = hasCreate(agg)
     ? [
-        `    public ${agg.name}Id create${agg.name}(Create${agg.name}Request request) {`,
+        `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
         ...createLets,
         hasValidators ? `        ${agg.name}Validators.create(${createArgs});` : null,
         `        var aggregate = ${agg.name}.create(${createArgs});`,
@@ -72,7 +76,7 @@ export function renderJavaService(
   // --- reads -------------------------------------------------------------------
   const readLines = [
     `    @Transactional(readOnly = true)`,
-    `    public ${agg.name}Response get${agg.name}ById(${agg.name}Id id) {`,
+    `    public ${agg.name}Response get${agg.name}ById(${idClass} id) {`,
     `        return repository.findById(id).map(${agg.name}Response::from).orElse(null);`,
     `    }`,
     ``,
@@ -128,7 +132,7 @@ export function renderJavaService(
     .flatMap((op) => {
       const hasParams = op.params.length > 0;
       const reqType = `${upperFirst(op.name)}${agg.name}Request`;
-      const paramSig = hasParams ? `${agg.name}Id id, ${reqType} request` : `${agg.name}Id id`;
+      const paramSig = hasParams ? `${idClass} id, ${reqType} request` : `${idClass} id`;
       const lets = op.params.map(
         (p) => `        var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`)};`,
       );
@@ -186,7 +190,7 @@ export function renderJavaService(
   const destroyLines =
     (agg.destroys?.length ?? 0) > 0
       ? [
-          `    public void destroy${agg.name}(${agg.name}Id id) {`,
+          `    public void destroy${agg.name}(${idClass} id) {`,
           `        var aggregate = repository.getById(id);`,
           `        repository.delete(aggregate);`,
           `    }`,

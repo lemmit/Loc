@@ -878,7 +878,7 @@ export function validateInheritanceStorage(
   // TPH storage emission ships on Hono (Drizzle shared table + `kind`), .NET
   // (EF Core native `HasDiscriminator`), and Phoenix (Ash shared-table
   // multi-resource + `base_filter` on `kind`).
-  const TPH_CAPABLE = new Set(["node", "dotnet", "elixir", "python"]);
+  const TPH_CAPABLE = new Set(["node", "dotnet", "elixir", "python", "java"]);
   const hostedByCapable = [...backendPlatforms].some((p) => TPH_CAPABLE.has(p));
   for (const agg of ctx.aggregates) {
     if (!agg.isAbstract && !agg.extendsAggregate) continue;
@@ -905,7 +905,7 @@ export function validateInheritanceStorage(
       code: "loom.tph-backend-unsupported",
       message:
         `aggregate '${agg.name}' (${role}) resolves to sharedTable (TPH) inheritance via ` +
-        `${how}, but TPH storage emission is implemented for the Hono, .NET, and Phoenix backends only — ` +
+        `${how}, but TPH storage emission is implemented for the Hono, .NET, Phoenix, Python, and Java backends only — ` +
         `${hostNote}. Host the context on a Hono, .NET, or Phoenix deployable, or declare ` +
         `'inheritanceUsing(ownTable)' to use the per-concrete (TPC) layout (all backends). ` +
         `Tracked in aggregate-inheritance.md I2/I3.`,

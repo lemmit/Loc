@@ -35,6 +35,9 @@ export interface ControllerCtx {
   entityPkg?: string;
   /** The enclosing context — resolves exception-less return unions. */
   boundedContext?: EnrichedBoundedContextIR;
+  /** Strongly-typed id class (default `<Agg>Id`); a TPH concrete passes
+   *  its base's `<Base>Id` (the shared single-table key). */
+  idClass?: string;
 }
 
 export function renderJavaController(
@@ -43,6 +46,7 @@ export function renderJavaController(
   ctx: ControllerCtx,
 ): string {
   const route = snake(plural(agg.name));
+  const idClass = ctx.idClass ?? `${agg.name}Id`;
   const idJava = javaValueTypeForId(agg.idValueType);
   const imports = new Set<string>(["java.util.List"]);
   if (idJava === "UUID") imports.add("java.util.UUID");
@@ -93,8 +97,8 @@ export function renderJavaController(
             ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request) {`
             : `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id) {`,
           hasParams
-            ? `        var result = service.${op.name}(new ${agg.name}Id(id), request);`
-            : `        var result = service.${op.name}(new ${agg.name}Id(id));`,
+            ? `        var result = service.${op.name}(new ${idClass}(id), request);`
+            : `        var result = service.${op.name}(new ${idClass}(id));`,
           `        return switch (result) {`,
           ...arms,
           `        };`,
@@ -109,8 +113,8 @@ export function renderJavaController(
           ? `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request) {`
           : `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id) {`,
         hasParams
-          ? `        service.${op.name}(new ${agg.name}Id(id), request);`
-          : `        service.${op.name}(new ${agg.name}Id(id));`,
+          ? `        service.${op.name}(new ${idClass}(id), request);`
+          : `        service.${op.name}(new ${idClass}(id));`,
         `    }`,
         ``,
       ];
@@ -157,7 +161,7 @@ export function renderJavaController(
           `    @DeleteMapping("/{id}")`,
           `    @ResponseStatus(HttpStatus.NO_CONTENT)`,
           `    public void destroy${agg.name}(@PathVariable ${idJava} id) {`,
-          `        service.destroy${agg.name}(new ${agg.name}Id(id));`,
+          `        service.destroy${agg.name}(new ${idClass}(id));`,
           `    }`,
           ``,
         ]
@@ -179,7 +183,7 @@ export function renderJavaController(
     ...createRoute,
     `    @GetMapping("/{id}")`,
     `    public ResponseEntity<${agg.name}Response> get${agg.name}ById(@PathVariable ${idJava} id) {`,
-    `        var response = service.get${agg.name}ById(new ${agg.name}Id(id));`,
+    `        var response = service.get${agg.name}ById(new ${idClass}(id));`,
     `        return response == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(response);`,
     `    }`,
     ``,

@@ -502,6 +502,7 @@ function emitAggregate(
       domainRepoPkg: pkgFor("repository-interface", agg.name),
       authed: authRequired,
       boundedContext: ctx,
+      idClass,
     }),
     agg.name,
   );
@@ -539,6 +540,7 @@ function emitAggregate(
       applicationPkg,
       entityPkg: pkgFor("entity", agg.name),
       boundedContext: ctx,
+      idClass,
     }),
     agg.name,
   );

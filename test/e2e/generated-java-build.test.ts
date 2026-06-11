@@ -53,6 +53,9 @@ const FIXTURES: Array<[string, string]> = [
   // Capability filters: @SQLRestriction from the non-principal filter
   // predicate (softDelete pattern).
   ["test/e2e/fixtures/java-build/context-filter.ddd", "cf_api"],
+  // TPH (sharedTable) inheritance: JPA SINGLE_TABLE + @DiscriminatorColumn
+  // on the abstract base, @DiscriminatorValue per concrete, shared <Base>Id.
+  ["test/e2e/fixtures/java-build/tph.ddd", "tph_api"],
 ];
 
 describe.skipIf(!ENABLED)(
