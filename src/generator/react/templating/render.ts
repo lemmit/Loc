@@ -79,6 +79,12 @@ export function renderAppShell(
    *  and the realtime wire exists — App imports and mounts the renderless
    *  `<RealtimeHandlers />` component (channels.md Part I). */
   hasRealtimeHandlers = false,
+  /** Whether a scaffold-synthesised `ViewsIndex` / `WorkflowsIndex` page
+   *  exists — gates the `/views` / `/workflows` index import+route so an
+   *  explicit (non-scaffold) view/workflow page doesn't dangle against a
+   *  missing index module.  Mirrors `hasScaffoldHome`. */
+  hasViewsIndex: boolean = true,
+  hasWorkflowsIndex: boolean = true,
 ): string {
   return pack.render("app-shell", {
     hasRealtimeHandlers,
@@ -94,6 +100,8 @@ export function renderAppShell(
       namedLayouts,
       layoutImports,
       observableWorkflows,
+      hasViewsIndex,
+      hasWorkflowsIndex,
     ),
     // Router 7 (stack v3) renamed the package react-router-dom →
     // react-router; library mode keeps the v6 API so only the

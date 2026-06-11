@@ -407,6 +407,18 @@ system DevPlatform {
             body: Stack { Badge { label }, Slot { "extra" } }
         }
 
+        // Active-projects view page — exercises the `scaffoldViewList` view
+        // primitive and gives the "browse projects via the console UI" e2e a
+        // real route + view-list page-object to drive.  Route/testids line up
+        // with the generated `ActiveProjectsViewPage.goto()` (`/views/<snake>`,
+        // `view-active_projects`), so the UI spec resolves its import and the
+        // Playwright navigation lands on a rendered page rather than a 404.
+        page ActiveProjectsView {
+            route: "/views/active_projects"
+            title: "Active projects"
+            body: scaffoldViewList(of: ActiveProjects)
+        }
+
         // UI-level sidebar menu — internal link + external link.
         menu {
             section "Platform" {
@@ -528,18 +540,19 @@ system DevPlatform {
     // bad input with the SAME status" at runtime — the behavioral complement
     // to the static `errorResponseDiffs` OpenAPI parity gate.  Status contract
     // (identical across all three backends): an `invariant` / `check`
-    // violation surfaces as a DomainError → 400; a missing aggregate → 404.
+    // violation surfaces as a ValidationError → 422 (Unprocessable Entity, the
+    // stdlib default in `src/util/error-defaults.ts`); a missing aggregate → 404.
     // Payloads mirror the happy-path creates above so the *only* reason to
     // fail is the one field under test.
 
-    // 400 — invariant `name.length > 0` (Catalog.Project) must reject.
+    // 422 — invariant `name.length > 0` (Catalog.Project) must reject.
     test e2e "creating a project with an empty name is rejected" against dotnetApi {
-        expect(api.projects.create({ name: "", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", budget: 100.0, createdAt: "2024-01-01T00:00:00Z" })).toThrow(400)
+        expect(api.projects.create({ name: "", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", budget: 100.0, createdAt: "2024-01-01T00:00:00Z" })).toThrow(422)
     }
 
-    // 400 — invariant `commitSha.length > 0` (Builds.Build) must reject.
+    // 422 — invariant `commitSha.length > 0` (Builds.Build) must reject.
     test e2e "creating a build with an empty commitSha is rejected" against honoApi {
-        expect(api.builds.create({ commitSha: "", buildState: "Passed", total: 0, startedAt: "2024-01-01T00:00:00Z" })).toThrow(400)
+        expect(api.builds.create({ commitSha: "", buildState: "Passed", total: 0, startedAt: "2024-01-01T00:00:00Z" })).toThrow(422)
     }
 
     // 404 — reading an id that was never created must error, not 200.
@@ -547,8 +560,8 @@ system DevPlatform {
         expect(api.projects.getById("ffffffff-ffff-ffff-ffff-ffffffffffff")).toThrow(404)
     }
 
-    // 400 — inline field `check` constraints (People.Engineer) lower to
-    // invariants, so they reject through the same DomainError → 400 path as
+    // 422 — inline field `check` constraints (People.Engineer) lower to
+    // invariants, so they reject through the same ValidationError → 422 path as
     // the block `invariant`s above — but via a distinct mechanism (inline
     // `check`) on a module (Accounts) that otherwise has no e2e coverage.
     // Each payload is valid except the single field under test, so the
@@ -556,12 +569,12 @@ system DevPlatform {
 
     // level out of range: `check level >= 1 && level <= 10`.
     test e2e "registering an engineer with an out-of-range level is rejected" against honoApi {
-        expect(api.engineers.create({ handle: "ada", email: "ada@example.com", level: 0, onCall: false })).toThrow(400)
+        expect(api.engineers.create({ handle: "ada", email: "ada@example.com", level: 0, onCall: false })).toThrow(422)
     }
 
     // malformed email: `check email.matches("^[^@]+@[^@]+\\.[^@]+$")`.
     test e2e "registering an engineer with a malformed email is rejected" against phoenixApi {
-        expect(api.engineers.create({ handle: "grace", email: "not-an-email", level: 5, onCall: false })).toThrow(400)
+        expect(api.engineers.create({ handle: "grace", email: "not-an-email", level: 5, onCall: false })).toThrow(422)
     }
 }
 
