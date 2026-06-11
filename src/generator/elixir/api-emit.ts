@@ -366,6 +366,11 @@ function renderWorkflowsController(
 defmodule ${webModule}.WorkflowsController do
   use ${webModule}, :controller
 
+  # Normalise camelCase request keys to snake_case before each action (same
+  # rule as the aggregate controllers), so the per-param \`params["snake"]\`
+  # lookups below resolve a \`newName\` body key as \`new_name\`.
+  plug :decamelize_params
+
   @moduledoc """
   HTTP entry points for all workflow code-interface functions.
   Each action delegates to the matching workflow module's run/1.
@@ -379,6 +384,11 @@ defmodule ${webModule}.WorkflowsController do
   """
 
 ${actions}
+
+  # Controller plug: rewrite request param keys camelCase → snake_case.
+  defp decamelize_params(conn, _opts) do
+    %{conn | params: ${appModule}.JasonCamelCase.decamelize_keys(conn.params)}
+  end
 
   # ---------------------------------------------------------------------------
   # Error helpers
@@ -833,6 +843,16 @@ ${cuLine}    ${contextModule}.${opSnake}_${aggSnake}!(${callArgs}${callOpts})
   return `# Auto-generated.
 defmodule ${controllerModule} do
   use ${webModule}, :controller
+
+  # Normalise camelCase request keys to the snake_case Ash attribute /
+  # argument names before any action runs.  Hono / .NET / the React client
+  # all send camelCase bodies (\`createdAt\`, \`commitSha\`), but Ash inputs
+  # are snake_case, so without this every multi-word field would be rejected
+  # as an unknown input (create/update) or silently read as nil (operations
+  # / finds).  Runs in the controller plug pipeline, so the \`params\` passed
+  # to each action below is already snake-keyed.
+  plug :decamelize_params
+
   # Plug.ErrorHandler intercepts raised exceptions from the bang
   # Ash code-interface calls below (\`create_${aggSnake}!\`, etc.).
   # When the raised reason is an \`Ash.Error.Invalid\`, we route to
@@ -855,6 +875,13 @@ defmodule ${controllerModule} do
   """
 
 ${allActions}
+
+  # Controller plug: rewrite every request param key (recursively, including
+  # nested value objects and contained collections) from camelCase to the
+  # snake_case Ash expects.  See the \`plug :decamelize_params\` note above.
+  defp decamelize_params(conn, _opts) do
+    %{conn | params: ${appModule}.JasonCamelCase.decamelize_keys(conn.params)}
+  end
 
   # ---------------------------------------------------------------------------
   # Plug.ErrorHandler — Ash.Error.Invalid → 422 ProblemDetails + errors[]

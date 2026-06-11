@@ -1,0 +1,54 @@
+// Seeding regression fixture (database-seeding.md) — java twin of
+// examples/seeding.ddd, consumed by the java build gate via
+// `ddd generate system` → <Ctx>SeedRunner.java (LOOM_JAVA_BUILD).
+//
+// Covers all three dataset shapes: `default` (always runs), `demo`
+// (opt-in via LOOM_SEED), and `wired raw` (explicit-id direct INSERT,
+// schema-qualified — java tables live in per-module schemas).
+system Seeding {
+  subdomain Catalog {
+    context Catalog {
+      enum Tier { Free, Pro }
+
+      aggregate Widget with crudish {
+        name: string
+        size: int
+        tier: Tier
+        invariant size >= 0
+        derived display: string = name
+      }
+
+      aggregate Gadget with crudish {
+        widgetId: Widget id
+        label: string
+      }
+
+      repository Widgets for Widget { }
+      repository Gadgets for Gadget { }
+
+      seed default {
+        Widget { name: "Alpha", size: 1, tier: Free }
+        Widget { name: "Beta", size: 2, tier: Pro }
+      }
+      seed demo {
+        Widget { name: "Gamma", size: 3, tier: Pro }
+      }
+      seed wired raw {
+        Widget { id: "11111111-1111-1111-1111-111111111111", name: "Anchor", size: 4, tier: Free }
+        Gadget { id: "22222222-2222-2222-2222-222222222222", widgetId: "11111111-1111-1111-1111-111111111111", label: "g1" }
+      }
+    }
+  }
+
+  api CatalogApi from Catalog
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+
+  deployable seedApi {
+    platform: java
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    port: 8081
+  }
+}

@@ -236,6 +236,10 @@ export function typeLabel(t: TypeIR): string {
       return t.variants.map(typeLabel).join(" or ");
     case "none":
       return "none";
+    case "action":
+      // Function-valued component-param marker; match the source-faithful
+      // `action` / `action(<arg>)` label the AST printer emits.
+      return t.arg ? `action(${typeLabel(t.arg)})` : "action";
   }
 }
 

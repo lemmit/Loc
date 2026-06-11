@@ -1,0 +1,29 @@
+system TPH {
+  subdomain D {
+    context Fleet {
+      abstract aggregate Vehicle {
+        name: string
+        capacity: int
+      }
+      aggregate Car extends Vehicle {
+        doors: int
+        operation refit(d: int) { doors := d }
+      }
+      aggregate Truck extends Vehicle {
+        payloadKg: int
+      }
+      repository Cars for Car { }
+      repository Trucks for Truck { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Fleet, kind: state, use: primary }
+  deployable tphApi {
+    platform: java
+    contexts: [Fleet]
+    dataSources: [st]
+    serves: A
+    port: 8081
+  }
+}
