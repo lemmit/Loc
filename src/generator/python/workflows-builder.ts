@@ -1,8 +1,12 @@
-import type {
-  BoundedContextIR,
-  EnrichedBoundedContextIR,
-  WorkflowIR,
-  WorkflowStmtIR,
+import {
+  type BoundedContextIR,
+  type EnrichedBoundedContextIR,
+  type OperationIR,
+  operationUsesCurrentUser,
+  type WorkflowIR,
+  type WorkflowStmtIR,
+  workflowIsGuarded,
+  workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
 import { lines } from "../../util/code-builder.js";
@@ -45,6 +49,9 @@ export function buildPyWorkflowsFile(
   const wfs = commandWorkflowsOf(ctx);
   if (wfs.length === 0) return null;
   const dispatcherExpr = hasDispatch ? "make_dispatcher(session)" : "NoopDomainEventDispatcher()";
+  const anyUser = wfs.some(
+    (wf) => workflowUsesCurrentUser(wf) || callsUserGatedOp(wf.statements, ctx),
+  );
 
   const models = wfs
     .map((wf) =>
@@ -82,11 +89,12 @@ export function buildPyWorkflowsFile(
     "",
     refersTo("datetime") ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
-    "from fastapi import APIRouter, Depends, Response",
+    `from fastapi import APIRouter, Depends, ${anyUser ? "Request, " : ""}Response`,
     "from pydantic import BaseModel",
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
+    anyUser ? "from app.auth.user import User" : null,
     "from app.db.engine import get_session",
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
     hasDispatch ? "from app.dispatch import make_dispatcher" : null,
@@ -142,6 +150,29 @@ function eventsImports(
   return names.length > 0 ? `from app.domain.events import ${names.join(", ")}` : null;
 }
 
+/** The workflow body calls a currentUser-gated operation — the op's
+ *  method signature takes a trailing `current_user` argument the
+ *  op-call renderer threads through, so the actor must be bound even
+ *  if the workflow body itself never names `currentUser`. */
+function callsUserGatedOp(sts: WorkflowStmtIR[], ctx: EnrichedBoundedContextIR): boolean {
+  return sts.some((s) => {
+    if (s.kind === "op-call") {
+      const o = lookupOp(ctx, s.aggName, s.op);
+      return !!o && operationUsesCurrentUser(o);
+    }
+    if (s.kind === "for-each") return callsUserGatedOp(s.body, ctx);
+    return false;
+  });
+}
+
+function lookupOp(
+  ctx: EnrichedBoundedContextIR,
+  aggName: string,
+  opName: string,
+): OperationIR | undefined {
+  return ctx.aggregates.find((a) => a.name === aggName)?.operations.find((o) => o.name === opName);
+}
+
 interface RepoNeed {
   repoName: string;
   aggName: string;
@@ -188,9 +219,20 @@ function workflowRoute(
   ctx: EnrichedBoundedContextIR,
   dispatcherExpr: string,
 ): string {
+  // A `requires`-guarded workflow declares its 403 outcome; a
+  // currentUser-referencing one binds the actor off the request scope
+  // before any rendered statement mentions the bare `current_user`.
+  const usesUser = workflowUsesCurrentUser(wf) || callsUserGatedOp(wf.statements, ctx);
+  const forbidden = workflowIsGuarded(wf) ? ', responses={403: {"description": "Forbidden"}}' : "";
+  const sig = [
+    `body: ${upperFirst(wf.name)}Request`,
+    ...(usesUser ? ["request: Request"] : []),
+    "session: SessionDep",
+  ].join(", ");
   const out: string[] = [
-    `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}")`,
-    `async def ${snake(wf.name)}_workflow(body: ${upperFirst(wf.name)}Request, session: SessionDep) -> Response:`,
+    `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}"${forbidden})`,
+    `async def ${snake(wf.name)}_workflow(${sig}) -> Response:`,
+    ...(usesUser ? ["    current_user: User = request.state.current_user"] : []),
   ];
   // Wire params → domain locals (brand ids, build VOs) once up front.
   for (const p of wf.params) {
@@ -203,7 +245,7 @@ function workflowRoute(
   const hasEmit = collectEmits(wf.statements).length > 0;
   if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
   for (const st of wf.statements) {
-    out.push(...renderWorkflowStmt(st, "    "));
+    out.push(...renderWorkflowStmt(st, "    ", undefined, ctx));
   }
   for (const save of wf.savesAtExit) {
     out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
@@ -221,6 +263,7 @@ export function renderWorkflowStmt(
   st: WorkflowStmtIR,
   i: string,
   rctx: PyRenderContext = { thisName: "self" },
+  ctx?: EnrichedBoundedContextIR,
 ): string[] {
   switch (st.kind) {
     case "precondition":
@@ -262,11 +305,17 @@ export function renderWorkflowStmt(
     case "expr-let":
       return [`${i}${snake(st.name)} = ${renderPyExpr(st.expr, rctx)}`];
     case "op-call": {
-      const args = st.args.map((a) => renderPyExpr(a, rctx)).join(", ");
+      // A currentUser-gated op takes the actor as its trailing argument
+      // (in scope: the route bound `current_user` for this workflow).
+      const op = ctx ? lookupOp(ctx, st.aggName, st.op) : undefined;
+      const args = [
+        ...st.args.map((a) => renderPyExpr(a, rctx)),
+        ...(op && operationUsesCurrentUser(op) ? ["current_user"] : []),
+      ].join(", ");
       return [`${i}${snake(st.target)}.${snake(st.op)}(${args})`];
     }
     case "for-each": {
-      const body = st.body.flatMap((s) => renderWorkflowStmt(s, `${i}    `, rctx));
+      const body = st.body.flatMap((s) => renderWorkflowStmt(s, `${i}    `, rctx, ctx));
       const saves = st.savesPerIteration.map(
         (s) => `${i}    await ${snake(s.repoName)}.save(${snake(s.name)})`,
       );

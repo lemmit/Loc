@@ -6,14 +6,17 @@ import {
   pagedReturn,
 } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
-import type {
-  BoundedContextIR,
-  EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
-  EnrichedEntityPartIR,
-  OperationIR,
-  RepositoryIR,
-  TypeIR,
+import {
+  type BoundedContextIR,
+  type EnrichedAggregateIR,
+  type EnrichedBoundedContextIR,
+  type EnrichedEntityPartIR,
+  findUsesCurrentUser,
+  type OperationIR,
+  operationIsGuarded,
+  operationUsesCurrentUser,
+  type RepositoryIR,
+  type TypeIR,
 } from "../../ir/types/loom-ir.js";
 import {
   camelId,
@@ -144,6 +147,9 @@ export function buildPyRoutesFile(
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
+    publicOps.some(operationUsesCurrentUser) || emittableFinds(repo).some(findUsesCurrentUser)
+      ? "from app.auth.user import User"
+      : null,
     "from app.db.engine import get_session",
     `from app.db.repositories.${snake(agg.name)}_repository import ${agg.name}Repository`,
     hasDispatch ? "from app.dispatch import make_dispatcher" : null,
@@ -372,7 +378,6 @@ function operationRoute(
   ctx: EnrichedBoundedContextIR,
 ): string {
   const opSnake = snake(op.routeSlug ?? op.name);
-  const args = op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx)).join(", ");
   // Exception-less operation (`operation foo(): X or NotFound`): the
   // route intercepts each error variant and translates it to an
   // RFC-7807 ProblemDetails at its mapped status; success rides as the
@@ -392,23 +397,44 @@ function operationRoute(
         "        )",
       ];
     });
+    const usesUser = operationUsesCurrentUser(op);
+    const forbidden = operationIsGuarded(op)
+      ? ', responses={403: {"description": "Forbidden"}}'
+      : "";
+    const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
+    if (usesUser) callArgs.push("current_user");
     return lines(
-      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}")`,
+      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${forbidden})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(id: str, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
+      usesUser ? "    current_user: User = request.state.current_user" : null,
       "    repo = _repo(session)",
       `    found = await repo.get_by_id(${agg.name}Id(id))`,
-      `    result = found.${snake(op.name)}(${args})`,
+      `    result = found.${snake(op.name)}(${callArgs.join(", ")})`,
       "    await repo.save(found)",
       ...translations,
       "    return result",
     );
   }
+  // currentUser-gated ops read the actor the auth middleware stashed on
+  // the request scope and thread it as the trailing domain argument; a
+  // `requires`-guarded op additionally declares its 403 outcome.
+  const usesUser = operationUsesCurrentUser(op);
+  const forbidden = operationIsGuarded(op) ? ', responses={403: {"description": "Forbidden"}}' : "";
+  const opSig = [
+    "id: str",
+    `body: ${upperFirst(op.name)}${agg.name}Request`,
+    ...(usesUser ? ["request: Request"] : []),
+    "session: SessionDep",
+  ].join(", ");
+  const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
+  if (usesUser) callArgs.push("current_user");
   return lines(
-    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}")`,
-    `async def ${snake(op.name)}_${snake(agg.name)}(id: str, body: ${upperFirst(op.name)}${agg.name}Request, session: SessionDep) -> Response:`,
+    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${forbidden})`,
+    `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
+    usesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
-    `    found.${snake(op.name)}(${args})`,
+    `    found.${snake(op.name)}(${callArgs.join(", ")})`,
     "    await repo.save(found)",
     "    return Response(status_code=204)",
   );
@@ -421,9 +447,18 @@ function findRoute(
 ): string {
   const findSnake = snake(find.name);
   const isList = find.returnType.kind === "array";
+  // A currentUser-scoped find (`where … == currentUser.x`) reads the
+  // actor off the request scope and passes it as the trailing repo arg.
+  const usesUser = findUsesCurrentUser(find);
+  const userBind = usesUser ? "    current_user: User = request.state.current_user" : null;
   const params = find.params.map((p) => `${p.name}: ${requestPyType(p.type, ctx)}`);
-  const sig = [...params, "session: SessionDep"].join(", ");
-  const args = find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)).join(", ");
+  const sig = [...params, ...(usesUser ? ["request: Request"] : []), "session: SessionDep"].join(
+    ", ",
+  );
+  const args = [
+    ...find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)),
+    ...(usesUser ? ["current_user"] : []),
+  ].join(", ");
   const opId = camelId(opFind(agg.name, find.name));
   const unionSpec = findUnionSpec(find.returnType, agg.name, ctx);
   if (unionSpec) {
@@ -431,11 +466,7 @@ function findRoute(
     const absent =
       unionSpec.absent.kind === "none"
         ? [
-            "    if (found := await repo." +
-              findSnake +
-              "(" +
-              find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)).join(", ") +
-              ")) is None:",
+            `    if (found := await repo.${findSnake}(${args})) is None:`,
             '        raise AggregateNotFoundError("not_found")',
           ]
         : (() => {
@@ -445,11 +476,7 @@ function findRoute(
               ? `"resource": ${JSON.stringify(agg.name)}, `
               : "";
             return [
-              "    if (found := await repo." +
-                findSnake +
-                "(" +
-                find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)).join(", ") +
-                ")) is None:",
+              `    if (found := await repo.${findSnake}(${args})) is None:`,
               "        return JSONResponse(",
               `            {${resourceExt}"type": ${JSON.stringify(errorTypeUri(tag))}, "title": ${JSON.stringify(errorTitle(tag))}, "status": ${st}, "detail": ${JSON.stringify(errorTitle(tag))}, "instance": request.url.path},`,
               `            status_code=${st},`,
@@ -460,6 +487,7 @@ function findRoute(
     return lines(
       `@router.get("/${findSnake}", response_model=None, operation_id="${opId}")`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object] | JSONResponse:`,
+      userBind,
       "    repo = _repo(session)",
       ...absent,
       // Found → the tagged success variant ({type: "<Agg>", …wire}).
@@ -471,18 +499,21 @@ function findRoute(
     // Defaulted params last (python syntax) — FastAPI is order-agnostic.
     const pagedSig = [
       ...params,
+      ...(usesUser ? ["request: Request"] : []),
       "session: SessionDep",
       `page: int = ${PAGED_DEFAULT_PAGE}`,
       `pageSize: int = ${PAGED_DEFAULT_PAGE_SIZE}`,
     ].join(", ");
     const callArgs = [
       ...find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)),
+      ...(usesUser ? ["current_user"] : []),
       "page",
       "pageSize",
     ];
     return lines(
       `@router.get("/${findSnake}", response_model=${paged.name}, operation_id="${opId}")`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${pagedSig}) -> dict[str, object]:`,
+      userBind,
       "    repo = _repo(session)",
       `    result = await repo.${findSnake}(${callArgs.join(", ")})`,
       "    return {",
@@ -498,6 +529,7 @@ function findRoute(
     return lines(
       `@router.get("/${findSnake}", response_model=list[${agg.name}Response], operation_id="${opId}")`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> list[dict[str, object]]:`,
+      userBind,
       "    repo = _repo(session)",
       `    return [repo.to_wire(r) for r in await repo.${findSnake}(${args})]`,
     );
@@ -505,6 +537,7 @@ function findRoute(
   return lines(
     `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}")`,
     `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object]:`,
+    userBind,
     "    repo = _repo(session)",
     `    found = await repo.${findSnake}(${args})`,
     "    if found is None:",

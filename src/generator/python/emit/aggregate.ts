@@ -1,15 +1,16 @@
 import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  ContainmentIR,
-  DerivedIR,
-  EntityPartIR,
-  FieldIR,
-  FunctionIR,
-  InvariantIR,
-  OperationIR,
-  TypeIR,
+import {
+  type AggregateIR,
+  type BoundedContextIR,
+  type ContainmentIR,
+  type DerivedIR,
+  type EntityPartIR,
+  type FieldIR,
+  type FunctionIR,
+  type InvariantIR,
+  type OperationIR,
+  operationUsesCurrentUser,
+  type TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
@@ -156,6 +157,7 @@ export function renderPyAggregate(agg: AggregateIR, ctx: BoundedContextIR): stri
   ].sort();
   const eventImports = ["DomainEvent", ...emittedEvents];
 
+  const usesCurrentUser = shapes.some((s) => s.operations.some(operationUsesCurrentUser));
   const bodyUsesCast = /\bcast\(/.test(body);
   return lines(
     `"""${agg.name} aggregate.  Auto-generated."""`,
@@ -165,6 +167,7 @@ export function renderPyAggregate(agg: AggregateIR, ctx: BoundedContextIR): stri
     usesDatetime ? "from datetime import UTC, datetime" : null,
     usesDecimal ? "from decimal import Decimal" : null,
     exprImports.has("re") || usesDatetime || usesDecimal ? "" : null,
+    usesCurrentUser ? "from app.auth.user import User" : null,
     errorNames.length > 0 ? `from app.domain.errors import ${errorNames.join(", ")}` : null,
     `from app.domain.events import ${eventImports.join(", ")}`,
     `from app.domain.ids import ${idImports.join(", ")}`,
@@ -333,6 +336,9 @@ function renderEntity(e: EntityShape): string {
   const ops = e.operations.flatMap((op) => {
     const prefix = op.visibility === "public" ? "" : "_";
     const params = ["self", ...op.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`)];
+    // currentUser-gated ops pick up a trailing actor parameter — the
+    // route threads `request.state.current_user` into it.
+    if (operationUsesCurrentUser(op)) params.push("current_user: User");
     const retType = op.returnType ? renderPyOperationReturnType(op.returnType) : "None";
     const body = renderPyStatements(op.statements, undefined, { eventSourced: e.eventSourced });
     return [

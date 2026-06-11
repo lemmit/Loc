@@ -9,6 +9,7 @@ import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { emitPyAuthFiles } from "./auth-emit.js";
 import {
   abstractBasesOf,
   buildPyBaseReaderFile,
@@ -82,7 +83,15 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   );
   const hasViews = merged.views.some((v) => v.source.kind === "aggregate");
   const hasWorkflows = commandWorkflowsOf(merged).length > 0;
-  out.set("app/main.py", renderMain(args.sys.name, routedAggs, hasViews, hasWorkflows));
+  // Auth scaffolding (docs/auth.md): only an `auth: required` deployable
+  // (whose system declares a `user { ... }` block) carries the verifier
+  // registry + middleware — anonymous deployables stay byte-identical.
+  const authRequired = !!(args.deployable.auth?.required && args.sys.user);
+  if (authRequired && args.sys.user) emitPyAuthFiles(args.sys.user, out);
+  out.set(
+    "app/main.py",
+    renderMain(args.sys.name, routedAggs, hasViews, hasWorkflows, authRequired),
+  );
 
   out.set("app/domain/__init__.py", "");
   out.set("app/domain/ids.py", renderPyIds(merged));
@@ -291,6 +300,7 @@ function renderMain(
   routerAggs: string[],
   hasViews = false,
   hasWorkflows = false,
+  authRequired = false,
 ): string {
   return lines(
     `"""FastAPI application entrypoint.`,
@@ -305,6 +315,8 @@ function renderMain(
     "from fastapi.middleware.cors import CORSMiddleware",
     "from sqlalchemy import text",
     "",
+    authRequired ? "from app.auth.middleware import AuthMiddleware" : null,
+    authRequired ? "from app.auth.verifier import assert_user_verifier_registered" : null,
     "from app.db.engine import engine",
     "from app.db.migrate import run_migrations",
     ...routerAggs.map(
@@ -318,6 +330,9 @@ function renderMain(
     "",
     "@asynccontextmanager",
     "async def lifespan(_: FastAPI) -> AsyncIterator[None]:",
+    // A missing verifier registration surfaces as a clear boot error
+    // instead of a 401 storm on the first request.
+    authRequired ? "    assert_user_verifier_registered()" : null,
     "    await run_migrations()",
     "    yield",
     "",
@@ -325,6 +340,10 @@ function renderMain(
     `app = FastAPI(title=${JSON.stringify(systemName)}, version="0.1.0", lifespan=lifespan)`,
     "install_error_handlers(app)",
     "",
+    // Starlette runs later-added middleware first, so AuthMiddleware is
+    // added BEFORE CORS to keep CORS outermost (auth after CORS — the
+    // same ordering the Hono/.NET pipelines mount).
+    authRequired ? "app.add_middleware(AuthMiddleware)" : null,
     "# Permissive CORS for development — pin via .loomignore to tighten.",
     "app.add_middleware(",
     "    CORSMiddleware,",

@@ -1,14 +1,26 @@
 import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  ExprIR,
-  TestIR,
-  TestStmtIR,
-  TypeIR,
+import {
+  type AggregateIR,
+  type BoundedContextIR,
+  type ExprIR,
+  operationUsesCurrentUser,
+  type TestIR,
+  type TestStmtIR,
+  type TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { snake } from "../../../util/naming.js";
 import { renderPyExpr } from "../render-expr.js";
+
+// A currentUser-gated operation's method signature picks up a trailing
+// `current_user: User` parameter; a domain `test` block has no auth
+// context, so calls to such ops are supplied a synthetic full-access
+// actor — admin role + non-empty permissions so guards pass and the
+// test exercises the op's domain logic.  Built on a SimpleNamespace +
+// cast so it stays valid regardless of the system's actual
+// `user { ... }` claim shape (the Python analogue of the TS emitter's
+// `as unknown as User`).
+const TEST_ACTOR_PY =
+  'cast(User, SimpleNamespace(id="00000000-0000-0000-0000-000000000000", role="admin", permissions=["*"]))';
 
 // ---------------------------------------------------------------------------
 // `test "..." { ... }` DSL → pytest file at `tests/test_<snake(agg)>.py`.
@@ -53,14 +65,18 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
   const usesPytest = /\bpytest\./.test(bodyStr);
   const usesDatetime = /\bdatetime\./.test(bodyStr);
   const usesDecimal = /\bDecimal\(/.test(bodyStr);
+  const usesActor = bodyStr.includes("SimpleNamespace(");
 
   const out: string[] = [];
   out.push(`"""Domain tests for ${agg.name}.  Auto-generated."""`);
-  if (usesDatetime || usesDecimal || usesPytest) out.push("");
+  if (usesDatetime || usesDecimal || usesPytest || usesActor) out.push("");
   if (usesDatetime) out.push("from datetime import datetime");
   if (usesDecimal) out.push("from decimal import Decimal");
+  if (usesActor) out.push("from types import SimpleNamespace");
+  if (usesActor) out.push("from typing import cast");
   if (usesPytest) out.push("import pytest");
   out.push("");
+  if (usesActor) out.push("from app.auth.user import User");
   if (domainNames.length > 0) {
     out.push(`from app.domain.${snake(agg.name)} import ${domainNames.join(", ")}`);
   }
@@ -87,7 +103,14 @@ function testFnName(name: string, used: Set<string>): string {
 function renderTest(t: TestIR, ctx: BoundedContextIR, used: Set<string>): string[] {
   const out: string[] = [];
   out.push(`def ${testFnName(t.name, used)}() -> None:`);
-  const stmts = t.statements.flatMap((s) => renderTestStmt(s, ctx));
+  // Track let-bound aggregate types: a bare `o.cancel()` expression
+  // statement lowers with an untyped receiver, so gated-op detection
+  // resolves the aggregate through the let's declared type instead.
+  const lets = new Map<string, string>();
+  for (const s of t.statements) {
+    if (s.kind === "let" && s.type?.kind === "entity") lets.set(s.name, s.type.name);
+  }
+  const stmts = t.statements.flatMap((s) => renderTestStmt(s, ctx, lets));
   out.push(...(stmts.length > 0 ? stmts : ["    pass"]));
   return out;
 }
@@ -95,7 +118,26 @@ function renderTest(t: TestIR, ctx: BoundedContextIR, used: Set<string>): string
 /** Render a test-body expression: `<Agg>.create({ … })` object literals
  *  become coerced keyword arguments; everything else defers to
  *  `renderPyExpr`. */
-function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
+function renderTestExpr(e: ExprIR, ctx: BoundedContextIR, lets?: Map<string, string>): string {
+  // Calls of currentUser-gated ops thread the synthetic actor as the
+  // trailing argument (mirrors the TS test emitter).  The aggregate
+  // resolves through the receiver's type when lowered, else through the
+  // let-binding table (bare expression statements lower untyped).
+  if (e.kind === "method-call" && !e.isCollectionOp && !e.isIntrinsicMatcher) {
+    const aggName =
+      e.receiverType.kind === "entity"
+        ? e.receiverType.name
+        : e.receiver.kind === "ref"
+          ? lets?.get(e.receiver.name)
+          : undefined;
+    const agg = aggName ? ctx.aggregates.find((a) => a.name === aggName) : undefined;
+    const op = agg?.operations.find((o) => o.name === e.member);
+    if (op && operationUsesCurrentUser(op)) {
+      const recv = renderTestExpr(e.receiver, ctx, lets);
+      const args = [...e.args.map((a) => renderTestExpr(a, ctx, lets)), TEST_ACTOR_PY];
+      return `${recv}.${snake(e.member)}(${args.join(", ")})`;
+    }
+  }
   if (
     e.kind === "method-call" &&
     e.member === "create" &&
@@ -158,7 +200,11 @@ const MATCHER_OP: Record<string, string> = {
 
 /** `expect(x).<matcher>(y)` / `.not.<matcher>(y)` → a comparison assert.
  *  Returns null for bare boolean assertions (caller wraps those). */
-function renderExplicitMatcher(expr: ExprIR, ctx: BoundedContextIR): string | null {
+function renderExplicitMatcher(
+  expr: ExprIR,
+  ctx: BoundedContextIR,
+  lets?: Map<string, string>,
+): string | null {
   if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) return null;
   const op = MATCHER_OP[expr.member];
   if (!op) return null;
@@ -169,30 +215,34 @@ function renderExplicitMatcher(expr: ExprIR, ctx: BoundedContextIR): string | nu
     receiver = receiver.receiver;
   }
   const inner = receiver.kind === "paren" ? receiver.inner : receiver;
-  const actual = renderTestExpr(inner, ctx);
-  const expected = expr.args.map((a) => renderTestExpr(a, ctx)).join(", ");
+  const actual = renderTestExpr(inner, ctx, lets);
+  const expected = expr.args.map((a) => renderTestExpr(a, ctx, lets)).join(", ");
   const cmp = `${actual} ${op} ${expected}`;
   return negate ? `    assert not (${cmp})` : `    assert ${cmp}`;
 }
 
-function renderTestStmt(s: TestStmtIR, ctx: BoundedContextIR): string[] {
+function renderTestStmt(
+  s: TestStmtIR,
+  ctx: BoundedContextIR,
+  lets?: Map<string, string>,
+): string[] {
   if (s.kind === "expect") {
-    const explicit = renderExplicitMatcher(s.expr, ctx);
+    const explicit = renderExplicitMatcher(s.expr, ctx, lets);
     if (explicit) return [explicit];
-    return [`    assert ${renderTestExpr(s.expr, ctx)}`];
+    return [`    assert ${renderTestExpr(s.expr, ctx, lets)}`];
   }
   if (s.kind === "expect-throws") {
-    return ["    with pytest.raises(Exception):", `        ${renderTestExpr(s.expr, ctx)}`];
+    return ["    with pytest.raises(Exception):", `        ${renderTestExpr(s.expr, ctx, lets)}`];
   }
   if (s.kind === "let") {
-    return [`    ${snake(s.name)} = ${renderTestExpr(s.expr, ctx)}`];
+    return [`    ${snake(s.name)} = ${renderTestExpr(s.expr, ctx, lets)}`];
   }
   if (s.kind === "call") {
-    const args = s.args.map((a) => renderTestExpr(a, ctx)).join(", ");
+    const args = s.args.map((a) => renderTestExpr(a, ctx, lets)).join(", ");
     return [`    ${snake(s.name)}(${args})`];
   }
   if (s.kind === "expression") {
-    return [`    ${renderTestExpr(s.expr, ctx)}`];
+    return [`    ${renderTestExpr(s.expr, ctx, lets)}`];
   }
   // Mutating kinds are validator-rejected before they reach the
   // generator — same contract as the TS emitter.

@@ -7,7 +7,7 @@ import type {
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
-import { plural, snake, upperFirst } from "../../util/naming.js";
+import { snake } from "../../util/naming.js";
 import { renderPyExpr } from "./render-expr.js";
 import { renderWorkflowStmt } from "./workflows-builder.js";
 
