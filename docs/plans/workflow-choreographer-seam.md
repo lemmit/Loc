@@ -233,9 +233,35 @@ nested loops too).
 `repo-run`±page/`for-each`/`emit`; resources: `resource-call`) — zero diff —
 plus the full `test/generator/java/` suite and both layering guards green.
 
+## .NET leaf — landed
+
+Fourth adopter, and the one the plan called hardest. `src/generator/dotnet/workflow-emit.ts`
+now supplies `csWorkflowStmtTarget(ctx, renderArg, guardLoads)` and drives the
+shared `renderWorkflowStmts` from both drivers — the command handler
+(`guardLoads = dereffedLoads`, the op-call-target set) and the event reactor
+(`guardLoads = true`). Its bespoke `renderStatement` switch is deleted. The
+target captures each driver's `renderArg` closure (cmd-param vs event-param
+substitution) and `guardLoads` policy; the `usage` arg the old switch ignored
+(`void usage`) is simply dropped. Same indent transform as Java (8-space base
+threaded in, 4-space `indentUnit`, `for-each` body stepped by the spine instead
+of a post-`+4` map).
+
+Notably the envelope confirmed the pilot's refinement: the `transactional`
+`BeginTransactionAsync`/`try`/`CommitAsync` wrap, the `_workflowEvents` dispatch
+loop, and the saga-correlation shell all stay in the drivers — only the
+statement sequence flows through the seam.
+
+**Gate:** byte-identical across the full `generateSystems` tree for 5 dotnet
+workflow examples (acme, showcase, vue-showcase, dotnet-backend, storefront-dotnet
+— the last a transactional `checkout` saga) — **1,230 files, zero diff** — plus
+the full `test/generator/dotnet/` suite (256 tests) and both layering guards green.
+
 ## Next step
 
-Roll the `WorkflowStmtTarget` leaf out to **.NET** (the hardest — explicit
-`BeginTransactionAsync` envelope, largest leaf set), then assess **Elixir** last
-per Risks. The envelope (transaction/dispatch/route shell) is explicitly **out
-of scope** for the seam — it stays per-backend.
+Only **Elixir** remains, and it is the **conditional** one (see Risks): its body
+composes as a `with`-chain and `for-each` lowers to `Enum.reduce_while` — a
+different control-flow *topology*, not just spelling. Assess whether it fits the
+spine without a leaky "compose mode"; if not, Elixir keeps its own emitter and
+the seam is declared done at 4 of 5 backends. The envelope
+(transaction/dispatch/route shell) is explicitly **out of scope** — it stays
+per-backend on every adopter.
