@@ -35,6 +35,8 @@ npm run test:e2e          # LOOM_E2E=1 — boots docker-compose stack + hits /he
 npm run test:tsc          # LOOM_TS_BUILD=1 — emits TS projects and runs `tsc --noEmit` against them
 npm run test:tsc-react    # LOOM_REACT_BUILD=1 — emits React projects for every example × design pack and tscs them
                           # CI shards via LOOM_REACT_BUILD_CASE=<ddd-path>:<pack>
+npm run test:svelte-build # LOOM_SVELTE_BUILD=1 — emits SvelteKit projects (examples × svelte packs), svelte-checks + vite-builds them
+                          # CI shards via LOOM_SVELTE_BUILD_CASE=<ddd-path>:<pack>
 npm run test:dotnet       # LOOM_DOTNET_BUILD=1 — `dotnet build /warnaserror` against generated .NET projects
 npm run test:java         # LOOM_JAVA_BUILD=1 — `gradle testClasses bootJar` against generated Spring Boot projects (JDK 21 + Gradle)
 npm run test:phoenix      # LOOM_PHOENIX_BUILD=1 — `mix compile --warnings-as-errors` against real Ash 3.x in Elixir docker
@@ -124,7 +126,7 @@ The three expression renderers share one dispatcher: `src/generator/_expr/target
 
 Page bodies in the `ui` DSL are written in a closed primitive library (`List`/`Detail`/`Form`/`MasterDetail`/`Stack`/`Heading`/`Button`/`Card`/`Toolbar`/`match`/lambdas/`state := …`). The dispatch registry lives in `src/generator/_walker/registry.ts`; `src/language/walker-stdlib.ts` holds the name-only mirror consumed by the validator (pinned by `walker-stdlib-completeness.test.ts`). Contributors adding a primitive register it in both places — the test gates the mirror. The renderer lives in `src/generator/react/body-walker.ts` and dispatches per-primitive through the active **design pack** (`designs/mantine|shadcn|mui|chakra/`, plus `designs/ashPhoenix/` for Phoenix HEEx). The `walker-*.test.ts` files (~30 of them) each cover one primitive or rendering concern; if you change the walker, expect to touch one of these.
 
-The framework-specific seams (state read/write syntax, helper imports, navigation, API call lowering, `match` rendering) are framework-shaped and cannot be expressed as pack templates. `src/generator/_walker/target.ts` **defines** the `WalkerTarget` contract that captures them. Both targets are now implemented and consumed: `src/generator/react/walker/tsx-target.ts` (consumed by `body-walker.ts`) and `src/generator/elixir/heex-target.ts` (consumed by `heex-walker.ts`). The byte-identical-output gate guarded each per-seam extraction (Phase A Item 1 slices; see PRs #607, #610, #612, #616, #622, #623, #624, #625, #627).
+The framework-specific seams (state read/write syntax, helper imports, navigation, API call lowering, `match` rendering, plus the markup seams — comments, conditional children, style attr, text escaping, children slot, form-runtime imports) are framework-shaped and cannot be expressed as pack templates. `src/generator/_walker/target.ts` **defines** the `WalkerTarget` contract that captures them. Three targets are implemented and consumed: `src/generator/react/walker/tsx-target.ts`, `src/generator/svelte/walker/svelte-target.ts` (both consumed by the SHARED walker core at `src/generator/_walker/walker-core.ts` — the old `react/body-walker.ts` is a thin re-export + `walkBodyToTsx` entry), and `src/generator/elixir/heex-target.ts` (consumed by the parallel `heex-walker.ts`). The byte-identical-output gate guarded each extraction (Phase A Item 1 slices: PRs #607–#627; the Svelte-port walker move + seam additions repeated the same gate). Framework-neutral frontend pieces shared by react + svelte (zod schema emission, menu derivation, Playwright page objects, the e2e harness, the smoke spec) live under `src/generator/_frontend/`.
 
 ### Scaffolding
 
@@ -147,8 +149,8 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 | `packages/` | **Publish-shaped workspaces** discovered by the plugin resolver: `@loom/core` (the toolchain library + `PlatformSurface` contract), `@loom/backend-hono-v4` (versioned Hono backend), `@loom/ui-test-driver` (the cross-window page-object/locator runtime), `ddd-mcp` (the MCP stdio-server publish wrapper — `bin` + the SDK dep over `src/mcp/`).  Each `package.json` carries a `loom` key (`kind: "core"\|"backend"\|"mcp-server"`, `family`, `loomVersion`, `core` semver range) read by `src/platform/fs-discovery.ts` — this is the out-of-tree backend story. |
 | `web/` | Separate package — the browser-side playground. Imports the Loom toolchain straight from `../src` (pure TS, no Node-only APIs except `src/cli/` and `src/language/main.ts`). Has its own `package.json`, `playwright.config.ts`, and Vite shim that swaps `_packs/loader-fs.js` for a VFS-backed loader. |
 | `vscode/` | Separate package — VS Code extension (LSP client). Has its own `package.json`; builds against the compiled toolchain. |
-| `designs/` | Design packs (Mantine / shadcn / MUI / Chakra / ashPhoenix). Each pack is a tree of templates that the body-walker dispatches into. |
-| `api/`, `vite/`, `docker/` | Top-level `.hbs` snippets — boilerplate for generated projects (API client, vite config, dockerfile). |
+| `designs/` | Design packs (Mantine / shadcn / MUI / Chakra for React, shadcnSvelte / flowbite for Svelte, ashPhoenix for HEEx). Each pack is a tree of templates that the body-walker dispatches into. |
+| `api/`, `vite/`, `docker/`, `sveltekit/` | Top-level `.hbs` snippets — boilerplate for generated projects (API client, vite config, dockerfile; `sveltekit/` is the svelte-format packs' shared layer). |
 | `stacks/v1/`, `v2/`, `v3/` | Versioned Handlebars templates for generated-project `package.json` dependency / devDependency blocks (`stack-package-deps.hbs`, `stack-package-devdeps.hbs`, `stack.json` manifest).  The active stack version is chosen per generated deployable based on its platform pins. |
 | `phoenix/` | Top-level companion docs for the Phoenix backend (README). |
 | `examples/`, `web/src/examples/` | Sample `.ddd` files. CI's `generated-react-build.yml` matrix iterates `examples/acme.ddd` + everything under `web/src/examples/` × every design pack. |
@@ -192,6 +194,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `langium-generated.yml` — guards that `npm run langium:generate` produces deterministic output (drift between `ddd.langium` and the committed types).
 - `pages.yml` — typecheck + smoke + build playground + deploy docs/playground to GitHub Pages (main only).
 - `generated-react-build.yml` — matrix `{example × pack}`, generates the React project, `npm install`, `tsc --noEmit`. Catches generator drift invisible to IR-level tests.
+- `generated-svelte-build.yml` — matrix `{example × svelte pack}`, generates the SvelteKit project, `npm install`, `svelte-check --fail-on-warnings`, `vite build`.
 - `hono-build.yml` — fast `tsc --noEmit` + `tsup` gate against the Hono backend output.
 - `dotnet-build.yml` — `dotnet build /warnaserror` against the .NET output.
 - `java-build.yml` — `gradle testClasses bootJar` (main + emitted JUnit sources) against the Java output.

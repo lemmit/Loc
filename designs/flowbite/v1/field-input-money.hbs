@@ -1,0 +1,5 @@
+<div class="flex flex-col gap-2">
+          <Label for="{{testId}}">{{label}}</Label>
+          <Input id="{{testId}}" type="text" inputmode="decimal" data-testid="{{testId}}" value={form.values.{{path}} instanceof Decimal ? form.values.{{path}}.toString() : String(form.values.{{path}} ?? "0")} oninput={(e) => { try { form.values.{{path}} = new Decimal((e.currentTarget as HTMLInputElement).value || "0"); } catch { form.values.{{path}} = new Decimal("0"); } }} />
+          {#if form.errors["{{path}}"]}<Helper color="red">{form.errors["{{path}}"]}</Helper>{/if}
+        </div>

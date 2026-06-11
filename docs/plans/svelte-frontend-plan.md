@@ -1,5 +1,40 @@
 # Svelte frontend — implementation plan
 
+> **Status (2026-06): IMPLEMENTED** — slices 1–10 landed on
+> `claude/dazzling-ride-6r2ux7`.  Deltas vs the plan, decided during
+> implementation:
+>
+> - `@tanstack/svelte-query` landed at **v6** (the runes-native line —
+>   `createQuery(() => opts)` returning a reactive object), not v5;
+>   the generated factories keep the TSX hook names.
+> - The walker gained **six** new `WalkerTarget` methods, not three:
+>   the four markup seams plus `renderChildrenSlot` (Svelte renders
+>   children as `{@render children?.()}`) and `formRuntimeImports`
+>   (react-hook-form's import set moved off the shared form
+>   primitives onto the TSX target).
+> - shadcnSvelte ships **hand-rolled tailwind-4 markup** (one vendored
+>   `Tabs.svelte`), not vendored bits-ui components — zero component
+>   deps proved more robust for generated code; flowbite@v1 is the
+>   npm-model pack (real `flowbite-svelte` components).
+> - Operation-form modals render as page-scope
+>   `{#snippet <op>OpModal(form)}` blocks (one component per .svelte
+>   file — module scope lands in the template).
+>
+> **Known follow-ups (deliberately out of this pass):**
+> - Named layouts map to the `(app)` chrome group (no per-layout route
+>   group yet); `layout: none` works via `(bare)`.
+> - `extern` components throw a clear error on svelte (escape hatch
+>   not wired).
+> - Phoenix hosting of svelte uis is rejected by the validator —
+>   SvelteKit under the `/app` path prefix needs `paths.base`
+>   threading (nav hrefs, goto, assets).
+> - Playground in-browser svelte preview (per the original scope
+>   decision).
+> - Docker-compose boot e2e for the svelte example (the compile +
+>   smoke surface is gated; the booted-stack Playwright pass rides
+>   the existing LOOM_E2E machinery once a svelte deployable joins a
+>   compose example).
+
 Add **Svelte 5 as a second frontend platform** (`platform: svelte`) with feature
 parity to React, plus **two Svelte design packs** (`shadcnSvelte`, `flowbite`)
 with feature parity to `react`/`mantine`. This plan supersedes the

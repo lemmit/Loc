@@ -11,7 +11,7 @@ import {
   chainSingleFieldNative,
   refineClauseFor,
   takeSingleFieldChain,
-} from "../../../generator/typescript/zod-refine.js";
+} from "../../../generator/zod-refine.js";
 import { wireShapeFor } from "../../../ir/enrich/enrichments.js";
 import {
   createInputFields,

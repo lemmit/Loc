@@ -14,7 +14,7 @@
 // icon's intrinsic dimensions.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { lookupBuiltinIcon } from "../../react/walker/icons.js";
+import { lookupBuiltinIcon } from "../icons.js";
 import { renderPrimitive } from "../render-primitive.js";
 import { stringNamed } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";

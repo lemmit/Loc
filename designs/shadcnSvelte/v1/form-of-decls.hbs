@@ -1,0 +1,3 @@
+  const create = useCreate{{aggregateName}}();
+{{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
+{{/each}}  const form = createForm(Create{{aggregateName}}Request, {{{defaultValuesTs}}});

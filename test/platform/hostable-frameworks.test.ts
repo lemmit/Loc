@@ -21,36 +21,30 @@ const sorted = (s: ReadonlySet<string>) => [...s].sort();
 
 describe("hostableFrameworks — the host-capability rule", () => {
   it("every static-asset host serves exactly the static-bundle frameworks", () => {
-    // The standalone frontend host plus every backend that serves a
+    // The standalone frontend hosts plus every backend that serves a
     // static root (dotnet → wwwroot, hono → static middleware).
-    for (const p of ["react", "static", "dotnet", "hono"] as Platform[]) {
+    for (const p of ["react", "svelte", "static", "dotnet", "hono"] as Platform[]) {
       expect(sorted(platformFor(p).hostableFrameworks)).toEqual(sorted(STATIC_BUNDLE_FRAMEWORKS));
     }
   });
 
-  it("Phoenix is the keystone — its runtime framework UNIONED with the static bundles", () => {
+  it("Phoenix hosts LiveView + the react bundles — svelte awaits paths.base wiring", () => {
     const phoenix = platformFor("phoenixLiveView").hostableFrameworks;
     // Hosts its own runtime-coupled LiveView…
     expect(phoenix.has("phoenixLiveView")).toBe(true);
-    // …AND every static-bundle framework (priv/static).
-    for (const f of STATIC_BUNDLE_FRAMEWORKS) {
-      expect(phoenix.has(f)).toBe(true);
-    }
-  });
-
-  it("Phoenix has the strictly richest set (the only render-runtime + static-host platform)", () => {
-    const phoenix = platformFor("phoenixLiveView").hostableFrameworks;
-    for (const p of ["react", "static", "dotnet", "hono"] as Platform[]) {
-      const other = platformFor(p).hostableFrameworks;
-      // Phoenix is a proper superset of every other platform's set.
-      expect(other.size).toBeLessThan(phoenix.size);
-      for (const f of other) expect(phoenix.has(f)).toBe(true);
-    }
+    // …and the react static bundles (priv/static under /app).
+    expect(phoenix.has("react")).toBe(true);
+    expect(phoenix.has("static")).toBe(true);
+    // A SvelteKit bundle under the /app path prefix needs `paths.base`
+    // threading (svelte-frontend-plan.md follow-up) — deliberately
+    // not hostable yet, so the validator rejects it loudly instead of
+    // emitting a bundle whose deep links 404.
+    expect(phoenix.has("svelte")).toBe(false);
   });
 
   it("LiveView is hostable ONLY by Phoenix (runtime-coupled, not a static bundle)", () => {
     expect(STATIC_BUNDLE_FRAMEWORKS.has("phoenixLiveView")).toBe(false);
-    for (const p of ["react", "static", "dotnet", "hono"] as Platform[]) {
+    for (const p of ["react", "svelte", "static", "dotnet", "hono"] as Platform[]) {
       expect(platformFor(p).hostableFrameworks.has("phoenixLiveView")).toBe(false);
     }
   });

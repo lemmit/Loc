@@ -329,4 +329,18 @@ export interface WalkerTarget {
    *  entities; Svelte's template grammar shares the same significant
    *  set, so the entity escape carries over; HEEx escapes its own. */
   escapeText(text: string): string;
+
+  /** OPTIONAL — page-side import lines the form runtime needs.
+   *  Omitted targets fall back to the react-hook-form import set
+   *  (TSX's `useForm` / `Controller`); Svelte returns `[]` — the
+   *  runes `createForm` import rides the pack templates. */
+  formRuntimeImports?(
+    useController: boolean,
+  ): ReadonlyArray<{ from: string; named: readonly string[] }>;
+
+  /** OPTIONAL — children-slot spelling for the `Slot()` primitive.
+   *  Omitted targets fall back to the JSX `{children}` idiom (TSX,
+   *  Vue's render path); Svelte 5 overrides with
+   *  `{@render children?.()}` (snippets aren't interpolatable). */
+  renderChildrenSlot?(): string;
 }

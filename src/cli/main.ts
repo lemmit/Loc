@@ -844,7 +844,7 @@ program
   .option("--template <template>", "starter model: blank | crud (default: crud)")
   .option(
     "--design <pack>",
-    "frontend: mantine | shadcn | mui | chakra (React), or ashPhoenix (Phoenix LiveView)",
+    "frontend: mantine | shadcn | mui | chakra (React), shadcnSvelte | flowbite (Svelte), or ashPhoenix (Phoenix LiveView)",
   )
   .option("-o, --out <dir>", "output directory (default: ./<name>)")
   .option("--force", "scaffold into an existing, non-empty directory")
