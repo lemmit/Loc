@@ -249,9 +249,9 @@ Tier 3 — partially-shipped families
   loads: plans; criterion selectability tail; payload P3-full + P5;
   exception-less remainder per failure-taxonomy (A4 = the one
   coordinated rebaseline); channels realtime wire; outbox;
-  dapper/mikroorm scope decision; storage dataSource tail; F5d +
-  MVC transport; sensitivity 2–4; audit promotion; React/forms/
-  extern remainders; resource-kind codegen; seeding tail;
+  dapper/mikroorm scope decision; storage dataSource tail;
+  sensitivity 2–4; audit promotion; React/forms remainders;
+  resource-kind codegen; seeding tail;
   inheritance I4.
 
 Tier 4 — unstarted families (dependency spine)

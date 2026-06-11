@@ -4,13 +4,13 @@
 // into the right DotnetArtifactCategory so the byLayer layout
 // adapter can route them without ambiguity.
 //
-// The per-op `emitEndpoint` / `emitHandlerOrService` methods throw
-// AdapterNotImplementedError until the F5d orchestrator rewire
-// decomposes `emitCqrs` into per-op pieces — that's deliberate and
-// covered by the test below.
+// The per-op `emitEndpoint` / `emitHandlerOrService` methods are real
+// since the F5d decomposition split `emitCqrs` into per-op pieces;
+// byte-equality with the per-aggregate packaging is gated by
+// `cqrs-style-per-op.test.ts`.
 
 import { describe, expect, it } from "vitest";
-import { AdapterNotImplementedError, type EmitCtx } from "../../src/generator/_adapters/index.js";
+import type { EmitCtx } from "../../src/generator/_adapters/index.js";
 import { cqrsStyleAdapter } from "../../src/generator/dotnet/adapters/cqrs-style.js";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
@@ -140,12 +140,14 @@ describe("cqrs StyleAdapter — dotnet (real)", () => {
     }
   });
 
-  it("per-op emitEndpoint + emitHandlerOrService throw until the F5d rewire decomposes emitCqrs", async () => {
+  it("per-op emitEndpoint + emitHandlerOrService are real (F5d) — byte-equality is gated in cqrs-style-per-op.test.ts", async () => {
     const ctx = await buildCtx();
     const op = ctx.contexts[0]!.aggregates[0]!.operations[0]!;
-    expect(() => cqrsStyleAdapter.emitEndpoint(op, ctx)).toThrow(AdapterNotImplementedError);
-    expect(() => cqrsStyleAdapter.emitHandlerOrService(op, ctx)).toThrow(
-      AdapterNotImplementedError,
+    const endpoint = cqrsStyleAdapter.emitEndpoint(op, ctx);
+    expect(endpoint.join("\n")).toContain("[HttpPost(");
+    const artifacts = cqrsStyleAdapter.emitHandlerOrService(op, ctx);
+    expect(artifacts.map((a) => a.name)).toContain(
+      `${op.name[0]!.toUpperCase()}${op.name.slice(1)}Command.cs`,
     );
   });
 });
