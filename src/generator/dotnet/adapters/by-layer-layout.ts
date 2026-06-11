@@ -56,7 +56,7 @@ export type DotnetArtifactCategory =
   | "query" // includes get-by-id + per-find
   | "query-handler"
   | "validation-behavior"
-  | "domain-log-behavior"
+  | "execution-context-behavior"
   | "extern-handler-interface"
   | "extern-handler-stub"
   // View + workflow artifacts live under per-context shared folders,
@@ -172,7 +172,7 @@ function pathForCategory(artifact: DotnetArtifact): string {
       return `Application/Workflows/${name}`;
     case "validation-behavior":
       return `Application/Common/${name}`;
-    case "domain-log-behavior":
+    case "execution-context-behavior":
       return `Application/Common/${name}`;
     case "extern-handler-interface":
     case "extern-handler-stub":

@@ -49,6 +49,7 @@ const dotnetPlatform: PlatformSurface = {
     migrations,
     styleAdapter,
     layoutAdapter,
+    emitTrace,
   }): Map<string, string> {
     const namespace = deployable.name[0]!.toUpperCase() + deployable.name.slice(1);
     // The orchestrator (`generator/dotnet/index.ts`) dispatches
@@ -64,13 +65,18 @@ const dotnetPlatform: PlatformSurface = {
     // platformFor → registry).  When the orchestrator passes none (legacy
     // single-context generate mode), the generator falls back to its own
     // sibling adapters — byte-identical under the size-1 real menus.
-    return generateDotnetForContexts(contexts, namespace, {
-      deployable,
-      sys,
-      migrations,
-      styleAdapter,
-      layoutAdapter,
-    });
+    return generateDotnetForContexts(
+      contexts,
+      namespace,
+      {
+        deployable,
+        sys,
+        migrations,
+        styleAdapter,
+        layoutAdapter,
+      },
+      { emitTrace },
+    );
   },
   composeService({ slug }): ComposeServiceShape {
     return {

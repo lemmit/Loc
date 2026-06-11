@@ -410,38 +410,54 @@ describe(".NET generator", () => {
       );
     });
 
-    it("--trace on: emits DomainLog accessor + DomainLogBehavior + domain trace injections", async () => {
+    it("--trace on: emits DomainLog shim + RequestContext carrier + ExecutionContextBehavior + domain trace injections", async () => {
       // Phase 8 .NET domain-trace v1 — mirrors Hono Phase 6.  Aggregate
       // methods can't take ILogger via constructor (they're POCO
-      // entities, not DI-managed), so the compile-time --trace
-      // switch emits a Domain/Common/DomainLog.cs static accessor
-      // backed by AsyncLocal<ILogger?>, a Mediator pipeline behavior
-      // that sets it per command/query from the request-scoped
-      // logger, and renders trace lines through DomainLog.LogTrace
-      // at the catalog's domain seams (value_computed after every
-      // scalar assign; precondition_evaluated as a bound-temp wrap).
+      // entities, not DI-managed), so the compile-time --trace switch
+      // surfaces the request logger as a SLICE of the ambient
+      // RequestContext: a Domain/Common/DomainLog.cs shim reads
+      // RequestContext.Current?.Logger, ExecutionContextBehavior binds it
+      // per dispatch, and trace lines render through DomainLog.LogTrace at
+      // the catalog's domain seams (value_computed after every scalar
+      // assign; precondition_evaluated as a bound-temp wrap).
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model, { emitTrace: true });
 
-      // 1. Accessor + behavior emitted.
+      // 1. DomainLog is now a shim over the RequestContext logger slice
+      // (no AsyncLocal of its own).
       const log = files.get("Domain/Common/DomainLog.cs")!;
       expect(log).toMatch(/public static class DomainLog/);
-      expect(log).toMatch(/AsyncLocal<ILogger\?>/);
+      expect(log).toMatch(/public static ILogger\? Current => RequestContext\.Current\?\.Logger;/);
+      expect(log).not.toMatch(/AsyncLocal/);
       expect(log).toMatch(/public static void LogTrace\(string template, params object\[\] args\)/);
 
-      const behavior = files.get("Application/Common/DomainLogBehavior.cs")!;
+      // 2. The ambient carrier is emitted (trace-only here: a Logger
+      // slice, no CurrentUser since this legacy path has no auth) along
+      // with the boundary middleware that opens the root frame.
+      const rc = files.get("Domain/Common/RequestContext.cs")!;
+      expect(rc).toMatch(/public sealed class RequestContext/);
+      expect(rc).toMatch(/AsyncLocal<RequestContext\?> _current/);
+      expect(rc).toMatch(/public ILogger\? Logger \{ get; set; \}/);
+      expect(rc).not.toMatch(/CurrentUser/);
+      expect(files.has("Middleware/RequestContextMiddleware.cs")).toBe(true);
+
+      // 3. ExecutionContextBehavior binds the logger onto the frame and
+      // restores it in finally so reentrant Send calls stack cleanly.
+      const behavior = files.get("Application/Common/ExecutionContextBehavior.cs")!;
       expect(behavior).toMatch(/IPipelineBehavior<TMessage, TResponse>/);
-      expect(behavior).toMatch(/DomainLog\.Current = _log;/);
-      // Restores the previous value on exit so reentrant Send calls
-      // stack cleanly.
-      expect(behavior).toMatch(/var prev = DomainLog\.Current;/);
-      expect(behavior).toMatch(/DomainLog\.Current = prev;/);
+      expect(behavior).toMatch(/rc\.Logger = _log;/);
+      expect(behavior).toMatch(/var prev = rc\.Logger;/);
+      expect(behavior).toMatch(/rc\.Logger = prev;/);
+      expect(files.has("Application/Common/DomainLogBehavior.cs")).toBe(false);
 
-      // 2. Program.cs registers the pipeline behavior.
+      // 4. Program.cs mounts the boundary middleware first and registers
+      // the renamed pipeline behaviour.
       const program = files.get("Program.cs")!;
-      expect(program).toMatch(/typeof\(.+\.Application\.Common\.DomainLogBehavior<,>\)/);
+      expect(program).toMatch(/app\.UseMiddleware<.+\.Middleware\.RequestContextMiddleware>\(\);/);
+      expect(program).toMatch(/typeof\(.+\.Application\.Common\.ExecutionContextBehavior<,>\)/);
+      expect(program).not.toMatch(/DomainLogBehavior/);
 
-      // 3. Aggregate ops get value_computed + precondition_evaluated.
+      // 5. Aggregate ops get value_computed + precondition_evaluated.
       const order = files.get("Domain/Orders/Order.cs")!;
       // precondition_evaluated — bound temp + trace + conditional throw.
       expect(order).toMatch(/var __pre_\d+_ok = \(/);
@@ -456,16 +472,23 @@ describe(".NET generator", () => {
       );
     });
 
-    it("--trace off: domain layer stays free of DomainLog accessor + behavior + injections", async () => {
+    it("--trace off: domain layer stays free of DomainLog shim + behavior + carrier + injections", async () => {
       // The whole point of the compile-time switch — off path emits
-      // NOTHING domain-trace-related.  No DomainLog.cs, no behavior,
-      // no Program.cs registration, no LogTrace calls in entities.
+      // NOTHING domain-trace-related.  No DomainLog.cs, no behavior, no
+      // Program.cs registration, no LogTrace calls in entities.  And with
+      // no auth either (legacy path), the ambient carrier + its boundary
+      // middleware stay absent too — the byte-identical-when-off contract.
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model); // no emitTrace
       expect(files.has("Domain/Common/DomainLog.cs")).toBe(false);
+      expect(files.has("Application/Common/ExecutionContextBehavior.cs")).toBe(false);
       expect(files.has("Application/Common/DomainLogBehavior.cs")).toBe(false);
+      expect(files.has("Domain/Common/RequestContext.cs")).toBe(false);
+      expect(files.has("Middleware/RequestContextMiddleware.cs")).toBe(false);
       const program = files.get("Program.cs")!;
       expect(program).not.toMatch(/DomainLogBehavior/);
+      expect(program).not.toMatch(/ExecutionContextBehavior/);
+      expect(program).not.toMatch(/RequestContextMiddleware/);
       const order = files.get("Domain/Orders/Order.cs")!;
       expect(order).not.toMatch(/DomainLog\./);
       expect(order).not.toMatch(/__pre_\d+_ok/);
@@ -1500,6 +1523,64 @@ describe(".NET generator", () => {
       const handler = files.get("Application/Orders/Commands/CancelHandler.cs")!;
       expect(handler).toMatch(/ICurrentUserAccessor _currentUser/);
       expect(handler).toMatch(/aggregate\.Cancel\(_currentUser\.User\)/);
+    });
+
+    it("auth convergence: principal rides the ambient RequestContext (one source of truth)", async () => {
+      // The principal is no longer stashed on HttpContext.Items — it is a
+      // slice of the ambient RequestContext.  UserMiddleware writes the
+      // frame; the accessor (a thin facade) reads it.  See
+      // docs/architecture/request-context.md.
+      const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
+      // Carrier emitted with the CurrentUser slice (auth) and no Logger
+      // slice (trace off in this helper).
+      const rc = files.get("Domain/Common/RequestContext.cs")!;
+      expect(rc).toMatch(/public sealed class RequestContext/);
+      expect(rc).toMatch(/public User\? CurrentUser \{ get; set; \}/);
+      expect(rc).not.toMatch(/public ILogger\? Logger/);
+      // Boundary middleware emitted and mounted FIRST — before the request
+      // log, which is before user verification.
+      expect(files.has("Middleware/RequestContextMiddleware.cs")).toBe(true);
+      const program = files.get("Program.cs")!;
+      const rcm = program.search(/UseMiddleware<[^>]*RequestContextMiddleware>/);
+      const rlm = program.search(/UseMiddleware<[^>]*RequestLoggingMiddleware>/);
+      const um = program.search(/UseMiddleware<UserMiddleware>/);
+      expect(rcm).toBeGreaterThan(-1);
+      expect(rcm).toBeLessThan(rlm);
+      expect(rlm).toBeLessThan(um);
+      // UserMiddleware writes the frame; no HttpContext.Items channel.
+      const mw = files.get("Auth/UserMiddleware.cs")!;
+      expect(mw).toMatch(/rc\.CurrentUser = user;/);
+      expect(mw).not.toMatch(/Items\["currentUser"\]/);
+      // The accessor reads the frame — no IHttpContextAccessor dependency.
+      const acc = files.get("Auth/HttpContextCurrentUserAccessor.cs")!;
+      expect(acc).toMatch(/RequestContext\.Current/);
+      expect(acc).toMatch(/return rc\.CurrentUser/);
+      expect(acc).not.toMatch(/IHttpContextAccessor/);
+    });
+
+    it("system-mode forwards --trace through the platform surface (emitTrace not dropped)", async () => {
+      // Guards the platform/dotnet.ts emitProject forward: before the fix
+      // emitTrace was never threaded into the generator in system mode, so
+      // the trace artefacts silently vanished off the product path (only
+      // the legacy single-context generate entry exercised --trace).
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(SRC_AUTH_REQUIRED, { validation: true });
+      const { lowerModel } = await import("../../../src/ir/lower/lower.js");
+      const { enrichLoomModel } = await import("../../../src/ir/enrich/enrichments.js");
+      const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+      const sys = loom.systems[0]!;
+      const dep = sys.deployables.find((d) => d.platform === "dotnet")!;
+      const contexts = sys.subdomains.flatMap((m) => m.contexts);
+      const platform = (await import("../../../src/platform/dotnet.js")).default;
+      const files = platform.emitProject({ contexts, deployable: dep, sys, emitTrace: true });
+      expect(files.has("Application/Common/ExecutionContextBehavior.cs")).toBe(true);
+      expect(files.has("Domain/Common/DomainLog.cs")).toBe(true);
+      // With auth AND trace, the carrier carries both slices.
+      const rc = files.get("Domain/Common/RequestContext.cs")!;
+      expect(rc).toMatch(/public User\? CurrentUser/);
+      expect(rc).toMatch(/public ILogger\? Logger/);
     });
 
     // -----------------------------------------------------------------------

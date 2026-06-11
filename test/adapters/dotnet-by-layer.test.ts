@@ -123,8 +123,8 @@ describe("byLayer LayoutAdapter (real)", () => {
     expect(p({ name: "ValidationBehavior.cs", category: "validation-behavior" })).toBe(
       "Application/Common/ValidationBehavior.cs",
     );
-    expect(p({ name: "DomainLogBehavior.cs", category: "domain-log-behavior" })).toBe(
-      "Application/Common/DomainLogBehavior.cs",
+    expect(p({ name: "ExecutionContextBehavior.cs", category: "execution-context-behavior" })).toBe(
+      "Application/Common/ExecutionContextBehavior.cs",
     );
   });
 

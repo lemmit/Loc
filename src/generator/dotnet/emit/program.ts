@@ -49,11 +49,11 @@ export function renderProgram(
     /** When true (a `seed` block is present), adds a `Seed.RunSeeds(...)`
      *  startup call after `Database.Migrate()` (database-seeding.md). */
     hasSeeds?: boolean;
-    /** When true, register `DomainLogBehavior` (a Mediator pipeline
-     *  behavior) so the request-scoped ILogger reaches the domain
-     *  layer via `DomainLog.Current` — used by --trace-injected
-     *  trace calls in aggregate methods.  Off keeps Program.cs
-     *  free of the registration entirely. */
+    /** When true, register `ExecutionContextBehavior` (a Mediator
+     *  pipeline behaviour) so the request-scoped ILogger reaches the
+     *  domain layer via `DomainLog.Current` (the RequestContext logger
+     *  slice) — used by --trace-injected trace calls in aggregate
+     *  methods.  Off keeps Program.cs free of the registration entirely. */
     emitTrace?: boolean;
     /** When true, the deployable has channel-routed event subscriptions, so
      *  Program.cs registers the in-process Mediator-notification dispatcher
@@ -279,16 +279,16 @@ builder.Services.AddScoped(
 }${
   emitTrace
     ? `
-// DomainLogBehavior — Mediator pipeline behavior that surfaces the
-// request-scoped ILogger to the domain layer via DomainLog.Current
-// (AsyncLocal).  --trace-injected log calls in aggregate methods
-// resolve through that accessor, so the per-request correlation
-// reaches domain code without a constructor-injection refactor.
-// Emitted only when --trace is on; off path keeps Program.cs free
-// of the registration entirely.
+// ExecutionContextBehavior — Mediator pipeline behaviour that binds the
+// request logger onto the ambient RequestContext for the duration of
+// each dispatch.  --trace-injected log calls in aggregate methods
+// resolve through DomainLog → the frame's logger slice, so the
+// per-request correlation reaches domain code without a
+// constructor-injection refactor.  Emitted only when --trace is on; off
+// path keeps Program.cs free of the registration entirely.
 builder.Services.AddScoped(
     typeof(Mediator.IPipelineBehavior<,>),
-    typeof(${ns}.Application.Common.DomainLogBehavior<,>));
+    typeof(${ns}.Application.Common.ExecutionContextBehavior<,>));
 `
     : ""
 }
@@ -460,7 +460,16 @@ ${
     }
 });`
 }
-// Catalog-identity request log — emits the cross-backend
+${
+  authRequired || emitTrace
+    ? `// Ambient execution context — births the RequestContext (correlation
+// id, locale, start time) and opens the root frame.  Mounted FIRST so
+// the frame covers the entire pipeline, including the request log and
+// bypassed / unauthenticated paths.  See Middleware/RequestContextMiddleware.cs.
+app.UseMiddleware<${ns}.Middleware.RequestContextMiddleware>();
+`
+    : ""
+}// Catalog-identity request log — emits the cross-backend
 // request_start / request_end events (same envelope shape Hono
 // and Phoenix produce).  Mounted FIRST so its Stopwatch covers the
 // full pipeline (auth, routing, controller body, serialization).
