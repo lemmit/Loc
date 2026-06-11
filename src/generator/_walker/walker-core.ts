@@ -51,6 +51,7 @@
 //   - `isWalkableLayoutBody(body)` — predicate the page emitter
 //     uses to decide whether to dispatch to the walker.
 
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -62,7 +63,6 @@ import type {
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../language/walker-stdlib.js";
-import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { tryDetectApiHook } from "./api-hook-detector.js";
 import { registerApiHook } from "./api-hook-register.js";
@@ -687,7 +687,7 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       }));
       const elseArm = expr.otherwise ? walk(expr.otherwise, ctx, depth + 1) : undefined;
       const inner = ctx.target.renderMatch(arms, elseArm);
-      return depth === 0 ? inner : `{${inner}}`;
+      return depth === 0 ? inner : ctx.target.renderInterpolation(inner);
     }
     case "ternary": {
       // Conditional rendering.  `cond ? <A /> : <B />`
