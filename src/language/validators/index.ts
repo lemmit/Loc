@@ -34,8 +34,8 @@ export {
   checkStatement,
 } from "./statements.js";
 export {
-  checkAggregate,
   checkActionTypePosition,
+  checkAggregate,
   checkContainment,
   checkContext,
   checkEntityPart,
