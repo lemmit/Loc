@@ -435,6 +435,13 @@ function emitWorkflowStateTable(wf: WorkflowIR, ctx: BoundedContextIR): string {
       lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
     }
   }
+  // Idempotent-consumer marker (dispatch-delivery-semantics.md §3): under a
+  // durable channel the relay redelivers at-least-once, so the saga row
+  // records the last processed outbox event id — the handler preamble
+  // no-ops on a repeat.  Ephemeral-only contexts stay byte-identical.
+  if (durableEventTypes(ctx).size > 0) {
+    lines.push(`  lastEventId: text("last_event_id"),`);
+  }
   lines.push(`});`);
   return lines.join("\n");
 }

@@ -41,7 +41,7 @@ function producesProblem(kind: OpErrorKind, guarded = false, indent = "    "): s
  *  the catalog's `wire_in` event after binding `[FromBody]`.  Op
  *  param names (lowerCamel — matching the wire JSON key set the
  *  request was de-serialised from) flow through `publicOps[i].paramNames`. */
-interface ControllerShape {
+export interface ControllerShape {
   /** The strongly-typed id class to construct from a route id (default
    *  `<Agg>Id`; a TPH concrete uses its base's `<Base>Id`). */
   idClass?: string;
@@ -130,122 +130,13 @@ export function renderController(
 
   const createBody = renderCmdConstructorBody(shape.createCmdArgs, "            ");
 
-  const opBlocks = shape.publicOps.flatMap((op) => {
-    const cmdArgs = [`new ${idClass}(id)`, ...op.cmdArgs];
-    const cmdBody = renderCmdConstructorBody(cmdArgs, "            ");
-    // wire_in (trace) — the structural shape (keys only, no values) of
-    // the parsed request, emitted right after `[FromBody]` binding so
-    // a downstream filter pivoting on wire_in sees the same field set
-    // Hono emits via `Object.keys(body)`.  Keys are lowerCamel
-    // (matching the JSON wire under ASP.NET's default
-    // JsonNamingPolicy.CamelCase).  Skipped entirely when --trace is off.
-    const wireInLine = shape.emitTrace
-      ? [
-          `        ${renderDotnetLogCall("wireIn", [
-            {
-              name: "keys",
-              // Empty arrays need an explicit element type so C# can
-              // infer the `params object[]` overload of LogTrace —
-              // `new[] { }` is a compile error.  Common case (op with
-              // params) uses the implicit array literal.
-              valueExpr:
-                op.paramNames.length === 0
-                  ? "Array.Empty<string>()"
-                  : `new[] { ${op.paramNames.map((n) => `"${n}"`).join(", ")} }`,
-            },
-          ])}`,
-        ]
-      : [];
-    // Exception-less return-typed op (exception-less.md): the action dispatches
-    // the command, then translates the Domain union — an error variant to an
-    // RFC-7807 ProblemDetails (status from the api `httpStatus` override or the
-    // stdlib default), a success variant to 200 wrapped in the Application wire
-    // DTO (cast to the polymorphic base so it serializes with the `type` tag).
-    const ru = op.returnUnion;
-    const STD = new Set<number>([400, 422, 404, ...(op.guarded ? [403] : [])]);
-    const when409 = op.whenGated ? ["    [ProducesResponseType(typeof(ProblemDetails), 409)]"] : [];
-    const responseDecls = ru
-      ? [
-          `    [ProducesResponseType(typeof(${ru.appNs}.${ru.unionName}), 200)]`,
-          ...producesProblem("operation", op.guarded),
-          ...when409,
-          ...ru.errorStatuses
-            .filter((s) => !STD.has(s))
-            .map((s) => `    [ProducesResponseType(${s})]`),
-        ]
-      : [
-          "    [ProducesResponseType(204)]",
-          ...producesProblem("operation", op.guarded),
-          ...when409,
-        ];
-    const dispatchTail = ru
-      ? [
-          "        var result = await _mediator.Send(cmd);",
-          "        switch (result)",
-          "        {",
-          ...ru.arms.flatMap((a) => {
-            const variant = `${ru.domainNs}.${ru.unionName}_${a.tag}`;
-            if (a.isError) {
-              return [
-                `            case ${variant} _:`,
-                `                return Problem(statusCode: ${a.status}, title: ${JSON.stringify(a.title)}, type: ${JSON.stringify(a.typeUri)}, detail: ${JSON.stringify(a.title)});`,
-              ];
-            }
-            const bind = a.ctorArgs.length > 0 ? "v" : "_";
-            const ctor = `new ${ru.appNs}.${ru.unionName}_${a.tag}(${a.ctorArgs.join(", ")})`;
-            return [
-              `            case ${variant} ${bind}:`,
-              `                return Ok((${ru.appNs}.${ru.unionName})${ctor});`,
-            ];
-          }),
-          "            default:",
-          '                return Problem(statusCode: 500, title: "Internal Server Error");',
-          "        }",
-        ]
-      : ["        await _mediator.Send(cmd);", "        return NoContent();"];
-    // The side-effect-free can_<op> companion (criterion.md use site 2):
-    // GET → loads the aggregate, evaluates the `when` predicate, returns
-    // `{ allowed }` so a UI can enable/disable the action without invoking it.
-    const canBlock = op.whenGated
-      ? [
-          `    [HttpGet("{id}/can_${snake(op.routeSlug ?? op.name)}")]`,
-          `    [ProducesResponseType(typeof(CanResponse), 200)]`,
-          `    [ProducesResponseType(typeof(ProblemDetails), 404)]`,
-          `    public async Task<ActionResult<CanResponse>> ${actionName(opOperation(agg.name, `can_${op.name}`))}([FromRoute] ${shape.idClrType} id)`,
-          "    {",
-          `        var result = await _mediator.Send(new Can${upperFirst(op.name)}Query(new ${idClass}(id)));`,
-          "        return Ok(result);",
-          "    }",
-          "",
-        ]
-      : [];
-    return [
-      ...canBlock,
-      `    [HttpPost("{id}/${snake(op.routeSlug ?? op.name)}")]`,
-      // Declare the success response explicitly — once any
-      // [ProducesResponseType] is present, Swashbuckle stops inferring the
-      // 2xx body from the action signature, so it must be spelled out.
-      ...responseDecls,
-      `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}${agg.name}Request request)`,
-      "    {",
-      ...wireInLine,
-      // Business-narrative line — what the controller was asked to do,
-      // before Mediator dispatches the command.  Mirrors the
-      // operation_invoked emission on the Hono side so a cross-backend
-      // log consumer sees the same event with the same field set.
-      `        ${renderDotnetLogCall("operationInvoked", [
-        { name: "aggregate", valueExpr: `"${agg.name}"` },
-        { name: "op", valueExpr: `"${op.name}"` },
-        { name: "id", valueExpr: "id" },
-      ])}`,
-      `        var cmd = new ${upperFirst(op.name)}Command(`,
-      ...cmdBody,
-      "        );",
-      ...dispatchTail,
-      "    }",
-      "",
-    ];
-  });
+  const opBlocks = shape.publicOps.flatMap((op) =>
+    renderOperationActionBlock(agg, op, {
+      idClass,
+      idClrType: shape.idClrType,
+      emitTrace: shape.emitTrace,
+    }),
+  );
 
   const findBlocks = shape.finds.flatMap((f) => {
     const responseType =
@@ -416,6 +307,130 @@ export function renderController(
       "}",
     ) + "\n"
   );
+}
+
+/** The per-OPERATION controller action block (F5d decomposition): the
+ *  `can_<op>` companion (when-gated), the `[HttpPost("{id}/<slug>")]`
+ *  action with its response declarations, trace lines, command
+ *  construction, and dispatch tail.  `renderController` flatMaps this
+ *  per public op; the cqrs StyleAdapter's `emitEndpoint(op)` calls it
+ *  directly for one op. */
+export function renderOperationActionBlock(
+  agg: AggregateIR,
+  op: ControllerShape["publicOps"][number],
+  shape: { idClass?: string; idClrType: string; emitTrace?: boolean },
+): string[] {
+  const idClass = shape.idClass ?? `${agg.name}Id`;
+  const cmdArgs = [`new ${idClass}(id)`, ...op.cmdArgs];
+  const cmdBody = renderCmdConstructorBody(cmdArgs, "            ");
+  // wire_in (trace) — the structural shape (keys only, no values) of
+  // the parsed request, emitted right after `[FromBody]` binding so
+  // a downstream filter pivoting on wire_in sees the same field set
+  // Hono emits via `Object.keys(body)`.  Keys are lowerCamel
+  // (matching the JSON wire under ASP.NET's default
+  // JsonNamingPolicy.CamelCase).  Skipped entirely when --trace is off.
+  const wireInLine = shape.emitTrace
+    ? [
+        `        ${renderDotnetLogCall("wireIn", [
+          {
+            name: "keys",
+            // Empty arrays need an explicit element type so C# can
+            // infer the `params object[]` overload of LogTrace —
+            // `new[] { }` is a compile error.  Common case (op with
+            // params) uses the implicit array literal.
+            valueExpr:
+              op.paramNames.length === 0
+                ? "Array.Empty<string>()"
+                : `new[] { ${op.paramNames.map((n) => `"${n}"`).join(", ")} }`,
+          },
+        ])}`,
+      ]
+    : [];
+  // Exception-less return-typed op (exception-less.md): the action dispatches
+  // the command, then translates the Domain union — an error variant to an
+  // RFC-7807 ProblemDetails (status from the api `httpStatus` override or the
+  // stdlib default), a success variant to 200 wrapped in the Application wire
+  // DTO (cast to the polymorphic base so it serializes with the `type` tag).
+  const ru = op.returnUnion;
+  const STD = new Set<number>([400, 422, 404, ...(op.guarded ? [403] : [])]);
+  const when409 = op.whenGated ? ["    [ProducesResponseType(typeof(ProblemDetails), 409)]"] : [];
+  const responseDecls = ru
+    ? [
+        `    [ProducesResponseType(typeof(${ru.appNs}.${ru.unionName}), 200)]`,
+        ...producesProblem("operation", op.guarded),
+        ...when409,
+        ...ru.errorStatuses
+          .filter((s) => !STD.has(s))
+          .map((s) => `    [ProducesResponseType(${s})]`),
+      ]
+    : ["    [ProducesResponseType(204)]", ...producesProblem("operation", op.guarded), ...when409];
+  const dispatchTail = ru
+    ? [
+        "        var result = await _mediator.Send(cmd);",
+        "        switch (result)",
+        "        {",
+        ...ru.arms.flatMap((a) => {
+          const variant = `${ru.domainNs}.${ru.unionName}_${a.tag}`;
+          if (a.isError) {
+            return [
+              `            case ${variant} _:`,
+              `                return Problem(statusCode: ${a.status}, title: ${JSON.stringify(a.title)}, type: ${JSON.stringify(a.typeUri)}, detail: ${JSON.stringify(a.title)});`,
+            ];
+          }
+          const bind = a.ctorArgs.length > 0 ? "v" : "_";
+          const ctor = `new ${ru.appNs}.${ru.unionName}_${a.tag}(${a.ctorArgs.join(", ")})`;
+          return [
+            `            case ${variant} ${bind}:`,
+            `                return Ok((${ru.appNs}.${ru.unionName})${ctor});`,
+          ];
+        }),
+        "            default:",
+        '                return Problem(statusCode: 500, title: "Internal Server Error");',
+        "        }",
+      ]
+    : ["        await _mediator.Send(cmd);", "        return NoContent();"];
+  // The side-effect-free can_<op> companion (criterion.md use site 2):
+  // GET → loads the aggregate, evaluates the `when` predicate, returns
+  // `{ allowed }` so a UI can enable/disable the action without invoking it.
+  const canBlock = op.whenGated
+    ? [
+        `    [HttpGet("{id}/can_${snake(op.routeSlug ?? op.name)}")]`,
+        `    [ProducesResponseType(typeof(CanResponse), 200)]`,
+        `    [ProducesResponseType(typeof(ProblemDetails), 404)]`,
+        `    public async Task<ActionResult<CanResponse>> ${actionName(opOperation(agg.name, `can_${op.name}`))}([FromRoute] ${shape.idClrType} id)`,
+        "    {",
+        `        var result = await _mediator.Send(new Can${upperFirst(op.name)}Query(new ${idClass}(id)));`,
+        "        return Ok(result);",
+        "    }",
+        "",
+      ]
+    : [];
+  return [
+    ...canBlock,
+    `    [HttpPost("{id}/${snake(op.routeSlug ?? op.name)}")]`,
+    // Declare the success response explicitly — once any
+    // [ProducesResponseType] is present, Swashbuckle stops inferring the
+    // 2xx body from the action signature, so it must be spelled out.
+    ...responseDecls,
+    `    public async Task<IActionResult> ${actionName(opOperation(agg.name, op.name))}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}${agg.name}Request request)`,
+    "    {",
+    ...wireInLine,
+    // Business-narrative line — what the controller was asked to do,
+    // before Mediator dispatches the command.  Mirrors the
+    // operation_invoked emission on the Hono side so a cross-backend
+    // log consumer sees the same event with the same field set.
+    `        ${renderDotnetLogCall("operationInvoked", [
+      { name: "aggregate", valueExpr: `"${agg.name}"` },
+      { name: "op", valueExpr: `"${op.name}"` },
+      { name: "id", valueExpr: "id" },
+    ])}`,
+    `        var cmd = new ${upperFirst(op.name)}Command(`,
+    ...cmdBody,
+    "        );",
+    ...dispatchTail,
+    "    }",
+    "",
+  ];
 }
 
 function renderCmdConstructorBody(args: string[], indent: string): string[] {

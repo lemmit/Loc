@@ -38,9 +38,6 @@ export interface ControllerCtx {
   /** Strongly-typed id class (default `<Agg>Id`); a TPH concrete passes
    *  its base's `<Base>Id` (the shared single-table key). */
   idClass?: string;
-  /** Prepended to @RequestMapping (fullstack mode passes "/api" so the
-   *  SPA owns the un-prefixed route space).  Empty for standalone. */
-  routePrefix?: string;
 }
 
 export function renderJavaController(

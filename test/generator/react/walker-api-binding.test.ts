@@ -200,7 +200,7 @@ describe("api binding + walker hook injection", () => {
     expect(content).toMatch(/const customerCreate = useCreateCustomer\(\);/);
   });
 
-  it("custom finder operation: byEmail → useByEmailCustomer with arg", async () => {
+  it("custom finder operation: byEmail → useByEmailCustomer with the object-shaped query arg", async () => {
     const files = await buildAndGenerate(`
       system S {
         subdomain Sales {
@@ -223,7 +223,10 @@ describe("api binding + walker hook injection", () => {
     `);
     const content = files.get("web/src/pages/lookup.tsx")!;
     expect(content).toMatch(/import \{ useByEmailCustomer \} from "\.\.\/api\/customer";/);
-    expect(content).toMatch(/const customerByEmail = useByEmailCustomer\(email\);/);
+    // The emitted hook signature takes the find's query OBJECT
+    // (`use<Find><Agg>(query: <Find>Query)` — api-builder.ts), so the
+    // hoist builds `{ email: email }` from the positional DSL args.
+    expect(content).toMatch(/const customerByEmail = useByEmailCustomer\(\{ email: email \}\);/);
   });
 
   it("UI without api parameters: existing behaviour unchanged (no hook injection)", async () => {

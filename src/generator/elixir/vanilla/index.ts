@@ -27,6 +27,7 @@ import { emitVanillaContextModule } from "./context-emit.js";
 import { emitVanillaEventModules } from "./events-emit.js";
 import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
 import { emitVanillaRepositories } from "./repository-emit.js";
+import { emitVanillaRetrievals } from "./retrieval-emit.js";
 import { emitVanillaSchemas } from "./schema-emit.js";
 import { emitVanillaShellFiles } from "./shell-emit.js";
 import {
@@ -82,6 +83,12 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // project-wide (one `ViewsController` for all views, matching the ash path).
     emitVanillaViewModules(appName, appModule, ctx, out);
     for (const view of ctx.views) allViews.push({ ctx, view });
+    // Retrievals — per-context Ecto query modules at
+    // `lib/<app>/<ctx>/retrievals/<name>.ex` plus a matching
+    // `defdelegate run_<ret>_<agg>` on the context facade (emitted by
+    // `context-emit.ts`).  Consumed by a workflow's `repo-run` lowering
+    // (a separate follow-up slice).
+    emitVanillaRetrievals(appName, appModule, ctx, out);
     // Workflow-instance read endpoints — saga-state Ecto schema + a
     // read-only WorkflowInstancesController (the deferred-Phoenix gap closer).
     apiRoutes.push(...emitVanillaWorkflowInstances(appName, appModule, ctx, out));

@@ -1,0 +1,20 @@
+{
+  "name": "loom-vue-app",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 3000"
+  },
+  "dependencies": {
+{{> stack-package-deps}},
+    "vuetify": "^3.7.0",
+    "@mdi/js": "^7.4.47"{{#if usesMoney}},
+    "decimal.js": "^10.4.3"{{/if}}
+  },
+  "devDependencies": {
+{{> stack-package-devdeps}}
+  }
+}

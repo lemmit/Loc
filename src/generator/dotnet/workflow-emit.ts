@@ -10,6 +10,7 @@ import {
   workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+import { durableEventTypes } from "../../ir/util/channels.js";
 import { errorStatuses } from "../../ir/util/openapi-errors.js";
 import {
   camelId,
@@ -357,6 +358,17 @@ function renderEventReactorHandler(
       stmtLines.push("            return;");
       stmtLines.push("        }");
     }
+    if (durableEventTypes(ctx).size > 0) {
+      // Idempotent-consumer marker (dispatch-delivery-semantics.md §3):
+      // the relay rides the outbox row id on OutboxDelivery.CurrentEventId;
+      // a repeat of the recorded id is a no-op (at-least-once →
+      // effectively-once).  Inline (ephemeral) dispatch carries null.
+      stmtLines.push("        var __eventId = OutboxDelivery.CurrentEventId;");
+      stmtLines.push("        if (__eventId is not null && state.LastEventId == __eventId)");
+      stmtLines.push("        {");
+      stmtLines.push("            return; // already processed — at-least-once redelivery");
+      stmtLines.push("        }");
+    }
   }
   for (const st of statements) {
     stmtLines.push(...renderStatement(st, renderArg, ctx, usage, /* guardLoads */ true));
@@ -366,6 +378,9 @@ function renderEventReactorHandler(
     stmtLines.push(`        await ${fieldName}.SaveAsync(${save.name}, cancellationToken);`);
   }
   // Persist the saga row (a new allocation, or a `this.<stateField>` mutation).
+  if (persisted && durableEventTypes(ctx).size > 0) {
+    stmtLines.push("        if (__eventId is not null) state.LastEventId = __eventId;");
+  }
   if (persisted) stmtLines.push("        await _db.SaveChangesAsync(cancellationToken);");
 
   let body = stmtLines.join("\n") + "\n";

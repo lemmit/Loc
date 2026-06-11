@@ -51,7 +51,12 @@ import {
 } from "./emit/dapper.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
 import { emitDotnetMigrations } from "./emit/migrations.js";
-import { renderOutboxDispatcher, renderOutboxMessage, renderOutboxRelay } from "./emit/outbox.js";
+import {
+  renderOutboxDelivery,
+  renderOutboxDispatcher,
+  renderOutboxMessage,
+  renderOutboxRelay,
+} from "./emit/outbox.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import { emitDotnetSeeds } from "./emit/seed.js";
 import {
@@ -288,6 +293,7 @@ function emitProjectFromContexts(
   const hasOutbox =
     hasSubscriptions && system?.deployable.persistence !== "dapper" && durableTypes.length > 0;
   if (hasOutbox) {
+    out.set("Domain/Common/OutboxDelivery.cs", renderOutboxDelivery(ns));
     out.set("Infrastructure/Persistence/OutboxMessage.cs", renderOutboxMessage(ns));
     out.set(
       "Infrastructure/Events/OutboxDomainEventDispatcher.cs",
@@ -336,7 +342,7 @@ function emitProjectFromContexts(
     // Persisted workflow-correlation state POCOs + EF configs (one per
     // correlation-bearing workflow); the DbSet/ApplyConfiguration wiring is
     // inside renderDbContext above.
-    emitWorkflowStatePersistence(merged.workflows, ns, out);
+    emitWorkflowStatePersistence(merged.workflows, ns, out, durableEventTypes(merged).size > 0);
   }
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
@@ -472,6 +478,7 @@ function emitContext(
   const durableTypes = [...durableEventTypes(ctx)].sort();
   const hasOutbox = hasSubscriptions && durableTypes.length > 0;
   if (hasOutbox) {
+    out.set("Domain/Common/OutboxDelivery.cs", renderOutboxDelivery(ns));
     out.set("Infrastructure/Persistence/OutboxMessage.cs", renderOutboxMessage(ns));
     out.set(
       "Infrastructure/Events/OutboxDomainEventDispatcher.cs",
@@ -840,7 +847,7 @@ function emitInfrastructure(
     "Infrastructure/Persistence/AppDbContext.cs",
     renderDbContext(ctx, ns, documentAggNames([ctx]), eventSourcedAggNames([ctx]), hasOutbox),
   );
-  emitWorkflowStatePersistence(ctx.workflows, ns, out);
+  emitWorkflowStatePersistence(ctx.workflows, ns, out, durableEventTypes(ctx).size > 0);
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set("Api/ListResponseWrapperFilter.cs", renderListWrapperFilter(ns, listWrapperPairs([ctx])));

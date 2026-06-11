@@ -17,6 +17,7 @@ import {
   wireToCommandArgument,
   wireType,
 } from "../dto-mapping.js";
+import type { ControllerShape } from "../emit/api.js";
 import { renderController } from "../emit.js";
 
 /** One arm of a return-typed operation's controller translation. */
@@ -43,6 +44,39 @@ export interface ReturnUnionSpec {
   arms: ReturnUnionArm[];
   /** Distinct error statuses → `[ProducesResponseType]` declarations. */
   errorStatuses: number[];
+}
+
+/** Build the controller-shape spec for ONE public operation (F5d
+ *  decomposition) — the object `renderController`'s `publicOps` array
+ *  carries per op, and the input `renderOperationActionBlock` consumes.
+ *  The cqrs StyleAdapter's `emitEndpoint(op)` builds a single spec
+ *  through this. */
+export function buildOperationSpec(
+  agg: AggregateIR,
+  op: AggregateIR["operations"][number],
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): ControllerShape["publicOps"][number] {
+  return {
+    name: op.name,
+    // URL segment from routeSlug (D-URLSTYLE); name stays the verb
+    // for the C# action method + command type.
+    routeSlug: op.routeSlug,
+    cmdArgs: op.params.map((p) =>
+      wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx),
+    ),
+    // Wire-shape key set for --trace's wire_in line.  Param names
+    // are lowerCamel in the IR — same form the JSON wire uses
+    // (default ASP.NET JsonNamingPolicy.CamelCase).
+    paramNames: op.params.map((p) => p.name),
+    guarded: operationIsGuarded(op),
+    // `when` canCommand gate: 409 on the action + the GET can_<op>
+    // companion (criterion.md use site 2).
+    whenGated: !!op.when,
+    // Exception-less return-typed op: the controller-side translation spec
+    // (Domain union → ProblemDetails / Ok-wrapped wire DTO).
+    returnUnion: buildReturnUnionSpec(op, agg, ctx, ns),
+  };
 }
 
 function buildReturnUnionSpec(
@@ -134,26 +168,7 @@ export function emitController(
       ),
       publicOps: agg.operations
         .filter((o) => o.visibility === "public")
-        .map((op) => ({
-          name: op.name,
-          // URL segment from routeSlug (D-URLSTYLE); name stays the verb
-          // for the C# action method + command type.
-          routeSlug: op.routeSlug,
-          cmdArgs: op.params.map((p) =>
-            wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx),
-          ),
-          // Wire-shape key set for --trace's wire_in line.  Param names
-          // are lowerCamel in the IR — same form the JSON wire uses
-          // (default ASP.NET JsonNamingPolicy.CamelCase).
-          paramNames: op.params.map((p) => p.name),
-          guarded: operationIsGuarded(op),
-          // `when` canCommand gate: 409 on the action + the GET can_<op>
-          // companion (criterion.md use site 2).
-          whenGated: !!op.when,
-          // Exception-less return-typed op: the controller-side translation spec
-          // (Domain union → ProblemDetails / Ok-wrapped wire DTO).
-          returnUnion: buildReturnUnionSpec(op, agg, ctx, ns),
-        })),
+        .map((op) => buildOperationSpec(agg, op, ctx, ns)),
       finds: (repo?.finds ?? []).map((find) => {
         const paged = pagedReturn(find.returnType);
         // Discriminated-union find return (P4c): the controller returns the
