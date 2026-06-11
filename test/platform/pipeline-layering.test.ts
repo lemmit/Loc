@@ -183,6 +183,7 @@ describe("pipeline layering — value imports point one way", () => {
       "src/generator/elixir/index.ts -> generator/react/",
       "src/generator/elixir/theme-emit.ts -> generator/react/",
       "src/generator/java/index.ts -> generator/react/",
+      "src/generator/python/index.ts -> generator/react/",
     ]);
     const out: string[] = [];
     for (const plat of platformDirs) {
