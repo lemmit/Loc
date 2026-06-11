@@ -11,6 +11,7 @@
 
 import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { customFindsOf } from "./repository-emit.js";
 
 /** Operation names whose `<op>_<agg>` collide with the CRUD
  *  defdelegates emitted above (list/get/create/update/delete).  Skipped
@@ -41,13 +42,22 @@ function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedC
     const opBlocks = (agg.operations ?? [])
       .filter((op) => !CRUD_RESERVED_NAMES.has(op.name))
       .map((op) => renderNamedOpFunction(facadeMod, agg, aggPascal, aggSnake, op));
+    // Custom-find defdelegates — `<find>_<agg>(args...)` routes to the
+    // repository fn emitted by `customFindsOf`.  Workflow `repo-let`
+    // lowering (for a non-getById method) calls through this seam.
+    const repo = (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name);
+    const findLines = customFindsOf(repo).map((f) => {
+      const findSnake = snake(f.name);
+      const findArgs = f.params.map((p) => snake(p.name)).join(", ");
+      return `  defdelegate ${findSnake}_${aggSnake}(${findArgs}), to: ${repoMod}, as: :${findSnake}`;
+    });
+    const findBlock = findLines.length > 0 ? `\n${findLines.join("\n")}\n` : "";
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(), to: ${repoMod}, as: :list
   defdelegate get_${aggSnake}(id), to: ${repoMod}, as: :find_by_id
   defdelegate create_${aggSnake}(attrs), to: ${repoMod}, as: :insert
   defdelegate update_${aggSnake}(record, attrs), to: ${repoMod}, as: :update
-  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete
-${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
+  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
   });
 
   // Retrieval defdelegates — `run_<retrieval>_<agg>(args..., opts \\ [])`

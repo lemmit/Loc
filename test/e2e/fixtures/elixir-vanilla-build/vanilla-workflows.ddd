@@ -15,7 +15,15 @@ system Tasks {
           done := true
         }
       }
-      repository Tasks for Task { }
+      // A custom-find — exercises Slice 8 (repository custom-find emission +
+      // context defdelegate).  Convention-find: no explicit `where`,
+      // so the params match aggregate property names.
+      // `byDone(done: bool): Task[]` lowers to a
+      // `def by_done(done)` fn on the repository module +
+      // `defdelegate by_done_task(done), as: :by_done` on the context.
+      repository Tasks for Task {
+        find byDone(done: bool): Task[]
+      }
 
       // Empty body — exercises the SHAPE-only emit path.
       workflow markAllDone transactional {
