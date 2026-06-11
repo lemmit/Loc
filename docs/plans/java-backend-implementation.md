@@ -23,25 +23,37 @@
 >   harness needs a docker host to iterate against (this session's
 >   environment has none) and touching the canonical showcase fans out
 >   into every other backend's gates.
-> - **Shipped post-merge (PR #1110 follow-ups):** paged carriers
->   (`Paged<T>` over Spring Data `Pageable`), retrievals (`run<Name>`
->   port methods: reified criterion-ref retrievals ride
->   `JpaSpecificationExecutor` + `Sort`, composed `where`s fall back to
->   `@Query` JPQL with `order by`), reified criteria →
->   `<Agg>Criteria` `Specification<T>` factories (java is the first
->   backend consuming `CriterionIR` directly), retrieval-driven
->   workflow loops (`repo-run` + `for-each`). Boot-verified end-to-end
->   against Postgres (`test/e2e/fixtures/java-build/retrieval.ddd`).
+> - **Shipped post-merge (PR #1110 follow-ups, each boot-verified
+>   against Postgres):** paged carriers (`Paged<T>` over Spring Data
+>   `Pageable`); retrievals (`run<Name>` port methods: reified
+>   criterion-ref retrievals ride `JpaSpecificationExecutor` + `Sort`,
+>   composed `where`s fall back to `@Query` JPQL with `order by`);
+>   reified criteria → `<Agg>Criteria` `Specification<T>` factories
+>   (java is the first backend consuming `CriterionIR` directly);
+>   retrieval-driven workflow loops (`repo-run` + `for-each`) including
+>   paged `Repo.run(..., page:)` (the `OffsetLimitPageRequest`
+>   Pageable); workflow-level `emit` (event record + `domain_event`
+>   envelope); the `ddd new` java starter; first-boot seeding
+>   (`<Ctx>SeedRunner`, ship-once `__loom_seed` marker, domain + raw
+>   paths); root-level single containments (hidden owning `_parent`
+>   @OneToOne, inverse mappedBy + orphanRemoval); exception-less
+>   operation returns (sealed domain unions + Jackson-polymorphic wire
+>   DTOs + controller ProblemDetail translation — java joined
+>   `SUPPORTED_RETURN_BACKENDS`); capability filters → `@SQLRestriction`
+>   (non-principal relational subset; java joined the limited-families
+>   gate).  Fixtures under `test/e2e/fixtures/java-build/` pin each in
+>   the `LOOM_JAVA_BUILD` matrix.
 > - **Deferred features — all fail-fast gated, never silent:**
->   discriminated unions, exception-less operation returns
->   (java absent from the `SUPPORTED_*` sets), TPH `sharedTable`,
->   `persistedAs(eventLog)`, `shape(document|embedded)`, single
->   containments (`loom.java-single-containment-unsupported`), the
->   embedded-SPA fullstack mount (`loom.java-fullstack-unsupported`),
->   workflow-level `emit`, paged `Repo.run(..., page:)` in workflows,
->   resource-op clients, seeding (`seed` blocks),
->   provenance + per-op audited (gated like .NET), `ddd new` starter
->   template.
+>   discriminated unions in finds / payload positions
+>   (`SUPPORTED_UNION_BACKENDS`), TPH `sharedTable`,
+>   `persistedAs(eventLog)`, `shape(document|embedded)`,
+>   part-declared single containments
+>   (`loom.java-single-containment-unsupported`), the embedded-SPA
+>   fullstack mount (`loom.java-fullstack-unsupported`), resource-op
+>   clients, principal-referencing filters / non-relational filter
+>   shapes (`loom.context-filter-unsupported`), provenance + per-op
+>   audited (gated like .NET).  Lifecycle stamps (`contextStamps`) are
+>   consumed by .NET only today — a cross-backend gap, not java-specific.
 >
 > The proposal's stated blocker — criterion-everywhere — had **shipped**
 > before this work started: the selectability oracle
