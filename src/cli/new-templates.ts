@@ -7,7 +7,7 @@
 // so a template that drifts from the grammar fails fast rather than shipping
 // a broken starter — `test/cli/new.test.ts` pins every combination.
 
-export type StarterPlatform = "hono" | "dotnet" | "elixir" | "java";
+export type StarterPlatform = "hono" | "dotnet" | "elixir" | "java" | "python";
 export type StarterTemplate = "blank" | "crud";
 export type DesignPack =
   | "mantine"
@@ -18,7 +18,13 @@ export type DesignPack =
   | "shadcnSvelte"
   | "flowbite";
 
-export const STARTER_PLATFORMS: readonly StarterPlatform[] = ["hono", "dotnet", "elixir", "java"];
+export const STARTER_PLATFORMS: readonly StarterPlatform[] = [
+  "hono",
+  "dotnet",
+  "elixir",
+  "java",
+  "python",
+];
 export const STARTER_TEMPLATES: readonly StarterTemplate[] = ["blank", "crud"];
 export const REACT_DESIGN_PACKS: readonly DesignPack[] = ["mantine", "shadcn", "mui", "chakra"];
 export const SVELTE_DESIGN_PACKS: readonly DesignPack[] = ["shadcnSvelte", "flowbite"];
@@ -35,6 +41,7 @@ export const BACKEND_PORT: Record<StarterPlatform, number> = {
   dotnet: 8080,
   elixir: 4000,
   java: 8081,
+  python: 8000,
 };
 export const FRONTEND_PORT = 3001;
 

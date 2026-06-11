@@ -1,0 +1,60 @@
+// Auth gate for the Python backend (docs/auth.md): `auth: required`
+// emits the User dataclass + verifier registry + middleware; a
+// `requires`-guarded operation denies with 403 (ForbiddenError), a
+// currentUser-scoped find threads the actor into the repository
+// predicate, and a guarded workflow binds the actor before its guard.
+system AuthSys {
+  user {
+    id: string
+    role: string
+    permissions: string[]
+    customerId: string
+  }
+
+  subdomain Sales {
+    permissions { ordersCancel }
+
+    context Orders {
+      aggregate Order {
+        customerId: string
+        status: string
+        operation cancel() {
+          requires currentUser.role == "admin" || currentUser.permissions.contains(permissions.ordersCancel)
+          precondition status != "cancelled"
+          status := "cancelled"
+        }
+
+        test "manager cancels" {
+          let o = Order.create({ customerId: "c-1", status: "open" })
+          o.cancel()
+          expect(o.status).toBe("cancelled")
+        }
+      }
+      repository Orders for Order {
+        find mine(): Order[] where customerId == currentUser.customerId
+      }
+
+      workflow CancelOrder {
+        create(order: Order id) {
+          requires currentUser.role == "admin"
+          let o = Orders.getById(order)
+          o.cancel()
+        }
+      }
+    }
+  }
+
+  api OrdersApi from Sales
+
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+
+  deployable api {
+    platform: python
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 8000
+    auth: required
+  }
+}

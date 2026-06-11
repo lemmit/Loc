@@ -20,6 +20,15 @@
 
 import type { ExprIR, StateFieldIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
+import {
+  defaultInitForJs,
+  escapeJsFamilyText,
+  hookFnName,
+  hookVarName,
+  lowerFirstName,
+  renderJsMatch,
+  upperFirstName,
+} from "../../_walker/js-target-helpers.js";
 import type {
   ApiCallSite,
   RenderPosition,
@@ -62,9 +71,9 @@ export const vueTarget: WalkerTarget = {
    *  not a crash. */
   renderStateInit(field: StateFieldIR, init: ExprIR | undefined): string {
     if (init !== undefined) {
-      return defaultInitForVue(field.type);
+      return defaultInitForJs(field.type);
     }
-    return defaultInitForVue(field.type);
+    return defaultInitForJs(field.type);
   },
 
   // --- API binding seam ---------------------------------------------------
@@ -78,19 +87,19 @@ export const vueTarget: WalkerTarget = {
   buildHookUse(detected: DetectedApiCall, renderArg: (e: ExprIR) => string): TargetHookUse {
     if (detected.kind === "view") {
       const viewName = detected.aggregateName;
-      const viewPascal = upperFirstLocal(viewName);
+      const viewPascal = upperFirstName(viewName);
       return {
-        varName: `${lowerFirstLocal(viewName)}View`,
+        varName: `${lowerFirstName(viewName)}View`,
         hookName: `use${viewPascal}View`,
         importFrom: "../api/views",
         argsRendered: [],
       };
     }
     if (detected.kind === "workflow-instance") {
-      const wf = upperFirstLocal(detected.aggregateName);
+      const wf = upperFirstName(detected.aggregateName);
       const isAll = detected.operation === "all";
       return {
-        varName: isAll ? `all${wf}Instances` : `${lowerFirstLocal(detected.aggregateName)}Instance`,
+        varName: isAll ? `all${wf}Instances` : `${lowerFirstName(detected.aggregateName)}Instance`,
         hookName: isAll ? `useAll${wf}Instances` : `use${wf}InstanceById`,
         importFrom: "../api/workflows",
         argsRendered: detected.args.map(renderArg),
@@ -101,7 +110,7 @@ export const vueTarget: WalkerTarget = {
     return {
       varName: hookVarName(aggregate, op),
       hookName: hookFnName(aggregate, op),
-      importFrom: `../api/${lowerFirstLocal(upperFirstLocal(aggregate))}`,
+      importFrom: `../api/${lowerFirstName(upperFirstName(aggregate))}`,
       argsRendered: detected.args.map(renderArg),
     };
   },
@@ -147,13 +156,7 @@ export const vueTarget: WalkerTarget = {
     arms: ReadonlyArray<{ predicate: string; value: string }>,
     elseArm: string | undefined,
   ): string {
-    const terminal = elseArm ?? "null";
-    let out = terminal;
-    for (let i = arms.length - 1; i >= 0; i--) {
-      const a = arms[i]!;
-      out = `(${a.predicate}) ? (${a.value}) : ${out}`;
-    }
-    return out;
+    return renderJsMatch(arms, elseArm);
   },
 
   // --- Navigation seam ----------------------------------------------------
@@ -181,7 +184,7 @@ export const vueTarget: WalkerTarget = {
   // --- Type-default seam --------------------------------------------------
 
   defaultInitFor(type: TypeIR): string {
-    return defaultInitForVue(type);
+    return defaultInitForJs(type);
   },
 
   // --- Markup seams ---------------------------------------------------------
@@ -254,73 +257,6 @@ export const vueTarget: WalkerTarget = {
    *  tag delimiters; `{`/`}` entity-escape too so literal `{{` can
    *  never form a mustache interpolation. */
   escapeText(text: string): string {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/\{/g, "&#123;")
-      .replace(/\}/g, "&#125;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    return escapeJsFamilyText(text);
   },
 };
-
-// ---------------------------------------------------------------------------
-// Internals — naming formulas shared with the React target by value
-// (kept local so the module stays self-contained; the conformance
-// test pins the cross-target naming equality deliberately).
-// ---------------------------------------------------------------------------
-
-/** Composable variable name: `<aggCamel><OpPascal>`. */
-function hookVarName(aggregate: string, op: string): string {
-  return `${lowerFirstLocal(aggregate)}${upperFirstLocal(op)}`;
-}
-
-/** Composable fn name — `use<Op><Single>` family. */
-function hookFnName(aggregate: string, op: string): string {
-  const single = upperFirstLocal(aggregate);
-  const pluralName = pluralLocal(single);
-  if (op === "all") return `useAll${pluralName}`;
-  if (op === "byId") return `use${single}ById`;
-  if (op === "create") return `useCreate${single}`;
-  if (op === "update") return `useUpdate${single}`;
-  if (op === "delete") return `useDelete${single}`;
-  return `use${upperFirstLocal(op)}${single}`;
-}
-
-/** Zero value per type — JS literals, same table as TSX (the Vue
- *  SPA shares the wire shape and the decimal.js money convention). */
-function defaultInitForVue(type: TypeIR): string {
-  if (type.kind === "primitive") {
-    switch (type.name) {
-      case "int":
-      case "long":
-      case "decimal":
-        return "0";
-      case "money":
-        return 'new Decimal("0")';
-      case "bool":
-        return "false";
-      case "string":
-      case "datetime":
-      case "guid":
-        return '""';
-    }
-  }
-  if (type.kind === "id" || type.kind === "enum") return '""';
-  if (type.kind === "optional") return "undefined";
-  return "undefined";
-}
-
-function lowerFirstLocal(s: string): string {
-  return s.length === 0 ? s : s[0]!.toLowerCase() + s.slice(1);
-}
-
-function upperFirstLocal(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
-}
-
-function pluralLocal(s: string): string {
-  // Conservative rules matching `src/util/naming.ts:plural`.
-  if (s.endsWith("y") && !/[aeiou]y$/.test(s)) return `${s.slice(0, -1)}ies`;
-  if (/(s|x|z|ch|sh)$/.test(s)) return `${s}es`;
-  return `${s}s`;
-}

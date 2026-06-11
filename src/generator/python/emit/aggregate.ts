@@ -1,15 +1,16 @@
 import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  ContainmentIR,
-  DerivedIR,
-  EntityPartIR,
-  FieldIR,
-  FunctionIR,
-  InvariantIR,
-  OperationIR,
-  TypeIR,
+import {
+  type AggregateIR,
+  type BoundedContextIR,
+  type ContainmentIR,
+  type DerivedIR,
+  type EntityPartIR,
+  type FieldIR,
+  type FunctionIR,
+  type InvariantIR,
+  type OperationIR,
+  operationUsesCurrentUser,
+  type TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
@@ -156,6 +157,7 @@ export function renderPyAggregate(agg: AggregateIR, ctx: BoundedContextIR): stri
   ].sort();
   const eventImports = ["DomainEvent", ...emittedEvents];
 
+  const usesCurrentUser = shapes.some((s) => s.operations.some(operationUsesCurrentUser));
   const bodyUsesCast = /\bcast\(/.test(body);
   return lines(
     `"""${agg.name} aggregate.  Auto-generated."""`,
@@ -165,6 +167,7 @@ export function renderPyAggregate(agg: AggregateIR, ctx: BoundedContextIR): stri
     usesDatetime ? "from datetime import UTC, datetime" : null,
     usesDecimal ? "from decimal import Decimal" : null,
     exprImports.has("re") || usesDatetime || usesDecimal ? "" : null,
+    usesCurrentUser ? "from app.auth.user import User" : null,
     errorNames.length > 0 ? `from app.domain.errors import ${errorNames.join(", ")}` : null,
     `from app.domain.events import ${eventImports.join(", ")}`,
     `from app.domain.ids import ${idImports.join(", ")}`,
@@ -297,6 +300,10 @@ function renderEntity(e: EntityShape): string {
     `        self._assert_invariants()`,
   ].filter((s): s is string => s != null);
 
+  // Extern ops (docs/extern.md): the user-supplied handler owns the
+  // mutation, so the aggregate opens a controlled mutation surface —
+  // field setters, `raise_event`, and a public `assert_invariants`.
+  const hasExtern = e.operations.some((op) => op.extern);
   const getters: string[] = [];
   const prop = (name: string, type: string, value: string): string[] => [
     "",
@@ -304,12 +311,19 @@ function renderEntity(e: EntityShape): string {
     `    def ${name}(self) -> ${type}:`,
     `        return ${value}`,
   ];
+  const setter = (name: string, type: string): string[] => [
+    "",
+    `    @${name}.setter`,
+    `    def ${name}(self, v: ${type}) -> None:`,
+    `        self._${name} = v`,
+  ];
   getters.push(...prop("id", `${e.name}Id`, "self._id"));
   if (!e.isRoot) {
     getters.push(...prop("parent_id", `${e.rootName}Id`, "self._parent_id"));
   }
   for (const f of e.fields) {
     getters.push(...prop(snake(f.name), renderPyType(f.type), `self._${snake(f.name)}`));
+    if (hasExtern) getters.push(...setter(snake(f.name), renderPyType(f.type)));
   }
   for (const c of e.contains) {
     getters.push(...prop(snake(c.name), containsType(c), `self._${snake(c.name)}`));
@@ -331,8 +345,22 @@ function renderEntity(e: EntityShape): string {
   });
 
   const ops = e.operations.flatMap((op) => {
-    const prefix = op.visibility === "public" ? "" : "_";
     const params = ["self", ...op.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`)];
+    // currentUser-gated ops pick up a trailing actor parameter — the
+    // route threads `request.state.current_user` into it.
+    if (operationUsesCurrentUser(op)) params.push("current_user: User");
+    // An extern op has no body of its own — the user handler owns the
+    // logic.  Only the precondition gate is generated (`check_<op>`),
+    // run by the route before dispatching to the registered handler.
+    if (op.extern) {
+      const body = renderPyStatements(op.statements, undefined, { eventSourced: e.eventSourced });
+      return [
+        "",
+        `    def check_${snake(op.name)}(${params.join(", ")}) -> None:`,
+        ...(body.length > 0 ? [body] : ["        return None"]),
+      ];
+    }
+    const prefix = op.visibility === "public" ? "" : "_";
     const retType = op.returnType ? renderPyOperationReturnType(op.returnType) : "None";
     const body = renderPyStatements(op.statements, undefined, { eventSourced: e.eventSourced });
     return [
@@ -352,6 +380,16 @@ function renderEntity(e: EntityShape): string {
         "        out = self._events",
         "        self._events = []",
         "        return out",
+        ...(hasExtern
+          ? [
+              "",
+              "    def raise_event(self, ev: DomainEvent) -> None:",
+              "        self._events.append(ev)",
+              "",
+              "    def assert_invariants(self) -> None:",
+              "        self._assert_invariants()",
+            ]
+          : []),
       ]
     : [];
 

@@ -6,7 +6,6 @@ import {
 } from "../../ir/types/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 import { zodForResponse } from "./api-module.js";
-import { fillBlock } from "./page-objects-builder.js";
 
 // ---------------------------------------------------------------------------
 // Workflow API module + Playwright page object emission.
@@ -238,49 +237,12 @@ function walkType(t: TypeIR, visit: (t: TypeIR) => void): void {
 }
 
 // ---------------------------------------------------------------------------
-// Playwright page object emission — one class per workflow.
+// Playwright page object — moved to `workflow-page-object.ts` (the
+// selectStyle-aware builder the svelte frontend parameterizes; the
+// defaults reproduce this module's original output byte-for-byte).
 // ---------------------------------------------------------------------------
 
-export function buildWorkflowPageObject(wf: WorkflowIR, ctx: BoundedContextIR): string {
-  const slug = snake(wf.name);
-  const className = `${upperFirst(wf.name)}WorkflowPage`;
-  const requestType = `${upperFirst(wf.name)}Request`;
-  const lines: string[] = [];
-  lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(`import type { Page } from "@playwright/test";`);
-  lines.push(`import type { ${requestType} } from "../../../src/api/workflows";`);
-  lines.push("");
-  lines.push(`export class ${className} {`);
-  lines.push(`  static readonly url = "/workflows/${slug}";`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
-  lines.push("");
-  lines.push(`  async goto(): Promise<this> {`);
-  lines.push(`    await this.page.goto(${className}.url);`);
-  lines.push(`    await this.page.getByTestId("workflow-${slug}").waitFor();`);
-  lines.push(`    return this;`);
-  lines.push(`  }`);
-  lines.push("");
-  lines.push(`  async fill(input: Partial<${requestType}>): Promise<this> {`);
-  for (const p of wf.params) {
-    const fillLines = fillBlock("input", p.name, p.type, ctx, `workflow-${slug}-input-${p.name}`);
-    for (const l of fillLines) lines.push(`    ${l}`);
-  }
-  lines.push(`    return this;`);
-  lines.push(`  }`);
-  lines.push("");
-  lines.push(`  async submit(): Promise<void> {`);
-  lines.push(`    await this.page.getByTestId("workflow-${slug}-submit").click();`);
-  lines.push(`    await this.page.waitForURL(/\\/workflows$/);`);
-  lines.push(`  }`);
-  lines.push("");
-  lines.push(`  async run(input: ${requestType}): Promise<void> {`);
-  lines.push(`    await this.goto();`);
-  lines.push(`    await this.fill(input);`);
-  lines.push(`    await this.submit();`);
-  lines.push(`  }`);
-  lines.push(`}`);
-  return lines.join("\n") + "\n";
-}
+export { buildWorkflowPageObject } from "./workflow-page-object.js";
 
 // ---------------------------------------------------------------------------
 // helpers

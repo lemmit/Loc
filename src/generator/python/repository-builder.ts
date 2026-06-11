@@ -1,18 +1,19 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
 import { forApiRead } from "../../ir/enrich/wire-projection.js";
 import { pagedReturn } from "../../ir/stdlib/generics.js";
-import type {
-  AssociationIR,
-  ContainmentIR,
-  EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
-  EnrichedEntityPartIR,
-  FieldIR,
-  FindIR,
-  RepositoryIR,
-  RetrievalIR,
-  TypeIR,
-  ViewIR,
+import {
+  type AssociationIR,
+  type ContainmentIR,
+  type EnrichedAggregateIR,
+  type EnrichedBoundedContextIR,
+  type EnrichedEntityPartIR,
+  type FieldIR,
+  type FindIR,
+  findUsesCurrentUser,
+  type RepositoryIR,
+  type RetrievalIR,
+  type TypeIR,
+  type ViewIR,
 } from "../../ir/types/loom-ir.js";
 import {
   baseOf,
@@ -21,7 +22,7 @@ import {
   tableOwnerName,
 } from "../../ir/util/inheritance.js";
 import { lines } from "../../util/code-builder.js";
-import { plural, snake } from "../../util/naming.js";
+import { snake } from "../../util/naming.js";
 import { lowerToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
 import {
   columnsForFields,
@@ -67,7 +68,6 @@ export function buildPyRepositoryFile(
   const owner = tableOwnerName(agg, ctx.aggregates);
   const root = rowClassName(owner);
   const kind = discriminatorValue(agg, ctx.aggregates);
-  const refColls = agg.fields.filter(isRefCollectionField);
   const assocs = agg.associations ?? [];
   // Pin the enriched element type — the AggregateIR ∩ Enriched
   // intersection's `.parts` otherwise infers the un-enriched element.
@@ -123,7 +123,14 @@ export function buildPyRepositoryFile(
       [
         `${agg.name}Id`,
         ...agg.parts.map((p) => `${p.name}Id`),
-        ...refColls.map((f) => `${refTarget(f)}Id`),
+        // Every id-typed field (own or part, singular or collection)
+        // brands on hydrate — `order_ref=OrderId(row.order_ref)`.
+        ...[agg, ...agg.parts].flatMap((holder) =>
+          holder.fields
+            .map(idFieldTarget)
+            .filter((n): n is string => n != null)
+            .map((n) => `${n}Id`),
+        ),
       ].filter(refersTo),
     ),
   ].sort();
@@ -148,6 +155,7 @@ export function buildPyRepositoryFile(
     refersTo("insert") ? "from sqlalchemy.dialects.postgresql import insert" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
+    emittableFinds(repo).some(findUsesCurrentUser) ? "from app.auth.user import User" : null,
     refersTo("PagedResult") ? "from app.db.paging import PagedResult" : null,
     rowNames.length > 0 ? `from app.db.schema import ${rowNames.join(", ")}` : null,
     refersTo("iso") ? "from app.db.wire import iso" : null,
@@ -167,10 +175,13 @@ export function buildPyRepositoryFile(
   );
 }
 
-function refTarget(f: FieldIR): string {
+/** Target aggregate of an id-typed field — `Order id`, `Order id?`,
+ *  or `Order id[]` — else `null`. */
+function idFieldTarget(f: FieldIR): string | null {
   const t = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (t.kind === "id") return t.targetName;
   if (t.kind === "array" && t.element.kind === "id") return t.element.targetName;
-  return "";
+  return null;
 }
 
 // --- finds -------------------------------------------------------------------
@@ -182,6 +193,9 @@ function findMethod(agg: EnrichedAggregateIR, find: FindIR, ctx: EnrichedBounded
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
   const params = find.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`);
+  // currentUser-scoped finds take the actor as the trailing parameter;
+  // the predicate renders `current_user.<claim>` as a plain bind value.
+  if (findUsesCurrentUser(find)) params.push("current_user: User");
   const pred = find.filter
     ? lowerToSqlAlchemy(find.filter, agg, ctx)
     : conventionPredicate(agg, find);

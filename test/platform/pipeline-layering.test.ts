@@ -168,26 +168,44 @@ describe("pipeline layering — value imports point one way", () => {
   });
 
   it("no generator/<platform>/ imports a sibling platform directory", () => {
-    const platformDirs = ["typescript", "dotnet", "elixir", "react", "svelte", "java", "python"];
+    // Derived from the tree, not hardcoded: every non-underscore subdir
+    // of `src/generator/` is a per-platform generator (`dotnet`, `vue`,
+    // …); the `_`-prefixed dirs (`_walker`, `_expr`, `_frontend`, …) are
+    // the SHARED seams every platform may legitimately import.  Deriving
+    // the set means a newly-added platform (java/python/vue were all
+    // missed by the old hardcoded `["typescript","dotnet","elixir","react"]`
+    // list) is guarded automatically, with no edit here.
+    const platformDirs = fs
+      .readdirSync(path.join(srcDir, "generator"), { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.name.startsWith("_"))
+      .map((e) => e.name);
+    expect(
+      platformDirs.length,
+      "Expected to discover the per-platform generator dirs; did the layout change?",
+    ).toBeGreaterThanOrEqual(5);
     // Pinned sibling edges (frozen, not license to grow):
-    //   - dotnet/elixir → react/svelte index: the fullstack-host embed —
+    //   - dotnet/elixir/java → react/svelte index: the fullstack-host embed —
     //     a backend hosting a frontend SPA calls that frontend's
     //     generator to emit the embedded project (ClientApp/, priv/spa).
     //     This is deliberate composition, not a layering accident.
-    //   - elixir/theme-emit → react/templating/preparers/theme: the
-    //     theme VM preparer is framework-neutral but still homed in
-    //     react/; relocation is a follow-up.
+    //   - elixir/theme-emit & vue → react/...: framework-neutral frontend
+    //     helpers (the theme VM preparer, the money-schema constant, the
+    //     id-target form helper) that are still homed in react/; Vue reuses
+    //     them rather than re-deriving. Relocation into _frontend/ is a
+    //     follow-up — these are frozen, not a licence to grow new edges.
     const pinnedSibling = new Set([
       "src/generator/dotnet/index.ts -> generator/react/",
       "src/generator/dotnet/index.ts -> generator/svelte/",
       "src/generator/elixir/index.ts -> generator/react/",
       "src/generator/elixir/theme-emit.ts -> generator/react/",
       "src/generator/java/index.ts -> generator/react/",
+      "src/generator/python/index.ts -> generator/react/",
+      "src/generator/vue/index.ts -> generator/react/",
+      "src/generator/vue/walker/page-shell.ts -> generator/react/",
     ]);
     const out: string[] = [];
     for (const plat of platformDirs) {
       const dir = path.join(srcDir, "generator", plat);
-      if (!fs.existsSync(dir)) continue;
       for (const f of tsFiles(dir)) {
         for (const imp of importsOf(fs.readFileSync(f, "utf-8"))) {
           if (imp.typeOnly) continue; // type imports carry no runtime edge

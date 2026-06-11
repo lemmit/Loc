@@ -50,7 +50,7 @@ import {
   renderDapperRepository,
   renderDapperSchema,
 } from "./emit/dapper.js";
-import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
+import { renderDomainLog, renderExecutionContextBehavior } from "./emit/domain-log.js";
 import { emitDotnetMigrations } from "./emit/migrations.js";
 import {
   renderOutboxDelivery,
@@ -58,6 +58,8 @@ import {
   renderOutboxMessage,
   renderOutboxRelay,
 } from "./emit/outbox.js";
+import { renderRequestContext } from "./emit/request-context.js";
+import { renderRequestContextMiddleware } from "./emit/request-context-middleware.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import { emitDotnetSeeds } from "./emit/seed.js";
 import {
@@ -937,12 +939,26 @@ function emitProject(
   // Catalog-identity request log — always-on.  Cross-backend parity
   // with Phoenix's <App>.Telemetry and Hono's pino access log.
   out.set("Middleware/RequestLoggingMiddleware.cs", renderRequestLoggingMiddleware(ns));
+  // Ambient execution context (docs/architecture/request-context.md).
+  // The one AsyncLocal carrier the principal slice (auth) and the
+  // request-logger slice (--trace) both ride.  Emitted when either slice
+  // is present; a no-auth, no-trace project emits neither file, keeping
+  // the default artefact byte-identical.
+  const authRequired = !!options?.authRequired;
+  const hasCarrier = authRequired || emitTrace;
+  if (hasCarrier) {
+    out.set(
+      "Domain/Common/RequestContext.cs",
+      renderRequestContext(ns, { hasAuth: authRequired, hasLogger: emitTrace }),
+    );
+    out.set("Middleware/RequestContextMiddleware.cs", renderRequestContextMiddleware(ns));
+  }
   if (emitTrace) {
     // Domain-layer logger plumbing — emitted only on --trace so the
-    // default artefact stays free of an AsyncLocal accessor + the
-    // pipeline behavior that sets it.
+    // default artefact stays free of the DomainLog shim + the pipeline
+    // behaviour that binds the logger slice onto the frame.
     out.set("Domain/Common/DomainLog.cs", renderDomainLog(ns));
-    out.set("Application/Common/DomainLogBehavior.cs", renderDomainLogBehavior(ns));
+    out.set("Application/Common/ExecutionContextBehavior.cs", renderExecutionContextBehavior(ns));
   }
 }
 

@@ -192,6 +192,8 @@ export function renderSveltePage(
   workflowsByName: ReadonlyMap<string, WorkflowIR> = new Map(),
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR> = new Map(),
   pageRoutes: ReadonlyMap<string, string> = new Map(),
+  /** Extern frontend function names declared on this ui. */
+  externFunctions: ReadonlySet<string> = new Set(),
 ): string {
   void pageName;
   const paramNames = new Set(params.map((p) => p.name));
@@ -206,6 +208,7 @@ export function renderSveltePage(
     usedApiHooks,
     formOfs,
     actionMutations,
+    usedExternFunctions,
   } = walkBody(
     body,
     svelteTarget,
@@ -220,6 +223,7 @@ export function renderSveltePage(
     bcByWorkflow,
     aggregateParamTypes(params, aggregatesByName),
     pageRoutes,
+    externFunctions,
   );
 
   // Title — a plain `$effect`; runes auto-track any param/state the
@@ -238,6 +242,13 @@ export function renderSveltePage(
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((name) => `  import ${name} from "$lib/components/${name}.svelte";\n`)
+    .join("");
+  // One named-import line per extern function the body calls — the
+  // conformance shim at `src/lib/<name>.ts` (the typed seam; see
+  // extern-function-hook-escape-hatch.md §3).
+  const externFunctionImports = [...(usedExternFunctions ?? [])]
+    .sort()
+    .map((name) => `  import { ${name} } from "$lib/${name}";\n`)
     .join("");
   const apiHookImports = renderSvelteApiHookImports(usedApiHooks);
   const apiHookDecls = svelteTarget
@@ -286,7 +297,7 @@ export function renderSveltePage(
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${navigateImport}${pageStateImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}</script>
+${navigateImport}${pageStateImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}</script>
 
 ${indentJsx(tsx, "")}
 ${templateScope}`;
@@ -305,6 +316,8 @@ export function renderSvelteComponentFile(
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
   pageRoutes: ReadonlyMap<string, string> = new Map(),
+  /** Extern frontend function names declared on this ui. */
+  externFunctions: ReadonlySet<string> = new Set(),
 ): string {
   void name;
   const paramNames = new Set(params.map((p) => p.name));
@@ -319,6 +332,7 @@ export function renderSvelteComponentFile(
     usedApiHooks,
     actionMutations,
     formOfs,
+    usedExternFunctions,
   } = walkBody(
     body,
     svelteTarget,
@@ -333,6 +347,7 @@ export function renderSvelteComponentFile(
     new Map(),
     aggregateParamTypes(params, aggregatesByName),
     pageRoutes,
+    externFunctions,
   );
   const actionWiring = renderActionMutations(actionMutations);
   const form = formOfs.reduce<FormWiring>(
@@ -370,6 +385,10 @@ export function renderSvelteComponentFile(
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((n) => `  import ${n} from "./${n}.svelte";\n`)
+    .join("");
+  const externFunctionImports = [...(usedExternFunctions ?? [])]
+    .sort()
+    .map((n) => `  import { ${n} } from "$lib/${n}";\n`)
     .join("");
   // Snippet type for slot params + children — Svelte 5's analog of
   // ReactNode props.
@@ -410,7 +429,7 @@ export function renderSvelteComponentFile(
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${snippetImport}${navigateImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${propsDestructure}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}</script>
+${snippetImport}${navigateImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}</script>
 
 ${indentJsx(markup, "")}
 ${templateScope}`;

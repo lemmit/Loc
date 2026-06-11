@@ -1,0 +1,55 @@
+name: Python observability e2e
+
+# Boots a generated FastAPI backend against a postgres sidecar and
+# asserts the observability catalog envelope appears on stdout
+# (server_starting → server_listening → request_start/health_ok/
+# request_end with a shared request_id → server_shutdown →
+# server_drained).  Mirrors `dotnet-obs-e2e.yml` / `java-obs-e2e.yml`.
+#
+# Push-to-main only (regression net, not a PR gate).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/python/**'
+      - 'src/platform/python.ts'
+      - '.github/workflows/python-obs-e2e.yml'
+      - 'test/e2e/observability-events-python.test.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-obs-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # uv provisions Python 3.12 itself; the cache keys on the pinned
+      # dependency set so warm runs skip the resolver.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: 'src/generator/python/pins.ts'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Type-check
+        run: npm run build
+
+      - name: Boot generated backend + assert catalog envelope
+        run: npm run test:obs-python

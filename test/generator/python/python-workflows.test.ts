@@ -32,7 +32,7 @@ describe("python workflows", () => {
     const wf = files.get("api/app/http/workflows_routes.py")!;
     expect(wf).toContain("class RenameCustomerRequest(BaseModel):");
     expect(wf).toContain(
-      '@router.post("/rename_customer", status_code=204, operation_id="renameCustomerWorkflow")',
+      '@router.post("/rename_customer", status_code=204, operation_id="renameCustomerWorkflow", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
     );
     expect(wf).toContain("customer_id = CustomerId(body.customerId)");
     expect(wf).toContain("customers = CustomerRepository(session, NoopDomainEventDispatcher())");

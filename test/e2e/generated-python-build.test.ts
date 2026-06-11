@@ -36,6 +36,19 @@ const CASES: Array<[fixture: string, project: string]> = [
   ["test/e2e/fixtures/python-build/inheritance.ddd", "api"],
   // persistedAs(eventLog): append-only stream + appliers fold.
   ["test/e2e/fixtures/python-build/eventlog.ddd", "api"],
+  // Channels + event-triggered saga (in-process dispatcher, persisted
+  // correlation state).
+  ["test/e2e/fixtures/python-build/saga.ddd", "api"],
+  // `auth: required` — User dataclass + verifier registry + middleware,
+  // requires-guarded op/workflow, currentUser-scoped find.
+  ["test/e2e/fixtures/python-build/auth.ddd", "api"],
+  // `seed { ... }` — domain-create + raw datasets, __loom_seed marker.
+  ["test/e2e/fixtures/python-build/seeds.ddd", "api"],
+  // `operation X() extern` — handler registry + dev-stubs + boot verify,
+  // check_<op> precondition gate, controlled mutation surface.
+  ["test/e2e/fixtures/python-build/extern.ddd", "api"],
+  // Fullstack `ui:` embed — routers under /api/*, SPA fallback, ClientApp/.
+  ["test/e2e/fixtures/python-build/fullstack.ddd", "app"],
 ];
 
 describe.skipIf(!ENABLED)(

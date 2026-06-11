@@ -21,6 +21,7 @@ import {
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderDotnetLogCall } from "../_obs/render-dotnet.js";
+import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
 import { dotnetResourceAdapterFor, resourceClassName } from "./adapters/resource-clients.js";
 import {
   collectWireUsings,
@@ -370,9 +371,10 @@ function renderEventReactorHandler(
       stmtLines.push("        }");
     }
   }
-  for (const st of statements) {
-    stmtLines.push(...renderStatement(st, renderArg, ctx, usage, /* guardLoads */ true));
-  }
+  // Reactor / event-create bodies always dereference their loads → guard all.
+  stmtLines.push(
+    ...renderWorkflowStmts(statements, csWorkflowStmtTarget(ctx, renderArg, true), INDENT),
+  );
   for (const save of saves) {
     const fieldName = `_${save.repoName.charAt(0).toLowerCase() + save.repoName.slice(1)}`;
     stmtLines.push(`        await ${fieldName}.SaveAsync(${save.name}, cancellationToken);`);
@@ -623,9 +625,13 @@ function renderHandler(
   // Guard exactly the getById loads this command handler later dereferences
   // (op-call targets); loads only read to seed a `create` stay unguarded.
   const dereffedLoads = collectDereferencedLoads(wf.statements);
-  for (const st of wf.statements) {
-    stmtLines.push(...renderStatement(st, renderArg, ctx, usage, dereffedLoads));
-  }
+  stmtLines.push(
+    ...renderWorkflowStmts(
+      wf.statements,
+      csWorkflowStmtTarget(ctx, renderArg, dereffedLoads),
+      INDENT,
+    ),
+  );
   // Saves.
   for (const save of wf.savesAtExit) {
     const fieldName = `_${save.repoName.charAt(0).toLowerCase() + save.repoName.slice(1)}`;
@@ -760,32 +766,37 @@ function collectDereferencedLoads(stmts: readonly WorkflowStmtIR[]): Set<string>
   return names;
 }
 
-function renderStatement(
-  st: WorkflowStmtIR,
-  renderArg: (e: import("../../ir/types/loom-ir.js").ExprIR) => string,
+// The .NET leaf table for the shared workflow statement spine
+// (`_workflow/stmt-target.ts`). Built per render call so it captures the
+// driver's `renderArg` closure (cmd-param vs event-param substitution differ
+// between the handler and the reactor) and its `guardLoads` policy. The
+// dispatch + `for-each` recursion live in the spine; the base indent
+// (`INDENT`, 8 spaces) is threaded by the driver and `for-each` bodies step
+// +`indentUnit` (4 spaces), reproducing the prior hand-indentation exactly.
+function csWorkflowStmtTarget(
   ctx: EnrichedBoundedContextIR,
-  usage: WorkflowUsage,
+  renderArg: (e: ExprIR) => string,
   guardLoads: boolean | ReadonlySet<string> = false,
-): string[] {
-  void usage;
-  switch (st.kind) {
-    case "precondition": {
+): WorkflowStmtTarget {
+  return {
+    indentUnit: "    ",
+    precondition: (st, indent) => {
       const expr = renderArg(st.expr);
       return [
-        `${INDENT}if (!(${expr})) throw new DomainException(${JSON.stringify(`Precondition failed: ${st.source}`)});`,
+        `${indent}if (!(${expr})) throw new DomainException(${JSON.stringify(`Precondition failed: ${st.source}`)});`,
       ];
-    }
-    case "requires": {
+    },
+    requires: (st, indent) => {
       const expr = renderArg(st.expr);
       return [
-        `${INDENT}if (!(${expr})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${st.source}`)});`,
+        `${indent}if (!(${expr})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${st.source}`)});`,
       ];
-    }
-    case "emit": {
+    },
+    emit: (st, indent) => {
       const args = st.fields.map((f) => `${upperFirst(f.name)}: ${renderArg(f.value)}`).join(", ");
-      return [`${INDENT}_workflowEvents.Add(new ${st.eventName}(${args}));`];
-    }
-    case "factory-let": {
+      return [`${indent}_workflowEvents.Add(new ${st.eventName}(${args}));`];
+    },
+    factoryLet: (st, indent) => {
       // The Create(...) factory's parameters are emitted in camelCase
       // (matching the source field name), so the named-arg call site
       // must use the same casing — PascalCase here would fail with
@@ -807,9 +818,9 @@ function renderStatement(
       const args = [...provided, ...omitted].join(", ");
       // C# doesn't support reordering positional args; using named
       // args lets the user write fields in any order in the .ddd source.
-      return [`${INDENT}var ${st.name} = ${st.aggName}.Create(${args});`];
-    }
-    case "repo-let": {
+      return [`${indent}var ${st.name} = ${st.aggName}.Create(${args});`];
+    },
+    repoLet: (st, indent) => {
       const fieldName = `_${st.repoName.charAt(0).toLowerCase() + st.repoName.slice(1)}`;
       const argList = st.args.map(renderArg).join(", ");
       const callArgs = argList.length > 0 ? `${argList}, cancellationToken` : `cancellationToken`;
@@ -826,13 +837,13 @@ function renderStatement(
       const guardsLoad = typeof guardLoads === "boolean" ? guardLoads : guardLoads.has(st.name);
       if (guardsLoad && st.method === "getById") {
         return [
-          `${INDENT}var ${st.name} = ${call}`,
-          `${INDENT}    ?? throw new AggregateNotFoundException($"${st.aggName} {${argList}} not found");`,
+          `${indent}var ${st.name} = ${call}`,
+          `${indent}    ?? throw new AggregateNotFoundException($"${st.aggName} {${argList}} not found");`,
         ];
       }
-      return [`${INDENT}var ${st.name} = ${call};`];
-    }
-    case "op-call": {
+      return [`${indent}var ${st.name} = ${call};`];
+    },
+    opCall: (st, indent) => {
       const argList = st.args.map(renderArg).join(", ");
       const op = ctx.aggregates
         .find((a) => a.name === st.aggName)
@@ -849,10 +860,10 @@ function renderStatement(
           .map((p, i) => domainToRequestExpr(renderArg(st.args[i]!), p.type, ctx))
           .join(", ");
         return [
-          `${INDENT}${st.target}.Check${upperFirst(st.op)}(${argList});`,
-          `${INDENT}var __${st.op}Request = new ${reqName}(${requestArgs});`,
-          `${INDENT}await ${handlerField}.HandleAsync(${st.target}, __${st.op}Request, cancellationToken);`,
-          `${INDENT}${st.target}.AssertInvariants();`,
+          `${indent}${st.target}.Check${upperFirst(st.op)}(${argList});`,
+          `${indent}var __${st.op}Request = new ${reqName}(${requestArgs});`,
+          `${indent}await ${handlerField}.HandleAsync(${st.target}, __${st.op}Request, cancellationToken);`,
+          `${indent}${st.target}.AssertInvariants();`,
         ];
       }
       // Operations that reference `currentUser` pick up a trailing
@@ -864,16 +875,16 @@ function renderStatement(
             ? `${argList}, currentUser`
             : "currentUser"
           : argList;
-      return [`${INDENT}${st.target}.${upperFirst(st.op)}(${callArgs});`];
-    }
-    case "expr-let": {
+      return [`${indent}${st.target}.${upperFirst(st.op)}(${callArgs});`];
+    },
+    exprLet: (st, indent) => {
       // `let x = files.get(k)` — a resource-op RHS is an async helper, so
       // await it; ordinary expr-lets render unchanged.
       const isResourceOp = st.expr.kind === "call" && st.expr.callKind === "resource-op";
       const exprText = renderArg(st.expr);
-      return [`${INDENT}var ${st.name} = ${isResourceOp ? "await " : ""}${exprText};`];
-    }
-    case "repo-run": {
+      return [`${indent}var ${st.name} = ${isResourceOp ? "await " : ""}${exprText};`];
+    },
+    repoRun: (st, indent) => {
       // `Repo.run(<Retrieval>(args), page?)` → the generated
       // `Run<Name>Async(args, page?, cancellationToken)` repository method.
       const fieldName = `_${st.repoName.charAt(0).toLowerCase() + st.repoName.slice(1)}`;
@@ -885,33 +896,29 @@ function renderStatement(
       }
       const callArgs = [...args, "cancellationToken"].join(", ");
       return [
-        `${INDENT}var ${st.name} = await ${fieldName}.Run${upperFirst(st.retrievalName)}Async(${callArgs});`,
+        `${indent}var ${st.name} = await ${fieldName}.Run${upperFirst(st.retrievalName)}Async(${callArgs});`,
       ];
-    }
-    case "for-each": {
-      // `for o in xs { … }` → C# `foreach`; body recurses at +4 indent,
-      // then each iteration's dirty bindings save inside the loop (the
-      // aggregate's events drain through SaveAsync).
-      const bodyLines = st.body
-        .flatMap((s) => renderStatement(s, renderArg, ctx, usage, guardLoads))
-        .map((l) => `    ${l}`);
+    },
+    forEach: (st, indent, body) => {
+      // `for o in xs { … }` → C# `foreach`; the spine renders the body at
+      // `indent + indentUnit`, then each iteration's dirty bindings save
+      // inside the loop (the aggregate's events drain through SaveAsync).
       const saveLines = st.savesPerIteration.map((sv) => {
         const fieldName = `_${sv.repoName.charAt(0).toLowerCase() + sv.repoName.slice(1)}`;
-        return `${INDENT}    await ${fieldName}.SaveAsync(${sv.name}, cancellationToken);`;
+        return `${indent}    await ${fieldName}.SaveAsync(${sv.name}, cancellationToken);`;
       });
       return [
-        `${INDENT}foreach (var ${st.var} in ${renderArg(st.iterable)})`,
-        `${INDENT}{`,
-        ...bodyLines,
+        `${indent}foreach (var ${st.var} in ${renderArg(st.iterable)})`,
+        `${indent}{`,
+        ...body,
         ...saveLines,
-        `${INDENT}}`,
+        `${indent}}`,
       ];
-    }
-    case "resource-call":
-      // 4c: bare resource-op statement (`files.put(k, v)`) → awaited async
-      // helper call.
-      return [`${INDENT}await ${renderArg(st.call)};`];
-  }
+    },
+    // 4c: bare resource-op statement (`files.put(k, v)`) → awaited async
+    // helper call.
+    resourceCall: (st, indent) => [`${indent}await ${renderArg(st.call)};`],
+  };
 }
 
 /** Structural ExprIR rewrite: applies `onRef` to every leaf `ref` node

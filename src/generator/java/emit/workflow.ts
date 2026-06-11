@@ -8,6 +8,7 @@ import type {
 import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { renderWorkflowStmts, type WorkflowStmtTarget } from "../../_workflow/stmt-target.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import {
   collectWireImports,
@@ -95,24 +96,33 @@ function reposUsed(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
   return [...aggs].filter((a) => ctx.aggregates.some((x) => x.name === a)).sort();
 }
 
-function renderWorkflowStmt(
-  s: WorkflowStmtIR,
+// The Java leaf table for the shared workflow statement spine
+// (`_workflow/stmt-target.ts`). Built per render call so it captures the
+// `ctx`, the `imports` accumulator (each arm side-effects it via
+// `collectJavaExprImports`), and the `renderCtx`. The dispatch + `for-each`
+// recursion live in the spine; the base indent (8 spaces) is threaded in by
+// the driver and `for-each` bodies step +`indentUnit` (4 spaces), matching
+// the pre-seam hand-indentation exactly.
+function javaWorkflowStmtTarget(
   ctx: EnrichedBoundedContextIR,
   imports: Set<string>,
   renderCtx: typeof baseRenderCtx & { resourceClasses?: Map<string, string> } = baseRenderCtx,
-): string[] {
-  switch (s.kind) {
-    case "precondition":
+): WorkflowStmtTarget {
+  return {
+    indentUnit: "    ",
+    precondition: (s, indent) => {
       collectJavaExprImports(s.expr, imports);
       return [
-        `        if (!(${renderJavaExpr(s.expr, renderCtx)})) throw new DomainException(${JSON.stringify(`Precondition failed: ${s.source}`)});`,
+        `${indent}if (!(${renderJavaExpr(s.expr, renderCtx)})) throw new DomainException(${JSON.stringify(`Precondition failed: ${s.source}`)});`,
       ];
-    case "requires":
+    },
+    requires: (s, indent) => {
       collectJavaExprImports(s.expr, imports);
       return [
-        `        if (!(${renderJavaExpr(s.expr, renderCtx)})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${s.source}`)});`,
+        `${indent}if (!(${renderJavaExpr(s.expr, renderCtx)})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${s.source}`)});`,
       ];
-    case "factory-let": {
+    },
+    factoryLet: (s, indent) => {
       // Positional create over the target aggregate's create-input list;
       // fields the workflow doesn't supply are filled with null (the
       // .NET handler passes named nulls the same way).
@@ -125,19 +135,20 @@ function renderWorkflowStmt(
         collectJavaExprImports(v, imports);
         return renderJavaExpr(v, renderCtx);
       });
-      return [`        var ${s.name} = ${s.aggName}.create(${args.join(", ")});`];
-    }
-    case "repo-let": {
+      return [`${indent}var ${s.name} = ${s.aggName}.create(${args.join(", ")});`];
+    },
+    repoLet: (s, indent) => {
       for (const a of s.args) collectJavaExprImports(a, imports);
       const args = s.args.map((a) => renderJavaExpr(a, renderCtx)).join(", ");
       const method = s.method === "byId" ? "getById" : s.method;
       const wrap = s.method === "byId" ? `new ${s.aggName}Id(${args})` : args;
-      return [`        var ${s.name} = ${repoField(s.aggName)}.${method}(${wrap});`];
-    }
-    case "expr-let":
+      return [`${indent}var ${s.name} = ${repoField(s.aggName)}.${method}(${wrap});`];
+    },
+    exprLet: (s, indent) => {
       collectJavaExprImports(s.expr, imports);
-      return [`        var ${s.name} = ${renderJavaExpr(s.expr, renderCtx)};`];
-    case "op-call": {
+      return [`${indent}var ${s.name} = ${renderJavaExpr(s.expr, renderCtx)};`];
+    },
+    opCall: (s, indent) => {
       for (const a of s.args) collectJavaExprImports(a, imports);
       const rendered = s.args.map((a) => renderJavaExpr(a, renderCtx));
       // Aggregate ops that reference currentUser take it as a trailing
@@ -146,9 +157,9 @@ function renderWorkflowStmt(
         .find((a) => a.name === s.aggName)
         ?.operations.find((o) => o.name === s.op);
       if (targetOp && operationUsesCurrentUser(targetOp)) rendered.push("currentUser");
-      return [`        ${s.target}.${s.op}(${rendered.join(", ")});`];
-    }
-    case "emit": {
+      return [`${indent}${s.target}.${s.op}(${rendered.join(", ")});`];
+    },
+    emit: (s, indent) => {
       // Workflow-level emission has no aggregate stream to ride: the
       // event record is constructed (so its shape stays compile-checked)
       // and logged with the same `domain_event` envelope the per-aggregate
@@ -161,10 +172,10 @@ function renderWorkflowStmt(
         ? declared.fields.map((f) => rendered.get(f.name) ?? "null").join(", ")
         : [...rendered.values()].join(", ");
       return [
-        `        { var __ev = new ${s.eventName}(${args}); log.info("domain_event type={}", __ev.getClass().getSimpleName()); }`,
+        `${indent}{ var __ev = new ${s.eventName}(${args}); log.info("domain_event type={}", __ev.getClass().getSimpleName()); }`,
       ];
-    }
-    case "repo-run": {
+    },
+    repoRun: (s, indent) => {
       for (const a of s.retrievalArgs) collectJavaExprImports(a, imports);
       const args = s.retrievalArgs.map((a) => renderJavaExpr(a, renderCtx));
       // Call-site page rides the `(…, Integer offset, Integer limit)`
@@ -178,27 +189,31 @@ function renderWorkflowStmt(
         );
       }
       return [
-        `        var ${s.name} = ${repoField(s.aggName)}.run${upperFirst(s.retrievalName)}(${args.join(", ")});`,
+        `${indent}var ${s.name} = ${repoField(s.aggName)}.run${upperFirst(s.retrievalName)}(${args.join(", ")});`,
       ];
-    }
-    case "for-each": {
+    },
+    forEach: (s, indent, body) => {
       collectJavaExprImports(s.iterable, imports);
-      const body = s.body.flatMap((b) => renderWorkflowStmt(b, ctx, imports, renderCtx));
+      // The spine renders `body` at `indent + indentUnit`; per-iteration
+      // saves sit at the same depth.
+      const inner = `${indent}    `;
       const saves = s.savesPerIteration.map(
-        (save) => `        ${repoField(save.aggName)}.save(${save.name});`,
+        (save) => `${inner}${repoField(save.aggName)}.save(${save.name});`,
       );
       return [
-        `        for (var ${s.var} : ${renderJavaExpr(s.iterable, renderCtx)}) {`,
-        ...[...body, ...saves].map((l) => `    ${l}`),
-        `        }`,
+        `${indent}for (var ${s.var} : ${renderJavaExpr(s.iterable, renderCtx)}) {`,
+        ...body,
+        ...saves,
+        `${indent}}`,
       ];
-    }
-    case "resource-call":
-      // Bare resource-op statement (`files.put(k, v)`) — the expression
-      // renderer's `resource-op` arm dispatches through resourceClasses.
+    },
+    // Bare resource-op statement (`files.put(k, v)`) — the expression
+    // renderer's `resource-op` arm dispatches through resourceClasses.
+    resourceCall: (s, indent) => {
       collectJavaExprImports(s.call, imports);
-      return [`        ${renderJavaExpr(s.call, renderCtx)};`];
-  }
+      return [`${indent}${renderJavaExpr(s.call, renderCtx)};`];
+    },
+  };
 }
 
 function repoField(aggName: string): string {
@@ -259,8 +274,10 @@ export function renderJavaWorkflows(
       collectWireToDomainImports(p.type, imports);
       return `        var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`)};`;
     });
-    const bodyLines = wf.statements.flatMap((s) =>
-      renderWorkflowStmt(s, ctx, imports, renderCtxFor(wctx)),
+    const bodyLines = renderWorkflowStmts(
+      wf.statements,
+      javaWorkflowStmtTarget(ctx, imports, renderCtxFor(wctx)),
+      "        ",
     );
     const saves = wf.savesAtExit.map((s) => `        ${repoField(s.aggName)}.save(${s.name});`);
     methods.push(

@@ -1,0 +1,215 @@
+import type { EnrichedBoundedContextIR, ExprIR, SeedRowIR } from "../../../ir/types/loom-ir.js";
+import { lines } from "../../../util/code-builder.js";
+import { snake, upperFirst } from "../../../util/naming.js";
+import { renderSeedRowInsert } from "../../sql-pg.js";
+import { renderPyExpr } from "../render-expr.js";
+
+// ---------------------------------------------------------------------------
+// First-boot database seeding (database-seeding.md) — `app/db/seed.py`
+// from the merged context's `SeedIR` list, the Python port of the Hono
+// `db/seed.ts` emitter:
+//
+//   - Default path is **through the domain `create`** (D-SEED-PATH):
+//     each row becomes `await <agg>_repo.save(<Agg>.create(field=…))`,
+//     so constructor invariants run — a bad seed fails at boot instead
+//     of writing a corrupt row.
+//   - `raw` rows bypass the domain and emit the shared
+//     `renderSeedRowInsert` INSERT verbatim (explicit ids + literal FK
+//     columns per D-SEED-XREF), driver-executed so `:` in literals
+//     can't be mistaken for bind params.
+//   - **Ship-once per dataset** (D-SEED-IDEMPOTENCY): the `__loom_seed`
+//     marker table records applied datasets; `default` always runs,
+//     others opt in via LOOM_SEED (comma-separated).
+//
+// Boot order matches the other backends: migrations, then seeds (the
+// lifespan calls `run_seeds()` right after `run_migrations()`); the
+// module also runs out-of-band via `python -m app.db.seed`.
+// ---------------------------------------------------------------------------
+
+interface Entry {
+  row: SeedRowIR;
+  raw: boolean;
+}
+
+interface Dataset {
+  name: string;
+  entries: Entry[];
+}
+
+export function buildPySeedFile(
+  ctx: EnrichedBoundedContextIR,
+  schemaFor: (aggName: string) => string | undefined = () => undefined,
+): string | null {
+  const datasets = groupByDataset(ctx);
+  if (datasets.length === 0) return null;
+
+  // Only non-abstract aggregates have a `create` factory + repository.
+  const seedable = new Set(ctx.aggregates.filter((a) => !a.isAbstract).map((a) => a.name));
+
+  const fnBlocks: string[] = [];
+  const callLines: string[] = [];
+  for (const ds of datasets) {
+    const entries = ds.entries.filter((e) => seedable.has(e.row.aggregate));
+    if (entries.length === 0) continue;
+    fnBlocks.push(renderDatasetFn(ds.name, entries, schemaFor));
+    callLines.push(`        await _seed_${snake(ds.name)}(session, requested)`);
+  }
+  if (callLines.length === 0) return null;
+
+  const body = lines(...fnBlocks);
+  const domainAggs = usedAggregates(datasets, seedable);
+  const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
+  const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
+  const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
+    .filter(refersTo)
+    .sort();
+  const idNames = ctx.aggregates
+    .map((a) => `${a.name}Id`)
+    .filter(refersTo)
+    .sort();
+
+  return lines(
+    `"""First-boot database seeding (database-seeding.md).  Auto-generated.`,
+    "",
+    "Ship-once per dataset via the __loom_seed marker; re-runs are no-ops.",
+    "`default` always runs; other datasets opt in via LOOM_SEED.",
+    `"""`,
+    "",
+    "import asyncio",
+    "import os",
+    refersTo("datetime") ? "from datetime import UTC, datetime" : null,
+    refersTo("Decimal") ? "from decimal import Decimal" : null,
+    "",
+    "from sqlalchemy import text",
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+    "",
+    "from app.db.engine import session_factory",
+    ...domainAggs.map(
+      (a) => `from app.db.repositories.${snake(a)}_repository import ${a}Repository`,
+    ),
+    domainAggs.length > 0 ? "from app.domain.events import NoopDomainEventDispatcher" : null,
+    idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
+    ...domainAggs.map((a) => `from app.domain.${snake(a)} import ${a}`),
+    voEnumNames.length > 0
+      ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
+      : null,
+    "",
+    "",
+    "def _dataset_enabled(dataset: str, requested: set[str]) -> bool:",
+    '    return dataset == "default" or dataset in requested',
+    "",
+    "",
+    "async def _already_seeded(session: AsyncSession, dataset: str) -> bool:",
+    "    r = await session.execute(",
+    '        text("SELECT 1 FROM __loom_seed WHERE dataset = :d"), {"d": dataset}',
+    "    )",
+    "    return r.first() is not None",
+    "",
+    "",
+    "async def _mark_seeded(session: AsyncSession, dataset: str) -> None:",
+    '    await session.execute(text("INSERT INTO __loom_seed (dataset) VALUES (:d)"), {"d": dataset})',
+    "",
+    "",
+    body,
+    "",
+    "async def run_seeds() -> None:",
+    "    requested = {",
+    '        s.strip() for s in os.environ.get("LOOM_SEED", "").split(",") if s.strip()',
+    "    }",
+    "    async with session_factory() as session:",
+    "        await session.execute(",
+    "            text(",
+    '                "CREATE TABLE IF NOT EXISTS __loom_seed"',
+    '                " (dataset text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"',
+    "            )",
+    "        )",
+    ...callLines,
+    "        await session.commit()",
+    "",
+    "",
+    'if __name__ == "__main__":',
+    "    asyncio.run(run_seeds())",
+    "",
+  );
+}
+
+function groupByDataset(ctx: EnrichedBoundedContextIR): Dataset[] {
+  const byName = new Map<string, Dataset>();
+  const order: string[] = [];
+  for (const seed of ctx.seeds) {
+    let ds = byName.get(seed.dataset);
+    if (!ds) {
+      ds = { name: seed.dataset, entries: [] };
+      byName.set(seed.dataset, ds);
+      order.push(seed.dataset);
+    }
+    for (const row of seed.rows) ds.entries.push({ row, raw: seed.path === "raw" });
+  }
+  return order.map((n) => byName.get(n)!);
+}
+
+/** Aggregates whose domain class + repository the seed imports — `raw`
+ *  rows emit pure SQL and import nothing. */
+function usedAggregates(datasets: Dataset[], seedable: Set<string>): string[] {
+  const used = new Set<string>();
+  for (const ds of datasets) {
+    for (const e of ds.entries) {
+      if (!e.raw && seedable.has(e.row.aggregate)) used.add(e.row.aggregate);
+    }
+  }
+  return [...used].sort();
+}
+
+function renderDatasetFn(
+  dataset: string,
+  entries: Entry[],
+  schemaFor: (aggName: string) => string | undefined,
+): string {
+  const domainAggs = [...new Set(entries.filter((e) => !e.raw).map((e) => e.row.aggregate))];
+  const repoDecls = domainAggs.map(
+    (a) => `    ${snake(a)}_repo = ${a}Repository(session, NoopDomainEventDispatcher())`,
+  );
+  const saveLines = entries.map((e) =>
+    e.raw
+      ? // raw path (D-SEED-XREF): driver-level INSERT with explicit ids,
+        // schema-qualified to match the dataSource-routed table.
+        `    await (await session.connection()).exec_driver_sql(${pyStr(qualifiedInsert(e.row, schemaFor(e.row.aggregate)))})`
+      : `    await ${snake(e.row.aggregate)}_repo.save(${e.row.aggregate}.create(${renderInput(e.row)}))`,
+  );
+  return lines(
+    `async def _seed_${snake(dataset)}(session: AsyncSession, requested: set[str]) -> None:`,
+    `    if not _dataset_enabled(${pyStr(dataset)}, requested):`,
+    "        return",
+    `    if await _already_seeded(session, ${pyStr(dataset)}):`,
+    "        return",
+    ...repoDecls,
+    ...saveLines,
+    `    await _mark_seeded(session, ${pyStr(dataset)})`,
+    "",
+  );
+}
+
+/** The shared INSERT renderer emits an unqualified table name; the
+ *  Python schema routes every aggregate table through its dataSource's
+ *  Postgres schema, so the raw INSERT is qualified to match. */
+function qualifiedInsert(row: SeedRowIR, schema: string | undefined): string {
+  const sql = renderSeedRowInsert(row.aggregate, row.fields);
+  if (!schema) return sql;
+  return sql.replace(/^INSERT INTO "/, `INSERT INTO "${schema}"."`);
+}
+
+/** `field=<expr>, …` create-factory kwargs from a seed row.  Seed
+ *  expressions never reference `this`; the default render context
+ *  (literals / enum values / value-object ctors / money / now())
+ *  suffices. */
+function renderInput(row: SeedRowIR): string {
+  return row.fields.map((f) => `${snake(f.name)}=${renderField(f.value)}`).join(", ");
+}
+
+function renderField(value: ExprIR): string {
+  return renderPyExpr(value);
+}
+
+function pyStr(s: string): string {
+  return JSON.stringify(s);
+}

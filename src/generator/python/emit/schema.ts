@@ -3,6 +3,7 @@ import type {
   AssociationIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import {
   isTphBase,
@@ -77,6 +78,12 @@ export function renderPySchema(
     for (const assoc of (agg as EnrichedAggregateIR).associations ?? []) {
       models.push(renderJoinModel(assoc, schema, prefix));
     }
+  }
+  // Persisted workflow-correlation state (workflow-and-applier.md A2-S2):
+  // one row per running instance, keyed by the correlation field.  The
+  // shared migration leaves these unqualified (public schema).
+  for (const wf of ctx.workflows) {
+    if (wf.correlationField) models.push(renderWorkflowStateModel(wf, ctx));
   }
   const body = models.join("\n\n\n");
 
@@ -187,6 +194,44 @@ function renderEventLogModel(name: string, schema?: string, prefix?: string): st
     "    type: Mapped[str] = mapped_column(Text)",
     "    data: Mapped[object] = mapped_column(JSONB)",
     "    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))",
+  );
+}
+
+/** Saga-state row for a correlation-bearing workflow — PK is the
+ *  id-shaped correlation column (UUID, parity with the shared DDL);
+ *  reference-collection state fields fold to JSONB. */
+function renderWorkflowStateModel(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
+  const tableName = plural(snake(wf.name));
+  const corr = wf.correlationField as string;
+  const cols: PyColumn[] = [];
+  for (const f of wf.stateFields ?? []) {
+    if (f.name === corr) {
+      cols.push({
+        attr: snake(f.name),
+        pyType: "str",
+        saType: "Uuid(as_uuid=False)",
+        optional: false,
+        primaryKey: true,
+      });
+      continue;
+    }
+    const t = f.type.kind === "optional" ? f.type.inner : f.type;
+    if (t.kind === "array" && t.element.kind === "id") {
+      cols.push({
+        attr: snake(f.name),
+        pyType: "object",
+        saType: "JSONB",
+        optional: !!f.optional,
+      });
+      continue;
+    }
+    cols.push(...columnsForFields([f], ctx));
+  }
+  return lines(
+    `class ${wf.name}Row(Base):`,
+    `    __tablename__ = "${tableName}"`,
+    "",
+    cols.map(renderColumn),
   );
 }
 
