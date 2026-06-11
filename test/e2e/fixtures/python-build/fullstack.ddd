@@ -1,0 +1,32 @@
+// Fullstack `platform: python, ui: WebApp` mode (dotnet embed parity):
+// one deployable that BOTH serves the API (under /api/*) AND hosts a
+// React SPA from wwwroot/ — multi-stage Dockerfile builds ClientApp/,
+// main.py serves the bundle with an index.html fallback for
+// client-side routing.
+system PyFullstack {
+  subdomain Sales {
+    context Sales {
+      aggregate Order {
+        name: string
+        derived display: string = name
+      }
+      repository Orders for Order { }
+    }
+  }
+
+  ui WebApp with scaffold(subdomains: [Sales]) { }
+
+  api SalesApi from Sales
+
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
+
+  deployable app {
+    platform: python
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    ui: WebApp
+    port: 8000
+  }
+}

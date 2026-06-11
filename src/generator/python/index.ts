@@ -9,6 +9,7 @@ import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { generateReactForContexts } from "../react/index.js";
 import { emitPyAuthFiles, renderPyStubUserKwargs } from "./auth-emit.js";
 import {
   abstractBasesOf,
@@ -73,8 +74,13 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   const slug = pythonProjectName(args.deployable.name);
   const merged = mergeContexts(args.contexts);
 
+  // Fullstack-python branch (dotnet parity): a `ui:` mount embeds the
+  // React SPA — routers move under /api/*, main.py serves wwwroot/ with
+  // an index.html fallback, the Dockerfile becomes multi-stage, and the
+  // React project is generated under ClientApp/.
+  const hasEmbeddedSpa = !!args.deployable.uiName;
   out.set("pyproject.toml", renderPyproject(slug));
-  out.set("Dockerfile", DOCKERFILE_PY);
+  out.set("Dockerfile", hasEmbeddedSpa ? DOCKERFILE_PY_FULLSTACK : DOCKERFILE_PY);
   out.set(".dockerignore", DOCKERIGNORE_PY);
   out.set("certs/.gitkeep", "");
   out.set("app/__init__.py", "");
@@ -123,8 +129,30 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       authRequired ? args.sys.user : undefined,
       hasSeeds,
       externAggs,
+      hasEmbeddedSpa,
     ),
   );
+  if (hasEmbeddedSpa) {
+    const spaFiles = generateReactForContexts(args.contexts, args.sys, args.deployable, {
+      apiBaseUrl: "/api",
+      pathPrefix: "ClientApp/",
+    });
+    for (const [path, content] of spaFiles) {
+      // The React pack also ships Dockerfile / .dockerignore / certs /
+      // the e2e harness at the project root — the python project owns
+      // those surfaces in fullstack mode (multi-stage Dockerfile builds
+      // the SPA).  Skip them so the file map stays clean.
+      if (
+        path === "ClientApp/Dockerfile" ||
+        path === "ClientApp/.dockerignore" ||
+        path === "ClientApp/certs/.gitkeep" ||
+        path.startsWith("ClientApp/e2e/")
+      )
+        continue;
+      out.set(path, content);
+    }
+    out.set("ClientApp/.gitignore", "node_modules\ndist\n");
+  }
 
   out.set("app/domain/__init__.py", "");
   out.set("app/domain/ids.py", renderPyIds(merged));
@@ -338,7 +366,11 @@ function renderMain(
   authUser: import("../../ir/types/loom-ir.js").UserIR | undefined = undefined,
   hasSeeds = false,
   externAggs: string[] = [],
+  hasEmbeddedSpa = false,
 ): string {
+  // Embedded-SPA mode mounts every router under /api/* so the SPA's
+  // path namespace stays free for client-side routing.
+  const routerArgs = hasEmbeddedSpa ? ', prefix="/api"' : "";
   const authRequired = authUser != null;
   // Dev-stub verifier (Hono index.ts parity): accepts every request as
   // a built-in admin user with EMPTY permissions so the generated
@@ -355,11 +387,13 @@ function renderMain(
     "import os",
     "from collections.abc import AsyncIterator",
     "from contextlib import asynccontextmanager",
+    hasEmbeddedSpa ? "from pathlib import Path as FilePath" : null,
     stubKwargs.includes("datetime.") ? "from datetime import UTC, datetime" : null,
     stubKwargs.includes("Decimal(") ? "from decimal import Decimal" : null,
     "",
     `from fastapi import FastAPI${authRequired ? ", Request" : ""}`,
     "from fastapi.middleware.cors import CORSMiddleware",
+    hasEmbeddedSpa ? "from fastapi.responses import FileResponse" : null,
     "from sqlalchemy import text",
     "",
     authRequired ? "from app.auth.middleware import AuthMiddleware" : null,
@@ -437,9 +471,9 @@ function renderMain(
     "# Added last so it runs first (Starlette: later-added is outermost) —",
     "# every request is bracketed, including 401s from the auth middleware.",
     "app.add_middleware(ObservabilityMiddleware)",
-    ...routerAggs.map((name) => `app.include_router(${snake(name)}_router)`),
-    hasViews ? "app.include_router(views_router)" : null,
-    hasWorkflows ? "app.include_router(workflows_router)" : null,
+    ...routerAggs.map((name) => `app.include_router(${snake(name)}_router${routerArgs})`),
+    hasViews ? `app.include_router(views_router${routerArgs})` : null,
+    hasWorkflows ? `app.include_router(workflows_router${routerArgs})` : null,
     "",
     "",
     `@app.get("/health")`,
@@ -456,6 +490,24 @@ function renderMain(
     `        await conn.execute(text("SELECT 1"))`,
     `    return {"ok": True}`,
     "",
+    ...(hasEmbeddedSpa
+      ? [
+          "",
+          '_WWWROOT = FilePath(__file__).resolve().parent.parent / "wwwroot"',
+          "",
+          "",
+          "# Embedded SPA (wwwroot/, copied in by the Dockerfile's spa-build",
+          "# stage).  Registered last so every API route wins; unknown paths",
+          "# fall back to index.html for client-side routing.",
+          '@app.get("/{spa_path:path}", include_in_schema=False)',
+          "async def spa(spa_path: str) -> FileResponse:",
+          "    candidate = (_WWWROOT / spa_path).resolve()",
+          "    if candidate.is_file() and candidate.is_relative_to(_WWWROOT):",
+          "        return FileResponse(candidate)",
+          '    return FileResponse(_WWWROOT / "index.html")',
+          "",
+        ]
+      : []),
   );
 }
 
@@ -485,6 +537,39 @@ COPY pyproject.toml ./
 RUN uv sync --no-dev
 COPY app/ ./app/
 COPY migrations/ ./migrations/
+ENV PATH="/app/.venv/bin:$PATH"
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+`;
+
+// Fullstack image: stage 1 builds the React SPA under ClientApp/,
+// stage 2 is the standard python image with the bundle copied into
+// wwwroot/ for main.py's FileResponse fallback (dotnet parity).
+const DOCKERFILE_PY_FULLSTACK = `# syntax=docker/dockerfile:1
+# Auto-generated — fullstack Python + React (embedded SPA).
+
+FROM node:20-alpine AS spa-build
+WORKDIR /spa
+COPY ClientApp/package.json ./
+RUN npm install --no-audit --no-fund
+COPY ClientApp/ ./
+RUN npm run build
+
+FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+WORKDIR /app
+RUN apt-get update \\
+    && apt-get install -y --no-install-recommends wget ca-certificates \\
+    && rm -rf /var/lib/apt/lists/*
+COPY certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates 2>/dev/null || true
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \\
+    UV_PROJECT_ENVIRONMENT=/app/.venv
+COPY pyproject.toml ./
+RUN uv sync --no-dev
+COPY app/ ./app/
+COPY migrations/ ./migrations/
+COPY --from=spa-build /spa/dist ./wwwroot
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

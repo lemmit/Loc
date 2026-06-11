@@ -47,6 +47,8 @@ const CASES: Array<[fixture: string, project: string]> = [
   // `operation X() extern` — handler registry + dev-stubs + boot verify,
   // check_<op> precondition gate, controlled mutation surface.
   ["test/e2e/fixtures/python-build/extern.ddd", "api"],
+  // Fullstack `ui:` embed — routers under /api/*, SPA fallback, ClientApp/.
+  ["test/e2e/fixtures/python-build/fullstack.ddd", "app"],
 ];
 
 describe.skipIf(!ENABLED)(
