@@ -9,12 +9,13 @@ import { renderCsType } from "./render-expr.js";
 //   Auth/User.cs                          — strongly-typed claim record
 //   Auth/IUserVerifier.cs                 — verifier hook interface
 //   Auth/ICurrentUserAccessor.cs          — request-scoped accessor
-//   Auth/HttpContextCurrentUserAccessor.cs — default IHttpContextAccessor
-//                                            implementation
+//   Auth/HttpContextCurrentUserAccessor.cs — facade reading the principal
+//                                            slice of the ambient
+//                                            RequestContext
 //   Auth/UserMiddleware.cs                — JWT decode middleware that
 //                                            calls IUserVerifier and
-//                                            stashes the resolved user
-//                                            on the request scope
+//                                            attaches the resolved user
+//                                            to the ambient RequestContext
 //
 // The user supplies a class implementing `IUserVerifier`; the project
 // fails fast at startup if no verifier is registered (Program.cs check).
@@ -156,36 +157,30 @@ public interface ICurrentUserAccessor
 
 function renderAccessorImpl(ns: string): string {
   return `// Auto-generated.
-using Microsoft.AspNetCore.Http;
+using ${ns}.Domain.Common;
 
 namespace ${ns}.Auth;
 
-/// <summary>Default implementation backed by
-/// <see cref="IHttpContextAccessor"/>.  The middleware stashes the
-/// resolved <see cref="User"/> on
-/// <c>HttpContext.Items["currentUser"]</c>; this accessor reads it
-/// back per scoped request.</summary>
+/// <summary>Default implementation that reads the verified principal from
+/// the ambient <see cref="RequestContext"/> — the single source of truth
+/// for the request user.  UserMiddleware attaches it after the verifier
+/// succeeds; this accessor exposes it as the typed <see cref="User"/>
+/// claim per scoped request.</summary>
 public sealed class HttpContextCurrentUserAccessor : ICurrentUserAccessor
 {
-    private readonly IHttpContextAccessor _http;
-
-    public HttpContextCurrentUserAccessor(IHttpContextAccessor http)
-    {
-        _http = http;
-    }
-
     public User User
     {
         get
         {
-            var ctx = _http.HttpContext
+            var rc = RequestContext.Current
                 ?? throw new InvalidOperationException(
-                    "ICurrentUserAccessor requires an active HttpContext.");
-            if (ctx.Items["currentUser"] is User u) return u;
-            throw new InvalidOperationException(
-                "currentUser was not populated for this request — verify that " +
-                "UserMiddleware is mounted before MapControllers and that the " +
-                "request was authenticated.");
+                    "ICurrentUserAccessor requires an active RequestContext — " +
+                    "verify RequestContextMiddleware is mounted first.");
+            return rc.CurrentUser
+                ?? throw new InvalidOperationException(
+                    "currentUser was not populated for this request — verify that " +
+                    "UserMiddleware is mounted before MapControllers and that the " +
+                    "request was authenticated.");
         }
     }
 }
@@ -199,6 +194,7 @@ function renderMiddleware(ns: string): string {
   return `// Auto-generated.
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
+using ${ns}.Domain.Common;
 
 namespace ${ns}.Auth;
 
@@ -247,7 +243,10 @@ public sealed class UserMiddleware
             await ctx.Response.WriteAsync("unauthorized");
             return;
         }
-        ctx.Items["currentUser"] = user;
+        // Attach the verified principal to the ambient frame opened by
+        // RequestContextMiddleware — the single source of truth read by
+        // ICurrentUserAccessor and every currentUser-aware handler.
+        if (RequestContext.Current is { } rc) rc.CurrentUser = user;
         await _next(ctx);
     }
 }
