@@ -6,9 +6,10 @@
 > additive codegen on the `PlatformSurface` contract. Builds on
 > [`docs/platforms.md`](../platforms.md) (the surface contract) and
 > [`docs/generators.md`](../generators.md) (per-backend feature matrix).
-> Sibling of [`java-backend.md`](./java-backend.md) and
-> [`php-backend.md`](./php-backend.md) — the three "new domain-logic
-> backend" studies.
+> Sibling of [`java-backend.md`](./java-backend.md) (since **shipped**
+> — its ~6–9-week parity estimate proved out, a useful calibration for
+> the numbers below) and [`php-backend.md`](./php-backend.md) — the
+> three "new domain-logic backend" studies.
 
 ## TL;DR
 

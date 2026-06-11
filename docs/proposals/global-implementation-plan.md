@@ -167,9 +167,11 @@ Ordered by the dependency spine, not by size.
    per-package-output-tree (deferred on fixture/CI cost),
    unfoldable-api-derivation (coordinate with payload P2 before
    building more on `wireShape`).
-10. **java-backend** — deliberately last; consumes the reified
-    `Specification<T>` model (T2.g) and the `ExprTarget`/`WalkerTarget`
-    seams.
+10. **java-backend** — **SHIPPED** (#1110 + follow-ups; execution
+    record in `../plans/java-backend-implementation.md`).  Landed as
+    planned on the reified `Specification<T>` model and the
+    `ExprTarget`/`WalkerTarget` seams — the first backend consuming
+    `CriterionIR` directly.
 
 ## Coordinated single-PR moments (surviving set)
 
