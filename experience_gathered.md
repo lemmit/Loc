@@ -1309,3 +1309,19 @@ What the second `WalkerTarget`-consuming frontend taught us:
   walker-core move, the zod-schema extraction, the page-object/
   harness moves to `_frontend/`, and the `formRuntimeImports` seam all
   shipped with an empty showcase full-system diff against main.
+
+## Money-primitive forms vs the zod resolver (2026-06-12)
+
+- **The schema sees what the *control* writes, not the wire shape.**
+  `moneySchema` was `z.string().transform(→ Decimal)` — correct for
+  parsing wire JSON, but every pack's money input control converts on
+  change (`field.onChange(new Decimal(...))`), so the zodResolver
+  validated a Decimal *instance* against `z.string()` and every
+  money-primitive form failed submit with "Expected string, received
+  object".  Fix: `z.union([z.instanceof(Decimal), z.string()])` with an
+  instance pass-through ahead of the string parse.  The gap survived
+  because the e2e fixtures exercise the Money *value object*
+  (`z.number()` amounts), never the `money` primitive, in a form —
+  when a schema is shared between wire parsing and form validation,
+  test BOTH inbound shapes behaviourally (the new
+  `money-schema-runtime.test.ts` transpiles + executes the template).
