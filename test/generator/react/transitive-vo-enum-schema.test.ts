@@ -12,7 +12,7 @@
 // shared/geo.ddd.
 
 import { describe, expect, it } from "vitest";
-import { buildApiModule } from "../../../src/generator/react/api-builder.js";
+import { buildApiModule } from "../../../src/generator/_frontend/api-module.js";
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../../src/ir/lower/lower.js";
 import { allContexts } from "../../../src/ir/types/loom-ir.js";

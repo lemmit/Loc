@@ -11,6 +11,7 @@ import {
 import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
 import { requestPyType } from "./emit/http-models.js";
 import { type PyRenderContext, renderPyExpr } from "./render-expr.js";
 import { errorResponsesKwarg, pyWireToDomain, requestFieldDecl } from "./routes-builder.js";
@@ -244,9 +245,7 @@ function workflowRoute(
   }
   const hasEmit = collectEmits(wf.statements).length > 0;
   if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
-  for (const st of wf.statements) {
-    out.push(...renderWorkflowStmt(st, "    ", undefined, ctx));
-  }
+  out.push(...renderWorkflowStmts(wf.statements, pyWorkflowStmtTarget(undefined, ctx), "    "));
   for (const save of wf.savesAtExit) {
     out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
   }
@@ -259,40 +258,43 @@ function workflowRoute(
   return out.join("\n");
 }
 
-export function renderWorkflowStmt(
-  st: WorkflowStmtIR,
-  i: string,
+// The Python leaf table for the shared workflow statement spine
+// (`_workflow/stmt-target.ts`). One method per `WorkflowStmtIR` kind; the
+// dispatch + `for-each` recursion live in the spine.  The table closes
+// over the render context (saga handlers render `this.<state>` against
+// the tracked row via `thisName: "state"`) and, when a context is
+// given, threads the actor into currentUser-gated op-calls.
+export function pyWorkflowStmtTarget(
   rctx: PyRenderContext = { thisName: "self" },
   ctx?: EnrichedBoundedContextIR,
-): string[] {
-  switch (st.kind) {
-    case "precondition":
-      return [
-        `${i}if not (${renderPyExpr(st.expr, rctx)}):`,
-        `${i}    raise DomainError(${JSON.stringify(`Precondition failed: ${st.source}`)})`,
-      ];
-    case "requires":
-      return [
-        `${i}if not (${renderPyExpr(st.expr, rctx)}):`,
-        `${i}    raise ForbiddenError(${JSON.stringify(`Forbidden: ${st.source}`)})`,
-      ];
-    case "emit": {
+): WorkflowStmtTarget {
+  return {
+    indentUnit: "    ",
+    precondition: (st, i) => [
+      `${i}if not (${renderPyExpr(st.expr, rctx)}):`,
+      `${i}    raise DomainError(${JSON.stringify(`Precondition failed: ${st.source}`)})`,
+    ],
+    requires: (st, i) => [
+      `${i}if not (${renderPyExpr(st.expr, rctx)}):`,
+      `${i}    raise ForbiddenError(${JSON.stringify(`Forbidden: ${st.source}`)})`,
+    ],
+    emit: (st, i) => {
       const kwargs = st.fields
         .map((f) => `${snake(f.name)}=${renderPyExpr(f.value, rctx)}`)
         .join(", ");
       return [`${i}workflow_events.append(${st.eventName}(${kwargs}))`];
-    }
-    case "factory-let": {
+    },
+    factoryLet: (st, i) => {
       const kwargs = st.fields
         .map((f) => `${snake(f.name)}=${renderPyExpr(f.value, rctx)}`)
         .join(", ");
       return [`${i}${snake(st.name)} = ${st.aggName}.create(${kwargs})`];
-    }
-    case "repo-let": {
+    },
+    repoLet: (st, i) => {
       const args = st.args.map((a) => renderPyExpr(a, rctx)).join(", ");
       return [`${i}${snake(st.name)} = await ${snake(st.repoName)}.${snake(st.method)}(${args})`];
-    }
-    case "repo-run": {
+    },
+    repoRun: (st, i) => {
       const args = [
         ...st.retrievalArgs.map((a) => renderPyExpr(a, rctx)),
         ...(st.page?.offset ? [`offset=${renderPyExpr(st.page.offset, rctx)}`] : []),
@@ -301,10 +303,9 @@ export function renderWorkflowStmt(
       return [
         `${i}${snake(st.name)} = await ${snake(st.repoName)}.run_${snake(st.retrievalName)}(${args})`,
       ];
-    }
-    case "expr-let":
-      return [`${i}${snake(st.name)} = ${renderPyExpr(st.expr, rctx)}`];
-    case "op-call": {
+    },
+    exprLet: (st, i) => [`${i}${snake(st.name)} = ${renderPyExpr(st.expr, rctx)}`],
+    opCall: (st, i) => {
       // A currentUser-gated op takes the actor as its trailing argument
       // (in scope: the route bound `current_user` for this workflow).
       const op = ctx ? lookupOp(ctx, st.aggName, st.op) : undefined;
@@ -313,9 +314,8 @@ export function renderWorkflowStmt(
         ...(op && operationUsesCurrentUser(op) ? ["current_user"] : []),
       ].join(", ");
       return [`${i}${snake(st.target)}.${snake(st.op)}(${args})`];
-    }
-    case "for-each": {
-      const body = st.body.flatMap((s) => renderWorkflowStmt(s, `${i}    `, rctx, ctx));
+    },
+    forEach: (st, i, body) => {
       const saves = st.savesPerIteration.map(
         (s) => `${i}    await ${snake(s.repoName)}.save(${snake(s.name)})`,
       );
@@ -323,9 +323,10 @@ export function renderWorkflowStmt(
         `${i}for ${snake(st.var)} in ${renderPyExpr(st.iterable, rctx)}:`,
         ...(body.length + saves.length > 0 ? [...body, ...saves] : [`${i}    pass`]),
       ];
-    }
-    case "resource-call":
-      // Resource adapters land with S16 — surface loudly, not silently.
-      return [`${i}raise NotImplementedError("resource operations land with the extern slice")`];
-  }
+    },
+    // Resource adapters stay a recorded follow-up — surface loudly.
+    resourceCall: (_st, i) => [
+      `${i}raise NotImplementedError("resource operations land with the extern slice")`,
+    ],
+  };
 }

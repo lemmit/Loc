@@ -9,7 +9,8 @@ import type {
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { renderPyExpr } from "./render-expr.js";
-import { renderWorkflowStmt } from "./workflows-builder.js";
+import { renderWorkflowStmts } from "../_workflow/stmt-target.js";
+import { pyWorkflowStmtTarget } from "./workflows-builder.js";
 
 // ---------------------------------------------------------------------------
 // In-process event dispatch — `app/dispatch.py` (channels.md, the
@@ -291,9 +292,7 @@ function handlerFn(
   }
   const hasEmit = statements.some((st) => st.kind === "emit");
   if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
-  for (const st of statements) {
-    out.push(...renderWorkflowStmt(st, "    ", rctx));
-  }
+  out.push(...renderWorkflowStmts(statements, pyWorkflowStmtTarget(rctx), "    "));
   for (const save of saves) {
     out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
   }

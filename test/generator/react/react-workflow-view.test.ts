@@ -4,7 +4,7 @@
 // columns come from the workflow's instance wire shape.
 
 import { describe, expect, it } from "vitest";
-import { buildViewsApiModule } from "../../../src/generator/react/view-builder.js";
+import { buildViewsApiModule } from "../../../src/generator/_frontend/views-module.js";
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../../src/ir/lower/lower.js";
 import { allContexts, type ExprIR, type PageIR } from "../../../src/ir/types/loom-ir.js";

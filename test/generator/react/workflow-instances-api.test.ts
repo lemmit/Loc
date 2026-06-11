@@ -5,7 +5,7 @@
 // `useAll<Agg>` / `use<Agg>ById`.
 
 import { describe, expect, it } from "vitest";
-import { buildWorkflowsApiModule } from "../../../src/generator/react/workflow-builder.js";
+import { buildWorkflowsApiModule } from "../../../src/generator/_frontend/workflows-module.js";
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../../src/ir/lower/lower.js";
 import { allContexts } from "../../../src/ir/types/loom-ir.js";
