@@ -140,7 +140,7 @@ diff-sync semantics under SQLAlchemy.
 | S13 inheritance | ✅ | TPH shared table + kind scoping, TPC, base readers; verified live |
 | S14 event sourcing | ✅ | stream table + appliers fold + ES create; verified live; document shape stays gated |
 | S15a command workflows | ✅ | POST /workflows/<wf>, one-transaction-per-request (repos flush, session dependency commits); verified live |
-| S15b sagas/dispatcher | next | event-triggered creates + on(...) reactors, correlation state tables |
+| S15b sagas/dispatcher | ✅ | `app/dispatch.py` InProcessDispatcher (create = load-or-allocate, on = route-or-drop + `event_unrouted`), saga-state SQLAlchemy models + migrations, routes/views/workflows repos take `make_dispatcher(session)`; choreography chain verified live (place → saga row + Tracked shipment in one tx); durable-channel outbox tier stays a follow-up |
 | S16 auth/seed/extern | next | |
 | S17 observability | next | |
 | **S10 conformance** | **moved after S17** | showcase.ddd (the parity fixture) declares `auth: required` and exercises every feature — joining it requires S11–S17 first.  Matches the roadmap's Phase E exit criterion ("showcase passes the multi-backend suite") being terminal. |

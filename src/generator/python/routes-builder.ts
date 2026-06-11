@@ -55,6 +55,7 @@ export function buildPyRoutesFile(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
   ctx: EnrichedBoundedContextIR,
+  hasDispatch = false,
 ): string {
   const slug = snake(plural(agg.name));
   const parts: EnrichedEntityPartIR[] = agg.parts;
@@ -93,7 +94,9 @@ export function buildPyRoutesFile(
     "",
     "",
     "def _repo(session: AsyncSession) -> " + `${agg.name}Repository:`,
-    `    return ${agg.name}Repository(session, NoopDomainEventDispatcher())`,
+    hasDispatch
+      ? `    return ${agg.name}Repository(session, make_dispatcher(session))`
+      : `    return ${agg.name}Repository(session, NoopDomainEventDispatcher())`,
     hasCreateFactory(agg) ? ["", "", createRoute(agg, ctx)] : null,
     "",
     "",
@@ -143,12 +146,13 @@ export function buildPyRoutesFile(
     "",
     "from app.db.engine import get_session",
     `from app.db.repositories.${snake(agg.name)}_repository import ${agg.name}Repository`,
+    hasDispatch ? "from app.dispatch import make_dispatcher" : null,
     refersTo("AggregateNotFoundError")
       ? "from app.domain.errors import AggregateNotFoundError"
       : null,
     // Only the create route constructs the domain class directly.
     refersTo(agg.name) ? `from app.domain.${snake(agg.name)} import ${agg.name}` : null,
-    "from app.domain.events import NoopDomainEventDispatcher",
+    hasDispatch ? null : "from app.domain.events import NoopDomainEventDispatcher",
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     [...enumNames, ...voDomainNames].length > 0
       ? `from app.domain.value_objects import ${[...enumNames, ...voDomainNames].sort().join(", ")}`

@@ -8,7 +8,7 @@ import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { requestPyType } from "./emit/http-models.js";
-import { renderPyExpr } from "./render-expr.js";
+import { type PyRenderContext, renderPyExpr } from "./render-expr.js";
 import { pyWireToDomain } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -38,9 +38,13 @@ export function commandWorkflowsOf(ctx: EnrichedBoundedContextIR): WorkflowIR[] 
   return ctx.workflows.filter(emitsCommandRoute);
 }
 
-export function buildPyWorkflowsFile(ctx: EnrichedBoundedContextIR): string | null {
+export function buildPyWorkflowsFile(
+  ctx: EnrichedBoundedContextIR,
+  hasDispatch = false,
+): string | null {
   const wfs = commandWorkflowsOf(ctx);
   if (wfs.length === 0) return null;
+  const dispatcherExpr = hasDispatch ? "make_dispatcher(session)" : "NoopDomainEventDispatcher()";
 
   const models = wfs
     .map((wf) =>
@@ -55,7 +59,7 @@ export function buildPyWorkflowsFile(ctx: EnrichedBoundedContextIR): string | nu
     )
     .join("");
 
-  const routes = wfs.map((wf) => workflowRoute(wf, ctx)).join("\n\n\n");
+  const routes = wfs.map((wf) => workflowRoute(wf, ctx, dispatcherExpr)).join("\n\n\n");
   const body = `${models}router = APIRouter(prefix="/workflows", tags=["workflows"])\n\n\n${routes}`;
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
@@ -85,6 +89,7 @@ export function buildPyWorkflowsFile(ctx: EnrichedBoundedContextIR): string | nu
     "",
     "from app.db.engine import get_session",
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
+    hasDispatch ? "from app.dispatch import make_dispatcher" : null,
     refersTo("DomainError") || refersTo("ForbiddenError")
       ? `from app.domain.errors import ${[
           refersTo("DomainError") ? "DomainError" : null,
@@ -93,7 +98,7 @@ export function buildPyWorkflowsFile(ctx: EnrichedBoundedContextIR): string | nu
           .filter(Boolean)
           .join(", ")}`
       : null,
-    `from app.domain.events import ${[refersTo("DomainEvent") ? "DomainEvent" : null, "NoopDomainEventDispatcher", ...eventNames].filter(Boolean).join(", ")}`,
+    eventsImports(refersTo, hasDispatch, eventNames),
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     ...[
       ...new Set(
@@ -119,6 +124,22 @@ export function buildPyWorkflowsFile(ctx: EnrichedBoundedContextIR): string | nu
     body,
     "",
   );
+}
+
+/** The events-module import line.  Noop only ships when the deployable
+ *  has no live dispatcher; with one, the line can vanish entirely
+ *  (a workflow set with no emits and no DomainEvent reference). */
+function eventsImports(
+  refersTo: (n: string) => boolean,
+  hasDispatch: boolean,
+  eventNames: string[],
+): string | null {
+  const names = [
+    refersTo("DomainEvent") ? "DomainEvent" : null,
+    hasDispatch ? null : "NoopDomainEventDispatcher",
+    ...eventNames,
+  ].filter((n): n is string => n != null);
+  return names.length > 0 ? `from app.domain.events import ${names.join(", ")}` : null;
 }
 
 interface RepoNeed {
@@ -162,7 +183,11 @@ function scanIdNames(scan: string, ctx: BoundedContextIR): string[] {
     .filter((n) => new RegExp(`\\b${n}\\b`).test(scan));
 }
 
-function workflowRoute(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
+function workflowRoute(
+  wf: WorkflowIR,
+  ctx: EnrichedBoundedContextIR,
+  dispatcherExpr: string,
+): string {
   const out: string[] = [
     `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}")`,
     `async def ${snake(wf.name)}_workflow(body: ${upperFirst(wf.name)}Request, session: SessionDep) -> Response:`,
@@ -173,9 +198,7 @@ function workflowRoute(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
   }
   const repos = reposFor(wf);
   for (const r of repos) {
-    out.push(
-      `    ${snake(r.repoName)} = ${r.aggName}Repository(session, NoopDomainEventDispatcher())`,
-    );
+    out.push(`    ${snake(r.repoName)} = ${r.aggName}Repository(session, ${dispatcherExpr})`);
   }
   const hasEmit = collectEmits(wf.statements).length > 0;
   if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
@@ -186,7 +209,7 @@ function workflowRoute(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
     out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
   }
   if (hasEmit) {
-    out.push("    dispatcher = NoopDomainEventDispatcher()");
+    out.push(`    dispatcher = ${dispatcherExpr}`);
     out.push("    for ev in workflow_events:");
     out.push("        await dispatcher.dispatch(ev)");
   }
@@ -194,53 +217,61 @@ function workflowRoute(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
   return out.join("\n");
 }
 
-function renderWorkflowStmt(st: WorkflowStmtIR, i: string): string[] {
+export function renderWorkflowStmt(
+  st: WorkflowStmtIR,
+  i: string,
+  rctx: PyRenderContext = { thisName: "self" },
+): string[] {
   switch (st.kind) {
     case "precondition":
       return [
-        `${i}if not (${renderPyExpr(st.expr)}):`,
+        `${i}if not (${renderPyExpr(st.expr, rctx)}):`,
         `${i}    raise DomainError(${JSON.stringify(`Precondition failed: ${st.source}`)})`,
       ];
     case "requires":
       return [
-        `${i}if not (${renderPyExpr(st.expr)}):`,
+        `${i}if not (${renderPyExpr(st.expr, rctx)}):`,
         `${i}    raise ForbiddenError(${JSON.stringify(`Forbidden: ${st.source}`)})`,
       ];
     case "emit": {
-      const kwargs = st.fields.map((f) => `${snake(f.name)}=${renderPyExpr(f.value)}`).join(", ");
+      const kwargs = st.fields
+        .map((f) => `${snake(f.name)}=${renderPyExpr(f.value, rctx)}`)
+        .join(", ");
       return [`${i}workflow_events.append(${st.eventName}(${kwargs}))`];
     }
     case "factory-let": {
-      const kwargs = st.fields.map((f) => `${snake(f.name)}=${renderPyExpr(f.value)}`).join(", ");
+      const kwargs = st.fields
+        .map((f) => `${snake(f.name)}=${renderPyExpr(f.value, rctx)}`)
+        .join(", ");
       return [`${i}${snake(st.name)} = ${st.aggName}.create(${kwargs})`];
     }
     case "repo-let": {
-      const args = st.args.map((a) => renderPyExpr(a)).join(", ");
+      const args = st.args.map((a) => renderPyExpr(a, rctx)).join(", ");
       return [`${i}${snake(st.name)} = await ${snake(st.repoName)}.${snake(st.method)}(${args})`];
     }
     case "repo-run": {
       const args = [
-        ...st.retrievalArgs.map((a) => renderPyExpr(a)),
-        ...(st.page?.offset ? [`offset=${renderPyExpr(st.page.offset)}`] : []),
-        ...(st.page?.limit ? [`limit=${renderPyExpr(st.page.limit)}`] : []),
+        ...st.retrievalArgs.map((a) => renderPyExpr(a, rctx)),
+        ...(st.page?.offset ? [`offset=${renderPyExpr(st.page.offset, rctx)}`] : []),
+        ...(st.page?.limit ? [`limit=${renderPyExpr(st.page.limit, rctx)}`] : []),
       ].join(", ");
       return [
         `${i}${snake(st.name)} = await ${snake(st.repoName)}.run_${snake(st.retrievalName)}(${args})`,
       ];
     }
     case "expr-let":
-      return [`${i}${snake(st.name)} = ${renderPyExpr(st.expr)}`];
+      return [`${i}${snake(st.name)} = ${renderPyExpr(st.expr, rctx)}`];
     case "op-call": {
-      const args = st.args.map((a) => renderPyExpr(a)).join(", ");
+      const args = st.args.map((a) => renderPyExpr(a, rctx)).join(", ");
       return [`${i}${snake(st.target)}.${snake(st.op)}(${args})`];
     }
     case "for-each": {
-      const body = st.body.flatMap((s) => renderWorkflowStmt(s, `${i}    `));
+      const body = st.body.flatMap((s) => renderWorkflowStmt(s, `${i}    `, rctx));
       const saves = st.savesPerIteration.map(
         (s) => `${i}    await ${snake(s.repoName)}.save(${snake(s.name)})`,
       );
       return [
-        `${i}for ${snake(st.var)} in ${renderPyExpr(st.iterable)}:`,
+        `${i}for ${snake(st.var)} in ${renderPyExpr(st.iterable, rctx)}:`,
         ...(body.length + saves.length > 0 ? [...body, ...saves] : [`${i}    pass`]),
       ];
     }

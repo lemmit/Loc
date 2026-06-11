@@ -123,7 +123,14 @@ export function buildPyRepositoryFile(
       [
         `${agg.name}Id`,
         ...agg.parts.map((p) => `${p.name}Id`),
-        ...refColls.map((f) => `${refTarget(f)}Id`),
+        // Every id-typed field (own or part, singular or collection)
+        // brands on hydrate — `order_ref=OrderId(row.order_ref)`.
+        ...[agg, ...agg.parts].flatMap((holder) =>
+          holder.fields
+            .map(idFieldTarget)
+            .filter((n): n is string => n != null)
+            .map((n) => `${n}Id`),
+        ),
       ].filter(refersTo),
     ),
   ].sort();
@@ -167,10 +174,13 @@ export function buildPyRepositoryFile(
   );
 }
 
-function refTarget(f: FieldIR): string {
+/** Target aggregate of an id-typed field — `Order id`, `Order id?`,
+ *  or `Order id[]` — else `null`. */
+function idFieldTarget(f: FieldIR): string | null {
   const t = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (t.kind === "id") return t.targetName;
   if (t.kind === "array" && t.element.kind === "id") return t.element.targetName;
-  return "";
+  return null;
 }
 
 // --- finds -------------------------------------------------------------------

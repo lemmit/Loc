@@ -36,6 +36,9 @@ const CASES: Array<[fixture: string, project: string]> = [
   ["test/e2e/fixtures/python-build/inheritance.ddd", "api"],
   // persistedAs(eventLog): append-only stream + appliers fold.
   ["test/e2e/fixtures/python-build/eventlog.ddd", "api"],
+  // Channels + event-triggered saga (in-process dispatcher, persisted
+  // correlation state).
+  ["test/e2e/fixtures/python-build/saga.ddd", "api"],
 ];
 
 describe.skipIf(!ENABLED)(

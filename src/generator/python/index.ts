@@ -15,6 +15,7 @@ import {
   buildPyBaseUnionFile,
   concretesOf,
 } from "./base-reader-builder.js";
+import { buildPyDispatchFile } from "./dispatch-builder.js";
 import { renderPyAggregate } from "./emit/aggregate.js";
 import { ERRORS_PY } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
@@ -108,12 +109,20 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("migrations/.gitkeep", "");
   emitPythonMigrations(args.migrations ?? [], out);
 
+  // In-process event dispatch (channels.md): only when a channel routes
+  // a subscribed event does `app/dispatch.py` exist — and then every
+  // repository constructed by routes/views/workflows takes the live
+  // dispatcher instead of the Noop (mirrors Hono's createApp default).
+  const dispatchFile = buildPyDispatchFile(merged);
+  const hasDispatch = dispatchFile != null;
+  if (dispatchFile != null) out.set("app/dispatch.py", dispatchFile);
+
   out.set("app/http/__init__.py", "");
   out.set("app/http/problem.py", PROBLEM_PY);
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
-  const viewsFile = buildPyViewsFile(merged);
+  const viewsFile = buildPyViewsFile(merged, hasDispatch);
   if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
-  const workflowsFile = buildPyWorkflowsFile(merged);
+  const workflowsFile = buildPyWorkflowsFile(merged, hasDispatch);
   if (workflowsFile != null) out.set("app/http/workflows_routes.py", workflowsFile);
 
   // Per-aggregate emission stays per-context — each aggregate module is
@@ -140,7 +149,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
           ? buildPyEventSourcedRepositoryFile(agg, repo, ctx)
           : buildPyRepositoryFile(agg, repo, ctx),
       );
-      out.set(`app/http/${snake(agg.name)}_routes.py`, buildPyRoutesFile(agg, repo, ctx));
+      out.set(
+        `app/http/${snake(agg.name)}_routes.py`,
+        buildPyRoutesFile(agg, repo, ctx, hasDispatch),
+      );
       const tests = renderPyTestsFile(agg, ctx);
       if (tests != null) out.set(`tests/test_${snake(agg.name)}.py`, tests);
     }
