@@ -88,6 +88,15 @@ export function prepareAppShellVM(
    *  (`/workflows/<slug>/instances/:id`).  Distinct from `workflows` (the
    *  form set): an event-triggered-only saga appears here but not there. */
   observableWorkflows: WorkflowIR[] = [],
+  /** Whether a scaffold-synthesised `ViewsIndex` page (origin
+   *  `views-index`) exists.  When false — an explicit view page with no
+   *  scaffold — the `/views` index import+route is skipped to avoid a
+   *  dangling `./pages/views/index` reference; the per-view pages still
+   *  mount.  Mirrors `hasScaffoldHome`.  Default true is the safe
+   *  assumption for callers without a ui. */
+  hasViewsIndex: boolean = true,
+  /** Same, for the `WorkflowsIndex` page (origin `workflows-index`). */
+  hasWorkflowsIndex: boolean = true,
 ): AppShellVM {
   const imports: ImportVM[] = [];
   const routes: RouteVM[] = [];
@@ -115,10 +124,13 @@ export function prepareAppShellVM(
     routes.push({ path: `/${slug}/:id`, elementJsx: `<${cap}Detail />` });
   }
 
-  // Per-workflow pages — index + per-workflow form.
+  // Per-workflow pages — index (only when the scaffold synthesised one)
+  // + per-workflow form.
   if (workflows.length > 0) {
-    imports.push({ specifier: "WorkflowsIndex", from: "./pages/workflows/index" });
-    routes.push({ path: "/workflows", elementJsx: "<WorkflowsIndex />" });
+    if (hasWorkflowsIndex) {
+      imports.push({ specifier: "WorkflowsIndex", from: "./pages/workflows/index" });
+      routes.push({ path: "/workflows", elementJsx: "<WorkflowsIndex />" });
+    }
     for (const wf of workflows) {
       const slug = snake(wf.name);
       const cap = `${upperFirst(wf.name)}WorkflowPage`;
@@ -146,10 +158,13 @@ export function prepareAppShellVM(
     });
   }
 
-  // Per-view pages — index + per-view table.
+  // Per-view pages — index (only when the scaffold synthesised one)
+  // + per-view table.
   if (views.length > 0) {
-    imports.push({ specifier: "ViewsIndex", from: "./pages/views/index" });
-    routes.push({ path: "/views", elementJsx: "<ViewsIndex />" });
+    if (hasViewsIndex) {
+      imports.push({ specifier: "ViewsIndex", from: "./pages/views/index" });
+      routes.push({ path: "/views", elementJsx: "<ViewsIndex />" });
+    }
     for (const view of views) {
       const slug = snake(view.name);
       const cap = `${upperFirst(view.name)}ViewPage`;
