@@ -48,6 +48,11 @@ export function renderJavaController(
   if (idJava === "UUID") imports.add("java.util.UUID");
 
   const unionImports = new Set<string>();
+  const anyReturnUnion =
+    !!ctx.boundedContext &&
+    agg.operations.some(
+      (op) => op.visibility === "public" && returnUnionSpec(op, ctx.boundedContext!),
+    );
   // Extern ops route identically — the service dispatches to the
   // user-supplied handler instead of an aggregate method.
   const opRoutes = agg.operations
@@ -198,8 +203,8 @@ export function renderJavaController(
     `import org.slf4j.Logger;`,
     `import org.slf4j.LoggerFactory;`,
     `import org.springframework.http.HttpStatus;`,
-    unionImports.size > 0 ? `import org.springframework.http.MediaType;` : null,
-    unionImports.size > 0 ? `import org.springframework.http.ProblemDetail;` : null,
+    anyReturnUnion ? `import org.springframework.http.MediaType;` : null,
+    anyReturnUnion ? `import org.springframework.http.ProblemDetail;` : null,
     `import org.springframework.http.ResponseEntity;`,
     `import org.springframework.web.bind.annotation.*;`,
     ``,

@@ -498,7 +498,7 @@ export function validateOperationReturnsUnimplemented(
   // `"node"` is the Hono/TS backend (exception-less.md spike); the others land
   // in later slices.  No backend (legacy single-context path) → emittable, gate
   // stays quiet.
-  const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python"]);
+  const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_RETURN_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 

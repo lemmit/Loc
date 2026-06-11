@@ -47,6 +47,9 @@ const FIXTURES: Array<[string, string]> = [
   // Single (non-collection) containment: hidden owning `_parent`
   // @OneToOne on the part, inverse mappedBy on the root, orphanRemoval.
   ["test/e2e/fixtures/java-build/single-containment.ddd", "sc_api"],
+  // Exception-less operation returns: sealed domain union + Jackson
+  // polymorphic wire DTO + controller ProblemDetail translation.
+  ["test/e2e/fixtures/java-build/operation-returns.ddd", "ru_api"],
 ];
 
 describe.skipIf(!ENABLED)(
