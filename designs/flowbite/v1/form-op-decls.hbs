@@ -1,0 +1,4 @@
+  const {{opCamel}} = use{{opPascal}}{{aggregateName}}(() => {{{idExpr}}});
+  let {{opCamel}}ModalOpen = $state(false);
+{{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
+{{/each}}  const {{opCamel}}Form = createForm({{opPascal}}{{aggregateName}}Request, {{{defaultValuesTs}}});

@@ -1,0 +1,5 @@
+<div class="flex flex-col gap-2">
+          <label class="loom-label" for="{{testId}}">{{label}}</label>
+          <input id="{{testId}}" type="text" inputmode="decimal" class="loom-input" data-testid="{{testId}}" value={form.values.{{path}} instanceof Decimal ? form.values.{{path}}.toString() : String(form.values.{{path}} ?? "0")} oninput={(e) => { try { form.values.{{path}} = new Decimal(e.currentTarget.value || "0"); } catch { form.values.{{path}} = new Decimal("0"); } }} />
+          {#if form.errors["{{path}}"]}<p class="text-sm text-destructive">{form.errors["{{path}}"]}</p>{/if}
+        </div>

@@ -22,6 +22,7 @@ import type {
   JavaArtifactCategory,
   JavaLayoutAdapter,
 } from "./adapters/by-layer-layout.js";
+import { emitJavaResourceFiles } from "./adapters/resource-clients.js";
 import { renderApiExceptionAdvice, renderJavaController } from "./emit/api.js";
 import { renderAuthFiles } from "./emit/auth.js";
 import {
@@ -37,6 +38,7 @@ import { criterionEligible, renderJavaCriteriaClasses } from "./emit/criteria.js
 import { renderDtoFiles } from "./emit/dto.js";
 import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
+import { renderJavaEventSourcedRepositoryImpl } from "./emit/event-store.js";
 import { renderJavaEvent } from "./emit/events.js";
 import { renderExternHandlerInterface, renderExternHandlerStub } from "./emit/extern.js";
 import { renderJavaId } from "./emit/ids.js";
@@ -177,6 +179,17 @@ function emitProjectFromContexts(
     layout.packageFor(category, basePkg, aggregateName);
 
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
+  // Resource client classes (objectStore / queue / api) + their Gradle
+  // deps (Phase 4c) — empty when the deployable wires no consumable
+  // resources, leaving build.gradle.kts byte-identical.
+  const resourceEmission = emitJavaResourceFiles(
+    system?.sys,
+    new Set(system?.deployable.dataSourceNames ?? []),
+    pkgFor("resource-client"),
+  );
+  for (const [name, content] of resourceEmission.files) {
+    place(name, "resource-client", content);
+  }
   // Fullstack mode (`ui:` on a java deployable): the SPA owns the
   // un-prefixed route space; controllers move under /api (the .NET
   // embedded-SPA shape).
@@ -245,6 +258,8 @@ function emitProjectFromContexts(
         basePkg,
         pkg: pkgFor("workflow-service"),
         routePrefix,
+        resourceClasses: resourceEmission.classes,
+        resourcesPkg: pkgFor("resource-client"),
         entityPkgOf: (a) => pkgFor("entity", a),
         repoPkgOf: (a) => pkgFor("repository-interface", a),
       },
@@ -319,7 +334,10 @@ function emitProjectFromContexts(
   const hasMigrations = allMigrations.some((m) => m.steps.length > 0 || m.baseline !== null);
 
   // Project shell — stable from S1 on.
-  out.set("build.gradle.kts", renderGradleBuild({ flyway: hasMigrations }));
+  out.set(
+    "build.gradle.kts",
+    renderGradleBuild({ flyway: hasMigrations, extraDeps: resourceEmission.deps }),
+  );
   out.set("settings.gradle.kts", renderGradleSettings(slug));
   out.set("src/main/resources/application.yml", renderApplicationYml(slug));
   out.set(mainSourcePath(basePkg, "Application.java"), renderApplication(basePkg));
@@ -457,12 +475,17 @@ function emitAggregate(
       superType,
       operationReturnUnions,
       eventFields,
-      persistence: {
-        tableName: plural(snake(agg.name)),
-        schema,
-        containmentOwnerName: ownerName,
-        voLookup,
-      },
+      // Event-sourced aggregates have no state table — the entity is a
+      // plain domain class folded from the stream (no JPA bindings).
+      persistence:
+        agg.persistedAs === "eventLog"
+          ? undefined
+          : {
+              tableName: plural(snake(agg.name)),
+              schema,
+              containmentOwnerName: ownerName,
+              voLookup,
+            },
     }),
     agg.name,
   );
@@ -507,28 +530,41 @@ function emitAggregate(
     renderJavaRepositoryInterface(agg, repoWithViews, repoCtx, idClass),
     agg.name,
   );
-  place(
-    `${agg.name}JpaRepository.java`,
-    "spring-data-repository",
-    renderJavaSpringDataRepository(agg, repoWithViews, repoCtx, idClass),
-    agg.name,
-  );
-  place(
-    `${agg.name}RepositoryImpl.java`,
-    "repository-impl",
-    renderJavaRepositoryImpl(agg, repoWithViews, repoCtx, idClass),
-    agg.name,
-  );
+  if (agg.persistedAs === "eventLog") {
+    // Event-sourced: no Spring Data interface — the impl reads/appends
+    // the <agg>_events stream via JdbcTemplate and folds via appliers.
+    place(
+      `${agg.name}RepositoryImpl.java`,
+      "repository-impl",
+      renderJavaEventSourcedRepositoryImpl(agg, repoWithViews, repoCtx, idClass, schema),
+      agg.name,
+    );
+  } else {
+    place(
+      `${agg.name}JpaRepository.java`,
+      "spring-data-repository",
+      renderJavaSpringDataRepository(agg, repoWithViews, repoCtx, idClass),
+      agg.name,
+    );
+    place(
+      `${agg.name}RepositoryImpl.java`,
+      "repository-impl",
+      renderJavaRepositoryImpl(agg, repoWithViews, repoCtx, idClass),
+      agg.name,
+    );
+  }
 
   // API layer: DTO records, wire validators, the layered service, and
   // the controller.
   const applicationPkg = pkgFor("service", agg.name);
+  const esCreateParams = agg.persistedAs === "eventLog" ? agg.creates?.[0]?.params : undefined;
   for (const dto of renderDtoFiles(
     agg,
     voLookup,
     applicationPkg,
     basePkg,
     pkgFor("entity", agg.name),
+    esCreateParams,
   )) {
     place(dto.name, dto.category, dto.content, agg.name);
   }
@@ -547,6 +583,7 @@ function emitAggregate(
       authed: authRequired,
       boundedContext: ctx,
       idClass,
+      esCreateParams,
     }),
     agg.name,
   );
@@ -608,6 +645,7 @@ function emitAggregate(
       boundedContext: ctx,
       idClass,
       routePrefix,
+      esConstructible: !!esCreateParams,
     }),
     agg.name,
   );

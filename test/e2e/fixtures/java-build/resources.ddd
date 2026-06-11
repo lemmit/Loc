@@ -1,0 +1,32 @@
+system RC {
+  subdomain D {
+    context Sales {
+      aggregate Order with crudish { name: string }
+      repository Orders for Order { }
+      workflow archive {
+        create(name: string) {
+          let prev = salesFiles.get("orders/" + name)
+          salesFiles.put("orders/" + name, name)
+          salesJobs.enqueue(name)
+          let info = crm.get("/customers")
+        }
+      }
+    }
+  }
+  api A from D
+  storage pg { type: postgres }
+  storage files { type: s3, config: { bucket: "app-files" } }
+  storage jobs { type: rabbitmq }
+  storage crmApi { type: restApi, config: { baseUrl: "http://crm:9000" } }
+  resource salesState { for: Sales, kind: state, use: pg }
+  resource salesFiles { for: Sales, kind: objectStore, use: files }
+  resource salesJobs { for: Sales, kind: queue, use: jobs }
+  resource crm { for: Sales, kind: api, use: crmApi }
+  deployable rcApi {
+    platform: java
+    contexts: [Sales]
+    dataSources: [salesState, salesFiles, salesJobs, crm]
+    serves: A
+    port: 8081
+  }
+}

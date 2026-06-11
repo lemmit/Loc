@@ -941,7 +941,7 @@ export function validateInheritanceStorage(
 // `foundation: vanilla` (D-VANILLA-PHOENIX-FOUNDATION + D-VANILLA-ES-HOME)
 // will host pure ES on Phoenix; until it ships the diagnostic names the Ash
 // foundation as the constraint and points at the proposal.
-const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet", "python"]);
+const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet", "python", "java"]);
 export function validateEventSourcedStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],

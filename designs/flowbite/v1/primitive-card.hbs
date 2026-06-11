@@ -1,0 +1,8 @@
+{{#if hasTitle}}{{#if hasContent}}<Card class="max-w-none"{{{testidAttr}}}{{{styleAttr}}}>
+{{indent}}<h3 class="mb-2 text-lg font-semibold text-gray-900 dark:text-white">{{{titleText}}}</h3>
+{{indent}}<div>{{{contentJsx}}}</div>
+{{closeIndent}}</Card>{{else}}<Card class="max-w-none"{{{testidAttr}}}{{{styleAttr}}}>
+{{indent}}<h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{{titleText}}}</h3>
+{{closeIndent}}</Card>{{/if}}{{else}}{{#if hasContent}}<Card class="max-w-none"{{{testidAttr}}}{{{styleAttr}}}>
+{{indent}}<div>{{{contentJsx}}}</div>
+{{closeIndent}}</Card>{{else}}<Card class="max-w-none"{{{testidAttr}}}{{{styleAttr}}}></Card>{{/if}}{{/if}}

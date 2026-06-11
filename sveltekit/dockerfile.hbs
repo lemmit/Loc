@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+# Auto-generated.
+
+FROM node:24-alpine
+WORKDIR /app
+# Optional proxy CAs — drop *.crt files into ./certs/ to make npm
+# trust them.  The directory always exists (with a .gitkeep), so
+# this COPY is a no-op when no CAs are configured.
+COPY certs/ /usr/local/share/ca-certificates/
+RUN cat /usr/local/share/ca-certificates/*.crt 2>/dev/null >> /etc/ssl/cert.pem || true
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem NPM_CONFIG_CAFILE=/etc/ssl/cert.pem
+COPY package.json package-lock.json* ./
+RUN npm ci || npm install
+COPY . .
+RUN npm run build
+ENV PORT=3000
+EXPOSE 3000
+# `vite preview` serves the adapter-static output with the SPA
+# fallback; it needs the SvelteKit project context (svelte.config +
+# .svelte-kit), so the runtime stage keeps the full app tree.
+CMD ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "3000"]

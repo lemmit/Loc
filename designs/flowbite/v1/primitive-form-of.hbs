@@ -1,0 +1,8 @@
+<form onsubmit={(e) => { e.preventDefault(); form.submit(async (vals) => {{{submitBody}}}); }}{{{testidAttr}}}>
+{{indent}}<div class="flex flex-col gap-4">
+{{#each fieldHtmls}}{{../innerIndent}}{{{this}}}
+{{/each}}{{innerIndent}}<div class="flex justify-end gap-2 pt-2">
+{{deepIndent}}<Button type="submit" disabled={ {{submitPendingExpr}} || form.submitting } data-testid="{{submitTestid}}">{{submitLabel}}</Button>
+{{innerIndent}}</div>
+{{indent}}</div>
+{{closeIndent}}</form>

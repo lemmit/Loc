@@ -112,8 +112,17 @@ const PLATFORM_KEYWORDS = new Set([
   "phoenix",
   "phoenixLiveView",
   "java",
+  "svelte",
 ]);
-const DESIGN_KEYWORDS = new Set(["mantine", "shadcn", "mui", "chakra", "ashPhoenix"]);
+const DESIGN_KEYWORDS = new Set([
+  "mantine",
+  "shadcn",
+  "mui",
+  "chakra",
+  "ashPhoenix",
+  "shadcnSvelte",
+  "flowbite",
+]);
 
 /** Platform / DesignPack are `keyword | STRING` rules: print a known keyword
  *  bare, otherwise re-quote (the value came from the STRING alternative). */

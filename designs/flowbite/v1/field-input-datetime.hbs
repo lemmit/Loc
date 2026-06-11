@@ -1,0 +1,5 @@
+<div class="flex flex-col gap-2">
+          <Label for="{{testId}}">{{label}}</Label>
+          <Input id="{{testId}}" type="datetime-local" data-testid="{{testId}}" bind:value={form.values.{{path}} } />
+          {#if form.errors["{{path}}"]}<Helper color="red">{form.errors["{{path}}"]}</Helper>{/if}
+        </div>

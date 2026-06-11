@@ -1,0 +1,43 @@
+<!-- Auto-generated.  Do not edit by hand. -->
+<script lang="ts">
+  import { page } from "$app/state";
+
+  let { children } = $props();
+  let opened = $state(false);
+
+  function isActive(path: string): boolean {
+    return page.url.pathname === path || page.url.pathname.startsWith(path + "/");
+  }
+  // Mobile UX: close the drawer after navigating.
+  $effect(() => {
+    void page.url.pathname;
+    opened = false;
+  });
+</script>
+
+<div class="flex min-h-screen flex-col">
+  <header class="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-background px-4 lg:px-6">
+    <button
+      type="button"
+      class="loom-btn loom-btn-ghost sm:hidden"
+      aria-label="Toggle navigation"
+      onclick={() => { opened = !opened; }}
+    >☰</button>
+    <span class="text-base font-semibold" data-testid="app-title">{{systemNameHuman}}</span>
+  </header>
+  <div class="flex flex-1">
+    <nav class={"w-56 shrink-0 border-r bg-background p-3 " + (opened ? "block" : "hidden sm:block")}>
+      <div class="flex flex-col gap-1">
+{{#each navSections}}        <p class="px-3 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">{{label}}</p>
+{{#each entries}}        <a
+          href="{{to}}"
+          data-testid="{{testId}}"
+          class={"rounded-md px-3 py-2 text-sm font-medium transition-colors " + (isActive("{{to}}") ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground")}
+        >{{label}}</a>
+{{/each}}{{/each}}      </div>
+    </nav>
+    <main class="flex-1 p-6">
+      {@render children()}
+    </main>
+  </div>
+</div>

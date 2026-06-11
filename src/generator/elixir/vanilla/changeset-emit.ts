@@ -6,8 +6,11 @@
 // `change_<op>/2` helpers wrap the basic cast with the action's param
 // allow-list, mirroring what `with crudish` would expose on the Ash
 // path.  Per-field `validate_*` (length, format, …) deferred to a later
-// slice since the IR doesn't carry those constraints in v1 — Slice 1
-// schema-emit just declares the column types.
+// slice.  The constraints ARE available at the IR layer now —
+// `src/ir/validate/invariant-classify.ts`'s `singleFieldShape` yields
+// min/max/between/len-*/regex patterns from invariants (the same
+// classifier Zod and FluentValidation consume); this emitter just
+// doesn't consume it yet.
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";

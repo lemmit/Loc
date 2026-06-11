@@ -15,7 +15,14 @@ import { dtoParam } from "../../../src/generator/dotnet/dto-mapping.js";
 
 describe("dtoParam — required-ness attribute target", () => {
   it("requests target the ctor parameter (bare [Required]), not the property", () => {
-    expect(dtoParam("string", "Name", "request")).toBe("[Required] string Name");
+    // Required STRINGS carry `AllowEmptyStrings = true` so an empty string
+    // passes the structural layer and is rejected by the domain invariant
+    // as 422 (matching Hono/Phoenix) instead of a 400 model-validation error.
+    expect(dtoParam("string", "Name", "request")).toBe(
+      "[Required(AllowEmptyStrings = true)] string Name",
+    );
+    // Non-string required fields keep the bare `[Required]` (AllowEmptyStrings
+    // is string-only; null/omitted still 400s).
     expect(dtoParam("Visibility", "Visibility", "request")).toBe(
       "[Required] Visibility Visibility",
     );

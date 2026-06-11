@@ -560,6 +560,28 @@ bundler actually loads.
 
 ---
 
+## Svelte frontend (`platform: svelte`)
+
+The second frontend generator (`src/generator/svelte/`).  Emits a
+Svelte 5 / SvelteKit **static SPA** per svelte deployable —
+`@sveltejs/adapter-static` with `ssr = false` and an `index.html`
+fallback, served by `vite preview` in docker exactly like the React
+SPA.  Pages flow through the **same shared markup walker** the React
+generator uses (`src/generator/_walker/walker-core.ts`) with
+`svelteTarget` + a svelte-format design pack (`shadcnSvelte` default,
+`flowbite`); see D-SVELTE-FRONTEND in [`decisions.md`](decisions.md).
+
+| Concern | Emission |
+|---|---|
+| Routing | SvelteKit file routing — `/orders/:id` → `src/routes/(app)/orders/[id]/+page.svelte`; route groups `(app)` (chrome) / `(bare)` (`layout: none`) carry the layout selectors.  Named layouts currently render in the `(app)` group (follow-up). |
+| Data | `@tanstack/svelte-query` v6 factories with the React hook names (`useAllCustomers`, …) — `createQuery(() => opts)` returns a runes-reactive object with the `.data`/`.isPending`/`.mutate` surface.  Zod schemas are byte-identical with the react modules (shared `src/generator/_frontend/zod-schemas.ts`). |
+| State | `let x = $state<T>(init)`; walker `:=` writes lower to plain assignments; page `title:` becomes a `$effect`. |
+| Forms | Hand-rolled runes + zod helper (`src/lib/forms.svelte.ts`): `createForm(schema, defaults)` → `values` (deep-reactive bind targets), `errors` (dotted-path map), `submit`, `applyServerErrors` (RFC 7807 422 decode).  Field templates bind `form.values.<path>`. |
+| Operation modals | Page-scope `{#snippet <op>OpModal(form)}` blocks after the markup — one component per `.svelte` file means module scope lands in the template; `primitive-modal` renders `{@render <op>OpModal(<op>Form)}`. |
+| e2e | Same testid-keyed Playwright surface as react: page objects from the shared `_frontend` builders (api imports root at `src/lib/api`), smoke spec, fixtures, config.  `test e2e … against <svelte deployable>` lowers to a Playwright ui spec. |
+| Embedding | dotnet fullstack hosts embed the SvelteKit SPA under `ClientApp/` (`framework: svelte` on the ui binding; Dockerfile copies `build/` → wwwroot).  Phoenix hosting awaits `paths.base` wiring. |
+| CI | `generated-svelte-build.yml` — per `{example × pack}`: `npm install` + `svelte-check --fail-on-warnings` + `vite build` (`npm run test:svelte-build` locally). |
+
 ## Phoenix LiveView fullstack (`platform: phoenixLiveView`)
 
 `generate system` for deployables marked `platform: phoenixLiveView`.

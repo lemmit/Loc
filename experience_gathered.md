@@ -1272,3 +1272,56 @@ Ecto over the shared `Repo` and keep it off the action surface. The frictions ar
 accumulating enough that whether the Ash foundation is carried further at all is
 an open product question — design new Phoenix work so it doesn't *deepen* the Ash
 coupling.
+
+## Svelte frontend port (svelte-frontend-plan.md)
+
+What the second `WalkerTarget`-consuming frontend taught us:
+
+- **Svelte 5 is close enough to JSX that the shared walker held.**
+  `{expr}` interpolation, `<Comp x={y}/>` invocation and
+  `data-testid={expr}` are byte-compatible; the divergences fit in six
+  new contract methods (4 markup seams + children slot + form-runtime
+  imports).  The roadmap's fear that Svelte's "compiler-driven
+  reactivity is a bigger shape delta" did not materialise — runes read
+  like plain JS, and plain-assignment state writes are SIMPLER than
+  React's setter convention.
+- **svelte-query v6's runes adapter is the load-bearing luck.**
+  `createQuery(() => opts)` returns a reactive object with the
+  React-Query property surface, so the api factories keep the TSX hook
+  names and the walker's api seam needed zero new contract surface.
+  Validate the data-layer library's adapter FIRST when porting a
+  frontend — everything else hangs off it.
+- **Prototype the generated project before writing templates.**  A
+  hand-built /tmp SvelteKit probe (install → svelte-check → vite
+  build) caught the version matrix (vite-plugin-svelte 4 vs 5,
+  @types/node, adapter fallback behavior) in minutes; encoding wrong
+  pins into stack partials would have cost a CI-roundtrip each.
+- **Handlebars + Svelte braces: one real collision.**  `{{x}}}` (a
+  double-stash immediately followed by a literal `}`) lexes as a
+  triple-stash close.  The fix is mechanical — insert a space
+  (`{{x}} }`) — and worth a regex sweep over any new svelte pack.
+- **One-component-per-file forced one real design move:** React's
+  module-scope operation-form components became page-scope
+  `{#snippet <op>OpModal(form)}` blocks parameterised by their form
+  instance.  Snippets close over page state, so the modal-open flag
+  stays a plain `$state` local.
+- **Byte-identical gates made the React-side refactors safe**: the
+  walker-core move, the zod-schema extraction, the page-object/
+  harness moves to `_frontend/`, and the `formRuntimeImports` seam all
+  shipped with an empty showcase full-system diff against main.
+
+## Money-primitive forms vs the zod resolver (2026-06-12)
+
+- **The schema sees what the *control* writes, not the wire shape.**
+  `moneySchema` was `z.string().transform(→ Decimal)` — correct for
+  parsing wire JSON, but every pack's money input control converts on
+  change (`field.onChange(new Decimal(...))`), so the zodResolver
+  validated a Decimal *instance* against `z.string()` and every
+  money-primitive form failed submit with "Expected string, received
+  object".  Fix: `z.union([z.instanceof(Decimal), z.string()])` with an
+  instance pass-through ahead of the string parse.  The gap survived
+  because the e2e fixtures exercise the Money *value object*
+  (`z.number()` amounts), never the `money` primitive, in a form —
+  when a schema is shared between wire parsing and form validation,
+  test BOTH inbound shapes behaviourally (the new
+  `money-schema-runtime.test.ts` transpiles + executes the template).

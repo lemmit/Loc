@@ -50,12 +50,20 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   // renders LiveView; react/static render React.  Backends without a
   // `ui:` binding leave this undefined.
   // Precedence: explicit `framework:` on the legacy block binding, then
-  // the framework declared on the `hosts:`-ed `ui` itself (D-PHOENIX-SURFACE
-  // phase 2 — the ui owns its framework), then the legacy platform-derived
-  // default.  Computed before `design` so the pack default can branch on
-  // it (a phoenix host embedding react needs a tsx pack, not ashPhoenix).
+  // the framework declared on the bound `ui` itself — whether bound via
+  // `ui:` sugar / `compose` / the block's reference or via `hosts:`
+  // (D-PHOENIX-SURFACE phase 2 — the ui owns its framework) — then the
+  // legacy platform-derived default.  The bound-ui hop matters: the
+  // validator's rules 13b/14 read the ui's declared framework through
+  // every binding spelling, so lowering must agree or a validation-clean
+  // `ui X { framework: svelte }` + `ui: X` would silently lower as the
+  // platform default.  Computed before `design` so the pack default can
+  // branch on it (a phoenix host embedding react needs a tsx pack, not
+  // ashPhoenix).
+  const boundUi = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
   const uiFramework =
     canonicalFramework(d.uiBlock?.framework) ??
+    canonicalFramework(boundUi?.framework) ??
     canonicalFramework(firstHostedUi?.framework) ??
     (uiName
       ? platform === "elixir"
@@ -84,7 +92,10 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     : platform === "elixir"
       ? qualifyDesign(d.design, uiFramework === "react" ? "mantine" : "ashPhoenix")
       : (platform === "dotnet" || platform === "java") && uiName
-        ? qualifyDesign(d.design, "mantine")
+        ? qualifyDesign(
+            d.design,
+            platform === "dotnet" && uiFramework === "svelte" ? "shadcnSvelte" : "mantine",
+          )
         : undefined;
   // Explicit api composition.
   const serves = (d.serves ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);

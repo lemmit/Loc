@@ -28,10 +28,12 @@ import { compilePack, type LoadedPack, type PackFormat, type PackManifest } from
  *  into a single shared-sources map keyed by logical name. */
 const SHARED_SOURCE_DIRS_TSX = ["vite", "api", "docker"] as const;
 const SHARED_SOURCE_DIRS_HEEX: readonly string[] = ["phoenix"];
-// Svelte packs share the framework-neutral `docker/` scaffold (the
-// dockerfile is a generic vite-build/vite-preview two-stage) plus a
-// SvelteKit-specific shared layer.
-const SHARED_SOURCE_DIRS_SVELTE: readonly string[] = ["sveltekit", "docker"];
+// Svelte packs read their own shared layer only: the SvelteKit
+// dockerfile diverges from the TSX one (the preview server needs the
+// kit project context, not a bare dist/), and duplicate logical names
+// across shared dirs throw (sveltekit/ ships its own dockerfile.hbs)
+// — so `docker/` stays TSX/vue-side.
+const SHARED_SOURCE_DIRS_SVELTE: readonly string[] = ["sveltekit"];
 // Vue packs share a Vue-specific layer (`vue/`: index.html,
 // tsconfig-node, the NotFound page) plus the framework-neutral `api/`
 // fetch-client/config/logger sources (plain TS, no JSX — the React

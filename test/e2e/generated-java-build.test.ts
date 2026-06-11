@@ -62,6 +62,12 @@ const FIXTURES: Array<[string, string]> = [
   // Union finds (`Order or NotFound` / `Order option`): optional-twin
   // repo/service, tagged 200 wire record, problem/bare-404 absence.
   ["test/e2e/fixtures/java-build/union-finds.ddd", "uf_api"],
+  // Resource clients (objectStore / queue / api): S3 / RabbitMQ /
+  // HttpClient classes + workflow resource-op call sites.
+  ["test/e2e/fixtures/java-build/resources.ddd", "rc_api"],
+  // Event sourcing (persistedAs(eventLog)): JdbcTemplate stream
+  // append + applier fold, no state table / Spring Data interface.
+  ["test/e2e/fixtures/java-build/event-sourced.ddd", "es_api"],
 ];
 
 describe.skipIf(!ENABLED)(

@@ -30,6 +30,7 @@ import type { DetectedApiCall } from "../../../src/generator/_walker/api-hook-de
 import type { ApiCallSite, StateRef, WalkerTarget } from "../../../src/generator/_walker/target.js";
 import { heexTarget } from "../../../src/generator/elixir/heex-target.js";
 import { tsxTarget } from "../../../src/generator/react/walker/tsx-target.js";
+import { svelteTarget } from "../../../src/generator/svelte/walker/svelte-target.js";
 import { vueTarget } from "../../../src/generator/vue/walker/vue-target.js";
 
 const SAMPLE_STATE_REF: StateRef = {
@@ -56,6 +57,7 @@ const SAMPLE_API_CALL_QUERY: ApiCallSite = {
 const TARGETS: ReadonlyArray<{ name: string; target: WalkerTarget }> = [
   { name: "tsxTarget", target: tsxTarget },
   { name: "heexTarget", target: heexTarget },
+  { name: "svelteTarget", target: svelteTarget },
   { name: "vueTarget", target: vueTarget },
 ];
 
@@ -121,6 +123,19 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
     const heex = heexTarget.renderStateWrite(SAMPLE_STATE_REF, "value");
     expect(tsx).toBe("setStep(value)");
     expect(heex).toBe("|> assign(:step, value)");
+  });
+
+  it("svelteTarget diverges from TSX where runes differ, matches where shared", () => {
+    // `$state` runes read as the bare name (same spelling as TSX —
+    // position-invariant), but writes are plain assignment, not the
+    // useState setter call.
+    const read = svelteTarget.renderStateRead(SAMPLE_STATE_REF, "template");
+    const write = svelteTarget.renderStateWrite(SAMPLE_STATE_REF, "value");
+    expect(read).toBe(tsxTarget.renderStateRead(SAMPLE_STATE_REF, "template"));
+    expect(write).not.toBe(tsxTarget.renderStateWrite(SAMPLE_STATE_REF, "value"));
+    expect(write).toBe("step = value");
+    // Text escaping is shared with TSX by design (same HTML-entity set).
+    expect(svelteTarget.escapeText("a < b & c")).toBe(tsxTarget.escapeText("a < b & c"));
   });
 
   it("renderApiCall diverges by design: TSX returns var only, HEEx returns full call", () => {

@@ -1,0 +1,62 @@
+/* Auto-generated.  Do not edit by hand. */
+@import "tailwindcss";
+@plugin "flowbite/plugin";
+@custom-variant dark (&:where(.dark, .dark *));
+@source "../node_modules/flowbite-svelte/dist";
+@import "./theme.css";
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --card: 0 0% 100%;
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+  --destructive: 0 84.2% 60.2%;
+  --border: 240 5.9% 90%;
+}
+
+@theme {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-border: hsl(var(--border));
+  --color-primary: var(--loom-primary);
+  --font-sans: var(--loom-font-family);
+  --font-mono: var(--loom-font-family-mono);
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--loom-font-family);
+}
+
+/* Loom helpers shared with the structural templates. */
+.loom-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+  border-radius: var(--loom-radius);
+  font-size: 0.875rem;
+  font-weight: 500;
+  height: 2.25rem;
+  padding: 0 1rem;
+  cursor: pointer;
+}
+.loom-btn:disabled { pointer-events: none; opacity: 0.5; }
+.loom-btn-primary { background: var(--loom-primary); color: white; border: 1px solid transparent; }
+.loom-btn-outline { background: transparent; border: 1px solid hsl(var(--border)); }
+.loom-btn-ghost { background: transparent; border: 1px solid transparent; }
+.loom-icon svg { width: 1em; height: 1em; }
+.loom-icon-sm svg { width: 0.875em; height: 0.875em; }
+.loom-icon-lg svg { width: 1.5em; height: 1.5em; }
+.text-destructive { color: hsl(var(--destructive)); }

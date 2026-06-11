@@ -33,12 +33,16 @@ export interface WorkflowCtx {
   pkg: string;
   /** Route prefix ("/api" in fullstack mode). */
   routePrefix?: string;
+  /** resourceName → client class, for `resource-op` calls (Phase 4c). */
+  resourceClasses?: Map<string, string>;
+  /** Package the resource client classes live in. */
+  resourcesPkg?: string;
   /** category-resolved package lookups for cross-package imports. */
   entityPkgOf: (aggName: string) => string;
   repoPkgOf: (aggName: string) => string;
 }
 
-const renderCtx = { thisName: "this" };
+const baseRenderCtx = { thisName: "this" };
 
 function workflowUsesCurrentUser(wf: WorkflowIR): boolean {
   const exprs: (ExprIR | undefined)[] = [];
@@ -95,6 +99,7 @@ function renderWorkflowStmt(
   s: WorkflowStmtIR,
   ctx: EnrichedBoundedContextIR,
   imports: Set<string>,
+  renderCtx: typeof baseRenderCtx & { resourceClasses?: Map<string, string> } = baseRenderCtx,
 ): string[] {
   switch (s.kind) {
     case "precondition":
@@ -178,7 +183,7 @@ function renderWorkflowStmt(
     }
     case "for-each": {
       collectJavaExprImports(s.iterable, imports);
-      const body = s.body.flatMap((b) => renderWorkflowStmt(b, ctx, imports));
+      const body = s.body.flatMap((b) => renderWorkflowStmt(b, ctx, imports, renderCtx));
       const saves = s.savesPerIteration.map(
         (save) => `        ${repoField(save.aggName)}.save(${save.name});`,
       );
@@ -189,14 +194,23 @@ function renderWorkflowStmt(
       ];
     }
     case "resource-call":
-      throw new Error(
-        "java workflows: resource-op calls in workflows are not yet implemented on the java backend.",
-      );
+      // Bare resource-op statement (`files.put(k, v)`) — the expression
+      // renderer's `resource-op` arm dispatches through resourceClasses.
+      collectJavaExprImports(s.call, imports);
+      return [`        ${renderJavaExpr(s.call, renderCtx)};`];
   }
 }
 
 function repoField(aggName: string): string {
   return `${lowerFirst(plural(aggName))}Repository`;
+}
+
+function renderCtxFor(
+  wctx: WorkflowCtx,
+): typeof baseRenderCtx & { resourceClasses?: Map<string, string> } {
+  return wctx.resourceClasses?.size
+    ? { ...baseRenderCtx, resourceClasses: wctx.resourceClasses }
+    : baseRenderCtx;
 }
 
 export function renderJavaWorkflows(
@@ -245,7 +259,9 @@ export function renderJavaWorkflows(
       collectWireToDomainImports(p.type, imports);
       return `        var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`)};`;
     });
-    const bodyLines = wf.statements.flatMap((s) => renderWorkflowStmt(s, ctx, imports));
+    const bodyLines = wf.statements.flatMap((s) =>
+      renderWorkflowStmt(s, ctx, imports, renderCtxFor(wctx)),
+    );
     const saves = wf.savesAtExit.map((s) => `        ${repoField(s.aggName)}.save(${s.name});`);
     methods.push(
       `    public void ${lowerFirst(wf.name)}(${wf.params.length > 0 ? `${reqType} request` : ""}) {`,
@@ -293,6 +309,9 @@ export function renderJavaWorkflows(
       }),
       anyUser ? `import ${wctx.basePkg}.auth.CurrentUserAccessor;` : null,
       anyUser ? `import ${wctx.basePkg}.auth.User;` : null,
+      wctx.resourceClasses?.size && wctx.resourcesPkg && wctx.resourcesPkg !== wctx.pkg
+        ? `import ${wctx.resourcesPkg}.*;`
+        : null,
       hasEmit ? `import ${wctx.basePkg}.domain.events.*;` : null,
       `import ${wctx.basePkg}.domain.common.*;`,
       `import ${wctx.basePkg}.domain.enums.*;`,

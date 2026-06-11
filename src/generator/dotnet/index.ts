@@ -23,6 +23,7 @@ import { plural, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import { generateReactForContexts } from "../react/index.js";
+import { generateSvelteForContexts } from "../svelte/index.js";
 import {
   byLayerLayoutAdapter,
   type DotnetArtifact,
@@ -391,6 +392,7 @@ function emitProjectFromContexts(
     usesValidators,
     usesStamping,
     hasEmbeddedSpa,
+    spaOutDir: system?.deployable.uiFramework === "svelte" ? "build" : "dist",
     hasMigrations,
     hasSeeds,
     emitTrace,
@@ -408,10 +410,20 @@ function emitProjectFromContexts(
   // certs, e2e suite — the .NET project ships its own equivalents
   // at the root).
   if (hasEmbeddedSpa && system) {
-    const spaFiles = generateReactForContexts(contexts, system.sys, system.deployable, {
-      apiBaseUrl: "/api",
-      pathPrefix: "ClientApp/",
-    });
+    // Frontend dispatch by the ui's framework — `framework: svelte`
+    // embeds a SvelteKit static SPA under ClientApp/ exactly like the
+    // React embed (same /api origin, same wwwroot serving; only the
+    // SPA build output dir differs — see renderDockerfile).
+    const embedSvelte = system.deployable.uiFramework === "svelte";
+    const spaFiles = embedSvelte
+      ? generateSvelteForContexts(contexts, system.sys, system.deployable, {
+          apiBaseUrl: "/api",
+          pathPrefix: "ClientApp/",
+        })
+      : generateReactForContexts(contexts, system.sys, system.deployable, {
+          apiBaseUrl: "/api",
+          pathPrefix: "ClientApp/",
+        });
     for (const [path, content] of spaFiles) {
       // The React generator's pack also ships `Dockerfile` /
       // `.dockerignore` / `certs/.gitkeep` at the project root —
@@ -429,7 +441,10 @@ function emitProjectFromContexts(
         continue;
       out.set(path, content);
     }
-    out.set("ClientApp/.gitignore", "node_modules\ndist\n");
+    out.set(
+      "ClientApp/.gitignore",
+      embedSvelte ? "node_modules\nbuild\n.svelte-kit\n" : "node_modules\ndist\n",
+    );
   }
   // Layout-aware namespace rewrite (D-REALIZATION-AXES `directoryLayout:`):
   // when the layout adapter relocated files under `Features/`, make each
@@ -863,6 +878,7 @@ function emitProject(
     usesValidators?: boolean;
     usesStamping?: boolean;
     hasEmbeddedSpa?: boolean;
+    spaOutDir?: "dist" | "build";
     hasMigrations?: boolean;
     hasSeeds?: boolean;
     emitTrace?: boolean;
@@ -915,7 +931,7 @@ function emitProject(
       usesSpecifications,
     ),
   );
-  out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa }));
+  out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa, spaOutDir: options?.spaOutDir }));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");
   // Catalog-identity request log — always-on.  Cross-backend parity

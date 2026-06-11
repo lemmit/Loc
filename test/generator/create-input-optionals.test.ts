@@ -93,9 +93,15 @@ describe("create-input contract — optionals are included", () => {
     // attribute target (`[Required]` on the record parameter vs
     // `[property: Required]` on the property) is an ASP.NET binding detail,
     // not part of "is it required" — so match either form.
-    expect(create).toMatch(/\[(?:property: )?Required\][^,)]*\bName\b/);
+    // Required strings carry `AllowEmptyStrings = true` (empty → domain 422);
+    // accept that suffix when asserting required-ness.
+    expect(create).toMatch(
+      /\[(?:property: )?Required(?:\(AllowEmptyStrings = true\))?\][^,)]*\bName\b/,
+    );
     expect(create).toMatch(/string\?\s+Description/);
-    expect(create).not.toMatch(/\[(?:property: )?Required\][^,)]*\bDescription\b/);
+    expect(create).not.toMatch(
+      /\[(?:property: )?Required(?:\(AllowEmptyStrings = true\))?\][^,)]*\bDescription\b/,
+    );
   });
 
   it("Phoenix CreateProjectRequest marks optionals not-required", async () => {

@@ -9,7 +9,14 @@
 
 export type StarterPlatform = "hono" | "dotnet" | "elixir" | "java" | "python";
 export type StarterTemplate = "blank" | "crud";
-export type DesignPack = "mantine" | "shadcn" | "mui" | "chakra" | "ashPhoenix";
+export type DesignPack =
+  | "mantine"
+  | "shadcn"
+  | "mui"
+  | "chakra"
+  | "ashPhoenix"
+  | "shadcnSvelte"
+  | "flowbite";
 
 export const STARTER_PLATFORMS: readonly StarterPlatform[] = [
   "hono",
@@ -20,10 +27,15 @@ export const STARTER_PLATFORMS: readonly StarterPlatform[] = [
 ];
 export const STARTER_TEMPLATES: readonly StarterTemplate[] = ["blank", "crud"];
 export const REACT_DESIGN_PACKS: readonly DesignPack[] = ["mantine", "shadcn", "mui", "chakra"];
-export const DESIGN_PACKS: readonly DesignPack[] = [...REACT_DESIGN_PACKS, "ashPhoenix"];
+export const SVELTE_DESIGN_PACKS: readonly DesignPack[] = ["shadcnSvelte", "flowbite"];
+export const DESIGN_PACKS: readonly DesignPack[] = [
+  ...REACT_DESIGN_PACKS,
+  ...SVELTE_DESIGN_PACKS,
+  "ashPhoenix",
+];
 
 /** Backend listen port per platform (mirrors `defaultPort` in
- *  `src/platform/registry.ts`). The React frontend always uses 3001. */
+ *  `src/platform/registry.ts`). The frontend scaffold (react or svelte) always uses 3001. */
 export const BACKEND_PORT: Record<StarterPlatform, number> = {
   hono: 3000,
   dotnet: 8080,
@@ -122,7 +134,10 @@ function renderDeployment(platform: StarterPlatform, design: DesignPack, context
   }`;
   }
 
-  // Backend + a separate React frontend (hono/dotnet, or elixir + a React pack).
+  // Backend + a separate SPA frontend.  The design pack picks the
+  // frontend platform: react packs → `platform: react`, svelte packs
+  // (shadcnSvelte / flowbite) → `platform: svelte`.
+  const frontendPlatform = SVELTE_DESIGN_PACKS.includes(design) ? "svelte" : "react";
   return `${storage}
 
   deployable api {
@@ -133,7 +148,7 @@ function renderDeployment(platform: StarterPlatform, design: DesignPack, context
   }
 
   deployable webApp {
-    platform: react,
+    platform: ${frontendPlatform},
     targets: api,
     ui: WebApp,
     port: ${FRONTEND_PORT},
@@ -176,9 +191,12 @@ export function renderReadme(opts: {
 }): string {
   const backendPort = BACKEND_PORT[opts.platform];
   const liveView = isLiveView(opts.platform, opts.design);
+  const svelte = SVELTE_DESIGN_PACKS.includes(opts.design);
   const frontendLine = liveView
     ? `- Frontend (LiveView):  http://localhost:${backendPort}`
-    : `- Frontend (React):     http://localhost:${FRONTEND_PORT}`;
+    : svelte
+      ? `- Frontend (Svelte):    http://localhost:${FRONTEND_PORT}`
+      : `- Frontend (React):     http://localhost:${FRONTEND_PORT}`;
 
   return `# ${opts.name}
 
