@@ -1,0 +1,23 @@
+system FS {
+  subdomain D {
+    context Shop {
+      aggregate Product with crudish {
+        name: string
+        price: money
+      }
+      repository Products for Product { }
+    }
+  }
+  api A from D
+  ui Admin with scaffold(subdomains: [D]) { }
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable fsApp {
+    platform: java
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    ui: Admin
+    port: 8081
+  }
+}

@@ -38,6 +38,9 @@ export interface ControllerCtx {
   /** Strongly-typed id class (default `<Agg>Id`); a TPH concrete passes
    *  its base's `<Base>Id` (the shared single-table key). */
   idClass?: string;
+  /** Prepended to @RequestMapping (fullstack mode passes "/api" so the
+   *  SPA owns the un-prefixed route space).  Empty for standalone. */
+  routePrefix?: string;
 }
 
 export function renderJavaController(
@@ -173,7 +176,7 @@ export function renderJavaController(
         `    public ResponseEntity<Create${agg.name}Response> create${agg.name}(@RequestBody Create${agg.name}Request request) {`,
         `        var id = service.create${agg.name}(request);`,
         `        log.info("aggregate_created aggregate=${agg.name} id={}", id.value());`,
-        `        return ResponseEntity.created(URI.create("/${route}/" + id.value()))`,
+        `        return ResponseEntity.created(URI.create("${ctx.routePrefix ?? ""}/${route}/" + id.value()))`,
         `            .body(new Create${agg.name}Response(id.value()));`,
         `    }`,
         ``,
@@ -218,7 +221,7 @@ export function renderJavaController(
     `import ${ctx.basePkg}.domain.ids.*;`,
     ``,
     `@RestController`,
-    `@RequestMapping("/${route}")`,
+    `@RequestMapping("${ctx.routePrefix ?? ""}/${route}")`,
     `public class ${plural(agg.name)}Controller {`,
     `    private static final Logger log = LoggerFactory.getLogger(${plural(agg.name)}Controller.class);`,
     ``,
