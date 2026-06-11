@@ -184,7 +184,41 @@ output is byte-identical, and the extracted shared spine is < ~250 LOC.
   prefer rendering it inside the existing leaf over adding an interface method
   used by one backend (the `ExprTarget` discipline).
 
+## Pilot result (Hono + Python) — landed
+
+The pilot shipped and validated the seam, with one **important refinement to the
+design above**: the cleanly-shareable spine is the *statement dispatch*, not the
+whole-body envelope.
+
+**What shipped:** `src/generator/_workflow/stmt-target.ts` —
+`renderWorkflowStmts(stmts, target, indent)` owns the 10-arm `WorkflowStmtIR`
+dispatch + the only `for-each` recursion; the `WorkflowStmtTarget` interface is
+one method per kind (plus `indentUnit` and a `forEach(st, indent, renderedBody)`
+hook that takes the pre-rendered body, exactly like `WalkerTarget.renderMatch`).
+Hono supplies `honoWorkflowStmtTarget(ctx, paramExprs, thisName)` (built per
+call so it captures the route- vs saga-handler bindings) and Python supplies
+`pyWorkflowStmtTarget()`. Both backends' bespoke statement switches are deleted.
+
+**Refinement — envelope hooks were *not* shared spine.** The fuller
+`WorkflowTarget` sketched above (`wrapTransaction` / `renderEventDispatch` /
+`renderSaves` / `renderReturn`) turned out to be genuinely divergent *per-driver
+scaffolding*, not shared choreography: Hono has **two** drivers (an OpenAPI
+command route *and* a saga `handle*` reactor) and wraps in a
+`db.transaction(tx => …)` callback; Python has **one** FastAPI route and relies
+on request-scoped session commit. Forcing those into a shared `renderWorkflowBody`
+would mean teaching the spine about routes/handlers/transaction callbacks — a net
+loss. So the envelope stays per-backend; only the statement sequence is shared.
+This is the same judgment the doc reserves for Elixir, applied one level down.
+
+**Gate:** byte-identical. Captured the full `generateSystems` tree for 9
+workflow-bearing examples before/after — **1,400 files, zero diff** — plus the
+Hono + Python workflow test suites and both layering guards green. The new
+`platform/hono/v4 → generator/_workflow` and `generator/python → _workflow`
+edges are legal (shared `_`-dir; `_workflow` imports only the IR type).
+
 ## Next step
 
-Land this design for review, then execute the Hono+Python pilot on a branch with
-the baseline diff captured first.
+Roll the `WorkflowStmtTarget` leaf out to Java and .NET (same byte-identical
+gate, one backend per PR), then assess Elixir last per Risks. The envelope
+(transaction/dispatch/route shell) is explicitly **out of scope** for the seam —
+it stays per-backend.
