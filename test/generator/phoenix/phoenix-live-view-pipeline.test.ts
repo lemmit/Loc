@@ -6,7 +6,9 @@ import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { beforeAll, describe, expect, it } from "vitest";
 import { emitApiControllers } from "../../../src/generator/elixir/api-emit.js";
+import { renderPolicies } from "../../../src/generator/elixir/domain/actions.js";
 import { emitAggregateResources } from "../../../src/generator/elixir/domain-emit.js";
+import { renderJasonCamelCaseModule } from "../../../src/generator/elixir/jason-camel-emit.js";
 import { emitOpenApiSpec } from "../../../src/generator/elixir/openapi-emit.js";
 import { enrichContext } from "../../../src/ir/enrich/enrichments.js";
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../../src/ir/types/loom-ir.js";
@@ -561,6 +563,42 @@ describe("emitApiControllers (api-emit unit)", () => {
     );
   });
 
+  it("orders_controller.ex normalises camelCase request keys via a decamelize plug", () => {
+    // Hono / .NET / the React client send camelCase bodies, but Ash
+    // attribute / argument names are snake_case — so the controller runs a
+    // plug that rewrites every request key before any action, and the
+    // create/update/operation actions read the (now snake-keyed) params
+    // directly.  Without it, multi-word fields (`createdAt`, `commitSha`)
+    // would be rejected as unknown inputs (create) or read as nil (ops).
+    const aggCtx: BoundedContextIR = {
+      ...workflowCtx,
+      aggregates: [
+        {
+          name: "Order",
+          fields: [],
+          parts: [],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [],
+          identity: { kind: "guid" },
+        } as unknown as BoundedContextIR["aggregates"][number],
+      ],
+    };
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const aggCtrl = files.get("lib/phoenix_app_web/controllers/orders_controller.ex")!;
+    expect(aggCtrl).toMatch(/plug :decamelize_params/);
+    expect(aggCtrl).toMatch(/defp decamelize_params\(conn, _opts\) do/);
+    expect(aggCtrl).toMatch(/PhoenixApp\.JasonCamelCase\.decamelize_keys\(conn\.params\)/);
+  });
+
   it("orders_controller.ex stays free of wire_in when --trace is off", () => {
     const aggCtx: BoundedContextIR = {
       ...workflowCtx,
@@ -637,6 +675,12 @@ describe("emitApiControllers (api-emit unit)", () => {
     const ctrl = files.get("lib/phoenix_app_web/controllers/workflows_controller.ex")!;
     expect(ctrl).toMatch(/def place_order\(conn, params\)/);
     expect(ctrl).toMatch(/PhoenixApp\.Sales\.Workflows\.PlaceOrder\.run/);
+    // camelCase request keys are normalised to snake_case before each
+    // action via a controller plug, so the `params["customer_id"]` lookup
+    // resolves a `customerId` body key (matching Hono / .NET).
+    expect(ctrl).toMatch(/plug :decamelize_params/);
+    expect(ctrl).toMatch(/defp decamelize_params\(conn, _opts\) do/);
+    expect(ctrl).toMatch(/PhoenixApp\.JasonCamelCase\.decamelize_keys\(conn\.params\)/);
 
     // Route entry exists with correct shape
     const wfRoute = apiRoutes.find((r) => r.path === "/workflows/place_order");
@@ -3427,5 +3471,85 @@ describe("authorization — requires guards emit Ash policies (403)", () => {
       /403 => %OpenApiSpex\.Response\{[\s\S]*?"application\/problem\+json"[\s\S]*?Schemas\.ProblemDetails/,
     );
     expect((spec.match(/403 => %OpenApiSpex\.Response\{/g) ?? []).length).toBe(5);
+  });
+});
+
+describe("Ash policy base-allow + request-key decamelization (unit)", () => {
+  // An aggregate with one guarded operation (a `requires` clause) and one
+  // un-guarded operation.  Ash's policy authorizer DENIES any action with no
+  // matching policy, so `renderPolicies` must emit a base `policy always()`
+  // that authorizes every action — otherwise the un-guarded CRUD actions
+  // (`:read`/`:create`/`:destroy`/…) would all 403.  The guarded op still
+  // gets its own `policy action(:op)` that ANDs on top.
+  const guardedAgg = {
+    name: "Project",
+    operations: [
+      {
+        name: "archive",
+        visibility: "public",
+        params: [],
+        statements: [
+          {
+            kind: "requires",
+            expr: { kind: "literal", lit: "bool", value: "true" },
+            source: 'currentUser.role == "admin"',
+          },
+        ],
+        extern: false,
+        audited: false,
+      },
+      {
+        name: "touch",
+        visibility: "public",
+        params: [],
+        statements: [],
+        extern: false,
+        audited: false,
+      },
+    ],
+  } as unknown as Parameters<typeof renderPolicies>[0];
+
+  it("prepends a base `policy always()` allow before the guarded action policy", () => {
+    const out = renderPolicies(guardedAgg, "PhoenixApp.Catalog.Project");
+    expect(out).toMatch(/policy always\(\) do\s*\n\s*authorize_if always\(\)/);
+    expect(out).toMatch(/policy action\(:archive\) do/);
+    // base allow comes first so it applies to every (un-guarded) action.
+    expect(out.indexOf("policy always()")).toBeLessThan(out.indexOf("policy action(:archive)"));
+  });
+
+  it("does not emit a per-action policy for un-guarded operations", () => {
+    const out = renderPolicies(guardedAgg, "PhoenixApp.Catalog.Project");
+    expect(out).not.toMatch(/policy action\(:touch\)/);
+  });
+
+  it("emits no policies block (and no authorizer) when nothing is guarded", () => {
+    const unguarded = {
+      name: "Note",
+      operations: [
+        {
+          name: "touch",
+          visibility: "public",
+          params: [],
+          statements: [],
+          extern: false,
+          audited: false,
+        },
+      ],
+    } as unknown as Parameters<typeof renderPolicies>[0];
+    expect(renderPolicies(unguarded, "PhoenixApp.Notes.Note")).toBe("");
+  });
+
+  it("JasonCamelCase emits a recursive decamelize_keys (request-side inverse of camelize)", () => {
+    const mod = renderJasonCamelCaseModule("PhoenixApp");
+    // struct guard first (pass-through), then map / list / scalar arms.
+    expect(mod).toMatch(/def decamelize_keys\(%\{__struct__: _\} = struct\), do: struct/);
+    expect(mod).toMatch(/def decamelize_keys\(map\) when is_map\(map\) do/);
+    expect(mod).toMatch(/def decamelize_keys\(list\) when is_list\(list\)/);
+    expect(mod).toMatch(/def decamelize_keys\(other\), do: other/);
+    // keys are snake-cased via Macro.underscore; values pass through.
+    expect(mod).toMatch(/Macro\.underscore/);
+    expect(mod).toMatch(
+      /Map\.new\(map, fn \{k, v\} -> \{decamelize\(k\), decamelize_keys\(v\)\} end\)/,
+    );
   });
 });
