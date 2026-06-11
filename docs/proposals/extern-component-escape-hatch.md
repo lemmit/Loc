@@ -1,11 +1,16 @@
 # Extern components — an escape hatch for hand-written frontend code
 
-> Status: **PARTIAL — Tier 1 (React) implemented.** The `component …
+> Status: **PARTIAL — Tiers 1 + 2 (React) implemented.** The `component …
 > extern from "<path>"` surface, IR/lowering, validator, and the React
-> generator (props-interface emit + re-export shim) ship on branch
-> `claude/extern-component-escape-hatch-4vobH` (see §8 "What shipped").
-> Tier 2 (`action` behaviour params) and LiveView remain designed-only
-> per §4's staging. This note designs a UI-side analogue of the backend's
+> generator (props-interface emit + re-export shim) shipped first (see §8
+> "What shipped"); **Tier 2 (`action` behaviour params) shipped after**:
+> the `action` / `action(Order)` param type (the token choice from §11 —
+> mirrors bare `slot`), position validator (`loom.action-out-of-position`,
+> `loom.action-nested-marker`), TypeIR/DddType variants, props emit
+> (`(arg: OrderResponse) => void`, `action?` → optional), and the
+> call-site lambda walked in the caller's scope (state writes hit the
+> caller's setters; the lambda param stays bound and typed via
+> `paramTypes`).  LiveView remains designed-only per §4's staging. This note designs a UI-side analogue of the backend's
 > `operation … extern` escape hatch: a way to drop a **hand-written
 > React/TSX (or HEEx) component** into a Loom page body, type-checked
 > against the domain, wired into routing / state / data, without forking

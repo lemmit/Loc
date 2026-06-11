@@ -222,6 +222,8 @@ export function printStructural(node: AstNode): string {
       return printUiChannelParam(node as import("../generated/ast.js").UiChannelParam);
     case "UiNotification":
       return printUiNotification(node as import("../generated/ast.js").UiNotification);
+    case "UiFunction":
+      return printUiFunction(node as import("../generated/ast.js").UiFunction);
     case "FindDecl":
       return printFindDecl(node as FindDecl);
     case "Criterion":
@@ -413,6 +415,11 @@ function printUiApiParam(node: UiApiParam): string {
 
 function printUiChannelParam(node: import("../generated/ast.js").UiChannelParam): string {
   return `channel ${node.name}: ${node.context.$refText}.${node.channel.$refText}`;
+}
+
+function printUiFunction(node: import("../generated/ast.js").UiFunction): string {
+  const params = node.params.map(printParameter).join(", ");
+  return `function ${node.name}(${params}): ${printTypeRef(node.returnType)} extern from ${quote(node.externPath)}`;
 }
 
 function printUiNotification(node: import("../generated/ast.js").UiNotification): string {
@@ -908,6 +915,9 @@ function printTypeAtom(node: TypeRef | import("../generated/ast.js").TypeAtom): 
       break;
     case "SlotType":
       s = "slot";
+      break;
+    case "ActionType":
+      s = base.arg ? `action(${printTypeRef(base.arg)})` : "action";
       break;
     case "IdType":
       s = `${base.target.$refText} id`;

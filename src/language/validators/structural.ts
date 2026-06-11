@@ -72,6 +72,40 @@ export function checkSlotTypePosition(model: Model, accept: ValidationAcceptor):
   }
 }
 
+/** `action` is the function-valued sibling of `slot`
+ *  (extern-component-escape-hatch.md, Tier 2) — a behaviour the caller
+ *  passes as a lambda, fired by the component.  Same position rule as
+ *  `slot`: only meaningful on a `component`'s parameter list.  The
+ *  callback's argument type (`action(Order)`) additionally may not
+ *  itself be a `slot` / `action` (no higher-order nesting in v1). */
+export function checkActionTypePosition(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (node.$type !== "ActionType") continue;
+    const a = node as import("../generated/ast.js").ActionType;
+    const typeRef = a.$container;
+    const holder = typeRef?.$container;
+    const enclosing = holder?.$container;
+    const ok = holder?.$type === "Parameter" && enclosing?.$type === "Component";
+    if (!ok) {
+      const where = enclosing?.$type ?? holder?.$type ?? "<unknown>";
+      accept(
+        "error",
+        `'action' is only valid on a component's parameter list; found on ${where}.`,
+        { node: a, code: "loom.action-out-of-position" },
+      );
+      continue;
+    }
+    const argBase = a.arg?.base?.$type;
+    if (argBase === "SlotType" || argBase === "ActionType") {
+      accept(
+        "error",
+        `'action(${argBase === "SlotType" ? "slot" : "action"})' is not allowed — the callback argument must be a data type (primitive, aggregate, value object, …), not another UI marker.`,
+        { node: a, property: "arg", code: "loom.action-nested-marker" },
+      );
+    }
+  }
+}
+
 export function checkTypeReferences(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
     if (node.$type !== "NamedType") continue;

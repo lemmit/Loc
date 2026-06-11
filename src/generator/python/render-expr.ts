@@ -368,6 +368,7 @@ export function renderPyType(t: TypeIR): string {
       return `list[${renderPyType(t.element)}]`;
     case "optional":
       return `${renderPyType(t.inner)} | None`;
+    case "action":
     case "slot":
       throw new Error("renderPyType: 'slot' type is UI-only and should not reach the backend.");
     case "genericInstance":

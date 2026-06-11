@@ -24,6 +24,7 @@ import type {
   ValueObject,
 } from "./generated/ast.js";
 import {
+  isActionType,
   isAggregate,
   isApply,
   isBinaryChain,
@@ -110,6 +111,13 @@ export type DddType =
    *  a slot ref is an error and the consumer-side validators flag it.
    *  Compatibility against `any` succeeds (opaque pass-through). */
   | { kind: "slot"; sensitivity?: SensitivityTags }
+  /** Function-valued param marker — `slot`'s behavioural sibling
+   *  (extern-component-escape-hatch.md, Tier 2).  Only valid on a
+   *  `component`'s parameter list (`checkActionTypePosition` rejects
+   *  misuse).  `arg` is the callback's declared argument type
+   *  (undefined for a bare zero-arg `action`); the caller-side value
+   *  is a lambda whose param types flow forward from `arg`. */
+  | { kind: "action"; arg?: DddType; sensitivity?: SensitivityTags }
   | { kind: "any"; sensitivity?: SensitivityTags }
   | { kind: "never"; sensitivity?: SensitivityTags }
   | { kind: "unknown"; sensitivity?: SensitivityTags };
@@ -205,6 +213,8 @@ export function typeToString(t: DddType): string {
         return `${typeToString(t.inner)}?`;
       case "slot":
         return "slot";
+      case "action":
+        return t.arg ? `action(${typeToString(t.arg)})` : "action";
       case "any":
         return "any";
       case "never":
@@ -340,6 +350,9 @@ export function resolveTypeRef(ref: TypeRef | undefined): DddType {
 function resolveBase(base: BaseType): DddType {
   if (isPrimitiveType(base)) return T.prim(base.name as PrimitiveName);
   if (isSlotType(base)) return T.slot;
+  if (isActionType(base)) {
+    return base.arg ? { kind: "action", arg: resolveTypeRef(base.arg) } : { kind: "action" };
+  }
   if (isIdType(base)) {
     const target = base.target?.ref;
     if (!target) return T.unknown;
