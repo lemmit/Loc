@@ -69,7 +69,7 @@
 | Web / DI | **Spring Boot 3.x** (Spring MVC `@RestController`) | SpringDoc OpenAPI for the spec endpoint. |
 | Language level | **Java 21** (LTS) | Records, sealed interfaces, switch expressions — all load-bearing for the emit shape. |
 | ORM | **Spring Data JPA over Hibernate** (adapter `jpa`, real) | `jooq` and `axon` registered as honest stubs, mirroring .NET's `marten` stub pattern. |
-| Build | **Maven** (single `pom.xml`) | Chosen over the proposal's Gradle: the generator emits text files only — Gradle's wrapper needs a binary jar; a lone `pom.xml` + `maven:3.9-eclipse-temurin-21` docker image is the simplest reproducible shell. |
+| Build | **Gradle (Kotlin DSL)** — `build.gradle.kts` + `settings.gradle.kts`, no wrapper jar committed | Revised from the original Maven pick on review feedback: the wrapper-jar concern is a practical non-issue (auditable ~43KB, SHA-256 pinned, or `gradle wrapper` on demand), and Gradle wins on build speed, the Kotlin DSL, and multi-module/composite builds.  Docker builds ride the `gradle:8-jdk21` base image; CI uses the runner's Gradle. |
 | App style default | **`layered`** (Controller → Service → Repository), real | Idiomatic Spring, per the proposal. `cqrs` registered as a stub (the inverse of .NET, where `cqrs` is real and `layered` is the stub). |
 | Layouts | `byLayer` + `byFeature`, both real | Mirrors .NET; `byFeature` is package-by-feature, idiomatic Spring/Modulith. |
 | jMolecules | **Yes** | Stamp `@AggregateRoot` / `@ValueObject` / `@Identity` / `@DomainEvent` / `@Repository` on generated types. Metadata-only dep. |
@@ -157,7 +157,8 @@ transports `{ restController: real, webflux?: stub }`, runtimes
 
 ```
 shop-java/
-  pom.xml                      Dockerfile (multi-stage maven build)
+  build.gradle.kts             Dockerfile (multi-stage gradle build)
+  settings.gradle.kts
   src/main/resources/application.yml
   src/main/resources/db/migration/V1__init.sql        ← MigrationsIR → sql-pg
   src/main/resources/static/                          ← fullstack SPA mount
@@ -175,7 +176,7 @@ shop-java/
 ## Slices
 
 Each slice: implement → tests green (`npm test` + the named targeted suites) →
-commit. JDK 21 + Maven are available in the dev environment, so generated-code
+commit. JDK 21 + Gradle are available in the dev environment, so generated-code
 compilation is verified locally from Slice 4 onward, not just in CI.
 
 ### S0 — This plan document
@@ -184,7 +185,7 @@ Commit the plan. *(Exit: doc pushed.)*
 ### S1 — Platform wiring + walking skeleton
 - All wiring-map rows above (grammar regen committed; registry; surface;
   validator messages; likec4; the `"elixir"` branch sweep).
-- `src/generator/java/index.ts` minimal: emits `pom.xml`, `Application.java`,
+- `src/generator/java/index.ts` minimal: emits `build.gradle.kts` / `settings.gradle.kts`, `Application.java`,
   `application.yml`, health/ready endpoints, Dockerfile; `composeService` wired.
 - Tests: registry resolution (`java`, `"java@v1"`, bad-version error), surface
   contract, skeleton snapshot, parse test for `platform: java`.
@@ -222,7 +223,7 @@ Commit the plan. *(Exit: doc pushed.)*
   interfaces + impl finds (typed find-filter `ExprIR` → JPQL `@Query` /
   Criteria), auto-`findAll`/`getById` from the enrichment, datasource-schema
   split, seeding (first-boot data), migrations: `MigrationsIR` →
-  `V<N>__*.sql` via `sql-pg.ts` + `flyway-core` wiring in `pom.xml`/config.
+  `V<N>__*.sql` via `sql-pg.ts` + `flyway-core` wiring in `build.gradle.kts`/config.
 - Adapters made real: `jpa` persistence, `layered` style, `byLayer`/`byFeature`
   layouts; stubs registered for `jooq`/`axon`/`cqrs`.
 - New opt-in build suite: `test/e2e/generated-java-build.test.ts`
