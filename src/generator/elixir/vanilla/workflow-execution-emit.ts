@@ -32,15 +32,19 @@
 //                     orchestrator's `emitPhoenixResourceFiles` reuse
 //                     (foundation-agnostic; the same Phoenix adapter set
 //                     the Ash path uses).
+//   ✓ repo-run     → `{:ok, <name>} <- Context.run_<ret>_<agg>(args..., limit:, offset:)`
+//                     against the per-context retrieval defdelegate (the
+//                     vanilla retrieval `run/N` returns `{:ok, [_]}`).
+//                     Pagination opts ride as a trailing keyword list.
+//   ✓ for-each     → `{:ok, _} <- Enum.reduce_while(xs, {:ok, nil}, fn x, _acc ->
+//                                    case Context.<op>_<agg>(x, %{}) do ... end
+//                                  end)` — first body-op failure halts the
+//                     reduce and bubbles `{:error, _}` up the with-chain.
 //   ✓ default     → preserved as `# TODO:<kind>` comment; the workflow
-//                   still compiles and the route is exercisable.
-// Remaining kinds (for-each + repo-run; non-getById repo-let) need
-// upstream vanilla emit infrastructure they don't have yet — repo-run
-// needs a `Repo.run(<Retrieval>)` code interface (vanilla doesn't emit
-// Retrievals), and the for-each validator requires its iterable to be a
-// repo-run binding.  Those slices land on a separate Retrieval-emit
-// follow-up; this file's per-kind status stays in lock-step with
-// `collectWorkflowStmtParamRefs`.
+//                   still compiles and the route is exercisable.  Only a
+//                   non-getById `repo-let` (custom find) reaches this
+//                   today — vanilla repositories don't yet expose custom
+//                   finds through the context facade.
 //
 // Param surfacing: a workflow body that references a declared
 // create-param (`create(initialTitle: string) { … initialTitle … }`)
@@ -292,12 +296,64 @@ function lowerStatement(
       ];
     }
 
-    default:
-      // Unsupported kind today — preserved as a TODO comment so the
-      // workflow still compiles.  Future slices add per-kind lowering
-      // and remove this fallthrough as each kind moves into a real
-      // BodyLine.
-      return todoLine(st.kind);
+    case "repo-run": {
+      // `let xs = Repo.run(<Retrieval>(args), page?)` →
+      // `{:ok, xs} <- Context.run_<ret>_<agg>(args..., limit: N, offset: M)`.
+      // The vanilla retrieval `run/N` returns `{:ok, [aggregate]}` (no Ash
+      // page struct), so the bind is the bare list — consumed directly by
+      // a subsequent `for-each`.  Pagination opts (`page: { offset: O, limit: L }`)
+      // ride as a trailing keyword list, which Elixir parses positionally
+      // into the retrieval's `opts \\ []` arg.
+      const args = st.retrievalArgs.map((a) => renderExpr(a, renderCtx));
+      if (st.page) {
+        const pageEntries: string[] = [];
+        if (st.page.offset) pageEntries.push(`offset: ${renderExpr(st.page.offset, renderCtx)}`);
+        if (st.page.limit) pageEntries.push(`limit: ${renderExpr(st.page.limit, renderCtx)}`);
+        if (pageEntries.length > 0) args.push(pageEntries.join(", "));
+      }
+      const action = `run_${snake(st.retrievalName)}_${snake(st.aggName)}`;
+      const call = `${contextModule}.${action}(${args.join(", ")})`;
+      return [
+        {
+          kind: "with-clause",
+          text: `{:ok, ${snake(st.name)}} <- ${call}`,
+          bindName: snake(st.name),
+        },
+      ];
+    }
+
+    case "for-each": {
+      // `for x in xs { <body> }` →
+      // `{:ok, _} <- Enum.reduce_while(xs, {:ok, nil}, fn x, _acc -> ... end)`.
+      // Each body statement is rendered as a `case ... do` block returning
+      // `{:cont, _}` on success / `{:halt, err}` on failure — the
+      // reduce_while bubbles the first error up the with-chain, so a failed
+      // op short-circuits the whole workflow and a transactional wrapper
+      // rolls back.  The iterable is rendered through `renderExpr` (typically
+      // a bare ref to a preceding `repo-run` binding — the validator
+      // `loom.workflow-foreach-source` enforces this shape).
+      const iterable = renderExpr(st.iterable, renderCtx);
+      const loopVar = snake(st.var);
+      const bodyLines = st.body.flatMap((inner) =>
+        renderLoopBodyStmt(inner, renderCtx, contextModule),
+      );
+      // Multi-line clause: assembleBody indents the FIRST line at the
+      // with-chain's column; subsequent lines keep their authored
+      // indentation, so bake in the leading spaces (11 spaces aligns each
+      // body line under the `Enum.reduce_while(...` opener).
+      const lines = [
+        `{:ok, _} <- Enum.reduce_while(${iterable}, {:ok, nil}, fn ${loopVar}, _acc ->`,
+        ...bodyLines.map((l) => `           ${l}`),
+        `         end)`,
+      ];
+      return [
+        {
+          kind: "with-clause",
+          text: lines.join("\n"),
+          bindName: undefined,
+        },
+      ];
+    }
   }
 }
 
@@ -310,6 +366,36 @@ function todoLine(kind: string): BodyLine[] {
       text: `# TODO: lower workflow statement kind '${kind}' (vanilla-foundation-tdd-plan.md follow-up)`,
     },
   ];
+}
+
+/** Render a single body statement of a `for-each` as the inner Elixir
+ *  source lines.  Wrapped in a `case ... do {:ok, _} -> {:cont, _}; err ->
+ *  {:halt, err} end` so a failed op breaks the reduce_while with the
+ *  error tuple intact — bubbled out to the with-chain by the enclosing
+ *  `{:ok, _} <-` clause.  The validator restricts loop bodies to
+ *  `op-call`s today (no nested loops, no factory-let); any other kind
+ *  falls through to a `# TODO` comment so the workflow still compiles. */
+function renderLoopBodyStmt(
+  st: WorkflowStmtIR,
+  renderCtx: RenderCtx,
+  contextModule: string,
+): string[] {
+  if (st.kind === "op-call") {
+    const argFields = st.args.map((arg, i) => `arg${i}: ${renderExpr(arg, renderCtx)}`).join(", ");
+    const target = snake(st.target);
+    const action = `${snake(st.op)}_${snake(st.aggName)}`;
+    const call = `${contextModule}.${action}(${target}, %{${argFields}})`;
+    return [
+      `case ${call} do`,
+      `  {:ok, updated} -> {:cont, {:ok, updated}}`,
+      `  err -> {:halt, err}`,
+      `end`,
+    ];
+  }
+  // Anything else inside a for-each body is unsupported today — emit a
+  // TODO comment so mix-compile stays green (the comment lives at the
+  // statement position, harmlessly within the lambda body).
+  return [`# TODO: lower for-each body statement kind '${st.kind}'`];
 }
 
 // ---------------------------------------------------------------------------
@@ -405,15 +491,11 @@ function collectParamRefsInStmt(s: StmtIR, acc: Set<string>): void {
   }
 }
 
-/** Collect referenced create-params, but ONLY from the statement kinds
- *  that today lower to real code emitting the param ref (precondition /
- *  requires / expr-let / factory-let / op-call / emit, plus a `getById`
- *  repo-let).  The kinds still on the `# TODO` fallthrough (non-getById
- *  `repo-let` / `repo-run` / `for-each` / `resource-call`) don't render
- *  their param refs yet — binding a param only those reference would leave
- *  an unused local that trips `--warnings-as-errors`.  When a future slice
- *  lowers one of those kinds, it adds the matching arm here in the same
- *  change.  This MUST stay in lock-step with `lowerStatement`. */
+/** Collect referenced create-params from EVERY lowered statement kind —
+ *  every kind now lowers to real code emitting its param refs, so the
+ *  full WorkflowStmtIR union is covered.  Must stay in lock-step with
+ *  `lowerStatement`; if a future kind is added without a matching arm
+ *  here, an unused param destructure could trip `--warnings-as-errors`. */
 function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): void {
   switch (st.kind) {
     case "precondition":
@@ -432,14 +514,21 @@ function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): voi
       return;
     case "repo-let":
       // Gated to the lowered form — see the `repo-let` arm in lowerStatement.
+      // A non-getById repo-let stays on the `# TODO` fallthrough, so its
+      // args aren't surfaced.
       if (st.method === "getById") for (const a of st.args) collectParamRefs(a, acc);
       return;
     case "resource-call":
       collectParamRefs(st.call, acc);
       return;
-    default:
-      // repo-run / for-each — not yet lowered to param-referencing code
-      // (see lowerStatement default arm).
+    case "repo-run":
+      for (const a of st.retrievalArgs) collectParamRefs(a, acc);
+      collectParamRefs(st.page?.offset, acc);
+      collectParamRefs(st.page?.limit, acc);
+      return;
+    case "for-each":
+      collectParamRefs(st.iterable, acc);
+      for (const inner of st.body) collectWorkflowStmtParamRefs(inner, acc);
       return;
   }
 }

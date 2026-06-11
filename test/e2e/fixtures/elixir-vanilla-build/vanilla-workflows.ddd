@@ -89,17 +89,36 @@ system Tasks {
         }
       }
 
-      // retrieval exercise — a named Ecto query bundle with a typed
-      // param.  Lowers to `lib/api/tracker/retrievals/done_tasks.ex`
-      // with a `def run(d, opts \\\\ [])` that builds
+      // retrieval — a named Ecto query bundle.  Lowers to
+      // `lib/api/tracker/retrievals/done_tasks.ex` with
+      // `def run(d, opts \\\\ [])` building
       // `from(record in Api.Tracker.Task, where: record.done == ^d) |> Repo.all()`
-      // and a defdelegate on the context facade
-      // (`run_done_tasks_task(d, opts \\\\ [])`).  Workflow `repo-run`
-      // lowering is a follow-up slice; this slice's gate is just that
-      // the emitted module + delegate compile under --warnings-as-errors.
+      // plus a context defdelegate `run_done_tasks_task(d, opts \\\\ [])`.
       retrieval DoneTasks(d: bool) of Task {
         where: this.done == d
         sort:  [title asc]
+      }
+
+      // repo-run + for-each exercise — page a named retrieval, then
+      // iterate the result and mutate each element.  Lowers to:
+      //   {:ok, xs} <- Context.run_done_tasks_task(d, offset: 0, limit: 100),
+      //   {:ok, _} <- Enum.reduce_while(xs, {:ok, nil}, fn x, _acc ->
+      //     case Context.mark_done_task(x, %{}) do
+      //       {:ok, updated} -> {:cont, {:ok, updated}}
+      //       err -> {:halt, err}
+      //     end
+      //   end)
+      // The reduce_while bubbles the first per-element failure up the
+      // with-chain.  Non-transactional (this is the final body-lowering
+      // slice; pairing with `transactional` is a separate behavioural
+      // test, not a syntactic gate).
+      workflow finalizeBatch {
+        create(d: bool) {
+          let xs = Tasks.run(DoneTasks(d), page: { offset: 0, limit: 100 })
+          for x in xs {
+            x.markDone()
+          }
+        }
       }
     }
   }
