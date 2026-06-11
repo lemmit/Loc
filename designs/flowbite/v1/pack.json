@@ -72,7 +72,8 @@
     "svelte-config": "svelte-config.hbs",
     "theme": "theme.hbs",
     "tsconfig": "tsconfig.hbs",
-    "vite-config": "vite-config.hbs"
+    "vite-config": "vite-config.hbs",
+    "realtime-toast": "realtime-toast.hbs"
   },
   "imports": {
     "primitive-button": [
@@ -401,6 +402,14 @@
         "from": "$lib/format",
         "named": [
           "formatId"
+        ]
+      }
+    ],
+    "realtime-toast": [
+      {
+        "from": "$lib/toast.svelte",
+        "named": [
+          "toast"
         ]
       }
     ]

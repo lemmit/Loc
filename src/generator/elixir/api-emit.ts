@@ -888,8 +888,20 @@ ${allActions}
   # ---------------------------------------------------------------------------
 
   @impl Plug.ErrorHandler
-  def handle_errors(conn, %{reason: %Ash.Error.Invalid{} = err}) do
-    ${webModule}.ProblemDetails.validation_error_response(conn, err)
+  # A get-by-id read of a missing row raises Ash's NotFound — directly, or
+  # wrapped in an Ash.Error.Invalid by the bang code-interface.  Map it to
+  # 404 (matching Hono / .NET) before the generic validation → 422 path,
+  # which would otherwise surface "record not found" as a 422.
+  def handle_errors(conn, %{reason: %Ash.Error.Query.NotFound{}}) do
+    ${webModule}.ProblemDetails.problem_response(conn, 404, "Not Found", "Resource not found")
+  end
+
+  def handle_errors(conn, %{reason: %Ash.Error.Invalid{errors: errors} = err}) do
+    if Enum.any?(errors, &match?(%Ash.Error.Query.NotFound{}, &1)) do
+      ${webModule}.ProblemDetails.problem_response(conn, 404, "Not Found", "Resource not found")
+    else
+      ${webModule}.ProblemDetails.validation_error_response(conn, err)
+    end
   end
 
   def handle_errors(conn, _assigns), do: conn

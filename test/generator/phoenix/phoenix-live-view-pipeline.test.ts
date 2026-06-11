@@ -903,6 +903,55 @@ describe("Ash validate clause emission (domain-emit unit)", () => {
     // compare validator or function-form validate.
     expect(customerEx).toMatch(/validate /);
   });
+
+  it("binds a function-form invariant's `record` from applied attributes, not changeset.data", () => {
+    // A cross-field invariant (`name != email`) can't reduce to a single-field
+    // Ash builtin, so it emits a `validate fn changeset, _opts ->` reading
+    // `record.<field>`.  On a CREATE `changeset.data` is the empty struct, so
+    // `record` must come from the changeset's APPLIED attributes — otherwise
+    // `record.email` is nil (a `Regex.match?` predicate would crash → 500, and
+    // `name != email` would compare nil to nil → spurious failure).
+    const crossField: BoundedContextIR = {
+      ...salesCtx,
+      aggregates: [
+        {
+          ...salesCtx.aggregates[0]!,
+          invariants: [
+            {
+              expr: {
+                kind: "binary",
+                op: "!=",
+                left: {
+                  kind: "ref",
+                  name: "name",
+                  refKind: "this-prop",
+                  type: { kind: "primitive", name: "string" },
+                },
+                right: {
+                  kind: "ref",
+                  name: "email",
+                  refKind: "this-prop",
+                  type: { kind: "primitive", name: "string" },
+                },
+              },
+              source: "name != email",
+            },
+          ],
+        } as unknown as BoundedContextIR["aggregates"][number],
+      ],
+    };
+    const customerEx = emitAggregateResources(
+      enrichContext(crossField),
+      "PhoenixApp",
+      "phoenix_app",
+    ).get("lib/phoenix_app/sales/customer.ex")!;
+    expect(customerEx).toMatch(/validate fn changeset, _opts ->/);
+    expect(customerEx).toMatch(
+      /\{:ok, record\} = Ash\.Changeset\.apply_attributes\(changeset, force\?: true\)/,
+    );
+    // The stale binding must be gone from the validations.
+    expect(customerEx).not.toMatch(/record = changeset\.data/);
+  });
 });
 
 // suppress unused imports if test framework expects them at top level
