@@ -178,3 +178,48 @@ describe("realtime SSE client — React", () => {
     expect([...files.keys()].some((k) => k.endsWith("/http/realtime.ts"))).toBe(false);
   });
 });
+
+// ─── Live-event handlers (`channel` / `on` ui surface) ──────────────────────
+
+const HANDLERS_UI = `
+  ui WebApp {
+    api Fulfillment: FulfillmentApi
+    channel Orders: Fulfillment.Lifecycle
+    on Orders.OrderPlaced(e) { toast("Order " + e.order + " placed") }
+    page Home { route: "/" body: Heading { "hi" } }
+  }`;
+
+const HANDLERS_SYSTEM = REALTIME_SYSTEM.replace(
+  / {2}ui WebApp \{[\s\S]*?\n {2}\}/,
+  HANDLERS_UI.trimStart().replace(/^/, "  "),
+);
+
+describe("realtime live-event handlers — React (`on <channel>.<Event>`)", () => {
+  it("emits RealtimeHandlers.tsx with the pack toast and mounts it in App", async () => {
+    const model = await parseValid(HANDLERS_SYSTEM);
+    const { files } = generateSystems(model);
+    const key = [...files.keys()].find((k) =>
+      k.endsWith("web_app/src/components/RealtimeHandlers.tsx"),
+    );
+    expect(key, "RealtimeHandlers emitted").toBeTruthy();
+    const rh = files.get(key ?? "") ?? "";
+    expect(rh).toContain('import { subscribeRealtime } from "../api/realtime";');
+    // Default design is mantine — the pack's `realtime-toast` template.
+    expect(rh).toContain('import { notifications } from "@mantine/notifications";');
+    expect(rh).toContain('case "OrderPlaced":');
+    expect(rh).toContain(
+      'notifications.show({ message: "Order " + String(event.order ?? "") + " placed" });',
+    );
+    const app = files.get(key!.replace("src/components/RealtimeHandlers.tsx", "src/App.tsx")) ?? "";
+    expect(app).toContain('import { RealtimeHandlers } from "./components/RealtimeHandlers";');
+    expect(app).toContain("<RealtimeHandlers />");
+  });
+
+  it("a ui without handlers gets no component and an unchanged App shell", async () => {
+    const model = await parseValid(REALTIME_SYSTEM);
+    const { files } = generateSystems(model);
+    expect([...files.keys()].some((k) => k.endsWith("/RealtimeHandlers.tsx"))).toBe(false);
+    const appKey = [...files.keys()].find((k) => k.endsWith("web_app/src/App.tsx"));
+    expect(files.get(appKey ?? "") ?? "").not.toContain("RealtimeHandlers");
+  });
+});

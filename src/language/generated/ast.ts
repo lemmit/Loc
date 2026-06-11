@@ -119,6 +119,7 @@ export type DddKeywordNames =
     | "extends"
     | "extern"
     | "false"
+    | "fastapi"
     | "favicon"
     | "filter"
     | "find"
@@ -200,6 +201,7 @@ export type DddKeywordNames =
     | "precondition"
     | "private"
     | "provenanced"
+    | "python"
     | "query"
     | "queue"
     | "rabbitmq"
@@ -504,10 +506,10 @@ export function isPayloadKind(item: unknown): item is PayloadKind {
     return item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error';
 }
 
-export type Platform = 'dotnet' | 'elixir' | 'hono' | 'java' | 'node' | 'phoenix' | 'phoenixLiveView' | 'react' | 'static' | string;
+export type Platform = 'dotnet' | 'elixir' | 'fastapi' | 'hono' | 'java' | 'node' | 'phoenix' | 'phoenixLiveView' | 'python' | 'react' | 'static' | string;
 
 export function isPlatform(item: unknown): item is Platform {
-    return item === 'dotnet' || item === 'hono' || item === 'node' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || item === 'elixir' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'dotnet' || item === 'hono' || item === 'node' || item === 'react' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || item === 'elixir' || item === 'python' || item === 'fastapi' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export type PostfixSuffix = CallSuffix | MemberSuffix;
@@ -604,7 +606,7 @@ export function isTruthKind(item: unknown): item is TruthKind {
     return item === 'eventLog' || item === 'state';
 }
 
-export type UiMember = Component | MenuBlock | Page | UiApiParam;
+export type UiMember = Component | MenuBlock | Page | UiApiParam | UiChannelParam | UiNotification;
 
 export const UiMember = 'UiMember';
 
@@ -705,7 +707,7 @@ export function isApply(item: unknown): item is Apply {
 }
 
 export interface AssignOrCallStmt extends AstNode {
-    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | StampDecl | TestBlock | TestE2E | WorkflowCreateDecl;
+    readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | StampDecl | TestBlock | TestE2E | UiNotification | WorkflowCreateDecl;
     readonly $type: 'AssignOrCallStmt';
     op?: '+=' | '-=' | ':=';
     target: LValue;
@@ -2453,6 +2455,20 @@ export function isUiBlockBinding(item: unknown): item is UiBlockBinding {
     return reflection.isInstance(item, UiBlockBinding);
 }
 
+export interface UiChannelParam extends AstNode {
+    readonly $container: Ui;
+    readonly $type: 'UiChannelParam';
+    channel: Reference<Channel>;
+    context: Reference<BoundedContext>;
+    name: string;
+}
+
+export const UiChannelParam = 'UiChannelParam';
+
+export function isUiChannelParam(item: unknown): item is UiChannelParam {
+    return reflection.isInstance(item, UiChannelParam);
+}
+
 export interface UiComposeBinding extends AstNode {
     readonly $container: Deployable;
     readonly $type: 'UiComposeBinding';
@@ -2464,6 +2480,21 @@ export const UiComposeBinding = 'UiComposeBinding';
 
 export function isUiComposeBinding(item: unknown): item is UiComposeBinding {
     return reflection.isInstance(item, UiComposeBinding);
+}
+
+export interface UiNotification extends AstNode {
+    readonly $container: Ui;
+    readonly $type: 'UiNotification';
+    bind: string;
+    body: Array<AssignOrCallStmt>;
+    event: Reference<EventDecl>;
+    param: Reference<UiChannelParam>;
+}
+
+export const UiNotification = 'UiNotification';
+
+export function isUiNotification(item: unknown): item is UiNotification {
+    return reflection.isInstance(item, UiNotification);
 }
 
 export interface UiParamBinding extends AstNode {
@@ -2756,8 +2787,10 @@ export type DddAstType = {
     Ui: Ui
     UiApiParam: UiApiParam
     UiBlockBinding: UiBlockBinding
+    UiChannelParam: UiChannelParam
     UiComposeBinding: UiComposeBinding
     UiMember: UiMember
+    UiNotification: UiNotification
     UiParamBinding: UiParamBinding
     UiSugarBinding: UiSugarBinding
     UnaryExpr: UnaryExpr
@@ -2776,7 +2809,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [Aggregate, AggregateMember, Api, ApiStatus, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiComposeBinding, UiMember, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
+        return [Aggregate, AggregateMember, Api, ApiStatus, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiChannelParam, UiComposeBinding, UiMember, UiNotification, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2930,7 +2963,9 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case MenuBlock:
             case Page:
-            case UiApiParam: {
+            case UiApiParam:
+            case UiChannelParam:
+            case UiNotification: {
                 return this.isSubtype(UiMember, supertype);
             }
             case Operation: {
@@ -2978,7 +3013,8 @@ export class DddAstReflection extends AbstractAstReflection {
             case 'Apply:event':
             case 'Channel:carries':
             case 'EmitStmt:event':
-            case 'OnDecl:event': {
+            case 'OnDecl:event':
+            case 'UiNotification:event': {
                 return EventDecl;
             }
             case 'ChannelSource:use':
@@ -2989,7 +3025,8 @@ export class DddAstReflection extends AbstractAstReflection {
                 return EntityPart;
             }
             case 'Deployable:contextRefs':
-            case 'Resource:context': {
+            case 'Resource:context':
+            case 'UiChannelParam:context': {
                 return BoundedContext;
             }
             case 'Deployable:dataSourceRefs': {
@@ -3029,6 +3066,12 @@ export class DddAstReflection extends AbstractAstReflection {
             case 'TestBlock:verifies':
             case 'TestE2E:verifies': {
                 return TestCase;
+            }
+            case 'UiChannelParam:channel': {
+                return Channel;
+            }
+            case 'UiNotification:param': {
+                return UiChannelParam;
             }
             case 'View:source': {
                 return ViewSource;
@@ -4285,12 +4328,33 @@ export class DddAstReflection extends AbstractAstReflection {
                     ]
                 };
             }
+            case UiChannelParam: {
+                return {
+                    name: UiChannelParam,
+                    properties: [
+                        { name: 'channel' },
+                        { name: 'context' },
+                        { name: 'name' }
+                    ]
+                };
+            }
             case UiComposeBinding: {
                 return {
                     name: UiComposeBinding,
                     properties: [
                         { name: 'bindings', defaultValue: [] },
                         { name: 'ref' }
+                    ]
+                };
+            }
+            case UiNotification: {
+                return {
+                    name: UiNotification,
+                    properties: [
+                        { name: 'bind' },
+                        { name: 'body', defaultValue: [] },
+                        { name: 'event' },
+                        { name: 'param' }
                     ]
                 };
             }

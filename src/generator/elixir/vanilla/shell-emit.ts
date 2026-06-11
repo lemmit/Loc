@@ -12,8 +12,9 @@ export function emitVanillaShellFiles(
   appModule: string,
   out: Map<string, string>,
   apiRoutes: ApiRoute[] = [],
+  extraHexDeps: Record<string, string> = {},
 ): void {
-  out.set("mix.exs", renderVanillaMixExs(appName, appModule));
+  out.set("mix.exs", renderVanillaMixExs(appName, appModule, extraHexDeps));
   out.set(".formatter.exs", renderVanillaFormatterExs());
   out.set(`lib/${appName}/application.ex`, renderVanillaApplication(appName, appModule));
   out.set(`lib/${appName}/repo.ex`, renderVanillaRepo(appName, appModule));
@@ -33,7 +34,19 @@ export function emitVanillaShellFiles(
   out.set("config/test.exs", renderVanillaTest(appName, appModule));
 }
 
-function renderVanillaMixExs(appName: string, appModule: string): string {
+function renderVanillaMixExs(
+  appName: string,
+  appModule: string,
+  extraHexDeps: Record<string, string>,
+): string {
+  // Resource-adapter hex deps (s3 → ex_aws_s3, rabbitmq → amqp, restApi →
+  // req) ride alongside the core Phoenix/Ecto set.  Sorted for stable output.
+  // Values already include the surrounding `"…"` (matching the Ash
+  // precedent in `shell/project.ts:renderMixExs`).
+  const extraBlock = Object.keys(extraHexDeps)
+    .sort()
+    .map((k) => `,\n      {:${k}, ${extraHexDeps[k]}}`)
+    .join("");
   return `# Auto-generated.
 defmodule ${appModule}.MixProject do
   use Mix.Project
@@ -70,7 +83,7 @@ defmodule ${appModule}.MixProject do
       {:jason, "~> 1.4"},
       {:plug_cowboy, "~> 2.6"},
       {:telemetry_metrics, "~> 1.0"},
-      {:telemetry_poller, "~> 1.0"}
+      {:telemetry_poller, "~> 1.0"}${extraBlock}
     ]
   end
 

@@ -1,0 +1,139 @@
+// Entity parts + containment + collection ops + money on the python
+// backend — the sales-shaped cell of the LOOM_PYTHON_BUILD corpus.
+system PySales {
+  subdomain Sales {
+    context Sales {
+      enum OrderStatus { Draft, Confirmed, Shipped }
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+      }
+
+      error NotFound { resource: string }
+
+      event LineAdded {
+        order: Order id,
+        quantity: int
+      }
+
+      event OrderConfirmed {
+        order: Order id,
+        at: datetime
+      }
+
+      aggregate Customer {
+        name: string
+        operation rename(newName: string) {
+          name := newName
+        }
+      }
+
+      aggregate Order {
+        status: OrderStatus
+        placedAt: datetime
+        unitBudget: money
+        watchers: Customer id[]
+        contains lines: OrderLine[]
+
+        derived total: Money =
+          Money { amount: lines.sum(l => l.subtotal.amount), currency: "USD" }
+
+        invariant lines.count > 0 when status == Confirmed
+
+        function isMutable(): bool = status == Draft
+
+        private operation requireMutable() {
+          precondition isMutable()
+        }
+
+        operation addLine(qty: int, price: Money) {
+          precondition isMutable()
+          precondition qty > 0
+          lines += OrderLine { quantity: qty, unitPrice: price }
+          emit LineAdded { order: id, quantity: qty }
+        }
+
+        operation reserve(): Order or NotFound {
+          return NotFound { resource: "order" }
+        }
+
+        operation confirm() {
+          precondition isMutable()
+          precondition lines.count > 0
+          status := Confirmed
+          emit OrderConfirmed { order: id, at: now() }
+        }
+
+        entity OrderLine {
+          quantity: int
+          unitPrice: Money
+
+          function subtotalAmount(): decimal = unitPrice.amount * quantity
+
+          derived subtotal: Money =
+            Money { amount: subtotalAmount(), currency: unitPrice.currency }
+
+          invariant quantity > 0
+        }
+      }
+      repository Orders for Order {
+        find recent(): Order paged
+        find firstDraft(): Order or NotFound where this.status == Draft
+        find byStatus(status: OrderStatus): Order[] where this.status == status
+        find cheaperThan(limit: money): Order[] where this.unitBudget <= limit
+        find watchedBy(customerId: Customer id): Order[] where this.watchers.contains(customerId)
+      }
+      repository Customers for Customer {
+        find byName(name: string): Customer[] where this.name == name
+      }
+
+      // Reusable predicate + named query bundle (criterion.md / retrieval.md).
+      criterion StatusIs(s: OrderStatus) of Order = this.status == s
+      retrieval ByStatusSorted(s: OrderStatus) of Order {
+        where: StatusIs(s)
+        sort: [placedAt desc]
+      }
+
+      // Command workflow — load, mutate via an operation, save at exit
+      // (one transaction per request).
+      workflow renameCustomer transactional {
+        create(customerId: Customer id, newName: string) {
+          let c = Customers.getById(customerId)
+          c.rename(newName)
+        }
+      }
+
+      // Shorthand view — filtered list of the source wire shape.
+      view DraftOrders = Order where this.status == Draft
+
+      // Full-form view — custom row shape bound per hydrated row.
+      view OrderSummaries {
+        orderId: Order id
+        status: OrderStatus
+        budget: money
+        lineCount: int
+
+        from Order
+        bind orderId = id,
+             status = status,
+             budget = unitBudget,
+             lineCount = lines.count
+      }
+    }
+  }
+
+  api SalesApi from Sales
+
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
+
+  deployable api {
+    platform: python
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 8000
+  }
+}

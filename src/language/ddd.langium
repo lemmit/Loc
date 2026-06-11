@@ -240,8 +240,11 @@ Framework returns string:
 // `elixir` is the D-ELIXIR-PLATFORM canonical name for the
 // language-ecosystem platform; legacy `phoenix` and `phoenixLiveView`
 // desugar to `elixir` (the latter through a `phoenix → elixir` chain).
+// `python` is the canonical language-ecosystem name for the
+// FastAPI + SQLAlchemy backend; `fastapi` is its framework-spelled
+// alias and desugars to `python` (mirrors `hono` → `node`).
 Platform returns string:
-    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'java' | STRING;
+    'dotnet' | 'hono' | 'node' | 'react' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'python' | 'fastapi' | 'java' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,
@@ -288,7 +291,7 @@ Ui:
     '}';
 
 UiMember:
-    UiApiParam | Page | Component | MenuBlock;
+    UiApiParam | UiChannelParam | UiNotification | Page | Component | MenuBlock;
 
 // ---- api declaration (system-level) ----------------------------
 //
@@ -379,6 +382,30 @@ ConnectionSource:
 //   api Sales: SalesApi
 UiApiParam:
     'api' name=ID ':' apiRef=[Api:ID];
+
+// ---- channel subscription (channels.md Part I, ui surface) --------
+//
+//   channel Orders: Sales.Lifecycle
+//
+// Subscribes this UI to a context's `delivery: broadcast` channel.
+// The wire format (SSE vs WebSocket) is an infra fact derived from
+// the frontend's platform — never stated here; the scope provider
+// resolves `channel` within the named context.
+UiChannelParam:
+    'channel' name=ID ':' context=[BoundedContext:ID] '.' channel=[Channel:ID];
+
+// ---- live-event handler --------------------------------------------
+//
+//   on Orders.OrderShipped(e) { toast("Order " + e.order + " shipped") }
+//
+// Renders the event itself (toast / feed / badge) when it arrives on
+// the subscribed channel's realtime wire.  v1 restricts the body to
+// `toast(<expr>)` calls (validator rule `loom.ui-handler-unsupported`).
+// A live READ needs no marker — an ordinary cached query auto-freshens
+// (channels.md Part II).
+UiNotification:
+    'on' param=[UiChannelParam:ID] '.' event=[EventDecl:ID]
+        '(' bind=ID ')' '{' body+=AssignOrCallStmt* '}';
 
 // ---- page ---------------------------------------------------------------
 

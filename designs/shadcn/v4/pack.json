@@ -86,7 +86,8 @@
     "form-op-module": "form-op-module.hbs",
     "primitive-multiline-field": "primitive-multiline-field.hbs",
     "primitive-select-field": "primitive-select-field.hbs",
-    "components-ui-textarea": "components-ui-textarea.hbs"
+    "components-ui-textarea": "components-ui-textarea.hbs",
+    "realtime-toast": "realtime-toast.hbs"
   },
   "imports": {
     "primitive-button": [
@@ -466,6 +467,14 @@
         "from": "@/components/ui/label",
         "named": [
           "Label"
+        ]
+      }
+    ],
+    "realtime-toast": [
+      {
+        "from": "sonner",
+        "named": [
+          "toast"
         ]
       }
     ]

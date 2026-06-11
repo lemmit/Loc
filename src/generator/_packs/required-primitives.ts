@@ -147,6 +147,11 @@ const TSX_FORM: readonly string[] = [
   "form-op-decls",
   "form-op-module",
   "form-runs-decls",
+  // The one-statement toast a `on <channel>.<Event>` live-event handler
+  // renders into RealtimeHandlers.tsx (channels.md Part I).  An optional
+  // sibling `realtime-toast-setup` (chakra v2's `const toast = useToast()`)
+  // stays pack-private — only the call template is required.
+  "realtime-toast",
 ];
 
 export const REQUIRED_PRIMITIVES: Record<PackFormat, RequiredSet> = {
