@@ -251,3 +251,51 @@ describe("phoenix migrations-emit — delta path", () => {
     expect(pipelines).toContain('create index(:pipelines, [:project_id], prefix: "catalog")');
   });
 });
+
+describe("phoenix migrations-emit — multi-module initial versions are unique", () => {
+  // A backend that serves >1 module writes all their initial migrations into
+  // ONE priv/repo/migrations/ dir.  Each module's versions are allocated from
+  // BASE_TIMESTAMP, so without a per-module offset every module's first table
+  // collides at 20260101000000 — and Ecto refuses to run a dir with a
+  // duplicated version (`migration version ... is duplicated`), crashing the
+  // release migrate-on-boot.  This pins that each module's block is offset.
+  const initialModule = (module: string, table: string): MigrationsIR => ({
+    module,
+    storageName: "",
+    baseline: null,
+    next: EMPTY_SNAP,
+    steps: [
+      {
+        op: "createTable",
+        table: {
+          name: table,
+          ownerModule: module,
+          columns: [{ name: "id", type: { kind: "uuid" }, nullable: false }],
+          primaryKey: ["id"],
+          foreignKeys: [],
+          indexes: [],
+        },
+      },
+    ],
+    version: "20260101000000",
+    name: "Initial",
+  });
+
+  it("offsets each module so no two migration files share a version prefix", () => {
+    const out = new Map<string, string>();
+    emitMigrations(
+      "phoenix_app",
+      [
+        initialModule("Catalog", "projects"),
+        initialModule("Builds", "builds"),
+        initialModule("People", "engineers"),
+      ],
+      APP_MODULE,
+      out,
+    );
+    const versions = [...out.keys()].map((p) => p.match(/migrations\/(\d+)_/)![1]!);
+    expect(versions).toHaveLength(3);
+    // All distinct — the bug emitted three files all at 20260101000000.
+    expect(new Set(versions).size).toBe(3);
+  });
+});

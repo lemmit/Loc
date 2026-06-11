@@ -48,23 +48,44 @@ function schemaCreateLine(schema: string | undefined): string {
   return schema ? `    execute "CREATE SCHEMA IF NOT EXISTS ${schema}"\n` : "";
 }
 
+/** Per-module version stride.  Every backend that serves >1 module writes
+ *  all their initial migrations into ONE `priv/repo/migrations/` dir, and
+ *  Ecto refuses to run a dir with a duplicated version prefix.  `emitInitial`
+ *  allocates each module's versions from `BASE_TIMESTAMP` (parents `+i`, parts
+ *  `+N*10+…`, joins `+N*100+k`), so without a per-module offset every module's
+ *  first table collides at `BASE_TIMESTAMP`.  Offsetting module M by
+ *  `M * STRIDE` keeps each module's block disjoint; the stride is far larger
+ *  than any realistic within-module span (`N*100 + joins`). */
+const MODULE_VERSION_STRIDE = 1_000_000;
+
 export function emitMigrations(
   _appName: string,
   migrations: MigrationsIR[],
   appModule: string,
   out: Map<string, string>,
 ): void {
+  let initialModuleIndex = 0;
   for (const m of migrations) {
     if (m.steps.length === 0) continue;
     if (m.baseline === null) {
-      emitInitial(m, appModule, out);
+      emitInitial(m, appModule, out, initialModuleIndex * MODULE_VERSION_STRIDE);
+      initialModuleIndex++;
     } else {
       emitDelta(m, appModule, out);
     }
   }
 }
 
-function emitInitial(m: MigrationsIR, appModule: string, out: Map<string, string>): void {
+function emitInitial(
+  m: MigrationsIR,
+  appModule: string,
+  out: Map<string, string>,
+  /** Per-module offset added to every allocated version so migrations from
+   *  different modules don't collide in the shared dir.  See
+   *  `MODULE_VERSION_STRIDE`. */
+  baseOffset = 0,
+): void {
+  const base = BASE_TIMESTAMP + baseOffset;
   // Three classes of table, separated so timestamps preserve the
   // create-order required by FK targets:
   //   - aggregate (no cascade FK) → BASE + i
@@ -88,9 +109,9 @@ function emitInitial(m: MigrationsIR, appModule: string, out: Map<string, string
     .filter((t) => !joinTables.includes(t) && !partTables.includes(t))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  // Parents — BASE + i.
+  // Parents — base + i.
   for (let i = 0; i < parentTables.length; i++) {
-    writeInitialFile(parentTables[i]!, BASE_TIMESTAMP + i, appModule, out);
+    writeInitialFile(parentTables[i]!, base + i, appModule, out);
   }
   // Parts — grouped by parent.
   const parentCount = parentTables.length;
@@ -102,7 +123,7 @@ function emitInitial(m: MigrationsIR, appModule: string, out: Map<string, string
       )
       .sort((a, b) => a.name.localeCompare(b.name));
     for (let j = 0; j < partsOfThis.length; j++) {
-      const ts = BASE_TIMESTAMP + parentCount * 10 + i * 10 + (j + 1);
+      const ts = base + parentCount * 10 + i * 10 + (j + 1);
       writeInitialFile(partsOfThis[j]!, ts, appModule, out);
     }
   }
@@ -110,7 +131,7 @@ function emitInitial(m: MigrationsIR, appModule: string, out: Map<string, string
   // both endpoints resolve.  Sorted by name for stable allocation.
   const sortedJoins = [...joinTables].sort((a, b) => a.name.localeCompare(b.name));
   for (let k = 0; k < sortedJoins.length; k++) {
-    const ts = BASE_TIMESTAMP + parentCount * 100 + k;
+    const ts = base + parentCount * 100 + k;
     writeInitialFile(sortedJoins[k]!, ts, appModule, out);
   }
 }
