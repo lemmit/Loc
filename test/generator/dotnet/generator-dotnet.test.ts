@@ -774,8 +774,10 @@ describe(".NET generator", () => {
     // ASP.NET's record validation throw at model-binding time (500 on every
     // POST).  Responses keep `[property: Required]`; see dtoParam.
     const req = files.get("Application/Workflows/PlaceOrderRequest.cs")!;
+    // Required strings carry `AllowEmptyStrings = true` (empty → domain 422,
+    // not model-validation 400); non-string required fields stay bare.
     expect(req).toMatch(
-      /public sealed record PlaceOrderRequest\(\[Required\] Guid CustomerId, \[Required\] decimal Amount, \[Required\] string PlacedAt\)/,
+      /public sealed record PlaceOrderRequest\(\[Required\] Guid CustomerId, \[Required\] decimal Amount, \[Required\(AllowEmptyStrings = true\)\] string PlacedAt\)/,
     );
 
     // Command uses domain types (CustomerId, DateTime).

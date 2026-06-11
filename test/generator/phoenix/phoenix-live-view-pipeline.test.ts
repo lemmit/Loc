@@ -118,6 +118,30 @@ describe("phoenixLiveView pipeline", () => {
     expect(mix).toMatch(/ignore_warnings: "\.dialyzer_ignore\.exs"/);
   });
 
+  it("runs Ecto migrations on boot via a Release task evaled by bin/server", async () => {
+    // The per-backend database is created empty by the compose db-init SQL;
+    // without a migrate-on-boot step the server starts against a tableless
+    // DB and every query 500s with `42P01 relation does not exist`.  The
+    // release ships a `Release.migrate/0` task and `bin/server` evals it
+    // before `start` (mirrors the .NET backend's migrate-on-startup).
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+
+    const release = files.get("phoenix_app/lib/phoenix_app/release.ex");
+    expect(release, "release.ex is emitted").toBeDefined();
+    expect(release!).toMatch(/defmodule PhoenixApp\.Release do/);
+    expect(release!).toMatch(/def migrate do/);
+    expect(release!).toMatch(/Ecto\.Migrator\.with_repo/);
+    expect(release!).toMatch(/Application\.fetch_env!\(@app, :ecto_repos\)/);
+
+    const server = files.get("phoenix_app/rel/overlays/bin/server")!;
+    // migrate is evaled BEFORE the server starts.
+    expect(server).toMatch(/eval "PhoenixApp\.Release\.migrate\(\)"/);
+    expect(server.indexOf("Release.migrate")).toBeLessThan(
+      server.indexOf('exec "./bin/phoenix_app" start'),
+    );
+  });
+
   it("emits the shared <App>.Types module at lib/<app>/types.ex", async () => {
     // Per the Ash specing discipline in
     // docs/proposals/cross-stack-static-analysis.md — one shared

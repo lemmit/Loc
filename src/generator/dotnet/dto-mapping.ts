@@ -147,7 +147,22 @@ export function dtoParam(
   // Request → parameter target (bare `[Required]`) so ASP.NET record
   // validation doesn't throw at model-binding time; response → property
   // target (`[property: Required]`).  See the doc comment above.
-  const attr = dir === "request" ? "[Required] " : "[property: Required] ";
+  //
+  // Required STRING request fields carry `AllowEmptyStrings = true`: by
+  // default `[Required]` rejects `""` with a 400 model-validation error,
+  // which would pre-empt the domain `invariant`/`check` (e.g. `name.length
+  // > 0`) that the other backends surface as 422.  Allowing the empty
+  // string through the structural layer defers emptiness to the domain
+  // invariant, so all backends reject it with the same 422 (cross-backend
+  // parity).  Null/omitted still fails `[Required]` (400), as before.  Stays
+  // a `RequiredAttribute`, so Swashbuckle's `RequiredFromCtorParamFilter`
+  // keeps the field in the OpenAPI required-set.
+  const attr =
+    dir === "request"
+      ? csType === "string"
+        ? "[Required(AllowEmptyStrings = true)] "
+        : "[Required] "
+      : "[property: Required] ";
   return `${attr}${csType} ${name}`;
 }
 
