@@ -113,23 +113,47 @@ and DTO seams are lower urgency.
 > as LOC). The duplication is real and structural; the magnitude is "thousands
 > of lines of parallel choreography," not the 75K figure.
 
-### 5. Phoenix runs a parallel walker — the "universal walker" isn't universal *(maintainability)*
+### 5. Phoenix runs a parallel walker — justified, but the parity gap is untracked *(maintainability)*
 
 The frontend story claims a shared body-walker with framework seams captured by
 `WalkerTarget`. React and Vue genuinely consume the shared
-`_walker/walker-core.ts` (1,346 LOC). Phoenix/HEEx does **not** — it runs its
-own `elixir/heex-walker-core.ts` (1,068 LOC) + `heex-primitives.ts` (956 LOC),
-roughly a parallel ~2,000-LOC implementation. The `heexTarget` exists mainly as
-a conformance shim, not as the thing that drives HEEx rendering.
+`_walker/walker-core.ts` (1,346 LOC) via `walkBody(body, target)`. Phoenix/HEEx
+does **not** — it runs its own `elixir/heex-walker-core.ts` (1,068 LOC) +
+`heex-primitives.ts` (956 LOC), roughly a parallel ~2,000-LOC engine. The
+`heexTarget` is mainly a conformance shim; the real HEEx rendering is the
+parallel engine.
 
-This is defensible (LiveView's position-dependent state refs and inline API
-calls don't fit the JSX-family assumptions baked into the shared core), but it
-means the seam is "JSX-family-universal," not universal, and the two walkers
-will drift as primitives are added. Worth either (a) documenting HEEx as an
-explicit non-consumer of the shared walker (so contributors know to update both
-when adding a primitive), or (b) factoring the genuinely-shared
-primitive-dispatch skeleton out of both. `walker-stdlib-completeness.test.ts`
-guards the registry mirror but not the two renderers' parity.
+**On closer inspection, the two engines should NOT be merged** — and an earlier
+draft of this audit was wrong to suggest "factor out the shared skeleton." The
+divergence is *topological*, not cosmetic, on three axes the `WalkerTarget`
+seams deliberately exclude (target.ts:49-68):
+
+- **Lambdas** — inline in JSX (`onClick={() => navigate(...)}`, one node → one
+  expression) vs hoisted in LiveView (`phx-click="ev"` attribute **plus** a
+  separate `handle_event/3` clause accumulated on the module body, one node →
+  two non-adjacent fragments; heex-walker-core.ts:14,74,194).
+- **Collection ops** — `xs.map(...)` returning markup vs `<%= for x <- xs %>`
+  comprehension blocks.
+- **Conditional children** — `cond ? <A/> : <B/>` vs `<%= if do %>` blocks.
+
+A single recursion engine can only emit both topologies by branching on
+framework internally — re-introducing exactly the `if (framework === "heex")`
+leakage the seam was built to prevent. Note what *is* already shared: the
+`WALKER_PRIMITIVES` registry (`_walker/registry.ts`) is a single table carrying
+both a `tsx` and a `heex` renderer per primitive, and
+`walker-stdlib-completeness.test.ts` pins the primitive *names* across both. So
+the catalogue isn't duplicated — only the two engines are, and that's earned.
+
+**The actionable risk is parity drift, not LOC.** The registry has **49 `tsx`
+renderers but only 32 `heex`** ones — ~17 primitives (Field, Toggle, Money,
+Avatar, Bold/Italic/InlineCode, the input family, Tabs, DestroyForm, …) render
+on React but **silently fall through to a "not supported" comment** on Phoenix.
+Nothing guards that gap, so a newly-added primitive defaults to TSX-only and
+quietly degrades Phoenix output. Fix is cheap and engine-free: a parity test
+that, for every primitive meant to be cross-framework, asserts a `heex` renderer
+exists or the gap is on an explicit allow-list — turning silent divergence into
+a reviewed list. Also state plainly in CLAUDE.md that HEEx is a parallel engine,
+not a `WalkerTarget` consumer (today's docs imply the seam is universal).
 
 ### 6. React still uses its own API builder while Vue uses the shared one *(small, clean-up)*
 
@@ -192,4 +216,6 @@ called production-ready.
 4. Add the missing Python/Vue test + CI gates.
 5. Resolve the `platform/` layout dichotomy (document or migrate).
 6. Extract the `WorkflowChoreographer` seam (largest duplication payoff).
-7. Migrate React onto `_frontend/api-module.ts`; document HEEx as a parallel walker.
+7. Migrate React onto `_frontend/api-module.ts`.
+8. Add a HEEx primitive-parity test + document HEEx as a parallel engine (do
+   NOT merge the walkers — the divergence is topological).
