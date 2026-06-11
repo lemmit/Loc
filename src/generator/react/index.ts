@@ -11,6 +11,7 @@ import {
 } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
 import { lowerFirst } from "../../util/naming.js";
+import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
@@ -385,43 +386,6 @@ export function generateReactForContexts(
     prefixed.set(`${pathPrefix}${path}`, content);
   }
   return prefixed;
-}
-
-/** The realtime SSE client — one EventSource against the backend's
- *  `GET /realtime/events`, fanning typed events out to subscribers
- *  (channels.md Part I).  v1 is broadcast-to-all: the authorized read
- *  stays the gate, so consumers typically refetch/invalidate rather
- *  than trust payloads for anything privileged. */
-function renderRealtimeClient(eventTypes: readonly string[]): string {
-  const typeList = eventTypes.map((t) => JSON.stringify(t)).join(", ");
-  return `// Auto-generated.  Do not edit by hand.
-// Realtime SSE client (channels.md Part I) — subscribes to the backend's
-// GET /realtime/events stream.  Events carried by a \`delivery: broadcast\`
-// channel arrive as \`{ type, ...fields }\`; the connection auto-reconnects
-// (EventSource semantics).  The authorized read remains the gate — refetch
-// through the API for anything privileged.
-import { API_BASE } from "./config";
-
-export type RealtimeEvent = { type: string } & Record<string, unknown>;
-
-/** Event types the backend's broadcast channels carry. */
-export const REALTIME_EVENT_TYPES = [${typeList}] as const;
-
-/** Subscribe to the realtime stream.  Returns an unsubscribe fn that
- *  closes the EventSource.  \`onEvent\` fires once per carried event. */
-export function subscribeRealtime(onEvent: (event: RealtimeEvent) => void): () => void {
-  const source = new EventSource(\`\${API_BASE}/realtime/events\`);
-  const handler = (m: MessageEvent) => {
-    try {
-      onEvent(JSON.parse(m.data as string) as RealtimeEvent);
-    } catch {
-      // Malformed frame — skip (keep the stream alive).
-    }
-  };
-  for (const t of REALTIME_EVENT_TYPES) source.addEventListener(t, handler);
-  return () => source.close();
-}
-`;
 }
 
 /** Emit each entry in the pack manifest's `shellFiles` map (logical
