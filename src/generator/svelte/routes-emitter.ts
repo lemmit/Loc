@@ -257,7 +257,7 @@ export function emitSveltePageObjectsForUi(
         if (!agg || !ctxIR) break;
         out.set(
           `e2e/pages/${lowerFirst(agg.name)}.ts`,
-          buildPageObjectModule(agg, ctxIR, "../../src/lib/api"),
+          buildPageObjectModule(agg, ctxIR, "../../src/lib/api", "native"),
         );
         break;
       }
@@ -279,7 +279,7 @@ export function emitSveltePageObjectsForUi(
         if (!ctxIR || !wf) break;
         out.set(
           `e2e/pages/workflows/${snake(wf.name)}.ts`,
-          buildWorkflowPageObject(wf, ctxIR, "../../../src/lib/api"),
+          buildWorkflowPageObject(wf, ctxIR, "../../../src/lib/api", "native"),
         );
         break;
       }

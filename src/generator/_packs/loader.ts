@@ -31,8 +31,9 @@ import { flattenRequired, REQUIRED_PRIMITIVES } from "./required-primitives.js";
  *  markup).  Drives two things:
  *    1. Which repo-root shared-source directories the loader pulls
  *       in (TSX packs get `vite/`+`api/`+`docker/`; svelte packs get
- *       `sveltekit/`+`docker/`; HEEx packs get a future `phoenix/`
- *       and skip the TSX dirs).
+ *       `sveltekit/` only — `docker/` stays TSX-side because the
+ *       dockerfiles' logical names would collide (see loader-fs.ts);
+ *       HEEx packs get a future `phoenix/` and skip the TSX dirs).
  *    2. Documentation — pack authors and downstream tooling can
  *       discriminate without parsing template contents.
  *  Handlebars itself is content-agnostic, so the compilation path

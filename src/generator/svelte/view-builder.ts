@@ -31,7 +31,7 @@ export function allViews(
 
 // ---------------------------------------------------------------------------
 // API module — Zod schemas + query hooks per view.  One file at
-// `src/api/views.ts` aggregating them all.
+// `src/lib/api/views.ts` aggregating them all.
 // ---------------------------------------------------------------------------
 
 export function buildViewsApiModule(contexts: BoundedContextIR[]): string {

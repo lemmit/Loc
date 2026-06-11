@@ -34,7 +34,7 @@ export function allWorkflows(
 
 // ---------------------------------------------------------------------------
 // API module — Zod schemas + mutation hooks for every workflow in the
-// deployable.  One file at `src/api/workflows.ts` aggregating them all.
+// deployable.  One file at `src/lib/api/workflows.ts` aggregating them all.
 // ---------------------------------------------------------------------------
 
 export function buildWorkflowsApiModule(contexts: BoundedContextIR[]): string {

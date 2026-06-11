@@ -10,7 +10,7 @@ import {
 import { humanize, lowerFirst } from "../../util/naming.js";
 import {
   E2E_FIXTURES_TS,
-  E2E_PACKAGE_JSON,
+  E2E_PACKAGE_JSON_SVELTE,
   E2E_TSCONFIG_JSON,
   PLAYWRIGHT_CONFIG_TS,
 } from "../_frontend/e2e-harness.js";
@@ -123,7 +123,7 @@ export function generateSvelteForContexts(
   out.set("e2e/smoke.spec.ts", smokeSpec(ui));
   out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
   out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
-  out.set("e2e/package.json", E2E_PACKAGE_JSON);
+  out.set("e2e/package.json", E2E_PACKAGE_JSON_SVELTE);
   out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
   // Shared lib surface.

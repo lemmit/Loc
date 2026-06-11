@@ -1,4 +1,4 @@
-// Pure argument-reader and string utilities for the React body walker.
+// Pure argument-reader and string utilities for the shared body walker.
 //
 // Everything here is a pure function of its arguments — no WalkContext,
 // no shared-state mutation. Extracted from body-walker.ts so the

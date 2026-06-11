@@ -78,6 +78,15 @@ export const E2E_PACKAGE_JSON =
     2,
   ) + "\n";
 
+/** Same harness manifest under the SvelteKit project's name.  The
+ *  react constant keeps its original name + bytes (the react output
+ *  is byte-identity-gated); svelte projects get an honestly-named
+ *  package. */
+export const E2E_PACKAGE_JSON_SVELTE = E2E_PACKAGE_JSON.replace(
+  '"loom-react-app-e2e"',
+  '"loom-svelte-app-e2e"',
+);
+
 export const E2E_TSCONFIG_JSON =
   JSON.stringify(
     {

@@ -26,11 +26,20 @@ describe("svelte pack format groundwork", () => {
   it("svelte required set mirrors TSX (forms + field inputs owned by the pack) plus svelte-config", () => {
     const svelte = new Set(flattenRequired(REQUIRED_PRIMITIVES.svelte));
     const tsx = new Set(flattenRequired(REQUIRED_PRIMITIVES.tsx));
+    // Documented exclusions: tsx-required templates whose emitting
+    // feature the svelte generator does not implement yet.
+    const svelteExclusions = new Set(["realtime-toast"]);
     for (const name of tsx) {
+      if (svelteExclusions.has(name)) {
+        expect(svelte.has(name), `"${name}" is excluded — drop it from svelteExclusions`).toBe(
+          false,
+        );
+        continue;
+      }
       expect(svelte.has(name), `svelte set missing tsx-required "${name}"`).toBe(true);
     }
     expect(svelte.has("svelte-config")).toBe(true);
-    expect(svelte.size).toBe(tsx.size + 1);
+    expect(svelte.size).toBe(tsx.size + 1 - svelteExclusions.size);
   });
 
   it("a svelte-format pack loads against the sv1 stack and sees its partials + docker shared sources", () => {

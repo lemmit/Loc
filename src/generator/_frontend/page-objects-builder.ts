@@ -1,6 +1,6 @@
 import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
-import { unwrapOpt } from "../react/form-helpers.js";
+import { unwrapOpt } from "./form-helpers.js";
 
 // ---------------------------------------------------------------------------
 // Page-object builder — emits Playwright page-object classes per
@@ -24,6 +24,7 @@ export function buildPageObjectModule(
    *  from `e2e/pages/` — react projects keep them at `src/api`,
    *  SvelteKit projects at `src/lib/api`. */
   apiImportRoot = "../../src/api",
+  selectStyle: SelectStyle = "combobox",
 ): string {
   const slug = snake(plural(agg.name));
   const aggCap = upperFirst(agg.name);
@@ -89,7 +90,7 @@ export function buildPageObjectModule(
   lines.push(`  async fill(input: Partial<Create${agg.name}Request>): Promise<this> {`);
   for (const f of required) {
     lines.push(
-      ...fillBlock(`input`, f.name, f.type, ctx, `${slug}-new-input-${f.name}`).map(
+      ...fillBlock(`input`, f.name, f.type, ctx, `${slug}-new-input-${f.name}`, selectStyle).map(
         (l) => `    ${l}`,
       ),
     );
@@ -170,9 +171,14 @@ export function buildPageObjectModule(
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor();`);
       for (const p of op.params) {
         lines.push(
-          ...fillBlock("input", p.name, p.type, ctx, `${slug}-op-${op.name}-input-${p.name}`).map(
-            (l) => `    ${l}`,
-          ),
+          ...fillBlock(
+            "input",
+            p.name,
+            p.type,
+            ctx,
+            `${slug}-op-${op.name}-input-${p.name}`,
+            selectStyle,
+          ).map((l) => `    ${l}`),
         );
       }
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-submit").click();`);
@@ -212,12 +218,21 @@ export function buildPageObjectModule(
 // conventions instead of forking the logic.
 // ---------------------------------------------------------------------------
 
+/** How the generated form renders `enum` / `X id` choice fields.
+ *  React packs render portal-combobox components (Mantine `<Select>`
+ *  et al.) driven by click-to-open-then-click-option; svelte packs
+ *  render native `<select>` elements, which Playwright drives via
+ *  `selectOption()` — clicking a closed native select's options would
+ *  time out. */
+export type SelectStyle = "combobox" | "native";
+
 export function fillBlock(
   inputVar: string,
   path: string,
   t: TypeIR,
   ctx: BoundedContextIR,
   testId: string,
+  selectStyle: SelectStyle = "combobox",
 ): string[] {
   const inner = unwrapOpt(t);
   const lines: string[] = [];
@@ -228,7 +243,14 @@ export function fillBlock(
     if (vo) {
       lines.push(`if (${accessor} !== undefined) {`);
       for (const vf of vo.fields) {
-        const sub = fillBlock(`${accessor}!`, vf.name, vf.type, ctx, `${testId}-${vf.name}`);
+        const sub = fillBlock(
+          `${accessor}!`,
+          vf.name,
+          vf.type,
+          ctx,
+          `${testId}-${vf.name}`,
+          selectStyle,
+        );
         for (const l of sub) lines.push(`  ${l}`);
       }
       lines.push(`}`);
@@ -262,6 +284,14 @@ export function fillBlock(
       lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!);`);
     }
   } else if (inner.kind === "id") {
+    if (selectStyle === "native") {
+      // Native `<select>` populated by `useAll<X>()` — option values
+      // carry the id.  `selectOption` auto-waits for the matching
+      // option to mount, covering the async options load.
+      lines.push(`  await this.page.getByTestId("${testId}").selectOption(${accessor}!);`);
+      lines.push(`}`);
+      return lines;
+    }
     // `X id` renders as a Mantine `<Select>` populated by
     // `useAll<X>()`.  Each option carries a `data-testid` of the form
     // `<input-tid>-option-<id>`, set by the form's `renderOption`.
@@ -275,6 +305,12 @@ export function fillBlock(
     lines.push(`    await __opt.click();`);
     lines.push(`  }`);
   } else if (inner.kind === "enum") {
+    if (selectStyle === "native") {
+      // Native `<select>` — option values are the enum values.
+      lines.push(`  await this.page.getByTestId("${testId}").selectOption(${accessor}!);`);
+      lines.push(`}`);
+      return lines;
+    }
     // Mantine <Select> opens a portal-mounted listbox on click.  Open
     // it, wait for the listbox role to attach, then click the option
     // by its accessible name (exact match, so "Draft" doesn't match

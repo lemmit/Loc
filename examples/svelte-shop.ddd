@@ -76,7 +76,8 @@ system SvelteShop {
                 },
                 Tabs {
                     Tab { "Customers", Text { "Manage customers from the sidebar." } },
-                    Tab { "Orders", Text { "Orders tab body." } }
+                    Tab { "Orders", Text { "Orders tab body." } },
+                    testid: "home-tabs"
                 },
                 Anchor { "Go to customers", to: "/customers", testid: "go-customers" }
             }

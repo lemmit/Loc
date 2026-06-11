@@ -18,29 +18,29 @@
 //   6. Cross-page navigation — `useNavigate()` vs `push_navigate(socket, to: ...)`
 //
 // `WalkerTarget` is the contract every framework-specific walker
-// implements.  v0 wires the React (TSX) walker through `tsxTarget`
-// and the Phoenix LiveView (HEEx) walker through `heexTarget`.  The
-// walker itself takes a `WalkerTarget` parameter and consults it at
-// each of the seams above; the rest (pack dispatch, attribute
-// formatting, lambda traversal) stays in the shared walker.
+// implements.  The shared walker core (`_walker/walker-core.ts`)
+// takes a `WalkerTarget` parameter and consults it at each of the
+// seams above; the rest (pack dispatch, attribute formatting, lambda
+// traversal) stays in the shared walker.
 //
-// The contract has two implementations:
+// The contract has three implementations:
 //
-//   - `src/generator/react/walker/tsx-target.ts`            → `tsxTarget`
-//   - `src/generator/elixir/heex-target.ts`      → `heexTarget`
+//   - `src/generator/react/walker/tsx-target.ts`     → `tsxTarget`
+//   - `src/generator/svelte/walker/svelte-target.ts` → `svelteTarget`
+//   - `src/generator/elixir/heex-target.ts`          → `heexTarget`
 //
-// Both validate the interface end-to-end through the cross-target
-// conformance test.  The walkers (`body-walker.ts` for React,
-// `heex-walker.ts` for Phoenix) inline their seam implementations
-// directly; extracting them behind these targets is gated on the
-// byte-identical fixture suite (React) and
-// `mix compile --warnings-as-errors` (Phoenix).
+// All validate the interface end-to-end through the cross-target
+// conformance test.  tsx/svelte are consumed by the shared walker
+// core; the HEEx walker (`heex-walker.ts`) is a parallel sibling that
+// implements the same contract for conformance but renders through
+// its own walk.
 //
-// SCOPE DECISION (13 methods: the 9 lowering seams + 4 markup
+// SCOPE DECISION (15 methods: the 9 lowering seams + 6 markup
 // seams).  The contract covers the CROSS-FRAMEWORK seams a new
 // frontend (Vue / Svelte / Blazor) must implement to reuse the
 // shared walker core.  The markup seams (renderComment /
-// renderConditionalChild / renderStyleAttr / escapeText) joined for
+// renderConditionalChild / renderStyleAttr / escapeText /
+// renderChildrenSlot / formRuntimeImports) joined for
 // the Svelte port: Svelte 5 shares JSX's `{expr}` interpolation and
 // `<Comp x={y}/>` invocation syntax (those stay hardcoded in the
 // shared walker), but diverges on comments (`<!-- -->` vs

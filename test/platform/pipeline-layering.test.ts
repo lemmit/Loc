@@ -168,20 +168,74 @@ describe("pipeline layering — value imports point one way", () => {
   });
 
   it("no generator/<platform>/ imports a sibling platform directory", () => {
-    const platformDirs = ["typescript", "dotnet", "elixir", "react"];
+    const platformDirs = ["typescript", "dotnet", "elixir", "react", "svelte", "java", "python"];
+    // Pinned sibling edges (frozen, not license to grow):
+    //   - dotnet/elixir → react/svelte index: the fullstack-host embed —
+    //     a backend hosting a frontend SPA calls that frontend's
+    //     generator to emit the embedded project (ClientApp/, priv/spa).
+    //     This is deliberate composition, not a layering accident.
+    //   - elixir/theme-emit → react/templating/preparers/theme: the
+    //     theme VM preparer is framework-neutral but still homed in
+    //     react/; relocation is a follow-up.
+    const pinnedSibling = new Set([
+      "src/generator/dotnet/index.ts -> generator/react/",
+      "src/generator/dotnet/index.ts -> generator/svelte/",
+      "src/generator/elixir/index.ts -> generator/react/",
+      "src/generator/elixir/theme-emit.ts -> generator/react/",
+    ]);
     const out: string[] = [];
     for (const plat of platformDirs) {
       const dir = path.join(srcDir, "generator", plat);
       if (!fs.existsSync(dir)) continue;
       for (const f of tsFiles(dir)) {
         for (const imp of importsOf(fs.readFileSync(f, "utf-8"))) {
+          if (imp.typeOnly) continue; // type imports carry no runtime edge
+          // Relative specifiers never contain "generator/" — resolve them
+          // against the importing file so `../../react/foo.js` from
+          // svelte/walker/ is seen as generator/react/.
+          const resolved = imp.spec.startsWith(".")
+            ? path.resolve(path.dirname(f), imp.spec)
+            : imp.spec;
           const sibling = platformDirs.find(
-            (p) => p !== plat && new RegExp(`/generator/${p}/`).test(imp.spec),
+            (p) => p !== plat && new RegExp(`(^|/)generator/${p}/`).test(resolved),
           );
-          if (sibling) out.push(`${path.relative(repoRoot, f)} -> generator/${sibling}/`);
+          if (!sibling) continue;
+          const edge = `${path.relative(repoRoot, f)} -> generator/${sibling}/`;
+          if (!pinnedSibling.has(edge)) out.push(edge);
         }
       }
     }
     expect(out, "A platform generator must not import a sibling platform.").toEqual([]);
+  });
+
+  it("shared walker/frontend layers (_walker/, _frontend/) do not value-import a platform directory", () => {
+    // The shared core's premise is that platform specifics flow in
+    // through the WalkerTarget contract / pack templates — a runtime
+    // import from _walker/ or _frontend/ into a platform dir reverses
+    // that.  Pinned exception: _walker/registry.ts's HEEx renderer
+    // table predates the WalkerTarget extraction (the heex walker is a
+    // parallel sibling); it is frozen here, not license to grow.
+    const platformDirs = ["typescript", "dotnet", "elixir", "react", "svelte", "java", "python"];
+    const pinned = new Set(["src/generator/_walker/registry.ts -> generator/elixir/"]);
+    const out: string[] = [];
+    for (const shared of ["_walker", "_frontend"]) {
+      for (const f of tsFiles(path.join(srcDir, "generator", shared))) {
+        for (const imp of importsOf(fs.readFileSync(f, "utf-8"))) {
+          if (imp.typeOnly) continue;
+          const resolved = imp.spec.startsWith(".")
+            ? path.resolve(path.dirname(f), imp.spec)
+            : imp.spec;
+          const plat = platformDirs.find((p) => new RegExp(`(^|/)generator/${p}/`).test(resolved));
+          if (!plat) continue;
+          const edge = `${path.relative(repoRoot, f)} -> generator/${plat}/`;
+          if (!pinned.has(edge)) out.push(edge);
+        }
+      }
+    }
+    expect(
+      out,
+      "Shared _walker//_frontend/ code must not runtime-import a platform generator — " +
+        "move the helper into the shared layer (leave a platform-side re-export shim).",
+    ).toEqual([]);
   });
 });

@@ -30,6 +30,7 @@ import type {
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { idTargetHookVar } from "../../_frontend/form-helpers.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { indentJsx } from "../../_walker/shared/args.js";
 import type {
@@ -40,7 +41,6 @@ import type {
   WorkflowFormState,
 } from "../../_walker/walker-core.js";
 import { emitExpr, walkBody } from "../../_walker/walker-core.js";
-import { idTargetHookVar } from "../../react/form-helpers.js";
 import { renderSvelteApiHookImports, renderSvelteImportLines } from "./import-lines.js";
 import { svelteTarget } from "./svelte-target.js";
 

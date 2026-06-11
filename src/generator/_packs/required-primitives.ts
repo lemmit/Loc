@@ -174,7 +174,11 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat, RequiredSet> = {
     core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES],
     shell: [...SHARED_SHELL, "svelte-config"],
     fieldInput: TSX_FIELD_INPUT,
-    form: TSX_FORM,
+    // TSX form surface minus `realtime-toast`: the svelte generator
+    // does not emit `on <channel>.<Event>` RealtimeHandlers yet
+    // (channels.md Part I is react-only), so requiring the template
+    // would force dead .hbs files into every svelte pack.
+    form: TSX_FORM.filter((t) => t !== "realtime-toast"),
   },
 };
 

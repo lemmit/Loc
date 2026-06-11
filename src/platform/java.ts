@@ -10,11 +10,7 @@ import { byLayerLayoutAdapter } from "../generator/java/adapters/by-layer-layout
 import { jpaPersistenceAdapter } from "../generator/java/adapters/jpa-persistence.js";
 import { layeredStyleAdapter } from "../generator/java/adapters/layered-style.js";
 import { generateJavaForContexts } from "../generator/java/index.js";
-import {
-  type ComposeServiceShape,
-  type PlatformSurface,
-  STATIC_BUNDLE_FRAMEWORKS,
-} from "./surface.js";
+import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 
 // ---------------------------------------------------------------------------
 // Java platform — Spring Boot 3 / Spring Data JPA (Hibernate) / Postgres.
@@ -34,9 +30,12 @@ const javaPlatform: PlatformSurface = {
   needsDb: true,
   isFrontend: false,
   // Static-asset host (embeds a SPA via src/main/resources/static + an
-  // SPA fallback) — serves any static-bundle framework, like dotnet.
+  // SPA fallback).  `svelte` is deliberately absent (unlike dotnet):
+  // the java embed copies a Vite `dist/` output; hosting a SvelteKit
+  // bundle needs the `build/`-dir + ClientApp filter wiring dotnet has
+  // (svelte-embed) — a follow-up if anyone asks for it.
   mountsUi: true,
-  hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
+  hostableFrameworks: new Set(["react", "static"]),
   // The java repository auto-emits `save`, `findById`, `getById`,
   // `delete`, and `findAll` (Spring Data conventions).  All but
   // `findAll` are already reserved by the Hono surface; the union

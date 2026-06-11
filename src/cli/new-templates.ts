@@ -29,7 +29,7 @@ export const DESIGN_PACKS: readonly DesignPack[] = [
 ];
 
 /** Backend listen port per platform (mirrors `defaultPort` in
- *  `src/platform/registry.ts`). The React frontend always uses 3001. */
+ *  `src/platform/registry.ts`). The frontend scaffold (react or svelte) always uses 3001. */
 export const BACKEND_PORT: Record<StarterPlatform, number> = {
   hono: 3000,
   dotnet: 8080,

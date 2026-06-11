@@ -12,9 +12,9 @@ import {
   idTargetsInFields,
   initialValuesTs,
   needsController,
-} from "../../react/form-helpers.js";
-import { prepareFormFieldVM } from "../../react/templating/preparers/form-fields.js";
-import { renderFormField } from "../../react/templating/render.js";
+} from "../../_frontend/form-helpers.js";
+import { prepareFormFieldVM } from "../form-fields-vm.js";
+import { renderFormField } from "../render-form-field.js";
 import {
   addImport,
   addImportsForPrimitive,

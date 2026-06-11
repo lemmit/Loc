@@ -2,16 +2,20 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
+  // Rest props catch the walker's spliced `data-testid` attribute
+  // (the triple-stash testidAttr splice lands on the component tag as
+  // a prop) and forward it to the wrapper div, so page-object
+  // locators resolve.
   let {
     tabs,
     defaultValue,
-    testid,
     body,
+    ...rest
   }: {
     tabs: Array<{ value: string; label: string }>;
     defaultValue: string;
-    testid?: string;
     body: Snippet<[string]>;
+    [key: string]: unknown;
   } = $props();
 
   // svelte-ignore state_referenced_locally — the initial tab is
@@ -20,7 +24,7 @@
   let active = $state(defaultValue);
 </script>
 
-<div data-testid={testid}>
+<div {...rest}>
   <div class="inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground" role="tablist">
     {#each tabs as t (t.value)}
       <button

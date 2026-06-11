@@ -55,6 +55,21 @@ describe("dotnet hosts a svelte ui (fullstack embed)", () => {
     expect(out.get("app/ClientApp/package.json")).toContain('"@tanstack/svelte-query"');
   });
 
+  it("honours the ui's own framework through the `ui:` sugar binding", async () => {
+    // The validator reads the ui's declared framework through every
+    // binding spelling; lowering must agree — a sugar-bound
+    // `ui WebApp { framework: svelte }` declaration must not fall back
+    // to the platform's react default (which would feed a svelte-format
+    // pack to the React generator).
+    const sugarSrc = SRC.replace(
+      "ui WebApp with scaffold(subdomains: [Sales]) {",
+      "ui WebApp with scaffold(subdomains: [Sales]) {\n        framework: svelte",
+    ).replace("ui WebApp { framework: svelte }", "ui: WebApp");
+    const out = await generateSystemFiles(sugarSrc);
+    expect(out.has("app/ClientApp/svelte.config.js")).toBe(true);
+    expect(out.has("app/ClientApp/src/routes/(app)/customers/+page.svelte")).toBe(true);
+  });
+
   it("rejects a svelte ui on a phoenix host (paths.base wiring is a follow-up)", async () => {
     const phoenixSrc = SRC.replace("platform: dotnet", "platform: phoenix").replace(
       "port: 8080",

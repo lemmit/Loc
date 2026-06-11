@@ -1,8 +1,14 @@
-// Recursive body walker.
+// Shared markup walker core.
 //
-// Walks a page's body `ExprIR` and emits TSX for hand-written
-// custom layouts that don't dispatch to one of the scaffold
-// archetypes (List / Detail / Form / etc.).  Unlocks pages like:
+// Walks a page/component body `ExprIR` and emits framework markup
+// (TSX for React, Svelte 5 for SvelteKit) by dispatching every
+// primitive through the active design pack's templates
+// (`_walker/registry.ts` + `_walker/primitives/*`) and every
+// framework-divergent seam (state, api hoisting, navigation, match,
+// comments, escaping, …) through the `WalkerTarget` contract
+// (`_walker/target.ts`).  The page DSL surface it consumes is the
+// closed walker-stdlib primitive set — see docs/page-metamodel.md
+// and `src/language/walker-stdlib.ts` (the validator's mirror).
 //
 //   page Welcome {
 //     route: "/welcome"
@@ -13,32 +19,13 @@
 //     )
 //   }
 //
-// v0 stdlib (closed set):
-//
-//   Stack(...children)            → Mantine <Stack>...</Stack>
-//   Heading("text", level: N)     → Mantine <Title order={N}>text</Title>
-//   Text("text")                  → Mantine <Text>text</Text>
-//   Button("label", ...)          → Mantine <Button>label</Button>
-//   Card("title", content)        → Mantine <Card> with optional title
-//                                    + <Card.Section>{content}</Card.Section>
-//
-// Each emitter follows the contract:
+// Each primitive emitter follows the contract:
 //   - First positional arg is the component's primary content (text /
 //     label / title), unwrapped from its `ExprIR { kind: "literal" }`
 //     when it's a string literal.
 //   - Subsequent positional args are children (rendered recursively).
 //   - Named args are picked off by hand per emitter (e.g. Heading
 //     reads `level`).
-//
-// What v0 does NOT cover:
-//   - Event handlers (onClick: () => navigate(...)).  Buttons emit
-//     unwired in v0; click handling lands with the action / state
-//     IR threading work.
-//   - Nested arrays as children (e.g. `items: [...]`).  Spec syntax
-//     is positional-only at this layer.
-//   - Per-pack rendering.  v0 hardcodes Mantine output; a future
-//     change opens this through the template-pack layer (one
-//     stdlib emitter per pack).
 //
 // What this module exports:
 //   - `walkBody(body, target, pack, …)` — { tsx, imports } where
@@ -729,7 +716,7 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
   // walker).  Surface a comment so the gap is visible in generated
   // output rather than silently producing nothing useful.
   if (def) {
-    return ctx.target.renderComment(`${call.name}: not supported by the React walker yet`);
+    return ctx.target.renderComment(`${call.name}: not supported by the page walker yet`);
   }
   return ctx.target.renderComment(`unknown layout component: ${call.name}`);
 }
@@ -1059,7 +1046,7 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       }
       return unsupportedPageStmt(
         `assignment to '${seg.join(".")}'`,
-        "the React backend only mutates page-state fields (declare the root in `state { … }`)",
+        "the page walker only mutates page-state fields (declare the root in `state { … }`)",
       );
     }
     case "add":
@@ -1078,7 +1065,7 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       }
       return unsupportedPageStmt(
         `'${stmt.kind === "add" ? "+=" : "-="}' on '${seg.join(".")}'`,
-        "the React backend only mutates page-state fields (declare the root in `state { … }`)",
+        "the page walker only mutates page-state fields (declare the root in `state { … }`)",
       );
     }
     case "let":
@@ -1098,7 +1085,7 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
     default:
       return unsupportedPageStmt(
         `statement '${stmt.kind}'`,
-        "it has no meaning in a React page event handler",
+        "it has no meaning in a page event handler",
       );
   }
 }
@@ -1132,7 +1119,7 @@ function stateWrite(seg: readonly string[], valueJs: string, ctx: WalkContext): 
  *  handler does nothing).  Failing generation surfaces the gap loudly — see
  *  the same rationale in src/ir/validate/validate.ts (test-body fallbacks). */
 function unsupportedPageStmt(what: string, why: string): never {
-  throw new Error(`react: unsupported ${what} in a page event handler — ${why}.`);
+  throw new Error(`page walker: unsupported ${what} in a page event handler — ${why}.`);
 }
 
 /** Read a named arg as a navigation target.  String

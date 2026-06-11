@@ -17,8 +17,8 @@
 // ---------------------------------------------------------------------------
 
 import type { UiIR } from "../../ir/types/loom-ir.js";
-import { deriveSidebarFromUi } from "../react/menu-emitter.js";
-import type { NavSectionVM } from "../react/templating/view-models.js";
+import type { NavSectionVM } from "../_frontend/menu-emitter.js";
+import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 
 export interface RenderSidebarComponentArgs {
   ui: UiIR;

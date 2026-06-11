@@ -4,7 +4,7 @@
 
 import type { BoundedContextIR, WorkflowIR } from "../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
-import { fillBlock } from "./page-objects-builder.js";
+import { fillBlock, type SelectStyle } from "./page-objects-builder.js";
 
 export function buildWorkflowPageObject(
   wf: WorkflowIR,
@@ -13,6 +13,7 @@ export function buildWorkflowPageObject(
    *  `e2e/pages/workflows/` — `src/api` on react, `src/lib/api` on
    *  SvelteKit. */
   apiImportRoot = "../../../src/api",
+  selectStyle: SelectStyle = "combobox",
 ): string {
   const slug = snake(wf.name);
   const className = `${upperFirst(wf.name)}WorkflowPage`;
@@ -34,7 +35,14 @@ export function buildWorkflowPageObject(
   lines.push("");
   lines.push(`  async fill(input: Partial<${requestType}>): Promise<this> {`);
   for (const p of wf.params) {
-    const fillLines = fillBlock("input", p.name, p.type, ctx, `workflow-${slug}-input-${p.name}`);
+    const fillLines = fillBlock(
+      "input",
+      p.name,
+      p.type,
+      ctx,
+      `workflow-${slug}-input-${p.name}`,
+      selectStyle,
+    );
     for (const l of fillLines) lines.push(`    ${l}`);
   }
   lines.push(`    return this;`);

@@ -38,11 +38,8 @@ const elixirPlatform: PlatformSurface = {
   isFrontend: false,
   // The keystone (D-PHOENIX-SURFACE): Phoenix is the only platform that
   // is BOTH a server-render runtime (LiveView, spelled `phoenixLiveView`)
-  // AND a static-asset host (`priv/static`), so it serves its own
-  // runtime-coupled framework UNIONED with every static-bundle framework.
-  // Richest `hostableFrameworks` of any platform.
-  // Phoenix hosts its runtime-coupled LiveView plus the React static
-  // bundles.  `svelte` is deliberately ABSENT: Phoenix serves embedded
+  // AND a static-asset host (`priv/static`) — it hosts its
+  // runtime-coupled LiveView plus the React static bundles.  `svelte` is deliberately ABSENT: Phoenix serves embedded
   // SPAs under the `/app` path prefix, and a SvelteKit bundle needs
   // `paths.base` threading (nav hrefs, goto, asset URLs) to live
   // there — a follow-up (docs/plans/svelte-frontend-plan.md).  Root-

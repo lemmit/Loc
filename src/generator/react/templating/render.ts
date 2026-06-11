@@ -30,7 +30,11 @@ import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
 import { prepareAppShellVM } from "./preparers/app-shell.js";
 import { prepareThemeVM } from "./preparers/theme.js";
-import type { FormFieldVM } from "./view-models.js";
+
+// renderFormField moved to src/generator/_walker/render-form-field.ts
+// (shared by the walker's form primitives across frontends); re-export
+// preserves this module's original surface.
+export { renderFormField } from "../../_walker/render-form-field.js";
 
 /** Render any pack-level "shell file" (project scaffolding outside
  *  the page-emission path).  Pack manifest's `emits` map names the
@@ -108,20 +112,6 @@ export function renderMain(pack: LoadedPack): string {
   return pack.render("main", {
     routerPackage: routerPackageForStack(pack.manifest.stack),
   });
-}
-
-/** Render one form-field input through its per-pack
- *  `field-input-*` template.  Used by the walker's `Form(of:)` /
- *  `Form(runs:)` emission to produce one TSX block per field.
- *  Value-object fields recursively render their children and pass
- *  the joined HTML as `innerHtml` (the template variable the
- *  `field-input-valueobject.hbs` Fieldset reads). */
-export function renderFormField(vm: FormFieldVM, pack: LoadedPack): string {
-  if (vm.template === "field-input-valueobject") {
-    const innerHtml = (vm.children ?? []).map((child) => renderFormField(child, pack)).join("\n");
-    return pack.render(vm.template, { ...vm, innerHtml });
-  }
-  return pack.render(vm.template, vm);
 }
 
 // BoundedContextIR is re-exported below for callers that import
