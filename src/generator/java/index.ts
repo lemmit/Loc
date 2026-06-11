@@ -61,8 +61,14 @@ import {
   renderJavaSpringDataRepository,
   renderOffsetLimitPageRequest,
 } from "./emit/repository.js";
+import { renderJavaSeedRunner } from "./emit/seed.js";
 import { renderJavaService } from "./emit/service.js";
 import { renderJavaTestsFile } from "./emit/tests.js";
+import {
+  aggregateReturnUnions,
+  renderJavaDomainUnionFiles,
+  renderJavaUnionWireFiles,
+} from "./emit/unions.js";
 import { renderJavaValidators } from "./emit/validator.js";
 import { renderJavaViews, viewFindsFor } from "./emit/view.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
@@ -261,6 +267,20 @@ function emitProjectFromContexts(
         renderOffsetLimitPageRequest(pkgFor("infra-persistence")),
       );
     }
+    // First-boot seed datasets → an ApplicationRunner per seeded context.
+    const seedRunner = renderJavaSeedRunner(ctx, {
+      basePkg,
+      pkg: pkgFor("infra-persistence"),
+      entityPkgOf: (a) => pkgFor("entity", a),
+      repoPkgOf: (a) => pkgFor("repository-interface", a),
+      schemaOf: (a) => {
+        const agg = ctx.aggregates.find((x) => x.name === a);
+        return agg && system?.sys
+          ? resolveDataSourceConfig(agg, ctx, system.sys)?.schema
+          : undefined;
+      },
+    });
+    if (seedRunner) place(`${ctx.name}SeedRunner.java`, "infra-persistence", seedRunner);
   }
 
   // Auth surface — only when the deployable opts in via auth: required
@@ -376,6 +396,9 @@ function emitAggregate(
           tableName: plural(snake(part.name)),
           schema,
           parentFkColumn: `${snake(ownerName)}_id`,
+          oneToOneParentOf: agg.contains.some((c) => !c.collection && c.partName === part.name)
+            ? agg.name
+            : undefined,
           voLookup,
         },
       }),
@@ -478,9 +501,22 @@ function emitAggregate(
       entityPkg: pkgFor("entity", agg.name),
       domainRepoPkg: pkgFor("repository-interface", agg.name),
       authed: authRequired,
+      boundedContext: ctx,
+      idClass,
     }),
     agg.name,
   );
+  // Exception-less operation returns: the domain union (sealed interface
+  // + variant records, entity package) and its Jackson-polymorphic wire
+  // twin (response-dto package).
+  for (const spec of aggregateReturnUnions(agg, ctx).values()) {
+    for (const f of renderJavaDomainUnionFiles(spec, pkgFor("entity", agg.name), basePkg)) {
+      place(f.name, "entity", f.content, agg.name);
+    }
+    for (const f of renderJavaUnionWireFiles(spec, pkgFor("response-dto", agg.name), basePkg)) {
+      place(f.name, "response-dto", f.content, agg.name);
+    }
+  }
   for (const op of agg.operations.filter((o) => o.extern)) {
     place(
       `${upperFirst(op.name)}${agg.name}Handler.java`,
@@ -502,6 +538,9 @@ function emitAggregate(
       basePkg,
       pkg: pkgFor("controller", agg.name),
       applicationPkg,
+      entityPkg: pkgFor("entity", agg.name),
+      boundedContext: ctx,
+      idClass,
     }),
     agg.name,
   );

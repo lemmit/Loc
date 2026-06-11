@@ -41,6 +41,21 @@ const FIXTURES: Array<[string, string]> = [
   // JpaSpecificationExecutor path, composed-where @Query JPQL fallback,
   // workflow `Repo.run` + `for` loops.
   ["test/e2e/fixtures/java-build/retrieval.ddd", "crm_api"],
+  // First-boot seeding: <Ctx>SeedRunner with domain + raw datasets and
+  // the __loom_seed ship-once marker.
+  ["test/e2e/fixtures/java-build/seeding.ddd", "seed_api"],
+  // Single (non-collection) containment: hidden owning `_parent`
+  // @OneToOne on the part, inverse mappedBy on the root, orphanRemoval.
+  ["test/e2e/fixtures/java-build/single-containment.ddd", "sc_api"],
+  // Exception-less operation returns: sealed domain union + Jackson
+  // polymorphic wire DTO + controller ProblemDetail translation.
+  ["test/e2e/fixtures/java-build/operation-returns.ddd", "ru_api"],
+  // Capability filters: @SQLRestriction from the non-principal filter
+  // predicate (softDelete pattern).
+  ["test/e2e/fixtures/java-build/context-filter.ddd", "cf_api"],
+  // TPH (sharedTable) inheritance: JPA SINGLE_TABLE + @DiscriminatorColumn
+  // on the abstract base, @DiscriminatorValue per concrete, shared <Base>Id.
+  ["test/e2e/fixtures/java-build/tph.ddd", "tph_api"],
 ];
 
 describe.skipIf(!ENABLED)(
