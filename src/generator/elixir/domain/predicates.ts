@@ -81,6 +81,30 @@ export function exprUsesThis(e: ExprIR | undefined): boolean {
   return walkExpr(e, exprUsesThis);
 }
 
+/** True when the expr references a `this`-scoped field that is NOT a scalar
+ *  attribute — a containment relationship (`pipelines`) or a derived
+ *  calculation (`this-derived`).  Neither is materialised on a CREATE
+ *  changeset's *applied attributes* (relationships are `%Ash.NotLoaded{}`,
+ *  calcs aren't run), so an invariant touching one must read `changeset.data`
+ *  rather than `Ash.Changeset.apply_attributes/2` — otherwise e.g.
+ *  `Enum.count(record.pipelines)` raises on the NotLoaded relationship.
+ *  `attrNames` is the resource's scalar-attribute set. */
+export function exprRefsNonAttribute(
+  e: ExprIR | undefined,
+  attrNames: ReadonlySet<string>,
+): boolean {
+  if (!e) return false;
+  if (e.kind === "ref" && e.refKind === "this-derived") return true;
+  if (
+    e.kind === "ref" &&
+    (e.refKind === "this-prop" || e.refKind === "this-vo-prop") &&
+    !attrNames.has(e.name)
+  ) {
+    return true;
+  }
+  return walkExpr(e, (c) => exprRefsNonAttribute(c, attrNames));
+}
+
 export function stmtUsesThis(s: StmtIR): boolean {
   switch (s.kind) {
     case "precondition":
