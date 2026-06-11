@@ -51,12 +51,17 @@
 >   `LOOM_JAVA_BUILD` matrix.
 >   Post-#1127: union finds (`Order or NotFound` / `Order option` —
 >   optional-twin repo/service, tagged 200 wire record, problem /
->   bare-404 absence; java joined `SUPPORTED_UNION_BACKENDS`) and
+>   bare-404 absence; java joined `SUPPORTED_UNION_BACKENDS`);
 >   resource clients (S3 / RabbitMQ / HttpClient classes + workflow
 >   resource-op call sites + Gradle dep merge; restApi boot-verified
->   against a stub).
+>   against a stub); event sourcing (`persistedAs(eventLog)` — plain
+>   domain class folding the stream via appliers, JdbcTemplate impl
+>   over the shared `<agg>_events` table, in-memory find folds,
+>   create via the action's params; java joined
+>   `EVENT_SOURCING_BACKENDS`; boot-verified incl. preconditions over
+>   folded state).
 > - **Deferred features — all fail-fast gated, never silent:**
->   `persistedAs(eventLog)`, `shape(document|embedded)` (needs a
+>   `shape(document|embedded)` (needs a
 >   Jackson strategy for the package-private-field entity shape),
 >   part-declared single containments
 >   (`loom.java-single-containment-unsupported`), `hosts:` UI hosting
