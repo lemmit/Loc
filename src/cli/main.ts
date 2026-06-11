@@ -840,7 +840,10 @@ program
   .description(
     "Scaffold a starter .ddd project (main.ddd + README + .loomignore), validated before writing. Pick the backend with --platform and the frontend with --design.",
   )
-  .option("--platform <platform>", "backend: hono | dotnet | elixir | java | python (default: hono)")
+  .option(
+    "--platform <platform>",
+    "backend: hono | dotnet | elixir | java | python (default: hono)",
+  )
   .option("--template <template>", "starter model: blank | crud (default: crud)")
   .option(
     "--design <pack>",
