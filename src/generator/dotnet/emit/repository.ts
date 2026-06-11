@@ -122,6 +122,29 @@ export function renderRepositoryImpl(
   const loadByIdLines = buildLoadByIdLines(associations);
   const loadManyByIdsLines = buildLoadManyByIdsLines(agg.name, setName, associations);
   const saveDiffSyncLines = buildSaveDiffSyncLines(associations);
+  // Provenance flush (provenance.md): drain the per-write lineage buffer and
+  // stage one provenance_records row per write.  Added to the same scoped
+  // AppDbContext as the aggregate change, BEFORE SaveChangesAsync, so the
+  // history commits atomically with the state (the .NET mirror of the Hono
+  // transactional `drainProv()` insert).  Empty (byte-identical) when the
+  // aggregate has no `provenanced` fields.
+  const provFlushLines = agg.fields.some((f) => f.provenanced)
+    ? [
+        "        foreach (var __lin in aggregate.DrainProv())",
+        "        {",
+        "            _db.ProvenanceRecords.Add(new ProvenanceRecord",
+        "            {",
+        "                TraceId = Guid.NewGuid().ToString(),",
+        "                SnapshotId = __lin.SnapshotId,",
+        "                TargetType = __lin.Target.Type,",
+        "                Field = __lin.Target.Field,",
+        "                Inputs = System.Text.Json.JsonSerializer.Serialize(__lin.Inputs, ProvJson.Options),",
+        "                ComputedValue = System.Text.Json.JsonSerializer.Serialize(__lin.ComputedValue, ProvJson.Options),",
+        "                At = DateTime.UtcNow,",
+        "            });",
+        "        }",
+      ]
+    : [];
   // Per-find catalog log: `find_executed` (debug) at every method's
   // return.  Mirrors the Hono repo emission so cross-backend log
   // consumers see the same event identity + field set.  Array finds
@@ -269,6 +292,7 @@ export function renderRepositoryImpl(
       `            _db.${setName}.Add(aggregate);`,
       "        }",
       ...saveDiffSyncLines,
+      ...provFlushLines,
       // tx_* (trace) — emitted ONLY under --trace.  EF's SaveChangesAsync
       // runs an implicit transaction; the trio (begin/commit/rollback)
       // brackets it so an operator can correlate a failed save with

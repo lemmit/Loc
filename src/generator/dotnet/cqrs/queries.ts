@@ -203,7 +203,7 @@ function buildFindHandlerBody(
     return (
       `        var domain = await _repo.${upperFirst(find.name)}(${callArgs});\n` +
       `        if (domain is null) return ${absent};\n` +
-      `        return new ${spec.name}_${spec.successTag}(${projectEntityArgs("domain", agg, ctx)});\n`
+      `        return new ${spec.name}_${spec.successTag}(${projectEntityArgs("domain", agg, ctx, { unionVariant: true })});\n`
     );
   }
   if (find.returnType.kind === "array") {

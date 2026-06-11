@@ -1,8 +1,9 @@
 // Tier-0 honest-gate guard.  Per-operation audit-record emission (`operation …
-// audited`) is implemented on the Hono (node) backend only; on dotnet / phoenix
-// the modifier is inert, so an `audited` operation hosted there silently records
-// nothing.  The validator now rejects that mismatch with
-// loom.audited-backend-unsupported.
+// audited`) is implemented on the Hono (node) and .NET (dotnet) backends; on
+// phoenix the modifier is inert, so an `audited` operation hosted there silently
+// records nothing.  The validator rejects that mismatch with
+// loom.audited-backend-unsupported.  Audited LIFECYCLE actions (audited create /
+// destroy) stay node-only (the .NET create/destroy handlers aren't instrumented).
 //
 // Note: this gates the per-operation `audited` flag only — the `with audit`
 // capability macro (context stamps) is a separate concern and is NOT gated here.
@@ -44,12 +45,8 @@ describe("audited-operation capability validation", () => {
     expect(await auditErrors(sys("hono"))).toEqual([]);
   });
 
-  it("rejects an audited operation on a .NET deployable (no audit emission)", async () => {
-    const errs = await auditErrors(sys("dotnet"));
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("Order");
-    expect(errs[0]).toContain("cancel");
-    expect(errs[0]).toContain("dotnet");
+  it("accepts an audited operation on a .NET deployable (audit runtime ported)", async () => {
+    expect(await auditErrors(sys("dotnet"))).toEqual([]);
   });
 
   it("rejects an audited operation on a Phoenix deployable (no audit emission)", async () => {

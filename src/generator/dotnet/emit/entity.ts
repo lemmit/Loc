@@ -193,6 +193,31 @@ export function renderEntity(
       ]
     : [];
 
+  // Provenance runtime (provenance.md): each `provenanced` ROOT field carries a
+  // co-located `<Field>Provenance` lineage property (persisted on the row via a
+  // jsonb value-converter — see efcore.ts) holding the lineage of its current
+  // value; `_provTraces` buffers every write's lineage for the repository to
+  // drain into provenance_records inside the save transaction.  Root-only —
+  // operations (the write sites) live on the root; a containment write-through
+  // carries no co-located slot (render-stmt's segment guard).
+  const provFields = isRoot ? entity.fields.filter((f) => f.provenanced) : [];
+  const provBlock =
+    provFields.length > 0
+      ? [
+          "",
+          ...provFields.map(
+            (f) => `    public ProvLineage? ${upperFirst(f.name)}Provenance { get; private set; }`,
+          ),
+          "    private readonly List<ProvLineage> _provTraces = new();",
+          "    public IReadOnlyList<ProvLineage> DrainProv()",
+          "    {",
+          "        var __copy = _provTraces.ToArray();",
+          "        _provTraces.Clear();",
+          "        return __copy;",
+          "    }",
+        ]
+      : [];
+
   const ctorLines: string[] = [];
   ctorLines.push(`    private ${entity.name}()`);
   ctorLines.push("    {");
@@ -561,6 +586,7 @@ export function renderEntity(
       "{",
       ...propLines,
       ...eventBlock,
+      ...provBlock,
       ...(isRoot ? [] : [""]),
       ...ctorLines,
       "",

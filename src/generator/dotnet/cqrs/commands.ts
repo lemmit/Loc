@@ -1,8 +1,12 @@
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
-import type { AggregateIR, EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+} from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
-import { domainToRequestExpr } from "../dto-mapping.js";
+import { domainToRequestExpr, projectEntityExpr } from "../dto-mapping.js";
 import { renderCommand, renderCommandHandler } from "../emit.js";
 import { renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderCreateValidator, renderOperationValidator } from "../validator-emit.js";
@@ -272,19 +276,61 @@ export function emitOperationCommandAndHandler(
       );
       return;
     }
+    // Per-operation audit (audit-and-logging.md): an `audited` op records a
+    // who/what/when + before/after wire snapshot.  The before/after are the
+    // aggregate's wire projection either side of the mutation; the record is
+    // STAGED onto the request-scoped unit of work (IAuditWriter.Stage → adds to
+    // the same AppDbContext) so `_repo.SaveAsync` commits it in the SAME
+    // transaction as the state change.  Actor capture is a follow-up (the
+    // column is nullable); the essential who/what/when + before/after ships.
+    const audited = op.audited;
+    const projectExpr = audited
+      ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, ctx)
+      : "";
+    const auditBefore = audited
+      ? `        var __before = System.Text.Json.JsonSerializer.Serialize(${projectExpr});\n`
+      : "";
+    const auditStage = audited
+      ? `        var __after = System.Text.Json.JsonSerializer.Serialize(${projectExpr});\n` +
+        `        _audit.Stage(new AuditRecord\n` +
+        `        {\n` +
+        `            AuditId = Guid.NewGuid().ToString(),\n` +
+        `            OperationId = ${JSON.stringify(`${op.name}${agg.name}`)},\n` +
+        `            Action = ${JSON.stringify(op.name)},\n` +
+        `            TargetType = ${JSON.stringify(agg.name)},\n` +
+        `            TargetId = command.Id.Value.ToString(),\n` +
+        `            Actor = null,\n` +
+        `            Before = __before,\n` +
+        `            After = __after,\n` +
+        `            At = DateTime.UtcNow,\n` +
+        `            Status = "ok",\n` +
+        `        });\n`
+      : "";
+    const auditDeps = audited ? [{ type: "IAuditWriter", field: "_audit" }] : [];
+    const auditUsings = audited
+      ? [
+          `${ns}.Application.Common`,
+          `${ns}.Application.${plural(agg.name)}.Responses`,
+          `${ns}.Infrastructure.Persistence`,
+        ]
+      : [];
     // A return-typed op threads the union value: capture the method result,
     // save, then return it (the aggregate produces the tagged Domain union).
+    const loadLine =
+      `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
+      `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+      whenGate(agg, op);
     const handlerBody = returnUnion
-      ? `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
-        `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
-        whenGate(agg, op) +
+      ? loadLine +
+        auditBefore +
         `        var result = aggregate.${upperFirst(op.name)}(${callArgs});\n` +
+        auditStage +
         `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
         `        return result;\n`
-      : `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
-        `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
-        whenGate(agg, op) +
+      : loadLine +
+        auditBefore +
         `        aggregate.${upperFirst(op.name)}(${callArgs});\n` +
+        auditStage +
         `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
         `        return Unit.Value;\n`;
     out.set(
@@ -295,8 +341,8 @@ export function emitOperationCommandAndHandler(
         handlerName: `${upperFirst(op.name)}Handler`,
         commandName: `${upperFirst(op.name)}Command`,
         returnType: returnUnion,
-        extraDeps: userExtraDeps,
-        extraUsings: userExtraUsings,
+        extraDeps: [...userExtraDeps, ...auditDeps],
+        extraUsings: [...userExtraUsings, ...auditUsings],
         body: handlerBody,
       }),
     );

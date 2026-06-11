@@ -17,6 +17,7 @@ import {
   aggregateResponseParams,
   csIdValueClrType,
   dtoParam,
+  entityExposesProvenance,
   entityResponseParams,
   valueObjectsUsedBy,
   wireType,
@@ -62,9 +63,19 @@ export function emitResponseDtos(
       params: dtoParam(csIdValueClrType(agg.idValueType), "Id"),
     });
   }
+  // Provenance (provenance.md): a response carrying any provenanced field's
+  // `ProvLineage?` lineage needs `<ns>.Domain.Common` in scope.  Covers the
+  // root and any provenanced containment part.
+  const exposesProvenance =
+    entityExposesProvenance(agg) || agg.parts.some((p) => entityExposesProvenance(p));
   out.set(
     `Application/${aggFolder}/Responses/${agg.name}Responses.cs`,
-    renderResponseDtos({ ns, aggName: agg.name, records }),
+    renderResponseDtos({
+      ns,
+      aggName: agg.name,
+      records,
+      extraUsings: exposesProvenance ? [`${ns}.Domain.Common`] : undefined,
+    }),
   );
 }
 

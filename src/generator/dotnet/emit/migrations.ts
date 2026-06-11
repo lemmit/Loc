@@ -1,5 +1,7 @@
+import type { EnrichedBoundedContextIR, SystemIR } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
-import { upperFirst } from "../../../util/naming.js";
+import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
+import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderPgStep } from "../../sql-pg.js";
 
 // ---------------------------------------------------------------------------
@@ -42,6 +44,91 @@ export function emitDotnetMigrations(
     const sql = m.steps.map(renderPgStep).join("\n\n");
     out.set(`Migrations/${slug}.cs`, renderMigrationClass(ns, className, slug, sql));
   }
+}
+
+// Provenance / per-operation audit DDL is NOT part of the platform-neutral
+// MigrationsIR (it is feature-local, mirroring the Hono Drizzle schema), so the
+// .NET backend emits it as one extra migration that sorts AFTER every module's
+// initial migration (BASE_TIMESTAMP "2026…").  By then every aggregate table
+// exists, so the co-located `<field>_provenance` column ALTERs apply cleanly.
+// EF runs the raw SQL via `migrationBuilder.Sql(...)` (no model diff), so the
+// DbContext model + this DDL only need to be runtime-consistent.
+const PROV_AUDIT_VERSION = "29991231235959";
+
+/** Emit `Migrations/<late>_ProvenanceAudit.cs` when the served contexts use
+ *  provenance and/or per-operation audit: CREATE the history/audit tables and
+ *  ADD the co-located `<field>_provenance` columns.  No-op (nothing emitted)
+ *  when neither feature is present, or on the dapper path (which self-applies
+ *  its own DbSchema). */
+export function emitDotnetProvenanceAuditMigration(
+  contexts: EnrichedBoundedContextIR[],
+  sys: SystemIR | undefined,
+  ns: string,
+  out: Map<string, string>,
+  opts: { provenance: boolean; audit: boolean },
+): void {
+  const stmts: string[] = [];
+  if (opts.provenance) {
+    stmts.push(
+      [
+        "CREATE TABLE IF NOT EXISTS provenance_records (",
+        "  trace_id text PRIMARY KEY,",
+        "  snapshot_id text NOT NULL,",
+        "  target_type text NOT NULL,",
+        "  field text NOT NULL,",
+        "  inputs jsonb NOT NULL,",
+        "  computed_value jsonb,",
+        "  at timestamptz NOT NULL",
+        ");",
+      ].join("\n"),
+    );
+    stmts.push(
+      "CREATE INDEX IF NOT EXISTS provenance_records_target_idx ON provenance_records (target_type, field);",
+    );
+    // Co-located current-lineage column per provenanced field, on each owning
+    // aggregate's table.  The table is schema-/prefix-qualified the same way
+    // efcore.ts `ToTable` derives it from the resolved dataSource binding, so
+    // the ALTER hits the real table (e.g. `ordering.orders`), not a bare name.
+    for (const ctx of contexts) {
+      for (const agg of ctx.aggregates) {
+        if (agg.isAbstract) continue;
+        const ds = sys ? resolveDataSourceConfig(agg, ctx, sys) : undefined;
+        const base = snake(plural(agg.name));
+        const local = ds?.tablePrefix ? `${ds.tablePrefix}${base}` : base;
+        const table = ds?.schema ? `${ds.schema}.${local}` : local;
+        for (const f of agg.fields) {
+          if (!f.provenanced) continue;
+          stmts.push(
+            `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${snake(f.name)}_provenance jsonb;`,
+          );
+        }
+      }
+    }
+  }
+  if (opts.audit) {
+    stmts.push(
+      [
+        "CREATE TABLE IF NOT EXISTS audit_records (",
+        "  audit_id text PRIMARY KEY,",
+        "  operation_id text NOT NULL,",
+        "  action text NOT NULL,",
+        "  target_type text NOT NULL,",
+        "  target_id text NOT NULL,",
+        "  actor jsonb,",
+        "  before jsonb NOT NULL,",
+        "  after jsonb NOT NULL,",
+        "  at timestamptz NOT NULL,",
+        "  status text NOT NULL",
+        ");",
+      ].join("\n"),
+    );
+    stmts.push(
+      "CREATE INDEX IF NOT EXISTS audit_records_target_idx ON audit_records (target_type, target_id);",
+    );
+  }
+  if (stmts.length === 0) return;
+  const slug = `${PROV_AUDIT_VERSION}_ProvenanceAudit`;
+  out.set(`Migrations/${slug}.cs`, renderMigrationClass(ns, `M${slug}`, slug, stmts.join("\n\n")));
 }
 
 function renderMigrationClass(

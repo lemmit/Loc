@@ -1021,12 +1021,13 @@ export function validateEventSourcedStorage(
 }
 
 // Provenanced-field runtime (trace capture + write-site history) is emitted for
-// the Hono (`node`) backend only — `domain/provenance.ts` + a per-write
-// `recordTrace(...)`.  On a backend that doesn't (dotnet / phoenix today) a
-// `provenanced` field silently behaves like a plain field, dropping the audit
-// trail it promises — an error, not a silent no-op.  Mirrors the event-sourcing
-// storage gate (a parsed-but-unemitted feature is a footgun, so it fails fast).
-const PROVENANCE_BACKENDS = new Set(["node"]);
+// the Hono (`node`) and .NET (`dotnet`) backends — the lineage SDK + co-located
+// `<field>_provenance` column + the `provenance_records` flush.  On a backend
+// that doesn't (phoenix today) a `provenanced` field silently behaves like a
+// plain field, dropping the audit trail it promises — an error, not a silent
+// no-op.  Mirrors the event-sourcing storage gate (a parsed-but-unemitted
+// feature is a footgun, so it fails fast).
+const PROVENANCE_BACKENDS = new Set(["node", "dotnet"]);
 export function validateProvenancedStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
@@ -1041,15 +1042,15 @@ export function validateProvenancedStorage(
     const hostNote =
       unsupported.length > 0
         ? `it is hosted by ${unsupported.join(", ")}, where the provenance runtime is not emitted`
-        : "no provenance-capable (node) backend deployable hosts this context";
+        : "no provenance-capable (node / dotnet) backend deployable hosts this context";
     const names = provFields.map((f) => f.name).join(", ");
     diags.push({
       severity: "error",
       code: "loom.provenanced-backend-unsupported",
       message:
         `aggregate '${agg.name}' has provenanced field(s) ${names}, but the provenance runtime ` +
-        `(trace capture + history) is emitted for the Hono (node) backend only — ${hostNote}. ` +
-        `Host the context on a node deployable, or drop the 'provenanced' modifier to use a plain ` +
+        `(trace capture + history) is emitted for the Hono (node) and .NET (dotnet) backends only — ${hostNote}. ` +
+        `Host the context on a node or dotnet deployable, or drop the 'provenanced' modifier to use a plain ` +
         `field (all backends). Tracked in provenance.md / type-system-feature-migration.md (DBT-1).`,
       source: `${ctx.name}/${agg.name}`,
     });
@@ -1057,41 +1058,71 @@ export function validateProvenancedStorage(
 }
 
 // Per-operation audit-record emission (`operation … audited`) is implemented for
-// the Hono (`node`) backend only — an audited public route appends a who/what/
-// when + before/after snapshot to the audit sink.  On a backend that doesn't
-// (dotnet / phoenix today) the modifier is inert, so an `audited` operation
-// hosted there silently records nothing — an error, not a silent no-op.  (This
-// gates the per-operation `audited` flag only; the `with audit` capability
-// macro emits stamping rules via `contextStamps`, a separate concern.)
-const AUDIT_BACKENDS = new Set(["node"]);
+// the Hono (`node`) and .NET (`dotnet`) backends — an audited public route /
+// command handler appends a who/what/when + before/after snapshot to the audit
+// sink in the operation's save transaction.  Audited LIFECYCLE actions (`audited
+// create` / `destroy`) stay node-only — the .NET create/destroy handlers are
+// not yet instrumented, so hosting one on dotnet would silently record nothing.
+// Either mismatch is an error, not a silent no-op.  (This gates the per-operation
+// `audited` flag only; the `with audit` capability macro emits stamping rules via
+// `contextStamps`, a separate concern.)
+const AUDIT_OP_BACKENDS = new Set(["node", "dotnet"]);
+const AUDIT_LIFECYCLE_BACKENDS = new Set(["node"]);
 export function validateAuditedOperationSupport(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
 ): void {
-  const unsupported = [...backendPlatforms].filter((p) => !AUDIT_BACKENDS.has(p));
   const anyBackend = backendPlatforms.size > 0;
-  for (const agg of ctx.aggregates) {
-    const auditedOps = [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])].filter(
-      (o) => o.audited,
-    );
-    if (auditedOps.length === 0) continue;
-    if (anyBackend && unsupported.length === 0) continue;
+  const opUnsupported = [...backendPlatforms].filter((p) => !AUDIT_OP_BACKENDS.has(p));
+  const lifecycleUnsupported = [...backendPlatforms].filter(
+    (p) => !AUDIT_LIFECYCLE_BACKENDS.has(p),
+  );
+  const push = (
+    agg: BoundedContextIR["aggregates"][number],
+    kind: "operation" | "lifecycle action",
+    names: string[],
+    unsupported: string[],
+    capable: string,
+  ): void => {
     const hostNote =
       unsupported.length > 0
         ? `it is hosted by ${unsupported.join(", ")}, where audit-record emission is not implemented`
-        : "no audit-capable (node) backend deployable hosts this context";
-    const names = auditedOps.map((o) => o.name || "<create>").join(", ");
+        : `no audit-capable (${capable}) backend deployable hosts this context`;
     diags.push({
       severity: "error",
       code: "loom.audited-backend-unsupported",
       message:
-        `aggregate '${agg.name}' has 'audited' operation(s) ${names}, but per-operation audit-record ` +
-        `emission is implemented for the Hono (node) backend only — ${hostNote}. ` +
-        `Host the context on a node deployable, or drop the 'audited' modifier (all backends). ` +
+        `aggregate '${agg.name}' has 'audited' ${kind}(s) ${names.join(", ")}, but per-operation ` +
+        `audit-record emission for ${kind}s is implemented for the ${capable} backend(s) only — ${hostNote}. ` +
+        `Host the context on a capable deployable, or drop the 'audited' modifier (all backends). ` +
         `Tracked in audit-and-logging.md.`,
       source: `${ctx.name}/${agg.name}`,
     });
+  };
+  for (const agg of ctx.aggregates) {
+    const auditedOps = agg.operations.filter((o) => o.audited);
+    if (auditedOps.length > 0 && (!anyBackend || opUnsupported.length > 0)) {
+      push(
+        agg,
+        "operation",
+        auditedOps.map((o) => o.name),
+        opUnsupported,
+        "Hono (node) / .NET (dotnet)",
+      );
+    }
+    const auditedLifecycle = [...(agg.creates ?? []), ...(agg.destroys ?? [])].filter(
+      (o) => o.audited,
+    );
+    if (auditedLifecycle.length > 0 && (!anyBackend || lifecycleUnsupported.length > 0)) {
+      push(
+        agg,
+        "lifecycle action",
+        auditedLifecycle.map((o) => o.name || "<create>"),
+        lifecycleUnsupported,
+        "Hono (node)",
+      );
+    }
   }
 }
 

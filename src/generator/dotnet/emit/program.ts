@@ -68,6 +68,10 @@ export function renderProgram(
      *  (not a `DbContext`) and applies the self-contained `DbSchema` at
      *  startup instead of EF migrations. */
     usingDapper?: boolean;
+    /** Per-operation audit (audit-and-logging.md): registers the scoped
+     *  `IAuditWriter` → `AuditWriter` the audited command handlers depend on
+     *  to stage audit rows onto the request unit of work. */
+    hasAudit?: boolean;
   },
 ): string {
   const authRequired = !!options?.authRequired;
@@ -109,6 +113,15 @@ using (var seedScope = app.Services.CreateScope())
         `builder.Services.AddScoped<${ns}.Domain.${plural(a.name)}.I${a.name}Repository, ${ns}.Infrastructure.Repositories.${a.name}Repository>();`,
     )
     .join("\n");
+
+  // Per-operation audit (audit-and-logging.md): the audited command handlers
+  // depend on IAuditWriter to stage audit rows onto the request-scoped unit of
+  // work (the same AppDbContext the repository saves through).
+  // Leading newline so an empty audit registration leaves Program.cs
+  // byte-identical (the template emits `${repoRegistrations}${auditDi}`).
+  const auditDi = options?.hasAudit
+    ? `\n// Per-operation audit — stages audit_records onto the request unit of work.\nbuilder.Services.AddScoped<${ns}.Application.Common.IAuditWriter, ${ns}.Infrastructure.Persistence.AuditWriter>();`
+    : "";
 
   // Per-aggregate list of (op-name, IXAggHandler) pairs for extern
   // operations.  Drives both the Scrutor registration helper text
@@ -294,7 +307,7 @@ builder.Services.AddScoped(
 }
 ${dispatcherRegistration}
 
-${repoRegistrations}
+${repoRegistrations}${auditDi}
 ${authDi}
 ${externScan}
 
