@@ -205,9 +205,14 @@ describe("Phoenix validation-error extension — per-aggregate controller wiring
     // raised exceptions before Phoenix's render_errors pipeline runs.
     expect(ctrl).toMatch(/use Plug\.ErrorHandler/);
     expect(ctrl).toMatch(/@impl Plug\.ErrorHandler/);
-    // The Ash.Error.Invalid arm dispatches to the shared module.
+    // The Ash.Error.Invalid arm dispatches to the shared module (a NotFound
+    // wrapped in the Invalid is routed to 404 first; everything else → 422).
     expect(ctrl).toMatch(
-      /def handle_errors\(conn, %\{reason: %Ash\.Error\.Invalid\{\} = err\}\) do[\s\S]*?ProblemDetails\.validation_error_response\(conn, err\)/,
+      /def handle_errors\(conn, %\{reason: %Ash\.Error\.Invalid\{errors: errors\} = err\}\) do[\s\S]*?ProblemDetails\.validation_error_response\(conn, err\)/,
+    );
+    // A get-by-id miss (Ash NotFound) maps to 404, not the 422 validation path.
+    expect(ctrl).toMatch(
+      /def handle_errors\(conn, %\{reason: %Ash\.Error\.Query\.NotFound\{\}\}\) do[\s\S]*?problem_response\(conn, 404,/,
     );
     // The catch-all arm leaves the connection alone so non-validation
     // exceptions fall through to Phoenix's default render_errors.

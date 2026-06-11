@@ -547,10 +547,17 @@ function renderValidations(
     const condStr = renderExpr(inv.expr, ctx);
     const msg = JSON.stringify(`Invariant violated: ${inv.source}`);
     // `record` isn't a callback param of `validate fn changeset, _opts ->`,
-    // so bind it from the changeset's loaded data when the predicate uses
-    // any `this`-family reference.
+    // so bind it when the predicate uses any `this`-family reference.  It
+    // must carry the changeset's NEW values: on a create `changeset.data` is
+    // the empty struct, so `record.<field>` would be nil — crashing a
+    // `Regex.match?`/`String.length` predicate and making a cross-field
+    // invariant (`handle != email`) compare nil to nil.  `apply_attributes`
+    // (force? so it materialises mid-validation, before required-checks pass)
+    // returns the would-be record with the casted attributes applied.
     const needsRecord = exprUsesThis(inv.expr) || (inv.guard ? exprUsesThis(inv.guard) : false);
-    const recordLine = needsRecord ? "      record = changeset.data\n" : "";
+    const recordLine = needsRecord
+      ? "      {:ok, record} = Ash.Changeset.apply_attributes(changeset, force?: true)\n"
+      : "";
     if (inv.guard) {
       const guardStr = renderExpr(inv.guard, ctx);
       // Guard-first: when the guard is false the invariant doesn't apply
