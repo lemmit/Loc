@@ -20,10 +20,16 @@ import { renderPyExpr } from "./render-expr.js";
 // instances that JSON-stringify to strings — copied, not invented).
 // ---------------------------------------------------------------------------
 
-export function buildPyViewsFile(ctx: EnrichedBoundedContextIR): string | null {
+export function buildPyViewsFile(
+  ctx: EnrichedBoundedContextIR,
+  hasDispatch = false,
+): string | null {
   const views = ctx.views.filter((v) => v.source.kind === "aggregate");
   if (views.length === 0) return null;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  // View reads never save, but repos take the deployable's default
+  // dispatcher uniformly (Hono parity).
+  const dispatcherExpr = hasDispatch ? "make_dispatcher(session)" : "NoopDomainEventDispatcher()";
 
   const models: string[] = [];
   for (const view of views) {
@@ -34,11 +40,17 @@ export function buildPyViewsFile(ctx: EnrichedBoundedContextIR): string | null {
         view.output.fields.map((f) => `    ${f.name}: ${rowFieldType(f.type)}`),
         "",
         "",
+        // Named array component (`<View>Response`, RootModel → $ref) —
+        // response-schema parity with the other backends.
+        `class ${view.name}Response(RootModel[list[${view.name}Row]]):`,
+        "    pass",
+        "",
+        "",
       ),
     );
   }
 
-  const routes = views.map((v) => viewRoute(v, ctx)).join("\n\n\n");
+  const routes = views.map((v) => viewRoute(v, ctx, dispatcherExpr)).join("\n\n\n");
   const body = `${models.join("")}router = APIRouter(prefix="/views", tags=["views"])\n\n\n${routes}`;
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
@@ -50,7 +62,9 @@ export function buildPyViewsFile(ctx: EnrichedBoundedContextIR): string | null {
   const repoAggs = [...new Set([...sourceAggs, ...auxAggs])]
     .filter((n) => aggsByName.has(n))
     .sort();
-  const responseAggs = sourceAggs.filter((n) => refersTo(`${n}Response`)).sort();
+  const responseAggs = sourceAggs
+    .filter((n) => refersTo(`${n}Response`) || refersTo(`${n}ListResponse`))
+    .sort();
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
     .filter(refersTo)
     .sort();
@@ -59,17 +73,24 @@ export function buildPyViewsFile(ctx: EnrichedBoundedContextIR): string | null {
     `"""Read-model view routes.  Auto-generated."""`,
     "",
     "from fastapi import APIRouter, Depends",
-    models.length > 0 ? "from pydantic import BaseModel" : null,
+    models.length > 0 ? "from pydantic import BaseModel, RootModel" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
     "from app.db.engine import get_session",
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
-    "from app.domain.events import NoopDomainEventDispatcher",
+    hasDispatch ? "from app.dispatch import make_dispatcher" : null,
+    hasDispatch ? null : "from app.domain.events import NoopDomainEventDispatcher",
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
-    ...responseAggs.map((n) => `from app.http.${snake(n)}_routes import ${n}Response`),
+    ...responseAggs.map((n) => {
+      const names = [
+        refersTo(`${n}ListResponse`) ? `${n}ListResponse` : null,
+        refersTo(`${n}Response`) ? `${n}Response` : null,
+      ].filter((x): x is string => x != null);
+      return `from app.http.${snake(n)}_routes import ${names.join(", ")}`;
+    }),
     "",
     "SessionDep = Annotated[AsyncSession, Depends(get_session)]",
     "",
@@ -79,14 +100,14 @@ export function buildPyViewsFile(ctx: EnrichedBoundedContextIR): string | null {
   );
 }
 
-function viewRoute(view: ViewIR, ctx: EnrichedBoundedContextIR): string {
+function viewRoute(view: ViewIR, ctx: EnrichedBoundedContextIR, dispatcherExpr: string): string {
   const src = view.source.name;
   const fn = snake(view.name);
   const opId = camelId(opView(view.name));
-  const repoInit = `    repo = ${src}Repository(session, NoopDomainEventDispatcher())`;
+  const repoInit = `    repo = ${src}Repository(session, ${dispatcherExpr})`;
   if (!view.output) {
     return lines(
-      `@router.get("/${fn}", response_model=list[${src}Response], operation_id="${opId}")`,
+      `@router.get("/${fn}", response_model=${src}ListResponse, operation_id="${opId}")`,
       `async def ${fn}_view(session: SessionDep) -> list[dict[str, object]]:`,
       repoInit,
       `    return [repo.to_wire(r) for r in await repo.${fn}()]`,
@@ -95,7 +116,7 @@ function viewRoute(view: ViewIR, ctx: EnrichedBoundedContextIR): string {
   // Full form: bulk-load follows (dependency order — shortest path
   // first), then project binds per row.
   const out: string[] = [
-    `@router.get("/${fn}", response_model=list[${view.name}Row], operation_id="${opId}")`,
+    `@router.get("/${fn}", response_model=${view.name}Response, operation_id="${opId}")`,
     `async def ${fn}_view(session: SessionDep) -> list[dict[str, object]]:`,
     repoInit,
     `    rows = await repo.${fn}()`,
@@ -104,7 +125,7 @@ function viewRoute(view: ViewIR, ctx: EnrichedBoundedContextIR): string {
   for (const aux of view.output.auxiliaries) {
     const mapVar = snake(aux.mapVar);
     const repoVar = `${snake(aux.aggName)}_repo`;
-    out.push(`    ${repoVar} = ${aux.aggName}Repository(session, NoopDomainEventDispatcher())`);
+    out.push(`    ${repoVar} = ${aux.aggName}Repository(session, ${dispatcherExpr})`);
     const idsSource =
       aux.path.length === 1
         ? `[r.${snake(aux.path[0]!)} for r in rows]`

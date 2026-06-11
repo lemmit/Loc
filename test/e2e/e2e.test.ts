@@ -87,7 +87,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     // In parity-only mode (per-PR CI tier) build + boot just the three
     // backends + their db — the React frontends are slow to build and the
     // OpenAPI parity check doesn't need them.  The full run builds all.
-    const services = PARITY_ONLY ? " dotnet_api hono_api phoenix_api" : "";
+    const services = PARITY_ONLY ? " dotnet_api hono_api phoenix_api python_api" : "";
     execSync(`docker compose -f ${outDir}/docker-compose.yml build${services}`, {
       stdio: "inherit",
       timeout: 600_000,
@@ -141,6 +141,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     // Phoenix is slowest (mix release boot + Ecto migrate).
     try {
       await pollHealthy("http://localhost:3000/health", 60_000); // honoApi
+      await pollHealthy("http://localhost:8000/health", 120_000); // pythonApi
       await pollHealthy("http://localhost:8080/health", 120_000); // dotnetApi
       await pollHealthy("http://localhost:4000/health", 180_000); // phoenixApi
     } catch (err) {
@@ -252,16 +253,18 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     900_000,
   );
 
-  it("cross-check (3-way): Hono / .NET / Phoenix OpenAPI parity", async () => {
-    // All three backends serve the same modules from showcase.ddd, so
+  it("cross-check (4-way): Hono / .NET / Phoenix / Python OpenAPI parity", async () => {
+    // All four backends serve the same modules from showcase.ddd, so
     // their OpenAPI specs should describe the same contract.  Hono via
-    // @hono/zod-openapi, .NET via Swashbuckle, Phoenix via OpenApiSpex.
+    // @hono/zod-openapi, .NET via Swashbuckle, Phoenix via OpenApiSpex,
+    // Python via FastAPI (+ the install_openapi parity post-processor).
     let specs: Record<string, OpenApiSpec>;
     try {
       specs = {
         hono: await fetchSpec("http://localhost:3000/openapi.json"),
         dotnet: await fetchSpec("http://localhost:8080/swagger/v1/swagger.json"),
         phoenix: await fetchSpec("http://localhost:4000/api/openapi.json"),
+        python: await fetchSpec("http://localhost:8000/openapi.json"),
       };
     } catch (err) {
       // /health succeeded but a spec endpoint didn't.  Most likely cause is
@@ -316,6 +319,9 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       ["hono", "dotnet"],
       ["hono", "phoenix"],
       ["dotnet", "phoenix"],
+      ["hono", "python"],
+      ["dotnet", "python"],
+      ["phoenix", "python"],
     ];
     let cleanOverall = true;
     for (const [refName, otherName] of pairs) {
@@ -375,7 +381,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
 
     if (cleanOverall) {
       console.info(
-        "[parity] all three backends agree across all three pairs (ops / cardinality / schemas / fields / required).",
+        "[parity] all four backends agree across all six pairs (ops / cardinality / schemas / fields / required).",
       );
     }
   }, 120_000);
@@ -398,6 +404,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       hono: "http://localhost:3000/workflows/register_project",
       dotnet: "http://localhost:8080/workflows/register_project",
       phoenix: "http://localhost:4000/api/workflows/register_project",
+      python: "http://localhost:8000/workflows/register_project",
     };
     const statuses: Record<string, number> = {};
     const bodies: Record<string, string> = {};

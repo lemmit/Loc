@@ -29,7 +29,9 @@ const pythonPlatform: PlatformSurface = {
   // uvicorn convention.
   defaultPort: 8000,
   needsDb: true,
-  mountsUi: false,
+  // Dual-mode like dotnet: a backend-only python deployable has no
+  // `uiName`; with `ui:` it hosts the embedded React SPA from wwwroot/.
+  mountsUi: true,
   isFrontend: false,
   // Static-asset host (FastAPI StaticFiles): can serve any
   // static-bundle framework.  D-PHOENIX-SURFACE.

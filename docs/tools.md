@@ -57,6 +57,7 @@ ddd new acme --platform dotnet --design shadcn # .NET backend + React (shadcn)
 ddd new acme --platform elixir                 # Phoenix LiveView fullstack (ashPhoenix)
 ddd new acme --platform elixir --design mui    # Phoenix backend + a React (mui) frontend
 ddd new acme --platform java                   # Spring Boot backend + React (mantine)
+ddd new acme --platform python                 # FastAPI backend + React (mantine)
 ```
 
 | Flag | Default | Meaning |

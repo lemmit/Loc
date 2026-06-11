@@ -52,7 +52,7 @@ describe("python views", () => {
     const files = await build();
     const views = files.get("api/app/http/views_routes.py")!;
     expect(views).toContain(
-      '@router.get("/draft_orders", response_model=list[OrderResponse], operation_id="draftOrdersView")',
+      '@router.get("/draft_orders", response_model=OrderListResponse, operation_id="draftOrdersView")',
     );
     expect(views).toContain("return [repo.to_wire(r) for r in await repo.draft_orders()]");
     // The repo gains the synthesised view find with the lowered filter.

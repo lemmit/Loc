@@ -581,7 +581,7 @@ async function runNew(name: string, options: NewOptions): Promise<void> {
   );
   if (platformDefaulted) {
     console.log(
-      "  platform: hono (default) — also: dotnet, elixir, java (re-run with --platform <p>)",
+      "  platform: hono (default) — also: dotnet, elixir, java, python (re-run with --platform <p>)",
     );
   }
   console.log(`  next: cd ${where} && ddd generate system main.ddd -o . && docker compose up`);
@@ -840,7 +840,10 @@ program
   .description(
     "Scaffold a starter .ddd project (main.ddd + README + .loomignore), validated before writing. Pick the backend with --platform and the frontend with --design.",
   )
-  .option("--platform <platform>", "backend: hono | dotnet | elixir | java (default: hono)")
+  .option(
+    "--platform <platform>",
+    "backend: hono | dotnet | elixir | java | python (default: hono)",
+  )
   .option("--template <template>", "starter model: blank | crud (default: crud)")
   .option(
     "--design <pack>",

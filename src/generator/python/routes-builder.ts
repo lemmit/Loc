@@ -6,15 +6,19 @@ import {
   pagedReturn,
 } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
-import type {
-  BoundedContextIR,
-  EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
-  EnrichedEntityPartIR,
-  OperationIR,
-  RepositoryIR,
-  TypeIR,
+import {
+  type BoundedContextIR,
+  type EnrichedAggregateIR,
+  type EnrichedBoundedContextIR,
+  type EnrichedEntityPartIR,
+  findUsesCurrentUser,
+  type OperationIR,
+  operationIsGuarded,
+  operationUsesCurrentUser,
+  type RepositoryIR,
+  type TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { errorStatuses, type OpErrorKind, problemTitle } from "../../ir/util/openapi-errors.js";
 import {
   camelId,
   opCreate,
@@ -55,10 +59,14 @@ export function buildPyRoutesFile(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
   ctx: EnrichedBoundedContextIR,
+  hasDispatch = false,
 ): string {
   const slug = snake(plural(agg.name));
   const parts: EnrichedEntityPartIR[] = agg.parts;
   const publicOps = agg.operations.filter((o) => o.visibility === "public" && !o.extern);
+  // Extern ops (docs/extern.md) get the same request model + route slot
+  // but dispatch through the user-registered handler module.
+  const externOps = agg.operations.filter((o) => o.visibility === "public" && o.extern);
 
   // One <Name>Paged response model per distinct paged carrier.
   const pagedNames = new Set<string>();
@@ -83,9 +91,17 @@ export function buildPyRoutesFile(
   const models = lines(
     ...parts.map((p) => responseModel(p.name, p, ctx)),
     responseModel(agg.name, agg, ctx),
+    // Named array component for list endpoints (`<Agg>ListResponse`,
+    // RootModel so FastAPI emits a $ref instead of an inline array) —
+    // response-schema parity with the other backends.
+    `class ${agg.name}ListResponse(RootModel[list[${agg.name}Response]]):`,
+    "    pass",
+    "",
+    "",
     ...pagedModels,
     hasCreateFactory(agg) ? createModels(agg, ctx) : null,
     ...publicOps.map((op) => opRequestModel(agg, op, ctx)),
+    ...externOps.map((op) => opRequestModel(agg, op, ctx)),
   );
 
   const routes = lines(
@@ -93,7 +109,9 @@ export function buildPyRoutesFile(
     "",
     "",
     "def _repo(session: AsyncSession) -> " + `${agg.name}Repository:`,
-    `    return ${agg.name}Repository(session, NoopDomainEventDispatcher())`,
+    hasDispatch
+      ? `    return ${agg.name}Repository(session, make_dispatcher(session))`
+      : `    return ${agg.name}Repository(session, NoopDomainEventDispatcher())`,
     hasCreateFactory(agg) ? ["", "", createRoute(agg, ctx)] : null,
     "",
     "",
@@ -106,6 +124,7 @@ export function buildPyRoutesFile(
     byIdRoute(agg),
     agg.canonicalDestroy ? ["", "", destroyRoute(agg)] : null,
     ...publicOps.map((op) => ["", "", operationRoute(agg, op, ctx)]),
+    ...externOps.map((op) => ["", "", externRoute(agg, op, ctx)]),
   );
 
   const body = `${models}\n\n\n${routes}`;
@@ -134,26 +153,30 @@ export function buildPyRoutesFile(
     refersTo("datetime") ? "from datetime import datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     refersTo("datetime") || refersTo("Decimal") ? "" : null,
-    `from fastapi import ${["APIRouter", "Depends", refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
+    `from fastapi import ${["APIRouter", "Depends", refersTo("Path") ? "Path" : null, refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
     refersTo("JSONResponse") ? "from fastapi.responses import JSONResponse" : null,
-    "from pydantic import BaseModel",
+    `from pydantic import BaseModel${refersTo("RootModel") ? ", RootModel" : ""}`,
     refersTo("IntegrityError") ? "from sqlalchemy.exc import IntegrityError" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
+    [...publicOps, ...externOps].some(operationUsesCurrentUser) ||
+      emittableFinds(repo).some(findUsesCurrentUser)
+      ? "from app.auth.user import User"
+      : null,
     "from app.db.engine import get_session",
     `from app.db.repositories.${snake(agg.name)}_repository import ${agg.name}Repository`,
-    refersTo("AggregateNotFoundError")
-      ? "from app.domain.errors import AggregateNotFoundError"
-      : null,
+    hasDispatch ? "from app.dispatch import make_dispatcher" : null,
+    externOps.length > 0 ? `from app.domain import ${snake(agg.name)}_handlers` : null,
+    errorImports(refersTo),
     // Only the create route constructs the domain class directly.
     refersTo(agg.name) ? `from app.domain.${snake(agg.name)} import ${agg.name}` : null,
-    "from app.domain.events import NoopDomainEventDispatcher",
+    hasDispatch ? null : "from app.domain.events import NoopDomainEventDispatcher",
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     [...enumNames, ...voDomainNames].length > 0
       ? `from app.domain.value_objects import ${[...enumNames, ...voDomainNames].sort().join(", ")}`
       : null,
-    refersTo("problem") ? "from app.http.problem import problem" : null,
+    problemImports(refersTo),
     voModelImports.length > 0
       ? `from app.http.wire_models import ${voModelImports.map((n) => `${n} as ${n}Model`).join(", ")}`
       : null,
@@ -164,6 +187,46 @@ export function buildPyRoutesFile(
     body,
     "",
   );
+}
+
+/** `app.http.problem` names this routes file references. */
+function problemImports(refersTo: (n: string) => boolean): string | null {
+  const names = [
+    refersTo("ProblemDetails") ? "ProblemDetails" : null,
+    refersTo("problem") ? "problem" : null,
+  ].filter((n): n is string => n != null);
+  return names.length > 0 ? `from app.http.problem import ${names.join(", ")}` : null;
+}
+
+/** The per-route error-response matrix (openapi-errors.ts) as a
+ *  FastAPI `responses=` kwarg.  Declared via `"model": ProblemDetails`
+ *  (which registers the shared component); `install_openapi` re-keys
+ *  the content to application/problem+json — and routes that declare
+ *  their own 422 here suppress FastAPI's auto HTTPValidationError. */
+export function errorResponsesKwarg(kind: OpErrorKind, guarded = false): string {
+  const statuses = errorStatuses(kind, guarded);
+  if (statuses.length === 0) return "";
+  const entries = statuses.map(
+    (st) => `${st}: {"model": ProblemDetails, "description": "${problemTitle(st)}"}`,
+  );
+  return `, responses={${entries.join(", ")}}`;
+}
+
+/** `{id}` path-param annotation carrying the uuid format every backend
+ *  declares (paramTypeDiffs parity). */
+const ID_PARAM = 'id: Annotated[str, Path(json_schema_extra={"format": "uuid"})]';
+
+/** The domain error names this routes file actually references —
+ *  extern dispatch re-raises the domain taxonomy and wraps everything
+ *  else in ExternHandlerError. */
+function errorImports(refersTo: (n: string) => boolean): string | null {
+  const names = [
+    "AggregateNotFoundError",
+    "DomainError",
+    "ExternHandlerError",
+    "ForbiddenError",
+  ].filter(refersTo);
+  return names.length > 0 ? `from app.domain.errors import ${names.join(", ")}` : null;
 }
 
 /** Same constructibility gate the domain emitter uses — no `create`
@@ -232,12 +295,7 @@ function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
   return lines(
     `class Create${agg.name}Request(BaseModel):`,
     inputs.length > 0
-      ? inputs.map((f) => {
-          const t = requestPyType(f.type, ctx);
-          const suffix =
-            f.optional && !t.endsWith("| None") ? " | None = None" : f.optional ? " = None" : "";
-          return `    ${f.name}: ${t}${suffix}`;
-        })
+      ? inputs.map((f) => `    ${f.name}: ${requestFieldDecl(f.type, f.optional, ctx)}`)
       : ["    pass"],
     "",
     "",
@@ -256,11 +314,22 @@ function opRequestModel(
   return lines(
     `class ${upperFirst(op.name)}${agg.name}Request(BaseModel):`,
     op.params.length > 0
-      ? op.params.map((p) => `    ${p.name}: ${requestPyType(p.type, ctx)}`)
+      ? op.params.map((p) => `    ${p.name}: ${requestFieldDecl(p.type, false, ctx)}`)
       : ["    pass"],
     "",
     "",
   );
+}
+
+/** Request-model field declaration with the cross-backend required-set
+ *  semantics: optional-typed values default to None, and bool inputs
+ *  are optional-with-default-false (Hono's zod `.default(false)`). */
+export function requestFieldDecl(t: TypeIR, optional: boolean, ctx: BoundedContextIR): string {
+  const base = requestPyType(t, ctx);
+  const isOpt = optional || t.kind === "optional";
+  if (isOpt) return base.endsWith("| None") ? `${base} = None` : `${base} | None = None`;
+  if (t.kind === "primitive" && t.name === "bool") return `${base} = False`;
+  return base;
 }
 
 // --- wire → domain coercion -----------------------------------------------------
@@ -304,7 +373,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
       .map((p) => `${snake(p.name)}=${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`)
       .join(", ");
     return lines(
-      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}")`,
+      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
       `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
       `    created = ${agg.name}.create(${args})`,
       "    await _repo(session).save(created)",
@@ -316,7 +385,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     .map((f) => `${snake(f.name)}=${pyWireToDomain(`body.${f.name}`, f.type, ctx)}`)
     .join(", ");
   return lines(
-    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}")`,
+    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
     `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
     `    created = ${agg.name}.create(${args})`,
     "    await _repo(session).save(created)",
@@ -326,7 +395,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
 
 function allRoute(agg: EnrichedAggregateIR): string {
   return lines(
-    `@router.get("", response_model=list[${agg.name}Response], operation_id="all${agg.name}")`,
+    `@router.get("", response_model=${agg.name}ListResponse, operation_id="all${agg.name}")`,
     `async def all_${snake(plural(agg.name))}(session: SessionDep) -> list[dict[str, object]]:`,
     "    repo = _repo(session)",
     "    return [repo.to_wire(root) for root in await repo.all()]",
@@ -335,8 +404,8 @@ function allRoute(agg: EnrichedAggregateIR): string {
 
 function byIdRoute(agg: EnrichedAggregateIR): string {
   return lines(
-    `@router.get("/{id}", response_model=${agg.name}Response, operation_id="${camelId(opGetById(agg.name))}")`,
-    `async def get_${snake(agg.name)}_by_id(id: str, session: SessionDep) -> dict[str, object]:`,
+    `@router.get("/{id}", response_model=${agg.name}Response, operation_id="${camelId(opGetById(agg.name))}"${errorResponsesKwarg("getById")})`,
+    `async def get_${snake(agg.name)}_by_id(${ID_PARAM}, session: SessionDep) -> dict[str, object]:`,
     "    repo = _repo(session)",
     `    return repo.to_wire(await repo.get_by_id(${agg.name}Id(id)))`,
   );
@@ -344,8 +413,8 @@ function byIdRoute(agg: EnrichedAggregateIR): string {
 
 function destroyRoute(agg: EnrichedAggregateIR): string {
   return lines(
-    `@router.delete("/{id}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}")`,
-    `async def destroy_${snake(agg.name)}(id: str, request: Request, session: SessionDep) -> Response:`,
+    `@router.delete("/{id}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}"${errorResponsesKwarg("destroy")})`,
+    `async def destroy_${snake(agg.name)}(${ID_PARAM}, request: Request, session: SessionDep) -> Response:`,
     "    repo = _repo(session)",
     `    await repo.get_by_id(${agg.name}Id(id))`,
     "    try:",
@@ -368,7 +437,6 @@ function operationRoute(
   ctx: EnrichedBoundedContextIR,
 ): string {
   const opSnake = snake(op.routeSlug ?? op.name);
-  const args = op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx)).join(", ");
   // Exception-less operation (`operation foo(): X or NotFound`): the
   // route intercepts each error variant and translates it to an
   // RFC-7807 ProblemDetails at its mapped status; success rides as the
@@ -388,23 +456,87 @@ function operationRoute(
         "        )",
       ];
     });
+    const usesUser = operationUsesCurrentUser(op);
+    const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
+    if (usesUser) callArgs.push("current_user");
     return lines(
-      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}")`,
-      `async def ${snake(op.name)}_${snake(agg.name)}(id: str, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
+      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
+      `async def ${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
+      usesUser ? "    current_user: User = request.state.current_user" : null,
       "    repo = _repo(session)",
       `    found = await repo.get_by_id(${agg.name}Id(id))`,
-      `    result = found.${snake(op.name)}(${args})`,
+      `    result = found.${snake(op.name)}(${callArgs.join(", ")})`,
       "    await repo.save(found)",
       ...translations,
       "    return result",
     );
   }
+  // currentUser-gated ops read the actor the auth middleware stashed on
+  // the request scope and thread it as the trailing domain argument; a
+  // `requires`-guarded op additionally declares its 403 outcome.
+  const usesUser = operationUsesCurrentUser(op);
+  const opSig = [
+    ID_PARAM,
+    `body: ${upperFirst(op.name)}${agg.name}Request`,
+    ...(usesUser ? ["request: Request"] : []),
+    "session: SessionDep",
+  ].join(", ");
+  const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
+  if (usesUser) callArgs.push("current_user");
   return lines(
-    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}")`,
-    `async def ${snake(op.name)}_${snake(agg.name)}(id: str, body: ${upperFirst(op.name)}${agg.name}Request, session: SessionDep) -> Response:`,
+    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
+    `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
+    usesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
-    `    found.${snake(op.name)}(${args})`,
+    `    found.${snake(op.name)}(${callArgs.join(", ")})`,
+    "    await repo.save(found)",
+    "    return Response(status_code=204)",
+  );
+}
+
+/** Extern operation route: the framework owns the lifecycle — load,
+ *  `check_<op>` preconditions, dispatch to the registered handler
+ *  (read off the module at request time so late registration is
+ *  observed), `assert_invariants`, save.  Domain errors re-raise
+ *  untranslated; anything else wraps into ExternHandlerError (500). */
+function externRoute(
+  agg: EnrichedAggregateIR,
+  op: OperationIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const opSnake = snake(op.routeSlug ?? op.name);
+  const usesUser = operationUsesCurrentUser(op);
+  const sig = [
+    ID_PARAM,
+    `body: ${upperFirst(op.name)}${agg.name}Request`,
+    ...(usesUser ? ["request: Request"] : []),
+    "session: SessionDep",
+  ].join(", ");
+  const checkArgs = [
+    ...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx)),
+    ...(usesUser ? ["current_user"] : []),
+  ];
+  const reqEntries = op.params.map(
+    (p) => `"${snake(p.name)}": ${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`,
+  );
+  return lines(
+    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
+    `async def ${snake(op.name)}_${snake(agg.name)}(${sig}) -> Response:`,
+    usesUser ? "    current_user: User = request.state.current_user" : null,
+    "    repo = _repo(session)",
+    `    found = await repo.get_by_id(${agg.name}Id(id))`,
+    `    found.check_${snake(op.name)}(${checkArgs.join(", ")})`,
+    `    handler = ${snake(agg.name)}_handlers.${snake(op.name)}`,
+    "    if handler is None:",
+    `        raise RuntimeError("Missing extern handler for '${op.name}' on aggregate '${agg.name}'.")`,
+    "    try:",
+    `        await handler(found, {${reqEntries.join(", ")}})`,
+    "    except (AggregateNotFoundError, DomainError, ForbiddenError):",
+    "        raise",
+    "    except Exception as err:",
+    `        raise ExternHandlerError(${JSON.stringify(op.name)}, ${JSON.stringify(agg.name)}, err) from err`,
+    "    found.assert_invariants()",
     "    await repo.save(found)",
     "    return Response(status_code=204)",
   );
@@ -417,9 +549,18 @@ function findRoute(
 ): string {
   const findSnake = snake(find.name);
   const isList = find.returnType.kind === "array";
+  // A currentUser-scoped find (`where … == currentUser.x`) reads the
+  // actor off the request scope and passes it as the trailing repo arg.
+  const usesUser = findUsesCurrentUser(find);
+  const userBind = usesUser ? "    current_user: User = request.state.current_user" : null;
   const params = find.params.map((p) => `${p.name}: ${requestPyType(p.type, ctx)}`);
-  const sig = [...params, "session: SessionDep"].join(", ");
-  const args = find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)).join(", ");
+  const sig = [...params, ...(usesUser ? ["request: Request"] : []), "session: SessionDep"].join(
+    ", ",
+  );
+  const args = [
+    ...find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)),
+    ...(usesUser ? ["current_user"] : []),
+  ].join(", ");
   const opId = camelId(opFind(agg.name, find.name));
   const unionSpec = findUnionSpec(find.returnType, agg.name, ctx);
   if (unionSpec) {
@@ -427,11 +568,7 @@ function findRoute(
     const absent =
       unionSpec.absent.kind === "none"
         ? [
-            "    if (found := await repo." +
-              findSnake +
-              "(" +
-              find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)).join(", ") +
-              ")) is None:",
+            `    if (found := await repo.${findSnake}(${args})) is None:`,
             '        raise AggregateNotFoundError("not_found")',
           ]
         : (() => {
@@ -441,11 +578,7 @@ function findRoute(
               ? `"resource": ${JSON.stringify(agg.name)}, `
               : "";
             return [
-              "    if (found := await repo." +
-                findSnake +
-                "(" +
-                find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)).join(", ") +
-                ")) is None:",
+              `    if (found := await repo.${findSnake}(${args})) is None:`,
               "        return JSONResponse(",
               `            {${resourceExt}"type": ${JSON.stringify(errorTypeUri(tag))}, "title": ${JSON.stringify(errorTitle(tag))}, "status": ${st}, "detail": ${JSON.stringify(errorTitle(tag))}, "instance": request.url.path},`,
               `            status_code=${st},`,
@@ -456,6 +589,7 @@ function findRoute(
     return lines(
       `@router.get("/${findSnake}", response_model=None, operation_id="${opId}")`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object] | JSONResponse:`,
+      userBind,
       "    repo = _repo(session)",
       ...absent,
       // Found → the tagged success variant ({type: "<Agg>", …wire}).
@@ -467,18 +601,21 @@ function findRoute(
     // Defaulted params last (python syntax) — FastAPI is order-agnostic.
     const pagedSig = [
       ...params,
+      ...(usesUser ? ["request: Request"] : []),
       "session: SessionDep",
       `page: int = ${PAGED_DEFAULT_PAGE}`,
       `pageSize: int = ${PAGED_DEFAULT_PAGE_SIZE}`,
     ].join(", ");
     const callArgs = [
       ...find.params.map((p) => pyWireToDomain(p.name, p.type, ctx)),
+      ...(usesUser ? ["current_user"] : []),
       "page",
       "pageSize",
     ];
     return lines(
       `@router.get("/${findSnake}", response_model=${paged.name}, operation_id="${opId}")`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${pagedSig}) -> dict[str, object]:`,
+      userBind,
       "    repo = _repo(session)",
       `    result = await repo.${findSnake}(${callArgs.join(", ")})`,
       "    return {",
@@ -492,15 +629,17 @@ function findRoute(
   }
   if (isList) {
     return lines(
-      `@router.get("/${findSnake}", response_model=list[${agg.name}Response], operation_id="${opId}")`,
+      `@router.get("/${findSnake}", response_model=${agg.name}ListResponse, operation_id="${opId}")`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> list[dict[str, object]]:`,
+      userBind,
       "    repo = _repo(session)",
       `    return [repo.to_wire(r) for r in await repo.${findSnake}(${args})]`,
     );
   }
   return lines(
-    `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}")`,
+    `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}"${errorResponsesKwarg("findOptional")})`,
     `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object]:`,
+    userBind,
     "    repo = _repo(session)",
     `    found = await repo.${findSnake}(${args})`,
     "    if found is None:",

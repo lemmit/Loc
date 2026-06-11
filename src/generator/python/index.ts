@@ -9,21 +9,27 @@ import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { generateReactForContexts } from "../react/index.js";
+import { emitPyAuthFiles, renderPyStubUserKwargs } from "./auth-emit.js";
 import {
   abstractBasesOf,
   buildPyBaseReaderFile,
   buildPyBaseUnionFile,
   concretesOf,
 } from "./base-reader-builder.js";
+import { buildPyDispatchFile } from "./dispatch-builder.js";
 import { renderPyAggregate } from "./emit/aggregate.js";
 import { ERRORS_PY } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
 import { renderPyWireModels } from "./emit/http-models.js";
 import { renderPyIds } from "./emit/ids.js";
 import { emitPythonMigrations, MIGRATE_PY } from "./emit/migrations.js";
+import { OBS_LOG_PY, OBS_MIDDLEWARE_PY } from "./emit/obs.js";
 import { renderPySchema } from "./emit/schema.js";
+import { buildPySeedFile } from "./emit/seed.js";
 import { renderPyTestsFile } from "./emit/tests.js";
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
+import { buildPyExternHandlersFile, externOpsOf } from "./extern-builder.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
 import { buildPyEventSourcedRepositoryFile } from "./repository-eventsourced-builder.js";
@@ -68,20 +74,85 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   const slug = pythonProjectName(args.deployable.name);
   const merged = mergeContexts(args.contexts);
 
+  // Fullstack-python branch (dotnet parity): a `ui:` mount embeds the
+  // React SPA — routers move under /api/*, main.py serves wwwroot/ with
+  // an index.html fallback, the Dockerfile becomes multi-stage, and the
+  // React project is generated under ClientApp/.
+  const hasEmbeddedSpa = !!args.deployable.uiName;
   out.set("pyproject.toml", renderPyproject(slug));
-  out.set("Dockerfile", DOCKERFILE_PY);
+  out.set("Dockerfile", hasEmbeddedSpa ? DOCKERFILE_PY_FULLSTACK : DOCKERFILE_PY);
   out.set(".dockerignore", DOCKERIGNORE_PY);
   out.set("certs/.gitkeep", "");
   out.set("app/__init__.py", "");
   out.set("app/settings.py", renderSettings(slug));
   out.set("app/db/__init__.py", "");
   out.set("app/db/engine.py", ENGINE_PY);
+  out.set("app/obs/__init__.py", "");
+  out.set("app/obs/log.py", OBS_LOG_PY);
+  out.set("app/obs/middleware.py", OBS_MIDDLEWARE_PY);
   const routedAggs = args.contexts.flatMap((c) =>
     c.aggregates.filter((a) => !a.isAbstract).map((a) => a.name),
   );
   const hasViews = merged.views.some((v) => v.source.kind === "aggregate");
   const hasWorkflows = commandWorkflowsOf(merged).length > 0;
-  out.set("app/main.py", renderMain(args.sys.name, routedAggs, hasViews, hasWorkflows));
+  const resolveDs = (agg: import("../../ir/types/loom-ir.js").AggregateIR) => {
+    const owning = args.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
+    return owning
+      ? resolveDataSourceConfig(agg as EnrichedAggregateIR, owning, args.sys)
+      : undefined;
+  };
+  // Auth scaffolding (docs/auth.md): only an `auth: required` deployable
+  // (whose system declares a `user { ... }` block) carries the verifier
+  // registry + middleware — anonymous deployables stay byte-identical.
+  const authRequired = !!(args.deployable.auth?.required && args.sys.user);
+  if (authRequired && args.sys.user) emitPyAuthFiles(args.sys.user, out);
+  // First-boot seeding (database-seeding.md): emitted only when a
+  // dataset survives filtering (rows on concrete aggregates); the
+  // lifespan runs seeds right after migrations (Hono/.NET boot order).
+  // Aggregates with extern ops — the lifespan verifies their handler
+  // registrations at boot (docs/extern.md).
+  const externAggs = merged.aggregates
+    .filter((a) => !a.isAbstract && externOpsOf(a).length > 0)
+    .map((a) => a.name);
+  const seedFile = buildPySeedFile(merged, (aggName) => {
+    const agg = merged.aggregates.find((a) => a.name === aggName);
+    return agg ? resolveDs(agg)?.schema : undefined;
+  });
+  const hasSeeds = seedFile != null;
+  out.set(
+    "app/main.py",
+    renderMain(
+      args.sys.name,
+      routedAggs,
+      hasViews,
+      hasWorkflows,
+      authRequired ? args.sys.user : undefined,
+      hasSeeds,
+      externAggs,
+      hasEmbeddedSpa,
+    ),
+  );
+  if (hasEmbeddedSpa) {
+    const spaFiles = generateReactForContexts(args.contexts, args.sys, args.deployable, {
+      apiBaseUrl: "/api",
+      pathPrefix: "ClientApp/",
+    });
+    for (const [path, content] of spaFiles) {
+      // The React pack also ships Dockerfile / .dockerignore / certs /
+      // the e2e harness at the project root — the python project owns
+      // those surfaces in fullstack mode (multi-stage Dockerfile builds
+      // the SPA).  Skip them so the file map stays clean.
+      if (
+        path === "ClientApp/Dockerfile" ||
+        path === "ClientApp/.dockerignore" ||
+        path === "ClientApp/certs/.gitkeep" ||
+        path.startsWith("ClientApp/e2e/")
+      )
+        continue;
+      out.set(path, content);
+    }
+    out.set("ClientApp/.gitignore", "node_modules\ndist\n");
+  }
 
   out.set("app/domain/__init__.py", "");
   out.set("app/domain/ids.py", renderPyIds(merged));
@@ -89,12 +160,6 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/domain/value_objects.py", renderPyEnumsAndValueObjects(merged));
   out.set("app/domain/events.py", renderPyEvents(merged));
 
-  const resolveDs = (agg: import("../../ir/types/loom-ir.js").AggregateIR) => {
-    const owning = args.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
-    return owning
-      ? resolveDataSourceConfig(agg as EnrichedAggregateIR, owning, args.sys)
-      : undefined;
-  };
   out.set("app/db/schema.py", renderPySchema(merged, resolveDs));
   out.set("app/db/wire.py", WIRE_PY);
   out.set("app/db/migrate.py", MIGRATE_PY);
@@ -107,13 +172,22 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // COPY valid on systems whose snapshot is already up to date.
   out.set("migrations/.gitkeep", "");
   emitPythonMigrations(args.migrations ?? [], out);
+  if (seedFile != null) out.set("app/db/seed.py", seedFile);
+
+  // In-process event dispatch (channels.md): only when a channel routes
+  // a subscribed event does `app/dispatch.py` exist — and then every
+  // repository constructed by routes/views/workflows takes the live
+  // dispatcher instead of the Noop (mirrors Hono's createApp default).
+  const dispatchFile = buildPyDispatchFile(merged);
+  const hasDispatch = dispatchFile != null;
+  if (dispatchFile != null) out.set("app/dispatch.py", dispatchFile);
 
   out.set("app/http/__init__.py", "");
   out.set("app/http/problem.py", PROBLEM_PY);
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
-  const viewsFile = buildPyViewsFile(merged);
+  const viewsFile = buildPyViewsFile(merged, hasDispatch);
   if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
-  const workflowsFile = buildPyWorkflowsFile(merged);
+  const workflowsFile = buildPyWorkflowsFile(merged, hasDispatch);
   if (workflowsFile != null) out.set("app/http/workflows_routes.py", workflowsFile);
 
   // Per-aggregate emission stays per-context — each aggregate module is
@@ -133,6 +207,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract) continue;
       out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx));
+      const externFile = buildPyExternHandlersFile(agg);
+      if (externFile != null) {
+        out.set(`app/domain/${snake(agg.name)}_handlers.py`, externFile);
+      }
       const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
       out.set(
         `app/db/repositories/${snake(agg.name)}_repository.py`,
@@ -140,7 +218,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
           ? buildPyEventSourcedRepositoryFile(agg, repo, ctx)
           : buildPyRepositoryFile(agg, repo, ctx),
       );
-      out.set(`app/http/${snake(agg.name)}_routes.py`, buildPyRoutesFile(agg, repo, ctx));
+      out.set(
+        `app/http/${snake(agg.name)}_routes.py`,
+        buildPyRoutesFile(agg, repo, ctx, hasDispatch),
+      );
       const tests = renderPyTestsFile(agg, ctx);
       if (tests != null) out.set(`tests/test_${snake(agg.name)}.py`, tests);
     }
@@ -216,10 +297,13 @@ function renderPyproject(slug: string): string {
     "line-length = 100",
     `target-version = "py312"`,
     "",
-    "# E741: DSL-authored lambda params (idiomatically `l` for lines)",
-    "# flow into the generated source verbatim.",
+    "# E741: DSL-authored lambda params (idiomatically `l` for lines) flow",
+    "# into the generated source verbatim.  E711/E712: DSL equality against",
+    "# null/true renders structurally — and in SQLAlchemy predicates",
+    "# `== True` / `!= None` are the operator-overloaded forms, not style",
+    "# slips.",
     "[tool.ruff.lint]",
-    `ignore = ["E741"]`,
+    `ignore = ["E711", "E712", "E741"]`,
     "",
     "[tool.mypy]",
     `python_version = "3.12"`,
@@ -279,40 +363,104 @@ function renderMain(
   routerAggs: string[],
   hasViews = false,
   hasWorkflows = false,
+  authUser: import("../../ir/types/loom-ir.js").UserIR | undefined = undefined,
+  hasSeeds = false,
+  externAggs: string[] = [],
+  hasEmbeddedSpa = false,
 ): string {
+  // Embedded-SPA mode mounts every router under /api/* so the SPA's
+  // path namespace stays free for client-side routing.
+  const routerArgs = hasEmbeddedSpa ? ', prefix="/api"' : "";
+  const authRequired = authUser != null;
+  // Dev-stub verifier (Hono index.ts parity): accepts every request as
+  // a built-in admin user with EMPTY permissions so the generated
+  // stack boots out of the box, while permission-guarded surfaces
+  // still deny.  REPLACE in production via register_user_verifier.
+  const stubKwargs = authUser ? renderPyStubUserKwargs(authUser) : "";
+  const stubIds = [...new Set(stubKwargs.match(/\b\w+Id(?=\()/g) ?? [])].sort();
   return lines(
     `"""FastAPI application entrypoint.`,
     "",
     "Auto-generated by Loom.  Pin via .loomignore to customise.",
     `"""`,
     "",
+    "import os",
     "from collections.abc import AsyncIterator",
     "from contextlib import asynccontextmanager",
+    hasEmbeddedSpa ? "from pathlib import Path as FilePath" : null,
+    stubKwargs.includes("datetime.") ? "from datetime import UTC, datetime" : null,
+    stubKwargs.includes("Decimal(") ? "from decimal import Decimal" : null,
     "",
-    "from fastapi import FastAPI",
+    `from fastapi import FastAPI${authRequired ? ", Request" : ""}`,
     "from fastapi.middleware.cors import CORSMiddleware",
+    hasEmbeddedSpa ? "from fastapi.responses import FileResponse" : null,
     "from sqlalchemy import text",
     "",
+    authRequired ? "from app.auth.middleware import AuthMiddleware" : null,
+    authRequired ? "from app.auth.user import User" : null,
+    authRequired
+      ? "from app.auth.verifier import assert_user_verifier_registered, register_user_verifier"
+      : null,
     "from app.db.engine import engine",
     "from app.db.migrate import run_migrations",
+    hasSeeds ? "from app.db.seed import run_seeds" : null,
+    stubIds.length > 0 ? `from app.domain.ids import ${stubIds.join(", ")}` : null,
+    ...externAggs.map(
+      (n) =>
+        `from app.domain.${snake(n)}_handlers import verify_${snake(n)}_extern_handlers_registered`,
+    ),
     ...routerAggs.map(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
-    "from app.http.problem import install_error_handlers",
+    "from app.http.problem import install_error_handlers, install_openapi",
     hasViews ? "from app.http.views_routes import router as views_router" : null,
     hasWorkflows ? "from app.http.workflows_routes import router as workflows_router" : null,
+    "from app.obs.log import log",
+    "from app.obs.middleware import ObservabilityMiddleware",
     "",
+    "",
+    ...(authRequired
+      ? [
+          "# Dev-stub verifier — accepts every request as a built-in admin user",
+          "# (EMPTY permissions, so permission-guarded surfaces still deny).",
+          "# REPLACE for production by calling register_user_verifier(...) with a",
+          "# JWT-decoding implementation, ideally from a non-regenerated module.",
+          "async def _dev_stub_verifier(_: Request) -> User:",
+          `    return User(${stubKwargs})`,
+          "",
+          "",
+          "register_user_verifier(_dev_stub_verifier)",
+          'log("warn", "auth_dev_stub_registered")',
+          "",
+          "",
+        ]
+      : []),
+    '_PORT = int(os.environ.get("PORT", "8000"))',
     "",
     "",
     "@asynccontextmanager",
     "async def lifespan(_: FastAPI) -> AsyncIterator[None]:",
+    '    log("info", "server_starting", port=_PORT)',
+    // A missing verifier registration surfaces as a clear boot error
+    // instead of a 401 storm on the first request.
+    authRequired ? "    assert_user_verifier_registered()" : null,
+    ...externAggs.map((n) => `    verify_${snake(n)}_extern_handlers_registered()`),
     "    await run_migrations()",
+    hasSeeds ? "    await run_seeds()" : null,
+    '    log("info", "server_listening", port=_PORT)',
     "    yield",
+    '    log("info", "server_shutdown", signal="SIGTERM")',
+    '    log("info", "server_drained")',
     "",
     "",
     `app = FastAPI(title=${JSON.stringify(systemName)}, version="0.1.0", lifespan=lifespan)`,
     "install_error_handlers(app)",
+    "install_openapi(app)",
     "",
+    // Starlette runs later-added middleware first, so AuthMiddleware is
+    // added BEFORE CORS to keep CORS outermost (auth after CORS — the
+    // same ordering the Hono/.NET pipelines mount).
+    authRequired ? "app.add_middleware(AuthMiddleware)" : null,
     "# Permissive CORS for development — pin via .loomignore to tighten.",
     "app.add_middleware(",
     "    CORSMiddleware,",
@@ -320,24 +468,47 @@ function renderMain(
     `    allow_methods=["*"],`,
     `    allow_headers=["*"],`,
     ")",
-    ...routerAggs.map((name) => `app.include_router(${snake(name)}_router)`),
-    hasViews ? "app.include_router(views_router)" : null,
-    hasWorkflows ? "app.include_router(workflows_router)" : null,
+    "# Added last so it runs first (Starlette: later-added is outermost) —",
+    "# every request is bracketed, including 401s from the auth middleware.",
+    "app.add_middleware(ObservabilityMiddleware)",
+    ...routerAggs.map((name) => `app.include_router(${snake(name)}_router${routerArgs})`),
+    hasViews ? `app.include_router(views_router${routerArgs})` : null,
+    hasWorkflows ? `app.include_router(workflows_router${routerArgs})` : null,
     "",
     "",
     `@app.get("/health")`,
-    "async def health() -> dict[str, bool]:",
-    `    """Liveness probe — no dependencies."""`,
-    `    return {"ok": True}`,
+    "async def health() -> dict[str, str]:",
+    `    """Liveness probe — no dependencies.  Body is the cross-backend`,
+    `    contract ({"status": "ok"}) the e2e health poll asserts."""`,
+    '    log("debug", "health_ok", checks=["app"])',
+    `    return {"status": "ok"}`,
     "",
     "",
     `@app.get("/ready")`,
-    "async def ready() -> dict[str, bool]:",
+    "async def ready() -> dict[str, str]:",
     `    """Readiness probe — verifies database connectivity."""`,
     "    async with engine.connect() as conn:",
     `        await conn.execute(text("SELECT 1"))`,
-    `    return {"ok": True}`,
+    `    return {"status": "ready"}`,
     "",
+    ...(hasEmbeddedSpa
+      ? [
+          "",
+          '_WWWROOT = FilePath(__file__).resolve().parent.parent / "wwwroot"',
+          "",
+          "",
+          "# Embedded SPA (wwwroot/, copied in by the Dockerfile's spa-build",
+          "# stage).  Registered last so every API route wins; unknown paths",
+          "# fall back to index.html for client-side routing.",
+          '@app.get("/{spa_path:path}", include_in_schema=False)',
+          "async def spa(spa_path: str) -> FileResponse:",
+          "    candidate = (_WWWROOT / spa_path).resolve()",
+          "    if candidate.is_file() and candidate.is_relative_to(_WWWROOT):",
+          "        return FileResponse(candidate)",
+          '    return FileResponse(_WWWROOT / "index.html")',
+          "",
+        ]
+      : []),
   );
 }
 
@@ -367,6 +538,39 @@ COPY pyproject.toml ./
 RUN uv sync --no-dev
 COPY app/ ./app/
 COPY migrations/ ./migrations/
+ENV PATH="/app/.venv/bin:$PATH"
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+`;
+
+// Fullstack image: stage 1 builds the React SPA under ClientApp/,
+// stage 2 is the standard python image with the bundle copied into
+// wwwroot/ for main.py's FileResponse fallback (dotnet parity).
+const DOCKERFILE_PY_FULLSTACK = `# syntax=docker/dockerfile:1
+# Auto-generated — fullstack Python + React (embedded SPA).
+
+FROM node:20-alpine AS spa-build
+WORKDIR /spa
+COPY ClientApp/package.json ./
+RUN npm install --no-audit --no-fund
+COPY ClientApp/ ./
+RUN npm run build
+
+FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+WORKDIR /app
+RUN apt-get update \\
+    && apt-get install -y --no-install-recommends wget ca-certificates \\
+    && rm -rf /var/lib/apt/lists/*
+COPY certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates 2>/dev/null || true
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \\
+    UV_PROJECT_ENVIRONMENT=/app/.venv
+COPY pyproject.toml ./
+RUN uv sync --no-dev
+COPY app/ ./app/
+COPY migrations/ ./migrations/
+COPY --from=spa-build /spa/dist ./wwwroot
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -403,11 +607,71 @@ def iso(dt: datetime) -> str:
 // (RFC 6901 pointers), matching the other backends' ProblemDetails.
 const PROBLEM_PY = `"""RFC 7807 problem responses + exception handlers.  Auto-generated."""
 
+from typing import Any, cast
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
-from app.domain.errors import AggregateNotFoundError, DomainError, ForbiddenError
+from app.domain.errors import (
+    AggregateNotFoundError,
+    DomainError,
+    ExternHandlerError,
+    ForbiddenError,
+)
+from app.obs.log import log
+
+
+class ProblemDetails(BaseModel):
+    """RFC 7807 body (+ the §3.2 errors[] extension on 422) — the shared
+    cross-backend error component the conformance gate compares."""
+
+    type: str | None = None
+    title: str | None = None
+    status: int | None = None
+    detail: str | None = None
+    instance: str | None = None
+    errors: list[dict[str, str]] | None = None
+
+
+def install_openapi(app: FastAPI) -> None:
+    """Post-process the generated OpenAPI for cross-backend parity:
+    error responses ride as application/problem+json (the declared
+    \`model\` registers the ProblemDetails component under
+    application/json), and FastAPI's auto-added 422
+    HTTPValidationError responses (+ their components) are dropped —
+    routes declare their own 422 where the shared error matrix
+    (openapi-errors.ts) says so."""
+
+    def custom_openapi() -> dict[str, Any]:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+        for item in cast(dict[str, Any], schema.get("paths", {})).values():
+            for op in item.values():
+                if not isinstance(op, dict):
+                    continue
+                responses = cast(dict[str, Any], op.get("responses", {}))
+                for code in list(responses):
+                    if not (code[:1] in "45" and len(code) == 3):
+                        continue
+                    content = cast(dict[str, Any], responses[code].get("content", {}))
+                    ref = (
+                        content.get("application/json", {}).get("schema", {}).get("$ref", "")
+                    )
+                    if ref.endswith("/HTTPValidationError"):
+                        del responses[code]
+                    elif ref.endswith("/ProblemDetails"):
+                        content["application/problem+json"] = content.pop("application/json")
+        components = cast(dict[str, Any], schema.get("components", {})).get("schemas", {})
+        components.pop("HTTPValidationError", None)
+        components.pop("ValidationError", None)
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = custom_openapi  # type: ignore[method-assign]
 
 
 def problem(
@@ -437,16 +701,24 @@ def _pointer(loc: tuple[object, ...]) -> str:
 
 
 def install_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(ExternHandlerError)
+    async def _extern(request: Request, err: ExternHandlerError) -> JSONResponse:
+        log("error", "extern_handler_threw", error=str(err), status=500)
+        return problem(request, 500, "Internal Server Error", str(err))
+
     @app.exception_handler(ForbiddenError)
     async def _forbidden(request: Request, err: ForbiddenError) -> JSONResponse:
+        log("warn", "forbidden", message=str(err), status=403)
         return problem(request, 403, "Forbidden", str(err))
 
     @app.exception_handler(DomainError)
     async def _domain(request: Request, err: DomainError) -> JSONResponse:
+        log("warn", "domain_error", message=str(err), status=400)
         return problem(request, 400, "Bad Request", str(err))
 
     @app.exception_handler(AggregateNotFoundError)
     async def _not_found(request: Request, err: AggregateNotFoundError) -> JSONResponse:
+        log("warn", "not_found", message=str(err), status=404)
         return problem(request, 404, "Not Found", str(err))
 
     @app.exception_handler(RequestValidationError)

@@ -57,12 +57,14 @@ describe("python platform — registry resolution", () => {
     );
   });
 
-  it("surface flags: backend-only, owns a DB, no UI mount", () => {
+  it("surface flags: dual-mode backend (UI mount optional), owns a DB", () => {
     const surface = platformFor("python");
     expect(surface.name).toBe("python");
     expect(surface.defaultPort).toBe(8000);
     expect(surface.needsDb).toBe(true);
-    expect(surface.mountsUi).toBe(false);
+    // Dual-mode like dotnet (S18): `ui:` embeds a React SPA; without
+    // one the deployable stays backend-only.
+    expect(surface.mountsUi).toBe(true);
     expect(surface.isFrontend).toBe(false);
   });
 
@@ -103,7 +105,7 @@ describe("python platform — grammar + validation", () => {
     expect(errors.some((e) => /'python@v1'/.test(e))).toBe(true);
   });
 
-  it("rejects a `ui:` binding (python mounts no UI in v1)", async () => {
+  it("accepts a `ui:` binding (fullstack embed, S18)", async () => {
     const { errors } = await parse(`
       system S {
         subdomain M { context C { } }
@@ -111,7 +113,7 @@ describe("python platform — grammar + validation", () => {
         deployable api { platform: python, contexts: [C], ui: W, port: 8000 }
       }
     `);
-    expect(errors.some((e) => /only valid on platforms that mount a UI/.test(e))).toBe(true);
+    expect(errors).toEqual([]);
   });
 });
 

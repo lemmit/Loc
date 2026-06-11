@@ -19,7 +19,7 @@ versioning works.
 | `hono` (default `hono@v4`) | `src/platform/hono/v4/index.ts` | 3000 | ✓ | ✗ |
 | `dotnet` (default `dotnet@v8`) | `src/platform/dotnet.ts` | 8080 | ✓ | ✓ (when `ui:` is declared) |
 | `elixir` (default `elixir@v1`; legacy aliases `phoenix` / `phoenixLiveView` desugar to it) | `src/platform/elixir.ts` | 4000 | ✓ | ✓ (fullstack) |
-| `python` (default `python@v1`; framework alias `fastapi`) | `src/platform/python.ts` | 8000 | ✓ | ✗ |
+| `python` (default `python@v1`; framework alias `fastapi`) | `src/platform/python.ts` | 8000 | ✓ | ✓ (when `ui:` is declared — dotnet-style dual mode) |
 | `java` (default `java@v1`) | `src/platform/java.ts` | 8081 | ✓ | ✓ (`ui:` embedded-SPA mount; `hosts:` gated) |
 | `react` | `src/platform/react.ts` | 3001 | ✗ | ✓ |
 | `vue` | `src/platform/vue.ts` | 3003 | ✗ | ✓ |
@@ -32,10 +32,9 @@ versioning works.
   wire a `depends_on: db` healthcheck in `docker-compose.yml`.
 - **Mounts UI** — whether the deployable validator allows a `ui:`
   binding on this platform.  `react` / `vue` / `svelte` / `static`
-  always mount; `dotnet` and `java` are
+  always mount; `dotnet`, `java` and `python` are
   dual-mode (mount when `ui:` is declared, otherwise backend-only);
-  `elixir` always mounts (fullstack LiveView); `hono` and `python`
-  never do.
+  `elixir` always mounts (fullstack LiveView); `hono` never does.
 
 ## Resolving a `platform:` value
 

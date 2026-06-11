@@ -1,6 +1,6 @@
 # Python backend — FastAPI + SQLAlchemy 2 generator (implementation plan)
 
-> Status: **APPROVED-PENDING / ready to execute.** This is the executable
+> Status: **SHIPPED** — all slices landed (see the progress table). This is the executable
 > slice plan for adding Python as the fourth domain-logic backend (after
 > Hono, .NET, Elixir/Ash). It instantiates the
 > [`platform-expansion-roadmap.md`](platform-expansion-roadmap.md) Phase E
@@ -140,11 +140,14 @@ diff-sync semantics under SQLAlchemy.
 | S13 inheritance | ✅ | TPH shared table + kind scoping, TPC, base readers; verified live |
 | S14 event sourcing | ✅ | stream table + appliers fold + ES create; verified live; document shape stays gated |
 | S15a command workflows | ✅ | POST /workflows/<wf>, one-transaction-per-request (repos flush, session dependency commits); verified live |
-| S15b sagas/dispatcher | next | event-triggered creates + on(...) reactors, correlation state tables |
-| S16 auth/seed/extern | next | |
-| S17 observability | next | |
-| **S10 conformance** | **moved after S17** | showcase.ddd (the parity fixture) declares `auth: required` and exercises every feature — joining it requires S11–S17 first.  Matches the roadmap's Phase E exit criterion ("showcase passes the multi-backend suite") being terminal. |
-| S18, S19 | after S10 | |
+| S15b sagas/dispatcher | ✅ | `app/dispatch.py` InProcessDispatcher (create = load-or-allocate, on = route-or-drop + `event_unrouted`), saga-state SQLAlchemy models + migrations, routes/views/workflows repos take `make_dispatcher(session)`; choreography chain verified live (place → saga row + Tracked shipment in one tx); durable-channel outbox tier stays a follow-up |
+| S16a auth gate | ✅ | User dataclass + verifier registry + middleware (bypass list parity), trailing `current_user` threading (ops/finds/workflows + gated op-calls), 403 declared on guarded routes, synthetic test actor; verified live (401/403/204 + row-level `mine` scoping) |
+| S16b seeds | ✅ | app/db/seed.py — domain-create path (invariants run) + schema-qualified raw INSERTs, __loom_seed ship-once marker, LOOM_SEED gating, lifespan runs seeds after migrations + `python -m app.db.seed`; verified live (3 datasets once, re-boot no-op) |
+| S16c extern ops | ✅ | check_<op> precondition gate + controlled mutation surface (setters/raise_event/assert_invariants), `<agg>_handlers.py` typed registry + dev-stubs + lifespan verify, route dispatch with ExternHandlerError→500; verified live.  Resource verb clients (objectStore/queue/api) deferred — showcase doesn't exercise them (follow-up with Hono parity) |
+| S17 observability | ✅ | app/obs/ (CatalogFormatter flat-JSON envelope + log facade + request-bracket middleware with x-request-id correlation), lifecycle bracket in lifespan, health_ok debug, fault warns in problem handlers, event_unrouted on the catalog stream; `test:obs-python` + LOOM_OBS_E2E_PYTHON e2e (LOOM_OBS_PG_URL override) + python-obs-e2e.yml; passed live.  `--trace` domain instrumentation (invariant/precondition_evaluated) deferred — follow-up with Hono parity |
+| **S10 conformance** | ✅ | pythonApi joined showcase.ddd + the e2e 4-way OpenAPI parity matrix (6 pairs) + the guarded-workflow-403 runtime check.  Parity work: ProblemDetails component + install_openapi post-processor (problem+json re-keying, auto-422 pruning), full per-route error matrix from openapi-errors.ts, `<X>ListResponse`/`<View>Response` RootModel array components, uuid-format id params, request-model required-set alignment (optional→None, bool→False default), dev-stub auth verifier (admin, EMPTY permissions).  hono↔python diffSpecs verified CLEAN offline against live servers; dotnet/phoenix pairs gate in conformance-parity.yml (docker). |
+| S18 fullstack embed | ✅ | `ui:` on a python deployable embeds the React SPA (dotnet parity): routers under /api/*, ClientApp/ generation (apiBaseUrl /api), wwwroot FileResponse fallback for client-side routing, multi-stage Dockerfile; verified live (index/fallback/assets//api CRUD/health) |
+| S19 docs/examples/scaffold | ✅ | generators.md Python section, platforms.md registry row, CLAUDE.md (stack list, test:python/test:obs-python, CI surface, `ddd new`), roadmap Phase E → SHIPPED, `ddd new --platform python` starter (port 8000, validated), playground browser-safety confirmed (no node: imports).  showcase's pythonApi + the 9-fixture LOOM_PYTHON_BUILD corpus stand in for a dedicated example |
 
 ## Slices
 

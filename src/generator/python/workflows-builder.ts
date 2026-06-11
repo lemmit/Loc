@@ -1,16 +1,20 @@
-import type {
-  BoundedContextIR,
-  EnrichedBoundedContextIR,
-  WorkflowIR,
-  WorkflowStmtIR,
+import {
+  type BoundedContextIR,
+  type EnrichedBoundedContextIR,
+  type OperationIR,
+  operationUsesCurrentUser,
+  type WorkflowIR,
+  type WorkflowStmtIR,
+  workflowIsGuarded,
+  workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
 import { requestPyType } from "./emit/http-models.js";
-import { renderPyExpr } from "./render-expr.js";
-import { pyWireToDomain } from "./routes-builder.js";
+import { type PyRenderContext, renderPyExpr } from "./render-expr.js";
+import { errorResponsesKwarg, pyWireToDomain, requestFieldDecl } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
 // Workflow routes — `app/http/workflows_routes.py`, mounted at
@@ -39,16 +43,23 @@ export function commandWorkflowsOf(ctx: EnrichedBoundedContextIR): WorkflowIR[] 
   return ctx.workflows.filter(emitsCommandRoute);
 }
 
-export function buildPyWorkflowsFile(ctx: EnrichedBoundedContextIR): string | null {
+export function buildPyWorkflowsFile(
+  ctx: EnrichedBoundedContextIR,
+  hasDispatch = false,
+): string | null {
   const wfs = commandWorkflowsOf(ctx);
   if (wfs.length === 0) return null;
+  const dispatcherExpr = hasDispatch ? "make_dispatcher(session)" : "NoopDomainEventDispatcher()";
+  const anyUser = wfs.some(
+    (wf) => workflowUsesCurrentUser(wf) || callsUserGatedOp(wf.statements, ctx),
+  );
 
   const models = wfs
     .map((wf) =>
       lines(
         `class ${upperFirst(wf.name)}Request(BaseModel):`,
         wf.params.length > 0
-          ? wf.params.map((p) => `    ${p.name}: ${requestPyType(p.type, ctx)}`)
+          ? wf.params.map((p) => `    ${p.name}: ${requestFieldDecl(p.type, false, ctx)}`)
           : ["    pass"],
         "",
         "",
@@ -56,7 +67,7 @@ export function buildPyWorkflowsFile(ctx: EnrichedBoundedContextIR): string | nu
     )
     .join("");
 
-  const routes = wfs.map((wf) => workflowRoute(wf, ctx)).join("\n\n\n");
+  const routes = wfs.map((wf) => workflowRoute(wf, ctx, dispatcherExpr)).join("\n\n\n");
   const body = `${models}router = APIRouter(prefix="/workflows", tags=["workflows"])\n\n\n${routes}`;
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
@@ -79,13 +90,15 @@ export function buildPyWorkflowsFile(ctx: EnrichedBoundedContextIR): string | nu
     "",
     refersTo("datetime") ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
-    "from fastapi import APIRouter, Depends, Response",
+    `from fastapi import APIRouter, Depends, ${anyUser ? "Request, " : ""}Response`,
     "from pydantic import BaseModel",
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
+    anyUser ? "from app.auth.user import User" : null,
     "from app.db.engine import get_session",
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
+    hasDispatch ? "from app.dispatch import make_dispatcher" : null,
     refersTo("DomainError") || refersTo("ForbiddenError")
       ? `from app.domain.errors import ${[
           refersTo("DomainError") ? "DomainError" : null,
@@ -94,7 +107,7 @@ export function buildPyWorkflowsFile(ctx: EnrichedBoundedContextIR): string | nu
           .filter(Boolean)
           .join(", ")}`
       : null,
-    `from app.domain.events import ${[refersTo("DomainEvent") ? "DomainEvent" : null, "NoopDomainEventDispatcher", ...eventNames].filter(Boolean).join(", ")}`,
+    eventsImports(refersTo, hasDispatch, eventNames),
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     ...[
       ...new Set(
@@ -110,6 +123,7 @@ export function buildPyWorkflowsFile(ctx: EnrichedBoundedContextIR): string | nu
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
+    refersTo("ProblemDetails") ? "from app.http.problem import ProblemDetails" : null,
     voModelImports.length > 0
       ? `from app.http.wire_models import ${voModelImports.map((n) => `${n} as ${n}Model`).join(", ")}`
       : null,
@@ -120,6 +134,45 @@ export function buildPyWorkflowsFile(ctx: EnrichedBoundedContextIR): string | nu
     body,
     "",
   );
+}
+
+/** The events-module import line.  Noop only ships when the deployable
+ *  has no live dispatcher; with one, the line can vanish entirely
+ *  (a workflow set with no emits and no DomainEvent reference). */
+function eventsImports(
+  refersTo: (n: string) => boolean,
+  hasDispatch: boolean,
+  eventNames: string[],
+): string | null {
+  const names = [
+    refersTo("DomainEvent") ? "DomainEvent" : null,
+    hasDispatch ? null : "NoopDomainEventDispatcher",
+    ...eventNames,
+  ].filter((n): n is string => n != null);
+  return names.length > 0 ? `from app.domain.events import ${names.join(", ")}` : null;
+}
+
+/** The workflow body calls a currentUser-gated operation — the op's
+ *  method signature takes a trailing `current_user` argument the
+ *  op-call renderer threads through, so the actor must be bound even
+ *  if the workflow body itself never names `currentUser`. */
+function callsUserGatedOp(sts: WorkflowStmtIR[], ctx: EnrichedBoundedContextIR): boolean {
+  return sts.some((s) => {
+    if (s.kind === "op-call") {
+      const o = lookupOp(ctx, s.aggName, s.op);
+      return !!o && operationUsesCurrentUser(o);
+    }
+    if (s.kind === "for-each") return callsUserGatedOp(s.body, ctx);
+    return false;
+  });
+}
+
+function lookupOp(
+  ctx: EnrichedBoundedContextIR,
+  aggName: string,
+  opName: string,
+): OperationIR | undefined {
+  return ctx.aggregates.find((a) => a.name === aggName)?.operations.find((o) => o.name === opName);
 }
 
 interface RepoNeed {
@@ -163,10 +216,24 @@ function scanIdNames(scan: string, ctx: BoundedContextIR): string[] {
     .filter((n) => new RegExp(`\\b${n}\\b`).test(scan));
 }
 
-function workflowRoute(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
+function workflowRoute(
+  wf: WorkflowIR,
+  ctx: EnrichedBoundedContextIR,
+  dispatcherExpr: string,
+): string {
+  // A `requires`-guarded workflow declares its 403 outcome; a
+  // currentUser-referencing one binds the actor off the request scope
+  // before any rendered statement mentions the bare `current_user`.
+  const usesUser = workflowUsesCurrentUser(wf) || callsUserGatedOp(wf.statements, ctx);
+  const sig = [
+    `body: ${upperFirst(wf.name)}Request`,
+    ...(usesUser ? ["request: Request"] : []),
+    "session: SessionDep",
+  ].join(", ");
   const out: string[] = [
-    `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}")`,
-    `async def ${snake(wf.name)}_workflow(body: ${upperFirst(wf.name)}Request, session: SessionDep) -> Response:`,
+    `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}"${errorResponsesKwarg("workflow", workflowIsGuarded(wf))})`,
+    `async def ${snake(wf.name)}_workflow(${sig}) -> Response:`,
+    ...(usesUser ? ["    current_user: User = request.state.current_user"] : []),
   ];
   // Wire params → domain locals (brand ids, build VOs) once up front.
   for (const p of wf.params) {
@@ -174,18 +241,16 @@ function workflowRoute(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
   }
   const repos = reposFor(wf);
   for (const r of repos) {
-    out.push(
-      `    ${snake(r.repoName)} = ${r.aggName}Repository(session, NoopDomainEventDispatcher())`,
-    );
+    out.push(`    ${snake(r.repoName)} = ${r.aggName}Repository(session, ${dispatcherExpr})`);
   }
   const hasEmit = collectEmits(wf.statements).length > 0;
   if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
-  out.push(...renderWorkflowStmts(wf.statements, pyWorkflowStmtTarget(), "    "));
+  out.push(...renderWorkflowStmts(wf.statements, pyWorkflowStmtTarget(undefined, ctx), "    "));
   for (const save of wf.savesAtExit) {
     out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
   }
   if (hasEmit) {
-    out.push("    dispatcher = NoopDomainEventDispatcher()");
+    out.push(`    dispatcher = ${dispatcherExpr}`);
     out.push("    for ev in workflow_events:");
     out.push("        await dispatcher.dispatch(ev)");
   }
@@ -195,43 +260,59 @@ function workflowRoute(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
 
 // The Python leaf table for the shared workflow statement spine
 // (`_workflow/stmt-target.ts`). One method per `WorkflowStmtIR` kind; the
-// dispatch + `for-each` recursion live in the spine.
-function pyWorkflowStmtTarget(): WorkflowStmtTarget {
+// dispatch + `for-each` recursion live in the spine.  The table closes
+// over the render context (saga handlers render `this.<state>` against
+// the tracked row via `thisName: "state"`) and, when a context is
+// given, threads the actor into currentUser-gated op-calls.
+export function pyWorkflowStmtTarget(
+  rctx: PyRenderContext = { thisName: "self" },
+  ctx?: EnrichedBoundedContextIR,
+): WorkflowStmtTarget {
   return {
     indentUnit: "    ",
     precondition: (st, i) => [
-      `${i}if not (${renderPyExpr(st.expr)}):`,
+      `${i}if not (${renderPyExpr(st.expr, rctx)}):`,
       `${i}    raise DomainError(${JSON.stringify(`Precondition failed: ${st.source}`)})`,
     ],
     requires: (st, i) => [
-      `${i}if not (${renderPyExpr(st.expr)}):`,
+      `${i}if not (${renderPyExpr(st.expr, rctx)}):`,
       `${i}    raise ForbiddenError(${JSON.stringify(`Forbidden: ${st.source}`)})`,
     ],
     emit: (st, i) => {
-      const kwargs = st.fields.map((f) => `${snake(f.name)}=${renderPyExpr(f.value)}`).join(", ");
+      const kwargs = st.fields
+        .map((f) => `${snake(f.name)}=${renderPyExpr(f.value, rctx)}`)
+        .join(", ");
       return [`${i}workflow_events.append(${st.eventName}(${kwargs}))`];
     },
     factoryLet: (st, i) => {
-      const kwargs = st.fields.map((f) => `${snake(f.name)}=${renderPyExpr(f.value)}`).join(", ");
+      const kwargs = st.fields
+        .map((f) => `${snake(f.name)}=${renderPyExpr(f.value, rctx)}`)
+        .join(", ");
       return [`${i}${snake(st.name)} = ${st.aggName}.create(${kwargs})`];
     },
     repoLet: (st, i) => {
-      const args = st.args.map((a) => renderPyExpr(a)).join(", ");
+      const args = st.args.map((a) => renderPyExpr(a, rctx)).join(", ");
       return [`${i}${snake(st.name)} = await ${snake(st.repoName)}.${snake(st.method)}(${args})`];
     },
     repoRun: (st, i) => {
       const args = [
-        ...st.retrievalArgs.map((a) => renderPyExpr(a)),
-        ...(st.page?.offset ? [`offset=${renderPyExpr(st.page.offset)}`] : []),
-        ...(st.page?.limit ? [`limit=${renderPyExpr(st.page.limit)}`] : []),
+        ...st.retrievalArgs.map((a) => renderPyExpr(a, rctx)),
+        ...(st.page?.offset ? [`offset=${renderPyExpr(st.page.offset, rctx)}`] : []),
+        ...(st.page?.limit ? [`limit=${renderPyExpr(st.page.limit, rctx)}`] : []),
       ].join(", ");
       return [
         `${i}${snake(st.name)} = await ${snake(st.repoName)}.run_${snake(st.retrievalName)}(${args})`,
       ];
     },
-    exprLet: (st, i) => [`${i}${snake(st.name)} = ${renderPyExpr(st.expr)}`],
+    exprLet: (st, i) => [`${i}${snake(st.name)} = ${renderPyExpr(st.expr, rctx)}`],
     opCall: (st, i) => {
-      const args = st.args.map((a) => renderPyExpr(a)).join(", ");
+      // A currentUser-gated op takes the actor as its trailing argument
+      // (in scope: the route bound `current_user` for this workflow).
+      const op = ctx ? lookupOp(ctx, st.aggName, st.op) : undefined;
+      const args = [
+        ...st.args.map((a) => renderPyExpr(a, rctx)),
+        ...(op && operationUsesCurrentUser(op) ? ["current_user"] : []),
+      ].join(", ");
       return [`${i}${snake(st.target)}.${snake(st.op)}(${args})`];
     },
     forEach: (st, i, body) => {
@@ -239,11 +320,11 @@ function pyWorkflowStmtTarget(): WorkflowStmtTarget {
         (s) => `${i}    await ${snake(s.repoName)}.save(${snake(s.name)})`,
       );
       return [
-        `${i}for ${snake(st.var)} in ${renderPyExpr(st.iterable)}:`,
+        `${i}for ${snake(st.var)} in ${renderPyExpr(st.iterable, rctx)}:`,
         ...(body.length + saves.length > 0 ? [...body, ...saves] : [`${i}    pass`]),
       ];
     },
-    // Resource adapters land with S16 — surface loudly, not silently.
+    // Resource adapters stay a recorded follow-up — surface loudly.
     resourceCall: (_st, i) => [
       `${i}raise NotImplementedError("resource operations land with the extern slice")`,
     ],

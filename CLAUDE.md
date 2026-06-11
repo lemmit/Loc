@@ -39,11 +39,13 @@ npm run test:svelte-build # LOOM_SVELTE_BUILD=1 — emits SvelteKit projects (ex
                           # CI shards via LOOM_SVELTE_BUILD_CASE=<ddd-path>:<pack>
 npm run test:dotnet       # LOOM_DOTNET_BUILD=1 — `dotnet build /warnaserror` against generated .NET projects
 npm run test:java         # LOOM_JAVA_BUILD=1 — `gradle testClasses bootJar` against generated Spring Boot projects (JDK 21 + Gradle)
+npm run test:python       # LOOM_PYTHON_BUILD=1 — `uv sync` + `ruff check` + `mypy --strict` + `pytest` against generated FastAPI projects (uv)
 npm run test:phoenix      # LOOM_PHOENIX_BUILD=1 — `mix compile --warnings-as-errors` against real Ash 3.x in Elixir docker
 npm run test:obs          # LOOM_OBS_E2E=1 — boots generated Hono backend, asserts catalog envelope on stdout
 npm run test:obs-dotnet   # LOOM_OBS_E2E_DOTNET=1 — same for the .NET backend (postgres sidecar via docker)
 npm run test:obs-phoenix  # LOOM_OBS_E2E_PHOENIX=1 — same for the Phoenix backend (postgres sidecar via docker)
 npm run test:obs-java     # LOOM_OBS_E2E_JAVA=1 — same for the Java backend (docker postgres, or LOOM_OBS_PG_URL override)
+npm run test:obs-python   # LOOM_OBS_E2E_PYTHON=1 — same for the Python backend (docker postgres, or LOOM_OBS_PG_URL override)
 npm run test:biome-gen    # LOOM_BIOME=1 — Biome lint against emitted TS/TSX (already run in `test.yml`)
 ```
 
@@ -52,7 +54,7 @@ npm run test:biome-gen    # LOOM_BIOME=1 — Biome lint against emitted TS/TSX (
 ### CLI
 
 ```bash
-node bin/cli.js new <name> [--platform hono|dotnet|elixir|java] [--template blank|crud] [--design <pack>]  # scaffold a starter project (main.ddd + README + .loomignore), validated before writing
+node bin/cli.js new <name> [--platform hono|dotnet|elixir|java|python] [--template blank|crud] [--design <pack>]  # scaffold a starter project (main.ddd + README + .loomignore), validated before writing
 node bin/cli.js parse <file.ddd>                       # parse + validate, exit non-zero on errors
 node bin/cli.js generate ts     <file.ddd> -o <out>    # single Hono project (legacy single-context mode)
 node bin/cli.js generate dotnet <file.ddd> -o <out>    # single .NET project (legacy)
@@ -198,10 +200,10 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `hono-build.yml` — fast `tsc --noEmit` + `tsup` gate against the Hono backend output.
 - `dotnet-build.yml` — `dotnet build /warnaserror` against the .NET output.
 - `java-build.yml` — `gradle testClasses bootJar` (main + emitted JUnit sources) against the Java output.
+- `python-build.yml` — `uv sync` + `ruff check` + `mypy --strict` + `pytest` against the Python/FastAPI output.
 - `elixir-ash-build.yml` — `mix deps.get && mix compile --warnings-as-errors` against the real Ash 3.x dep set in an Elixir docker image.
 - `elixir-vanilla-build.yml` — same, against the vanilla Ecto/Phoenix (non-Ash) foundation.
-- `python-build.yml` — build gate against the generated Python/FastAPI output.
-- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-ash-obs-e2e.yml` / `java-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout). No Python obs-e2e gate yet.
+- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-ash-obs-e2e.yml` / `java-obs-e2e.yml` / `python-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout).
 - `generated-svelte-build.yml` — matrix `{example × svelte pack}`, generates the SvelteKit project and typechecks it (the Svelte analogue of `generated-react-build.yml`). Vue has no dedicated generated-build workflow yet (it rides the fast vitest suite).
 - `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview).
 - `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader run).

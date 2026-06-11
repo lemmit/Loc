@@ -744,6 +744,53 @@ provenance/audited (gated like .NET).  See
 
 ---
 
+## Python backend (`platform: python`)
+
+FastAPI / SQLAlchemy 2 (typed declarative, async) / asyncpg / Postgres,
+managed by **uv** (Python 3.12) and held to `ruff check` + `mypy
+--strict` + `pytest` by the `LOOM_PYTHON_BUILD` gate.  Emission lives in
+`src/generator/python/`; the surface is `src/platform/python.ts`
+(`python@v1`; `platform: fastapi` desugars to `python` the way `hono` →
+`node`).  Async end-to-end: `async def` handlers over a per-request
+`AsyncSession` — repositories `flush()`, the session dependency commits
+once after the handler returns, so multi-save workflows are atomic by
+construction.
+
+Per deployable it emits:
+
+| Piece | Files |
+|---|---|
+| Project shell | `pyproject.toml` (uv, pinned deps, ruff/mypy/pytest config), `app/main.py` (lifespan: verifier/extern asserts → migrations → seeds; CORS; `/health` + `/ready`), `app/settings.py`, `app/db/engine.py`, `python:3.12-slim + uv` Dockerfile |
+| Domain | `NewType`-branded str ids, `StrEnum`s, VO classes with invariant ctors, frozen-dataclass events + dispatcher protocol, aggregate/part classes (private state, `@property` accessors, `create` factory, `pull_events()`) |
+| Persistence | `app/db/schema.py` SQLAlchemy models (`Mapped[...]`, dataSource-routed `__table_args__` schema, `Uuid(as_uuid=False)` ids, flattened VO columns, join tables), per-aggregate repositories (`find_by_id`/`get_by_id`/`all`/declared finds/`save` diff-sync/`to_wire` from `wireShape`), `where` clauses lowered to SQLAlchemy predicates incl. correlated-EXISTS `contains` |
+| Migrations | `MigrationsIR` → `migrations/*.sql` via the shared Postgres-SQL renderer + `app/db/migrate.py`, a `__loom_migrations`-tracked boot-time runner (also `python -m app.db.migrate`) |
+| API | APIRouter per aggregate (`POST /` 201 `{id}`, `GET /`, `GET /{id}`, `POST /{id}/<op_snake>` 204, `GET /<find_snake>`, `DELETE /{id}` with 409), Pydantic wire DTOs in `wireShape` order, named `<Agg>ListResponse` array components, paged carriers, discriminated-union finds/returns, RFC 7807 handlers (+ §3.2 `errors[]` on 422), the shared per-route error matrix re-keyed to `application/problem+json` by an `install_openapi` post-processor |
+| Inheritance / ES | TPC + TPH (`kind`-scoped shared table, base readers), `persistedAs(eventLog)` append-only stream + applier folds |
+| Sagas | `app/dispatch.py` in-process dispatcher when a channel routes a subscribed event — `create(e) by …` load-or-allocates the persisted correlation row, `on(e) by …` routes or drops + logs `event_unrouted`; handler emits re-enter |
+| Auth | `auth: required` + `user {}` → `app/auth/` (frozen `User` dataclass, verifier registry, middleware with the cross-backend bypass list) + a dev-stub verifier registered in `main.py`; `current_user` threads into ops/finds/workflows as a trailing parameter |
+| Seeds / extern | `app/db/seed.py` (`__loom_seed` ship-once marker, LOOM_SEED gating, schema-qualified raw INSERTs); `app/domain/<agg>_handlers.py` extern registries (TypedDict requests, dev-stubs, boot verify) with routes running load → `check_<op>` → handler → `assert_invariants` → save |
+| Fullstack | `ui:` embeds the React SPA (dotnet parity): routers under `/api/*`, ClientApp/ generation, wwwroot FileResponse fallback, multi-stage Dockerfile |
+| Tests | `test "…"` → pytest under `tests/` (synthetic admin actor threads into gated ops) |
+| Observability | `app/obs/` — flat-JSON catalog envelope (`ts`/`level`/`event`/`request_id`) on stdout, lifecycle bracket, request bracket middleware with `x-request-id` correlation, fault warns in the problem handlers |
+
+Expression rendering is the `PY_TARGET` leaf table over the shared
+`ExprTarget` dispatcher: native `Decimal` money arithmetic,
+comprehension-shaped collection ops, `re.search` regex, snake_case
+member folding.
+
+Conformance: a `pythonApi` deployable ships in `examples/showcase.ddd`
+and the e2e OpenAPI cross-check compares it pairwise against Hono /
+.NET / Phoenix (strict in `conformance-parity.yml`).
+
+**Not yet implemented** (fails fast / follow-ups): resource verb
+clients (`objectStore`/`queue`/`api` adapters), durable-channel outbox
+tier, `--trace` domain instrumentation, `shape(document|embedded)`
+(`PLATFORM_SAVING_SHAPES.python` is relational-only), `when` can-queries
+(python absent from `SUPPORTED_WHEN_BACKENDS`), and provenance/audited
+(gated like .NET).
+
+---
+
 ## System orchestration
 
 `generate system` (in `src/system/index.ts`) runs each deployable
