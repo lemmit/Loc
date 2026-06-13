@@ -20,6 +20,7 @@ import { snake, upperFirst } from "../../util/naming.js";
 import { renderActions, renderPolicies, renderPolicyChecks } from "./domain/actions.js";
 import {
   ashBuiltinValidate,
+  exprRefsNonAttribute,
   exprUsesThis,
   isGuardedOperation,
   isRefCollection,
@@ -555,9 +556,22 @@ function renderValidations(
     // (force? so it materialises mid-validation, before required-checks pass)
     // returns the would-be record with the casted attributes applied.
     const needsRecord = exprUsesThis(inv.expr) || (inv.guard ? exprUsesThis(inv.guard) : false);
-    const recordLine = needsRecord
-      ? "      {:ok, record} = Ash.Changeset.apply_attributes(changeset, force?: true)\n"
-      : "";
+    // `apply_attributes` materialises the new scalar values but leaves
+    // relationships `%Ash.NotLoaded{}` and derived calcs unrun.  An invariant
+    // that touches a containment (`pipelines.count`) or derived field must
+    // therefore fall back to `changeset.data` — on a create its guard is
+    // typically vacuously false (the attribute it keys on is nil), so it's
+    // skipped rather than crashing on the unloaded relationship.  Attribute-
+    // only invariants use the applied (new) values so create-time predicates
+    // (`Regex.match?(record.email, …)`) see the submitted data, not nil.
+    const refsNonAttr =
+      exprRefsNonAttribute(inv.expr, fieldNames) ||
+      (inv.guard ? exprRefsNonAttribute(inv.guard, fieldNames) : false);
+    const recordLine = !needsRecord
+      ? ""
+      : refsNonAttr
+        ? "      record = changeset.data\n"
+        : "      {:ok, record} = Ash.Changeset.apply_attributes(changeset, force?: true)\n";
     if (inv.guard) {
       const guardStr = renderExpr(inv.guard, ctx);
       // Guard-first: when the guard is false the invariant doesn't apply

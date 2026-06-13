@@ -7,6 +7,7 @@ import { NodeFileSystem } from "langium/node";
 import { beforeAll, describe, expect, it } from "vitest";
 import { emitApiControllers } from "../../../src/generator/elixir/api-emit.js";
 import { renderPolicies } from "../../../src/generator/elixir/domain/actions.js";
+import { exprRefsNonAttribute } from "../../../src/generator/elixir/domain/predicates.js";
 import { emitAggregateResources } from "../../../src/generator/elixir/domain-emit.js";
 import { renderJasonCamelCaseModule } from "../../../src/generator/elixir/jason-camel-emit.js";
 import { emitOpenApiSpec } from "../../../src/generator/elixir/openapi-emit.js";
@@ -951,6 +952,29 @@ describe("Ash validate clause emission (domain-emit unit)", () => {
     );
     // The stale binding must be gone from the validations.
     expect(customerEx).not.toMatch(/record = changeset\.data/);
+  });
+
+  it("exprRefsNonAttribute distinguishes scalar-attribute refs from containment/derived", () => {
+    const attrs = new Set(["name", "email"]);
+    const ref = (name: string, refKind: string) =>
+      ({
+        kind: "ref",
+        name,
+        refKind,
+        type: { kind: "primitive", name: "string" },
+      }) as unknown as Parameters<typeof exprRefsNonAttribute>[0];
+    // Scalar attribute → safe for apply_attributes.
+    expect(exprRefsNonAttribute(ref("email", "this-prop"), attrs)).toBe(false);
+    // A containment relationship (`pipelines.count`) is `%Ash.NotLoaded{}` on a
+    // create changeset's applied attributes → must fall back to changeset.data.
+    const pipelinesCount = {
+      kind: "member",
+      receiver: ref("pipelines", "this-prop"),
+      member: "count",
+    } as unknown as Parameters<typeof exprRefsNonAttribute>[0];
+    expect(exprRefsNonAttribute(pipelinesCount, attrs)).toBe(true);
+    // A derived calculation isn't run at validation time either.
+    expect(exprRefsNonAttribute(ref("pipelineCount", "this-derived"), attrs)).toBe(true);
   });
 });
 
