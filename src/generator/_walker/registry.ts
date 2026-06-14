@@ -84,6 +84,7 @@ import {
   renderQueryView as renderQueryViewHeex,
   renderSection as renderSectionHeex,
   renderSkeleton as renderSkeletonHeex,
+  renderSlot as renderSlotHeex,
   renderStack as renderStackHeex,
   renderStat as renderStatHeex,
   renderSticky as renderStickyHeex,
@@ -263,7 +264,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   Anchor: { group: "layout", admissibleInSource: true, tsx: emitAnchor, heex: renderAnchorHeex },
   Image: { group: "layout", admissibleInSource: true, tsx: emitImage, heex: renderImageHeex },
   Avatar: { group: "layout", admissibleInSource: true, tsx: emitAvatar, heex: renderAvatarHeex },
-  Slot: { group: "layout", admissibleInSource: true, tsx: emitSlot },
+  Slot: { group: "layout", admissibleInSource: true, tsx: emitSlot, heex: renderSlotHeex },
   Heading: {
     group: "layout",
     admissibleInSource: true,
