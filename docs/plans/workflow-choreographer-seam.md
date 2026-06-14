@@ -256,12 +256,39 @@ workflow examples (acme, showcase, vue-showcase, dotnet-backend, storefront-dotn
 — the last a transactional `checkout` saga) — **1,230 files, zero diff** — plus
 the full `test/generator/dotnet/` suite (256 tests) and both layering guards green.
 
-## Next step
+## Elixir — assessed, declined (the seam is complete at 4 of 5)
 
-Only **Elixir** remains, and it is the **conditional** one (see Risks): its body
-composes as a `with`-chain and `for-each` lowers to `Enum.reduce_while` — a
-different control-flow *topology*, not just spelling. Assess whether it fits the
-spine without a leaky "compose mode"; if not, Elixir keeps its own emitter and
-the seam is declared done at 4 of 5 backends. The envelope
-(transaction/dispatch/route shell) is explicitly **out of scope** — it stays
-per-backend on every adopter.
+Elixir was always the conditional one, and the assessment lands on **keep its own
+emitter**. This is the pre-registered decision criterion from Risks firing, not a
+new judgment.
+
+The evidence is structural, in `src/generator/elixir/workflow-emit.ts`:
+
+- `renderWorkflowStmt` returns **`WorkflowBodyLine[]`** — tagged objects
+  (`kind: "with-clause" | "emit" | "precondition" | "requires" | "expr" | "stmt"
+  | "loop"`, plus an optional `bindName`) — **not** the flat `string[]` the
+  `WorkflowStmtTarget` arms return.
+- A separate assembly pass (`renderTransactionalBody` / `renderSequentialBody`)
+  does **not** concatenate in declaration order. It **partitions** lines by kind,
+  **hoists** `precondition`/`requires` guards to run *before* the transaction,
+  **regroups** `expr` + `with-clause` lines into a single `with c1, c2, … do
+  {:ok, <lastBind>} end` chain, falls back to ordered-sequence mode only when a
+  `stmt`/`loop` line is present, and appends `emit`s as a trailing section.
+- `for-each` lowers to `Enum.reduce_while` with a *different* per-statement
+  renderer (`renderLoopBodyStmt`) that threads `{:cont, _}` / `{:halt, _}`
+  accumulators — not the top-level arms.
+
+The shared spine's whole premise is "each arm → flat `string[]` at an indent; the
+spine concatenates in order." Elixir reorders, regroups, and re-tags — its body
+*topology* is computed from the tagged lines, the same class of mismatch that
+keeps **HEEx on a parallel walker** (audit finding #5). Forcing it would mean
+inverting `renderWorkflowStmts` to emit structured tagged lines plus a
+per-backend assembler hook — complicating the seam for the four backends that
+simply concatenate, purely to fit the fifth. That is the "compose-mode" leakage
+Risks explicitly rules out.
+
+**Verdict:** the `WorkflowStmtTarget` seam is **done at 4 of 5 backends** (Hono,
+Python, Java, .NET). Elixir's bespoke `with`-chain emitter stays. The seam still
+delivers its payoff — a new `WorkflowStmtIR` kind is a compile error across all
+four concatenating backends at once — and Elixir's compiler-flagged switch keeps
+it honest on its own terms.
