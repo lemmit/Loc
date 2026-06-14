@@ -12,6 +12,10 @@ import type {
 import { contextUsesMoney, uiUsesMoney } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
+import {
+  buildExternFunctionShim,
+  buildExternFunctionSignature,
+} from "../_frontend/extern-functions.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { buildViewsApiModule, hasAnyView } from "../_frontend/views-module.js";
@@ -138,6 +142,22 @@ export function generateVueForContexts(
   }
   const pageRoutes = new Map<string, string>();
   for (const page of pages) pageRoutes.set(page.name, page.route!);
+
+  // Extern frontend functions (extern-function-hook-escape-hatch.md §3):
+  // the SAME two machine-owned files as react — the wire-DTO-typed
+  // signature (`src/lib/extern/<name>.signature.ts`; Vue keeps the api
+  // modules at `src/api/` like react, so the default `"../../api"`
+  // import root is correct) and the conformance shim
+  // (`src/lib/<name>.ts`).  Body calls register through
+  // `externFunctionNames`; the page shell imports each used shim as
+  // `<relPrefix>lib/<name>`.
+  const externFunctionNames = new Set<string>();
+  for (const fn of ui.functions ?? []) {
+    externFunctionNames.add(fn.name);
+    out.set(`src/lib/extern/${fn.name}.signature.ts`, buildExternFunctionSignature(fn));
+    out.set(`src/lib/${fn.name}.ts`, buildExternFunctionShim(fn));
+  }
+
   for (const page of pages) {
     if (!page.body) {
       out.set(pagePath(page), renderPageStub(page));
@@ -159,6 +179,7 @@ export function generateVueForContexts(
       bcByWorkflow,
       new Map(),
       pageRoutes,
+      externFunctionNames,
     );
     out.set(
       pagePath(page),

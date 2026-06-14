@@ -286,6 +286,13 @@ export function renderVuePage(input: VuePageShellInput): string {
   if (usesLoomForm) {
     script.push(`import { useLoomForm } from "${relPrefix(input)}lib/form";`);
   }
+  // Extern frontend functions called from the body — one conformance-
+  // shim import per used name (`src/lib/<name>.ts`).  The shim re-exports
+  // the user's impl behind the Loom-derived signature, so call sites get
+  // a stable import regardless of where the user's module lives.
+  for (const name of [...(result.usedExternFunctions ?? new Set<string>())].sort()) {
+    script.push(`import { ${name} } from "${relPrefix(input)}lib/${name}";`);
+  }
   for (const [from, names] of [...apiImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const adjusted = adjustDepth(from, input);
     script.push(`import { ${[...names].sort().join(", ")} } from "${adjusted}";`);
