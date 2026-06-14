@@ -154,27 +154,40 @@ describe("typescript generator", () => {
   });
 
   describe("request observability", () => {
-    it("emits obs/als.ts wiring the bound child logger into AsyncLocalStorage", async () => {
+    it("emits obs/als.ts wiring the ambient RequestContext into AsyncLocalStorage", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
       const als = files.get("obs/als.ts")!;
       // Non-HTTP code (repository, dispatcher, domain on --trace) resolves
-      // the request-scoped logger through `requestLog()` which reads from
-      // Node's AsyncLocalStorage — wired by the request-id middleware.
+      // the ambient RequestContext (correlation id, principal, locale,
+      // scope id, logger) through `requestContext()` / `requestLog()`,
+      // which read Node's AsyncLocalStorage — wired by the request-id
+      // middleware.
       expect(als).toMatch(/from "node:async_hooks"/);
+      expect(als).toMatch(/export interface RequestContext \{/);
+      expect(als).toMatch(/correlationId: string;/);
+      expect(als).toMatch(/scopeId: string;/);
+      expect(als).toMatch(/parentId: string \| null;/);
       expect(als).toMatch(
-        /export const requestLogStore = new AsyncLocalStorage<\{ log: RequestLogger \}>/,
+        /export const requestContextStore = new AsyncLocalStorage<RequestContext>/,
       );
+      expect(als).toMatch(/export function requestContext\(\): RequestContext \| undefined/);
       // Outside-request fallback to baseLogger so the helper never throws.
       expect(als).toMatch(/export function requestLog\(\): RequestLogger \{[\s\S]+baseLogger/);
     });
 
-    it("request-id middleware wraps next() in requestLogStore.run so non-HTTP code resolves the same logger", async () => {
+    it("request-id middleware opens the RequestContext and echoes correlation on both headers", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
       const reqId = files.get("obs/request-id.ts")!;
-      expect(reqId).toMatch(/import \{ requestLogStore \} from "\.\/als"/);
-      expect(reqId).toMatch(/await requestLogStore\.run\(\{ log \}, async \(\) => \{/);
+      expect(reqId).toMatch(/import \{ type RequestContext, requestContextStore \} from "\.\/als"/);
+      expect(reqId).toMatch(/await requestContextStore\.run\(ctx, async \(\) => \{/);
+      // Reads X-Correlation-Id, falls back to X-Request-Id; echoes both.
+      expect(reqId).toMatch(
+        /c\.req\.header\(CORRELATION_ID_HEADER\) \?\? c\.req\.header\(REQUEST_ID_HEADER\)/,
+      );
+      expect(reqId).toMatch(/c\.res\.headers\.set\(CORRELATION_ID_HEADER, correlationId\)/);
+      expect(reqId).toMatch(/c\.res\.headers\.set\(REQUEST_ID_HEADER, correlationId\)/);
     });
 
     it("--trace off: domain file imports no infra and statements stay byte-identical", async () => {
@@ -448,19 +461,23 @@ describe("typescript generator", () => {
       const reqId = files.get("obs/request-id.ts")!;
       // Mints a fresh UUID when no inbound header is set.
       expect(reqId).toMatch(/randomUUID\(\)/);
-      // Honours an inbound X-Request-Id header.
+      // Honours an inbound X-Correlation-Id / X-Request-Id header.
+      expect(reqId).toMatch(/CORRELATION_ID_HEADER = "X-Correlation-Id"/);
       expect(reqId).toMatch(/REQUEST_ID_HEADER = "X-Request-Id"/);
-      expect(reqId).toMatch(/c\.req\.header\(REQUEST_ID_HEADER\)/);
-      // Echoes the value back on the response.  Set AFTER next()
-      // via direct headers mutation to avoid Hono's null-body
+      expect(reqId).toMatch(
+        /c\.req\.header\(CORRELATION_ID_HEADER\) \?\? c\.req\.header\(REQUEST_ID_HEADER\)/,
+      );
+      // Echoes the value back on the response (both headers).  Set AFTER
+      // next() via direct headers mutation to avoid Hono's null-body
       // (204/304) Response-construction trap.
-      expect(reqId).toMatch(/c\.res\.headers\.set\(REQUEST_ID_HEADER, requestId\)/);
+      expect(reqId).toMatch(/c\.res\.headers\.set\(CORRELATION_ID_HEADER, correlationId\)/);
+      expect(reqId).toMatch(/c\.res\.headers\.set\(REQUEST_ID_HEADER, correlationId\)/);
       // Stashes the bare id on the Hono context for downstream onError.
-      expect(reqId).toMatch(/c\.set\("requestId", requestId\)/);
+      expect(reqId).toMatch(/c\.set\("requestId", correlationId\)/);
       // Binds a per-request child logger with the request_id field, so
       // every downstream `c.get("log").info(...)` call is correlated
       // without the seam having to re-pass the id.
-      expect(reqId).toMatch(/baseLogger\.child\(\{ request_id: requestId \}\)/);
+      expect(reqId).toMatch(/baseLogger\.child\(\{ request_id: correlationId \}\)/);
       expect(reqId).toMatch(/c\.set\("log", log\)/);
       // Structured request_start + request_end log lines via pino.
       expect(reqId).toMatch(/log\.info\(\{ event: "request_start"/);
@@ -1493,6 +1510,21 @@ describe("typescript generator", () => {
       expect(mw).toMatch(/"\/health"/);
       expect(mw).toMatch(/"\/openapi\.json"/);
       expect(mw).toMatch(/"\/swagger"/);
+    });
+
+    it("auth middleware attaches the principal to the ambient RequestContext + exposes requireCurrentUser", async () => {
+      const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
+      const mw = files.get("auth/middleware.ts")!;
+      // The principal is written onto the carrier (read by non-HTTP code)
+      // as well as the Hono context (read by route handlers).
+      expect(mw).toMatch(/import \{ requestContext \} from "\.\.\/obs\/als"/);
+      expect(mw).toMatch(
+        /const ctx = requestContext\(\);\s*\n\s*if \(ctx\) ctx\.currentUser = user;/,
+      );
+      expect(mw).toMatch(/c\.set\("currentUser", user\)/);
+      // Ambient accessor — the analogue of .NET's ICurrentUserAccessor.User.
+      expect(mw).toMatch(/export function requireCurrentUser\(\): User/);
+      expect(mw).toMatch(/return user as User;/);
     });
 
     it("aggregate operation referencing currentUser gains a User parameter and the route threads currentUser into the call", async () => {
