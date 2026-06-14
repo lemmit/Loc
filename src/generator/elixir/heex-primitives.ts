@@ -926,6 +926,47 @@ export function renderSlot(_expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   ctx.slotUsed.value = true;
   return `{render_slot(@inner_block)}`;
 }
+
+/** `DestroyForm(of: <Agg>)` → a confirm-delete `<.button>` that calls the
+ *  aggregate's Ash destroy code interface (`destroy_<agg>!(id)`) and navigates
+ *  to its list route.  Requires a canonical `destroy` (declare `destroy { }`
+ *  or `with crudish`).  Hosted on a detail page, where the route `id` param is
+ *  assigned as `@id`.  The delete handler is recorded as a `byId` ActionBinding
+ *  and hoisted to the LiveView by the emitter (reusing `Action`'s machinery). */
+export function renderDestroyForm(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  let ofName: string | undefined;
+  let testid = "";
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (name === "of" && arg.kind === "ref") ofName = arg.name;
+    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  if (!ofName) return `<!-- DestroyForm: expected (of: <Agg>) -->`;
+  const agg = ctx.aggregatesByName.get(ofName);
+  if (!agg) return `<!-- DestroyForm(of: ${ofName}): aggregate not found -->`;
+  if (!agg.canonicalDestroy) {
+    return `<!-- DestroyForm(of: ${ofName}): no canonical destroy — declare 'destroy { }' (or use 'with crudish') -->`;
+  }
+  const eventName = `destroy_${snake(ofName)}`;
+  const thenRoute = `/${snake(plural(ofName))}`;
+  if (!ctx.actionBindings.some((b) => b.eventName === eventName)) {
+    ctx.actionBindings.push({
+      agg: ofName,
+      op: "destroy",
+      opHuman: "Delete",
+      eventName,
+      thenRoute,
+      byId: true,
+    });
+  }
+  const human = humanize(ofName);
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  return `<.button phx-click="${eventName}" phx-value-id={@id} data-confirm="Delete this ${human.toLowerCase()}? This cannot be undone." class="btn-danger"${testidAttr}>Delete ${human}</.button>`;
+}
 export function renderCard(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Card!, expr, ctx);
 }

@@ -58,18 +58,9 @@ const KNOWN_HEEX_GAPS: Record<string, string> = {
   Toggle: "DECLINED — form sub-element; standalone boolean input has no LiveView changeset to bind",
   // --- DECLINED: stateful topology --------------------------------------
   Tabs: "DECLINED — interactive tab-switching needs LiveView handle_event + an active-tab assign (stateful topology), not a markup mapping",
-  // DestroyForm is also stateful, and additionally uncovered by any compile
-  // gate.  A LiveView delete is a `handle_event` clause calling the Ash
-  // destroy code-interface (`<Context>.destroy_<agg>!(id)`) + a
-  // `push_navigate` to the aggregate's list route — and that navigation uses
-  // a *compile-checked* verified route (`~p"/…"`).  No example or scaffold
-  // emits DestroyForm, so `build-generated-phoenix` would NOT compile-validate
-  // it; shipping the wiring blind risks a broken `~p` route that passes CI but
-  // breaks for any user who writes DestroyForm.  Implementing it properly means
-  // adding the handler/Ash-destroy wiring AND Phoenix example coverage — a
-  // focused effort, not a markup mapping.
-  DestroyForm:
-    "DECLINED — stateful LiveView delete (handle_event + Ash destroy + compile-checked ~p route nav), and uncovered by any compile gate; needs handler wiring + example coverage, not a markup mapping",
+  // (DestroyForm now renders a confirm-delete <.button> wired to the Ash
+  //  destroy action via a byId ActionBinding — no longer a gap.  showcase.ddd's
+  //  ProjectDetail exercises it, so build-generated-phoenix compile-validates it.)
 };
 
 describe("HEEx walker parity (finding #5)", () => {
