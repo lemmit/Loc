@@ -1,0 +1,14 @@
+  <Dialog v-model:open="{{openVar}}">
+    <DialogContent>
+      <DialogHeader><DialogTitle>{{title}}</DialogTitle></DialogHeader>
+      <form data-testid="{{ns}}-form" @submit.prevent='{{formVar}}.handleSubmit(async (vals) => { await {{mutVar}}.mutateAsync(vals); {{openVar}} = false; })($event)'>
+        <div class="flex flex-col gap-4">
+{{{fieldsHtml}}}
+          <div v-if='{{formVar}}.errors["__global"]' role="alert" class="rounded-lg border border-destructive/50 p-4 text-sm text-destructive">\{{ {{formVar}}.errors["__global"] }}</div>
+          <div class="mt-2 flex justify-end">
+            <Button type="submit" :disabled='{{mutVar}}.isPending' data-testid="{{ns}}-submit">{{submitLabel}}</Button>
+          </div>
+        </div>
+      </form>
+    </DialogContent>
+  </Dialog>

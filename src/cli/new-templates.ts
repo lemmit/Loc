@@ -16,7 +16,9 @@ export type DesignPack =
   | "chakra"
   | "ashPhoenix"
   | "shadcnSvelte"
-  | "flowbite";
+  | "flowbite"
+  | "vuetify"
+  | "shadcnVue";
 
 export const STARTER_PLATFORMS: readonly StarterPlatform[] = [
   "hono",
@@ -28,9 +30,13 @@ export const STARTER_PLATFORMS: readonly StarterPlatform[] = [
 export const STARTER_TEMPLATES: readonly StarterTemplate[] = ["blank", "crud"];
 export const REACT_DESIGN_PACKS: readonly DesignPack[] = ["mantine", "shadcn", "mui", "chakra"];
 export const SVELTE_DESIGN_PACKS: readonly DesignPack[] = ["shadcnSvelte", "flowbite"];
+/** Vue-format packs — picking one scaffolds a `platform: vue` frontend
+ *  (the design implies the frontend platform via its pack format). */
+export const VUE_DESIGN_PACKS: readonly DesignPack[] = ["vuetify", "shadcnVue"];
 export const DESIGN_PACKS: readonly DesignPack[] = [
   ...REACT_DESIGN_PACKS,
   ...SVELTE_DESIGN_PACKS,
+  ...VUE_DESIGN_PACKS,
   "ashPhoenix",
 ];
 
@@ -44,6 +50,8 @@ export const BACKEND_PORT: Record<StarterPlatform, number> = {
   python: 8000,
 };
 export const FRONTEND_PORT = 3001;
+/** The Vue frontend's port (mirrors the vue platform's defaultPort). */
+export const VUE_FRONTEND_PORT = 3003;
 
 /** Turn an arbitrary project name into a valid Loom system identifier
  *  (PascalCase, leading letter). `my-app` → `MyApp`, `123` → `App123`. */
@@ -135,9 +143,15 @@ function renderDeployment(platform: StarterPlatform, design: DesignPack, context
   }
 
   // Backend + a separate SPA frontend.  The design pack picks the
-  // frontend platform: react packs → `platform: react`, svelte packs
-  // (shadcnSvelte / flowbite) → `platform: svelte`.
-  const frontendPlatform = SVELTE_DESIGN_PACKS.includes(design) ? "svelte" : "react";
+  // frontend platform: svelte packs (shadcnSvelte / flowbite) →
+  // `platform: svelte`, vue packs (vuetify / shadcnVue) →
+  // `platform: vue`; everything else stays React.
+  const frontendPlatform = SVELTE_DESIGN_PACKS.includes(design)
+    ? "svelte"
+    : VUE_DESIGN_PACKS.includes(design)
+      ? "vue"
+      : "react";
+  const frontendPort = frontendPlatform === "vue" ? VUE_FRONTEND_PORT : FRONTEND_PORT;
   return `${storage}
 
   deployable api {
@@ -151,7 +165,7 @@ function renderDeployment(platform: StarterPlatform, design: DesignPack, context
     platform: ${frontendPlatform},
     targets: api,
     ui: WebApp,
-    port: ${FRONTEND_PORT},
+    port: ${frontendPort},
     design: ${design}
   }`;
 }

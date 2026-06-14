@@ -5,17 +5,13 @@
 // `docs/plans/vue-frontend-plan.md` for the platform plan.
 //
 // Generated pages are SFCs with a `<script setup lang="ts">` block:
-// state fields are `ref()`s, API handles are vue-query composables
-// hoisted in the script block, and block-body lambdas (where
-// `state :=` writes and api mutations live) hoist to script-level
-// handler functions.  That split drives the two position-dependent
-// seams:
-//
-//   - reads: bare name in TEMPLATE position (Vue auto-unwraps
-//     top-level refs in templates), `.value` in HANDLER position
-//     (script-level functions see the raw Ref);
-//   - writes: always `.value =` — writes only occur inside
-//     block-body lambdas, which the page shell hoists to script.
+// state fields are `ref()`s and API handles are vue-query composables
+// hoisted in the script block.  Everything the WALKER emits lands in
+// the SFC `<template>` (mustaches, directive attrs, inline handlers),
+// where Vue auto-unwraps top-level refs and compiles assignments to
+// them — so state reads/writes are bare names in both contract
+// positions; only the page shell's own script-side code touches
+// `.value`.
 // ---------------------------------------------------------------------------
 
 import type { ExprIR, StateFieldIR, TypeIR } from "../../../ir/types/loom-ir.js";
@@ -46,21 +42,22 @@ export const vueTarget: WalkerTarget = {
 
   // --- State seam ---------------------------------------------------------
 
-  /** Vue templates auto-unwrap top-level refs (`step` reads the
-   *  number), but script-position code sees the raw `Ref` and needs
-   *  `.value`.  This is the position-dependence the contract's
-   *  `RenderPosition` parameter exists for (HEEx precedent:
-   *  `@step` vs `socket.assigns.step`). */
-  renderStateRead(ref: StateRef, position: RenderPosition): string {
-    return position === "template" ? ref.name : `${ref.name}.value`;
+  /** Bare name in BOTH positions: every expression the shared walker
+   *  emits lands inside the SFC `<template>` (mustaches, `v-if`
+   *  attrs, inline `@click` handlers) where Vue auto-unwraps
+   *  top-level refs — and Vue compiles assignments to setup refs in
+   *  inline handlers too.  Script-position code is the page shell's
+   *  own (it writes `.value` itself). */
+  renderStateRead(ref: StateRef, _position: RenderPosition): string {
+    return ref.name;
   },
 
-  /** `step.value = <expr>` — `state :=` writes occur inside
-   *  block-body lambdas, which the Vue page shell hoists to
-   *  script-level handler functions (never inline template
-   *  expressions), so the script-position form is always right. */
+  /** `step = <expr>` — `state :=` writes occur inside inline
+   *  template handlers where the SFC compiler rewrites unwrapped-ref
+   *  assignment; `.value` there would dereference the unwrapped
+   *  value instead. */
   renderStateWrite(ref: StateRef, value: string): string {
-    return `${ref.name}.value = ${value}`;
+    return `${ref.name} = ${value}`;
   },
 
   /** State-field initializer rendered as a JS expression.  Same
@@ -157,6 +154,38 @@ export const vueTarget: WalkerTarget = {
     elseArm: string | undefined,
   ): string {
     return renderJsMatch(arms, elseArm);
+  },
+
+  /** Child-position match — a structural `<template v-if>` /
+   *  `v-else-if` / `v-else` chain (Vue template expressions cannot
+   *  evaluate to markup, so the TSX brace-wrapped ternary has no
+   *  analogue).  Predicate attrs quote-collision-safe like
+   *  renderAttrBinding. */
+  renderMatchChild(
+    arms: ReadonlyArray<{ predicate: string; value: string }>,
+    elseArm: string | undefined,
+    depth: number,
+  ): string {
+    const pad = "  ".repeat(depth);
+    const inner = "  ".repeat(depth + 1);
+    const quoteCond = (cond: string): string => {
+      if (!cond.includes('"')) return `"${cond}"`;
+      if (!cond.includes("'")) return `'${cond}'`;
+      throw new Error(
+        `vueTarget.renderMatchChild: match predicate mixes single and double quotes — cannot be attribute-quoted: ${cond}`,
+      );
+    };
+    const blocks: string[] = [];
+    arms.forEach((arm, i) => {
+      const directive = i === 0 ? "v-if" : "v-else-if";
+      blocks.push(
+        `<template ${directive}=${quoteCond(arm.predicate)}>\n${inner}${arm.value}\n${pad}</template>`,
+      );
+    });
+    if (elseArm !== undefined) {
+      blocks.push(`<template v-else>\n${inner}${elseArm}\n${pad}</template>`);
+    }
+    return blocks.join(`\n${pad}`);
   },
 
   // --- Navigation seam ----------------------------------------------------

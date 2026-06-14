@@ -107,6 +107,16 @@ export const heexTarget: WalkerTarget = {
     return `cond do\n${armLines}${fallback}\n    end`;
   },
 
+  /** Unreachable in practice (the parallel heex-walker owns match
+   *  rendering); passthrough for contract completeness. */
+  renderMatchChild(
+    arms: ReadonlyArray<{ predicate: string; value: string }>,
+    elseArm: string | undefined,
+    _depth: number,
+  ): string {
+    return heexTarget.renderMatch(arms, elseArm);
+  },
+
   // --- Navigation seam ----------------------------------------------------
 
   /** `push_navigate(socket, to: ~p"/route?k=v")`.  Mirrors

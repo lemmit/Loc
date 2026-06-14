@@ -3,6 +3,7 @@ import type { ExprIR, InvariantIR } from "../../src/ir/types/loom-ir.js";
 import {
   classifyForWire,
   pickErrorPath,
+  singleFieldConstraints,
   singleFieldShape,
 } from "../../src/ir/validate/invariant-classify.js";
 
@@ -319,5 +320,62 @@ describe("pickErrorPath", () => {
       right: { kind: "literal", lit: "int", value: "1" },
     });
     expect(pickErrorPath(i)).toBeNull();
+  });
+});
+
+describe("singleFieldConstraints", () => {
+  const strField = (name: string): ExprIR => ({
+    kind: "ref",
+    name,
+    refKind: "this-prop",
+    type: StrT,
+  });
+  const bin = (op: "&&" | ">=" | "<=" | "!=", left: ExprIR, right: ExprIR): ExprIR =>
+    ({ kind: "binary", op, left, right }) as unknown as ExprIR;
+  const matches = (recv: ExprIR, pattern: string): ExprIR =>
+    ({
+      kind: "method-call",
+      receiver: recv,
+      member: "matches",
+      args: [{ kind: "literal", lit: "string", value: pattern }],
+      receiverType: StrT,
+      isCollectionOp: false,
+    }) as unknown as ExprIR;
+
+  it("splits a numeric `f >= N && f <= M` into separate min + max constraints", () => {
+    const i = inv(
+      bin("&&", bin(">=", refField("level"), litInt(1)), bin("<=", refField("level"), litInt(10))),
+    );
+    expect(singleFieldConstraints(i)).toEqual([
+      { field: "level", pattern: { kind: "min", n: 1 } },
+      { field: "level", pattern: { kind: "max", n: 10 } },
+    ]);
+  });
+
+  it("collects both regex AND len-max from `f.matches(r) && f.length <= N` (single field)", () => {
+    const i = inv(
+      bin(
+        "&&",
+        matches(strField("email"), "^x$"),
+        bin("<=", lengthOf(strField("email")), litInt(120)),
+      ),
+    );
+    expect(singleFieldConstraints(i)).toEqual([
+      { field: "email", pattern: { kind: "regex", pattern: "^x$" } },
+      { field: "email", pattern: { kind: "len-max", n: 120 } },
+    ]);
+  });
+
+  it("returns null for a cross-field invariant (not input-derivable)", () => {
+    expect(
+      singleFieldConstraints(inv(bin("!=", strField("handle"), strField("email")))),
+    ).toBeNull();
+  });
+
+  it("returns null when any conjunct is not a single-field shape", () => {
+    const i = inv(
+      bin("&&", bin(">=", refField("level"), litInt(1)), bin("!=", strField("a"), strField("b"))),
+    );
+    expect(singleFieldConstraints(i)).toBeNull();
   });
 });

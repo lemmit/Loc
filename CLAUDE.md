@@ -37,6 +37,8 @@ npm run test:tsc-react    # LOOM_REACT_BUILD=1 — emits React projects for ever
                           # CI shards via LOOM_REACT_BUILD_CASE=<ddd-path>:<pack>
 npm run test:svelte-build # LOOM_SVELTE_BUILD=1 — emits SvelteKit projects (examples × svelte packs), svelte-checks + vite-builds them
                           # CI shards via LOOM_SVELTE_BUILD_CASE=<ddd-path>:<pack>
+npm run test:vue-build    # LOOM_VUE_BUILD=1 — {minimal,scaffold,showcase} × {vuetify,shadcnVue}: vue-tsc + vite build
+                          # CI shards via LOOM_VUE_BUILD_CASE=<case>:<pack>
 npm run test:dotnet       # LOOM_DOTNET_BUILD=1 — `dotnet build /warnaserror` against generated .NET projects
 npm run test:java         # LOOM_JAVA_BUILD=1 — `gradle testClasses bootJar` against generated Spring Boot projects (JDK 21 + Gradle)
 npm run test:python       # LOOM_PYTHON_BUILD=1 — `uv sync` + `ruff check` + `mypy --strict` + `pytest` against generated FastAPI projects (uv)
@@ -153,6 +155,8 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 | `vscode/` | Separate package — VS Code extension (LSP client). Has its own `package.json`; builds against the compiled toolchain. |
 | `designs/` | Design packs (Mantine / shadcn / MUI / Chakra for React, Vuetify for Vue, shadcnSvelte / flowbite for Svelte, ashPhoenix for HEEx). Each pack is a tree of templates that the body-walker dispatches into. |
 | `api/`, `vite/`, `docker/`, `sveltekit/` | Top-level `.hbs` snippets — boilerplate for generated projects (API client, vite config, dockerfile; `sveltekit/` is the svelte-format packs' shared layer). |
+| `designs/` | Design packs (Mantine / shadcn / MUI / Chakra / ashPhoenix, plus the vue packs vuetify / shadcnVue). Each pack is a tree of templates that the body-walker dispatches into. |
+| `api/`, `vite/`, `docker/` | Top-level `.hbs` snippets — boilerplate for generated projects (API client, vite config, dockerfile). |
 | `stacks/v1/`, `v2/`, `v3/` | Versioned Handlebars templates for generated-project `package.json` dependency / devDependency blocks (`stack-package-deps.hbs`, `stack-package-devdeps.hbs`, `stack.json` manifest).  The active stack version is chosen per generated deployable based on its platform pins. |
 | `phoenix/` | Top-level companion docs for the Phoenix backend (README). |
 | `examples/`, `web/src/examples/` | Sample `.ddd` files. CI's `generated-react-build.yml` matrix iterates `examples/acme.ddd` + everything under `web/src/examples/` × every design pack. |
@@ -197,6 +201,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `pages.yml` — typecheck + smoke + build playground + deploy docs/playground to GitHub Pages (main only).
 - `generated-react-build.yml` — matrix `{example × pack}`, generates the React project, `npm install`, `tsc --noEmit`. Catches generator drift invisible to IR-level tests.
 - `generated-svelte-build.yml` — matrix `{example × svelte pack}`, generates the SvelteKit project, `npm install`, `svelte-check --fail-on-warnings`, `vite build`.
+- `generated-vue-build.yml` — the Vue sibling: `{case × vuetify@v3,shadcnVue@v1}`, `vue-tsc --noEmit` + `vite build` per cell.
 - `hono-build.yml` — fast `tsc --noEmit` + `tsup` gate against the Hono backend output.
 - `dotnet-build.yml` — `dotnet build /warnaserror` against the .NET output.
 - `java-build.yml` — `gradle testClasses bootJar` (main + emitted JUnit sources) against the Java output.

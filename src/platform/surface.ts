@@ -27,13 +27,19 @@ import type { MigrationsIR } from "../ir/types/migrations-ir.js";
 /** Frameworks that compile to static assets and are therefore hostable
  *  by any platform that serves a static root.  `static` is React's
  *  UI-only alias (same Vite-built bundle); `svelte` is the SvelteKit
- *  adapter-static bundle.  Future static-bundle frameworks
- *  (`angular`, `vue`) join here and become embeddable in every
- *  static-asset host with no per-host edit.  (Phoenix is the one
- *  exception — it serves embedded SPAs under the `/app` path prefix,
- *  which SvelteKit needs `paths.base` wiring for; its surface lists
- *  its hostable set explicitly until that lands.) */
-export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set(["react", "static", "svelte"]);
+ *  adapter-static bundle; `vue` is the Vite-built Vue 3 bundle.
+ *  Future static-bundle frameworks (`angular`) join here and become
+ *  embeddable in every static-asset host with no per-host edit.
+ *  (Phoenix is the one exception — it serves embedded SPAs under the
+ *  `/app` path prefix, which SvelteKit needs `paths.base` wiring
+ *  for; its surface lists its hostable set explicitly until that
+ *  lands.) */
+export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set([
+  "react",
+  "static",
+  "svelte",
+  "vue",
+]);
 
 // ---------------------------------------------------------------------------
 // Platform surface contract.
@@ -49,7 +55,14 @@ export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set(["react", "
 // for each ecosystem.
 //
 // Add a new platform by:
-//   1. Implement `PlatformSurface` in `src/platform/<name>/index.ts`.
+//   1. Implement `PlatformSurface`.  Two layouts exist (see
+//      docs/platforms.md):
+//      - DEFAULT — a thin `src/platform/<name>.ts` surface delegating to
+//        the emitters under `src/generator/<name>/`.  dotnet, elixir, java,
+//        python, react, vue and svelte all follow this.
+//      - VERSIONED PACKAGE — `src/platform/<family>/v<N>/index.ts`, a full
+//        in-tree backend package (only `hono` today; see
+//        docs/backend-packages.md).
 //   2. Register it in `src/platform/registry.ts`.
 //   3. Extend the `Platform` IR type + grammar.
 // ---------------------------------------------------------------------------

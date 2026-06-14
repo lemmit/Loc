@@ -1325,3 +1325,36 @@ What the second `WalkerTarget`-consuming frontend taught us:
   when a schema is shared between wire parsing and form validation,
   test BOTH inbound shapes behaviourally (the new
   `money-schema-runtime.test.ts` transpiles + executes the template).
+## Vue frontend (Phase B): what the second SPA target taught us
+
+- **The walker-contract bet paid off, with a twist.**  Vue needed
+  three NEW seams (`renderInterpolation`, `renderAttrBinding`,
+  `renderMatchChild`) — exactly the places Vue diverges from the JSX
+  family where Svelte doesn't (mustaches, `:attr` bindings, no
+  markup-valued ternaries).  Every extension was byte-identical for
+  TSX/HEEx, gated by the baseline fixture re-capture.  Lesson: budget
+  for contract growth when the new framework's TEMPLATE language
+  differs, not just its state model.
+- **Render-position is subtler than "template vs handler".**  The
+  original vueTarget design put `.value` on handler-position state
+  reads — wrong, because EVERYTHING the walker emits lands inside the
+  SFC template (inline `@click` handlers are template-scoped and Vue
+  compiles unwrapped-ref assignment).  Only the page shell's own
+  script code touches `.value` — including a targeted rewrite of
+  hook-hoist args, the single script-position landing site for
+  walker-rendered expressions.
+- **Quote discipline is a pack-authoring contract.**  Rendered JS
+  carries double-quoted string literals, so every JS-splicing
+  attribute in a vue pack is single-quoted (`@click='{{{onClick}}}'`),
+  and `vueTarget.renderAttrBinding` picks the collision-free quote
+  (throwing on mixed quotes).  A sweep test greps emitted `.vue` for
+  JSX artifacts + unrendered Handlebars.
+- **vue-query's nested refs**: hoist handles as `reactive(useX(...))`
+  so `x.data` reads correctly in template AND script.  Plain captured
+  args mean find-filters don't live-refetch yet — `MaybeRefOrGetter`
+  api params are the follow-up.
+- **Agent-translated packs work** (vuetify: 53 templates, shadcnVue:
+  ~100 incl. ui sources) when the prompt pins VM-field fidelity, the
+  escaping rules, and an end-to-end compile gate; the orchestrator-
+  side review then focuses on the handful of contract spots (form
+  bindings, dialog wiring, quote collisions) the gates surface.

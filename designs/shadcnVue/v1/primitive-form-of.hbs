@@ -1,0 +1,9 @@
+<form @submit.prevent='form.handleSubmit(async (vals) => {{{submitBody}}})($event)'{{{testidAttr}}}>
+{{indent}}<div class="flex flex-col gap-4">
+{{#each fieldHtmls}}{{../innerIndent}}{{{this}}}
+{{/each}}{{innerIndent}}<div v-if='form.errors["__global"]' role="alert" class="rounded-lg border border-destructive/50 p-4 text-sm text-destructive">\{{ form.errors["__global"] }}</div>
+{{innerIndent}}<div class="mt-2 flex justify-end">
+{{deepIndent}}<Button type="submit" :disabled='{{submitPendingExpr}}' :loading='{{submitPendingExpr}}' data-testid="{{submitTestid}}">{{submitLabel}}</Button>
+{{innerIndent}}</div>
+{{indent}}</div>
+{{closeIndent}}</form>

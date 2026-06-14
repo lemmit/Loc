@@ -44,7 +44,7 @@ const elixirPlatform: PlatformSurface = {
   // `paths.base` threading (nav hrefs, goto, asset URLs) to live
   // there — a follow-up (docs/plans/svelte-frontend-plan.md).  Root-
   // origin hosts (dotnet wwwroot) serve svelte today.
-  hostableFrameworks: new Set(["phoenixLiveView", "react", "static"]),
+  hostableFrameworks: new Set(["phoenixLiveView", "react", "static", "vue"]),
   // Ash code-interface conventions.  A user-declared find named one
   // of these would collide with the auto-generated CRUD action of
   // the same name on the resource module.

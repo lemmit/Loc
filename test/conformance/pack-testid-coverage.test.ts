@@ -62,7 +62,7 @@ interface PackUnderTest {
   dir: string;
   /** Human label for test names (`mantine@v9`). */
   label: string;
-  format: "tsx" | "heex" | "svelte";
+  format: "tsx" | "heex" | "svelte" | "vue";
 }
 
 const BUILT_IN_PACKS: ReadonlyArray<PackUnderTest> = [
@@ -75,10 +75,12 @@ const BUILT_IN_PACKS: ReadonlyArray<PackUnderTest> = [
   { dir: "designs/chakra/v2", label: "chakra@v2", format: "tsx" },
   { dir: "designs/chakra/v3", label: "chakra@v3", format: "tsx" },
   { dir: "designs/ashPhoenix/v3", label: "ashPhoenix@v3", format: "heex" },
-  // Svelte packs share the TSX contract — same walker, same
-  // testidAttr helper expansion in the templates.
+  // Svelte + Vue packs share the TSX contract — same walker, same
+  // testidAttr splices in the templates.
   { dir: "designs/shadcnSvelte/v1", label: "shadcnSvelte@v1", format: "svelte" },
   { dir: "designs/flowbite/v1", label: "flowbite@v1", format: "svelte" },
+  { dir: "designs/vuetify/v3", label: "vuetify@v3", format: "vue" },
+  { dir: "designs/shadcnVue/v1", label: "shadcnVue@v1", format: "vue" },
 ];
 
 // Phoenix testid emission is split between templates and the
@@ -106,7 +108,7 @@ function listPrimitives(packDir: string): { name: string; file: string }[] {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-describe("pack testid coverage — TSX + Svelte packs", () => {
+describe("pack testid coverage — TSX + Svelte + Vue packs", () => {
   for (const pack of BUILT_IN_PACKS) {
     if (pack.format === "heex") continue;
     it(`${pack.label}: every non-exempt primitive carries data-testid (template or partial)`, () => {

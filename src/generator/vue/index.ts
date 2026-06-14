@@ -12,16 +12,26 @@ import type {
 import { contextUsesMoney } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
+import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { buildViewsApiModule, hasAnyView } from "../_frontend/views-module.js";
 import { buildWorkflowsApiModule, hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
+import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
 import { walkBody } from "../_walker/walker-core.js";
-// Framework-neutral TS constant (zod moneySchema over decimal.js) that
-// happens to live with the React emit templates; shared the same way
-// the elixir theme-emit shares `prepareThemeVM`.  Candidate for a
-// later move into `_frontend/`.
-import { REACT_LIB_SCHEMAS_MONEY_TS } from "../react/emit-templates.js";
+// Framework-neutral pieces that live react-side today (same sharing
+// pattern as the elixir theme-emit): the e2e harness constants, the
+// page-object emitters (testid/DOM-only — `@loom/ui-test-driver`
+// drives any framework's markup), and the theme/money constants.
+// Candidates for a later `_frontend/` move.
+import {
+  E2E_FIXTURES_TS,
+  E2E_PACKAGE_JSON,
+  E2E_TSCONFIG_JSON,
+  PLAYWRIGHT_CONFIG_TS,
+  REACT_LIB_SCHEMAS_MONEY_TS,
+} from "../react/emit-templates.js";
+import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { prepareThemeVM } from "../react/templating/preparers/theme.js";
 import { renderVuePage } from "./walker/page-shell.js";
 import { vueTarget } from "./walker/vue-target.js";
@@ -43,15 +53,26 @@ import { vueTarget } from "./walker/vue-target.js";
 // route table, nav, and build gates are real.
 // ---------------------------------------------------------------------------
 
+/** Options for the Vue generator's secondary entry point — the
+ *  backend-host embedding path (dotnet / java / elixir hosting a
+ *  `framework: vue` ui).  Mirrors `GenerateReactOptions`:
+ *  `apiBaseUrl: "/api"` for same-origin fetches; `pathPrefix`
+ *  relocates the project under the host's SPA dir. */
+export interface GenerateVueOptions {
+  apiBaseUrl?: string;
+  pathPrefix?: string;
+}
+
 export function generateVueForContexts(
   contexts: EnrichedBoundedContextIR[],
   sys: SystemIR,
   deployable: DeployableIR,
+  options: GenerateVueOptions = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
 
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
-  const apiBaseUrl = `http://localhost:${target?.port ?? 8080}`;
+  const apiBaseUrl = options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
 
   const aggregates: Array<{ agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }> = [];
   for (const ctx of contexts) {
@@ -133,11 +154,33 @@ export function generateVueForContexts(
     );
     out.set(
       pagePath(page),
-      renderVuePage({ page, routeParams: page.params.map((p) => p.name), result }),
+      renderVuePage({ page, routeParams: page.params.map((p) => p.name), result, pack }),
     );
   }
   out.set("src/pages/NotFound.vue", renderShell(pack, "not-found-page", {}));
   out.set("src/router.ts", renderRouter(pages));
+
+  // Page objects + the Playwright e2e harness (vue-frontend-plan.md
+  // Slice 6).  Page objects are framework-neutral — testid/DOM only,
+  // driven by `@loom/ui-test-driver` — so the SAME builders the React
+  // generator uses emit them here; the testid contract is identical
+  // because the vuetify templates splice the same `{{{testidAttr}}}`
+  // values.  The smoke spec navigates by route (shared
+  // `_frontend/smoke-spec.ts`).
+  const pageObjects = emitPageObjectsForUi(ui, {
+    sys,
+    deployable,
+    aggregatesByName: aggregatesIRByName,
+    contextsByName: new Map(contexts.map((c) => [c.name, c])),
+    pack,
+    topLevelComponents: [],
+  });
+  for (const [path, content] of pageObjects) out.set(path, content);
+  out.set("e2e/smoke.spec.ts", smokeSpec(ui));
+  out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
+  out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
+  out.set("e2e/package.json", E2E_PACKAGE_JSON);
+  out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
   // Shared views / workflows api modules — 1:1 with the inventory,
   // same builders as React with the vue-query import.
@@ -188,7 +231,22 @@ export function generateVueForContexts(
   out.set(".dockerignore", renderShell(pack, "dockerignore", {}));
   out.set("certs/.gitkeep", "");
 
-  return out;
+  // Pack-specific extras — `shellFiles` and `shellGlobs` from
+  // pack.json.  vuetify ships neither; shadcnVue ships globals-css /
+  // lib-utils / the components-ui barrel plus the `components-ui-*`
+  // source-copy glob (`src/components/ui/{1}.vue`).
+  emitShellFiles(pack, out);
+  emitShellGlobs(pack, out);
+
+  // Path-prefix transform — applied once at the end (mirrors the
+  // React generator) so every emitter above stays path-agnostic.
+  const pathPrefix = options.pathPrefix ?? "";
+  if (pathPrefix === "") return out;
+  const prefixed = new Map<string, string>();
+  for (const [path, content] of out) {
+    prefixed.set(`${pathPrefix}${path}`, content);
+  }
+  return prefixed;
 }
 
 function renderShell(pack: LoadedPack, name: string, vm: unknown): string {

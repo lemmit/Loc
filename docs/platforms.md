@@ -84,7 +84,7 @@ available. The matured axis today is **`persistence:`**:
 |---|---|---|
 | `dotnet` | `efcore`, `dapper` | `efcore` |
 | `node` (also spelled `hono`) | `drizzle`, `mikroorm` | `drizzle` |
-| `phoenixLiveView` | `ashPostgres` | `ashPostgres` |
+| `elixir` | `ashPostgres` | `ashPostgres` |
 
 - **The default (`efcore` / `drizzle`) is the full-surface adapter** — every
   aggregate shape, inheritance, associations, audit/provenance, etc.
@@ -128,7 +128,7 @@ Each registered backend ships a manifest:
 ```ts
 interface LoomBackendManifest {
   kind: "backend";
-  family: BackendFamily;       // "hono" | "dotnet" | "phoenixLiveView"
+  family: BackendFamily;       // "node" | "dotnet" | "elixir" | "python" | "java"
   loomVersion: string;         // e.g. "v4"
   core: string;                // semver range against @loom/core
 }

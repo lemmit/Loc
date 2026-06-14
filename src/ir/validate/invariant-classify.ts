@@ -321,6 +321,34 @@ export function singleFieldShape(
   return matchSingleField(inv.expr);
 }
 
+/** Decompose an invariant into the FULL set of single-field constraints it
+ *  implies, splitting top-level `&&` conjunctions.  Where `singleFieldShape`
+ *  returns one recognised pattern (or null), this collects EVERY conjunct
+ *  that is a single-field shape — so `email.matches(r) && email.length <= 120`
+ *  yields `[{email, regex}, {email, len-max 120}]`.  Returns null when the
+ *  invariant is guarded or ANY conjunct is not a single-field shape
+ *  (cross-field, relationship, …) — those keep their domain/refine fallback.
+ *  Lets a backend whose input layer applies several constraints to one field
+ *  at once (Pydantic `Field(pattern=, max_length=)`) derive them all. */
+export function singleFieldConstraints(
+  inv: InvariantIR,
+): Array<{ field: string; pattern: SingleFieldPattern }> | null {
+  if (inv.guard) return null;
+  const out: Array<{ field: string; pattern: SingleFieldPattern }> = [];
+  const visit = (e: ExprIR): boolean => {
+    const inner = e.kind === "paren" ? e.inner : e;
+    if (inner.kind === "binary" && inner.op === "&&") {
+      return visit(inner.left) && visit(inner.right);
+    }
+    const m = matchSingleField(inner);
+    if (!m) return false;
+    out.push(m);
+    return true;
+  };
+  if (!visit(inv.expr)) return null;
+  return out.length > 0 ? out : null;
+}
+
 function matchSingleField(e: ExprIR): { field: string; pattern: SingleFieldPattern } | null {
   if (e.kind === "paren") return matchSingleField(e.inner);
 
