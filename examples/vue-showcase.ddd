@@ -323,6 +323,19 @@ system AcmeVue {
         api Catalog:      CatalogApi
         api Sales:        SalesApi
         api CustomerMgmt: CustomerMgmtApi
+
+        // A reusable user component (covers ComponentIR emission on the
+        // Vue backend) + a page that invokes it, so the LOOM_VUE_BUILD
+        // gate compiles both the `src/components/StatusPill.vue` file and
+        // the `<StatusPill :label="…" />` invocation under vue-tsc.
+        component StatusPill(label: string) {
+            body: Card { Badge { label } }
+        }
+        page Dashboard {
+            route: "/dashboard"
+            title: "Dashboard"
+            body: Stack { StatusPill("Active"), StatusPill("Idle") }
+        }
     }
 
     // React + React Query + Zod + Mantine frontend.  References the

@@ -1,10 +1,12 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  ComponentIR,
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   PageIR,
+  ParamIR,
   SystemIR,
   UiIR,
   WorkflowIR,
@@ -37,7 +39,7 @@ import {
   REACT_LIB_SCHEMAS_MONEY_TS,
 } from "../react/emit-templates.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
-import { renderVuePage } from "./walker/page-shell.js";
+import { renderVueComponentFile, renderVuePage } from "./walker/page-shell.js";
 import { vueTarget } from "./walker/vue-target.js";
 
 // ---------------------------------------------------------------------------
@@ -70,6 +72,12 @@ export interface GenerateVueOptions {
    *  for root-served hosts (dotnet/java wwwroot, standalone) →
    *  byte-identical. */
   basePath?: string;
+  /** Top-level (workspace-wide) components — pure render functions
+   *  declared as bare `ModelMember`s in any reachable `.ddd` document.
+   *  Merged into the per-ui name→params map; emitted as
+   *  `src/components/<Name>.vue` (ui-scope wins on name collisions).
+   *  Mirrors `GenerateReactOptions.topLevelComponents`. */
+  topLevelComponents?: ComponentIR[];
 }
 
 export function generateVueForContexts(
@@ -158,6 +166,43 @@ export function generateVueForContexts(
     out.set(`src/lib/${fn.name}.ts`, buildExternFunctionShim(fn));
   }
 
+  // User components — `src/components/<Name>.vue`.  Top-level
+  // (workspace-wide) components merge with the ui's own, ui-scope last
+  // so it shadows on name collision.  The name→params map threads into
+  // every page / component walk so a `Name(args)` call renders as the
+  // `<Name :prop="…" />` tag.  Extern components are a follow-up parity
+  // slice for vue (same posture svelte shipped with) — surface loudly
+  // rather than emit a broken import.
+  const userComponents = new Map<string, readonly ParamIR[]>();
+  for (const c of options.topLevelComponents ?? []) userComponents.set(c.name, c.params);
+  for (const c of ui.components) userComponents.set(c.name, c.params);
+
+  const emittedComponents = new Map<string, ComponentIR>();
+  for (const c of options.topLevelComponents ?? []) emittedComponents.set(c.name, c);
+  for (const c of ui.components) emittedComponents.set(c.name, c);
+  for (const c of emittedComponents.values()) {
+    if (c.extern) {
+      throw new Error(
+        `vue: extern component '${c.name}' — the extern-component escape hatch is not wired for the vue platform yet (vue-frontend-plan.md parity follow-up).`,
+      );
+    }
+    out.set(
+      `src/components/${c.name}.vue`,
+      renderVueComponentFile(
+        c.name,
+        c.params,
+        c.state,
+        c.body!,
+        pack,
+        userComponents,
+        aggregatesIRByName,
+        bcByAggregate,
+        pageRoutes,
+        externFunctionNames,
+      ),
+    );
+  }
+
   for (const page of pages) {
     if (!page.body) {
       out.set(pagePath(page), renderPageStub(page));
@@ -171,7 +216,7 @@ export function generateVueForContexts(
       pack,
       paramNames,
       stateNames,
-      new Map(), // user components — vue support lands with the parity slice
+      userComponents,
       ui.apiParams,
       aggregatesIRByName,
       bcByAggregate,
@@ -202,7 +247,7 @@ export function generateVueForContexts(
     aggregatesByName: aggregatesIRByName,
     contextsByName: new Map(contexts.map((c) => [c.name, c])),
     pack,
-    topLevelComponents: [],
+    topLevelComponents: options.topLevelComponents ?? [],
   });
   for (const [path, content] of pageObjects) out.set(path, content);
   out.set("e2e/smoke.spec.ts", smokeSpec(ui));
