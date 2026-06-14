@@ -29,32 +29,39 @@ import { WALKER_PRIMITIVES } from "../../../src/generator/_walker/registry.js";
 // walker-stdlib-completeness.test.ts.
 // ---------------------------------------------------------------------------
 
-/** Primitives the TSX walker renders that the HEEx walker intentionally does
- *  not, each with WHY Phoenix omits it.  FROZEN — see the header. */
+/** Primitives the TSX walker renders that the HEEx walker does NOT, each with
+ *  WHY Phoenix omits it.  FROZEN — see the header.
+ *
+ *  Two categories:
+ *    DECLINED — a standalone HEEx renderer doesn't make sense (the primitive
+ *      needs a form/changeset context or stateful LiveView wiring that only
+ *      exists elsewhere).  Same class of call as the Elixir-workflow / parallel-
+ *      walker declines: not a TODO, a reviewed decision.
+ *    DEFERRED — implementable, but needs a dedicated change (and a Phoenix
+ *      `mix compile` validation cycle), not a markup mapping.
+ *
+ *  (The cleanly-mappable display primitives — Bold/Italic/InlineCode, Divider/
+ *  Image/Stat, Avatar/Loader, Money — now have HEEx renderers; see git history.)
+ */
 const KNOWN_HEEX_GAPS: Record<string, string> = {
-  // Form inputs — HEEx renders inputs through Form-level dispatch
-  // (renderFormHeex builds the `<.simple_form>` fields), not as standalone
-  // walker primitives, so these have no per-primitive `heex` renderer.
-  Field: "input — rendered via HEEx Form-level dispatch, not a standalone primitive",
-  NumberField: "input — rendered via HEEx Form-level dispatch, not a standalone primitive",
-  PasswordField: "input — rendered via HEEx Form-level dispatch, not a standalone primitive",
-  MultilineField: "input — rendered via HEEx Form-level dispatch, not a standalone primitive",
-  SelectField: "input — rendered via HEEx Form-level dispatch, not a standalone primitive",
-  Toggle: "boolean input — rendered via HEEx Form-level dispatch, not a standalone primitive",
-  // (Bold / Italic / InlineCode now have HEEx renderers — `<strong>`/`<em>`/
-  //  `<code>` — so they are no longer gaps.)
-  // Confirmation destroy form — renderFormHeex covers the create/op/workflow
-  // shapes only; the LiveView destroy-confirm is the Elixir track's, not ported.
+  // --- DECLINED: form-input family --------------------------------------
+  // In LiveView an input only exists inside `<.simple_form for={@x_form}>`
+  // with a changeset + `validate`/`submit` handle_event clauses (HEEx renders
+  // them via Form-level dispatch, `renderFieldInputForField`).  A *standalone*
+  // input has no form/changeset to bind to, so there is no sensible per-
+  // primitive HEEx renderer — they are form sub-elements on Phoenix.
+  Field: "DECLINED — form sub-element; standalone input has no LiveView changeset to bind",
+  NumberField: "DECLINED — form sub-element; standalone input has no LiveView changeset to bind",
+  PasswordField: "DECLINED — form sub-element; standalone input has no LiveView changeset to bind",
+  MultilineField: "DECLINED — form sub-element; standalone input has no LiveView changeset to bind",
+  SelectField: "DECLINED — form sub-element; standalone input has no LiveView changeset to bind",
+  Toggle: "DECLINED — form sub-element; standalone boolean input has no LiveView changeset to bind",
+  // --- DECLINED: stateful topology --------------------------------------
+  Tabs: "DECLINED — interactive tab-switching needs LiveView handle_event + an active-tab assign (stateful topology), not a markup mapping",
+  // --- DEFERRED: implementable, own change ------------------------------
+  Slot: "DEFERRED — `{render_slot(@inner_block)}` is feasible once the user-component HEEx emitter declares the slot",
   DestroyForm:
-    "destroy-confirm form — renderFormHeex covers create/op/workflow shapes only; not yet ported",
-  // Display primitives with no HEEx renderer yet (TSX-only today).
-  // (Divider / Image / Stat now have HEEx renderers — `<hr>` / `<img>` /
-  //  a stat block — so they are no longer gaps.)
-  // (Avatar / Loader now have HEEx renderers — a circle <img>/placeholder and
-  //  an animated spinner — so they are no longer gaps.)
-  Slot: "named-slot passthrough — no HEEx equivalent wired",
-  Money: "money formatter display — needs the Decimal/currency money-type handling, deferred",
-  Tabs: "tabbed layout — no HEEx renderer; LiveView tab/navigation topology diverges from the JSX Tabs component",
+    "DEFERRED — confirm + delete-event wiring; renderFormHeex covers create/op/workflow shapes only",
 };
 
 describe("HEEx walker parity (finding #5)", () => {
