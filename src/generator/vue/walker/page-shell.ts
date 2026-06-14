@@ -1,4 +1,5 @@
 import type { PageIR } from "../../../ir/types/loom-ir.js";
+import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
 import type { OperationFormState, WalkResult } from "../../_walker/walker-core.js";
@@ -262,6 +263,12 @@ export function renderVuePage(input: VuePageShellInput): string {
   // --- script assembly, imports first -------------------------------------
   if (vueImports.size > 0) {
     script.push(`import { ${[...vueImports].sort().join(", ")} } from "vue";`);
+  }
+  // A money-typed `state {}` field refs as `ref(new Decimal("0"))` —
+  // pull decimal.js into the <script setup> (the dep rides the
+  // deployable's money-usage flag in package.json).
+  if (result.usesState && page.state.some((f) => typeUsesMoney(f.type))) {
+    script.push(`import Decimal from "decimal.js";`);
   }
   if (needsRoute && needsNavigate) {
     script.push(`import { useRoute, useRouter } from "vue-router";`);

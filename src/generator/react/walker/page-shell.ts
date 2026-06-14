@@ -15,6 +15,7 @@ import type {
   UiApiParamIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
+import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
@@ -296,6 +297,13 @@ export function renderCustomLayoutPage(
   const stateLines = effectiveUsesState
     ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("")
     : "";
+  // A money-typed `state {}` field renders as `useState<Decimal>(new
+  // Decimal("0"))` — pull decimal.js into scope (the dep is added to
+  // package.json via the deployable's money-usage flag).
+  const decimalImport =
+    effectiveUsesState && state.some((f) => typeUsesMoney(f.type))
+      ? `import Decimal from "decimal.js";\n`
+      : "";
   const paramsType = hasParams
     ? `<{ ${params.map((p) => `${p.name}: ${typeRefAsTsString(p)}`).join("; ")} }>`
     : "";
@@ -309,7 +317,7 @@ export function renderCustomLayoutPage(
   const navigateLine =
     usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}
+${reactImport}${decimalImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}
 export default function ${pageName}() {
 ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}  return (
     ${indentJsx(tsx, "    ")}
@@ -571,6 +579,10 @@ export function renderUserComponentFile(
       ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
       : "";
   const reactImport = usesState ? `import { useState } from "react";\n` : "";
+  const decimalImport =
+    usesState && state.some((f) => typeUsesMoney(f.type))
+      ? `import Decimal from "decimal.js";\n`
+      : "";
   // Components that reference Slot() or declare a `slot`-typed
   // param get `ReactNode` in scope — Slot() emits `{children}` and
   // slot params are typed as `ReactNode`.  `slot?` (optional) lowers

@@ -9,7 +9,7 @@ import type {
   UiIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
-import { contextUsesMoney } from "../../ir/types/loom-ir.js";
+import { contextUsesMoney, uiUsesMoney } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
@@ -226,7 +226,7 @@ export function generateVueForContexts(
     }),
   );
 
-  const usesMoney = contexts.some(contextUsesMoney);
+  const usesMoney = contexts.some(contextUsesMoney) || uiUsesMoney(ui);
   if (usesMoney) {
     out.set("src/lib/schemas.ts", REACT_LIB_SCHEMAS_MONEY_TS);
   }

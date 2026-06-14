@@ -29,6 +29,7 @@ import type {
   UiApiParamIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
+import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { idTargetHookVar } from "../../_frontend/form-helpers.js";
 import type { LoadedPack } from "../../_packs/loader.js";
@@ -293,11 +294,18 @@ export function renderSveltePage(
   const stateLines = effectiveUsesState
     ? state.map((f) => `  ${renderRunesState(f, pack)}\n`).join("")
     : "";
+  // A money-typed `state {}` field renders as `$state<Decimal>(new
+  // Decimal("0"))` — pull decimal.js into the <script> (the dep rides
+  // the deployable's money-usage flag in package.json).
+  const decimalImport =
+    effectiveUsesState && state.some((f) => typeUsesMoney(f.type))
+      ? `  import Decimal from "decimal.js";\n`
+      : "";
 
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${navigateImport}${pageStateImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}</script>
+${navigateImport}${pageStateImport}${decimalImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}</script>
 
 ${indentJsx(tsx, "")}
 ${templateScope}`;
@@ -426,10 +434,14 @@ export function renderSvelteComponentFile(
     markup = markup.split(`{${p.name}}`).join(`{@render ${p.name}?.()}`);
   }
   const stateLines = usesState ? state.map((f) => `  ${renderRunesState(f, pack)}\n`).join("") : "";
+  const decimalImport =
+    usesState && state.some((f) => typeUsesMoney(f.type))
+      ? `  import Decimal from "decimal.js";\n`
+      : "";
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${snippetImport}${navigateImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}</script>
+${snippetImport}${navigateImport}${decimalImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}</script>
 
 ${indentJsx(markup, "")}
 ${templateScope}`;
