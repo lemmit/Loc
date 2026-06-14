@@ -92,7 +92,13 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     : platform === "elixir"
       ? qualifyDesign(
           d.design,
-          uiFramework === "react" ? "mantine" : uiFramework === "vue" ? "vuetify" : "ashPhoenix",
+          uiFramework === "react"
+            ? "mantine"
+            : uiFramework === "vue"
+              ? "vuetify"
+              : uiFramework === "svelte"
+                ? "shadcnSvelte"
+                : "ashPhoenix",
         )
       : (platform === "dotnet" || platform === "java") && uiName
         ? qualifyDesign(
