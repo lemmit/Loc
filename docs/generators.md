@@ -617,6 +617,7 @@ web_app/
 │   ├── components/<Name>.vue # user components — typed defineProps SFC, walked <template>
 │   ├── lib/<extern>.ts + lib/extern/<extern>.signature.ts  # extern frontend fns (shim + signature)
 │   ├── components/ui/      # shadcnVue only: source-copied SFCs + index.ts barrel
+│   ├── layouts/<Name>.vue + layouts/DefaultLayout.vue  # named layouts only: chrome moves out of App.vue, router nests
 │   └── pages/**/*.vue      # SFC pages — <script setup lang="ts"> + walked <template>
 └── e2e/                    # identical harness/page objects to React (testid/DOM only)
 ```
