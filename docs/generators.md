@@ -825,9 +825,12 @@ Conformance: a `pythonApi` deployable ships in `examples/showcase.ddd`
 and the e2e OpenAPI cross-check compares it pairwise against Hono /
 .NET / Phoenix (strict in `conformance-parity.yml`).
 
-**Not yet implemented** (fails fast / follow-ups): resource verb
-clients (`objectStore`/`queue`/`api` adapters), durable-channel outbox
-tier, `--trace` domain instrumentation, `shape(document|embedded)`
+Resource verb clients (`objectStore` → boto3, `queue` → aio-pika,
+`api` → httpx) are emitted under `app/resources/<sourceType>.py`;
+workflow / saga `<resource>.<verb>(...)` calls import + await them.
+
+**Not yet implemented** (fails fast / follow-ups): durable-channel
+outbox tier, `--trace` domain instrumentation, `shape(document|embedded)`
 (`PLATFORM_SAVING_SHAPES.python` is relational-only), `when` can-queries
 (python absent from `SUPPORTED_WHEN_BACKENDS`), and provenance/audited
 (gated like .NET).

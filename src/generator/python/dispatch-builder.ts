@@ -3,6 +3,7 @@ import type {
   EnrichedBoundedContextIR,
   EventSubscriptionIR,
   ExprIR,
+  SystemIR,
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
@@ -10,6 +11,7 @@ import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { renderWorkflowStmts } from "../_workflow/stmt-target.js";
 import { renderPyExpr } from "./render-expr.js";
+import { resourceImportLines } from "./resource-clients.js";
 import { pyWorkflowStmtTarget } from "./workflows-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -40,7 +42,7 @@ export function dispatchSubscriptionsOf(ctx: EnrichedBoundedContextIR): EventSub
   return deriveEventSubscriptions(ctx.channels, ctx.workflows);
 }
 
-export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR): string | null {
+export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR, sys?: SystemIR): string | null {
   const subs = dispatchSubscriptionsOf(ctx);
   if (subs.length === 0) return null;
 
@@ -115,6 +117,12 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR): string | nul
       }),
     ),
   ].sort();
+  const handlerStmts = subs.flatMap((sub) => {
+    const wf = ctx.workflows.find((w) => w.name === sub.workflow);
+    const r = wf ? resolveHandlerBody(wf, sub) : null;
+    return r ? r.statements : [];
+  });
+  const resourceImports = sys ? resourceImportLines(sys, handlerStmts) : [];
   const stateRows = [...helperDone].map((n) => `${n}Row`).sort();
   const idNames = ctx.aggregates
     .map((a) => `${a.name}Id`)
@@ -139,6 +147,7 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR): string | nul
     `from app.domain.events import ${["DomainEvent", ...eventNames].join(", ")}`,
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     ...factoryAggs.map((n) => `from app.domain.${snake(n)} import ${n}`),
+    ...resourceImports,
     refersTo("log") ? "from app.obs.log import log" : null,
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`

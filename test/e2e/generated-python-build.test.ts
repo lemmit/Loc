@@ -49,6 +49,8 @@ const CASES: Array<[fixture: string, project: string]> = [
   ["test/e2e/fixtures/python-build/extern.ddd", "api"],
   // Fullstack `ui:` embed — routers under /api/*, SPA fallback, ClientApp/.
   ["test/e2e/fixtures/python-build/fullstack.ddd", "app"],
+  // Resource verb clients: objectStore (boto3) + queue (aio-pika) + api (httpx).
+  ["test/e2e/fixtures/python-build/resources.ddd", "api"],
 ];
 
 describe.skipIf(!ENABLED)(
