@@ -39,6 +39,9 @@ const CASES: Array<[fixture: string, project: string]> = [
   // Channels + event-triggered saga (in-process dispatcher, persisted
   // correlation state).
   ["test/e2e/fixtures/python-build/saga.ddd", "api"],
+  // Durable channel (`retention: log`): transactional outbox + relay +
+  // last_event_id idempotent-consumer dedup.
+  ["test/e2e/fixtures/python-build/outbox.ddd", "api"],
   // `auth: required` — User dataclass + verifier registry + middleware,
   // requires-guarded op/workflow, currentUser-scoped find.
   ["test/e2e/fixtures/python-build/auth.ddd", "api"],

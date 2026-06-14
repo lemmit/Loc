@@ -6,6 +6,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import { durableEventTypes } from "../../ir/util/channels.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
@@ -17,7 +18,7 @@ import {
   buildPyBaseUnionFile,
   concretesOf,
 } from "./base-reader-builder.js";
-import { buildPyDispatchFile } from "./dispatch-builder.js";
+import { buildPyDispatchFile, dispatchSubscriptionsOf } from "./dispatch-builder.js";
 import { renderPyAggregate } from "./emit/aggregate.js";
 import { ERRORS_PY } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
@@ -127,6 +128,12 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     return agg ? resolveDs(agg)?.schema : undefined;
   });
   const hasSeeds = seedFile != null;
+  // Durable-channel outbox relay (dispatch-delivery-semantics.md): only
+  // when a durable channel carries a *subscribed* event does `app/dispatch.py`
+  // ship `start_outbox_relay`, which the lifespan kicks off as a background
+  // task.  No durable channel / no subscription → byte-identical boot.
+  const startsRelay =
+    durableEventTypes(merged).size > 0 && dispatchSubscriptionsOf(merged).length > 0;
   out.set(
     "app/main.py",
     renderMain(
@@ -138,6 +145,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       hasSeeds,
       externAggs,
       hasEmbeddedSpa,
+      startsRelay,
     ),
   );
   if (hasEmbeddedSpa) {
@@ -383,6 +391,7 @@ function renderMain(
   hasSeeds = false,
   externAggs: string[] = [],
   hasEmbeddedSpa = false,
+  startsRelay = false,
 ): string {
   // Embedded-SPA mode mounts every router under /api/* so the SPA's
   // path namespace stays free for client-side routing.
@@ -420,6 +429,7 @@ function renderMain(
     "from app.db.engine import engine",
     "from app.db.migrate import run_migrations",
     hasSeeds ? "from app.db.seed import run_seeds" : null,
+    startsRelay ? "from app.dispatch import start_outbox_relay" : null,
     stubIds.length > 0 ? `from app.domain.ids import ${stubIds.join(", ")}` : null,
     ...externAggs.map(
       (n) =>
@@ -463,8 +473,13 @@ function renderMain(
     ...externAggs.map((n) => `    verify_${snake(n)}_extern_handlers_registered()`),
     "    await run_migrations()",
     hasSeeds ? "    await run_seeds()" : null,
+    // Durable-channel relay: at-least-once redelivery of `__loom_outbox`
+    // rows, drained on a background task for the process lifetime.
+    startsRelay ? "    _outbox_relay = start_outbox_relay()" : null,
+    startsRelay ? '    log("info", "outbox_relay_started")' : null,
     '    log("info", "server_listening", port=_PORT)',
     "    yield",
+    startsRelay ? "    _outbox_relay.cancel()" : null,
     '    log("info", "server_shutdown", signal="SIGTERM")',
     '    log("info", "server_drained")',
     "",

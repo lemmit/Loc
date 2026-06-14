@@ -1,12 +1,15 @@
 import { deriveEventSubscriptions } from "../../ir/enrich/enrichments.js";
 import type {
   EnrichedBoundedContextIR,
+  EventIR,
   EventSubscriptionIR,
   ExprIR,
   SystemIR,
+  TypeIR,
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
+import { durableEventTypes } from "../../ir/util/channels.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { renderWorkflowStmts } from "../_workflow/stmt-target.js";
@@ -31,8 +34,14 @@ import { pyWorkflowStmtTarget } from "./workflows-builder.js";
 //   - `make_dispatcher(session)` is what routes/workflows/views
 //     construct repositories with instead of the Noop.
 //
-// Durable channels (`retention: log | work` → the transactional-outbox
-// tier) are a follow-up; this is the in-process tier.
+// Durable channels (`retention: log | work`) add the transactional-outbox
+// tier on top: an `OutboxDispatcher` wraps the in-process one, recording
+// durable events in `__loom_outbox` inside the request transaction; a
+// background relay (`start_outbox_relay`, drained by `_run_outbox_relay`)
+// redelivers them at-least-once through the in-process dispatcher, with
+// `last_event_id` idempotent-consumer dedup on the saga rows
+// (dispatch-delivery-semantics.md).  Ephemeral channels keep the
+// at-most-once in-process path.
 // ---------------------------------------------------------------------------
 
 export function dispatchSubscriptionsOf(ctx: EnrichedBoundedContextIR): EventSubscriptionIR[] {
@@ -45,6 +54,12 @@ export function dispatchSubscriptionsOf(ctx: EnrichedBoundedContextIR): EventSub
 export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR, sys?: SystemIR): string | null {
   const subs = dispatchSubscriptionsOf(ctx);
   if (subs.length === 0) return null;
+
+  // Durable tier: events on a `retention: log | work` channel route
+  // through `__loom_outbox` + the relay; saga rows gain `last_event_id`.
+  const durableSet = durableEventTypes(ctx);
+  const durableEvents = ctx.events.filter((e) => durableSet.has(e.name));
+  const hasOutbox = durableEvents.length > 0;
 
   const out: string[] = [];
   // Saga-state load/save helpers — once per correlation-bearing workflow
@@ -66,7 +81,7 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR, sys?: SystemI
     if (!resolved) continue;
     const fn = `_${snake(sub.workflow)}_${sub.trigger}_${snake(sub.event)}`;
     handlers.push(
-      handlerFn(fn, wf, sub, resolved.correlation, resolved.statements, resolved.saves),
+      handlerFn(fn, wf, sub, resolved.correlation, resolved.statements, resolved.saves, hasOutbox),
       "",
     );
     const list = handlerByEvent.get(sub.event) ?? [];
@@ -90,11 +105,20 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR, sys?: SystemI
     ]),
     "",
     "",
-    "def make_dispatcher(session: AsyncSession) -> InProcessDispatcher:",
-    "    return InProcessDispatcher(session)",
+    hasOutbox
+      ? 'def make_dispatcher(session: AsyncSession) -> "OutboxDispatcher":'
+      : "def make_dispatcher(session: AsyncSession) -> InProcessDispatcher:",
+    hasOutbox
+      ? "    return OutboxDispatcher(session, InProcessDispatcher(session))"
+      : "    return InProcessDispatcher(session)",
   );
 
-  const body = lines(...out, ...handlers, dispatcher);
+  const body = lines(
+    ...out,
+    ...handlers,
+    dispatcher,
+    ...(hasOutbox ? ["", "", outboxBlock(durableEvents)] : []),
+  );
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
   const eventNames = [...new Set(subs.map((s) => s.event))].sort();
@@ -123,7 +147,8 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR, sys?: SystemI
     return r ? r.statements : [];
   });
   const resourceImports = sys ? resourceImportLines(sys, handlerStmts) : [];
-  const stateRows = [...helperDone].map((n) => `${n}Row`).sort();
+  const stateRows = [...helperDone].map((n) => `${n}Row`);
+  const schemaRows = [...stateRows, ...(hasOutbox ? ["LoomOutboxRow"] : [])].sort();
   const idNames = ctx.aggregates
     .map((a) => `${a.name}Id`)
     .filter((n) => refersTo(n))
@@ -135,14 +160,18 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR, sys?: SystemI
   return lines(
     `"""In-process event dispatch (channels.md).  Auto-generated."""`,
     "",
+    hasOutbox ? "import asyncio" : null,
+    hasOutbox ? "from contextvars import ContextVar" : null,
     refersTo("datetime") ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
+    refersTo("cast") ? "from typing import cast" : null,
     "",
-    "from sqlalchemy import select",
+    hasOutbox ? "from sqlalchemy import select, update" : "from sqlalchemy import select",
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
+    hasOutbox ? "from app.db.engine import engine" : null,
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
-    stateRows.length > 0 ? `from app.db.schema import ${stateRows.join(", ")}` : null,
+    schemaRows.length > 0 ? `from app.db.schema import ${schemaRows.join(", ")}` : null,
     refersTo("DomainError") ? "from app.domain.errors import DomainError" : null,
     `from app.domain.events import ${["DomainEvent", ...eventNames].join(", ")}`,
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
@@ -266,6 +295,7 @@ function handlerFn(
   correlation: ExprIR | undefined,
   statements: WorkflowStmtIR[],
   saves: { name: string; aggName: string; repoName: string }[],
+  hasOutbox: boolean,
 ): string {
   const param = snake(sub.param);
   const out: string[] = [
@@ -295,6 +325,16 @@ function handlerFn(
       );
       out.push("        return");
     }
+    // Idempotent-consumer dedup (dispatch-delivery-semantics.md §3): the
+    // relay redelivers at-least-once, so a row already stamped with this
+    // event id is a no-op; otherwise claim it before running the body.
+    if (hasOutbox) {
+      out.push("    __eid = _current_event_id.get()");
+      out.push("    if __eid is not None:");
+      out.push("        if state.last_event_id == __eid:");
+      out.push("            return");
+      out.push("        state.last_event_id = __eid");
+    }
   }
   for (const r of reposIn(statements, saves)) {
     out.push(`    ${snake(r.repoName)} = ${r.aggName}Repository(session, events)`);
@@ -308,8 +348,180 @@ function handlerFn(
   if (persisted) out.push("    await session.flush()");
   if (hasEmit) {
     out.push("    for ev in workflow_events:");
-    out.push("        await events.dispatch(ev)");
+    // A handler's own emit is a fresh event, never an outbox redelivery —
+    // dispatch it with the relayed id cleared so chained handlers don't
+    // dedup against it (`_dispatch_chained` resets `_current_event_id`).
+    out.push(
+      hasOutbox
+        ? "        await _dispatch_chained(events, ev)"
+        : "        await events.dispatch(ev)",
+    );
   }
   if (out[out.length - 1] === ") -> None:") out.push("    return None");
   return out.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Durable-channel outbox tier (`retention: log | work`).
+// ---------------------------------------------------------------------------
+
+/** The `OutboxDispatcher` wrapper + payload (de)serialisers + the polling
+ *  relay.  `make_dispatcher` returns the wrapper, so durable events drained
+ *  from an aggregate land in `__loom_outbox` inside the request
+ *  transaction; the relay redelivers them through the in-process
+ *  dispatcher at-least-once, ordered by `occurred_at`, dead-lettering
+ *  after `max_attempts`. */
+function outboxBlock(durableEvents: EventIR[]): string {
+  const toArms = durableEvents.flatMap((ev, i) => [
+    `    ${i === 0 ? "if" : "elif"} isinstance(event, ${ev.name}):`,
+    `        return {${ev.fields.map((f) => `"${f.name}": ${toPayload(`event.${snake(f.name)}`, f.type)}`).join(", ")}}`,
+  ]);
+  const fromArms = durableEvents.flatMap((ev, i) => [
+    `    ${i === 0 ? "if" : "elif"} event_type == "${ev.name}":`,
+    `        return ${ev.name}(${ev.fields.map((f) => `${snake(f.name)}=${fromPayload(f.name, f.type)}`).join(", ")})`,
+  ]);
+  return lines(
+    `_DURABLE_EVENT_TYPES: frozenset[str] = frozenset({${durableEvents.map((e) => `"${e.name}"`).join(", ")}})`,
+    "",
+    `_current_event_id: ContextVar[str | None] = ContextVar("loom_outbox_event_id", default=None)`,
+    "",
+    "",
+    "class OutboxDispatcher:",
+    `    """Durable tier (dispatch-delivery-semantics.md): events on a`,
+    "    `retention: log | work` channel are recorded in __loom_outbox inside",
+    "    the request transaction; the relay delivers them at-least-once.",
+    "    Ephemeral events dispatch in-process (at-most-once).",
+    `    """`,
+    "",
+    "    def __init__(self, session: AsyncSession, inner: InProcessDispatcher) -> None:",
+    "        self._session = session",
+    "        self._inner = inner",
+    "",
+    "    async def dispatch(self, event: DomainEvent) -> None:",
+    "        if event.type in _DURABLE_EVENT_TYPES:",
+    "            self._session.add(LoomOutboxRow(type=event.type, payload=_event_to_payload(event)))",
+    "            return",
+    "        await self._inner.dispatch(event)",
+    "",
+    "",
+    "async def _dispatch_chained(events: InProcessDispatcher, event: DomainEvent) -> None:",
+    `    """Re-emit a handler's own event with the redelivery id cleared — a`,
+    "    fresh emit is never an outbox redelivery, so chained handlers must",
+    "    not dedup it against the relayed event's id.",
+    `    """`,
+    "    token = _current_event_id.set(None)",
+    "    try:",
+    "        await events.dispatch(event)",
+    "    finally:",
+    "        _current_event_id.reset(token)",
+    "",
+    "",
+    "def _event_to_payload(event: DomainEvent) -> dict[str, object]:",
+    ...toArms,
+    `    raise ValueError(f"unknown durable event: {type(event).__name__}")`,
+    "",
+    "",
+    "def _event_from_payload(event_type: str, payload: dict[str, object]) -> DomainEvent:",
+    ...fromArms,
+    `    raise ValueError(f"unknown durable event type: {event_type}")`,
+    "",
+    "",
+    "async def _drain_outbox(max_attempts: int, batch_size: int) -> None:",
+    "    async with AsyncSession(engine) as session:",
+    "        rows = (",
+    "            await session.execute(",
+    "                select(LoomOutboxRow)",
+    "                .where(LoomOutboxRow.dispatched_at.is_(None))",
+    "                .where(LoomOutboxRow.attempts < max_attempts)",
+    "                .order_by(LoomOutboxRow.occurred_at.asc())",
+    "                .limit(batch_size)",
+    "            )",
+    "        ).scalars().all()",
+    "        pending = [",
+    "            (str(r.id), r.type, cast(dict[str, object], r.payload), r.attempts) for r in rows",
+    "        ]",
+    "    for event_id, event_type, payload, attempts in pending:",
+    "        token = _current_event_id.set(event_id)",
+    "        try:",
+    "            async with AsyncSession(engine) as session:",
+    "                await InProcessDispatcher(session).dispatch(",
+    "                    _event_from_payload(event_type, payload)",
+    "                )",
+    "                await session.execute(",
+    "                    update(LoomOutboxRow)",
+    "                    .where(LoomOutboxRow.id == event_id)",
+    "                    .values(dispatched_at=datetime.now(UTC))",
+    "                )",
+    "                await session.commit()",
+    "        except Exception as exc:  # noqa: BLE001 — relay isolates one row's failure",
+    "            next_attempts = attempts + 1",
+    "            async with AsyncSession(engine) as fail_session:",
+    "                await fail_session.execute(",
+    "                    update(LoomOutboxRow)",
+    "                    .where(LoomOutboxRow.id == event_id)",
+    "                    .values(attempts=next_attempts)",
+    "                )",
+    "                await fail_session.commit()",
+    "            if next_attempts >= max_attempts:",
+    `                log("warn", "event_dead_lettered", type=event_type, attempts=next_attempts, error=str(exc))`,
+    "        finally:",
+    "            _current_event_id.reset(token)",
+    "",
+    "",
+    "async def _run_outbox_relay(",
+    "    interval: float = 0.5, max_attempts: int = 5, batch_size: int = 50",
+    ") -> None:",
+    `    """Background relay: drains undispatched __loom_outbox rows in`,
+    "    occurred_at order through the in-process dispatcher (at-least-once).",
+    `    """`,
+    "    while True:",
+    "        try:",
+    "            await _drain_outbox(max_attempts, batch_size)",
+    "        except Exception as exc:  # noqa: BLE001 — keep the relay alive",
+    `            log("warn", "outbox_relay_error", error=str(exc))`,
+    "        await asyncio.sleep(interval)",
+    "",
+    "",
+    `def start_outbox_relay() -> "asyncio.Task[None]":`,
+    "    return asyncio.create_task(_run_outbox_relay())",
+  );
+}
+
+/** Domain-event field → its JSON-safe payload value (DSL-keyed, mirrors
+ *  the event-sourcing store's `_event_to_data`). */
+function toPayload(expr: string, t: TypeIR): string {
+  const inner = t.kind === "optional" ? t.inner : t;
+  if (inner.kind === "primitive" && inner.name === "datetime") return `${expr}.isoformat()`;
+  if (inner.kind === "primitive" && inner.name === "money") return `str(${expr})`;
+  return expr;
+}
+
+/** Payload value → typed domain-event field (mirror of `toPayload`). */
+function fromPayload(name: string, t: TypeIR): string {
+  const access = `payload["${name}"]`;
+  const inner = t.kind === "optional" ? t.inner : t;
+  switch (inner.kind) {
+    case "primitive":
+      switch (inner.name) {
+        case "int":
+        case "long":
+          return `cast(int, ${access})`;
+        case "decimal":
+          return `float(cast("int | float", ${access}))`;
+        case "money":
+          return `Decimal(cast(str, ${access}))`;
+        case "bool":
+          return `cast(bool, ${access})`;
+        case "datetime":
+          return `datetime.fromisoformat(cast(str, ${access}))`;
+        default:
+          return `cast(str, ${access})`;
+      }
+    case "id":
+      return `${inner.targetName}Id(cast(str, ${access}))`;
+    case "enum":
+      return `${inner.name}(cast(str, ${access}))`;
+    default:
+      return `cast(str, ${access})`;
+  }
 }

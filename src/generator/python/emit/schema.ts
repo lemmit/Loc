@@ -5,6 +5,7 @@ import type {
   EnrichedBoundedContextIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
+import { durableEventTypes } from "../../../ir/util/channels.js";
 import {
   isTphBase,
   isTphConcrete,
@@ -103,10 +104,15 @@ export function renderPySchema(
   }
   // Persisted workflow-correlation state (workflow-and-applier.md A2-S2):
   // one row per running instance, keyed by the correlation field.  The
-  // shared migration leaves these unqualified (public schema).
+  // shared migration leaves these unqualified (public schema).  A durable
+  // channel adds the `last_event_id` idempotent-consumer marker.
+  const durable = durableEventTypes(ctx).size > 0;
   for (const wf of ctx.workflows) {
-    if (wf.correlationField) models.push(renderWorkflowStateModel(wf, ctx));
+    if (wf.correlationField) models.push(renderWorkflowStateModel(wf, ctx, durable));
   }
+  // Transactional outbox (dispatch-delivery-semantics.md): the shared
+  // `__loom_outbox` table when any channel asks for durability.
+  if (durable) models.push(renderOutboxModel());
   const body = models.join("\n\n\n");
 
   // Import narrowing — every SQLAlchemy helper is invoked by name, so a
@@ -121,6 +127,7 @@ export function renderPySchema(
     "Numeric",
     "PrimaryKeyConstraint",
     "Text",
+    "text",
     "Uuid",
   ].filter(uses);
   const pgNames = ["ARRAY", "JSONB"].filter(uses);
@@ -273,7 +280,11 @@ function renderEventLogModel(name: string, schema?: string, prefix?: string): st
 /** Saga-state row for a correlation-bearing workflow — PK is the
  *  id-shaped correlation column (UUID, parity with the shared DDL);
  *  reference-collection state fields fold to JSONB. */
-function renderWorkflowStateModel(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
+function renderWorkflowStateModel(
+  wf: WorkflowIR,
+  ctx: EnrichedBoundedContextIR,
+  durable = false,
+): string {
   const tableName = plural(snake(wf.name));
   const corr = wf.correlationField as string;
   const cols: PyColumn[] = [];
@@ -300,11 +311,37 @@ function renderWorkflowStateModel(wf: WorkflowIR, ctx: EnrichedBoundedContextIR)
     }
     cols.push(...columnsForFields([f], ctx));
   }
+  // Idempotent-consumer marker for the at-least-once relay redelivery.
+  if (durable) {
+    cols.push({ attr: "last_event_id", pyType: "str", saType: "Text", optional: true });
+  }
   return lines(
     `class ${wf.name}Row(Base):`,
     `    __tablename__ = "${tableName}"`,
     "",
     cols.map(renderColumn),
+  );
+}
+
+/** The shared transactional-outbox table (`__loom_outbox`) — fixed shape;
+ *  the relay drains undispatched rows ordered by `occurred_at`.  Server
+ *  defaults (`gen_random_uuid()` / `now()` / `0`) match the shared DDL so
+ *  inserts omitting those columns let Postgres fill them. */
+function renderOutboxModel(): string {
+  return lines(
+    "class LoomOutboxRow(Base):",
+    `    __tablename__ = "__loom_outbox"`,
+    "",
+    "    id: Mapped[str] = mapped_column(",
+    `        Uuid(as_uuid=False), primary_key=True, server_default=text("gen_random_uuid()")`,
+    "    )",
+    "    occurred_at: Mapped[datetime] = mapped_column(",
+    `        DateTime(timezone=True), server_default=text("now()")`,
+    "    )",
+    "    type: Mapped[str] = mapped_column(Text)",
+    "    payload: Mapped[object] = mapped_column(JSONB)",
+    "    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))",
+    `    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))`,
   );
 }
 
