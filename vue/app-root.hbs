@@ -1,0 +1,13 @@
+<!-- Auto-generated.  Do not edit by hand. -->
+<!-- Thin app root used when named layouts are in play: the chrome moved
+     into src/layouts/DefaultLayout.vue and the outer <router-view />
+     renders whichever layout a route nests under.  Channel handlers
+     mount once here so they cover every layout. -->
+<script setup lang="ts">
+{{#if hasRealtimeHandlers}}import RealtimeHandlers from "./components/RealtimeHandlers.vue";
+{{/if}}</script>
+
+<template>
+{{#if hasRealtimeHandlers}}  <RealtimeHandlers />
+{{/if}}  <router-view />
+</template>
