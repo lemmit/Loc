@@ -33,6 +33,7 @@ describe.skipIf(!ENABLED)(
   () => {
     it.each([
       { name: "vanilla-min.ddd", deployable: "api" },
+      { name: "vanilla-channels.ddd", deployable: "api" },
     ])("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
