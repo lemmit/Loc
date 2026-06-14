@@ -96,26 +96,54 @@ describe("vanilla — workflow body lowering (repo-let / getById)", () => {
   });
 });
 
-describe("vanilla — workflow body lowering (repo-let / custom find stays TODO)", () => {
-  it("keeps a non-getById repo-let on the # TODO fallthrough", async () => {
-    const wf = await workflowFor(
-      `repository Tasks for Task {
-        find byTitle(title: string): Task? where this.title == title
-      }
+describe("vanilla — workflow body lowering (repo-let / custom find routes through context defdelegate)", () => {
+  it("a non-getById repo-let now lowers to a Context.<find>_<agg> with-clause", async () => {
+    // Slice 8 (custom find emission, #PR-this) — the custom find now has a
+    // defdelegate on the context facade, so a workflow's `repo-let` can
+    // route through it just like `getById`.  Self-contained source so the
+    // aggregate carries the field the find's predicate references (the
+    // shared `sys()` helper above hardcodes a `title`/`done` Task that
+    // doesn't expose the field shape we need here).
+    const files = await generateSystemFiles(`
+      system Catalog {
+        subdomain Inventory {
+          context Items {
+            aggregate Item with crudish {
+              label: string
 
-      workflow findThenComplete transactional {
-        create(wanted: string) {
-          let t = Tasks.byTitle(wanted)
-          t.markDone()
+              operation markFound() {
+                label := "found"
+              }
+            }
+            repository Items for Item {
+              find byLabel(label: string): Item? where this.label == label
+            }
+
+            workflow findThenMark transactional {
+              create(wanted: string) {
+                let i = Items.byLabel(wanted)
+                i.markFound()
+              }
+            }
+          }
         }
-      }`,
-      "find_then_complete",
-    );
-    // The custom find isn't exposed via the vanilla context yet.
-    expect(wf).toContain("# TODO: lower workflow statement kind 'repo-let'");
-    expect(wf).not.toContain("by_title_task");
-    // ...and its arg is NOT destructured (binding an unused local would
-    // trip --warnings-as-errors).
-    expect(wf).not.toContain("wanted");
+        api CatalogApi from Inventory
+        storage primary { type: postgres }
+        resource itemsState { for: Items, kind: state, use: primary }
+        deployable api {
+          platform: elixir { foundation: vanilla }
+          contexts: [Items]
+          dataSources: [itemsState]
+          serves: CatalogApi
+          port: 4000
+        }
+      }
+    `);
+    const wf = files.get(
+      [...files.keys()].find((k) => k.endsWith("/workflows/find_then_mark.ex"))!,
+    )!;
+    expect(wf).toContain("{:ok, i} <- Context.by_label_item(wanted)");
+    expect(wf).toContain(`%{"wanted" => wanted} = params`);
+    expect(wf).not.toContain("# TODO: lower workflow statement kind 'repo-let'");
   });
 });
