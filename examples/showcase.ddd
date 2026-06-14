@@ -491,6 +491,15 @@ system DevPlatform {
         auth: required
     }
 
+    deployable javaApi {
+        platform: java
+        contexts: [Catalog, Builds, People]
+        dataSources: [catalogState, buildsState, peopleState]
+        serves: ProjectsApi, DeliveryApi, AccountsApi
+        port: 8081
+        auth: required
+    }
+
     // ----- Frontend deployables: all three ui-binding forms -----
 
     // Compose-block binding form.

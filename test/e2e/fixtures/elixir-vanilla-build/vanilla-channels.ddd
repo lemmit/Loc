@@ -1,0 +1,65 @@
+// Channels-on-vanilla — exercises the in-process Dispatcher + per-context
+// handler modules + correlation-keyed saga Ecto schema under the
+// `mix compile --warnings-as-errors` gate.  Vanilla mirror of
+// `test/e2e/fixtures/phoenix-build/dispatch.ddd` (the Ash channels gate).
+//
+// Shape: OrderPlaced STARTS the OrderFulfillment saga (allocates the
+// correlation row) and emits ShipmentRequested; that event routes back
+// to the SAME instance via `on(...) by s.order` and marks the shipment.
+// Proves the foundation-agnostic dispatcher code (plain Elixir + Ecto +
+// Phoenix.PubSub) compiles cleanly against the vanilla context facade.
+system FulfillmentSys {
+  subdomain Fulfillment {
+    context Fulfillment {
+      aggregate Order with crudish {
+        customerId: string
+        status: string
+        total: int
+      }
+      repository Orders for Order { }
+
+      aggregate Shipment with crudish {
+        orderRef: Order id
+        status: string
+        operation markTracked() { status := "Tracked" }
+      }
+      repository Shipments for Shipment { }
+
+      event OrderPlaced { order: Order id, at: datetime }
+      event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+
+      channel Lifecycle {
+        carries: OrderPlaced, ShipmentRequested
+        delivery: broadcast
+        retention: ephemeral
+      }
+
+      workflow OrderFulfillment {
+        orderId: Order id          // correlation — one instance per order
+        attempts: int              // typed saga state
+
+        // Starter: allocates the instance, requests a shipment.
+        create(p: OrderPlaced) by p.order {
+          let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+          emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+        }
+
+        // Continuation: route to the started instance by order; mark shipment.
+        on(s: ShipmentRequested) by s.order {
+          let ship = Shipments.getById(s.shipment)
+          ship.markTracked()
+        }
+      }
+    }
+  }
+  api FulfillmentApi from Fulfillment
+  storage primary { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Fulfillment]
+    dataSources: [fulfillmentState]
+    serves: FulfillmentApi
+    port: 4000
+  }
+}

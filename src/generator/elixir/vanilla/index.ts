@@ -19,6 +19,7 @@ import {
   emitPhoenixResourceFiles,
 } from "../adapters/resource-clients.js";
 import type { ApiRoute } from "../api-emit.js";
+import { emitDispatch, emitWorkflowStateSchemas } from "../dispatch-emit.js";
 import type { GenerateElixirArgs } from "../index.js";
 import { toModulePrefix, toSnakeApp } from "../shell-emit.js";
 import { emitVanillaApiControllers } from "./api-emit.js";
@@ -100,6 +101,16 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     apiRoutes.push(
       ...emitVanillaWorkflowExecution(appName, appModule, ctx, out, resourceModules).routes,
     );
+    // Channels-on-vanilla — the in-process Dispatcher fans the workflow's
+    // `emit` (which lowers to `Phoenix.PubSub.broadcast`) into per-context
+    // channel handler modules.  The dispatcher code is foundation-agnostic
+    // (plain Elixir + `${App}.Repo` + `Phoenix.PubSub` + the vanilla context
+    // facade fns the handler bodies call into).  Saga state schemas are
+    // emitted unconditionally for every correlation-bearing workflow so
+    // `WorkflowInstancesController` (the deferred-Phoenix gap closer) has
+    // the table to read from even on a command-only saga.
+    emitWorkflowStateSchemas(appName, ctx, appModule, out);
+    emitDispatch(appName, ctx, appModule, out, sys, "vanilla");
   }
   apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
 

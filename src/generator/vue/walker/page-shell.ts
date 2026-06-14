@@ -578,11 +578,21 @@ export function renderVueComponentFile(
     pageRoutes,
     externFunctions,
   );
-  if (result.formOfs.length > 0) {
+  // Operation forms (Action dialogs) inside a component need the
+  // page's route-param-derived `idExpr` + the pack op-dialog host, so
+  // they stay a narrow deferral — host them on a page.  Aggregate
+  // create-forms and workflow run-forms carry no route dependency and
+  // ARE supported (a reusable "create X" / "run W" widget).
+  const opFormStates = result.formOfs.filter(
+    (f): f is OperationFormState => f.kind === "operation",
+  );
+  if (opFormStates.length > 0) {
     throw new Error(
-      `vue: forms inside user components are not yet supported (component '${name}') — host the form on a page (vue-frontend-plan.md parity follow-up).`,
+      `vue: operation forms (Action dialogs) inside user components are not yet supported (component '${name}') — host the operation form on a page (vue-frontend-plan.md parity follow-up).`,
     );
   }
+  const aggFormState = result.formOfs.find((f) => f.kind === "aggregate");
+  const wfFormState = result.formOfs.find((f) => f.kind === "workflow");
 
   const script: string[] = [];
   const vueImports = new Set<string>();
@@ -635,7 +645,63 @@ export function renderVueComponentFile(
   }
   const rewrittenHooks = hookLines.map(rewriteScript);
   const propsReferenced = rewrittenHooks.some((l) => l.includes("props."));
-  const needsNavigate = result.usesNavigate;
+
+  // Form wiring — the same create-/workflow-form decls the page shell
+  // emits (no route dependency, so they transplant verbatim; component
+  // files sit one hop from `src/`, matching the page's `../api` / `../lib`
+  // import depth).  Operation forms were rejected above.
+  const formLines: string[] = [];
+  let usesLoomForm = false;
+  if (aggFormState && aggFormState.kind === "aggregate") {
+    const agg = aggFormState.agg.name;
+    usesLoomForm = true;
+    if (!seenVars.has("create")) {
+      seenVars.add("create");
+      formLines.push(`const create = reactive(useCreate${agg}());`);
+      vueImports.add("reactive");
+    }
+    formLines.push(
+      `const form = useLoomForm(Create${agg}Request, ${aggFormState.defaultValuesTs});`,
+    );
+    const from = `../api/${lowerFirst(agg)}`;
+    const names = apiImports.get(from) ?? new Set<string>();
+    names.add(`useCreate${agg}`);
+    names.add(`Create${agg}Request`);
+    apiImports.set(from, names);
+  }
+  if (wfFormState && wfFormState.kind === "workflow") {
+    const wf = upperFirst(wfFormState.workflow.name);
+    usesLoomForm = true;
+    if (!seenVars.has("run")) {
+      seenVars.add("run");
+      formLines.push(`const run = reactive(use${wf}Workflow());`);
+      vueImports.add("reactive");
+    }
+    formLines.push(`const form = useLoomForm(${wf}Request, ${wfFormState.defaultValuesTs});`);
+    const from = "../api/workflows";
+    const names = apiImports.get(from) ?? new Set<string>();
+    names.add(`use${wf}Workflow`);
+    names.add(`${wf}Request`);
+    apiImports.set(from, names);
+  }
+  // Id-target select hooks (`X id` form fields render as `useAll<Target>()`
+  // selects), deduped across the form states.
+  for (const st of result.formOfs) {
+    for (const t of st.idTargets) {
+      const hookVar = idTargetHookVar(t);
+      if (seenVars.has(hookVar)) continue;
+      seenVars.add(hookVar);
+      formLines.push(`const ${hookVar} = reactive(useAll${plural(t.name)}());`);
+      vueImports.add("reactive");
+      const from = `../api/${lowerFirst(t.name)}`;
+      const names = apiImports.get(from) ?? new Set<string>();
+      names.add(`useAll${plural(t.name)}`);
+      apiImports.set(from, names);
+    }
+  }
+  // Create / workflow forms' default submit navigates.
+  const needsNavigate =
+    result.usesNavigate || aggFormState !== undefined || wfFormState !== undefined;
 
   // --- script assembly, imports first -------------------------------------
   if (vueImports.size > 0) {
@@ -657,6 +723,9 @@ export function renderVueComponentFile(
   script.push(
     `import { EMPTY, formatBool, formatDateTime, formatMoney, formatNumber, formatPlain, isEmpty, shortId } from "../lib/format";`,
   );
+  if (usesLoomForm) {
+    script.push(`import { useLoomForm } from "../lib/form";`);
+  }
   for (const [from, names] of [...apiImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     script.push(`import { ${[...names].sort().join(", ")} } from "${from}";`);
   }
@@ -693,6 +762,7 @@ export function renderVueComponentFile(
   }
   script.push(...stateLines);
   script.push(...rewrittenHooks);
+  script.push(...formLines);
   while (script.length > 0 && script[script.length - 1] === "") script.pop();
 
   return `<!-- Auto-generated.  Do not edit by hand.  (${name}) -->

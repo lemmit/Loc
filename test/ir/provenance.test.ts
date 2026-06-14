@@ -188,6 +188,21 @@ describe("provenanced — TypeScript emission", () => {
     expect(repo).toContain("total_provenance: aggregate.total_provenance");
   });
 
+  it("stamps the request correlation id + scope id onto each provenance row", async () => {
+    const { model } = await parseModel(SYSTEM(""));
+    const files = generateSystems(model).files;
+    const schema = files.get("api/db/schema.ts")!;
+    expect(schema).toContain('correlationId: text("correlation_id")');
+    expect(schema).toContain('scopeId: text("scope_id")');
+    expect(schema).toContain('index("provenance_records_correlation_idx").on(t.correlationId)');
+    const routes = files.get("api/http/cart.routes.ts")!;
+    expect(routes).toContain('import { requestContext } from "../obs/als";');
+    expect(routes).toContain("const reqCtx = requestContext();");
+    // Inside the drainProv loop, each row carries the carrier ids.
+    expect(routes).toContain("correlationId: reqCtx?.correlationId ?? null,");
+    expect(routes).toContain("scopeId: reqCtx?.scopeId ?? null,");
+  });
+
   it("emits nothing when no field is provenanced (toggle off)", async () => {
     const src = SYSTEM("").replace("total: int provenanced", "total: int");
     const { model } = await parseModel(src);
