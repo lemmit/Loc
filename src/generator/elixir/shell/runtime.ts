@@ -184,10 +184,15 @@ end
  * non-HTTP code read the carrier without a `conn`.  Foundation-neutral (pure
  * Plug + Logger), so the ash and vanilla endpoints emit the same module.
  *
+ * The carrier holds the request-stable tier (correlation id, locale, start
+ * time) plus the root of the frame-local tier (a fresh `scope_id`, no parent).
+ * Per-dispatch child frames (chaining `parent_id` through a Mediator-style
+ * pipeline) and the principal slice are deferred — the BEAM has no per-dispatch
+ * pipeline in the generated app, and the principal still lives on `conn.assigns`.
+ *
  * Caveat: `Logger.metadata` does not propagate to spawned processes
  * (`Task.async` / Oban jobs) — a background job that needs the correlation id
- * must copy it into the child explicitly.  Frame-local ids (scope/parent) and
- * the principal slice are deferred.
+ * must copy it into the child explicitly.
  */
 export function renderRequestContext(appModule: string): string {
   return `# Auto-generated.
@@ -209,8 +214,14 @@ defmodule ${appModule}.RequestContext do
   def call(conn, _opts) do
     correlation_id = resolve_correlation_id(conn)
 
+    # Frame-local tier: the root frame for this request gets a fresh scope id
+    # and no parent (parity with .NET's OpenRoot / Hono's root frame).  The
+    # BEAM has no per-dispatch Mediator pipeline, so there is no child-frame
+    # nesting yet — parent_id stays nil; a future per-dispatch slice would
+    # chain it.  scope_id rides every log line, so causality is greppable.
     Logger.metadata(
       correlation_id: correlation_id,
+      scope_id: generate_id(),
       locale: resolve_locale(conn),
       started_at: System.system_time(:millisecond)
     )
@@ -243,6 +254,12 @@ defmodule ${appModule}.RequestContext do
 
   @doc "The correlation id for the current request, or nil outside a request."
   def correlation_id, do: Logger.metadata()[:correlation_id]
+
+  @doc "The id of the current execution frame (the root frame for a request)."
+  def scope_id, do: Logger.metadata()[:scope_id]
+
+  @doc "The parent frame's id, or nil at the root frame (no per-dispatch nesting yet)."
+  def parent_id, do: Logger.metadata()[:parent_id]
 
   @doc ~S(The request locale from Accept-Language, defaulting to "en".)
   def locale, do: Logger.metadata()[:locale] || "en"
