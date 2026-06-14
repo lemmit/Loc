@@ -347,10 +347,16 @@ system AcmeVue {
         component StatusPill(label: string) {
             body: Card { Badge { label } }
         }
+        // A reusable create-form widget — exercises CreateForm inside a
+        // user component (useLoomForm + the create mutation) so the
+        // LOOM_VUE_BUILD gate compiles the in-component form under vue-tsc.
+        component NewCustomerWidget() {
+            body: Card { CreateForm { of: Customer, testid: "dash-new-customer" } }
+        }
         page Dashboard {
             route: "/dashboard"
             title: "Dashboard"
-            body: Stack { StatusPill("Active"), StatusPill("Idle") }
+            body: Stack { StatusPill("Active"), StatusPill("Idle"), NewCustomerWidget() }
         }
     }
 

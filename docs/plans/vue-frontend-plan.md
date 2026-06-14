@@ -16,10 +16,11 @@
 > filter input re-fetches — the page passes `() => ({ … })`, React stays
 > a plain object param).  **Remaining tracked gaps:** named layouts on
 > vue (Svelte omits these too — needs a vue-router nested-route
-> restructuring), forms inside user components (host the form on a page
-> for now), slot params on extern components, and the
-> docker-boot e2e fold-in once the Svelte effort settles the shared
-> LOOM_E2E gate shape.
+> restructuring), operation forms (Action dialogs) inside user
+> components — create-forms and workflow run-forms inside a component DO
+> work; operation forms need the op-dialog host so they stay a narrow
+> deferral — slot params on extern components, and the docker-boot e2e
+> fold-in once the Svelte effort settles the shared LOOM_E2E gate shape.
 
 Add **Vue 3 as a frontend platform** (`platform: vue`) with feature parity to
 React, plus **two Vue design packs** (`vuetify`, `shadcnVue`) with feature
