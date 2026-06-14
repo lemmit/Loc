@@ -198,6 +198,7 @@ describe("pipeline layering — value imports point one way", () => {
       "src/generator/dotnet/index.ts -> generator/svelte/",
       "src/generator/dotnet/index.ts -> generator/vue/",
       "src/generator/elixir/index.ts -> generator/react/",
+      "src/generator/elixir/index.ts -> generator/svelte/",
       "src/generator/elixir/index.ts -> generator/vue/",
       "src/generator/elixir/theme-emit.ts -> generator/react/",
       "src/generator/java/index.ts -> generator/react/",

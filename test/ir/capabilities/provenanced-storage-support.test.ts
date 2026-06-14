@@ -1,7 +1,8 @@
-// Tier-0 honest-gate guard.  The provenance runtime (domain/provenance.ts +
-// per-write recordTrace) is emitted on the Hono (node) backend only; on dotnet
-// / phoenix a `provenanced` field used to silently behave like a plain field,
-// dropping the trail it promises.  The validator now rejects that mismatch with
+// Tier-0 honest-gate guard.  The provenance runtime (the lineage SDK +
+// co-located `<field>_provenance` column + the provenance_records flush) is
+// emitted on the Hono (node) and .NET (dotnet) backends; on phoenix a
+// `provenanced` field would silently behave like a plain field, dropping the
+// trail it promises.  The validator rejects that mismatch with
 // loom.provenanced-backend-unsupported rather than emitting a footgun.
 
 import { describe, expect, it } from "vitest";
@@ -41,12 +42,8 @@ describe("provenanced-field storage capability validation", () => {
     expect(await provErrors(sys("hono"))).toEqual([]);
   });
 
-  it("rejects a provenanced field on a .NET deployable (no provenance runtime)", async () => {
-    const errs = await provErrors(sys("dotnet"));
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("Order");
-    expect(errs[0]).toContain("total");
-    expect(errs[0]).toContain("dotnet");
+  it("accepts a provenanced field on a .NET deployable (provenance runtime ported)", async () => {
+    expect(await provErrors(sys("dotnet"))).toEqual([]);
   });
 
   it("rejects a provenanced field on a Phoenix deployable (no provenance runtime)", async () => {
@@ -55,7 +52,7 @@ describe("provenanced-field storage capability validation", () => {
     expect(errs[0]).toContain("provenance runtime");
   });
 
-  it("rejects when a provenanced context is co-hosted on hono + dotnet (mismatch)", async () => {
+  it("accepts a provenanced context co-hosted on hono + dotnet (both capable)", async () => {
     const src = `
 system Shop {
   subdomain Core {
@@ -73,8 +70,29 @@ system Shop {
   deployable dotnetApi { platform: dotnet, contexts: [Ordering], dataSources: [ordersState], port: 8080 }
 }
 `;
+    expect(await provErrors(src)).toEqual([]);
+  });
+
+  it("rejects when a provenanced context is co-hosted on hono + phoenix (mismatch)", async () => {
+    const src = `
+system Shop {
+  subdomain Core {
+    context Ordering {
+      aggregate Order ids guid {
+        total: int provenanced
+        operation bump() { total := total + 1 }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource ordersState { for: Ordering, kind: state, use: pg }
+  deployable honoApi { platform: hono, contexts: [Ordering], dataSources: [ordersState], port: 3000 }
+  deployable phx { platform: phoenixLiveView, contexts: [Ordering], dataSources: [ordersState], port: 8080 }
+}
+`;
     const errs = await provErrors(src);
     expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("dotnet");
+    expect(errs[0]).toContain("elixir");
   });
 });

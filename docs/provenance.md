@@ -8,9 +8,11 @@ backend records a runtime trace on every write so a value can later
 be explained: "this 128.40 came from `reprice(qty=8, price=16)` via
 rule `<snapshotId>`".
 
-Today provenance is a **Hono-only** runtime feature.  Other backends
-parse the keyword but emit no trace code — only the snapshot capture
-runs across all backends.
+Provenance has a runtime on the **Hono (`node`)** and **.NET (`dotnet`)**
+backends — both emit the co-located lineage column, per-write trace
+capture, and the transactional `provenance_records` flush.  The
+remaining backends (`phoenixLiveView`, `react`) parse the keyword but
+emit no trace code; only the snapshot capture runs across all backends.
 
 ## Surface
 
@@ -102,16 +104,42 @@ capture is inlined statement-by-statement.  See
 and `src/generator/typescript/emit/aggregate.ts` (the field +
 buffer + `drainProv` plumbing).
 
+## Generated runtime (.NET)
+
+The .NET backend emits the same runtime shape, in EF Core / CQRS terms:
+
+- `Domain/Common/ProvLineage.cs` — the `ProvLineage` / `ProvTarget` /
+  `ProvInput` records (System.Text.Json Web defaults, so the jsonb
+  shape matches the Hono lineage) plus `ProvJson.Options`.
+- A co-located `public ProvLineage? <Field>Provenance { get; private
+  set; }` per provenanced field, mapped to a `<field>_provenance` jsonb
+  column via a value-converter, plus a private `_provTraces` buffer and
+  a `DrainProv()` drainage hook on the aggregate.
+- **Inline trace capture** at every provenanced write site in the
+  aggregate method body — snapshot the leaf inputs *before* the write,
+  build the `ProvLineage`, and route it to both the backing property and
+  `_provTraces` (identical to the Hono `withTrace` logic).
+- A `ProvenanceRecord` EF entity + configuration for the append-only
+  `provenance_records` table; the repository's `SaveAsync` drains
+  `DrainProv()` into it *before* `SaveChangesAsync`, so the history
+  commits in the aggregate's transaction.
+- The current lineage is exposed on the wire as a trailing
+  `<Field>Provenance` field on the aggregate's `<Agg>Response` DTO.
+
+The `provenance_records` table + the co-located columns ship as one
+extra EF migration (`Migrations/<late>_ProvenanceAudit.cs`) that sorts
+after every module's initial migration.
+
 ## Other backends
 
-`.NET`, `phoenixLiveView`, and `react` parse `provenanced` and treat
-it as a no-op at runtime.  The snapshot capture still produces a file
-for the system as a whole; backends that don't implement the runtime
-half ignore it.
+`phoenixLiveView` and `react` parse `provenanced` and treat it as a
+no-op at runtime.  The snapshot capture still produces a file for the
+system as a whole; backends that don't implement the runtime half
+ignore it.
 
 This is intentional: provenance is opt-in at the deployable level
 without being opt-in at the language level — you can declare a
-`provenanced` field once and only the Hono deployable will exercise
+`provenanced` field once and only a node/dotnet deployable will exercise
 it, until a runtime is wired up for the others.
 
 ## Cross-references

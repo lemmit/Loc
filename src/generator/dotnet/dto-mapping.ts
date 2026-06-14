@@ -5,6 +5,7 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
+  FieldIR,
   IdValueType,
   TypeIR,
   ValueObjectIR,
@@ -370,6 +371,13 @@ export function projectEntityArgs(
   domainExpr: string,
   entity: EnrichedAggregateIR | EnrichedEntityPartIR,
   ctx: EnrichedBoundedContextIR,
+  /** Provenance (provenance.md): the `<Ent>Response` record carries one trailing
+   *  `<Field>Provenance` param per provenanced field, so its projection appends
+   *  the matching `domainExpr.<Field>Provenance` args by default — keeping the
+   *  record + projection in lockstep.  A discriminated-union variant record
+   *  (`<Union>_<Tag>`, params from `unionMembers`) does NOT carry the provenance
+   *  params, so that one call site sets `unionVariant` to suppress them. */
+  opts?: { unionVariant?: boolean },
 ): string {
   // `entity.wireShape` is populated by `enrichLoomModel` and exposed via
   // the `Enriched...` brands threaded through `PlatformSurface.emitProject`.
@@ -396,6 +404,13 @@ export function projectEntityArgs(
       args.push(projectToResponse(`${domainExpr}.${upperFirst(wf.name)}`, wf.type, ctx));
     }
   }
+  // Provenance: trailing `<Field>Provenance` lineage args, in field order,
+  // matching the response record's trailing params (see `responseRecordParams`).
+  if (!opts?.unionVariant) {
+    for (const f of entity.fields.filter((pf) => pf.provenanced)) {
+      args.push(`${domainExpr}.${upperFirst(f.name)}Provenance`);
+    }
+  }
   return args.join(", ");
 }
 
@@ -403,8 +418,9 @@ export function projectEntityExpr(
   domainExpr: string,
   entity: EnrichedAggregateIR | EnrichedEntityPartIR,
   ctx: EnrichedBoundedContextIR,
+  opts?: { unionVariant?: boolean },
 ): string {
-  return `new ${entity.name}Response(${projectEntityArgs(domainExpr, entity, ctx)})`;
+  return `new ${entity.name}Response(${projectEntityArgs(domainExpr, entity, ctx, opts)})`;
 }
 
 export function aggregateResponseParams(
@@ -437,7 +453,19 @@ function responseRecordParams(
       parts.push(dtoParam(wireType(wf.type, ctx, "response"), upperFirst(wf.name)));
     }
   }
+  // Provenance (provenance.md): expose each provenanced field's current lineage
+  // as a trailing nullable `<Field>Provenance` response param (no `[Required]` —
+  // a never-written field has null lineage).  Lockstep with `projectEntityArgs`.
+  for (const f of ent.fields.filter((pf) => pf.provenanced)) {
+    parts.push(`ProvLineage? ${upperFirst(f.name)}Provenance`);
+  }
   return parts.join(", ");
+}
+
+/** True iff the entity exposes any provenanced field on its response (so the
+ *  emitter adds the `using <ns>.Domain.Common;` the `ProvLineage?` param needs). */
+export function entityExposesProvenance(ent: { fields: FieldIR[] }): boolean {
+  return ent.fields.some((f) => f.provenanced);
 }
 
 function isPart(ent: EnrichedAggregateIR | EnrichedEntityPartIR): ent is EnrichedEntityPartIR {

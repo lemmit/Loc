@@ -61,6 +61,11 @@ import { vueTarget } from "./walker/vue-target.js";
 export interface GenerateVueOptions {
   apiBaseUrl?: string;
   pathPrefix?: string;
+  /** Sub-path the built bundle is served under (Phoenix `/app`) — sets
+   *  the vite `base` and bakes the vue-router history basename.  Unset
+   *  for root-served hosts (dotnet/java wwwroot, standalone) →
+   *  byte-identical. */
+  basePath?: string;
 }
 
 export function generateVueForContexts(
@@ -73,6 +78,9 @@ export function generateVueForContexts(
 
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
   const apiBaseUrl = options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
+  const basePath = options.basePath ?? "";
+  const viteBase = basePath ? `${basePath}/` : undefined;
+  const routerBasename = basePath || undefined;
 
   const aggregates: Array<{ agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }> = [];
   for (const ctx of contexts) {
@@ -158,7 +166,7 @@ export function generateVueForContexts(
     );
   }
   out.set("src/pages/NotFound.vue", renderShell(pack, "not-found-page", {}));
-  out.set("src/router.ts", renderRouter(pages));
+  out.set("src/router.ts", renderRouter(pages, routerBasename));
 
   // Page objects + the Playwright e2e harness (vue-frontend-plan.md
   // Slice 6).  Page objects are framework-neutral — testid/DOM only,
@@ -225,7 +233,7 @@ export function generateVueForContexts(
   out.set("package.json", renderShell(pack, "package-json", { usesMoney }));
   out.set("tsconfig.json", renderShell(pack, "tsconfig", {}));
   out.set("tsconfig.node.json", renderShell(pack, "tsconfig-node", {}));
-  out.set("vite.config.ts", renderShell(pack, "vite-config", {}));
+  out.set("vite.config.ts", renderShell(pack, "vite-config", { base: viteBase }));
   out.set("index.html", renderShell(pack, "index-html", prepareIndexHtmlVM(deployable, ui)));
   out.set("Dockerfile", renderShell(pack, "dockerfile", {}));
   out.set(".dockerignore", renderShell(pack, "dockerignore", {}));
@@ -293,7 +301,7 @@ function renderPageStub(page: PageIR): string {
 `;
 }
 
-function renderRouter(pages: PageIR[]): string {
+function renderRouter(pages: PageIR[], bakedBasename?: string): string {
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { createRouter, createWebHistory } from "vue-router";`);
@@ -310,7 +318,9 @@ function renderRouter(pages: PageIR[]): string {
   lines.push("const basename =");
   lines.push(`  (typeof window !== "undefined"`);
   lines.push("    ? (window as { __LOOM_BASENAME__?: string }).__LOOM_BASENAME__");
-  lines.push("    : undefined) ?? undefined;");
+  lines.push(
+    `    : undefined) ?? ${bakedBasename !== undefined ? JSON.stringify(bakedBasename) : "undefined"};`,
+  );
   lines.push("");
   lines.push("export const router = createRouter({");
   lines.push("  history: createWebHistory(basename),");

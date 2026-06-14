@@ -47,18 +47,31 @@ import { domainUnionFiles } from "./cqrs/dtos.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { canEmitToExpressionFor, emitCriteria } from "./criteria-emit.js";
 import {
+  aggHasAuditedOp,
+  renderAuditRecord,
+  renderAuditRecordConfiguration,
+  renderAuditWriter,
+  renderAuditWriterInterface,
+} from "./emit/audit.js";
+import {
   renderDapperEventSourcedRepository,
   renderDapperRepository,
   renderDapperSchema,
 } from "./emit/dapper.js";
 import { renderDomainLog, renderExecutionContextBehavior } from "./emit/domain-log.js";
-import { emitDotnetMigrations } from "./emit/migrations.js";
+import { emitDotnetMigrations, emitDotnetProvenanceAuditMigration } from "./emit/migrations.js";
 import {
   renderOutboxDelivery,
   renderOutboxDispatcher,
   renderOutboxMessage,
   renderOutboxRelay,
 } from "./emit/outbox.js";
+import {
+  contextsHaveProvenance,
+  renderProvenanceRecord,
+  renderProvenanceRecordConfiguration,
+  renderProvLineage,
+} from "./emit/provenance.js";
 import { renderRequestContext } from "./emit/request-context.js";
 import { renderRequestContextMiddleware } from "./emit/request-context-middleware.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
@@ -330,6 +343,12 @@ function emitProjectFromContexts(
   // validator gates dapper to the supported subset, so the EF-only branches
   // below stay byte-identical for the default `efcore`.
   const usingDapper = system?.deployable.persistence === "dapper";
+  // Provenance (provenance.md) + per-operation audit (audit-and-logging.md)
+  // runtimes — EF Core only (the dapper path is a follow-up).  `hasProvenance`
+  // drives the lineage SDK + history table + co-located columns; `hasAudit`
+  // drives the audit table + writer + per-handler instrumentation.
+  const hasProvenance = !usingDapper && contextsHaveProvenance(contexts);
+  const hasAudit = !usingDapper && merged.aggregates.some(aggHasAuditedOp);
   if (usingDapper) {
     out.set("Infrastructure/Persistence/DbSchema.cs", renderDapperSchema(merged.aggregates, ns));
   } else {
@@ -341,8 +360,33 @@ function emitProjectFromContexts(
         documentAggNames(contexts, system?.sys),
         eventSourcedAggNames(contexts),
         hasOutbox,
+        hasProvenance,
+        hasAudit,
       ),
     );
+    // Provenance runtime shared files — the lineage SDK + the append-only
+    // history POCO/configuration.  The co-located columns + per-write capture +
+    // flush are emitted per aggregate (entity.ts / efcore.ts / repository.ts).
+    if (hasProvenance) {
+      out.set("Domain/Common/ProvLineage.cs", renderProvLineage(ns));
+      out.set("Infrastructure/Persistence/ProvenanceRecord.cs", renderProvenanceRecord(ns));
+      out.set(
+        "Infrastructure/Persistence/Configurations/ProvenanceRecordConfiguration.cs",
+        renderProvenanceRecordConfiguration(ns),
+      );
+    }
+    // Per-operation audit shared files — the append-only audit POCO/configuration
+    // + the IAuditWriter staging seam.  Per-handler before/after capture is
+    // emitted in cqrs/commands.ts.
+    if (hasAudit) {
+      out.set("Infrastructure/Persistence/AuditRecord.cs", renderAuditRecord(ns));
+      out.set(
+        "Infrastructure/Persistence/Configurations/AuditRecordConfiguration.cs",
+        renderAuditRecordConfiguration(ns),
+      );
+      out.set("Application/Common/IAuditWriter.cs", renderAuditWriterInterface(ns));
+      out.set("Infrastructure/Persistence/AuditWriter.cs", renderAuditWriter(ns));
+    }
     // Persisted workflow-correlation state POCOs + EF configs (one per
     // correlation-bearing workflow); the DbSet/ApplyConfiguration wiring is
     // inside renderDbContext above.
@@ -375,6 +419,15 @@ function emitProjectFromContexts(
   const hasMigrations = !usingDapper && !!(system?.migrations && system.migrations.length > 0);
   if (hasMigrations) {
     emitDotnetMigrations(system!.migrations!, ns, out);
+    // The provenance/audit DDL ships as one extra migration sorting after every
+    // module's initial migration (so the aggregate tables exist for the
+    // co-located-column ALTERs).  Feature-local — not part of MigrationsIR.
+    if (hasProvenance || hasAudit) {
+      emitDotnetProvenanceAuditMigration(contexts, system?.sys, ns, out, {
+        provenance: hasProvenance,
+        audit: hasAudit,
+      });
+    }
   }
   // First-boot seed data (database-seeding.md, Phase 3a) — emits
   // Infrastructure/Persistence/Seed.cs when the served contexts declare any
@@ -402,6 +455,7 @@ function emitProjectFromContexts(
     usingDapper,
     hasSubscriptions,
     hasOutbox,
+    hasAudit,
     resourceNugetDeps: resourceEmission.nugetDeps,
   });
   emitTestProject(merged, ns, out);
@@ -890,6 +944,9 @@ function emitProject(
     /** Transactional outbox (dispatch-delivery-semantics.md): registers the
      *  outbox-wrapping dispatcher + the relay BackgroundService. */
     hasOutbox?: boolean;
+    /** Per-operation audit (audit-and-logging.md): registers the scoped
+     *  `IAuditWriter` → `AuditWriter` the audited command handlers depend on. */
+    hasAudit?: boolean;
     resourceNugetDeps?: Record<string, string>;
   },
 ): void {
@@ -914,6 +971,7 @@ function emitProject(
       usingDapper,
       hasSubscriptions: !!options?.hasSubscriptions,
       hasOutbox: !!options?.hasOutbox,
+      hasAudit: !!options?.hasAudit,
     }),
   );
   // Ardalis.Specification ships only when a retrieval exists (EF Core path;

@@ -115,10 +115,14 @@ export function renderAppShell(
   });
 }
 
-/** Render `src/main.tsx` — provider chain + React-Query client. */
-export function renderMain(pack: LoadedPack): string {
+/** Render `src/main.tsx` — provider chain + React-Query client.
+ *  `basename` bakes the router basename fallback for sub-path hosts
+ *  (Phoenix `/app`); omitted → the runtime `__LOOM_BASENAME__` hook
+ *  still falls back to `undefined` (root), byte-identical. */
+export function renderMain(pack: LoadedPack, basename?: string): string {
   return pack.render("main", {
     routerPackage: routerPackageForStack(pack.manifest.stack),
+    basename,
   });
 }
 

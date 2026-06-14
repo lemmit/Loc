@@ -17,8 +17,10 @@
 //   ✓ precondition → `:ok <- (if <cond>, do: :ok, else: {:error, :precondition_failed})`
 //   ✓ requires     → `:ok <- (if <cond>, do: :ok, else: {:error, :forbidden})`
 //   ✓ expr-let     → `<name> <- (<expr>)` (always succeeds; binds `name`)
-//   ✓ repo-let     → `{:ok, <name>} <- Context.get_<agg>(id)` (getById only;
-//                    custom finds aren't yet exposed via the vanilla context)
+//   ✓ repo-let     → `{:ok, <name>} <- Context.get_<agg>(id)` (getById)
+//                    OR `{:ok, <name>} <- Context.<find>_<agg>(args...)`
+//                    (custom find via the per-find defdelegate emitted by
+//                    `context-emit.ts` → `repository-emit.ts:renderFindFn`)
 //   ✓ emit         → `Phoenix.PubSub.broadcast(App.PubSub, "events",
 //                     %App.Ctx.Events.<Name>{...})` — rendered INSIDE the
 //                    with-chain's do-branch so a failed precondition / op
@@ -40,11 +42,11 @@
 //                                    case Context.<op>_<agg>(x, %{}) do ... end
 //                                  end)` — first body-op failure halts the
 //                     reduce and bubbles `{:error, _}` up the with-chain.
-//   ✓ default     → preserved as `# TODO:<kind>` comment; the workflow
-//                   still compiles and the route is exercisable.  Only a
-//                   non-getById `repo-let` (custom find) reaches this
-//                   today — vanilla repositories don't yet expose custom
-//                   finds through the context facade.
+// Every WorkflowStmtIR kind now lowers to real Elixir — there is no
+// `default:` / `# TODO` fallthrough remaining.  The switch over
+// `lowerStatement` is exhaustive over the IR union; if a new kind is
+// added to `WorkflowStmtIR`, TypeScript fails compile until a matching
+// arm is added here AND in `collectWorkflowStmtParamRefs`.
 //
 // Param surfacing: a workflow body that references a declared
 // create-param (`create(initialTitle: string) { … initialTitle … }`)
@@ -228,18 +230,24 @@ function lowerStatement(
     }
 
     case "repo-let": {
-      // `let wallet = Wallets.getById(walletId)` →
-      // `{:ok, wallet} <- Context.get_wallet(wallet_id)`.
-      // Only the auto-generated `getById` finder is supported on vanilla
-      // today — it maps to the context's `get_<agg>/1` (find_by_id)
-      // facade.  Custom repository finds aren't yet exposed through the
-      // vanilla context, so a non-getById repo-let stays on the TODO
-      // fallthrough (a call to a non-existent fn would fail mix compile).
-      // The matching arm in `collectWorkflowStmtParamRefs` is likewise
-      // gated to getById.
-      if (st.method !== "getById") return todoLine(st.kind);
+      // Two shapes, both lowering to a with-clause:
+      //
+      //   `let wallet = Wallets.getById(walletId)` →
+      //     `{:ok, wallet} <- Context.get_wallet(wallet_id)`
+      //
+      //   `let c = Customers.byEmail(needle)` (custom find) →
+      //     `{:ok, c} <- Context.by_email_customer(needle)`
+      //
+      // The `getById` finder maps to the context's `get_<agg>/1` (find_by_id)
+      // facade.  Custom finds map to the per-find defdelegate emitted by
+      // `context-emit.ts` (see `customFindsOf`), which routes to the
+      // matching `def <find>` in the repository module.
       const argList = st.args.map((a) => renderExpr(a, renderCtx)).join(", ");
-      const call = `${contextModule}.get_${snake(st.aggName)}(${argList})`;
+      const action =
+        st.method === "getById"
+          ? `get_${snake(st.aggName)}`
+          : `${snake(st.method)}_${snake(st.aggName)}`;
+      const call = `${contextModule}.${action}(${argList})`;
       return [
         {
           kind: "with-clause",
@@ -355,17 +363,6 @@ function lowerStatement(
       ];
     }
   }
-}
-
-/** The `# TODO` fallthrough BodyLine for a not-yet-lowered statement kind —
- *  keeps the workflow compiling while the per-kind lowering is pending. */
-function todoLine(kind: string): BodyLine[] {
-  return [
-    {
-      kind: "stmt",
-      text: `# TODO: lower workflow statement kind '${kind}' (vanilla-foundation-tdd-plan.md follow-up)`,
-    },
-  ];
 }
 
 /** Render a single body statement of a `for-each` as the inner Elixir
@@ -513,10 +510,10 @@ function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): voi
       for (const f of st.fields) collectParamRefs(f.value, acc);
       return;
     case "repo-let":
-      // Gated to the lowered form — see the `repo-let` arm in lowerStatement.
-      // A non-getById repo-let stays on the `# TODO` fallthrough, so its
-      // args aren't surfaced.
-      if (st.method === "getById") for (const a of st.args) collectParamRefs(a, acc);
+      // Every repo-let is now lowered — getById maps to `get_<agg>/1`, a
+      // custom find maps to `<find>_<agg>(args...)` via the context
+      // defdelegate emitted by context-emit.ts.
+      for (const a of st.args) collectParamRefs(a, acc);
       return;
     case "resource-call":
       collectParamRefs(st.call, acc);

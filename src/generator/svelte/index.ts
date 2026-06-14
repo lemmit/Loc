@@ -58,6 +58,11 @@ export interface GenerateSvelteOptions {
    *  passes `"ClientApp/"` so the SvelteKit project lands inside the
    *  host project's tree.  Mirrors GenerateReactOptions.pathPrefix. */
   pathPrefix?: string;
+  /** Sub-path the built bundle is served under (Phoenix `/app`) — sets
+   *  SvelteKit's `kit.paths.base`, which base-prefixes asset URLs and
+   *  base-aware links automatically.  Unset for root-served hosts
+   *  (dotnet/java wwwroot, standalone) → byte-identical. */
+  basePath?: string;
   topLevelComponents?: import("../../ir/types/loom-ir.js").ComponentIR[];
 }
 
@@ -71,6 +76,7 @@ export function generateSvelteForContexts(
 
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
   const apiBaseUrl = options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
+  const base = options.basePath || undefined;
 
   const aggregates: Array<{ agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }> = [];
   for (const ctx of contexts) {
@@ -213,7 +219,7 @@ export function generateSvelteForContexts(
   out.set("src/theme.css", pack.render("theme", themeVM(sys)));
   out.set("package.json", pack.render("package-json", { usesMoney }));
   out.set("tsconfig.json", pack.render("tsconfig", {}));
-  out.set("svelte.config.js", pack.render("svelte-config", {}));
+  out.set("svelte.config.js", pack.render("svelte-config", { base }));
   out.set("vite.config.ts", pack.render("vite-config", {}));
   out.set("Dockerfile", pack.render("dockerfile", {}));
   out.set(".dockerignore", pack.render("dockerignore", {}));

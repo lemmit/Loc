@@ -222,6 +222,17 @@ describe.skipIf(!ENABLED)("Phoenix embeds React — runtime e2e (LOOM_EMBED_E2E_
       // Vite-built index.html references the bundled module script.
       expect(appBody, ctx).toContain('<div id="root">');
 
+      // 7a′. The bundle's assets must be referenced under /app (vite
+      //      `base: "/app/"`) and actually load — a root-based
+      //      `/assets/...` href would 404 here, which is the bug the
+      //      basePath thread fixes.  Pull the module script's src out of
+      //      index.html and fetch it.
+      const scriptSrc = appBody.match(/<script[^>]+src="([^"]+)"/)?.[1] ?? "";
+      expect(scriptSrc, `${ctx} index.html script src`).toMatch(/^\/app\/assets\//);
+      const assetRes = await fetch(`http://127.0.0.1:${appPort}${scriptSrc}`);
+      expect(assetRes.status, `${ctx} GET ${scriptSrc}`).toBe(200);
+      expect(assetRes.headers.get("content-type") ?? "", ctx).toMatch(/javascript/);
+
       // 7b. A client-side deep link under /app → still the SPA shell
       //     (the SpaController catch-all, the MapFallbackToFile analogue).
       const deepRes = await fetch(`http://127.0.0.1:${appPort}/app/products`);
