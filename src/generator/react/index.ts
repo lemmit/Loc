@@ -76,6 +76,13 @@ import { renderAppShell, renderMain, renderShellFile, renderTheme } from "./temp
 export interface GenerateReactOptions {
   apiBaseUrl?: string;
   pathPrefix?: string;
+  /** Sub-path the built bundle is *served* under (e.g. `"/app"` when a
+   *  Phoenix host serves the SPA at `/app` via `Plug.Static`).  Sets the
+   *  vite `base` (so `index.html` references `/app/assets/…`) and bakes
+   *  the router basename so client-side routing resolves under it.
+   *  Root-served hosts (dotnet/java `wwwroot`, standalone) leave it
+   *  unset → byte-identical output. */
+  basePath?: string;
   /** Top-level (workspace-wide) components — pure render functions
    *  declared as bare `ModelMember`s in any reachable `.ddd`
    *  document.  The emitter merges them into the per-ui name→params
@@ -97,6 +104,12 @@ export function generateReactForContexts(
   // Standalone react picks the target deployable's port; fullstack
   // dotnet overrides with `"/api"` for same-origin SPA fetches.
   const apiBaseUrl = options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
+  // Sub-path the bundle is served under (Phoenix `/app`).  `viteBase`
+  // is the trailing-slashed form vite wants (`/app/`); `basename` is
+  // the slashless router basename.  Unset for root-served hosts.
+  const basePath = options.basePath ?? "";
+  const viteBase = basePath ? `${basePath}/` : undefined;
+  const routerBasename = basePath || undefined;
 
   // Per-aggregate api modules + pages.
   const aggregates: Array<{ agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }> = [];
@@ -233,7 +246,7 @@ export function generateReactForContexts(
   // pack's "theme" template; the generated file always exists and
   // main.tsx always wires `<MantineProvider theme={theme}>`.
   out.set("src/theme.ts", renderTheme(sys.theme, pack));
-  out.set("src/main.tsx", renderMain(pack));
+  out.set("src/main.tsx", renderMain(pack, routerBasename));
   // When the ui block declares an explicit `menu { … }`,
   // its derived sidebar overrides the hardcoded Aggregates /
   // Workflows / Views grouping below.  When the ui has no menu
@@ -348,7 +361,7 @@ export function generateReactForContexts(
   out.set("package.json", renderShellFile("package-json", { usesMoney }, pack));
   out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));
   out.set("tsconfig.node.json", renderShellFile("tsconfig-node", {}, pack));
-  out.set("vite.config.ts", renderShellFile("vite-config", {}, pack));
+  out.set("vite.config.ts", renderShellFile("vite-config", { base: viteBase }, pack));
   // Pages that use the `CodeBlock { ... }` primitive need the
   // highlight.js CDN payload injected into the shell HTML — every
   // page's CDN tags are identical, so a single per-deployable

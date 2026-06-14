@@ -138,6 +138,18 @@ describe("Phoenix embeds React (D-PHOENIX-SURFACE phase 6a)", () => {
     expect(dockerfile).toContain("COPY --from=spa-build /spa/dist priv/static/app");
   });
 
+  it("the embedded bundle builds with vite base /app/ + baked router basename (6b)", async () => {
+    // Phoenix serves the bundle from /app, so the vite build must base
+    // its asset URLs there (`index.html` → /app/assets/...) and the
+    // react-router basename must default to /app — otherwise deep links
+    // and asset loads 404.  Standalone/root-served react gets neither.
+    const files = await generate(EMBED_REACT_SRC);
+    const vite = get(files, "/assets/vite.config.ts");
+    expect(vite).toContain('base: "/app/"');
+    const main = get(files, "/assets/src/main.tsx");
+    expect(main).toContain('?? "/app"');
+  });
+
   it("the legacy liveview shell files carry NO SPA serve-wiring (6b output-neutral)", async () => {
     const files = await generate(LIVEVIEW_SRC);
     const endpoint = get(files, "_web/endpoint.ex");

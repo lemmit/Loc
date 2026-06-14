@@ -430,15 +430,14 @@ describe("phoenixLiveView pipeline", () => {
     expect(parsed.lastVersion).toBe("20260101000000");
   });
 
-  it("framework overrides on phoenix follow the hostable set: react embeds, svelte rejects", async () => {
-    // `framework: react` on a phoenix host is the embedded-SPA mode
-    // (D-PHOENIX-SURFACE phase 6a/6b — React project under assets/,
-    // served from priv/static).  Rule 13 used to hard-reject the
-    // legacy block-binding spelling while the hosts:-declared form
-    // was allowed; it now consults `hostableFrameworks` so both
-    // spellings agree.  `svelte` stays rejected — a SvelteKit bundle
-    // under the /app path prefix needs `paths.base` wiring
-    // (docs/plans/svelte-frontend-plan.md follow-up).
+  it("framework overrides on phoenix follow the hostable set: react + svelte embed", async () => {
+    // `framework: react` (and now `svelte`) on a phoenix host is the
+    // embedded-SPA mode (D-PHOENIX-SURFACE — SPA project under assets/,
+    // served from priv/static/app).  Rule 13 used to hard-reject the
+    // legacy block-binding spelling while the hosts:-declared form was
+    // allowed; it now consults `hostableFrameworks` so both spellings
+    // agree.  `svelte` is accepted too — the SvelteKit bundle builds
+    // with `paths.base = "/app"` so it resolves under the prefix.
     const check = async (framework: string): Promise<string[]> => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pliv-fw-"));
       const file = path.join(dir, "fw.ddd");
@@ -463,7 +462,7 @@ describe("phoenixLiveView pipeline", () => {
     const svelteErrors = await check("svelte");
     expect(
       svelteErrors.some((e) => /Framework 'svelte' does not match platform 'phoenix'/.test(e)),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 

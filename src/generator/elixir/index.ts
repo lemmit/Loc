@@ -9,6 +9,7 @@ import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { StyleAdapter } from "../_adapters/index.js";
 import { generateReactForContexts } from "../react/index.js";
+import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
 import { emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
@@ -108,9 +109,10 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   // unchanged.  The Ash domain + `/api` controllers + OpenAPI are
   // emitted in either mode.
   const embedVue = deployable.uiFramework === "vue";
+  const embedSvelte = deployable.uiFramework === "svelte";
   // Any static-bundle embed suppresses LiveView page emission and
   // routes the SPA serving wiring instead.
-  const embedReact = deployable.uiFramework === "react" || embedVue;
+  const embedReact = deployable.uiFramework === "react" || embedVue || embedSvelte;
 
   // Per-aggregate dataSource lookup — feeds `postgres do schema "…"
   // end` + `tablePrefix` routing in each Ash.Resource's `postgres`
@@ -234,16 +236,17 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   // `apiBaseUrl: "/api"`, same skip of duplicate shell files the
   // Phoenix project owns.  The endpoint/router/Dockerfile wiring that
   // *serves* the built bundle from `priv/static` is phase 6b.
-  if (embedReact || embedVue) {
-    const spaFiles = embedVue
-      ? generateVueForContexts(contexts, sys, deployable, {
-          apiBaseUrl: "/api",
-          pathPrefix: "assets/",
-        })
-      : generateReactForContexts(contexts, sys, deployable, {
-          apiBaseUrl: "/api",
-          pathPrefix: "assets/",
-        });
+  if (embedReact) {
+    // Phoenix serves the bundle from `/app` (Plug.Static + SpaController),
+    // so every static-bundle frontend builds with `basePath: "/app"` —
+    // vite `base` / SvelteKit `paths.base` make the asset URLs and
+    // client-side links resolve under `/app` rather than 404 at root.
+    const spaOpts = { apiBaseUrl: "/api", pathPrefix: "assets/", basePath: "/app" };
+    const spaFiles = embedSvelte
+      ? generateSvelteForContexts(contexts, sys, deployable, spaOpts)
+      : embedVue
+        ? generateVueForContexts(contexts, sys, deployable, spaOpts)
+        : generateReactForContexts(contexts, sys, deployable, spaOpts);
     for (const [path, content] of spaFiles) {
       // Skip the standalone-react shell files the Phoenix project owns
       // (Dockerfile / .dockerignore / certs) or that don't apply in
@@ -257,7 +260,10 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
         continue;
       out.set(path, content);
     }
-    out.set("assets/.gitignore", "node_modules\ndist\n");
+    out.set(
+      "assets/.gitignore",
+      embedSvelte ? "node_modules\nbuild\n.svelte-kit\n" : "node_modules\ndist\n",
+    );
 
     // SpaController — serves the built SPA's index.html for any client-side
     // `/app/*` deep link (the router catch-all, phase 6b).  Reads the file

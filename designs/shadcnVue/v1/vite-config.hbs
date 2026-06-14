@@ -4,7 +4,8 @@ import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [vue(), tailwindcss()],
+{{#if base}}  base: {{json base}},
+{{/if}}  plugins: [vue(), tailwindcss()],
   resolve: {
     alias: {
       "@": "/src",
