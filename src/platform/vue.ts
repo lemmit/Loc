@@ -34,8 +34,8 @@ const vuePlatform: PlatformSurface = {
   // Vue generator only emits API call factories — no per-aggregate
   // repository class.  No find-name collisions are possible.
   reservedRepositoryFindNames: new Set(),
-  emitProject({ contexts, sys, deployable }): Map<string, string> {
-    return generateVueForContexts(contexts, sys, deployable);
+  emitProject({ contexts, sys, deployable, topLevelComponents }): Map<string, string> {
+    return generateVueForContexts(contexts, sys, deployable, { topLevelComponents });
   },
   composeService({ deployable, sys }): ComposeServiceShape {
     const target = sys.deployables.find((t) => t.name === deployable.targetName);
