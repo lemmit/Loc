@@ -19,12 +19,14 @@
 > `<router-view />` is the `main` outlet, `layout: none` mounts
 > top-level, and the default chrome moves to `src/layouts/DefaultLayout.vue`
 > with App.vue a thin host — default-only uis keep the flat
-> chrome-in-App.vue shape).  **Remaining tracked gaps:** operation forms
-> (Action dialogs) inside user components — create-forms and workflow
-> run-forms inside a component DO work; operation forms need the op-dialog
-> host so they stay a narrow deferral — slot params on extern components,
-> and the docker-boot e2e fold-in once the Svelte effort settles the
-> shared LOOM_E2E gate shape.
+> chrome-in-App.vue shape); and the runtime e2e fold-in
+> (`generated-vue-e2e.yml` / `LOOM_VUE_E2E` — `vite build` vue-showcase,
+> `vite preview` the bundle, run the emitted Playwright smoke against the
+> live app; a sibling gate matching the Svelte runtime-e2e shape).
+> **Remaining tracked gaps:** operation forms (Action dialogs) inside
+> user components — create-forms and workflow run-forms inside a component
+> DO work; operation forms need the op-dialog host so they stay a narrow
+> deferral — and slot params on extern components.
 
 Add **Vue 3 as a frontend platform** (`platform: vue`) with feature parity to
 React, plus **two Vue design packs** (`vuetify`, `shadcnVue`) with feature
@@ -295,12 +297,16 @@ feature to its Vue counterpart or a documented exclusion;
   harness in the emitted project.
 - Extend `test/conformance/pack-testid-coverage.test.ts` to vue packs (same
   allowlist policy as TSX).
-- Docker-compose boot e2e for the vue example: build the stack, hit `/`, run
-  the generated Playwright specs (folded into the `LOOM_E2E` suite or a
-  sibling `LOOM_VUE_E2E` gate, whichever keeps `test:e2e` runtimes sane —
-  match whatever the Svelte effort settled on).
+- Runtime e2e for the vue example (**SHIPPED** as `generated-vue-e2e.yml` /
+  `LOOM_VUE_E2E`): `vite build` vue-showcase, `vite preview` the bundle, run
+  the emitted Playwright smoke against the live app.  Settled on the
+  **sibling-gate** shape the Svelte effort chose (`generated-svelte-e2e`) —
+  a separate opt-in gate keeps `test:e2e` runtimes sane.  Pure client-side
+  (no backend/docker; API + realtime calls may fail, the smoke only asserts
+  navigation + a visible body).
 
-**Gate:** Playwright specs pass against the booted vue example.
+**Gate:** Playwright smoke passes against the `vite preview`-served vue
+example.
 
 ---
 
