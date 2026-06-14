@@ -23,11 +23,13 @@
 > **Known follow-ups (deliberately out of this pass):**
 > - Named layouts map to the `(app)` chrome group (no per-layout route
 >   group yet); `layout: none` works via `(bare)`.
-> - `extern` components throw a clear error on svelte (escape hatch
->   not wired).
-> - Phoenix hosting of svelte uis is rejected by the validator —
+> - ~~`extern` components throw a clear error on svelte (escape hatch
+>   not wired).~~ DONE — svelte emits the forwarding `.svelte` wrapper +
+>   typed `<Name>.props.ts` (Snippet for slots), mirroring react.
+> - ~~Phoenix hosting of svelte uis is rejected by the validator —
 >   SvelteKit under the `/app` path prefix needs `paths.base`
->   threading (nav hrefs, goto, assets).
+>   threading (nav hrefs, goto, assets).~~ DONE — phoenix embeds svelte
+>   with `kit.paths.base = "/app"` (also fixed the react/vue asset base).
 > - Playground in-browser svelte preview (per the original scope
 >   decision).
 > - Docker-compose boot e2e for the svelte example (the compile +
