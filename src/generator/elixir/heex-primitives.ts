@@ -808,6 +808,55 @@ export function renderInlineCode(
 ): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.InlineCode!, expr, ctx);
 }
+
+/** `Divider(label?)` → `<hr />`.  LiveView has no labelled-divider
+ *  component; the optional `label:` is dropped (the same fallback the
+ *  TSX packs that lack a labelled divider use). */
+export function renderDivider(expr: Extract<ExprIR, { kind: "call" }>, _ctx: WalkContext): string {
+  let testid = "";
+  for (let i = 0; i < expr.args.length; i++) {
+    const arg = expr.args[i]!;
+    if (expr.argNames?.[i] === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  return `<hr${testidAttr} />`;
+}
+
+/** `Image(src, alt)` → `<img src=… alt=… />`.  Literal attrs render as
+ *  quoted strings; refs render as `{@assign}` HEEx expressions. */
+export function renderImage(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  const attrVal = (arg: ExprIR): string =>
+    arg.kind === "literal"
+      ? `"${arg.value}"`
+      : `{${renderExpr(arg, { ...ctx, position: "template" })}}`;
+  let srcAttr = "";
+  let altAttr = "";
+  let testid = "";
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (name === "src") srcAttr = ` src=${attrVal(arg)}`;
+    else if (name === "alt") altAttr = ` alt=${attrVal(arg)}`;
+    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  return `<img${srcAttr}${altAttr}${testidAttr} />`;
+}
+
+/** `Stat(label, value)` → a small headline-stat block (dimmed label +
+ *  bold value), the HEEx analogue of the TSX `primitive-stat` template. */
+export function renderStat(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  let testid = "";
+  for (let i = 0; i < expr.args.length; i++) {
+    const arg = expr.args[i]!;
+    if (expr.argNames?.[i] === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
+  const label = positionals[0] ? renderInTemplate(positionals[0], ctx) : "";
+  const value = positionals[1] ? renderInTemplate(positionals[1], ctx) : "";
+  return `<div class="stat"${testidAttr}>\n  <div class="stat-label text-sm text-gray-500">${label}</div>\n  <div class="stat-value text-2xl font-semibold">${value}</div>\n</div>`;
+}
 export function renderCard(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Card!, expr, ctx);
 }
