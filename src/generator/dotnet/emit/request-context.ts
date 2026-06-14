@@ -23,6 +23,10 @@ export function renderRequestContext(
   const { hasAuth, hasLogger } = opts;
   const loggingUsing = hasLogger ? "using Microsoft.Extensions.Logging;\n" : "";
   const authUsing = hasAuth ? `using ${ns}.Auth;\n` : "";
+  // The principal is request-stable, so a child frame inherits it from its
+  // parent (the accessor still resolves `currentUser` once dispatch opens a
+  // child).  Only present when auth carries a CurrentUser slice.
+  const childUserCopy = hasAuth ? "\n            CurrentUser = parent.CurrentUser," : "";
   const currentUserSlice = hasAuth
     ? `
     /// <summary>The verified principal for this flow, or null before
@@ -72,8 +76,9 @@ public sealed class RequestContext
     public string Locale { get; init; } = "en";
     public DateTimeOffset StartedAt { get; init; }
 ${currentUserSlice}${loggerSlice}
-    // ---- Frame-local tier — the root frame here.  Per-boundary child
-    // frames (a fresh ScopeId + ParentId chain) arrive with nesting.
+    // ---- Frame-local tier — a fresh ScopeId per frame.  The root frame
+    // (opened at the boundary) has no parent; each Mediator dispatch opens a
+    // child whose ParentId chains to its caller, forming the causality chain.
     public string ScopeId { get; init; } = string.Empty;
     public string? ParentId { get; init; }
 
@@ -88,6 +93,21 @@ ${currentUserSlice}${loggerSlice}
             StartedAt = startedAt,
             ScopeId = Guid.NewGuid().ToString(),
             ParentId = null,
+        };
+
+    /// <summary>Open a child frame under <paramref name="parent"/>: a fresh
+    /// scope whose <see cref="ParentId"/> chains to the parent's
+    /// <see cref="ScopeId"/>, inheriting the request-stable tier (correlation
+    /// id, principal, locale, start time).  The logger slice is dispatch-local
+    /// and bound by the pipeline behaviour, so it is not inherited here.</summary>
+    public static RequestContext OpenChild(RequestContext parent)
+        => new()
+        {
+            CorrelationId = parent.CorrelationId,
+            Locale = parent.Locale,
+            StartedAt = parent.StartedAt,${childUserCopy}
+            ScopeId = Guid.NewGuid().ToString(),
+            ParentId = parent.ScopeId,
         };
 
     /// <summary>Make <paramref name="frame"/> current until the returned handle

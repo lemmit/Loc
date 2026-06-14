@@ -441,14 +441,25 @@ describe(".NET generator", () => {
       expect(rc).not.toMatch(/CurrentUser/);
       expect(files.has("Middleware/RequestContextMiddleware.cs")).toBe(true);
 
-      // 3. ExecutionContextBehavior binds the logger onto the frame and
-      // restores it in finally so reentrant Send calls stack cleanly.
+      // 3. ExecutionContextBehavior opens a per-dispatch child frame (root
+      // when none is active), binds the logger slice, and surfaces the
+      // correlation / scope / parent ids on a logger scope.  Enter restores
+      // the previous frame on exit so reentrant Send calls stack cleanly.
       const behavior = files.get("Application/Common/ExecutionContextBehavior.cs")!;
       expect(behavior).toMatch(/IPipelineBehavior<TMessage, TResponse>/);
-      expect(behavior).toMatch(/rc\.Logger = _log;/);
-      expect(behavior).toMatch(/var prev = rc\.Logger;/);
-      expect(behavior).toMatch(/rc\.Logger = prev;/);
+      expect(behavior).toMatch(/var parent = RequestContext\.Current;/);
+      expect(behavior).toMatch(/RequestContext\.OpenChild\(parent\)/);
+      expect(behavior).toMatch(/RequestContext\.OpenRoot\(/);
+      expect(behavior).toMatch(/frame\.Logger = _log;/);
+      expect(behavior).toMatch(/using \(RequestContext\.Enter\(frame\)\)/);
+      expect(behavior).toMatch(/\["scopeId"\] = frame\.ScopeId,/);
+      expect(behavior).toMatch(/\["parentId"\] = frame\.ParentId,/);
       expect(files.has("Application/Common/DomainLogBehavior.cs")).toBe(false);
+
+      // 3b. The carrier exposes the child-frame factory chaining ParentId
+      // to the caller's ScopeId.
+      expect(rc).toMatch(/public static RequestContext OpenChild\(RequestContext parent\)/);
+      expect(rc).toMatch(/ParentId = parent\.ScopeId,/);
 
       // 4. Program.cs mounts the boundary middleware first and registers
       // the renamed pipeline behaviour.
@@ -1537,6 +1548,9 @@ describe(".NET generator", () => {
       expect(rc).toMatch(/public sealed class RequestContext/);
       expect(rc).toMatch(/public User\? CurrentUser \{ get; set; \}/);
       expect(rc).not.toMatch(/public ILogger\? Logger/);
+      // A child frame inherits the principal, so the accessor still resolves
+      // currentUser once a Mediator dispatch opens a child under the root.
+      expect(rc).toMatch(/CurrentUser = parent\.CurrentUser,/);
       // Boundary middleware emitted and mounted FIRST — before the request
       // log, which is before user verification.
       expect(files.has("Middleware/RequestContextMiddleware.cs")).toBe(true);
