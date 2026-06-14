@@ -120,6 +120,11 @@ export interface ActionBinding {
   eventName: string;
   /** Optional `then: navigate(<Page>)` target route. */
   thenRoute?: string;
+  /** When set, the handler calls `<eventName>!(id)` directly with the route
+   *  id (the code interface does the lookup via `get_by: [:id]`), rather than
+   *  loading a record first.  Used by `DestroyForm`, whose `destroy_<agg>`
+   *  interface takes the id (matching the REST controller's destroy call). */
+  byId?: boolean;
 }
 
 export interface FormBinding {

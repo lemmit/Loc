@@ -230,14 +230,23 @@ function buildActionHandlers(
     const ctxModule = contextModuleByAggName.get(b.agg);
     const aggSnake = snake(b.agg);
     const navPipe = b.thenRoute ? ` |> push_navigate(to: ~p"${b.thenRoute}")` : "";
+    // `byId` actions (DestroyForm) call the code interface with the id
+    // directly — the `get_by: [:id]` interface does the lookup.  Other
+    // actions load the record first, then invoke the op on it.
+    const body = b.byId
+      ? [
+          `    ${ctxModule}.${b.eventName}!(id)`,
+          `    {:noreply, socket |> put_flash(:info, "${b.opHuman} succeeded")${navPipe}}`,
+        ]
+      : [
+          `    record = ${ctxModule}.get_${aggSnake}!(id)`,
+          `    ${ctxModule}.${b.eventName}!(record)`,
+          `    {:noreply, socket |> put_flash(:info, "${b.opHuman} succeeded")${navPipe}}`,
+        ];
     return {
       name: b.eventName,
       paramsPattern: `%{"id" => id}`,
-      body: [
-        `    record = ${ctxModule}.get_${aggSnake}!(id)`,
-        `    ${ctxModule}.${b.eventName}!(record)`,
-        `    {:noreply, socket |> put_flash(:info, "${b.opHuman} succeeded")${navPipe}}`,
-      ],
+      body,
     };
   });
 }

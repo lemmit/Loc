@@ -64,6 +64,7 @@ import {
   renderCodeBlock as renderCodeBlockHeex,
   renderContainer as renderContainerHeex,
   renderDateDisplay as renderDateDisplayHeex,
+  renderDestroyForm as renderDestroyFormHeex,
   renderDivider as renderDividerHeex,
   renderEmpty as renderEmptyHeex,
   renderEnumBadge as renderEnumBadgeHeex,
@@ -349,13 +350,14 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     tsx: emitWorkflowForm,
     heex: renderFormHeex,
   },
-  // Confirmation-only destroy form (loom-forms.md).  No HEEx renderer yet
-  // — `renderFormHeex` assumes the of:/runs: form shapes; the LiveView
-  // destroy confirm is the elixir track's.
+  // Confirmation-only destroy form (loom-forms.md).  HEEx renders a
+  // confirm-delete `<.button>` wired to the aggregate's Ash destroy action
+  // (renderDestroyForm); the create/op/workflow form shapes use renderFormHeex.
   DestroyForm: {
     group: "layout",
     admissibleInSource: true,
     tsx: emitDestroyForm,
+    heex: renderDestroyFormHeex,
   },
   // --- Legacy archetype names (admissible, lower as `custom` page
   //     origins post-#515; no walker renderer needed) -------------------
