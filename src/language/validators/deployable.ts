@@ -324,7 +324,6 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
     );
   }
 
-
   // R1 — every set axis value must be in its platform menu.
   for (const { name, value } of axes) {
     if (value == null) continue;
