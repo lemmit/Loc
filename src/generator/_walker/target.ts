@@ -143,6 +143,11 @@ export interface TargetHookUse {
   /** Pre-rendered argument strings for parameterised hooks
    *  (`useCustomerById(id)`).  Empty for paramless reads. */
   argsRendered: readonly string[];
+  /** True for a parameterised `find` query (object-shaped filter arg).
+   *  Reactive-framework targets (Vue) wrap the arg in a getter so the
+   *  query live-refetches when a bound filter input changes; React
+   *  ignores it (re-render passes fresh args every render). */
+  reactiveQuery?: boolean;
 }
 
 /** Per-target lowering interface.  An implementation is selected by
