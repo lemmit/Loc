@@ -27,6 +27,11 @@ import {
   opGetById,
   opOperation,
 } from "../../ir/util/openapi-ids.js";
+import {
+  classifyForWire,
+  type SingleFieldPattern,
+  singleFieldConstraints,
+} from "../../ir/validate/invariant-classify.js";
 import { lines } from "../../util/code-builder.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
@@ -155,7 +160,7 @@ export function buildPyRoutesFile(
     refersTo("datetime") || refersTo("Decimal") ? "" : null,
     `from fastapi import ${["APIRouter", "Depends", refersTo("Path") ? "Path" : null, refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
     refersTo("JSONResponse") ? "from fastapi.responses import JSONResponse" : null,
-    `from pydantic import BaseModel${refersTo("RootModel") ? ", RootModel" : ""}`,
+    `from pydantic import ${["BaseModel", refersTo("Field") ? "Field" : null, refersTo("RootModel") ? "RootModel" : null].filter(Boolean).join(", ")}`,
     refersTo("IntegrityError") ? "from sqlalchemy.exc import IntegrityError" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
@@ -273,6 +278,88 @@ function containmentResponseType(t: TypeIR): string {
   return "object";
 }
 
+/** Map each create-input field to a Pydantic `Field(...)` expression carrying
+ *  the constraints implied by the aggregate's single-field invariants, so an
+ *  invalid create is rejected by FastAPI at the request boundary with 422
+ *  (matching Hono's zod chains / Phoenix's Ash validations) instead of
+ *  reaching the domain and raising DomainError → 400.  Mirrors the wire-scope
+ *  + classifier filtering Hono uses (`takeSingleFieldChain`); `&&` conjuncts
+ *  on one field (e.g. `email.matches(r) && email.length <= 120`) become a
+ *  single `Field(pattern=, max_length=)`. */
+function createFieldConstraints(
+  agg: EnrichedAggregateIR,
+  available: ReadonlySet<string>,
+): Map<string, string> {
+  const byField = new Map<string, SingleFieldPattern[]>();
+  for (const inv of agg.invariants) {
+    if (!classifyForWire(inv, { available })) continue;
+    const cons = singleFieldConstraints(inv);
+    if (!cons) continue;
+    for (const { field, pattern } of cons) {
+      if (!available.has(field)) continue;
+      byField.set(field, [...(byField.get(field) ?? []), pattern]);
+    }
+  }
+  const out = new Map<string, string>();
+  for (const [field, patterns] of byField) {
+    const kwargs: string[] = [];
+    const seen = new Set<string>();
+    for (const p of patterns) {
+      for (const kw of pydanticKwargs(p)) {
+        const key = kw.slice(0, kw.indexOf("="));
+        if (seen.has(key)) continue; // first constraint wins on a duplicate key
+        seen.add(key);
+        kwargs.push(kw);
+      }
+    }
+    if (kwargs.length > 0) out.set(field, `Field(${kwargs.join(", ")})`);
+  }
+  return out;
+}
+
+function pydanticKwargs(p: SingleFieldPattern): string[] {
+  switch (p.kind) {
+    case "min":
+      return [`ge=${p.n}`];
+    case "max":
+      return [`le=${p.n}`];
+    case "between":
+      return [`ge=${p.lo}`, `le=${p.hi}`];
+    case "len-min":
+      return [`min_length=${p.n}`];
+    case "len-max":
+      return [`max_length=${p.n}`];
+    case "len-eq":
+      return [`min_length=${p.n}`, `max_length=${p.n}`];
+    case "len-range":
+      return [`min_length=${p.lo}`, `max_length=${p.hi}`];
+    case "regex":
+      return [`pattern=${pyRawRegex(p.pattern)}`];
+  }
+}
+
+/** Render a regex source as a Python raw-string literal (backslashes are
+ *  regex escapes, not string escapes).  Falls back to a JSON string only if
+ *  the source contains both quote kinds (regexes effectively never do). */
+function pyRawRegex(src: string): string {
+  if (!src.includes('"')) return `r"${src}"`;
+  if (!src.includes("'")) return `r'${src}'`;
+  return JSON.stringify(src);
+}
+
+/** Splice a derived `Field(...)` onto a request-field declaration, folding any
+ *  existing default (`= None` / `= False`) into `Field(default=…, …)` so the
+ *  field's optionality is preserved. */
+function withFieldConstraint(name: string, decl: string, fieldExpr: string | undefined): string {
+  if (!fieldExpr) return `    ${name}: ${decl}`;
+  const eq = decl.indexOf(" = ");
+  if (eq === -1) return `    ${name}: ${decl} = ${fieldExpr}`;
+  const type = decl.slice(0, eq);
+  const dflt = decl.slice(eq + 3);
+  const inner = fieldExpr.slice("Field(".length, -1);
+  return `    ${name}: ${type} = Field(default=${dflt}, ${inner})`;
+}
+
 function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
   // Event-sourced create: the request shape is the create ACTION's
   // params (the command), not the field set (appliers A2.2).
@@ -292,10 +379,17 @@ function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
     );
   }
   const inputs = forCreateInput(agg.fields);
+  const constraints = createFieldConstraints(agg, new Set(inputs.map((f) => f.name)));
   return lines(
     `class Create${agg.name}Request(BaseModel):`,
     inputs.length > 0
-      ? inputs.map((f) => `    ${f.name}: ${requestFieldDecl(f.type, f.optional, ctx)}`)
+      ? inputs.map((f) =>
+          withFieldConstraint(
+            f.name,
+            requestFieldDecl(f.type, f.optional, ctx),
+            constraints.get(f.name),
+          ),
+        )
       : ["    pass"],
     "",
     "",
