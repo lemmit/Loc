@@ -55,6 +55,7 @@ import {
   renderAction as renderActionHeex,
   renderAlert as renderAlertHeex,
   renderAnchor as renderAnchorHeex,
+  renderAvatar as renderAvatarHeex,
   renderBadge as renderBadgeHeex,
   renderBold as renderBoldHeex,
   renderBreadcrumbs as renderBreadcrumbsHeex,
@@ -76,6 +77,7 @@ import {
   renderInlineCode as renderInlineCodeHeex,
   renderItalic as renderItalicHeex,
   renderKeyValueRow as renderKeyValueRowHeex,
+  renderLoader as renderLoaderHeex,
   renderModal as renderModalHeex,
   renderPaper as renderPaperHeex,
   renderQueryView as renderQueryViewHeex,
@@ -256,10 +258,10 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   MultilineField: { group: "layout", admissibleInSource: true, tsx: emitMultilineField },
   SelectField: { group: "layout", admissibleInSource: true, tsx: emitSelectField },
   // --- Display -----------------------------------------------------------
-  Loader: { group: "layout", admissibleInSource: true, tsx: emitLoader },
+  Loader: { group: "layout", admissibleInSource: true, tsx: emitLoader, heex: renderLoaderHeex },
   Anchor: { group: "layout", admissibleInSource: true, tsx: emitAnchor, heex: renderAnchorHeex },
   Image: { group: "layout", admissibleInSource: true, tsx: emitImage, heex: renderImageHeex },
-  Avatar: { group: "layout", admissibleInSource: true, tsx: emitAvatar },
+  Avatar: { group: "layout", admissibleInSource: true, tsx: emitAvatar, heex: renderAvatarHeex },
   Slot: { group: "layout", admissibleInSource: true, tsx: emitSlot },
   Heading: {
     group: "layout",

@@ -86,4 +86,19 @@ describe("HEEx simple-display primitives (parity finding #5)", () => {
     expect(heex).toMatch(/Total/);
     expect(heex).toMatch(/42/);
   });
+
+  it("Avatar with src renders a circle <img>", async () => {
+    const heex = await landingHeex(`Stack { Avatar(src: "/me.png", alt: "Me") }`);
+    expect(heex).toMatch(/<img class="[^"]*rounded-full[^"]*"[^>]*src="\/me\.png"[^>]*alt="Me"/);
+  });
+
+  it("Avatar without src renders a neutral circle placeholder", async () => {
+    const heex = await landingHeex(`Stack { Avatar(testid: "av") }`);
+    expect(heex).toMatch(/<span class="[^"]*rounded-full[^"]*"[^>]*data-testid="av"/);
+  });
+
+  it("Loader renders an animated spinner", async () => {
+    const heex = await landingHeex(`Stack { Loader(testid: "ld") }`);
+    expect(heex).toMatch(/<div class="[^"]*animate-spin[^"]*"[^>]*data-testid="ld"/);
+  });
 });

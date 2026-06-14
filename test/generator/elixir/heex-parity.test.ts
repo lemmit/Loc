@@ -50,10 +50,10 @@ const KNOWN_HEEX_GAPS: Record<string, string> = {
   // Display primitives with no HEEx renderer yet (TSX-only today).
   // (Divider / Image / Stat now have HEEx renderers — `<hr>` / `<img>` /
   //  a stat block — so they are no longer gaps.)
-  Loader: "loading-spinner display — no HEEx renderer yet",
-  Avatar: "avatar display — no HEEx renderer yet",
+  // (Avatar / Loader now have HEEx renderers — a circle <img>/placeholder and
+  //  an animated spinner — so they are no longer gaps.)
   Slot: "named-slot passthrough — no HEEx equivalent wired",
-  Money: "money formatter display — no standalone HEEx renderer yet",
+  Money: "money formatter display — needs the Decimal/currency money-type handling, deferred",
   Tabs: "tabbed layout — no HEEx renderer; LiveView tab/navigation topology diverges from the JSX Tabs component",
 };
 
