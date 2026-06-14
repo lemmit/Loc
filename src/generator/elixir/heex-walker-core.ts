@@ -94,6 +94,9 @@ export interface WalkResult {
   /** Names of user `component`s invoked in the body, so the LiveView
    *  emitter can hoist their action handlers transitively. */
   usedComponents: string[];
+  /** True when the body renders a `Slot()` (children passthrough), so the
+   *  component emitter declares `slot :inner_block` for it. */
+  usesSlot: boolean;
   /** Aggregate names (PascalCase) referenced by `X id` form fields in
    *  this page's body — the LiveView emitter loads each target's
    *  record list in `mount/3` and assigns to
@@ -197,6 +200,10 @@ export interface WalkContext {
   actionBindings: ActionBinding[];
   /** Names of user components invoked while walking this body. */
   usedComponents: Set<string>;
+  /** Shared box flag set by `Slot()` rendering — boxed so the mutation
+   *  survives the `{...ctx}` shallow copies nested renders make (like the
+   *  Set/array accumulators above). */
+  slotUsed: { value: boolean };
   /** Current rendering position — see RenderPosition. */
   position: RenderPosition;
   /** Optional variable remappings — maps a source ref name to the LiveView
@@ -258,6 +265,7 @@ export function walkBodyToHeex(
     handlers: [],
     actionBindings: [],
     usedComponents: new Set(),
+    slotUsed: { value: false },
     position: "template",
     instanceTypes,
   };
@@ -271,6 +279,7 @@ export function walkBodyToHeex(
     queryBindings: ctx.queryBindings,
     actionBindings: ctx.actionBindings,
     usedComponents: [...ctx.usedComponents],
+    usesSlot: ctx.slotUsed.value,
     idOptionsBindings: [...ctx.idOptionsBindings],
   };
 }
@@ -1009,6 +1018,7 @@ export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): 
     handlers: [],
     actionBindings: [],
     usedComponents: new Set(),
+    slotUsed: { value: false },
     position: "handler",
   };
   return renderExpr(page.requires, ctx);

@@ -59,7 +59,8 @@ const KNOWN_HEEX_GAPS: Record<string, string> = {
   // --- DECLINED: stateful topology --------------------------------------
   Tabs: "DECLINED — interactive tab-switching needs LiveView handle_event + an active-tab assign (stateful topology), not a markup mapping",
   // --- DEFERRED: implementable, own change ------------------------------
-  Slot: "DEFERRED — `{render_slot(@inner_block)}` is feasible once the user-component HEEx emitter declares the slot",
+  // (Slot now renders `{render_slot(@inner_block)}`; the component emitter
+  //  declares the matching `slot :inner_block`.)
   DestroyForm:
     "DEFERRED — confirm + delete-event wiring; renderFormHeex covers create/op/workflow shapes only",
 };

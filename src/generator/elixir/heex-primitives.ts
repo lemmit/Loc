@@ -919,6 +919,13 @@ export function renderMoney(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   const prefix = currency ? `${currency} ` : "";
   return `<span class="money"${testidAttr}>${prefix}<%= Decimal.to_string(${val}) %></span>`;
 }
+/** `Slot()` → `{render_slot(@inner_block)}` — the children passthrough inside a
+ *  user `component` body.  Flags `ctx.slotUsed` so the component emitter
+ *  declares the matching `slot :inner_block`. */
+export function renderSlot(_expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  ctx.slotUsed.value = true;
+  return `{render_slot(@inner_block)}`;
+}
 export function renderCard(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Card!, expr, ctx);
 }
