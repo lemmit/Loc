@@ -16,7 +16,13 @@ import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js"
 import { effectiveSavingShape } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
-import { columnsForFields, joinRowClassName, type PyColumn, rowClassName } from "../py-columns.js";
+import {
+  columnsForFields,
+  isRefCollectionField,
+  joinRowClassName,
+  type PyColumn,
+  rowClassName,
+} from "../py-columns.js";
 
 // ---------------------------------------------------------------------------
 // `app/db/schema.py` — SQLAlchemy 2 typed declarative models.  Table /
@@ -49,6 +55,14 @@ export function renderPySchema(
     if (effectiveSavingShape(agg as EnrichedAggregateIR, resolveDataSource?.(agg)) === "document") {
       const dds = resolveDataSource?.(agg);
       models.push(renderDocumentModel(agg, dds?.schema, dds?.tablePrefix));
+      continue;
+    }
+    // shape(embedded): the root stays a queryable row, but each
+    // containment folds into one JSONB column and reference collections
+    // fold into a JSONB id-array column — no part / join tables.
+    if (effectiveSavingShape(agg as EnrichedAggregateIR, resolveDataSource?.(agg)) === "embedded") {
+      const eds = resolveDataSource?.(agg);
+      models.push(renderEmbeddedModel(agg, ctx, eds?.schema, eds?.tablePrefix));
       continue;
     }
     // dataSource-driven routing — the table lives in the binding's
@@ -197,6 +211,41 @@ function renderDocumentModel(agg: AggregateIR, schema?: string, prefix?: string)
     "    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)",
     "    data: Mapped[object] = mapped_column(JSONB)",
     "    version: Mapped[int] = mapped_column(Integer)",
+  );
+}
+
+/** Embedded-children aggregate (`shape(embedded)`): the root is a normal
+ *  queryable row — `id` plus its flattened scalar / VO / `X id` columns,
+ *  exactly like the relational root — but each containment folds into one
+ *  JSONB column and reference collections (`X id[]`) fold into a JSONB
+ *  id-array column.  No part tables, no join tables (parity with the
+ *  shared DDL's `embeddedTableForAggregate`). */
+function renderEmbeddedModel(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  schema?: string,
+  prefix?: string,
+): string {
+  const tableName = `${prefix ?? ""}${snake(plural(agg.name))}`;
+  const cols: PyColumn[] = [
+    { attr: "id", pyType: "str", saType: "Uuid(as_uuid=False)", optional: false, primaryKey: true },
+  ];
+  for (const f of agg.fields) {
+    if (isRefCollectionField(f)) {
+      cols.push({ attr: snake(f.name), pyType: "object", saType: "JSONB", optional: !!f.optional });
+      continue;
+    }
+    cols.push(...columnsForFields([f], ctx));
+  }
+  for (const c of agg.contains) {
+    cols.push({ attr: snake(c.name), pyType: "object", saType: "JSONB", optional: false });
+  }
+  return lines(
+    `class ${rowClassName(agg.name)}(Base):`,
+    `    __tablename__ = "${tableName}"`,
+    schema ? ["    __table_args__ = (", `        {"schema": "${schema}"},`, "    )"] : null,
+    "",
+    cols.map(renderColumn),
   );
 }
 

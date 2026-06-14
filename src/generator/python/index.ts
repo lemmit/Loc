@@ -33,6 +33,7 @@ import { buildPyExternHandlersFile, externOpsOf } from "./extern-builder.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
 import { buildPyDocumentRepositoryFile } from "./repository-document-builder.js";
+import { buildPyEmbeddedRepositoryFile } from "./repository-embedded-builder.js";
 import { buildPyEventSourcedRepositoryFile } from "./repository-eventsourced-builder.js";
 import { emitPyResourceFiles } from "./resource-clients.js";
 import { buildPyRoutesFile } from "./routes-builder.js";
@@ -225,7 +226,9 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
           ? buildPyEventSourcedRepositoryFile(agg, repo, ctx)
           : effectiveSavingShape(agg, resolveDs(agg)) === "document"
             ? buildPyDocumentRepositoryFile(agg, repo, ctx)
-            : buildPyRepositoryFile(agg, repo, ctx),
+            : effectiveSavingShape(agg, resolveDs(agg)) === "embedded"
+              ? buildPyEmbeddedRepositoryFile(agg, repo, ctx)
+              : buildPyRepositoryFile(agg, repo, ctx),
       );
       out.set(
         `app/http/${snake(agg.name)}_routes.py`,

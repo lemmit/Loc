@@ -53,6 +53,9 @@ const CASES: Array<[fixture: string, project: string]> = [
   ["test/e2e/fixtures/python-build/resources.ddd", "api"],
   // shape(document): one jsonb (id, data, version) blob + in-memory finds.
   ["test/e2e/fixtures/python-build/document.ddd", "api"],
+  // shape(embedded): queryable root row + one jsonb column per containment
+  // / ref-collection; SQL finds over root columns.
+  ["test/e2e/fixtures/python-build/embedded.ddd", "api"],
 ];
 
 describe.skipIf(!ENABLED)(

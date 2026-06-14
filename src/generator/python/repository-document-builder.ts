@@ -198,7 +198,7 @@ function containsType(c: ContainmentIR): boolean {
   return c.collection;
 }
 
-function entityToDoc(
+export function entityToDoc(
   entity: EnrichedAggregateIR | EnrichedEntityPartIR,
   root: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
@@ -222,7 +222,7 @@ function entityToDoc(
   );
 }
 
-function entityFromDoc(
+export function entityFromDoc(
   entity: EnrichedAggregateIR | EnrichedEntityPartIR,
   isRoot: boolean,
   root: EnrichedAggregateIR,
