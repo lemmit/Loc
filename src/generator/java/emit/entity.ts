@@ -7,7 +7,7 @@ import type {
   IdValueType,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
@@ -489,20 +489,29 @@ export function renderJavaEntity(
   // --- lifecycle stamps (audit / softDelete capability stamps) ----------------------
   // `contextStamps` (from `stamp onCreate`/`onUpdate`, hand-written or
   // macro-emitted) become package-private `_stampOnCreate` / `_stampOnUpdate`
-  // methods the service calls before save.  Principal-referencing stamps
-  // (`currentUser`) and event-sourced aggregates are gated upstream
-  // (loom.java-stamp-unsupported), so values here are non-principal.
+  // methods the service calls before save.  A `currentUser` value resolves
+  // to the principal id (a guid): the method takes a `User currentUser`
+  // param and the assignment renders `currentUser.id()`.  Event-sourced
+  // aggregates and principal stamps without auth are gated upstream.
   const stampsFor = (event: "create" | "update"): { field: string; value: ExprIR }[] =>
     isRoot && isAgg(entity)
       ? (entity.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments)
       : [];
+  // A bare `currentUser` value is the principal id; member access
+  // (`currentUser.role`) renders normally via the expr renderer.
+  const renderStampValue = (value: ExprIR): string =>
+    value.kind === "ref" && value.refKind === "current-user"
+      ? "currentUser.id()"
+      : renderJavaExpr(value, renderCtx);
   const stampMethod = (event: "create" | "update"): string[] => {
     const rules = stampsFor(event);
     if (rules.length === 0) return [];
+    const usesUser = rules.some((a) => exprUsesCurrentUser(a.value));
+    if (usesUser) javaImports.add(`${basePkg}.auth.User`);
     for (const a of rules) collectJavaExprImports(a.value, javaImports);
     return [
-      `    void _stampOn${upperFirst(event)}() {`,
-      ...rules.map((a) => `        this.${a.field} = ${renderJavaExpr(a.value, renderCtx)};`),
+      `    void _stampOn${upperFirst(event)}(${usesUser ? "User currentUser" : ""}) {`,
+      ...rules.map((a) => `        this.${a.field} = ${renderStampValue(a.value)};`),
       `    }`,
       ``,
     ];

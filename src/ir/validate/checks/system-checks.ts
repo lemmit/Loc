@@ -394,18 +394,22 @@ export function validateJavaFullstackSupport(sys: SystemIR, diags: LoomDiagnosti
 }
 
 // Lifecycle stamps (`stamp onCreate`/`onUpdate`, audit / softDelete) on
-// the java backend.  Non-principal state stamps are emitted as
-// `_stampOnCreate` / `_stampOnUpdate` entity methods the service calls
-// before save.  Two cases stay fail-fast (never a silent drop): a stamp
-// value that references `currentUser` (no request-scoped principal in the
-// entity-method seam — the .NET interceptor's accessor has no java
-// analog here) and stamps on an event-sourced aggregate (state is folded
-// from events, not field-stamped).  Mirrors the Dapper stamp gate.
+// the java backend.  Stamps are emitted as `_stampOnCreate` /
+// `_stampOnUpdate` entity methods the service calls before save;
+// non-principal values render directly, and a `currentUser` value
+// resolves to the principal id (a guid — the service threads
+// `currentUser` into the stamp method, the entity assigns
+// `currentUser.id()`).  Two cases stay fail-fast (never a silent drop):
+// a principal-referencing stamp on a deployable WITHOUT auth (no
+// request-scoped principal accessor to thread), and stamps on an
+// event-sourced aggregate (state is folded from events, not
+// field-stamped).
 export function validateJavaStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
   for (const dep of sys.deployables) {
     if (platformFamily(dep.platform) !== "java") continue;
+    const authed = !!(dep.auth?.required && sys.user);
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
@@ -413,16 +417,18 @@ export function validateJavaStampSupport(sys: SystemIR, diags: LoomDiagnostic[])
         const enriched = agg as EnrichedAggregateIR;
         const stamps = enriched.contextStamps ?? [];
         if (stamps.length === 0) continue;
-        if (stamps.some((r) => r.assignments.some((a) => exprUsesCurrentUser(a.value)))) {
+        const usesPrincipal = stamps.some((r) =>
+          r.assignments.some((a) => exprUsesCurrentUser(a.value)),
+        );
+        if (usesPrincipal && !authed) {
           diags.push({
             severity: "error",
             message:
               `Deployable '${dep.name}' (platform java) hosts aggregate '${ctxName}.${agg.name}' ` +
               `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
-              `from \`with audit\`) — principal-referencing stamps are not yet wired on the java ` +
-              `backend (the entity-level stamp seam has no request-scoped principal). ` +
-              `Use non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`), or host ` +
-              `this aggregate on a dotnet deployable.`,
+              `from \`with audit\`), but the deployable has no auth — there is no request-scoped ` +
+              `principal to stamp from. Add 'auth: required' (and a system 'user {}' block), or use ` +
+              `non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`).`,
             source: `${sys.name}/${dep.name}`,
             code: "loom.java-stamp-unsupported",
           });
