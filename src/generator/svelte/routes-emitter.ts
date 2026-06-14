@@ -43,7 +43,12 @@ import { buildWalkerPageObject } from "../_frontend/walker-page-objects.js";
 import { buildWorkflowPageObject } from "../_frontend/workflow-page-object.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { isWalkableLayoutBody, walkBody } from "../_walker/walker-core.js";
-import { renderSvelteComponentFile, renderSveltePage } from "./walker/page-shell.js";
+import {
+  renderSvelteComponentFile,
+  renderSvelteExternComponentProps,
+  renderSvelteExternComponentShim,
+  renderSveltePage,
+} from "./walker/page-shell.js";
 import { svelteTarget } from "./walker/svelte-target.js";
 
 export interface SveltePageEmitContext {
@@ -136,10 +141,21 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
   for (const c of ctx.topLevelComponents) emittedComponents.set(c.name, c);
   for (const c of ui.components) emittedComponents.set(c.name, c);
   for (const c of emittedComponents.values()) {
+    // Extern component: Loom owns a re-export wrapper at
+    // `src/lib/components/<Name>.svelte` (so call sites import
+    // `$lib/components/<Name>.svelte` unchanged) + a typed
+    // `<Name>.props.ts`; the user owns the hand-written module at the
+    // `from` path.  No body is walked.
     if (c.extern) {
-      throw new Error(
-        `svelte: extern component '${c.name}' — the extern-component escape hatch is not wired for the svelte platform yet (docs/plans/svelte-frontend-plan.md).`,
+      out.set(
+        `src/lib/components/${c.name}.svelte`,
+        renderSvelteExternComponentShim(c.name, c.externPath ?? ""),
       );
+      out.set(
+        `src/lib/components/${c.name}.props.ts`,
+        renderSvelteExternComponentProps(c.name, [...c.params], ctx.aggregatesByName),
+      );
+      continue;
     }
     out.set(
       `src/lib/components/${c.name}.svelte`,
