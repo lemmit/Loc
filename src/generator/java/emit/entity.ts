@@ -2,6 +2,7 @@ import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js
 import type {
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
+  ExprIR,
   FieldIR,
   IdValueType,
   TypeIR,
@@ -485,6 +486,29 @@ export function renderJavaEntity(
       ]
     : [];
 
+  // --- lifecycle stamps (audit / softDelete capability stamps) ----------------------
+  // `contextStamps` (from `stamp onCreate`/`onUpdate`, hand-written or
+  // macro-emitted) become package-private `_stampOnCreate` / `_stampOnUpdate`
+  // methods the service calls before save.  Principal-referencing stamps
+  // (`currentUser`) and event-sourced aggregates are gated upstream
+  // (loom.java-stamp-unsupported), so values here are non-principal.
+  const stampsFor = (event: "create" | "update"): { field: string; value: ExprIR }[] =>
+    isRoot && isAgg(entity)
+      ? (entity.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments)
+      : [];
+  const stampMethod = (event: "create" | "update"): string[] => {
+    const rules = stampsFor(event);
+    if (rules.length === 0) return [];
+    for (const a of rules) collectJavaExprImports(a.value, javaImports);
+    return [
+      `    void _stampOn${upperFirst(event)}() {`,
+      ...rules.map((a) => `        this.${a.field} = ${renderJavaExpr(a.value, renderCtx)};`),
+      `    }`,
+      ``,
+    ];
+  };
+  const stampLines = [...stampMethod("create"), ...stampMethod("update")];
+
   const jmolecules = isRoot
     ? "@org.jmolecules.ddd.annotation.AggregateRoot"
     : // jakarta.persistence.Entity shares the simple name — keep both
@@ -499,6 +523,7 @@ export function renderJavaEntity(
     ...pullEventsLines,
     ...assertLines,
     "",
+    ...stampLines,
     ...createPublicLines,
     ...partFactoryLines,
     ...applierLines,

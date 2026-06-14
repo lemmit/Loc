@@ -65,7 +65,14 @@
 >   in-memory find folds) and `shape(embedded)` (containments fold into
 >   jsonb columns via the Hibernate JSON FormatMapper swapped for the
 >   same field-visibility mapper; the root stays a queryable @Entity).
+>   Post-#1146: lifecycle stamps (`stamp onCreate`/`onUpdate` →
+>   `_stampOnCreate`/`_stampOnUpdate` entity methods the service calls
+>   before save — closes the prior silent-drop where `createdAt` came
+>   from the request; principal-referencing `currentUser` stamps and
+>   event-sourced stamps stay fail-fast gated, `loom.java-stamp-unsupported`).
 > - **Deferred features — all fail-fast gated, never silent:**
+>   principal-referencing lifecycle stamps (`currentUser` —
+>   `loom.java-stamp-unsupported`),
 >   reference collections on `shape(embedded)` aggregates
 >   (`loom.java-embedded-refcoll-unsupported` — Hibernate's
 >   structured-JSON path bypasses the FormatMapper for @Embeddable ids),
@@ -73,9 +80,7 @@
 >   (`loom.java-single-containment-unsupported`), `hosts:` UI hosting
 >   (`loom.java-fullstack-unsupported`), principal-referencing filters /
 >   non-relational filter shapes (`loom.context-filter-unsupported`),
->   provenance + per-op audited (gated like .NET).  Lifecycle stamps
->   (`contextStamps`) are consumed by .NET only today — a cross-backend
->   gap, not java-specific.
+>   provenance + per-op audited (gated like .NET).
 >
 > The proposal's stated blocker — criterion-everywhere — had **shipped**
 > before this work started: the selectability oracle

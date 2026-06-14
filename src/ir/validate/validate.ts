@@ -29,6 +29,7 @@ import {
   validateInheritanceStorage,
   validateJavaContainmentSupport,
   validateJavaFullstackSupport,
+  validateJavaStampSupport,
   validateMikroOrmSupport,
   validateNeedCapabilities,
   validatePermissions,
@@ -99,6 +100,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateContextFilterSupport(sys, diags);
     validateJavaContainmentSupport(sys, diags);
     validateJavaFullstackSupport(sys, diags);
+    validateJavaStampSupport(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);
     validateNeedCapabilities(sys, diags);

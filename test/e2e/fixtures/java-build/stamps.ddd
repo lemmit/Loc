@@ -1,0 +1,19 @@
+system ST {
+  subdomain D {
+    context Shop {
+      stamp onCreate { createdAt := now() }
+      stamp onUpdate { updatedAt := now() }
+      aggregate Order with crudish {
+        code: string
+        createdAt: datetime
+        updatedAt: datetime
+        implements "auditable"
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable api1 { platform: java, contexts: [Shop], dataSources: [st], serves: A, port: 8081 }
+}
