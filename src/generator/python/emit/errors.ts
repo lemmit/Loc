@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
 // `app/domain/errors.py` — the domain error taxonomy every layer maps
 // onto HTTP statuses (DomainError → 400, AggregateNotFoundError → 404,
-// ForbiddenError → 403).  Mirrors the TS `domain/errors.ts`.
+// ForbiddenError → 403, DisallowedError → 409).  Mirrors the TS
+// `domain/errors.ts`.
 // ---------------------------------------------------------------------------
 
 export const ERRORS_PY = `"""Domain error types.  Auto-generated."""
@@ -17,6 +18,13 @@ class AggregateNotFoundError(Exception):
 
 class ForbiddenError(Exception):
     """An authorization guard rejected the caller (surfaces as HTTP 403)."""
+
+
+class DisallowedError(Exception):
+    """A \`when\` state gate rejected the operation in the aggregate's
+    current state (surfaces as HTTP 409; the side-effect-free
+    \`GET /{id}/can_<op>\` query reports the same predicate as
+    \`{ allowed }\`)."""
 
 
 class ExternHandlerError(Exception):

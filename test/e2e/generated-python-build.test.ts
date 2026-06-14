@@ -59,6 +59,9 @@ const CASES: Array<[fixture: string, project: string]> = [
   // shape(embedded): queryable root row + one jsonb column per containment
   // / ref-collection; SQL finds over root columns.
   ["test/e2e/fixtures/python-build/embedded.ddd", "api"],
+  // `when` state gate: DisallowedError (409) before the body + the
+  // side-effect-free GET /{id}/can_<op> companion.
+  ["test/e2e/fixtures/python-build/when.ddd", "api"],
 ];
 
 describe.skipIf(!ENABLED)(

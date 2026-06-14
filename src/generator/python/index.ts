@@ -648,6 +648,7 @@ from pydantic import BaseModel
 
 from app.domain.errors import (
     AggregateNotFoundError,
+    DisallowedError,
     DomainError,
     ExternHandlerError,
     ForbiddenError,
@@ -741,6 +742,11 @@ def install_error_handlers(app: FastAPI) -> None:
     async def _forbidden(request: Request, err: ForbiddenError) -> JSONResponse:
         log("warn", "forbidden", message=str(err), status=403)
         return problem(request, 403, "Forbidden", str(err))
+
+    @app.exception_handler(DisallowedError)
+    async def _disallowed(request: Request, err: DisallowedError) -> JSONResponse:
+        log("warn", "disallowed", message=str(err), status=409)
+        return problem(request, 409, "Conflict", str(err))
 
     @app.exception_handler(DomainError)
     async def _domain(request: Request, err: DomainError) -> JSONResponse:
