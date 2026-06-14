@@ -118,6 +118,21 @@ describe("dotnet provenance runtime", () => {
     expect(repo.indexOf("DrainProv")).toBeLessThan(repo.indexOf("SaveChangesAsync"));
   });
 
+  it("stamps the request correlation id + scope id onto each provenance row (M3)", async () => {
+    const f = await files();
+    const rec = f.get("api/Infrastructure/Persistence/ProvenanceRecord.cs")!;
+    expect(rec).toContain("public string? CorrelationId { get; set; }");
+    expect(rec).toContain("public string? ScopeId { get; set; }");
+    const cfg = f.get(
+      "api/Infrastructure/Persistence/Configurations/ProvenanceRecordConfiguration.cs",
+    )!;
+    expect(cfg).toContain('HasColumnName("correlation_id")');
+    expect(cfg).toContain('HasColumnName("scope_id")');
+    const repo = f.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    expect(repo).toContain("CorrelationId = RequestContext.Current?.CorrelationId,");
+    expect(repo).toContain("ScopeId = RequestContext.Current?.ScopeId,");
+  });
+
   it("exposes the current lineage on the response DTO", async () => {
     const resp = (await files()).get("api/Application/Orders/Responses/OrderResponses.cs")!;
     expect(resp).toContain("ProvLineage? TotalProvenance");
@@ -130,6 +145,7 @@ describe("dotnet provenance runtime", () => {
     expect(key).toBeDefined();
     const mig = f.get(key!)!;
     expect(mig).toContain("CREATE TABLE IF NOT EXISTS provenance_records");
+    expect(mig).toMatch(/provenance_records \([\s\S]*?correlation_id text,[\s\S]*?scope_id text/);
     // schema-qualified to the resolved dataSource schema (matching ToTable)
     expect(mig).toContain(
       "ALTER TABLE ordering.orders ADD COLUMN IF NOT EXISTS total_provenance jsonb;",
@@ -164,6 +180,34 @@ describe("dotnet per-operation audit runtime", () => {
     expect(handler.indexOf("_audit.Stage")).toBeLessThan(handler.indexOf("SaveAsync"));
   });
 
+  it("stamps actor + correlation id + scope id from the ambient RequestContext (M3)", async () => {
+    const f = await files();
+    const rec = f.get("api/Infrastructure/Persistence/AuditRecord.cs")!;
+    expect(rec).toContain("public string? CorrelationId { get; set; }");
+    expect(rec).toContain("public string? ScopeId { get; set; }");
+    const cfg = f.get("api/Infrastructure/Persistence/Configurations/AuditRecordConfiguration.cs")!;
+    expect(cfg).toContain('HasColumnName("correlation_id")');
+    expect(cfg).toContain('HasColumnName("scope_id")');
+    const handler = f.get("api/Application/Orders/Commands/CancelHandler.cs")!;
+    expect(handler).toContain("Actor = RequestContext.Current?.PrincipalJson(),");
+    expect(handler).toContain("CorrelationId = RequestContext.Current?.CorrelationId,");
+    expect(handler).toContain("ScopeId = RequestContext.Current?.ScopeId,");
+    expect(handler).toContain("using Api.Domain.Common;");
+  });
+
+  it("forces the ambient carrier to exist even with no auth + no trace (gate widen, M3)", async () => {
+    // SOURCE has audited + provenanced but no `auth: required` and no --trace,
+    // yet audit/provenance need RequestContext.Current to stamp correlation —
+    // so the carrier + boundary middleware are now emitted.
+    const f = await files();
+    const rc = f.get("api/Domain/Common/RequestContext.cs")!;
+    expect(rc).toContain("public sealed class RequestContext");
+    expect(f.has("api/Middleware/RequestContextMiddleware.cs")).toBe(true);
+    // No auth → no principal slice, so PrincipalJson is the null-returning form.
+    expect(rc).toContain("public string? PrincipalJson() => null;");
+    expect(rc).not.toContain("public User? CurrentUser");
+  });
+
   it("registers the IAuditWriter in Program.cs", async () => {
     const program = (await files()).get("api/Program.cs")!;
     expect(program).toMatch(
@@ -176,5 +220,6 @@ describe("dotnet per-operation audit runtime", () => {
     const key = [...f.keys()].find((k) => /api\/Migrations\/.*ProvenanceAudit\.cs$/.test(k));
     const mig = f.get(key!)!;
     expect(mig).toContain("CREATE TABLE IF NOT EXISTS audit_records");
+    expect(mig).toMatch(/audit_records \([\s\S]*?correlation_id text,[\s\S]*?scope_id text/);
   });
 });

@@ -18,19 +18,20 @@ export class OrderSummaryViewPage {
   }
 
   async rows(): Promise<OrderSummaryRowText[]> {
+    const body = this.page.getByTestId("view-order_summary").locator("tbody tr");
+    const n = await body.count();
     const out: OrderSummaryRowText[] = [];
-    for (let i = 0; i < 1000; i++) {
-      const row = this.page.getByTestId(`view-order_summary-row-${i}`);
-      if ((await row.count()) === 0) break;
-      const c_orderId = await this.page.getByTestId(`view-order_summary-row-${i}-orderId`).innerText();
-      const c_status = await this.page.getByTestId(`view-order_summary-row-${i}-status`).innerText();
-      const c_lineCount = await this.page.getByTestId(`view-order_summary-row-${i}-lineCount`).innerText();
-      out.push({ orderId: c_orderId, status: c_status, lineCount: c_lineCount });
+    for (let i = 0; i < n; i++) {
+      const cells = body.nth(i).locator("td");
+      const c_0 = (await cells.nth(0).innerText()).trim();
+      const c_1 = (await cells.nth(1).innerText()).trim();
+      const c_2 = (await cells.nth(2).innerText()).trim();
+      out.push({ orderId: c_0, status: c_1, lineCount: c_2 });
     }
     return out;
   }
 
   async count(): Promise<number> {
-    return (await this.rows()).length;
+    return this.page.getByTestId("view-order_summary").locator("tbody tr").count();
   }
 }

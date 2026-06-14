@@ -719,9 +719,15 @@ describe("react generator", () => {
       expect(po).toMatch(/export interface OrderSummaryRowText \{/);
       expect(po).toMatch(/orderId: string;/);
       expect(po).toMatch(/lineCount: string;/);
-      // rows() walks indexed testids until break.
+      // rows() reads the rendered table body structurally (pack-agnostic
+      // `<tbody><tr><td>`), indexing cells in column order — so it returns
+      // the actual rendered row content, not empty stubs.
       expect(po).toMatch(/async rows\(\): Promise<OrderSummaryRowText\[\]>/);
-      expect(po).toMatch(/view-order_summary-row-\$\{i\}-orderId/);
+      expect(po).toMatch(/getByTestId\("view-order_summary"\)\.locator\("tbody tr"\)/);
+      expect(po).toMatch(/const cells = body\.nth\(i\)\.locator\("td"\)/);
+      // First projected column maps to cell 0.
+      expect(po).toMatch(/const c_0 = \(await cells\.nth\(0\)\.innerText\(\)\)\.trim\(\)/);
+      expect(po).toMatch(/orderId: c_0/);
     });
 
     it("UI spec lowers ui.workflows.<name>(...) to the generated page object's run()", async () => {

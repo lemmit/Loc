@@ -149,7 +149,7 @@ describe("vanilla — custom find functions on the repository module", () => {
     // Regression: an empty findBlock must NOT collapse the persist_change
     // `end` into the module's `end` (the `endend` mix-compile bug from CI).
     expect(task).not.toContain("endend");
-    expect(task).toMatch(/Repo\.update\(changeset\)\n  end\nend\n?$/);
+    expect(task).toMatch(/Repo\.update\(changeset\)\n {2}end\nend\n?$/);
 
     // Regression: the per-aggregate context block must end with `\n` so the
     // module's `end` doesn't fuse with the last defdelegate's `:delete` atom

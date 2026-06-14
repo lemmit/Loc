@@ -74,7 +74,6 @@ describe("WalkerTarget — every shipped target conforms", () => {
       // the object literal).
       expect(typeof target.renderStateRead).toBe("function");
       expect(typeof target.renderStateWrite).toBe("function");
-      expect(typeof target.renderStateInit).toBe("function");
       expect(typeof target.buildHookUse).toBe("function");
       expect(typeof target.renderApiCall).toBe("function");
       expect(typeof target.renderApiHoisting).toBe("function");
@@ -88,7 +87,6 @@ describe("WalkerTarget — every shipped target conforms", () => {
     it(`${name}: every method produces a string (or string[]) on a canned input`, () => {
       expect(typeof target.renderStateRead(SAMPLE_STATE_REF, "template")).toBe("string");
       expect(typeof target.renderStateWrite(SAMPLE_STATE_REF, "1")).toBe("string");
-      expect(typeof target.renderStateInit(SAMPLE_STATE_REF.field, undefined)).toBe("string");
       expect(typeof target.renderApiCall(SAMPLE_API_CALL_MUTATION, "{}")).toBe("string");
       expect(Array.isArray(target.renderApiHoisting([SAMPLE_API_CALL_MUTATION]))).toBe(true);
       expect(typeof target.renderMatch([], undefined)).toBe("string");

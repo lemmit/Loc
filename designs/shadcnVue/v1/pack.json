@@ -368,7 +368,7 @@
       }
     ],
     "field-input-valueobject": [],
-    "realtime-toast": [],
+    "realtime-toast": [{ "from": "@/lib/toast", "named": ["pushToast"] }],
     "op-dialog": [
       {
         "from": "@/components/ui",

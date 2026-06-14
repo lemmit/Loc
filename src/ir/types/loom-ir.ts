@@ -2735,3 +2735,16 @@ export function contextUsesMoney(ctx: BoundedContextIR): boolean {
   if (ctx.valueObjects.some(valueObjectUsesMoney)) return true;
   return false;
 }
+/** True when the ui declares a money-typed `state {}` field on any page
+ *  or component.  Such a field renders as `<Decimal>` + `new
+ *  Decimal("0")` in the page shell, so the generated project needs the
+ *  `decimal.js` runtime dep even when no aggregate / wire shape carries
+ *  money (`contextUsesMoney` covers that case).  Frontend generators OR
+ *  this into their package.json money-dep flag. */
+export function uiUsesMoney(ui: UiIR): boolean {
+  const stateHasMoney = (state: readonly StateFieldIR[]) =>
+    state.some((f) => typeUsesMoney(f.type));
+  if (ui.pages.some((p) => stateHasMoney(p.state))) return true;
+  if (ui.components.some((c) => stateHasMoney(c.state))) return true;
+  return false;
+}

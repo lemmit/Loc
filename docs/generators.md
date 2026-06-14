@@ -611,6 +611,11 @@ web_app/
 │   ├── theme.ts            # createVuetify tokens (vuetify) / `export {}` stub (shadcnVue — CSS vars)
 │   ├── lib/form.ts         # useLoomForm — reactive() values + zod parse + per-field error map
 │   ├── lib/format.ts       # formatting FUNCTIONS (the React packs' format components, fn-style)
+│   ├── lib/toast.ts        # channels only: reactive pushToast() queue the app-shell host renders
+│   ├── api/realtime.ts     # channels only: EventSource client (broadcast wire → subscribeRealtime)
+│   ├── components/RealtimeHandlers.vue  # channels only: renderless on-mount switch → pushToast
+│   ├── components/<Name>.vue # user components — typed defineProps SFC, walked <template>
+│   ├── lib/<extern>.ts + lib/extern/<extern>.signature.ts  # extern frontend fns (shim + signature)
 │   ├── components/ui/      # shadcnVue only: source-copied SFCs + index.ts barrel
 │   └── pages/**/*.vue      # SFC pages — <script setup lang="ts"> + walked <template>
 └── e2e/                    # identical harness/page objects to React (testid/DOM only)
@@ -628,8 +633,18 @@ web_app/
   zero forked walker code.
 - Backend hosts (dotnet / java / phoenix) embed a `framework: vue` ui
   exactly like a React one (`vue` ∈ STATIC_BUNDLE_FRAMEWORKS).
-- Known gaps (tracked in the plan): user components / named layouts /
-  extern functions on vue; live-refetch find-filters; channels toast.
+- User components (`component <Name>(p: T)`) emit `src/components/<Name>.vue`
+  (typed `defineProps`, walked body); extern frontend functions emit the
+  shared signature + conformance shim (`tsc` is the fail-fast).
+- Channels (`on <channel>.<Event>`) emit the SSE client, a renderless
+  `RealtimeHandlers.vue`, and a `pushToast()` queue the app-shell renders
+  (a `<v-alert>` stack on vuetify, an `Alert` stack on shadcnVue).
+- Find-filter live-refetch: a parameterised `find` hook takes a
+  `MaybeRefOrGetter<Query>` (queryKey tracks `computed(toValue(query))`)
+  and the list page passes `() => ({ … })`, so a bound filter input
+  re-fetches (React re-renders, so its hook stays a plain object param).
+- Known gaps (tracked in the plan): named layouts on vue;
+  extern/forms inside user components.
 
 ## Phoenix LiveView fullstack (`platform: phoenixLiveView`)
 

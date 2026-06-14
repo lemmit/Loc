@@ -281,8 +281,8 @@ export function emitOperationCommandAndHandler(
     // aggregate's wire projection either side of the mutation; the record is
     // STAGED onto the request-scoped unit of work (IAuditWriter.Stage → adds to
     // the same AppDbContext) so `_repo.SaveAsync` commits it in the SAME
-    // transaction as the state change.  Actor capture is a follow-up (the
-    // column is nullable); the essential who/what/when + before/after ships.
+    // transaction as the state change.  The actor (principal), correlation id,
+    // and scope id are stamped from the ambient RequestContext (M3 consumer).
     const audited = op.audited;
     const projectExpr = audited
       ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, ctx)
@@ -299,11 +299,13 @@ export function emitOperationCommandAndHandler(
         `            Action = ${JSON.stringify(op.name)},\n` +
         `            TargetType = ${JSON.stringify(agg.name)},\n` +
         `            TargetId = command.Id.Value.ToString(),\n` +
-        `            Actor = null,\n` +
+        `            Actor = RequestContext.Current?.PrincipalJson(),\n` +
         `            Before = __before,\n` +
         `            After = __after,\n` +
         `            At = DateTime.UtcNow,\n` +
         `            Status = "ok",\n` +
+        `            CorrelationId = RequestContext.Current?.CorrelationId,\n` +
+        `            ScopeId = RequestContext.Current?.ScopeId,\n` +
         `        });\n`
       : "";
     const auditDeps = audited ? [{ type: "IAuditWriter", field: "_audit" }] : [];
@@ -311,6 +313,7 @@ export function emitOperationCommandAndHandler(
       ? [
           `${ns}.Application.Common`,
           `${ns}.Application.${plural(agg.name)}.Responses`,
+          `${ns}.Domain.Common`,
           `${ns}.Infrastructure.Persistence`,
         ]
       : [];

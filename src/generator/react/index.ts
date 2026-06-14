@@ -8,6 +8,7 @@ import {
   type PageIR,
   type SystemIR,
   type UiIR,
+  uiUsesMoney,
 } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
 import { lowerFirst } from "../../util/naming.js";
@@ -349,7 +350,7 @@ export function generateReactForContexts(
   // `decimal.js` is conditional in the React package.json — only
   // pulled in when at least one served context uses a money field /
   // expression.  Mirrors the Hono backend's conditional dep gate.
-  const usesMoney = contexts.some(contextUsesMoney);
+  const usesMoney = contexts.some(contextUsesMoney) || uiUsesMoney(ui);
   // Shared `moneySchema` helper — single home for the precise-
   // decimal wire shape; every api/view/workflow module references
   // it rather than redeclaring the string-to-Decimal transform per

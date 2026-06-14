@@ -2,7 +2,6 @@
 import type { Page } from "@playwright/test";
 
 export interface ActiveOrdersRowText {
-  id: string;
   customerId: string;
   status: string;
   placedAt: string;
@@ -19,20 +18,20 @@ export class ActiveOrdersViewPage {
   }
 
   async rows(): Promise<ActiveOrdersRowText[]> {
+    const body = this.page.getByTestId("view-active_orders").locator("tbody tr");
+    const n = await body.count();
     const out: ActiveOrdersRowText[] = [];
-    for (let i = 0; i < 1000; i++) {
-      const row = this.page.getByTestId(`view-active_orders-row-${i}`);
-      if ((await row.count()) === 0) break;
-      const c_id = await this.page.getByTestId(`view-active_orders-row-${i}-id`).innerText();
-      const c_customerId = await this.page.getByTestId(`view-active_orders-row-${i}-customerId`).innerText();
-      const c_status = await this.page.getByTestId(`view-active_orders-row-${i}-status`).innerText();
-      const c_placedAt = await this.page.getByTestId(`view-active_orders-row-${i}-placedAt`).innerText();
-      out.push({ id: c_id, customerId: c_customerId, status: c_status, placedAt: c_placedAt });
+    for (let i = 0; i < n; i++) {
+      const cells = body.nth(i).locator("td");
+      const c_0 = (await cells.nth(0).innerText()).trim();
+      const c_1 = (await cells.nth(1).innerText()).trim();
+      const c_2 = (await cells.nth(2).innerText()).trim();
+      out.push({ customerId: c_0, status: c_1, placedAt: c_2 });
     }
     return out;
   }
 
   async count(): Promise<number> {
-    return (await this.rows()).length;
+    return this.page.getByTestId("view-active_orders").locator("tbody tr").count();
   }
 }
