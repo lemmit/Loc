@@ -1,0 +1,48 @@
+// DestroyForm Phoenix-build fixture (parity finding #5).
+//
+// A fullstack `platform: phoenix` LiveView app whose detail page hosts a
+// `DestroyForm(of: Widget)`.  Compiled by the generated-phoenix CI gate
+// (test/e2e/generated-phoenix-build.test.ts globs this directory), so the
+// delete `<.button>` + the hoisted `destroy_widget` handle_event clause +
+// the `~p"/widgets"` post-delete navigation are validated by `mix compile`.
+//
+// `with crudish` gives Widget the canonical `destroy` action (and the
+// `destroy_widget!/1` code interface DestroyForm calls); the explicit
+// `Widgets` list page at `/widgets` makes the verified route resolve.
+
+system DestroyDemo {
+  subdomain Catalog {
+    context Inventory {
+      aggregate Widget with crudish {
+        name: string
+      }
+    }
+  }
+
+  api InventoryApi from Catalog
+  storage primary { type: postgres }
+  resource invState { for: Inventory, kind: state, use: primary }
+
+  ui Admin {
+    page Widgets {
+      route: "/widgets"
+      body: Stack { Heading { "Widgets" } }
+    }
+    page WidgetDetail(id: Widget id) {
+      route: "/widgets/:id"
+      body: Stack {
+        Heading { "Widget" },
+        DestroyForm(of: Widget)
+      }
+    }
+  }
+
+  deployable phoenixApp {
+    platform: phoenix
+    contexts: [Inventory]
+    dataSources: [invState]
+    serves: InventoryApi
+    ui: Admin
+    port: 4000
+  }
+}
