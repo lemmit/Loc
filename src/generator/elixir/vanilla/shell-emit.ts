@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ApiRoute } from "../api-emit.js";
+import { renderRequestContext } from "../shell/runtime.js";
 
 export function emitVanillaShellFiles(
   appName: string,
@@ -18,6 +19,9 @@ export function emitVanillaShellFiles(
   out.set(".formatter.exs", renderVanillaFormatterExs());
   out.set(`lib/${appName}/application.ex`, renderVanillaApplication(appName, appModule));
   out.set(`lib/${appName}/repo.ex`, renderVanillaRepo(appName, appModule));
+  // Ambient execution-context carrier (Logger.metadata) — the Plug is mounted
+  // in the endpoint after Plug.RequestId; shared with the ash foundation.
+  out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
   out.set(`lib/${appName}_web.ex`, renderVanillaWebModule(appName, appModule));
   out.set(`lib/${appName}_web/endpoint.ex`, renderVanillaEndpoint(appName, appModule));
   out.set(`lib/${appName}_web/router.ex`, renderVanillaRouter(appModule, apiRoutes));
@@ -189,6 +193,7 @@ defmodule ${appModule}Web.Endpoint do
   ]
 
   plug Plug.RequestId
+  plug ${appModule}.RequestContext
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug Plug.Parsers,

@@ -34,6 +34,7 @@ import {
   renderEndpoint,
   renderLogFormatter,
   renderRepo,
+  renderRequestContext,
   renderRouter,
 } from "./shell/runtime.js";
 import {
@@ -139,6 +140,10 @@ export function emitShellFiles(
   // parseable upstream the same way Hono's pino and .NET's
   // AddJsonConsole emit.
   out.set(`lib/${appName}/log_formatter.ex`, renderLogFormatter(appModule));
+
+  // Ambient execution-context carrier (Logger.metadata) — the Plug is mounted
+  // in the endpoint after Plug.RequestId; correlation_id then rides every log.
+  out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
 
   // lib/<app>/application.ex
   out.set(`lib/${appName}/application.ex`, renderApplication(appName, appModule));
