@@ -39,6 +39,9 @@ npm run test:svelte-build # LOOM_SVELTE_BUILD=1 — emits SvelteKit projects (ex
                           # CI shards via LOOM_SVELTE_BUILD_CASE=<ddd-path>:<pack>
 npm run test:vue-build    # LOOM_VUE_BUILD=1 — {minimal,scaffold,showcase} × {vuetify,shadcnVue}: vue-tsc + vite build
                           # CI shards via LOOM_VUE_BUILD_CASE=<case>:<pack>
+npm run test:vue-e2e      # LOOM_VUE_E2E=1 — RUNTIME e2e: vite-builds vue-showcase, `vite preview`s the bundle, runs the
+                          # emitted Playwright smoke spec against it (pure client-side; pack via LOOM_VUE_E2E_PACK)
+npm run test:svelte-e2e   # LOOM_SVELTE_E2E=1 — the Svelte sibling of the above (vite preview + Playwright smoke)
 npm run test:dotnet       # LOOM_DOTNET_BUILD=1 — `dotnet build /warnaserror` against generated .NET projects
 npm run test:java         # LOOM_JAVA_BUILD=1 — `gradle testClasses bootJar` against generated Spring Boot projects (JDK 21 + Gradle)
 npm run test:python       # LOOM_PYTHON_BUILD=1 — `uv sync` + `ruff check` + `mypy --strict` + `pytest` against generated FastAPI projects (uv)
@@ -202,6 +205,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `generated-react-build.yml` — matrix `{example × pack}`, generates the React project, `npm install`, `tsc --noEmit`. Catches generator drift invisible to IR-level tests.
 - `generated-svelte-build.yml` — matrix `{example × svelte pack}`, generates the SvelteKit project, `npm install`, `svelte-check --fail-on-warnings`, `vite build`.
 - `generated-vue-build.yml` — the Vue sibling: `{case × vuetify@v3,shadcnVue@v1}`, `vue-tsc --noEmit` + `vite build` per cell.
+- `generated-vue-e2e.yml` / `generated-svelte-e2e.yml` — RUNTIME e2e: `vite build` the frontend, `vite preview` the bundle, run the emitted Playwright smoke spec against it (pure client-side, no backend). The runtime sibling of the `-build` gates.
 - `hono-build.yml` — fast `tsc --noEmit` + `tsup` gate against the Hono backend output.
 - `dotnet-build.yml` — `dotnet build /warnaserror` against the .NET output.
 - `java-build.yml` — `gradle testClasses bootJar` (main + emitted JUnit sources) against the Java output.
