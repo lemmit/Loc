@@ -66,6 +66,11 @@ export function renderJavaService(
       `        var ${f.name} = ${wireToDomain(eff(f.type, !!f.optional), `request.${f.name}()`)};`,
   );
   const createArgs = createParams.map((f) => f.name).join(", ");
+  // Lifecycle stamps (audit / softDelete): the entity exposes
+  // `_stampOnCreate` / `_stampOnUpdate` (non-principal values, gated
+  // upstream); the service calls them before save.
+  const hasStamp = (event: "create" | "update"): boolean =>
+    (agg.contextStamps ?? []).some((r) => r.event === event);
   const createLines =
     hasCreate(agg) || ctx.esCreateParams
       ? [
@@ -75,6 +80,7 @@ export function renderJavaService(
             ? `        ${agg.name}Validators.create(${createArgs});`
             : null,
           `        var aggregate = ${agg.name}.create(${createArgs});`,
+          hasStamp("create") ? `        aggregate._stampOnCreate();` : null,
           `        repository.save(aggregate);`,
           `        publishEvents(aggregate);`,
           `        return aggregate.id();`,
@@ -167,6 +173,7 @@ export function renderJavaService(
           `        aggregate.check${upperFirst(op.name)}(${args});`,
           `        ${lowerFirst(op.name)}Handler.handle(${handlerArgs});`,
           `        aggregate._assertInvariants();`,
+          hasStamp("update") ? `        aggregate._stampOnUpdate();` : null,
           `        repository.save(aggregate);`,
           `        publishEvents(aggregate);`,
           `    }`,
@@ -189,6 +196,7 @@ export function renderJavaService(
         spec
           ? `        var result = aggregate.${op.name}(${args});`
           : `        aggregate.${op.name}(${args});`,
+        hasStamp("update") ? `        aggregate._stampOnUpdate();` : null,
         `        repository.save(aggregate);`,
         `        publishEvents(aggregate);`,
         spec ? `        return result;` : null,

@@ -393,6 +393,57 @@ export function validateJavaFullstackSupport(sys: SystemIR, diags: LoomDiagnosti
   }
 }
 
+// Lifecycle stamps (`stamp onCreate`/`onUpdate`, audit / softDelete) on
+// the java backend.  Non-principal state stamps are emitted as
+// `_stampOnCreate` / `_stampOnUpdate` entity methods the service calls
+// before save.  Two cases stay fail-fast (never a silent drop): a stamp
+// value that references `currentUser` (no request-scoped principal in the
+// entity-method seam — the .NET interceptor's accessor has no java
+// analog here) and stamps on an event-sourced aggregate (state is folded
+// from events, not field-stamped).  Mirrors the Dapper stamp gate.
+export function validateJavaStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "java") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        const stamps = enriched.contextStamps ?? [];
+        if (stamps.length === 0) continue;
+        if (stamps.some((r) => r.assignments.some((a) => exprUsesCurrentUser(a.value)))) {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform java) hosts aggregate '${ctxName}.${agg.name}' ` +
+              `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
+              `from \`with audit\`) — principal-referencing stamps are not yet wired on the java ` +
+              `backend (the entity-level stamp seam has no request-scoped principal). ` +
+              `Use non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`), or host ` +
+              `this aggregate on a dotnet deployable.`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.java-stamp-unsupported",
+          });
+        }
+        if (enriched.persistedAs === "eventLog") {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform java) hosts event-sourced aggregate ` +
+              `'${ctxName}.${agg.name}' with a lifecycle stamp — stamps mutate state fields, but an ` +
+              `event-sourced aggregate's state is folded from its event stream. ` +
+              `Record the timestamp in an event instead, or drop persistedAs(eventLog).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.java-stamp-unsupported",
+          });
+        }
+      }
+    }
+  }
+}
+
 export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
