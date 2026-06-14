@@ -60,9 +60,13 @@ interface EntityShape {
   esCreate?: OperationIR;
 }
 
-export function renderPyAggregate(agg: AggregateIR, ctx: BoundedContextIR): string {
+export function renderPyAggregate(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  emitTrace = false,
+): string {
   const shapes = [...agg.parts.map((p) => partShape(p, agg)), rootShape(agg)];
-  const rendered = shapes.map(renderEntity);
+  const rendered = shapes.map((s) => renderEntity(s, emitTrace));
   const body = rendered.join("\n\n\n");
 
   // --- import resolution -------------------------------------------------
@@ -174,6 +178,7 @@ export function renderPyAggregate(agg: AggregateIR, ctx: BoundedContextIR): stri
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
+    emitTrace && /\blog\("trace"/.test(body) ? "from app.obs.log import log" : null,
     "",
     "",
     body,
@@ -272,8 +277,15 @@ function containsType(c: ContainmentIR): string {
   return c.collection ? `list[${c.partName}]` : `${c.partName} | None`;
 }
 
-function renderEntity(e: EntityShape): string {
+function renderEntity(e: EntityShape, emitTrace = false): string {
   const self = `"${e.name}"`;
+  // Under --trace, `_assert_invariants` takes an `__op` label threaded by
+  // each caller (the ctor passes "<init>", the extern wrapper "extern") so
+  // the `invariant_evaluated` line carries the originating operation.
+  const assertCall = (op: string): string =>
+    emitTrace
+      ? `        self._assert_invariants(${JSON.stringify(op)})`
+      : "        self._assert_invariants()";
 
   // Full-state keyword-only parameter list — shared by `__init__` and the
   // `_create` rehydration alias.
@@ -297,7 +309,7 @@ function renderEntity(e: EntityShape): string {
     ...e.fields.map((f) => `        self._${snake(f.name)} = ${snake(f.name)}`),
     ...e.contains.map((c) => `        self._${snake(c.name)} = ${snake(c.name)}`),
     e.isRoot ? `        self._events: list[DomainEvent] = []` : null,
-    `        self._assert_invariants()`,
+    assertCall("<init>"),
   ].filter((s): s is string => s != null);
 
   // Extern ops (docs/extern.md): the user-supplied handler owns the
@@ -352,8 +364,12 @@ function renderEntity(e: EntityShape): string {
     // An extern op has no body of its own — the user handler owns the
     // logic.  Only the precondition gate is generated (`check_<op>`),
     // run by the route before dispatching to the registered handler.
+    const trace = emitTrace ? { aggregate: e.name, op: op.name } : undefined;
     if (op.extern) {
-      const body = renderPyStatements(op.statements, undefined, { eventSourced: e.eventSourced });
+      const body = renderPyStatements(op.statements, undefined, {
+        eventSourced: e.eventSourced,
+        trace,
+      });
       return [
         "",
         `    def check_${snake(op.name)}(${params.join(", ")}) -> None:`,
@@ -362,14 +378,17 @@ function renderEntity(e: EntityShape): string {
     }
     const prefix = op.visibility === "public" ? "" : "_";
     const retType = op.returnType ? renderPyOperationReturnType(op.returnType) : "None";
-    const body = renderPyStatements(op.statements, undefined, { eventSourced: e.eventSourced });
+    const body = renderPyStatements(op.statements, undefined, {
+      eventSourced: e.eventSourced,
+      trace,
+    });
     return [
       "",
       `    def ${prefix}${snake(op.name)}(${params.join(", ")}) -> ${retType}:`,
       ...(body.length > 0 ? [body] : []),
       // Void operations re-assert invariants on the way out; a returning
       // one ends in `return`, so the trailing assert would be unreachable.
-      ...(op.returnType ? [] : ["        self._assert_invariants()"]),
+      ...(op.returnType ? [] : [assertCall(op.name)]),
     ];
   });
 
@@ -387,14 +406,30 @@ function renderEntity(e: EntityShape): string {
               "        self._events.append(ev)",
               "",
               "    def assert_invariants(self) -> None:",
-              "        self._assert_invariants()",
+              assertCall("extern"),
             ]
           : []),
       ]
     : [];
 
-  const invariantLines = e.invariants.flatMap((inv) => {
+  const invariantLines = e.invariants.flatMap((inv, idx) => {
     const msg = JSON.stringify(`Invariant violated: ${inv.source}`);
+    // Under --trace, evaluate into a temp, emit `invariant_evaluated`
+    // (op label = the threaded `__op`), then check — matching Hono/.NET.
+    if (emitTrace) {
+      const ok = `__inv_${idx}_ok`;
+      const traceArgs = `aggregate=${JSON.stringify(e.name)}, op=__op, expr=${JSON.stringify(inv.source)}, passed=${ok}`;
+      const evalCheck = (pad: string): string[] => [
+        `${pad}${ok} = (${renderPyExpr(inv.expr)})`,
+        `${pad}log("trace", "invariant_evaluated", ${traceArgs})`,
+        `${pad}if not ${ok}:`,
+        `${pad}    raise DomainError(${msg})`,
+      ];
+      if (inv.guard) {
+        return [`        if ${renderPyExpr(inv.guard)}:`, ...evalCheck("            ")];
+      }
+      return evalCheck("        ");
+    }
     if (inv.guard) {
       return [
         `        if (${renderPyExpr(inv.guard)}) and not (${renderPyExpr(inv.expr)}):`,
@@ -405,7 +440,9 @@ function renderEntity(e: EntityShape): string {
   });
   const assertInvariants = [
     "",
-    "    def _assert_invariants(self) -> None:",
+    emitTrace
+      ? "    def _assert_invariants(self, __op: str) -> None:"
+      : "    def _assert_invariants(self) -> None:",
     ...(invariantLines.length > 0 ? invariantLines : ["        pass"]),
   ];
 

@@ -222,7 +222,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     }
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract) continue;
-      out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx));
+      out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx, args.emitTrace));
       const externFile = buildPyExternHandlersFile(agg);
       if (externFile != null) {
         out.set(`app/domain/${snake(agg.name)}_handlers.py`, externFile);
