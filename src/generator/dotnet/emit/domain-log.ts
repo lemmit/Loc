@@ -50,6 +50,7 @@ public static class DomainLog
 export function renderExecutionContextBehavior(ns: string): string {
   return `// Auto-generated.
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Mediator;
@@ -59,18 +60,21 @@ using ${ns}.Domain.Common;
 namespace ${ns}.Application.Common;
 
 /// <summary>
-/// Mediator pipeline behaviour that binds the request logger onto the
+/// Mediator pipeline behaviour that opens a per-dispatch frame on the
 /// ambient <see cref="RequestContext"/> for the duration of every
-/// command/query.  Aggregate methods' --trace-injected LogTrace calls
-/// resolve through DomainLog → the frame's logger slice, so the
-/// per-request correlation reaches the domain layer without a
-/// constructor-injection refactor.
+/// command/query.  The frame chains to its caller (a child whose
+/// <see cref="RequestContext.ParentId"/> is the caller's
+/// <see cref="RequestContext.ScopeId"/>), so reentrant Send calls form a
+/// causality chain.  The dispatch logger is bound onto the frame's logger
+/// slice — aggregate methods' --trace-injected LogTrace calls resolve
+/// through DomainLog → that slice without a constructor-injection refactor
+/// — and a logger scope carries the correlation / scope / parent ids onto
+/// every log line emitted under the dispatch.
 ///
-/// Restores the previous logger on exit so reentrant Send calls (a
-/// handler that sends another Mediator message) stack cleanly.  When no
-/// frame is active — a non-HTTP entrypoint (background job, outbox relay)
-/// where no middleware ran — it opens a root frame for the dispatch, so
-/// domain trace logging keeps working off the HTTP edge.
+/// When no frame is active — a non-HTTP entrypoint (background job, outbox
+/// relay) where no middleware ran — it opens a root frame for the
+/// dispatch, so domain trace logging keeps working off the HTTP edge.  The
+/// disposable Enter/scope handles restore the previous frame on exit.
 /// </summary>
 public sealed class ExecutionContextBehavior<TMessage, TResponse> : IPipelineBehavior<TMessage, TResponse>
     where TMessage : IMessage
@@ -84,28 +88,22 @@ public sealed class ExecutionContextBehavior<TMessage, TResponse> : IPipelineBeh
         MessageHandlerDelegate<TMessage, TResponse> next,
         CancellationToken cancellationToken)
     {
-        var rc = RequestContext.Current;
-        if (rc is null)
+        var parent = RequestContext.Current;
+        // A child frame under the caller, or a fresh root for a non-HTTP
+        // entrypoint where no middleware opened one.
+        var frame = parent is null
+            ? RequestContext.OpenRoot(Guid.NewGuid().ToString(), "en", DateTimeOffset.UtcNow)
+            : RequestContext.OpenChild(parent);
+        frame.Logger = _log;
+        using (RequestContext.Enter(frame))
+        using (_log.BeginScope(new Dictionary<string, object?>
         {
-            // Non-HTTP entrypoint: no middleware established a frame, so
-            // open a root frame for this dispatch (a minted correlation id,
-            // default locale).  Disposes back to null on exit.
-            using (RequestContext.Enter(
-                RequestContext.OpenRoot(Guid.NewGuid().ToString(), "en", DateTimeOffset.UtcNow)))
-            {
-                RequestContext.Current!.Logger = _log;
-                return await next(message, cancellationToken);
-            }
-        }
-        var prev = rc.Logger;
-        rc.Logger = _log;
-        try
+            ["correlationId"] = frame.CorrelationId,
+            ["scopeId"] = frame.ScopeId,
+            ["parentId"] = frame.ParentId,
+        }))
         {
             return await next(message, cancellationToken);
-        }
-        finally
-        {
-            rc.Logger = prev;
         }
     }
 }
