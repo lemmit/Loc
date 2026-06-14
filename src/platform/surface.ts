@@ -49,7 +49,14 @@ export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set(["react", "
 // for each ecosystem.
 //
 // Add a new platform by:
-//   1. Implement `PlatformSurface` in `src/platform/<name>/index.ts`.
+//   1. Implement `PlatformSurface`.  Two layouts exist (see
+//      docs/platforms.md):
+//      - DEFAULT — a thin `src/platform/<name>.ts` surface delegating to
+//        the emitters under `src/generator/<name>/`.  dotnet, elixir, java,
+//        python, react, vue and svelte all follow this.
+//      - VERSIONED PACKAGE — `src/platform/<family>/v<N>/index.ts`, a full
+//        in-tree backend package (only `hono` today; see
+//        docs/backend-packages.md).
 //   2. Register it in `src/platform/registry.ts`.
 //   3. Extend the `Platform` IR type + grammar.
 // ---------------------------------------------------------------------------
