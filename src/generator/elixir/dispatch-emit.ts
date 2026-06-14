@@ -127,6 +127,7 @@ export function emitDispatch(
   appModule: string,
   out: Map<string, string>,
   sys?: SystemIR,
+  foundation: "ash" | "vanilla" = "ash",
 ): void {
   if ((ctx.eventSubscriptions ?? []).length === 0) return;
   const ctxSnake = snake(ctx.name);
@@ -153,7 +154,7 @@ export function emitDispatch(
     const verb = sub.trigger === "on" ? "on" : "start";
     out.set(
       `lib/${appName}/${ctxSnake}/workflows/${snake(sub.workflow.name)}/${verb}_${snake(sub.event)}.ex`,
-      renderHandler(appModule, contextModule, ctx, sub, sys),
+      renderHandler(appModule, contextModule, ctx, sub, sys, foundation),
     );
   }
 
@@ -327,6 +328,7 @@ function renderHandler(
   ctx: EnrichedBoundedContextIR,
   sub: Subscription,
   sys?: SystemIR,
+  foundation: "ash" | "vanilla" = "ash",
 ): string {
   const wf = sub.workflow;
   const persisted = !!wf.correlationField;
@@ -341,7 +343,7 @@ function renderHandler(
 
   // Body statements → ordered Elixir lines (0-indented), woven into a
   // `with`-chain plus the re-entrant dispatches the do-branch runs.
-  const body = renderBody(sub.statements, ctx, renderCtx, contextModule);
+  const body = renderBody(sub.statements, ctx, renderCtx, contextModule, foundation);
 
   // Saga routing wrapper, indented to the `def handle` body (4 spaces).
   const inner = persisted
@@ -479,9 +481,11 @@ function renderBody(
   ctx: EnrichedBoundedContextIR,
   renderCtx: RenderCtx,
   contextModule: string,
+  foundation: "ash" | "vanilla" = "ash",
 ): string[] {
   const lines: BodyLine[] = [];
-  for (const st of statements) lines.push(...renderStmt(st, ctx, renderCtx, contextModule));
+  for (const st of statements)
+    lines.push(...renderStmt(st, ctx, renderCtx, contextModule, foundation));
 
   const guards = lines.filter((l) => l.kind === "guard");
   // `with` clauses + `=` matches compose the chain, in source order.
@@ -514,6 +518,7 @@ function renderStmt(
   ctx: EnrichedBoundedContextIR,
   renderCtx: RenderCtx,
   contextModule: string,
+  foundation: "ash" | "vanilla" = "ash",
 ): BodyLine[] {
   switch (st.kind) {
     case "factory-let": {
@@ -550,14 +555,25 @@ function renderStmt(
       const op = ctx.aggregates
         .find((a: AggregateIR) => a.name === st.aggName)
         ?.operations.find((o) => o.name === st.op);
-      const argEntries = (op?.params ?? []).map(
-        (p, i) => `${snake(p.name)}: ${renderExpr(st.args[i]!, renderCtx)}`,
-      );
+      // Vanilla's context facade emits ops as arity-2 `<op>_<agg>(record, params)`
+      // regardless of param count — mirror `vanilla/workflow-execution-emit.ts`
+      // (key shape `arg<i>:` for positional args, `%{}` for none).  Ash's
+      // code-interface generates an arity-1 form when the action has no
+      // args, so the no-arg branch stays on the bare `(target)` call.
       const action = `${snake(st.op)}_${snake(st.aggName)}`;
       const target = snake(st.target);
-      const call = argEntries.length
-        ? `${contextModule}.${action}(${target}, %{${argEntries.join(", ")}})`
-        : `${contextModule}.${action}(${target})`;
+      let call: string;
+      if (foundation === "vanilla") {
+        const fields = st.args.map((arg, i) => `arg${i}: ${renderExpr(arg, renderCtx)}`).join(", ");
+        call = `${contextModule}.${action}(${target}, %{${fields}})`;
+      } else {
+        const argEntries = (op?.params ?? []).map(
+          (p, i) => `${snake(p.name)}: ${renderExpr(st.args[i]!, renderCtx)}`,
+        );
+        call = argEntries.length
+          ? `${contextModule}.${action}(${target}, %{${argEntries.join(", ")}})`
+          : `${contextModule}.${action}(${target})`;
+      }
       return [{ kind: "with-clause", text: `{:ok, _} <- ${call}` }];
     }
     case "emit": {

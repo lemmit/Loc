@@ -110,7 +110,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // `WorkflowInstancesController` (the deferred-Phoenix gap closer) has
     // the table to read from even on a command-only saga.
     emitWorkflowStateSchemas(appName, ctx, appModule, out);
-    emitDispatch(appName, ctx, appModule, out, sys);
+    emitDispatch(appName, ctx, appModule, out, sys, "vanilla");
   }
   apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
 
