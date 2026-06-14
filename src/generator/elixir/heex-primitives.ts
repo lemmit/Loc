@@ -857,6 +857,45 @@ export function renderStat(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   const value = positionals[1] ? renderInTemplate(positionals[1], ctx) : "";
   return `<div class="stat"${testidAttr}>\n  <div class="stat-label text-sm text-gray-500">${label}</div>\n  <div class="stat-value text-2xl font-semibold">${value}</div>\n</div>`;
 }
+
+/** `Avatar(src?, alt?)` → a circle-cropped `<img>`, or a neutral circle
+ *  placeholder when no `src:` (the HEEx analogue of the packs' user-icon
+ *  fallback). */
+export function renderAvatar(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  const attrVal = (arg: ExprIR): string =>
+    arg.kind === "literal"
+      ? `"${arg.value}"`
+      : `{${renderExpr(arg, { ...ctx, position: "template" })}}`;
+  let srcArg: ExprIR | undefined;
+  let altArg: ExprIR | undefined;
+  let testid = "";
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (name === "src") srcArg = arg;
+    else if (name === "alt") altArg = arg;
+    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const cls = "inline-block h-8 w-8 rounded-full";
+  if (srcArg) {
+    const altAttr = altArg ? ` alt=${attrVal(altArg)}` : ` alt=""`;
+    return `<img class="${cls} object-cover" src=${attrVal(srcArg)}${altAttr}${testidAttr} />`;
+  }
+  return `<span class="${cls} bg-gray-200"${testidAttr}></span>`;
+}
+
+/** `Loader(size?)` → an animated spinner.  The optional `size:` is dropped
+ *  (a single spinner size, like the packs that don't vary it). */
+export function renderLoader(expr: Extract<ExprIR, { kind: "call" }>, _ctx: WalkContext): string {
+  let testid = "";
+  for (let i = 0; i < expr.args.length; i++) {
+    const arg = expr.args[i]!;
+    if (expr.argNames?.[i] === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  return `<div class="animate-spin h-6 w-6 rounded-full border-2 border-gray-300 border-t-transparent" role="status" aria-label="Loading"${testidAttr}></div>`;
+}
 export function renderCard(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Card!, expr, ctx);
 }
