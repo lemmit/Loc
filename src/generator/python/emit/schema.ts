@@ -5,6 +5,7 @@ import type {
   EnrichedBoundedContextIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
+import { durableEventTypes } from "../../../ir/util/channels.js";
 import {
   isTphBase,
   isTphConcrete,
@@ -13,9 +14,16 @@ import {
   tphConcretesOf,
 } from "../../../ir/util/inheritance.js";
 import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js";
+import { effectiveSavingShape } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
-import { columnsForFields, joinRowClassName, type PyColumn, rowClassName } from "../py-columns.js";
+import {
+  columnsForFields,
+  isRefCollectionField,
+  joinRowClassName,
+  type PyColumn,
+  rowClassName,
+} from "../py-columns.js";
 
 // ---------------------------------------------------------------------------
 // `app/db/schema.py` — SQLAlchemy 2 typed declarative models.  Table /
@@ -41,6 +49,21 @@ export function renderPySchema(
     if (agg.persistedAs === "eventLog") {
       const ds14 = resolveDataSource?.(agg);
       models.push(renderEventLogModel(agg.name, ds14?.schema, ds14?.tablePrefix));
+      continue;
+    }
+    // shape(document): the whole aggregate tree is one jsonb blob — the
+    // canonical document triple `(id, data, version)`.
+    if (effectiveSavingShape(agg as EnrichedAggregateIR, resolveDataSource?.(agg)) === "document") {
+      const dds = resolveDataSource?.(agg);
+      models.push(renderDocumentModel(agg, dds?.schema, dds?.tablePrefix));
+      continue;
+    }
+    // shape(embedded): the root stays a queryable row, but each
+    // containment folds into one JSONB column and reference collections
+    // fold into a JSONB id-array column — no part / join tables.
+    if (effectiveSavingShape(agg as EnrichedAggregateIR, resolveDataSource?.(agg)) === "embedded") {
+      const eds = resolveDataSource?.(agg);
+      models.push(renderEmbeddedModel(agg, ctx, eds?.schema, eds?.tablePrefix));
       continue;
     }
     // dataSource-driven routing — the table lives in the binding's
@@ -81,10 +104,15 @@ export function renderPySchema(
   }
   // Persisted workflow-correlation state (workflow-and-applier.md A2-S2):
   // one row per running instance, keyed by the correlation field.  The
-  // shared migration leaves these unqualified (public schema).
+  // shared migration leaves these unqualified (public schema).  A durable
+  // channel adds the `last_event_id` idempotent-consumer marker.
+  const durable = durableEventTypes(ctx).size > 0;
   for (const wf of ctx.workflows) {
-    if (wf.correlationField) models.push(renderWorkflowStateModel(wf, ctx));
+    if (wf.correlationField) models.push(renderWorkflowStateModel(wf, ctx, durable));
   }
+  // Transactional outbox (dispatch-delivery-semantics.md): the shared
+  // `__loom_outbox` table when any channel asks for durability.
+  if (durable) models.push(renderOutboxModel());
   const body = models.join("\n\n\n");
 
   // Import narrowing — every SQLAlchemy helper is invoked by name, so a
@@ -99,6 +127,7 @@ export function renderPySchema(
     "Numeric",
     "PrimaryKeyConstraint",
     "Text",
+    "text",
     "Uuid",
   ].filter(uses);
   const pgNames = ["ARRAY", "JSONB"].filter(uses);
@@ -176,6 +205,57 @@ function renderColumn(c: PyColumn): string {
   return `    ${c.attr}: Mapped[${annotation}] = mapped_column(${args.join(", ")})`;
 }
 
+/** Document-shaped aggregate (`shape(document)`): the whole tree is one
+ *  jsonb blob, so the table is the canonical document triple — `id` (PK),
+ *  `data` (the serialised tree, JSONB), `version` (optimistic counter). */
+function renderDocumentModel(agg: AggregateIR, schema?: string, prefix?: string): string {
+  const tableName = `${prefix ?? ""}${snake(plural(agg.name))}`;
+  return lines(
+    `class ${agg.name}Row(Base):`,
+    `    __tablename__ = "${tableName}"`,
+    ...(schema ? [`    __table_args__ = ({"schema": "${schema}"},)`] : []),
+    "",
+    "    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)",
+    "    data: Mapped[object] = mapped_column(JSONB)",
+    "    version: Mapped[int] = mapped_column(Integer)",
+  );
+}
+
+/** Embedded-children aggregate (`shape(embedded)`): the root is a normal
+ *  queryable row — `id` plus its flattened scalar / VO / `X id` columns,
+ *  exactly like the relational root — but each containment folds into one
+ *  JSONB column and reference collections (`X id[]`) fold into a JSONB
+ *  id-array column.  No part tables, no join tables (parity with the
+ *  shared DDL's `embeddedTableForAggregate`). */
+function renderEmbeddedModel(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  schema?: string,
+  prefix?: string,
+): string {
+  const tableName = `${prefix ?? ""}${snake(plural(agg.name))}`;
+  const cols: PyColumn[] = [
+    { attr: "id", pyType: "str", saType: "Uuid(as_uuid=False)", optional: false, primaryKey: true },
+  ];
+  for (const f of agg.fields) {
+    if (isRefCollectionField(f)) {
+      cols.push({ attr: snake(f.name), pyType: "object", saType: "JSONB", optional: !!f.optional });
+      continue;
+    }
+    cols.push(...columnsForFields([f], ctx));
+  }
+  for (const c of agg.contains) {
+    cols.push({ attr: snake(c.name), pyType: "object", saType: "JSONB", optional: false });
+  }
+  return lines(
+    `class ${rowClassName(agg.name)}(Base):`,
+    `    __tablename__ = "${tableName}"`,
+    schema ? ["    __table_args__ = (", `        {"schema": "${schema}"},`, "    )"] : null,
+    "",
+    cols.map(renderColumn),
+  );
+}
+
 /** Append-only event stream for a `persistedAs(eventLog)` aggregate —
  *  `(stream_id, version)`-keyed; state rehydrates by folding. */
 function renderEventLogModel(name: string, schema?: string, prefix?: string): string {
@@ -200,7 +280,11 @@ function renderEventLogModel(name: string, schema?: string, prefix?: string): st
 /** Saga-state row for a correlation-bearing workflow — PK is the
  *  id-shaped correlation column (UUID, parity with the shared DDL);
  *  reference-collection state fields fold to JSONB. */
-function renderWorkflowStateModel(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
+function renderWorkflowStateModel(
+  wf: WorkflowIR,
+  ctx: EnrichedBoundedContextIR,
+  durable = false,
+): string {
   const tableName = plural(snake(wf.name));
   const corr = wf.correlationField as string;
   const cols: PyColumn[] = [];
@@ -227,11 +311,37 @@ function renderWorkflowStateModel(wf: WorkflowIR, ctx: EnrichedBoundedContextIR)
     }
     cols.push(...columnsForFields([f], ctx));
   }
+  // Idempotent-consumer marker for the at-least-once relay redelivery.
+  if (durable) {
+    cols.push({ attr: "last_event_id", pyType: "str", saType: "Text", optional: true });
+  }
   return lines(
     `class ${wf.name}Row(Base):`,
     `    __tablename__ = "${tableName}"`,
     "",
     cols.map(renderColumn),
+  );
+}
+
+/** The shared transactional-outbox table (`__loom_outbox`) — fixed shape;
+ *  the relay drains undispatched rows ordered by `occurred_at`.  Server
+ *  defaults (`gen_random_uuid()` / `now()` / `0`) match the shared DDL so
+ *  inserts omitting those columns let Postgres fill them. */
+function renderOutboxModel(): string {
+  return lines(
+    "class LoomOutboxRow(Base):",
+    `    __tablename__ = "__loom_outbox"`,
+    "",
+    "    id: Mapped[str] = mapped_column(",
+    `        Uuid(as_uuid=False), primary_key=True, server_default=text("gen_random_uuid()")`,
+    "    )",
+    "    occurred_at: Mapped[datetime] = mapped_column(",
+    `        DateTime(timezone=True), server_default=text("now()")`,
+    "    )",
+    "    type: Mapped[str] = mapped_column(Text)",
+    "    payload: Mapped[object] = mapped_column(JSONB)",
+    "    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))",
+    `    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))`,
   );
 }
 

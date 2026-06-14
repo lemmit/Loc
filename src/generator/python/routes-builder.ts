@@ -11,6 +11,7 @@ import {
   type EnrichedAggregateIR,
   type EnrichedBoundedContextIR,
   type EnrichedEntityPartIR,
+  type ExprIR,
   findUsesCurrentUser,
   type OperationIR,
   operationIsGuarded,
@@ -73,6 +74,9 @@ export function buildPyRoutesFile(
   // Extern ops (docs/extern.md) get the same request model + route slot
   // but dispatch through the user-registered handler module.
   const externOps = agg.operations.filter((o) => o.visibility === "public" && o.extern);
+  // `when`-gated ops (criterion.md, use site 2) each expose a
+  // side-effect-free `GET /{id}/can_<op>` → `{ allowed }` companion.
+  const whenGatedOps = [...publicOps, ...externOps].filter((o) => o.when);
 
   // One <Name>Paged response model per distinct paged carrier.
   const pagedNames = new Set<string>();
@@ -104,6 +108,11 @@ export function buildPyRoutesFile(
     "    pass",
     "",
     "",
+    // The `can_<op>` companion's response body — `{ allowed }` (one per
+    // routes file when any op is `when`-gated).
+    whenGatedOps.length > 0
+      ? lines("class CanResponse(BaseModel):", "    allowed: bool", "", "")
+      : null,
     ...pagedModels,
     hasCreateFactory(agg) ? createModels(agg, ctx) : null,
     ...publicOps.map((op) => opRequestModel(agg, op, ctx)),
@@ -131,6 +140,9 @@ export function buildPyRoutesFile(
     agg.canonicalDestroy ? ["", "", destroyRoute(agg)] : null,
     ...publicOps.map((op) => ["", "", operationRoute(agg, op, ctx)]),
     ...externOps.map((op) => ["", "", externRoute(agg, op, ctx)]),
+    // Can-query companions register after the operation routes (static
+    // `can_<op>` paths, no collision with `/{id}`).
+    ...whenGatedOps.map((op) => ["", "", canOpRoute(agg, op, ctx)]),
   );
 
   const body = `${models}\n\n\n${routes}`;
@@ -228,6 +240,7 @@ const ID_PARAM = 'id: Annotated[str, Path(json_schema_extra={"format": "uuid"})]
 function errorImports(refersTo: (n: string) => boolean): string | null {
   const names = [
     "AggregateNotFoundError",
+    "DisallowedError",
     "DomainError",
     "ExternHandlerError",
     "ForbiddenError",
@@ -564,6 +577,40 @@ function destroyRoute(agg: EnrichedAggregateIR): string {
   );
 }
 
+/** The `when` state-gate line(s) injected after the aggregate loads and
+ *  before the operation body runs — false → DisallowedError (409),
+ *  matching the side-effect-free `can_<op>` predicate. */
+function whenGate(agg: EnrichedAggregateIR, op: OperationIR): string[] {
+  if (!op.when) return [];
+  const pred = renderPyExpr(op.when, { thisName: "found" });
+  return [
+    `    if not (${pred}):`,
+    `        raise DisallowedError(${JSON.stringify(
+      `operation '${op.name}' is not allowed in the current state of ${agg.name}.`,
+    )})`,
+  ];
+}
+
+/** The auto-exposed, side-effect-free `GET /{id}/can_<op>` companion of a
+ *  `when`-gated operation — loads the aggregate, evaluates the predicate,
+ *  returns `{ allowed }` so a UI can enable/disable the action without
+ *  invoking it (the canCommand pattern). */
+function canOpRoute(
+  agg: EnrichedAggregateIR,
+  op: OperationIR,
+  _ctx: EnrichedBoundedContextIR,
+): string {
+  const opSnake = snake(op.routeSlug ?? op.name);
+  const pred = renderPyExpr(op.when as ExprIR, { thisName: "found" });
+  return lines(
+    `@router.get("/{id}/can_${opSnake}", response_model=CanResponse, operation_id="${camelId(opOperation(agg.name, `can_${op.name}`))}"${errorResponsesKwarg("getById")})`,
+    `async def can_${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, session: SessionDep) -> dict[str, object]:`,
+    "    repo = _repo(session)",
+    `    found = await repo.get_by_id(${agg.name}Id(id))`,
+    `    return {"allowed": ${pred}}`,
+  );
+}
+
 function operationRoute(
   agg: EnrichedAggregateIR,
   op: OperationIR,
@@ -598,6 +645,7 @@ function operationRoute(
       usesUser ? "    current_user: User = request.state.current_user" : null,
       "    repo = _repo(session)",
       `    found = await repo.get_by_id(${agg.name}Id(id))`,
+      ...whenGate(agg, op),
       `    result = found.${snake(op.name)}(${callArgs.join(", ")})`,
       "    await repo.save(found)",
       ...translations,
@@ -622,6 +670,7 @@ function operationRoute(
     usesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
+    ...whenGate(agg, op),
     `    found.${snake(op.name)}(${callArgs.join(", ")})`,
     "    await repo.save(found)",
     "    return Response(status_code=204)",
@@ -659,6 +708,7 @@ function externRoute(
     usesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
+    ...whenGate(agg, op),
     `    found.check_${snake(op.name)}(${checkArgs.join(", ")})`,
     `    handler = ${snake(agg.name)}_handlers.${snake(op.name)}`,
     "    if handler is None:",

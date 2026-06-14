@@ -6,7 +6,8 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
-import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
+import { durableEventTypes } from "../../ir/util/channels.js";
+import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { generateReactForContexts } from "../react/index.js";
@@ -17,7 +18,7 @@ import {
   buildPyBaseUnionFile,
   concretesOf,
 } from "./base-reader-builder.js";
-import { buildPyDispatchFile } from "./dispatch-builder.js";
+import { buildPyDispatchFile, dispatchSubscriptionsOf } from "./dispatch-builder.js";
 import { renderPyAggregate } from "./emit/aggregate.js";
 import { ERRORS_PY } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
@@ -32,7 +33,10 @@ import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { buildPyExternHandlersFile, externOpsOf } from "./extern-builder.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
+import { buildPyDocumentRepositoryFile } from "./repository-document-builder.js";
+import { buildPyEmbeddedRepositoryFile } from "./repository-embedded-builder.js";
 import { buildPyEventSourcedRepositoryFile } from "./repository-eventsourced-builder.js";
+import { emitPyResourceFiles } from "./resource-clients.js";
 import { buildPyRoutesFile } from "./routes-builder.js";
 import { buildPyViewsFile } from "./views-builder.js";
 import { buildPyWorkflowsFile, commandWorkflowsOf } from "./workflows-builder.js";
@@ -79,7 +83,12 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // an index.html fallback, the Dockerfile becomes multi-stage, and the
   // React project is generated under ClientApp/.
   const hasEmbeddedSpa = !!args.deployable.uiName;
-  out.set("pyproject.toml", renderPyproject(slug));
+  // Resource verb clients (resources.md): async client modules for the
+  // objectStore / queue / api resources this deployable wires.  Workflow
+  // / saga `resource-call`s import the verb helpers from these.
+  const resources = emitPyResourceFiles(args.sys, args.deployable.dataSourceNames);
+  for (const [path, content] of resources.files) out.set(path, content);
+  out.set("pyproject.toml", renderPyproject(slug, resources.deps, resources.devDeps));
   out.set("Dockerfile", hasEmbeddedSpa ? DOCKERFILE_PY_FULLSTACK : DOCKERFILE_PY);
   out.set(".dockerignore", DOCKERIGNORE_PY);
   out.set("certs/.gitkeep", "");
@@ -119,6 +128,12 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     return agg ? resolveDs(agg)?.schema : undefined;
   });
   const hasSeeds = seedFile != null;
+  // Durable-channel outbox relay (dispatch-delivery-semantics.md): only
+  // when a durable channel carries a *subscribed* event does `app/dispatch.py`
+  // ship `start_outbox_relay`, which the lifespan kicks off as a background
+  // task.  No durable channel / no subscription → byte-identical boot.
+  const startsRelay =
+    durableEventTypes(merged).size > 0 && dispatchSubscriptionsOf(merged).length > 0;
   out.set(
     "app/main.py",
     renderMain(
@@ -130,6 +145,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       hasSeeds,
       externAggs,
       hasEmbeddedSpa,
+      startsRelay,
     ),
   );
   if (hasEmbeddedSpa) {
@@ -178,7 +194,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // a subscribed event does `app/dispatch.py` exist — and then every
   // repository constructed by routes/views/workflows takes the live
   // dispatcher instead of the Noop (mirrors Hono's createApp default).
-  const dispatchFile = buildPyDispatchFile(merged);
+  const dispatchFile = buildPyDispatchFile(merged, args.sys);
   const hasDispatch = dispatchFile != null;
   if (dispatchFile != null) out.set("app/dispatch.py", dispatchFile);
 
@@ -187,7 +203,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
   const viewsFile = buildPyViewsFile(merged, hasDispatch);
   if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
-  const workflowsFile = buildPyWorkflowsFile(merged, hasDispatch);
+  const workflowsFile = buildPyWorkflowsFile(merged, hasDispatch, args.sys);
   if (workflowsFile != null) out.set("app/http/workflows_routes.py", workflowsFile);
 
   // Per-aggregate emission stays per-context — each aggregate module is
@@ -206,7 +222,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     }
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract) continue;
-      out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx));
+      out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx, args.emitTrace));
       const externFile = buildPyExternHandlersFile(agg);
       if (externFile != null) {
         out.set(`app/domain/${snake(agg.name)}_handlers.py`, externFile);
@@ -216,7 +232,11 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
         `app/db/repositories/${snake(agg.name)}_repository.py`,
         agg.persistedAs === "eventLog"
           ? buildPyEventSourcedRepositoryFile(agg, repo, ctx)
-          : buildPyRepositoryFile(agg, repo, ctx),
+          : effectiveSavingShape(agg, resolveDs(agg)) === "document"
+            ? buildPyDocumentRepositoryFile(agg, repo, ctx)
+            : effectiveSavingShape(agg, resolveDs(agg)) === "embedded"
+              ? buildPyEmbeddedRepositoryFile(agg, repo, ctx)
+              : buildPyRepositoryFile(agg, repo, ctx),
       );
       out.set(
         `app/http/${snake(agg.name)}_routes.py`,
@@ -271,7 +291,11 @@ export function pythonProjectName(deployableName: string): string {
   return deployableName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 }
 
-function renderPyproject(slug: string): string {
+function renderPyproject(
+  slug: string,
+  extraDeps: readonly string[] = [],
+  extraDevDeps: readonly string[] = [],
+): string {
   const dep = (r: string) => `  "${r}",`;
   return lines(
     "# Auto-generated by Loom.  Pin via .loomignore to customise.",
@@ -280,12 +304,12 @@ function renderPyproject(slug: string): string {
     `version = "0.1.0"`,
     `requires-python = ">=3.12"`,
     "dependencies = [",
-    PYTHON_PINS.dependencies.map(dep),
+    [...PYTHON_PINS.dependencies, ...extraDeps].map(dep),
     "]",
     "",
     "[dependency-groups]",
     "dev = [",
-    PYTHON_PINS.devDependencies.map(dep),
+    [...PYTHON_PINS.devDependencies, ...extraDevDeps].map(dep),
     "]",
     "",
     "# Application project, not a distributable package — uv installs the",
@@ -367,6 +391,7 @@ function renderMain(
   hasSeeds = false,
   externAggs: string[] = [],
   hasEmbeddedSpa = false,
+  startsRelay = false,
 ): string {
   // Embedded-SPA mode mounts every router under /api/* so the SPA's
   // path namespace stays free for client-side routing.
@@ -404,6 +429,7 @@ function renderMain(
     "from app.db.engine import engine",
     "from app.db.migrate import run_migrations",
     hasSeeds ? "from app.db.seed import run_seeds" : null,
+    startsRelay ? "from app.dispatch import start_outbox_relay" : null,
     stubIds.length > 0 ? `from app.domain.ids import ${stubIds.join(", ")}` : null,
     ...externAggs.map(
       (n) =>
@@ -447,8 +473,13 @@ function renderMain(
     ...externAggs.map((n) => `    verify_${snake(n)}_extern_handlers_registered()`),
     "    await run_migrations()",
     hasSeeds ? "    await run_seeds()" : null,
+    // Durable-channel relay: at-least-once redelivery of `__loom_outbox`
+    // rows, drained on a background task for the process lifetime.
+    startsRelay ? "    _outbox_relay = start_outbox_relay()" : null,
+    startsRelay ? '    log("info", "outbox_relay_started")' : null,
     '    log("info", "server_listening", port=_PORT)',
     "    yield",
+    startsRelay ? "    _outbox_relay.cancel()" : null,
     '    log("info", "server_shutdown", signal="SIGTERM")',
     '    log("info", "server_drained")',
     "",
@@ -617,6 +648,7 @@ from pydantic import BaseModel
 
 from app.domain.errors import (
     AggregateNotFoundError,
+    DisallowedError,
     DomainError,
     ExternHandlerError,
     ForbiddenError,
@@ -710,6 +742,11 @@ def install_error_handlers(app: FastAPI) -> None:
     async def _forbidden(request: Request, err: ForbiddenError) -> JSONResponse:
         log("warn", "forbidden", message=str(err), status=403)
         return problem(request, 403, "Forbidden", str(err))
+
+    @app.exception_handler(DisallowedError)
+    async def _disallowed(request: Request, err: DisallowedError) -> JSONResponse:
+        log("warn", "disallowed", message=str(err), status=409)
+        return problem(request, 409, "Conflict", str(err))
 
     @app.exception_handler(DomainError)
     async def _domain(request: Request, err: DomainError) -> JSONResponse:

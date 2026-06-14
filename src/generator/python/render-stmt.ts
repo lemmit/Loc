@@ -14,12 +14,23 @@ import { renderPyExpr } from "./render-expr.js";
 // below it.
 // ---------------------------------------------------------------------------
 
+export interface PyTraceCtx {
+  /** Aggregate / part name carried on each emitted trace line. */
+  aggregate: string;
+  /** Operation label carried on `precondition_evaluated` lines. */
+  op: string;
+}
+
 export interface PyStmtCtx {
   /** True when rendering a body on an event-sourced
    *  (`persistedAs(eventLog)`) aggregate: an `emit` then both records
    *  the event AND folds it via `self._apply(ev)` (S14).  Off ⇒ `emit`
    *  is the plain notification-event append. */
   eventSourced?: boolean;
+  /** Present under `--trace` (F5): inject `precondition_evaluated` /
+   *  `value_computed` domain-trace lines (no obs e2e asserts these;
+   *  cosmetic parity with the Hono / .NET `--trace` instrumentation). */
+  trace?: PyTraceCtx;
 }
 
 const METHOD_BODY_INDENT = "        ";
@@ -29,17 +40,37 @@ export function renderPyStatements(
   indent: string = METHOD_BODY_INDENT,
   ctx: PyStmtCtx = {},
 ): string {
-  return stmts.map((s) => renderPyStatement(s, indent, ctx)).join("\n");
+  let preIndex = 0;
+  return stmts
+    .map((s) => renderPyStatement(s, indent, ctx, s.kind === "precondition" ? preIndex++ : 0))
+    .join("\n");
 }
 
-function renderPyStatement(s: StmtIR, i: string, ctx: PyStmtCtx): string {
+/** `log("trace", "<event>", <kwargs>)` — the domain-trace facade call. */
+function traceLine(i: string, event: string, kwargs: string): string {
+  return `${i}log("trace", ${JSON.stringify(event)}, ${kwargs})`;
+}
+
+function renderPyStatement(s: StmtIR, i: string, ctx: PyStmtCtx, preIndex: number): string {
   const sub = `${i}    `;
   switch (s.kind) {
-    case "precondition":
+    case "precondition": {
+      const thrown = `raise DomainError(${JSON.stringify(`Precondition failed: ${s.source}`)})`;
+      if (!ctx.trace) {
+        return [`${i}if not (${renderPyExpr(s.expr)}):`, `${sub}${thrown}`].join("\n");
+      }
+      const ok = `__pre_${preIndex}_ok`;
       return [
-        `${i}if not (${renderPyExpr(s.expr)}):`,
-        `${sub}raise DomainError(${JSON.stringify(`Precondition failed: ${s.source}`)})`,
+        `${i}${ok} = (${renderPyExpr(s.expr)})`,
+        traceLine(
+          i,
+          "precondition_evaluated",
+          `aggregate=${JSON.stringify(ctx.trace.aggregate)}, op=${JSON.stringify(ctx.trace.op)}, expr=${JSON.stringify(s.source)}, passed=${ok}`,
+        ),
+        `${i}if not ${ok}:`,
+        `${sub}${thrown}`,
       ].join("\n");
+    }
     case "requires":
       // Authorization gate — surfaces as 403 via the route-level
       // ForbiddenError handler (S16).
@@ -49,8 +80,22 @@ function renderPyStatement(s: StmtIR, i: string, ctx: PyStmtCtx): string {
       ].join("\n");
     case "let":
       return `${i}${snake(s.name)} = ${renderPyExpr(s.expr)}`;
-    case "assign":
-      return `${i}${renderPath(s.target)} = ${renderPyExpr(s.value)}`;
+    case "assign": {
+      const base = `${i}${renderPath(s.target)} = ${renderPyExpr(s.value)}`;
+      // `value_computed` trace after a single-segment field assign (nested
+      // paths are skipped, matching the Hono / .NET `withValueComputed`).
+      if (ctx.trace && s.target.segments.length === 1) {
+        return [
+          base,
+          traceLine(
+            i,
+            "value_computed",
+            `aggregate=${JSON.stringify(ctx.trace.aggregate)}, field=${JSON.stringify(s.target.segments[0])}, value=${renderPath(s.target)}`,
+          ),
+        ].join("\n");
+      }
+      return base;
+    }
     case "add":
       return `${i}${renderPath(s.target)}.append(${renderPyExpr(s.value)})`;
     case "remove": {

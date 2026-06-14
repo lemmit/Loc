@@ -96,7 +96,7 @@ export function buildPyRepositoryFile(
     `    async def all(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${root})${kindWhere(root, kind)})).scalars().all()`,
     "        return [await self._hydrate(row) for row in rows]",
-    ...emittableFinds(repo).flatMap((f) => ["", findMethod(agg, f, ctx)]),
+    ...emittableFinds(repo).flatMap((f) => ["", relationalFindMethod(agg, f, ctx)]),
     "",
     `    async def find_many_by_ids(self, ids: list[${agg.name}Id]) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${root}).where(${root}.id.in_(list(ids))))).scalars().all()`,
@@ -189,7 +189,11 @@ function idFieldTarget(f: FieldIR): string | null {
 /** One repository method per user-declared find.  A `where` clause
  *  lowers to a SQLAlchemy predicate; a clause-less find falls back to
  *  convention-matching its params to columns. */
-function findMethod(agg: EnrichedAggregateIR, find: FindIR, ctx: EnrichedBoundedContextIR): string {
+export function relationalFindMethod(
+  agg: EnrichedAggregateIR,
+  find: FindIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
   const params = find.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`);
@@ -365,7 +369,7 @@ function hydrateScalar(expr: string, t: TypeIR, optional: boolean): string {
 
 /** Domain ctor kwarg for one declared field, reading flattened columns
  *  off `rowVar`.  Ref collections are passed in as pre-loaded locals. */
-function hydrateField(rowVar: string, f: FieldIR, ctx: EnrichedBoundedContextIR): string {
+export function hydrateField(rowVar: string, f: FieldIR, ctx: EnrichedBoundedContextIR): string {
   const t = f.type.kind === "optional" ? f.type.inner : f.type;
   const opt = f.optional || f.type.kind === "optional";
   if (t.kind === "valueobject") {
@@ -502,7 +506,7 @@ function persistScalar(expr: string, t: TypeIR, optional: boolean): string {
 }
 
 /** `(sql column attr, value expr)` pairs for one declared field. */
-function persistField(
+export function persistField(
   ownerExpr: string,
   f: FieldIR,
   ctx: EnrichedBoundedContextIR,
@@ -730,7 +734,7 @@ function wireProjection(
   return pairs;
 }
 
-function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
+export function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
   return lines(
     `    def to_wire(self, root: ${agg.name}) -> dict[str, object]:`,
     "        return {",
@@ -739,7 +743,7 @@ function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
   );
 }
 
-function partWireMethod(p: EnrichedEntityPartIR, ctx: EnrichedBoundedContextIR): string {
+export function partWireMethod(p: EnrichedEntityPartIR, ctx: EnrichedBoundedContextIR): string {
   return lines(
     `    def _wire_${snake(p.name)}(self, e: ${p.name}) -> dict[str, object]:`,
     "        return {",

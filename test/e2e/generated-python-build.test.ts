@@ -26,8 +26,9 @@ const cli = path.join(repoRoot, "bin", "cli.js");
 
 const ENABLED = process.env.LOOM_PYTHON_BUILD === "1";
 
-/** Fixture → the deployable folder (serviceSlug) to gate. */
-const CASES: Array<[fixture: string, project: string]> = [
+/** Fixture → the deployable folder (serviceSlug) to gate, plus optional
+ *  extra `generate system` flags (e.g. `--trace`). */
+const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   ["test/e2e/fixtures/python-build/shell.ddd", "api"],
   // Entity parts + containment + collection ops + money domain logic.
   ["test/e2e/fixtures/python-build/domain.ddd", "api"],
@@ -39,6 +40,9 @@ const CASES: Array<[fixture: string, project: string]> = [
   // Channels + event-triggered saga (in-process dispatcher, persisted
   // correlation state).
   ["test/e2e/fixtures/python-build/saga.ddd", "api"],
+  // Durable channel (`retention: log`): transactional outbox + relay +
+  // last_event_id idempotent-consumer dedup.
+  ["test/e2e/fixtures/python-build/outbox.ddd", "api"],
   // `auth: required` — User dataclass + verifier registry + middleware,
   // requires-guarded op/workflow, currentUser-scoped find.
   ["test/e2e/fixtures/python-build/auth.ddd", "api"],
@@ -49,20 +53,37 @@ const CASES: Array<[fixture: string, project: string]> = [
   ["test/e2e/fixtures/python-build/extern.ddd", "api"],
   // Fullstack `ui:` embed — routers under /api/*, SPA fallback, ClientApp/.
   ["test/e2e/fixtures/python-build/fullstack.ddd", "app"],
+  // Resource verb clients: objectStore (boto3) + queue (aio-pika) + api (httpx).
+  ["test/e2e/fixtures/python-build/resources.ddd", "api"],
+  // shape(document): one jsonb (id, data, version) blob + in-memory finds.
+  ["test/e2e/fixtures/python-build/document.ddd", "api"],
+  // shape(embedded): queryable root row + one jsonb column per containment
+  // / ref-collection; SQL finds over root columns.
+  ["test/e2e/fixtures/python-build/embedded.ddd", "api"],
+  // `when` state gate: DisallowedError (409) before the body + the
+  // side-effect-free GET /{id}/can_<op> companion.
+  ["test/e2e/fixtures/python-build/when.ddd", "api"],
+  // `--trace` domain instrumentation: precondition_evaluated /
+  // value_computed / invariant_evaluated trace lines must stay
+  // ruff-/mypy-clean (the domain fixture exercises all three).
+  ["test/e2e/fixtures/python-build/domain.ddd", "api", "--trace"],
 ];
 
 describe.skipIf(!ENABLED)(
   "generated Python project passes uv sync + ruff + mypy --strict (LOOM_PYTHON_BUILD=1)",
   () => {
     it.each(CASES)(
-      "%s — generated project is statically clean",
-      (fixture, project) => {
+      "%s %s — generated project is statically clean",
+      (fixture, project, flags = "") => {
         const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-python-"));
         try {
-          execSync(`node ${cli} generate system ${fixture} -o ${outDir}`, {
-            stdio: "inherit",
-            cwd: repoRoot,
-          });
+          execSync(
+            `node ${cli} generate system ${fixture} -o ${outDir}${flags ? ` ${flags}` : ""}`,
+            {
+              stdio: "inherit",
+              cwd: repoRoot,
+            },
+          );
           const proj = path.join(outDir, project);
           expect(fs.existsSync(path.join(proj, "pyproject.toml"))).toBe(true);
           const run = (cmd: string) =>

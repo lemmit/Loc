@@ -1,0 +1,39 @@
+// `when` state gate (criterion.md, use site 2) for the Python backend.
+// A `when`-gated operation evaluates its predicate against the loaded
+// aggregate before the body runs (false → 409 DisallowedError) and
+// auto-exposes a side-effect-free `GET /{id}/can_<op>` returning
+// `{ allowed }` for UI enablement.  Distinct from `requires` (auth, 403)
+// and `precondition` (argument validation, 400).
+system WhenSys {
+  subdomain Orders {
+    context Orders {
+      aggregate Order {
+        status: string
+        total: int
+
+        // Gated: only a Draft order may be submitted.
+        operation submit() when status == "Draft" {
+          status := "Submitted"
+        }
+
+        // Gated with an aggregate function in the predicate.
+        operation cancel() when canCancel() {
+          status := "Cancelled"
+        }
+
+        function canCancel(): bool = status != "Cancelled" && status != "Shipped"
+      }
+      repository Orders for Order { }
+    }
+  }
+  api OrdersApi from Orders
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable api {
+    platform: python
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 8000
+  }
+}

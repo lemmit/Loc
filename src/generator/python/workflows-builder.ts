@@ -3,6 +3,7 @@ import {
   type EnrichedBoundedContextIR,
   type OperationIR,
   operationUsesCurrentUser,
+  type SystemIR,
   type WorkflowIR,
   type WorkflowStmtIR,
   workflowIsGuarded,
@@ -14,6 +15,7 @@ import { snake, upperFirst } from "../../util/naming.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
 import { requestPyType } from "./emit/http-models.js";
 import { type PyRenderContext, renderPyExpr } from "./render-expr.js";
+import { resourceImportLines } from "./resource-clients.js";
 import { errorResponsesKwarg, pyWireToDomain, requestFieldDecl } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -46,9 +48,18 @@ export function commandWorkflowsOf(ctx: EnrichedBoundedContextIR): WorkflowIR[] 
 export function buildPyWorkflowsFile(
   ctx: EnrichedBoundedContextIR,
   hasDispatch = false,
+  sys?: SystemIR,
 ): string | null {
   const wfs = commandWorkflowsOf(ctx);
   if (wfs.length === 0) return null;
+  // Resource verb-helper imports for any `<resource>.<verb>(...)` the
+  // workflows call (resources.md).
+  const resourceImports = sys
+    ? resourceImportLines(
+        sys,
+        wfs.flatMap((wf) => wf.statements),
+      )
+    : [];
   const dispatcherExpr = hasDispatch ? "make_dispatcher(session)" : "NoopDomainEventDispatcher()";
   const anyUser = wfs.some(
     (wf) => workflowUsesCurrentUser(wf) || callsUserGatedOp(wf.statements, ctx),
@@ -97,6 +108,7 @@ export function buildPyWorkflowsFile(
     "",
     anyUser ? "from app.auth.user import User" : null,
     "from app.db.engine import get_session",
+    ...resourceImports,
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
     hasDispatch ? "from app.dispatch import make_dispatcher" : null,
     refersTo("DomainError") || refersTo("ForbiddenError")
@@ -146,7 +158,7 @@ function eventsImports(
 ): string | null {
   const names = [
     refersTo("DomainEvent") ? "DomainEvent" : null,
-    hasDispatch ? null : "NoopDomainEventDispatcher",
+    !hasDispatch && refersTo("NoopDomainEventDispatcher") ? "NoopDomainEventDispatcher" : null,
     ...eventNames,
   ].filter((n): n is string => n != null);
   return names.length > 0 ? `from app.domain.events import ${names.join(", ")}` : null;
@@ -324,9 +336,12 @@ export function pyWorkflowStmtTarget(
         ...(body.length + saves.length > 0 ? [...body, ...saves] : [`${i}    pass`]),
       ];
     },
-    // Resource adapters stay a recorded follow-up — surface loudly.
-    resourceCall: (_st, i) => [
-      `${i}raise NotImplementedError("resource operations land with the extern slice")`,
-    ],
+    // Bare `<resource>.<verb>(...)` statement — render-expr wraps the
+    // resource-op in `(await …)`; a bare statement drops the parens.
+    resourceCall: (st, i) => {
+      const rendered = renderPyExpr(st.call, rctx);
+      const bare = rendered.startsWith("(await ") ? rendered.slice(1, -1) : rendered;
+      return [`${i}${bare}`];
+    },
   };
 }

@@ -1,0 +1,35 @@
+// shape(document) for the Python backend: the whole aggregate tree
+// (root + contained parts) round-trips ONE jsonb column (id, data,
+// version) instead of the normalised table-per-entity tree.  Operations
+// load the blob, mutate the rehydrated domain instance, and re-serialise;
+// finds evaluate in-memory over the rehydrated documents.  Verified live
+// (create → addSection → bump → read-back → find popular).
+system DocSys {
+  subdomain Cms {
+    context Cms {
+      aggregate Article shape(document) {
+        title: string
+        viewCount: int
+        contains sections: Section[]
+        entity Section { heading: string  body: string }
+        operation addSection(heading: string, body: string) {
+          sections += Section { heading: heading, body: body }
+        }
+        operation bump() { viewCount := viewCount + 1 }
+      }
+      repository Articles for Article {
+        find popular(min: int): Article[] where this.viewCount >= min
+      }
+    }
+  }
+  api CmsApi from Cms
+  storage primary { type: postgres }
+  resource cmsState { for: Cms, kind: state, use: primary }
+  deployable api {
+    platform: python
+    contexts: [Cms]
+    dataSources: [cmsState]
+    serves: CmsApi
+    port: 8000
+  }
+}

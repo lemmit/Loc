@@ -96,9 +96,10 @@ describe("when gate — backend support (loom.when-unsupported)", () => {
       .map((d) => d.message);
   };
 
-  it("passes on node and dotnet", async () => {
+  it("passes on node, dotnet and python", async () => {
     expect(await codes("hono")).toEqual([]);
     expect(await codes("dotnet")).toEqual([]);
+    expect(await codes("python")).toEqual([]);
   });
 
   it("gates an elixir-hosted context", async () => {

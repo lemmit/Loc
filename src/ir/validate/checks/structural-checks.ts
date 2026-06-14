@@ -467,7 +467,7 @@ export function validateWhenGateSupport(
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
 ): void {
-  const SUPPORTED_WHEN_BACKENDS = new Set(["node", "dotnet"]);
+  const SUPPORTED_WHEN_BACKENDS = new Set(["node", "dotnet", "python"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_WHEN_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 

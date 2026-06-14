@@ -1,0 +1,72 @@
+// Durable-channel outbox tier (dispatch-delivery-semantics.md) for the
+// Python backend.  The Lifecycle channel carries OrderPlaced /
+// ShipmentRequested with `retention: log`, so those events route through
+// the transactional outbox: the OutboxDispatcher records them in
+// `__loom_outbox` inside the request transaction; a background relay
+// (`start_outbox_relay`) redelivers them at-least-once through the
+// in-process dispatcher, with `last_event_id` idempotent-consumer dedup
+// on the saga rows.  Same choreography as saga.ddd (the ephemeral tier),
+// but durable.
+system OutboxSys {
+  subdomain Fulfillment {
+    context Fulfillment {
+      aggregate Order {
+        customerId: string
+        status: string
+        total: int
+        operation place() {
+          precondition status == "Draft"
+          status := "Placed"
+          emit OrderPlaced { order: id, at: now() }
+        }
+      }
+      repository Orders for Order { }
+
+      aggregate Shipment {
+        orderRef: Order id
+        status: string
+        operation markTracked() { status := "Tracked" }
+      }
+      repository Shipments for Shipment { }
+
+      event OrderPlaced { order: Order id, at: datetime }
+      event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+
+      channel Lifecycle {
+        carries: OrderPlaced, ShipmentRequested
+        delivery: queue
+        retention: log
+      }
+
+      workflow OrderFulfillment {
+        orderId: Order id          // correlation field — one instance per order
+        attempts: int              // saga state — exercises typed allocate defaults
+
+        // Starter: allocates the instance, requests a shipment.
+        create(p: OrderPlaced) by p.order {
+          let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+          emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+        }
+
+        // Continuation: routes to the started instance by order; marks shipment.
+        on(s: ShipmentRequested) by s.order {
+          let ship = Shipments.getById(s.shipment)
+          ship.markTracked()
+        }
+      }
+    }
+  }
+
+  api FulfillmentApi from Fulfillment
+
+  storage pg { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: pg }
+
+  deployable api {
+    platform: python
+    contexts: [Fulfillment]
+    dataSources: [fulfillmentState]
+    serves: FulfillmentApi
+    port: 8000
+  }
+}
