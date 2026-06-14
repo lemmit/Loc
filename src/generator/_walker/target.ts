@@ -167,11 +167,6 @@ export interface WalkerTarget {
    *  rendered via `renderExpression`. */
   renderStateWrite(ref: StateRef, value: string): string;
 
-  /** Render the initial-value expression for a state field's `mount`
-   *  / `useState` initialiser.  `init` is the lowered IR or undefined
-   *  (caller falls back to the type-default). */
-  renderStateInit(field: StateFieldIR, init: ExprIR | undefined): string;
-
   // --- API binding seam ---------------------------------------------------
 
   /** Turn a framework-agnostic `DetectedApiCall` (produced by the
