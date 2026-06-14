@@ -129,6 +129,13 @@ The vocabulary is registry-defined (`src/ir/resource-verbs.ts`). Rules:
   outbox;
 - resource-ops are async; the generated call site awaits the verb helper.
 
+The `api` verbs (`get(path): json` / `post(path, body): json`) are
+**untyped** — raw paths in, raw `json` out. For a typed call surface over a
+`kind: api` resource (named operations, typed request/response derived from
+an OpenAPI spec), see the proposed `contract` layer in
+[`proposals/contract-typed-resources.md`](proposals/contract-typed-resources.md);
+the untyped verbs remain as the escape hatch for spec-less APIs.
+
 ### Interface selection
 
 Each `(sourceType, kind)` exposes one or more access **interfaces**
@@ -176,3 +183,4 @@ backend discovery; trusted like any installed package.
 - [`language.md`](language.md) — declaration grammar.
 - [`generators.md`](generators.md) — per-backend emission detail.
 - [`workflow.md`](workflow.md) — workflow bodies (where resource-ops live).
+- [`proposals/contract-typed-resources.md`](proposals/contract-typed-resources.md) — proposed typed call surface over a `kind: api` resource.

@@ -11,7 +11,11 @@
 > (payloads are the contract layer's content), and
 > [`workflow-and-applier.md`](./workflow-and-applier.md) (workflows
 > are first-class application-layer citizens, not wrapped by
-> handlers).
+> handlers), and
+> [`contract-typed-resources.md`](./contract-typed-resources.md) (unifies
+> this proposal's `contract` layer with the inbound, consumed direction
+> under one keyword — and **widens** the Layer-2 definition below to
+> include operations, not records alone).
 
 ## Problem statement
 
@@ -99,6 +103,14 @@ context-scoped. Already pure of transport concerns. No change.
 Holds `command`, `query`, `response`, `error` declarations — the
 named, addressable wire shapes the system speaks. Lives inside
 `context`, alongside the aggregates whose wire shape it publishes.
+
+> **Superseded:** [`contract-typed-resources.md`](./contract-typed-resources.md)
+> widens `contract` to hold **operations + their records** (not records
+> alone), and unifies the published (outbound) and consumed (inbound,
+> `from openapi(...)`) directions under the one keyword. The records-only
+> framing below doesn't hold even here — Layer 4 calls the route list "the
+> only thing that is actually a contract with the outside world," i.e. the
+> operations *are* the contract.
 
 Today these declarations exist (`payload-transport-layer.md` is the
 relevant background) but are not the *only* expression of the wire
