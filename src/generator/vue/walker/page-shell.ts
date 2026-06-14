@@ -559,6 +559,11 @@ export function renderVueComponentFile(
   if (vueImports.size > 0) {
     script.push(`import { ${[...vueImports].sort().join(", ")} } from "vue";`);
   }
+  // A money-typed `state {}` field refs as `ref(new Decimal("0"))` —
+  // pull decimal.js in, same as the page shell.
+  if (result.usesState && state.some((f) => typeUsesMoney(f.type))) {
+    script.push(`import Decimal from "decimal.js";`);
+  }
   if (needsNavigate) {
     script.push(`import { useRouter } from "vue-router";`);
   }
