@@ -79,6 +79,7 @@ import {
   renderKeyValueRow as renderKeyValueRowHeex,
   renderLoader as renderLoaderHeex,
   renderModal as renderModalHeex,
+  renderMoney as renderMoneyHeex,
   renderPaper as renderPaperHeex,
   renderQueryView as renderQueryViewHeex,
   renderSection as renderSectionHeex,
@@ -285,7 +286,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   Badge: { group: "layout", admissibleInSource: true, tsx: emitBadge, heex: renderBadgeHeex },
   Divider: { group: "layout", admissibleInSource: true, tsx: emitDivider, heex: renderDividerHeex },
   Table: { group: "layout", admissibleInSource: true, tsx: emitTable, heex: renderTableHeex },
-  Money: { group: "layout", admissibleInSource: true, tsx: emitMoney },
+  Money: { group: "layout", admissibleInSource: true, tsx: emitMoney, heex: renderMoneyHeex },
   DateDisplay: {
     group: "layout",
     admissibleInSource: true,

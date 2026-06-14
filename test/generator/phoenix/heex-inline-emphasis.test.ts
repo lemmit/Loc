@@ -102,3 +102,10 @@ describe("HEEx simple-display primitives (parity finding #5)", () => {
     expect(heex).toMatch(/<div class="[^"]*animate-spin[^"]*"[^>]*data-testid="ld"/);
   });
 });
+
+describe("HEEx Money primitive (parity finding #5)", () => {
+  it("renders the amount via Decimal.to_string, with an optional currency prefix", async () => {
+    const heex = await landingHeex(`Stack { Money(value: 9.99, currency: "USD", testid: "m1") }`);
+    expect(heex).toMatch(/<span class="money"[^>]*data-testid="m1">USD <%= Decimal\.to_string\(/);
+  });
+});
