@@ -730,7 +730,7 @@ function wireProjection(
   return pairs;
 }
 
-function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
+export function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
   return lines(
     `    def to_wire(self, root: ${agg.name}) -> dict[str, object]:`,
     "        return {",
@@ -739,7 +739,7 @@ function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
   );
 }
 
-function partWireMethod(p: EnrichedEntityPartIR, ctx: EnrichedBoundedContextIR): string {
+export function partWireMethod(p: EnrichedEntityPartIR, ctx: EnrichedBoundedContextIR): string {
   return lines(
     `    def _wire_${snake(p.name)}(self, e: ${p.name}) -> dict[str, object]:`,
     "        return {",

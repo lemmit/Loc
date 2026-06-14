@@ -13,6 +13,7 @@ import {
   tphConcretesOf,
 } from "../../../ir/util/inheritance.js";
 import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js";
+import { effectiveSavingShape } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
 import { columnsForFields, joinRowClassName, type PyColumn, rowClassName } from "../py-columns.js";
@@ -41,6 +42,13 @@ export function renderPySchema(
     if (agg.persistedAs === "eventLog") {
       const ds14 = resolveDataSource?.(agg);
       models.push(renderEventLogModel(agg.name, ds14?.schema, ds14?.tablePrefix));
+      continue;
+    }
+    // shape(document): the whole aggregate tree is one jsonb blob — the
+    // canonical document triple `(id, data, version)`.
+    if (effectiveSavingShape(agg as EnrichedAggregateIR, resolveDataSource?.(agg)) === "document") {
+      const dds = resolveDataSource?.(agg);
+      models.push(renderDocumentModel(agg, dds?.schema, dds?.tablePrefix));
       continue;
     }
     // dataSource-driven routing — the table lives in the binding's
@@ -174,6 +182,22 @@ function renderColumn(c: PyColumn): string {
     c.primaryKey ? "primary_key=True" : null,
   ].filter((a): a is string => a != null);
   return `    ${c.attr}: Mapped[${annotation}] = mapped_column(${args.join(", ")})`;
+}
+
+/** Document-shaped aggregate (`shape(document)`): the whole tree is one
+ *  jsonb blob, so the table is the canonical document triple — `id` (PK),
+ *  `data` (the serialised tree, JSONB), `version` (optimistic counter). */
+function renderDocumentModel(agg: AggregateIR, schema?: string, prefix?: string): string {
+  const tableName = `${prefix ?? ""}${snake(plural(agg.name))}`;
+  return lines(
+    `class ${agg.name}Row(Base):`,
+    `    __tablename__ = "${tableName}"`,
+    ...(schema ? [`    __table_args__ = ({"schema": "${schema}"},)`] : []),
+    "",
+    "    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)",
+    "    data: Mapped[object] = mapped_column(JSONB)",
+    "    version: Mapped[int] = mapped_column(Integer)",
+  );
 }
 
 /** Append-only event stream for a `persistedAs(eventLog)` aggregate —

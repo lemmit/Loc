@@ -82,7 +82,8 @@ this on any backend; cosmetic completeness).
 | Slice | State | Notes |
 |---|---|---|
 | F1 resource verbs | ✅ | `app/resources/{s3,rabbitmq,rest_api}.py` async helpers (boto3 / aio-pika / httpx), workflow+saga import-and-await wiring, deps merged into pyproject; `resources.ddd` corpus case passes uv+ruff+mypy --strict; replaced the runtime `NotImplementedError` |
-| F2 document + embedded shapes | next | |
+| F2a document shape | ✅ | `shape(document)` → `(id, data jsonb, version)` triple, to_doc/from_doc serialisers (money/datetime/VO/enum/ref/nested-part), in-memory finds, version-bumped upsert; `PLATFORM_SAVING_SHAPES.python += document`; verified live (create→addSection→bump→read-back→find) + corpus uv/ruff/mypy --strict |
+| F2b embedded shape | next | |
 | F3 durable outbox | next | |
 | F4 when can-queries | later | |
 | F5 --trace instrumentation | later | |

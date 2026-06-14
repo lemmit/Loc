@@ -6,7 +6,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
-import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
+import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { generateReactForContexts } from "../react/index.js";
@@ -32,6 +32,7 @@ import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { buildPyExternHandlersFile, externOpsOf } from "./extern-builder.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
+import { buildPyDocumentRepositoryFile } from "./repository-document-builder.js";
 import { buildPyEventSourcedRepositoryFile } from "./repository-eventsourced-builder.js";
 import { emitPyResourceFiles } from "./resource-clients.js";
 import { buildPyRoutesFile } from "./routes-builder.js";
@@ -222,7 +223,9 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
         `app/db/repositories/${snake(agg.name)}_repository.py`,
         agg.persistedAs === "eventLog"
           ? buildPyEventSourcedRepositoryFile(agg, repo, ctx)
-          : buildPyRepositoryFile(agg, repo, ctx),
+          : effectiveSavingShape(agg, resolveDs(agg)) === "document"
+            ? buildPyDocumentRepositoryFile(agg, repo, ctx)
+            : buildPyRepositoryFile(agg, repo, ctx),
       );
       out.set(
         `app/http/${snake(agg.name)}_routes.py`,
