@@ -43,6 +43,7 @@ import { buildWalkerPageObject } from "../_frontend/walker-page-objects.js";
 import { buildWorkflowPageObject } from "../_frontend/workflow-page-object.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { isWalkableLayoutBody, walkBody } from "../_walker/walker-core.js";
+import { svelteLayoutGroup } from "./layouts-emitter.js";
 import {
   renderSvelteComponentFile,
   renderSvelteExternComponentProps,
@@ -68,9 +69,14 @@ export function routeToKitDir(route: string): string {
   return segs.map((s) => (s.startsWith(":") ? `[${s.slice(1)}]` : s)).join("/");
 }
 
-/** The route group a page's layout selector maps to. */
+/** The route group a page's layout selector maps to:
+ *   - `layout: none`     → `(bare)` (root layout only, no chrome)
+ *   - `layout: <Name>`   → `(<name>)` (the named layout's group, whose
+ *     `+layout.svelte` is emitted by layouts-emitter)
+ *   - default            → `(app)` (the default chrome) */
 function groupForLayout(page: PageIR): string {
   if (page.layout?.kind === "preset" && page.layout.name === "none") return "(bare)";
+  if (page.layout?.kind === "named") return svelteLayoutGroup(page.layout.ref);
   return "(app)";
 }
 

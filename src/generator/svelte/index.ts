@@ -29,6 +29,7 @@ import {
   SVELTE_LIB_SCHEMAS_MONEY,
   SVELTE_LIB_TOAST,
 } from "./emit-templates.js";
+import { emitSvelteNamedLayouts } from "./layouts-emitter.js";
 import { buildSvelteRealtimeHandlers } from "./realtime-handlers-builder.js";
 import {
   defaultNavSections,
@@ -126,6 +127,24 @@ export function generateSvelteForContexts(
   };
   for (const [path, content] of emitSveltePagesForUi(ui, emitCtx)) out.set(path, content);
   for (const [path, content] of emitSveltePageObjectsForUi(ui, emitCtx)) out.set(path, content);
+
+  // Named layouts (`layout <Name> { … }`) → a `(<name>)/+layout.svelte`
+  // route group whose pages route in via groupForLayout.  No-op when no
+  // page selects a named layout (the default (app) chrome is untouched).
+  const bcByAggregate = new Map<string, BoundedContextIR>();
+  for (const c of contexts) {
+    for (const agg of c.aggregates) bcByAggregate.set(agg.name, c);
+  }
+  for (const [path, content] of emitSvelteNamedLayouts({
+    ui,
+    sys,
+    pack,
+    aggregatesByName,
+    bcByAggregate,
+    topLevelComponents: options.topLevelComponents ?? [],
+  })) {
+    out.set(path, content);
+  }
 
   // Playwright e2e harness — same testid-keyed page-object surface
   // the react projects ship; the ui-e2e spec renderer (system layer)

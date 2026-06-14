@@ -21,8 +21,11 @@
 >   file — module scope lands in the template).
 >
 > **Known follow-ups (deliberately out of this pass):**
-> - Named layouts map to the `(app)` chrome group (no per-layout route
->   group yet); `layout: none` works via `(bare)`.
+> - ~~Named layouts map to the `(app)` chrome group (no per-layout route
+>   group yet); `layout: none` works via `(bare)`.~~ DONE — each named
+>   `layout <Name>` emits a `(<name>)/+layout.svelte` route group
+>   rendering its header/sidebar/footer slots around
+>   `{@render children()}`; `layout: <Name>` pages route into it.
 > - ~~`extern` components throw a clear error on svelte (escape hatch
 >   not wired).~~ DONE — svelte emits the forwarding `.svelte` wrapper +
 >   typed `<Name>.props.ts` (Snippet for slots), mirroring react.
