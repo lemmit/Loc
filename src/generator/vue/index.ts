@@ -13,6 +13,7 @@ import { contextUsesMoney } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
+import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { buildViewsApiModule, hasAnyView } from "../_frontend/views-module.js";
 import { buildWorkflowsApiModule, hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
@@ -32,7 +33,6 @@ import {
   REACT_LIB_SCHEMAS_MONEY_TS,
 } from "../react/emit-templates.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
-import { prepareThemeVM } from "../react/templating/preparers/theme.js";
 import { renderVuePage } from "./walker/page-shell.js";
 import { vueTarget } from "./walker/vue-target.js";
 

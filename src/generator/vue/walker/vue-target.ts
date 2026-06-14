@@ -60,19 +60,6 @@ export const vueTarget: WalkerTarget = {
     return `${ref.name} = ${value}`;
   },
 
-  /** State-field initializer rendered as a JS expression.  Same
-   *  contract semantics as `tsxTarget.renderStateInit`: the
-   *  delegating walker pre-renders explicit `= <init>` expressions
-   *  with its own context; the standalone target falls back to the
-   *  type default so misuse surfaces as "always-default" output,
-   *  not a crash. */
-  renderStateInit(field: StateFieldIR, init: ExprIR | undefined): string {
-    if (init !== undefined) {
-      return defaultInitForJs(field.type);
-    }
-    return defaultInitForJs(field.type);
-  },
-
   // --- API binding seam ---------------------------------------------------
 
   /** Turn a detected api call into vue-query composable naming +

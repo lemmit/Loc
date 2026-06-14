@@ -13,7 +13,6 @@
 // Mapping (file:line at time of extraction):
 //   renderStateRead   — body-walker.ts:625-633 (ref-case path)
 //   renderStateWrite  — body-walker.ts:980-1011 (assign / add / remove)
-//   renderStateInit   — walker/page-shell.ts:625-725 (renderUseState + zeroValueForType)
 //   renderApiCall     — body-walker.ts:594-597 + walker/api-hooks.ts:60-103
 //   renderApiHoisting — walker/page-shell.ts:220-226 (apiHookDecls)
 //   renderMatch       — body-walker.ts:635-645 (ternary chain — match
@@ -66,29 +65,6 @@ export const tsxTarget: WalkerTarget = {
     const name = ref.name;
     const setter = `set${name[0]!.toUpperCase()}${name.slice(1)}`;
     return `${setter}(${value})`;
-  },
-
-  /** State-field initializer rendered as a JS expression.  When the
-   *  declaration carries an explicit `= <init>`, the caller has
-   *  pre-rendered it and passes the source string here would lose
-   *  context — but the WalkerTarget contract receives the raw
-   *  `ExprIR`, which we DON'T re-walk here because there's no
-   *  WalkContext.  Today the delegation site (page-shell) already
-   *  pre-renders via `renderInitExpr` — once it delegates to us,
-   *  we'll need either a rendering callback in `ApiCallSite`-shape
-   *  or a thin `WalkerContext` parameter.  v0 returns the type
-   *  default when no init is present; explicit-init handling is
-   *  the same shape the future-walker will pass through. */
-  renderStateInit(field: StateFieldIR, init: ExprIR | undefined): string {
-    if (init !== undefined) {
-      // Caller is expected to pre-render via its own walker context
-      // (page-shell.ts:643 renderInitExpr).  Once delegation lands,
-      // this branch becomes `return walk(init)` — for the
-      // standalone target we fall back to the type default so
-      // misuse surfaces as "always-default" output, not a crash.
-      return defaultInitForJs(field.type);
-    }
-    return defaultInitForJs(field.type);
   },
 
   // --- API binding seam ---------------------------------------------------

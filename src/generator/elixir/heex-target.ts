@@ -13,7 +13,6 @@
 //   renderStateRead   — heex-walker.ts:253-259 (this/id position branches)
 //                       + line 366 (state-field ref-case path)
 //   renderStateWrite  — heex-walker.ts:1565-1572 (case "assign")
-//   renderStateInit   — heex-walker.ts:1565-1594 (default + initializer)
 //   renderApiCall     — heex-walker.ts:647-683 (direct context-function call)
 //   renderApiHoisting — empty array (LiveView reads inline; no hoisting)
 //   renderMatch       — heex-walker.ts:543-552 (renderMatch — cond do...end)
@@ -44,22 +43,6 @@ export const heexTarget: WalkerTarget = {
    *  Mirrors `case "assign"` at heex-walker.ts:1566-1572. */
   renderStateWrite(ref: StateRef, value: string): string {
     return `|> assign(:${snakeLocal(ref.name)}, ${value})`;
-  },
-
-  /** Elixir literal for a state field's `mount/3` `assign(socket,
-   *  :field, <init>)` value.  When the field declares an explicit
-   *  `= <init>`, the caller pre-renders via its WalkContext (HEEx
-   *  walker has no `renderInitExpr` equivalent today — state inits
-   *  in Phoenix flow through the mount template's initial-assigns
-   *  list).  v0 returns the type default when no init is provided. */
-  renderStateInit(field: StateFieldIR, init: ExprIR | undefined): string {
-    if (init !== undefined) {
-      // Caller is expected to pre-render via its own walker context.
-      // Standalone target falls back to type default — see the
-      // matching tsxTarget note.
-      return defaultInitForHeex(field.type);
-    }
-    return defaultInitForHeex(field.type);
   },
 
   // --- API binding seam ---------------------------------------------------

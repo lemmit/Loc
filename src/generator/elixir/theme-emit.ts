@@ -18,7 +18,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ThemeIR } from "../../ir/types/loom-ir.js";
-import { prepareThemeVM } from "../react/templating/preparers/theme.js";
+import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 
 /** Emit a standalone CSS file (`:root { ... }`) with design tokens from the
  *  system's ThemeIR.  Pass `undefined` when the system declares no `theme {}`
