@@ -155,6 +155,15 @@ exists or the gap is on an explicit allow-list — turning silent divergence int
 a reviewed list. Also state plainly in CLAUDE.md that HEEx is a parallel engine,
 not a `WalkerTarget` consumer (today's docs imply the seam is universal).
 
+> **RESOLVED.** Both halves landed. `test/generator/elixir/heex-parity.test.ts`
+> freezes the TSX-rendered-without-HEEx gap (18 primitives today) as a pinned,
+> rationale-carrying allow-list: adding a new TSX-only primitive now fails CI
+> until the author either writes the `heex` renderer or pins the name with a
+> reason — and closing a gap fails too (delete the entry). CLAUDE.md's walker
+> section already states plainly that Phoenix/HEEx runs a parallel engine and
+> does **not** consume `walkBody`. The two engines were left separate, as the
+> finding recommends.
+
 ### 6. React/Vue API-builder import asymmetry — RESOLVED *(small, clean-up)*
 
 > Correction to the original finding: there was no duplicate React builder.
@@ -224,5 +233,6 @@ called production-ready.
 6. Extract the `WorkflowChoreographer` seam (largest duplication payoff) — design
    + pilot plan in [`docs/plans/workflow-choreographer-seam.md`](../plans/workflow-choreographer-seam.md).
 7. ~~Migrate React onto `_frontend/api-module.ts`~~ — done (shims removed).
-8. Add a HEEx primitive-parity test + document HEEx as a parallel engine (do
-   NOT merge the walkers — the divergence is topological).
+8. ~~Add a HEEx primitive-parity test + document HEEx as a parallel engine~~ —
+   done (`test/generator/elixir/heex-parity.test.ts`; CLAUDE.md walker section).
+   The walkers were NOT merged (the divergence is topological).

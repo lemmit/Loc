@@ -70,15 +70,6 @@ describe("dotnet hosts a svelte ui (fullstack embed)", () => {
     expect(out.has("app/ClientApp/src/routes/(app)/customers/+page.svelte")).toBe(true);
   });
 
-  it("rejects a svelte ui on a phoenix host (paths.base wiring is a follow-up)", async () => {
-    const phoenixSrc = SRC.replace("platform: dotnet", "platform: phoenix").replace(
-      "port: 8080",
-      "port: 4000",
-    );
-    const { errors } = await parseString(phoenixSrc);
-    expect(
-      errors.some((e) => /Framework 'svelte' does not match platform 'phoenix'/.test(e)),
-      errors.join("\n"),
-    ).toBe(true);
-  });
+  // Phoenix-hosted svelte is now supported (paths.base = "/app") and
+  // covered by test/generator/phoenix/phoenix-embeds-svelte.test.ts.
 });

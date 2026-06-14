@@ -9,7 +9,8 @@ const config = {
     // SPA mode — every route falls back to index.html; the app is a
     // pure client bundle calling the backend API (see +layout.ts).
     adapter: adapter({ fallback: "index.html" }),
-  },
+{{#if base}}    paths: { base: {{json base}} },
+{{/if}}  },
 };
 
 export default config;

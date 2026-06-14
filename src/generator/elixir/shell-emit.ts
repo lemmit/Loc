@@ -82,7 +82,14 @@ export function emitShellFiles(
   // `index.html` for client-side deep links.  Same dispatch the
   // orchestrator's emit branch uses — any static-bundle framework
   // (react / vue) gets identical serving wiring.
-  const embedReact = deployable.uiFramework === "react" || deployable.uiFramework === "vue";
+  // "embed a static SPA" — suppresses LiveView, serves the bundle from
+  // /app.  True for every static-bundle frontend (react / vue / svelte).
+  const embedReact =
+    deployable.uiFramework === "react" ||
+    deployable.uiFramework === "vue" ||
+    deployable.uiFramework === "svelte";
+  // SvelteKit's adapter-static writes `build/`; Vite SPAs write `dist/`.
+  const spaOutDir = deployable.uiFramework === "svelte" ? "build" : "dist";
 
   // Resource client modules (objectStore / queue / api) + their Hex
   // deps (Phase 4c).  Empty when the deployable wires no consumable
@@ -99,7 +106,7 @@ export function emitShellFiles(
   // the Phoenix ladder in docs/proposals/cross-stack-static-analysis.md);
   // shipping it now future-proofs the project.
   out.set(".dialyzer_ignore.exs", renderDialyzerIgnoreExs(appName));
-  out.set("Dockerfile", renderDockerfile(appName, embedReact));
+  out.set("Dockerfile", renderDockerfile(appName, embedReact, spaOutDir));
   out.set(".dockerignore", renderDockerignore());
   // certs/ is the CA-bake landing slot — see the COPY in renderDockerfile.
   // .gitkeep keeps the dir present in git so the COPY is a no-op when

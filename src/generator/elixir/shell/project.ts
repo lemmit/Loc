@@ -118,7 +118,7 @@ export function renderFormatterExs(): string {
 `;
 }
 
-export function renderDockerfile(appName: string, embedReact = false): string {
+export function renderDockerfile(appName: string, embedReact = false, spaOutDir = "dist"): string {
   // Embedded-React mode: a first `spa-build` stage runs the SPA's own
   // Vite build (the React project the orchestrator emitted under
   // `assets/`), then the builder stage copies its `dist/` into
@@ -138,7 +138,7 @@ RUN npm run build
   // In embedded mode, drop the built SPA into priv/static/app before
   // `mix compile`/`mix release` so the release overlay includes it.
   const spaCopy = embedReact
-    ? `COPY --from=spa-build /spa/dist priv/static/app
+    ? `COPY --from=spa-build /spa/${spaOutDir} priv/static/app
 `
     : "";
   return `# syntax=docker/dockerfile:1
