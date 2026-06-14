@@ -486,9 +486,27 @@ function dumpComposeDiagnostics(
 }
 
 async function fetchSpec(url: string): Promise<OpenApiSpec> {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`GET ${url} → ${r.status}`);
-  return (await r.json()) as OpenApiSpec;
+  // Retry on transient socket errors.  The smoke test polls `/health` on
+  // these origins early in this same process, so undici pools a keep-alive
+  // connection per backend; by the time the parity check runs (after the
+  // minutes-long DSL-e2e + Playwright subprocesses) an idle pooled socket
+  // may have been closed server-side, and the first reuse throws
+  // `UND_ERR_SOCKET: other side closed` before the request reaches the
+  // backend.  `connection: close` keeps each attempt from re-pooling, and a
+  // fresh attempt opens a new socket.  Real failures (non-2xx, malformed
+  // JSON, a genuinely-down backend) still surface after the retries.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const r = await fetch(url, { headers: { connection: "close" } });
+      if (!r.ok) throw new Error(`GET ${url} → ${r.status}`);
+      return (await r.json()) as OpenApiSpec;
+    } catch (err) {
+      lastErr = err;
+      await new Promise((res) => setTimeout(res, 250 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 async function pollHealthy(url: string, timeoutMs: number): Promise<void> {
