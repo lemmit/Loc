@@ -136,7 +136,12 @@ export function renderVuePage(input: VuePageShellInput): string {
     if (seenVars.has(use.varName)) continue;
     seenVars.add(use.varName);
     const args = scriptArgs(use.argsRendered ?? []);
-    hookLines.push(`const ${use.varName} = reactive(${use.hookName}(${args}));`);
+    // A parameterised `find` query takes a `MaybeRefOrGetter` arg on
+    // Vue: pass it as a getter so vue-query re-runs when a bound filter
+    // input changes (a snapshot `{ status: status.value }` would freeze
+    // the query at setup).  Other hooks take their captured value.
+    const callArg = use.reactiveQuery && args !== "" ? `() => (${args})` : args;
+    hookLines.push(`const ${use.varName} = reactive(${use.hookName}(${callArg}));`);
     vueImports.add("reactive");
     const names = apiImports.get(use.importFrom) ?? new Set<string>();
     names.add(use.hookName);

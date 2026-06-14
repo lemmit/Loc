@@ -9,11 +9,14 @@
 > toast manager (`on <channel>.<Event>` → `src/api/realtime.ts` +
 > renderless `RealtimeHandlers.vue` + a `src/lib/toast.ts` queue rendered
 > by each pack's app-shell host — `<v-alert>` on vuetify, an `Alert`
-> stack on shadcnVue).  **Remaining tracked gaps:** named layouts on vue
+> stack on shadcnVue); and live-refetch find-filters (a parameterised
+> `find` hook takes a `MaybeRefOrGetter` query so a bound filter input
+> re-fetches — the page passes `() => ({ … })`, React stays a plain
+> object param).  **Remaining tracked gaps:** named layouts on vue
 > (Svelte omits these too — needs a vue-router nested-route
-> restructuring), live-refetch find-filters (MaybeRefOrGetter api
-> params), and the docker-boot e2e fold-in once the Svelte effort settles
-> the shared LOOM_E2E gate shape.
+> restructuring), extern/forms inside user components, and the
+> docker-boot e2e fold-in once the Svelte effort settles the shared
+> LOOM_E2E gate shape.
 
 Add **Vue 3 as a frontend platform** (`platform: vue`) with feature parity to
 React, plus **two Vue design packs** (`vuetify`, `shadcnVue`) with feature

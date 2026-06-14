@@ -639,8 +639,12 @@ web_app/
 - Channels (`on <channel>.<Event>`) emit the SSE client, a renderless
   `RealtimeHandlers.vue`, and a `pushToast()` queue the app-shell renders
   (a `<v-alert>` stack on vuetify, an `Alert` stack on shadcnVue).
-- Known gaps (tracked in the plan): named layouts on vue; live-refetch
-  find-filters; extern/forms inside user components.
+- Find-filter live-refetch: a parameterised `find` hook takes a
+  `MaybeRefOrGetter<Query>` (queryKey tracks `computed(toValue(query))`)
+  and the list page passes `() => ({ … })`, so a bound filter input
+  re-fetches (React re-renders, so its hook stays a plain object param).
+- Known gaps (tracked in the plan): named layouts on vue;
+  extern/forms inside user components.
 
 ## Phoenix LiveView fullstack (`platform: phoenixLiveView`)
 

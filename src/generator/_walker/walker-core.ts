@@ -195,6 +195,9 @@ export interface ApiHookUse {
    *  WalkContext so any param/state refs in the args propagate
    *  to `usedParams` / `usesState` for the shell. */
   argsRendered: readonly string[];
+  /** True for a parameterised `find` query — the Vue shell wraps the
+   *  arg in a getter so a bound filter input live-refetches. */
+  reactiveQuery?: boolean;
 }
 
 /** Component names the React walker accepts as the TOP-LEVEL `body:`
@@ -588,7 +591,7 @@ function adjustFindHookArgs(
   if (!find || hookUse.argsRendered.length === 0) return hookUse;
   const pairs = find.params.map((p, i) => `${p.name}: ${hookUse.argsRendered[i] ?? "undefined"}`);
   if (pagedReturn(find.returnType)) pairs.push("page: 1", "pageSize: 20");
-  return { ...hookUse, argsRendered: [`{ ${pairs.join(", ")} }`] };
+  return { ...hookUse, argsRendered: [`{ ${pairs.join(", ")} }`], reactiveQuery: true };
 }
 
 const STANDARD_AGG_OPS: ReadonlySet<string> = new Set([
