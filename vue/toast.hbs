@@ -1,0 +1,26 @@
+// Auto-generated.  Do not edit by hand.
+// Minimal channel-notification toast queue (channels.md Part I).
+// `pushToast` appends a message; the app-shell renders the active
+// queue (a `<v-snackbar>` host on vuetify, a fixed stack on shadcnVue)
+// and each entry auto-dismisses after a few seconds.  Pack-agnostic —
+// only the host markup differs.
+import { reactive } from "vue";
+
+export interface Toast {
+  id: number;
+  message: string;
+}
+
+export const toastQueue = reactive<{ items: Toast[] }>({ items: [] });
+
+let seq = 0;
+
+/** Append a toast; it auto-dismisses after 5s. */
+export function pushToast(message: string): void {
+  const id = ++seq;
+  toastQueue.items.push({ id, message });
+  setTimeout(() => {
+    const i = toastQueue.items.findIndex((t) => t.id === id);
+    if (i !== -1) toastQueue.items.splice(i, 1);
+  }, 5000);
+}

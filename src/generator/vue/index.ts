@@ -12,12 +12,14 @@ import type {
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { contextUsesMoney, uiUsesMoney } from "../../ir/types/loom-ir.js";
+import { realtimeEventTypes } from "../../ir/util/channels.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
 import {
   buildExternFunctionShim,
   buildExternFunctionSignature,
 } from "../_frontend/extern-functions.js";
+import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { buildViewsApiModule, hasAnyView } from "../_frontend/views-module.js";
@@ -39,6 +41,7 @@ import {
   REACT_LIB_SCHEMAS_MONEY_TS,
 } from "../react/emit-templates.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
+import { buildVueRealtimeHandlers } from "./realtime-handlers-builder.js";
 import { renderVueComponentFile, renderVuePage } from "./walker/page-shell.js";
 import { vueTarget } from "./walker/vue-target.js";
 
@@ -281,6 +284,27 @@ export function generateVueForContexts(
   // generated pages' field inputs and v-form handlers bind to it.
   out.set("src/lib/form.ts", renderShell(pack, "loom-form", {}));
 
+  // Realtime SSE client + live-event handlers (channels.md Part I).
+  // Mirrors the react/svelte wiring: when the targeted backend exposes
+  // the realtime wire (any `delivery: broadcast` channel; Hono is the
+  // only backend serving GET /realtime/events so far), emit the
+  // EventSource client.  When the ui ALSO declares `on <channel>.<Event>`
+  // handlers, emit the renderless RealtimeHandlers component + the toast
+  // queue the app-shell mounts; the config module exports `API_BASE_URL`
+  // on Vue (the SvelteKit symbol).
+  const realtimeTypes =
+    target?.platform === "node"
+      ? [...new Set(contexts.flatMap((c) => [...realtimeEventTypes(c)]))].sort()
+      : [];
+  if (realtimeTypes.length > 0) {
+    out.set("src/api/realtime.ts", renderRealtimeClient(realtimeTypes, "API_BASE_URL"));
+  }
+  const hasRealtimeHandlers = realtimeTypes.length > 0 && (ui.notifications?.length ?? 0) > 0;
+  if (hasRealtimeHandlers) {
+    out.set("src/components/RealtimeHandlers.vue", buildVueRealtimeHandlers(ui, pack));
+    out.set("src/lib/toast.ts", renderShell(pack, "toast", {}));
+  }
+
   // Pack shell tier.
   out.set("src/theme.ts", renderShell(pack, "theme", prepareThemeVM(sys.theme)));
   out.set("src/main.ts", renderShell(pack, "main", {}));
@@ -289,6 +313,7 @@ export function generateVueForContexts(
     renderShell(pack, "app-shell", {
       systemNameHuman: humanize(sys.name),
       navSections: deriveNavSections(pages),
+      hasRealtimeHandlers,
     }),
   );
 
