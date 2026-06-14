@@ -1358,3 +1358,30 @@ What the second `WalkerTarget`-consuming frontend taught us:
   escaping rules, and an end-to-end compile gate; the orchestrator-
   side review then focuses on the handful of contract spots (form
   bindings, dialog wiring, quote collisions) the gates surface.
+## EF's PascalCase default silently diverges from the snake_case migration DDL — and only a *live query* catches it
+
+The .NET backend 500'd on every `INSERT`/`SELECT` with `42703 column "Id" of
+relation "projects" does not exist`. Cause: EF entity configs emitted no
+`HasColumnName` for scalar properties (and only `HasConversion`, no column name,
+for id/enum properties), so EF defaulted to the **PascalCase CLR property name**
+(`Id`, `CreatedAt`, `ExternalId`) while the shared `MigrationsIR` DDL — and the
+Hono/Phoenix backends — use **snake_case** (`id`, `created_at`, `external_id`).
+The owned-collection FK was a name mismatch too: EF's default `ParentId` vs the
+migration's `<parent>_id`. Fix: emit an explicit `.HasColumnName(snake(field))`
+on every mapped column (scalars, PK, id-refs, enums), suppressed only in the
+embedded `ToJson` shape where members are JSON keys, not columns.
+
+The real lesson is the **feedback-loop gap**, not the mapping. This never worked
+at runtime, yet survived because the only per-PR .NET gate (`dotnet-build`)
+checks **compilation**, never a live query — and the behavioral run that *does*
+hit Postgres (`conformance-full`) is nightly-only, and was itself masked by an
+earlier missing-tables bug. A whole class of "compiles fine, 500s on first
+request" defects hides in that gap. Mitigations now in place: a unit test pins
+every emitted `HasColumnName` against the DDL column (asserting **no** PascalCase
+column survives), so the divergence is caught at `npm test` rather than waiting
+for a nightly boot.
+
+Lesson: when two backends must agree on an external contract (here, Postgres
+column identifiers across the EF mapping and the `MigrationsIR` DDL), pin the
+agreement in a fast unit assertion — don't rely on a heavy, nightly, easily-masked
+e2e run to be the first thing that exercises it.
