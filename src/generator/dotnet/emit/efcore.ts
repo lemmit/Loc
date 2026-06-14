@@ -56,6 +56,14 @@ export function renderDbContext(
    *  AppDbContext maps the shared `__loom_outbox` table (OutboxMessage
    *  entity + configuration).  False ⇒ byte-identical. */
   hasOutbox = false,
+  /** Provenance (provenance.md): when the context declares any `provenanced`
+   *  field, AppDbContext maps the append-only `provenance_records` history
+   *  table (ProvenanceRecord entity + configuration).  False ⇒ byte-identical. */
+  hasProvenance = false,
+  /** Per-operation audit (audit-and-logging.md): when the context declares any
+   *  `audited` operation, AppDbContext maps the append-only `audit_records`
+   *  table (AuditRecord entity + configuration).  False ⇒ byte-identical. */
+  hasAudit = false,
 ): string {
   const isDoc = (name: string) => documentAggs.has(name);
   const isEs = (name: string) => eventSourcedAggs.has(name);
@@ -143,6 +151,22 @@ export function renderDbContext(
   const outboxApplyConfigs = hasOutbox
     ? ["        modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());"]
     : [];
+  // Provenance history + per-operation audit sinks — append-only tables, one
+  // shared per database, mapped when the served contexts use the feature.
+  const provenanceDbSets = hasProvenance
+    ? ["    public DbSet<ProvenanceRecord> ProvenanceRecords => Set<ProvenanceRecord>();"]
+    : [];
+  const provenanceApplyConfigs = hasProvenance
+    ? [
+        "        modelBuilder.ApplyConfiguration(new Configurations.ProvenanceRecordConfiguration());",
+      ]
+    : [];
+  const auditDbSets = hasAudit
+    ? ["    public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();"]
+    : [];
+  const auditApplyConfigs = hasAudit
+    ? ["        modelBuilder.ApplyConfiguration(new Configurations.AuditRecordConfiguration());"]
+    : [];
   // Capability filter installation is per-EntityConfiguration —
   // see `renderConfiguration` below, which emits one
   // `builder.HasQueryFilter(...)` per `agg.contextFilters` entry.  No
@@ -169,6 +193,8 @@ export function renderDbContext(
       ...joinDbSets,
       ...wfStateDbSets,
       ...outboxDbSets,
+      ...provenanceDbSets,
+      ...auditDbSets,
       "    protected override void OnModelCreating(ModelBuilder modelBuilder)",
       "    {",
       ...ignoreBases,
@@ -177,6 +203,8 @@ export function renderDbContext(
       ...joinApplyConfigs,
       ...wfStateApplyConfigs,
       ...outboxApplyConfigs,
+      ...provenanceApplyConfigs,
+      ...auditApplyConfigs,
       "    }",
       "}",
     ) + "\n"
@@ -270,6 +298,20 @@ export function renderConfiguration(
         (predicate) =>
           `        builder.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
       );
+  // Co-located provenance (provenance.md): each `provenanced` field's
+  // `<Field>Provenance` lineage maps to a `<field>_provenance` jsonb column via
+  // a System.Text.Json value-converter (ProvJson.Options → the same Web-default
+  // shape the history flush serialises).  The CLR property is nullable, so EF
+  // stores null verbatim and only runs the converter for a non-null lineage;
+  // the `!` on Deserialize keeps the converter warning-clean under /warnaserror.
+  const provFields = tph ? [] : agg.fields.filter((f) => f.provenanced);
+  const provColumnLines = provFields.map(
+    (f) =>
+      `        builder.Property(x => x.${upperFirst(f.name)}Provenance).HasColumnName("${snake(f.name)}_provenance").HasColumnType("jsonb")` +
+      ".HasConversion(" +
+      "v => System.Text.Json.JsonSerializer.Serialize(v, ProvJson.Options), " +
+      "v => System.Text.Json.JsonSerializer.Deserialize<ProvLineage>(v, ProvJson.Options)!);",
+  );
   // The abstract TPH base carries no `_domainEvents` list (only concrete roots
   // do), so it has nothing to ignore; every other config ignores it.
   const domainEventsIgnore =
@@ -292,6 +334,9 @@ export function renderConfiguration(
       `using ${ns}.Domain.Ids;`,
       `using ${ns}.Domain.ValueObjects;`,
       `using ${ns}.Domain.Enums;`,
+      // Provenance lineage type + its shared JSON options for the co-located
+      // `<field>_provenance` value-converter.
+      provColumnLines.length > 0 ? `using ${ns}.Domain.Common;` : null,
       "",
       `namespace ${ns}.Infrastructure.Persistence.Configurations;`,
       "",
@@ -301,6 +346,7 @@ export function renderConfiguration(
       "    {",
       ...tableKeyLines,
       ...fieldConfigs,
+      ...provColumnLines,
       ...discriminatorLines,
       ...containmentLines,
       ...refCollectionIgnores,

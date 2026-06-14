@@ -27,10 +27,10 @@ Legend: ✓ implemented · ✗ gated (validator error) · ⚠ partial / stub · 
 | `shape(document)` persistence | ✓ | ✓ | ✗ | N/A |
 | Principal-referencing capability `filter` (`currentUser`) | ✗ | ✓ | ✗ | N/A |
 | Non-principal capability `filter` (relational) | ✓ | ✓ | ✓ | N/A |
-| Provenanced fields (runtime trace) | ✓ | ✗ (gated) | ✗ (gated) | N/A |
+| Provenanced fields (runtime trace) | ✓ | ✓ | ✗ (gated) | N/A |
 | Generic carriers (`paged<T>` etc.) | ✓ | ✓ | ✓ | ✗ |
 | Ordered `X id[]` reference collections | ✓ | ✓ | ✗ (set semantics) | display-only |
-| Per-op `audited` operations (audit record) | ✓ | ✗ (gated) | ✗ (gated) | N/A |
+| Per-op `audited` operations (audit record) | ✓ | ✓ | ✗ (gated) | N/A |
 | Audit stamping (`with audit` / `contextStamps`) | ✓ | ⚠ parsed, parity deferred | ⚠ parsed, parity deferred | N/A |
 | Non-constructible aggregates (omit create surface) | ✓ | ✓ | ⚠ always create | ⚠ always create |
 | `where`-clause finds / queryable predicates | ✓ | ✓ | ✓ | ⚠ hook only |
@@ -113,11 +113,14 @@ the inheritance feature can express today.
 
 ### 3.2 Per-operation `audited` flag (`operation … audited`)
 - **Gate:** `src/ir/validate/checks/system-checks.ts` `validateAuditedOperationSupport`
-  (`AUDIT_BACKENDS = {node}`).
-- **Supported:** **node only** — an audited public route appends a who/what/when +
-  before/after snapshot to the audit sink.
-- **Gated:** **dotnet, phoenix** — the modifier was inert (silently recorded nothing);
-  now a hard error. **Code:** `loom.audited-backend-unsupported`.
+  (`AUDIT_OP_BACKENDS = {node, dotnet}`; `AUDIT_LIFECYCLE_BACKENDS = {node}`).
+- **Supported:** **node, dotnet** — an audited public operation appends a who/what/when +
+  before/after snapshot to the `audit_records` sink in the operation's save transaction.
+  On .NET an `IAuditWriter` stages the row onto the request unit of work so the audit
+  row commits with the aggregate.
+- **Gated:** **phoenix** (audited operations); **dotnet, phoenix** (audited *lifecycle*
+  actions `audited create` / `destroy`, not yet instrumented on .NET) — a hard error.
+  **Code:** `loom.audited-backend-unsupported`.
 - Scope note: this gates the *per-operation* `audited` flag only. The `with audit`
   capability macro (§3.3) is a separate mechanism and is **not** gated.
 
@@ -157,11 +160,13 @@ server-managed field access (`managed`/`token`/`internal`/`secret`).
 
 ## 5. Provenanced fields — `provenanced field: T`
 - **Gate:** `src/ir/validate/checks/system-checks.ts` `validateProvenancedStorage`
-  (`PROVENANCE_BACKENDS = {node}`).
-- **Supported:** node — `domain/provenance.ts` SDK, `recordTrace(...)` after each write,
-  `ddd snapshot` capture.
-- **Gated:** **dotnet, phoenix** — the keyword was accepted but emitted no trace code
-  (a silent no-op); now a hard error. **Code:** `loom.provenanced-backend-unsupported`.
+  (`PROVENANCE_BACKENDS = {node, dotnet}`).
+- **Supported:** **node, dotnet** — the lineage SDK (`domain/provenance.ts` /
+  `Domain/Common/ProvLineage.cs`), per-write trace capture, the co-located
+  `<field>_provenance` column, the transactional `provenance_records` flush, wire-DTO
+  exposure, and `ddd snapshot` capture.
+- **Gated:** **phoenix** — the keyword is accepted but emits no trace code (a silent
+  no-op); now a hard error. **Code:** `loom.provenanced-backend-unsupported`.
 - **Reference:** `docs/provenance.md`, `docs/plans/type-system-feature-migration.md` DBT-1.
 
 ---
