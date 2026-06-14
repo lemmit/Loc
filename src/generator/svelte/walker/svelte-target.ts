@@ -145,6 +145,26 @@ export const svelteTarget: WalkerTarget = {
     return renderJsMatch(arms, elseArm);
   },
 
+  /** Child-position match — a structural `{#if}` / `{:else if}` /
+   *  `{:else}` chain (Svelte template expressions cannot evaluate to
+   *  markup; same divergence as renderConditionalChild). */
+  renderMatchChild(
+    arms: ReadonlyArray<{ predicate: string; value: string }>,
+    elseArm: string | undefined,
+    depth: number,
+  ): string {
+    const inner = "  ".repeat(depth + 1);
+    const close = "  ".repeat(depth);
+    const parts: string[] = [];
+    arms.forEach((arm, i) => {
+      parts.push(`{${i === 0 ? "#if" : ":else if"} ${arm.predicate}}\n${inner}${arm.value}`);
+    });
+    if (elseArm !== undefined) {
+      parts.push(`{:else}\n${inner}${elseArm}`);
+    }
+    return `${parts.join(`\n${close}`)}\n${close}{/if}`;
+  },
+
   // --- Navigation seam ----------------------------------------------------
 
   /** SvelteKit navigation through the `navigate` local.  The svelte

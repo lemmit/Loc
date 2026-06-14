@@ -1,0 +1,70 @@
+<!-- Auto-generated. -->
+<script setup lang="ts">
+import { onErrorCaptured, ref, watch } from "vue";
+import { useRoute } from "vue-router";
+import { Menu } from "lucide-vue-next";
+import { Alert, AlertDescription, AlertTitle, Button } from "@/components/ui";
+
+// Mobile sidebar toggle — hidden below the `sm` breakpoint until the
+// burger opens it; auto-closes after a route change so tapping a nav
+// link doesn't leave the menu covering the destination page.
+const opened = ref(false);
+// App-level error capture — a render-time crash in any page lands
+// here instead of blanking the whole shell.  Reset navigates home,
+// matching "the dashboard keeps working when one page is broken".
+const appError = ref<Error | null>(null);
+onErrorCaptured((err) => {
+  appError.value = err instanceof Error ? err : new Error(String(err));
+  console.error("App error boundary caught:", err);
+  return false;
+});
+function resetError() {
+  appError.value = null;
+  window.location.assign("/");
+}
+const route = useRoute();
+watch(
+  () => route.path,
+  () => {
+    opened.value = false;
+  },
+);
+function isActive(path: string, opts?: { exact?: boolean }): boolean {
+  if (opts?.exact) return route.path === path;
+  return route.path === path || route.path.startsWith(path + "/");
+}
+</script>
+
+<template>
+  <div class="flex min-h-screen flex-col">
+    <header class="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-background px-4 lg:px-6">
+      <Button variant="ghost" size="icon" class="sm:hidden" data-testid="nav-burger" aria-label="Toggle navigation" @click="opened = !opened">
+        <Menu class="h-5 w-5" />
+      </Button>
+      <router-link to="/" class="flex items-center gap-2">
+        <div class="h-7 w-7 rounded-md bg-primary" aria-hidden="true"></div>
+        <span class="text-lg font-semibold tracking-tight">{{systemNameHuman}}</span>
+      </router-link>
+    </header>
+    <div class="flex flex-1">
+      <nav data-testid="nav-sidebar" :class="['w-60 shrink-0 border-r bg-background p-4 sm:block', opened ? 'block' : 'hidden']">
+        <div class="flex flex-col gap-1">
+{{#each navSections}}          <p class="mt-2 mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{{label}}</p>
+{{#each entries}}          <router-link to="{{to}}" data-testid="{{testId}}" :class="['rounded-md px-3 py-2 text-sm font-medium transition-colors', isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}}) ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground']">{{label}}</router-link>
+{{/each}}{{/each}}        </div>
+      </nav>
+      <main class="flex-1 p-4 lg:p-6">
+        <div v-if="appError" data-testid="app-error" class="flex flex-col gap-4">
+          <Alert variant="destructive">
+            <AlertTitle>Something went wrong</AlertTitle>
+            <AlertDescription>\{{ appError.message }}</AlertDescription>
+          </Alert>
+          <div>
+            <Button variant="outline" @click="resetError">Back to home</Button>
+          </div>
+        </div>
+        <router-view v-else />
+      </main>
+    </div>
+  </div>
+</template>

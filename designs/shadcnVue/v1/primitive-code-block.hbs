@@ -1,0 +1,4 @@
+{{#if hasTitle}}<div class="loom-code-block overflow-hidden rounded-md border border-border bg-muted/40"{{{testidAttr}}}>
+<div class="loom-code-block-title border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground">{{title}}</div>
+<pre class="overflow-x-auto p-4 text-sm"><code class="language-{{language}}">{{{source}}}</code></pre>
+</div>{{else}}<pre class="loom-code-block overflow-x-auto rounded-md border border-border bg-muted/40 p-4 text-sm"{{{testidAttr}}}><code class="language-{{language}}">{{{source}}}</code></pre>{{/if}}

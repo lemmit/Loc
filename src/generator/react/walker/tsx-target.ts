@@ -192,6 +192,18 @@ export const tsxTarget: WalkerTarget = {
     return renderJsMatch(arms, elseArm);
   },
 
+  /** Child-position match — the flat ternary chain, brace-wrapped
+   *  below depth 0 (JSX-child syntax).  Byte-identical to the inline
+   *  form the walker carried before the seam. */
+  renderMatchChild(
+    arms: ReadonlyArray<{ predicate: string; value: string }>,
+    elseArm: string | undefined,
+    depth: number,
+  ): string {
+    const inner = tsxTarget.renderMatch(arms, elseArm);
+    return depth === 0 ? inner : `{${inner}}`;
+  },
+
   // --- Navigation seam ----------------------------------------------------
 
   /** `navigate("/route", { state: { ...args } })` — React Router v6

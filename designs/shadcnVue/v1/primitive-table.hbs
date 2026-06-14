@@ -1,0 +1,12 @@
+{{#if hasColumns}}<Table{{{testidAttr}}}>
+{{indent}}<TableHeader>
+{{headIndent}}<TableRow>
+{{#each columns}}{{../rowIndent}}<TableHead>{{{this.header}}}</TableHead>
+{{/each}}{{headIndent}}</TableRow>
+{{indent}}</TableHeader>
+{{indent}}<TableBody>
+{{headIndent}}<TableRow v-for="({{rowVar}}{{#if usesIdx}}, idx{{/if}}) in {{{rowsExpr}}}" :key="{{{keyExpr}}}"{{#if hasRowTestid}} :data-testid='{{{rowTestid}}}'{{/if}}{{#if hasOnRowClick}} @click='{{{onRowClick}}}'{{/if}}>
+{{#each columns}}{{../rowIndent}}<TableCell>{{{this.cellJsx}}}</TableCell>
+{{/each}}{{headIndent}}</TableRow>
+{{indent}}</TableBody>
+{{closeIndent}}</Table>{{else}}<Table{{{testidAttr}}} />{{/if}}

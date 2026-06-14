@@ -79,9 +79,10 @@ export function emitShellFiles(
   // serve-wiring that makes the built bundle reachable — a multi-stage
   // Dockerfile that runs the SPA's Vite build, a `Plug.Static` that
   // serves it from `priv/static`, and a router catch-all serving
-  // `index.html` for client-side deep links.  Same flag the orchestrator
-  // uses for the emit branch.
-  const embedReact = deployable.uiFramework === "react";
+  // `index.html` for client-side deep links.  Same dispatch the
+  // orchestrator's emit branch uses — any static-bundle framework
+  // (react / vue) gets identical serving wiring.
+  const embedReact = deployable.uiFramework === "react" || deployable.uiFramework === "vue";
 
   // Resource client modules (objectStore / queue / api) + their Hex
   // deps (Phase 4c).  Empty when the deployable wires no consumable

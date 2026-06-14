@@ -22,6 +22,7 @@ import {
 } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
+import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
 import {
   E2E_FIXTURES_TS,
   E2E_PACKAGE_JSON,
@@ -392,49 +393,6 @@ export function generateReactForContexts(
   return prefixed;
 }
 
-/** Emit each entry in the pack manifest's `shellFiles` map (logical
- *  template name → output path).  Throws if a declared template name
- *  isn't registered in `emits`, naming the offending key — this keeps
- *  manifest typos loud rather than silently dropping shell files. */
-function emitShellFiles(pack: LoadedPack, out: Map<string, string>): void {
-  const entries = Object.entries(pack.manifest.shellFiles ?? {});
-  for (const [templateName, outputPath] of entries) {
-    if (!pack.templates.has(templateName)) {
-      throw new Error(
-        `pack ${pack.manifest.name}: shellFiles entry "${templateName}" → "${outputPath}" not present in emits map.`,
-      );
-    }
-    out.set(outputPath, renderShellFile(templateName, {}, pack));
-  }
-}
-
-/** Emit every template matching one of the pack manifest's
- *  `shellGlobs` patterns.  Each pattern uses `*` as a single-segment
- *  capture; the corresponding output-path template references the
- *  captures as `{1}`, `{2}`, etc.  shadcn uses this for its
- *  `components-ui-*` library: pattern `components-ui-*` →
- *  `src/components/ui/{1}.tsx`. */
-function emitShellGlobs(pack: LoadedPack, out: Map<string, string>): void {
-  const entries = Object.entries(pack.manifest.shellGlobs ?? {});
-  for (const [pattern, outputTemplate] of entries) {
-    // Translate `components-ui-*` → /^components-ui-(.+)$/.  Escape
-    // every other regex meta-char so a future pattern like
-    // `cells.*-mobile` can't accidentally interpret `.` as the
-    // any-char metacharacter.
-    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp("^" + escaped.replace(/\*/g, "(.+)") + "$");
-    for (const templateName of pack.templates.keys()) {
-      const m = re.exec(templateName);
-      if (!m) continue;
-      let outputPath = outputTemplate;
-      for (let i = 1; i < m.length; i++) {
-        outputPath = outputPath.replaceAll(`{${i}}`, m[i]);
-      }
-      out.set(outputPath, renderShellFile(templateName, {}, pack));
-    }
-  }
-}
-
 // ---------------------------------------------------------------------------
 // index.html shell — page metadata + favicon projection.
 //
@@ -500,4 +458,4 @@ function staticTitleOf(page: PageIR | undefined): string | undefined {
 }
 
 // smokeSpec moved to src/generator/_frontend/smoke-spec.ts (shared
-// with the Svelte frontend — it drives routes, not framework code).
+// with the Svelte + Vue frontends — it drives routes, not framework code).

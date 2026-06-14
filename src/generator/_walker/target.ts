@@ -235,6 +235,18 @@ export interface WalkerTarget {
     elseArm: string | undefined,
   ): string;
 
+  /** Render a `match` whose arms are MARKUP (child position — the
+   *  page-metamodel §7 predicate-arms conditional).  TSX wraps the
+   *  flat `renderMatch` ternary chain in braces at depth > 0; Vue
+   *  renders a structural `<template v-if>` / `v-else-if` / `v-else`
+   *  chain (template expressions cannot evaluate to markup); HEEx's
+   *  parallel walker never reaches this. */
+  renderMatchChild(
+    arms: ReadonlyArray<{ predicate: string; value: string }>,
+    elseArm: string | undefined,
+    depth: number,
+  ): string;
+
   // --- Navigation seam ----------------------------------------------------
 
   /** Render a cross-page navigation call — `navigate(<TargetPage>,

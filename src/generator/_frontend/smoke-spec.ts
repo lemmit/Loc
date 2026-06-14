@@ -1,6 +1,6 @@
 // Route-driven Playwright smoke spec — framework-neutral (navigates
-// param-less page routes and asserts the URL); shared by the React
-// and Svelte frontends.  Extracted from src/generator/react/index.ts.
+// param-less page routes and asserts the URL); shared by the React,
+// Svelte, and Vue frontends.  Extracted from src/generator/react/index.ts.
 
 import type { UiIR } from "../../ir/types/loom-ir.js";
 

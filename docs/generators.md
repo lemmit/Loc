@@ -588,6 +588,48 @@ generator uses (`src/generator/_walker/walker-core.ts`) with
 | e2e | Same testid-keyed Playwright surface as react: page objects from the shared `_frontend` builders (api imports root at `src/lib/api`), smoke spec, fixtures, config.  `test e2e … against <svelte deployable>` lowers to a Playwright ui spec. |
 | Embedding | dotnet fullstack hosts embed the SvelteKit SPA under `ClientApp/` (`framework: svelte` on the ui binding; Dockerfile copies `build/` → wwwroot).  Phoenix hosting awaits `paths.base` wiring. |
 | CI | `generated-svelte-build.yml` — per `{example × pack}`: `npm install` + `svelte-check --fail-on-warnings` + `vite build` (`npm run test:svelte-build` locally). |
+## Vue frontend (`platform: vue`)
+
+The structural mirror of the React frontend, driven by the SAME shared
+markup walker (`src/generator/_walker/`) through `vueTarget` and the
+SAME `_frontend/` api/views/workflows module builders (only the
+TanStack Query import specifier differs).  Design packs: `vuetify`
+(default) and `shadcnVue` (reka-ui + Tailwind 4, source-copy).  See
+[D-VUE-FRONTEND](decisions.md) and `docs/plans/vue-frontend-plan.md`.
+
+### File map (deltas vs the React project)
+
+```
+web_app/
+├── package.json            # vue, vue-router, @tanstack/vue-query, zod (+ vuetify/@mdi or
+│                           # reka-ui/tailwindcss/cva/clsx/tailwind-merge/lucide-vue-next)
+├── vite.config.ts          # @vitejs/plugin-vue (+ @tailwindcss/vite and the @ alias on shadcnVue)
+├── src/
+│   ├── main.ts             # createApp + router + VueQueryPlugin (+ vuetify instance / globals.css)
+│   ├── App.vue             # app chrome + <router-view/> + onErrorCaptured boundary
+│   ├── router.ts           # createRouter(createWebHistory) route table + NotFound catch-all
+│   ├── theme.ts            # createVuetify tokens (vuetify) / `export {}` stub (shadcnVue — CSS vars)
+│   ├── lib/form.ts         # useLoomForm — reactive() values + zod parse + per-field error map
+│   ├── lib/format.ts       # formatting FUNCTIONS (the React packs' format components, fn-style)
+│   ├── components/ui/      # shadcnVue only: source-copied SFCs + index.ts barrel
+│   └── pages/**/*.vue      # SFC pages — <script setup lang="ts"> + walked <template>
+└── e2e/                    # identical harness/page objects to React (testid/DOM only)
+```
+
+### Key behaviours
+
+- vue-query handles hoist as `reactive(useX(...))` so nested refs
+  (`.data`, `.isPending`) read uniformly in template + script.
+- Forms: `useLoomForm(schema, drafts)` — no third-party form dep;
+  create forms, operation `v-dialog`s (the pack-owned `op-dialog`
+  template), and workflow run-forms are wired.
+- Operation/find hook args, navigate, match-in-child-position, and
+  state reads/writes all flow through the `WalkerTarget` seams —
+  zero forked walker code.
+- Backend hosts (dotnet / java / phoenix) embed a `framework: vue` ui
+  exactly like a React one (`vue` ∈ STATIC_BUNDLE_FRAMEWORKS).
+- Known gaps (tracked in the plan): user components / named layouts /
+  extern functions on vue; live-refetch find-filters; channels toast.
 
 ## Phoenix LiveView fullstack (`platform: phoenixLiveView`)
 

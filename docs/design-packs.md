@@ -66,6 +66,19 @@ packs (Handlebars over `.hbs` files yielding Svelte markup, e.g. the
 built-in `shadcnSvelte` and `flowbite` packs — these declare the
 `sv1` stack and own the full TSX-style required surface incl. forms
 and field inputs, plus a `svelte-config` shell template).
+the built-in `ashPhoenix` pack); `"vue"` for Vue 3 packs (Handlebars
+yielding Vue SFC template markup, e.g. the built-in `vuetify` and
+`shadcnVue` packs).
+
+**Vue-pack authoring note — the mustache collision:** Handlebars and
+Vue both use `{{ … }}`.  Generation-time VM substitutions stay plain
+Handlebars (`{{label}}`, `{{{onClick}}}`); a literal Vue runtime
+interpolation must be written `\{{ … }}` (Handlebars emits the
+literal mustache).  JS-splicing attributes use single quotes
+(`@click='{{{onClick}}}'`) because rendered JS carries double-quoted
+string literals.  Vue packs additionally own the `op-dialog` template
+(the operation-modal wrapper the page shell renders) — see
+`REQUIRED_PRIMITIVES.vue`.
 
 The Handlebars compiler is content-agnostic, so `format` does not
 change template compilation.  It DOES gate which repo-root shared
@@ -76,6 +89,7 @@ template directories the loader pulls in:
 | `tsx` (default) | `vite/`, `api/`, `docker/` |
 | `heex` | `phoenix/` (future; empty in v0 — `ashPhoenix` ships its shell files directly) |
 | `svelte` | `sveltekit/` (api client + logger + root layout + the SvelteKit dockerfile) |
+| `vue` | `vue/`, `api/`, `docker/` (the `api/` fetch-client layer is framework-neutral TS) |
 
 A pack's filename convention should match its format (`*.hbs` for tsx,
 `*.heex.hbs` for heex), but the loader keys off the manifest's
@@ -548,9 +562,11 @@ design: chakra                   // → chakra@v3
 design: ashPhoenix               // forced for phoenixLiveView platform
 ```
 
-The five shipped families: `mantine` (v7, v9), `shadcn` (v3, v4),
-`mui` (v5, v7), `chakra` (v2, v3), `ashPhoenix` (v3).  The current
-bareword defaults live in `BUILTIN_PACK_LATEST` in
+The shipped families: `mantine` (v7, v9), `shadcn` (v3, v4),
+`mui` (v5, v7), `chakra` (v2, v3), `ashPhoenix` (v3), and the vue
+packs `vuetify` (v3 — tracks Vuetify 3) and `shadcnVue` (v1 — the
+shadcn-vue flavour: reka-ui + Tailwind 4, source-copy distribution).
+The current bareword defaults live in `BUILTIN_PACK_LATEST` in
 `src/util/builtin-formats.ts`.
 
 The loader (`src/generator/_packs/loader-fs.ts:resolvePackDir`)

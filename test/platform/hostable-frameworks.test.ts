@@ -23,7 +23,7 @@ describe("hostableFrameworks — the host-capability rule", () => {
   it("every static-asset host serves exactly the static-bundle frameworks", () => {
     // The standalone frontend hosts plus every backend that serves a
     // static root (dotnet → wwwroot, hono → static middleware).
-    for (const p of ["react", "svelte", "static", "dotnet", "hono"] as Platform[]) {
+    for (const p of ["react", "svelte", "static", "vue", "dotnet", "hono"] as Platform[]) {
       expect(sorted(platformFor(p).hostableFrameworks)).toEqual(sorted(STATIC_BUNDLE_FRAMEWORKS));
     }
   });
@@ -32,9 +32,12 @@ describe("hostableFrameworks — the host-capability rule", () => {
     const phoenix = platformFor("phoenixLiveView").hostableFrameworks;
     // Hosts its own runtime-coupled LiveView…
     expect(phoenix.has("phoenixLiveView")).toBe(true);
-    // …and the react static bundles (priv/static under /app).
+    // …and the static bundles it can serve under /app today: react /
+    // static / vue (the vue bundle mirrors react's embed wiring,
+    // including the __LOOM_BASENAME__ hook).
     expect(phoenix.has("react")).toBe(true);
     expect(phoenix.has("static")).toBe(true);
+    expect(phoenix.has("vue")).toBe(true);
     // A SvelteKit bundle under the /app path prefix needs `paths.base`
     // threading (svelte-frontend-plan.md follow-up) — deliberately
     // not hostable yet, so the validator rejects it loudly instead of
@@ -44,7 +47,7 @@ describe("hostableFrameworks — the host-capability rule", () => {
 
   it("LiveView is hostable ONLY by Phoenix (runtime-coupled, not a static bundle)", () => {
     expect(STATIC_BUNDLE_FRAMEWORKS.has("phoenixLiveView")).toBe(false);
-    for (const p of ["react", "svelte", "static", "dotnet", "hono"] as Platform[]) {
+    for (const p of ["react", "svelte", "static", "vue", "dotnet", "hono"] as Platform[]) {
       expect(platformFor(p).hostableFrameworks.has("phoenixLiveView")).toBe(false);
     }
   });

@@ -24,6 +24,7 @@ import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js
 import { unionMembers } from "../_payload/union-wire.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
+import { generateVueForContexts } from "../vue/index.js";
 import {
   byLayerLayoutAdapter,
   type DotnetArtifact,
@@ -412,20 +413,20 @@ function emitProjectFromContexts(
   // certs, e2e suite — the .NET project ships its own equivalents
   // at the root).
   if (hasEmbeddedSpa && system) {
-    // Frontend dispatch by the ui's framework — `framework: svelte`
-    // embeds a SvelteKit static SPA under ClientApp/ exactly like the
-    // React embed (same /api origin, same wwwroot serving; only the
-    // SPA build output dir differs — see renderDockerfile).
-    const embedSvelte = system.deployable.uiFramework === "svelte";
-    const spaFiles = embedSvelte
-      ? generateSvelteForContexts(contexts, system.sys, system.deployable, {
-          apiBaseUrl: "/api",
-          pathPrefix: "ClientApp/",
-        })
-      : generateReactForContexts(contexts, system.sys, system.deployable, {
-          apiBaseUrl: "/api",
-          pathPrefix: "ClientApp/",
-        });
+    // Frontend dispatch by the ui's framework — `framework: svelte` /
+    // `framework: vue` embed their static SPAs under ClientApp/
+    // exactly like the React embed (same /api origin, same wwwroot
+    // serving; only the SPA build output dir differs for svelte —
+    // see renderDockerfile).
+    const embedOpts = { apiBaseUrl: "/api", pathPrefix: "ClientApp/" };
+    const uiFw = system.deployable.uiFramework;
+    const embedSvelte = uiFw === "svelte";
+    const spaFiles =
+      uiFw === "svelte"
+        ? generateSvelteForContexts(contexts, system.sys, system.deployable, embedOpts)
+        : uiFw === "vue"
+          ? generateVueForContexts(contexts, system.sys, system.deployable, embedOpts)
+          : generateReactForContexts(contexts, system.sys, system.deployable, embedOpts);
     for (const [path, content] of spaFiles) {
       // The React generator's pack also ships `Dockerfile` /
       // `.dockerignore` / `certs/.gitkeep` at the project root —

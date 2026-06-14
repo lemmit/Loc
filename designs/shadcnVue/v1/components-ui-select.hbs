@@ -1,0 +1,16 @@
+<!-- Auto-generated.  shadcn-vue Select (reka-ui SelectRoot wrapper). -->
+<script setup lang="ts">
+import { SelectRoot } from "reka-ui";
+
+const model = defineModel<string>();
+
+// reka-ui's model value is the wider `AcceptableValue`; the generated
+// pages only ever bind string-shaped fields, so coerce on the way out.
+function onUpdate(v: unknown): void {
+  model.value = typeof v === "string" ? v : v == null ? undefined : String(v);
+}
+</script>
+
+<template>
+  <SelectRoot :model-value="model" @update:model-value="onUpdate"><slot /></SelectRoot>
+</template>

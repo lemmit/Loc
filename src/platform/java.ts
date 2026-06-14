@@ -35,7 +35,11 @@ const javaPlatform: PlatformSurface = {
   // bundle needs the `build/`-dir + ClientApp filter wiring dotnet has
   // (svelte-embed) — a follow-up if anyone asks for it.
   mountsUi: true,
-  hostableFrameworks: new Set(["react", "static"]),
+  // react/static/vue static bundles embed under ClientApp/ (the vue
+  // dispatch mirrors react's — see generator/java/index.ts); svelte
+  // stays out until its java embed wiring lands (SvelteKit's build
+  // output dir diverges — see the dotnet renderDockerfile note).
+  hostableFrameworks: new Set(["react", "static", "vue"]),
   // The java repository auto-emits `save`, `findById`, `getById`,
   // `delete`, and `findAll` (Spring Data conventions).  All but
   // `findAll` are already reserved by the Hono surface; the union

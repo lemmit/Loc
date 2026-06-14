@@ -1,0 +1,15 @@
+<!-- Auto-generated.  shadcn-vue TabsTrigger. -->
+<script setup lang="ts">
+import { TabsTrigger } from "reka-ui";
+
+defineProps<{ value: string }>();
+</script>
+
+<template>
+  <TabsTrigger
+    :value="value"
+    class="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground"
+  >
+    <slot />
+  </TabsTrigger>
+</template>

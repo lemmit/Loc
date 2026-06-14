@@ -1,5 +1,6 @@
 import type { PageIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
 import type { OperationFormState, WalkResult } from "../../_walker/walker-core.js";
 import { idTargetHookVar } from "../../react/form-helpers.js";
 import { vueTarget } from "./vue-target.js";
@@ -37,6 +38,10 @@ export interface VuePageShellInput {
   /** Route params the page's route declares (`:id` → `id`). */
   routeParams: readonly string[];
   result: WalkResult;
+  /** Active design pack — operation dialogs render through its
+   *  `op-dialog` template so the modal markup stays pack-owned
+   *  (v-dialog on vuetify, the ui Dialog components on shadcnVue). */
+  pack: LoadedPack;
 }
 
 export function renderVuePage(input: VuePageShellInput): string {
@@ -85,6 +90,13 @@ export function renderVuePage(input: VuePageShellInput): string {
   if (result.usesState) {
     for (const f of page.state) {
       stateLines.push(`const ${f.name} = ref(${vueTarget.defaultInitFor(f.type)});`);
+      // The shared input primitives' VM carries the React-style
+      // `set<Pascal>` setter name (`@update:model-value` callbacks in
+      // the vue packs call it) — provide it as a plain function.
+      const pascal = f.name[0]!.toUpperCase() + f.name.slice(1);
+      stateLines.push(
+        `const set${pascal} = (v: typeof ${f.name}.value) => { ${f.name}.value = v; };`,
+      );
       vueImports.add("ref");
     }
   }
@@ -94,10 +106,27 @@ export function renderVuePage(input: VuePageShellInput): string {
   const hookLines: string[] = [];
   const apiImports = new Map<string, Set<string>>();
   const seenVars = new Set<string>();
+  // Hoisted hook args were rendered at WALK time (template-position
+  // forms: state refs are bare names) but the hoist line lives in
+  // SCRIPT position — re-point state-field reads at `.value`.  Plain
+  // captured values, not reactive inputs: a vue filter input doesn't
+  // live-refetch yet (the api module would need MaybeRefOrGetter
+  // params — tracked as a parity follow-up).
+  const stateNames = new Set(page.state.map((f) => f.name));
+  const scriptArgs = (rendered: readonly string[]): string =>
+    rendered
+      .map((a) => {
+        let out = a;
+        for (const n of stateNames) {
+          out = out.replace(new RegExp(`\\b${n}\\b(?!\\.value)`, "g"), `${n}.value`);
+        }
+        return out;
+      })
+      .join(", ");
   for (const use of result.usedApiHooks.values()) {
     if (seenVars.has(use.varName)) continue;
     seenVars.add(use.varName);
-    const args = (use.argsRendered ?? []).join(", ");
+    const args = scriptArgs(use.argsRendered ?? []);
     hookLines.push(`const ${use.varName} = reactive(${use.hookName}(${args}));`);
     vueImports.add("reactive");
     const names = apiImports.get(use.importFrom) ?? new Set<string>();
@@ -181,24 +210,25 @@ export function renderVuePage(input: VuePageShellInput): string {
       .join("\n");
     const ns = state.testidNamespace;
     dialogBlocks.push(
-      [
-        `  <v-dialog v-model="${opCamel}Open" max-width="560">`,
-        `    <v-card title="${humanize(state.op.name)}">`,
-        `      <v-card-text>`,
-        `        <v-form data-testid="${ns}-form" @submit.prevent='${opCamel}Form.handleSubmit(async (vals) => { await ${opCamel}.mutateAsync(vals); ${opCamel}Open = false; })($event)'>`,
-        `          <div class="d-flex flex-column ga-4">`,
-        fields,
-        `            <v-alert v-if='${opCamel}Form.errors["__global"]' type="error" variant="tonal" :text='${opCamel}Form.errors["__global"]' />`,
-        `            <div class="d-flex justify-end mt-2">`,
-        `              <v-btn type="submit" color="primary" variant="flat" :loading="${opCamel}.isPending" data-testid="${ns}-submit">${humanize(state.op.name)}</v-btn>`,
-        `            </div>`,
-        `          </div>`,
-        `        </v-form>`,
-        `      </v-card-text>`,
-        `    </v-card>`,
-        `  </v-dialog>`,
-      ].join("\n"),
+      input.pack.render("op-dialog", {
+        openVar: `${opCamel}Open`,
+        formVar: `${opCamel}Form`,
+        mutVar: opCamel,
+        title: humanize(state.op.name),
+        submitLabel: humanize(state.op.name),
+        ns,
+        fieldsHtml: fields,
+      }),
     );
+    // The dialog template's component imports (pack.json
+    // `imports["op-dialog"]`) merge into the page's import lines —
+    // the walk never sees this template, so the walker's ImportMap
+    // can't carry them.
+    for (const spec of (input.pack.manifest.imports?.["op-dialog"] ?? []) as ImportSpec[]) {
+      const names = result.imports.get(spec.from) ?? new Set<string>();
+      for (const n of spec.named) names.add(n);
+      result.imports.set(spec.from, names);
+    }
   }
   // Id-target lookup hooks (`X id` form fields render as selects fed
   // by `useAll<Target>()` — the field templates reference the
@@ -252,6 +282,29 @@ export function renderVuePage(input: VuePageShellInput): string {
   for (const [from, names] of [...apiImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const adjusted = adjustDepth(from, input);
     script.push(`import { ${[...names].sort().join(", ")} } from "${adjusted}";`);
+  }
+  // Pack-declared per-primitive imports (pack.json `imports` tables) —
+  // shadcnVue's ui-component barrel (`@/components/ui`) flows in here;
+  // packs with globally-registered components (vuetify) declare none.
+  // `@/` specifiers resolve through the pack's vite/tsconfig alias and
+  // need no depth adjustment.
+  //
+  // The shared walker also drops React-pipeline imports into the same
+  // sink (`react-hook-form` / `@hookform/resolvers/zod` from
+  // `prepareFormFields`, plus un-depth-adjusted `../api/<agg>` request
+  // imports the Vue shell already hoists itself via `apiImports`).
+  // Those are TSX-shell concerns — emitting them here produces
+  // duplicate identifiers and unresolvable modules — so only
+  // non-relative, non-RHF specifiers pass through.
+  const walkerInternalSources = new Set(["react-hook-form", "@hookform/resolvers/zod"]);
+  for (const [from, names] of [...result.imports.entries()].sort(([a], [b]) =>
+    a.localeCompare(b),
+  )) {
+    if (names.size === 0) continue;
+    if (walkerInternalSources.has(from) || from.startsWith("./") || from.startsWith("../")) {
+      continue;
+    }
+    script.push(`import { ${[...names].sort().join(", ")} } from "${from}";`);
   }
   script.push("");
   if (needsRoute) {

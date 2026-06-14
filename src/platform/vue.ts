@@ -1,5 +1,9 @@
 import { generateVueForContexts } from "../generator/vue/index.js";
-import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
+import {
+  type ComposeServiceShape,
+  type PlatformSurface,
+  STATIC_BUNDLE_FRAMEWORKS,
+} from "./surface.js";
 
 // ---------------------------------------------------------------------------
 // Vue frontend platform — the third frontend-only platform after
@@ -21,12 +25,12 @@ const vuePlatform: PlatformSurface = {
   needsDb: false,
   mountsUi: true,
   isFrontend: true,
-  // Standalone static-asset host for its own Vue bundle.  Joins
-  // `STATIC_BUNDLE_FRAMEWORKS` (making vue bundles hostable on any
-  // static-asset host, and react bundles on this one) in the
-  // backend-host-embedding slice — until then the surface hosts only
-  // its own framework.
-  hostableFrameworks: new Set(["vue"]),
+  // Standalone static-asset host (Vite preview over a built bundle):
+  // serves any static-bundle framework — `vue` joined
+  // `STATIC_BUNDLE_FRAMEWORKS` in the embedding slice, so vue bundles
+  // host anywhere static assets are served and react bundles host
+  // here.
+  hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
   // Vue generator only emits API call factories — no per-aggregate
   // repository class.  No find-name collisions are possible.
   reservedRepositoryFindNames: new Set(),
