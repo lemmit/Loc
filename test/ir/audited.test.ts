@@ -141,6 +141,22 @@ describe("audited — TypeScript emission", () => {
     expect(routes).toContain("const after = repoTx.toWire(aggregate);");
   });
 
+  it("stamps the request correlation id + scope id onto the audit row from the carrier", async () => {
+    const { model } = await parseModel(SYSTEM());
+    const files = generateSystems(model).files;
+    // audit_records carries the governance ids + a correlation index.
+    const schema = files.get("api/db/schema.ts")!;
+    expect(schema).toContain('correlationId: text("correlation_id")');
+    expect(schema).toContain('scopeId: text("scope_id")');
+    expect(schema).toContain('index("audit_records_correlation_idx").on(t.correlationId)');
+    // The route reads the ambient RequestContext and stamps both onto the row.
+    const routes = files.get("api/http/cart.routes.ts")!;
+    expect(routes).toContain('import { requestContext } from "../obs/als";');
+    expect(routes).toContain("const reqCtx = requestContext();");
+    expect(routes).toContain("correlationId: reqCtx?.correlationId ?? null,");
+    expect(routes).toContain("scopeId: reqCtx?.scopeId ?? null,");
+  });
+
   it("instruments only the audited operation, not the plain one", async () => {
     const { model } = await parseModel(SYSTEM());
     const routes = generateSystems(model).files.get("api/http/cart.routes.ts")!;

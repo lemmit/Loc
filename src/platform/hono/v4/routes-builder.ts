@@ -157,6 +157,7 @@ export function buildRoutesFile(
     // types for the transactional repo (mirrors the workflow routes' imports).
     lines.push(`import { randomUUID } from "node:crypto";`);
     lines.push(`import * as schema from "../db/schema";`);
+    lines.push(`import { requestContext } from "../obs/als";`);
     lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
     lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   }
@@ -852,6 +853,11 @@ function emitOperationRoute(
         : `(c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null`;
       out.push(`    const actor = ${actorExpr};`);
     }
+    // The request correlation id + frame scope id stamped onto every audit /
+    // provenance row, tying each to the request (and its causality position)
+    // that produced it.  Read from the ambient RequestContext opened by the
+    // request-id middleware.
+    out.push(`    const reqCtx = requestContext();`);
     out.push(`    await db.transaction(async (tx) => {`);
     out.push(`      const repoTx = new ${agg.name}Repository(tx, events);`);
     out.push(`      const aggregate = await repoTx.getById(Ids.${agg.name}Id(id));`);
@@ -872,6 +878,8 @@ function emitOperationRoute(
       out.push(`        after,`);
       out.push(`        at: new Date(),`);
       out.push(`        status: "ok",`);
+      out.push(`        correlationId: reqCtx?.correlationId ?? null,`);
+      out.push(`        scopeId: reqCtx?.scopeId ?? null,`);
       out.push(`      });`);
     }
     if (prov) {
@@ -886,6 +894,8 @@ function emitOperationRoute(
       out.push(`          inputs: t.inputs,`);
       out.push(`          computedValue: t.computedValue,`);
       out.push(`          at: new Date(),`);
+      out.push(`          correlationId: reqCtx?.correlationId ?? null,`);
+      out.push(`          scopeId: reqCtx?.scopeId ?? null,`);
       out.push(`        });`);
       out.push(`      }`);
     }
