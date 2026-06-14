@@ -150,6 +150,13 @@ describe("vanilla — custom find functions on the repository module", () => {
     // `end` into the module's `end` (the `endend` mix-compile bug from CI).
     expect(task).not.toContain("endend");
     expect(task).toMatch(/Repo\.update\(changeset\)\n  end\nend\n?$/);
+
+    // Regression: the per-aggregate context block must end with `\n` so the
+    // module's `end` doesn't fuse with the last defdelegate's `:delete` atom
+    // (the `as: :deleteend` mix-compile bug — TokenMissingError from CI).
+    const ctx = files.get([...files.keys()].find((k) => k.endsWith("/lib/api/tracker.ex"))!)!;
+    expect(ctx).not.toContain(":deleteend");
+    expect(ctx).toMatch(/as: :delete\nend\n?$/);
   });
 });
 

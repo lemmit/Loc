@@ -57,7 +57,8 @@ function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedC
   defdelegate get_${aggSnake}(id), to: ${repoMod}, as: :find_by_id
   defdelegate create_${aggSnake}(attrs), to: ${repoMod}, as: :insert
   defdelegate update_${aggSnake}(record, attrs), to: ${repoMod}, as: :update
-  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
+  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete
+${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
   });
 
   // Retrieval defdelegates — `run_<retrieval>_<agg>(args..., opts \\ [])`
