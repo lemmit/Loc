@@ -51,11 +51,16 @@ function assertCarrier(files: Map<string, string>): void {
   expect(rc).toContain("correlation_id: correlation_id,");
   expect(rc).toContain("locale: resolve_locale(conn),");
   expect(rc).toContain("started_at: System.system_time(:millisecond)");
+  // Frame-local tier: a fresh scope id for the root frame (parity with .NET's
+  // OpenRoot / Hono's root frame); parent_id stays nil (no per-dispatch nesting).
+  expect(rc).toContain("scope_id: generate_id(),");
   // Echoes the correlation id on the response.
   expect(rc).toContain("put_resp_header(conn, @correlation_header, correlation_id)");
   // Accessors for non-HTTP reads.
   expect(rc).toContain("def correlation_id, do: Logger.metadata()[:correlation_id]");
   expect(rc).toContain("def locale, do: Logger.metadata()[:locale]");
+  expect(rc).toContain("def scope_id, do: Logger.metadata()[:scope_id]");
+  expect(rc).toContain("def parent_id, do: Logger.metadata()[:parent_id]");
 
   // The Plug is mounted in the endpoint between RequestId and Telemetry so the
   // request_start / request_end telemetry logs carry the correlation id.
