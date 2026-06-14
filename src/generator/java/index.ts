@@ -16,6 +16,7 @@ import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { findUnionSpec, unionMembers } from "../_payload/union-wire.js";
 import { generateReactForContexts } from "../react/index.js";
+import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
 import { byFeatureLayoutAdapter } from "./adapters/by-feature-layout.js";
 import type {
@@ -361,25 +362,35 @@ function emitProjectFromContexts(
     mainSourcePath(`${basePkg}.api`, "HealthController.java"),
     renderHealthController(basePkg),
   );
-  out.set("Dockerfile", renderDockerfile({ embeddedSpa: hasEmbeddedSpa }));
-  out.set(".dockerignore", renderDockerignore({ embeddedSpa: hasEmbeddedSpa }));
+  // SvelteKit's adapter-static writes `build/`; Vite SPAs write `dist/`.
+  const spaOutDir = system?.deployable.uiFramework === "svelte" ? "build" : "dist";
+  out.set("Dockerfile", renderDockerfile({ embeddedSpa: hasEmbeddedSpa, spaOutDir }));
+  out.set(".dockerignore", renderDockerignore({ embeddedSpa: hasEmbeddedSpa, spaOutDir }));
 
   // Fullstack: the same-origin SPA host (resource handler + index.html
   // fallback) and the embedded React project under ClientApp/.
   if (hasEmbeddedSpa && system) {
     out.set(mainSourcePath(`${basePkg}.config`, "SpaWebConfig.java"), renderSpaWebConfig(basePkg));
-    // Dispatch on the hosted ui's framework: `vue` static bundles
-    // embed exactly like React ones (STATIC_BUNDLE_FRAMEWORKS).
+    // Dispatch on the hosted ui's framework — every static-bundle
+    // frontend (react / svelte / vue) embeds under ClientApp/; only the
+    // SPA build output dir differs (svelte `build/`, vite `dist/` — see
+    // renderDockerfile's spaOutDir).
+    const uiFw = system.deployable.uiFramework;
     const spaFiles =
-      system.deployable.uiFramework === "vue"
-        ? generateVueForContexts(contexts, system.sys, system.deployable, {
+      uiFw === "svelte"
+        ? generateSvelteForContexts(contexts, system.sys, system.deployable, {
             apiBaseUrl: "/api",
             pathPrefix: "ClientApp/",
           })
-        : generateReactForContexts(contexts, system.sys, system.deployable, {
-            apiBaseUrl: "/api",
-            pathPrefix: "ClientApp/",
-          });
+        : uiFw === "vue"
+          ? generateVueForContexts(contexts, system.sys, system.deployable, {
+              apiBaseUrl: "/api",
+              pathPrefix: "ClientApp/",
+            })
+          : generateReactForContexts(contexts, system.sys, system.deployable, {
+              apiBaseUrl: "/api",
+              pathPrefix: "ClientApp/",
+            });
     for (const [path, content] of spaFiles) {
       // The React generator also ships project-root files (Dockerfile,
       // .dockerignore, certs, e2e) — the java project owns those
@@ -394,6 +405,10 @@ function emitProjectFromContexts(
         continue;
       out.set(path, content);
     }
+    out.set(
+      "ClientApp/.gitignore",
+      uiFw === "svelte" ? "node_modules\nbuild\n.svelte-kit\n" : "node_modules\ndist\n",
+    );
   }
 }
 
