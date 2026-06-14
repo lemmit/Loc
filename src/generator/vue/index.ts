@@ -41,6 +41,7 @@ import {
   REACT_LIB_SCHEMAS_MONEY_TS,
 } from "../react/emit-templates.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
+import { prepareVueNamedLayouts } from "./layouts-emitter.js";
 import { buildVueRealtimeHandlers } from "./realtime-handlers-builder.js";
 import {
   renderVueComponentFile,
@@ -256,7 +257,44 @@ export function generateVueForContexts(
     );
   }
   out.set("src/pages/NotFound.vue", renderShell(pack, "not-found-page", {}));
-  out.set("src/router.ts", renderRouter(pages, routerBasename));
+
+  // Named layouts (Phase 8).  A page selects one via `layout: <Name>`;
+  // `layout: none` mounts outside all chrome.  When any page uses a
+  // non-default layout we restructure into nested vue-router routes:
+  // the default chrome moves to `src/layouts/DefaultLayout.vue`, App.vue
+  // becomes a thin `<router-view />` host, and each named layout is its
+  // own SFC.  Default-only uis keep the flat router + chrome-in-App.vue
+  // shape (byte-identical).
+  const namedLayoutPages = new Map<string, PageIR[]>();
+  const nonePages: PageIR[] = [];
+  const defaultPages: PageIR[] = [];
+  for (const page of pages) {
+    if (page.layout?.kind === "named") {
+      const bucket = namedLayoutPages.get(page.layout.ref) ?? [];
+      bucket.push(page);
+      namedLayoutPages.set(page.layout.ref, bucket);
+    } else if (page.layout?.kind === "preset" && page.layout.name === "none") {
+      nonePages.push(page);
+    } else {
+      defaultPages.push(page);
+    }
+  }
+  const preparedLayouts = prepareVueNamedLayouts(
+    ui,
+    sys,
+    pack,
+    options.topLevelComponents ?? [],
+    externComponentNames,
+  );
+  const useLayouts = preparedLayouts.length > 0 || nonePages.length > 0;
+  for (const l of preparedLayouts) out.set(`src/layouts/${l.name}.vue`, l.content);
+
+  out.set(
+    "src/router.ts",
+    useLayouts
+      ? renderNestedRouter({ defaultPages, nonePages, namedLayoutPages }, routerBasename)
+      : renderRouter(pages, routerBasename),
+  );
 
   // Page objects + the Playwright e2e harness (vue-frontend-plan.md
   // Slice 6).  Page objects are framework-neutral — testid/DOM only,
@@ -329,14 +367,25 @@ export function generateVueForContexts(
   // Pack shell tier.
   out.set("src/theme.ts", renderShell(pack, "theme", prepareThemeVM(sys.theme)));
   out.set("src/main.ts", renderShell(pack, "main", {}));
-  out.set(
-    "src/App.vue",
-    renderShell(pack, "app-shell", {
-      systemNameHuman: humanize(sys.name),
-      navSections: deriveNavSections(pages),
-      hasRealtimeHandlers,
-    }),
-  );
+  // App root.  Default-only uis render the pack chrome straight into
+  // App.vue (the flat-router shape).  When named layouts are in play the
+  // chrome moves to `src/layouts/DefaultLayout.vue` and App.vue is a thin
+  // `<router-view />` host that mounts the channel handlers once for
+  // every layout.
+  const chromeVM = {
+    systemNameHuman: humanize(sys.name),
+    navSections: deriveNavSections(defaultPages),
+    hasRealtimeHandlers,
+  };
+  if (useLayouts) {
+    out.set(
+      "src/layouts/DefaultLayout.vue",
+      renderShell(pack, "app-shell", { ...chromeVM, hasRealtimeHandlers: false }),
+    );
+    out.set("src/App.vue", renderShell(pack, "app-root", { hasRealtimeHandlers }));
+  } else {
+    out.set("src/App.vue", renderShell(pack, "app-shell", chromeVM));
+  }
 
   const usesMoney = contexts.some(contextUsesMoney) || uiUsesMoney(ui);
   if (usesMoney) {
@@ -413,16 +462,8 @@ function renderPageStub(page: PageIR): string {
 `;
 }
 
-function renderRouter(pages: PageIR[], bakedBasename?: string): string {
-  const lines: string[] = [];
-  lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(`import { createRouter, createWebHistory } from "vue-router";`);
-  for (const page of pages) {
-    const rel = pagePath(page).replace(/^src\//, "./");
-    lines.push(`import ${pageComponentName(page)} from "${rel}";`);
-  }
-  lines.push(`import NotFound from "./pages/NotFound.vue";`);
-  lines.push("");
+/** The shared `__LOOM_BASENAME__` hook block both router shapes emit. */
+function pushBasename(lines: string[], bakedBasename?: string): void {
   lines.push("// Optional basename hook the host page can set before the bundle");
   lines.push("// runs (e.g. the Loom playground iframe injects __LOOM_BASENAME__");
   lines.push("// so routes resolve inside the iframe scope).  Plain deploys");
@@ -433,6 +474,19 @@ function renderRouter(pages: PageIR[], bakedBasename?: string): string {
   lines.push(
     `    : undefined) ?? ${bakedBasename !== undefined ? JSON.stringify(bakedBasename) : "undefined"};`,
   );
+}
+
+function renderRouter(pages: PageIR[], bakedBasename?: string): string {
+  const lines: string[] = [];
+  lines.push("// Auto-generated.  Do not edit by hand.");
+  lines.push(`import { createRouter, createWebHistory } from "vue-router";`);
+  for (const page of pages) {
+    const rel = pagePath(page).replace(/^src\//, "./");
+    lines.push(`import ${pageComponentName(page)} from "${rel}";`);
+  }
+  lines.push(`import NotFound from "./pages/NotFound.vue";`);
+  lines.push("");
+  pushBasename(lines, bakedBasename);
   lines.push("");
   lines.push("export const router = createRouter({");
   lines.push("  history: createWebHistory(basename),");
@@ -443,6 +497,85 @@ function renderRouter(pages: PageIR[], bakedBasename?: string): string {
     );
   }
   lines.push(`    { path: "/:pathMatch(.*)*", component: NotFound },`);
+  lines.push("  ],");
+  lines.push("});");
+  lines.push("");
+  return lines.join("\n");
+}
+
+/** Nested-route table for the named-layouts shape: `layout: none` pages
+ *  mount top-level (no chrome), each named layout wraps its pages as
+ *  `children`, and the default `DefaultLayout` chrome wraps the rest +
+ *  the NotFound catch-all. */
+function renderNestedRouter(
+  buckets: {
+    defaultPages: PageIR[];
+    nonePages: PageIR[];
+    namedLayoutPages: ReadonlyMap<string, PageIR[]>;
+  },
+  bakedBasename?: string,
+): string {
+  const { defaultPages, nonePages, namedLayoutPages } = buckets;
+  const layoutNames = [...namedLayoutPages.keys()].sort();
+  const lines: string[] = [];
+  lines.push("// Auto-generated.  Do not edit by hand.");
+  lines.push(`import { createRouter, createWebHistory } from "vue-router";`);
+  const allPages = [
+    ...nonePages,
+    ...layoutNames.flatMap((n) => namedLayoutPages.get(n)!),
+    ...defaultPages,
+  ];
+  for (const page of allPages) {
+    const rel = pagePath(page).replace(/^src\//, "./");
+    lines.push(`import ${pageComponentName(page)} from "${rel}";`);
+  }
+  lines.push(`import NotFound from "./pages/NotFound.vue";`);
+  lines.push(`import DefaultLayout from "./layouts/DefaultLayout.vue";`);
+  for (const name of layoutNames) {
+    lines.push(`import ${name}Layout from "./layouts/${name}.vue";`);
+  }
+  lines.push("");
+  pushBasename(lines, bakedBasename);
+  lines.push("");
+  lines.push("export const router = createRouter({");
+  lines.push("  history: createWebHistory(basename),");
+  lines.push("  routes: [");
+  // `layout: none` — top-level, no chrome.
+  for (const page of nonePages) {
+    lines.push(
+      `    { path: ${JSON.stringify(page.route!)}, component: ${pageComponentName(page)} },`,
+    );
+  }
+  // Named layouts — each wraps its pages as children.  The parent is a
+  // pathless (`path: ""`) layout route: children keep their absolute
+  // paths, so the empty parent path is a grouping anchor (and satisfies
+  // vue-router's `RouteRecordRaw`, which requires a string `path`).
+  for (const name of layoutNames) {
+    lines.push("    {");
+    lines.push(`      path: "",`);
+    lines.push(`      component: ${name}Layout,`);
+    lines.push("      children: [");
+    for (const page of namedLayoutPages.get(name)!) {
+      lines.push(
+        `        { path: ${JSON.stringify(page.route!)}, component: ${pageComponentName(page)} },`,
+      );
+    }
+    lines.push("      ],");
+    lines.push("    },");
+  }
+  // Default chrome — the rest + the NotFound catch-all.
+  lines.push("    {");
+  lines.push(`      path: "",`);
+  lines.push("      component: DefaultLayout,");
+  lines.push("      children: [");
+  for (const page of defaultPages) {
+    lines.push(
+      `        { path: ${JSON.stringify(page.route!)}, component: ${pageComponentName(page)} },`,
+    );
+  }
+  lines.push(`        { path: "/:pathMatch(.*)*", component: NotFound },`);
+  lines.push("      ],");
+  lines.push("    },");
   lines.push("  ],");
   lines.push("});");
   lines.push("");

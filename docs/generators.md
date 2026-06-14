@@ -617,6 +617,7 @@ web_app/
 │   ├── components/<Name>.vue # user components — typed defineProps SFC, walked <template>
 │   ├── lib/<extern>.ts + lib/extern/<extern>.signature.ts  # extern frontend fns (shim + signature)
 │   ├── components/ui/      # shadcnVue only: source-copied SFCs + index.ts barrel
+│   ├── layouts/<Name>.vue + layouts/DefaultLayout.vue  # named layouts only: chrome moves out of App.vue, router nests
 │   └── pages/**/*.vue      # SFC pages — <script setup lang="ts"> + walked <template>
 └── e2e/                    # identical harness/page objects to React (testid/DOM only)
 ```
@@ -648,8 +649,13 @@ web_app/
 - A `component` body can host a `CreateForm`/`WorkflowForm` (the
   `useLoomForm` + mutation wiring transplants from the page shell);
   operation forms (Action dialogs) inside a component stay a deferral.
-- Known gaps (tracked in the plan): named layouts on vue; operation
-  forms inside user components; slot params on extern components.
+- Named layouts (`layout <Name> { header / main / footer }`) restructure
+  into nested vue-router routes: the layout SFC's inner `<router-view />`
+  is the `main` outlet, `layout: none` mounts top-level, and the default
+  chrome moves to `src/layouts/DefaultLayout.vue` with App.vue a thin
+  host.  Default-only uis keep the flat chrome-in-App.vue shape.
+- Known gaps (tracked in the plan): operation forms inside user
+  components; slot params on extern components.
 
 ## Phoenix LiveView fullstack (`platform: phoenixLiveView`)
 
