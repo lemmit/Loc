@@ -329,6 +329,17 @@ system AcmeVue {
     // through the legacy path and don't reference these params yet;
     // future explicit `page` declarations on the same UI can use
     // them directly (e.g. `body: Sales.Customer.all.data`).
+    // A named layout (Phase 8) — the Dashboard page selects it via
+    // `layout: Marketing`, so the Vue frontend restructures into nested
+    // routes (the DefaultLayout chrome + this MarketingLayout) and the
+    // LOOM_VUE_BUILD gate compiles the layout SFC + the thin App.vue
+    // (channel handlers move there) under vue-tsc.
+    layout Marketing {
+        header { Heading { "Acme Storefront", level: 3 } }
+        main
+        footer { Text { "© Acme" } }
+    }
+
     ui WebApp with scaffold(subdomains: [Catalog, Sales, CustomerMgmt]) {
         api Catalog:      CatalogApi
         api Sales:        SalesApi
@@ -356,6 +367,7 @@ system AcmeVue {
         page Dashboard {
             route: "/dashboard"
             title: "Dashboard"
+            layout: Marketing
             body: Stack { StatusPill("Active"), StatusPill("Idle"), NewCustomerWidget() }
         }
     }

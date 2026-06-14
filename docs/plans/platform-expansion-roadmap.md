@@ -85,9 +85,10 @@ Four items, independent, suggested merge order 4 → 3 → 2 → 1:
 > 3. **No IR gaps.**  Vue's reactivity surfaced POSITION questions
 >    (template auto-unwrap vs script `.value` — solved with bare-name
 >    reads everywhere walker output lands plus shell-side `.value`
->    rewrites for hook hoists), not IR-shape questions.  One parity
->    follow-up: live-refetch find-filters want `MaybeRefOrGetter` api
->    params.
+>    rewrites for hook hoists), not IR-shape questions.  The live-refetch
+>    find-filter follow-up shipped: parameterised `find` hooks take a
+>    `MaybeRefOrGetter` query (`computed(toValue(query))` in the queryKey),
+>    and the page passes a getter so a bound filter input re-fetches.
 
 **Goal:** prove the post-Phase-A `WalkerTarget` contract by adding a second
 frontend that is *not* HEEx (which has structural exemptions).

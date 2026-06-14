@@ -14,13 +14,17 @@
 > `Alert` stack on shadcnVue); and live-refetch find-filters (a
 > parameterised `find` hook takes a `MaybeRefOrGetter` query so a bound
 > filter input re-fetches — the page passes `() => ({ … })`, React stays
-> a plain object param).  **Remaining tracked gaps:** named layouts on
-> vue (Svelte omits these too — needs a vue-router nested-route
-> restructuring), operation forms (Action dialogs) inside user
-> components — create-forms and workflow run-forms inside a component DO
-> work; operation forms need the op-dialog host so they stay a narrow
-> deferral — slot params on extern components, and the docker-boot e2e
-> fold-in once the Svelte effort settles the shared LOOM_E2E gate shape.
+> a plain object param); and named layouts (`layout <Name> { header /
+> main / footer }` → nested vue-router routes; the layout SFC's inner
+> `<router-view />` is the `main` outlet, `layout: none` mounts
+> top-level, and the default chrome moves to `src/layouts/DefaultLayout.vue`
+> with App.vue a thin host — default-only uis keep the flat
+> chrome-in-App.vue shape).  **Remaining tracked gaps:** operation forms
+> (Action dialogs) inside user components — create-forms and workflow
+> run-forms inside a component DO work; operation forms need the op-dialog
+> host so they stay a narrow deferral — slot params on extern components,
+> and the docker-boot e2e fold-in once the Svelte effort settles the
+> shared LOOM_E2E gate shape.
 
 Add **Vue 3 as a frontend platform** (`platform: vue`) with feature parity to
 React, plus **two Vue design packs** (`vuetify`, `shadcnVue`) with feature
