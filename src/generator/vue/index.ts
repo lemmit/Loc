@@ -42,7 +42,12 @@ import {
 } from "../react/emit-templates.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { buildVueRealtimeHandlers } from "./realtime-handlers-builder.js";
-import { renderVueComponentFile, renderVuePage } from "./walker/page-shell.js";
+import {
+  renderVueComponentFile,
+  renderVueExternComponentProps,
+  renderVueExternComponentShim,
+  renderVuePage,
+} from "./walker/page-shell.js";
 import { vueTarget } from "./walker/vue-target.js";
 
 // ---------------------------------------------------------------------------
@@ -169,13 +174,14 @@ export function generateVueForContexts(
     out.set(`src/lib/${fn.name}.ts`, buildExternFunctionShim(fn));
   }
 
-  // User components — `src/components/<Name>.vue`.  Top-level
-  // (workspace-wide) components merge with the ui's own, ui-scope last
-  // so it shadows on name collision.  The name→params map threads into
-  // every page / component walk so a `Name(args)` call renders as the
-  // `<Name :prop="…" />` tag.  Extern components are a follow-up parity
-  // slice for vue (same posture svelte shipped with) — surface loudly
-  // rather than emit a broken import.
+  // User components.  Top-level (workspace-wide) components merge with
+  // the ui's own, ui-scope last so it shadows on name collision.  The
+  // name→params map threads into every page / component walk so a
+  // `Name(args)` call renders as the `<Name :prop="…" />` tag.  A walked
+  // component emits `src/components/<Name>.vue`; an `extern` one emits a
+  // typed `<Name>.props.ts` + a `<Name>.ts` re-export shim instead (the
+  // user owns the hand-written `.vue`), and is imported without the
+  // extension at call sites.
   const userComponents = new Map<string, readonly ParamIR[]>();
   for (const c of options.topLevelComponents ?? []) userComponents.set(c.name, c.params);
   for (const c of ui.components) userComponents.set(c.name, c.params);
@@ -183,11 +189,19 @@ export function generateVueForContexts(
   const emittedComponents = new Map<string, ComponentIR>();
   for (const c of options.topLevelComponents ?? []) emittedComponents.set(c.name, c);
   for (const c of ui.components) emittedComponents.set(c.name, c);
+  const externComponentNames = new Set<string>();
   for (const c of emittedComponents.values()) {
     if (c.extern) {
-      throw new Error(
-        `vue: extern component '${c.name}' — the extern-component escape hatch is not wired for the vue platform yet (vue-frontend-plan.md parity follow-up).`,
+      externComponentNames.add(c.name);
+      out.set(
+        `src/components/${c.name}.props.ts`,
+        renderVueExternComponentProps(c.name, c.params, aggregatesIRByName),
       );
+      out.set(
+        `src/components/${c.name}.ts`,
+        renderVueExternComponentShim(c.name, c.externPath ?? ""),
+      );
+      continue;
     }
     out.set(
       `src/components/${c.name}.vue`,
@@ -202,6 +216,7 @@ export function generateVueForContexts(
         bcByAggregate,
         pageRoutes,
         externFunctionNames,
+        externComponentNames,
       ),
     );
   }
@@ -231,7 +246,13 @@ export function generateVueForContexts(
     );
     out.set(
       pagePath(page),
-      renderVuePage({ page, routeParams: page.params.map((p) => p.name), result, pack }),
+      renderVuePage({
+        page,
+        routeParams: page.params.map((p) => p.name),
+        result,
+        pack,
+        externComponents: externComponentNames,
+      }),
     );
   }
   out.set("src/pages/NotFound.vue", renderShell(pack, "not-found-page", {}));

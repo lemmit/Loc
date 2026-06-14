@@ -4,17 +4,20 @@
 > **Parity follow-ups landed:** extern frontend functions
 > (`function <name>(...) extern from "…"`); user-defined components
 > (`src/components/<Name>.vue`, ui-scope + workspace top-level; the body
-> walks through the shared markup walker — extern components and
-> forms-inside-components still throw, a further slice); and the channels
-> toast manager (`on <channel>.<Event>` → `src/api/realtime.ts` +
-> renderless `RealtimeHandlers.vue` + a `src/lib/toast.ts` queue rendered
-> by each pack's app-shell host — `<v-alert>` on vuetify, an `Alert`
-> stack on shadcnVue); and live-refetch find-filters (a parameterised
-> `find` hook takes a `MaybeRefOrGetter` query so a bound filter input
-> re-fetches — the page passes `() => ({ … })`, React stays a plain
-> object param).  **Remaining tracked gaps:** named layouts on vue
-> (Svelte omits these too — needs a vue-router nested-route
-> restructuring), extern/forms inside user components, and the
+> walks through the shared markup walker); extern components
+> (`component <Name>(...) extern from "…"` → a typed `<Name>.props.ts` +
+> a `<Name>.ts` re-export shim, imported without the `.vue` extension —
+> slot params are a narrow deferral since Vue slots aren't props); the
+> channels toast manager (`on <channel>.<Event>` → `src/api/realtime.ts`
+> + renderless `RealtimeHandlers.vue` + a `src/lib/toast.ts` queue
+> rendered by each pack's app-shell host — `<v-alert>` on vuetify, an
+> `Alert` stack on shadcnVue); and live-refetch find-filters (a
+> parameterised `find` hook takes a `MaybeRefOrGetter` query so a bound
+> filter input re-fetches — the page passes `() => ({ … })`, React stays
+> a plain object param).  **Remaining tracked gaps:** named layouts on
+> vue (Svelte omits these too — needs a vue-router nested-route
+> restructuring), forms inside user components (host the form on a page
+> for now), slot params on extern components, and the
 > docker-boot e2e fold-in once the Svelte effort settles the shared
 > LOOM_E2E gate shape.
 
