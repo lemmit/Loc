@@ -68,11 +68,11 @@
 >   Post-#1146: lifecycle stamps (`stamp onCreate`/`onUpdate` →
 >   `_stampOnCreate`/`_stampOnUpdate` entity methods the service calls
 >   before save — closes the prior silent-drop where `createdAt` came
->   from the request; principal-referencing `currentUser` stamps and
->   event-sourced stamps stay fail-fast gated, `loom.java-stamp-unsupported`).
+>   from the request; `currentUser` stamps resolve to the principal id (the service threads
+>   `currentUser`, the entity assigns `currentUser.id()`) under auth;
+>   event-sourced stamps and currentUser stamps without auth stay
+>   fail-fast gated, `loom.java-stamp-unsupported`).
 > - **Deferred features — all fail-fast gated, never silent:**
->   principal-referencing lifecycle stamps (`currentUser` —
->   `loom.java-stamp-unsupported`),
 >   reference collections on `shape(embedded)` aggregates
 >   (`loom.java-embedded-refcoll-unsupported` — Hibernate's
 >   structured-JSON path bypasses the FormatMapper for @Embeddable ids),

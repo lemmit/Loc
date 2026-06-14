@@ -7,7 +7,7 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
@@ -67,10 +67,17 @@ export function renderJavaService(
   );
   const createArgs = createParams.map((f) => f.name).join(", ");
   // Lifecycle stamps (audit / softDelete): the entity exposes
-  // `_stampOnCreate` / `_stampOnUpdate` (non-principal values, gated
-  // upstream); the service calls them before save.
-  const hasStamp = (event: "create" | "update"): boolean =>
-    (agg.contextStamps ?? []).some((r) => r.event === event);
+  // `_stampOnCreate` / `_stampOnUpdate` the service calls before save.
+  // A stamp value that references currentUser resolves to the principal
+  // id; the method takes a `User currentUser` arg threaded from the
+  // request-scoped accessor.
+  const stampRules = (event: "create" | "update") =>
+    (agg.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments);
+  const hasStamp = (event: "create" | "update"): boolean => stampRules(event).length > 0;
+  const stampUsesUser = (event: "create" | "update"): boolean =>
+    stampRules(event).some((a) => exprUsesCurrentUser(a.value));
+  const stampCall = (event: "create" | "update"): string =>
+    `        aggregate._stampOn${upperFirst(event)}(${stampUsesUser(event) ? "currentUser" : ""});`;
   const createLines =
     hasCreate(agg) || ctx.esCreateParams
       ? [
@@ -79,8 +86,9 @@ export function renderJavaService(
           hasValidators && !ctx.esCreateParams
             ? `        ${agg.name}Validators.create(${createArgs});`
             : null,
+          stampUsesUser("create") ? `        var currentUser = currentUserAccessor.user();` : null,
           `        var aggregate = ${agg.name}.create(${createArgs});`,
-          hasStamp("create") ? `        aggregate._stampOnCreate();` : null,
+          hasStamp("create") ? stampCall("create") : null,
           `        repository.save(aggregate);`,
           `        publishEvents(aggregate);`,
           `        return aggregate.id();`,
@@ -141,9 +149,11 @@ export function renderJavaService(
     });
 
   // --- operations ----------------------------------------------------------------
+  const anyStampUsesUser = stampUsesUser("create") || stampUsesUser("update");
   const anyOpUsesUser =
-    !!ctx.authed &&
-    agg.operations.some((op) => op.visibility === "public" && operationUsesCurrentUser(op));
+    (!!ctx.authed &&
+      agg.operations.some((op) => op.visibility === "public" && operationUsesCurrentUser(op))) ||
+    anyStampUsesUser;
   const unionReturnNames = new Set<string>();
   const opLines = agg.operations
     .filter((op) => op.visibility === "public")
@@ -168,12 +178,14 @@ export function renderJavaService(
         return [
           `    public void ${op.name}(${paramSig}) {`,
           ...lets,
-          usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
+          usesUser || stampUsesUser("update")
+            ? `        var currentUser = currentUserAccessor.user();`
+            : null,
           `        var aggregate = repository.getById(id);`,
           `        aggregate.check${upperFirst(op.name)}(${args});`,
           `        ${lowerFirst(op.name)}Handler.handle(${handlerArgs});`,
           `        aggregate._assertInvariants();`,
-          hasStamp("update") ? `        aggregate._stampOnUpdate();` : null,
+          hasStamp("update") ? stampCall("update") : null,
           `        repository.save(aggregate);`,
           `        publishEvents(aggregate);`,
           `    }`,
@@ -188,7 +200,9 @@ export function renderJavaService(
       return [
         `    public ${spec ? spec.name : "void"} ${op.name}(${paramSig}) {`,
         ...lets,
-        usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
+        usesUser || stampUsesUser("update")
+          ? `        var currentUser = currentUserAccessor.user();`
+          : null,
         opHasValidator
           ? `        ${agg.name}Validators.${op.name}(${op.params.map((p) => p.name).join(", ")});`
           : null,
@@ -196,7 +210,7 @@ export function renderJavaService(
         spec
           ? `        var result = aggregate.${op.name}(${args});`
           : `        aggregate.${op.name}(${args});`,
-        hasStamp("update") ? `        aggregate._stampOnUpdate();` : null,
+        hasStamp("update") ? stampCall("update") : null,
         `        repository.save(aggregate);`,
         `        publishEvents(aggregate);`,
         spec ? `        return result;` : null,
