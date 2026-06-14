@@ -176,7 +176,9 @@ export function renderHealthController(basePkg: string): string {
   );
 }
 
-export function renderDockerfile(options: { embeddedSpa?: boolean } = {}): string {
+export function renderDockerfile(
+  options: { embeddedSpa?: boolean; spaOutDir?: string } = {},
+): string {
   // Fullstack: a node stage builds the embedded React SPA (ClientApp/)
   // and the runtime image serves the bundle from /app/ui on the same
   // origin as the /api/* controllers (SpaWebConfig).
@@ -205,21 +207,26 @@ export function renderDockerfile(options: { embeddedSpa?: boolean } = {}): strin
     `FROM eclipse-temurin:${JAVA_VERSION}-jre`,
     `WORKDIR /app`,
     `COPY --from=build /src/build/libs/*.jar app.jar`,
-    options.embeddedSpa ? `COPY --from=spa-build /spa/dist /app/ui` : null,
+    options.embeddedSpa
+      ? `COPY --from=spa-build /spa/${options.spaOutDir ?? "dist"} /app/ui`
+      : null,
     `EXPOSE 8080`,
     `ENTRYPOINT ["java", "-jar", "app.jar"]`,
     ``,
   );
 }
 
-export function renderDockerignore(options: { embeddedSpa?: boolean } = {}): string {
+export function renderDockerignore(
+  options: { embeddedSpa?: boolean; spaOutDir?: string } = {},
+): string {
   return lines(
     `build/`,
     `.gradle/`,
     `.idea/`,
     `*.iml`,
     options.embeddedSpa ? `ClientApp/node_modules/` : null,
-    options.embeddedSpa ? `ClientApp/dist/` : null,
+    options.embeddedSpa ? `ClientApp/${options.spaOutDir ?? "dist"}/` : null,
+    options.embeddedSpa && options.spaOutDir === "build" ? `ClientApp/.svelte-kit/` : null,
     ``,
   );
 }
