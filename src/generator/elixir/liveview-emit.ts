@@ -638,7 +638,10 @@ function renderUiComponents(args: {
     const attrLines = c.params
       .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)
       .join("\n");
-    const attrBlock = attrLines.length > 0 ? `${attrLines}\n` : "";
+    // A `Slot()` in the body declares the `:inner_block` slot it renders via
+    // `{render_slot(@inner_block)}` (walker sets `usesSlot`).
+    const slotLine = walked.usesSlot ? "  slot :inner_block, required: true\n" : "";
+    const attrBlock = `${attrLines.length > 0 ? `${attrLines}\n` : ""}${slotLine}`;
     return `${attrBlock}  def ${snake(c.name)}(assigns) do
     ~H"""
 ${indent(walked.heex, 4)}
