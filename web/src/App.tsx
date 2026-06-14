@@ -104,6 +104,16 @@ function analyzeDeployables(files: VirtualFile[]): DeployableAnalysis {
     if (dotnet) platformBySlug.set(dotnet[1], "dotnet");
     const phoenix = f.path.match(/^([^/]+)\/mix\.exs$/);
     if (phoenix) platformBySlug.set(phoenix[1], "phoenixLiveView");
+    // Frontend SPAs the preview engine doesn't bundle in-browser yet:
+    // SvelteKit (`svelte.config.js`; its `$app/*` client + file routing
+    // aren't reproduced) and Vue (`src/main.ts` — the `.ts` entry, vs
+    // react's `src/main.tsx`; the `.vue` SFC pipeline isn't wired).
+    // Surfaced like the backend platforms so Preview explains the grey
+    // rather than showing a silent blank — the full project is in Files.
+    const svelte = f.path.match(/^([^/]+)\/svelte\.config\.js$/);
+    if (svelte) platformBySlug.set(svelte[1], "svelte");
+    const vue = f.path.match(/^([^/]+)\/src\/main\.ts$/);
+    if (vue) platformBySlug.set(vue[1], "vue");
   }
   const unsupported: UnsupportedDeployable[] = [...platformBySlug]
     .sort(([a], [b]) => a.localeCompare(b))

@@ -35,8 +35,12 @@ export type ReactBundleStatus =
 
 /** Platforms whose generated output the playground cannot bundle or
  *  boot — i.e. anything other than Hono + React.  Listed in the UI so
- *  the user understands why Preview is grey instead of erroring out. */
-export type UnsupportedPlatform = "dotnet" | "phoenixLiveView";
+ *  the user understands why Preview is grey instead of erroring out.
+ *  `svelte` / `vue` generate a complete, downloadable project (the
+ *  preview engine bundles only the React SPA shape — SvelteKit's
+ *  `$app/*` client and Vue's SFC pipeline aren't reproduced in-browser
+ *  yet), so they're surfaced here exactly like the backend platforms. */
+export type UnsupportedPlatform = "dotnet" | "phoenixLiveView" | "svelte" | "vue";
 export interface UnsupportedDeployable {
   slug: string;
   platform: UnsupportedPlatform;
@@ -309,7 +313,16 @@ export function formatBytes(n: number): string {
 
 /** Human label for a runtime the playground can't host in-browser. */
 export function unsupportedPlatformLabel(p: UnsupportedPlatform): string {
-  return p === "dotnet" ? ".NET" : "Phoenix LiveView";
+  switch (p) {
+    case "dotnet":
+      return ".NET";
+    case "phoenixLiveView":
+      return "Phoenix LiveView";
+    case "svelte":
+      return "SvelteKit";
+    case "vue":
+      return "Vue";
+  }
 }
 
 /** Render the unsupported-deployable list as a comma-joined string —
