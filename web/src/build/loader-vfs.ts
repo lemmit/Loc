@@ -29,10 +29,19 @@ import { parseBuiltinDesignRef } from "../../../src/util/builtin-formats.js";
 import type { VfsPath } from "../vfs/types.js";
 import { getWorkerVfs } from "./worker-vfs.js";
 
-/** Top-level VFS dirs that hold pack-agnostic Handlebars sources
- *  (Vite scaffold, API integration, Docker artifacts).  Mirrors the
- *  on-disk repo-root layout — see `loader-fs.ts`. */
-const SHARED_SOURCE_DIRS = ["/vite/", "/api/", "/docker/"] as const;
+/** Top-level VFS dirs holding pack-agnostic Handlebars sources, keyed
+ *  by pack `format` — mirrors `loader-fs.ts`'s `readSharedSources`.
+ *  TSX packs read vite/+api/+docker/; HEEx reads phoenix/; svelte reads
+ *  sveltekit/ only (its dockerfile diverges, so docker/ stays TSX-side);
+ *  vue reads its own vue/ layer plus the framework-neutral api/+docker/.
+ *  The seeder (`template-bundled.ts`) hydrates every dir; the loader
+ *  selects the active subset per pack. */
+const SHARED_SOURCE_DIRS_BY_FORMAT: Record<string, readonly string[]> = {
+  tsx: ["/vite/", "/api/", "/docker/"],
+  heex: ["/phoenix/"],
+  svelte: ["/sveltekit/"],
+  vue: ["/vue/", "/api/", "/docker/"],
+};
 
 /** POSIX-style path join — duplicating the relevant slice of
  *  `node:path/posix` rather than importing it so this module stays
@@ -128,14 +137,17 @@ export function loadPack(packDir: VfsPath): LoadedPack {
   // in the VFS by the seeder) and pass them to compilePack so they
   // register as pack-agnostic partials.
   const sharedSources: Record<string, string> = {};
-  for (const dir of SHARED_SOURCE_DIRS) {
+  const sharedDirs =
+    SHARED_SOURCE_DIRS_BY_FORMAT[manifest.format ?? "tsx"] ??
+    SHARED_SOURCE_DIRS_BY_FORMAT.tsx;
+  for (const dir of sharedDirs) {
     for (const p of vfs.list(dir)) {
       if (!p.endsWith(".hbs")) continue;
       const slash = p.lastIndexOf("/");
       const logicalName = p.slice(slash + 1, -".hbs".length);
       if (sharedSources[logicalName] != null) {
         throw new Error(
-          `loader-vfs: duplicate shared template "${logicalName}" — defined under multiple shared dirs.  Logical names must be unique across ${SHARED_SOURCE_DIRS.join(", ")}.`,
+          `loader-vfs: duplicate shared template "${logicalName}" — defined under multiple shared dirs.  Logical names must be unique across ${sharedDirs.join(", ")}.`,
         );
       }
       const src = vfs.read(p);
