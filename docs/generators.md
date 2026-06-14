@@ -634,8 +634,10 @@ web_app/
 - Backend hosts (dotnet / java / phoenix) embed a `framework: vue` ui
   exactly like a React one (`vue` ∈ STATIC_BUNDLE_FRAMEWORKS).
 - User components (`component <Name>(p: T)`) emit `src/components/<Name>.vue`
-  (typed `defineProps`, walked body); extern frontend functions emit the
-  shared signature + conformance shim (`tsc` is the fail-fast).
+  (typed `defineProps`, walked body); an `extern` component emits a typed
+  `<Name>.props.ts` + a `<Name>.ts` re-export shim (call sites import
+  `components/<Name>` without the `.vue`).  Extern frontend functions emit
+  the shared signature + conformance shim (`tsc` is the fail-fast).
 - Channels (`on <channel>.<Event>`) emit the SSE client, a renderless
   `RealtimeHandlers.vue`, and a `pushToast()` queue the app-shell renders
   (a `<v-alert>` stack on vuetify, an `Alert` stack on shadcnVue).
@@ -643,8 +645,8 @@ web_app/
   `MaybeRefOrGetter<Query>` (queryKey tracks `computed(toValue(query))`)
   and the list page passes `() => ({ … })`, so a bound filter input
   re-fetches (React re-renders, so its hook stays a plain object param).
-- Known gaps (tracked in the plan): named layouts on vue;
-  extern/forms inside user components.
+- Known gaps (tracked in the plan): named layouts on vue; forms inside
+  user components; slot params on extern components.
 
 ## Phoenix LiveView fullstack (`platform: phoenixLiveView`)
 

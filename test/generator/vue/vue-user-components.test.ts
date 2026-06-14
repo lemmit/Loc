@@ -87,13 +87,57 @@ describe("user-defined components — Vue", () => {
     expect(banner).toContain("{{ shout(label) }}");
   });
 
-  it("an extern component is rejected loudly (parity follow-up)", async () => {
+  it("an extern component emits a typed props file + a re-export shim, no walked body", async () => {
+    const files = await vueFiles(
+      sys(`
+      component OrderChart(caption: string) extern from "widgets/order-chart"
+      page Home { route: "/" body: Heading { "hi" } }`),
+    );
+    const props = files.get("src/components/OrderChart.props.ts")!;
+    expect(props).toContain("export interface OrderChartProps {");
+    expect(props).toContain("caption: string;");
+    const shim = files.get("src/components/OrderChart.ts")!;
+    expect(shim).toContain('export { default } from "../widgets/order-chart";');
+    expect(shim).toContain('export type { OrderChartProps } from "./OrderChart.props";');
+    // No walked SFC for an extern component.
+    expect(files.has("src/components/OrderChart.vue")).toBe(false);
+  });
+
+  it("an aggregate-typed extern prop pulls in the wire DTO", async () => {
+    const files = await vueFiles(`
+      system S {
+        subdomain M { context C { aggregate Order { customerId: string } } }
+        ui WebApp {
+          component OrderChart(order: Order, caption: string) extern from "widgets/order-chart"
+          page Home { route: "/" body: Heading { "hi" } }
+        }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable web { platform: vue, targets: api, ui: WebApp, port: 3001 }
+      }
+    `);
+    const props = files.get("src/components/OrderChart.props.ts")!;
+    expect(props).toContain('import type { OrderResponse } from "../api/order";');
+    expect(props).toContain("order: OrderResponse;");
+  });
+
+  it("a call site imports the extern shim without the .vue extension", async () => {
+    const files = await vueFiles(
+      sys(`
+      component Banner(text: string) extern from "widgets/banner"
+      page Home { route: "/" body: Banner(text: "hello") }`),
+    );
+    const home = files.get("src/pages/home.vue")!;
+    expect(home).toContain('import Banner from "../components/Banner";');
+    expect(home).toContain('<Banner text="hello" />');
+  });
+
+  it("a slot param on an extern component is a narrow deferral (throws)", async () => {
     await expect(
       vueFiles(
         sys(`
-        component Fancy(name: string) extern from "./widgets/Fancy"
-        page Home { route: "/" body: Fancy("x") }`),
+        component Fancy(name: string, aside: slot?) extern from "widgets/fancy"
+        page Home { route: "/" body: Heading { "hi" } }`),
       ),
-    ).rejects.toThrow(/extern component 'Fancy'/);
+    ).rejects.toThrow(/slot param 'aside' on extern component 'Fancy'/);
   });
 });
