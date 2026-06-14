@@ -67,3 +67,23 @@ describe("HEEx inline-emphasis primitives (parity finding #5)", () => {
     );
   });
 });
+
+describe("HEEx simple-display primitives (parity finding #5)", () => {
+  it("Divider renders an <hr /> (testid threaded)", async () => {
+    expect(await landingHeex(`Stack { Divider(testid: "d1") }`)).toMatch(
+      /<hr [^>]*data-testid="d1" \/>/,
+    );
+  });
+
+  it("Image renders an <img> with literal src/alt", async () => {
+    const heex = await landingHeex(`Stack { Image(src: "/logo.png", alt: "Logo") }`);
+    expect(heex).toMatch(/<img [^>]*src="\/logo\.png"[^>]*alt="Logo"[^>]*\/>/);
+  });
+
+  it("Stat renders a label + value block", async () => {
+    const heex = await landingHeex(`Stack { Stat("Total", "42") }`);
+    expect(heex).toMatch(/class="stat"/);
+    expect(heex).toMatch(/Total/);
+    expect(heex).toMatch(/42/);
+  });
+});

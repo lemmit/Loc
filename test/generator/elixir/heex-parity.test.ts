@@ -48,12 +48,11 @@ const KNOWN_HEEX_GAPS: Record<string, string> = {
   DestroyForm:
     "destroy-confirm form — renderFormHeex covers create/op/workflow shapes only; not yet ported",
   // Display primitives with no HEEx renderer yet (TSX-only today).
+  // (Divider / Image / Stat now have HEEx renderers — `<hr>` / `<img>` /
+  //  a stat block — so they are no longer gaps.)
   Loader: "loading-spinner display — no HEEx renderer yet",
-  Image: "image display — no HEEx renderer yet",
   Avatar: "avatar display — no HEEx renderer yet",
   Slot: "named-slot passthrough — no HEEx equivalent wired",
-  Stat: "stat/metric display — no HEEx renderer yet",
-  Divider: "visual divider — no HEEx renderer yet",
   Money: "money formatter display — no standalone HEEx renderer yet",
   Tabs: "tabbed layout — no HEEx renderer; LiveView tab/navigation topology diverges from the JSX Tabs component",
 };
