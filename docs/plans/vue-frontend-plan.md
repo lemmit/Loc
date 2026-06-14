@@ -2,15 +2,18 @@
 
 > **Status: Slices 0–9 EXECUTED** (merged via #1117 + follow-ups).
 > **Parity follow-ups landed:** extern frontend functions
-> (`function <name>(...) extern from "…"`) and user-defined components
+> (`function <name>(...) extern from "…"`); user-defined components
 > (`src/components/<Name>.vue`, ui-scope + workspace top-level; the body
 > walks through the shared markup walker — extern components and
-> forms-inside-components still throw, a further slice).  **Remaining
-> tracked gaps:** named layouts on vue (Svelte omits these too —
-> needs a vue-router nested-route restructuring), live-refetch
-> find-filters (MaybeRefOrGetter api params), the channels toast manager,
-> and the docker-boot e2e fold-in once the Svelte effort settles the
-> shared LOOM_E2E gate shape.
+> forms-inside-components still throw, a further slice); and the channels
+> toast manager (`on <channel>.<Event>` → `src/api/realtime.ts` +
+> renderless `RealtimeHandlers.vue` + a `src/lib/toast.ts` queue rendered
+> by each pack's app-shell host — `<v-alert>` on vuetify, an `Alert`
+> stack on shadcnVue).  **Remaining tracked gaps:** named layouts on vue
+> (Svelte omits these too — needs a vue-router nested-route
+> restructuring), live-refetch find-filters (MaybeRefOrGetter api
+> params), and the docker-boot e2e fold-in once the Svelte effort settles
+> the shared LOOM_E2E gate shape.
 
 Add **Vue 3 as a frontend platform** (`platform: vue`) with feature parity to
 React, plus **two Vue design packs** (`vuetify`, `shadcnVue`) with feature
