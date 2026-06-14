@@ -3,7 +3,7 @@
 // from src/generator/react/view-builder.ts.
 
 import type { BoundedContextIR, TypeIR, ViewIR } from "../../ir/types/loom-ir.js";
-import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
 
 export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string {
   const slug = snake(view.name);
@@ -28,45 +28,55 @@ export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string
   lines.push(`    return this;`);
   lines.push(`  }`);
   lines.push("");
+  // Read the rendered rows STRUCTURALLY — the view table renders semantic
+  // `<tbody><tr><td>` across every design pack, and the cells are emitted in
+  // the same column order `collectColumnNames` derives (both follow the view's
+  // projected field list).  Per-row/cell testids would otherwise have to be
+  // threaded through every pack's table template; reading the table body keeps
+  // this pack-agnostic (and matches the Phoenix page object).
   lines.push(`  async rows(): Promise<${upperFirst(view.name)}RowText[]> {`);
+  lines.push(`    const body = this.page.getByTestId("view-${slug}").locator("tbody tr");`);
+  lines.push(`    const n = await body.count();`);
   lines.push(`    const out: ${upperFirst(view.name)}RowText[] = [];`);
-  lines.push(`    for (let i = 0; i < 1000; i++) {`);
-  lines.push(`      const row = this.page.getByTestId(\`view-${slug}-row-\${i}\`);`);
-  lines.push(`      if ((await row.count()) === 0) break;`);
-  for (const c of cols) {
-    lines.push(
-      `      const ${lowerFirst("c_" + c)} = await this.page.getByTestId(\`view-${slug}-row-\${i}-${c}\`).innerText();`,
-    );
-  }
-  const rowLiteral = cols.map((c) => `${c}: ${lowerFirst("c_" + c)}`).join(", ");
+  lines.push(`    for (let i = 0; i < n; i++) {`);
+  lines.push(`      const cells = body.nth(i).locator("td");`);
+  cols.forEach((_c, j) => {
+    lines.push(`      const c_${j} = (await cells.nth(${j}).innerText()).trim();`);
+  });
+  const rowLiteral = cols.map((c, j) => `${c}: c_${j}`).join(", ");
   lines.push(`      out.push({ ${rowLiteral} });`);
   lines.push(`    }`);
   lines.push(`    return out;`);
   lines.push(`  }`);
   lines.push("");
   lines.push(`  async count(): Promise<number> {`);
-  lines.push(`    return (await this.rows()).length;`);
+  lines.push(`    return this.page.getByTestId("view-${slug}").locator("tbody tr").count();`);
   lines.push(`  }`);
   lines.push(`}`);
   return lines.join("\n") + "\n";
 }
 
+/** The view's rendered column order — must match the table built by
+ *  `expandScaffoldViewList` (rows() indexes `<td>`s by position): the view's
+ *  projected fields, dropping value-object and array fields (which the table
+ *  doesn't render as plain cells).  No synthetic `id` column. */
 function collectColumnNames(view: ViewIR, ctx: BoundedContextIR): string[] {
-  if (view.output) return view.output.fields.map((f) => f.name);
-  if (view.source.kind === "workflow") {
+  let fields: Array<{ name: string; type: TypeIR }> = [];
+  if (view.output) {
+    fields = view.output.fields;
+  } else if (view.source.kind === "workflow") {
     const wf = ctx.workflows.find((w) => w.name === view.source.name);
-    return wf?.instanceWireShape?.map((f) => f.name) ?? ["id"];
+    fields = wf?.instanceWireShape?.map((f) => ({ name: f.name, type: f.type })) ?? [];
+  } else {
+    const agg = ctx.aggregates.find((a) => a.name === view.source.name);
+    fields = agg?.fields ?? [];
   }
-  const agg = ctx.aggregates.find((a) => a.name === view.source.name);
-  if (!agg) return ["id"];
-  const cols = ["id"];
-  for (const f of agg.fields) {
-    const inner = unwrapOpt(f.type);
-    if (inner.kind === "primitive" || inner.kind === "enum" || inner.kind === "id") {
-      cols.push(f.name);
-    }
-  }
-  return cols;
+  return fields
+    .filter((f) => {
+      const inner = unwrapOpt(f.type);
+      return inner.kind !== "valueobject" && inner.kind !== "array";
+    })
+    .map((f) => f.name);
 }
 
 function unwrapOpt(t: TypeIR): TypeIR {
