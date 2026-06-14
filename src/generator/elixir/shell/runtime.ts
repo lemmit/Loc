@@ -174,6 +174,85 @@ end
 `;
 }
 
+/**
+ * The ambient execution-context carrier for the Phoenix backend
+ * (docs/architecture/request-context.md).  The BEAM has no AsyncLocal, so
+ * the carrier rides `Logger.metadata` — per-process, and ride-along on every
+ * structured log line for free.  A Plug at the HTTP edge (mounted right after
+ * `Plug.RequestId`) mints/propagates the correlation id, captures the locale
+ * and start time, and echoes `X-Correlation-Id`; the accessor functions let
+ * non-HTTP code read the carrier without a `conn`.  Foundation-neutral (pure
+ * Plug + Logger), so the ash and vanilla endpoints emit the same module.
+ *
+ * Caveat: `Logger.metadata` does not propagate to spawned processes
+ * (`Task.async` / Oban jobs) — a background job that needs the correlation id
+ * must copy it into the child explicitly.  Frame-local ids (scope/parent) and
+ * the principal slice are deferred.
+ */
+export function renderRequestContext(appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}.RequestContext do
+  @moduledoc """
+  Ambient per-request execution context, carried in \`Logger.metadata\`.
+  Established at the HTTP edge by this Plug; read elsewhere via the accessors.
+  """
+  @behaviour Plug
+  import Plug.Conn
+
+  @correlation_header "x-correlation-id"
+  @request_id_header "x-request-id"
+
+  @impl Plug
+  def init(opts), do: opts
+
+  @impl Plug
+  def call(conn, _opts) do
+    correlation_id = resolve_correlation_id(conn)
+
+    Logger.metadata(
+      correlation_id: correlation_id,
+      locale: resolve_locale(conn),
+      started_at: System.system_time(:millisecond)
+    )
+
+    put_resp_header(conn, @correlation_header, correlation_id)
+  end
+
+  # Prefer the cross-backend X-Correlation-Id, then X-Request-Id, then the id
+  # Plug.RequestId already established (it honoured X-Request-Id or minted),
+  # else mint.  Never derived from a sampled trace id.
+  defp resolve_correlation_id(conn) do
+    first_header(conn, @correlation_header) ||
+      first_header(conn, @request_id_header) ||
+      Logger.metadata()[:request_id] ||
+      generate_id()
+  end
+
+  defp resolve_locale(conn) do
+    first_header(conn, "accept-language") || "en"
+  end
+
+  defp first_header(conn, name) do
+    case get_req_header(conn, name) do
+      [value | _] when value != "" -> value
+      _ -> nil
+    end
+  end
+
+  defp generate_id, do: Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false)
+
+  @doc "The correlation id for the current request, or nil outside a request."
+  def correlation_id, do: Logger.metadata()[:correlation_id]
+
+  @doc ~S(The request locale from Accept-Language, defaulting to "en".)
+  def locale, do: Logger.metadata()[:locale] || "en"
+
+  @doc "Epoch milliseconds at request start, or nil outside a request."
+  def started_at, do: Logger.metadata()[:started_at]
+end
+`;
+}
+
 export function renderEndpoint(appName: string, appModule: string, embedReact = false): string {
   const webModule = `${appModule}Web`;
   // Embedded-React mode: the SPA bundle lands in `priv/static/app/`
@@ -218,6 +297,7 @@ ${spaStatic}
   end
 
   plug Plug.RequestId
+  plug ${appModule}.RequestContext
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug Plug.Parsers,
