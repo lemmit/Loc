@@ -41,11 +41,8 @@ const KNOWN_HEEX_GAPS: Record<string, string> = {
   MultilineField: "input — rendered via HEEx Form-level dispatch, not a standalone primitive",
   SelectField: "input — rendered via HEEx Form-level dispatch, not a standalone primitive",
   Toggle: "boolean input — rendered via HEEx Form-level dispatch, not a standalone primitive",
-  // Inline-emphasis — no HEEx pack templates; the Phoenix walker falls through
-  // to the visible "not supported" comment (registry.ts).
-  Bold: "inline emphasis — no HEEx pack template; falls through to the divergence comment",
-  Italic: "inline emphasis — no HEEx pack template; falls through to the divergence comment",
-  InlineCode: "inline emphasis — no HEEx pack template; falls through to the divergence comment",
+  // (Bold / Italic / InlineCode now have HEEx renderers — `<strong>`/`<em>`/
+  //  `<code>` — so they are no longer gaps.)
   // Confirmation destroy form — renderFormHeex covers the create/op/workflow
   // shapes only; the LiveView destroy-confirm is the Elixir track's, not ported.
   DestroyForm:

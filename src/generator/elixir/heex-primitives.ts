@@ -772,6 +772,11 @@ const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
   Empty: { tag: ".empty", takesChildren: false },
   Badge: { tag: ".badge", takesChildren: true },
   Button: { tag: ".button", takesChildren: true },
+  // --- inline-emphasis primitives — plain HTML inline elements, the
+  //     Phoenix analogue of the TSX `<strong>`/`<em>`/`<code>` spans. ---
+  Bold: { tag: "strong", takesChildren: true },
+  Italic: { tag: "em", takesChildren: true },
+  InlineCode: { tag: "code", takesChildren: true },
   // --- scaffold expander primitives ---
   Paper: { tag: "div", staticAttrs: ["class"], takesChildren: true },
   Grid: { tag: "div", staticAttrs: ["class"], takesChildren: true },
@@ -790,6 +795,18 @@ export function renderHeading(expr: Extract<ExprIR, { kind: "call" }>, ctx: Walk
 }
 export function renderText(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Text!, expr, ctx);
+}
+export function renderBold(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Bold!, expr, ctx);
+}
+export function renderItalic(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Italic!, expr, ctx);
+}
+export function renderInlineCode(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.InlineCode!, expr, ctx);
 }
 export function renderCard(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Card!, expr, ctx);
