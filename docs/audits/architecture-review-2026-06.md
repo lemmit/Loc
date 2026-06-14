@@ -113,6 +113,36 @@ and DTO seams are lower urgency.
 > as LOC). The duplication is real and structural; the magnitude is "thousands
 > of lines of parallel choreography," not the 75K figure.
 
+> **OUTCOME (all three sub-concerns now worked through).**
+> - **Workflow emission — extracted.** The `WorkflowStmtTarget` seam
+>   (`_workflow/stmt-target.ts`) owns the 10-arm statement-sequence dispatch +
+>   `for-each` recursion; Hono, Python, Java and .NET supply leaf tables
+>   (byte-identical-gated). The *envelope* (transaction wrap / event dispatch /
+>   route shell) proved to be per-driver scaffolding and stayed per-backend, and
+>   **Elixir was assessed and declined** (its tagged-line `with`-chain assembly is
+>   a topological mismatch). Full writeup: `docs/plans/workflow-choreographer-seam.md`.
+> - **Repository emission — assessed, DECLINED.** The method *inventory* is
+>   uniform (auto `getById`/`save`/`findAll`, one method per `find`, paged finds,
+>   retrievals), but unlike workflows there is **no shared algorithmic spine** —
+>   each method is independent and its body is 100% ORM-specific query
+>   construction (EF LINQ vs JPQL `@Query` vs SQLAlchemy `select()` vs Drizzle vs
+>   Ash `read` actions). The per-ORM predicate lowering is already factored
+>   per-backend (`lowerToDrizzle` / `lowerToSqlAlchemy` / `renderJpqlWhere` / …),
+>   downstream of the `ExprTarget` seam. A `RepositoryTarget` would only share a
+>   *list of method names* while each backend re-supplied ~95% of today's body —
+>   it would wrap, not delete. Decline.
+> - **DTO / wire-shape emission — already shared; nothing left to seam.** The
+>   cross-backend-uniform part — the canonical ordered field list — is `wireShape`,
+>   derived once in enrichment (phase ⑥) and consumed by every backend's DTO
+>   emitter (`java/emit/dto.ts` walks `entity.wireShape`, etc.). What remains
+>   per-backend is irreducibly divergent field-type + record/class/schema
+>   rendering. The "spine" was extracted into the IR long ago; a generator-side
+>   seam would add indirection over divergent leaves.
+>
+> Net: the seam pattern was extended exactly as far as it pays — the workflow
+> *choreography*. The other two are either already-shared (DTO) or have no
+> algorithmic spine to share (repository).
+
 ### 5. Phoenix runs a parallel walker — justified, but the parity gap is untracked *(maintainability)*
 
 The frontend story claims a shared body-walker with framework seams captured by
@@ -230,8 +260,12 @@ called production-ready.
 3. Refresh CLAUDE.md + docs/platforms.md + docs/generators.md to the real roster.
 4. Add the missing Python/Vue test + CI gates.
 5. Resolve the `platform/` layout dichotomy (document or migrate).
-6. Extract the `WorkflowChoreographer` seam (largest duplication payoff) — design
-   + pilot plan in [`docs/plans/workflow-choreographer-seam.md`](../plans/workflow-choreographer-seam.md).
+6. ~~Extract the `WorkflowChoreographer` seam (largest duplication payoff)~~ —
+   done as `WorkflowStmtTarget` across Hono/Python/Java/.NET (Elixir declined);
+   see [`docs/plans/workflow-choreographer-seam.md`](../plans/workflow-choreographer-seam.md).
+   The lower-urgency siblings (repository, DTO) were **assessed and declined** —
+   repository has no shared algorithmic spine (ORM-specific bodies) and the DTO
+   spine is already shared via `wireShape`; see the OUTCOME note under finding #4.
 7. ~~Migrate React onto `_frontend/api-module.ts`~~ — done (shims removed).
 8. ~~Add a HEEx primitive-parity test + document HEEx as a parallel engine~~ —
    done (`test/generator/elixir/heex-parity.test.ts`; CLAUDE.md walker section).
