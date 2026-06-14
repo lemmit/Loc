@@ -580,14 +580,17 @@ generator uses (`src/generator/_walker/walker-core.ts`) with
 
 | Concern | Emission |
 |---|---|
-| Routing | SvelteKit file routing — `/orders/:id` → `src/routes/(app)/orders/[id]/+page.svelte`; route groups `(app)` (chrome) / `(bare)` (`layout: none`) carry the layout selectors.  Named layouts currently render in the `(app)` group (follow-up). |
+| Routing | SvelteKit file routing — `/orders/:id` → `src/routes/(app)/orders/[id]/+page.svelte`; route groups `(app)` (chrome) / `(bare)` (`layout: none`) carry the layout selectors.  A named `layout <Name>` lowers to its own route group `(<name>)/+layout.svelte`, rendering the header/sidebar/footer slots around `{@render children()}`; pages selecting it via `layout: <Name>` route into that group (`src/generator/svelte/layouts-emitter.ts`). |
 | Data | `@tanstack/svelte-query` v6 factories with the React hook names (`useAllCustomers`, …) — `createQuery(() => opts)` returns a runes-reactive object with the `.data`/`.isPending`/`.mutate` surface.  Zod schemas are byte-identical with the react modules (shared `src/generator/_frontend/zod-schemas.ts`). |
-| State | `let x = $state<T>(init)`; walker `:=` writes lower to plain assignments; page `title:` becomes a `$effect`. |
+| State | `let x = $state<T>(init)`; walker `:=` writes lower to plain assignments; page `title:` becomes a `$effect`.  Money page-state imports `decimal.js` so `Decimal` initial values compile (matches the react fix). |
 | Forms | Hand-rolled runes + zod helper (`src/lib/forms.svelte.ts`): `createForm(schema, defaults)` → `values` (deep-reactive bind targets), `errors` (dotted-path map), `submit`, `applyServerErrors` (RFC 7807 422 decode).  Field templates bind `form.values.<path>`. |
 | Operation modals | Page-scope `{#snippet <op>OpModal(form)}` blocks after the markup — one component per `.svelte` file means module scope lands in the template; `primitive-modal` renders `{@render <op>OpModal(<op>Form)}`. |
-| e2e | Same testid-keyed Playwright surface as react: page objects from the shared `_frontend` builders (api imports root at `src/lib/api`), smoke spec, fixtures, config.  `test e2e … against <svelte deployable>` lowers to a Playwright ui spec. |
-| Embedding | dotnet fullstack hosts embed the SvelteKit SPA under `ClientApp/` (`framework: svelte` on the ui binding; Dockerfile copies `build/` → wwwroot).  Phoenix hosting awaits `paths.base` wiring. |
-| CI | `generated-svelte-build.yml` — per `{example × pack}`: `npm install` + `svelte-check --fail-on-warnings` + `vite build` (`npm run test:svelte-build` locally). |
+| Realtime | `realtime` channels emit a `RealtimeHandlers.svelte` that subscribes via a `$effect` to `src/lib/api/realtime.ts` (shared transport contract `src/generator/_frontend/realtime.ts`), surfacing a `realtime-toast` on events — parity with the react realtime client. |
+| Extern hatch | `extern function` → a typed signature stub `src/lib/extern/<name>.signature.ts` re-exported through `$lib/<name>`.  `extern component` → a forwarding `<Name>.svelte` wrapper rendering `<Impl {...props} />` against a typed `<Name>.props.ts` (slots typed as `Snippet`). |
+| e2e | Same testid-keyed Playwright surface as react: page objects from the shared `_frontend` builders (api imports root at `src/lib/api`), smoke spec, fixtures, config.  `test e2e … against <svelte deployable>` lowers to a Playwright ui spec, gated at runtime by `generated-svelte-e2e.yml` (`vite preview` + the spec). |
+| Embedding | Every backend host can embed the SvelteKit SPA (`framework: svelte` on the ui binding).  dotnet/java fullstack hosts mount it under `ClientApp/` (Dockerfile copies `build/` → wwwroot); phoenix mounts it under `assets/` served at `/app`, with `kit.paths.base = "/app"` so asset URLs resolve (the fleet-wide base-path fix also covers react/vue). |
+| CI | `generated-svelte-build.yml` — per `{example × pack}`: `npm install` + `svelte-check --fail-on-warnings` + `vite build` (`npm run test:svelte-build` locally); `generated-svelte-e2e.yml` adds the runtime preview + Playwright gate. |
+
 ## Vue frontend (`platform: vue`)
 
 The structural mirror of the React frontend, driven by the SAME shared
