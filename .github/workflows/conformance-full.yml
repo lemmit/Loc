@@ -1,7 +1,7 @@
 name: Conformance full (nightly)
 
 # Full tier of the cross-generator conformance harness.  Generates
-# examples/showcase.ddd, builds + boots the WHOLE stack (three
+# examples/showcase.ddd, builds + boots the WHOLE stack (five
 # backends + three React frontends + postgres), and runs:
 #   - /health on every deployable,
 #   - the generated DSL-level e2e suite (vitest + fetch),

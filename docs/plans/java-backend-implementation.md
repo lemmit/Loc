@@ -1,6 +1,6 @@
 # Java backend (Spring Boot + JPA) — implementation plan
 
-> **Status:** S0–S7 + S9 SHIPPED; S8 partially shipped (see the execution
+> **Status:** S0–S9 SHIPPED (see the execution
 > record below). Supersedes the effort-shape sketch in
 > [`../proposals/java-backend.md`](../proposals/java-backend.md). Each slice
 > landed as one commit on `npm test`-green trees; the generated output was
@@ -15,14 +15,17 @@
 >   `LOOM_JAVA_BUILD` / `LOOM_OBS_E2E_JAVA` opt-in suites
 >   (`npm run test:java` / `test:obs-java`), CI workflows
 >   (`java-build.yml`, `java-obs-e2e.yml`), docs.
-> - **S8 — partial.** The build fixtures include the full java-variant
->   showcase, and validation gates keep every unsupported combination
->   fail-fast. **Follow-up:** add a java deployable to the canonical
->   `examples/showcase.ddd` and wire the 4-way OpenAPI diff into
->   `test/e2e/e2e.test.ts` — deliberately deferred because the compose
->   harness needs a docker host to iterate against (this session's
->   environment has none) and touching the canonical showcase fans out
->   into every other backend's gates.
+> - **S8 — done.** `examples/showcase.ddd` now ships a `javaApi`
+>   deployable (Catalog/Builds/People, the same contexts as the other
+>   backends, `auth: required`), and `test/e2e/e2e.test.ts` boots it as
+>   the 5th compose service in the strict cross-backend OpenAPI parity
+>   diff (`conformance-parity.yml`, `LOOM_E2E_STRICT_PARITY=1`): five
+>   backends, ten pairwise comparisons (ops / cardinality / schemas /
+>   fields / required), plus the 403 runtime-authorization parity.  The
+>   showcase java project gradle-compiles and serves a 20-path
+>   springdoc spec matching the cross-backend route contract; the
+>   normalizer already strips java's `/health` `/ready` `/openapi.json`
+>   probe paths.  CI runs the live 5-way diff on docker.
 > - **Shipped post-merge (PR #1110 follow-ups, each boot-verified
 >   against Postgres):** paged carriers (`Paged<T>` over Spring Data
 >   `Pageable`); retrievals (`run<Name>` port methods: reified
@@ -302,12 +305,17 @@ Commit the plan. *(Exit: doc pushed.)*
   generated-tests snapshot.
 - *Exit:* `npm test`, `test:java`, `test:obs-java` green locally.
 
-### S8 — System conformance integration
-- Add java to the e2e conformance harness (`test/e2e/e2e.test.ts`): 4th
-  compose service, 4-way OpenAPI diff under `LOOM_E2E_STRICT_PARITY`;
-  `showcase-completeness` + paged/union wire-parity conformance tests extended
-  to java; `.loom/` artifacts verified (wire-spec, likec4, traceability).
-- *Exit:* conformance suites green locally (docker compose boot incl. java).
+### S8 — System conformance integration — **DONE**
+- `examples/showcase.ddd` ships a `javaApi` deployable (Catalog/Builds/People,
+  `auth: required`, port 8081); `test/e2e/e2e.test.ts` boots it as the 5th
+  compose service (`java_api`) in the strict cross-backend OpenAPI parity
+  diff under `LOOM_E2E_STRICT_PARITY` — five backends, ten pairwise
+  comparisons, plus the 403 runtime-authorization parity.  `conformance-parity.yml`
+  runs the live 5-way diff on docker (timeout bumped 45→60 for the cold
+  java image build).
+- *Verified:* showcase java project gradle-compiles + boots, serves a 20-path
+  springdoc spec matching the cross-backend route contract; the openapi
+  normalizer already strips java's `/health` `/ready` `/openapi.json` probes.
 
 ### S9 — CI + docs + closure
 - Workflows: `java-build.yml` (mirror `dotnet-build.yml`: setup-java 21 +

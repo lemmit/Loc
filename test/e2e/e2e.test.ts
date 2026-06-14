@@ -40,7 +40,7 @@ const ENABLED = process.env.LOOM_E2E === "1";
 // drift between Hono / .NET / Phoenix at PR time.
 const STRICT_PARITY = process.env.LOOM_E2E_STRICT_PARITY === "1";
 
-// Parity-only mode (per-PR CI tier): build + boot only the three backends
+// Parity-only mode (per-PR CI tier): build + boot only the five backends
 // and run only the OpenAPI parity check — skip the behavioral DSL suite and
 // the Playwright UI run (and the React frontend builds they need).  The
 // full nightly tier leaves this unset.
@@ -84,10 +84,10 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
   }, 60_000);
 
   it("builds every deployable, brings up the system, and serves /health", async () => {
-    // In parity-only mode (per-PR CI tier) build + boot just the three
-    // backends + their db — the React frontends are slow to build and the
+    // In parity-only mode (per-PR CI tier) build + boot just the five
+    // backends + their db — the SPA frontends are slow to build and the
     // OpenAPI parity check doesn't need them.  The full run builds all.
-    const services = PARITY_ONLY ? " dotnet_api hono_api phoenix_api python_api" : "";
+    const services = PARITY_ONLY ? " dotnet_api hono_api phoenix_api python_api java_api" : "";
     execSync(`docker compose -f ${outDir}/docker-compose.yml build${services}`, {
       stdio: "inherit",
       timeout: 600_000,
@@ -144,6 +144,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       await pollHealthy("http://localhost:8000/health", 120_000); // pythonApi
       await pollHealthy("http://localhost:8080/health", 120_000); // dotnetApi
       await pollHealthy("http://localhost:4000/health", 180_000); // phoenixApi
+      await pollHealthy("http://localhost:8081/health", 180_000); // javaApi
     } catch (err) {
       // Same forensic capture as the up -d catch: containers are up
       // (up -d succeeded), but one didn't get to "responding on
@@ -253,11 +254,12 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     900_000,
   );
 
-  it("cross-check (4-way): Hono / .NET / Phoenix / Python OpenAPI parity", async () => {
-    // All four backends serve the same modules from showcase.ddd, so
+  it("cross-check (5-way): Hono / .NET / Phoenix / Python / Java OpenAPI parity", async () => {
+    // All five backends serve the same modules from showcase.ddd, so
     // their OpenAPI specs should describe the same contract.  Hono via
     // @hono/zod-openapi, .NET via Swashbuckle, Phoenix via OpenApiSpex,
-    // Python via FastAPI (+ the install_openapi parity post-processor).
+    // Python via FastAPI (+ the install_openapi parity post-processor),
+    // Java via springdoc-openapi.
     let specs: Record<string, OpenApiSpec>;
     try {
       specs = {
@@ -265,6 +267,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         dotnet: await fetchSpec("http://localhost:8080/swagger/v1/swagger.json"),
         phoenix: await fetchSpec("http://localhost:4000/api/openapi.json"),
         python: await fetchSpec("http://localhost:8000/openapi.json"),
+        java: await fetchSpec("http://localhost:8081/openapi.json"),
       };
     } catch (err) {
       // /health succeeded but a spec endpoint didn't.  Most likely cause is
@@ -305,7 +308,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       expect(collectOps(spec).size, `${name} emits at least one operation`).toBeGreaterThan(0);
     }
 
-    // Compare each pair of backends.  Three pairs total — hono↔dotnet,
+    // Compare each pair of backends.  Ten pairs total (5 choose 2) — hono↔dotnet,
     // hono↔phoenix, dotnet↔phoenix.  The third pair catches drift
     // where two non-Hono backends diverge from each other in a way
     // that's NOT a Hono divergence (e.g., both Phoenix and .NET
@@ -381,7 +384,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
 
     if (cleanOverall) {
       console.info(
-        "[parity] all four backends agree across all six pairs (ops / cardinality / schemas / fields / required).",
+        "[parity] all five backends agree across all ten pairs (ops / cardinality / schemas / fields / required).",
       );
     }
   }, 120_000);
@@ -390,9 +393,9 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
   // showcase's `registerProject` workflow guards on
   // `currentUser.permissions.length > 0`; every backend's dev-stub auth
   // verifier returns an admin user with EMPTY permissions, so an
-  // authenticated request must be DENIED with 403 on all three backends.
+  // authenticated request must be DENIED with 403 on all five backends.
   //
-  // Runs in parity-only mode too (the three backends are already booted).
+  // Runs in parity-only mode too (the five backends are already booted).
   // History: Hono once 500'd (unbound currentUser, #759), Phoenix once
   // 500'd (`.length` field access #759, then uncaught `throw` #771) — both
   // fixed.  .NET still 500s despite correct-looking generated code; this
@@ -405,6 +408,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       dotnet: "http://localhost:8080/workflows/register_project",
       phoenix: "http://localhost:4000/api/workflows/register_project",
       python: "http://localhost:8000/workflows/register_project",
+      java: "http://localhost:8081/workflows/register_project",
     };
     const statuses: Record<string, number> = {};
     const bodies: Record<string, string> = {};
@@ -435,7 +439,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     }
 
     // Every backend must deny with 403 — not 400 (domain/validation) and
-    // not 500 (a guard crash).  Asserting all three at once names which
+    // not 500 (a guard crash).  Asserting each at once names which
     // backend diverged in the failure message.
     for (const [name, status] of Object.entries(statuses)) {
       expect(
