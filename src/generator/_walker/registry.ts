@@ -56,12 +56,14 @@ import {
   renderAlert as renderAlertHeex,
   renderAnchor as renderAnchorHeex,
   renderBadge as renderBadgeHeex,
+  renderBold as renderBoldHeex,
   renderBreadcrumbs as renderBreadcrumbsHeex,
   renderButton as renderButtonHeex,
   renderCard as renderCardHeex,
   renderCodeBlock as renderCodeBlockHeex,
   renderContainer as renderContainerHeex,
   renderDateDisplay as renderDateDisplayHeex,
+  renderDivider as renderDividerHeex,
   renderEmpty as renderEmptyHeex,
   renderEnumBadge as renderEnumBadgeHeex,
   renderForm as renderFormHeex,
@@ -70,6 +72,9 @@ import {
   renderHeading as renderHeadingHeex,
   renderIcon as renderIconHeex,
   renderIdLink as renderIdLinkHeex,
+  renderImage as renderImageHeex,
+  renderInlineCode as renderInlineCodeHeex,
+  renderItalic as renderItalicHeex,
   renderKeyValueRow as renderKeyValueRowHeex,
   renderModal as renderModalHeex,
   renderPaper as renderPaperHeex,
@@ -77,6 +82,7 @@ import {
   renderSection as renderSectionHeex,
   renderSkeleton as renderSkeletonHeex,
   renderStack as renderStackHeex,
+  renderStat as renderStatHeex,
   renderSticky as renderStickyHeex,
   renderTableColumn as renderTableColumnHeex,
   renderTable as renderTableHeex,
@@ -252,7 +258,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   // --- Display -----------------------------------------------------------
   Loader: { group: "layout", admissibleInSource: true, tsx: emitLoader },
   Anchor: { group: "layout", admissibleInSource: true, tsx: emitAnchor, heex: renderAnchorHeex },
-  Image: { group: "layout", admissibleInSource: true, tsx: emitImage },
+  Image: { group: "layout", admissibleInSource: true, tsx: emitImage, heex: renderImageHeex },
   Avatar: { group: "layout", admissibleInSource: true, tsx: emitAvatar },
   Slot: { group: "layout", admissibleInSource: true, tsx: emitSlot },
   Heading: {
@@ -262,16 +268,20 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     heex: renderHeadingHeex,
   },
   Text: { group: "layout", admissibleInSource: true, tsx: emitText, heex: renderTextHeex },
-  // Inline-emphasis primitives — TSX only today; Phoenix/HEEx does
-  // not have pack templates for these and falls through to the
-  // visible "not supported" comment.
-  Bold: { group: "layout", admissibleInSource: true, tsx: emitBold },
-  Italic: { group: "layout", admissibleInSource: true, tsx: emitItalic },
-  InlineCode: { group: "layout", admissibleInSource: true, tsx: emitInlineCode },
+  // Inline-emphasis primitives — `<strong>`/`<em>`/`<code>` spans on
+  // both targets (TSX via the design pack; HEEx via plain inline tags).
+  Bold: { group: "layout", admissibleInSource: true, tsx: emitBold, heex: renderBoldHeex },
+  Italic: { group: "layout", admissibleInSource: true, tsx: emitItalic, heex: renderItalicHeex },
+  InlineCode: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitInlineCode,
+    heex: renderInlineCodeHeex,
+  },
   Button: { group: "layout", admissibleInSource: true, tsx: emitButton, heex: renderButtonHeex },
-  Stat: { group: "layout", admissibleInSource: true, tsx: emitStat },
+  Stat: { group: "layout", admissibleInSource: true, tsx: emitStat, heex: renderStatHeex },
   Badge: { group: "layout", admissibleInSource: true, tsx: emitBadge, heex: renderBadgeHeex },
-  Divider: { group: "layout", admissibleInSource: true, tsx: emitDivider },
+  Divider: { group: "layout", admissibleInSource: true, tsx: emitDivider, heex: renderDividerHeex },
   Table: { group: "layout", admissibleInSource: true, tsx: emitTable, heex: renderTableHeex },
   Money: { group: "layout", admissibleInSource: true, tsx: emitMoney },
   DateDisplay: {

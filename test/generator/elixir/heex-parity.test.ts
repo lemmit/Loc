@@ -41,22 +41,18 @@ const KNOWN_HEEX_GAPS: Record<string, string> = {
   MultilineField: "input — rendered via HEEx Form-level dispatch, not a standalone primitive",
   SelectField: "input — rendered via HEEx Form-level dispatch, not a standalone primitive",
   Toggle: "boolean input — rendered via HEEx Form-level dispatch, not a standalone primitive",
-  // Inline-emphasis — no HEEx pack templates; the Phoenix walker falls through
-  // to the visible "not supported" comment (registry.ts).
-  Bold: "inline emphasis — no HEEx pack template; falls through to the divergence comment",
-  Italic: "inline emphasis — no HEEx pack template; falls through to the divergence comment",
-  InlineCode: "inline emphasis — no HEEx pack template; falls through to the divergence comment",
+  // (Bold / Italic / InlineCode now have HEEx renderers — `<strong>`/`<em>`/
+  //  `<code>` — so they are no longer gaps.)
   // Confirmation destroy form — renderFormHeex covers the create/op/workflow
   // shapes only; the LiveView destroy-confirm is the Elixir track's, not ported.
   DestroyForm:
     "destroy-confirm form — renderFormHeex covers create/op/workflow shapes only; not yet ported",
   // Display primitives with no HEEx renderer yet (TSX-only today).
+  // (Divider / Image / Stat now have HEEx renderers — `<hr>` / `<img>` /
+  //  a stat block — so they are no longer gaps.)
   Loader: "loading-spinner display — no HEEx renderer yet",
-  Image: "image display — no HEEx renderer yet",
   Avatar: "avatar display — no HEEx renderer yet",
   Slot: "named-slot passthrough — no HEEx equivalent wired",
-  Stat: "stat/metric display — no HEEx renderer yet",
-  Divider: "visual divider — no HEEx renderer yet",
   Money: "money formatter display — no standalone HEEx renderer yet",
   Tabs: "tabbed layout — no HEEx renderer; LiveView tab/navigation topology diverges from the JSX Tabs component",
 };

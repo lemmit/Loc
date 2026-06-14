@@ -141,6 +141,8 @@ export function renderRepositoryImpl(
         "                Inputs = System.Text.Json.JsonSerializer.Serialize(__lin.Inputs, ProvJson.Options),",
         "                ComputedValue = System.Text.Json.JsonSerializer.Serialize(__lin.ComputedValue, ProvJson.Options),",
         "                At = DateTime.UtcNow,",
+        "                CorrelationId = RequestContext.Current?.CorrelationId,",
+        "                ScopeId = RequestContext.Current?.ScopeId,",
         "            });",
         "        }",
       ]

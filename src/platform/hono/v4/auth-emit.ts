@@ -100,16 +100,18 @@ export function assertUserVerifierRegistered(): void {
 function renderMiddleware(): string {
   return `// Auto-generated.
 import { createMiddleware } from "hono/factory";
+import { requestContext } from "../obs/als";
 import type { User } from "./user-types";
 import { verifyUserOrThrow } from "./verifier";
 
 const BYPASS_PREFIXES = ["/health", "/ready", "/openapi.json", "/swagger"] as const;
 
-/** Hono middleware that decodes the request's JWT into a User and
- *  stashes it on the request scope under the key "currentUser".
- *  Bypass list matches the .NET side — framework endpoints stay
- *  anonymous so smoke tests + the OpenAPI cross-check don't need
- *  tokens. */
+/** Hono middleware that decodes the request's JWT into a User, attaches it
+ *  to the ambient RequestContext (the one source of truth, readable by
+ *  non-HTTP code via \`requireCurrentUser()\`), and also stashes it on the
+ *  Hono request scope under "currentUser" for HTTP-layer reads.  Bypass
+ *  list matches the .NET side — framework endpoints stay anonymous so
+ *  smoke tests + the OpenAPI cross-check don't need tokens. */
 export const authMiddleware = createMiddleware<{
   Variables: { currentUser: User };
 }>(async (c, next) => {
@@ -126,8 +128,27 @@ export const authMiddleware = createMiddleware<{
   } catch {
     return c.json({ error: "unauthorized" }, 401);
   }
+  // Attach the principal to the ambient frame (read by non-HTTP code via
+  // requireCurrentUser) and to the Hono context (read by route handlers
+  // that hold \`c\`).
+  const ctx = requestContext();
+  if (ctx) ctx.currentUser = user;
   c.set("currentUser", user);
   await next();
 });
+
+/** The verified principal for the current request, read from the ambient
+ *  RequestContext — the analogue of .NET's ICurrentUserAccessor.User.
+ *  Throws when no principal is bound, so anonymous / bypassed paths must
+ *  not call it. */
+export function requireCurrentUser(): User {
+  const user = requestContext()?.currentUser;
+  if (user == null) {
+    throw new Error(
+      "currentUser is not available — ensure authMiddleware ran for this route.",
+    );
+  }
+  return user as User;
+}
 `;
 }

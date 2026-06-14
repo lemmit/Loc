@@ -45,6 +45,22 @@ export function renderRequestContext(
     public ILogger? Logger { get; set; }
 `
     : "";
+  // The principal serialized for audit's `actor` column.  Auth-conditional
+  // here so consumers (the audited command handler) call a stable
+  // `PrincipalJson()` without referencing the auth-only CurrentUser slice or
+  // the Auth namespace — when there is no principal slice it is simply null.
+  const principalJsonMethod = hasAuth
+    ? `
+    /// <summary>The bound principal serialized as JSON (audit's actor), or
+    /// null when no principal has been resolved for this flow.</summary>
+    public string? PrincipalJson()
+        => CurrentUser is { } u ? System.Text.Json.JsonSerializer.Serialize(u) : null;
+`
+    : `
+    /// <summary>No principal slice on this carrier (no auth), so there is no
+    /// actor to serialize.</summary>
+    public string? PrincipalJson() => null;
+`;
   return `// Auto-generated.
 using System;
 using System.Threading;
@@ -81,7 +97,7 @@ ${currentUserSlice}${loggerSlice}
     // child whose ParentId chains to its caller, forming the causality chain.
     public string ScopeId { get; init; } = string.Empty;
     public string? ParentId { get; init; }
-
+${principalJsonMethod}
     /// <summary>Open the root frame for a flow: a fresh scope with no parent.
     /// The principal and logger slices are attached later by the boundary
     /// middleware / pipeline behaviour.</summary>

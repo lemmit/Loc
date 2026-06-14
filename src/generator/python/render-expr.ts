@@ -33,6 +33,12 @@ import {
 export interface PyRenderContext {
   /** Rendered name for the implicit receiver (`self` by default). */
   thisName: string;
+  /** Render `this`-family field refs as the VERBATIM (camelCase) wire name
+   *  off `thisName` — `self.commitSha` — instead of the snake_case domain
+   *  spelling.  Set when rendering a predicate against a request DTO (the
+   *  Pydantic `@model_validator` for cross-field invariants), whose fields
+   *  keep the wire casing. */
+  wireField?: boolean;
   /** Method-name prefix for `function` / `private-operation` call
    *  targets and `helper-fn` refs.  Defaults to `_` (aggregate
    *  functions are private).  Value-object emission passes `""` —
@@ -200,11 +206,14 @@ function renderRef(e: RefExpr, ctx: PyRenderContext): string {
     case "lambda":
       return snake(e.name);
     case "this-prop":
-      // Inside the aggregate class: the private backing field.  Outside
-      // (row scope, e.g. view binds): the public property.
+      // Wire DTO: the verbatim camelCase attribute.  Inside the aggregate
+      // class: the private backing field.  Outside (row scope, e.g. view
+      // binds): the public property.
+      if (ctx.wireField) return `${ctx.thisName}.${e.name}`;
       return fromOutside ? `${ctx.thisName}.${snake(e.name)}` : `self._${snake(e.name)}`;
     case "this-vo-prop":
     case "this-derived":
+      if (ctx.wireField) return `${ctx.thisName}.${e.name}`;
       return `${ctx.thisName}.${snake(e.name)}`;
     case "helper-fn":
       return `${ctx.thisName}.${ctx.fnPrefix ?? "_"}${snake(e.name)}`;

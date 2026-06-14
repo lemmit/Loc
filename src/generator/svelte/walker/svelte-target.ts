@@ -55,17 +55,6 @@ export const svelteTarget: WalkerTarget = {
     return `${ref.name} = ${value}`;
   },
 
-  /** Same JS zero values as TSX (the generated app shares the wire
-   *  shape and the decimal.js money representation). */
-  renderStateInit(field: StateFieldIR, init: ExprIR | undefined): string {
-    if (init !== undefined) {
-      // Caller pre-renders explicit initializers via its own walker
-      // context (mirrors tsxTarget.renderStateInit's contract note).
-      return defaultInitForJs(field.type);
-    }
-    return defaultInitForJs(field.type);
-  },
-
   // --- API binding seam ---------------------------------------------------
 
   /** Identical naming to the TSX target — the svelte api modules

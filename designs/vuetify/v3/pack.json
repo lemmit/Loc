@@ -71,5 +71,8 @@
     "form-runs-decls": "form-runs-decls.hbs",
     "realtime-toast": "realtime-toast.hbs",
     "op-dialog": "op-dialog.hbs"
+  },
+  "imports": {
+    "realtime-toast": [{ "from": "../lib/toast", "named": ["pushToast"] }]
   }
 }

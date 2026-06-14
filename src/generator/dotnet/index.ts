@@ -456,6 +456,7 @@ function emitProjectFromContexts(
     hasSubscriptions,
     hasOutbox,
     hasAudit,
+    hasProvenance,
     resourceNugetDeps: resourceEmission.nugetDeps,
   });
   emitTestProject(merged, ns, out);
@@ -947,6 +948,11 @@ function emitProject(
     /** Per-operation audit (audit-and-logging.md): registers the scoped
      *  `IAuditWriter` → `AuditWriter` the audited command handlers depend on. */
     hasAudit?: boolean;
+    /** Field-level provenance (provenance.md): the lineage history table +
+     *  co-located columns.  Together with `hasAudit` it forces the ambient
+     *  RequestContext to exist so audit/provenance rows can stamp the request
+     *  correlation id + scope id. */
+    hasProvenance?: boolean;
     resourceNugetDeps?: Record<string, string>;
   },
 ): void {
@@ -999,12 +1005,12 @@ function emitProject(
   // with Phoenix's <App>.Telemetry and Hono's pino access log.
   out.set("Middleware/RequestLoggingMiddleware.cs", renderRequestLoggingMiddleware(ns));
   // Ambient execution context (docs/architecture/request-context.md).
-  // The one AsyncLocal carrier the principal slice (auth) and the
-  // request-logger slice (--trace) both ride.  Emitted when either slice
-  // is present; a no-auth, no-trace project emits neither file, keeping
-  // the default artefact byte-identical.
+  // The one AsyncLocal carrier the principal slice (auth), the request-logger
+  // slice (--trace), and the audit/provenance correlation stamps all ride.
+  // Emitted when any of those is present; a project with none emits neither
+  // file, keeping the default artefact byte-identical.
   const authRequired = !!options?.authRequired;
-  const hasCarrier = authRequired || emitTrace;
+  const hasCarrier = authRequired || emitTrace || !!options?.hasAudit || !!options?.hasProvenance;
   if (hasCarrier) {
     out.set(
       "Domain/Common/RequestContext.cs",

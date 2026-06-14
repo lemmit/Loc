@@ -1,7 +1,16 @@
-import type { PageIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ExprIR,
+  PageIR,
+  ParamIR,
+  StateFieldIR,
+  TypeIR,
+} from "../../../ir/types/loom-ir.js";
+import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
-import type { OperationFormState, WalkResult } from "../../_walker/walker-core.js";
+import { type OperationFormState, type WalkResult, walkBody } from "../../_walker/walker-core.js";
 import { idTargetHookVar } from "../../react/form-helpers.js";
 import { vueTarget } from "./vue-target.js";
 
@@ -42,6 +51,10 @@ export interface VuePageShellInput {
    *  `op-dialog` template so the modal markup stays pack-owned
    *  (v-dialog on vuetify, the ui Dialog components on shadcnVue). */
   pack: LoadedPack;
+  /** Names of `extern` user components — imported without the `.vue`
+   *  extension (they resolve to a `<Name>.ts` re-export shim forwarding
+   *  the hand-written module), unlike walked components (`<Name>.vue`). */
+  externComponents?: ReadonlySet<string>;
 }
 
 export function renderVuePage(input: VuePageShellInput): string {
@@ -127,7 +140,12 @@ export function renderVuePage(input: VuePageShellInput): string {
     if (seenVars.has(use.varName)) continue;
     seenVars.add(use.varName);
     const args = scriptArgs(use.argsRendered ?? []);
-    hookLines.push(`const ${use.varName} = reactive(${use.hookName}(${args}));`);
+    // A parameterised `find` query takes a `MaybeRefOrGetter` arg on
+    // Vue: pass it as a getter so vue-query re-runs when a bound filter
+    // input changes (a snapshot `{ status: status.value }` would freeze
+    // the query at setup).  Other hooks take their captured value.
+    const callArg = use.reactiveQuery && args !== "" ? `() => (${args})` : args;
+    hookLines.push(`const ${use.varName} = reactive(${use.hookName}(${callArg}));`);
     vueImports.add("reactive");
     const names = apiImports.get(use.importFrom) ?? new Set<string>();
     names.add(use.hookName);
@@ -263,6 +281,12 @@ export function renderVuePage(input: VuePageShellInput): string {
   if (vueImports.size > 0) {
     script.push(`import { ${[...vueImports].sort().join(", ")} } from "vue";`);
   }
+  // A money-typed `state {}` field refs as `ref(new Decimal("0"))` —
+  // pull decimal.js into the <script setup> (the dep rides the
+  // deployable's money-usage flag in package.json).
+  if (result.usesState && page.state.some((f) => typeUsesMoney(f.type))) {
+    script.push(`import Decimal from "decimal.js";`);
+  }
   if (needsRoute && needsNavigate) {
     script.push(`import { useRoute, useRouter } from "vue-router";`);
   } else if (needsRoute) {
@@ -278,6 +302,21 @@ export function renderVuePage(input: VuePageShellInput): string {
   );
   if (usesLoomForm) {
     script.push(`import { useLoomForm } from "${relPrefix(input)}lib/form";`);
+  }
+  // Extern frontend functions called from the body — one conformance-
+  // shim import per used name (`src/lib/<name>.ts`).  The shim re-exports
+  // the user's impl behind the Loom-derived signature, so call sites get
+  // a stable import regardless of where the user's module lives.
+  for (const name of [...(result.usedExternFunctions ?? new Set<string>())].sort()) {
+    script.push(`import { ${name} } from "${relPrefix(input)}lib/${name}";`);
+  }
+  // User components the body invoked — one default-import per name.
+  // Walked components resolve to `<Name>.vue`; `extern` ones resolve to
+  // the `<Name>.ts` re-export shim (imported without the extension), so
+  // the walker's `<Name :prop="…" />` tag binds either way.
+  for (const n of [...result.usedUserComponents].sort()) {
+    const ext = input.externComponents?.has(n) ? "" : ".vue";
+    script.push(`import ${n} from "${relPrefix(input)}components/${n}${ext}";`);
   }
   for (const [from, names] of [...apiImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const adjusted = adjustDepth(from, input);
@@ -323,11 +362,6 @@ export function renderVuePage(input: VuePageShellInput): string {
   script.push(...stateLines);
   script.push(...hookLines);
   script.push(...opFormLines);
-  if (result.usedUserComponents.size > 0) {
-    script.push(
-      `// TODO(vue-components): user components not yet supported by the Vue walker (${[...result.usedUserComponents].join(", ")})`,
-    );
-  }
   // Trim trailing blanks.
   while (script.length > 0 && script[script.length - 1] === "") script.pop();
 
@@ -374,4 +408,300 @@ function indent(markup: string, prefix: string): string {
     .split("\n")
     .map((l) => (l.length > 0 ? prefix + l : l))
     .join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// User components — `src/components/<Name>.vue`
+//
+// The Vue analogue of react's `renderUserComponentFile`, common-case
+// scope: a typed `defineProps`, `ref()` state, nested user-component
+// invocation, extern-function shims, and `Action(<inst>.<op>)` mutation
+// hoists.  Component files sit one hop from `src/`, so api / lib / format
+// imports resolve via `../`, and sibling components via `./<Name>.vue`.
+//
+// Forms inside a component (an aggregate/operation/workflow `Form`) are a
+// parity follow-up: they throw loudly here rather than emit broken markup
+// — host the form on a page (the same posture Svelte shipped components
+// with).
+// ---------------------------------------------------------------------------
+
+/** Map a Loom type to its prop TS spelling — wire-DTO for aggregate
+ *  params (recorded into `dtoImports`), primitives/ids/enums to their TS
+ *  equivalents.  Mirrors `_frontend/extern-functions.ts`'s `wireTsType`. */
+function componentPropTsType(
+  t: TypeIR,
+  aggregatesByName: ReadonlyMap<string, AggregateIR>,
+  dtoImports: Map<string, string>,
+): string {
+  switch (t.kind) {
+    case "primitive":
+      switch (t.name) {
+        case "int":
+        case "long":
+        case "decimal":
+          return "number";
+        case "bool":
+          return "boolean";
+        case "string":
+        case "datetime":
+        case "guid":
+          return "string";
+        case "json":
+          return "unknown";
+        default:
+          throw new Error(`vue component: unsupported primitive '${t.name}' in prop.`);
+      }
+    case "entity":
+      if (aggregatesByName.has(t.name)) {
+        dtoImports.set(`${t.name}Response`, `../api/${lowerFirst(t.name)}`);
+        return `${t.name}Response`;
+      }
+      return "unknown";
+    case "id":
+      return "string";
+    case "enum":
+      return "string";
+    case "array":
+      return `${componentPropTsType(t.element, aggregatesByName, dtoImports)}[]`;
+    case "optional":
+      return `${componentPropTsType(t.inner, aggregatesByName, dtoImports)} | undefined`;
+    default:
+      throw new Error(`vue component: unsupported prop type kind '${t.kind}'.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Extern components — the UI escape hatch.  A `component <Name>(...) extern
+// from "<path>"` makes Loom own two files and import the user's `.vue`
+// module:
+//   ① `src/components/<Name>.props.ts` — the typed props interface derived
+//      from the params' wire shape; the user annotates their `defineProps`.
+//   ② `src/components/<Name>.ts` — a re-export shim forwarding the user
+//      module's default + the props type, so call sites import
+//      `components/<Name>` (no extension) exactly as for a walked component.
+// Vue slots are a template construct (`<slot>`), not props, so a `slot`
+// param on a vue extern component is a narrow deferral (throws) — pass slot
+// content as children at the call site instead.
+// ---------------------------------------------------------------------------
+
+/** ① The typed props interface at `src/components/<Name>.props.ts`. */
+export function renderVueExternComponentProps(
+  name: string,
+  params: readonly ParamIR[],
+  aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
+): string {
+  const dtoImports = new Map<string, string>();
+  const propType = (p: ParamIR): string => {
+    const t = p.type;
+    const action =
+      t.kind === "action"
+        ? t
+        : t.kind === "optional" && t.inner.kind === "action"
+          ? t.inner
+          : undefined;
+    if (action) {
+      return action.arg
+        ? `(arg: ${componentPropTsType(action.arg, aggregatesByName, dtoImports)}) => void`
+        : "() => void";
+    }
+    if (t.kind === "slot" || (t.kind === "optional" && t.inner.kind === "slot")) {
+      throw new Error(
+        `vue: slot param '${p.name}' on extern component '${name}' — Vue slots are template content, not props; pass slot content as children at the call site (vue-frontend-plan.md).`,
+      );
+    }
+    return componentPropTsType(t, aggregatesByName, dtoImports);
+  };
+  const propLines = params.map((p) => {
+    const optional = p.type.kind === "optional" && p.type.inner.kind === "action";
+    return `  ${p.name}${optional ? "?:" : ":"} ${propType(p)};`;
+  });
+  const dtoImportLines = [...dtoImports.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([type, mod]) => `import type { ${type} } from "${mod}";\n`)
+    .join("");
+  const body =
+    propLines.length > 0
+      ? `export interface ${name}Props {\n${propLines.join("\n")}\n}\n`
+      : `export type ${name}Props = Record<string, never>;\n`;
+  return `// AUTO-GENERATED by Loom — typed props for the extern component '${name}'.
+// Do not edit; overwritten on every generate.  Import this type into your
+// hand-written .vue module (declared via \`component ${name}(...) extern from\`).
+${dtoImportLines}\n${body}`;
+}
+
+/** ② The re-export shim at `src/components/<Name>.ts`. */
+export function renderVueExternComponentShim(name: string, externPath: string): string {
+  const rel = externPath.replace(/^\.?\//, "");
+  return `// AUTO-GENERATED extern component shim.  Re-exports the hand-written
+// module declared via \`component ${name}(...) extern from "${externPath}"\`.
+// Loom owns this shim and './${name}.props'; you own '../${rel}'.
+export { default } from "../${rel}";
+export type { ${name}Props } from "./${name}.props";
+`;
+}
+
+export function renderVueComponentFile(
+  name: string,
+  params: readonly ParamIR[],
+  state: readonly StateFieldIR[],
+  body: ExprIR,
+  pack: LoadedPack,
+  userComponents: ReadonlyMap<string, readonly ParamIR[]>,
+  aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  pageRoutes: ReadonlyMap<string, string> = new Map(),
+  externFunctions: ReadonlySet<string> = new Set(),
+  externComponents: ReadonlySet<string> = new Set(),
+): string {
+  const paramNames = new Set(params.map((p) => p.name));
+  const stateNames = new Set(state.map((s) => s.name));
+  // Aggregate-typed params power `Action(<inst>.<op>)` resolution.
+  const paramTypes = new Map<string, string>();
+  for (const p of params) {
+    if (p.type.kind === "entity" && aggregatesByName.has(p.type.name)) {
+      paramTypes.set(p.name, p.type.name);
+    }
+  }
+  const result = walkBody(
+    body,
+    vueTarget,
+    pack,
+    paramNames,
+    stateNames,
+    userComponents,
+    [],
+    aggregatesByName,
+    bcByAggregate,
+    new Map(),
+    new Map(),
+    paramTypes,
+    pageRoutes,
+    externFunctions,
+  );
+  if (result.formOfs.length > 0) {
+    throw new Error(
+      `vue: forms inside user components are not yet supported (component '${name}') — host the form on a page (vue-frontend-plan.md parity follow-up).`,
+    );
+  }
+
+  const script: string[] = [];
+  const vueImports = new Set<string>();
+
+  // Prop typing.
+  const dtoImports = new Map<string, string>();
+  const propFields = params.map(
+    (p) => `${p.name}: ${componentPropTsType(p.type, aggregatesByName, dtoImports)};`,
+  );
+
+  // State — `ref()` per field + a `set<Pascal>` setter (the shared input
+  // primitives' VM references it), matching the page shell.
+  const stateLines: string[] = [];
+  if (result.usesState) {
+    for (const f of state) {
+      stateLines.push(`const ${f.name} = ref(${vueTarget.defaultInitFor(f.type)});`);
+      const pascal = upperFirst(f.name);
+      stateLines.push(
+        `const set${pascal} = (v: typeof ${f.name}.value) => { ${f.name}.value = v; };`,
+      );
+      vueImports.add("ref");
+    }
+  }
+
+  // `Action(<inst>.<op>)` mutation hoists — the only api a component
+  // body reaches (no apiParams in component scope).  Hoist args (when
+  // present) reference props/state; re-point them for script position.
+  const rewriteScript = (s: string): string => {
+    let out = s;
+    for (const n of stateNames) {
+      out = out.replace(new RegExp(`\\b${n}\\b(?!\\.value)`, "g"), `${n}.value`);
+    }
+    for (const n of paramNames) {
+      out = out.replace(new RegExp(`\\b${n}\\b(?!\\.value)`, "g"), `props.${n}`);
+    }
+    return out;
+  };
+  const apiImports = new Map<string, Set<string>>();
+  const seenVars = new Set<string>();
+  const hookLines: string[] = [];
+  for (const m of result.actionMutations) {
+    if (seenVars.has(m.localVar)) continue;
+    seenVars.add(m.localVar);
+    hookLines.push(`const ${m.localVar} = reactive(${m.hookName}());`);
+    vueImports.add("reactive");
+    const from = `../api/${m.aggCamel}`;
+    const names = apiImports.get(from) ?? new Set<string>();
+    names.add(m.hookName);
+    apiImports.set(from, names);
+  }
+  const rewrittenHooks = hookLines.map(rewriteScript);
+  const propsReferenced = rewrittenHooks.some((l) => l.includes("props."));
+  const needsNavigate = result.usesNavigate;
+
+  // --- script assembly, imports first -------------------------------------
+  if (vueImports.size > 0) {
+    script.push(`import { ${[...vueImports].sort().join(", ")} } from "vue";`);
+  }
+  // A money-typed `state {}` field refs as `ref(new Decimal("0"))` —
+  // pull decimal.js in, same as the page shell.
+  if (result.usesState && state.some((f) => typeUsesMoney(f.type))) {
+    script.push(`import Decimal from "decimal.js";`);
+  }
+  if (needsNavigate) {
+    script.push(`import { useRouter } from "vue-router";`);
+  }
+  for (const [type, mod] of [...dtoImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    script.push(`import type { ${type} } from "${mod}";`);
+  }
+  // Format helpers — imported unconditionally (mirrors the page shell;
+  // the generated tsconfig keeps unused named imports tolerable).
+  script.push(
+    `import { EMPTY, formatBool, formatDateTime, formatMoney, formatNumber, formatPlain, isEmpty, shortId } from "../lib/format";`,
+  );
+  for (const [from, names] of [...apiImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    script.push(`import { ${[...names].sort().join(", ")} } from "${from}";`);
+  }
+  for (const fn of [...(result.usedExternFunctions ?? new Set<string>())].sort()) {
+    script.push(`import { ${fn} } from "../lib/${fn}";`);
+  }
+  for (const n of [...result.usedUserComponents].sort()) {
+    const ext = externComponents.has(n) ? "" : ".vue";
+    script.push(`import ${n} from "./${n}${ext}";`);
+  }
+  // Pack per-primitive imports (shadcnVue barrel etc.) — same filter as
+  // the page shell: only non-relative, non-RHF specifiers pass through.
+  const walkerInternalSources = new Set(["react-hook-form", "@hookform/resolvers/zod"]);
+  for (const [from, names] of [...result.imports.entries()].sort(([a], [b]) =>
+    a.localeCompare(b),
+  )) {
+    if (names.size === 0) continue;
+    if (walkerInternalSources.has(from) || from.startsWith("./") || from.startsWith("../")) {
+      continue;
+    }
+    script.push(`import { ${[...names].sort().join(", ")} } from "${from}";`);
+  }
+  script.push("");
+  if (propFields.length > 0) {
+    // `const props =` only when the script references a prop — keeps an
+    // otherwise-unused binding out (template auto-exposes props by name).
+    script.push(`${propsReferenced ? "const props = " : ""}defineProps<{`);
+    for (const f of propFields) script.push(`  ${f}`);
+    script.push(`}>();`);
+  }
+  if (needsNavigate) {
+    script.push("const router = useRouter();");
+    script.push("const navigate = (to: string) => { void router.push(to); };");
+  }
+  script.push(...stateLines);
+  script.push(...rewrittenHooks);
+  while (script.length > 0 && script[script.length - 1] === "") script.pop();
+
+  return `<!-- Auto-generated.  Do not edit by hand.  (${name}) -->
+<script setup lang="ts">
+${script.join("\n")}
+</script>
+
+<template>
+${indent(result.tsx, "  ")}
+</template>
+`;
 }

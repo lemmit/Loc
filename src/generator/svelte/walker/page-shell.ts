@@ -29,6 +29,7 @@ import type {
   UiApiParamIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
+import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { idTargetHookVar } from "../../_frontend/form-helpers.js";
 import type { LoadedPack } from "../../_packs/loader.js";
@@ -293,11 +294,18 @@ export function renderSveltePage(
   const stateLines = effectiveUsesState
     ? state.map((f) => `  ${renderRunesState(f, pack)}\n`).join("")
     : "";
+  // A money-typed `state {}` field renders as `$state<Decimal>(new
+  // Decimal("0"))` — pull decimal.js into the <script> (the dep rides
+  // the deployable's money-usage flag in package.json).
+  const decimalImport =
+    effectiveUsesState && state.some((f) => typeUsesMoney(f.type))
+      ? `  import Decimal from "decimal.js";\n`
+      : "";
 
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${navigateImport}${pageStateImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}</script>
+${navigateImport}${pageStateImport}${decimalImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}</script>
 
 ${indentJsx(tsx, "")}
 ${templateScope}`;
@@ -426,10 +434,14 @@ export function renderSvelteComponentFile(
     markup = markup.split(`{${p.name}}`).join(`{@render ${p.name}?.()}`);
   }
   const stateLines = usesState ? state.map((f) => `  ${renderRunesState(f, pack)}\n`).join("") : "";
+  const decimalImport =
+    usesState && state.some((f) => typeUsesMoney(f.type))
+      ? `  import Decimal from "decimal.js";\n`
+      : "";
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${snippetImport}${navigateImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}</script>
+${snippetImport}${navigateImport}${decimalImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}</script>
 
 ${indentJsx(markup, "")}
 ${templateScope}`;
@@ -437,6 +449,90 @@ ${templateScope}`;
 
 function isSlotShape(t: ParamIR["type"]): boolean {
   return t.kind === "slot" || (t.kind === "optional" && t.inner.kind === "slot");
+}
+
+function actionShape(t: ParamIR["type"]): Extract<ParamIR["type"], { kind: "action" }> | undefined {
+  if (t.kind === "action") return t;
+  if (t.kind === "optional" && t.inner.kind === "action") return t.inner;
+  return undefined;
+}
+
+/** Machine-owned typed props for an `extern` component, at
+ *  `src/lib/components/<Name>.props.ts` — the SvelteKit sibling of
+ *  react's `renderExternComponentProps`.  Each declared param becomes a
+ *  typed field by the same wire rules the walked component uses: an
+ *  aggregate-typed param gets the wire DTO (`<Agg>Response`, imported
+ *  from `$lib/api/<agg>`), `slot` / `slot?` map to Svelte 5's `Snippet`,
+ *  an `action` param maps to a void callback (Tier 2), everything else
+ *  falls back to the route-param shape.  The hand-written `.svelte`
+ *  module imports this type to check its `$props()`. */
+export function renderSvelteExternComponentProps(
+  name: string,
+  params: ParamIR[],
+  aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
+): string {
+  const dtoImports = new Map<string, string>();
+  const wireType = (t: ParamIR["type"]): string => {
+    if (t.kind === "entity" && aggregatesByName.has(t.name)) {
+      dtoImports.set(`${t.name}Response`, `$lib/api/${lowerFirst(t.name)}`);
+      return `${t.name}Response`;
+    }
+    if (t.kind === "array") return `${wireType(t.element)}[]`;
+    return "string";
+  };
+  const propType = (p: ParamIR): string => {
+    if (p.type.kind === "entity" || (p.type.kind === "array" && p.type.element.kind === "entity")) {
+      return wireType(p.type);
+    }
+    if (isSlotShape(p.type)) return "Snippet";
+    const action = actionShape(p.type);
+    if (action) return action.arg ? `(arg: ${wireType(action.arg)}) => void` : "() => void";
+    return typeRefAsTsString(p);
+  };
+  const propLines = params.map((p) => {
+    const optional =
+      p.type.kind === "optional" &&
+      (p.type.inner.kind === "slot" || p.type.inner.kind === "action");
+    return `  ${p.name}${optional ? "?:" : ":"} ${propType(p)};`;
+  });
+  const needsSnippet = params.some((p) => isSlotShape(p.type));
+  const snippetImport = needsSnippet ? `import type { Snippet } from "svelte";\n` : "";
+  const dtoImportLines = [...dtoImports.entries()]
+    .map(([type, mod]) => `import type { ${type} } from "${mod}";\n`)
+    .join("");
+  const body =
+    propLines.length > 0
+      ? `export interface ${name}Props {\n${propLines.join("\n")}\n}\n`
+      : `export type ${name}Props = Record<string, never>;\n`;
+  return `// AUTO-GENERATED by Loom — typed props for the extern component '${name}'.
+// Do not edit; overwritten on every generate.  Import this type from your
+// hand-written .svelte module (declared via \`component ${name}(...) extern from\`).
+${snippetImport}${dtoImportLines}\n${body}`;
+}
+
+/** Machine-owned re-export wrapper for an `extern` component, at
+ *  `src/lib/components/<Name>.svelte`.  Call sites import
+ *  `$lib/components/<Name>.svelte` exactly as for a walked component;
+ *  the wrapper forwards its typed `$props()` to the hand-written module
+ *  at the `from` path (src-relative, so two `../` hops up from
+ *  `src/lib/components/`).  Loom owns this wrapper + `<Name>.props.ts`;
+ *  the user owns the target module — a missing target or a props
+ *  mismatch fails `svelte-check`, the fail-fast (react's contract,
+ *  SvelteKit shape). */
+export function renderSvelteExternComponentShim(name: string, externPath: string): string {
+  const rel = externPath.replace(/^\.?\//, "");
+  return `<!-- AUTO-GENERATED extern component shim.  Forwards to the hand-written
+     module declared via \`component ${name}(...) extern from "${externPath}"\`.
+     Loom owns this wrapper + './${name}.props'; you own '../../${rel}'. -->
+<script lang="ts">
+  import Impl from "../../${rel}";
+  import type { ${name}Props } from "./${name}.props";
+
+  const props: ${name}Props = $props();
+</script>
+
+<Impl {...props} />
+`;
 }
 
 /** `let name = $state<T>(init);` — one per state field. */

@@ -66,10 +66,18 @@ export function buildApiModule(
   options: ApiModuleOptions = {},
 ): string {
   const queryPackage = options.queryPackage ?? "@tanstack/react-query";
+  // Vue's reactivity is pull-based: a parameterised `find` query takes a
+  // `MaybeRefOrGetter` so a bound filter input live-refetches (React
+  // re-renders and passes fresh args every render — no wrapper needed).
+  const isVueQuery = queryPackage === "@tanstack/vue-query";
+  const hasParamFind = !!repo?.finds.some((f) => f.name !== "all");
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { z } from "zod";`);
   lines.push(`import { useQuery, useMutation, useQueryClient } from "${queryPackage}";`);
+  if (isVueQuery && hasParamFind) {
+    lines.push(`import { type MaybeRefOrGetter, computed, toValue } from "vue";`);
+  }
   lines.push(`import { api } from "./client";`);
   if (aggregateUsesMoney(agg)) {
     // Shared `moneySchema` — single home for the precise-decimal
@@ -295,9 +303,32 @@ export function buildApiModule(
             : find.returnType.kind === "optional"
               ? `${agg.name}Response.nullable()`
               : `${agg.name}Response`;
-      lines.push(
-        `export function use${upperFirst(find.name)}${agg.name}(query: ${upperFirst(find.name)}Query) {`,
-      );
+      const queryType = `${upperFirst(find.name)}Query`;
+      if (isVueQuery) {
+        // Reactive: the arg is a getter/ref; `computed(toValue)` makes
+        // the query key (and fetch) track its source so a bound filter
+        // input live-refetches.
+        lines.push(
+          `export function use${upperFirst(find.name)}${agg.name}(query: MaybeRefOrGetter<${queryType}>) {`,
+        );
+        lines.push(`  const queryArgs = computed(() => toValue(query));`);
+        lines.push(`  return useQuery({`);
+        lines.push(`    queryKey: ["${tag}", "find", "${findSnake}", queryArgs],`);
+        lines.push(`    queryFn: async () => {`);
+        lines.push(
+          `      const qs = new URLSearchParams(Object.entries(queryArgs.value).map(([k, v]) => [k, String(v)])).toString();`,
+        );
+        lines.push(
+          `      const r = await api.get(\`/${tag}/${findSnake}\${qs ? "?" + qs : ""}\`);`,
+        );
+        lines.push(`      return ${responseSchema}.parse(r);`);
+        lines.push(`    },`);
+        lines.push(`  });`);
+        lines.push(`}`);
+        lines.push("");
+        continue;
+      }
+      lines.push(`export function use${upperFirst(find.name)}${agg.name}(query: ${queryType}) {`);
       lines.push(`  return useQuery({`);
       lines.push(`    queryKey: ["${tag}", "find", "${findSnake}", query],`);
       lines.push(`    queryFn: async () => {`);

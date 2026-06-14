@@ -55,6 +55,8 @@ export function renderAuditRecord(ns: string): string {
       "    public string After { get; set; } = default!;",
       "    public DateTime At { get; set; }",
       "    public string Status { get; set; } = default!;",
+      "    public string? CorrelationId { get; set; }",
+      "    public string? ScopeId { get; set; }",
       "}",
     ) + "\n"
   );
@@ -87,7 +89,10 @@ export function renderAuditRecordConfiguration(ns: string): string {
       '        builder.Property(x => x.After).HasColumnName("after").HasColumnType("jsonb");',
       '        builder.Property(x => x.At).HasColumnName("at");',
       '        builder.Property(x => x.Status).HasColumnName("status");',
+      '        builder.Property(x => x.CorrelationId).HasColumnName("correlation_id");',
+      '        builder.Property(x => x.ScopeId).HasColumnName("scope_id");',
       "        builder.HasIndex(x => new { x.TargetType, x.TargetId });",
+      "        builder.HasIndex(x => x.CorrelationId);",
       "    }",
       "}",
     ) + "\n"

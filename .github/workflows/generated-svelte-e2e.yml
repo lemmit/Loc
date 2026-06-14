@@ -1,0 +1,73 @@
+name: Generated Svelte e2e
+
+# Runtime e2e for the Svelte frontend: generate the SvelteKit project,
+# `vite build` it, serve the static bundle with `vite preview`, and run
+# the SPA's own emitted Playwright smoke spec (every param-less page
+# navigates + loads) against it.  The runtime sibling of
+# generated-svelte-build.yml — that gate compiles the bundle; this one
+# proves it actually runs.  Pure client-side smoke (no backend), so no
+# docker/postgres sidecar is needed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'designs/**'
+      - 'examples/svelte-shop.ddd'
+      - 'sveltekit/**'
+      - 'stacks/**'
+      - 'test/e2e/generated-svelte-e2e.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-svelte-e2e.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'designs/**'
+      - 'examples/svelte-shop.ddd'
+      - 'sveltekit/**'
+      - 'stacks/**'
+      - 'test/e2e/generated-svelte-e2e.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-svelte-e2e.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  svelte-e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pack: ['shadcnSvelte@v1', 'flowbite@v1']
+    timeout-minutes: 20
+    name: svelte-shop × ${{ matrix.pack }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # Root install runs the `prepare` lifecycle (langium:generate).
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Run svelte runtime e2e
+        env:
+          LOOM_SVELTE_E2E: '1'
+          LOOM_SVELTE_E2E_PACK: ${{ matrix.pack }}
+        run: npx vitest run test/e2e/generated-svelte-e2e.test.ts

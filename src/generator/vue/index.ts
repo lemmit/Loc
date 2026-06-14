@@ -1,18 +1,27 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  ComponentIR,
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   PageIR,
+  ParamIR,
   SystemIR,
   UiIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
-import { contextUsesMoney } from "../../ir/types/loom-ir.js";
+import { contextUsesMoney, uiUsesMoney } from "../../ir/types/loom-ir.js";
+import { realtimeEventTypes } from "../../ir/util/channels.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
+import {
+  buildExternFunctionShim,
+  buildExternFunctionSignature,
+} from "../_frontend/extern-functions.js";
+import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
+import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { buildViewsApiModule, hasAnyView } from "../_frontend/views-module.js";
 import { buildWorkflowsApiModule, hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
@@ -32,8 +41,13 @@ import {
   REACT_LIB_SCHEMAS_MONEY_TS,
 } from "../react/emit-templates.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
-import { prepareThemeVM } from "../react/templating/preparers/theme.js";
-import { renderVuePage } from "./walker/page-shell.js";
+import { buildVueRealtimeHandlers } from "./realtime-handlers-builder.js";
+import {
+  renderVueComponentFile,
+  renderVueExternComponentProps,
+  renderVueExternComponentShim,
+  renderVuePage,
+} from "./walker/page-shell.js";
 import { vueTarget } from "./walker/vue-target.js";
 
 // ---------------------------------------------------------------------------
@@ -66,6 +80,12 @@ export interface GenerateVueOptions {
    *  for root-served hosts (dotnet/java wwwroot, standalone) →
    *  byte-identical. */
   basePath?: string;
+  /** Top-level (workspace-wide) components — pure render functions
+   *  declared as bare `ModelMember`s in any reachable `.ddd` document.
+   *  Merged into the per-ui name→params map; emitted as
+   *  `src/components/<Name>.vue` (ui-scope wins on name collisions).
+   *  Mirrors `GenerateReactOptions.topLevelComponents`. */
+  topLevelComponents?: ComponentIR[];
 }
 
 export function generateVueForContexts(
@@ -138,6 +158,69 @@ export function generateVueForContexts(
   }
   const pageRoutes = new Map<string, string>();
   for (const page of pages) pageRoutes.set(page.name, page.route!);
+
+  // Extern frontend functions (extern-function-hook-escape-hatch.md §3):
+  // the SAME two machine-owned files as react — the wire-DTO-typed
+  // signature (`src/lib/extern/<name>.signature.ts`; Vue keeps the api
+  // modules at `src/api/` like react, so the default `"../../api"`
+  // import root is correct) and the conformance shim
+  // (`src/lib/<name>.ts`).  Body calls register through
+  // `externFunctionNames`; the page shell imports each used shim as
+  // `<relPrefix>lib/<name>`.
+  const externFunctionNames = new Set<string>();
+  for (const fn of ui.functions ?? []) {
+    externFunctionNames.add(fn.name);
+    out.set(`src/lib/extern/${fn.name}.signature.ts`, buildExternFunctionSignature(fn));
+    out.set(`src/lib/${fn.name}.ts`, buildExternFunctionShim(fn));
+  }
+
+  // User components.  Top-level (workspace-wide) components merge with
+  // the ui's own, ui-scope last so it shadows on name collision.  The
+  // name→params map threads into every page / component walk so a
+  // `Name(args)` call renders as the `<Name :prop="…" />` tag.  A walked
+  // component emits `src/components/<Name>.vue`; an `extern` one emits a
+  // typed `<Name>.props.ts` + a `<Name>.ts` re-export shim instead (the
+  // user owns the hand-written `.vue`), and is imported without the
+  // extension at call sites.
+  const userComponents = new Map<string, readonly ParamIR[]>();
+  for (const c of options.topLevelComponents ?? []) userComponents.set(c.name, c.params);
+  for (const c of ui.components) userComponents.set(c.name, c.params);
+
+  const emittedComponents = new Map<string, ComponentIR>();
+  for (const c of options.topLevelComponents ?? []) emittedComponents.set(c.name, c);
+  for (const c of ui.components) emittedComponents.set(c.name, c);
+  const externComponentNames = new Set<string>();
+  for (const c of emittedComponents.values()) {
+    if (c.extern) {
+      externComponentNames.add(c.name);
+      out.set(
+        `src/components/${c.name}.props.ts`,
+        renderVueExternComponentProps(c.name, c.params, aggregatesIRByName),
+      );
+      out.set(
+        `src/components/${c.name}.ts`,
+        renderVueExternComponentShim(c.name, c.externPath ?? ""),
+      );
+      continue;
+    }
+    out.set(
+      `src/components/${c.name}.vue`,
+      renderVueComponentFile(
+        c.name,
+        c.params,
+        c.state,
+        c.body!,
+        pack,
+        userComponents,
+        aggregatesIRByName,
+        bcByAggregate,
+        pageRoutes,
+        externFunctionNames,
+        externComponentNames,
+      ),
+    );
+  }
+
   for (const page of pages) {
     if (!page.body) {
       out.set(pagePath(page), renderPageStub(page));
@@ -151,7 +234,7 @@ export function generateVueForContexts(
       pack,
       paramNames,
       stateNames,
-      new Map(), // user components — vue support lands with the parity slice
+      userComponents,
       ui.apiParams,
       aggregatesIRByName,
       bcByAggregate,
@@ -159,10 +242,17 @@ export function generateVueForContexts(
       bcByWorkflow,
       new Map(),
       pageRoutes,
+      externFunctionNames,
     );
     out.set(
       pagePath(page),
-      renderVuePage({ page, routeParams: page.params.map((p) => p.name), result, pack }),
+      renderVuePage({
+        page,
+        routeParams: page.params.map((p) => p.name),
+        result,
+        pack,
+        externComponents: externComponentNames,
+      }),
     );
   }
   out.set("src/pages/NotFound.vue", renderShell(pack, "not-found-page", {}));
@@ -181,7 +271,7 @@ export function generateVueForContexts(
     aggregatesByName: aggregatesIRByName,
     contextsByName: new Map(contexts.map((c) => [c.name, c])),
     pack,
-    topLevelComponents: [],
+    topLevelComponents: options.topLevelComponents ?? [],
   });
   for (const [path, content] of pageObjects) out.set(path, content);
   out.set("e2e/smoke.spec.ts", smokeSpec(ui));
@@ -215,6 +305,27 @@ export function generateVueForContexts(
   // generated pages' field inputs and v-form handlers bind to it.
   out.set("src/lib/form.ts", renderShell(pack, "loom-form", {}));
 
+  // Realtime SSE client + live-event handlers (channels.md Part I).
+  // Mirrors the react/svelte wiring: when the targeted backend exposes
+  // the realtime wire (any `delivery: broadcast` channel; Hono is the
+  // only backend serving GET /realtime/events so far), emit the
+  // EventSource client.  When the ui ALSO declares `on <channel>.<Event>`
+  // handlers, emit the renderless RealtimeHandlers component + the toast
+  // queue the app-shell mounts; the config module exports `API_BASE_URL`
+  // on Vue (the SvelteKit symbol).
+  const realtimeTypes =
+    target?.platform === "node"
+      ? [...new Set(contexts.flatMap((c) => [...realtimeEventTypes(c)]))].sort()
+      : [];
+  if (realtimeTypes.length > 0) {
+    out.set("src/api/realtime.ts", renderRealtimeClient(realtimeTypes, "API_BASE_URL"));
+  }
+  const hasRealtimeHandlers = realtimeTypes.length > 0 && (ui.notifications?.length ?? 0) > 0;
+  if (hasRealtimeHandlers) {
+    out.set("src/components/RealtimeHandlers.vue", buildVueRealtimeHandlers(ui, pack));
+    out.set("src/lib/toast.ts", renderShell(pack, "toast", {}));
+  }
+
   // Pack shell tier.
   out.set("src/theme.ts", renderShell(pack, "theme", prepareThemeVM(sys.theme)));
   out.set("src/main.ts", renderShell(pack, "main", {}));
@@ -223,10 +334,11 @@ export function generateVueForContexts(
     renderShell(pack, "app-shell", {
       systemNameHuman: humanize(sys.name),
       navSections: deriveNavSections(pages),
+      hasRealtimeHandlers,
     }),
   );
 
-  const usesMoney = contexts.some(contextUsesMoney);
+  const usesMoney = contexts.some(contextUsesMoney) || uiUsesMoney(ui);
   if (usesMoney) {
     out.set("src/lib/schemas.ts", REACT_LIB_SCHEMAS_MONEY_TS);
   }

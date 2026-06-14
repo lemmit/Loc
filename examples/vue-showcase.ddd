@@ -86,6 +86,16 @@ system AcmeVue {
 
             event OrderConfirmed { order: Order id, at: datetime }
 
+            // A broadcast channel so the Vue frontend can wire a live
+            // `on Live.OrderConfirmed` toast (channels.md Part I) — the
+            // LOOM_VUE_BUILD gate then compiles RealtimeHandlers.vue + the
+            // toast host + the App mount under vue-tsc.
+            channel OrderEvents {
+                carries: OrderConfirmed
+                delivery: broadcast
+                retention: ephemeral
+            }
+
             aggregate Order with crudish {
                 customerId: string
                 status: OrderStatus
@@ -323,6 +333,25 @@ system AcmeVue {
         api Catalog:      CatalogApi
         api Sales:        SalesApi
         api CustomerMgmt: CustomerMgmtApi
+
+        // A live channel notification (channels.md Part I) — the Vue
+        // frontend emits src/api/realtime.ts, a renderless
+        // RealtimeHandlers.vue, and the toast host in App.vue.
+        channel Live: Orders.OrderEvents
+        on Live.OrderConfirmed(e) { toast("Order " + e.order + " confirmed") }
+
+        // A reusable user component (covers ComponentIR emission on the
+        // Vue backend) + a page that invokes it, so the LOOM_VUE_BUILD
+        // gate compiles both the `src/components/StatusPill.vue` file and
+        // the `<StatusPill :label="…" />` invocation under vue-tsc.
+        component StatusPill(label: string) {
+            body: Card { Badge { label } }
+        }
+        page Dashboard {
+            route: "/dashboard"
+            title: "Dashboard"
+            body: Stack { StatusPill("Active"), StatusPill("Idle") }
+        }
     }
 
     // React + React Query + Zod + Mantine frontend.  References the

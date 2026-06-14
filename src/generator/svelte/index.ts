@@ -6,6 +6,7 @@ import {
   type EnrichedAggregateIR,
   type EnrichedBoundedContextIR,
   type SystemIR,
+  uiUsesMoney,
 } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
@@ -160,7 +161,7 @@ export function generateSvelteForContexts(
   if (hasRealtimeHandlers) {
     out.set("src/lib/components/RealtimeHandlers.svelte", buildSvelteRealtimeHandlers(ui, pack));
   }
-  const usesMoney = contexts.some(contextUsesMoney);
+  const usesMoney = contexts.some(contextUsesMoney) || uiUsesMoney(ui);
   if (usesMoney) {
     out.set("src/lib/schemas.ts", SVELTE_LIB_SCHEMAS_MONEY);
   }

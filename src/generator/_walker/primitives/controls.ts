@@ -386,7 +386,7 @@ export function emitUserComponent(
     const namedTarget = argNames[i];
     if (namedTarget !== undefined) {
       const param = params.find((p) => p.name === namedTarget);
-      attrs.push(`${namedTarget}=${attrValue(arg, ctx, depth, param?.type)}`);
+      attrs.push(componentAttr(namedTarget, arg, ctx, depth, param?.type));
       continue;
     }
     // Advance the cursor past any params that were already filled
@@ -397,7 +397,7 @@ export function emitUserComponent(
     const param = params[nextParamCursor];
     if (param) {
       nextParamCursor += 1;
-      attrs.push(`${param.name}=${attrValue(arg, ctx, depth, param.type)}`);
+      attrs.push(componentAttr(param.name, arg, ctx, depth, param.type));
     } else {
       // No more declared params — extra positional arg becomes a
       // JSX child.
@@ -414,14 +414,22 @@ export function emitUserComponent(
   return `${open}>\n${indent}${childTsx}\n${closeIndent}</${call.name}>`;
 }
 
-/** Render an ExprIR as a JSX attribute value.
- *  String literals → `"text"` (quoted attr); for a slot-typed param,
- *  the arg is walked as JSX in the caller's scope and brace-wrapped
- *  so the JSX element flows in as a `ReactNode` prop value; for an
- *  action-typed param the arg is a lambda emitted as a typed arrow in
- *  the caller's scope (Tier 2); everything else → `{<emitExpr>}`
- *  (brace-wrapped JS expression). */
-function attrValue(expr: ExprIR, ctx: WalkContext, depth: number, paramType?: TypeIR): string {
+/** Render a single user-component attribute, name included
+ *  (`name="text"` / `:name="expr"` / `name={expr}` per framework).
+ *  String literals → a static quoted attr (`name="text"`, identical
+ *  across frameworks); a slot-typed param walks its arg as JSX in the
+ *  caller's scope, brace-wrapped into a `ReactNode` prop (react-only);
+ *  an action-typed param emits a typed arrow (Tier 2, react-only);
+ *  every other dynamic value routes through the target's
+ *  `renderAttrBinding` so the JSX vs Vue-`v-bind` form is the seam's
+ *  call, not hardcoded here. */
+function componentAttr(
+  name: string,
+  expr: ExprIR,
+  ctx: WalkContext,
+  depth: number,
+  paramType?: TypeIR,
+): string {
   const isSlot =
     paramType?.kind === "slot" ||
     (paramType?.kind === "optional" && paramType.inner.kind === "slot");
@@ -432,10 +440,10 @@ function attrValue(expr: ExprIR, ctx: WalkContext, depth: number, paramType?: Ty
         ? paramType.inner
         : undefined;
   if (action && expr.kind === "lambda") {
-    return `{${emitActionLambda(expr, action, ctx)}}`;
+    return `${name}={${emitActionLambda(expr, action, ctx)}}`;
   }
   if (!isSlot && expr.kind === "literal" && expr.lit === "string") {
-    return JSON.stringify(expr.value);
+    return `${name}=${JSON.stringify(expr.value)}`;
   }
   if (isSlot) {
     // Slot args walk in the caller's env — `order.confirm` /
@@ -444,13 +452,13 @@ function attrValue(expr: ExprIR, ctx: WalkContext, depth: number, paramType?: Ty
     // flags raised inside (usesNavigate, usesRouterLink, …) propagate
     // through `ctx` directly since we walk against the same context.
     const jsx = walk(expr, ctx, depth + 1);
-    return `{${jsx}}`;
+    return `${name}={${jsx}}`;
   }
-  // User-component attr values stay JSX-shaped (`{expr}`) — the
-  // user-component invocation path is JSX-only until the Vue
-  // user-component slice; renderAttrBinding owns the cross-framework
-  // dynamic-attr form for the seam-routed call sites.
-  return `{${emitExpr(expr, ctx)}}`;
+  // Dynamic non-slot value — the target owns the cross-framework
+  // dynamic-attr form (`name={expr}` JSX vs `:name="expr"` v-bind).
+  // `renderAttrBinding` returns the attr with a leading separator
+  // space; the open-tag assembly adds its own, so trim it here.
+  return ctx.target.renderAttrBinding(name, emitExpr(expr, ctx)).trimStart();
 }
 
 /** Render a lambda passed to an `action`-typed component param as a TS
