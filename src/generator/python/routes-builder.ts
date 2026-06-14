@@ -37,6 +37,7 @@ import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../util/error-d
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
+import { renderPyExpr } from "./render-expr.js";
 import { emittableFinds } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -160,7 +161,7 @@ export function buildPyRoutesFile(
     refersTo("datetime") || refersTo("Decimal") ? "" : null,
     `from fastapi import ${["APIRouter", "Depends", refersTo("Path") ? "Path" : null, refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
     refersTo("JSONResponse") ? "from fastapi.responses import JSONResponse" : null,
-    `from pydantic import ${["BaseModel", refersTo("Field") ? "Field" : null, refersTo("RootModel") ? "RootModel" : null].filter(Boolean).join(", ")}`,
+    `from pydantic import ${["BaseModel", refersTo("Field") ? "Field" : null, refersTo("RootModel") ? "RootModel" : null, refersTo("model_validator") ? "model_validator" : null].filter(Boolean).join(", ")}`,
     refersTo("IntegrityError") ? "from sqlalchemy.exc import IntegrityError" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
@@ -360,6 +361,42 @@ function withFieldConstraint(name: string, decl: string, fieldExpr: string | und
   return `    ${name}: ${type} = Field(default=${dflt}, ${inner})`;
 }
 
+/** A Pydantic `@model_validator(mode="after")` enforcing the wire-scoped
+ *  invariants that are NOT single-field shapes (cross-field comparisons like
+ *  `handle != email`, or guarded predicates) — the refine fallback the other
+ *  backends emit (Hono's `.refine`, Phoenix's `validate fn`).  Single-field
+ *  invariants are handled by `Field(...)` constraints; this raises ValueError
+ *  → FastAPI 422 for the rest, so a violation surfaces as 422 (not the
+ *  domain's DomainError → 400).  Predicates render against the request DTO's
+ *  verbatim camelCase fields (`self.handle`). */
+function createModelValidator(
+  agg: EnrichedAggregateIR,
+  available: ReadonlySet<string>,
+): string | null {
+  const refines = agg.invariants.filter(
+    (inv) => classifyForWire(inv, { available }) && !singleFieldConstraints(inv),
+  );
+  if (refines.length === 0) return null;
+  const cls = `Create${agg.name}Request`;
+  const checks = refines.map((inv) => {
+    const pred = renderPyExpr(inv.expr, { thisName: "self", wireField: true });
+    const ok = inv.guard
+      ? `not (${renderPyExpr(inv.guard, { thisName: "self", wireField: true })}) or (${pred})`
+      : pred;
+    return lines(
+      `        if not (${ok}):`,
+      `            raise ValueError(${JSON.stringify(`Invariant violated: ${inv.source}`)})`,
+    );
+  });
+  return lines(
+    "",
+    '    @model_validator(mode="after")',
+    `    def _check_invariants(self) -> "${cls}":`,
+    ...checks,
+    "        return self",
+  );
+}
+
 function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
   // Event-sourced create: the request shape is the create ACTION's
   // params (the command), not the field set (appliers A2.2).
@@ -379,7 +416,8 @@ function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
     );
   }
   const inputs = forCreateInput(agg.fields);
-  const constraints = createFieldConstraints(agg, new Set(inputs.map((f) => f.name)));
+  const available = new Set(inputs.map((f) => f.name));
+  const constraints = createFieldConstraints(agg, available);
   return lines(
     `class Create${agg.name}Request(BaseModel):`,
     inputs.length > 0
@@ -391,6 +429,7 @@ function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
           ),
         )
       : ["    pass"],
+    createModelValidator(agg, available),
     "",
     "",
     `class Create${agg.name}Response(BaseModel):`,

@@ -58,6 +58,40 @@ describe("python wire DTOs", () => {
     expect(customer).toContain("class CreateCustomerRequest(BaseModel):");
     expect(customer).toContain("    name: str");
   });
+
+  it("derives Field constraints + a @model_validator for invariants → 422 at the boundary", async () => {
+    const src = `
+system Demo {
+  subdomain S {
+    context C {
+      aggregate Account ids guid with crudish {
+        handle: string
+        email: string
+        invariant handle.length > 0
+        invariant handle != email
+      }
+      repository AccountRepo for Account { }
+    }
+  }
+  api AccountApi from S
+  deployable pyApi { platform: python contexts: [C] serves: AccountApi port: 8000 }
+}
+`;
+    const { model, errors } = await parseString(src);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const files = generateSystems(model).files;
+    const routes = [...files.entries()].find(([k]) => /account_routes\.py$/i.test(k))?.[1];
+    expect(routes).toBeDefined();
+    if (!routes) throw new Error("account_routes.py not emitted");
+    // Single-field invariant → Pydantic Field constraint (FastAPI 422 on bad input).
+    expect(routes).toContain("handle: str = Field(min_length=1)");
+    // Cross-field invariant → @model_validator that raises ValueError → 422,
+    // instead of falling through to the domain's DomainError → 400.
+    expect(routes).toMatch(/from pydantic import .*\bField\b.*\bmodel_validator\b/);
+    expect(routes).toMatch(/@model_validator\(mode="after"\)/);
+    expect(routes).toContain("if not (self.handle != self.email):");
+    expect(routes).toContain('raise ValueError("Invariant violated: handle != email")');
+  });
 });
 
 describe("python routes", () => {
