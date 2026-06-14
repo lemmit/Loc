@@ -645,8 +645,11 @@ web_app/
   `MaybeRefOrGetter<Query>` (queryKey tracks `computed(toValue(query))`)
   and the list page passes `() => ({ … })`, so a bound filter input
   re-fetches (React re-renders, so its hook stays a plain object param).
-- Known gaps (tracked in the plan): named layouts on vue; forms inside
-  user components; slot params on extern components.
+- A `component` body can host a `CreateForm`/`WorkflowForm` (the
+  `useLoomForm` + mutation wiring transplants from the page shell);
+  operation forms (Action dialogs) inside a component stay a deferral.
+- Known gaps (tracked in the plan): named layouts on vue; operation
+  forms inside user components; slot params on extern components.
 
 ## Phoenix LiveView fullstack (`platform: phoenixLiveView`)
 
