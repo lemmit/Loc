@@ -102,6 +102,8 @@ export function renderProvenanceRecord(ns: string): string {
       "    public string Inputs { get; set; } = default!;",
       "    public string? ComputedValue { get; set; }",
       "    public DateTime At { get; set; }",
+      "    public string? CorrelationId { get; set; }",
+      "    public string? ScopeId { get; set; }",
       "}",
     ) + "\n"
   );
@@ -131,7 +133,10 @@ export function renderProvenanceRecordConfiguration(ns: string): string {
       '        builder.Property(x => x.Inputs).HasColumnName("inputs").HasColumnType("jsonb");',
       '        builder.Property(x => x.ComputedValue).HasColumnName("computed_value").HasColumnType("jsonb");',
       '        builder.Property(x => x.At).HasColumnName("at");',
+      '        builder.Property(x => x.CorrelationId).HasColumnName("correlation_id");',
+      '        builder.Property(x => x.ScopeId).HasColumnName("scope_id");',
       "        builder.HasIndex(x => new { x.TargetType, x.Field });",
+      "        builder.HasIndex(x => x.CorrelationId);",
       "    }",
       "}",
     ) + "\n"

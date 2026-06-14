@@ -78,7 +78,9 @@ export function emitDotnetProvenanceAuditMigration(
         "  field text NOT NULL,",
         "  inputs jsonb NOT NULL,",
         "  computed_value jsonb,",
-        "  at timestamptz NOT NULL",
+        "  at timestamptz NOT NULL,",
+        "  correlation_id text,",
+        "  scope_id text",
         ");",
       ].join("\n"),
     );
@@ -118,7 +120,9 @@ export function emitDotnetProvenanceAuditMigration(
         "  before jsonb NOT NULL,",
         "  after jsonb NOT NULL,",
         "  at timestamptz NOT NULL,",
-        "  status text NOT NULL",
+        "  status text NOT NULL,",
+        "  correlation_id text,",
+        "  scope_id text",
         ");",
       ].join("\n"),
     );
