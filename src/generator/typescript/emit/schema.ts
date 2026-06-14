@@ -302,7 +302,12 @@ const AUDIT_TABLE = `export const auditRecords = pgTable("audit_records", {
   after: jsonb("after").notNull(),
   at: timestamp("at", { withTimezone: true }).notNull(),
   status: text("status").notNull(),
-}, (t) => [index("audit_records_target_idx").on(t.targetType, t.targetId)]);`;
+  correlationId: text("correlation_id"),
+  scopeId: text("scope_id"),
+}, (t) => [
+  index("audit_records_target_idx").on(t.targetType, t.targetId),
+  index("audit_records_correlation_idx").on(t.correlationId),
+]);`;
 
 // Provenance history table.  Emitted only when the model declares at least
 // one written `provenanced` field.  One append-only row per provenanced
@@ -318,7 +323,12 @@ const PROVENANCE_TABLE = `export const provenanceRecords = pgTable("provenance_r
   inputs: jsonb("inputs").notNull(),
   computedValue: jsonb("computed_value"),
   at: timestamp("at", { withTimezone: true }).notNull(),
-}, (t) => [index("provenance_records_target_idx").on(t.targetType, t.field)]);`;
+  correlationId: text("correlation_id"),
+  scopeId: text("scope_id"),
+}, (t) => [
+  index("provenance_records_target_idx").on(t.targetType, t.field),
+  index("provenance_records_correlation_idx").on(t.correlationId),
+]);`;
 
 /** Field names on the aggregate root that should be indexed so the
  * generated finds don't run sequential scans.  Walks every find: if
