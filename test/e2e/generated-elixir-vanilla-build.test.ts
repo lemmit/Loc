@@ -34,6 +34,10 @@ describe.skipIf(!ENABLED)(
     it.each([
       { name: "vanilla-min.ddd", deployable: "api" },
       { name: "vanilla-channels.ddd", deployable: "api" },
+      // Event sourcing (T2.b) + operation `or`-union returns (T2.c) — compile the
+      // from-scratch ES + producer-translation Elixir, not just the structure tests.
+      { name: "vanilla-eventlog.ddd", deployable: "api" },
+      { name: "vanilla-returns.ddd", deployable: "api" },
     ])("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
