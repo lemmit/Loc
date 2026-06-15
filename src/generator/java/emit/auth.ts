@@ -26,6 +26,10 @@ export function renderAuthFiles(
   const out = new Map<string, string>();
   const fields = sys.user?.fields ?? [];
   const pkg = `${basePkg}.auth`;
+  // The principal's id key — the field named `id`, else the first declared
+  // field.  Stamped into MDC (RequestContext.actorId) after the verifier
+  // succeeds; only the id rides the carrier, the full principal stays here.
+  const actorIdField = fields.find((f) => f.name === "id") ?? fields[0];
 
   const imports = new Set<string>();
   const components = fields
@@ -127,6 +131,8 @@ export function renderAuthFiles(
       ``,
       `import java.io.IOException;`,
       ``,
+      `import ${basePkg}.config.RequestContext;`,
+      ``,
       `import org.springframework.stereotype.Component;`,
       `import org.springframework.web.filter.OncePerRequestFilter;`,
       ``,
@@ -186,6 +192,9 @@ export function renderAuthFiles(
       `            return;`,
       `        }`,
       `        accessor.set(user);`,
+      ...(actorIdField
+        ? [`        RequestContext.putActorId(String.valueOf(user.${actorIdField.name}()));`]
+        : []),
       `        try {`,
       `            chain.doFilter(request, response);`,
       `        } finally {`,
