@@ -68,6 +68,7 @@ import {
   renderDivider as renderDividerHeex,
   renderEmpty as renderEmptyHeex,
   renderEnumBadge as renderEnumBadgeHeex,
+  renderField as renderFieldHeex,
   renderForm as renderFormHeex,
   renderGrid as renderGridHeex,
   renderGroup as renderGroupHeex,
@@ -81,9 +82,13 @@ import {
   renderLoader as renderLoaderHeex,
   renderModal as renderModalHeex,
   renderMoney as renderMoneyHeex,
+  renderMultilineField as renderMultilineFieldHeex,
+  renderNumberField as renderNumberFieldHeex,
   renderPaper as renderPaperHeex,
+  renderPasswordField as renderPasswordFieldHeex,
   renderQueryView as renderQueryViewHeex,
   renderSection as renderSectionHeex,
+  renderSelectField as renderSelectFieldHeex,
   renderSkeleton as renderSkeletonHeex,
   renderSlot as renderSlotHeex,
   renderStack as renderStackHeex,
@@ -93,6 +98,7 @@ import {
   renderTable as renderTableHeex,
   renderTabs as renderTabsHeex,
   renderText as renderTextHeex,
+  renderToggle as renderToggleHeex,
   renderToolbar as renderToolbarHeex,
 } from "../elixir/heex-walker.js";
 import { emitCodeBlock } from "./primitives/code-block.js";
@@ -255,12 +261,32 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   // (`Switch` is deliberately absent: docs/page-metamodel.md removed it from
   // the closed set — control-flow `Switch` is subsumed by `match`, and the
   // boolean input is `Toggle`.)
-  Field: { group: "layout", admissibleInSource: true, tsx: emitField },
-  NumberField: { group: "layout", admissibleInSource: true, tsx: emitNumberField },
-  PasswordField: { group: "layout", admissibleInSource: true, tsx: emitPasswordField },
-  Toggle: { group: "layout", admissibleInSource: true, tsx: emitToggle },
-  MultilineField: { group: "layout", admissibleInSource: true, tsx: emitMultilineField },
-  SelectField: { group: "layout", admissibleInSource: true, tsx: emitSelectField },
+  Field: { group: "layout", admissibleInSource: true, tsx: emitField, heex: renderFieldHeex },
+  NumberField: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitNumberField,
+    heex: renderNumberFieldHeex,
+  },
+  PasswordField: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitPasswordField,
+    heex: renderPasswordFieldHeex,
+  },
+  Toggle: { group: "layout", admissibleInSource: true, tsx: emitToggle, heex: renderToggleHeex },
+  MultilineField: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitMultilineField,
+    heex: renderMultilineFieldHeex,
+  },
+  SelectField: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitSelectField,
+    heex: renderSelectFieldHeex,
+  },
   // --- Display -----------------------------------------------------------
   Loader: { group: "layout", admissibleInSource: true, tsx: emitLoader, heex: renderLoaderHeex },
   Anchor: { group: "layout", admissibleInSource: true, tsx: emitAnchor, heex: renderAnchorHeex },

@@ -1022,6 +1022,96 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
   return `<div class="tabs"${testidAttr}>\n  <div role="tablist" class="tab-bar">\n${triggers}\n  </div>\n${panels}\n</div>`;
 }
+
+// ---------------------------------------------------------------------------
+// Standalone controlled inputs — Field / NumberField / PasswordField /
+// MultilineField / SelectField / Toggle.  Each binds to a page `state` field
+// via `bind:` and renders the app's `<.input>` core component with a
+// `phx-change` that writes the new value back to the assign through a hoisted
+// `handle_event` clause — the idiomatic LiveView "state-bound input" (the
+// server-side analogue of the React controlled-input-over-useState).
+//
+// In-form inputs go through Form-level dispatch (renderFieldInputForField);
+// this path only fires for inputs that appear *standalone* in a page body.
+// A `bind:` that isn't a known state field renders a disabled stub (nothing
+// to two-way bind to) so the page still renders.
+// ---------------------------------------------------------------------------
+function controlledInput(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+  type: "text" | "number" | "password" | "textarea" | "select" | "checkbox",
+): string {
+  let label = "";
+  let bind: string | undefined;
+  let testid = "";
+  let optionsExpr: ExprIR | undefined;
+  let seenPositional = false;
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (!name) {
+      if (!seenPositional && arg.kind === "literal") label = arg.value;
+      seenPositional = true;
+    } else if (name === "bind" && arg.kind === "ref") bind = arg.name;
+    else if (name === "options") optionsExpr = arg;
+    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
+  }
+  const labelAttr = label ? ` label="${label.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"` : "";
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  if (!bind || !ctx.stateNames.has(bind)) {
+    const opt = type === "select" ? ` options={[]}` : "";
+    return `<.input type="${type}" name="_unbound"${labelAttr}${opt} value="" disabled${testidAttr} />`;
+  }
+  const field = snake(bind);
+  const isCheckbox = type === "checkbox";
+  const eventName = isCheckbox ? `toggle_${field}` : `update_${field}`;
+  // Hoist the write-back handler once per bound field.
+  if (!ctx.handlers.some((h) => h.name === eventName)) {
+    ctx.handlers.push({
+      name: eventName,
+      paramsPattern: `%{"${field}" => value}`,
+      body: [
+        `    {:noreply, assign(socket, :${field}, ${isCheckbox ? `value == "true"` : "value"})}`,
+      ],
+    });
+  }
+  const optionsAttr =
+    type === "select"
+      ? ` options={${optionsExpr ? renderExpr(optionsExpr, { ...ctx, position: "template" }) : "[]"}}`
+      : "";
+  return `<.input type="${type}" name="${field}" value={@${field}}${optionsAttr}${labelAttr} phx-change="${eventName}"${testidAttr} />`;
+}
+
+export function renderField(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return controlledInput(expr, ctx, "text");
+}
+export function renderNumberField(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  return controlledInput(expr, ctx, "number");
+}
+export function renderPasswordField(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  return controlledInput(expr, ctx, "password");
+}
+export function renderMultilineField(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  return controlledInput(expr, ctx, "textarea");
+}
+export function renderSelectField(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  return controlledInput(expr, ctx, "select");
+}
+export function renderToggle(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return controlledInput(expr, ctx, "checkbox");
+}
 export function renderCard(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Card!, expr, ctx);
 }
