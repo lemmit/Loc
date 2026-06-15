@@ -14,9 +14,21 @@
 // extension shape byte-identical to the Ash tower) lands in Slice 4.
 // ---------------------------------------------------------------------------
 
-import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
+import type { BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
+import { CRUD_RESERVED_NAMES } from "./context-emit.js";
+
+/** Public operations that earn a dedicated `POST /<plural>/:id/<op>`
+ *  member endpoint.  CRUD-verb-named ops (create/update/destroy/…) are
+ *  served by the generic create/update/delete routes — and have no
+ *  `<op>_<agg>` context function to call — so they're excluded here, in
+ *  lockstep with the named-op emission in `context-emit.ts`. */
+function memberOperations(agg: { operations: readonly OperationIR[] }): OperationIR[] {
+  return agg.operations.filter(
+    (op) => op.visibility === "public" && !CRUD_RESERVED_NAMES.has(op.name),
+  );
+}
 
 export interface VanillaApiEmitResult {
   routes: ApiRoute[];
@@ -36,9 +48,10 @@ export function emitVanillaApiControllers(
     const aggSnake = snake(agg.name);
     const aggsPath = snake(plural(agg.name)); // "tasks" for Task
     const controllerName = `${aggPascal}Controller`;
+    const memberOps = memberOperations(agg);
     out.set(
       `lib/${appName}_web/controllers/${aggSnake}_controller.ex`,
-      renderController(appModule, ctxModule, agg.name, aggSnake),
+      renderController(appModule, ctxModule, agg.name, aggSnake, memberOps),
     );
 
     // Read path
@@ -81,6 +94,18 @@ export function emitVanillaApiControllers(
         action: ":delete",
       });
     }
+    // Per-operation member endpoints — `POST /<plural>/:id/<op>`, one per
+    // public non-CRUD operation, matching the Ash path (`elixir/api-emit.ts`)
+    // and the node/dotnet/python/java backends.  The URL segment uses
+    // `routeSlug` (D-URLSTYLE) while the action atom stays the op verb.
+    for (const op of memberOps) {
+      routes.push({
+        method: "post",
+        path: `/${aggsPath}/:id/${snake(op.routeSlug ?? op.name)}`,
+        controller: controllerName,
+        action: `:${snake(op.name)}`,
+      });
+    }
   }
 
   return { routes };
@@ -91,9 +116,36 @@ function renderController(
   ctxModule: string,
   aggName: string,
   aggSnake: string,
+  memberOps: readonly OperationIR[],
 ): string {
   const aggPascal = upperFirst(aggName);
   const facadeMod = `${appModule}.${ctxModule}`;
+
+  // Per-operation member actions.  Load the aggregate, run the named
+  // operation (`<op>_<agg>(record, attrs)` from context-emit.ts), and
+  // return 204 No Content on success — ops are side-effecting and don't
+  // return the entity (matches Ash/Hono/.NET/python/java).  Validation
+  // failures surface as 422 ProblemDetails; a missing row is 404.
+  const opActions = memberOps
+    .map((op) => {
+      const opSnake = snake(op.name);
+      return `
+  def ${opSnake}(conn, %{"id" => id} = params) do
+    attrs = Map.drop(params, ["id"])
+
+    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id),
+         {:ok, _updated} <- ${ctxModule}.${opSnake}_${aggSnake}(record, attrs) do
+      send_resp(conn, 204, "")
+    else
+      {:error, :not_found} ->
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        ProblemDetails.validation_error_response(conn, changeset)
+    end
+  end`;
+    })
+    .join("\n");
 
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do
@@ -156,7 +208,7 @@ defmodule ${appModule}Web.${aggPascal}Controller do
         ProblemDetails.validation_error_response(conn, changeset)
     end
   end
-
+${opActions}
   defp serialize(record) do
     record
     |> Map.from_struct()
