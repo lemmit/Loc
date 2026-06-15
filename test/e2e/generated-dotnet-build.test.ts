@@ -166,6 +166,18 @@ describe.skipIf(!ENABLED)(
           ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
           : [];
         expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+        // The generated xUnit `Tests/` project is a SEPARATE csproj the app
+        // build above never touches — compile it too (it ProjectReferences the
+        // app, so this builds the showcase's emitted aggregate tests, e.g. the
+        // currentUser-gated `expect(p.rename("")).toThrow()`).  Catches the
+        // blind spot where generated test code failed to compile.
+        const testProj = path.join(proj, "Tests", "DotnetApi.Tests", "DotnetApi.Tests.csproj");
+        expect(fs.existsSync(testProj), "generated Tests project").toBe(true);
+        execSync(`dotnet build "${testProj}" --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 240_000,
+        });
       } finally {
         try {
           fs.rmSync(outDir, { recursive: true, force: true });

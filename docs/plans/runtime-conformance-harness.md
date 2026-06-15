@@ -63,7 +63,7 @@ Scope to close the specific gaps found:
 | Gap | Tier-1 action |
 |---|---|
 | Phoenix view `CaseClauseError` | hit `GET /api/views/<v>` and assert 200 + body for both foundations |
-| .NET generated tests don't compile/run | add `dotnet test` (not just `build`) over `Tests/*.csproj` in the showcase case |
+| .NET generated tests don't compile/run | DONE (compile): the showcase dotnet build case now also `dotnet build`s the generated `Tests/DotnetApi.Tests.csproj` under `/warnaserror`. Still TODO: `dotnet test` to also *run* them. |
 | Generated test suites never executed | run the emitted vitest/JUnit/pytest/ExUnit suites where the toolchain is present |
 | React/Vue runtime behavior | extend the Playwright smoke (already emitted) to submit a form with a 422 and assert per-field error display; assert realtime files emitted |
 
@@ -71,8 +71,8 @@ Scope to close the specific gaps found:
 
 1. **Tier 0 per finding** (in flight) — red test → generator fix → green, in
    default `npm test`.
-2. **`dotnet test` over the generated `Tests/` project** in the showcase dotnet
-   case — smallest high-value Tier-1 step; catches the compile gap immediately.
+2. **Compile the generated `Tests/` project** in the showcase dotnet case —
+   DONE. Next: `dotnet test` to also *run* the emitted aggregate tests.
 3. **Cross-backend status conformance runner** — lift showcase's `toThrow`
    blocks into an executable matrix over the booted backends.
 4. **Frontend runtime assertions** — extend the emitted Playwright smoke.
