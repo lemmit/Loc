@@ -15,8 +15,20 @@ import { customFindsOf } from "./repository-emit.js";
 
 /** Operation names whose `<op>_<agg>` collide with the CRUD
  *  defdelegates emitted above (list/get/create/update/delete).  Skipped
- *  for named-op emission to avoid Elixir function-clause redefinition. */
-const CRUD_RESERVED_NAMES = new Set(["create", "update", "delete", "destroy", "list", "get"]);
+ *  for named-op emission to avoid Elixir function-clause redefinition.
+ *  Exported so the controller emitter (`api-emit.ts`) only mounts a
+ *  per-operation member route for ops that actually have a `<op>_<agg>`
+ *  context function — CRUD-verb-named ops are served by the generic
+ *  create/update/delete routes instead, exactly as the named-op emission
+ *  here skips them. */
+export const CRUD_RESERVED_NAMES = new Set([
+  "create",
+  "update",
+  "delete",
+  "destroy",
+  "list",
+  "get",
+]);
 
 export function emitVanillaContextModule(
   appModule: string,
