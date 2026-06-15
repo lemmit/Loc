@@ -1025,14 +1025,47 @@ export function validateInheritanceStorage(
 // will host pure ES on Phoenix; until it ships the diagnostic names the Ash
 // foundation as the constraint and points at the proposal.
 const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet", "python", "java"]);
+
+/** Per-context set of foundations of the elixir deployables hosting it
+ *  (`"ash"` / `"vanilla"`).  Event sourcing on elixir is foundation-shaped,
+ *  not platform-shaped (D-VANILLA-ES-HOME): the `vanilla` foundation hosts a
+ *  pure-ES data layer (per-aggregate stream + fold-on-load), while `ash` has
+ *  no pure-ES fit and stays gated.  `validateEventSourcedStorage` consumes
+ *  this to tell `elixir+vanilla` (supported) from `elixir+ash` (rejected). */
+export function elixirFoundationsHostingEachContext(
+  loom: EnrichedLoomModel,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const sys of loom.systems) {
+    for (const d of sys.deployables) {
+      if (d.platform !== "elixir") continue;
+      const foundation = d.foundation ?? "ash";
+      for (const cn of d.contextNames) {
+        const set = out.get(cn) ?? new Set<string>();
+        set.add(foundation);
+        out.set(cn, set);
+      }
+    }
+  }
+  return out;
+}
+
 export function validateEventSourcedStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
+  elixirFoundations: Set<string> = new Set(),
 ): void {
+  // elixir hosts ES only on the vanilla foundation (D-VANILLA-ES-HOME); the
+  // Ash foundation has no pure-ES fit, so an `elixir` host counts as ES-capable
+  // for this context iff every elixir deployable hosting it uses `vanilla`.
+  const elixirEsCapable =
+    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
+  const isEsCapable = (p: string): boolean =>
+    EVENT_SOURCING_BACKENDS.has(p) || (p === "elixir" && elixirEsCapable);
   // Every hosting backend must implement event sourcing; flag the ones that
-  // don't (e.g. a Phoenix deployable hosting the context alongside a node one).
-  const unsupported = [...backendPlatforms].filter((p) => !EVENT_SOURCING_BACKENDS.has(p));
+  // don't (e.g. an Ash-foundation Phoenix deployable hosting the context).
+  const unsupported = [...backendPlatforms].filter((p) => !isEsCapable(p));
   const anyBackend = backendPlatforms.size > 0;
   const includesPhoenix = unsupported.includes("elixir");
   for (const agg of ctx.aggregates) {
@@ -1052,7 +1085,8 @@ export function validateEventSourcedStorage(
         `(1) host event-sourced aggregates on a node / dotnet deployable (same .ddd ` +
         `source — they share the cross-backend ES contract); ` +
         `(2) drop persistedAs(eventLog) to use state persistence on Phoenix; ` +
-        `(3) wait for foundation: vanilla on Phoenix — see ` +
+        `(3) switch this deployable to foundation: vanilla on Phoenix, which ` +
+        `hosts pure ES (per-aggregate stream + fold-on-load) — see ` +
         `proposals/vanilla-phoenix-foundation.md (D-VANILLA-PHOENIX-FOUNDATION + ` +
         `D-VANILLA-ES-HOME). Tracked in workflow-and-applier.md (appliers A2).`
       : // Generic non-Phoenix unsupported backend (or no backend at all).

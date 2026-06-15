@@ -21,6 +21,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { isEventSourced } from "./eventsourced-emit.js";
 
 export function emitVanillaRepositories(
   appModule: string,
@@ -29,6 +30,9 @@ export function emitVanillaRepositories(
 ): void {
   const ctxModule = upperFirst(ctx.name);
   for (const agg of ctx.aggregates) {
+    // Event-sourced aggregates get an event-store repository from
+    // `eventsourced-emit.ts` (load+fold reads, append writes) instead.
+    if (isEventSourced(agg)) continue;
     const aggSnake = snake(agg.name);
     const ctxSnake = snake(ctx.name);
     const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());

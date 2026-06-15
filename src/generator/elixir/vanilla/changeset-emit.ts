@@ -15,6 +15,7 @@
 
 import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { isEventSourced } from "./eventsourced-emit.js";
 
 interface AggField {
   name: string;
@@ -31,6 +32,8 @@ export function emitVanillaChangesets(
 ): void {
   const ctxModule = upperFirst(ctx.name);
   for (const agg of ctx.aggregates) {
+    // Event-sourced aggregates mutate via emit+fold, not Ecto changesets.
+    if (isEventSourced(agg)) continue;
     const aggSnake = snake(agg.name);
     const ctxSnake = snake(ctx.name);
     const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());

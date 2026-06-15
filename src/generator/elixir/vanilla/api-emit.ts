@@ -18,6 +18,7 @@ import type { BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
+import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
 
 /** Public operations that earn a dedicated `POST /<plural>/:id/<op>`
  *  member endpoint.  CRUD-verb-named ops (create/update/destroy/…) are
@@ -49,9 +50,12 @@ export function emitVanillaApiControllers(
     const aggsPath = snake(plural(agg.name)); // "tasks" for Task
     const controllerName = `${aggPascal}Controller`;
     const memberOps = memberOperations(agg);
+    const es = isEventSourced(agg);
     out.set(
       `lib/${appName}_web/controllers/${aggSnake}_controller.ex`,
-      renderController(appModule, ctxModule, agg.name, aggSnake, memberOps),
+      es
+        ? renderEsController(appModule, ctxModule, agg)
+        : renderController(appModule, ctxModule, agg.name, aggSnake, memberOps),
     );
 
     // Read path
@@ -78,7 +82,9 @@ export function emitVanillaApiControllers(
         action: ":create",
       });
     }
-    if (agg.operations.length > 0) {
+    // Event-sourced aggregates have no generic field-update / delete surface —
+    // their only mutations are the per-operation member endpoints below.
+    if (!es && agg.operations.length > 0) {
       routes.push({
         method: "patch",
         path: `/${aggsPath}/:id`,
@@ -86,7 +92,7 @@ export function emitVanillaApiControllers(
         action: ":update",
       });
     }
-    if ((agg.destroys ?? []).length > 0) {
+    if (!es && (agg.destroys ?? []).length > 0) {
       routes.push({
         method: "delete",
         path: `/${aggsPath}/:id`,

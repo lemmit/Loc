@@ -26,6 +26,7 @@ import { emitVanillaApiControllers } from "./api-emit.js";
 import { emitVanillaChangesets } from "./changeset-emit.js";
 import { emitVanillaContextModule } from "./context-emit.js";
 import { emitVanillaEventModules } from "./events-emit.js";
+import { emitVanillaEventSourcedFiles } from "./eventsourced-emit.js";
 import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
 import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaRetrievals } from "./retrieval-emit.js";
@@ -72,6 +73,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     emitVanillaSchemas(appModule, ctx, out);
     emitVanillaChangesets(appModule, ctx, out);
     emitVanillaRepositories(appModule, ctx, out);
+    // Event-sourced aggregates (persistedAs(eventLog)) — struct + event-log
+    // Ecto schema + fold + event-store repository (D-VANILLA-ES-HOME).  The
+    // state emitters above skip them; the context module + controllers branch.
+    emitVanillaEventSourcedFiles(appModule, ctx, out);
     emitVanillaContextModule(appModule, ctx, out);
     // Event struct modules — `lib/<app>/<ctx>/events/<event>.ex`.  The
     // workflow-execution `emit` lowering builds `%Context.Events.<Name>{...}`

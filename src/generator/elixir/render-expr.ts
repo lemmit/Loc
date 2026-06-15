@@ -74,6 +74,12 @@ export interface RenderCtx {
    *  17-arm `ExprIR.kind` dispatch is unchanged — only these leaves branch.
    *  See `docs/plans/vanilla-foundation-research.md` §3. */
   foundation?: "ash" | "vanilla";
+  /** Renders the aggregate-`id` expression (`{kind:"id"}`) as this bare
+   *  local instead of `<thisName>.id`.  Set by the event-sourced create
+   *  command runner, where the new aggregate id is a freshly generated
+   *  local (`id = Ecto.UUID.generate()`) and no `this` struct exists yet.
+   *  Unset everywhere else → `id` stays `<thisName>.id`. */
+  idLocal?: string;
   /** Per-name rewrite for `param` references.  Used by the in-process
    *  dispatch handlers (dispatch-emit.ts), where a reactor / event-create
    *  body's single bound event param (`s` in `on(s: ShipmentRequested)`)
@@ -102,7 +108,7 @@ export function relationshipNameFor(_agg: AggregateIR, fieldName: string): strin
 
 const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   literal: renderLiteral,
-  id: (ctx) => `${ctx.thisName}.id`,
+  id: (ctx) => ctx.idLocal ?? `${ctx.thisName}.id`,
   ref: renderRef,
   member: renderMember,
   methodCall: renderMethodCall,
