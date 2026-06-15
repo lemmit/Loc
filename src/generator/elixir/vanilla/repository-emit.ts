@@ -166,9 +166,15 @@ function renderFindFn(f: FindIR, aggModule: string, contextModule: string): stri
     : `{:ok, [${aggModule}.t()]} | {:error, term()}`;
   const specHead = argNames.length > 0 ? argNames.map(() => "term()").join(", ") : "";
   const spec = `  @spec ${fnName}(${specHead}) :: ${specTail}`;
+  // A find with neither a `where` clause nor convention params (e.g. an
+  // unfiltered `find recent(): Order`) has an empty predicate — emit a bare
+  // `from(record in Mod)` rather than `where: ` (which is invalid Elixir).
+  const query = whereExpr
+    ? `from(record in ${aggModule}, where: ${whereExpr})`
+    : `from(record in ${aggModule})`;
   return `${spec}
   def ${fnName}(${argList}) do
-    query = from(record in ${aggModule}, where: ${whereExpr})
+    query = ${query}
     {:ok, ${fetchCall}}
   end`;
 }

@@ -16,7 +16,10 @@ system Orders {
         }
       }
 
-      repository Orders for Order { }
+      // An unfiltered find (no `where`, no params) exercises the
+      // bare-`from(record in Mod)` path — `where: ` with an empty predicate
+      // is invalid Elixir.
+      repository Orders for Order { find recent(): Order[] }
     }
   }
 
