@@ -14,11 +14,17 @@
 // extension shape byte-identical to the Ash tower) lands in Slice 4.
 // ---------------------------------------------------------------------------
 
-import type { BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
 import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
+import {
+  aggregateHasReturningOp,
+  isReturningOperation,
+  renderProblemVariantHelper,
+  renderReturningOpControllerAction,
+} from "./operation-returns-emit.js";
 
 /** Public operations that earn a dedicated `POST /<plural>/:id/<op>`
  *  member endpoint.  CRUD-verb-named ops (create/update/destroy/…) are
@@ -55,7 +61,7 @@ export function emitVanillaApiControllers(
       `lib/${appName}_web/controllers/${aggSnake}_controller.ex`,
       es
         ? renderEsController(appModule, ctxModule, agg)
-        : renderController(appModule, ctxModule, agg.name, aggSnake, memberOps),
+        : renderController(appModule, ctxModule, agg, aggSnake, memberOps, ctx),
     );
 
     // Read path
@@ -120,20 +126,23 @@ export function emitVanillaApiControllers(
 function renderController(
   appModule: string,
   ctxModule: string,
-  aggName: string,
+  agg: AggregateIR,
   aggSnake: string,
   memberOps: readonly OperationIR[],
+  ctx: BoundedContextIR,
 ): string {
-  const aggPascal = upperFirst(aggName);
+  const aggPascal = upperFirst(agg.name);
   const facadeMod = `${appModule}.${ctxModule}`;
 
-  // Per-operation member actions.  Load the aggregate, run the named
-  // operation (`<op>_<agg>(record, attrs)` from context-emit.ts), and
-  // return 204 No Content on success — ops are side-effecting and don't
-  // return the entity (matches Ash/Hono/.NET/python/java).  Validation
-  // failures surface as 422 ProblemDetails; a missing row is 404.
+  // Per-operation member actions.  A returning operation (`: A or B`) translates
+  // its tagged result to HTTP (success → 200, error variant → ProblemDetails);
+  // a plain side-effecting op returns 204.  Validation failures surface as 422;
+  // a missing row is 404.
   const opActions = memberOps
     .map((op) => {
+      if (isReturningOperation(op)) {
+        return renderReturningOpControllerAction(ctxModule, agg, op, ctx);
+      }
       const opSnake = snake(op.name);
       return `
   def ${opSnake}(conn, %{"id" => id} = params) do
@@ -152,6 +161,10 @@ function renderController(
   end`;
     })
     .join("\n");
+
+  // Shared error-variant responder, emitted once when the aggregate has any
+  // returning op (else it'd be an unused private fn under --warnings-as-errors).
+  const problemVariant = aggregateHasReturningOp(agg) ? `\n${renderProblemVariantHelper()}\n` : "";
 
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do
@@ -215,6 +228,7 @@ defmodule ${appModule}Web.${aggPascal}Controller do
     end
   end
 ${opActions}
+${problemVariant}
   defp serialize(record) do
     record
     |> Map.from_struct()

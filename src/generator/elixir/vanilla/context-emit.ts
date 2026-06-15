@@ -18,6 +18,7 @@ import {
   renderEnsureHelper,
   renderEsContextBlock,
 } from "./eventsourced-emit.js";
+import { isReturningOperation, renderReturningOpFunction } from "./operation-returns-emit.js";
 import { customFindsOf } from "./repository-emit.js";
 
 /** Operation names whose `<op>_<agg>` collide with the CRUD
@@ -65,7 +66,11 @@ function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedC
     // already provides those names.
     const opBlocks = (agg.operations ?? [])
       .filter((op) => !CRUD_RESERVED_NAMES.has(op.name))
-      .map((op) => renderNamedOpFunction(facadeMod, agg, aggPascal, aggSnake, op));
+      .map((op) =>
+        isReturningOperation(op)
+          ? renderReturningOpFunction(facadeMod, ctx, agg, op)
+          : renderNamedOpFunction(facadeMod, agg, aggPascal, aggSnake, op),
+      );
     // Custom-find defdelegates — `<find>_<agg>(args...)` routes to the
     // repository fn emitted by `customFindsOf`.  Workflow `repo-let`
     // lowering (for a non-getById method) calls through this seam.
