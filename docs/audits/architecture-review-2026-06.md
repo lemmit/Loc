@@ -193,12 +193,20 @@ not a `WalkerTarget` consumer (today's docs imply the seam is universal).
 > plainly that Phoenix/HEEx runs a parallel engine and does **not** consume
 > `walkBody`. The two engines were left separate, as the finding recommends.
 >
-> The gap was then **driven from 18 down to 8**: ten primitives gained HEEx
-> renderers (Bold/Italic/InlineCode, Divider/Image/Stat, Avatar/Loader, Money,
-> Slot); the remaining **8 are all reviewed declines** — the form-input family
-> and `Tabs`/`DestroyForm` need a form/changeset context or stateful LiveView
-> wiring (handle_event + Ash actions + compile-checked routes), not a markup
-> mapping. Each carries a `DECLINED` rationale in the tracker.
+> The gap was then **driven from 18 down to 0** — every TSX-rendered primitive
+> now has a HEEx renderer, so `KNOWN_HEEX_GAPS` is empty. The cleanly-mappable
+> display primitives (Bold/Italic/InlineCode, Divider/Image/Stat, Avatar/Loader,
+> Money, Slot) came first; then the stateful family followed once each was given
+> the LiveView wiring it needs rather than a markup mapping: `Tabs` toggles via
+> `Phoenix.LiveView.JS` (client-side show/hide, no round-trip), `DestroyForm`
+> emits a confirm `<.button>` + a hoisted `destroy_<agg>` `handle_event` calling
+> the Ash code interface and navigating a verified `~p` route, and the
+> **form-input family** (Field/NumberField/PasswordField/MultilineField/
+> SelectField/Toggle) renders the app's `<.input>` with a `phx-change` whose
+> hoisted `handle_event` writes the bound page-`state` field back via `assign`
+> (the LiveView analogue of a React controlled input; in-form inputs still go
+> through Form-level dispatch). Closing a gap now fails the tracker until the
+> entry is deleted, so the empty list is itself enforced.
 
 ### 6. React/Vue API-builder import asymmetry — RESOLVED *(small, clean-up)*
 

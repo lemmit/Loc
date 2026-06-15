@@ -30,8 +30,22 @@ system DestroyDemo {
     }
     page WidgetDetail(id: Widget id) {
       route: "/widgets/:id"
+      state {
+        draft: string = ""
+        count: int = 0
+        pw: string = ""
+        notes: string = ""
+        region: string = "EU"
+        active: bool = false
+      }
       body: Stack {
         Heading { "Widget" },
+        Field("Name", bind: draft),
+        NumberField("Count", bind: count),
+        PasswordField("Secret", bind: pw),
+        MultilineField("Notes", bind: notes),
+        SelectField("Region", bind: region, options: ["EU", "US"]),
+        Toggle("Active", bind: active),
         Tabs {
           Tab("Overview", Text { "the overview" }),
           Tab("Settings", Stack { Text { "the settings" } })

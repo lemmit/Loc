@@ -43,26 +43,16 @@ import { WALKER_PRIMITIVES } from "../../../src/generator/_walker/registry.js";
  *  (The cleanly-mappable display primitives — Bold/Italic/InlineCode, Divider/
  *  Image/Stat, Avatar/Loader, Money — now have HEEx renderers; see git history.)
  */
-const KNOWN_HEEX_GAPS: Record<string, string> = {
-  // --- DECLINED: form-input family --------------------------------------
-  // In LiveView an input only exists inside `<.simple_form for={@x_form}>`
-  // with a changeset + `validate`/`submit` handle_event clauses (HEEx renders
-  // them via Form-level dispatch, `renderFieldInputForField`).  A *standalone*
-  // input has no form/changeset to bind to, so there is no sensible per-
-  // primitive HEEx renderer — they are form sub-elements on Phoenix.
-  Field: "DECLINED — form sub-element; standalone input has no LiveView changeset to bind",
-  NumberField: "DECLINED — form sub-element; standalone input has no LiveView changeset to bind",
-  PasswordField: "DECLINED — form sub-element; standalone input has no LiveView changeset to bind",
-  MultilineField: "DECLINED — form sub-element; standalone input has no LiveView changeset to bind",
-  SelectField: "DECLINED — form sub-element; standalone input has no LiveView changeset to bind",
-  Toggle: "DECLINED — form sub-element; standalone boolean input has no LiveView changeset to bind",
-  // (Tabs now renders a client-side Phoenix.LiveView.JS toggle — all panels
-  //  rendered, JS.hide/JS.show switches them, no server round-trip — so it is
-  //  no longer a gap.  DestroyForm renders a confirm-delete <.button> wired to
-  //  the Ash destroy action.  Both are exercised by the phoenix-build fixture
-  //  test/e2e/fixtures/phoenix-build/destroy-form.ddd, so build-generated-phoenix
-  //  compile-validates them.)
-};
+//
+//  EMPTY — every TSX-rendered primitive now has a HEEx renderer.  The
+//  standalone form-input family (Field/NumberField/PasswordField/
+//  MultilineField/SelectField/Toggle) renders the app's `<.input>` with a
+//  `phx-change` that writes the bound page `state` field back via a hoisted
+//  `handle_event` (the LiveView analogue of a React controlled input);
+//  in-form inputs still go through Form-level dispatch.  A newly-added
+//  TSX-only primitive re-introduces a gap and fails this test until it gets a
+//  `heex` renderer or is pinned here with a reason.
+const KNOWN_HEEX_GAPS: Record<string, string> = {};
 
 describe("HEEx walker parity (finding #5)", () => {
   it("the TSX-rendered-without-HEEx gap matches the pinned list", () => {
