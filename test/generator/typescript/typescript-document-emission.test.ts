@@ -91,7 +91,8 @@ describe("Hono/Drizzle document-persistence emission (normalised(false))", () =>
   it("embedded: root columns + one jsonb containment column, no part table", () => {
     const schema = files.get("db/schema.ts")!;
     expect(schema).toContain('export const wishlists = pgTable("wishlists", {');
-    expect(schema).toContain('customerId: text("customer_id").notNull(),');
+    // `customerId: Customer id` (guid) → uuid, in lockstep with the migration.
+    expect(schema).toContain('customerId: uuid("customer_id").notNull(),');
     expect(schema).toContain('items: jsonb("items").notNull(),');
     expect(schema).not.toContain('pgTable("wish_items"');
   });

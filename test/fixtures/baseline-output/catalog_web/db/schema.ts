@@ -1,12 +1,12 @@
 // Auto-generated.
-import { pgSchema, text, integer, numeric, index } from "drizzle-orm/pg-core";
+import { pgSchema, text, integer, numeric, uuid, index } from "drizzle-orm/pg-core";
 
 export const productsSchema = pgSchema("products");
 export const customersSchema = pgSchema("customers");
 
 
 export const products = productsSchema.table("products", {
-  id: text("id").primaryKey(),
+  id: uuid("id").primaryKey(),
   sku: text("sku").notNull(),
   price_amount: numeric("price_amount").notNull(),
   price_currency: text("price_currency").notNull(),
@@ -15,7 +15,7 @@ export const products = productsSchema.table("products", {
 }));
 
 export const customers = customersSchema.table("customers", {
-  id: text("id").primaryKey(),
+  id: uuid("id").primaryKey(),
   username: text("username").notNull(),
   email: text("email").notNull(),
   age: integer("age").notNull(),
