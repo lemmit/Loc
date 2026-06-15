@@ -104,7 +104,7 @@ elixir items form one coherent track (a→e order).
 | T2.e | **HEEx walker primitive backfill** — 32 of ~53 primitives have HEEx renderers; missing: `List`, `Detail`, `MasterDetail`, `Tabs`, `Toggle`, `Field`/`NumberField`/`PasswordField`/`MultilineField`/`SelectField` (inputs are HEEx-form-level by design; pack templates exist, walker dispatch doesn't), `For`, `Stat`, `Money`, `Avatar`, `Image`, `Divider`, `Loader`, `Slot`, `Bold`/`Italic`/`InlineCode` (`Switch` left the stdlib — page-metamodel.md subsumed it under `match`). Unsupported ones render visible `<!-- not supported -->` stubs (`heex-walker-core.ts`). Prioritise `List`/`Detail`/`MasterDetail`/`Tabs` + the form inputs. | elixir/heex | [phase-a platform expansion](../plans/phase-a-platform-expansion-prereqs.md) |
 | T2.g | **Reified-criteria tail** — capability-`filter` reification: **Hono shipped** (`contextFilterRefs` in the IR; the repo calls the module-level criterion fn); Phoenix/Ash remains (elixir track). The principal/tenancy constructor factory (`currentUser.<field>` as ctor arg — gates T2.j, **excluded from the current run per maintainer**) and ambient (`of bool`) criteria (`src/generator/dotnet/criteria-emit.ts:~64-70`) remain. | elixir + principal factory | [reified-criteria](./reified-criteria.md) |
 | T2.h | **`shape(document)` on elixir** — `PLATFORM_SAVING_SHAPES` allows `relational`+`embedded` only (`src/util/platform-axes.ts:~127`). | elixir | [document-and-json-hierarchies](./document-and-json-hierarchies.md) |
-| T2.i | **IR field-constraint metadata** — **the IR-layer carrier exists in function form**: `src/ir/validate/invariant-classify.ts` (`classifyForWire` + `singleFieldShape` → min/max/between/len-min/len-max/len-eq/len-range/regex) is the shared classifier already consumed by Zod (react/hono via `generator/zod-refine.ts`), .NET FluentValidation (`validator-emit.ts`), and the Java validator. Remaining: elixir's `vanilla/changeset-emit.ts` consuming `singleFieldShape` for per-field `validate_*` (elixir track — its "the IR doesn't carry those constraints" comment was stale and is now fixed). A FieldIR *data* carrier would duplicate the classifier without new capability — only add it if a consumer needs constraints away from invariant context. | elixir consumption only | [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) §validators |
+| T2.i | **IR field-constraint metadata** — ✅ **SHIPPED** (#1214). The shared `singleFieldConstraints` classifier (`src/ir/validate/invariant-classify.ts` → min/max/between/len-*/regex), already consumed by Zod / .NET FluentValidation / the Java validator, is now consumed by elixir's `vanilla/changeset-emit.ts` too — numeric bounds → `validate_number`, length → `validate_length`, regex → `validate_format` on `base_changeset` (no-invariant aggregates stay byte-identical). A FieldIR *data* carrier would duplicate the classifier without new capability — only add it if a consumer needs constraints away from invariant context. | ~~elixir~~ done | [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) §validators |
 | T2.j | **Principal-referencing context filters on node/elixir** — `LIMITED_FAMILIES = {node, elixir}` in `validateContextFilterSupport` (`system-checks.ts:~365-407`); only .NET (`HasQueryFilter`) supports principal/tenancy filters today. Prereq for multi-tenancy (T4). | node, elixir | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
 | T2.k | **Provenance + audit runtimes on dotnet/elixir** — DONE for dotnet (`PROVENANCE_BACKENDS = {node, dotnet}`, `AUDIT_OP_BACKENDS = {node, dotnet}`); the .NET backend emits the lineage SDK + co-located column + transactional `provenance_records` flush + wire exposure, and audited operations stage `audit_records` in the save transaction. Elixir still owed (audited lifecycle actions also remain node-only). | ~~dotnet~~, elixir | [provenance](./provenance.md), [audit-and-logging](./audit-and-logging.md) |
 
@@ -187,21 +187,17 @@ retired: P4 and most of A1/A3 shipped independently, and A2 is dropped.
 
 ## Suggested near-term order
 
-A pragmatic next-6, dependency-consistent (T2.a / T2.b / T2.e all ✅ shipped):
+A pragmatic order, dependency-consistent (T2.a / T2.b / T2.c / T2.e / T2.i all
+✅ shipped; ES VO/enum applier folds ✅ #1212):
 
-1. **ES-on-vanilla tail (P4.3/P4.4)** — cross-backend conformance-parity
-   case for the vanilla ES column, VO/enum applier folds, dispatch
-   fan-out on append; example + CI wiring.  The T2.c returning-op tail
-   (guard/emit bodies, success serialization, the union-find absence
-   producer) rides alongside.
+1. **ES-on-vanilla tail (P4.4)** — cross-backend conformance-*wire*-parity case
+   for the vanilla ES column (the compile-parity fixtures already ship), dispatch
+   fan-out on append.  The T2.c returning-op tail (guard/emit bodies, success
+   serialization, the union-find absence producer) rides alongside.
 2. **T2.g residue** — Phoenix capability-`filter` reification (elixir
    track); principal factory excluded per maintainer.
-3. **T2.i** IR field-constraint metadata (+ elixir validators, Zod/.NET
-   enrichment).
-5. **T2.i** IR field-constraint metadata (+ elixir validators, Zod/.NET
-   enrichment).
-6. **T3.1** explicit `loads:` plans.
-7. **Tier 4 #1–#3** execution-context → multi-tenancy → authorization
+3. **T3.1** explicit `loads:` plans.
+4. **Tier 4 #1–#3** execution-context → multi-tenancy → authorization
     — the governance spine.
 
 ## Parallelisation
