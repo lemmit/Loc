@@ -91,8 +91,11 @@ describe("frontend ACL shared files — content", () => {
     expect(src).toMatch(
       /import type \{ UseFormSetError, FieldValues, Path \} from "react-hook-form"/,
     );
-    // 422-gated: we do not consume non-422 errors.
-    expect(src).toMatch(/r\?\.status !== 422/);
+    // 422-gated: we do not consume non-422 errors.  Reads the ApiError shape
+    // the generated client actually throws (`{ status, body }`), not an
+    // axios-style `.response` envelope (the bug that left this path dormant).
+    expect(src).toMatch(/e\?\.status !== 422/);
+    expect(src).not.toContain(".response");
     // The JSON pointer → flat key translator is the linchpin of the ACL.
     expect(src).toMatch(/pointerToFlat/);
   });
@@ -252,14 +255,12 @@ describe("applyServerErrors — runtime behaviour against synthetic inputs", () 
 
     const outcome = fn({
       error: {
-        response: {
-          status: 422,
-          data: {
-            errors: [
-              { pointer: "/price/amount", message: "must be positive" },
-              { pointer: "/name", message: "too short" },
-            ],
-          },
+        status: 422,
+        body: {
+          errors: [
+            { pointer: "/price/amount", message: "must be positive" },
+            { pointer: "/name", message: "too short" },
+          ],
         },
       },
       setError,
@@ -288,10 +289,8 @@ describe("applyServerErrors — runtime behaviour against synthetic inputs", () 
 
     fn({
       error: {
-        response: {
-          status: 422,
-          data: { errors: [{ pointer: "/price/amount", message: "bad" }] },
-        },
+        status: 422,
+        body: { errors: [{ pointer: "/price/amount", message: "bad" }] },
       },
       setError,
       fieldMap: { "price.amount": "priceAmountFlat" },
@@ -309,10 +308,8 @@ describe("applyServerErrors — runtime behaviour against synthetic inputs", () 
 
     const outcome = fn({
       error: {
-        response: {
-          status: 422,
-          data: { title: "Inventory conflict — please retry" },
-        },
+        status: 422,
+        body: { title: "Inventory conflict — please retry" },
       },
       setError: (field, options) => calls.push({ field, options }),
       fieldMap: {},
@@ -328,7 +325,7 @@ describe("applyServerErrors — runtime behaviour against synthetic inputs", () 
     const calls: SetErrorCall[] = [];
 
     const outcome = fn({
-      error: { response: { status: 500, data: { title: "Internal Server Error" } } },
+      error: { status: 500, body: { title: "Internal Server Error" } },
       setError: (field, options) => calls.push({ field, options }),
       fieldMap: {},
     });
@@ -362,7 +359,8 @@ describe("applyServerErrors — runtime behaviour against synthetic inputs", () 
 
     fn({
       error: {
-        response: { status: 422, data: { errors: [{ pointer: "/foo%2Fbar", message: "x" }] } },
+        status: 422,
+        body: { errors: [{ pointer: "/foo%2Fbar", message: "x" }] },
       },
       setError: (field, options) => calls.push({ field, options }),
       fieldMap: {},
@@ -382,7 +380,8 @@ describe("applyServerErrors — runtime behaviour against synthetic inputs", () 
 
     fn({
       error: {
-        response: { status: 422, data: { errors: [{ pointer: "/customerId", message: "x" }] } },
+        status: 422,
+        body: { errors: [{ pointer: "/customerId", message: "x" }] },
       },
       setError: (field, options) => calls.push({ field, options }),
       fieldMap: {},

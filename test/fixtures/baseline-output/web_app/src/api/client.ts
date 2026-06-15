@@ -5,7 +5,10 @@ import { getLogger } from "../logger";
 const log = getLogger("api");
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  // `body` retains the parsed error response (an RFC 7807 ProblemDetails on a
+  // 422, carrying the per-field `errors[]`) so the form decoder
+  // (`applyServerErrors`) can map field errors back onto inputs.
+  constructor(public status: number, message: string, public body?: unknown) {
     super(message);
     this.name = "ApiError";
   }
@@ -35,7 +38,7 @@ async function rawFetch(path: string, init?: RequestInit): Promise<unknown> {
         ? String((body as { error: unknown }).error)
         : r.statusText;
     log.warn(`<- ${r.status} ${method} ${path} (${ms}ms): ${message}`);
-    throw new ApiError(r.status, message);
+    throw new ApiError(r.status, message, body);
   }
   log.debug(`<- ${r.status} ${method} ${path} (${ms}ms)`);
   return body;

@@ -937,6 +937,11 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       const op = expr.op === "==" ? "===" : expr.op === "!=" ? "!==" : expr.op;
       return `(${emitExpr(expr.left, ctx)} ${op} ${emitExpr(expr.right, ctx)})`;
     }
+    case "ternary":
+      // Conditional value in expression position (e.g. a `bool` cell's
+      // `onCall ? "Yes" : "No"`).  Distinct from the markup-child `ternary`
+      // arm in `walk`, which renders JSX-element branches.
+      return `(${emitExpr(expr.cond, ctx)} ? ${emitExpr(expr.then, ctx)} : ${emitExpr(expr.otherwise, ctx)})`;
     case "list":
       // List literal (`["EU", "US"]`) — e.g. a SelectField's `options:`.
       return `[${expr.elements.map((it) => emitExpr(it, ctx)).join(", ")}]`;

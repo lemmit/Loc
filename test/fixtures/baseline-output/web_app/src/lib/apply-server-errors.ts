@@ -25,10 +25,13 @@ export function applyServerErrors<TPayload, TFormState extends FieldValues>({
   setError,
   fieldMap,
 }: ApplyServerErrorsArgs<TPayload, TFormState>): ServerErrorOutcome {
-  const r = (error as { response?: { status?: number; data?: ProblemDetails } }).response;
-  if (r?.status !== 422 || !r.data) return { kind: "unhandled" };
+  // The generated API client throws an `ApiError` carrying `status` and the
+  // parsed `body` (an RFC 7807 ProblemDetails on a 422).  Read that shape
+  // structurally (no import coupling to the client module).
+  const e = error as { status?: number; body?: ProblemDetails };
+  if (e?.status !== 422 || !e.body) return { kind: "unhandled" };
 
-  const pd = r.data;
+  const pd = e.body;
   if (Array.isArray(pd.errors) && pd.errors.length > 0) {
     for (const { pointer, message } of pd.errors) {
       const flatKey = pointerToFlat(pointer);
