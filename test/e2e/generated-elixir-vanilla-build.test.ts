@@ -38,6 +38,9 @@ describe.skipIf(!ENABLED)(
       // from-scratch ES + producer-translation Elixir, not just the structure tests.
       { name: "vanilla-eventlog.ddd", deployable: "api" },
       { name: "vanilla-returns.ddd", deployable: "api" },
+      // ES applier folds over value-object / enum fields (P4.3): an inline VO
+      // constructor renders to a plain map on vanilla — compile that path.
+      { name: "vanilla-vo-fold.ddd", deployable: "api" },
     ])("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
