@@ -22,11 +22,16 @@
 > chrome-in-App.vue shape); and the runtime e2e fold-in
 > (`generated-vue-e2e.yml` / `LOOM_VUE_E2E` — `vite build` vue-showcase,
 > `vite preview` the bundle, run the emitted Playwright smoke against the
-> live app; a sibling gate matching the Svelte runtime-e2e shape).
-> **Remaining tracked gaps:** operation forms (Action dialogs) inside
-> user components — create-forms and workflow run-forms inside a component
-> DO work; operation forms need the op-dialog host so they stay a narrow
-> deferral — and slot params on extern components.
+> live app; a sibling gate matching the Svelte runtime-e2e shape);
+> operation forms (Action dialogs) inside user components (the op-dialog
+> host + per-op LoomForm transplant from the page shell — the instance
+> `idExpr` reads off the aggregate-typed prop, `order.id` →
+> `props.order.id`); and slot params on extern components (Vue slots
+> aren't props, so a `slot` param maps to a typed `<Name>Slots` contract
+> for `defineSlots`, kept out of `<Name>Props`).  **No remaining gaps —
+> the Vue frontend is at full parity with React across the page DSL,
+> with both compile-time (`LOOM_VUE_BUILD`) and runtime (`LOOM_VUE_E2E`)
+> CI coverage.**
 
 Add **Vue 3 as a frontend platform** (`platform: vue`) with feature parity to
 React, plus **two Vue design packs** (`vuetify`, `shadcnVue`) with feature
