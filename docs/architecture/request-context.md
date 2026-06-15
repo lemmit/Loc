@@ -1,12 +1,13 @@
 # RequestContext — the single ambient context shape
 
 > **Pins [D-CTX-SHAPE](../decisions.md#d-ctx-shape--the-ambient-requestcontext-field-set).**
-> Status: design pinned; the carrier is now **emitted** on .NET, Hono,
-> Phoenix, and Java/Spring (the request-stable tier + the root frame's
-> `scopeId`, plus the principal's `actor_id`). Per-dispatch frame nesting
-> (`parentId` chaining) and the downstream consumers (audit/provenance)
-> remain in progress — see the per-backend table and the § Emitted (Phoenix)
-> / § Emitted (Java) notes below. Every governance feature reads the same shape.
+> Status: design pinned; the carrier is now **emitted on all five backends** —
+> .NET, Hono, Phoenix, Java/Spring, and Python/FastAPI (the request-stable tier
+> + the root frame's `scopeId`, plus the principal's `actor_id`). Per-dispatch
+> frame nesting (`parentId` chaining) and the downstream consumers
+> (audit/provenance) remain in progress — see the per-backend table and the
+> § Emitted (Phoenix) / § Emitted (Java) / § Emitted (Python) notes below.
+> Every governance feature reads the same shape.
 
 ## Why one shape
 
@@ -133,6 +134,7 @@ Two **realization classes** cover every target:
 | `elixir` + `foundation: vanilla` | ambient | **`Logger.metadata`** — the same `RequestContext` Plug as ash (no `with`-struct variant; the carrier is pure Plug + Logger, so both foundations emit it identically) | root frame only — opened at the HTTP edge. Per-`with`-step child frames are deferred |
 | `Go` (proposed) | **explicit-threading** | `context.Context` (request-stable in `ctx.Value`; frame-local derived per call) | `ctx := context.WithValue(parent, …)` threaded into every call |
 | `java` (Spring MVC) | ambient | **SLF4J `MDC`** (a `ThreadLocal`-backed map, always on the classpath via spring-boot-starter-logging) — stamped by an `ExecutionContextFilter` at the HTTP edge. *Emitted today* (§ Emitted (Java) below). A WebFlux variant would need Reactor `Context` (`ThreadLocal` does not propagate across reactive operators); MVC is what ships | root frame only — opened by the outermost (`HIGHEST_PRECEDENCE`) filter. Per-dispatch child frames (`parentId` chaining) deferred |
+| `python` (FastAPI) | ambient | **`contextvars.ContextVar[RequestContext]`** — opened by the outermost `ObservabilityMiddleware`. *Emitted today* (§ Emitted (Python) below). **Subsumes** the pre-existing obs request-id contextvar (one ambient channel, not two): the log line's `request_id` is the carrier's `correlation_id` | root frame only — opened at the HTTP edge. Per-dispatch child frames (`parentId` chaining) deferred |
 
 **Within the ambient class, the two tiers want two mechanisms — and a
 scoped/thread-bound slot alone is not enough for the frame-local tier.**
@@ -343,6 +345,38 @@ idiomatic ambient slot, the direct twin of the BEAM's `Logger.metadata`.
 ids onto the catalog log lines (the bespoke `CatalogLog` writer bypasses SLF4J,
 so MDC is the carrier/seam — not yet echoed onto the obs envelope; that touches
 the cross-backend envelope contract and is its own change).
+
+## Emitted (Python)
+
+The FastAPI carrier ships today (`src/generator/python/emit/obs.ts`,
+`auth-emit.ts`). This is the **subsume** case the design names: the obs layer
+already had a `request_id` `ContextVar` set/reset at the boundary and echoed onto
+every log line. Rather than add a second ambient channel, that channel was
+**widened into the carrier** — one `contextvars.ContextVar[RequestContext]`, and
+the log line's `request_id` is now the carrier's `correlation_id` (the obs
+envelope contract is unchanged).
+
+- **Boundary establishment** — `ObservabilityMiddleware` (added last in
+  `app/main.py`, so Starlette runs it **outermost** — before auth). It resolves
+  the correlation id (`x-correlation-id` → `x-request-id` → minted), opens a
+  frozen `RequestContext` (correlation id, a fresh root `scope_id`, `locale` from
+  `accept-language`, `started_at`), brackets the request with
+  `request_start`/`request_end`, echoes the id on both `x-correlation-id` and
+  `x-request-id`, and resets the `ContextVar` on the way out.
+- **Principal — `actor_id` only.** After the verifier succeeds, `AuthMiddleware`
+  calls `set_actor_id(str(user.<id>))` (id key resolved from the user shape: `id`,
+  else the first field), which `replace()`s the frozen context with the actor id.
+  The full principal stays on `request.state.current_user` — only the id rides the
+  carrier. Auth runs inside the obs middleware, so the context is already open.
+- **Accessors** — `correlation_id()`/`scope_id()`/`parent_id()`/`actor_id()`/`locale()`/`started_at()`
+  (module functions in `app/obs/log.py`) read the `ContextVar` for non-HTTP
+  callers; `None` / `"en"` / `0.0` outside a request.
+
+**Deferred on Python**: per-dispatch child frames (`parent_id` stays `None`), and
+surfacing `scope_id`/`actor_id` onto the log lines beyond `request_id` (additive
+to the obs envelope — its own change). The `BaseHTTPMiddleware` contextvar-
+propagation caveat applies: the carrier is set by the outermost middleware and
+read within the request scope, which is the supported path.
 
 ## Open (deferred)
 
