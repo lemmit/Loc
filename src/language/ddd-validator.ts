@@ -10,6 +10,7 @@ import type { ValidationAcceptor, ValidationChecks } from "langium";
 import type { DddServices } from "./ddd-module.js";
 import type {
   Api,
+  AuthBlock,
   DddAstType,
   Deployable,
   Model,
@@ -21,6 +22,7 @@ import type {
 } from "./generated/ast.js";
 import {
   checkActionTypePosition,
+  checkAuthBlock,
   checkBinaryOperands,
   checkBuilderCallType,
   checkChannels,
@@ -198,6 +200,19 @@ export class DddValidator {
           }
         }
         for (const tb of themeBlocks) checkTheme(tb, accept);
+        // Auth block (D-AUTH-OIDC).  At most one `auth { … }` per
+        // system; flag the extras, semantic-check the first.
+        const authBlocks = m.members.filter((sm) => sm.$type === "AuthBlock") as AuthBlock[];
+        if (authBlocks.length > 1) {
+          for (const ab of authBlocks.slice(1)) {
+            accept(
+              "error",
+              `system '${m.name}' declares more than one 'auth { ... }' block; keep just the first.`,
+              { node: ab, code: "loom.duplicate-auth-block" },
+            );
+          }
+        }
+        for (const ab of authBlocks) checkAuthBlock(ab, m, accept);
         // Page metamodel.  Collect ui blocks first so per-
         // ui checks can see siblings (name uniqueness across uis), and
         // so per-deployable checks can cross-reference the system's

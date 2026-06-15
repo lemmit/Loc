@@ -20,7 +20,7 @@ ModelMember:
     // also admissible at file top level and compose into the project's single
     // `system` — so deployment can live in its own file.  See
     // docs/proposals/implicit-system-composition.md.
-    | Deployable | Storage | Resource | ChannelSource | Ui | ThemeBlock | UserBlock | Api | Layout | TestE2E;
+    | Deployable | Storage | Resource | ChannelSource | Ui | ThemeBlock | UserBlock | AuthBlock | Api | Layout | TestE2E;
 
 // ---------------------------------------------------------------------------
 // System / Module / Deployable — the deployment shape.
@@ -39,7 +39,7 @@ System:
     '}';
 
 SystemMember:
-    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -76,6 +76,62 @@ UserField:
 
 UserFieldName returns string:
     ID | 'id' | 'permissions';
+
+// System-level OIDC authentication config (D-AUTH-OIDC).  Sibling to
+// `user { … }`: the user block declares the claim SHAPE, this block
+// declares WHO issues the token and how its claims map onto that shape.
+// `provider:` names a preset (resolved to issuer/endpoints during
+// lowering); `keycloak` / `custom` are the self-hosted path and require
+// an explicit `oidc { issuer: … }`.  At most one per system, admissible
+// only alongside a `user { … }` block (validator enforces).  Loom owns
+// no auth runtime — declaring this generates a token verifier (filling
+// the existing per-backend verifier seam) plus the /auth/* redirect
+// handshake, nothing more.
+AuthBlock:
+    'auth' '{'
+        (
+            ('provider' ':' provider=ID ','?)
+          | ('oidc' oidc=OidcConfig ','?)
+          | ('sessions' ':' sessions=SessionMode ','?)
+          | ('claims' ':' claims=ClaimsMap ','?)
+          | ('enforcement' ':' enforcement=Enforcement ','?)
+        )*
+    '}';
+
+OidcConfig:
+    '{'
+        (
+            ('issuer' ':' issuer=AuthConfigValue ','?)
+          | ('clientId' ':' clientId=AuthConfigValue ','?)
+          | ('clientSecret' ':' clientSecret=AuthConfigValue ','?)
+          | ('audience' ':' audience=AuthConfigValue ','?)
+          | ('scopes' ':' '[' scopes+=STRING (',' scopes+=STRING)* ','? ']' ','?)
+        )*
+    '}';
+
+// A config value is either a string literal or an `env("VAR")` reference
+// resolved at runtime — mirrors the storage connection-source pattern so
+// issuer URLs and client secrets never land in source.
+AuthConfigValue:
+      {infer LiteralAuthValue} value=STRING
+    | {infer EnvAuthValue} 'env' '(' env=STRING ')';
+
+ClaimsMap:
+    '{'
+        (entries+=ClaimEntry (',' entries+=ClaimEntry)* ','?)?
+    '}';
+
+// Maps an IdP claim path (`realm_access.roles`) onto a `user { … }`
+// field.  The target reuses UserFieldName so `id` / `permissions` are
+// admissible.
+ClaimEntry:
+    field=UserFieldName ':' path=STRING;
+
+SessionMode returns string:
+    'cookie' | 'jwt';
+
+Enforcement returns string:
+    'denyByDefault' | 'opt';
 
 // E2E test against a running deployable.  The body reuses the per-
 // aggregate TestStatement vocabulary (let / expect / bare-call), but
@@ -263,11 +319,13 @@ Platform returns string:
 DesignPack returns string:
     'mantine' | 'shadcn' | 'mui' | 'chakra' | 'ashPhoenix' | 'shadcnSvelte' | 'flowbite' | 'vuetify' | 'shadcnVue' | STRING;
 // Per-deployable auth opt-in.  `required` enables JWT-decode middleware
-// and the user-supplied verifier hook.  Absence keeps the deployable
-// open (existing behaviour).  Future modes (`optional`, `forbidden`)
-// can extend the union without touching consumers.
+// and the user-supplied verifier hook on a backend; `ui` mounts the
+// login redirect + route guard on a frontend (react / LiveView) under a
+// system `auth { … }` block.  Absence keeps the deployable open
+// (existing behaviour).  Future modes (`optional`, `forbidden`) can
+// extend the union without touching consumers.
 AuthMode returns string:
-    'required';
+    'required' | 'ui';
 
 // ---------------------------------------------------------------------------
 // Page metamodel (Slice 1)

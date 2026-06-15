@@ -2,6 +2,7 @@
 // dispatcher in `ddd-validator.ts` (and any future direct caller)
 // can pull them from a single import.
 
+export { checkAuthBlock } from "./auth.js";
 export { checkBuilderCallType, checkLegacyConstructorCalls } from "./builder-call.js";
 export { checkChannels } from "./channel.js";
 export { checkProjectSingletons, checkTopLevelDomainComposition } from "./composition.js";

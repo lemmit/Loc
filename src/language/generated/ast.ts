@@ -60,6 +60,7 @@ export type DddKeywordNames =
     | "apply"
     | "asc"
     | "ashPhoenix"
+    | "audience"
     | "audited"
     | "auth"
     | "bigquery"
@@ -75,7 +76,10 @@ export type DddKeywordNames =
     | "channel"
     | "channelSource"
     | "check"
+    | "claims"
     | "clickhouse"
+    | "clientId"
+    | "clientSecret"
     | "command"
     | "component"
     | "config"
@@ -83,6 +87,7 @@ export type DddKeywordNames =
     | "contains"
     | "context"
     | "contexts"
+    | "cookie"
     | "covers"
     | "create"
     | "criterion"
@@ -90,6 +95,7 @@ export type DddKeywordNames =
     | "datetime"
     | "decimal"
     | "delivery"
+    | "denyByDefault"
     | "deployable"
     | "derived"
     | "desc"
@@ -105,6 +111,7 @@ export type DddKeywordNames =
     | "else"
     | "embedded"
     | "emit"
+    | "enforcement"
     | "entitles"
     | "entity"
     | "enum"
@@ -150,8 +157,10 @@ export type DddKeywordNames =
     | "internal"
     | "invariant"
     | "isolationLevel"
+    | "issuer"
     | "java"
     | "json"
+    | "jwt"
     | "kafka"
     | "key"
     | "keyPrefix"
@@ -181,10 +190,12 @@ export type DddKeywordNames =
     | "objectStore"
     | "of"
     | "ogImage"
+    | "oidc"
     | "on"
     | "onCreate"
     | "onUpdate"
     | "operation"
+    | "opt"
     | "option"
     | "or"
     | "ownTable"
@@ -203,6 +214,7 @@ export type DddKeywordNames =
     | "precondition"
     | "private"
     | "provenanced"
+    | "provider"
     | "python"
     | "query"
     | "queue"
@@ -231,6 +243,7 @@ export type DddKeywordNames =
     | "runtime"
     | "s3"
     | "schema"
+    | "scopes"
     | "secret"
     | "section"
     | "seed"
@@ -238,6 +251,7 @@ export type DddKeywordNames =
     | "serializable"
     | "serves"
     | "service"
+    | "sessions"
     | "shadcn"
     | "shadcnSvelte"
     | "shadcnVue"
@@ -301,10 +315,18 @@ export function isAggregateMember(item: unknown): item is AggregateMember {
     return reflection.isInstance(item, AggregateMember);
 }
 
-export type AuthMode = 'required';
+export type AuthConfigValue = EnvAuthValue | LiteralAuthValue;
+
+export const AuthConfigValue = 'AuthConfigValue';
+
+export function isAuthConfigValue(item: unknown): item is AuthConfigValue {
+    return reflection.isInstance(item, AuthConfigValue);
+}
+
+export type AuthMode = 'required' | 'ui';
 
 export function isAuthMode(item: unknown): item is AuthMode {
-    return item === 'required';
+    return item === 'required' || item === 'ui';
 }
 
 export type BaseType = ActionType | IdType | NamedType | PrimitiveType | SlotType;
@@ -375,6 +397,12 @@ export type DesignPack = 'ashPhoenix' | 'chakra' | 'flowbite' | 'mantine' | 'mui
 
 export function isDesignPack(item: unknown): item is DesignPack {
     return item === 'mantine' || item === 'shadcn' || item === 'mui' || item === 'chakra' || item === 'ashPhoenix' || item === 'shadcnSvelte' || item === 'flowbite' || item === 'vuetify' || item === 'shadcnVue' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+}
+
+export type Enforcement = 'denyByDefault' | 'opt';
+
+export function isEnforcement(item: unknown): item is Enforcement {
+    return item === 'denyByDefault' || item === 'opt';
 }
 
 export type EntityPartMember = Containment | DerivedProp | FunctionDecl | Invariant | Property;
@@ -477,7 +505,7 @@ export function isMemberName(item: unknown): item is MemberName {
     return item === 'by' || item === 'handle' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'create' || item === 'destroy' || item === 'where' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'action' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type ModelMember = Api | BoundedContext | ChannelSource | Component | Deployable | EnumDecl | Layout | PayloadDecl | Requirement | Resource | Solution | Storage | Subdomain | System | TestCase | TestE2E | ThemeBlock | Ui | UserBlock | ValueObject;
+export type ModelMember = Api | AuthBlock | BoundedContext | ChannelSource | Component | Deployable | EnumDecl | Layout | PayloadDecl | Requirement | Resource | Solution | Storage | Subdomain | System | TestCase | TestE2E | ThemeBlock | Ui | UserBlock | ValueObject;
 
 export const ModelMember = 'ModelMember';
 
@@ -545,6 +573,12 @@ export function isSavingShape(item: unknown): item is SavingShape {
     return item === 'relational' || item === 'embedded' || item === 'document';
 }
 
+export type SessionMode = 'cookie' | 'jwt';
+
+export function isSessionMode(item: unknown): item is SessionMode {
+    return item === 'cookie' || item === 'jwt';
+}
+
 export type SortDirection = 'asc' | 'desc';
 
 export function isSortDirection(item: unknown): item is SortDirection {
@@ -577,7 +611,7 @@ export function isStorageType(item: unknown): item is StorageType {
     return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery' || item === 's3' || item === 'rabbitmq' || item === 'nats' || item === 'restApi';
 }
 
-export type SystemMember = Api | BoundedContext | ChannelSource | Deployable | Layout | Resource | Storage | Subdomain | TestE2E | ThemeBlock | Ui | UserBlock;
+export type SystemMember = Api | AuthBlock | BoundedContext | ChannelSource | Deployable | Layout | Resource | Storage | Subdomain | TestE2E | ThemeBlock | Ui | UserBlock;
 
 export const SystemMember = 'SystemMember';
 
@@ -738,6 +772,22 @@ export const AssignOrCallStmt = 'AssignOrCallStmt';
 
 export function isAssignOrCallStmt(item: unknown): item is AssignOrCallStmt {
     return reflection.isInstance(item, AssignOrCallStmt);
+}
+
+export interface AuthBlock extends AstNode {
+    readonly $container: Model | System;
+    readonly $type: 'AuthBlock';
+    claims?: ClaimsMap;
+    enforcement?: Enforcement;
+    oidc?: OidcConfig;
+    provider?: string;
+    sessions?: SessionMode;
+}
+
+export const AuthBlock = 'AuthBlock';
+
+export function isAuthBlock(item: unknown): item is AuthBlock {
+    return reflection.isInstance(item, AuthBlock);
 }
 
 export interface BinaryChain extends AstNode {
@@ -908,6 +958,31 @@ export const ChannelSource = 'ChannelSource';
 
 export function isChannelSource(item: unknown): item is ChannelSource {
     return reflection.isInstance(item, ChannelSource);
+}
+
+export interface ClaimEntry extends AstNode {
+    readonly $container: ClaimsMap;
+    readonly $type: 'ClaimEntry';
+    field: UserFieldName;
+    path: string;
+}
+
+export const ClaimEntry = 'ClaimEntry';
+
+export function isClaimEntry(item: unknown): item is ClaimEntry {
+    return reflection.isInstance(item, ClaimEntry);
+}
+
+export interface ClaimsMap extends AstNode {
+    readonly $container: AuthBlock;
+    readonly $type: 'ClaimsMap';
+    entries: Array<ClaimEntry>;
+}
+
+export const ClaimsMap = 'ClaimsMap';
+
+export function isClaimsMap(item: unknown): item is ClaimsMap {
+    return reflection.isInstance(item, ClaimsMap);
 }
 
 export interface Component extends AstNode {
@@ -1129,6 +1204,18 @@ export const EnumValue = 'EnumValue';
 
 export function isEnumValue(item: unknown): item is EnumValue {
     return reflection.isInstance(item, EnumValue);
+}
+
+export interface EnvAuthValue extends AstNode {
+    readonly $container: OidcConfig;
+    readonly $type: 'EnvAuthValue';
+    env: string;
+}
+
+export const EnvAuthValue = 'EnvAuthValue';
+
+export function isEnvAuthValue(item: unknown): item is EnvAuthValue {
+    return reflection.isInstance(item, EnvAuthValue);
 }
 
 export interface EnvConnectionSource extends AstNode {
@@ -1410,6 +1497,18 @@ export const ListLit = 'ListLit';
 
 export function isListLit(item: unknown): item is ListLit {
     return reflection.isInstance(item, ListLit);
+}
+
+export interface LiteralAuthValue extends AstNode {
+    readonly $container: OidcConfig;
+    readonly $type: 'LiteralAuthValue';
+    value: string;
+}
+
+export const LiteralAuthValue = 'LiteralAuthValue';
+
+export function isLiteralAuthValue(item: unknown): item is LiteralAuthValue {
+    return reflection.isInstance(item, LiteralAuthValue);
 }
 
 export interface LiteralConnectionSource extends AstNode {
@@ -1762,6 +1861,22 @@ export const OgImageProp = 'OgImageProp';
 
 export function isOgImageProp(item: unknown): item is OgImageProp {
     return reflection.isInstance(item, OgImageProp);
+}
+
+export interface OidcConfig extends AstNode {
+    readonly $container: AuthBlock;
+    readonly $type: 'OidcConfig';
+    audience?: AuthConfigValue;
+    clientId?: AuthConfigValue;
+    clientSecret?: AuthConfigValue;
+    issuer?: AuthConfigValue;
+    scopes: Array<string>;
+}
+
+export const OidcConfig = 'OidcConfig';
+
+export function isOidcConfig(item: unknown): item is OidcConfig {
+    return reflection.isInstance(item, OidcConfig);
 }
 
 export interface OnDecl extends AstNode {
@@ -2675,6 +2790,8 @@ export type DddAstType = {
     ApiStatus: ApiStatus
     Apply: Apply
     AssignOrCallStmt: AssignOrCallStmt
+    AuthBlock: AuthBlock
+    AuthConfigValue: AuthConfigValue
     BaseType: BaseType
     BinaryChain: BinaryChain
     BindEntry: BindEntry
@@ -2689,6 +2806,8 @@ export type DddAstType = {
     CanonicalProp: CanonicalProp
     Channel: Channel
     ChannelSource: ChannelSource
+    ClaimEntry: ClaimEntry
+    ClaimsMap: ClaimsMap
     Component: Component
     ComponentDecl: ComponentDecl
     ConfigEntry: ConfigEntry
@@ -2709,6 +2828,7 @@ export type DddAstType = {
     EntityPartMember: EntityPartMember
     EnumDecl: EnumDecl
     EnumValue: EnumValue
+    EnvAuthValue: EnvAuthValue
     EnvConnectionSource: EnvConnectionSource
     EventDecl: EventDecl
     ExpectStmt: ExpectStmt
@@ -2734,6 +2854,7 @@ export type DddAstType = {
     LayoutSlot: LayoutSlot
     LetStmt: LetStmt
     ListLit: ListLit
+    LiteralAuthValue: LiteralAuthValue
     LiteralConnectionSource: LiteralConnectionSource
     LiteralExpr: LiteralExpr
     LoadPath: LoadPath
@@ -2765,6 +2886,7 @@ export type DddAstType = {
     ObjectFieldInit: ObjectFieldInit
     ObjectLit: ObjectLit
     OgImageProp: OgImageProp
+    OidcConfig: OidcConfig
     OnDecl: OnDecl
     Operation: Operation
     Page: Page
@@ -2846,7 +2968,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [ActionType, Aggregate, AggregateMember, Api, ApiStatus, Apply, AssignOrCallStmt, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvConnectionSource, EventDecl, ExpectStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiChannelParam, UiComposeBinding, UiFunction, UiMember, UiNotification, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
+        return [ActionType, Aggregate, AggregateMember, Api, ApiStatus, Apply, AssignOrCallStmt, AuthBlock, AuthConfigValue, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, ClaimEntry, ClaimsMap, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvAuthValue, EnvConnectionSource, EventDecl, ExpectStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralAuthValue, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OidcConfig, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiChannelParam, UiComposeBinding, UiFunction, UiMember, UiNotification, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -2875,6 +2997,17 @@ export class DddAstReflection extends AbstractAstReflection {
             case LetStmt:
             case PreconditionStmt: {
                 return this.isSubtype(Statement, supertype) || this.isSubtype(TestStatement, supertype);
+            }
+            case AuthBlock:
+            case ChannelSource:
+            case Layout:
+            case Resource:
+            case Storage:
+            case TestE2E:
+            case ThemeBlock:
+            case Ui:
+            case UserBlock: {
+                return this.isSubtype(ModelMember, supertype) || this.isSubtype(SystemMember, supertype);
             }
             case BinaryChain:
             case BuilderCall:
@@ -2928,16 +3061,6 @@ export class DddAstReflection extends AbstractAstReflection {
             case Seed: {
                 return this.isSubtype(ContextMember, supertype);
             }
-            case ChannelSource:
-            case Layout:
-            case Resource:
-            case Storage:
-            case TestE2E:
-            case ThemeBlock:
-            case Ui:
-            case UserBlock: {
-                return this.isSubtype(ModelMember, supertype) || this.isSubtype(SystemMember, supertype);
-            }
             case Component: {
                 return this.isSubtype(ModelMember, supertype) || this.isSubtype(UiMember, supertype);
             }
@@ -2960,6 +3083,10 @@ export class DddAstReflection extends AbstractAstReflection {
             case EnumDecl:
             case PayloadDecl: {
                 return this.isSubtype(ContextMember, supertype) || this.isSubtype(ModelMember, supertype) || this.isSubtype(NamedDecl, supertype);
+            }
+            case EnvAuthValue:
+            case LiteralAuthValue: {
+                return this.isSubtype(AuthConfigValue, supertype);
             }
             case EnvConnectionSource:
             case LiteralConnectionSource:
@@ -3188,6 +3315,18 @@ export class DddAstReflection extends AbstractAstReflection {
                     ]
                 };
             }
+            case AuthBlock: {
+                return {
+                    name: AuthBlock,
+                    properties: [
+                        { name: 'claims' },
+                        { name: 'enforcement' },
+                        { name: 'oidc' },
+                        { name: 'provider' },
+                        { name: 'sessions' }
+                    ]
+                };
+            }
             case BinaryChain: {
                 return {
                     name: BinaryChain,
@@ -3303,6 +3442,23 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'channel' },
                         { name: 'name' },
                         { name: 'use' }
+                    ]
+                };
+            }
+            case ClaimEntry: {
+                return {
+                    name: ClaimEntry,
+                    properties: [
+                        { name: 'field' },
+                        { name: 'path' }
+                    ]
+                };
+            }
+            case ClaimsMap: {
+                return {
+                    name: ClaimsMap,
+                    properties: [
+                        { name: 'entries', defaultValue: [] }
                     ]
                 };
             }
@@ -3464,6 +3620,14 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: EnumValue,
                     properties: [
                         { name: 'name' }
+                    ]
+                };
+            }
+            case EnvAuthValue: {
+                return {
+                    name: EnvAuthValue,
+                    properties: [
+                        { name: 'env' }
                     ]
                 };
             }
@@ -3643,6 +3807,14 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: ListLit,
                     properties: [
                         { name: 'elements', defaultValue: [] }
+                    ]
+                };
+            }
+            case LiteralAuthValue: {
+                return {
+                    name: LiteralAuthValue,
+                    properties: [
+                        { name: 'value' }
                     ]
                 };
             }
@@ -3877,6 +4049,18 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: OgImageProp,
                     properties: [
                         { name: 'value' }
+                    ]
+                };
+            }
+            case OidcConfig: {
+                return {
+                    name: OidcConfig,
+                    properties: [
+                        { name: 'audience' },
+                        { name: 'clientId' },
+                        { name: 'clientSecret' },
+                        { name: 'issuer' },
+                        { name: 'scopes', defaultValue: [] }
                     ]
                 };
             }

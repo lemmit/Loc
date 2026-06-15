@@ -5,8 +5,20 @@
 > Builds on the shipped auth surface in [`../auth.md`](../auth.md).
 > Branch: `claude/auth-providers-planning-hnnrep`.
 >
-> **Status: PLANNING.** No code written yet — this document scopes the
-> work. Decisions locked with the maintainer (2026-06-15):
+> **Phase 0 shipped (language surface, no codegen).** The system-level
+> `auth { … }` block now parses, lowers, and validates end-to-end:
+> grammar (`AuthBlock` / `OidcConfig` / `ClaimsMap` / `AuthConfigValue`
+> + `AuthMode` widened to `required | ui`), regenerated parser/AST,
+> `AuthIR` / `OidcConfigIR` / `ClaimMappingIR` on `SystemIR.auth`,
+> provider-preset resolution (`src/util/auth-providers.ts` →
+> `src/ir/lower/lower-auth.ts`), the `src/language/validators/auth.ts`
+> rule set, and a `print-structural` arm. 10 dedicated tests
+> (`test/language/auth-block.test.ts`); full fast suite green
+> (5051 passed). No backend consumes `SystemIR.auth` yet — that is
+> Phase 1 onward.
+>
+> **Status: Phase 0 done; Phases 1+ pending.** Decisions locked with the
+> maintainer (2026-06-15):
 >
 > 1. **Scope** = OIDC authentication providers + playground auth stub
 >    **+ default-deny enforcement** (the known `auth.md` hole, §4.3 of the

@@ -1424,6 +1424,11 @@ export interface SystemIR {
    *  JWT tokens into; `currentUser` references in expression bodies
    *  resolve members against this shape. */
   user?: UserIR;
+  /** Optional system-wide OIDC auth config.  Populated when the source
+   *  declares an `auth { ... }` block at system scope.  Requires a
+   *  `user { ... }` block (validator enforces).  Drives the generated
+   *  OIDC verifier + `/auth/*` handshake on opted-in deployables. */
+  auth?: AuthIR;
   /** Optional system-wide visual-identity tokens.  Populated when the
    *  source declares a `theme { ... }` block at system scope.  Each
    *  React deployable consumes the same ThemeIR; the platform's
@@ -1579,6 +1584,54 @@ export interface ThemeIR {
  *  the `currentUser` magic identifier's member-access surface. */
 export interface UserIR {
   fields: FieldIR[];
+}
+
+/** A resolved auth config value — an inline literal or a runtime
+ *  `env(VAR)` reference (the deployment supplies the value; it never
+ *  bakes into generated source). */
+export type AuthValueIR = { kind: "literal"; value: string } | { kind: "env"; env: string };
+
+/** One IdP-claim → `user { ... }`-field mapping. */
+export interface ClaimMappingIR {
+  /** Target field on the `user { ... }` shape. */
+  field: string;
+  /** Dotted IdP claim path, e.g. `realm_access.roles`. */
+  path: string;
+}
+
+/** Fully-resolved OIDC endpoint config.  Provider presets
+ *  (`keycloak` / `google` / …) are resolved into this record during
+ *  lowering so backends never special-case provider names — they
+ *  always consume concrete endpoints. */
+export interface OidcConfigIR {
+  issuer?: AuthValueIR;
+  clientId?: AuthValueIR;
+  clientSecret?: AuthValueIR;
+  audience?: AuthValueIR;
+  scopes: string[];
+}
+
+/** System-level OIDC authentication config (D-AUTH-OIDC).  Populated
+ *  when the source declares an `auth { ... }` block; requires a
+ *  `user { ... }` block (validator enforces).  Drives the generated
+ *  token verifier (filling the existing per-backend verifier seam) and
+ *  the `/auth/*` redirect handshake — Loom owns no auth runtime. */
+export interface AuthIR {
+  /** Provider preset name as written in source (`keycloak` / `custom`
+   *  / `google` / …).  `undefined` when only a raw `oidc { ... }` block
+   *  was given.  Already resolved into `oidc`; retained for emission
+   *  hints (e.g. the bundled dev Keycloak). */
+  provider?: string;
+  /** Resolved endpoints (preset ⊕ explicit `oidc { ... }` overrides). */
+  oidc: OidcConfigIR;
+  /** How the app holds the post-login session. */
+  sessions: "cookie" | "jwt";
+  /** IdP-claim → user-field projections. */
+  claims: ClaimMappingIR[];
+  /** Default-deny posture.  `opt` (default) preserves today's
+   *  per-`requires` opt-in; `denyByDefault` forces every reachable
+   *  command on an `auth: required` deployable to declare a gate. */
+  enforcement: "denyByDefault" | "opt";
 }
 
 /** End-to-end test that targets a running deployable. */
@@ -2097,11 +2150,13 @@ export interface DeployableIR {
   transport?: string;
   runtime?: string;
   /** Per-deployable auth opt-in.  Populated when the source declares
-   *  `auth: required` on the deployable.  Backends with
+   *  `auth: required` or `auth: ui` on the deployable.  Backends with
    *  `auth.required === true` emit JWT-decode middleware + a verifier
-   *  hook the user implements; deployables without this stay open
+   *  hook the user implements; a frontend with `auth.ui === true`
+   *  mounts the login redirect + route guard under the system
+   *  `auth { ... }` block.  Deployables without this stay open
    *  (existing behaviour). */
-  auth?: { required: boolean };
+  auth?: { required: boolean; ui: boolean };
   /** Name of the `ui { ... }` SystemMember this deployable serves.
    *  Set when the source declares
    *  either `ui: <Name>` (sugar) or `ui <Name> { framework: ... }`
