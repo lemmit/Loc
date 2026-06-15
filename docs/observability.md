@@ -109,7 +109,7 @@ This list is an excerpt of what the catalog ships; the file
 |---|---|---|---|
 | **Hono** | [pino](https://github.com/pinojs/pino) | Native — pino emits JSON by default | `req.log` child logger; envelope auto-bound |
 | **.NET** | `ILogger<T>` | `AddJsonConsole` — structured fields land under `State.<Pascal>` | `IHttpContextAccessor` + `BeginScope`; `Activity.Current.TraceId` carries `request_id` |
-| **Phoenix** | Elixir `Logger` | Custom `<App>.LogFormatter` — see [`lib/<app>/log_formatter.ex`](https://github.com/lemmit/Loc/blob/main/src/generator/phoenix-live-view/index.ts) | `:telemetry` handlers attach `[:phoenix, :endpoint, :start/:stop]` and translate to catalog identity |
+| **Phoenix** | Elixir `Logger` | Custom `<App>.LogFormatter` — see [`lib/<app>/log_formatter.ex`](https://github.com/lemmit/Loc/blob/main/src/generator/phoenix-live-view/index.ts) | `:telemetry` handlers attach `[:phoenix, :endpoint, :start/:stop]` and translate to catalog identity; the `<App>.RequestContext` Plug stamps `correlation_id`/`scope_id` (and `actor_id` post-auth) into `Logger.metadata`, which the LogFormatter dumps onto every line — see [`request-context.md`](architecture/request-context.md) |
 
 The renderers in `src/generator/_obs/` keep the per-backend differences
 local. A call site like `renderHonoLogCall("requestEnd", […])` emits the

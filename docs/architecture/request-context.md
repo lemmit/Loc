@@ -1,9 +1,12 @@
 # RequestContext — the single ambient context shape
 
 > **Pins [D-CTX-SHAPE](../decisions.md#d-ctx-shape--the-ambient-requestcontext-field-set).**
-> Status: design pinned; not yet emitted. The first consumer is
-> `execution-context.md` (Phase 3.0); every governance feature after it
-> reads the same shape.
+> Status: design pinned; the carrier is now **emitted** on .NET, Hono, and
+> Phoenix (the request-stable tier + the root frame's `scopeId`, plus the
+> principal's `actor_id`). Per-dispatch frame nesting (`parentId` chaining)
+> and the downstream consumers (audit/provenance) remain in progress — see
+> the per-backend table and § Emitted (Phoenix) below. Every governance
+> feature reads the same shape.
 
 ## Why one shape
 
@@ -126,8 +129,8 @@ Two **realization classes** cover every target:
 | `node` (minimal / Hono) | ambient | `AsyncLocalStorage<RequestContext>` | `als.run(childFrame, …)` around a tagged boundary |
 | `node` + `foundation: nest` | ambient | request-scoped DI provider (`nestjs-cls`, an `AsyncLocalStorage` wrapper) | interceptor/guard at the boundary; the `@nestjs/cqrs` bus is the frame-open seam for command/query handlers (the Mediator-behaviour analog) |
 | `.NET` | ambient | **`AsyncLocal<RequestContext>`** — a dedicated slot the backbone owns (the direct `AsyncLocalStorage` twin), surfaced through a scoped `IRequestContext` accessor. **Not** `Activity.Current`: tracing is sampled, so a span is `null` on unsampled requests — governance state must never be sampleable | root + request-stable via boundary middleware; per-boundary child frames via emitted inline `using` scopes — the Mediator behaviour covers only the `Send`-shaped subset (see § Two seams) |
-| `elixir` + `foundation: ash` | ambient | process dictionary / `Logger.metadata`, surfaced into the Ash action context | new frame per Ash action invocation |
-| `elixir` + `foundation: vanilla` | ambient | process dictionary / `Logger.metadata` + explicit struct | new frame per `with`-scoped step |
+| `elixir` + `foundation: ash` | ambient | **`Logger.metadata`** — stamped by a `RequestContext` Plug at the HTTP edge (foundation-neutral; the same module on both foundations). *Emitted today* (§ below) | root frame only — opened at the HTTP edge. Per-Ash-action child frames (`parentId` chaining) are deferred |
+| `elixir` + `foundation: vanilla` | ambient | **`Logger.metadata`** — the same `RequestContext` Plug as ash (no `with`-struct variant; the carrier is pure Plug + Logger, so both foundations emit it identically) | root frame only — opened at the HTTP edge. Per-`with`-step child frames are deferred |
 | `Go` (proposed) | **explicit-threading** | `context.Context` (request-stable in `ctx.Value`; frame-local derived per call) | `ctx := context.WithValue(parent, …)` threaded into every call |
 | Java / Spring (deferred) | ambient | MVC: `ThreadLocal` / MDC / Micrometer `Observation` (or JDK 21 `ScopedValue`). **WebFlux: Reactor `Context`** (`ThreadLocal` does not propagate across reactive operators) | per-request thread scope, or `contextWrite` on the reactive chain |
 
@@ -277,6 +280,41 @@ The PlatformSurface lifecycle hooks listed in global-plan §0.3
 (`emitAuthGate`, `emitAuditInit`, `emitTenancyFilter`, `emitI18nAdapter`)
 each receive the resolved `RequestContext` accessor for their backend;
 they do not open their own ambient channel.
+
+## Emitted (Phoenix)
+
+The Phoenix carrier ships today on **both** foundations, emitted as a single
+foundation-neutral `<App>.RequestContext` module (pure Plug + `Logger`, so ash
+and vanilla emit it identically — `src/generator/elixir/shell/runtime.ts`).
+
+- **Carrier = `Logger.metadata`.** The BEAM has no `AsyncLocal`; the per-process
+  `Logger.metadata` is the idiomatic ambient slot, with the bonus that every
+  stamped key rides every structured log line for free.
+- **Boundary establishment** — a `RequestContext` Plug mounted at the HTTP edge
+  (between `Plug.RequestId` and `Plug.Telemetry`, so the telemetry logs carry
+  the ids) stamps the **request-stable tier** (`correlation_id`, `locale`,
+  `started_at`) plus the **root frame's `scope_id`**, and echoes
+  `X-Correlation-Id` on the response. `correlation_id` resolves from
+  `X-Correlation-Id` → `X-Request-Id` → the id `Plug.RequestId` established →
+  freshly minted (never a sampled trace id).
+- **Principal — `actor_id` only (PII-safe).** After the auth verifier resolves
+  the principal, the Auth plug stamps `actor_id` into `Logger.metadata` (the id
+  key resolved from the user shape) — the **full principal stays on
+  `conn.assigns.current_user`**, never in the log-bearing carrier. This is the
+  log-safe realisation of the table's `currentUser.id` row; the richer
+  `currentUser` slices (`tenantId`/`permissions`/`dataKey`) are not on the
+  Elixir carrier yet.
+- **Accessors** (`correlation_id/0`, `scope_id/0`, `parent_id/0`, `actor_id/0`,
+  `locale/0`, `started_at/0`) let non-HTTP code read the carrier without a
+  `conn`; each returns nil outside a request (and `actor_id` nil before auth /
+  under no-auth — the .NET "CurrentUser null until auth" pattern).
+
+**Deferred on Phoenix** (consistent with the table): per-dispatch child frames
+(`parent_id` stays nil — the generated app has no Mediator-style pipeline to
+chain through), and the audit/provenance consumers (no Elixir audit/provenance
+runtime exists yet — once it does, `correlation_id`/`scope_id`/`actor_id` are
+already sitting in the carrier for it to read). The `Task.async`/spawn caveat
+above applies and is restated in the emitted module's `@moduledoc`.
 
 ## Open (deferred)
 
