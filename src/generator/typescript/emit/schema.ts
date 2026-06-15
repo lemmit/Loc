@@ -605,7 +605,13 @@ function emitTable(
   lines.push(`export const ${lowerFirst(plural(name))} = ${tableFactory}("${tableName}", {`);
   lines.push(`  id: ${drizzleIdColumn(idType, "id")}.primaryKey(),`);
   if (parentName) {
-    lines.push(`  parentId: ${drizzleIdColumn(idType, `${snake(parentName)}_id`)}.notNull(),`);
+    // `.references()` mirrors the migration's `FOREIGN KEY … REFERENCES …
+    // ON DELETE CASCADE` so the Drizzle schema's relational metadata matches
+    // the DDL Loom emits.
+    const parentTableConst = lowerFirst(plural(parentName));
+    lines.push(
+      `  parentId: ${drizzleIdColumn(idType, `${snake(parentName)}_id`)}.notNull().references(() => ${parentTableConst}.id, { onDelete: "cascade" }),`,
+    );
   }
   for (const f of fields) {
     lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
@@ -625,8 +631,11 @@ function emitTable(
   // root column referenced by a find.
   const indexEntries: string[] = [];
   if (parentName) {
+    // Index name keys off the real FK column (`<parent>_id`), matching the
+    // migration's `CREATE INDEX <table>_<parent>_id_idx`.
+    const parentSnake = snake(parentName);
     indexEntries.push(
-      `    ${lowerFirst(name)}ParentIdIdx: index("${tableName}_parent_id_idx").on(table.parentId),`,
+      `    ${lowerFirst(name)}${pascalize(parentSnake)}IdIdx: index("${tableName}_${parentSnake}_id_idx").on(table.parentId),`,
     );
   }
   for (const col of indexedColumns) {

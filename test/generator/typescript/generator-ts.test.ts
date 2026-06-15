@@ -1401,8 +1401,9 @@ describe("typescript generator", () => {
       /orderCustomerIdIdx: index\("orders_customer_id_idx"\)\.on\(table\.customerId\)/,
     );
     expect(schema).toMatch(/orderStatusIdx: index\("orders_status_idx"\)\.on\(table\.status\)/);
+    // Part FK index keys off the real column (`order_id`), matching the migration.
     expect(schema).toMatch(
-      /orderLineParentIdIdx: index\("order_lines_parent_id_idx"\)\.on\(table\.parentId\)/,
+      /orderLineOrderIdIdx: index\("order_lines_order_id_idx"\)\.on\(table\.parentId\)/,
     );
   });
 

@@ -33,9 +33,11 @@ public sealed class ValidationBehavior<TRequest, TResponse>
     {
         if (_validators.Any())
         {
-            var ctx = new ValidationContext<TRequest>(message);
+            // A fresh ValidationContext per validator: FluentValidation's
+            // context is not thread-safe, and the validators run concurrently
+            // via Task.WhenAll — sharing one would be a data race.
             var results = await Task.WhenAll(
-                _validators.Select(v => v.ValidateAsync(ctx, cancellationToken)));
+                _validators.Select(v => v.ValidateAsync(new ValidationContext<TRequest>(message), cancellationToken)));
             var failures = results
                 .SelectMany(r => r.Errors)
                 .Where(f => f != null)
