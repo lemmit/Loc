@@ -26,13 +26,11 @@
 > the dev stub, and `jose` is added to `package.json` only when OIDC is
 > present. Non-OIDC projects stay byte-identical. 6 codegen tests
 > (`test/generator/typescript/auth-oidc-codegen.test.ts`); emitted code
-> verified Biome-clean; full fast suite green (5057 passed).
->
-> **Caveat (Phase 1 follow-up):** the emitted OIDC TS is content- and
-> Biome-verified but not yet `tsc`-gated — no example carries an
-> `auth { oidc }` block, so the `LOOM_TS_BUILD` shard doesn't compile it
-> against the real `jose` types. Adding an `auth-oidc` example/fixture to
-> that shard is the immediate next step before relying on this in CI.
+> verified Biome-clean; full fast suite green (5057 passed). **tsc-gated:**
+> an `auth-oidc` fixture (`test/e2e/fixtures/ts-build/auth-oidc.ddd`) now
+> runs in the `LOOM_TS_BUILD` shard (`generate system` → `npm install` →
+> `tsc --noEmit` → `tsup`), so the emitted verifier + handshake compile
+> against the real `jose` / `hono` types — verified passing locally.
 >
 > **Status: Phases 0–1 done; Phases 2+ pending.** Decisions locked with
 > the maintainer (2026-06-15):
