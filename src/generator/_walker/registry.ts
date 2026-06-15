@@ -91,6 +91,7 @@ import {
   renderSticky as renderStickyHeex,
   renderTableColumn as renderTableColumnHeex,
   renderTable as renderTableHeex,
+  renderTabs as renderTabsHeex,
   renderText as renderTextHeex,
   renderToolbar as renderToolbarHeex,
 } from "../elixir/heex-walker.js";
@@ -213,7 +214,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     tsx: emitContainer,
     heex: renderContainerHeex,
   },
-  Tabs: { group: "layout", admissibleInSource: true, tsx: emitTabs },
+  Tabs: { group: "layout", admissibleInSource: true, tsx: emitTabs, heex: renderTabsHeex },
   Toolbar: {
     group: "layout",
     admissibleInSource: true,

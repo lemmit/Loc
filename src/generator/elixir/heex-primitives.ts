@@ -967,6 +967,61 @@ export function renderDestroyForm(
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
   return `<.button phx-click="${eventName}" phx-value-id={@id} data-confirm="Delete this ${human.toLowerCase()}? This cannot be undone." class="btn-danger"${testidAttr}>Delete ${human}</.button>`;
 }
+
+/** `Tabs(Tab(label, body), …)` → a client-side tab switcher.  All panels are
+ *  rendered; switching is a `Phoenix.LiveView.JS` toggle (`JS.hide`/`JS.show`
+ *  + active-class) — the idiomatic LiveView way to do presentational UI state
+ *  with no server round-trip and no verified-route plumbing.  Uses ARIA roles
+ *  (tablist/tab/tabpanel) — same roles Mantine's `<Tabs>` emits, so a
+ *  role-based e2e spec is portable across React and HEEx.  Each Tabs instance
+ *  gets a unique `tabs-<n>` id so its toggle selectors stay scoped. */
+export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  let testid = "";
+  const tabs: Array<{ label: string; slug: string; body: ExprIR | undefined }> = [];
+  let idx = 0;
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (name === "testid" && arg.kind === "literal") {
+      testid = arg.value;
+      continue;
+    }
+    if (name) continue; // other named args (style, …) not consumed here
+    idx++;
+    if (arg.kind === "call" && arg.name === "Tab") {
+      const pos = arg.args.filter((_, j) => !arg.argNames?.[j]);
+      const labelArg = pos[0];
+      const label = labelArg && labelArg.kind === "literal" ? labelArg.value : `Tab ${idx}`;
+      tabs.push({ label, slug: snake(label) || `tab-${idx}`, body: pos[1] });
+    } else {
+      // Bare positional (e.g. `Tabs(Card(...), Card(...))`) — its own panel.
+      tabs.push({ label: `Tab ${idx}`, slug: `tab-${idx}`, body: arg });
+    }
+  }
+  if (tabs.length === 0) return `<!-- Tabs: no tabs -->`;
+  const id = `tabs-${++ctx.tabSeq.value}`;
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const triggers = tabs
+    .map((t, i) => {
+      const active = i === 0 ? " tab-active" : "";
+      const js =
+        `JS.hide(to: "[data-tabs='${id}']")` +
+        ` |> JS.show(to: "#${id}-panel-${t.slug}")` +
+        ` |> JS.remove_class("tab-active", to: "[data-tabs-tab='${id}']")` +
+        ` |> JS.add_class("tab-active", to: "#${id}-tab-${t.slug}")`;
+      return `    <button type="button" role="tab" id="${id}-tab-${t.slug}" data-tabs-tab="${id}" class="tab${active}" phx-click={${js}}>${esc(t.label)}</button>`;
+    })
+    .join("\n");
+  const panels = tabs
+    .map((t, i) => {
+      const hidden = i === 0 ? "" : " hidden";
+      const body = t.body ? renderChild(t.body, ctx) : "";
+      return `  <div role="tabpanel" id="${id}-panel-${t.slug}" data-tabs="${id}" class="tab-panel${hidden}">\n${indent(body, 4)}\n  </div>`;
+    })
+    .join("\n");
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  return `<div class="tabs"${testidAttr}>\n  <div role="tablist" class="tab-bar">\n${triggers}\n  </div>\n${panels}\n</div>`;
+}
 export function renderCard(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Card!, expr, ctx);
 }

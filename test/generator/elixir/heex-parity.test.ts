@@ -56,11 +56,12 @@ const KNOWN_HEEX_GAPS: Record<string, string> = {
   MultilineField: "DECLINED — form sub-element; standalone input has no LiveView changeset to bind",
   SelectField: "DECLINED — form sub-element; standalone input has no LiveView changeset to bind",
   Toggle: "DECLINED — form sub-element; standalone boolean input has no LiveView changeset to bind",
-  // --- DECLINED: stateful topology --------------------------------------
-  Tabs: "DECLINED — interactive tab-switching needs LiveView handle_event + an active-tab assign (stateful topology), not a markup mapping",
-  // (DestroyForm now renders a confirm-delete <.button> wired to the Ash
-  //  destroy action via a byId ActionBinding — no longer a gap.  showcase.ddd's
-  //  ProjectDetail exercises it, so build-generated-phoenix compile-validates it.)
+  // (Tabs now renders a client-side Phoenix.LiveView.JS toggle — all panels
+  //  rendered, JS.hide/JS.show switches them, no server round-trip — so it is
+  //  no longer a gap.  DestroyForm renders a confirm-delete <.button> wired to
+  //  the Ash destroy action.  Both are exercised by the phoenix-build fixture
+  //  test/e2e/fixtures/phoenix-build/destroy-form.ddd, so build-generated-phoenix
+  //  compile-validates them.)
 };
 
 describe("HEEx walker parity (finding #5)", () => {
