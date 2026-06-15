@@ -78,6 +78,16 @@ feature.
 | `locale` | i18n middleware (`Accept-Language` / explicit) | i18n (catalog lookup), error rendering (ProblemDetails `title`) |
 | `startedAt` | boundary middleware | audit (timestamp), observability (duration) |
 
+**Consumer reads emitted today.** Observability reads `correlationId` on every
+log line (all five backends). On **Hono** and **.NET** (the backends with a
+provenance/audit runtime): the **provenance** `provenance_records` history
+stamps `correlation_id` + `scope_id` + `actor_id` (the design's "who computed" —
+the principal's id, sourced from the carrier) on every provenanced write; the
+**audit** record stamps `correlation_id` + `scope_id` + the full principal
+(`actor`). Both commit in the aggregate's save transaction. The carrier exposes
+the actor id as Hono `reqCtx.actorId` / .NET `RequestContext.Current?.ActorId`,
+stamped by auth alongside the principal.
+
 ## Frame semantics (from execution-context.md)
 
 One **current** frame per flow. `correlationId` is shared by every
