@@ -153,6 +153,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       c,
       diags,
       backendPlatformsByContext.get(c.name) ?? new Set(),
+      elixirFoundationsByContext.get(c.name) ?? new Set(),
     );
     validateUnmappedErrorStatuses(c, diags);
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
