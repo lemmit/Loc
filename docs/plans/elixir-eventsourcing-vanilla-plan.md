@@ -152,19 +152,23 @@ it simply gets no migration table (already handled). Pieces, mirroring Python:
 ## Slices (each: tests red → emit green → push → CI `mix compile`)
 
 - **P4.0 — per-operation endpoints on vanilla (prerequisite, state-path too).**
-  Emit `POST /<plural>/:id/<op>` + the `<op>_<agg>` controller action for every
-  public operation, calling the context `<op>_<agg>` that already exists
-  (`context-emit.ts:104`). Closes a standing vanilla↔ash/cross-backend gap.
-  Tests: route table + controller action structure; wire parity (operationIds).
-- **P4.1 — gate + read path.** Foundation-aware gate; `<agg>_event_log.ex`, fold
-  module, repository `find_by_id`/`list`, context `get`/`list`, `_row_to_event`.
-  Minimal `eventlog.ddd` vanilla case. Tests: structure + the gate's
-  moved-negative. CI compiles the read path.
-- **P4.2 — write path.** Command runners (create + operations), `append`,
-  dispatch wiring, controllers (create + per-op via P4.0). Conformance-parity
-  case added. CI compiles + parity green = the slice that lifts the headline gap.
+  ✅ SHIPPED (#1203). `POST /<plural>/:id/<op>` + the `<op>_<agg>` controller
+  action for every public operation. Closed the standing vanilla↔cross-backend gap.
+- **P4.1 — gate + read path.** ✅ DONE (this PR). Foundation-aware gate
+  (`elixirFoundationsHostingEachContext` + `validateEventSourcedStorage`:
+  `elixir+vanilla` accepted, `elixir+ash` still rejected); `<agg>_event_log.ex`,
+  `<agg>_fold.ex` (`apply_event/2` + `from_events/2`), event-store repository
+  `find_by_id`/`list` + `row_to_event`, context `get`/`list`.
+- **P4.2 — write path.** ✅ DONE (this PR). Command runners (create + operations)
+  emit→append→fold via the `with`/`ensure` chain; gap-free `append/2` in a
+  `Repo.transaction`; ES controller (create + per-op via P4.0, atom-error → 422/403).
+  Landed together with P4.1 because the gate can only lift once the whole path
+  compiles. **Remaining for this slice:** add the vanilla ES column to a
+  cross-backend conformance-parity case (the decisive runtime gate).
 - **P4.3 — finds + VO/enum/relationship folds + ProblemDetails parity.** In-memory
-  finds; applier folds over VO/enum fields; 422 envelope byte-parity.
+  finds SHIPPED (load-all + filter); still owed: applier folds over VO/enum/
+  containment fields, multi-word camelCase wire keys, dispatch/PubSub fan-out on
+  append, 422 envelope byte-parity with the other backends.
 - **P4.4 — CI + example.** Add an ES case to `elixir-vanilla-build.yml` and to the
   conformance matrix; one `examples/*-vanilla` ES `.ddd`.
 

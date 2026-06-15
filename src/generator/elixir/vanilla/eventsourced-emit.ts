@@ -1,0 +1,615 @@
+// ---------------------------------------------------------------------------
+// Vanilla event-sourced emit — `persistedAs(eventLog)` aggregates on the
+// plain Phoenix + Ecto foundation (D-VANILLA-ES-HOME).  Slice P4.1/P4.2 of
+// docs/plans/elixir-eventsourcing-vanilla-plan.md.
+//
+// Ash cannot host pure ES, so there is no Ash sibling to port — this mirrors
+// the cross-backend ES contract the Python/node/dotnet/java backends emit:
+//
+//   * the aggregate `<Agg>` is a plain in-memory struct (no state table —
+//     its truth is the append-only event stream), so it serialises to exactly
+//     the wire shape (id + properties + …), no Ecto timestamps;
+//   * `<Agg>EventLog` is an Ecto schema over the shared `<agg>_events` table
+//     (stream_id, version, type, data JSONB, occurred_at) that
+//     `migrations-builder.ts` already emits;
+//   * `<Agg>Fold` folds the stream — `apply_event/2` (one clause per declared
+//     `apply(...)` applier) + `from_events/2` (fold-from-zero);
+//   * `<Agg>Repository` loads+folds on read (`find_by_id` / `list`) and
+//     appends gap-free versions on `append/2`; custom `find`s filter the
+//     folded aggregates in memory (no queryable state columns);
+//   * the command bodies (`create` / `operation`) are emit-only — they
+//     produce events, the repository appends them, and the fold derives the
+//     resulting state (the appliers own every state transition).
+//
+// The state-path emitters (schema / changeset / state repository) skip ES
+// aggregates; the context module + controller branch per-aggregate (see
+// `context-emit.ts` / `api-emit.ts`).
+// ---------------------------------------------------------------------------
+
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  EventIR,
+  FindIR,
+  OperationIR,
+  StmtIR,
+  TypeIR,
+} from "../../../ir/types/loom-ir.js";
+import { snake, upperFirst } from "../../../util/naming.js";
+import { type RenderCtx, renderExpr } from "../render-expr.js";
+
+/** Truth-kind predicate — an aggregate whose persistence is its event log. */
+export function isEventSourced(agg: AggregateIR): boolean {
+  return agg.persistedAs === "eventLog";
+}
+
+/** Does any event-sourced aggregate in this context declare a command body
+ *  (create / operation) with a `precondition` / `requires` guard?  Drives
+ *  whether the context module emits the private `ensure/2` helper (emitting it
+ *  unused would fail `mix compile --warnings-as-errors`). */
+export function esContextNeedsEnsure(ctx: BoundedContextIR): boolean {
+  return ctx.aggregates
+    .filter(isEventSourced)
+    .flatMap((agg) => [...(agg.creates ?? []), ...agg.operations])
+    .some((op) => op.statements.some((s) => s.kind === "precondition" || s.kind === "requires"));
+}
+
+/** The private guard helper shared by the ES command runners in a context
+ *  module.  `precondition`/`requires` lower to `:ok <- ensure(<cond>, <atom>)`
+ *  with-clauses; a failed guard short-circuits the `with` to `{:error,atom}`. */
+export function renderEnsureHelper(): string {
+  return `  defp ensure(true, _reason), do: :ok
+  defp ensure(false, reason), do: {:error, reason}`;
+}
+
+// ---------------------------------------------------------------------------
+// File emit — struct + event-log schema + fold + repository, per ES aggregate.
+// ---------------------------------------------------------------------------
+
+export function emitVanillaEventSourcedFiles(
+  appModule: string,
+  ctx: BoundedContextIR,
+  out: Map<string, string>,
+): void {
+  const ctxModule = upperFirst(ctx.name);
+  const appSnake = toAppSnake(appModule);
+  const ctxSnake = snake(ctx.name);
+  const eventsByName = new Map(ctx.events.map((e) => [e.name, e]));
+  for (const agg of ctx.aggregates) {
+    if (!isEventSourced(agg)) continue;
+    const aggSnake = snake(agg.name);
+    const base = `lib/${appSnake}/${ctxSnake}`;
+    out.set(`${base}/${aggSnake}.ex`, renderStructModule(appModule, ctxModule, agg));
+    out.set(`${base}/${aggSnake}_event_log.ex`, renderEventLogSchema(appModule, ctxModule, agg));
+    out.set(`${base}/${aggSnake}_fold.ex`, renderFoldModule(appModule, ctxModule, agg));
+    out.set(
+      `${base}/${aggSnake}_repository.ex`,
+      renderEsRepository(appModule, ctxModule, agg, eventsByName, customFindsOfAgg(ctx, agg)),
+    );
+  }
+}
+
+/** Custom `find`s declared on this aggregate's repository, minus the
+ *  enrichment-synthesized `all` (the `list/0` CRUD seam covers it). */
+export function customFindsOfAgg(ctx: BoundedContextIR, agg: AggregateIR): FindIR[] {
+  const repo = (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name);
+  return (repo?.finds ?? []).filter((f) => f.name !== "all");
+}
+
+function toAppSnake(appModule: string): string {
+  return appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());
+}
+
+/** Field names carried on the in-memory aggregate struct — the canonical
+ *  wire shape (id, then declared properties / containments / derived). */
+function structFields(agg: AggregateIR): string[] {
+  return (agg.wireShape ?? []).map((f) => snake(f.name));
+}
+
+// --- `<Agg>` plain struct ---------------------------------------------------
+
+function renderStructModule(appModule: string, ctxModule: string, agg: AggregateIR): string {
+  const moduleName = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
+  const fields = structFields(agg);
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc "Event-sourced aggregate — in-memory state folded from its event stream (no state table)."
+  defstruct [${fields.map((f) => `:${f}`).join(", ")}]
+  @type t :: %__MODULE__{}
+end
+`;
+}
+
+// --- `<Agg>EventLog` Ecto schema over `<agg>_events` ------------------------
+
+function renderEventLogSchema(appModule: string, ctxModule: string, agg: AggregateIR): string {
+  const moduleName = `${appModule}.${ctxModule}.${upperFirst(agg.name)}EventLog`;
+  const table = `${snake(agg.name)}_events`;
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc false
+  use Ecto.Schema
+
+  @primary_key false
+  schema "${table}" do
+    field :stream_id, :string, primary_key: true
+    field :version, :integer, primary_key: true
+    field :type, :string
+    field :data, :map
+    field :occurred_at, :utc_datetime_usec
+  end
+end
+`;
+}
+
+// --- `<Agg>Fold` — apply_event/2 + from_events/2 ----------------------------
+
+function renderFoldModule(appModule: string, ctxModule: string, agg: AggregateIR): string {
+  const aggModule = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
+  const eventsModule = `${appModule}.${ctxModule}.Events`;
+  const renderCtx: RenderCtx = {
+    thisName: "state",
+    contextModule: `${appModule}.${ctxModule}`,
+    foundation: "vanilla",
+  };
+
+  const clauses = (agg.appliers ?? []).map((ap) => {
+    const usesParam = appliersStmtsUseParam(ap.statements, ap.param, renderCtx);
+    const bind = usesParam ? snake(ap.param) : `_${snake(ap.param)}`;
+    const body = renderFoldStatements(ap.statements, renderCtx);
+    return `  def apply_event(state, %${eventsModule}.${upperFirst(ap.event)}{} = ${bind}) do
+${body}
+    state
+  end`;
+  });
+  // Total fallback so an unrecognised stored event is a clear runtime error
+  // rather than a FunctionClauseError with no context.
+  clauses.push(`  def apply_event(_state, ev) do
+    raise ArgumentError, "no applier for event #{inspect(ev.__struct__)}"
+  end`);
+
+  return `# Auto-generated.
+defmodule ${aggModule}Fold do
+  @moduledoc false
+
+  @spec from_events(binary(), [struct()]) :: ${aggModule}.t()
+  def from_events(id, events) do
+    Enum.reduce(events, %${aggModule}{id: id}, fn ev, acc -> apply_event(acc, ev) end)
+  end
+
+${clauses.join("\n\n")}
+end
+`;
+}
+
+/** Render an applier's fold body — assignments rebind `state` via struct
+ *  update; `let`/`expression` lower as usual.  ES discipline guarantees the
+ *  body is pure (assignments / lets only — no emit, no side-effecting calls). */
+function renderFoldStatements(stmts: StmtIR[], ctx: RenderCtx): string {
+  return stmts
+    .map((s) => {
+      switch (s.kind) {
+        case "assign":
+          return `    state = %{state | ${snake(s.target.segments[0] ?? "")}: ${renderExpr(s.value, ctx)}}`;
+        case "let":
+          return `    ${snake(s.name)} = ${renderExpr(s.expr, ctx)}`;
+        case "expression":
+          return `    _ = ${renderExpr(s.expr, ctx)}`;
+        default:
+          // ES discipline rejects everything else inside an applier; keep the
+          // renderer total with a comment rather than emitting broken Elixir.
+          return `    # unsupported applier statement: ${s.kind}`;
+      }
+    })
+    .join("\n");
+}
+
+/** True when any applier statement's value expression references the bound
+ *  event param — decides whether the `apply_event` head binds it or `_param`s
+ *  it (an unused bind fails `--warnings-as-errors`). */
+function appliersStmtsUseParam(stmts: StmtIR[], param: string, ctx: RenderCtx): boolean {
+  const token = new RegExp(`\\b${snake(param)}\\b`);
+  const rhs: string[] = [];
+  for (const s of stmts) {
+    if (s.kind === "assign") rhs.push(renderExpr(s.value, ctx));
+    else if (s.kind === "let") rhs.push(renderExpr(s.expr, ctx));
+    else if (s.kind === "expression") rhs.push(renderExpr(s.expr, ctx));
+  }
+  return rhs.some((r) => token.test(r));
+}
+
+// --- `<Agg>Repository` — load+fold reads, append writes ---------------------
+
+function renderEsRepository(
+  appModule: string,
+  ctxModule: string,
+  agg: AggregateIR,
+  eventsByName: Map<string, EventIR>,
+  finds: FindIR[],
+): string {
+  const aggPascal = upperFirst(agg.name);
+  const aggModule = `${appModule}.${ctxModule}.${aggPascal}`;
+  const eventsModule = `${appModule}.${ctxModule}.Events`;
+  const logMod = `${aggModule}EventLog`;
+  const foldMod = `${aggModule}Fold`;
+  const repoMod = `${aggModule}Repository`;
+
+  // Event types that may appear in this aggregate's stream — its appliers'
+  // event set (ES discipline: every emitted event has a matching applier).
+  const eventNames = [...new Set((agg.appliers ?? []).map((a) => a.event))];
+  const events = eventNames.map((n) => eventsByName.get(n)).filter((e): e is EventIR => !!e);
+
+  const typeClauses = events
+    .map(
+      (e) =>
+        `  defp event_type(%${eventsModule}.${upperFirst(e.name)}{}), do: ${JSON.stringify(e.name)}`,
+    )
+    .join("\n");
+  const toDataClauses = events
+    .map((e) => {
+      const pairs = e.fields
+        .map((f) => `${JSON.stringify(snake(f.name))} => e.${snake(f.name)}`)
+        .join(", ");
+      return `  defp event_to_data(%${eventsModule}.${upperFirst(e.name)}{} = e), do: %{${pairs}}`;
+    })
+    .join("\n");
+  const fromRowClauses = events
+    .map((e) => {
+      const fields = e.fields
+        .map((f) => `${snake(f.name)}: d[${JSON.stringify(snake(f.name))}]`)
+        .join(", ");
+      return `  defp row_to_event(%{type: ${JSON.stringify(e.name)}, data: d}), do: %${eventsModule}.${upperFirst(e.name)}{${fields}}`;
+    })
+    .join("\n");
+
+  const findFns = finds.map((f) => renderEsFind(f, aggModule));
+  const findBlock = findFns.length > 0 ? `\n\n${findFns.join("\n\n")}` : "";
+  // Short aliases used throughout the body — declaring an alias and then
+  // referencing the fully-qualified name is an *unused alias*, which fails
+  // `mix compile --warnings-as-errors`.
+  const logShort = `${aggPascal}EventLog`;
+  const foldShort = `${aggPascal}Fold`;
+
+  return `# Auto-generated.
+defmodule ${repoMod} do
+  @moduledoc false
+  import Ecto.Query
+  alias ${appModule}.Repo
+  alias ${aggModule}
+  alias ${logMod}
+  alias ${foldMod}
+
+  @spec list() :: {:ok, [${aggPascal}.t()]} | {:error, term()}
+  def list do
+    aggregates =
+      Repo.all(from(r in ${logShort}, order_by: [asc: r.stream_id, asc: r.version]))
+      |> Enum.group_by(& &1.stream_id)
+      |> Enum.map(fn {sid, rows} ->
+        ${foldShort}.from_events(sid, Enum.map(rows, &row_to_event/1))
+      end)
+
+    {:ok, aggregates}
+  end
+
+  @spec find_by_id(binary()) :: {:ok, ${aggPascal}.t()} | {:error, :not_found}
+  def find_by_id(id) when is_binary(id) do
+    rows =
+      Repo.all(from(r in ${logShort}, where: r.stream_id == ^id, order_by: [asc: r.version]))
+
+    case rows do
+      [] -> {:error, :not_found}
+      _ -> {:ok, ${foldShort}.from_events(id, Enum.map(rows, &row_to_event/1))}
+    end
+  end
+
+  @doc "Append gap-free event versions to the aggregate's stream."
+  @spec append(binary(), [struct()]) :: :ok | {:error, term()}
+  def append(_id, []), do: :ok
+
+  def append(id, events) when is_binary(id) and is_list(events) do
+    Repo.transaction(fn ->
+      prior =
+        Repo.one(from(r in ${logShort}, where: r.stream_id == ^id, select: max(r.version))) || 0
+
+      events
+      |> Enum.with_index(prior + 1)
+      |> Enum.each(fn {ev, version} ->
+        Repo.insert_all(${logShort}, [
+          %{
+            stream_id: id,
+            version: version,
+            type: event_type(ev),
+            data: event_to_data(ev),
+            occurred_at: DateTime.utc_now()
+          }
+        ])
+      end)
+    end)
+    |> case do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end${findBlock}
+
+${typeClauses}
+
+${toDataClauses}
+
+${fromRowClauses}
+end
+`;
+}
+
+/** One in-memory custom find — load all + filter the folded aggregates.
+ *  ES streams have no queryable state columns, so finds run client-side. */
+function renderEsFind(f: FindIR, aggModule: string): string {
+  const fnName = snake(f.name);
+  const argNames = f.params.map((p) => snake(p.name));
+  const single = isSingleReturn(f.returnType);
+  const ctx: RenderCtx = { thisName: "a", contextModule: aggModule, foundation: "vanilla" };
+  const pred = f.filter
+    ? renderExpr(f.filter, ctx)
+    : argNames.map((n) => `a.${n} == ${n}`).join(" and ");
+  const reduce = single
+    ? `{:ok, Enum.find(all, fn a -> ${pred} end)}`
+    : `{:ok, Enum.filter(all, fn a -> ${pred} end)}`;
+  return `  def ${fnName}(${argNames.join(", ")}) do
+    {:ok, all} = list()
+    ${reduce}
+  end`;
+}
+
+function isSingleReturn(t: TypeIR): boolean {
+  if (t.kind === "optional" && t.inner.kind === "entity") return true;
+  if (t.kind === "entity") return true;
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Context-module block + controller for an ES aggregate.
+// ---------------------------------------------------------------------------
+
+const CRUD_OP_NAMES = new Set(["create", "update", "delete", "destroy", "list", "get"]);
+
+/** The context-module block for one ES aggregate: create / get / list +
+ *  one command runner per public non-CRUD operation + in-memory find
+ *  delegates.  Mirrors the read function names the controllers/state path
+ *  use (`create_<agg>` / `get_<agg>` / `list_<agg>s` / `<op>_<agg>`). */
+export function renderEsContextBlock(
+  appModule: string,
+  ctxModule: string,
+  agg: AggregateIR,
+  finds: FindIR[],
+): string {
+  const aggPascal = upperFirst(agg.name);
+  const aggSnake = snake(agg.name);
+  const facadeMod = `${appModule}.${ctxModule}`;
+  const aggModule = `${facadeMod}.${aggPascal}`;
+  const repoMod = `${aggModule}Repository`;
+  const foldMod = `${aggModule}Fold`;
+  const eventsModule = `${facadeMod}.Events`;
+
+  const create = agg.creates?.[0];
+  const createFn = create
+    ? renderCommandRunner({
+        kind: "create",
+        op: create,
+        aggSnake,
+        aggModule,
+        repoMod,
+        foldMod,
+        eventsModule,
+      })
+    : `  def create_${aggSnake}(_attrs), do: {:error, :not_constructible}`;
+
+  const opFns = agg.operations
+    .filter((op) => op.visibility === "public" && !CRUD_OP_NAMES.has(op.name))
+    .map((op) =>
+      renderCommandRunner({
+        kind: "operation",
+        op,
+        aggSnake,
+        aggModule,
+        repoMod,
+        foldMod,
+        eventsModule,
+      }),
+    );
+
+  const findLines = finds
+    .filter((f) => f.name !== "all")
+    .map((f) => {
+      const findSnake = snake(f.name);
+      const args = f.params.map((p) => snake(p.name)).join(", ");
+      return `  defdelegate ${findSnake}_${aggSnake}(${args}), to: ${repoMod}, as: :${findSnake}`;
+    });
+
+  return `  # ${aggPascal} (event-sourced)
+${createFn}
+  defdelegate get_${aggSnake}(id), to: ${repoMod}, as: :find_by_id
+  defdelegate list_${aggSnake}s(), to: ${repoMod}, as: :list
+${findLines.length > 0 ? `${findLines.join("\n")}\n` : ""}${opFns.length > 0 ? `\n${opFns.join("\n\n")}\n` : ""}`;
+}
+
+// ---------------------------------------------------------------------------
+// Controller for an ES aggregate — index/show/create + per-op member actions.
+// Diverges from the state controller in two ways: no generic update/delete
+// (operations are the only mutations), and command errors are atoms
+// (`:precondition_failed` → 422, `:forbidden` → 403) rather than changesets.
+// ---------------------------------------------------------------------------
+
+export function renderEsController(appModule: string, ctxModule: string, agg: AggregateIR): string {
+  const aggPascal = upperFirst(agg.name);
+  const aggSnake = snake(agg.name);
+  const facadeMod = `${appModule}.${ctxModule}`;
+
+  const create =
+    (agg.creates ?? []).length > 0
+      ? `
+  def create(conn, params) do
+    case ${ctxModule}.create_${aggSnake}(params) do
+      {:ok, record} ->
+        conn
+        |> put_status(201)
+        |> json(serialize(record))
+
+      {:error, reason} ->
+        command_error(conn, reason)
+    end
+  end
+`
+      : "";
+
+  const publicOps = agg.operations.filter(
+    (op) => op.visibility === "public" && !CRUD_OP_NAMES.has(op.name),
+  );
+  const opActions = publicOps
+    .map((op) => {
+      const opSnake = snake(op.name);
+      return `
+  def ${opSnake}(conn, %{"id" => id} = params) do
+    attrs = Map.drop(params, ["id"])
+
+    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id),
+         {:ok, _updated} <- ${ctxModule}.${opSnake}_${aggSnake}(record, attrs) do
+      send_resp(conn, 204, "")
+    else
+      {:error, :not_found} ->
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
+
+      {:error, reason} ->
+        command_error(conn, reason)
+    end
+  end`;
+    })
+    .join("\n");
+
+  // `command_error/2` is only referenced from the create / operation error
+  // branches — emit it only when one of those exists, else it's an unused
+  // private function (fails `--warnings-as-errors`).
+  const hasCommands = (agg.creates ?? []).length > 0 || publicOps.length > 0;
+  const commandError = hasCommands
+    ? `
+  defp command_error(conn, :forbidden) do
+    ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")
+  end
+
+  defp command_error(conn, _reason) do
+    ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")
+  end
+`
+    : "";
+
+  return `# Auto-generated.
+defmodule ${appModule}Web.${aggPascal}Controller do
+  use ${appModule}Web, :controller
+  alias ${facadeMod}
+  alias ${appModule}Web.ProblemDetails
+
+  def index(conn, _params) do
+    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s() do
+      json(conn, %{items: Enum.map(records, &serialize/1)})
+    end
+  end
+
+  def show(conn, %{"id" => id}) do
+    case ${ctxModule}.get_${aggSnake}(id) do
+      {:ok, record} ->
+        json(conn, serialize(record))
+
+      {:error, :not_found} ->
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
+    end
+  end
+${create}${opActions}
+${commandError}
+  defp serialize(record) do
+    record
+    |> Map.from_struct()
+    |> Map.drop([:__meta__, :__struct__])
+  end
+end
+`;
+}
+
+interface CommandCtx {
+  kind: "create" | "operation";
+  op: OperationIR;
+  aggSnake: string;
+  aggModule: string;
+  repoMod: string;
+  foldMod: string;
+  eventsModule: string;
+}
+
+/** A command runner — reads params, evaluates guards, builds the emitted
+ *  events, appends them, and returns the folded state.  Create generates the
+ *  new id; an operation receives the (already folded) aggregate. */
+function renderCommandRunner(c: CommandCtx): string {
+  const opSnake = snake(c.op.name);
+  const fnName = c.kind === "create" ? `create_${c.aggSnake}` : `${opSnake}_${c.aggSnake}`;
+
+  const idExpr = c.kind === "create" ? "id" : "state.id";
+  const exprCtx: RenderCtx = {
+    thisName: "state",
+    contextModule: c.aggModule.split(".").slice(0, -1).join("."),
+    foundation: "vanilla",
+    ...(c.kind === "create" ? { idLocal: "id" } : {}),
+  };
+
+  // Param reads — the JSON body key is the param name as authored (camelCase
+  // by DSL convention, matching the cross-backend wire); the Elixir local is
+  // its snake form.
+  const paramReads = c.op.params.map(
+    (p) => `    ${snake(p.name)} = Map.get(attrs, ${JSON.stringify(p.name)})`,
+  );
+  if (c.kind === "create") paramReads.push("    id = Ecto.UUID.generate()");
+
+  // with-clauses: guards + the `events` binding + the append.
+  const clauses: string[] = [];
+  const lets: string[] = [];
+  const eventStructs: string[] = [];
+  for (const s of c.op.statements) {
+    switch (s.kind) {
+      case "precondition":
+        clauses.push(`:ok <- ensure(${renderExpr(s.expr, exprCtx)}, :precondition_failed)`);
+        break;
+      case "requires":
+        clauses.push(`:ok <- ensure(${renderExpr(s.expr, exprCtx)}, :forbidden)`);
+        break;
+      case "let":
+        lets.push(`    ${snake(s.name)} = ${renderExpr(s.expr, exprCtx)}`);
+        break;
+      case "emit": {
+        const fields = s.fields
+          .map((f) => `${snake(f.name)}: ${renderExpr(f.value, exprCtx)}`)
+          .join(", ");
+        eventStructs.push(`%${c.eventsModule}.${upperFirst(s.eventName)}{${fields}}`);
+        break;
+      }
+      default:
+        // ES command discipline rejects assign / add / remove / call here.
+        break;
+    }
+  }
+
+  clauses.push(`events = [${eventStructs.join(", ")}]`);
+  clauses.push(`:ok <- ${c.repoMod}.append(${idExpr}, events)`);
+
+  const newState =
+    c.kind === "create"
+      ? `${c.foldMod}.from_events(id, events)`
+      : `Enum.reduce(events, state, fn ev, acc -> ${c.foldMod}.apply_event(acc, ev) end)`;
+
+  const head =
+    c.kind === "create"
+      ? `  def ${fnName}(attrs) do`
+      : `  def ${fnName}(%${c.aggModule}{} = state, attrs) do`;
+
+  const preamble = [...paramReads, ...lets].join("\n");
+  return `${head}
+${preamble}${preamble ? "\n" : ""}    with ${clauses.join(",\n         ")} do
+      {:ok, ${newState}}
+    end
+  end`;
+}
