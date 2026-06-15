@@ -896,6 +896,7 @@ function emitOperationRoute(
       out.push(`          at: new Date(),`);
       out.push(`          correlationId: reqCtx?.correlationId ?? null,`);
       out.push(`          scopeId: reqCtx?.scopeId ?? null,`);
+      out.push(`          actorId: reqCtx?.actorId ?? null,`);
       out.push(`        });`);
       out.push(`      }`);
     }

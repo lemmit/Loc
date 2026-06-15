@@ -18,6 +18,10 @@ export interface RequestContext {
    *  when the deployable has no auth).  Typed via the auth-emitted
    *  `requireCurrentUser()` accessor. */
   currentUser: unknown;
+  /** The principal's id, stamped by auth alongside currentUser — null before
+   *  auth has run / when the deployable carries no auth.  The carrier's
+   *  who-computed slice that audit / provenance read. */
+  actorId: string | null;
   /** Request locale from Accept-Language (default "en"). */
   locale: string;
   /** Epoch ms at request start. */

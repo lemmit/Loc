@@ -443,8 +443,15 @@ function emitProjectFromContexts(
   // resources — the csproj stays byte-identical.
   const resourceEmission = emitDotnetResourceFiles(system?.sys, ns);
   for (const [path, content] of resourceEmission.files) out.set(path, content);
+  // The principal's id property on the User record (PascalCased; the claim
+  // named `id`, else the first field), so the carrier's ActorId accessor can
+  // project it for audit/provenance "who computed".
+  const userFields = authRequired ? system?.sys.user?.fields : undefined;
+  const actorIdField = userFields?.find((f) => f.name === "id") ?? userFields?.[0];
+  const actorIdProp = actorIdField ? upperFirst(actorIdField.name) : undefined;
   emitProject(merged, ns, out, {
     authRequired,
+    actorIdProp,
     usesValidators,
     usesStamping,
     hasEmbeddedSpa,
@@ -953,6 +960,10 @@ function emitProject(
      *  RequestContext to exist so audit/provenance rows can stamp the request
      *  correlation id + scope id. */
     hasProvenance?: boolean;
+    /** The `User` record's id property (PascalCased), so the carrier's
+     *  `ActorId` accessor can project the principal's id for audit/provenance
+     *  "who computed".  Undefined when the deployable has no auth. */
+    actorIdProp?: string;
     resourceNugetDeps?: Record<string, string>;
   },
 ): void {
@@ -1014,7 +1025,11 @@ function emitProject(
   if (hasCarrier) {
     out.set(
       "Domain/Common/RequestContext.cs",
-      renderRequestContext(ns, { hasAuth: authRequired, hasLogger: emitTrace }),
+      renderRequestContext(ns, {
+        hasAuth: authRequired,
+        hasLogger: emitTrace,
+        actorIdProp: options?.actorIdProp,
+      }),
     );
     out.set("Middleware/RequestContextMiddleware.cs", renderRequestContextMiddleware(ns));
   }

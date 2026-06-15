@@ -22,7 +22,16 @@ export function emitAuthFiles(sys: SystemIR, out: Map<string, string>): void {
   if (!sys.user) return;
   out.set("auth/user-types.ts", renderUserTypes(sys.user));
   out.set("auth/verifier.ts", renderVerifier());
-  out.set("auth/middleware.ts", renderMiddleware());
+  out.set("auth/middleware.ts", renderMiddleware(sys.user));
+}
+
+/** The principal's id key — the claim named `id`, else the first declared
+ *  field.  Stamped onto the carrier as `actorId` (the who-computed slice
+ *  audit / provenance read); only the id rides it, the full principal stays
+ *  on `currentUser`. */
+function actorIdField(user: UserIR): string | null {
+  const field = user.fields.find((f) => f.name === "id") ?? user.fields[0];
+  return field ? field.name : null;
 }
 
 function renderUserTypes(user: UserIR): string {
@@ -97,7 +106,9 @@ export function assertUserVerifierRegistered(): void {
 `;
 }
 
-function renderMiddleware(): string {
+function renderMiddleware(user: UserIR): string {
+  const idField = actorIdField(user);
+  const stampActorId = idField ? `\n  if (ctx) ctx.actorId = String(user.${idField});` : "";
   return `// Auto-generated.
 import { createMiddleware } from "hono/factory";
 import { requestContext } from "../obs/als";
@@ -132,7 +143,7 @@ export const authMiddleware = createMiddleware<{
   // requireCurrentUser) and to the Hono context (read by route handlers
   // that hold \`c\`).
   const ctx = requestContext();
-  if (ctx) ctx.currentUser = user;
+  if (ctx) ctx.currentUser = user;${stampActorId}
   c.set("currentUser", user);
   await next();
 });

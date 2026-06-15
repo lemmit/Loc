@@ -36,6 +36,7 @@ export const requestIdMiddleware = createMiddleware<{
   const ctx: RequestContext = {
     correlationId,
     currentUser: null,
+    actorId: null,
     locale: acceptLanguage && acceptLanguage.length > 0 ? acceptLanguage : "en",
     startedAt,
     scopeId: randomUUID(),

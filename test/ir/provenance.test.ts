@@ -188,12 +188,13 @@ describe("provenanced — TypeScript emission", () => {
     expect(repo).toContain("total_provenance: aggregate.total_provenance");
   });
 
-  it("stamps the request correlation id + scope id onto each provenance row", async () => {
+  it("stamps the request correlation id + scope id + actor id onto each provenance row", async () => {
     const { model } = await parseModel(SYSTEM(""));
     const files = generateSystems(model).files;
     const schema = files.get("api/db/schema.ts")!;
     expect(schema).toContain('correlationId: text("correlation_id")');
     expect(schema).toContain('scopeId: text("scope_id")');
+    expect(schema).toContain('actorId: text("actor_id")');
     expect(schema).toContain('index("provenance_records_correlation_idx").on(t.correlationId)');
     const routes = files.get("api/http/cart.routes.ts")!;
     expect(routes).toContain('import { requestContext } from "../obs/als";');
@@ -201,6 +202,8 @@ describe("provenanced — TypeScript emission", () => {
     // Inside the drainProv loop, each row carries the carrier ids.
     expect(routes).toContain("correlationId: reqCtx?.correlationId ?? null,");
     expect(routes).toContain("scopeId: reqCtx?.scopeId ?? null,");
+    // The carrier's who-computed slice (request-context.md): the principal id.
+    expect(routes).toContain("actorId: reqCtx?.actorId ?? null,");
   });
 
   it("emits nothing when no field is provenanced (toggle off)", async () => {

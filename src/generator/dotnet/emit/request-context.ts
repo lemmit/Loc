@@ -18,9 +18,9 @@
  */
 export function renderRequestContext(
   ns: string,
-  opts: { hasAuth: boolean; hasLogger: boolean },
+  opts: { hasAuth: boolean; hasLogger: boolean; actorIdProp?: string },
 ): string {
-  const { hasAuth, hasLogger } = opts;
+  const { hasAuth, hasLogger, actorIdProp } = opts;
   const loggingUsing = hasLogger ? "using Microsoft.Extensions.Logging;\n" : "";
   const authUsing = hasAuth ? `using ${ns}.Auth;\n` : "";
   // The principal is request-stable, so a child frame inherits it from its
@@ -61,6 +61,22 @@ export function renderRequestContext(
     /// actor to serialize.</summary>
     public string? PrincipalJson() => null;
 `;
+  // The principal's id — the carrier's who-computed slice that audit /
+  // provenance stamp (the design's `currentUser.id`).  Always present (null
+  // under no-auth) so consumers read `RequestContext.Current?.ActorId`
+  // uniformly without referencing the auth-only CurrentUser slice.
+  const actorIdProperty =
+    hasAuth && actorIdProp
+      ? `
+    /// <summary>The bound principal's id (audit / provenance "who computed"),
+    /// or null before authentication has run.</summary>
+    public string? ActorId => CurrentUser?.${actorIdProp}.ToString();
+`
+      : `
+    /// <summary>No principal slice on this carrier (no auth), so there is no
+    /// actor id.</summary>
+    public string? ActorId => null;
+`;
   return `// Auto-generated.
 using System;
 using System.Threading;
@@ -97,7 +113,7 @@ ${currentUserSlice}${loggerSlice}
     // child whose ParentId chains to its caller, forming the causality chain.
     public string ScopeId { get; init; } = string.Empty;
     public string? ParentId { get; init; }
-${principalJsonMethod}
+${principalJsonMethod}${actorIdProperty}
     /// <summary>Open the root frame for a flow: a fresh scope with no parent.
     /// The principal and logger slices are attached later by the boundary
     /// middleware / pipeline behaviour.</summary>
