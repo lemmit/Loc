@@ -42,6 +42,7 @@
     "test:obs-java": "LOOM_OBS_E2E_JAVA=1 vitest run test/e2e/observability-events-java.test.ts",
     "test:obs-python": "LOOM_OBS_E2E_PYTHON=1 vitest run test/e2e/observability-events-python.test.ts",
     "test:obs-phoenix": "LOOM_OBS_E2E_PHOENIX=1 vitest run test/e2e/observability-events-phoenix.test.ts",
+    "test:obs-phoenix-vanilla": "LOOM_OBS_E2E_PHOENIX_VANILLA=1 vitest run test/e2e/observability-events-phoenix-vanilla.test.ts",
     "test:biome-gen": "LOOM_BIOME=1 vitest run test/e2e/generated-biome.test.ts",
     "prepare": "npm run langium:generate && npm run build && npm run build:web",
     "lint": "biome ci .",
