@@ -41,6 +41,8 @@ describe.skipIf(!ENABLED)(
       // ES applier folds over value-object / enum fields (P4.3): an inline VO
       // constructor renders to a plain map on vanilla — compile that path.
       { name: "vanilla-vo-fold.ddd", deployable: "api" },
+      // Per-field changeset validators (T2.i) — validate_number/length/format.
+      { name: "vanilla-invariants.ddd", deployable: "api" },
     ])("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

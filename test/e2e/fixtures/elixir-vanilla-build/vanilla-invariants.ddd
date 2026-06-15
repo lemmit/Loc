@@ -1,0 +1,30 @@
+// Per-field changeset constraint validators (T2.i).  Compiled by
+// build-generated-elixir-vanilla so the emitted `validate_number` /
+// `validate_length` / `validate_format` chain (derived from single-field
+// invariants) passes `mix compile --warnings-as-errors`.
+system Catalog {
+  subdomain Core {
+    context Shop {
+      aggregate Product with crudish {
+        name: string
+        price: int
+        sku: string
+
+        invariant price >= 0
+        invariant name.length <= 50
+        invariant sku.matches("[A-Z]{3}")
+      }
+      repository Products for Product { }
+    }
+  }
+  api CatalogApi from Core
+  storage pg { type: postgres }
+  resource productState { for: Shop, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Shop]
+    dataSources: [productState]
+    serves: CatalogApi
+    port: 4000
+  }
+}
