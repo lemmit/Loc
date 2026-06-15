@@ -10,10 +10,10 @@ import {
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
+import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
-import { requestPyType } from "./emit/http-models.js";
 import { type PyRenderContext, renderPyExpr } from "./render-expr.js";
 import { resourceImportLines } from "./resource-clients.js";
 import { errorResponsesKwarg, pyWireToDomain, requestFieldDecl } from "./routes-builder.js";
@@ -78,7 +78,7 @@ export function buildPyWorkflowsFile(
     )
     .join("");
 
-  const routes = wfs.map((wf) => workflowRoute(wf, ctx, dispatcherExpr)).join("\n\n\n");
+  const routes = wfs.map((wf) => workflowRoute(wf, ctx, dispatcherExpr, sys)).join("\n\n\n");
   const body = `${models}router = APIRouter(prefix="/workflows", tags=["workflows"])\n\n\n${routes}`;
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
@@ -228,10 +228,25 @@ function scanIdNames(scan: string, ctx: BoundedContextIR): string[] {
     .filter((n) => new RegExp(`\\b${n}\\b`).test(scan));
 }
 
+/** Postgres `isolation_level` execution-option string for a DSL level. */
+function pyIsolationLevel(level: import("../../ir/types/loom-ir.js").IsolationLevel): string {
+  switch (level) {
+    case "readUncommitted":
+      return "READ UNCOMMITTED";
+    case "readCommitted":
+      return "READ COMMITTED";
+    case "repeatableRead":
+      return "REPEATABLE READ";
+    case "serializable":
+      return "SERIALIZABLE";
+  }
+}
+
 function workflowRoute(
   wf: WorkflowIR,
   ctx: EnrichedBoundedContextIR,
   dispatcherExpr: string,
+  sys?: SystemIR,
 ): string {
   // A `requires`-guarded workflow declares its 403 outcome; a
   // currentUser-referencing one binds the actor off the request scope
@@ -247,6 +262,16 @@ function workflowRoute(
     `async def ${snake(wf.name)}_workflow(${sig}) -> Response:`,
     ...(usesUser ? ["    current_user: User = request.state.current_user"] : []),
   ];
+  // A `transactional(<level>)` workflow (or its state dataSource's
+  // `isolationLevel:`) pins the request transaction's isolation before any
+  // query runs — parity with the .NET BeginTransactionAsync(IsolationLevel.X)
+  // and Java @Transactional(isolation = …) paths.
+  const isolation = sys ? resolveWorkflowIsolation(wf, ctx, sys) : wf.isolation;
+  if (isolation) {
+    out.push(
+      `    await session.connection(execution_options={"isolation_level": "${pyIsolationLevel(isolation)}"})`,
+    );
+  }
   // Wire params → domain locals (brand ids, build VOs) once up front.
   for (const p of wf.params) {
     out.push(`    ${snake(p.name)} = ${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`);

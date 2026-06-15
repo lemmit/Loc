@@ -268,6 +268,7 @@ function emitProjectFromContexts(
         repoPkgOf: (a) => pkgFor("repository-interface", a),
       },
       authRequired,
+      system?.sys,
     );
     if (workflowFiles) {
       for (const [name, f] of workflowFiles) {
