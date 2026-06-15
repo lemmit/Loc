@@ -277,6 +277,11 @@ export function generateTypeScriptForContexts(
   const emitTrace = !!options.emitTrace;
   const out = new Map<string, string>();
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
+  // OIDC turnkey auth (D-AUTH-OIDC): present when the system declares an
+  // `auth { oidc { … } }` block AND this deployable opts in.  Drives the
+  // generated verifier + `/auth/*` handshake + the `jose` dep, replacing
+  // the hand-registered dev stub.
+  const oidcAuth = authRequired ? system?.sys.auth : undefined;
   // Emission is forced by presence: any written `provenanced` field turns
   // on the lineage types + co-located `<field>_provenance` columns + the
   // `provenance_records` history table.  Threaded as a flag (rather than
@@ -383,7 +388,11 @@ export function generateTypeScriptForContexts(
   }
   out.set(
     "http/index.ts",
-    renderHttpIndex(merged, { authRequired, persistence: usingMikro ? "mikroorm" : "drizzle" }),
+    renderHttpIndex(merged, {
+      authRequired,
+      oidc: !!oidcAuth,
+      persistence: usingMikro ? "mikroorm" : "drizzle",
+    }),
   );
   // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`
   // channel makes its carried events UI-observable at GET /realtime/events;
@@ -590,6 +599,7 @@ export function generateTypeScriptForContexts(
     "package.json",
     projectPackageJson(pins, {
       withMoney: projectUsesMoney,
+      withOidc: !!oidcAuth,
       resourceDeps,
       hasSeeds,
       persistence: usingMikro ? "mikroorm" : "drizzle",
@@ -620,6 +630,9 @@ export function generateTypeScriptForContexts(
       // Realtime tee: the relay's inner dispatcher rides through it so
       // relayed (durable) events reach the SSE wire too.
       !usingMikro && contexts.some((c) => realtimeEventTypes(c).size > 0),
+      // OIDC turnkey auth: register the generated verifier instead of the
+      // dev stub.
+      !!oidcAuth,
     ),
   );
   if (!usingMikro) out.set("drizzle.config.ts", DRIZZLE_CONFIG);
@@ -653,6 +666,7 @@ function projectPackageJson(
   pins: BackendPins,
   opts: {
     withMoney: boolean;
+    withOidc?: boolean;
     resourceDeps?: Record<string, string>;
     hasSeeds?: boolean;
     persistence?: "drizzle" | "mikroorm";
@@ -712,6 +726,9 @@ function projectPackageJson(
         dependencies: {
           ...dependencies,
           ...(opts.withMoney ? { "decimal.js": "^10.4.3" } : {}),
+          // OIDC token verification (D-AUTH-OIDC) — jose owns JWKS fetch +
+          // signature/claims validation in the generated verifier.
+          ...(opts.withOidc ? { jose: "^5.9.0" } : {}),
           ...(opts.resourceDeps ?? {}),
         },
         devDependencies,
@@ -829,6 +846,7 @@ function renderProjectIndexTs(
   usingMikro = false,
   outboxRelay = false,
   hasRealtime = false,
+  oidc = false,
 ): string {
   // Side-effect imports for the resource-client modules (objectStore /
   // queue / api) so their clients instantiate at boot.  Empty for
@@ -844,16 +862,20 @@ function renderProjectIndexTs(
   const migCall = runMigrationsAtBoot
     ? `\n// Apply pending schema migrations before serving traffic.  Drizzle's\n// runtime migrator reads db/migrations/meta/_journal.json + each\n// referenced .sql file, tracking state in \`__drizzle_migrations\`;\n// idempotent across boots.\nawait migrate(db, { migrationsFolder: "./db/migrations" });\n`
     : "";
-  // createApp() calls assertUserVerifierRegistered() when auth is required —
-  // emit a permissive dev stub so the generated stack boots out of the box.
-  // Replace this in production with a real JWT-decoding verifier (e.g. in
-  // a separate file kept out of the regen list and imported here).
-  const authStubImport = userShape
-    ? `import { registerUserVerifier } from "./auth/verifier";\n`
-    : "";
-  const authStubCall = userShape
-    ? `\n// Dev-stub verifier — accepts every request as a built-in admin user.\n// REPLACE for production by calling registerUserVerifier(...) with a JWT-\n// decoding implementation, ideally from a separate (non-regenerated) file.\nregisterUserVerifier(() => (${renderStubUserLiteral(userShape)}));\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`
-    : "";
+  // createApp() calls assertUserVerifierRegistered() when auth is required.
+  // With an `auth { oidc }` block (D-AUTH-OIDC) we register the generated
+  // OIDC verifier; otherwise we emit a permissive dev stub so the stack
+  // boots out of the box (replace in production with a real verifier).
+  const authStubImport = !userShape
+    ? ""
+    : oidc
+      ? `import { registerOidcVerifier } from "./auth/oidc";\n`
+      : `import { registerUserVerifier } from "./auth/verifier";\n`;
+  const authStubCall = !userShape
+    ? ""
+    : oidc
+      ? `\n// OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its\n// JWKS and maps claims onto the typed User.  Configure the issuer /\n// client via the env vars the \`auth { oidc }\` block referenced.\nregisterOidcVerifier();\nbaseLogger.info({ event: "auth_oidc_verifier_registered" });\n`
+      : `\n// Dev-stub verifier — accepts every request as a built-in admin user.\n// REPLACE for production by calling registerUserVerifier(...) with a JWT-\n// decoding implementation, ideally from a separate (non-regenerated) file.\nregisterUserVerifier(() => (${renderStubUserLiteral(userShape)}));\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`;
   // Persistence wiring (D-REALIZATION-AXES `persistence:`) — drizzle (pg pool +
   // boot-time migrate) vs mikroorm (MikroORM.init + schema:update at startup).
   // The drizzle import header is kept byte-identical to the pre-mikroorm shape.

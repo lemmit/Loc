@@ -17,8 +17,25 @@
 > (5051 passed). No backend consumes `SystemIR.auth` yet — that is
 > Phase 1 onward.
 >
-> **Status: Phase 0 done; Phases 1+ pending.** Decisions locked with the
-> maintainer (2026-06-15):
+> **Phase 1 shipped (Hono OIDC verifier + handshake).** Under an
+> `auth { oidc }` block, the Hono backend now emits `auth/oidc.ts` (a
+> `jose` + JWKS token verifier that maps the configured `claims:` onto
+> the typed `User`) and `auth/handshake.ts` (the `/auth/login|callback
+> |logout` redirect flow); `createApp` mounts `/auth` (middleware
+> bypasses it), `index.ts` auto-registers the OIDC verifier instead of
+> the dev stub, and `jose` is added to `package.json` only when OIDC is
+> present. Non-OIDC projects stay byte-identical. 6 codegen tests
+> (`test/generator/typescript/auth-oidc-codegen.test.ts`); emitted code
+> verified Biome-clean; full fast suite green (5057 passed).
+>
+> **Caveat (Phase 1 follow-up):** the emitted OIDC TS is content- and
+> Biome-verified but not yet `tsc`-gated — no example carries an
+> `auth { oidc }` block, so the `LOOM_TS_BUILD` shard doesn't compile it
+> against the real `jose` types. Adding an `auth-oidc` example/fixture to
+> that shard is the immediate next step before relying on this in CI.
+>
+> **Status: Phases 0–1 done; Phases 2+ pending.** Decisions locked with
+> the maintainer (2026-06-15):
 >
 > 1. **Scope** = OIDC authentication providers + playground auth stub
 >    **+ default-deny enforcement** (the known `auth.md` hole, §4.3 of the
