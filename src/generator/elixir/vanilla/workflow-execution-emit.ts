@@ -657,9 +657,6 @@ function renderWorkflowModule(
 defmodule ${moduleName} do
   @moduledoc """
   Workflow \`${wf.name}\` — vanilla foundation (plain Elixir, no Ash).${transactionalDoc}
-
-  Body lowering for individual statement kinds is incremental.  See
-  \`workflow-execution-emit.ts\` for the per-kind status.
   """
 
   alias ${repoMod}${contextAlias}
@@ -685,10 +682,7 @@ end
 defmodule ${moduleName} do
   @moduledoc """
   Workflow \`${wf.name}\` — vanilla foundation (plain Elixir, no Ash).
-
-  Body lowering for individual statement kinds is incremental.  See
-  \`workflow-execution-emit.ts\` for the per-kind status.
-  """${hasContextCall ? `\n${contextAlias.trimStart()}\n` : ""}
+  """${hasContextCall ? `${contextAlias}\n` : ""}
 
   @spec run(map()) :: {:ok, term()} | {:error, term()}
   def run(params) when is_map(params) do

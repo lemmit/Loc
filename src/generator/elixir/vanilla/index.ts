@@ -93,11 +93,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // Workflow-instance read endpoints — saga-state Ecto schema + a
     // read-only WorkflowInstancesController (the deferred-Phoenix gap closer).
     apiRoutes.push(...emitVanillaWorkflowInstances(appName, appModule, ctx, out));
-    // Slice 5c: workflow EXECUTION — `run/1` modules per command-triggered
-    // workflow + a project-wide `WorkflowsController` + POST /workflows/<name>
-    // routes.  Body lowering for individual statement kinds is incremental;
-    // this slice ships the shape (run/1 + optional Repo.transaction wrap) so
-    // every workflow compiles and its route is wired end-to-end.
+    // Workflow EXECUTION — `run/1` modules per command-triggered workflow +
+    // a project-wide `WorkflowsController` + POST /workflows/<name> routes.
+    // Body lowering covers every WorkflowStmtIR kind; the optional
+    // `Repo.transaction` wrap is driven by `wf.transactional`.
     apiRoutes.push(
       ...emitVanillaWorkflowExecution(appName, appModule, ctx, out, resourceModules).routes,
     );
