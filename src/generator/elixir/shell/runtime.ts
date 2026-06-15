@@ -186,9 +186,12 @@ end
  *
  * The carrier holds the request-stable tier (correlation id, locale, start
  * time) plus the root of the frame-local tier (a fresh `scope_id`, no parent).
+ * The principal slice is carried as `actor_id` only — stamped by the Auth plug
+ * after the verifier resolves the principal (so it never leaks the rest of the
+ * principal onto the logs); the full principal stays on `conn.assigns`.
  * Per-dispatch child frames (chaining `parent_id` through a Mediator-style
- * pipeline) and the principal slice are deferred — the BEAM has no per-dispatch
- * pipeline in the generated app, and the principal still lives on `conn.assigns`.
+ * pipeline) are deferred — the BEAM has no per-dispatch pipeline in the
+ * generated app.
  *
  * Caveat: `Logger.metadata` does not propagate to spawned processes
  * (`Task.async` / Oban jobs) — a background job that needs the correlation id
@@ -260,6 +263,9 @@ defmodule ${appModule}.RequestContext do
 
   @doc "The parent frame's id, or nil at the root frame (no per-dispatch nesting yet)."
   def parent_id, do: Logger.metadata()[:parent_id]
+
+  @doc "The authenticated principal's id, or nil before auth has run (or when the deployable carries no auth).  Only the id is carried here, not the whole principal; the full principal lives on conn.assigns.current_user."
+  def actor_id, do: Logger.metadata()[:actor_id]
 
   @doc ~S(The request locale from Accept-Language, defaulting to "en".)
   def locale, do: Logger.metadata()[:locale] || "en"

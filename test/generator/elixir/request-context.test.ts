@@ -61,6 +61,9 @@ function assertCarrier(files: Map<string, string>): void {
   expect(rc).toContain("def locale, do: Logger.metadata()[:locale]");
   expect(rc).toContain("def scope_id, do: Logger.metadata()[:scope_id]");
   expect(rc).toContain("def parent_id, do: Logger.metadata()[:parent_id]");
+  // Principal slice: actor_id accessor is always present (nil before auth runs);
+  // the Auth plug stamps it post-verification (asserted in the auth-emit tests).
+  expect(rc).toContain("def actor_id, do: Logger.metadata()[:actor_id]");
 
   // The Plug is mounted in the endpoint between RequestId and Telemetry so the
   // request_start / request_end telemetry logs carry the correlation id.
