@@ -209,6 +209,10 @@ export interface WalkContext {
    *  survives the `{...ctx}` shallow copies nested renders make (like the
    *  Set/array accumulators above). */
   slotUsed: { value: boolean };
+  /** Monotonic per-page counter for `Tabs` instances — boxed (survives the
+   *  `{...ctx}` copies) so each Tabs gets a unique id used to scope its
+   *  client-side `JS.show`/`JS.hide` toggle selectors. */
+  tabSeq: { value: number };
   /** Current rendering position — see RenderPosition. */
   position: RenderPosition;
   /** Optional variable remappings — maps a source ref name to the LiveView
@@ -271,6 +275,7 @@ export function walkBodyToHeex(
     actionBindings: [],
     usedComponents: new Set(),
     slotUsed: { value: false },
+    tabSeq: { value: 0 },
     position: "template",
     instanceTypes,
   };
@@ -1024,6 +1029,7 @@ export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): 
     actionBindings: [],
     usedComponents: new Set(),
     slotUsed: { value: false },
+    tabSeq: { value: 0 },
     position: "handler",
   };
   return renderExpr(page.requires, ctx);

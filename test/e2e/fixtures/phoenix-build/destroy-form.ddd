@@ -32,6 +32,10 @@ system DestroyDemo {
       route: "/widgets/:id"
       body: Stack {
         Heading { "Widget" },
+        Tabs {
+          Tab("Overview", Text { "the overview" }),
+          Tab("Settings", Stack { Text { "the settings" } })
+        },
         DestroyForm(of: Widget)
       }
     }
