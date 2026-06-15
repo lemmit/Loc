@@ -151,15 +151,25 @@ function renderVueLayoutFile(
   }
   if (footer) body.push(indentSlot(footer.html));
 
+  // A named layout is a top-level routed component, so on Vuetify it must
+  // carry the `<v-app>` root every Vuetify component needs for layout/theme
+  // injection (the auto DefaultLayout, a pack template, does the same).  Other
+  // vue packs (shadcnVue) use the plain wrapper.
+  const testid = `layout-${snakeName(layout.name)}`;
+  const [openTag, closeTag] =
+    pack.manifest.name === "vuetify"
+      ? [`<v-app data-testid="${testid}">`, "</v-app>"]
+      : [`<div class="loom-layout" data-testid="${testid}">`, "</div>"];
+
   return `<!-- Auto-generated.  Do not edit by hand.  (${layout.name} layout) -->
 <script setup lang="ts">
 ${script.join("\n")}
 </script>
 
 <template>
-  <div class="loom-layout" data-testid="layout-${snakeName(layout.name)}">
+  ${openTag}
 ${body.join("\n")}
-  </div>
+  ${closeTag}
 </template>
 `;
 }
