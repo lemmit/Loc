@@ -60,8 +60,22 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
 // an Authorization header).
 // ---------------------------------------------------------------------------
 
+/**
+ * The atom key under which the principal's identifier lives in the
+ * `build_user/1` map — the field named `id` if the user shape declares one,
+ * else the first declared field, else `id` (the no-user-block passthrough
+ * always carries `:id`).  Only this id is stamped into the request context,
+ * never the whole principal — minimal PII on the logs.
+ */
+function actorIdKey(user: UserIR | undefined): string {
+  if (!user || user.fields.length === 0) return "id";
+  const idField = user.fields.find((f) => f.name.toLowerCase() === "id");
+  return snake((idField ?? user.fields[0]).name);
+}
+
 function renderAuthPlug(user: UserIR | undefined, webModule: string): string {
   const buildUserBody = renderBuildUser(user);
+  const idKey = actorIdKey(user);
 
   return `# Auto-generated.
 defmodule ${webModule}.Auth do
@@ -105,7 +119,15 @@ defmodule ${webModule}.Auth do
 
       case verify_token(token) do
         {:ok, claims} ->
-          assign(conn, :current_user, build_user(claims))
+          user = build_user(claims)
+          # Principal slice of the execution context: stamp ONLY the actor id
+          # into Logger.metadata (the request-context carrier) so audit and log
+          # lines can attribute the actor without leaking the rest of the
+          # principal (PII) onto every line.  The full principal stays on
+          # conn.assigns.current_user; read the id elsewhere via
+          # RequestContext.actor_id/0.
+          Logger.metadata(actor_id: user[:${idKey}])
+          assign(conn, :current_user, user)
 
         _ ->
           send_unauthorized(conn)

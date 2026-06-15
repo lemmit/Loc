@@ -1069,7 +1069,12 @@ describe("JWT auth emission (auth-emit unit)", () => {
     expect(authEx).toMatch(/@behaviour Plug/);
     expect(authEx).toMatch(/def call\(conn, _opts\)/);
     expect(authEx).toMatch(/"Bearer " <> token/);
-    expect(authEx).toMatch(/assign\(conn, :current_user, build_user\(claims\)\)/);
+    expect(authEx).toMatch(/user = build_user\(claims\)/);
+    expect(authEx).toMatch(/assign\(conn, :current_user, user\)/);
+    // Principal slice: stamps ONLY the actor id into the request-context
+    // carrier (Logger.metadata) — never the whole principal (PII).  The
+    // no-user-block passthrough carries :id, so the key is :id here.
+    expect(authEx).toMatch(/Logger\.metadata\(actor_id: user\[:id\]\)/);
     // 401 must be sent with send_resp/3 — put_status + halt without a
     // send raises Plug.Conn.NotSentError at the cowboy adapter and
     // surfaces as a 500.  See send_unauthorized/1.
@@ -1127,6 +1132,32 @@ describe("JWT auth emission (auth-emit unit)", () => {
     expect(authEx).toContain('claims["email"]');
     // Array field gets a default of [].
     expect(authEx).toMatch(/claims\["permissions"\] \|\| \[\]/);
+    // Principal slice stamps the declared id field's value as the actor id.
+    expect(authEx).toMatch(/Logger\.metadata\(actor_id: user\[:id\]\)/);
+  });
+
+  it("auth.ex stamps the actor id from the first field when the user shape has no 'id'", () => {
+    // The principal-id resolver prefers a field literally named `id`, else
+    // falls back to the first declared field (snake-cased) — so a shape keyed
+    // on `userId` stamps user[:user_id], not a missing user[:id].
+    const sysWithUser: SystemIR = {
+      ...baseSys,
+      user: {
+        fields: [
+          { name: "userId", type: { kind: "primitive", name: "string" }, optional: false },
+          { name: "role", type: { kind: "primitive", name: "string" }, optional: false },
+        ],
+      },
+    };
+    const authDeployable: DeployableIR = { ...baseDeployable, auth: { required: true } };
+    const { files } = emitAuth({
+      sys: sysWithUser,
+      deployable: authDeployable,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const authEx = files.get("lib/phoenix_app_web/auth.ex")!;
+    expect(authEx).toMatch(/Logger\.metadata\(actor_id: user\[:user_id\]\)/);
   });
 
   it("live_auth.ex contains on_mount/4 with redirect to /login on failure", () => {
