@@ -692,6 +692,7 @@ phoenix_app/
 ├── lib/phoenix_app/
 │   ├── application.ex                            # supervision tree: Repo, Endpoint, PubSub
 │   ├── repo.ex                                   # Ecto.Repo
+│   ├── request_context.ex                        # ambient exec-context carrier (Plug → Logger.metadata: correlation_id/scope_id/actor_id) — see architecture/request-context.md
 │   └── sales/                                    # one folder per BoundedContext
 │       ├── customer.ex                           # Ash.Resource per aggregate
 │       ├── order.ex
