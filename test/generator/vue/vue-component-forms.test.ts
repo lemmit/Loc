@@ -56,12 +56,11 @@ describe("forms inside user components — Vue", () => {
     expect(comp).toContain('data-testid="cust-new-submit"');
   });
 
-  it("an operation form inside a component is a narrow deferral (throws)", async () => {
-    await expect(
-      vueFiles(`
+  it("an operation form inside a component wires the op-dialog (instance from a prop)", async () => {
+    const files = await vueFiles(`
       system S {
         subdomain M { context C {
-          aggregate Order { customerId: string  operation confirm() { } }
+          aggregate Order { customerId: string  derived display: string = customerId  operation confirm() { } }
           repository Orders for Order { }
         } }
         api Api from M
@@ -74,7 +73,14 @@ describe("forms inside user components — Vue", () => {
         }
         deployable api { platform: hono, contexts: [C], serves: Api, port: 3000 }
         deployable web { platform: vue, targets: api, ui: WebApp { C: api }, port: 3001 }
-      }`),
-    ).rejects.toThrow(/operation forms .* inside user components are not yet supported/);
+      }`);
+    const comp = files.get("src/components/OrderPanel.vue")!;
+    // The mutation hook's instance idExpr reads off the prop, not a route param.
+    expect(comp).toContain("const confirm = reactive(useConfirmOrder(props.order.id));");
+    expect(comp).toContain("const confirmOpen = ref(false);");
+    expect(comp).toContain("const confirmForm = useLoomForm(ConfirmOrderRequest,");
+    // The pack op-dialog host is appended after the body.
+    expect(comp).toContain('<v-dialog v-model="confirmOpen"');
+    expect(comp).toContain('@click="openConfirmModal(confirm)"');
   });
 });

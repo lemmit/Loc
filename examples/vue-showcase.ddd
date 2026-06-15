@@ -364,6 +364,13 @@ system AcmeVue {
         component NewCustomerWidget() {
             body: Card { CreateForm { of: Customer, testid: "dash-new-customer" } }
         }
+        // A reusable action widget — exercises an OPERATION form
+        // (Action dialog) inside a component, where the instance comes
+        // from the aggregate-typed prop (`order.id`), so the gate compiles
+        // the in-component op-dialog + the prop-derived mutation hook.
+        component OrderActions(order: Order) {
+            body: Modal { OperationForm { order.confirm }, trigger: Button { "Confirm" }, title: "Confirm order" }
+        }
         page Dashboard {
             route: "/dashboard"
             title: "Dashboard"

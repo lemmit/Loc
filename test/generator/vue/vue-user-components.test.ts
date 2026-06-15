@@ -131,13 +131,22 @@ describe("user-defined components — Vue", () => {
     expect(home).toContain('<Banner text="hello" />');
   });
 
-  it("a slot param on an extern component is a narrow deferral (throws)", async () => {
-    await expect(
-      vueFiles(
-        sys(`
-        component Fancy(name: string, aside: slot?) extern from "widgets/fancy"
-        page Home { route: "/" body: Heading { "hi" } }`),
-      ),
-    ).rejects.toThrow(/slot param 'aside' on extern component 'Fancy'/);
+  it("a slot param on an extern component maps to a typed Slots contract (not a prop)", async () => {
+    const files = await vueFiles(
+      sys(`
+      component Fancy(name: string, aside: slot?) extern from "widgets/fancy"
+      page Home { route: "/" body: Heading { "hi" } }`),
+    );
+    const props = files.get("src/components/Fancy.props.ts")!;
+    // The data param stays a prop; the slot param is kept OUT of Props
+    // and surfaced as a `<Name>Slots` contract for `defineSlots`.
+    expect(props).toContain("export interface FancyProps {");
+    expect(props).toContain("name: string;");
+    expect(props).not.toMatch(/FancyProps \{[^}]*aside/s);
+    expect(props).toContain("export interface FancySlots {");
+    expect(props).toContain("aside?(): unknown;");
+    // The shim re-exports both types.
+    const shim = files.get("src/components/Fancy.ts")!;
+    expect(shim).toContain('export type { FancyProps, FancySlots } from "./Fancy.props";');
   });
 });

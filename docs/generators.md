@@ -651,14 +651,20 @@ web_app/
   re-fetches (React re-renders, so its hook stays a plain object param).
 - A `component` body can host a `CreateForm`/`WorkflowForm` (the
   `useLoomForm` + mutation wiring transplants from the page shell);
-  operation forms (Action dialogs) inside a component stay a deferral.
+  operation forms (Action dialogs) inside a component also work — the
+  op-dialog host + per-op LoomForm transplant from the page shell, with
+  the instance `idExpr` read off the aggregate-typed prop (`order.id` →
+  `props.order.id`).
 - Named layouts (`layout <Name> { header / main / footer }`) restructure
   into nested vue-router routes: the layout SFC's inner `<router-view />`
   is the `main` outlet, `layout: none` mounts top-level, and the default
   chrome moves to `src/layouts/DefaultLayout.vue` with App.vue a thin
   host.  Default-only uis keep the flat chrome-in-App.vue shape.
-- Known gaps (tracked in the plan): operation forms inside user
-  components; slot params on extern components.
+- A `slot` param on an extern component maps to a typed `<Name>Slots`
+  contract (for `defineSlots`), kept out of `<Name>Props` (Vue slots are
+  `<slot>` template content, not props).
+- No known gaps — full parity with the React page DSL, with compile-time
+  (`LOOM_VUE_BUILD`) and runtime (`LOOM_VUE_E2E`) CI coverage.
 
 ## Phoenix LiveView fullstack (`platform: phoenixLiveView`)
 

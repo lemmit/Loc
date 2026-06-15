@@ -200,7 +200,15 @@ export function generateVueForContexts(
       );
       out.set(
         `src/components/${c.name}.ts`,
-        renderVueExternComponentShim(c.name, c.externPath ?? ""),
+        renderVueExternComponentShim(
+          c.name,
+          c.externPath ?? "",
+          c.params.some(
+            (p) =>
+              p.type.kind === "slot" ||
+              (p.type.kind === "optional" && p.type.inner.kind === "slot"),
+          ),
+        ),
       );
       continue;
     }
