@@ -20,6 +20,7 @@
 | Svelte | list/table `{#each x.data}` iterated `T[] \| undefined` → likely `svelte-check --fail-on-warnings` CI break | `825ee3e` |
 | .NET | `ValidationBehavior` shared one `ValidationContext` across validators run concurrently (`Task.WhenAll`) — latent FluentValidation data race; each validator now gets its own | `600008d` |
 | Hono + Python | containment-part FK drifted from the shared SQL migration: ORM index named `<table>_parent_id_idx` (vs the migration's real-column name) + Hono missing `.references()` | `600008d` |
+| Walker (all frontends + HEEx) | `Image { "/logo.png" }` positional arg dropped → bare `<Image />`; now feeds `src` | `e94f4b5` |
 
 Plus: tightened the over-claiming showcase status-contract comment, pinned the
 two-tier error→status mapping, and the [runtime-conformance-harness](../plans/runtime-conformance-harness.md)
@@ -62,10 +63,9 @@ walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
 - **React** `ProjectDetail` drops its `state` block (inert detail page) — a
   walker limitation (Modal/state in detail bodies), feature-sized; page-level
   `requires currentUser.role` not enforced client-side (backend still 403s —
-  a frontend-acl feature). `Avatar { "P" }` / `Image { "/logo.png" }` drop the
-  positional arg: `Image` positional is unambiguously `src` (cleanly fixable),
-  but `Avatar`'s positional is ambiguous (fallback-initials vs src) and
-  undocumented — left for the language owner rather than guessed.
+  a frontend-acl feature). `Avatar { "P" }` still drops its positional arg —
+  ambiguous (fallback-initials vs src) + undocumented, left for the language
+  owner. (`Image`'s positional `src` is now FIXED — `e94f4b5`.)
 - **Phoenix** (needs Ash compile to confirm): workflow `add_pipeline_project`
   called map-style vs positional; `requires` guard dereferences a possibly-nil
   actor; `manage_relationship` passes a struct where a map is idiomatic;
@@ -77,6 +77,6 @@ walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
 
 ## Method note
 
-The fast generator-string assertion layer (now ~12 new tests) catches every fixed
+The fast generator-string assertion layer (now ~13 new tests) catches every fixed
 defect in plain `npm test` with no toolchain — the recurrence net the harshness
 of the original escape (contract asserted but never executed) motivated.
