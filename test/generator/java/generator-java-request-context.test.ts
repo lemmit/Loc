@@ -1,6 +1,6 @@
 // Execution-context carrier on the Java/Spring backend (docs/architecture/
 // request-context.md).  MVC has no AsyncLocal, so the carrier rides SLF4J MDC:
-// a RequestContextFilter at the HTTP edge (outermost, HIGHEST_PRECEDENCE) mints/
+// an ExecutionContextFilter at the HTTP edge (outermost, HIGHEST_PRECEDENCE) mints/
 // propagates the correlation id from X-Correlation-Id || X-Request-Id, stamps
 // the request-stable tier + root scope_id into MDC, echoes X-Correlation-Id, and
 // clears MDC on the way out.  UserFilter stamps the principal's actor_id (only
@@ -58,10 +58,12 @@ describe("Java execution-context carrier", () => {
     expect(rc).toContain("public static void putActorId(String id) {");
     expect(rc).toContain("MDC.put(ACTOR_ID, id);");
 
-    const filter = get(files, "/config/RequestContextFilter.java");
+    // Named ExecutionContextFilter (not RequestContextFilter) so the @Component
+    // bean name doesn't collide with Spring's auto-configured requestContextFilter.
+    const filter = get(files, "/config/ExecutionContextFilter.java");
+    expect(filter).toContain("public class ExecutionContextFilter extends OncePerRequestFilter {");
     // Outermost filter so the context is set before auth / catalog run.
     expect(filter).toContain("@Order(Ordered.HIGHEST_PRECEDENCE)");
-    expect(filter).toContain("extends OncePerRequestFilter");
     // Correlation id: X-Correlation-Id, then X-Request-Id, then mint.
     expect(filter).toContain(
       'private static final String CORRELATION_HEADER = "X-Correlation-Id";',

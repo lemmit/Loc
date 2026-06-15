@@ -132,7 +132,7 @@ Two **realization classes** cover every target:
 | `elixir` + `foundation: ash` | ambient | **`Logger.metadata`** — stamped by a `RequestContext` Plug at the HTTP edge (foundation-neutral; the same module on both foundations). *Emitted today* (§ below) | root frame only — opened at the HTTP edge. Per-Ash-action child frames (`parentId` chaining) are deferred |
 | `elixir` + `foundation: vanilla` | ambient | **`Logger.metadata`** — the same `RequestContext` Plug as ash (no `with`-struct variant; the carrier is pure Plug + Logger, so both foundations emit it identically) | root frame only — opened at the HTTP edge. Per-`with`-step child frames are deferred |
 | `Go` (proposed) | **explicit-threading** | `context.Context` (request-stable in `ctx.Value`; frame-local derived per call) | `ctx := context.WithValue(parent, …)` threaded into every call |
-| `java` (Spring MVC) | ambient | **SLF4J `MDC`** (a `ThreadLocal`-backed map, always on the classpath via spring-boot-starter-logging) — stamped by a `RequestContextFilter` at the HTTP edge. *Emitted today* (§ Emitted (Java) below). A WebFlux variant would need Reactor `Context` (`ThreadLocal` does not propagate across reactive operators); MVC is what ships | root frame only — opened by the outermost (`HIGHEST_PRECEDENCE`) filter. Per-dispatch child frames (`parentId` chaining) deferred |
+| `java` (Spring MVC) | ambient | **SLF4J `MDC`** (a `ThreadLocal`-backed map, always on the classpath via spring-boot-starter-logging) — stamped by an `ExecutionContextFilter` at the HTTP edge. *Emitted today* (§ Emitted (Java) below). A WebFlux variant would need Reactor `Context` (`ThreadLocal` does not propagate across reactive operators); MVC is what ships | root frame only — opened by the outermost (`HIGHEST_PRECEDENCE`) filter. Per-dispatch child frames (`parentId` chaining) deferred |
 
 **Within the ambient class, the two tiers want two mechanisms — and a
 scoped/thread-bound slot alone is not enough for the frame-local tier.**
@@ -322,8 +322,9 @@ The Spring MVC carrier ships today (`src/generator/java/emit/request-context.ts`
 MVC has no `AsyncLocal`; SLF4J **`MDC`** (a `ThreadLocal`-backed map) is the
 idiomatic ambient slot, the direct twin of the BEAM's `Logger.metadata`.
 
-- **Boundary establishment** — a `RequestContextFilter extends
-  OncePerRequestFilter`, registered **outermost** (`@Order(Ordered.HIGHEST_PRECEDENCE)`)
+- **Boundary establishment** — an `ExecutionContextFilter extends
+  OncePerRequestFilter` (named to avoid colliding with Spring's auto-configured
+  `requestContextFilter` bean), registered **outermost** (`@Order(Ordered.HIGHEST_PRECEDENCE)`)
   so the context is set before auth / the catalog filter run. It stamps the
   request-stable tier (`correlation_id`, `locale`, `started_at`) + the root
   frame's `scope_id` into MDC, echoes `X-Correlation-Id`, and — being

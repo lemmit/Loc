@@ -7,7 +7,7 @@ import { lines } from "../../../util/code-builder.js";
 //
 // MVC has no AsyncLocal; the idiomatic ambient slot is SLF4J **MDC** (a
 // ThreadLocal-backed map, always on the classpath via spring-boot-starter-
-// logging).  A RequestContextFilter at the HTTP edge stamps the request-stable
+// logging).  An ExecutionContextFilter at the HTTP edge stamps the request-stable
 // tier (correlation_id, locale, started_at) + the root frame's scope_id, echoes
 // X-Correlation-Id, and clears MDC on the way out (pooled-thread hygiene).  The
 // principal's actor_id is stamped post-auth by UserFilter (auth.ts) — only the
@@ -26,7 +26,7 @@ export function renderRequestContext(basePkg: string): string {
     `import org.slf4j.MDC;`,
     ``,
     `/** Ambient per-request execution context, carried in SLF4J MDC.`,
-    ` *  Established at the HTTP edge by RequestContextFilter; read elsewhere`,
+    ` *  Established at the HTTP edge by ExecutionContextFilter; read elsewhere`,
     ` *  via the static accessors (no request handle needed). */`,
     `public final class RequestContext {`,
     `    public static final String CORRELATION_ID = "correlation_id";`,
@@ -86,7 +86,7 @@ export function renderRequestContext(basePkg: string): string {
   );
 }
 
-export function renderRequestContextFilter(basePkg: string): string {
+export function renderExecutionContextFilter(basePkg: string): string {
   return lines(
     `package ${basePkg}.config;`,
     ``,
@@ -106,10 +106,12 @@ export function renderRequestContextFilter(basePkg: string): string {
     `/** Opens the ambient RequestContext at the HTTP edge.  Outermost filter`,
     ` *  (HIGHEST_PRECEDENCE) so the request-stable tier + root scope are set`,
     ` *  before any inner filter (auth, catalog) runs, and MDC is cleared once`,
-    ` *  on the way out so a pooled thread never leaks context to the next request. */`,
+    ` *  on the way out so a pooled thread never leaks context to the next request.`,
+    ` *  Named ExecutionContextFilter (not RequestContextFilter) to avoid colliding`,
+    ` *  with Spring's auto-configured \`requestContextFilter\` bean. */`,
     `@Component`,
     `@Order(Ordered.HIGHEST_PRECEDENCE)`,
-    `public class RequestContextFilter extends OncePerRequestFilter {`,
+    `public class ExecutionContextFilter extends OncePerRequestFilter {`,
     `    private static final String CORRELATION_HEADER = "X-Correlation-Id";`,
     `    private static final String REQUEST_ID_HEADER = "X-Request-Id";`,
     ``,
