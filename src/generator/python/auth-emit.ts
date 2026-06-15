@@ -23,7 +23,7 @@ export function emitPyAuthFiles(user: UserIR, out: Map<string, string>): void {
   out.set("app/auth/__init__.py", "");
   out.set("app/auth/user.py", renderUserModule(user));
   out.set("app/auth/verifier.py", VERIFIER_PY);
-  out.set("app/auth/middleware.py", MIDDLEWARE_PY);
+  out.set("app/auth/middleware.py", renderAuthMiddleware(user));
 }
 
 /** Python kwargs for the dev-stub User — same defaults as Hono's
@@ -155,35 +155,51 @@ def assert_user_verifier_registered() -> None:
         )
 `;
 
-const MIDDLEWARE_PY = `"""Auth middleware.  Auto-generated.
+/** The principal's id key — the claim named `id`, else the first declared
+ *  field.  Stamped into the RequestContext carrier (only the id rides the
+ *  carrier; the full principal stays on request.state.current_user). */
+function actorIdAttr(user: UserIR): string | null {
+  const field = user.fields.find((f) => f.name === "id") ?? user.fields[0];
+  return field ? snake(field.name) : null;
+}
 
-Decodes the request's JWT into a User (via the registered verifier) and
-stashes it on the request scope as \`request.state.current_user\`.  The
-bypass list matches the Hono/.NET sides — framework endpoints stay
-anonymous so smoke tests + the OpenAPI cross-check don't need tokens.
-"""
-
-from fastapi import Request, Response
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-
-from app.auth.verifier import verify_user_or_throw
-
-BYPASS_PREFIXES = ("/health", "/ready", "/openapi.json", "/swagger")
-
-
-class AuthMiddleware(BaseHTTPMiddleware):
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        path = request.url.path
-        for prefix in BYPASS_PREFIXES:
-            if path.startswith(prefix):
-                return await call_next(request)
-        try:
-            user = await verify_user_or_throw(request)
-        except Exception:
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
-        request.state.current_user = user
-        return await call_next(request)
-`;
+function renderAuthMiddleware(user: UserIR): string {
+  const idAttr = actorIdAttr(user);
+  return lines(
+    '"""Auth middleware.  Auto-generated.',
+    "",
+    "Decodes the request's JWT into a User (via the registered verifier) and",
+    "stashes it on the request scope as `request.state.current_user`, then",
+    "stamps the principal id into the ambient RequestContext carrier.  The",
+    "bypass list matches the Hono/.NET sides — framework endpoints stay",
+    "anonymous so smoke tests + the OpenAPI cross-check don't need tokens.",
+    '"""',
+    "",
+    "from fastapi import Request, Response",
+    "from fastapi.responses import JSONResponse",
+    "from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint",
+    "",
+    "from app.auth.verifier import verify_user_or_throw",
+    "from app.obs.log import set_actor_id",
+    "",
+    'BYPASS_PREFIXES = ("/health", "/ready", "/openapi.json", "/swagger")',
+    "",
+    "",
+    "class AuthMiddleware(BaseHTTPMiddleware):",
+    "    async def dispatch(",
+    "        self, request: Request, call_next: RequestResponseEndpoint",
+    "    ) -> Response:",
+    "        path = request.url.path",
+    "        for prefix in BYPASS_PREFIXES:",
+    "            if path.startswith(prefix):",
+    "                return await call_next(request)",
+    "        try:",
+    "            user = await verify_user_or_throw(request)",
+    "        except Exception:",
+    '            return JSONResponse({"error": "unauthorized"}, status_code=401)',
+    "        request.state.current_user = user",
+    ...(idAttr ? [`        set_actor_id(str(user.${idAttr}))`] : []),
+    "        return await call_next(request)",
+    "",
+  );
+}
