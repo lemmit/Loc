@@ -3,7 +3,7 @@
 {{#each columns}}{{../headIndent}}<TableHeadCell>{{{this.header}}}</TableHeadCell>
 {{/each}}{{indent}}</TableHead>
 {{indent}}<TableBody>
-{{headIndent}}{#each {{{rowsExpr}}} as {{rowVar}}{{#if usesIdx}}, idx{{/if}} ({{{keyExpr}}})}
+{{headIndent}}{#each ({{{rowsExpr}}} ?? []) as {{rowVar}}{{#if usesIdx}}, idx{{/if}} ({{{keyExpr}}})}
 {{rowIndent}}<TableBodyRow{{#if hasRowTestid}} data-testid={ {{{rowTestid}}} }{{/if}}{{#if hasOnRowClick}} onclick={() => {{{onRowClick}}} }{{/if}}>
 {{#each columns}}{{../cellIndent}}<TableBodyCell>{{{this.cellJsx}}}</TableBodyCell>
 {{/each}}{{rowIndent}}</TableBodyRow>

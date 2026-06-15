@@ -134,7 +134,8 @@ describe("svelte generator — project shape", () => {
     // svelte-query handle hoisted in <script>, consumed via {#if}/{#each}.
     expect(list).toContain("const customerAll = useAllCustomers();");
     expect(list).toContain("{#if customerAll.isLoading}");
-    expect(list).toContain("{#each customerAll.data as row (row.id)}");
+    // Iterate a narrowed array — `.data` is `T[] | undefined` under svelte-check.
+    expect(list).toContain("{#each (customerAll.data ?? []) as row (row.id)}");
     expect(list).toContain('data-testid="customers-list"');
     // Explicit page: runes state + plain-assignment writes + $effect title.
     const welcome = out.get("web/src/routes/(app)/welcome/+page.svelte") ?? "";
