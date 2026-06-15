@@ -502,36 +502,40 @@ function renderViewAction(
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   const viewModule = `${contextModule}.Views.${upperFirst(view.name)}`;
 
-  // Ash internal metadata fields to strip before JSON encoding
+  // Ash internal metadata fields to strip before JSON encoding.
   const ashInternalKeys = `~w(__meta__ __struct__ __order__ __lateral_join_source__ calculations aggregates relationships)a`;
+
+  // `run/1` returns a BARE LIST on both foundations (`Ash.read!()` / `Repo.all()`)
+  // — the same shape the generated LiveView consumes (`run(...) |> Enum.map`).
+  // Bind it directly; a query error raises out of `run/1` and lands on the
+  // endpoint's 500 fallback (the old `case {:ok, _} / {:error, _}` arms could
+  // never match a list → CaseClauseError on every request).
+  //
+  // SHORTHAND views return aggregate structs (need `Map.from_struct` + drop of
+  // the ORM's internal keys); FULL-FORM views already project to plain maps via
+  // their own `Enum.map` bind, so they pass straight through.
+  const isShorthand = !view.output;
+  const projection = isShorthand
+    ? `record
+        |> Map.from_struct()
+        |> Map.drop(${ashInternalKeys})`
+    : "record";
 
   return `  @doc "GET /api/views/${viewSnake}"
   def ${viewSnake}(conn, _params) do
     # currentUser available to views via run/1 first arg.
     # Views that don't reference currentUser ignore it (default value).
     current_user = Map.get(conn.assigns, :current_user)
-    case ${viewModule}.run(current_user) do
-      {:ok, records} ->
-        data =
-          Enum.map(records, fn record ->
-            record
-            |> Map.from_struct()
-            |> Map.drop(${ashInternalKeys})
-          end)
+    records = ${viewModule}.run(current_user)
 
-        conn
-        |> put_status(:ok)
-        |> json(%{data: data})
+    data =
+      Enum.map(records, fn record ->
+        ${projection}
+      end)
 
-      {:error, reason} ->
-        trace_id = get_resp_header(conn, "x-request-id") |> List.first("unknown")
-        body = Jason.encode!(%{type: "about:blank", title: "Internal Server Error", status: 500, detail: inspect(reason), instance: conn.request_path})
-
-        conn
-        |> put_resp_content_type("application/problem+json")
-        |> put_resp_header("x-request-id", trace_id)
-        |> send_resp(500, body)
-    end
+    conn
+    |> put_status(:ok)
+    |> json(%{data: data})
   end`;
 }
 
