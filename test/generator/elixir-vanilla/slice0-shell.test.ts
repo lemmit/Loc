@@ -104,7 +104,9 @@ describe("vanilla orchestrator — Slice 0 shell skeleton", () => {
     const app = out.get("lib/api/application.ex")!;
     expect(app).toContain("Api.Repo");
     expect(app).toContain("Phoenix.PubSub");
-    expect(app).toContain("ApiWeb.Telemetry");
+    // Telemetry lives at lib/<app>/telemetry.ex (matching the Ash convention)
+    // so the shared `renderApplication` works for both foundations.
+    expect(app).toContain("Api.Telemetry");
     expect(app).toContain("ApiWeb.Endpoint");
   });
 

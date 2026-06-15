@@ -3,10 +3,18 @@
 // no AshPhoenix, no AshPostgres.  Slice 0 of vanilla-foundation-tdd-plan.md:
 // emit a minimal project that `mix compile --warnings-as-errors` accepts.
 // Slice 1: router now accepts per-aggregate routes spliced into /api.
+// Observability port (parity with the Ash shell): the foundation-
+// agnostic `renderApplication` / `renderLogFormatter` / `renderTelemetry`
+// in `../shell/runtime.ts` + `../telemetry-emit.ts` are now wired through
+// here so vanilla emits the same cross-backend log-event catalog
+// (`server_starting` / `_listening` / `_shutdown` / `_drained` +
+// `request_start` / `_end`) over the same JSON-per-line envelope as the
+// Ash, Hono, .NET, Java, and Python backends.
 // ---------------------------------------------------------------------------
 
 import type { ApiRoute } from "../api-emit.js";
-import { renderRequestContext } from "../shell/runtime.js";
+import { renderApplication, renderLogFormatter, renderRequestContext } from "../shell/runtime.js";
+import { renderTelemetry } from "../telemetry-emit.js";
 
 export function emitVanillaShellFiles(
   appName: string,
@@ -17,8 +25,26 @@ export function emitVanillaShellFiles(
 ): void {
   out.set("mix.exs", renderVanillaMixExs(appName, appModule, extraHexDeps));
   out.set(".formatter.exs", renderVanillaFormatterExs());
-  out.set(`lib/${appName}/application.ex`, renderVanillaApplication(appName, appModule));
+  // Application boot — shared renderer emits the catalog
+  // `server_starting` / `server_listening` / `server_shutdown` /
+  // `server_drained` events at the supervisor boundary.  Its children
+  // list references `${appModule}.Repo`, `Phoenix.PubSub`,
+  // `${appModule}.Telemetry`, `${appModule}Web.Endpoint` — vanilla
+  // emits each of those (Telemetry is now at lib/<app>/telemetry.ex,
+  // not lib/<app>_web/telemetry.ex, matching the Ash convention so a
+  // single `renderApplication` works for both foundations).
+  out.set(`lib/${appName}/application.ex`, renderApplication(appName, appModule));
   out.set(`lib/${appName}/repo.ex`, renderVanillaRepo(appName, appModule));
+  // Cross-backend log envelope — `<App>.LogFormatter` renders one JSON
+  // line per Logger event preserving the catalog metadata (event,
+  // request_id, method, path, status, duration_ms, …).  Wired into
+  // `:logger`'s default formatter via config/config.exs.
+  out.set(`lib/${appName}/log_formatter.ex`, renderLogFormatter(appModule));
+  // Catalog `:telemetry` translator — attaches to Phoenix endpoint
+  // events and emits `request_start` / `request_end` over the JSON
+  // envelope.  `emitTrace: false` keeps the Ash domain-trace handlers
+  // off vanilla (they reference `[:ash, …]` events vanilla never raises).
+  out.set(`lib/${appName}/telemetry.ex`, renderTelemetry({ appName, appModule, emitTrace: false }));
   // Ambient execution-context carrier (Logger.metadata) — the Plug is mounted
   // in the endpoint after Plug.RequestId; shared with the ash foundation.
   out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
@@ -30,7 +56,6 @@ export function emitVanillaShellFiles(
     `lib/${appName}_web/controllers/health_controller.ex`,
     renderVanillaHealthController(appModule),
   );
-  out.set(`lib/${appName}_web/telemetry.ex`, renderVanillaTelemetry(appModule));
   out.set("config/config.exs", renderVanillaConfig(appName, appModule));
   out.set("config/dev.exs", renderVanillaDev(appName, appModule));
   out.set("config/prod.exs", renderVanillaProd(appName));
@@ -85,9 +110,7 @@ defmodule ${appModule}.MixProject do
       {:postgrex, "~> 0.20"},
       {:phoenix_html, "~> 4.1"},
       {:jason, "~> 1.4"},
-      {:plug_cowboy, "~> 2.6"},
-      {:telemetry_metrics, "~> 1.0"},
-      {:telemetry_poller, "~> 1.0"}${extraBlock}
+      {:plug_cowboy, "~> 2.6"}${extraBlock}
     ]
   end
 
@@ -107,34 +130,6 @@ function renderVanillaFormatterExs(): string {
   import_deps: [:ecto, :ecto_sql, :phoenix],
   inputs: ["{mix,.formatter}.exs", "{config,lib,test}/**/*.{ex,exs}"]
 ]
-`;
-}
-
-function renderVanillaApplication(appName: string, appModule: string): string {
-  return `# Auto-generated.
-defmodule ${appModule}.Application do
-  @moduledoc false
-  use Application
-
-  @impl true
-  def start(_type, _args) do
-    children = [
-      ${appModule}.Repo,
-      {Phoenix.PubSub, name: ${appModule}.PubSub},
-      ${appModule}Web.Telemetry,
-      ${appModule}Web.Endpoint
-    ]
-
-    opts = [strategy: :one_for_one, name: ${appModule}.Supervisor]
-    Supervisor.start_link(children, opts)
-  end
-
-  @impl true
-  def config_change(changed, _new, removed) do
-    ${appModule}Web.Endpoint.config_change(changed, removed)
-    :ok
-  end
-end
 `;
 }
 
@@ -255,47 +250,6 @@ end
 `;
 }
 
-function renderVanillaTelemetry(appModule: string): string {
-  return `# Auto-generated.
-defmodule ${appModule}Web.Telemetry do
-  use Supervisor
-  import Telemetry.Metrics
-
-  def start_link(arg) do
-    Supervisor.start_link(__MODULE__, arg, name: __MODULE__)
-  end
-
-  @impl true
-  def init(_arg) do
-    children = [
-      {:telemetry_poller, measurements: periodic_measurements(), period: 10_000}
-    ]
-
-    Supervisor.init(children, strategy: :one_for_one)
-  end
-
-  def metrics do
-    [
-      summary("phoenix.endpoint.start.system_time", unit: {:native, :millisecond}),
-      summary("phoenix.endpoint.stop.duration", unit: {:native, :millisecond}),
-      summary("phoenix.router_dispatch.stop.duration",
-        tags: [:route],
-        unit: {:native, :millisecond}
-      ),
-      summary("vm.memory.total", unit: {:byte, :kilobyte}),
-      summary("vm.total_run_queue_lengths.total"),
-      summary("vm.total_run_queue_lengths.cpu"),
-      summary("vm.total_run_queue_lengths.io")
-    ]
-  end
-
-  defp periodic_measurements do
-    []
-  end
-end
-`;
-}
-
 function renderVanillaConfig(appName: string, appModule: string): string {
   return `import Config
 
@@ -314,6 +268,15 @@ config :${appName}, ${appModule}Web.Endpoint,
   live_view: [signing_salt: "loom_dev"]
 
 config :phoenix, :json_library, Jason
+
+# JSON Logger formatter — emits one structured JSON object per line so
+# the cross-backend observability catalog envelope (event, request_id,
+# method, path, status, duration_ms, …) is parseable upstream the same
+# way Hono's pino and .NET's AddJsonConsole emit.  See
+# lib/${appName}/log_formatter.ex.
+config :logger, :default_formatter,
+  format: {${appModule}.LogFormatter, :format},
+  metadata: :all
 
 import_config "#{config_env()}.exs"
 `;
