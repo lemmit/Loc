@@ -601,10 +601,14 @@ function renderCommandRunner(c: CommandCtx): string {
       ? `${c.foldMod}.from_events(id, events)`
       : `Enum.reduce(events, state, fn ev, acc -> ${c.foldMod}.apply_event(acc, ev) end)`;
 
+  // `attrs` is only read when the command has params (via `Map.get(attrs, …)`);
+  // a param-less command (e.g. `create open()` / `operation close()`) leaves it
+  // unused, which fails `--warnings-as-errors` — bind `_attrs` there.
+  const attrsArg = c.op.params.length > 0 ? "attrs" : "_attrs";
   const head =
     c.kind === "create"
-      ? `  def ${fnName}(attrs) do`
-      : `  def ${fnName}(%${c.aggModule}{} = state, attrs) do`;
+      ? `  def ${fnName}(${attrsArg}) do`
+      : `  def ${fnName}(%${c.aggModule}{} = state, ${attrsArg}) do`;
 
   const preamble = [...paramReads, ...lets].join("\n");
   return `${head}

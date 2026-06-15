@@ -350,7 +350,13 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       const names = e.argNames;
       if (names && names.length === args.length && names.every((n) => n)) {
         const namedFields = args.map((a, i) => `${snake(names[i] as string)}: ${a}`).join(", ");
-        return `%${ctx.contextModule}.${upperFirst(e.name)}{${namedFields}}`;
+        // Vanilla stores value objects as plain JSON maps — no `%Ctx.VO{}`
+        // struct module is emitted — so an inline VO constructor (e.g. in an
+        // event-sourced applier fold) builds a map; `%Ctx.VO{…}` would
+        // reference an undefined struct and fail `mix compile`.
+        return ctx.foundation === "vanilla"
+          ? `%{${namedFields}}`
+          : `%${ctx.contextModule}.${upperFirst(e.name)}{${namedFields}}`;
       }
       return `%${ctx.contextModule}.${upperFirst(e.name)}{${args.join(", ")}}`;
     }
@@ -606,7 +612,12 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
 // threaded through yet).
 // ---------------------------------------------------------------------------
 
-export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: string): string {
+export function renderTypespec(
+  t: TypeIR,
+  contextModule: string,
+  typesModule?: string,
+  foundation: "ash" | "vanilla" = "ash",
+): string {
   switch (t.kind) {
     // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
@@ -635,16 +646,19 @@ export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: s
       // IDs flow as UUID strings on the struct (Ash :uuid → String.t()).
       return typesModule ? `${typesModule}.id()` : "String.t()";
     case "enum":
-      // Enums are Ash.Type.Enum modules carrying an `atom` value on the
-      // struct.  Reference the module's auto-generated `.t()`.
-      return `${contextModule}.${upperFirst(t.name)}.t()`;
+      // Ash enums are `Ash.Type.Enum` modules (`.t()`); vanilla has no enum
+      // module — the value is stored as its string, so the spec is `String.t()`.
+      return foundation === "vanilla" ? "String.t()" : `${contextModule}.${upperFirst(t.name)}.t()`;
     case "valueobject":
+      // Ash emits an embedded resource module (`.t()`); vanilla stores value
+      // objects as plain JSON maps — no module exists, so the spec is `map()`.
+      return foundation === "vanilla" ? "map()" : `${contextModule}.${upperFirst(t.name)}.t()`;
     case "entity":
       return `${contextModule}.${upperFirst(t.name)}.t()`;
     case "array":
-      return `[${renderTypespec(t.element, contextModule, typesModule)}]`;
+      return `[${renderTypespec(t.element, contextModule, typesModule, foundation)}]`;
     case "optional":
-      return `${renderTypespec(t.inner, contextModule, typesModule)} | nil`;
+      return `${renderTypespec(t.inner, contextModule, typesModule, foundation)} | nil`;
     case "action":
     case "slot":
       throw new Error("renderTypespec: 'slot' type is UI-only and should not reach the backend.");
