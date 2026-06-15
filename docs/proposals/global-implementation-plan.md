@@ -98,7 +98,7 @@ elixir items form one coherent track (a→e order).
 | # | Item | Where / gate | Owning proposal |
 |---|---|---|---|
 | T2.a | **Vanilla workflow body lowering** — only `factory-let` + `op-call` lower (#1062); `precondition` / `requires` / `emit` / `repo-let` / `expr-let` / `for-each` / `repo-run` emit `# TODO` comments (`src/generator/elixir/vanilla/workflow-execution-emit.ts:~147-157`). The TDD slices are already cut in [`../plans/vanilla-foundation-tdd-plan.md`](../plans/vanilla-foundation-tdd-plan.md). | elixir/vanilla | [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) |
-| T2.b | **Event sourcing under vanilla** (D-VANILLA-ES-HOME) — `EVENT_SOURCING_BACKENDS` still `{node, dotnet}` (`system-checks.ts:~853`). The blocker (no state-based vanilla emitter) is gone; this is the headline elixir item. | elixir/vanilla | [workflow-and-applier](./workflow-and-applier.md) |
+| T2.b | **Event sourcing under vanilla** (D-VANILLA-ES-HOME) — ✅ **SHIPPED** (#1203 P4.0 per-op endpoints → #1205 P4.1/P4.2 gate + emit). `persistedAs(eventLog)` now generates on `foundation: vanilla` (foundation-aware gate: `elixir+vanilla` accepted, `elixir+ash` still rejected); emits the in-memory struct + `<Agg>EventLog` schema + `<Agg>Fold` + event-store repository + emit→append→fold command runners. Remaining tail tracked under T3.6 (projections/snapshots) and P4.3/P4.4 in [`../plans/elixir-eventsourcing-vanilla-plan.md`](../plans/elixir-eventsourcing-vanilla-plan.md) (conformance-parity case, VO/enum applier folds, dispatch fan-out). | ~~elixir/vanilla~~ | [workflow-and-applier](./workflow-and-applier.md) |
 | T2.c | **Operation `or`-union returns on elixir** — `SUPPORTED_RETURN_BACKENDS = {node, dotnet}` (`structural-checks.ts:~381`). Vanilla's `{:ok,_} \| {:error,_}` controllers are the natural carrier; Ash stays gated. Includes the **union-find absence producer**: `validateUnionFindShapes` exempts elixir-only hosts (the P4d tagger is success-side only; absence raises) — align it with the node/dotnet absence translation and drop the exemption. | elixir | [exception-less](./exception-less.md) / [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) |
 | T2.d | **Vanilla/ecto as first-class adapters** — today `elixir/index.ts:~88-94` short-circuits `if (foundation === "vanilla")` instead of routing through the `PersistenceAdapter`/`StyleAdapter` registry like node/dotnet; the headline divergence named by [`../plans/realization-axes-alignment.md`](../plans/realization-axes-alignment.md) (slices #1061–#1064 landed the plan + compatibility rules + transport axis; the rewire itself remains). | elixir, platform | [platform-realization-axes](./platform-realization-axes.md) |
 | T2.e | **HEEx walker primitive backfill** — 32 of ~53 primitives have HEEx renderers; missing: `List`, `Detail`, `MasterDetail`, `Tabs`, `Toggle`, `Field`/`NumberField`/`PasswordField`/`MultilineField`/`SelectField` (inputs are HEEx-form-level by design; pack templates exist, walker dispatch doesn't), `For`, `Stat`, `Money`, `Avatar`, `Image`, `Divider`, `Loader`, `Slot`, `Bold`/`Italic`/`InlineCode` (`Switch` left the stdlib — page-metamodel.md subsumed it under `match`). Unsupported ones render visible `<!-- not supported -->` stubs (`heex-walker-core.ts`). Prioritise `List`/`Detail`/`MasterDetail`/`Tabs` + the form inputs. | elixir/heex | [phase-a platform expansion](../plans/phase-a-platform-expansion-prereqs.md) |
@@ -187,13 +187,15 @@ retired: P4 and most of A1/A3 shipped independently, and A2 is dropped.
 
 ## Suggested near-term order
 
-A pragmatic next-6, dependency-consistent:
+A pragmatic next-6, dependency-consistent (T2.a / T2.b / T2.e all ✅ shipped):
 
-1. **T2.a** vanilla workflow statement kinds (slices already cut).
-2. **T2.b → T2.c** event sourcing + `or`-union returns under vanilla —
-   closes the two biggest elixir parity gates.
-3. **T2.e** HEEx walker primitive backfill (priority set).
-4. **T2.g residue** — Phoenix capability-`filter` reification (elixir
+1. **T2.c** `or`-union returns under vanilla — the next-biggest elixir
+   parity gate, and the natural sibling of the now-shipped ES path
+   (vanilla's `{:ok,_} | {:error,_}` controllers are the carrier).
+2. **ES-on-vanilla tail (P4.3/P4.4)** — cross-backend conformance-parity
+   case for the vanilla ES column, VO/enum applier folds, dispatch
+   fan-out on append; example + CI wiring.
+3. **T2.g residue** — Phoenix capability-`filter` reification (elixir
    track); principal factory excluded per maintainer.
 5. **T2.i** IR field-constraint metadata (+ elixir validators, Zod/.NET
    enrichment).
