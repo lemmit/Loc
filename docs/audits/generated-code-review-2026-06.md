@@ -18,6 +18,8 @@
 | Hono | Drizzle schema id columns were `text` while the migration declared them via `idColumnType` (guid→uuid, int→integer, …) | `5abc6e2` |
 | Java + Python | `workflow … transactional(serializable)` dropped the isolation level (.NET honored it) | `703e0cb` |
 | Svelte | list/table `{#each x.data}` iterated `T[] \| undefined` → likely `svelte-check --fail-on-warnings` CI break | `825ee3e` |
+| .NET | `ValidationBehavior` shared one `ValidationContext` across validators run concurrently (`Task.WhenAll`) — latent FluentValidation data race; each validator now gets its own | `600008d` |
+| Hono + Python | containment-part FK drifted from the shared SQL migration: ORM index named `<table>_parent_id_idx` (vs the migration's real-column name) + Hono missing `.references()` | `600008d` |
 
 Plus: tightened the over-claiming showcase status-contract comment, pinned the
 two-tier error→status mapping, and the [runtime-conformance-harness](../plans/runtime-conformance-harness.md)
@@ -48,12 +50,8 @@ plan (Tier-0 fast source assertions, Tier-1 runtime conformance).
 
 ## Real but runtime-cosmetic (no behavioral impact)
 
-- **Hono `pipelines` schema lacks `.references()` + index named
-  `pipelines_parent_id_idx` vs the migration's `pipelines_project_id_idx`.**
-  Loom ships its own SQL migrations (it does not run drizzle-kit), so the DB gets
-  the correct FK + index from the migration; the Drizzle schema's FK/index
-  declarations are unused metadata. Worth aligning for cleanliness; no runtime
-  effect (the 409-on-delete path relies on the migration's FK, which exists).
+_(The Hono/Python part-FK index drift that was here is now FIXED — see `600008d`
+above. It was runtime-cosmetic but aligned for cleanliness / no-debt.)_
 
 ## Remaining — genuine but unverified here (need a toolchain / are feature-sized)
 
@@ -61,12 +59,13 @@ These were flagged by the review; each needs runtime/toolchain verification this
 environment lacks (no Elixir/Ash, no dotnet SDK, docker daemon down), or is a
 walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
 
-- **.NET** `ValidationBehavior` shares one `ValidationContext` across parallel
-  `ValidateAsync` calls — latent data race; benign today (1 validator/command).
-- **React** `ProjectDetail` drops its `state` block (inert detail page) — partly
-  a known walker limitation (Modal/state in detail bodies); page-level
-  `requires currentUser.role` not enforced client-side (backend still 403s);
-  `Avatar`/`Image` drop literal args.
+- **React** `ProjectDetail` drops its `state` block (inert detail page) — a
+  walker limitation (Modal/state in detail bodies), feature-sized; page-level
+  `requires currentUser.role` not enforced client-side (backend still 403s —
+  a frontend-acl feature). `Avatar { "P" }` / `Image { "/logo.png" }` drop the
+  positional arg: `Image` positional is unambiguously `src` (cleanly fixable),
+  but `Avatar`'s positional is ambiguous (fallback-initials vs src) and
+  undocumented — left for the language owner rather than guessed.
 - **Phoenix** (needs Ash compile to confirm): workflow `add_pipeline_project`
   called map-style vs positional; `requires` guard dereferences a possibly-nil
   actor; `manage_relationship` passes a struct where a map is idiomatic;
@@ -78,6 +77,6 @@ walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
 
 ## Method note
 
-The fast generator-string assertion layer (now ~9 new tests) catches every fixed
+The fast generator-string assertion layer (now ~12 new tests) catches every fixed
 defect in plain `npm test` with no toolchain — the recurrence net the harshness
 of the original escape (contract asserted but never executed) motivated.
