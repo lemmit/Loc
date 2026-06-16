@@ -22,6 +22,7 @@ import type {
 import {
   checkActionTypePosition,
   checkBinaryOperands,
+  checkBindableInputArgs,
   checkBuilderCallType,
   checkChannels,
   checkComponent,
@@ -103,6 +104,9 @@ export class DddValidator {
     // targets (VO / EntityPart / user-component / walker primitive) and
     // errors on misses.
     checkBuilderCallType(model, accept, this.services);
+    // A bindable input (`Field`/`Toggle`/…) wires to page state via `bind:`;
+    // `value:` is silently ignored by the walker — warn and suggest `bind:`.
+    checkBindableInputArgs(model, accept);
     // Project composition: a top-level `subdomain` (declared outside any
     // `system { }`) folds into the project's single system — enforce that
     // exactly one system exists across the import graph.  See

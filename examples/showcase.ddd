@@ -377,10 +377,10 @@ system DevPlatform {
                         },
                         Card {
                             Stack {
-                                Field { "Name", value: draftName },
-                                NumberField { "Level", value: level },
+                                Field { "Name", bind: draftName },
+                                NumberField { "Level", bind: level },
                                 PasswordField { "Token" },
-                                Toggle { "Editing", value: editing },
+                                Toggle { "Editing", bind: editing },
                                 Anchor { "Docs", to: "/docs" },
                                 Button { "Save", to: "/projects" }
                             }

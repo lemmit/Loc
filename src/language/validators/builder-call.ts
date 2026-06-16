@@ -16,6 +16,37 @@ import {
 } from "../generated/ast.js";
 import { isWalkerPrimitive } from "../walker-stdlib.js";
 
+/** Bindable page-body inputs — they wire to a `state` field via `bind:`. */
+const BINDABLE_INPUTS: ReadonlySet<string> = new Set([
+  "Field",
+  "NumberField",
+  "PasswordField",
+  "MultilineField",
+  "Toggle",
+  "SelectField",
+]);
+
+/** A bindable input (`Field`, `Toggle`, …) binds to page `state` through
+ *  `bind:`.  Writing `value:` instead — the React habit — is silently dropped
+ *  by the walker: the input renders uncontrolled and no `useState` is emitted.
+ *  Warn and suggest `bind:` so the silent no-op can't recur. */
+export function checkBindableInputArgs(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (node.$type !== "BuilderCall") continue;
+    const bc = node as BuilderCall;
+    if (!BINDABLE_INPUTS.has(bc.type)) continue;
+    for (const entry of bc.entries) {
+      if (entry.name === "value") {
+        accept(
+          "warning",
+          `'${bc.type}' binds to page state via 'bind:', not 'value:'. Did you mean 'bind: …'? With 'value:' the input renders uncontrolled and the state never wires up.`,
+          { node: entry, property: "name", code: "loom.bindable-input-value-arg" },
+        );
+      }
+    }
+  }
+}
+
 /** v2 hard cut: reject `Name(args)` invocation forms that v2 replaces
  *  with BuilderCall.  Post grammar flatten, the AST shape is a
  *  `PostfixChain` whose first suffix is a `CallSuffix` and whose head
