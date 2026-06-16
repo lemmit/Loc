@@ -63,7 +63,7 @@ Scope to close the specific gaps found:
 | Gap | Tier-1 action |
 |---|---|
 | Phoenix view `CaseClauseError` | hit `GET /api/views/<v>` and assert 200 + body for both foundations |
-| .NET generated tests don't compile/run | DONE (compile): the showcase dotnet build case now also `dotnet build`s the generated `Tests/DotnetApi.Tests.csproj` under `/warnaserror`. Still TODO: `dotnet test` to also *run* them. |
+| .NET generated tests don't compile/run | PARTIAL: the showcase dotnet case asserts the `Tests/` csproj is *emitted*, and the generated test code's compile-readiness (currentUser actor + no void→var) is guarded by a fast generator test. Actually `dotnet build`ing it in CI is blocked: the runner's NuGet feed lacks the test-only packages (AwesomeAssertions/xunit) and build-time restore of them isn't reliable. TODO: once the CI NuGet feed carries the test packages, `dotnet build` then `dotnet test` the Tests project. |
 | Generated test suites never executed | run the emitted vitest/JUnit/pytest/ExUnit suites where the toolchain is present |
 | React/Vue runtime behavior | extend the Playwright smoke (already emitted) to submit a form with a 422 and assert per-field error display; assert realtime files emitted |
 
@@ -72,7 +72,10 @@ Scope to close the specific gaps found:
 1. **Tier 0 per finding** (in flight) — red test → generator fix → green, in
    default `npm test`.
 2. **Compile the generated `Tests/` project** in the showcase dotnet case —
-   DONE. Next: `dotnet test` to also *run* the emitted aggregate tests.
+   blocked on CI NuGet not carrying the test-only packages (AwesomeAssertions/
+   xunit). Once the feed has them: `dotnet build` then `dotnet test` the Tests
+   project. (Generated test-code shape is guarded by a fast generator test
+   meanwhile.)
 3. **Cross-backend status conformance runner** — lift showcase's `toThrow`
    blocks into an executable matrix over the booted backends.
 4. **Frontend runtime assertions** — extend the emitted Playwright smoke.
