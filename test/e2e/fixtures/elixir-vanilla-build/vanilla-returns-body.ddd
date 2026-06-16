@@ -1,0 +1,44 @@
+// Returning-op body statements on `foundation: vanilla` (exception-less.md, the
+// "Two-regime split" + success-path serialisation tail).  Beyond the return-only
+// `vanilla-returns.ddd`, this exercises the full body vocabulary inside an
+// `operation … : Agg or Error`:
+//   - `precondition` / `requires` → raise guards (bug-shaped / forbidden),
+//   - `assign field := value`    → struct-update the threaded `record`,
+//   - `emit Event { … }`         → Phoenix.PubSub broadcast,
+//   - fall-through success        → `{:ok, %{…wireShape…}}` (no struct on the wire).
+// Compiled by build-generated-elixir-vanilla so all four forms — plus the
+// emitted `Events.Adjusted` struct — pass `mix compile --warnings-as-errors`.
+system Inventory {
+  subdomain Core {
+    context Stock {
+      error NotFound { resource: string }
+      event Adjusted { sku: string, delta: int }
+
+      aggregate Item with crudish {
+        sku: string
+        quantity: int
+
+        // Returns the (mutated) Item on success, NotFound on a guard miss.
+        operation adjust(delta: int): Item or NotFound {
+          precondition delta != 0
+          requires quantity + delta >= 0
+          quantity := quantity + delta
+          emit Adjusted { sku: sku, delta: delta }
+        }
+      }
+      repository Items for Item { }
+    }
+  }
+
+  api StockApi from Core
+  storage pg { type: postgres }
+  resource itemState { for: Stock, kind: state, use: pg }
+
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Stock]
+    dataSources: [itemState]
+    serves: StockApi
+    port: 4000
+  }
+}

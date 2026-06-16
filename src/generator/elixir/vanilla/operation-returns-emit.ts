@@ -23,6 +23,13 @@ import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/erro
 import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 
+/** The wire field list a returning op's success branch serialises `record`
+ *  into — the same ordered `wireShape` the find/CRUD controllers expose, so the
+ *  success body matches what `GET /<plural>/:id` returns for the same aggregate. */
+function wireFieldsOf(agg: AggregateIR): string[] {
+  return (agg.wireShape ?? []).map((f) => snake(f.name));
+}
+
 /** An operation that declares an `or`-union return type (exception-less). */
 export function isReturningOperation(op: OperationIR): boolean {
   return !!op.returnType;
@@ -85,7 +92,26 @@ export function renderReturningOpFunction(
     (p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})`,
   );
   const bodyLines = op.statements.map((s) => renderReturningStmt(s, ctx, renderCtx));
-  const body = [...paramReads, ...bodyLines].join("\n");
+
+  // Success-path serialisation.  A body that doesn't end in an explicit
+  // `return` falls through to its aggregate success variant (`Order` in
+  // `Order or NotFound`) — the mutated `record`.  Append the terminal
+  // `{:ok, %{…wireShape…}}` so the context fn always returns a wire-ready
+  // tagged tuple (the controller just `json`s the map; no struct leaks
+  // `__meta__`/`__struct__` onto the wire).
+  const lastIsReturn = op.statements[op.statements.length - 1]?.kind === "return";
+  const succeedsWithAggregate =
+    op.returnType?.kind === "union" &&
+    op.returnType.variants.some((v) => v.kind === "entity" && v.name === agg.name);
+  const tailLines =
+    !lastIsReturn && succeedsWithAggregate
+      ? [
+          `    {:ok, %{${wireFieldsOf(agg)
+            .map((f) => `${f}: record.${f}`)
+            .join(", ")}}}`,
+        ]
+      : [];
+  const body = [...paramReads, ...bodyLines, ...tailLines].join("\n");
 
   return `  @doc "Returning operation \`${op.name}\` on \`${aggPascal}\` (exception-less)."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
@@ -96,9 +122,19 @@ ${body}
 }
 
 /** A statement in a returning-op body.  `return` is the terminal tagged tuple;
- *  `let` binds a local; anything else (precondition/emit/assign) is a v1 gap —
- *  the cross-backend fixtures are return-only — emitted as a TODO so the module
- *  still compiles. */
+ *  the guard/mutation/emit forms mirror what the other backends render for a
+ *  returning op (exception-less.md "Two-regime split"):
+ *
+ *  - `precondition`/`requires` are bug-shaped guards — they **raise** (the
+ *    aggregate-internal 500 / forbidden path), not return a typed error.
+ *  - `assign field := value` mutates the threaded `record` struct so the
+ *    fall-through success branch serialises the updated aggregate.
+ *  - `emit` broadcasts a domain event over `Phoenix.PubSub` (the same form the
+ *    vanilla workflow body emits).
+ *
+ *  `add`/`remove` collection mutations are still a v1 gap (they need the
+ *  association metadata the Ash changeset path carries) — emitted as a TODO so
+ *  the module still compiles. */
 function renderReturningStmt(s: StmtIR, ctx: BoundedContextIR, rc: RenderCtx): string {
   switch (s.kind) {
     case "return": {
@@ -113,6 +149,25 @@ function renderReturningStmt(s: StmtIR, ctx: BoundedContextIR, rc: RenderCtx): s
     }
     case "let":
       return `    ${snake(s.name)} = ${renderExpr(s.expr, rc)}`;
+    case "precondition":
+      // Bug-shaped guard → raises (aggregate-internal 500 ProblemDetails).
+      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`;
+    case "requires":
+      // Authorization guard → raises (translated to a forbidden response).
+      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`;
+    case "assign": {
+      // `field := value` → struct-update the threaded `record`, so the
+      // fall-through success branch serialises the mutated aggregate.
+      const field = snake(s.target.segments[0] ?? "");
+      return `    record = %{record | ${field}: ${renderExpr(s.value, rc)}}`;
+    }
+    case "emit": {
+      // Broadcast a domain event — same form the vanilla workflow body emits.
+      const fields = s.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, rc)}`).join(", ");
+      const appModule = rc.contextModule.split(".")[0]!;
+      const struct = `%${rc.contextModule}.Events.${upperFirst(s.eventName)}{${fields}}`;
+      return `    Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${struct})`;
+    }
     case "expression":
       return `    _ = ${renderExpr(s.expr, rc)}`;
     default:

@@ -38,6 +38,10 @@ describe.skipIf(!ENABLED)(
       // from-scratch ES + producer-translation Elixir, not just the structure tests.
       { name: "vanilla-eventlog.ddd", deployable: "api" },
       { name: "vanilla-returns.ddd", deployable: "api" },
+      // Returning-op body statements (T2.c tail) — precondition/requires raise
+      // guards, `assign` struct-update, `emit` PubSub broadcast, fall-through
+      // success serialised to a wire map.
+      { name: "vanilla-returns-body.ddd", deployable: "api" },
       // ES applier folds over value-object / enum fields (P4.3): an inline VO
       // constructor renders to a plain map on vanilla — compile that path.
       { name: "vanilla-vo-fold.ddd", deployable: "api" },
