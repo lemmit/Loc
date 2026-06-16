@@ -67,9 +67,13 @@ walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
   recur (`94de0e9`); the state-controlled `Modal { open: <state> }` is built
   (`84231f7`, React Mantine+shadcn; spec in
   `docs/proposals/state-controlled-modal.md`). showcase's ProjectDetail now
-  generates a fully controlled, stateful detail page. Remaining: the
-  controlled-modal template for the other packs (MUI/Chakra/Vue/Svelte/HEEx —
-  mechanical), page-level `requires currentUser.role` client-side gating
+  generates a fully controlled, stateful detail page. The controlled-modal
+  template now covers ALL four React packs (Mantine/shadcn/MUI/Chakra —
+  `ec21114`). Remaining: the controlled-modal template for Vue
+  (vuetify/shadcnVue) and Svelte (shadcnSvelte/flowbite) — their state model
+  differs (ref/v-model, $state runes) and the modal area is partly unbuilt
+  (vuetify op-form modal is a TODO), so they want vue-tsc/svelte-check
+  verification; page-level `requires currentUser.role` client-side gating
   (frontend-acl feature; backend already 403s), and `Avatar { "P" }`'s
   positional arg (ambiguous fallback-initials vs src + undocumented — left for
   the language owner). (`Image`'s positional `src` is FIXED — `e94f4b5`.)
@@ -84,6 +88,6 @@ walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
 
 ## Method note
 
-The fast generator-string assertion layer (now ~15 new tests) catches every fixed
+The fast generator-string assertion layer (now ~15 new tests (the controlled-modal test covers all 4 React packs)) catches every fixed
 defect in plain `npm test` with no toolchain — the recurrence net the harshness
 of the original escape (contract asserted but never executed) motivated.
