@@ -60,18 +60,19 @@ These were flagged by the review; each needs runtime/toolchain verification this
 environment lacks (no Elixir/Ash, no dotnet SDK, docker daemon down), or is a
 walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
 
-- **React** `ProjectDetail` `state` block — **largely resolved**: the inputs
-  just used the wrong keyword (`value:` instead of `bind:`; the `bind:` →
-  controlled-input + `useState` path works and is tested), and the
-  state-controlled `Modal { open: <state> }` is now **built** (`84231f7`, React
-  Mantine+shadcn; spec in `docs/proposals/state-controlled-modal.md`). Remaining
-  here: a validator warning for an unknown input arg (`value:` → "did you mean
-  `bind:`?"), fixing the showcase to use `bind:`, and the controlled-modal
-  template for the other packs (MUI/Chakra/Vue/Svelte/HEEx). Page-level
-  `requires currentUser.role` not enforced client-side (backend still 403s —
-  a frontend-acl feature). `Avatar { "P" }` still drops its positional arg —
-  ambiguous (fallback-initials vs src) + undocumented, left for the language
-  owner. (`Image`'s positional `src` is now FIXED — `e94f4b5`.)
+- **React** `ProjectDetail` `state` block — **RESOLVED**: the inputs used the
+  wrong keyword (`value:` not `bind:`; the `bind:` → controlled-input +
+  `useState` path works and is tested). Fixed the showcase to `bind:` and added
+  a `loom.bindable-input-value-arg` validator warning so the silent no-op can't
+  recur (`94de0e9`); the state-controlled `Modal { open: <state> }` is built
+  (`84231f7`, React Mantine+shadcn; spec in
+  `docs/proposals/state-controlled-modal.md`). showcase's ProjectDetail now
+  generates a fully controlled, stateful detail page. Remaining: the
+  controlled-modal template for the other packs (MUI/Chakra/Vue/Svelte/HEEx —
+  mechanical), page-level `requires currentUser.role` client-side gating
+  (frontend-acl feature; backend already 403s), and `Avatar { "P" }`'s
+  positional arg (ambiguous fallback-initials vs src + undocumented — left for
+  the language owner). (`Image`'s positional `src` is FIXED — `e94f4b5`.)
 - **Phoenix** (needs Ash compile to confirm): workflow `add_pipeline_project`
   called map-style vs positional; `requires` guard dereferences a possibly-nil
   actor; `manage_relationship` passes a struct where a map is idiomatic;
@@ -83,6 +84,6 @@ walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
 
 ## Method note
 
-The fast generator-string assertion layer (now ~14 new tests) catches every fixed
+The fast generator-string assertion layer (now ~15 new tests) catches every fixed
 defect in plain `npm test` with no toolchain — the recurrence net the harshness
 of the original escape (contract asserted but never executed) motivated.
