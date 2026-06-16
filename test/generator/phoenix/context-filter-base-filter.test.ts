@@ -72,7 +72,7 @@ describe("Phoenix capability filter — base_filter", () => {
   // function form `and(a, b)` is a parser SyntaxError — never valid in `expr()`.
   it("conjoins multiple filters with the infix `and` operator (not the `and(...)` function)", async () => {
     const doc = find(
-      await generate(sys("filter !this.isDeleted\n        filter this.subject != \"\"")),
+      await generate(sys('filter !this.isDeleted\n        filter this.subject != ""')),
       (k) => k.endsWith("/docs/doc.ex"),
       "doc.ex",
     );

@@ -420,8 +420,7 @@ function renderBaseFilter(
   // word in Elixir, so the function form `and(a, b)` is a parser SyntaxError.
   // Each predicate is parenthesised so a low-precedence operator inside one
   // (`a or b`) can't bind across the `and` join.
-  const body =
-    rendered.length === 1 ? rendered[0]! : rendered.map((r) => `(${r})`).join(" and ");
+  const body = rendered.length === 1 ? rendered[0]! : rendered.map((r) => `(${r})`).join(" and ");
   // `base_filter` is declared inside the `resource do … end` DSL section in
   // Ash 3.x — it is not a top-level resource macro.
   return `\n  resource do\n    base_filter expr(${body})\n  end\n`;
