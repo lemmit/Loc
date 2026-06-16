@@ -1,0 +1,54 @@
+// Event-sourced append → Dispatcher fan-out (P4.4 dispatch tail).  An
+// event-sourced aggregate's appended events must reach the in-process
+// Dispatcher so workflow saga handlers fire — the ES analogue of the state
+// path's emit→PubSub.  Compiled by build-generated-elixir-vanilla so the
+// `<Ctx>.Dispatcher.dispatch/1` call in `append/2` (gated on the context
+// actually emitting a Dispatcher) passes `mix compile --warnings-as-errors`.
+//
+// Shape: `place` appends OrderPlaced, which STARTS the Tracking saga; the
+// saga loads the (event-sourced) order and runs `fulfill`, appending Fulfilled.
+system Sales {
+  subdomain Core {
+    context Orders {
+      event OrderPlaced { order: Order id, at: datetime }
+      event Fulfilled { order: Order id }
+
+      aggregate Order ids guid persistedAs(eventLog) {
+        status: string
+
+        create place() { emit OrderPlaced { order: id, at: now() } }
+        operation fulfill() { emit Fulfilled { order: id } }
+
+        apply(e: OrderPlaced) { status := "placed" }
+        apply(e: Fulfilled) { status := "fulfilled" }
+      }
+      repository Orders for Order { }
+
+      channel Lifecycle {
+        carries: OrderPlaced, Fulfilled
+        delivery: broadcast
+        retention: ephemeral
+      }
+
+      workflow Tracking {
+        orderId: Order id
+        attempts: int
+
+        create(p: OrderPlaced) by p.order {
+          let o = Orders.getById(p.order)
+          o.fulfill()
+        }
+      }
+    }
+  }
+  api SalesApi from Core
+  storage pg { type: postgres }
+  resource ordersLog { for: Orders, kind: eventLog, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Orders]
+    dataSources: [ordersLog]
+    serves: SalesApi
+    port: 4000
+  }
+}
