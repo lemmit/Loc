@@ -56,6 +56,11 @@ context Sales {
 
 ### Backend emission
 
+Every backend that runs a query layer reifies non-principal,
+relational filters; only the deferred cases (principal-referencing
+predicates and non-relational shapes) are gated off — see *Deferred
+cases* below.
+
 - **.NET / EF Core** — every aggregate that has any propagated
   `contextFilters` gets one `b.HasQueryFilter(x => …)` per filter
   inside its `EntityConfiguration.Configure(...)` method.  Emission
@@ -63,16 +68,44 @@ context Sales {
   design); the filter applies to *every* query of that aggregate
   regardless of whether the aggregate names a capability via
   `implements` — the capability-grouping step happened earlier, in
-  the lowerer's propagation pass.  See
+  the lowerer's propagation pass.  EF Core resolves the DI-scoped
+  principal and queries jsonb transparently, so .NET is the one
+  backend with no deferred cases.  See
   `src/generator/dotnet/emit/efcore.ts`.
-- **Hono / Drizzle** and **Phoenix / Ash** — context filters are
-  **not yet wired through the query layer**.  The IR carries
-  `contextFilters` on every aggregate, but the Drizzle repository
-  builder and the Phoenix Ecto schemas don't currently consume
-  them, so soft-delete is enforced only on `dotnet` deployables.
-  Hand-writing the predicate inside individual `repository find`
-  bodies (or as a per-aggregate `filter` in the source) covers the
-  same ground in the meantime.
+- **Hono / Drizzle** — Drizzle has no global query filter, so the
+  repository builder AND-s each predicate into every root-table read
+  site (`src/generator/typescript/repository-find-predicate.ts`).
+- **Java / Hibernate** — a static `@SQLRestriction("…")` on the
+  entity (`src/generator/java/emit/entity.ts`).
+- **Phoenix / Ash** — an Ash `base_filter expr(…)` inside the
+  resource's `resource do … end` block — the platform analog of
+  `HasQueryFilter` (`src/generator/elixir/domain-emit.ts`).
+
+A filter that is *exactly* one named `criterion` (`filter NotDeleted`)
+**reifies** rather than inlining: the IR carries the reference in
+`contextFilterRefs` (index-aligned with `contextFilters`), and Hono
+calls the module-level `<name>Criterion` predicate fn while Phoenix
+references an Ash boolean **calculation** (`base_filter expr(active)`
+/ `base_filter expr(in_region(region: "EU"))`) — deduped with any
+find/retrieval consumers of the same criterion.  Behaviour-identical
+to the inline form; only the generated code is organised around the
+criterion as a first-class, reusable predicate.
+
+### Deferred cases
+
+Two filter shapes are wired only on **.NET**; the IR validator
+(`validateContextFilterSupport`, code `loom.context-filter-unsupported`)
+rejects them on `node` / `elixir` / `java`:
+
+- **Principal-referencing** predicates (tenancy — `filter for
+  "tenantScoped" this.tenantId == currentUser.tenantId`): binding the
+  request principal into the always-on read path is deferred.
+- **Non-relational shapes** (`shape(document)` / `shape(embedded)`):
+  the field lives inside a jsonb column, so the predicate needs
+  JSON-path lowering first.
+
+Host such an aggregate on a `.NET` deployable, or hand-write the
+predicate inside individual `repository find` bodies, in the meantime.
 
 ## `stamp <event> { … }`
 

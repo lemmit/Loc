@@ -36,7 +36,12 @@ import {
   renderExpr,
   renderTypespec,
 } from "./render-expr.js";
-import { reifiedCriteriaFor, renderCriterionCalculation } from "./repository-emit.js";
+import {
+  criterionCalcName,
+  reifiedCriteriaFor,
+  reifiedCriterionForRef,
+  renderCriterionCalculation,
+} from "./repository-emit.js";
 
 /** Per-aggregate dataSource lookup the orchestrator passes in.  When
  *  present, the resource's `postgres do … end` block picks up the
@@ -142,7 +147,7 @@ function renderAggregateResource(
   // read of the shared table is scoped to this concrete's rows (Ash's analog to
   // the discriminator filter EF Core / Drizzle apply).
   const kindPredicate = kindValue ? `kind == ${JSON.stringify(kindValue)}` : undefined;
-  const baseFilterLine = renderBaseFilter(agg, renderCtx, kindPredicate);
+  const baseFilterLine = renderBaseFilter(agg, renderCtx, ctx, kindPredicate);
 
   // Field list for the `defimpl Jason.Encoder` block: :id, persisted
   // fields only, timestamps.  Reference-collection fields are excluded
@@ -373,10 +378,40 @@ ${jasonImpl}`;
  *  shared `renderExpr` threads `thisName` as the receiver, so we render
  *  with `record` and strip the leading `record.` from each reference
  *  (`record.address.postal_code` → `address.postal_code`). */
-function renderBaseFilter(agg: AggregateIR, ctx: RenderCtx, extraPredicate?: string): string {
+function renderBaseFilter(
+  agg: AggregateIR,
+  ctx: RenderCtx,
+  bctx: BoundedContextIR,
+  extraPredicate?: string,
+): string {
+  const refs = agg.contextFilterRefs ?? [];
   const capability = (agg.contextFilters ?? [])
-    .filter((p) => !exprUsesCurrentUser(p))
-    .map((p) => renderExpr(p, { ...ctx, thisName: "record" }).replace(/\brecord\./g, ""));
+    .map((predicate, i) => ({ predicate, ref: refs[i] }))
+    .filter(({ predicate }) => !exprUsesCurrentUser(predicate))
+    .map(({ predicate, ref }) => {
+      // A filter that is *exactly* one named `criterion` reifies: reference
+      // its boolean calculation (defined alongside via `reifiedCriteriaFor`)
+      // instead of inlining the predicate — the Phoenix analog of Hono's
+      // module-level `<name>Criterion` fn, byte-identical in behaviour (the
+      // calc body IS the predicate).  Mirrors the find/retrieval use-site:
+      // a zero-arg criterion is a bare calc atom, an N-arg one pairs each
+      // parameter name with the filter's call-site argument.
+      const reified = ref ? reifiedCriterionForRef(ref, bctx) : undefined;
+      if (reified) {
+        const callArgs = reified.params.map((param, j) => {
+          const val = renderExpr(ref!.args[j]!, {
+            ...ctx,
+            thisName: "record",
+            filterArgs: true,
+          }).replace(/\brecord\./g, "");
+          return `${snake(param.name)}: ${val}`;
+        });
+        return callArgs.length === 0
+          ? criterionCalcName(reified.name)
+          : `${criterionCalcName(reified.name)}(${callArgs.join(", ")})`;
+      }
+      return renderExpr(predicate, { ...ctx, thisName: "record" }).replace(/\brecord\./g, "");
+    });
   // The TPH `kind` discriminator (when present) leads the conjunction, then the
   // aggregate's own capability filters.
   const rendered = [...(extraPredicate ? [extraPredicate] : []), ...capability];

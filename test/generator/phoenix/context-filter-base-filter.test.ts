@@ -66,4 +66,80 @@ describe("Phoenix capability filter — base_filter", () => {
     const doc = find(files, (k) => k.endsWith("/docs/doc.ex"), "doc.ex");
     expect(doc).not.toContain("base_filter");
   });
+
+  // A `filter <Criterion>` capability reifies to an Ash boolean calculation
+  // (reified-criteria.md, the anonymous-`filter` row): base_filter references
+  // the calc by name instead of inlining the predicate — the Phoenix analog of
+  // Hono's `<name>Criterion` fn — and the calc is defined even when the
+  // criterion is used ONLY in the filter (a filter-only criterion still needs
+  // its `<calc>` or base_filter names an undefined calculation).
+  it("reifies a filter that is exactly one named criterion to a base_filter calc reference", async () => {
+    const src = `
+system Sys {
+  subdomain Sales {
+    context Docs {
+      criterion Active of Doc = !this.isDeleted
+      aggregate Doc {
+        subject: string
+        isDeleted: bool
+        filter Active
+      }
+      repository Docs for Doc {}
+    }
+  }
+  storage primary { type: postgres }
+  resource docsState { for: Docs, kind: state, use: primary }
+  ui WebApp {}
+  deployable api {
+    platform: phoenix
+    contexts: [Docs]
+    dataSources: [docsState]
+    ui: WebApp
+    port: 4000
+  }
+}
+`;
+    const doc = find(await generate(src), (k) => k.endsWith("/docs/doc.ex"), "doc.ex");
+    // base_filter references the calc atom (zero-arg → bare name), not the inlined predicate.
+    expect(doc.split("\n").find((l) => l.includes("base_filter"))).toBe(
+      "    base_filter expr(active)",
+    );
+    // The calc is defined even though no find/retrieval uses the criterion.
+    expect(doc).toContain("calculate :active, :boolean, expr(not record.is_deleted)");
+  });
+
+  it("reifies an argument-bearing criterion filter, passing the call-site literal", async () => {
+    const src = `
+system Sys {
+  subdomain Sales {
+    context Docs {
+      criterion InRegion(region: string) of Doc = this.region == region
+      aggregate Doc {
+        subject: string
+        region: string
+        filter InRegion("EU")
+      }
+      repository Docs for Doc {}
+    }
+  }
+  storage primary { type: postgres }
+  resource docsState { for: Docs, kind: state, use: primary }
+  ui WebApp {}
+  deployable api {
+    platform: phoenix
+    contexts: [Docs]
+    dataSources: [docsState]
+    ui: WebApp
+    port: 4000
+  }
+}
+`;
+    const doc = find(await generate(src), (k) => k.endsWith("/docs/doc.ex"), "doc.ex");
+    // The literal argument pairs with the criterion's parameter name; the calc
+    // binds it via `^arg(:region)`.
+    expect(doc.split("\n").find((l) => l.includes("base_filter"))).toBe(
+      '    base_filter expr(in_region(region: "EU"))',
+    );
+    expect(doc).toContain("calculate :in_region, :boolean, expr(record.region == ^arg(:region))");
+  });
 });

@@ -97,6 +97,13 @@ describe.skipIf(!ENABLED)(
       // against real Ash 3.x — the decisive check that the event-triggered
       // saga path compiles under `--warnings-as-errors`.
       { name: "dispatch.ddd" },
+      // Reified criterion-ref capability filters (reified-criteria.md): a
+      // `filter <Criterion>` reifies to an Ash boolean calculation that
+      // `base_filter` references (`expr(active)` / `expr(in_region(region:
+      // "EU"))`) instead of inlining the predicate.  The decisive check that
+      // Ash 3.x accepts a calculation reference — including an argument-bearing
+      // one — inside `base_filter`, alongside a plain inline filter.
+      { name: "criterion-filter.ddd" },
     ])("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
