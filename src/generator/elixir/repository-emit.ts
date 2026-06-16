@@ -9,6 +9,7 @@ import type {
   RepositoryIR,
   RetrievalIR,
 } from "../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { effectiveSavingShape } from "../../ir/util/resolve-datasource.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
@@ -107,11 +108,15 @@ export function criterionCalcName(name: string): string {
   return snake(name);
 }
 
-/** The distinct criteria the retrievals *and finds* targeting `agg` reify to —
- *  one Ash boolean calculation each, deduped by name across both consumers (a
- *  criterion shared by a find and a retrieval yields one calculation).  Must
- *  cover every `criterionRef` the read-action emitters reference, or a `filter
- *  expr(<calc>(...))` would name a calculation that was never defined. */
+/** The distinct criteria the retrievals, finds, *and capability filters*
+ *  targeting `agg` reify to — one Ash boolean calculation each, deduped by name
+ *  across all consumers (a criterion shared by a find and a `filter` yields one
+ *  calculation).  Covers every `criterionRef` the read-action emitters AND
+ *  `renderBaseFilter` reference, so a filter-only criterion (`filter
+ *  ActiveOrders()` with no find using it) still gets its `<calc>` defined —
+ *  otherwise `base_filter expr(<calc>(...))` would name an undefined calculation
+ *  and `mix compile` would fail.  Principal-referencing filters are gated off
+ *  elixir and never reach `base_filter`, so they're skipped here too. */
 export function reifiedCriteriaFor(ctx: BoundedContextIR, agg: EnrichedAggregateIR): CriterionIR[] {
   const seen = new Set<string>();
   const out: CriterionIR[] = [];
@@ -128,6 +133,11 @@ export function reifiedCriteriaFor(ctx: BoundedContextIR, agg: EnrichedAggregate
   for (const f of findRepoFor(ctx, agg.name)?.finds ?? []) {
     add(reifiedCriterionForRef(f.criterionRef, ctx));
   }
+  const refs = agg.contextFilterRefs ?? [];
+  (agg.contextFilters ?? []).forEach((predicate, i) => {
+    if (exprUsesCurrentUser(predicate)) return;
+    add(reifiedCriterionForRef(refs[i], ctx));
+  });
   return out;
 }
 
