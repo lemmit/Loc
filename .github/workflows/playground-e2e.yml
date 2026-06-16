@@ -72,7 +72,14 @@ jobs:
     #            tell whether the bundle is just slow vs genuinely stuck.
     #            5 preview-runtime/runtime specs × up-to-12min × 2 retries
     #            / 2 workers ≈ 60min worst case — 75 leaves a margin)
-    timeout-minutes: 75
+    #   75 → 120 (diagnostic round, see #697: cold runs blew past the 75
+    #            cap and ended `cancelled`, so Playwright was SIGKILLed
+    #            before flushing its HTML report — we never saw WHICH spec
+    #            was the long pole.  120 lets even a fail-then-retry
+    #            (~24min/spec) run to COMPLETION so the report uploads and
+    #            we get a real pass/fail.  Revisit once #697 identifies the
+    #            spec: keep 120, shard the suite, or fix/quarantine it.)
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
 
