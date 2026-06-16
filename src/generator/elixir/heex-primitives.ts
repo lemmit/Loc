@@ -88,6 +88,7 @@ export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
 export function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let title = "";
   let triggerExpr: ExprIR | undefined;
+  let openExpr: ExprIR | undefined;
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -97,6 +98,8 @@ export function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
         arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
     } else if (name === "trigger") {
       triggerExpr = arg;
+    } else if (name === "open") {
+      openExpr = arg;
     } else if (!name) {
       positional.push(arg);
     }
@@ -104,6 +107,23 @@ export function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   const formChild = positional.find(
     (c): c is Extract<ExprIR, { kind: "call" }> => c.kind === "call" && c.name === "OperationForm",
   );
+  // State-controlled modal: `Modal { <children>, open: <stateBool>, title: "…" }`
+  // — visibility is a page `state` field (distinct from the operation-form
+  // modal).  LiveView idiom: an assign-driven conditional render
+  // (`<%= if @open do %> … <% end %>`); the user closes it via a child button
+  // that writes the state (`x := false` → the existing handle_event machinery).
+  if (!formChild && openExpr?.kind === "ref" && ctx.stateNames.has(snake(openExpr.name))) {
+    const openHeex = renderExpr(openExpr, { ...ctx, position: "template" });
+    const childrenHeex = positional.map((c) => renderChild(c, ctx)).join("\n");
+    const heading = title ? `      <h3 class="mb-4 text-lg font-semibold">${title}</h3>\n` : "";
+    return `<%= if ${openHeex} do %>
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div class="w-full max-w-md rounded-xl border bg-white p-6 shadow-lg">
+${heading}${childrenHeex}
+      </div>
+    </div>
+    <% end %>`;
+  }
   // The op-form names its operation via one of two shapes:
   //
   //   * `Form(<instance>.<operation>)` — receiver is the in-scope

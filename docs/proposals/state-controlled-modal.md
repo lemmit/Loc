@@ -68,9 +68,22 @@ state lives on the page):
 - **Svelte** — shadcnSvelte / flowbite (a hand-rolled `{#if <state>}` overlay,
   matching their op-form modal idiom; the `$state` rune drives visibility).
 
-Phoenix HEEx is the one frontend left on the stub — it runs a parallel walker
-(`heex-walker-core`, not `walkBody`), so `emitControlledModal` doesn't reach it;
-a HEEx controlled modal is a separate engine-specific task. A pack without a
+- **Phoenix LiveView** — an assign-driven conditional render
+  (`<%= if @open do %> … <% end %>`). HEEx runs a parallel walker, so this is a
+  branch in `heex-primitives.ts`'s `renderModal` rather than a pack template:
+  the `open:` ref reads the page-state assign (`@archive_open`), `mount` defaults
+  it, and the close is driven by a child button that writes the state (the
+  existing `handle_event` machinery). No `<.modal>` JS/id indirection — the
+  visibility is pure server state.
+
+Now implemented on **every frontend**. A pack without a
 `primitive-modal-controlled` template keeps the explanatory stub comment — no
 breakage. No new walker primitive name, so the completeness/HEEx-parity gates
 are unaffected.
+
+## Verification note
+
+Generated output verified structurally for all packs (state declaration +
+dialog/conditional binding + children render). Compile verification is the
+per-frontend build CI (`generated-react-build` / `-vue-build` / `-svelte-build`
+/ `elixir-ash-build`), as for any pack template — not run in this environment.
