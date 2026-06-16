@@ -27,6 +27,7 @@ import {
   validateDapperSupport,
   validateDataSourceCoverage,
   validateDataSourceUnwiredKnobs,
+  validateDefaultDeny,
   validateEventSourcedStorage,
   validateInheritanceStorage,
   validateJavaContainmentSupport,
@@ -110,6 +111,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);
+    validateDefaultDeny(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
     // Scaffold expansion now runs at the AST level
