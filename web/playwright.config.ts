@@ -47,6 +47,20 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:4173",
     headless: true,
+    // Bound individual actions + navigations.  Playwright's default
+    // `actionTimeout`/`navigationTimeout` is 0 (UNBOUNDED) — a `.click()`
+    // / `.fill()` whose target never becomes actionable then auto-waits
+    // for the WHOLE-TEST `timeout` (720s) before failing.  That turned a
+    // missing element (e.g. a file-tree entry that didn't render, or a
+    // diagram node that never laid out) into a silent 12-min hang ×2
+    // retries that ate the job cap and — because the job ended
+    // `cancelled` — flushed no HTML report (#697).  A 45s action cap
+    // fails such a spec fast WITH the offending locator named, lets the
+    // suite run to COMPLETION, and ships the report.  It does not touch
+    // the deliberate long `expect(...).toBeVisible({ timeout })` waits on
+    // bundle/boot (those are assertions, not actions).
+    actionTimeout: 45_000,
+    navigationTimeout: 60_000,
     trace: "retain-on-failure",
     // Video deliberately disabled: it is by far the heaviest CI
     // artifact and counts against the 500MB storage quota.  The
