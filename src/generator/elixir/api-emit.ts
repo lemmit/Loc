@@ -3,7 +3,7 @@ import {
   PAGED_DEFAULT_PAGE_SIZE,
   pagedReturn,
 } from "../../ir/stdlib/generics.js";
-import { unionInstanceName } from "../../ir/stdlib/unions.js";
+import { unionInstanceName, variantTag } from "../../ir/stdlib/unions.js";
 import {
   type BoundedContextIR,
   type DeployableIR,
@@ -11,6 +11,7 @@ import {
   type TypeIR,
   workflowEmitsCommandRoute,
 } from "../../ir/types/loom-ir.js";
+import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type UnionMember, unionMembers } from "../_payload/union-wire.js";
@@ -659,6 +660,42 @@ function renderUnionTagger(
   return clauses.join("\n");
 }
 
+/** The `case` arms that translate a union-find's *error* variants (`kind:
+ *  "error"` payloads) to RFC-7807 ProblemDetails responses.  Under
+ *  exception-less.md's find re-shape (A4) an error variant never rides the 200
+ *  tagged-union body — the route maps it to a ProblemDetails at its mapped
+ *  status, the same absent-variant wire the other five backends emit (Hono /
+ *  .NET / Python / Java / the vanilla foundation).  The `resource` extension
+ *  carries the aggregate name, matching the cross-backend canonical shape.
+ *  Empty when the union is success-only (`Order or Cancel`) — that find keeps
+ *  its plain `json(conn, tag_<union>(result))` action unchanged. */
+function unionFindErrorArms(
+  variants: TypeIR[],
+  ctx: BoundedContextIR,
+  contextModule: string,
+  aggPascal: string,
+): string[] {
+  return variants
+    .map((v) => variantTag(v))
+    .filter((tag) => ctx.payloads.some((p) => p.name === tag && p.kind === "error"))
+    .map((tag) => {
+      const status = ctx.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag);
+      const payload = ctx.payloads.find((p) => p.name === tag);
+      const hasResource = (payload?.fields ?? []).some((f) => f.name === "resource");
+      const resource = hasResource ? `, resource: ${JSON.stringify(aggPascal)}` : "";
+      const body = `%{type: ${JSON.stringify(errorTypeUri(tag))}, title: ${JSON.stringify(
+        errorTitle(tag),
+      )}, status: ${status}, detail: ${JSON.stringify(
+        errorTitle(tag),
+      )}, instance: conn.request_path${resource}}`;
+      return `      %${contextModule}.${upperFirst(tag)}{} ->
+        conn
+        |> put_resp_content_type("application/problem+json")
+        |> put_status(${status})
+        |> json(${body})`;
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Per-aggregate controllers (`<Aggs>Controller`)
 // ---------------------------------------------------------------------------
@@ -769,6 +806,33 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
         // Producer-side variant selection (yielding a non-primary variant) is
         // developer logic — same boundary as the TS/.NET stubs.
         unionsUsed.set(union.name, union.variants);
+        // Find re-shape (A4): when a variant is an `error` payload, it maps to
+        // an RFC-7807 ProblemDetails at its status instead of a 200 tagged
+        // body — matching the runtime of every other backend (Hono / .NET /
+        // Python / Java / vanilla).  `tag_<union>/1` still declares all
+        // variants (the union *type* contract), but the route only tags the
+        // success variant(s) inline.  A success-only union (`Order or Cancel`)
+        // has no error arm and keeps the plain tag action.
+        const errorArms = unionFindErrorArms(
+          union.variants,
+          ctx,
+          contextModule,
+          upperFirst(agg.name),
+        );
+        if (errorArms.length > 0) {
+          findActions.push(`  @doc "GET /api/${aggPlural}/${findSnake}"
+  def ${findSnake}(conn, params) do
+    _ = params
+
+    case ${contextModule}.${findSnake}_${aggSnake}!(${argReads}) do
+${errorArms.join("\n\n")}
+
+      result ->
+        json(conn, ${unionTagFn(union.name)}(result))
+    end
+  end`);
+          continue;
+        }
         findActions.push(`  @doc "GET /api/${aggPlural}/${findSnake}"
   def ${findSnake}(conn, params) do
     _ = params
