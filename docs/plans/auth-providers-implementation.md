@@ -100,13 +100,24 @@
 > **tsc-and-CA-gated:** an `auth-oidc` fixture in the `LOOM_DOTNET_BUILD`
 > shard generates + `dotnet build -warnaserror`s the project (the
 > `AnalysisLevel: latest-recommended` CA gate) — verified locally, 0
-> warnings. The **`/auth/login|callback|logout` redirect handshake remains
-> the follow-up** (HttpClient token-exchange + cookies; needs a real-IdP
-> runtime check).
+> warnings.
 >
-> **Status: Phases 0–1, 4 (partial), 6 (React), 7 done; Phase 2a (.NET
-> /auth/me) + 2b (.NET OIDC verifier) done; .NET /auth/* handshake +
-> Phases 3/5 + creates/workflows/finds/views default-deny + non-React
+> **Phase 2c shipped (.NET `/auth/*` handshake — .NET OIDC complete).** The
+> .NET backend now emits `Auth/AuthHandshake.cs` — `MapAuthHandshake()`
+> mounting `/auth/login` (authorization-code redirect + state cookie),
+> `/auth/callback` (code→token exchange via `HttpClient` + issues the
+> HttpOnly `session` cookie), and `/auth/logout`. The middleware bypasses
+> those three paths; `OidcUserVerifier` now reads the token from the Bearer
+> header **or** the `session` cookie, so the browser flow connects
+> end-to-end (login → callback → cookie → `/auth/me` → guard). Compiles
+> under `dotnet build -warnaserror` (CA gate) — verified locally via the
+> existing `auth-oidc` `LOOM_DOTNET_BUILD` cell. **Runtime correctness vs a
+> real IdP** is still unverified (no Keycloak in CI yet — Phase 3 would
+> close that). The .NET OIDC story is now: verifier + `/auth/me` +
+> handshake, matching Hono.
+>
+> **Status: Phases 0–1, 2 (.NET OIDC complete), 4 (partial), 6 (React), 7
+> done; Phases 3/5 + creates/workflows/finds/views default-deny + non-React
 > frontend guards pending.** Decisions locked with the maintainer (2026-06-15):
 >
 > 1. **Scope** = OIDC authentication providers + playground auth stub

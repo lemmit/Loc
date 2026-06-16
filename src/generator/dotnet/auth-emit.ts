@@ -34,13 +34,17 @@ export function emitAuthFiles(sys: SystemIR, ns: string, out: Map<string, string
   out.set("Auth/IUserVerifier.cs", renderVerifierInterface(ns));
   out.set("Auth/ICurrentUserAccessor.cs", renderAccessorInterface(ns));
   out.set("Auth/HttpContextCurrentUserAccessor.cs", renderAccessorImpl(ns));
-  out.set("Auth/UserMiddleware.cs", renderMiddleware(ns));
+  out.set("Auth/UserMiddleware.cs", renderMiddleware(ns, !!sys.auth));
   out.set("Auth/DevStubUserVerifier.cs", renderDevStubVerifier(sys.user, ns));
   // OIDC turnkey auth (D-AUTH-OIDC): the generated verifier that validates
   // the IdP's tokens against its JWKS and maps claims onto User — the
   // batteries-included fill-in for the IUserVerifier seam.  Registered
-  // automatically in Program.cs (last-wins over the dev stub).
-  if (sys.auth) out.set("Auth/OidcUserVerifier.cs", renderOidcVerifier(sys.user, sys.auth, ns));
+  // automatically in Program.cs (last-wins over the dev stub).  The
+  // /auth/* redirect handshake mounts the login flow.
+  if (sys.auth) {
+    out.set("Auth/OidcUserVerifier.cs", renderOidcVerifier(sys.user, sys.auth, ns));
+    out.set("Auth/AuthHandshake.cs", renderHandshake(sys.auth, ns));
+  }
 }
 
 /** Render an `AuthValueIR` (literal | env reference) as a C# expression. */
@@ -118,12 +122,11 @@ public sealed class OidcUserVerifier : IUserVerifier
 
     public async Task<User?> VerifyAsync(HttpContext httpContext, CancellationToken cancellationToken)
     {
-        string header = httpContext.Request.Headers.Authorization.ToString();
-        if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        string? token = ExtractToken(httpContext.Request);
+        if (token is null)
         {
             return null;
         }
-        string token = header["Bearer ".Length..].Trim();
 
         OpenIdConnectConfiguration configuration;
         try
@@ -179,6 +182,20 @@ public sealed class OidcUserVerifier : IUserVerifier
             ${args});
     }
 
+    /// <summary>The bearer token from the Authorization header, or the
+    /// HttpOnly <c>session</c> cookie issued by the /auth/callback
+    /// handshake (the browser flow).  Null when neither is present.</summary>
+    private static string? ExtractToken(HttpRequest request)
+    {
+        string header = request.Headers.Authorization.ToString();
+        if (header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            return header["Bearer ".Length..].Trim();
+        }
+        string? cookie = request.Cookies["session"];
+        return string.IsNullOrEmpty(cookie) ? null : cookie;
+    }
+
     private static string? ClaimString(JsonElement payload, string path)
     {
         JsonElement current = payload;
@@ -215,6 +232,138 @@ public sealed class OidcUserVerifier : IUserVerifier
             }
         }
         return values;
+    }
+}
+`;
+}
+
+// ---------------------------------------------------------------------------
+// OIDC redirect handshake (D-AUTH-OIDC) — /auth/login starts the
+// authorization-code flow, /auth/callback exchanges the code + issues the
+// session cookie, /auth/logout clears it.  No login form — the IdP hosts it.
+// ---------------------------------------------------------------------------
+
+function renderHandshake(auth: AuthIR, ns: string): string {
+  const issuerExpr = csAuthValue(auth.oidc.issuer);
+  const clientIdExpr = csAuthValue(auth.oidc.clientId);
+  // The secret is nullable (a public client has none): no `?? ""` so an
+  // unset env stays null and the token request omits client_secret.  Default
+  // to the OIDC_CLIENT_SECRET env var (an env read, not a literal null, so
+  // CA1805 / CA1508 stay quiet).
+  const secret = auth.oidc.clientSecret;
+  const clientSecretExpr = secret
+    ? secret.kind === "literal"
+      ? JSON.stringify(secret.value)
+      : `Environment.GetEnvironmentVariable(${JSON.stringify(secret.env)})`
+    : 'Environment.GetEnvironmentVariable("OIDC_CLIENT_SECRET")';
+  const scopes = auth.oidc.scopes.length ? auth.oidc.scopes : ["openid"];
+  const scopesLiteral = JSON.stringify(scopes.join(" "));
+  return `// Auto-generated.
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+
+namespace ${ns}.Auth;
+
+/// <summary>OIDC redirect handshake (D-AUTH-OIDC).  <c>/auth/login</c> starts
+/// the authorization-code flow, <c>/auth/callback</c> exchanges the code and
+/// issues the local <c>session</c> cookie (read by OidcUserVerifier),
+/// <c>/auth/logout</c> clears it.  No login form — the IdP hosts the
+/// credential pages.</summary>
+public static class AuthHandshake
+{
+    private static readonly string Issuer = (${issuerExpr}).TrimEnd('/');
+    private static readonly string ClientId = ${clientIdExpr};
+    private static readonly string? ClientSecret = ${clientSecretExpr};
+    private static readonly string Scopes = ${scopesLiteral};
+    private static readonly string RedirectUri =
+        Environment.GetEnvironmentVariable("OIDC_REDIRECT_URI") ?? "http://localhost:8080/auth/callback";
+    private static readonly string PostLogin =
+        Environment.GetEnvironmentVariable("OIDC_POST_LOGIN_REDIRECT") ?? "/";
+    private static readonly ConfigurationManager<OpenIdConnectConfiguration> Configuration =
+        new(
+            Issuer + "/.well-known/openid-configuration",
+            new OpenIdConnectConfigurationRetriever(),
+            new HttpDocumentRetriever());
+    private static readonly HttpClient Http = new();
+
+    private static CookieOptions SessionCookie() =>
+        new() { HttpOnly = true, SameSite = SameSiteMode.Lax, Path = "/" };
+
+    /// <summary>Mount the /auth/* redirect handlers.  Excluded from the
+    /// OpenAPI contract — they are redirects, not business operations.</summary>
+    public static void MapAuthHandshake(this WebApplication app)
+    {
+        app.MapGet("/auth/login", async (HttpContext ctx) =>
+        {
+            OpenIdConnectConfiguration config = await Configuration.GetConfigurationAsync(ctx.RequestAborted);
+            string state = Guid.NewGuid().ToString("N");
+            ctx.Response.Cookies.Append("oidc_state", state, SessionCookie());
+            var query = new Dictionary<string, string?>
+            {
+                ["response_type"] = "code",
+                ["client_id"] = ClientId,
+                ["redirect_uri"] = RedirectUri,
+                ["scope"] = Scopes,
+                ["state"] = state,
+            };
+            return Results.Redirect(QueryHelpers.AddQueryString(config.AuthorizationEndpoint, query));
+        }).ExcludeFromDescription();
+
+        app.MapGet("/auth/callback", async (HttpContext ctx) =>
+        {
+            string code = ctx.Request.Query["code"].ToString();
+            string state = ctx.Request.Query["state"].ToString();
+            if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state) || state != ctx.Request.Cookies["oidc_state"])
+            {
+                return Results.Json(new { error = "invalid_state" }, statusCode: 400);
+            }
+            OpenIdConnectConfiguration config = await Configuration.GetConfigurationAsync(ctx.RequestAborted);
+            var form = new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["redirect_uri"] = RedirectUri,
+                ["client_id"] = ClientId,
+            };
+            if (ClientSecret is not null)
+            {
+                form["client_secret"] = ClientSecret;
+            }
+            string accessToken;
+            try
+            {
+                using var content = new FormUrlEncodedContent(form);
+                using HttpResponseMessage response = await Http.PostAsync(new Uri(config.TokenEndpoint), content, ctx.RequestAborted);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return Results.Json(new { error = "token_exchange_failed" }, statusCode: 401);
+                }
+                string payload = await response.Content.ReadAsStringAsync(ctx.RequestAborted);
+                using JsonDocument document = JsonDocument.Parse(payload);
+                accessToken = document.RootElement.GetProperty("access_token").GetString() ?? string.Empty;
+            }
+#pragma warning disable CA1031 // any token-exchange failure → 401, never 500
+            catch (Exception)
+#pragma warning restore CA1031
+            {
+                return Results.Json(new { error = "token_exchange_failed" }, statusCode: 401);
+            }
+            ctx.Response.Cookies.Append("session", accessToken, SessionCookie());
+            ctx.Response.Cookies.Delete("oidc_state");
+            return Results.Redirect(PostLogin);
+        }).ExcludeFromDescription();
+
+        app.MapGet("/auth/logout", (HttpContext ctx) =>
+        {
+            ctx.Response.Cookies.Delete("session");
+            return Results.Redirect(PostLogin);
+        }).ExcludeFromDescription();
     }
 }
 `;
@@ -376,10 +525,19 @@ public sealed class HttpContextCurrentUserAccessor : ICurrentUserAccessor
 `;
 }
 
-function renderMiddleware(ns: string): string {
+function renderMiddleware(ns: string, oidc: boolean): string {
   // Bypass list — framework endpoints that should NEVER require auth.
   // Liveness / OpenAPI / Swagger UI all read freely.  Path-prefix
-  // match keeps the list tiny and avoids regex overhead.
+  // match keeps the list tiny and avoids regex overhead.  The OIDC
+  // redirect handshake (/auth/login|callback|logout) joins it when an
+  // `auth { oidc }` block is present — those must be reachable without a
+  // verified principal; /auth/me stays protected.
+  const handshakeBypass = oidc
+    ? `
+        "/auth/login",
+        "/auth/callback",
+        "/auth/logout",`
+    : "";
   return `// Auto-generated.
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
@@ -394,7 +552,7 @@ public sealed class UserMiddleware
         "/health",
         "/ready",
         "/openapi.json",
-        "/swagger",
+        "/swagger",${handshakeBypass}
     };
 
     private readonly RequestDelegate _next;
