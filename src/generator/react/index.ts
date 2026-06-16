@@ -13,6 +13,7 @@ import {
 import { realtimeEventTypes } from "../../ir/util/channels.js";
 import { lowerFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
+import { AUTH_GATE_TSX, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { allViews, buildViewsApiModule, hasAnyView } from "../_frontend/views-module.js";
@@ -203,8 +204,21 @@ export function generateReactForContexts(
   // destroy (declared or via `crudish`) — keeps the shared client
   // byte-identical for projects without any hard-delete.
   const hasDelete = aggregates.some((a) => !!a.agg.canonicalDestroy);
-  out.set("src/api/client.ts", renderShellFile("api-client", { hasDelete }, pack));
+  // Frontend auth guard (D-AUTH-OIDC, `auth: ui`): when this react
+  // deployable opts in AND its target backend enforces auth, emit the
+  // session-aware client + the route guard.  Works for both the OIDC
+  // verifier and the in-browser playground dev stub (both answer
+  // GET /auth/me).
+  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
+  out.set(
+    "src/api/client.ts",
+    renderShellFile("api-client", { hasDelete, hasAuthUi: authUi }, pack),
+  );
   out.set("src/api/config.ts", renderShellFile("api-config", { apiBaseUrl }, pack));
+  if (authUi) {
+    out.set("src/auth/session.ts", AUTH_SESSION_TS);
+    out.set("src/auth/AuthGate.tsx", AUTH_GATE_TSX);
+  }
   // Realtime SSE client (channels.md Part I): when the targeted backend
   // exposes the realtime wire (any `delivery: broadcast` channel; Hono is
   // the only backend serving GET /realtime/events so far), emit the
@@ -247,7 +261,7 @@ export function generateReactForContexts(
   // pack's "theme" template; the generated file always exists and
   // main.tsx always wires `<MantineProvider theme={theme}>`.
   out.set("src/theme.ts", renderTheme(sys.theme, pack));
-  out.set("src/main.tsx", renderMain(pack, routerBasename));
+  out.set("src/main.tsx", renderMain(pack, routerBasename, authUi));
   // When the ui block declares an explicit `menu { … }`,
   // its derived sidebar overrides the hardcoded Aggregates /
   // Workflows / Views grouping below.  When the ui has no menu

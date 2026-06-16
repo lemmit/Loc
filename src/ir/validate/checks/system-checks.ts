@@ -60,6 +60,24 @@ import { validateE2ETest } from "./test-checks.js";
 // just a string/uuid and doesn't depend on a display label.
 // ---------------------------------------------------------------------------
 
+// `auth: ui` (the frontend OIDC guard) is currently emitted only by the
+// React generator.  A deployable whose resolved UI framework isn't react
+// (vue / svelte / phoenixLiveView) would silently emit no guard — reject
+// it loudly so the limitation is visible rather than a no-op.
+export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    if (!d.auth?.ui) continue;
+    if (d.uiFramework !== "react") {
+      diags.push({
+        severity: "error",
+        code: "loom.auth-ui-unsupported-framework",
+        message: `Deployable '${d.name}': 'auth: ui' is currently only supported on react frontends; framework '${d.uiFramework ?? "unknown"}' isn't supported yet.`,
+        source: d.name,
+      });
+    }
+  }
+}
+
 export function validateReactIdReferences(sys: SystemIR, diags: LoomDiagnostic[]): void {
   // Build an aggregate registry across the whole system so we can
   // look up display fields regardless of which module declares the

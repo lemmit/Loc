@@ -70,7 +70,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@191"
+                "$ref": "#/rules@198"
               },
               "arguments": []
             }
@@ -105,7 +105,35 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@11"
+              "$ref": "#/rules@18"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@79"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@83"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@81"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@109"
             },
             "arguments": []
           },
@@ -126,77 +154,49 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@74"
+              "$ref": "#/rules@77"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@102"
+              "$ref": "#/rules@63"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@65"
+              "$ref": "#/rules@21"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@69"
+              "$ref": "#/rules@36"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@70"
+              "$ref": "#/rules@24"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@56"
+              "$ref": "#/rules@108"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@14"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@29"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@17"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@101"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@25"
+              "$ref": "#/rules@32"
             },
             "arguments": []
           },
@@ -217,21 +217,28 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@27"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@49"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
               "$ref": "#/rules@10"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@34"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@56"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@17"
             },
             "arguments": []
           }
@@ -261,7 +268,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -305,63 +312,21 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@11"
+              "$ref": "#/rules@18"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@14"
+              "$ref": "#/rules@21"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@72"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@10"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@7"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@5"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@25"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@27"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@29"
+              "$ref": "#/rules@79"
             },
             "arguments": []
           },
@@ -375,14 +340,63 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@101"
+              "$ref": "#/rules@7"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@49"
+              "$ref": "#/rules@10"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@5"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@32"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@34"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@36"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@24"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@108"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@56"
             },
             "arguments": []
           }
@@ -448,7 +462,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -464,7 +478,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@191"
+                "$ref": "#/rules@198"
               },
               "arguments": []
             }
@@ -547,7 +561,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@136"
+                "$ref": "#/rules@143"
               },
               "arguments": []
             }
@@ -571,7 +585,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@195"
+              "$ref": "#/rules@202"
             },
             "arguments": []
           },
@@ -582,6 +596,633 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "permissions"
+          }
+        ]
+      },
+      "definesHiddenTokens": false,
+      "entry": false,
+      "fragment": false,
+      "hiddenTokens": [],
+      "parameters": [],
+      "wildcard": false
+    },
+    {
+      "$type": "ParserRule",
+      "name": "AuthBlock",
+      "definition": {
+        "$type": "Group",
+        "elements": [
+          {
+            "$type": "Keyword",
+            "value": "auth"
+          },
+          {
+            "$type": "Keyword",
+            "value": "{"
+          },
+          {
+            "$type": "Alternatives",
+            "elements": [
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "provider"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ":"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "provider",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@202"
+                      },
+                      "arguments": []
+                    }
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
+                  }
+                ]
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "oidc"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "oidc",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@11"
+                      },
+                      "arguments": []
+                    }
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
+                  }
+                ]
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "sessions"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ":"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "sessions",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@15"
+                      },
+                      "arguments": []
+                    }
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
+                  }
+                ]
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "claims"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ":"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "claims",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@13"
+                      },
+                      "arguments": []
+                    }
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
+                  }
+                ]
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "enforcement"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ":"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "enforcement",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@16"
+                      },
+                      "arguments": []
+                    }
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
+                  }
+                ]
+              }
+            ],
+            "cardinality": "*"
+          },
+          {
+            "$type": "Keyword",
+            "value": "}"
+          }
+        ]
+      },
+      "definesHiddenTokens": false,
+      "entry": false,
+      "fragment": false,
+      "hiddenTokens": [],
+      "parameters": [],
+      "wildcard": false
+    },
+    {
+      "$type": "ParserRule",
+      "name": "OidcConfig",
+      "definition": {
+        "$type": "Group",
+        "elements": [
+          {
+            "$type": "Keyword",
+            "value": "{"
+          },
+          {
+            "$type": "Alternatives",
+            "elements": [
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "issuer"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ":"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "issuer",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@12"
+                      },
+                      "arguments": []
+                    }
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
+                  }
+                ]
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "clientId"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ":"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "clientId",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@12"
+                      },
+                      "arguments": []
+                    }
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
+                  }
+                ]
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "clientSecret"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ":"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "clientSecret",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@12"
+                      },
+                      "arguments": []
+                    }
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
+                  }
+                ]
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "audience"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ":"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "audience",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@12"
+                      },
+                      "arguments": []
+                    }
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
+                  }
+                ]
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "scopes"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ":"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": "["
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "scopes",
+                    "operator": "+=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@198"
+                      },
+                      "arguments": []
+                    }
+                  },
+                  {
+                    "$type": "Group",
+                    "elements": [
+                      {
+                        "$type": "Keyword",
+                        "value": ","
+                      },
+                      {
+                        "$type": "Assignment",
+                        "feature": "scopes",
+                        "operator": "+=",
+                        "terminal": {
+                          "$type": "RuleCall",
+                          "rule": {
+                            "$ref": "#/rules@198"
+                          },
+                          "arguments": []
+                        }
+                      }
+                    ],
+                    "cardinality": "*"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": "]"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
+                  }
+                ]
+              }
+            ],
+            "cardinality": "*"
+          },
+          {
+            "$type": "Keyword",
+            "value": "}"
+          }
+        ]
+      },
+      "definesHiddenTokens": false,
+      "entry": false,
+      "fragment": false,
+      "hiddenTokens": [],
+      "parameters": [],
+      "wildcard": false
+    },
+    {
+      "$type": "ParserRule",
+      "name": "AuthConfigValue",
+      "definition": {
+        "$type": "Alternatives",
+        "elements": [
+          {
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Action",
+                "inferredType": {
+                  "$type": "InferredType",
+                  "name": "LiteralAuthValue"
+                }
+              },
+              {
+                "$type": "Assignment",
+                "feature": "value",
+                "operator": "=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@198"
+                  },
+                  "arguments": []
+                }
+              }
+            ]
+          },
+          {
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Action",
+                "inferredType": {
+                  "$type": "InferredType",
+                  "name": "EnvAuthValue"
+                }
+              },
+              {
+                "$type": "Keyword",
+                "value": "env"
+              },
+              {
+                "$type": "Keyword",
+                "value": "("
+              },
+              {
+                "$type": "Assignment",
+                "feature": "env",
+                "operator": "=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@198"
+                  },
+                  "arguments": []
+                }
+              },
+              {
+                "$type": "Keyword",
+                "value": ")"
+              }
+            ]
+          }
+        ]
+      },
+      "definesHiddenTokens": false,
+      "entry": false,
+      "fragment": false,
+      "hiddenTokens": [],
+      "parameters": [],
+      "wildcard": false
+    },
+    {
+      "$type": "ParserRule",
+      "name": "ClaimsMap",
+      "definition": {
+        "$type": "Group",
+        "elements": [
+          {
+            "$type": "Keyword",
+            "value": "{"
+          },
+          {
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Assignment",
+                "feature": "entries",
+                "operator": "+=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@14"
+                  },
+                  "arguments": []
+                }
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": ","
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "entries",
+                    "operator": "+=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@14"
+                      },
+                      "arguments": []
+                    }
+                  }
+                ],
+                "cardinality": "*"
+              },
+              {
+                "$type": "Keyword",
+                "value": ",",
+                "cardinality": "?"
+              }
+            ],
+            "cardinality": "?"
+          },
+          {
+            "$type": "Keyword",
+            "value": "}"
+          }
+        ]
+      },
+      "definesHiddenTokens": false,
+      "entry": false,
+      "fragment": false,
+      "hiddenTokens": [],
+      "parameters": [],
+      "wildcard": false
+    },
+    {
+      "$type": "ParserRule",
+      "name": "ClaimEntry",
+      "definition": {
+        "$type": "Group",
+        "elements": [
+          {
+            "$type": "Assignment",
+            "feature": "field",
+            "operator": "=",
+            "terminal": {
+              "$type": "RuleCall",
+              "rule": {
+                "$ref": "#/rules@9"
+              },
+              "arguments": []
+            }
+          },
+          {
+            "$type": "Keyword",
+            "value": ":"
+          },
+          {
+            "$type": "Assignment",
+            "feature": "path",
+            "operator": "=",
+            "terminal": {
+              "$type": "RuleCall",
+              "rule": {
+                "$ref": "#/rules@198"
+              },
+              "arguments": []
+            }
+          }
+        ]
+      },
+      "definesHiddenTokens": false,
+      "entry": false,
+      "fragment": false,
+      "hiddenTokens": [],
+      "parameters": [],
+      "wildcard": false
+    },
+    {
+      "$type": "ParserRule",
+      "name": "SessionMode",
+      "dataType": "string",
+      "definition": {
+        "$type": "Alternatives",
+        "elements": [
+          {
+            "$type": "Keyword",
+            "value": "cookie"
+          },
+          {
+            "$type": "Keyword",
+            "value": "jwt"
+          }
+        ]
+      },
+      "definesHiddenTokens": false,
+      "entry": false,
+      "fragment": false,
+      "hiddenTokens": [],
+      "parameters": [],
+      "wildcard": false
+    },
+    {
+      "$type": "ParserRule",
+      "name": "Enforcement",
+      "dataType": "string",
+      "definition": {
+        "$type": "Alternatives",
+        "elements": [
+          {
+            "$type": "Keyword",
+            "value": "denyByDefault"
+          },
+          {
+            "$type": "Keyword",
+            "value": "opt"
           }
         ]
       },
@@ -613,7 +1254,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@191"
+                "$ref": "#/rules@198"
               },
               "arguments": []
             }
@@ -629,12 +1270,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@14"
+                "$ref": "#/rules@21"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@135"
+                  "$ref": "#/rules@142"
                 },
                 "arguments": []
               },
@@ -655,12 +1296,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "CrossReference",
                   "type": {
-                    "$ref": "#/rules@70"
+                    "$ref": "#/rules@77"
                   },
                   "terminal": {
                     "$type": "RuleCall",
                     "rule": {
-                      "$ref": "#/rules@68"
+                      "$ref": "#/rules@75"
                     },
                     "arguments": []
                   },
@@ -681,7 +1322,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@93"
+                "$ref": "#/rules@100"
               },
               "arguments": []
             },
@@ -717,7 +1358,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -736,7 +1377,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@72"
+                    "$ref": "#/rules@79"
                   },
                   "arguments": []
                 }
@@ -748,7 +1389,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@12"
+                    "$ref": "#/rules@19"
                   },
                   "arguments": []
                 }
@@ -793,7 +1434,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@13"
+                    "$ref": "#/rules@20"
                   },
                   "arguments": []
                 }
@@ -813,7 +1454,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@13"
+                        "$ref": "#/rules@20"
                       },
                       "arguments": []
                     }
@@ -852,7 +1493,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
         "terminal": {
           "$type": "RuleCall",
           "rule": {
-            "$ref": "#/rules@195"
+            "$ref": "#/rules@202"
           },
           "arguments": []
         }
@@ -881,7 +1522,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -908,7 +1549,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@22"
+                    "$ref": "#/rules@29"
                   },
                   "arguments": []
                 }
@@ -941,7 +1582,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                             "terminal": {
                               "$type": "RuleCall",
                               "rule": {
-                                "$ref": "#/rules@135"
+                                "$ref": "#/rules@142"
                               },
                               "arguments": []
                             }
@@ -971,7 +1612,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                             "terminal": {
                               "$type": "RuleCall",
                               "rule": {
-                                "$ref": "#/rules@135"
+                                "$ref": "#/rules@142"
                               },
                               "arguments": []
                             }
@@ -1001,7 +1642,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                             "terminal": {
                               "$type": "RuleCall",
                               "rule": {
-                                "$ref": "#/rules@135"
+                                "$ref": "#/rules@142"
                               },
                               "arguments": []
                             }
@@ -1031,7 +1672,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                             "terminal": {
                               "$type": "RuleCall",
                               "rule": {
-                                "$ref": "#/rules@135"
+                                "$ref": "#/rules@142"
                               },
                               "arguments": []
                             }
@@ -1061,7 +1702,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                             "terminal": {
                               "$type": "RuleCall",
                               "rule": {
-                                "$ref": "#/rules@135"
+                                "$ref": "#/rules@142"
                               },
                               "arguments": []
                             }
@@ -1091,7 +1732,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                             "terminal": {
                               "$type": "RuleCall",
                               "rule": {
-                                "$ref": "#/rules@135"
+                                "$ref": "#/rules@142"
                               },
                               "arguments": []
                             }
@@ -1145,12 +1786,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "CrossReference",
                       "type": {
-                        "$ref": "#/rules@72"
+                        "$ref": "#/rules@79"
                       },
                       "terminal": {
                         "$type": "RuleCall",
                         "rule": {
-                          "$ref": "#/rules@195"
+                          "$ref": "#/rules@202"
                         },
                         "arguments": []
                       },
@@ -1171,12 +1812,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "CrossReference",
                           "type": {
-                            "$ref": "#/rules@72"
+                            "$ref": "#/rules@79"
                           },
                           "terminal": {
                             "$type": "RuleCall",
                             "rule": {
-                              "$ref": "#/rules@195"
+                              "$ref": "#/rules@202"
                             },
                             "arguments": []
                           },
@@ -1224,12 +1865,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "CrossReference",
                       "type": {
-                        "$ref": "#/rules@17"
+                        "$ref": "#/rules@24"
                       },
                       "terminal": {
                         "$type": "RuleCall",
                         "rule": {
-                          "$ref": "#/rules@135"
+                          "$ref": "#/rules@142"
                         },
                         "arguments": []
                       },
@@ -1250,12 +1891,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "CrossReference",
                           "type": {
-                            "$ref": "#/rules@17"
+                            "$ref": "#/rules@24"
                           },
                           "terminal": {
                             "$type": "RuleCall",
                             "rule": {
-                              "$ref": "#/rules@135"
+                              "$ref": "#/rules@142"
                             },
                             "arguments": []
                           },
@@ -1299,12 +1940,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "CrossReference",
                       "type": {
-                        "$ref": "#/rules@14"
+                        "$ref": "#/rules@21"
                       },
                       "terminal": {
                         "$type": "RuleCall",
                         "rule": {
-                          "$ref": "#/rules@135"
+                          "$ref": "#/rules@142"
                         },
                         "arguments": []
                       },
@@ -1336,12 +1977,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "CrossReference",
                       "type": {
-                        "$ref": "#/rules@27"
+                        "$ref": "#/rules@34"
                       },
                       "terminal": {
                         "$type": "RuleCall",
                         "rule": {
-                          "$ref": "#/rules@195"
+                          "$ref": "#/rules@202"
                         },
                         "arguments": []
                       },
@@ -1362,12 +2003,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "CrossReference",
                           "type": {
-                            "$ref": "#/rules@27"
+                            "$ref": "#/rules@34"
                           },
                           "terminal": {
                             "$type": "RuleCall",
                             "rule": {
-                              "$ref": "#/rules@195"
+                              "$ref": "#/rules@202"
                             },
                             "arguments": []
                           },
@@ -1394,7 +2035,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@19"
+                        "$ref": "#/rules@26"
                       },
                       "arguments": []
                     }
@@ -1406,7 +2047,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@15"
+                        "$ref": "#/rules@22"
                       },
                       "arguments": []
                     }
@@ -1418,7 +2059,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@20"
+                        "$ref": "#/rules@27"
                       },
                       "arguments": []
                     }
@@ -1453,12 +2094,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                             "terminal": {
                               "$type": "CrossReference",
                               "type": {
-                                "$ref": "#/rules@25"
+                                "$ref": "#/rules@32"
                               },
                               "terminal": {
                                 "$type": "RuleCall",
                                 "rule": {
-                                  "$ref": "#/rules@195"
+                                  "$ref": "#/rules@202"
                                 },
                                 "arguments": []
                               },
@@ -1479,12 +2120,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                                 "terminal": {
                                   "$type": "CrossReference",
                                   "type": {
-                                    "$ref": "#/rules@25"
+                                    "$ref": "#/rules@32"
                                   },
                                   "terminal": {
                                     "$type": "RuleCall",
                                     "rule": {
-                                      "$ref": "#/rules@195"
+                                      "$ref": "#/rules@202"
                                     },
                                     "arguments": []
                                   },
@@ -1512,12 +2153,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "CrossReference",
                           "type": {
-                            "$ref": "#/rules@25"
+                            "$ref": "#/rules@32"
                           },
                           "terminal": {
                             "$type": "RuleCall",
                             "rule": {
-                              "$ref": "#/rules@195"
+                              "$ref": "#/rules@202"
                             },
                             "arguments": []
                           },
@@ -1551,7 +2192,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@193"
+                        "$ref": "#/rules@200"
                       },
                       "arguments": []
                     }
@@ -1581,7 +2222,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@24"
+                        "$ref": "#/rules@31"
                       },
                       "arguments": []
                     }
@@ -1611,7 +2252,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@23"
+                        "$ref": "#/rules@30"
                       },
                       "arguments": []
                     }
@@ -1641,7 +2282,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@191"
+                        "$ref": "#/rules@198"
                       },
                       "arguments": []
                     }
@@ -1690,12 +2331,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@25"
+                "$ref": "#/rules@32"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -1716,7 +2357,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@16"
+                    "$ref": "#/rules@23"
                   },
                   "arguments": []
                 }
@@ -1735,7 +2376,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@16"
+                        "$ref": "#/rules@23"
                       },
                       "arguments": []
                     }
@@ -1777,7 +2418,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -1793,12 +2434,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@14"
+                "$ref": "#/rules@21"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@135"
+                  "$ref": "#/rules@142"
                 },
                 "arguments": []
               },
@@ -1831,7 +2472,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -1858,12 +2499,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "CrossReference",
                   "type": {
-                    "$ref": "#/rules@72"
+                    "$ref": "#/rules@79"
                   },
                   "terminal": {
                     "$type": "RuleCall",
                     "rule": {
-                      "$ref": "#/rules@195"
+                      "$ref": "#/rules@202"
                     },
                     "arguments": []
                   },
@@ -1896,7 +2537,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@18"
+                    "$ref": "#/rules@25"
                   },
                   "arguments": []
                 }
@@ -1927,12 +2568,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "CrossReference",
                   "type": {
-                    "$ref": "#/rules@29"
+                    "$ref": "#/rules@36"
                   },
                   "terminal": {
                     "$type": "RuleCall",
                     "rule": {
-                      "$ref": "#/rules@135"
+                      "$ref": "#/rules@142"
                     },
                     "arguments": []
                   },
@@ -1965,7 +2606,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -1996,7 +2637,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -2027,7 +2668,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -2058,7 +2699,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@193"
+                    "$ref": "#/rules@200"
                   },
                   "arguments": []
                 }
@@ -2089,7 +2730,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@193"
+                    "$ref": "#/rules@200"
                   },
                   "arguments": []
                 }
@@ -2120,7 +2761,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@193"
+                    "$ref": "#/rules@200"
                   },
                   "arguments": []
                 }
@@ -2151,7 +2792,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@112"
+                    "$ref": "#/rules@119"
                   },
                   "arguments": []
                 }
@@ -2210,7 +2851,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@82"
+                    "$ref": "#/rules@89"
                   },
                   "arguments": []
                 }
@@ -2248,7 +2889,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@30"
+                        "$ref": "#/rules@37"
                       },
                       "arguments": []
                     }
@@ -2267,7 +2908,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@30"
+                            "$ref": "#/rules@37"
                           },
                           "arguments": []
                         }
@@ -2377,12 +3018,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@25"
+                "$ref": "#/rules@32"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -2420,12 +3061,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@25"
+                "$ref": "#/rules@32"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -2454,7 +3095,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@21"
+                    "$ref": "#/rules@28"
                   },
                   "arguments": []
                 }
@@ -2578,7 +3219,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@191"
+              "$ref": "#/rules@198"
             },
             "arguments": []
           }
@@ -2637,7 +3278,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@191"
+              "$ref": "#/rules@198"
             },
             "arguments": []
           }
@@ -2655,8 +3296,17 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
       "name": "AuthMode",
       "dataType": "string",
       "definition": {
-        "$type": "Keyword",
-        "value": "required"
+        "$type": "Alternatives",
+        "elements": [
+          {
+            "$type": "Keyword",
+            "value": "required"
+          },
+          {
+            "$type": "Keyword",
+            "value": "ui"
+          }
+        ]
       },
       "definesHiddenTokens": false,
       "entry": false,
@@ -2682,7 +3332,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -2694,7 +3344,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@83"
+                "$ref": "#/rules@90"
               },
               "arguments": []
             },
@@ -2722,7 +3372,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@21"
+                    "$ref": "#/rules@28"
                   },
                   "arguments": []
                 }
@@ -2742,7 +3392,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@26"
+                "$ref": "#/rules@33"
               },
               "arguments": []
             },
@@ -2770,49 +3420,49 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@35"
+              "$ref": "#/rules@42"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@36"
+              "$ref": "#/rules@43"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@38"
+              "$ref": "#/rules@45"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@37"
+              "$ref": "#/rules@44"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@39"
+              "$ref": "#/rules@46"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@56"
+              "$ref": "#/rules@63"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@61"
+              "$ref": "#/rules@68"
             },
             "arguments": []
           }
@@ -2842,7 +3492,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -2858,12 +3508,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@11"
+                "$ref": "#/rules@18"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -2916,7 +3566,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@28"
+                    "$ref": "#/rules@35"
                   },
                   "arguments": []
                 },
@@ -2955,7 +3605,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -2967,7 +3617,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@193"
+                "$ref": "#/rules@200"
               },
               "arguments": []
             }
@@ -2998,7 +3648,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -3025,7 +3675,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@33"
+                    "$ref": "#/rules@40"
                   },
                   "arguments": []
                 }
@@ -3055,7 +3705,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@195"
+                    "$ref": "#/rules@202"
                   },
                   "arguments": []
                 }
@@ -3086,7 +3736,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@34"
+                    "$ref": "#/rules@41"
                   },
                   "arguments": []
                 }
@@ -3124,7 +3774,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@30"
+                        "$ref": "#/rules@37"
                       },
                       "arguments": []
                     }
@@ -3143,7 +3793,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@30"
+                            "$ref": "#/rules@37"
                           },
                           "arguments": []
                         }
@@ -3197,7 +3847,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -3213,7 +3863,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@31"
+                "$ref": "#/rules@38"
               },
               "arguments": []
             }
@@ -3250,7 +3900,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -3274,7 +3924,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@193"
+                    "$ref": "#/rules@200"
                   },
                   "arguments": []
                 }
@@ -3298,7 +3948,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@32"
+                    "$ref": "#/rules@39"
                   },
                   "arguments": []
                 }
@@ -3441,7 +4091,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@195"
+                    "$ref": "#/rules@202"
                   },
                   "arguments": []
                 }
@@ -3477,7 +4127,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -3513,7 +4163,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@195"
+                    "$ref": "#/rules@202"
                   },
                   "arguments": []
                 }
@@ -3549,7 +4199,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -3586,7 +4236,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -3602,12 +4252,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@27"
+                "$ref": "#/rules@34"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -3640,7 +4290,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -3656,12 +4306,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@72"
+                "$ref": "#/rules@79"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -3679,12 +4329,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@98"
+                "$ref": "#/rules@105"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -3717,7 +4367,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -3736,7 +4386,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@134"
+                    "$ref": "#/rules@141"
                   },
                   "arguments": []
                 }
@@ -3755,7 +4405,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@134"
+                        "$ref": "#/rules@141"
                       },
                       "arguments": []
                     }
@@ -3781,7 +4431,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@136"
+                "$ref": "#/rules@143"
               },
               "arguments": []
             }
@@ -3801,7 +4451,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@191"
+                "$ref": "#/rules@198"
               },
               "arguments": []
             }
@@ -3832,12 +4482,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@36"
+                "$ref": "#/rules@43"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -3855,12 +4505,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@97"
+                "$ref": "#/rules@104"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -3878,7 +4528,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -3898,7 +4548,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@154"
+                "$ref": "#/rules@161"
               },
               "arguments": []
             },
@@ -3934,7 +4584,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -3956,7 +4606,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@134"
+                        "$ref": "#/rules@141"
                       },
                       "arguments": []
                     }
@@ -3975,7 +4625,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@134"
+                            "$ref": "#/rules@141"
                           },
                           "arguments": []
                         }
@@ -4004,7 +4654,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@40"
+                "$ref": "#/rules@47"
               },
               "arguments": []
             },
@@ -4032,48 +4682,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@41"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@42"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@43"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@58"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@44"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@54"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
               "$ref": "#/rules@48"
             },
             "arguments": []
@@ -4081,21 +4689,63 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@45"
+              "$ref": "#/rules@49"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@46"
+              "$ref": "#/rules@50"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@47"
+              "$ref": "#/rules@65"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@51"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@61"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@55"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@52"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@53"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@54"
             },
             "arguments": []
           }
@@ -4129,7 +4779,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@191"
+                "$ref": "#/rules@198"
               },
               "arguments": []
             }
@@ -4164,7 +4814,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -4195,7 +4845,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -4230,7 +4880,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -4265,7 +4915,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@191"
+                "$ref": "#/rules@198"
               },
               "arguments": []
             }
@@ -4300,7 +4950,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@191"
+                "$ref": "#/rules@198"
               },
               "arguments": []
             }
@@ -4335,7 +4985,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@191"
+                "$ref": "#/rules@198"
               },
               "arguments": []
             }
@@ -4370,7 +5020,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -4401,7 +5051,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -4417,7 +5067,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@50"
+                "$ref": "#/rules@57"
               },
               "arguments": []
             },
@@ -4445,14 +5095,14 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@51"
+              "$ref": "#/rules@58"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@52"
+              "$ref": "#/rules@59"
             },
             "arguments": []
           }
@@ -4478,7 +5128,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@53"
+                "$ref": "#/rules@60"
               },
               "arguments": []
             }
@@ -4494,7 +5144,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -4590,7 +5240,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@55"
+                    "$ref": "#/rules@62"
                   },
                   "arguments": []
                 }
@@ -4610,7 +5260,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@55"
+                        "$ref": "#/rules@62"
                       },
                       "arguments": []
                     }
@@ -4652,7 +5302,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -4668,7 +5318,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -4699,7 +5349,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -4718,7 +5368,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@134"
+                    "$ref": "#/rules@141"
                   },
                   "arguments": []
                 }
@@ -4737,7 +5387,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@134"
+                        "$ref": "#/rules@141"
                       },
                       "arguments": []
                     }
@@ -4775,7 +5425,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -4797,7 +5447,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@57"
+                    "$ref": "#/rules@64"
                   },
                   "arguments": []
                 },
@@ -4821,7 +5471,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@157"
+                        "$ref": "#/rules@164"
                       },
                       "arguments": []
                     }
@@ -4851,7 +5501,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
       "definition": {
         "$type": "RuleCall",
         "rule": {
-          "$ref": "#/rules@58"
+          "$ref": "#/rules@65"
         },
         "arguments": []
       },
@@ -4883,7 +5533,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@59"
+                "$ref": "#/rules@66"
               },
               "arguments": []
             },
@@ -4915,7 +5565,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@60"
+                "$ref": "#/rules@67"
               },
               "arguments": []
             }
@@ -4931,7 +5581,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@136"
+                "$ref": "#/rules@143"
               },
               "arguments": []
             }
@@ -4950,7 +5600,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@157"
+                    "$ref": "#/rules@164"
                   },
                   "arguments": []
                 }
@@ -4977,7 +5627,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@195"
+              "$ref": "#/rules@202"
             },
             "arguments": []
           },
@@ -5087,7 +5737,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@62"
+                "$ref": "#/rules@69"
               },
               "arguments": []
             },
@@ -5123,7 +5773,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@191"
+                "$ref": "#/rules@198"
               },
               "arguments": []
             }
@@ -5142,7 +5792,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@63"
+                    "$ref": "#/rules@70"
                   },
                   "arguments": []
                 }
@@ -5162,7 +5812,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@63"
+                        "$ref": "#/rules@70"
                       },
                       "arguments": []
                     }
@@ -5211,12 +5861,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "CrossReference",
                   "type": {
-                    "$ref": "#/rules@39"
+                    "$ref": "#/rules@46"
                   },
                   "terminal": {
                     "$type": "RuleCall",
                     "rule": {
-                      "$ref": "#/rules@135"
+                      "$ref": "#/rules@142"
                     },
                     "arguments": []
                   },
@@ -5240,7 +5890,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@64"
+                            "$ref": "#/rules@71"
                           },
                           "arguments": []
                         }
@@ -5260,7 +5910,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                             "terminal": {
                               "$type": "RuleCall",
                               "rule": {
-                                "$ref": "#/rules@64"
+                                "$ref": "#/rules@71"
                               },
                               "arguments": []
                             }
@@ -5299,7 +5949,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -5315,7 +5965,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -5344,7 +5994,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -5360,7 +6010,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -5391,7 +6041,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@68"
+                "$ref": "#/rules@75"
               },
               "arguments": []
             }
@@ -5410,12 +6060,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "CrossReference",
                   "type": {
-                    "$ref": "#/rules@65"
+                    "$ref": "#/rules@72"
                   },
                   "terminal": {
                     "$type": "RuleCall",
                     "rule": {
-                      "$ref": "#/rules@68"
+                      "$ref": "#/rules@75"
                     },
                     "arguments": []
                   },
@@ -5436,7 +6086,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@66"
+                "$ref": "#/rules@73"
               },
               "arguments": []
             },
@@ -5468,7 +6118,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@67"
+                "$ref": "#/rules@74"
               },
               "arguments": []
             }
@@ -5484,7 +6134,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -5508,7 +6158,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@195"
+              "$ref": "#/rules@202"
             },
             "arguments": []
           },
@@ -5539,14 +6189,14 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@194"
+              "$ref": "#/rules@201"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@195"
+              "$ref": "#/rules@202"
             },
             "arguments": []
           }
@@ -5576,7 +6226,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@68"
+                "$ref": "#/rules@75"
               },
               "arguments": []
             }
@@ -5592,12 +6242,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@65"
+                "$ref": "#/rules@72"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@68"
+                  "$ref": "#/rules@75"
                 },
                 "arguments": []
               },
@@ -5626,7 +6276,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -5660,7 +6310,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                       "terminal": {
                         "$type": "RuleCall",
                         "rule": {
-                          "$ref": "#/rules@71"
+                          "$ref": "#/rules@78"
                         },
                         "arguments": []
                       },
@@ -5686,7 +6336,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                           "terminal": {
                             "$type": "RuleCall",
                             "rule": {
-                              "$ref": "#/rules@71"
+                              "$ref": "#/rules@78"
                             },
                             "arguments": []
                           },
@@ -5741,7 +6391,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@68"
+                "$ref": "#/rules@75"
               },
               "arguments": []
             }
@@ -5757,12 +6407,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@65"
+                "$ref": "#/rules@72"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@68"
+                  "$ref": "#/rules@75"
                 },
                 "arguments": []
               },
@@ -5791,7 +6441,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -5825,7 +6475,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                       "terminal": {
                         "$type": "RuleCall",
                         "rule": {
-                          "$ref": "#/rules@71"
+                          "$ref": "#/rules@78"
                         },
                         "arguments": []
                       },
@@ -5851,7 +6501,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                           "terminal": {
                             "$type": "RuleCall",
                             "rule": {
-                              "$ref": "#/rules@71"
+                              "$ref": "#/rules@78"
                             },
                             "arguments": []
                           },
@@ -5899,7 +6549,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@135"
+              "$ref": "#/rules@142"
             },
             "arguments": []
           },
@@ -5913,7 +6563,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
               {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@135"
+                  "$ref": "#/rules@142"
                 },
                 "arguments": []
               }
@@ -5946,7 +6596,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -5958,7 +6608,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@83"
+                "$ref": "#/rules@90"
               },
               "arguments": []
             },
@@ -5975,7 +6625,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@73"
+                "$ref": "#/rules@80"
               },
               "arguments": []
             },
@@ -6003,35 +6653,21 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@74"
+              "$ref": "#/rules@81"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@76"
+              "$ref": "#/rules@83"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@78"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@97"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@102"
+              "$ref": "#/rules@85"
             },
             "arguments": []
           },
@@ -6045,7 +6681,14 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@106"
+              "$ref": "#/rules@109"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@111"
             },
             "arguments": []
           },
@@ -6059,42 +6702,42 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@115"
+              "$ref": "#/rules@120"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@117"
+              "$ref": "#/rules@122"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@118"
+              "$ref": "#/rules@124"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@88"
+              "$ref": "#/rules@125"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@89"
+              "$ref": "#/rules@95"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@91"
+              "$ref": "#/rules@96"
             },
             "arguments": []
           },
@@ -6102,6 +6745,13 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "$type": "RuleCall",
             "rule": {
               "$ref": "#/rules@98"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@105"
             },
             "arguments": []
           }
@@ -6131,7 +6781,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -6147,7 +6797,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@75"
+                "$ref": "#/rules@82"
               },
               "arguments": []
             }
@@ -6167,7 +6817,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@75"
+                    "$ref": "#/rules@82"
                   },
                   "arguments": []
                 }
@@ -6203,7 +6853,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
         "terminal": {
           "$type": "RuleCall",
           "rule": {
-            "$ref": "#/rules@195"
+            "$ref": "#/rules@202"
           },
           "arguments": []
         }
@@ -6232,7 +6882,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -6248,7 +6898,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@77"
+                "$ref": "#/rules@84"
               },
               "arguments": []
             },
@@ -6276,28 +6926,28 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@124"
+              "$ref": "#/rules@131"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@127"
+              "$ref": "#/rules@134"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@128"
+              "$ref": "#/rules@135"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@129"
+              "$ref": "#/rules@136"
             },
             "arguments": []
           }
@@ -6337,7 +6987,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -6356,12 +7006,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "CrossReference",
                   "type": {
-                    "$ref": "#/rules@78"
+                    "$ref": "#/rules@85"
                   },
                   "terminal": {
                     "$type": "RuleCall",
                     "rule": {
-                      "$ref": "#/rules@195"
+                      "$ref": "#/rules@202"
                     },
                     "arguments": []
                   },
@@ -6385,7 +7035,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@79"
+                    "$ref": "#/rules@86"
                   },
                   "arguments": []
                 }
@@ -6411,7 +7061,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@81"
+                    "$ref": "#/rules@88"
                   },
                   "arguments": []
                 }
@@ -6441,7 +7091,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@82"
+                    "$ref": "#/rules@89"
                   },
                   "arguments": []
                 }
@@ -6471,7 +7121,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@80"
+                    "$ref": "#/rules@87"
                   },
                   "arguments": []
                 }
@@ -6490,7 +7140,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@83"
+                "$ref": "#/rules@90"
               },
               "arguments": []
             },
@@ -6507,7 +7157,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@87"
+                "$ref": "#/rules@94"
               },
               "arguments": []
             },
@@ -6651,7 +7301,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@84"
+                "$ref": "#/rules@91"
               },
               "arguments": []
             }
@@ -6670,7 +7320,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@84"
+                    "$ref": "#/rules@91"
                   },
                   "arguments": []
                 }
@@ -6700,7 +7350,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -6722,7 +7372,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@85"
+                        "$ref": "#/rules@92"
                       },
                       "arguments": []
                     }
@@ -6741,7 +7391,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@85"
+                            "$ref": "#/rules@92"
                           },
                           "arguments": []
                         }
@@ -6781,7 +7431,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -6797,7 +7447,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@86"
+                "$ref": "#/rules@93"
               },
               "arguments": []
             }
@@ -6834,7 +7484,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -6888,7 +7538,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@193"
+                    "$ref": "#/rules@200"
                   },
                   "arguments": []
                 }
@@ -6912,7 +7562,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@195"
+                    "$ref": "#/rules@202"
                   },
                   "arguments": []
                 }
@@ -6943,7 +7593,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@195"
+                        "$ref": "#/rules@202"
                       },
                       "arguments": []
                     }
@@ -6962,7 +7612,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@195"
+                            "$ref": "#/rules@202"
                           },
                           "arguments": []
                         }
@@ -6997,35 +7647,63 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@126"
+              "$ref": "#/rules@133"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@127"
+              "$ref": "#/rules@134"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@128"
+              "$ref": "#/rules@135"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@129"
+              "$ref": "#/rules@136"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@130"
+              "$ref": "#/rules@137"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@138"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@139"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@102"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@99"
             },
             "arguments": []
           },
@@ -7039,13 +7717,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@132"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
               "$ref": "#/rules@95"
             },
             "arguments": []
@@ -7053,42 +7724,21 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@92"
+              "$ref": "#/rules@96"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@124"
+              "$ref": "#/rules@98"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@88"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@89"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@91"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@133"
+              "$ref": "#/rules@140"
             },
             "arguments": []
           }
@@ -7125,7 +7775,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -7140,7 +7790,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -7178,7 +7828,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -7193,7 +7843,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@90"
+                "$ref": "#/rules@97"
               },
               "arguments": []
             }
@@ -7209,7 +7859,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@154"
+                "$ref": "#/rules@161"
               },
               "arguments": []
             },
@@ -7269,7 +7919,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@191"
+                "$ref": "#/rules@198"
               },
               "arguments": []
             }
@@ -7300,7 +7950,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@191"
+                "$ref": "#/rules@198"
               },
               "arguments": []
             }
@@ -7319,12 +7969,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "CrossReference",
                   "type": {
-                    "$ref": "#/rules@70"
+                    "$ref": "#/rules@77"
                   },
                   "terminal": {
                     "$type": "RuleCall",
                     "rule": {
-                      "$ref": "#/rules@68"
+                      "$ref": "#/rules@75"
                     },
                     "arguments": []
                   },
@@ -7345,7 +7995,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@93"
+                "$ref": "#/rules@100"
               },
               "arguments": []
             },
@@ -7373,35 +8023,35 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@94"
+              "$ref": "#/rules@101"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@149"
+              "$ref": "#/rules@156"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@151"
+              "$ref": "#/rules@158"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@152"
+              "$ref": "#/rules@159"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@154"
+              "$ref": "#/rules@161"
             },
             "arguments": []
           }
@@ -7431,7 +8081,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -7462,7 +8112,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -7478,7 +8128,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@96"
+                "$ref": "#/rules@103"
               },
               "arguments": []
             },
@@ -7506,35 +8156,35 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@126"
+              "$ref": "#/rules@133"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@127"
+              "$ref": "#/rules@134"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@128"
+              "$ref": "#/rules@135"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@129"
+              "$ref": "#/rules@136"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@124"
+              "$ref": "#/rules@131"
             },
             "arguments": []
           }
@@ -7564,7 +8214,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -7583,7 +8233,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@124"
+                    "$ref": "#/rules@131"
                   },
                   "arguments": []
                 }
@@ -7603,7 +8253,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@124"
+                        "$ref": "#/rules@131"
                       },
                       "arguments": []
                     }
@@ -7649,7 +8299,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -7676,12 +8326,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "CrossReference",
                   "type": {
-                    "$ref": "#/rules@97"
+                    "$ref": "#/rules@104"
                   },
                   "terminal": {
                     "$type": "RuleCall",
                     "rule": {
-                      "$ref": "#/rules@195"
+                      "$ref": "#/rules@202"
                     },
                     "arguments": []
                   },
@@ -7702,12 +8352,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "CrossReference",
                       "type": {
-                        "$ref": "#/rules@97"
+                        "$ref": "#/rules@104"
                       },
                       "terminal": {
                         "$type": "RuleCall",
                         "rule": {
-                          "$ref": "#/rules@195"
+                          "$ref": "#/rules@202"
                         },
                         "arguments": []
                       },
@@ -7742,7 +8392,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@99"
+                    "$ref": "#/rules@106"
                   },
                   "arguments": []
                 }
@@ -7773,7 +8423,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@100"
+                    "$ref": "#/rules@107"
                   },
                   "arguments": []
                 }
@@ -7804,7 +8454,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@195"
+                    "$ref": "#/rules@202"
                   },
                   "arguments": []
                 }
@@ -7899,7 +8549,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -7926,7 +8576,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@195"
+                    "$ref": "#/rules@202"
                   },
                   "arguments": []
                 }
@@ -7956,12 +8606,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "CrossReference",
                   "type": {
-                    "$ref": "#/rules@29"
+                    "$ref": "#/rules@36"
                   },
                   "terminal": {
                     "$type": "RuleCall",
                     "rule": {
-                      "$ref": "#/rules@135"
+                      "$ref": "#/rules@142"
                     },
                     "arguments": []
                   },
@@ -8002,7 +8652,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@103"
+                "$ref": "#/rules@110"
               },
               "arguments": []
             }
@@ -8014,7 +8664,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -8036,7 +8686,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@137"
+                        "$ref": "#/rules@144"
                       },
                       "arguments": []
                     }
@@ -8055,7 +8705,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@137"
+                            "$ref": "#/rules@144"
                           },
                           "arguments": []
                         }
@@ -8082,7 +8732,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@124"
+                            "$ref": "#/rules@131"
                           },
                           "arguments": []
                         }
@@ -8102,7 +8752,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                             "terminal": {
                               "$type": "RuleCall",
                               "rule": {
-                                "$ref": "#/rules@124"
+                                "$ref": "#/rules@131"
                               },
                               "arguments": []
                             }
@@ -8188,7 +8838,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -8204,12 +8854,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@78"
+                "$ref": "#/rules@85"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -8227,7 +8877,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@105"
+                "$ref": "#/rules@112"
               },
               "arguments": []
             },
@@ -8263,7 +8913,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -8282,7 +8932,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@134"
+                    "$ref": "#/rules@141"
                   },
                   "arguments": []
                 }
@@ -8301,7 +8951,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@134"
+                        "$ref": "#/rules@141"
                       },
                       "arguments": []
                     }
@@ -8327,7 +8977,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@136"
+                "$ref": "#/rules@143"
               },
               "arguments": []
             }
@@ -8346,7 +8996,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@157"
+                    "$ref": "#/rules@164"
                   },
                   "arguments": []
                 }
@@ -8380,7 +9030,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -8421,7 +9071,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@112"
+                        "$ref": "#/rules@119"
                       },
                       "arguments": []
                     }
@@ -8447,7 +9097,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@107"
+                "$ref": "#/rules@114"
               },
               "arguments": []
             },
@@ -8475,35 +9125,35 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@108"
+              "$ref": "#/rules@115"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@133"
+              "$ref": "#/rules@140"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@110"
+              "$ref": "#/rules@117"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@109"
+              "$ref": "#/rules@116"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@124"
+              "$ref": "#/rules@131"
             },
             "arguments": []
           }
@@ -8533,7 +9183,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             },
@@ -8553,7 +9203,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@134"
+                    "$ref": "#/rules@141"
                   },
                   "arguments": []
                 }
@@ -8572,7 +9222,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@134"
+                        "$ref": "#/rules@141"
                       },
                       "arguments": []
                     }
@@ -8601,7 +9251,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@111"
+                    "$ref": "#/rules@118"
                   },
                   "arguments": []
                 }
@@ -8620,7 +9270,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@145"
+                "$ref": "#/rules@152"
               },
               "arguments": []
             },
@@ -8656,7 +9306,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -8675,7 +9325,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@134"
+                    "$ref": "#/rules@141"
                   },
                   "arguments": []
                 }
@@ -8694,7 +9344,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@134"
+                        "$ref": "#/rules@141"
                       },
                       "arguments": []
                     }
@@ -8720,7 +9370,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@145"
+                "$ref": "#/rules@152"
               },
               "arguments": []
             },
@@ -8760,7 +9410,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -8776,12 +9426,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@97"
+                "$ref": "#/rules@104"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -8806,7 +9456,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@111"
+                    "$ref": "#/rules@118"
                   },
                   "arguments": []
                 }
@@ -8825,7 +9475,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@145"
+                "$ref": "#/rules@152"
               },
               "arguments": []
             },
@@ -8857,7 +9507,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@186"
+              "$ref": "#/rules@193"
             },
             "arguments": []
           },
@@ -8880,7 +9530,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@169"
+                    "$ref": "#/rules@176"
                   },
                   "arguments": []
                 },
@@ -8947,7 +9597,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -8974,7 +9624,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                       "terminal": {
                         "$type": "RuleCall",
                         "rule": {
-                          "$ref": "#/rules@195"
+                          "$ref": "#/rules@202"
                         },
                         "arguments": []
                       },
@@ -8992,7 +9642,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@157"
+                        "$ref": "#/rules@164"
                       },
                       "arguments": []
                     }
@@ -9013,7 +9663,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@124"
+                        "$ref": "#/rules@131"
                       },
                       "arguments": []
                     },
@@ -9035,7 +9685,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                       "terminal": {
                         "$type": "RuleCall",
                         "rule": {
-                          "$ref": "#/rules@195"
+                          "$ref": "#/rules@202"
                         },
                         "arguments": []
                       },
@@ -9056,7 +9706,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@157"
+                            "$ref": "#/rules@164"
                           },
                           "arguments": []
                         }
@@ -9075,7 +9725,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@114"
+                        "$ref": "#/rules@121"
                       },
                       "arguments": []
                     }
@@ -9094,7 +9744,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@114"
+                            "$ref": "#/rules@121"
                           },
                           "arguments": []
                         }
@@ -9137,7 +9787,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -9153,7 +9803,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -9184,7 +9834,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             },
@@ -9211,7 +9861,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@116"
+                "$ref": "#/rules@123"
               },
               "arguments": []
             },
@@ -9243,12 +9893,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@78"
+                "$ref": "#/rules@85"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -9262,7 +9912,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@177"
+                "$ref": "#/rules@184"
               },
               "arguments": []
             }
@@ -9293,7 +9943,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -9315,7 +9965,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@134"
+                        "$ref": "#/rules@141"
                       },
                       "arguments": []
                     }
@@ -9334,7 +9984,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@134"
+                            "$ref": "#/rules@141"
                           },
                           "arguments": []
                         }
@@ -9363,7 +10013,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@136"
+                "$ref": "#/rules@143"
               },
               "arguments": []
             }
@@ -9385,7 +10035,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@157"
+                        "$ref": "#/rules@164"
                       },
                       "arguments": []
                     }
@@ -9414,7 +10064,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@157"
+                        "$ref": "#/rules@164"
                       },
                       "arguments": []
                     }
@@ -9453,7 +10103,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -9475,7 +10125,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@134"
+                        "$ref": "#/rules@141"
                       },
                       "arguments": []
                     }
@@ -9494,7 +10144,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@134"
+                            "$ref": "#/rules@141"
                           },
                           "arguments": []
                         }
@@ -9523,7 +10173,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@136"
+                "$ref": "#/rules@143"
               },
               "arguments": []
             }
@@ -9545,7 +10195,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@157"
+                        "$ref": "#/rules@164"
                       },
                       "arguments": []
                     }
@@ -9574,7 +10224,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@157"
+                        "$ref": "#/rules@164"
                       },
                       "arguments": []
                     }
@@ -9604,7 +10254,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                             "terminal": {
                               "$type": "RuleCall",
                               "rule": {
-                                "$ref": "#/rules@119"
+                                "$ref": "#/rules@126"
                               },
                               "arguments": []
                             }
@@ -9623,7 +10273,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                                 "terminal": {
                                   "$type": "RuleCall",
                                   "rule": {
-                                    "$ref": "#/rules@119"
+                                    "$ref": "#/rules@126"
                                   },
                                   "arguments": []
                                 }
@@ -9666,7 +10316,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                             "terminal": {
                               "$type": "RuleCall",
                               "rule": {
-                                "$ref": "#/rules@121"
+                                "$ref": "#/rules@128"
                               },
                               "arguments": []
                             }
@@ -9685,7 +10335,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                                 "terminal": {
                                   "$type": "RuleCall",
                                   "rule": {
-                                    "$ref": "#/rules@121"
+                                    "$ref": "#/rules@128"
                                   },
                                   "arguments": []
                                 }
@@ -9733,7 +10383,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@121"
+                "$ref": "#/rules@128"
               },
               "arguments": []
             }
@@ -9745,7 +10395,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@120"
+                "$ref": "#/rules@127"
               },
               "arguments": []
             },
@@ -9811,7 +10461,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@122"
+                "$ref": "#/rules@129"
               },
               "arguments": []
             }
@@ -9830,7 +10480,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@122"
+                    "$ref": "#/rules@129"
                   },
                   "arguments": []
                 }
@@ -9860,7 +10510,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -9936,7 +10586,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@195"
+                    "$ref": "#/rules@202"
                   },
                   "arguments": []
                 },
@@ -10166,7 +10816,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@136"
+                "$ref": "#/rules@143"
               },
               "arguments": []
             }
@@ -10188,7 +10838,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@125"
+                "$ref": "#/rules@132"
               },
               "arguments": []
             },
@@ -10201,7 +10851,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@123"
+                "$ref": "#/rules@130"
               },
               "arguments": []
             },
@@ -10221,7 +10871,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@157"
+                    "$ref": "#/rules@164"
                   },
                   "arguments": []
                 }
@@ -10243,7 +10893,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@157"
+                    "$ref": "#/rules@164"
                   },
                   "arguments": []
                 }
@@ -10281,7 +10931,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -10300,7 +10950,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@195"
+                    "$ref": "#/rules@202"
                   },
                   "arguments": []
                 }
@@ -10338,7 +10988,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -10354,12 +11004,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@95"
+                "$ref": "#/rules@102"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -10412,7 +11062,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -10428,7 +11078,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@136"
+                "$ref": "#/rules@143"
               },
               "arguments": []
             }
@@ -10444,7 +11094,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -10485,7 +11135,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -10504,7 +11154,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@157"
+                    "$ref": "#/rules@164"
                   },
                   "arguments": []
                 }
@@ -10538,7 +11188,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -10557,7 +11207,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@134"
+                    "$ref": "#/rules@141"
                   },
                   "arguments": []
                 }
@@ -10576,7 +11226,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@134"
+                        "$ref": "#/rules@141"
                       },
                       "arguments": []
                     }
@@ -10602,7 +11252,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@136"
+                "$ref": "#/rules@143"
               },
               "arguments": []
             }
@@ -10618,7 +11268,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -10659,7 +11309,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -10678,7 +11328,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@134"
+                    "$ref": "#/rules@141"
                   },
                   "arguments": []
                 }
@@ -10697,7 +11347,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@134"
+                        "$ref": "#/rules@141"
                       },
                       "arguments": []
                     }
@@ -10746,7 +11396,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@136"
+                    "$ref": "#/rules@143"
                   },
                   "arguments": []
                 }
@@ -10768,7 +11418,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@157"
+                    "$ref": "#/rules@164"
                   },
                   "arguments": []
                 }
@@ -10787,7 +11437,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@145"
+                "$ref": "#/rules@152"
               },
               "arguments": []
             },
@@ -10823,7 +11473,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             },
@@ -10843,7 +11493,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@134"
+                    "$ref": "#/rules@141"
                   },
                   "arguments": []
                 }
@@ -10862,7 +11512,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@134"
+                        "$ref": "#/rules@141"
                       },
                       "arguments": []
                     }
@@ -10888,7 +11538,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@145"
+                "$ref": "#/rules@152"
               },
               "arguments": []
             },
@@ -10924,7 +11574,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             },
@@ -10947,7 +11597,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@134"
+                        "$ref": "#/rules@141"
                       },
                       "arguments": []
                     }
@@ -10966,7 +11616,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@134"
+                            "$ref": "#/rules@141"
                           },
                           "arguments": []
                         }
@@ -10995,7 +11645,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@145"
+                "$ref": "#/rules@152"
               },
               "arguments": []
             },
@@ -11035,7 +11685,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -11051,12 +11701,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@97"
+                "$ref": "#/rules@104"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -11078,7 +11728,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@145"
+                "$ref": "#/rules@152"
               },
               "arguments": []
             },
@@ -11110,7 +11760,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -11126,7 +11776,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@136"
+                "$ref": "#/rules@143"
               },
               "arguments": []
             }
@@ -11150,7 +11800,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@195"
+              "$ref": "#/rules@202"
             },
             "arguments": []
           },
@@ -11512,7 +12162,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@139"
+                "$ref": "#/rules@146"
               },
               "arguments": []
             }
@@ -11524,7 +12174,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@138"
+                "$ref": "#/rules@145"
               },
               "arguments": []
             },
@@ -11564,7 +12214,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@137"
+                    "$ref": "#/rules@144"
                   },
                   "arguments": []
                 }
@@ -11594,7 +12244,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@139"
+                "$ref": "#/rules@146"
               },
               "arguments": []
             }
@@ -11606,7 +12256,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@138"
+                "$ref": "#/rules@145"
               },
               "arguments": []
             },
@@ -11678,35 +12328,35 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@140"
+              "$ref": "#/rules@147"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@141"
+              "$ref": "#/rules@148"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@142"
+              "$ref": "#/rules@149"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@143"
+              "$ref": "#/rules@150"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@144"
+              "$ref": "#/rules@151"
             },
             "arguments": []
           }
@@ -11823,7 +12473,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@136"
+                    "$ref": "#/rules@143"
                   },
                   "arguments": []
                 }
@@ -11862,7 +12512,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -11897,7 +12547,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           "terminal": {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@195"
+              "$ref": "#/rules@202"
             },
             "arguments": []
           },
@@ -11920,42 +12570,28 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@149"
+              "$ref": "#/rules@156"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@150"
+              "$ref": "#/rules@157"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@151"
+              "$ref": "#/rules@158"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@152"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@147"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@146"
+              "$ref": "#/rules@159"
             },
             "arguments": []
           },
@@ -11963,6 +12599,20 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "$type": "RuleCall",
             "rule": {
               "$ref": "#/rules@154"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@153"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@161"
             },
             "arguments": []
           }
@@ -11992,7 +12642,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -12023,7 +12673,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -12039,7 +12689,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@148"
+                "$ref": "#/rules@155"
               },
               "arguments": []
             }
@@ -12055,7 +12705,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@145"
+                "$ref": "#/rules@152"
               },
               "arguments": []
             },
@@ -12087,7 +12737,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@186"
+              "$ref": "#/rules@193"
             },
             "arguments": []
           },
@@ -12110,7 +12760,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@169"
+                    "$ref": "#/rules@176"
                   },
                   "arguments": []
                 },
@@ -12145,7 +12795,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -12176,7 +12826,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -12207,7 +12857,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -12223,7 +12873,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -12254,12 +12904,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "CrossReference",
               "type": {
-                "$ref": "#/rules@97"
+                "$ref": "#/rules@104"
               },
               "terminal": {
                 "$type": "RuleCall",
                 "rule": {
-                  "$ref": "#/rules@195"
+                  "$ref": "#/rules@202"
                 },
                 "arguments": []
               },
@@ -12280,7 +12930,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@153"
+                    "$ref": "#/rules@160"
                   },
                   "arguments": []
                 }
@@ -12299,7 +12949,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@153"
+                        "$ref": "#/rules@160"
                       },
                       "arguments": []
                     }
@@ -12341,7 +12991,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -12357,7 +13007,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -12384,7 +13034,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@155"
+                "$ref": "#/rules@162"
               },
               "arguments": []
             }
@@ -12411,7 +13061,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@157"
+                        "$ref": "#/rules@164"
                       },
                       "arguments": []
                     }
@@ -12437,7 +13087,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@157"
+                        "$ref": "#/rules@164"
                       },
                       "arguments": []
                     }
@@ -12463,7 +13113,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@157"
+                        "$ref": "#/rules@164"
                       },
                       "arguments": []
                     }
@@ -12495,7 +13145,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@156"
+                "$ref": "#/rules@163"
               },
               "arguments": []
             }
@@ -12514,7 +13164,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@156"
+                    "$ref": "#/rules@163"
                   },
                   "arguments": []
                 }
@@ -12544,7 +13194,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@157"
+                        "$ref": "#/rules@164"
                       },
                       "arguments": []
                     }
@@ -12563,7 +13213,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@157"
+                            "$ref": "#/rules@164"
                           },
                           "arguments": []
                         }
@@ -12600,7 +13250,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@195"
+              "$ref": "#/rules@202"
             },
             "arguments": []
           },
@@ -12718,14 +13368,14 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@158"
+              "$ref": "#/rules@165"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@160"
+              "$ref": "#/rules@167"
             },
             "arguments": []
           }
@@ -12762,7 +13412,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@159"
+                    "$ref": "#/rules@166"
                   },
                   "arguments": []
                 }
@@ -12782,7 +13432,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@159"
+                        "$ref": "#/rules@166"
                       },
                       "arguments": []
                     }
@@ -12816,7 +13466,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@157"
+                    "$ref": "#/rules@164"
                   },
                   "arguments": []
                 }
@@ -12855,7 +13505,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -12871,7 +13521,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -12898,7 +13548,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@161"
+              "$ref": "#/rules@168"
             },
             "arguments": []
           },
@@ -12925,7 +13575,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@157"
+                    "$ref": "#/rules@164"
                   },
                   "arguments": []
                 }
@@ -12941,7 +13591,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@157"
+                    "$ref": "#/rules@164"
                   },
                   "arguments": []
                 }
@@ -12971,7 +13621,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@162"
+              "$ref": "#/rules@169"
             },
             "arguments": []
           },
@@ -13006,7 +13656,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@162"
+                        "$ref": "#/rules@169"
                       },
                       "arguments": []
                     }
@@ -13039,7 +13689,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@163"
+              "$ref": "#/rules@170"
             },
             "arguments": []
           },
@@ -13074,7 +13724,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@163"
+                        "$ref": "#/rules@170"
                       },
                       "arguments": []
                     }
@@ -13107,7 +13757,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@164"
+              "$ref": "#/rules@171"
             },
             "arguments": []
           },
@@ -13151,7 +13801,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@164"
+                        "$ref": "#/rules@171"
                       },
                       "arguments": []
                     }
@@ -13184,7 +13834,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@165"
+              "$ref": "#/rules@172"
             },
             "arguments": []
           },
@@ -13236,7 +13886,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@165"
+                        "$ref": "#/rules@172"
                       },
                       "arguments": []
                     }
@@ -13269,7 +13919,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@166"
+              "$ref": "#/rules@173"
             },
             "arguments": []
           },
@@ -13313,7 +13963,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@166"
+                        "$ref": "#/rules@173"
                       },
                       "arguments": []
                     }
@@ -13346,7 +13996,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@167"
+              "$ref": "#/rules@174"
             },
             "arguments": []
           },
@@ -13394,7 +14044,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@167"
+                        "$ref": "#/rules@174"
                       },
                       "arguments": []
                     }
@@ -13459,7 +14109,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@168"
+                    "$ref": "#/rules@175"
                   },
                   "arguments": []
                 }
@@ -13469,7 +14119,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@168"
+              "$ref": "#/rules@175"
             },
             "arguments": []
           }
@@ -13495,7 +14145,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@173"
+              "$ref": "#/rules@180"
             },
             "arguments": []
           },
@@ -13518,7 +14168,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@169"
+                    "$ref": "#/rules@176"
                   },
                   "arguments": []
                 },
@@ -13563,7 +14213,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@171"
+                    "$ref": "#/rules@178"
                   },
                   "arguments": []
                 }
@@ -13590,7 +14240,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@170"
+                            "$ref": "#/rules@177"
                           },
                           "arguments": []
                         }
@@ -13609,7 +14259,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                             "terminal": {
                               "$type": "RuleCall",
                               "rule": {
-                                "$ref": "#/rules@170"
+                                "$ref": "#/rules@177"
                               },
                               "arguments": []
                             }
@@ -13653,7 +14303,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@170"
+                        "$ref": "#/rules@177"
                       },
                       "arguments": []
                     }
@@ -13672,7 +14322,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "terminal": {
                           "$type": "RuleCall",
                           "rule": {
-                            "$ref": "#/rules@170"
+                            "$ref": "#/rules@177"
                           },
                           "arguments": []
                         }
@@ -13714,7 +14364,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@135"
+                    "$ref": "#/rules@142"
                   },
                   "arguments": []
                 }
@@ -13733,7 +14383,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -13765,7 +14415,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@195"
+              "$ref": "#/rules@202"
             },
             "arguments": []
           },
@@ -13895,7 +14545,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -13914,7 +14564,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@157"
+                    "$ref": "#/rules@164"
                   },
                   "arguments": []
                 }
@@ -13933,7 +14583,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@145"
+                        "$ref": "#/rules@152"
                       },
                       "arguments": []
                     },
@@ -13969,49 +14619,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@172"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@175"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@177"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
               "$ref": "#/rules@179"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@174"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@180"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
-              "$ref": "#/rules@181"
             },
             "arguments": []
           },
@@ -14025,13 +14633,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@183"
-            },
-            "arguments": []
-          },
-          {
-            "$type": "RuleCall",
-            "rule": {
               "$ref": "#/rules@184"
             },
             "arguments": []
@@ -14039,14 +14640,63 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@185"
+              "$ref": "#/rules@186"
             },
             "arguments": []
           },
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@186"
+              "$ref": "#/rules@181"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@187"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@188"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@189"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@190"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@191"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@192"
+            },
+            "arguments": []
+          },
+          {
+            "$type": "RuleCall",
+            "rule": {
+              "$ref": "#/rules@193"
             },
             "arguments": []
           }
@@ -14086,7 +14736,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@157"
+                    "$ref": "#/rules@164"
                   },
                   "arguments": []
                 }
@@ -14105,7 +14755,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@157"
+                        "$ref": "#/rules@164"
                       },
                       "arguments": []
                     }
@@ -14147,7 +14797,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@195"
+                "$ref": "#/rules@202"
               },
               "arguments": []
             }
@@ -14166,7 +14816,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@176"
+                    "$ref": "#/rules@183"
                   },
                   "arguments": []
                 }
@@ -14185,7 +14835,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@176"
+                        "$ref": "#/rules@183"
                       },
                       "arguments": []
                     }
@@ -14230,7 +14880,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@135"
+                    "$ref": "#/rules@142"
                   },
                   "arguments": []
                 }
@@ -14246,7 +14896,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@157"
+                    "$ref": "#/rules@164"
                   },
                   "arguments": []
                 }
@@ -14260,7 +14910,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -14294,7 +14944,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@178"
+                    "$ref": "#/rules@185"
                   },
                   "arguments": []
                 }
@@ -14313,7 +14963,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                     "terminal": {
                       "$type": "RuleCall",
                       "rule": {
-                        "$ref": "#/rules@178"
+                        "$ref": "#/rules@185"
                       },
                       "arguments": []
                     }
@@ -14355,7 +15005,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@135"
+                "$ref": "#/rules@142"
               },
               "arguments": []
             }
@@ -14371,7 +15021,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -14402,7 +15052,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -14443,7 +15093,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@191"
+                    "$ref": "#/rules@198"
                   },
                   "arguments": []
                 }
@@ -14467,7 +15117,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@193"
+                    "$ref": "#/rules@200"
                   },
                   "arguments": []
                 }
@@ -14491,7 +15141,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "terminal": {
                   "$type": "RuleCall",
                   "rule": {
-                    "$ref": "#/rules@192"
+                    "$ref": "#/rules@199"
                   },
                   "arguments": []
                 }
@@ -14586,7 +15236,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@191"
+                "$ref": "#/rules@198"
               },
               "arguments": []
             }
@@ -14654,7 +15304,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "terminal": {
               "$type": "RuleCall",
               "rule": {
-                "$ref": "#/rules@157"
+                "$ref": "#/rules@164"
               },
               "arguments": []
             }
@@ -14768,7 +15418,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
         "terminal": {
           "$type": "RuleCall",
           "rule": {
-            "$ref": "#/rules@187"
+            "$ref": "#/rules@194"
           },
           "arguments": []
         }
@@ -14790,7 +15440,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "RuleCall",
             "rule": {
-              "$ref": "#/rules@195"
+              "$ref": "#/rules@202"
             },
             "arguments": []
           },
@@ -15218,31 +15868,25 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "SimpleType",
             "typeRef": {
-              "$ref": "#/rules@11"
+              "$ref": "#/rules@18"
             }
           },
           {
             "$type": "SimpleType",
             "typeRef": {
-              "$ref": "#/rules@72"
+              "$ref": "#/rules@79"
             }
           },
           {
             "$type": "SimpleType",
             "typeRef": {
-              "$ref": "#/rules@78"
+              "$ref": "#/rules@85"
             }
           },
           {
             "$type": "SimpleType",
             "typeRef": {
-              "$ref": "#/rules@76"
-            }
-          },
-          {
-            "$type": "SimpleType",
-            "typeRef": {
-              "$ref": "#/rules@97"
+              "$ref": "#/rules@83"
             }
           },
           {
@@ -15254,7 +15898,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "SimpleType",
             "typeRef": {
-              "$ref": "#/rules@106"
+              "$ref": "#/rules@111"
             }
           },
           {
@@ -15266,19 +15910,25 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "SimpleType",
             "typeRef": {
-              "$ref": "#/rules@130"
+              "$ref": "#/rules@120"
             }
           },
           {
             "$type": "SimpleType",
             "typeRef": {
-              "$ref": "#/rules@14"
+              "$ref": "#/rules@137"
             }
           },
           {
             "$type": "SimpleType",
             "typeRef": {
-              "$ref": "#/rules@27"
+              "$ref": "#/rules@21"
+            }
+          },
+          {
+            "$type": "SimpleType",
+            "typeRef": {
+              "$ref": "#/rules@34"
             }
           }
         ]
@@ -15293,13 +15943,13 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "SimpleType",
             "typeRef": {
-              "$ref": "#/rules@78"
+              "$ref": "#/rules@85"
             }
           },
           {
             "$type": "SimpleType",
             "typeRef": {
-              "$ref": "#/rules@106"
+              "$ref": "#/rules@113"
             }
           }
         ]
@@ -15314,37 +15964,37 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "SimpleType",
             "typeRef": {
-              "$ref": "#/rules@78"
-            }
-          },
-          {
-            "$type": "SimpleType",
-            "typeRef": {
-              "$ref": "#/rules@95"
-            }
-          },
-          {
-            "$type": "SimpleType",
-            "typeRef": {
-              "$ref": "#/rules@74"
-            }
-          },
-          {
-            "$type": "SimpleType",
-            "typeRef": {
-              "$ref": "#/rules@76"
-            }
-          },
-          {
-            "$type": "SimpleType",
-            "typeRef": {
-              "$ref": "#/rules@97"
+              "$ref": "#/rules@85"
             }
           },
           {
             "$type": "SimpleType",
             "typeRef": {
               "$ref": "#/rules@102"
+            }
+          },
+          {
+            "$type": "SimpleType",
+            "typeRef": {
+              "$ref": "#/rules@81"
+            }
+          },
+          {
+            "$type": "SimpleType",
+            "typeRef": {
+              "$ref": "#/rules@83"
+            }
+          },
+          {
+            "$type": "SimpleType",
+            "typeRef": {
+              "$ref": "#/rules@104"
+            }
+          },
+          {
+            "$type": "SimpleType",
+            "typeRef": {
+              "$ref": "#/rules@109"
             }
           }
         ]

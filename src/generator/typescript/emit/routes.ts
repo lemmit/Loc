@@ -113,7 +113,7 @@ export function renderHttpIndex(
   // that the user supplied a verifier, and mount the middleware
   // after CORS but before any business route.
   const authImport = authRequired
-    ? `import { authMiddleware } from "../auth/middleware";\nimport { assertUserVerifierRegistered } from "../auth/verifier";`
+    ? `import { authMiddleware } from "../auth/middleware";\nimport { assertUserVerifierRegistered } from "../auth/verifier";\nimport { authRoutes } from "../auth/handshake";`
     : null;
   // After the verifier assert, emit `auth_enabled` info so every boot's
   // log stream advertises whether auth is on for this deployable —
@@ -122,6 +122,10 @@ export function renderHttpIndex(
     ? `  assertUserVerifierRegistered();\n  ${renderHonoBaseLogCall("authEnabled", "required: true")}`
     : null;
   const authMount = authRequired ? '  app.use("*", authMiddleware);' : null;
+  // Auth session routes mount at /auth: `/auth/me` (the frontend guard's
+  // session probe) always, plus the OIDC login redirect + callback (which
+  // the middleware bypasses) when an `auth { oidc }` block is present.
+  const authRoutesMount = authRequired ? '  app.route("/auth", authRoutes());' : null;
   return (
     lines(
       "// Auto-generated.",
@@ -170,6 +174,7 @@ export function renderHttpIndex(
       "  // .loomignore + tighten in production.",
       '  app.use("*", cors());',
       authMount,
+      authRoutesMount,
       "  // Liveness probe — cheap, no I/O.  K8s livenessProbe / docker-compose",
       '  // healthcheck use this to decide "is the process alive?".  A DB blip',
       "  // must NOT mark the pod not-alive (that restarts the container);",

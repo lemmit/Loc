@@ -16,6 +16,7 @@ export function PreviewPane({ ctx }: Props): JSX.Element {
     previewProblem,
     ddl,
     engine,
+    authedRuntime,
     generateSuccess,
     reactBundleStatus,
     unsupportedDeployables,
@@ -40,7 +41,7 @@ export function PreviewPane({ ctx }: Props): JSX.Element {
             versions={previewBundle.versions}
             vendorImportmap={previewBundle.vendorImportmap}
             vendorCssUrl={previewBundle.vendorCssUrl}
-            runtime={engine}
+            runtime={authedRuntime}
             onAppLog={ctx.appendAppLog}
           />
           {previewProblem && (
