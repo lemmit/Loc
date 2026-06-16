@@ -58,15 +58,19 @@ state lives on the page):
 
 ## Scope / fallback
 
-All four React packs ship the controlled modal: Mantine (`<Modal opened/onClose>`),
-shadcn (`<Dialog open/onOpenChange>`), MUI (`<Dialog open/onClose>`), Chakra
-(v2 `<Modal isOpen/onClose>`, v3 `<Dialog.Root open/onOpenChange>`).
+> **Status update:** now implemented on **all eight frontend packs.**
 
-A pack without a `primitive-modal-controlled` template (Vue: vuetify/shadcnVue;
-Svelte: shadcnSvelte/flowbite; Phoenix HEEx) keeps the existing explanatory stub
-comment — no breakage. Vue/Svelte are a deliberate follow-up: their state model
-differs (Vue `ref` + `v-model`; Svelte `$state` + `x = false`, not the React
-`setter`), and their modal area is itself partly unbuilt (vuetify's op-form
-modal is a TODO), so the templates want their own verification (vue-tsc /
-svelte-check) rather than a port of the React shape. No new walker primitive
-name, so the completeness/HEEx-parity gates are unaffected.
+- **React** — Mantine (`<Modal opened/onClose>`), shadcn (`<Dialog open/onOpenChange>`),
+  MUI (`<Dialog open/onClose>`), Chakra (v2 `<Modal isOpen/onClose>`, v3
+  `<Dialog.Root open/onOpenChange>`).
+- **Vue** — vuetify (`<v-dialog v-model>` + `v-card`), shadcnVue
+  (`<Dialog v-model:open>`). State is a `ref`; v-model writes it (no React setter).
+- **Svelte** — shadcnSvelte / flowbite (a hand-rolled `{#if <state>}` overlay,
+  matching their op-form modal idiom; the `$state` rune drives visibility).
+
+Phoenix HEEx is the one frontend left on the stub — it runs a parallel walker
+(`heex-walker-core`, not `walkBody`), so `emitControlledModal` doesn't reach it;
+a HEEx controlled modal is a separate engine-specific task. A pack without a
+`primitive-modal-controlled` template keeps the explanatory stub comment — no
+breakage. No new walker primitive name, so the completeness/HEEx-parity gates
+are unaffected.

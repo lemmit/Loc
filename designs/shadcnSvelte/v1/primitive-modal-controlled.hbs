@@ -1,0 +1,8 @@
+{#if {{opened}} }
+{{indent}}<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+{{indent}}  <div class="w-full max-w-md rounded-xl border bg-background p-6 shadow-lg"{{{testidAttr}}}>{{#if hasTitle}}
+{{indent}}    <h3 class="mb-4 text-lg font-semibold">{{title}}</h3>{{/if}}
+{{indent}}    {{{childrenJsx}}}
+{{indent}}  </div>
+{{indent}}</div>
+{{closeIndent}}{/if}

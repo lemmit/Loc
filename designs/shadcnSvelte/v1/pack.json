@@ -53,6 +53,7 @@
     "primitive-key-value-row": "primitive-key-value-row.hbs",
     "primitive-loader": "primitive-loader.hbs",
     "primitive-modal": "primitive-modal.hbs",
+    "primitive-modal-controlled": "primitive-modal-controlled.hbs",
     "primitive-money": "primitive-money.hbs",
     "primitive-multiline-field": "primitive-multiline-field.hbs",
     "primitive-number-field": "primitive-number-field.hbs",
