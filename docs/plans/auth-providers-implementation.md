@@ -72,9 +72,18 @@
 > LiveView guards remain the open frontend-target work** (each is a
 > separate generator needing its own guard component).
 >
-> **Status: Phases 0–1, 6 (React) – 7 done; Phases 2–5 + non-React
-> frontend guards pending.** Decisions locked with
-> the maintainer (2026-06-15):
+> **Phase 4 shipped (default-deny enforcement, partial).** Opt-in via
+> `auth { enforcement: denyByDefault }` (default `opt` is inert). An IR
+> check (`loom.default-deny-ungated`) rejects any **public operation /
+> destroy** reachable on an `auth: required` deployable that declares no
+> `requires` gate; `requires true` is the explicit "intentionally public"
+> escape. Scope v1 covers operations + destroys (OperationIR bodies);
+> canonical creates, workflows, finds, and views are a documented
+> follow-up (different gate surface). 5 tests; full fast suite green.
+>
+> **Status: Phases 0–1, 4 (partial), 6 (React), 7 done; Phases 2/3/5 +
+> creates/workflows/finds/views default-deny + non-React frontend guards
+> pending.** Decisions locked with the maintainer (2026-06-15):
 >
 > 1. **Scope** = OIDC authentication providers + playground auth stub
 >    **+ default-deny enforcement** (the known `auth.md` hole, §4.3 of the

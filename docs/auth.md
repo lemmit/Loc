@@ -24,9 +24,14 @@ Shipped over four slices:
 
 What's intentionally **not** here yet:
 
-- Default-deny enforcement on `auth: required` deployables (every
-  operation/find/view must declare `requires anonymous` or a real
-  gate to be reachable).
+- **Default-deny enforcement** is now opt-in via
+  `auth { enforcement: denyByDefault }` (default `opt` preserves the
+  per-`requires` behaviour).  Under `denyByDefault`, every **public
+  operation / destroy** reachable on an `auth: required` deployable
+  must declare a `requires` gate — `requires true` is the explicit
+  "intentionally public" escape — else `loom.default-deny-ungated`
+  fires.  Still uncovered (follow-up): canonical `create`s, workflows,
+  repository finds, and views (their gate surface differs).
 - Workflow bodies calling currentUser-bound finds — the validator
   currently rejects this with a pointer at `getById` or moving the
   call out to the route layer.
@@ -181,10 +186,11 @@ declared `function`.  `requires` is admissible in workflow
 bodies too; the workflow handler / route handler maps it to 403
 the same way as the operation route does.
 
-Slice 2 does **not** add default-deny enforcement: a deployable
-on `auth: required` still serves any operation that doesn't
-declare a `requires` gate.  Closing that hole is a follow-up
-slice.
+Default-deny is opt-in via `auth { enforcement: denyByDefault }`
+(see the note at the top).  Without it (`enforcement: opt`, the
+default) a deployable on `auth: required` still serves any
+operation that doesn't declare a `requires` gate — Slice 2's
+original behaviour.
 
 `currentUser` is in scope wherever an expression evaluates **per
 request**:
