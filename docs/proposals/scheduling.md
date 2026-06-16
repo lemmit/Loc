@@ -87,35 +87,45 @@ context Orders {
 
 // System scope — infrastructure binding, mirrors `channelSource`.
 // The cadence lives HERE, swappable per environment.
-timerSource nightly { for: NightlyTick, cadence: "daily at 02:00", in: "Europe/Amsterdam" }
-timerSource sweep   { for: SweepTick,   cadence: "every 5m" }
+timerSource nightly { for: NightlyTick, cron:  "0 2 * * *", in: "Europe/Amsterdam" }
+timerSource sweep   { for: SweepTick,   every: 5m }
 ```
 
 - **`event … { at: datetime }`** — a tick is a normal event. Workflows that don't
   exist yet can ignore it; ones that care react with `on`. The `at` field carries
   the fire time so the body can use it (`t.at`).
-- **`timerSource name { for: <Event>, cadence: <string>, in: <tz>? }`** — the
-  system-scope binding that fires the event on a cadence. Shape mirrors
+- **`timerSource name { for: <Event>, (cron: <string> | every: <duration>), in: <tz>? }`**
+  — the system-scope binding that fires the event on a cadence. Shape mirrors
   `channelSource { for: <Channel>, use: <Storage> }`: a `for:` naming what it
   drives, the realization details alongside.
 
-### Cadence vocabulary (a validated string, not new grammar)
+### Two cadence modes — real cron, not a bespoke vocabulary
 
-`cadence:` is a **string literal** validated against a closed grammar at IR time —
-the same tactic the resource layer uses (typed surface, vendor cron underneath),
-without expanding the keyword surface:
+Cron and interval are genuinely different beasts, and a draft of this RFC got
+this wrong (a `cadence:` string sublanguage — `"daily at 02:00"` — that just
+lowered to cron anyway; see §9.1). The decision instead is **exactly one of two
+explicit fields**, the second existing only because cron literally cannot express
+it:
 
-| `cadence:` value | Meaning | Lowers to |
+| Field | For | Notes |
 |---|---|---|
-| `"every 30s"` … `"every 12h"` | fixed interval | interval timer |
-| `"daily at 02:00"` | once per day | cron `0 2 * * *` |
-| `"weekly on monday at 09:00"` | once per week | cron `0 9 * * 1` |
-| `"monthly on 1 at 00:00"` | once per month | cron `0 0 1 * *` |
-| `"cron(0 */6 * * *)"` | raw 5-field escape hatch | passthrough |
+| `cron: "<expr>"` | calendar schedules | a **real 5-field cron expression**, passed through to each backend's native scheduler. Standard cron nicknames work — `cron: "@daily"`, `"@hourly"`, `"@weekly"`, `"@monthly"` — giving readability with *zero* invented vocabulary. |
+| `every: <duration>` | fixed intervals | reuses the existing duration literal (`30s` / `5m` / `90m` / `12h`). Exists because 5-field cron **cannot** express sub-minute ticks or non-hour-dividing intervals, and every backend drives intervals through a separate timer mechanism anyway. |
 
-Keeping cadence a *string* (not grammar) is deliberate: it is an infra value, it
-belongs on the infra binding, and it lets ops re-tune cadence by editing the
-`timerSource` (or, later, an env override) without touching the domain.
+Why this over a structured cadence vocabulary:
+
+- **No translation layer.** A `cron:` value is the cron the backend already runs —
+  no parse-and-remap, no half-built sugar that punts to a `cron(...)` escape hatch
+  for anything non-trivial ("weekdays at 9 and 17", "first monday of the month").
+- **Right audience.** Cadence is infra config on the infra binding — written by
+  whoever runs ops, who already speaks cron. Optimizing the surface for
+  cron-illiterate readers optimizes for a reader who isn't here.
+- **Still validated.** "Real cron" ≠ "unchecked string": IR validation parses the
+  expression and range-checks each field, exactly as it would a bespoke
+  vocabulary. Validatability never depended on inventing words.
+- **Two fields, not one `cadence:`.** Keeping `cron`/`every` distinct makes each
+  field mono-typed (a cron expr vs a duration), so the validator and every backend
+  emitter branch on *which field is set*, never on parsing a mode out of a string.
 
 ## 4. Why `create(t: Tick) by …` also just works
 
@@ -189,8 +199,8 @@ app's Ecto repo). Deployables hosting no `timerSource` are byte-identical.
   (the one new emission category this RFC introduces).
 - `loom.timer-needs-state` — the owning deployable must bind a relational `state`
   resource (single-fire lock).
-- `loom.timer-bad-cadence` — malformed `cadence:` string (`"daily at 25:00"`,
-  interval below floor, unparseable `cron(...)`).
+- `loom.timer-cadence` — neither or both of `cron:` / `every:` set, an
+  unparseable / out-of-range cron expression, or an interval below the floor.
 - `loom.timer-source-unbound` — a `timerSource` whose `for:` event no workflow
   reacts to (warning — a tick with no listener is dead config).
 - **Print/round-trip:** `timerSource` is a top-level declaration — add a
@@ -227,19 +237,32 @@ needs a *new* paramless workflow entry shape (workflows are members-only today),
 reintroducing a bespoke trigger by the back door. Reusing `on(e: Event)` is
 strictly less new surface.
 
+### 9.1 Rejected sub-decision: a structured `cadence:` vocabulary
+
+The first cadence design was a single `cadence:` string with a closed pseudo-DSL
+(`"every 5m"`, `"daily at 02:00"`, `"weekly on monday at 09:00"`, plus a
+`"cron(…)"` escape hatch). Rejected: every form lowered to cron anyway, so it was
+a translation layer over a *partial* vocabulary that punted to raw cron for
+anything real ("weekdays at 9 and 17", "first monday"); it optimized readability
+for domain modelers when the actual author is ops (cron-fluent); and a single
+string conflated two genuinely different modes. Replaced by explicit `cron:`
+(real cron, with standard `@daily`/`@hourly`/… nicknames for readability) and
+`every:` (the interval mode cron cannot express). See §3.
+
 ## 10. Phased delivery
 
-**Phase 1 — interval + daily, Hono + one backend.**
-`timerSource` declaration; `TimerSourceIR`; `timerOwner` enrichment;
-infrastructure-emit validator relaxation; advisory-lock single-fire; node-cron +
-.NET `BackgroundService` tick→dispatch; `"every <d>"` + `"daily at HH:MM"`
-cadence; catalog events; validators. CI: a `timerSource`-bearing example
-generates byte-identically where unused; a fast unit test asserts cron lowering +
-lock SQL.
+**Phase 1 — `cron:` + `every:`, Hono + one backend.**
+`timerSource` declaration with both cadence fields; `TimerSourceIR`; `timerOwner`
+enrichment; infrastructure-emit validator relaxation; advisory-lock single-fire;
+node-cron + .NET `BackgroundService` tick→dispatch; cron parse/range validation
+(nicknames included) + interval floor; catalog events. CI: a `timerSource`-bearing
+example generates byte-identically where unused; a fast unit test asserts the cron
+passthrough + interval-timer wiring + lock SQL.
 
-**Phase 2 — full cadence + all backends.**
-`"weekly"` / `"monthly"` / `"cron(…)"`; timezone (`in:` + a `system { timezone }`
-default); Phoenix/Oban, Python/APScheduler, Java/Spring; `overlap: allow`.
+**Phase 2 — all backends + timezone.**
+Phoenix/Oban, Python/APScheduler, Java/Spring (each consuming the same `cron:` /
+`every:` pair); timezone (`in:` + a `system { timezone }` default);
+`overlap: allow`.
 
 **Phase 3 — durability + env overrides.**
 `missed: run` (catch-up), `retry: <n>` with backoff, per-environment cadence
