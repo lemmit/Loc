@@ -1465,7 +1465,7 @@ describe(".NET generator", () => {
     it("maps GET /auth/me when `auth: required`, and not otherwise", async () => {
       const program = (await emitForAuthSystem(SRC_AUTH_REQUIRED)).get("Program.cs")!;
       expect(program).toContain(
-        'app.MapGet("/auth/me", (ICurrentUserAccessor accessor) => Results.Json(accessor.User));',
+        'app.MapGet("/auth/me", (ICurrentUserAccessor accessor) => Results.Json(accessor.User)).ExcludeFromDescription();',
       );
       const noAuth = (await emitForAuthSystem(SRC_NO_AUTH)).get("Program.cs")!;
       expect(noAuth).not.toContain("/auth/me");
