@@ -41,12 +41,16 @@ on:
     - cron: '0 6 * * *'
   workflow_dispatch:
 
-# Cancel in-flight runs of the same branch when a new commit lands.
-# Saves CI minutes on rebases and force-pushes; the latest commit is
-# what ultimately gets gated.
+# Cancel superseded *push* runs (a newer merge is what ultimately gets
+# gated, so killing the older in-flight push saves CI minutes).  But key
+# the group by event so a scheduled / manually-dispatched run gets its
+# OWN lane: those share `refs/heads/main` with push runs, and on a busy
+# day every merge was cancelling the nightly before it could produce a
+# pass/fail signal.  Only push runs auto-cancel; schedule + dispatch
+# always run to completion.
 concurrency:
-  group: playground-e2e-${{ github.ref }}
-  cancel-in-progress: true
+  group: playground-e2e-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   e2e:
