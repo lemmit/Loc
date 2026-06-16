@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";
 
-const BASE = (authUi: boolean) => `
+const BASE = (authUi: boolean, design?: string) => `
 system Helpdesk {
   user { id: string role: string }
   auth {
@@ -25,7 +25,7 @@ system Helpdesk {
   api SupportApi from Support
   deployable api { platform: hono contexts: [Tickets] serves: SupportApi dataSources: [st] port: 8080 auth: required }
   ui WebApp with scaffold(subdomains: [Support]) { }
-  deployable web { platform: react targets: api ui: WebApp port: 3001${authUi ? " auth: ui" : ""} }
+  deployable web { platform: react targets: api ui: WebApp port: 3001${design ? ` design: ${design}` : ""}${authUi ? " auth: ui" : ""} }
 }
 `;
 
@@ -55,6 +55,21 @@ describe("react auth: ui guard — emission", () => {
 
     const client = find(files, "web/src/api/client.ts");
     expect(client).toContain('credentials: "include"');
+  });
+
+  // Every React design pack must wrap <App/> in <AuthGate> (the wrap lives
+  // in each pack's main.hbs; the guard files are pack-agnostic).
+  it.each([
+    "mantine",
+    "shadcn",
+    "mui",
+    "chakra",
+  ])("%s pack wraps <App/> in <AuthGate>", async (design) => {
+    const files = await generateSystemFiles(BASE(true, design));
+    const main = find(files, "web/src/main.tsx");
+    expect(main).toContain('import { AuthGate } from "./auth/AuthGate";');
+    expect(main).toContain("<AuthGate>");
+    expect(main).toContain("</AuthGate>");
   });
 
   it("omits all auth wiring when the frontend has no auth: ui", async () => {

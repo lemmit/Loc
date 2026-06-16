@@ -5,7 +5,8 @@ import { BrowserRouter } from "{{routerPackage}}";
 import { ChakraProvider } from "@chakra-ui/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
-import { ErrorBoundary } from "./ErrorBoundary";
+{{#if authUi}}import { AuthGate } from "./auth/AuthGate";
+{{/if}}import { ErrorBoundary } from "./ErrorBoundary";
 import { theme } from "./theme";
 
 const queryClient = new QueryClient({
@@ -23,8 +24,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <ChakraProvider theme={theme}>
         <BrowserRouter basename={basename}>
-          <App />
-        </BrowserRouter>
+{{#if authUi}}          <AuthGate>
+            <App />
+          </AuthGate>
+{{else}}          <App />
+{{/if}}        </BrowserRouter>
       </ChakraProvider>
     </QueryClientProvider>
     </ErrorBoundary>

@@ -62,12 +62,18 @@
 > needed). tsc-gated (the emitted `web/` project type-checks against real
 > React/Mantine types); content + validation tests; full fast suite green.
 >
-> **Other React packs (shadcn/mui/chakra) `auth: ui` wrap: follow-up** —
-> the pack-agnostic auth files + API-client credentials are emitted for
-> all packs, but only the mantine `main.hbs` wraps `<App/>` in `<AuthGate>`
-> so far; wiring the other packs' `main.hbs` is the remaining Phase 6 work.
+> **Phase 6b shipped (all React packs + framework gate).** The `<App/>`
+> wrap now lands in every React pack's `main.hbs` (mantine v7/v9, shadcn
+> v3/v4, mui v5/v7, chakra v2/v3) — verified per-pack (content test ×4)
+> and tsc'd on shadcn + mantine. A new IR check
+> (`loom.auth-ui-unsupported-framework`) rejects `auth: ui` on a frontend
+> whose resolved UI framework isn't react (vue / svelte) so the limitation
+> fails loudly instead of emitting no guard. **Vue / Svelte / Phoenix
+> LiveView guards remain the open frontend-target work** (each is a
+> separate generator needing its own guard component).
 >
-> **Status: Phases 0–1, 6–7 done; Phases 2–5 pending.** Decisions locked with
+> **Status: Phases 0–1, 6 (React) – 7 done; Phases 2–5 + non-React
+> frontend guards pending.** Decisions locked with
 > the maintainer (2026-06-15):
 >
 > 1. **Scope** = OIDC authentication providers + playground auth stub

@@ -22,6 +22,7 @@ import {
   elixirFoundationsHostingEachContext,
   validateAuditedOperationSupport,
   validateAuth,
+  validateAuthUiFramework,
   validateContextFilterSupport,
   validateDapperSupport,
   validateDataSourceCoverage,
@@ -108,6 +109,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
+    validateAuthUiFramework(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
     // Scaffold expansion now runs at the AST level
