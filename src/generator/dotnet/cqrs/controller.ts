@@ -194,6 +194,10 @@ export function emitController(
                   defaultErrorStatus(spec.absent.tag),
                 title: errorTitle(spec.absent.tag),
                 typeUri: errorTypeUri(spec.absent.tag),
+                // The `resource` extension carries the aggregate name when the
+                // error payload declares it — matching the cross-backend absent
+                // body (Hono / Python / Java / Phoenix / vanilla all emit it).
+                resource: spec.absent.hasResource ? agg.name : undefined,
               } as const)
           : undefined;
         return {
