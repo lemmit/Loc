@@ -81,7 +81,19 @@
 > canonical creates, workflows, finds, and views are a documented
 > follow-up (different gate surface). 5 tests; full fast suite green.
 >
-> **Status: Phases 0–1, 4 (partial), 6 (React), 7 done; Phases 2/3/5 +
+> **Phase 2a shipped (.NET `/auth/me` parity).** The .NET backend now maps
+> `GET /auth/me` (the session probe the React `auth: ui` guard reads) when
+> `auth: required`, so a React frontend can target a .NET backend (dev-stub
+> identity today). Verified with the local .NET 8 SDK: `dotnet build
+> -warnaserror` (the `AnalysisLevel: latest-recommended` CA gate) → 0
+> warnings. The **.NET OIDC token verifier + `/auth/login|callback|logout`
+> handshake remain a focused follow-up** — the typed-claim→`User` mapping
+> and the JWKS/redirect C# need to clear ~200 CA analyzer rules under
+> `-warnaserror` and ideally a real-IdP runtime test, so it warrants its
+> own reviewed pass rather than an autopilot one.
+>
+> **Status: Phases 0–1, 4 (partial), 6 (React), 7 done; Phase 2a (.NET
+> /auth/me) done; Phase 2 OIDC verifier/handshake + Phases 3/5 +
 > creates/workflows/finds/views default-deny + non-React frontend guards
 > pending.** Decisions locked with the maintainer (2026-06-15):
 >

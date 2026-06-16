@@ -207,6 +207,16 @@ using (var scope = app.Services.CreateScope())
     ? `app.UseMiddleware<UserMiddleware>();
 `
     : "";
+  // Session probe for the frontend `auth: ui` guard — NOT in the bypass
+  // list, so UserMiddleware has already resolved (or rejected) the
+  // principal by the time this runs.  Returns the verified User as JSON.
+  // `ExcludeFromDescription()` keeps it out of the OpenAPI contract — it's
+  // an internal probe, not a business operation, and the Hono `/auth/me`
+  // lives outside its OpenAPI doc too (cross-backend parity).
+  const authMe = authRequired
+    ? `app.MapGet("/auth/me", (ICurrentUserAccessor accessor) => Results.Json(accessor.User)).ExcludeFromDescription();
+`
+    : "";
   return `// Auto-generated.
 using System.Text.Json;
 ${usingDapper ? "using Npgsql;\n" : "using Microsoft.EntityFrameworkCore;\n"}${usesValidators ? "using FluentValidation;\n" : ""}using ${ns}.Api;
@@ -497,7 +507,7 @@ app.UseHttpLogging();
 app.UseCors();
 app.UseSwagger();
 ${authMount}app.MapControllers();
-${
+${authMe}${
   hasEmbeddedSpa
     ? `
 // Fullstack mode — host the embedded React SPA from wwwroot/.

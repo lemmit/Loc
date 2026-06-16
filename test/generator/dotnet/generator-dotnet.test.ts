@@ -1459,6 +1459,18 @@ describe(".NET generator", () => {
       expect(keys).toContain("Auth/UserMiddleware.cs");
     });
 
+    // The frontend `auth: ui` guard probes GET /auth/me for the verified
+    // session; .NET maps it (not bypassed → UserMiddleware resolves the
+    // principal first).  Parity with the Hono backend.
+    it("maps GET /auth/me when `auth: required`, and not otherwise", async () => {
+      const program = (await emitForAuthSystem(SRC_AUTH_REQUIRED)).get("Program.cs")!;
+      expect(program).toContain(
+        'app.MapGet("/auth/me", (ICurrentUserAccessor accessor) => Results.Json(accessor.User)).ExcludeFromDescription();',
+      );
+      const noAuth = (await emitForAuthSystem(SRC_NO_AUTH)).get("Program.cs")!;
+      expect(noAuth).not.toContain("/auth/me");
+    });
+
     // A `requires`-guarded op / workflow denies with ForbiddenException →
     // 403 at runtime; the controller must DECLARE 403 in [ProducesResponseType].
     const SRC_GUARDED = `
