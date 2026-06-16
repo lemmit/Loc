@@ -81,9 +81,20 @@ walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
   actor; `manage_relationship` passes a struct where a map is idiomatic;
   side-effects in a `change` body vs `after_action`; `created_at` +
   `timestamps()` type overlap.
-- **.NET** `RegisterProject` 403s with the shipped dev stub (empty permissions,
-  admin role) — documented "replace the stub" gap; non-unique `byName`/`byHandle`
-  index vs single-row finder intent.
+- **.NET** `RegisterProject` 403s with the shipped dev stub — **SUPERSEDED, not
+  fixing here.** It's not .NET-specific: every backend's dev stub seeds
+  `role: "admin"` + **empty** permissions, so any `requires
+  currentUser.permissions…` gate 403s out of the box (role gates pass). The dev
+  stub is a transitional placeholder being replaced per-backend by generated
+  OIDC verifiers in the in-flight auth-providers track (#1222 OIDC providers,
+  #1225 default-deny, #1228 .NET `/auth/me`; plan:
+  `docs/plans/auth-providers-implementation.md` — the OIDC verifier
+  auto-registers *instead of* the dev stub when a provider is configured).
+  Per the maintainer, the dev stub itself is a candidate for removal once
+  authorization is fully in place — so seeding permissions into it now would be
+  throwaway and would collide with that active work. Left untouched.
+  Non-unique `byName`/`byHandle` index vs single-row finder intent remains a
+  separate (uncertain) item.
 
 ## Method note
 
