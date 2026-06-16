@@ -132,9 +132,24 @@
 > obs/e2e cell booting the stack + completing the flow is the natural
 > follow-up (and would finally runtime-close the Hono + .NET OIDC paths).
 >
+> **OIDC runtime e2e shipped — the chain is now RUNTIME-verified.** A new
+> docker-gated suite (`test/e2e/auth-oidc-e2e.test.ts`, `LOOM_AUTH_E2E=1`,
+> CI workflow `hono-oidc-e2e.yml`) boots a **real Keycloak** (the Phase 3
+> bundled realm import) + postgres in docker, runs the generated Hono
+> backend natively, password-grants a real token for the seeded `demo`
+> user, and asserts the **generated `OidcUserVerifier` validates it against
+> Keycloak's live JWKS** and maps the claims onto `User` — including the
+> dotted `realm_access.roles` path (`/auth/me` → `{id←sub, roles←
+> realm_access.roles, email}`), rejecting no-token and forged-token with
+> 401. **Verified passing locally** (booted Keycloak + the backend, ran the
+> flow). This converts the "compile-verified, not runtime-verified" caveat
+> on the OIDC verifier path into actually-verified. (The native-backend
+> harness sidesteps in-container npm egress; the full-compose
+> `host.docker.internal` wiring stays content-tested.)
+>
 > **Status: Phases 0–1, 2 (.NET OIDC complete), 3 (dev Keycloak), 4
-> (partial), 6 (React), 7 done; Phase 5 + creates/workflows/finds/views
-> default-deny + non-React frontend guards + an OIDC runtime-e2e
+> (partial), 6 (React), 7 + OIDC runtime e2e done; Phase 5 +
+> creates/workflows/finds/views default-deny + non-React frontend guards
 > pending.** Decisions locked with the maintainer (2026-06-15):
 >
 > 1. **Scope** = OIDC authentication providers + playground auth stub

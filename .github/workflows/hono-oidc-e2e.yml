@@ -1,0 +1,65 @@
+name: Hono OIDC auth (runtime e2e)
+
+# Runtime-verifies the OIDC turnkey-auth chain (D-AUTH-OIDC) end-to-end:
+# boots a REAL Keycloak (the bundled dev realm import) + postgres in
+# docker, runs the generated Hono backend natively, gets a real token for
+# the seeded `demo` user via the password grant, and asserts the generated
+# OidcUserVerifier validates it against Keycloak's live JWKS and maps the
+# configured claims (incl. the dotted realm_access.roles path) onto User.
+#
+# This is the runtime check the compile-only Hono / .NET OIDC build gates
+# can't give.  ubuntu-latest ships docker; the backend runs in pure Node
+# (lazy pg pool), Keycloak + postgres are pulled images (no build).
+#
+# Triggers `push: main` + manual dispatch only — NOT per-PR (sibling to
+# the *-obs-e2e jobs; same rationale: regression net, not a PR gate, and
+# Keycloak boot is heavier than a unit suite).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/typescript/**'
+      - 'src/platform/hono/**'
+      - 'src/system/index.ts'
+      - 'test/e2e/auth-oidc-e2e.test.ts'
+      - 'test/e2e/fixtures/auth-oidc-e2e.ddd'
+      - 'package.json'
+      - '.github/workflows/hono-oidc-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hono-oidc-e2e:
+    runs-on: ubuntu-latest
+    # Keycloak boot (~25s) + the generated project's npm install (cold
+    # ~3-4min) dominate.  12min cap.
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Run Hono OIDC runtime e2e
+        env:
+          LOOM_AUTH_E2E: '1'
+        run: npm run test:auth-e2e -- --reporter=verbose
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## Hono OIDC runtime e2e failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the "Run Hono OIDC runtime e2e" step above for the captured backend stdout.' >> $GITHUB_STEP_SUMMARY
+          echo 'The test boots a real Keycloak + postgres, gets a token for the seeded `demo` user, and asserts the generated OIDC verifier validates it (JWKS) and maps the claims onto User.' >> $GITHUB_STEP_SUMMARY

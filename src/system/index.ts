@@ -489,6 +489,9 @@ function renderKeycloakRealm(sys: SystemIR): string {
         enabled: true,
         publicClient: true,
         standardFlowEnabled: true,
+        // Dev realm: allow the password grant so tokens can be scripted
+        // (tests / curl) without driving the browser redirect flow.
+        directAccessGrantsEnabled: true,
         redirectUris: ["http://localhost:*", "http://127.0.0.1:*"],
         webOrigins: ["*"],
       },
