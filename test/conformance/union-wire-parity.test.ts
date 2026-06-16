@@ -137,14 +137,18 @@ describe("discriminated unions — cross-backend wire parity (P4e)", () => {
     expect(await dotnetShape()).toEqual(await canonical());
   });
 
-  it("Phoenix emits the canonical tagged shape", async () => {
-    expect(await phoenixShape()).toEqual(await canonical());
+  it("Phoenix tags the success variant inline; the error variant rides a 404 (A4)", async () => {
+    // Under the find re-shape (A4) the `NotFound` error variant is not a 200
+    // tagged member on Phoenix — the error payload has no struct, and the absent
+    // case maps to a 404 ProblemDetails (pinned by union-find-absence-parity.
+    // test.ts).  The success variant tags identically to the other backends.
+    expect(await phoenixShape()).toEqual({ Order: (await canonical()).Order });
   });
 
-  it("all three backends agree on the tagged-union wire", async () => {
+  it("Hono and .NET agree on the full tagged-union wire; Phoenix matches on the success variant", async () => {
     const [hono, dotnet, phoenix] = await Promise.all([honoShape(), dotnetShape(), phoenixShape()]);
     expect(hono).toEqual(dotnet);
-    expect(dotnet).toEqual(phoenix);
+    expect(phoenix).toEqual({ Order: hono.Order });
   });
 
   it("every backend uses the `type` discriminator", async () => {

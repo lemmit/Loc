@@ -647,6 +647,12 @@ function renderUnionTagger(
   const members = unionMembers(variants, ctx);
   const clauseFor = (m: UnionMember): string | null => {
     if (m.shape !== "record") return null; // scalar / none → catch-all
+    // Error payloads aren't reified as structs on Ash (an `error NotFound` has
+    // no `%Ctx.NotFound{}` struct), and under A4 an error variant rides a 404
+    // ProblemDetails rather than a 200 tagged body — so it never needs a tagger
+    // clause.  Skipping it both fixes the phantom-struct compile error and keeps
+    // the tagger to the success (aggregate / value-object) variants.
+    if (ctx.payloads.some((p) => p.name === m.tag && p.kind === "error")) return null;
     const fields = m.fields.map((f) => `${f.name}: v.${snake(f.name)}`).join(", ");
     const body = fields
       ? `%{type: ${JSON.stringify(m.tag)}, ${fields}}`
@@ -660,40 +666,31 @@ function renderUnionTagger(
   return clauses.join("\n");
 }
 
-/** The `case` arms that translate a union-find's *error* variants (`kind:
- *  "error"` payloads) to RFC-7807 ProblemDetails responses.  Under
- *  exception-less.md's find re-shape (A4) an error variant never rides the 200
- *  tagged-union body — the route maps it to a ProblemDetails at its mapped
- *  status, the same absent-variant wire the other five backends emit (Hono /
- *  .NET / Python / Java / the vanilla foundation).  The `resource` extension
- *  carries the aggregate name, matching the cross-backend canonical shape.
- *  Empty when the union is success-only (`Order or Cancel`) — that find keeps
- *  its plain `json(conn, tag_<union>(result))` action unchanged. */
-function unionFindErrorArms(
+/** The absent variant of a union-find return — the `kind: "error"` payload (an
+ *  `Agg or NotFound` shape).  Under exception-less.md's find re-shape (A4) the
+ *  absent variant never rides the 200 tagged-union body: the route maps it to an
+ *  RFC-7807 ProblemDetails at its mapped status, the same absent-variant wire
+ *  the other five backends emit (Hono / .NET / Python / Java / the vanilla
+ *  foundation).  On Ash the absent case is signalled by the read (no NotFound
+ *  *struct* exists — error payloads aren't reified as structs), so the route
+ *  reads via the non-bang code interface and maps `{:ok, nil}` / `{:error, _}`
+ *  to the ProblemDetails.  `null` for a success-only union (`Order or Cancel`),
+ *  which keeps its plain tag action. */
+function unionAbsentSpec(
   variants: TypeIR[],
   ctx: BoundedContextIR,
-  contextModule: string,
-  aggPascal: string,
-): string[] {
-  return variants
+): { status: number; type: string; title: string; hasResource: boolean } | null {
+  const tag = variants
     .map((v) => variantTag(v))
-    .filter((tag) => ctx.payloads.some((p) => p.name === tag && p.kind === "error"))
-    .map((tag) => {
-      const status = ctx.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag);
-      const payload = ctx.payloads.find((p) => p.name === tag);
-      const hasResource = (payload?.fields ?? []).some((f) => f.name === "resource");
-      const resource = hasResource ? `, resource: ${JSON.stringify(aggPascal)}` : "";
-      const body = `%{type: ${JSON.stringify(errorTypeUri(tag))}, title: ${JSON.stringify(
-        errorTitle(tag),
-      )}, status: ${status}, detail: ${JSON.stringify(
-        errorTitle(tag),
-      )}, instance: conn.request_path${resource}}`;
-      return `      %${contextModule}.${upperFirst(tag)}{} ->
-        conn
-        |> put_resp_content_type("application/problem+json")
-        |> put_status(${status})
-        |> json(${body})`;
-    });
+    .find((t) => ctx.payloads.some((p) => p.name === t && p.kind === "error"));
+  if (!tag) return null;
+  const payload = ctx.payloads.find((p) => p.name === tag);
+  return {
+    status: ctx.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag),
+    type: errorTypeUri(tag),
+    title: errorTitle(tag),
+    hasResource: (payload?.fields ?? []).some((f) => f.name === "resource"),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -806,29 +803,37 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
         // Producer-side variant selection (yielding a non-primary variant) is
         // developer logic — same boundary as the TS/.NET stubs.
         unionsUsed.set(union.name, union.variants);
-        // Find re-shape (A4): when a variant is an `error` payload, it maps to
-        // an RFC-7807 ProblemDetails at its status instead of a 200 tagged
-        // body — matching the runtime of every other backend (Hono / .NET /
-        // Python / Java / vanilla).  `tag_<union>/1` still declares all
-        // variants (the union *type* contract), but the route only tags the
-        // success variant(s) inline.  A success-only union (`Order or Cancel`)
-        // has no error arm and keeps the plain tag action.
-        const errorArms = unionFindErrorArms(
-          union.variants,
-          ctx,
-          contextModule,
-          upperFirst(agg.name),
-        );
-        if (errorArms.length > 0) {
+        // Find re-shape (A4): an `error`-payload variant (`Agg or NotFound`) is
+        // the absent case — it maps to an RFC-7807 ProblemDetails at its status
+        // instead of a 200 tagged body, matching every other backend (Hono /
+        // .NET / Python / Java / vanilla).  On Ash the error payload has no
+        // struct, so the route reads via the *non-bang* code interface and maps
+        // `{:ok, nil}` / `{:error, _}` to the ProblemDetails; the success
+        // variant(s) tag inline via `tag_<union>/1`.  A success-only union
+        // (`Order or Cancel`) has no absent spec and keeps the plain tag action.
+        const absent = unionAbsentSpec(union.variants, ctx);
+        if (absent) {
+          const resource = absent.hasResource
+            ? `, resource: ${JSON.stringify(upperFirst(agg.name))}`
+            : "";
+          const body = `%{type: ${JSON.stringify(absent.type)}, title: ${JSON.stringify(
+            absent.title,
+          )}, status: ${absent.status}, detail: ${JSON.stringify(
+            absent.title,
+          )}, instance: conn.request_path${resource}}`;
           findActions.push(`  @doc "GET /api/${aggPlural}/${findSnake}"
   def ${findSnake}(conn, params) do
     _ = params
 
-    case ${contextModule}.${findSnake}_${aggSnake}!(${argReads}) do
-${errorArms.join("\n\n")}
+    case ${contextModule}.${findSnake}_${aggSnake}(${argReads}) do
+      {:ok, record} when not is_nil(record) ->
+        json(conn, ${unionTagFn(union.name)}(record))
 
-      result ->
-        json(conn, ${unionTagFn(union.name)}(result))
+      _ ->
+        conn
+        |> put_resp_content_type("application/problem+json")
+        |> put_status(${absent.status})
+        |> json(${body})
     end
   end`);
           continue;

@@ -100,10 +100,13 @@ async function absenceController(): Promise<string> {
 }
 
 describe("phoenix generator — union-find with an error variant (A4)", () => {
-  it("maps the error variant to a 404 ProblemDetails arm", async () => {
+  it("reads via the non-bang interface and maps the absent case to a 404 ProblemDetails", async () => {
     const ctrl = await absenceController();
-    expect(ctrl).toContain("case PhoenixApp.Orders.recent_order!() do");
-    expect(ctrl).toContain("%PhoenixApp.Orders.NotFound{} ->");
+    // The error payload has no struct on Ash, so the route can't pattern-match a
+    // `%NotFound{}` — it reads via the non-bang `recent_order` and maps the
+    // absent result (`{:ok, nil}` / `{:error, _}`) to the ProblemDetails.
+    expect(ctrl).toContain("case PhoenixApp.Orders.recent_order() do");
+    expect(ctrl).toContain("{:ok, record} when not is_nil(record) ->");
     expect(ctrl).toContain('|> put_resp_content_type("application/problem+json")');
     expect(ctrl).toContain("|> put_status(404)");
     // The absent-variant wire matches the other backends byte-for-byte:
@@ -114,19 +117,18 @@ describe("phoenix generator — union-find with an error variant (A4)", () => {
     );
   });
 
-  it("still tags the success variant inline at 200", async () => {
+  it("tags the success variant inline at 200", async () => {
     const ctrl = await absenceController();
-    expect(ctrl).toContain("result ->");
-    expect(ctrl).toContain("json(conn, tag_order_or_not_found(result))");
+    expect(ctrl).toContain("json(conn, tag_order_or_not_found(record))");
   });
 
-  it("keeps every variant in tag_<union>/1 — the union type contract is unchanged", async () => {
+  it("tags only the success variant — the error payload has no struct clause", async () => {
     const ctrl = await absenceController();
     expect(ctrl).toContain(
       'defp tag_order_or_not_found(%PhoenixApp.Orders.Order{} = v), do: %{type: "Order", id: v.id, code: v.code, region: v.region}',
     );
-    expect(ctrl).toContain(
-      'defp tag_order_or_not_found(%PhoenixApp.Orders.NotFound{} = v), do: %{type: "NotFound", resource: v.resource}',
-    );
+    // No `%PhoenixApp.Orders.NotFound{}` clause — that struct doesn't exist
+    // (error payloads aren't reified on Ash), and the absent variant is a 404.
+    expect(ctrl).not.toContain("tag_order_or_not_found(%PhoenixApp.Orders.NotFound{}");
   });
 });
