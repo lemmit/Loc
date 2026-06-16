@@ -11,12 +11,32 @@
 
 import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import {
+  customFindsOfAgg,
+  esContextNeedsEnsure,
+  isEventSourced,
+  renderEnsureHelper,
+  renderEsContextBlock,
+} from "./eventsourced-emit.js";
+import { isReturningOperation, renderReturningOpFunction } from "./operation-returns-emit.js";
 import { customFindsOf } from "./repository-emit.js";
 
 /** Operation names whose `<op>_<agg>` collide with the CRUD
  *  defdelegates emitted above (list/get/create/update/delete).  Skipped
- *  for named-op emission to avoid Elixir function-clause redefinition. */
-const CRUD_RESERVED_NAMES = new Set(["create", "update", "delete", "destroy", "list", "get"]);
+ *  for named-op emission to avoid Elixir function-clause redefinition.
+ *  Exported so the controller emitter (`api-emit.ts`) only mounts a
+ *  per-operation member route for ops that actually have a `<op>_<agg>`
+ *  context function — CRUD-verb-named ops are served by the generic
+ *  create/update/delete routes instead, exactly as the named-op emission
+ *  here skips them. */
+export const CRUD_RESERVED_NAMES = new Set([
+  "create",
+  "update",
+  "delete",
+  "destroy",
+  "list",
+  "get",
+]);
 
 export function emitVanillaContextModule(
   appModule: string,
@@ -32,6 +52,11 @@ export function emitVanillaContextModule(
 function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedContextIR): string {
   const facadeMod = `${appModule}.${ctxModule}`;
   const blocks = ctx.aggregates.map((agg) => {
+    // Event-sourced aggregates expose create/get/list + per-op command
+    // runners (emit→append→fold) instead of the CRUD defdelegates.
+    if (isEventSourced(agg)) {
+      return renderEsContextBlock(appModule, ctxModule, agg, customFindsOfAgg(ctx, agg));
+    }
     const aggPascal = upperFirst(agg.name);
     const aggSnake = snake(agg.name);
     const repoMod = `${facadeMod}.${aggPascal}Repository`;
@@ -41,7 +66,11 @@ function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedC
     // already provides those names.
     const opBlocks = (agg.operations ?? [])
       .filter((op) => !CRUD_RESERVED_NAMES.has(op.name))
-      .map((op) => renderNamedOpFunction(facadeMod, agg, aggPascal, aggSnake, op));
+      .map((op) =>
+        isReturningOperation(op)
+          ? renderReturningOpFunction(facadeMod, ctx, agg, op)
+          : renderNamedOpFunction(facadeMod, agg, aggPascal, aggSnake, op),
+      );
     // Custom-find defdelegates — `<find>_<agg>(args...)` routes to the
     // repository fn emitted by `customFindsOf`.  Workflow `repo-let`
     // lowering (for a non-getById method) calls through this seam.
@@ -81,6 +110,11 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
   const retrievalBlock =
     retrievalLines.length > 0 ? `\n  # Retrievals\n${retrievalLines.join("\n")}\n` : "";
 
+  // Private `ensure/2` guard helper shared by the ES command runners (only
+  // emitted when an ES command body actually has a precondition/requires, so
+  // it never sits unused under --warnings-as-errors).
+  const ensureBlock = esContextNeedsEnsure(ctx) ? `\n${renderEnsureHelper()}\n` : "";
+
   return `# Auto-generated.
 defmodule ${facadeMod} do
   @moduledoc """
@@ -91,7 +125,7 @@ defmodule ${facadeMod} do
   workflow body).  Vanilla foundation (no Ash.Domain).
   """
 
-${blocks.join("\n")}${retrievalBlock}end
+${blocks.join("\n")}${retrievalBlock}${ensureBlock}end
 `;
 }
 

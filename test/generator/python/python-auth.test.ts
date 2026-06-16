@@ -45,6 +45,14 @@ describe("python auth gate", () => {
     expect(mw).toContain('BYPASS_PREFIXES = ("/health", "/ready", "/openapi.json", "/swagger")');
     expect(mw).toContain("request.state.current_user = user");
     expect(mw).toContain('return JSONResponse({"error": "unauthorized"}, status_code=401)');
+    // Stamps the principal id into the RequestContext carrier after verify;
+    // the user block's id key is `id`, so it reads user.id.
+    expect(mw).toContain("from app.obs.log import set_actor_id");
+    expect(mw).toContain("set_actor_id(str(user.id))");
+    // Stamped after the principal is set on request.state, before call_next.
+    const setIdx = mw.indexOf("request.state.current_user = user");
+    const stampIdx = mw.indexOf("set_actor_id(");
+    expect(stampIdx).toBeGreaterThan(setIdx);
   });
 
   it("wires the middleware after CORS and asserts the verifier at boot", async () => {

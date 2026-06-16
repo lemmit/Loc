@@ -1,0 +1,37 @@
+// Operation `or`-union returns on `foundation: vanilla` (exception-less.md A3,
+// T2.c).  Compiled by `build-generated-elixir-vanilla` so the producer-side
+// translation — the tagged `{:ok,_} | {:error, tag, data}` context fn and the
+// controller `case` mapping each variant to its RFC-7807 status via the shared
+// `problem_variant/5` responder — actually passes `mix compile --warnings-as-errors`.
+system Orders {
+  subdomain Sales {
+    context Reservations {
+      error NotFound { resource: string }
+
+      aggregate Order with crudish {
+        code: string
+
+        operation reserve(): Order or NotFound {
+          return NotFound { resource: code }
+        }
+      }
+
+      // An unfiltered find (no `where`, no params) exercises the
+      // bare-`from(record in Mod)` path — `where: ` with an empty predicate
+      // is invalid Elixir.
+      repository Orders for Order { find recent(): Order[] }
+    }
+  }
+
+  api OrdersApi from Sales
+  storage pg { type: postgres }
+  resource orderState { for: Reservations, kind: state, use: pg }
+
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Reservations]
+    dataSources: [orderState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

@@ -1522,6 +1522,9 @@ describe("typescript generator", () => {
       expect(mw).toMatch(
         /const ctx = requestContext\(\);\s*\n\s*if \(ctx\) ctx\.currentUser = user;/,
       );
+      // The principal's id is also stamped as the carrier's `actorId` — the
+      // who-computed slice audit / provenance read.  Id key is `id` here.
+      expect(mw).toContain("if (ctx) ctx.actorId = String(user.id);");
       expect(mw).toMatch(/c\.set\("currentUser", user\)/);
       // Ambient accessor — the analogue of .NET's ICurrentUserAccessor.User.
       expect(mw).toMatch(/export function requireCurrentUser\(\): User/);

@@ -27,7 +27,7 @@ export function emitVanillaEventModules(
   for (const ev of ctx.events) {
     out.set(
       `lib/${appSnake}/${ctxSnake}/events/${snake(ev.name)}.ex`,
-      renderEventModule(ev, contextModule, typesModule),
+      renderEventModule(ev, contextModule, typesModule, "vanilla"),
     );
   }
 }

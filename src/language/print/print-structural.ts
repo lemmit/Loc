@@ -9,6 +9,8 @@ import {
 import type {
   Aggregate,
   Api,
+  AuthBlock,
+  AuthConfigValue,
   BindEntry,
   BoundedContext,
   Component,
@@ -147,6 +149,8 @@ export function printStructural(node: AstNode): string {
       return printThemeBlock(node as ThemeBlock);
     case "UserBlock":
       return printUserBlock(node as UserBlock);
+    case "AuthBlock":
+      return printAuthBlock(node as AuthBlock);
     case "TestE2E":
       return printTestE2E(node as TestE2E);
     case "Ui":
@@ -281,6 +285,32 @@ function printUserBlock(node: UserBlock): string {
     "user",
     node.fields.map((f) => `${f.name}: ${printTypeRef(f.type)}`),
   );
+}
+
+function printAuthValue(v: AuthConfigValue): string {
+  return v.$type === "EnvAuthValue" ? `env(${quote(v.env)})` : quote(v.value);
+}
+
+function printAuthBlock(node: AuthBlock): string {
+  const items: string[] = [];
+  if (node.provider) items.push(`provider: ${node.provider}`);
+  if (node.oidc) {
+    const o = node.oidc;
+    const oidcItems: string[] = [];
+    if (o.issuer) oidcItems.push(`issuer: ${printAuthValue(o.issuer)}`);
+    if (o.clientId) oidcItems.push(`clientId: ${printAuthValue(o.clientId)}`);
+    if (o.clientSecret) oidcItems.push(`clientSecret: ${printAuthValue(o.clientSecret)}`);
+    if (o.audience) oidcItems.push(`audience: ${printAuthValue(o.audience)}`);
+    if (o.scopes.length) oidcItems.push(`scopes: [${o.scopes.map(quote).join(", ")}]`);
+    items.push(block("oidc", oidcItems));
+  }
+  if (node.sessions) items.push(`sessions: ${node.sessions}`);
+  if (node.claims) {
+    const entries = node.claims.entries.map((e) => `${e.field}: ${quote(e.path)}`);
+    items.push(entries.length === 0 ? "claims: {}" : `claims: {\n${indent(entries.join("\n"))}\n}`);
+  }
+  if (node.enforcement) items.push(`enforcement: ${node.enforcement}`);
+  return block("auth", items);
 }
 
 function printLayout(node: Layout): string {

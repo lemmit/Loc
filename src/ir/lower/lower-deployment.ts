@@ -13,9 +13,16 @@ import {
 
 export function lowerDeployable(d: Deployable): DeployableIR {
   const { family: platform, ref: platformRef } = qualifyPlatform(d.platform);
-  // `auth: required` is currently the only AuthMode.  Future modes
-  // (`optional` / `forbidden`) would extend this branch.
-  const auth = d.auth === "required" ? { required: true } : undefined;
+  // `auth: required` opts a backend into token middleware; `auth: ui`
+  // mounts the login redirect + guard on a frontend under the system
+  // `auth { ... }` block.  Future modes (`optional` / `forbidden`)
+  // would extend this branch.
+  const auth =
+    d.auth === "required"
+      ? { required: true, ui: false }
+      : d.auth === "ui"
+        ? { required: false, ui: true }
+        : undefined;
   // `design` defaults only on platforms that actually render UI in
   // this deployable — keeping the IR honest about which deployables
   // mount a frontend.  `react`/`static` always render React (TSX

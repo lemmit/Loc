@@ -80,7 +80,8 @@ export function emitDotnetProvenanceAuditMigration(
         "  computed_value jsonb,",
         "  at timestamptz NOT NULL,",
         "  correlation_id text,",
-        "  scope_id text",
+        "  scope_id text,",
+        "  actor_id text",
         ");",
       ].join("\n"),
     );

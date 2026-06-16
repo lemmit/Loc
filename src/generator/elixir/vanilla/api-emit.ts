@@ -14,9 +14,29 @@
 // extension shape byte-identical to the Ash tower) lands in Slice 4.
 // ---------------------------------------------------------------------------
 
-import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
+import { CRUD_RESERVED_NAMES } from "./context-emit.js";
+import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
+import { aggregateHasUnionFind, findRoutes, renderFindActions } from "./find-controller.js";
+import {
+  aggregateHasReturningOp,
+  isReturningOperation,
+  renderProblemVariantHelper,
+  renderReturningOpControllerAction,
+} from "./operation-returns-emit.js";
+
+/** Public operations that earn a dedicated `POST /<plural>/:id/<op>`
+ *  member endpoint.  CRUD-verb-named ops (create/update/destroy/…) are
+ *  served by the generic create/update/delete routes — and have no
+ *  `<op>_<agg>` context function to call — so they're excluded here, in
+ *  lockstep with the named-op emission in `context-emit.ts`. */
+function memberOperations(agg: { operations: readonly OperationIR[] }): OperationIR[] {
+  return agg.operations.filter(
+    (op) => op.visibility === "public" && !CRUD_RESERVED_NAMES.has(op.name),
+  );
+}
 
 export interface VanillaApiEmitResult {
   routes: ApiRoute[];
@@ -36,18 +56,25 @@ export function emitVanillaApiControllers(
     const aggSnake = snake(agg.name);
     const aggsPath = snake(plural(agg.name)); // "tasks" for Task
     const controllerName = `${aggPascal}Controller`;
+    const memberOps = memberOperations(agg);
+    const es = isEventSourced(agg);
     out.set(
       `lib/${appName}_web/controllers/${aggSnake}_controller.ex`,
-      renderController(appModule, ctxModule, agg.name, aggSnake),
+      es
+        ? renderEsController(appModule, ctxModule, agg, ctx)
+        : renderController(appModule, ctxModule, agg, aggSnake, memberOps, ctx),
     );
 
-    // Read path
+    // Read path.  Custom-find routes (`GET /<plural>/<find>`) MUST precede the
+    // `/:id` show route — Phoenix matches in registration order, so a literal
+    // `/<find>` segment has to come first or `:id` would swallow it.
     routes.push({
       method: "get",
       path: `/${aggsPath}`,
       controller: controllerName,
       action: ":index",
     });
+    routes.push(...findRoutes(agg, ctx));
     routes.push({
       method: "get",
       path: `/${aggsPath}/:id`,
@@ -65,7 +92,9 @@ export function emitVanillaApiControllers(
         action: ":create",
       });
     }
-    if (agg.operations.length > 0) {
+    // Event-sourced aggregates have no generic field-update / delete surface —
+    // their only mutations are the per-operation member endpoints below.
+    if (!es && agg.operations.length > 0) {
       routes.push({
         method: "patch",
         path: `/${aggsPath}/:id`,
@@ -73,12 +102,24 @@ export function emitVanillaApiControllers(
         action: ":update",
       });
     }
-    if ((agg.destroys ?? []).length > 0) {
+    if (!es && (agg.destroys ?? []).length > 0) {
       routes.push({
         method: "delete",
         path: `/${aggsPath}/:id`,
         controller: controllerName,
         action: ":delete",
+      });
+    }
+    // Per-operation member endpoints — `POST /<plural>/:id/<op>`, one per
+    // public non-CRUD operation, matching the Ash path (`elixir/api-emit.ts`)
+    // and the node/dotnet/python/java backends.  The URL segment uses
+    // `routeSlug` (D-URLSTYLE) while the action atom stays the op verb.
+    for (const op of memberOps) {
+      routes.push({
+        method: "post",
+        path: `/${aggsPath}/:id/${snake(op.routeSlug ?? op.name)}`,
+        controller: controllerName,
+        action: `:${snake(op.name)}`,
       });
     }
   }
@@ -89,11 +130,52 @@ export function emitVanillaApiControllers(
 function renderController(
   appModule: string,
   ctxModule: string,
-  aggName: string,
+  agg: AggregateIR,
   aggSnake: string,
+  memberOps: readonly OperationIR[],
+  ctx: BoundedContextIR,
 ): string {
-  const aggPascal = upperFirst(aggName);
+  const aggPascal = upperFirst(agg.name);
   const facadeMod = `${appModule}.${ctxModule}`;
+
+  // Per-operation member actions.  A returning operation (`: A or B`) translates
+  // its tagged result to HTTP (success → 200, error variant → ProblemDetails);
+  // a plain side-effecting op returns 204.  Validation failures surface as 422;
+  // a missing row is 404.
+  const opActions = memberOps
+    .map((op) => {
+      if (isReturningOperation(op)) {
+        return renderReturningOpControllerAction(ctxModule, agg, op, ctx);
+      }
+      const opSnake = snake(op.name);
+      return `
+  def ${opSnake}(conn, %{"id" => id} = params) do
+    attrs = Map.drop(params, ["id"])
+
+    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id),
+         {:ok, _updated} <- ${ctxModule}.${opSnake}_${aggSnake}(record, attrs) do
+      send_resp(conn, 204, "")
+    else
+      {:error, :not_found} ->
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        ProblemDetails.validation_error_response(conn, changeset)
+    end
+  end`;
+    })
+    .join("\n");
+
+  // Shared error-variant responder, emitted once when the aggregate has any
+  // returning op or a union find (else it'd be an unused private fn under
+  // --warnings-as-errors).
+  const problemVariant =
+    aggregateHasReturningOp(agg) || aggregateHasUnionFind(ctx, agg)
+      ? `\n${renderProblemVariantHelper()}\n`
+      : "";
+
+  // `GET /<plural>/<find>` actions for the aggregate's custom finds.
+  const findActions = renderFindActions(ctxModule, agg, ctx);
 
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do
@@ -156,7 +238,9 @@ defmodule ${appModule}Web.${aggPascal}Controller do
         ProblemDetails.validation_error_response(conn, changeset)
     end
   end
-
+${findActions}
+${opActions}
+${problemVariant}
   defp serialize(record) do
     record
     |> Map.from_struct()

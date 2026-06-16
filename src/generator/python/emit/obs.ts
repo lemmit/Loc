@@ -1,33 +1,45 @@
 // ---------------------------------------------------------------------------
-// Observability (docs/observability.md) — `app/obs/` for the Python
-// backend.  One JSON object per log line on stdout with the catalog
+// Observability (docs/observability.md) + the ambient execution-context
+// carrier (docs/architecture/request-context.md) — `app/obs/` for the
+// Python backend.  One JSON object per log line on stdout with the catalog
 // envelope (`ts` / `level` / `event` / `request_id`); structured fields
 // ride as additional top-level snake_case keys — the same flat shape
 // the Hono backend's pino stream produces, so the per-backend obs e2e
 // suites assert one contract.
 //
 //   app/obs/log.py        — CatalogFormatter + the `log(level, event,
-//                           **fields)` facade + the contextvar carrying
-//                           the request id (usable from any layer).
-//   app/obs/middleware.py — request bracket: request_start/request_end
-//                           with method/path/status/duration_ms, honors
-//                           an inbound x-request-id, echoes it back.
+//                           **fields)` facade + the RequestContext carrier
+//                           (a ContextVar usable from any layer).  The
+//                           carrier SUBSUMES the old request-id contextvar:
+//                           one ambient channel, not two (request-context.md
+//                           "subsume, don't add a second channel") — the
+//                           log line's `request_id` is the carrier's
+//                           correlation_id.
+//   app/obs/middleware.py — request bracket: opens the carrier (correlation
+//                           id from x-correlation-id || x-request-id ||
+//                           minted, root scope id, locale, start time),
+//                           logs request_start/request_end, echoes the
+//                           correlation id on both headers.
 //
 // Event identities come from `src/generator/_obs/log-events.ts` — the
 // single cross-backend catalog.
 // ---------------------------------------------------------------------------
 
-export const OBS_LOG_PY = `"""Structured JSON logging (observability.md).  Auto-generated.
+export const OBS_LOG_PY = `"""Structured JSON logging + ambient request context (observability.md,
+architecture/request-context.md).  Auto-generated.
 
 One JSON object per line on stdout: the catalog envelope (ts / level /
 event / request_id) plus the event's structured fields as top-level
-keys.
+keys.  The \`request_id\` field is the current request's correlation id,
+read from the ambient RequestContext carrier below.
 """
 
 import json
 import logging
 import sys
-from contextvars import ContextVar
+import uuid
+from contextvars import ContextVar, Token
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -43,7 +55,84 @@ _LEVELNO = {
 }
 _LEVEL_NAME = {v: k for k, v in _LEVELNO.items()}
 
-request_id_var: ContextVar[str | None] = ContextVar("loom_request_id", default=None)
+
+@dataclass(frozen=True)
+class RequestContext:
+    """Ambient per-request execution context (architecture/request-context.md).
+
+    Opened at the HTTP edge by ObservabilityMiddleware; read anywhere via the
+    accessors below without threading a request handle.
+    """
+
+    correlation_id: str
+    scope_id: str
+    parent_id: str | None = None
+    actor_id: str | None = None
+    locale: str = "en"
+    started_at: float = 0.0
+
+
+request_context_var: ContextVar[RequestContext | None] = ContextVar(
+    "loom_request_context", default=None
+)
+
+
+def new_id() -> str:
+    """Mint a fresh id (correlation / scope)."""
+    return uuid.uuid4().hex
+
+
+def current_context() -> RequestContext | None:
+    """The ambient context for the current request, or None outside one."""
+    return request_context_var.get()
+
+
+def correlation_id() -> str | None:
+    ctx = request_context_var.get()
+    return ctx.correlation_id if ctx is not None else None
+
+
+def scope_id() -> str | None:
+    ctx = request_context_var.get()
+    return ctx.scope_id if ctx is not None else None
+
+
+def parent_id() -> str | None:
+    ctx = request_context_var.get()
+    return ctx.parent_id if ctx is not None else None
+
+
+def actor_id() -> str | None:
+    """The principal id, or None before auth runs / under no-auth."""
+    ctx = request_context_var.get()
+    return ctx.actor_id if ctx is not None else None
+
+
+def locale() -> str:
+    ctx = request_context_var.get()
+    return ctx.locale if ctx is not None else "en"
+
+
+def started_at() -> float:
+    ctx = request_context_var.get()
+    return ctx.started_at if ctx is not None else 0.0
+
+
+def set_actor_id(value: str) -> None:
+    """Stamp the principal id once auth resolves it.  Only the id rides the
+    carrier; the full principal stays on request.state.current_user."""
+    ctx = request_context_var.get()
+    if ctx is not None:
+        request_context_var.set(replace(ctx, actor_id=value))
+
+
+def open_context(ctx: RequestContext) -> Token[RequestContext | None]:
+    """Open the carrier for the current request; returns a reset token."""
+    return request_context_var.set(ctx)
+
+
+def reset_context(token: Token[RequestContext | None]) -> None:
+    request_context_var.reset(token)
 
 
 class CatalogFormatter(logging.Formatter):
@@ -53,9 +142,9 @@ class CatalogFormatter(logging.Formatter):
             "level": _LEVEL_NAME.get(record.levelno, "info"),
             "event": record.getMessage(),
         }
-        rid = request_id_var.get()
-        if rid is not None:
-            body["request_id"] = rid
+        cid = correlation_id()
+        if cid is not None:
+            body["request_id"] = cid
         fields = getattr(record, "loom_fields", None)
         if isinstance(fields, dict):
             body.update(fields)
@@ -81,28 +170,42 @@ def log(level: str, event: str, **fields: object) -> None:
     _logger.log(_LEVELNO.get(level, logging.INFO), event, extra={"loom_fields": fields})
 `;
 
-export const OBS_MIDDLEWARE_PY = `"""Request bracket middleware (observability.md).  Auto-generated.
+export const OBS_MIDDLEWARE_PY = `"""Request bracket middleware (observability.md) + execution-context
+carrier boundary (architecture/request-context.md).  Auto-generated.
 
-Brackets every request with request_start / request_end, correlated by
-a request id (inbound x-request-id honored, else minted) that every log
-line inside the request scope inherits via the contextvar.
+Opens the ambient RequestContext at the HTTP edge — correlation id from
+x-correlation-id || x-request-id || minted, a fresh root scope id, the
+request locale, and the start time — brackets the request with
+request_start / request_end, and echoes the correlation id back on both
+x-correlation-id and x-request-id.  Added last in app/main.py so it runs
+outermost: the context is open before auth (which stamps actor_id) runs.
 """
 
 import time
-import uuid
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
-from app.obs.log import log, request_id_var
+from app.obs.log import RequestContext, log, new_id, open_context, reset_context
 
 
 class ObservabilityMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        rid = request.headers.get("x-request-id") or uuid.uuid4().hex
-        token = request_id_var.set(rid)
+        correlation = (
+            request.headers.get("x-correlation-id")
+            or request.headers.get("x-request-id")
+            or new_id()
+        )
+        token = open_context(
+            RequestContext(
+                correlation_id=correlation,
+                scope_id=new_id(),
+                locale=request.headers.get("accept-language") or "en",
+                started_at=time.time(),
+            )
+        )
         started = time.monotonic()
         log("info", "request_start", method=request.method, path=request.url.path)
         try:
@@ -116,7 +219,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 status=500,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
-            request_id_var.reset(token)
+            reset_context(token)
             raise
         log(
             "info",
@@ -126,7 +229,8 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             status=response.status_code,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
-        response.headers["x-request-id"] = rid
-        request_id_var.reset(token)
+        response.headers["x-request-id"] = correlation
+        response.headers["x-correlation-id"] = correlation
+        reset_context(token)
         return response
 `;

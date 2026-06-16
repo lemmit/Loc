@@ -1,0 +1,27 @@
+// Union-returning find (the absence producer).  Compiled by
+// build-generated-elixir-vanilla so the union-find controller action — tagged
+// `%{type: "Order", …}` success + `problem_variant/5` absence translation —
+// passes `mix compile --warnings-as-errors`.
+system Catalog {
+  subdomain Core {
+    context Shop {
+      error NotFound { resource: string }
+      aggregate Order with crudish {
+        customerId: string
+      }
+      repository Orders for Order {
+        find locate(ref: string): Order or NotFound where this.customerId == ref
+      }
+    }
+  }
+  api CatalogApi from Core
+  storage pg { type: postgres }
+  resource orderState { for: Shop, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Shop]
+    dataSources: [orderState]
+    serves: CatalogApi
+    port: 4000
+  }
+}

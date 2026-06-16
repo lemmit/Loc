@@ -74,6 +74,12 @@ export interface RenderCtx {
    *  17-arm `ExprIR.kind` dispatch is unchanged — only these leaves branch.
    *  See `docs/plans/vanilla-foundation-research.md` §3. */
   foundation?: "ash" | "vanilla";
+  /** Renders the aggregate-`id` expression (`{kind:"id"}`) as this bare
+   *  local instead of `<thisName>.id`.  Set by the event-sourced create
+   *  command runner, where the new aggregate id is a freshly generated
+   *  local (`id = Ecto.UUID.generate()`) and no `this` struct exists yet.
+   *  Unset everywhere else → `id` stays `<thisName>.id`. */
+  idLocal?: string;
   /** Per-name rewrite for `param` references.  Used by the in-process
    *  dispatch handlers (dispatch-emit.ts), where a reactor / event-create
    *  body's single bound event param (`s` in `on(s: ShipmentRequested)`)
@@ -102,7 +108,7 @@ export function relationshipNameFor(_agg: AggregateIR, fieldName: string): strin
 
 const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   literal: renderLiteral,
-  id: (ctx) => `${ctx.thisName}.id`,
+  id: (ctx) => ctx.idLocal ?? `${ctx.thisName}.id`,
   ref: renderRef,
   member: renderMember,
   methodCall: renderMethodCall,
@@ -344,7 +350,13 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       const names = e.argNames;
       if (names && names.length === args.length && names.every((n) => n)) {
         const namedFields = args.map((a, i) => `${snake(names[i] as string)}: ${a}`).join(", ");
-        return `%${ctx.contextModule}.${upperFirst(e.name)}{${namedFields}}`;
+        // Vanilla stores value objects as plain JSON maps — no `%Ctx.VO{}`
+        // struct module is emitted — so an inline VO constructor (e.g. in an
+        // event-sourced applier fold) builds a map; `%Ctx.VO{…}` would
+        // reference an undefined struct and fail `mix compile`.
+        return ctx.foundation === "vanilla"
+          ? `%{${namedFields}}`
+          : `%${ctx.contextModule}.${upperFirst(e.name)}{${namedFields}}`;
       }
       return `%${ctx.contextModule}.${upperFirst(e.name)}{${args.join(", ")}}`;
     }
@@ -600,7 +612,12 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
 // threaded through yet).
 // ---------------------------------------------------------------------------
 
-export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: string): string {
+export function renderTypespec(
+  t: TypeIR,
+  contextModule: string,
+  typesModule?: string,
+  foundation: "ash" | "vanilla" = "ash",
+): string {
   switch (t.kind) {
     // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
@@ -629,16 +646,19 @@ export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: s
       // IDs flow as UUID strings on the struct (Ash :uuid → String.t()).
       return typesModule ? `${typesModule}.id()` : "String.t()";
     case "enum":
-      // Enums are Ash.Type.Enum modules carrying an `atom` value on the
-      // struct.  Reference the module's auto-generated `.t()`.
-      return `${contextModule}.${upperFirst(t.name)}.t()`;
+      // Ash enums are `Ash.Type.Enum` modules (`.t()`); vanilla has no enum
+      // module — the value is stored as its string, so the spec is `String.t()`.
+      return foundation === "vanilla" ? "String.t()" : `${contextModule}.${upperFirst(t.name)}.t()`;
     case "valueobject":
+      // Ash emits an embedded resource module (`.t()`); vanilla stores value
+      // objects as plain JSON maps — no module exists, so the spec is `map()`.
+      return foundation === "vanilla" ? "map()" : `${contextModule}.${upperFirst(t.name)}.t()`;
     case "entity":
       return `${contextModule}.${upperFirst(t.name)}.t()`;
     case "array":
-      return `[${renderTypespec(t.element, contextModule, typesModule)}]`;
+      return `[${renderTypespec(t.element, contextModule, typesModule, foundation)}]`;
     case "optional":
-      return `${renderTypespec(t.inner, contextModule, typesModule)} | nil`;
+      return `${renderTypespec(t.inner, contextModule, typesModule, foundation)} | nil`;
     case "action":
     case "slot":
       throw new Error("renderTypespec: 'slot' type is UI-only and should not reach the backend.");

@@ -12,6 +12,7 @@
 
 import type { AggregateIR, BoundedContextIR, EnumIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { isEventSourced } from "./eventsourced-emit.js";
 
 export function emitVanillaSchemas(
   appModule: string,
@@ -23,6 +24,9 @@ export function emitVanillaSchemas(
   // values list for the Ecto.Enum constraint.
   const enumsByName = new Map(ctx.enums.map((e) => [e.name, e]));
   for (const agg of ctx.aggregates) {
+    // Event-sourced aggregates have no state table — `eventsourced-emit.ts`
+    // emits a plain in-memory struct for `<agg>.ex` instead.
+    if (isEventSourced(agg)) continue;
     const aggSnake = snake(agg.name);
     const ctxSnake = snake(ctx.name);
     const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());

@@ -119,10 +119,11 @@ export function renderAppShell(
  *  `basename` bakes the router basename fallback for sub-path hosts
  *  (Phoenix `/app`); omitted → the runtime `__LOOM_BASENAME__` hook
  *  still falls back to `undefined` (root), byte-identical. */
-export function renderMain(pack: LoadedPack, basename?: string): string {
+export function renderMain(pack: LoadedPack, basename?: string, authUi = false): string {
   return pack.render("main", {
     routerPackage: routerPackageForStack(pack.manifest.stack),
     basename,
+    authUi,
   });
 }
 

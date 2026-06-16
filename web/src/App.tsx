@@ -9,7 +9,12 @@ import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateOk, GenerateResult, VfsEntry, VirtualFile } from "./build/protocol";
 import type { BundleOk } from "./bundle/protocol";
-import { engineRegistry, selectedEngineId, type RuntimeEngine } from "./engine";
+import {
+  engineRegistry,
+  type RuntimeDispatcher,
+  type RuntimeEngine,
+  selectedEngineId,
+} from "./engine";
 import { emptyDependencySet } from "./engine";
 import { recordAndGcOpfs } from "./engine/opfs-gc";
 import type { QueryResult } from "./runtime/protocol";
@@ -50,6 +55,9 @@ import { DesktopShell } from "./layout/DesktopShell";
 import { MobileShell } from "./layout/MobileShell";
 import { FooterBar } from "./layout/FooterBar";
 import {
+  type AuthStubConfig,
+  DEFAULT_AUTH_STUB,
+  devClaimsHeader,
   formatUnsupportedDeployables,
   type LayoutCtx,
   type MobileCodeView,
@@ -303,6 +311,17 @@ export default function App(): JSX.Element {
     "problems",
   );
 
+  // Playground auth stub (Phase 7) — claims injected into dispatched
+  // requests so an `auth: required` system is explorable as different
+  // users.  Read via a ref by the memoised authed dispatcher below so
+  // editing it doesn't re-mount the preview iframe.
+  const [authStub, setAuthStub] = usePersistedState<AuthStubConfig>(
+    "loom.authStub",
+    DEFAULT_AUTH_STUB,
+  );
+  const authStubRef = useRef(authStub);
+  authStubRef.current = authStub;
+
   // Live console streams for the Output panel — the backend (Hono
   // runtime worker) console + stack traces, and the preview app's
   // console + uncaught errors.  Capped so a chatty handler / app can't
@@ -331,6 +350,24 @@ export default function App(): JSX.Element {
   const editorHandleRef = useRef<EditorHandle | null>(null);
   const buildClientRef = useRef<LoomBuildClient | null>(null);
   const engineRef = useRef<RuntimeEngine | null>(null);
+  // Stable dispatcher handed to the preview: forwards to the live engine,
+  // injecting the auth-stub claims header when enabled.  Memoised with no
+  // deps (reads engine + stub via refs) so the preview iframe is not
+  // re-mounted when the stub config changes.
+  const authedRuntime = useMemo<RuntimeDispatcher>(
+    () => ({
+      dispatch: (req) => {
+        const engine = engineRef.current;
+        if (!engine) return Promise.reject(new Error("runtime not ready"));
+        const claims = devClaimsHeader(authStubRef.current);
+        const headers = claims
+          ? { ...req.headers, "x-loom-dev-claims": claims }
+          : req.headers;
+        return engine.dispatch({ ...req, headers });
+      },
+    }),
+    [],
+  );
   const lspClientRef = useRef<LoomLspClient | null>(null);
   if (lspClientRef.current === null) {
     lspClientRef.current = new LoomLspClient();
@@ -1071,6 +1108,10 @@ export default function App(): JSX.Element {
       if (body !== null && body.length > 0) {
         headers["content-type"] = "application/json";
       }
+      // Playground auth stub — inject the configured identity so a
+      // `requires`-gated route can be exercised as different users.
+      const claims = devClaimsHeader(authStub);
+      if (claims) headers["x-loom-dev-claims"] = claims;
       const result = await engine.dispatch({ url, method: reqMethod, headers, body });
       dispatch({ type: "DISPATCH_DONE", result });
     } catch (err) {
@@ -1221,6 +1262,9 @@ export default function App(): JSX.Element {
     lspClient: lspClientRef.current,
     buildClient: buildClientRef.current,
     engine: engineRef.current,
+    authedRuntime,
+    authStub,
+    setAuthStub,
     onSourceChange: (text, origin) => {
       sourceRef.current = text;
       // A real source change (typing in Monaco or a Builder Apply) — from

@@ -44,6 +44,7 @@ import {
   isAggregate,
   isApi,
   isApply,
+  isAuthBlock,
   isBoundedContext,
   isChannel,
   isChannelSource,
@@ -89,6 +90,7 @@ import { platformFor } from "../../platform/registry.js";
 import type {
   AggregateIR,
   ApiIR,
+  AuthIR,
   BoundedContextIR,
   ChannelIR,
   ChannelSourceIR,
@@ -134,6 +136,7 @@ import type {
   WorkflowIR,
 } from "../types/loom-ir.js";
 import { lit } from "../types/loom-ir.js";
+import { lowerAuth } from "./lower-auth.js";
 import type { ContextLevelCapabilities } from "./lower-capabilities.js";
 import {
   collectContextLevelCapabilities,
@@ -383,6 +386,7 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
   // (otherwise reserved for aggregate identity) is admissible.
   let user: UserIR | undefined;
   let theme: ThemeIR | undefined;
+  let auth: AuthIR | undefined;
   for (const m of members) {
     if (isUserBlock(m)) {
       user = {
@@ -394,6 +398,11 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
           }),
         ),
       };
+    } else if (isAuthBlock(m)) {
+      // System-level OIDC config (D-AUTH-OIDC).  At most one block per
+      // system (validator enforces; last wins if the parser accepts
+      // more).  Provider-preset resolution lives in `lowerAuth`.
+      auth = lowerAuth(m);
     } else if (isThemeBlock(m)) {
       // Theme props are name/value pairs; we lower into a typed
       // partial.  Validation (known names, hex colours, radius
@@ -562,6 +571,7 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
     deployables,
     e2eTests,
     user,
+    auth,
     theme,
     uis,
     apis,

@@ -331,8 +331,18 @@ export function validateUnionFindShapes(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
+  elixirFoundations: Set<string> = new Set(),
 ): void {
-  if (backendPlatforms.size > 0 && [...backendPlatforms].every((p) => p === "elixir")) return;
+  // An elixir-only context is exempt only on the Ash foundation — Phoenix/Ash's
+  // P4d find tagger is success-side only (absence raises), so enforcing the
+  // absent shape would regress it.  The vanilla foundation DOES emit the
+  // absence producer (`find-controller.ts`), so it gets the shape check like
+  // node/dotnet.  Mixed/non-elixir hosts always run the check.
+  const elixirOnly =
+    backendPlatforms.size > 0 && [...backendPlatforms].every((p) => p === "elixir");
+  const allVanilla =
+    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
+  if (elixirOnly && !allVanilla) return;
   const supported = (find: FindIR, aggName: string): string | null => {
     const t = find.returnType;
     // (A named `payload Foo = A | B` reference in find-return position never
@@ -493,13 +503,19 @@ export function validateOperationReturnsUnimplemented(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
+  elixirFoundations: Set<string> = new Set(),
 ): void {
   // Backends that emit the operation-return ProblemDetails translation today.
-  // `"node"` is the Hono/TS backend (exception-less.md spike); the others land
-  // in later slices.  No backend (legacy single-context path) → emittable, gate
-  // stays quiet.
+  // `"node"` is the Hono/TS backend (exception-less.md spike); python/java/dotnet
+  // followed.  Elixir emits it on the **vanilla** foundation only (the
+  // `{:ok,_} | {:error, tag, data}` controller carrier) — `ash` stays gated.
+  // No backend (legacy single-context path) → emittable, gate stays quiet.
   const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java"]);
-  const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_RETURN_BACKENDS.has(p));
+  const elixirReturnsCapable =
+    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
+  const isCapable = (p: string): boolean =>
+    SUPPORTED_RETURN_BACKENDS.has(p) || (p === "elixir" && elixirReturnsCapable);
+  const unsupported = [...backendPlatforms].filter((p) => !isCapable(p));
   if (unsupported.length === 0) return;
 
   for (const agg of ctx.aggregates) {
@@ -511,11 +527,8 @@ export function validateOperationReturnsUnimplemented(
         message:
           `operation '${agg.name}.${op.name}' declares an \`or\`-union return type, but the ` +
           `backend(s) serving this context (${unsupported.sort().join(", ")}) don't emit the ` +
-          `producer-side route translation yet (exception-less.md). It's supported on: ${[
-            ...SUPPORTED_RETURN_BACKENDS,
-          ]
-            .sort()
-            .join(", ")}.`,
+          `producer-side route translation yet (exception-less.md). It's supported on: node, ` +
+          `dotnet, python, java, and elixir on foundation: vanilla.`,
         source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
       });
     }

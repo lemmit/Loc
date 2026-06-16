@@ -34,6 +34,26 @@ describe.skipIf(!ENABLED)(
     it.each([
       { name: "vanilla-min.ddd", deployable: "api" },
       { name: "vanilla-channels.ddd", deployable: "api" },
+      // Event sourcing (T2.b) + operation `or`-union returns (T2.c) — compile the
+      // from-scratch ES + producer-translation Elixir, not just the structure tests.
+      { name: "vanilla-eventlog.ddd", deployable: "api" },
+      { name: "vanilla-returns.ddd", deployable: "api" },
+      // Returning-op body statements (T2.c tail) — precondition/requires raise
+      // guards, `assign` struct-update, `emit` PubSub broadcast, fall-through
+      // success serialised to a wire map.
+      { name: "vanilla-returns-body.ddd", deployable: "api" },
+      // ES applier folds over value-object / enum fields (P4.3): an inline VO
+      // constructor renders to a plain map on vanilla — compile that path.
+      { name: "vanilla-vo-fold.ddd", deployable: "api" },
+      // Per-field changeset validators (T2.i) — validate_number/length/format.
+      { name: "vanilla-invariants.ddd", deployable: "api" },
+      // Event-sourced append → Dispatcher fan-out (an ES event a workflow saga
+      // consumes) — compile the `<Ctx>.Dispatcher.dispatch/1` call in append.
+      { name: "vanilla-es-dispatch.ddd", deployable: "api" },
+      // Custom-find HTTP surface — list / single / param-less GET actions.
+      { name: "vanilla-finds.ddd", deployable: "api" },
+      // Union-returning find — tagged success + problem_variant absence.
+      { name: "vanilla-union-find.ddd", deployable: "api" },
     ])("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

@@ -13,7 +13,7 @@ import type { MutableRefObject, ReactNode } from "react";
 import type { EditorHandle } from "../editor/LoomEditor";
 import type { LoomLspClient } from "../lsp/client";
 import type { LoomBuildClient } from "../build/client";
-import type { RuntimeEngine } from "../engine";
+import type { RuntimeDispatcher, RuntimeEngine } from "../engine";
 import type { Diagnostic } from "../lsp/protocol";
 import type { GenerateOk, GenerateResult, VirtualFile } from "../build/protocol";
 import type { BundleFail, BundleOk } from "../bundle/protocol";
@@ -32,6 +32,43 @@ export type ReactBundleStatus =
   | { kind: "absent" }
   | { kind: "fail"; result: BundleFail }
   | { kind: "ok"; result: BundleOk };
+
+/** Playground auth-stub config (Phase 7).  When enabled, the configured
+ *  claims are injected into every dispatched request as the
+ *  `x-loom-dev-claims` header (base64 JSON), which the generated Hono
+ *  dev-stub verifier merges over its built-in identity — so an
+ *  `auth: required` system is explorable in the sandbox as different
+ *  users without a reachable IdP.  No-op for systems with a real
+ *  `auth { oidc }` block (the OIDC verifier is active instead). */
+export interface AuthStubConfig {
+  enabled: boolean;
+  /** A JSON object literal of claims, edited in the Auth panel. */
+  claimsJson: string;
+}
+
+export const DEFAULT_AUTH_STUB: AuthStubConfig = {
+  enabled: false,
+  claimsJson: '{\n  "role": "admin"\n}',
+};
+
+/** Encode the configured claims as the `x-loom-dev-claims` header value
+ *  (base64 of UTF-8 JSON) — or null when disabled / empty / invalid, in
+ *  which case no header is injected and the dev-stub's built-in identity
+ *  stands. */
+export function devClaimsHeader(cfg: AuthStubConfig): string | null {
+  if (!cfg.enabled) return null;
+  let obj: unknown;
+  try {
+    obj = JSON.parse(cfg.claimsJson);
+  } catch {
+    return null;
+  }
+  if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return null;
+  const bytes = new TextEncoder().encode(JSON.stringify(obj));
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
 
 /** Platforms whose generated output the playground cannot bundle or
  *  boot — i.e. anything other than Hono + React.  Listed in the UI so
@@ -59,7 +96,8 @@ export type MobileTab =
   | "output"
   | "backend"
   | "tests"
-  | "history";
+  | "history"
+  | "auth";
 
 /** Sub-view of the consolidated mobile "Code" tab: the source editor,
  *  the visual page Builder, the structural Model, or the generated-file
@@ -133,6 +171,10 @@ export interface LayoutCtx {
   lspClient: LoomLspClient | null;
   buildClient: LoomBuildClient | null;
   engine: RuntimeEngine | null;
+  /** Dispatcher handed to the preview — wraps `engine` with the auth-stub
+   *  claims-header injection.  Stable identity (so the preview iframe is
+   *  not re-mounted when the stub changes). */
+  authedRuntime: RuntimeDispatcher;
 
   // Editor wiring
   /** Canonical-source sink.  `origin` distinguishes edits typed in Monaco
@@ -228,6 +270,11 @@ export interface LayoutCtx {
    *  systems; the FooterBar + PreviewPane reference this to explain
    *  why those deployables are file-pane-only. */
   unsupportedDeployables: ReadonlyArray<UnsupportedDeployable>;
+
+  // Playground auth stub (Phase 7) — identity injected into dispatched
+  // requests via the `x-loom-dev-claims` header.  Persisted by App.tsx.
+  authStub: AuthStubConfig;
+  setAuthStub: (v: AuthStubConfig | ((prev: AuthStubConfig) => AuthStubConfig)) => void;
 
   // Backend tester form
   reqMethod: string;

@@ -1,0 +1,60 @@
+// Event-sourced applier folds over value-object / enum fields (P4.3).  Compiled
+// by `build-generated-elixir-vanilla` so an inline VO constructor in a fold —
+// which renders to a plain map on vanilla (no struct module is emitted) —
+// actually passes `mix compile --warnings-as-errors`.
+system Wallet {
+  subdomain Core {
+    context Accounts {
+      valueobject Money { amount: int  currency: string }
+      enum Status { active  closed }
+
+      event Opened { account: Account id }
+      event Funded { account: Account id, m: Money }
+      event Closed { account: Account id }
+
+      aggregate Account ids guid persistedAs(eventLog) {
+        status: Status
+        balance: Money
+
+        create open() {
+          emit Opened { account: id }
+        }
+
+        operation fund(m: Money) {
+          emit Funded { account: id, m: m }
+        }
+
+        operation close() {
+          emit Closed { account: id }
+        }
+
+        apply(e: Opened) {
+          status := active
+          balance := Money { amount: 0, currency: "USD" }
+        }
+
+        apply(e: Funded) {
+          balance := e.m
+        }
+
+        apply(e: Closed) {
+          status := closed
+        }
+      }
+
+      repository Accounts for Account { }
+    }
+  }
+
+  api WalletApi from Core
+  storage pg { type: postgres }
+  resource acctLog { for: Accounts, kind: eventLog, use: pg }
+
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Accounts]
+    dataSources: [acctLog]
+    serves: WalletApi
+    port: 4000
+  }
+}

@@ -69,6 +69,7 @@ import {
   renderJavaSpringDataRepository,
   renderOffsetLimitPageRequest,
 } from "./emit/repository.js";
+import { renderExecutionContextFilter, renderRequestContext } from "./emit/request-context.js";
 import { renderJavaSeedRunner } from "./emit/seed.js";
 import { renderJavaService } from "./emit/service.js";
 import { renderJavaTestsFile } from "./emit/tests.js";
@@ -221,6 +222,11 @@ function emitProjectFromContexts(
   place("CatalogLog.java", "config", renderCatalogLogger(basePkg));
   place("LifecycleCatalog.java", "config", renderLifecycleCatalog(basePkg));
   place("RequestCatalogFilter.java", "config", renderRequestCatalogFilter(basePkg));
+  // Ambient execution-context carrier (correlation_id / scope_id / actor_id in
+  // MDC) — always-on, the cross-backend RequestContext (docs/architecture/
+  // request-context.md).  The principal's actor_id is stamped by UserFilter.
+  place("RequestContext.java", "config", renderRequestContext(basePkg));
+  place("ExecutionContextFilter.java", "config", renderExecutionContextFilter(basePkg));
 
   for (const ctx of contexts) {
     // Ids — an abstract TPC base keeps no identity (each concrete owns a

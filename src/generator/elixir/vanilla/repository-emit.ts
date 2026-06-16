@@ -21,6 +21,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { isEventSourced } from "./eventsourced-emit.js";
 
 export function emitVanillaRepositories(
   appModule: string,
@@ -29,6 +30,9 @@ export function emitVanillaRepositories(
 ): void {
   const ctxModule = upperFirst(ctx.name);
   for (const agg of ctx.aggregates) {
+    // Event-sourced aggregates get an event-store repository from
+    // `eventsourced-emit.ts` (load+fold reads, append writes) instead.
+    if (isEventSourced(agg)) continue;
     const aggSnake = snake(agg.name);
     const ctxSnake = snake(ctx.name);
     const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());
@@ -50,11 +54,13 @@ export function customFindsOf(repo: RepositoryIR | undefined): FindIR[] {
 
 /** Does the find's declared return type produce ZERO-OR-ONE record
  *  (vs a list)?  `Customer?` lowers to `{kind:"optional", inner:entity}`;
- *  `Customer` (rare in finds but admissible) is a bare entity.  Anything
- *  else (array, etc.) is the list path. */
+ *  `Customer` (rare in finds but admissible) is a bare entity; a union find
+ *  (`Customer or NotFound`) is also a single-get — the absent variant is the
+ *  `nil` case, translated at the controller.  Anything else (array) is a list. */
 function isSingleReturn(t: TypeIR): boolean {
   if (t.kind === "optional" && t.inner.kind === "entity") return true;
   if (t.kind === "entity") return true;
+  if (t.kind === "union") return true;
   return false;
 }
 
@@ -162,9 +168,15 @@ function renderFindFn(f: FindIR, aggModule: string, contextModule: string): stri
     : `{:ok, [${aggModule}.t()]} | {:error, term()}`;
   const specHead = argNames.length > 0 ? argNames.map(() => "term()").join(", ") : "";
   const spec = `  @spec ${fnName}(${specHead}) :: ${specTail}`;
+  // A find with neither a `where` clause nor convention params (e.g. an
+  // unfiltered `find recent(): Order`) has an empty predicate — emit a bare
+  // `from(record in Mod)` rather than `where: ` (which is invalid Elixir).
+  const query = whereExpr
+    ? `from(record in ${aggModule}, where: ${whereExpr})`
+    : `from(record in ${aggModule})`;
   return `${spec}
   def ${fnName}(${argList}) do
-    query = from(record in ${aggModule}, where: ${whereExpr})
+    query = ${query}
     {:ok, ${fetchCall}}
   end`;
 }

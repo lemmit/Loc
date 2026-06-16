@@ -118,19 +118,23 @@ describe("dotnet provenance runtime", () => {
     expect(repo.indexOf("DrainProv")).toBeLessThan(repo.indexOf("SaveChangesAsync"));
   });
 
-  it("stamps the request correlation id + scope id onto each provenance row (M3)", async () => {
+  it("stamps the request correlation id + scope id + actor id onto each provenance row (M3)", async () => {
     const f = await files();
     const rec = f.get("api/Infrastructure/Persistence/ProvenanceRecord.cs")!;
     expect(rec).toContain("public string? CorrelationId { get; set; }");
     expect(rec).toContain("public string? ScopeId { get; set; }");
+    expect(rec).toContain("public string? ActorId { get; set; }");
     const cfg = f.get(
       "api/Infrastructure/Persistence/Configurations/ProvenanceRecordConfiguration.cs",
     )!;
     expect(cfg).toContain('HasColumnName("correlation_id")');
     expect(cfg).toContain('HasColumnName("scope_id")');
+    expect(cfg).toContain('HasColumnName("actor_id")');
     const repo = f.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
     expect(repo).toContain("CorrelationId = RequestContext.Current?.CorrelationId,");
     expect(repo).toContain("ScopeId = RequestContext.Current?.ScopeId,");
+    // The carrier's who-computed slice (provenance.md / request-context.md).
+    expect(repo).toContain("ActorId = RequestContext.Current?.ActorId,");
   });
 
   it("exposes the current lineage on the response DTO", async () => {
@@ -145,7 +149,9 @@ describe("dotnet provenance runtime", () => {
     expect(key).toBeDefined();
     const mig = f.get(key!)!;
     expect(mig).toContain("CREATE TABLE IF NOT EXISTS provenance_records");
-    expect(mig).toMatch(/provenance_records \([\s\S]*?correlation_id text,[\s\S]*?scope_id text/);
+    expect(mig).toMatch(
+      /provenance_records \([\s\S]*?correlation_id text,[\s\S]*?scope_id text,[\s\S]*?actor_id text/,
+    );
     // schema-qualified to the resolved dataSource schema (matching ToTable)
     expect(mig).toContain(
       "ALTER TABLE ordering.orders ADD COLUMN IF NOT EXISTS total_provenance jsonb;",

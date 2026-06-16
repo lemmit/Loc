@@ -143,6 +143,7 @@ export function renderRepositoryImpl(
         "                At = DateTime.UtcNow,",
         "                CorrelationId = RequestContext.Current?.CorrelationId,",
         "                ScopeId = RequestContext.Current?.ScopeId,",
+        "                ActorId = RequestContext.Current?.ActorId,",
         "            });",
         "        }",
       ]
