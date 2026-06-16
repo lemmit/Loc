@@ -220,6 +220,15 @@ export function checkDeployable(
         { node: d, property: "targets" },
       );
     }
+    // `auth: ui` mounts the login redirect + route guard; it needs its
+    // target backend to enforce auth (so /auth/me exists and gates).
+    if (d.auth === "ui" && target.auth !== "required") {
+      accept(
+        "error",
+        `Frontend deployable '${d.name}' declares 'auth: ui' but its target '${target.name}' is not 'auth: required'; the guard has no session endpoint to probe.`,
+        { node: d, property: "auth", code: "loom.auth-ui-target-open" },
+      );
+    }
     if ((d.contextRefs ?? []).length > 0) {
       accept(
         "warning",
@@ -234,6 +243,15 @@ export function checkDeployable(
         "error",
         `'targets:' is only valid on a frontend deployable ('platform: react', 'svelte', 'vue', or 'static').`,
         { node: d, property: "targets" },
+      );
+    }
+    // `auth: ui` is the frontend guard; a backend enforces auth via
+    // `auth: required` instead.
+    if (d.auth === "ui") {
+      accept(
+        "error",
+        `Deployable '${d.name}' declares 'auth: ui', which is only valid on a frontend deployable; backends use 'auth: required'.`,
+        { node: d, property: "auth", code: "loom.auth-ui-on-backend" },
       );
     }
   }

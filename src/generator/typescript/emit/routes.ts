@@ -12,11 +12,9 @@ import { renderHonoBaseLogCall, renderHonoLogCall } from "../../_obs/render-hono
 // sub-router and exposes `/openapi.json`.
 export function renderHttpIndex(
   ctx: EnrichedBoundedContextIR,
-  options?: { authRequired?: boolean; oidc?: boolean; persistence?: string },
+  options?: { authRequired?: boolean; persistence?: string },
 ): string {
   const authRequired = !!options?.authRequired;
-  // OIDC turnkey auth (D-AUTH-OIDC) mounts the /auth/* redirect handshake.
-  const oidc = !!options?.oidc;
   // Persistence selection (D-REALIZATION-AXES) — the `db` handle createApp
   // threads is drizzle's `NodePgDatabase` by default, or a MikroORM
   // `EntityManager` when `persistence: mikroorm`.
@@ -115,9 +113,7 @@ export function renderHttpIndex(
   // that the user supplied a verifier, and mount the middleware
   // after CORS but before any business route.
   const authImport = authRequired
-    ? `import { authMiddleware } from "../auth/middleware";\nimport { assertUserVerifierRegistered } from "../auth/verifier";${
-        oidc ? `\nimport { authRoutes } from "../auth/handshake";` : ""
-      }`
+    ? `import { authMiddleware } from "../auth/middleware";\nimport { assertUserVerifierRegistered } from "../auth/verifier";\nimport { authRoutes } from "../auth/handshake";`
     : null;
   // After the verifier assert, emit `auth_enabled` info so every boot's
   // log stream advertises whether auth is on for this deployable —
@@ -126,9 +122,10 @@ export function renderHttpIndex(
     ? `  assertUserVerifierRegistered();\n  ${renderHonoBaseLogCall("authEnabled", "required: true")}`
     : null;
   const authMount = authRequired ? '  app.use("*", authMiddleware);' : null;
-  // The OIDC handshake mounts at /auth (bypassed by the middleware) so the
-  // login redirect + callback are reachable without a verified principal.
-  const authRoutesMount = oidc ? '  app.route("/auth", authRoutes());' : null;
+  // Auth session routes mount at /auth: `/auth/me` (the frontend guard's
+  // session probe) always, plus the OIDC login redirect + callback (which
+  // the middleware bypasses) when an `auth { oidc }` block is present.
+  const authRoutesMount = authRequired ? '  app.route("/auth", authRoutes());' : null;
   return (
     lines(
       "// Auto-generated.",

@@ -118,13 +118,19 @@ describe("hono OIDC turnkey auth — codegen", () => {
     expect(httpIndex).toContain('import { authRoutes } from "../auth/handshake";');
     expect(httpIndex).toContain('app.route("/auth", authRoutes());');
     const mw = findFile(files, /auth\/middleware\.ts$/);
-    expect(mw).toContain('"/auth"');
+    // Only the redirect endpoints bypass auth; /auth/me stays protected.
+    expect(mw).toContain('"/auth/login"');
+    expect(mw).not.toContain('"/auth/me"');
   });
 
-  it("without an auth{} block keeps the dev stub and emits no OIDC files", async () => {
+  it("without an auth{} block keeps the dev stub and emits /auth/me but no OIDC", async () => {
     const files = await generateSystemFiles(STUB_ONLY);
+    // No OIDC verifier, no redirect handshake — but /auth/me still exists so
+    // a frontend guard can probe the (dev-stub) session.
     expect(hasFile(files, /auth\/oidc\.ts$/)).toBe(false);
-    expect(hasFile(files, /auth\/handshake\.ts$/)).toBe(false);
+    const handshake = findFile(files, /auth\/handshake\.ts$/);
+    expect(handshake).toContain('app.get("/me"');
+    expect(handshake).not.toContain('app.get("/login"');
     const index = entryIndex(files);
     expect(index).toContain("auth_dev_stub_registered");
     // The dev stub honours an injected x-loom-dev-claims header (the

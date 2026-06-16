@@ -45,7 +45,29 @@
 > the header. Web typecheck green; base64/UTF-8 round-trip verified
 > against the dev-stub decoder. (Playwright spec for the tab: follow-up.)
 >
-> **Status: Phases 0–1, 7 done; Phases 2–6 pending.** Decisions locked with
+> **Phase 6 shipped (React `auth: ui` guard — full-stack frontend auth).**
+> A new backend route `GET /auth/me` (always present when a backend is
+> `auth: required`; the redirect handshake's bypass narrowed to
+> `/auth/login|callback|logout` so `/me` stays middleware-protected) gives
+> the frontend a session probe that works for both the OIDC verifier and
+> the dev stub. When a react deployable opts in via `auth: ui` (target
+> backend `auth: required`), the generator emits pack-agnostic
+> `src/auth/session.ts` + `src/auth/AuthGate.tsx` (probe `/auth/me`; gate
+> the app; "Sign in" redirects to the IdP — no login form), wraps `<App/>`
+> in `<AuthGate>` (mantine v7+v9), and sends `credentials: "include"`.
+> Validation: `auth: ui` requires a frontend whose target is
+> `auth: required`. **Playground support is automatic** — `/auth/me` is a
+> normal intercepted endpoint, so the guard resolves through the dev stub
+> with the Phase 7 Auth-tab identity (the app renders as that user, no IdP
+> needed). tsc-gated (the emitted `web/` project type-checks against real
+> React/Mantine types); content + validation tests; full fast suite green.
+>
+> **Other React packs (shadcn/mui/chakra) `auth: ui` wrap: follow-up** —
+> the pack-agnostic auth files + API-client credentials are emitted for
+> all packs, but only the mantine `main.hbs` wraps `<App/>` in `<AuthGate>`
+> so far; wiring the other packs' `main.hbs` is the remaining Phase 6 work.
+>
+> **Status: Phases 0–1, 6–7 done; Phases 2–5 pending.** Decisions locked with
 > the maintainer (2026-06-15):
 >
 > 1. **Scope** = OIDC authentication providers + playground auth stub

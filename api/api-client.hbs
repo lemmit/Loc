@@ -18,6 +18,10 @@ async function rawFetch(path: string, init?: RequestInit): Promise<unknown> {
   log.debug(`-> ${method} ${path}`);
   const r = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
+{{#if hasAuthUi}}
+    // Send the session cookie with every request (auth: ui).
+    credentials: "include",
+{{/if}}
     headers: {
       "content-type": "application/json",
       ...(init?.headers ?? {}),

@@ -30,9 +30,13 @@ export function emitAuthFiles(sys: SystemIR, out: Map<string, string>): void {
   out.set("auth/user-types.ts", renderUserTypes(sys.user));
   out.set("auth/verifier.ts", renderVerifier());
   out.set("auth/middleware.ts", renderMiddleware(sys.user, !!oidc));
+  // The session routes (always `/auth/me`, plus the OIDC redirect handshake
+  // when an `auth { oidc }` block is present) are emitted whenever a
+  // backend has auth — the frontend `auth: ui` guard probes `/auth/me`,
+  // which works for both the OIDC verifier and the dev stub.
+  out.set("auth/handshake.ts", renderHandshake(oidc));
   if (oidc) {
     out.set("auth/oidc.ts", renderOidcVerifier(sys.user, oidc));
-    out.set("auth/handshake.ts", renderHandshake(oidc));
   }
 }
 
@@ -141,10 +145,12 @@ export function assertUserVerifierRegistered(): void {
 function renderMiddleware(user: UserIR, oidc: boolean): string {
   const idField = actorIdField(user);
   const stampActorId = idField ? `\n  if (ctx) ctx.actorId = String(user.${idField});` : "";
-  // The OIDC handshake routes (/auth/login|callback|logout) must be
-  // reachable without a verified principal, so they join the bypass list.
+  // Only the handshake's redirect endpoints bypass auth — they must be
+  // reachable without a verified principal.  `/auth/me` (the session probe
+  // the frontend guard reads) is deliberately NOT bypassed, so the
+  // middleware populates `currentUser` or rejects with 401.
   const bypass = oidc
-    ? '["/health", "/ready", "/openapi.json", "/swagger", "/auth"]'
+    ? '["/health", "/ready", "/openapi.json", "/swagger", "/auth/login", "/auth/callback", "/auth/logout"]'
     : '["/health", "/ready", "/openapi.json", "/swagger"]';
   return `// Auto-generated.
 import { createMiddleware } from "hono/factory";
@@ -302,7 +308,36 @@ export function registerOidcVerifier(): void {
 // hosts the credential pages.
 // ---------------------------------------------------------------------------
 
-function renderHandshake(auth: AuthIR): string {
+function renderHandshake(auth?: AuthIR): string {
+  // `/auth/me` (the session probe the frontend guard reads) is always
+  // emitted when a backend has auth — it works for both the OIDC verifier
+  // and the dev stub.  The OIDC redirect handshake (login/callback/logout)
+  // is added only when an `auth { oidc }` block is present; the dev-stub
+  // path (e.g. the in-browser playground, where no IdP is reachable) has
+  // no IdP to redirect to.
+  const meRoute = `  // Session probe for the frontend guard — NOT bypassed, so the auth
+  // middleware has already verified the principal (or returned 401) by
+  // the time this runs.  Returns the resolved User as plain JSON.
+  app.get("/me", (c) => {
+    const user = (c as unknown as { get(k: "currentUser"): unknown }).get("currentUser");
+    return c.json(user ?? null);
+  });`;
+
+  if (!auth) {
+    return `// Auto-generated.
+import { Hono } from "hono";
+
+/** Auth session routes.  Mounted at "/auth" by createApp. */
+export function authRoutes(): Hono {
+  const app = new Hono();
+
+${meRoute}
+
+  return app;
+}
+`;
+  }
+
   const issuerExpr = authValueExpr(auth.oidc.issuer);
   const clientIdExpr = authValueExpr(auth.oidc.clientId);
   // A client secret is only present for confidential clients; omit the
@@ -343,7 +378,8 @@ async function disco(): Promise<Endpoints> {
   return discoPromise;
 }
 
-/** The /auth/* redirect handshake.  Mounted at "/auth" by createApp. */
+/** The /auth/* redirect handshake + session probe.  Mounted at "/auth"
+ *  by createApp. */
 export function authRoutes(): Hono {
   const app = new Hono();
 
@@ -395,6 +431,8 @@ export function authRoutes(): Hono {
     deleteCookie(c, "session", { path: "/" });
     return c.redirect(POST_LOGIN);
   });
+
+${meRoute}
 
   return app;
 }

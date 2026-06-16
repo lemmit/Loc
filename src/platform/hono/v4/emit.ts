@@ -390,7 +390,6 @@ export function generateTypeScriptForContexts(
     "http/index.ts",
     renderHttpIndex(merged, {
       authRequired,
-      oidc: !!oidcAuth,
       persistence: usingMikro ? "mikroorm" : "drizzle",
     }),
   );

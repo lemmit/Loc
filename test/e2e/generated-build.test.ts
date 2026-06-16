@@ -161,6 +161,41 @@ describe.skipIf(!ENABLED)(
       }
     }, 300_000);
 
+    // React `auth: ui` guard (D-AUTH-OIDC, Phase 6): a react deployable with
+    // `auth: ui` (target backend `auth: required`) emits the pack-agnostic
+    // session client (src/auth/session.ts) + route guard
+    // (src/auth/AuthGate.tsx), wraps <App/> in <AuthGate>, and sends
+    // credentials.  Generated via `generate system` and the emitted `web/`
+    // React project is type-checked against the real React / Mantine types.
+    it("system react auth: ui guard — generated web project type-checks + builds", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-authui-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/auth-ui.ddd -o ${outDir}`,
+          {
+            stdio: "inherit",
+            cwd: repoRoot,
+          },
+        );
+        // The react deployable is named `web` → its project lands under `web/`.
+        const proj = path.join(outDir, "web");
+        expect(fs.existsSync(path.join(proj, "src", "auth", "AuthGate.tsx"))).toBe(true);
+        expect(fs.existsSync(path.join(proj, "src", "auth", "session.ts"))).toBe(true);
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 120_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
     // Event sourcing (appliers A2): a `persistedAs(eventLog)` aggregate emits
     // the `<agg>_events` stream table, the `_apply`/`_fromEvents` fold, the
     // record-and-fold `emit`, the shell-+emit-body `create` factory, and the

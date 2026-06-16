@@ -151,4 +151,32 @@ describe("auth block — validation", () => {
     );
     expect(errors.some((e) => e.includes("more than one 'auth"))).toBe(true);
   });
+
+  it("rejects auth: ui when the target backend is not auth: required", async () => {
+    const { errors } = await parseModel(
+      `system Acme {
+        ${USER}
+        subdomain S { context C { aggregate Item with crudish { name: string } repository Items for Item {} } }
+        api SApi from S
+        deployable api { platform: hono contexts: [C] serves: SApi port: 8080 }
+        ui W with scaffold(subdomains: [S]) { }
+        deployable web { platform: react targets: api ui: W auth: ui }
+      }`,
+    );
+    expect(errors.some((e) => e.includes("auth: ui") && e.includes("not 'auth: required'"))).toBe(
+      true,
+    );
+  });
+
+  it("rejects auth: ui on a backend deployable", async () => {
+    const { errors } = await parseModel(
+      `system Acme {
+        ${USER}
+        subdomain S { context C { aggregate Item with crudish { name: string } repository Items for Item {} } }
+        api SApi from S
+        deployable api { platform: hono contexts: [C] serves: SApi port: 8080 auth: ui }
+      }`,
+    );
+    expect(errors.some((e) => e.includes("only valid on a frontend"))).toBe(true);
+  });
 });
