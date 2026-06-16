@@ -86,16 +86,28 @@
 > `auth: required`, so a React frontend can target a .NET backend (dev-stub
 > identity today). Verified with the local .NET 8 SDK: `dotnet build
 > -warnaserror` (the `AnalysisLevel: latest-recommended` CA gate) → 0
-> warnings. The **.NET OIDC token verifier + `/auth/login|callback|logout`
-> handshake remain a focused follow-up** — the typed-claim→`User` mapping
-> and the JWKS/redirect C# need to clear ~200 CA analyzer rules under
-> `-warnaserror` and ideally a real-IdP runtime test, so it warrants its
-> own reviewed pass rather than an autopilot one.
+> warnings.
+>
+> **Phase 2b shipped (.NET OIDC token verifier).** Under an `auth { oidc }`
+> block the .NET backend emits `Auth/OidcUserVerifier.cs` — an
+> `IUserVerifier` that validates the bearer token against the issuer's JWKS
+> (`ConfigurationManager<OpenIdConnectConfiguration>` + `JsonWebTokenHandler`),
+> checks iss/aud/exp, and projects the configured claims onto `User`
+> (string / string[], dotted paths like `realm_access.roles` supported;
+> other field types fall back to `default!`). Auto-registered in
+> `Program.cs` (last-wins over the dev stub); the
+> `Microsoft.IdentityModel.*` NuGet refs ship only under OIDC.
+> **tsc-and-CA-gated:** an `auth-oidc` fixture in the `LOOM_DOTNET_BUILD`
+> shard generates + `dotnet build -warnaserror`s the project (the
+> `AnalysisLevel: latest-recommended` CA gate) — verified locally, 0
+> warnings. The **`/auth/login|callback|logout` redirect handshake remains
+> the follow-up** (HttpClient token-exchange + cookies; needs a real-IdP
+> runtime check).
 >
 > **Status: Phases 0–1, 4 (partial), 6 (React), 7 done; Phase 2a (.NET
-> /auth/me) done; Phase 2 OIDC verifier/handshake + Phases 3/5 +
-> creates/workflows/finds/views default-deny + non-React frontend guards
-> pending.** Decisions locked with the maintainer (2026-06-15):
+> /auth/me) + 2b (.NET OIDC verifier) done; .NET /auth/* handshake +
+> Phases 3/5 + creates/workflows/finds/views default-deny + non-React
+> frontend guards pending.** Decisions locked with the maintainer (2026-06-15):
 >
 > 1. **Scope** = OIDC authentication providers + playground auth stub
 >    **+ default-deny enforcement** (the known `auth.md` hole, §4.3 of the

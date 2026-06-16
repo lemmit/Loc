@@ -1471,6 +1471,54 @@ describe(".NET generator", () => {
       expect(noAuth).not.toContain("/auth/me");
     });
 
+    // OIDC turnkey auth (D-AUTH-OIDC): an `auth { oidc }` block emits a
+    // generated IUserVerifier that validates the IdP's tokens (JWKS) and
+    // maps claims onto User, registered last (wins over the dev stub), with
+    // the OIDC NuGet refs.  Verified to compile under `dotnet build
+    // -warnaserror` (the AnalysisLevel CA gate) out-of-band.
+    const SRC_OIDC = `
+      system Acme {
+        user { id: string role: string permissions: string[] }
+        auth {
+          provider: keycloak
+          oidc { issuer: env("OIDC_ISSUER") clientId: env("OIDC_CLIENT_ID") }
+          claims: { role: "realm_access.roles" }
+        }
+        subdomain Sales {
+          context Orders {
+            aggregate Order {
+              status: string
+              operation cancel() { requires currentUser.role == "admin"  status := "cancelled" }
+            }
+            repository Orders for Order { }
+          }
+        }
+        deployable api { platform: dotnet contexts: [Orders] port: 8080 auth: required }
+      }
+    `;
+
+    it("emits + registers the OIDC verifier and adds the NuGet refs under `auth { oidc }`", async () => {
+      const files = await emitForAuthSystem(SRC_OIDC);
+      const verifier = files.get("Auth/OidcUserVerifier.cs")!;
+      expect(verifier).toContain("public sealed class OidcUserVerifier : IUserVerifier");
+      expect(verifier).toContain("ConfigurationManager<OpenIdConnectConfiguration>");
+      expect(verifier).toContain("ValidateTokenAsync");
+      // explicit claim mapping wins; id defaults to `sub`; dotted paths resolve
+      expect(verifier).toContain('Role: ClaimString(payload, "realm_access.roles")');
+      expect(verifier).toContain('Id: ClaimString(payload, "sub")');
+      expect(verifier).toContain('Permissions: ClaimStringList(payload, "permissions")');
+      const program = files.get("Program.cs")!;
+      expect(program).toContain("builder.Services.AddScoped<IUserVerifier, OidcUserVerifier>();");
+      const csproj = files.get("Api.csproj")!;
+      expect(csproj).toContain("Microsoft.IdentityModel.Protocols.OpenIdConnect");
+    });
+
+    it("does not emit the OIDC verifier without an `auth { oidc }` block", async () => {
+      const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
+      expect(files.has("Auth/OidcUserVerifier.cs")).toBe(false);
+      expect(files.get("Api.csproj")!).not.toContain("Microsoft.IdentityModel");
+    });
+
     // A `requires`-guarded op / workflow denies with ForbiddenException →
     // 403 at runtime; the controller must DECLARE 403 in [ProducesResponseType].
     const SRC_GUARDED = `

@@ -1,4 +1,11 @@
-import type { SystemIR, TypeIR, UserIR } from "../../ir/types/loom-ir.js";
+import type {
+  AuthIR,
+  AuthValueIR,
+  FieldIR,
+  SystemIR,
+  TypeIR,
+  UserIR,
+} from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { renderCsType } from "./render-expr.js";
 
@@ -29,6 +36,188 @@ export function emitAuthFiles(sys: SystemIR, ns: string, out: Map<string, string
   out.set("Auth/HttpContextCurrentUserAccessor.cs", renderAccessorImpl(ns));
   out.set("Auth/UserMiddleware.cs", renderMiddleware(ns));
   out.set("Auth/DevStubUserVerifier.cs", renderDevStubVerifier(sys.user, ns));
+  // OIDC turnkey auth (D-AUTH-OIDC): the generated verifier that validates
+  // the IdP's tokens against its JWKS and maps claims onto User — the
+  // batteries-included fill-in for the IUserVerifier seam.  Registered
+  // automatically in Program.cs (last-wins over the dev stub).
+  if (sys.auth) out.set("Auth/OidcUserVerifier.cs", renderOidcVerifier(sys.user, sys.auth, ns));
+}
+
+/** Render an `AuthValueIR` (literal | env reference) as a C# expression. */
+function csAuthValue(v: AuthValueIR | undefined, fallback = '""'): string {
+  if (!v) return fallback;
+  return v.kind === "literal"
+    ? JSON.stringify(v.value)
+    : `Environment.GetEnvironmentVariable(${JSON.stringify(v.env)}) ?? ""`;
+}
+
+/** The IdP claim path projected onto a given user field — explicit
+ *  `claims:` mapping wins; `id` defaults to `sub`, others read their name. */
+function claimPathFor(field: string, auth: AuthIR): string {
+  const mapped = auth.claims.find((c) => c.field === field);
+  if (mapped) return mapped.path;
+  return field === "id" ? "sub" : field;
+}
+
+/** The User-constructor argument expression reading a field from the
+ *  verified token payload.  string / string[] are mapped; other field
+ *  types fall back to `default!` (a documented .NET OIDC limitation —
+ *  use string / string[] claims). */
+function csClaimRead(f: FieldIR, auth: AuthIR): string {
+  const param = upperFirst(f.name);
+  const path = JSON.stringify(claimPathFor(f.name, auth));
+  const t = f.type;
+  if (t.kind === "array" && t.element.kind === "primitive" && t.element.name === "string") {
+    return `${param}: ClaimStringList(payload, ${path})`;
+  }
+  if (t.kind === "primitive" && t.name === "string") {
+    return f.optional
+      ? `${param}: ClaimString(payload, ${path})`
+      : `${param}: ClaimString(payload, ${path}) ?? string.Empty`;
+  }
+  return `${param}: default!`;
+}
+
+function renderOidcVerifier(user: UserIR, auth: AuthIR, ns: string): string {
+  const issuerExpr = csAuthValue(auth.oidc.issuer);
+  // Audience is optional: an explicit `audience:` validates that value;
+  // otherwise default to the OIDC_AUDIENCE env var (null when unset → audience
+  // validation is skipped).  An env read (not a literal null) keeps CA1805 /
+  // CA5404 / CA1508 quiet.
+  const audienceExpr = auth.oidc.audience
+    ? csAuthValue(auth.oidc.audience)
+    : 'Environment.GetEnvironmentVariable("OIDC_AUDIENCE")';
+  const args = user.fields.map((f) => csClaimRead(f, auth)).join(",\n            ");
+  return `// Auto-generated.
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Tokens;
+
+namespace ${ns}.Auth;
+
+/// <summary>Generated OIDC verifier (D-AUTH-OIDC).  Validates the bearer
+/// token's signature against the issuer's JWKS (discovered + cached via
+/// <see cref="ConfigurationManager{T}"/>), checks iss / aud / exp, then
+/// projects the configured claims onto the <see cref="User"/> shape.
+/// Returns null to reject (→ 401).</summary>
+public sealed class OidcUserVerifier : IUserVerifier
+{
+    private static readonly string Issuer = (${issuerExpr}).TrimEnd('/');
+    private static readonly string? Audience = ${audienceExpr};
+    private static readonly ConfigurationManager<OpenIdConnectConfiguration> Configuration =
+        new(
+            Issuer + "/.well-known/openid-configuration",
+            new OpenIdConnectConfigurationRetriever(),
+            new HttpDocumentRetriever());
+    private static readonly JsonWebTokenHandler Handler = new();
+
+    public async Task<User?> VerifyAsync(HttpContext httpContext, CancellationToken cancellationToken)
+    {
+        string header = httpContext.Request.Headers.Authorization.ToString();
+        if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        string token = header["Bearer ".Length..].Trim();
+
+        OpenIdConnectConfiguration configuration;
+        try
+        {
+            configuration = await Configuration.GetConfigurationAsync(cancellationToken);
+        }
+#pragma warning disable CA1031 // a discovery failure rejects (401), never 500
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
+
+        var parameters = new TokenValidationParameters
+        {
+            ValidIssuer = Issuer,
+            ValidateIssuer = true,
+            IssuerSigningKeys = configuration.SigningKeys,
+            ValidateIssuerSigningKey = true,
+            ValidateAudience = Audience is not null,
+            ValidAudience = Audience,
+            ValidateLifetime = true,
+        };
+
+        TokenValidationResult result = await Handler.ValidateTokenAsync(token, parameters);
+        if (!result.IsValid)
+        {
+            return null;
+        }
+
+        // Re-parse the payload as JSON so dotted claim paths
+        // (e.g. realm_access.roles) resolve — the flat claims dictionary
+        // would lose the nesting.
+        string[] segments = token.Split('.');
+        if (segments.Length < 2)
+        {
+            return null;
+        }
+        JsonElement payload;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(Base64UrlEncoder.Decode(segments[1]));
+            payload = document.RootElement.Clone();
+        }
+#pragma warning disable CA1031 // a malformed payload rejects (401), never 500
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
+
+        return new User(
+            ${args});
+    }
+
+    private static string? ClaimString(JsonElement payload, string path)
+    {
+        JsonElement current = payload;
+        foreach (string segment in path.Split('.'))
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(segment, out current))
+            {
+                return null;
+            }
+        }
+        return current.ValueKind == JsonValueKind.String ? current.GetString() : current.ToString();
+    }
+
+    private static List<string> ClaimStringList(JsonElement payload, string path)
+    {
+        var values = new List<string>();
+        JsonElement current = payload;
+        foreach (string segment in path.Split('.'))
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(segment, out current))
+            {
+                return values;
+            }
+        }
+        if (current.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement element in current.EnumerateArray())
+            {
+                string? value = element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString();
+                if (value is not null)
+                {
+                    values.Add(value);
+                }
+            }
+        }
+        return values;
+    }
+}
+`;
 }
 
 /** Permissive dev stub registered in Program.cs so a generated stack

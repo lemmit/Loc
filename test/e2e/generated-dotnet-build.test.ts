@@ -140,6 +140,40 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // OIDC turnkey auth (D-AUTH-OIDC): an `auth { oidc }` block emits the
+    // generated OidcUserVerifier (JWKS validation + claims→User) + its NuGet
+    // refs + the Program.cs registration.  This cell compiles the verifier
+    // against the real Microsoft.IdentityModel.* packages under the
+    // AnalysisLevel CA gate — auth files are system-mode only.
+    it("system `auth { oidc }` (dotnet) — generated OIDC verifier builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-oidc-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/auth-oidc.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        expect(fs.existsSync(path.join(proj, "Auth", "OidcUserVerifier.cs"))).toBe(true);
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net8.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // The "tech showcase" system (`examples/showcase.ddd`) exercises the whole
     // language surface across multiple contexts, but it's multi-context — the
     // single-context `generate dotnet` cases above can't reach it, and no other
