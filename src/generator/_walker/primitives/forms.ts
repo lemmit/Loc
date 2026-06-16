@@ -571,6 +571,45 @@ function emitFormOfOperation(
   return "";
 }
 
+/** State-controlled modal: `Modal { <children>, open: <stateBool>, title: "…" }`
+ *  — a dialog whose visibility is a page `state` field (distinct from the
+ *  operation-form modal).  Reuses the input-bindables' state-ref plumbing: the
+ *  `open:` ref marks `usesState` so the page emits `useState`, and the pack's
+ *  `primitive-modal-controlled` template wraps the walked children in a
+ *  controlled dialog.  Returns undefined when `open:` is not a state ref or the
+ *  pack ships no controlled-modal template (→ caller falls back to the stub).
+ *  See docs/proposals/state-controlled-modal.md. */
+function emitControlledModal(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string | undefined {
+  const openArg = namedArgValue(call, "open");
+  if (!openArg || openArg.kind !== "ref" || !ctx.stateNames.has(openArg.name)) return undefined;
+  if (!ctx.pack.templates.has("primitive-modal-controlled")) return undefined;
+  ctx.usesState = true;
+  const stateName = openArg.name;
+  const setter = `set${stateName[0]!.toUpperCase()}${stateName.slice(1)}`;
+  const title = stringNamed(call, "title");
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  // Children = the modal body (every positional except the op-form, which this
+  // shape doesn't have).
+  const childrenJsx = positionalArgs(call)
+    .map((c) => walk(c, ctx, depth + 1))
+    .join(`\n${indent}`);
+  return renderPrimitive(ctx, "primitive-modal-controlled", {
+    opened: stateName,
+    setter,
+    hasTitle: title !== undefined,
+    title,
+    childrenJsx,
+    indent,
+    closeIndent,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
 export function emitModal(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -581,6 +620,14 @@ export function emitModal(
     (a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "OperationForm",
   );
   const triggerArg = namedArgValue(call, "trigger");
+  if (!formChild) {
+    // No operation-form child → maybe a state-controlled modal
+    // (`Modal { <children>, open: <stateBool> }`).  Returns undefined when
+    // `open:` isn't a state ref or the pack ships no controlled-modal template,
+    // falling through to the explanatory stub below.
+    const controlled = emitControlledModal(call, ctx, depth);
+    if (controlled !== undefined) return controlled;
+  }
   if (!formChild || !triggerArg || triggerArg.kind !== "call") {
     return ctx.target.renderComment(
       `Modal: expects trigger: Button(...) and a Form(<instance>.<operation>) child`,

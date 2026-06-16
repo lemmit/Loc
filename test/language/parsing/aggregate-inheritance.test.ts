@@ -654,8 +654,9 @@ system Sys {
     // The part gets its own table…
     expect(schema).toMatch(/\.table\("addresses"/);
     // …whose parent FK targets the SHARED base table (`party_id`), NOT a
-    // non-existent `customer_id`.
-    expect(schema).toMatch(/parentId: text\("party_id"\)/);
+    // non-existent `customer_id`.  The base has a guid id, so the FK is uuid
+    // (lockstep with the migration's idColumnType).
+    expect(schema).toMatch(/parentId: uuid\("party_id"\)/);
     expect(schema).not.toMatch(/text\("customer_id"\)/);
     // The repo loads/saves the part keyed on parentId (= the shared row id).
     const repo = files.get("api/db/repositories/customer-repository.ts") ?? "";

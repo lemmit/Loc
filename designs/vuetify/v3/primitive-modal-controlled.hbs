@@ -1,0 +1,7 @@
+<v-dialog v-model="{{opened}}" max-width="560"{{{testidAttr}}}>
+{{indent}}<v-card{{#if hasTitle}} title="{{title}}"{{/if}}>
+{{indent}}  <v-card-text>
+{{indent}}    {{{childrenJsx}}}
+{{indent}}  </v-card-text>
+{{indent}}</v-card>
+{{closeIndent}}</v-dialog>

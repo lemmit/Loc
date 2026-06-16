@@ -182,7 +182,9 @@ function renderModel(
   ];
   const tableArgs = [
     ...(parentName
-      ? [`        Index("${tableName}_parent_id_idx", "${snake(parentName)}_id"),`]
+      ? // Index name keys off the real FK column (`<parent>_id`), matching the
+        // shared migration's `CREATE INDEX <table>_<parent>_id_idx`.
+        [`        Index("${tableName}_${snake(parentName)}_id_idx", "${snake(parentName)}_id"),`]
       : []),
     ...(schema ? [`        {"schema": "${schema}"},`] : []),
   ];

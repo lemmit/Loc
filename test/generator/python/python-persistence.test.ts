@@ -48,7 +48,8 @@ describe("python schema emission", () => {
     expect(schema).toContain(
       '    parent_id: Mapped[str] = mapped_column("order_id", Uuid(as_uuid=False))',
     );
-    expect(schema).toContain('Index("order_lines_parent_id_idx", "order_id")');
+    // Index name keys off the real FK column, matching the migration.
+    expect(schema).toContain('Index("order_lines_order_id_idx", "order_id")');
     // VO fields flatten to prefixed columns.
     expect(schema).toContain("    unit_price_amount: Mapped[Decimal] = mapped_column(Numeric)");
     expect(schema).toContain("    unit_price_currency: Mapped[str] = mapped_column(Text)");

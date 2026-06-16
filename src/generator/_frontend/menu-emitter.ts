@@ -34,8 +34,16 @@ import { plural, snake } from "../../util/naming.js";
  *  Moved here from react/templating/view-models.ts with the menu
  *  emitter; the react module re-exports for its templates. */
 export interface NavEntryVM {
-  /** Router target path. */
+  /** Router target path.  For external links this is the legacy
+   *  `__external:<url>` sentinel (consumed by the Phoenix sidebar);
+   *  React templates branch on `external`/`href` instead. */
   to: string;
+  /** True when this entry links to an off-site URL (rendered as a
+   *  plain `<a>`/`<Anchor>`, not a React-Router `<NavLink>`). */
+  external?: boolean;
+  /** The off-site URL for an `external` entry (the `to` sentinel with
+   *  its `__external:` prefix stripped). */
+  href?: string;
   /** Visible link text. */
   label: string;
   /** Stable testid for Playwright drivers. */
@@ -124,14 +132,13 @@ function navEntryForLink(
   ui: UiIR,
 ): NavEntryVM | undefined {
   if (link.kind === "external") {
-    // External links don't go through React Router; render as a
-    // plain anchor.  We inject a sentinel `__external:<url>` token
-    // into `to` so the AppShell template can recognise the form
-    // (the existing template only renders `<NavLink to=...>` —
-    // external rendering can land with the template-pack work if it's
-    // needed by a real example).
+    // External links don't go through React Router; render as a plain
+    // anchor.  `to` keeps the legacy `__external:<url>` sentinel that the
+    // Phoenix sidebar slices; the React packs branch on `external`/`href`.
     return {
       to: `__external:${link.url}`,
+      external: true,
+      href: link.url,
       label: link.label,
       testId: `nav-ext-${slugifyLabel(link.label)}`,
       activeArgs: `""`,

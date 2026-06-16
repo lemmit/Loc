@@ -166,6 +166,19 @@ describe.skipIf(!ENABLED)(
           ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
           : [];
         expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+        // The generated xUnit `Tests/` project is a SEPARATE csproj. Its
+        // emission + compile-readiness (currentUser actor + no void→var) is
+        // guarded by the fast generator test
+        // (test/generator/dotnet/aggregate-test-currentuser.test.ts), which
+        // needs no toolchain.  We assert it's emitted here, but do NOT
+        // `dotnet build` it in CI: the Tests project pulls test-only packages
+        // (AwesomeAssertions/xunit) that this runner's NuGet environment does
+        // not have cached, and build-time restore of them isn't reliable here.
+        // Actually compiling the Tests project is a Tier-1 follow-up (see
+        // docs/plans/runtime-conformance-harness.md) once the CI NuGet feed
+        // carries the test packages.
+        const testProj = path.join(proj, "Tests", "DotnetApi.Tests", "DotnetApi.Tests.csproj");
+        expect(fs.existsSync(testProj), "generated Tests project").toBe(true);
       } finally {
         try {
           fs.rmSync(outDir, { recursive: true, force: true });

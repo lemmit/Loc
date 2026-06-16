@@ -6,9 +6,16 @@ import type {
   TestIR,
   TestStmtIR,
 } from "../../../ir/types/loom-ir.js";
+import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { intrinsicMatcherSig } from "../../../util/intrinsic-matchers.js";
 import { upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
+
+// A currentUser-gated operation's method signature picks up a trailing
+// `User currentUser` parameter; a domain `test` block has no auth context, so
+// calls to such ops are supplied a synthetic full-access actor (admin + `*`
+// permission) — parity with the Hono backend's TEST_ACTOR.
+const TEST_ACTOR = 'new User(System.Guid.Empty, "admin", new List<string> { "*" })';
 
 // ---------------------------------------------------------------------------
 // `test "..." { ... }` DSL → xUnit test class.
@@ -33,9 +40,18 @@ export function renderTestsFile(
   ns: string,
 ): string | null {
   if (agg.tests.length === 0) return null;
+  // Render the test bodies first so we know whether the synthetic actor
+  // (TEST_ACTOR) was threaded into any currentUser-gated op call — only then do
+  // we import its `List<string>` + Auth-layer `User` dependencies (a system
+  // with no `user` block emits no `${ns}.Auth` namespace, so an unconditional
+  // import would not compile).
+  const methodBlocks = agg.tests.map((t) => renderTest(t, ctx).map((l) => `    ${l}`));
+  const usesActor = methodBlocks.some((b) => b.some((l) => l.includes(TEST_ACTOR)));
+
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push("using System;");
+  if (usesActor) lines.push("using System.Collections.Generic;");
   lines.push("using Xunit;");
   lines.push("using AwesomeAssertions;");
   lines.push(`using ${ns}.Domain.${upperFirst(plural(agg.name))};`);
@@ -43,13 +59,14 @@ export function renderTestsFile(
   lines.push(`using ${ns}.Domain.ValueObjects;`);
   lines.push(`using ${ns}.Domain.Enums;`);
   lines.push(`using ${ns}.Domain.Ids;`);
+  if (usesActor) lines.push(`using ${ns}.Auth;`);
   lines.push("");
   lines.push(`namespace ${ns}.Tests.${upperFirst(plural(agg.name))};`);
   lines.push("");
   lines.push(`public sealed class ${agg.name}Tests`);
   lines.push("{");
-  for (const t of agg.tests) {
-    lines.push(...renderTest(t, ctx).map((l) => `    ${l}`));
+  for (const block of methodBlocks) {
+    lines.push(...block);
     lines.push("");
   }
   lines.push("}");
@@ -153,11 +170,17 @@ function renderTestStmt(s: TestStmtIR, ctx: BoundedContextIR): string {
     throw new Error("expect requires a matcher (e.g. expect(x).toBe(y)); got a bare expression.");
   }
   if (s.kind === "expect-throws") {
-    const expr = renderCreateCall(s.expr, ctx) ?? renderCsExpr(s.expr);
-    return `    Assert.Throws<DomainException>(() => { var __ = ${expr}; });`;
+    const expr = renderTestExpr(s.expr, ctx);
+    // An invocation (operation call) is a valid expression-statement whether it
+    // returns void or a value — `() => { call(); }`.  Only a non-invocation
+    // expression (e.g. a property access) needs binding to satisfy CS0201;
+    // binding a void call to `var` is a CS0815 error, so never do it for calls.
+    const isInvocation = s.expr.kind === "method-call" || s.expr.kind === "call";
+    const body = isInvocation ? `${expr};` : `var __ = ${expr};`;
+    return `    Assert.Throws<DomainException>(() => { ${body} });`;
   }
   if (s.kind === "let") {
-    const expr = renderCreateCall(s.expr, ctx) ?? renderCsExpr(s.expr);
+    const expr = renderTestExpr(s.expr, ctx);
     return `    var ${s.name} = ${expr};`;
   }
   if (s.kind === "call") {
@@ -165,10 +188,27 @@ function renderTestStmt(s: TestStmtIR, ctx: BoundedContextIR): string {
     return `    ${upperFirst(s.name)}(${args});`;
   }
   if (s.kind === "expression") {
-    const expr = renderCreateCall(s.expr, ctx) ?? renderCsExpr(s.expr);
-    return `    ${expr};`;
+    return `    ${renderTestExpr(s.expr, ctx)};`;
   }
   throw new Error(
     `internal: aggregate test body contains '${s.kind}' which the IR validator should have rejected`,
   );
+}
+
+/** Render a test-body expression, threading the synthetic actor (TEST_ACTOR)
+ *  into calls of currentUser-gated operations (whose method signature gained a
+ *  trailing `User currentUser` parameter).  Everything else defers to
+ *  `renderCreateCall` (typed `create({…})` input) / `renderCsExpr`. */
+function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
+  if (e.kind === "method-call" && e.receiverType.kind === "entity" && !e.isCollectionOp) {
+    const entityName = e.receiverType.name;
+    const agg = ctx.aggregates.find((a) => a.name === entityName);
+    const op = agg?.operations.find((o) => o.name === e.member);
+    if (op && operationUsesCurrentUser(op)) {
+      const recv = renderTestExpr(e.receiver, ctx);
+      const args = [...e.args.map((a) => renderTestExpr(a, ctx)), TEST_ACTOR];
+      return `${recv}.${upperFirst(e.member)}(${args.join(", ")})`;
+    }
+  }
+  return renderCreateCall(e, ctx) ?? renderCsExpr(e);
 }

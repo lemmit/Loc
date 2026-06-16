@@ -1,0 +1,6 @@
+<Dialog v-model:open="{{opened}}">
+{{indent}}<DialogContent{{{testidAttr}}}>{{#if hasTitle}}
+{{indent}}  <DialogHeader><DialogTitle>{{title}}</DialogTitle></DialogHeader>{{/if}}
+{{indent}}  {{{childrenJsx}}}
+{{indent}}</DialogContent>
+{{closeIndent}}</Dialog>

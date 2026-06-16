@@ -1,0 +1,9 @@
+<Modal isOpen={ {{opened}} } onClose={() => {{setter}}(false)}>
+{{indent}}<ModalOverlay />
+{{indent}}<ModalContent{{{testidAttr}}}>{{#if hasTitle}}
+{{indent}}  <ModalHeader>{{title}}</ModalHeader>{{/if}}
+{{indent}}  <ModalBody>
+{{indent}}    {{{childrenJsx}}}
+{{indent}}  </ModalBody>
+{{indent}}</ModalContent>
+{{closeIndent}}</Modal>

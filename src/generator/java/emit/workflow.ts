@@ -2,10 +2,13 @@ import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedBoundedContextIR,
   ExprIR,
+  IsolationLevel,
+  SystemIR,
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../../_workflow/stmt-target.js";
@@ -16,6 +19,20 @@ import {
   wireJavaType,
   wireToDomain,
 } from "./wire.js";
+
+/** Spring `Isolation` enum member for a DSL isolation level. */
+function javaIsolation(level: IsolationLevel): string {
+  switch (level) {
+    case "readUncommitted":
+      return "READ_UNCOMMITTED";
+    case "readCommitted":
+      return "READ_COMMITTED";
+    case "repeatableRead":
+      return "REPEATABLE_READ";
+    case "serializable":
+      return "SERIALIZABLE";
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Workflows — cross-aggregate orchestration.  One `<Context>Workflows`
@@ -232,6 +249,7 @@ export function renderJavaWorkflows(
   ctx: EnrichedBoundedContextIR,
   wctx: WorkflowCtx,
   authed: boolean,
+  sys?: SystemIR,
 ): Map<string, { category: "service" | "controller" | "request-dto"; content: string }> | null {
   if (ctx.workflows.length === 0) return null;
   const out = new Map<
@@ -239,6 +257,9 @@ export function renderJavaWorkflows(
     { category: "service" | "controller" | "request-dto"; content: string }
   >();
   const imports = new Set<string>();
+  // True when any workflow pins a SERIALIZABLE/etc. isolation level — drives
+  // the `import …Isolation;` and the per-method `@Transactional(isolation = …)`.
+  let usesIsolation = false;
   const repoAggs = new Set<string>();
   const methods: string[] = [];
 
@@ -280,7 +301,16 @@ export function renderJavaWorkflows(
       "        ",
     );
     const saves = wf.savesAtExit.map((s) => `        ${repoField(s.aggName)}.save(${s.name});`);
+    // The service carries a class-level `@Transactional`; a workflow that pins
+    // an isolation level (`transactional(<level>)`, or its state dataSource's
+    // `isolationLevel:`) overrides it per-method — parity with the .NET
+    // BeginTransactionAsync(IsolationLevel.X) path.
+    const isolation = sys ? resolveWorkflowIsolation(wf, ctx, sys) : wf.isolation;
+    if (isolation) usesIsolation = true;
     methods.push(
+      ...(isolation
+        ? [`    @Transactional(isolation = Isolation.${javaIsolation(isolation)})`]
+        : []),
       `    public void ${lowerFirst(wf.name)}(${wf.params.length > 0 ? `${reqType} request` : ""}) {`,
       ...(usesUser && authed ? [`        var currentUser = currentUserAccessor.user();`] : []),
       ...paramLets,
@@ -315,6 +345,7 @@ export function renderJavaWorkflows(
       hasEmit ? `import org.slf4j.LoggerFactory;` : null,
       `import org.springframework.stereotype.Service;`,
       `import org.springframework.transaction.annotation.Transactional;`,
+      usesIsolation ? `import org.springframework.transaction.annotation.Isolation;` : null,
       ``,
       ...repoFields.flatMap((a) => {
         const entityPkg = wctx.entityPkgOf(a);

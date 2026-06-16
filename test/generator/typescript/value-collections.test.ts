@@ -37,8 +37,9 @@ describe("value-object collection — child-table persistence (Hono)", () => {
     expect(schema).not.toMatch(/charges:\s*text\(/);
     // … a dedicated child table instead.
     expect(schema).toMatch(/export const orderCharges = pgTable\("order_charges"/);
-    // owner FK + ordinal + the value object's flattened columns
-    expect(schema).toMatch(/parentId:\s*text\("order_id"\)\.notNull\(\)/);
+    // owner FK + ordinal + the value object's flattened columns.  The owner is
+    // a guid-id aggregate, so the FK is uuid (lockstep with the migration).
+    expect(schema).toMatch(/parentId:\s*uuid\("order_id"\)\.notNull\(\)/);
     expect(schema).toMatch(/ordinal:\s*integer\("ordinal"\)\.notNull\(\)/);
     expect(schema).toMatch(/amount:\s*numeric\(/);
     expect(schema).toMatch(/currency:\s*text\(/);

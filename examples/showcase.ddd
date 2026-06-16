@@ -377,10 +377,10 @@ system DevPlatform {
                         },
                         Card {
                             Stack {
-                                Field { "Name", value: draftName },
-                                NumberField { "Level", value: level },
+                                Field { "Name", bind: draftName },
+                                NumberField { "Level", bind: level },
                                 PasswordField { "Token" },
-                                Toggle { "Editing", value: editing },
+                                Toggle { "Editing", bind: editing },
                                 Anchor { "Docs", to: "/docs" },
                                 Button { "Save", to: "/projects" }
                             }
@@ -557,11 +557,18 @@ system DevPlatform {
     // the exact status, so each block asserts "every backend rejects the same
     // bad input with the SAME status" at runtime — the behavioral complement
     // to the static `errorResponseDiffs` OpenAPI parity gate.  Status contract
-    // (identical across all three backends): an `invariant` / `check`
-    // violation surfaces as a ValidationError → 422 (Unprocessable Entity, the
-    // stdlib default in `src/util/error-defaults.ts`); a missing aggregate → 404.
-    // Payloads mirror the happy-path creates above so the *only* reason to
-    // fail is the one field under test.
+    // (identical across all three backends) — the two-tier error model from
+    // `docs/proposals/validation-error-extension.md` (SHIPPED):
+    //   • a *field-mirrorable* `invariant` / `check` (each case below is a
+    //     single-field rule) is caught at the WIRE validator and surfaces as a
+    //     ValidationError → 422 (Unprocessable Entity, the stdlib default in
+    //     `src/util/error-defaults.ts`) with a per-field `errors[]` pointer;
+    //   • an aggregate-level `DomainError` that reaches the domain floor (a
+    //     cross-field or `@server-only` invariant with no per-field path)
+    //     surfaces as 400 — this is by design, not a gap;
+    //   • a missing aggregate → 404.
+    // Every payload mirrors the happy-path creates above so the *only* reason to
+    // fail is the one field under test (keeping each case on the 422 wire path).
 
     // 422 — invariant `name.length > 0` (Catalog.Project) must reject.
     test e2e "creating a project with an empty name is rejected" against dotnetApi {

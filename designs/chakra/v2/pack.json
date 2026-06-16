@@ -64,6 +64,7 @@
     "primitive-query-view": "primitive-query-view.hbs",
     "primitive-key-value-row": "primitive-key-value-row.hbs",
     "primitive-modal": "primitive-modal.hbs",
+    "primitive-modal-controlled": "primitive-modal-controlled.hbs",
     "primitive-code-block": "primitive-code-block.hbs",
     "primitive-icon": "primitive-icon.hbs",
     "form-op-decls": "form-op-decls.hbs",
@@ -586,6 +587,18 @@
         "from": "@chakra-ui/react",
         "named": [
           "useToast"
+        ]
+      }
+    ],
+    "primitive-modal-controlled": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Modal",
+          "ModalOverlay",
+          "ModalContent",
+          "ModalHeader",
+          "ModalBody"
         ]
       }
     ]

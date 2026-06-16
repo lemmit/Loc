@@ -120,7 +120,7 @@ function AppShellLayout() {
       <AppShell.Navbar p="md">
         <Stack gap={4} data-testid="nav-sidebar">
 {{#each navSections}}          <Divider my="xs" label="{{label}}" labelPosition="left" />
-{{#each entries}}          <NavLink component={RouterLink} to="{{to}}" label="{{label}}" active={isActive({{{activeArgs}}})} data-testid="{{testId}}" />
+{{#each entries}}{{#if external}}          <Anchor href="{{href}}" target="_blank" rel="noreferrer" data-testid="{{testId}}">{{label}}</Anchor>{{else}}          <NavLink component={RouterLink} to="{{to}}" label="{{label}}" active={isActive({{{activeArgs}}})} data-testid="{{testId}}" />{{/if}}
 {{/each}}{{/each}}        </Stack>
       </AppShell.Navbar>
       <AppShell.Main>

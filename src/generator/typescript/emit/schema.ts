@@ -5,6 +5,7 @@ import type {
   EnrichedBoundedContextIR,
   ExprIR,
   FieldIR,
+  IdValueType,
   TypeIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
@@ -116,7 +117,12 @@ export function renderSchema(
       // parts otherwise identically to a plain aggregate's.
       const owner = tableOwnerName(agg, ctx.aggregates);
       for (const part of agg.parts) {
-        tables.push(emitTable(part.name, part.fields, owner, ctx, new Set(), { schema, prefix }));
+        tables.push(
+          emitTable(part.name, part.fields, owner, ctx, new Set(), agg.idValueType, {
+            schema,
+            prefix,
+          }),
+        );
       }
       continue;
     }
@@ -136,7 +142,7 @@ export function renderSchema(
     // Document (`shape(document)`): the whole aggregate is one opaque
     // jsonb blob (`id, data, version`).  No part/join tables.
     if (shape === "document") {
-      tables.push(emitDocumentTable(agg.name, { schema, prefix }));
+      tables.push(emitDocumentTable(agg.name, agg.idValueType, { schema, prefix }));
       continue;
     }
     // Embedded (`shape(embedded)`): queryable root row + one jsonb column
@@ -146,9 +152,16 @@ export function renderSchema(
       continue;
     }
     const indexed = indexedColumnsFor(agg, ctx);
-    tables.push(emitTable(agg.name, agg.fields, undefined, ctx, indexed, { schema, prefix }));
+    tables.push(
+      emitTable(agg.name, agg.fields, undefined, ctx, indexed, agg.idValueType, { schema, prefix }),
+    );
     for (const part of agg.parts) {
-      tables.push(emitTable(part.name, part.fields, agg.name, ctx, new Set(), { schema, prefix }));
+      tables.push(
+        emitTable(part.name, part.fields, agg.name, ctx, new Set(), agg.idValueType, {
+          schema,
+          prefix,
+        }),
+      );
     }
     // Many-to-many join tables for `T id[]` reference collections.
     // Live in the same schema as the owning aggregate so cross-table
@@ -160,11 +173,11 @@ export function renderSchema(
     // row per element keyed by (parent_id, ordinal), columns flattened
     // from the value object.  Plain relational shape (portable).
     for (const vc of valueCollectionsFor(agg)) {
-      tables.push(emitValueCollectionTable(vc, ctx, { schema, prefix }));
+      tables.push(emitValueCollectionTable(vc, ctx, agg.idValueType, { schema, prefix }));
     }
     for (const part of agg.parts) {
       for (const vc of valueCollectionsFor(part)) {
-        tables.push(emitValueCollectionTable(vc, ctx, { schema, prefix }));
+        tables.push(emitValueCollectionTable(vc, ctx, agg.idValueType, { schema, prefix }));
       }
     }
   }
@@ -245,8 +258,8 @@ function emitJoinTable(
   const tableName = options.prefix ? `${options.prefix}${baseTable}` : baseTable;
   const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
   lines.push(`export const ${tableConst} = ${tableFactory}("${tableName}", {`);
-  lines.push(`  ${ownerKey}: text("${assoc.ownerFk}").notNull(),`);
-  lines.push(`  ${targetKey}: text("${assoc.targetFk}").notNull(),`);
+  lines.push(`  ${ownerKey}: ${drizzleIdColumn(assoc.valueType, assoc.ownerFk)}.notNull(),`);
+  lines.push(`  ${targetKey}: ${drizzleIdColumn(assoc.valueType, assoc.targetFk)}.notNull(),`);
   lines.push(`  ordinal: integer("ordinal").notNull(),`);
   lines.push(`}, (table) => ({`);
   lines.push(
@@ -404,7 +417,7 @@ function emitEmbeddedTable(
   const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
   const lines: string[] = [];
   lines.push(`export const ${lowerFirst(plural(agg.name))} = ${tableFactory}("${tableName}", {`);
-  lines.push(`  id: text("id").primaryKey(),`);
+  lines.push(`  id: ${drizzleIdColumn(agg.idValueType, "id")}.primaryKey(),`);
   for (const f of agg.fields) {
     if (f.type.kind === "array" && f.type.element.kind === "id") {
       const not = f.optional ? "" : ".notNull()";
@@ -441,7 +454,8 @@ function emitWorkflowStateTable(wf: WorkflowIR, ctx: BoundedContextIR): string {
   lines.push(`export const ${lowerFirst(plural(wf.name))} = pgTable("${tableName}", {`);
   for (const f of wf.stateFields ?? []) {
     if (f.name === wf.correlationField) {
-      lines.push(`  ${f.name}: text("${snake(f.name)}").primaryKey(),`);
+      const corrType = f.type.kind === "id" ? f.type.valueType : "guid";
+      lines.push(`  ${f.name}: ${drizzleIdColumn(corrType, snake(f.name))}.primaryKey(),`);
     } else {
       lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
     }
@@ -489,6 +503,7 @@ function emitEventLogTable(
 
 function emitDocumentTable(
   name: string,
+  idType: IdValueType,
   options: { schema?: string; prefix?: string } = {},
 ): string {
   const baseTable = snake(plural(name));
@@ -496,7 +511,7 @@ function emitDocumentTable(
   const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
   return [
     `export const ${lowerFirst(plural(name))} = ${tableFactory}("${tableName}", {`,
-    `  id: text("id").primaryKey(),`,
+    `  id: ${drizzleIdColumn(idType, "id")}.primaryKey(),`,
     `  data: jsonb("data").notNull(),`,
     `  version: integer("version").notNull(),`,
     `});`,
@@ -522,7 +537,7 @@ function emitTphTable(
   const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
   const lines: string[] = [];
   lines.push(`export const ${lowerFirst(plural(base.name))} = ${tableFactory}("${tableName}", {`);
-  lines.push(`  id: text("id").primaryKey(),`);
+  lines.push(`  id: ${drizzleIdColumn(base.idValueType, "id")}.primaryKey(),`);
   lines.push(`  kind: text("kind").notNull(),`);
   for (const f of base.fields) {
     lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
@@ -548,6 +563,7 @@ function emitTphTable(
 function emitValueCollectionTable(
   vc: ValueCollectionIR,
   ctx: BoundedContextIR,
+  idType: IdValueType,
   options: { schema?: string; prefix?: string } = {},
 ): string {
   const vo = ctx.valueObjects.find((v) => v.name === vc.voName);
@@ -555,7 +571,7 @@ function emitValueCollectionTable(
   const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
   const lines: string[] = [];
   lines.push(`export const ${vc.tableConst} = ${tableFactory}("${tableName}", {`);
-  lines.push(`  parentId: text("${vc.parentFk}").notNull(),`);
+  lines.push(`  parentId: ${drizzleIdColumn(idType, vc.parentFk)}.notNull(),`);
   lines.push(`  ordinal: integer("ordinal").notNull(),`);
   for (const f of vo?.fields ?? []) {
     lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
@@ -575,6 +591,7 @@ function emitTable(
   parentName: string | undefined,
   ctx: BoundedContextIR,
   indexedColumns: Set<string>,
+  idType: IdValueType,
   options: { schema?: string; prefix?: string } = {},
 ): string {
   const baseTable = snake(plural(name));
@@ -587,9 +604,15 @@ function emitTable(
   // qualifies the SQL with the schema name.
   const tableFactory = options.schema ? `${schemaConstName(options.schema)}.table` : "pgTable";
   lines.push(`export const ${lowerFirst(plural(name))} = ${tableFactory}("${tableName}", {`);
-  lines.push(`  id: text("id").primaryKey(),`);
+  lines.push(`  id: ${drizzleIdColumn(idType, "id")}.primaryKey(),`);
   if (parentName) {
-    lines.push(`  parentId: text("${snake(parentName)}_id").notNull(),`);
+    // `.references()` mirrors the migration's `FOREIGN KEY … REFERENCES …
+    // ON DELETE CASCADE` so the Drizzle schema's relational metadata matches
+    // the DDL Loom emits.
+    const parentTableConst = lowerFirst(plural(parentName));
+    lines.push(
+      `  parentId: ${drizzleIdColumn(idType, `${snake(parentName)}_id`)}.notNull().references(() => ${parentTableConst}.id, { onDelete: "cascade" }),`,
+    );
   }
   for (const f of fields) {
     lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
@@ -609,8 +632,11 @@ function emitTable(
   // root column referenced by a find.
   const indexEntries: string[] = [];
   if (parentName) {
+    // Index name keys off the real FK column (`<parent>_id`), matching the
+    // migration's `CREATE INDEX <table>_<parent>_id_idx`.
+    const parentSnake = snake(parentName);
     indexEntries.push(
-      `    ${lowerFirst(name)}ParentIdIdx: index("${tableName}_parent_id_idx").on(table.parentId),`,
+      `    ${lowerFirst(name)}${pascalize(parentSnake)}IdIdx: index("${tableName}_${parentSnake}_id_idx").on(table.parentId),`,
     );
   }
   for (const col of indexedColumns) {
@@ -630,6 +656,24 @@ function emitTable(
 
 function pascalize(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+}
+
+/** The Drizzle column factory call for an id-shaped column (aggregate PK,
+ *  `X id` reference, containment / join-table FK, workflow correlation key).
+ *  Mirrors the migration builder's `idColumnType` so the Drizzle schema and the
+ *  generated DDL declare the same Postgres type: guid → uuid, int → integer,
+ *  long → bigint, string → text. */
+function drizzleIdColumn(valueType: IdValueType, colName: string): string {
+  switch (valueType) {
+    case "guid":
+      return `uuid("${colName}")`;
+    case "int":
+      return `integer("${colName}")`;
+    case "long":
+      return `bigint("${colName}", { mode: "number" })`;
+    case "string":
+      return `text("${colName}")`;
+  }
 }
 
 function drizzleColumnLines(f: FieldIR, ctx: BoundedContextIR): string[] {
@@ -693,7 +737,7 @@ function drizzleColumnLinesForName(
           return [`${fieldName}: jsonb("${colName}")${not},`];
       }
     case "id":
-      return [`${fieldName}: text("${colName}")${not},`];
+      return [`${fieldName}: ${drizzleIdColumn(inner.valueType, colName)}${not},`];
     case "enum":
       return [`${fieldName}: ${lowerFirst(inner.name)}Enum("${colName}")${not},`];
     case "valueobject": {

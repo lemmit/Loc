@@ -46,6 +46,7 @@
     "primitive-code-block": "primitive-code-block.hbs",
     "primitive-icon": "primitive-icon.hbs",
     "primitive-modal": "primitive-modal.hbs",
+    "primitive-modal-controlled": "primitive-modal-controlled.hbs",
     "app-shell": "app-shell.hbs",
     "format-helpers": "format-helpers.hbs",
     "main": "main.hbs",
@@ -73,6 +74,13 @@
     "op-dialog": "op-dialog.hbs"
   },
   "imports": {
-    "realtime-toast": [{ "from": "../lib/toast", "named": ["pushToast"] }]
+    "realtime-toast": [
+      {
+        "from": "../lib/toast",
+        "named": [
+          "pushToast"
+        ]
+      }
+    ]
   }
 }

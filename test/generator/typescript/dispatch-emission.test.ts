@@ -81,7 +81,8 @@ describe("in-process event dispatch emission", () => {
   it("emits a persisted state table keyed by the correlation field (db/schema.ts)", async () => {
     const schema = (await generate("test/fixtures/dispatch-sample.ddd")).get("db/schema.ts") ?? "";
     expect(schema).toMatch(/export const orderFulfillments = pgTable\("order_fulfillments", \{/);
-    expect(schema).toMatch(/orderId: text\("order_id"\)\.primaryKey\(\)/);
+    // guid correlation key → uuid, matching the migration's idColumnType.
+    expect(schema).toMatch(/orderId: uuid\("order_id"\)\.primaryKey\(\)/);
     expect(schema).toMatch(/attempts: integer\("attempts"\)\.notNull\(\)/);
   });
 

@@ -1103,6 +1103,9 @@ function typedCellFor(receiver: ExprIR, type: import("../types/loom-ir.js").Type
     if (inner.name === "datetime") {
       return call("DateDisplay", [receiver]);
     }
+    if (inner.name === "bool") {
+      return call("Text", [boolText(receiver)]);
+    }
     if (
       inner.name === "decimal" ||
       inner.name === "money" ||
@@ -1211,6 +1214,15 @@ function boolLit(value: boolean): ExprIR {
   return { kind: "literal", lit: "bool", value: value ? "true" : "false" };
 }
 
+/** A `<bool> ? "Yes" : "No"` ternary for a boolean cell.  React renders a
+ *  bare boolean as nothing, so scaffold cells route bools through this
+ *  readable text (matching the pack `BoolValue` helper's labels).  Uses the
+ *  shared `ternary` ExprIR so every frontend + Phoenix render it. */
+function boolText(receiver: ExprIR): ExprIR {
+  // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then` across the IR
+  return { kind: "ternary", cond: receiver, then: lit("Yes"), otherwise: lit("No") };
+}
+
 function ref(name: string): ExprIR {
   return { kind: "ref", name, refKind: "unknown" };
 }
@@ -1254,6 +1266,9 @@ function columnAccessorFor(
   if (inner.kind === "primitive") {
     if (inner.name === "datetime") {
       return call("DateDisplay", [member(ref(rowVar), fieldName)]);
+    }
+    if (inner.name === "bool") {
+      return call("Text", [boolText(member(ref(rowVar), fieldName))]);
     }
     if (
       inner.name === "decimal" ||

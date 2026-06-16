@@ -5,7 +5,7 @@
 {{/each}}{{headIndent}}</tr>
 {{indent}}</thead>
 {{indent}}<tbody class="[&_tr:last-child]:border-0">
-{{headIndent}}{#each {{{rowsExpr}}} as {{rowVar}}{{#if usesIdx}}, idx{{/if}} ({{{keyExpr}}})}
+{{headIndent}}{#each ({{{rowsExpr}}} ?? []) as {{rowVar}}{{#if usesIdx}}, idx{{/if}} ({{{keyExpr}}})}
 {{rowIndent}}<tr class="border-b transition-colors hover:bg-muted/50"{{#if hasRowTestid}} data-testid={ {{{rowTestid}}} }{{/if}}{{#if hasOnRowClick}} onclick={() => {{{onRowClick}}} }{{/if}}>
 {{#each columns}}{{../cellIndent}}<td class="p-2 align-middle">{{{this.cellJsx}}}</td>
 {{/each}}{{rowIndent}}</tr>

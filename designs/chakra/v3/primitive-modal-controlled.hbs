@@ -1,0 +1,13 @@
+<Dialog.Root open={ {{opened}} } onOpenChange={(e) => { if (!e.open) {{setter}}(false); }}>
+{{indent}}<Portal>
+{{indent}}  <Dialog.Backdrop />
+{{indent}}  <Dialog.Positioner>
+{{indent}}    <Dialog.Content{{{testidAttr}}}>{{#if hasTitle}}
+{{indent}}      <Dialog.Header><Dialog.Title>{{title}}</Dialog.Title></Dialog.Header>{{/if}}
+{{indent}}      <Dialog.Body>
+{{indent}}        {{{childrenJsx}}}
+{{indent}}      </Dialog.Body>
+{{indent}}    </Dialog.Content>
+{{indent}}  </Dialog.Positioner>
+{{indent}}</Portal>
+{{closeIndent}}</Dialog.Root>

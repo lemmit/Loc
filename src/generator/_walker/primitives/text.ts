@@ -147,9 +147,16 @@ export function emitImage(
   depth: number,
 ): string {
   // Image(src: "...", alt: "...") — packs render a styled image
-  // tag.  Both attrs accept string literals or refs.
+  // tag.  Both attrs accept string literals or refs.  The first
+  // POSITIONAL arg is shorthand for `src` (`Image { "/logo.png" }`),
+  // mirroring how Text/Money/EnumBadge read their primary value.
   void depth;
-  const src = stringOrRefArgValue(call, "src", ctx);
+  const positional = positionalArgs(call)[0];
+  const positionalSrc =
+    positional?.kind === "literal" && positional.lit === "string"
+      ? JSON.stringify(positional.value)
+      : undefined;
+  const src = stringOrRefArgValue(call, "src", ctx) ?? positionalSrc;
   const alt = stringOrRefArgValue(call, "alt", ctx);
   return renderPrimitive(ctx, "primitive-image", {
     src,
