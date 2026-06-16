@@ -40,6 +40,11 @@ on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
+  # On-demand per-PR run: apply the `run-e2e` label to a PR to run this
+  # otherwise post-merge-only suite against that branch before merge.  The
+  # job-level `if` below restricts the labeled trigger to that one label.
+  pull_request:
+    types: [labeled]
 
 # Cancel superseded *push* runs (a newer merge is what ultimately gets
 # gated, so killing the older in-flight push saves CI minutes).  But key
@@ -55,6 +60,11 @@ concurrency:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    # Skip the labeled trigger unless it's specifically `run-e2e`; push,
+    # schedule, and manual (`workflow_dispatch`) runs always proceed.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.label.name == 'run-e2e'
     # Job cap.  History:
     #   10 → 30 (stack v3, Tailwind 4, cold esm.sh fetches got heavier)
     #   30 → 45 (preview-runtime started reliably hitting 3min × retries)
