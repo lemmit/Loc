@@ -231,6 +231,10 @@ using (var scope = app.Services.CreateScope())
     ? `app.MapGet("/auth/me", (ICurrentUserAccessor accessor) => Results.Json(accessor.User)).ExcludeFromDescription();
 `
     : "";
+  // OIDC redirect handshake (/auth/login|callback|logout) — mounted under an
+  // `auth { oidc }` block.  Excluded from the OpenAPI contract inside
+  // MapAuthHandshake; the middleware bypasses these three paths.
+  const authHandshake = oidc ? "app.MapAuthHandshake();\n" : "";
   return `// Auto-generated.
 using System.Text.Json;
 ${usingDapper ? "using Npgsql;\n" : "using Microsoft.EntityFrameworkCore;\n"}${usesValidators ? "using FluentValidation;\n" : ""}using ${ns}.Api;
@@ -521,7 +525,7 @@ app.UseHttpLogging();
 app.UseCors();
 app.UseSwagger();
 ${authMount}app.MapControllers();
-${authMe}${
+${authMe}${authHandshake}${
   hasEmbeddedSpa
     ? `
 // Fullstack mode — host the embedded React SPA from wwwroot/.

@@ -1507,16 +1507,33 @@ describe(".NET generator", () => {
       expect(verifier).toContain('Role: ClaimString(payload, "realm_access.roles")');
       expect(verifier).toContain('Id: ClaimString(payload, "sub")');
       expect(verifier).toContain('Permissions: ClaimStringList(payload, "permissions")');
+      // The verifier also reads the session cookie issued by the handshake.
+      expect(verifier).toContain('request.Cookies["session"]');
       const program = files.get("Program.cs")!;
       expect(program).toContain("builder.Services.AddScoped<IUserVerifier, OidcUserVerifier>();");
       const csproj = files.get("Api.csproj")!;
       expect(csproj).toContain("Microsoft.IdentityModel.Protocols.OpenIdConnect");
     });
 
-    it("does not emit the OIDC verifier without an `auth { oidc }` block", async () => {
+    it("emits + mounts the /auth/* redirect handshake and bypasses it under `auth { oidc }`", async () => {
+      const files = await emitForAuthSystem(SRC_OIDC);
+      const handshake = files.get("Auth/AuthHandshake.cs")!;
+      expect(handshake).toContain("public static void MapAuthHandshake(this WebApplication app)");
+      expect(handshake).toContain('app.MapGet("/auth/login"');
+      expect(handshake).toContain('app.MapGet("/auth/callback"');
+      expect(handshake).toContain('app.MapGet("/auth/logout"');
+      expect(handshake).toContain('"grant_type"] = "authorization_code"');
+      // mounted + bypassed (redirect endpoints reachable without a principal)
+      expect(files.get("Program.cs")!).toContain("app.MapAuthHandshake();");
+      expect(files.get("Auth/UserMiddleware.cs")!).toContain('"/auth/login"');
+    });
+
+    it("does not emit the OIDC verifier or handshake without an `auth { oidc }` block", async () => {
       const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
       expect(files.has("Auth/OidcUserVerifier.cs")).toBe(false);
+      expect(files.has("Auth/AuthHandshake.cs")).toBe(false);
       expect(files.get("Api.csproj")!).not.toContain("Microsoft.IdentityModel");
+      expect(files.get("Auth/UserMiddleware.cs")!).not.toContain("/auth/login");
     });
 
     // A `requires`-guarded op / workflow denies with ForbiddenException →
