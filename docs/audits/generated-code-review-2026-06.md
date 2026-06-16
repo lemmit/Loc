@@ -60,8 +60,14 @@ These were flagged by the review; each needs runtime/toolchain verification this
 environment lacks (no Elixir/Ash, no dotnet SDK, docker daemon down), or is a
 walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
 
-- **React** `ProjectDetail` drops its `state` block (inert detail page) — a
-  walker limitation (Modal/state in detail bodies), feature-sized; page-level
+- **React** `ProjectDetail` `state` block — **largely resolved**: the inputs
+  just used the wrong keyword (`value:` instead of `bind:`; the `bind:` →
+  controlled-input + `useState` path works and is tested), and the
+  state-controlled `Modal { open: <state> }` is now **built** (`84231f7`, React
+  Mantine+shadcn; spec in `docs/proposals/state-controlled-modal.md`). Remaining
+  here: a validator warning for an unknown input arg (`value:` → "did you mean
+  `bind:`?"), fixing the showcase to use `bind:`, and the controlled-modal
+  template for the other packs (MUI/Chakra/Vue/Svelte/HEEx). Page-level
   `requires currentUser.role` not enforced client-side (backend still 403s —
   a frontend-acl feature). `Avatar { "P" }` still drops its positional arg —
   ambiguous (fallback-initials vs src) + undocumented, left for the language
@@ -77,6 +83,6 @@ walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
 
 ## Method note
 
-The fast generator-string assertion layer (now ~13 new tests) catches every fixed
+The fast generator-string assertion layer (now ~14 new tests) catches every fixed
 defect in plain `npm test` with no toolchain — the recurrence net the harshness
 of the original escape (contract asserted but never executed) motivated.
