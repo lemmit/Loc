@@ -1,0 +1,6 @@
+<Dialog open={ {{opened}} } onClose={() => {{setter}}(false)} fullWidth maxWidth="sm"{{{testidAttr}}}>{{#if hasTitle}}
+{{indent}}<DialogTitle>{{title}}</DialogTitle>{{/if}}
+{{indent}}<DialogContent>
+{{indent}}  {{{childrenJsx}}}
+{{indent}}</DialogContent>
+{{closeIndent}}</Dialog>

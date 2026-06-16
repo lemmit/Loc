@@ -66,4 +66,30 @@ describe("react Modal { open: <state> } — state-controlled dialog", () => {
     expect(page).toContain("Confirm archive?");
     expect(page).not.toContain("Modal: expects trigger");
   });
+
+  it("MUI renders a controlled <Dialog open/onClose>", async () => {
+    const files = await generateSystemFiles(SRC("mui"));
+    const page = [...files.entries()].find(([p]) => /pages\/confirm\.tsx$/.test(p))?.[1];
+    expect(page, "confirm page").toBeDefined();
+    expect(page).toMatch(/const \[archiveOpen, setArchiveOpen\] = useState<boolean>\(false\);/);
+    expect(page).toMatch(
+      /<Dialog open=\{\s*archiveOpen\s*\} onClose=\{\(\) => setArchiveOpen\(false\)\}/,
+    );
+    expect(page).toContain("Confirm archive?");
+    expect(page).not.toContain("Modal: expects trigger");
+  });
+
+  it("Chakra renders a controlled dialog driven by the state flag", async () => {
+    const files = await generateSystemFiles(SRC("chakra"));
+    const page = [...files.entries()].find(([p]) => /pages\/confirm\.tsx$/.test(p))?.[1];
+    expect(page, "confirm page").toBeDefined();
+    expect(page).toMatch(/const \[archiveOpen, setArchiveOpen\] = useState<boolean>\(false\);/);
+    // Chakra v2 (<Modal isOpen>) or v3 (<Dialog.Root open>) — either is the
+    // state flag wired to the controlled dialog.
+    expect(page).toMatch(
+      /<Modal isOpen=\{\s*archiveOpen\s*\}|<Dialog\.Root open=\{\s*archiveOpen\s*\}/,
+    );
+    expect(page).toContain("Confirm archive?");
+    expect(page).not.toContain("Modal: expects trigger");
+  });
 });

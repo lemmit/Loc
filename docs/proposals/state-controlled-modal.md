@@ -58,8 +58,15 @@ state lives on the page):
 
 ## Scope / fallback
 
-React Mantine + shadcn first (the packs the showcase deployables use). A pack
-without a `primitive-modal-controlled` template (MUI, Chakra, Vue, Svelte,
-Phoenix HEEx) keeps the existing explanatory stub comment — no breakage; those
-packs adopt the template incrementally. No new walker primitive name, so the
-walker-stdlib-completeness and HEEx-parity gates are unaffected.
+All four React packs ship the controlled modal: Mantine (`<Modal opened/onClose>`),
+shadcn (`<Dialog open/onOpenChange>`), MUI (`<Dialog open/onClose>`), Chakra
+(v2 `<Modal isOpen/onClose>`, v3 `<Dialog.Root open/onOpenChange>`).
+
+A pack without a `primitive-modal-controlled` template (Vue: vuetify/shadcnVue;
+Svelte: shadcnSvelte/flowbite; Phoenix HEEx) keeps the existing explanatory stub
+comment — no breakage. Vue/Svelte are a deliberate follow-up: their state model
+differs (Vue `ref` + `v-model`; Svelte `$state` + `x = false`, not the React
+`setter`), and their modal area is itself partly unbuilt (vuetify's op-form
+modal is a TODO), so the templates want their own verification (vue-tsc /
+svelte-check) rather than a port of the React shape. No new walker primitive
+name, so the completeness/HEEx-parity gates are unaffected.

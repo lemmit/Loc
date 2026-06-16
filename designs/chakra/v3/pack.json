@@ -65,6 +65,7 @@
     "primitive-query-view": "primitive-query-view.hbs",
     "primitive-key-value-row": "primitive-key-value-row.hbs",
     "primitive-modal": "primitive-modal.hbs",
+    "primitive-modal-controlled": "primitive-modal-controlled.hbs",
     "primitive-code-block": "primitive-code-block.hbs",
     "primitive-icon": "primitive-icon.hbs",
     "form-op-decls": "form-op-decls.hbs",
@@ -543,6 +544,15 @@
         "from": "../lib/toaster",
         "named": [
           "toaster"
+        ]
+      }
+    ],
+    "primitive-modal-controlled": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Dialog",
+          "Portal"
         ]
       }
     ]
