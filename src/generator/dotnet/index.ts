@@ -465,6 +465,7 @@ function emitProjectFromContexts(
     hasAudit,
     hasProvenance,
     resourceNugetDeps: resourceEmission.nugetDeps,
+    oidc: !!(authRequired && system?.sys.auth),
   });
   emitTestProject(merged, ns, out);
   // Fullstack mode — generate the React project under ClientApp/.
@@ -965,6 +966,9 @@ function emitProject(
      *  "who computed".  Undefined when the deployable has no auth. */
     actorIdProp?: string;
     resourceNugetDeps?: Record<string, string>;
+    /** OIDC turnkey auth (D-AUTH-OIDC): the system declares `auth { oidc }`,
+     *  so emit the generated verifier registration + its NuGet refs. */
+    oidc?: boolean;
   },
 ): void {
   const hasExtern = ctx.aggregates.some((a) => a.operations.some((o) => o.extern));
@@ -989,6 +993,7 @@ function emitProject(
       hasSubscriptions: !!options?.hasSubscriptions,
       hasOutbox: !!options?.hasOutbox,
       hasAudit: !!options?.hasAudit,
+      oidc: !!options?.oidc,
     }),
   );
   // Ardalis.Specification ships only when a retrieval exists (EF Core path;
@@ -1007,6 +1012,7 @@ function emitProject(
       options?.resourceNugetDeps,
       usingDapper,
       usesSpecifications,
+      !!options?.oidc,
     ),
   );
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa, spaOutDir: options?.spaOutDir }));

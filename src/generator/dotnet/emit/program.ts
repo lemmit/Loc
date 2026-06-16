@@ -72,9 +72,14 @@ export function renderProgram(
      *  `IAuditWriter` → `AuditWriter` the audited command handlers depend on
      *  to stage audit rows onto the request unit of work. */
     hasAudit?: boolean;
+    /** OIDC turnkey auth (D-AUTH-OIDC): the system declares an `auth { oidc }`
+     *  block, so register the generated `OidcUserVerifier` (last-wins over the
+     *  dev stub).  Implies `authRequired`. */
+    oidc?: boolean;
   },
 ): string {
   const authRequired = !!options?.authRequired;
+  const oidc = !!options?.oidc;
   const usesValidators = !!options?.usesValidators;
   const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
@@ -183,7 +188,16 @@ ${externHandlers
 // Dev-stub DevStubUserVerifier is registered first so a generated stack
 // boots out of the box; replace by registering your own IUserVerifier
 // (the last DI registration wins for new scope resolutions).
-builder.Services.AddScoped<IUserVerifier, DevStubUserVerifier>();
+builder.Services.AddScoped<IUserVerifier, DevStubUserVerifier>();${
+        oidc
+          ? `
+// OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its
+// JWKS and maps claims onto User.  Registered last so it wins over the
+// dev stub; configure the issuer / client via the env vars the
+// \`auth { oidc }\` block referenced.
+builder.Services.AddScoped<IUserVerifier, OidcUserVerifier>();`
+          : ""
+      }
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>();
 `
@@ -555,7 +569,14 @@ export function renderCsproj(
   resourceNugetDeps: Record<string, string> = {},
   usingDapper: boolean = false,
   usesSpecifications: boolean = false,
+  oidc: boolean = false,
 ): string {
+  // OIDC token validation (D-AUTH-OIDC) — JWKS discovery + JWT validation
+  // for the generated OidcUserVerifier.  Only ships under an `auth { oidc }`
+  // block.
+  const oidcRefs = oidc
+    ? `\n    <!-- OIDC token validation (generated OidcUserVerifier) -->\n    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.0.1" />\n    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.0.1" />`
+    : "";
   // Persistence package set — Dapper + raw Npgsql for `persistence: dapper`,
   // otherwise the EF Core + Npgsql.EntityFrameworkCore stack.
   const persistenceRefs = usingDapper
@@ -633,7 +654,7 @@ ${persistenceRefs}
     </PackageReference>
     <PackageReference Include="Mediator.Abstractions" Version="2.1.7" />
     <!-- OpenAPI spec emitted at /swagger/v1/swagger.json -->
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />${scrutorRef}${validatorRef}${specRef}${resourceRefs}
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />${scrutorRef}${validatorRef}${specRef}${oidcRefs}${resourceRefs}
   </ItemGroup>
 </Project>
 `;
