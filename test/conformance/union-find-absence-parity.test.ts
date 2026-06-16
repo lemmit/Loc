@@ -13,11 +13,12 @@
 // Two tiers of assertion:
 //   * The decisive invariant, asserted for ALL six backends: the absent
 //     variant produces HTTP 404 + the `/errors/not-found` type URI.
-//   * The `resource: "Order"` extension (the aggregate name), asserted for the
-//     five backends that emit it.  .NET routes through `ControllerBase.Problem`,
-//     which carries no extension members, so it omits `resource` — a documented
-//     field-level gap, tracked for a follow-up (it still 404s with the type
-//     URI, so the decisive invariant holds).
+//   * The `resource: "Order"` extension (the aggregate name), now asserted for
+//     ALL six backends.  .NET can't carry it through `ControllerBase.Problem`
+//     (no extension-member slot), so when the payload declares `resource` it
+//     builds an explicit `ProblemDetails` + `ObjectResult` and sets
+//     `Extensions["resource"]` (`[JsonExtensionData]` → serialized at the body
+//     root), matching the other five.
 //
 // Lives in the always-on `test` gate (no docker) alongside
 // `union-wire-parity.test.ts` (which pins the union *type* shape — the inline
@@ -89,7 +90,7 @@ const BACKENDS: Backend[] = [
     ui: false,
     file: "d/Api/OrdersController.cs",
     anchor: /RecentOrder/,
-    hasResource: false,
+    hasResource: true,
   },
   {
     platform: "java",
