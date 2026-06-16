@@ -19,6 +19,7 @@ import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
 import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
+import { findRoutes, renderFindActions } from "./find-controller.js";
 import {
   aggregateHasReturningOp,
   isReturningOperation,
@@ -60,17 +61,20 @@ export function emitVanillaApiControllers(
     out.set(
       `lib/${appName}_web/controllers/${aggSnake}_controller.ex`,
       es
-        ? renderEsController(appModule, ctxModule, agg)
+        ? renderEsController(appModule, ctxModule, agg, ctx)
         : renderController(appModule, ctxModule, agg, aggSnake, memberOps, ctx),
     );
 
-    // Read path
+    // Read path.  Custom-find routes (`GET /<plural>/<find>`) MUST precede the
+    // `/:id` show route — Phoenix matches in registration order, so a literal
+    // `/<find>` segment has to come first or `:id` would swallow it.
     routes.push({
       method: "get",
       path: `/${aggsPath}`,
       controller: controllerName,
       action: ":index",
     });
+    routes.push(...findRoutes(agg, ctx));
     routes.push({
       method: "get",
       path: `/${aggsPath}/:id`,
@@ -166,6 +170,9 @@ function renderController(
   // returning op (else it'd be an unused private fn under --warnings-as-errors).
   const problemVariant = aggregateHasReturningOp(agg) ? `\n${renderProblemVariantHelper()}\n` : "";
 
+  // `GET /<plural>/<find>` actions for the aggregate's custom finds.
+  const findActions = renderFindActions(ctxModule, agg, ctx);
+
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do
   use ${appModule}Web, :controller
@@ -227,6 +234,7 @@ defmodule ${appModule}Web.${aggPascal}Controller do
         ProblemDetails.validation_error_response(conn, changeset)
     end
   end
+${findActions}
 ${opActions}
 ${problemVariant}
   defp serialize(record) do

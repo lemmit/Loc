@@ -39,6 +39,7 @@ import type {
 import { snake, upperFirst } from "../../../util/naming.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { renderFindActions } from "./find-controller.js";
 
 /** Truth-kind predicate — an aggregate whose persistence is its event log. */
 export function isEventSourced(agg: AggregateIR): boolean {
@@ -457,10 +458,17 @@ ${findLines.length > 0 ? `${findLines.join("\n")}\n` : ""}${opFns.length > 0 ? `
 // (`:precondition_failed` → 422, `:forbidden` → 403) rather than changesets.
 // ---------------------------------------------------------------------------
 
-export function renderEsController(appModule: string, ctxModule: string, agg: AggregateIR): string {
+export function renderEsController(
+  appModule: string,
+  ctxModule: string,
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+): string {
   const aggPascal = upperFirst(agg.name);
   const aggSnake = snake(agg.name);
   const facadeMod = `${appModule}.${ctxModule}`;
+  // `GET /<plural>/<find>` actions — event-sourced finds run load-all + filter.
+  const findActions = renderFindActions(ctxModule, agg, ctx);
 
   const create =
     (agg.creates ?? []).length > 0
@@ -540,6 +548,7 @@ defmodule ${appModule}Web.${aggPascal}Controller do
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
     end
   end
+${findActions}
 ${create}${opActions}
 ${commandError}
   defp serialize(record) do
