@@ -62,6 +62,7 @@
     "primitive-query-view": "primitive-query-view.hbs",
     "primitive-key-value-row": "primitive-key-value-row.hbs",
     "primitive-modal": "primitive-modal.hbs",
+    "primitive-modal-controlled": "primitive-modal-controlled.hbs",
     "primitive-code-block": "primitive-code-block.hbs",
     "primitive-icon": "primitive-icon.hbs",
     "primitive-section": "primitive-section.hbs",
@@ -511,6 +512,14 @@
         "from": "@mantine/notifications",
         "named": [
           "notifications"
+        ]
+      }
+    ],
+    "primitive-modal-controlled": [
+      {
+        "from": "@mantine/core",
+        "named": [
+          "Modal"
         ]
       }
     ]
