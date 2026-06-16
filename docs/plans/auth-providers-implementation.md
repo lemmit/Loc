@@ -116,9 +116,26 @@
 > close that). The .NET OIDC story is now: verifier + `/auth/me` +
 > handshake, matching Hono.
 >
-> **Status: Phases 0–1, 2 (.NET OIDC complete), 4 (partial), 6 (React), 7
-> done; Phases 3/5 + creates/workflows/finds/views default-deny + non-React
-> frontend guards pending.** Decisions locked with the maintainer (2026-06-15):
+> **Phase 3 shipped (bundled dev Keycloak — the zero-config quick-start).**
+> When a system declares a self-hosted OIDC `auth { … }` block (provider
+> `keycloak` / `custom` / a raw `oidc { issuer }`), the generated
+> `docker-compose.yml` now adds a **Keycloak** service (`--import-realm`) +
+> a `keycloak/realm.json` (a public client with wildcard-localhost redirect
+> URIs + a seeded `demo`/`demo` user with `user`/`agent` realm roles), and
+> wires the `auth: required` backend's `OIDC_ISSUER` / `OIDC_CLIENT_ID` /
+> `OIDC_REDIRECT_URI` + `depends_on` at it. Uses `host.docker.internal` so
+> the browser (redirects) and backend (JWKS/token) resolve the **same**
+> issuer URL — sidestepping the Docker localhost-vs-service-name mismatch.
+> Hosted presets (google / auth0 / …) get no bundled service. Compose YAML
+> validated; 3 content tests. **Runtime correctness (an actual
+> `docker compose up` + login) is not yet CI-verified** — a docker-gated
+> obs/e2e cell booting the stack + completing the flow is the natural
+> follow-up (and would finally runtime-close the Hono + .NET OIDC paths).
+>
+> **Status: Phases 0–1, 2 (.NET OIDC complete), 3 (dev Keycloak), 4
+> (partial), 6 (React), 7 done; Phase 5 + creates/workflows/finds/views
+> default-deny + non-React frontend guards + an OIDC runtime-e2e
+> pending.** Decisions locked with the maintainer (2026-06-15):
 >
 > 1. **Scope** = OIDC authentication providers + playground auth stub
 >    **+ default-deny enforcement** (the known `auth.md` hole, §4.3 of the

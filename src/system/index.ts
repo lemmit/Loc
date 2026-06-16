@@ -139,6 +139,9 @@ function emitSystem(
 
   out.set("docker-compose.yml", renderDockerCompose(sys));
   out.set("db-init/00-create-databases.sql", renderDbInit(sys));
+  // Bundled dev Keycloak realm import (D-AUTH-OIDC §4.2) — loaded by the
+  // compose `keycloak` service's `--import-realm` on first boot.
+  if (bundlesKeycloak(sys)) out.set("keycloak/realm.json", renderKeycloakRealm(sys));
   // Wire-spec artifact — diffable record of every aggregate / part /
   // value object's canonical wire shape.  See `wire-spec.ts`.
   out.set(".loom/wire-spec.json", renderWireSpec(sys));
@@ -392,6 +395,13 @@ function renderDockerCompose(sys: SystemIR): string {
   lines.push("      timeout: 5s");
   lines.push("      retries: 10");
   lines.push("");
+  // Bundled dev IdP (D-AUTH-OIDC §4.2): a Keycloak with a pre-provisioned
+  // realm + seeded demo user, so `docker compose up` logs in out of the
+  // box.  Production repoints OIDC_ISSUER at a real IdP.
+  if (bundlesKeycloak(sys)) {
+    lines.push(...renderKeycloakService().map((l) => `  ${l}`));
+    lines.push("");
+  }
   for (const d of sys.deployables) {
     lines.push(...renderDeployableService(d, sys).map((l) => `  ${l}`));
     lines.push("");
@@ -410,6 +420,93 @@ function renderDockerCompose(sys: SystemIR): string {
   lines.push("  pgdata: {}");
   for (const v of sidecars.volumes) lines.push(`  ${v}: {}`);
   return lines.join("\n") + "\n";
+}
+
+// ---------------------------------------------------------------------------
+// Bundled dev Keycloak (D-AUTH-OIDC §4.2 — the zero-config quick-start).
+// Added when the system declares an OIDC `auth { … }` block whose provider is
+// self-hosted (keycloak / custom / a raw `oidc { issuer }`); hosted presets
+// (google / auth0 / …) use their own IdP and get no bundled service.
+// ---------------------------------------------------------------------------
+
+/** Host port the bundled Keycloak is published on (8080 is left for backends). */
+const KEYCLOAK_HOST_PORT = 8081;
+
+function bundlesKeycloak(sys: SystemIR): boolean {
+  const a = sys.auth;
+  if (!a) return false;
+  return !a.provider || a.provider === "keycloak" || a.provider === "custom";
+}
+
+/** Realm + client identifiers + the issuer URL the bundled Keycloak serves.
+ *  The issuer uses `host.docker.internal` so the browser (redirects) and the
+ *  backend (JWKS / token exchange) resolve the SAME issuer URL — avoiding the
+ *  classic Docker localhost-vs-service-name issuer mismatch. */
+function keycloakConfig(sys: SystemIR): { realm: string; clientId: string; issuer: string } {
+  const realm = serviceSlug(sys.name) || "loom";
+  return {
+    realm,
+    clientId: `${realm}-app`,
+    issuer: `http://host.docker.internal:${KEYCLOAK_HOST_PORT}/realms/${realm}`,
+  };
+}
+
+function renderKeycloakService(): string[] {
+  return [
+    "keycloak:",
+    "  image: quay.io/keycloak/keycloak:26.0",
+    '  command: ["start-dev", "--import-realm"]',
+    "  environment:",
+    "    KC_BOOTSTRAP_ADMIN_USERNAME: admin",
+    "    KC_BOOTSTRAP_ADMIN_PASSWORD: admin",
+    // KC_HOSTNAME pins the issuer/endpoint URLs Keycloak advertises in its
+    // discovery doc to the host-reachable address (see keycloakConfig).
+    `    KC_HOSTNAME: http://host.docker.internal:${KEYCLOAK_HOST_PORT}`,
+    '    KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"',
+    "  ports:",
+    `    - "${KEYCLOAK_HOST_PORT}:8080"`,
+    "  volumes:",
+    "    - ./keycloak:/opt/keycloak/data/import:ro",
+    "  extra_hosts:",
+    '    - "host.docker.internal:host-gateway"',
+  ];
+}
+
+/** Keycloak realm-import JSON: a public client (wildcard localhost redirect
+ *  URIs for dev) + a seeded `demo`/`demo` user with a `user` realm role.
+ *  Mounted read-only into the container's import dir; `--import-realm` loads
+ *  it on first boot. */
+function renderKeycloakRealm(sys: SystemIR): string {
+  const { realm, clientId } = keycloakConfig(sys);
+  const doc = {
+    realm,
+    enabled: true,
+    sslRequired: "none",
+    roles: { realm: [{ name: "user" }, { name: "agent" }, { name: "admin" }] },
+    clients: [
+      {
+        clientId,
+        enabled: true,
+        publicClient: true,
+        standardFlowEnabled: true,
+        redirectUris: ["http://localhost:*", "http://127.0.0.1:*"],
+        webOrigins: ["*"],
+      },
+    ],
+    users: [
+      {
+        username: "demo",
+        enabled: true,
+        email: "demo@example.com",
+        firstName: "Demo",
+        lastName: "User",
+        emailVerified: true,
+        credentials: [{ type: "password", value: "demo", temporary: false }],
+        realmRoles: ["user", "agent"],
+      },
+    ],
+  };
+  return `${JSON.stringify(doc, null, 2)}\n`;
 }
 
 /** Dev-compose sidecar services derived from `sys.storages`.  One per
@@ -464,16 +561,40 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   const slug = serviceSlug(d.name);
   const platform = platformFor(d.platform);
   const shape = platform.composeService({ deployable: d, sys, slug });
+  // Point an `auth: required` backend at the bundled dev Keycloak
+  // (D-AUTH-OIDC §4.2).  These env vars satisfy the OIDC verifier's
+  // `env(...)`-bound issuer/client; production overrides them.
+  const oidc = !!(d.auth?.required && bundlesKeycloak(sys));
   const lines: string[] = [];
   lines.push(`${slug}:`);
   lines.push(`  build: ./${slug}`);
-  if (shape.dependsOnDb) {
+  if (shape.dependsOnDb || oidc) {
     lines.push(`  depends_on:`);
-    lines.push(`    db:`);
-    lines.push(`      condition: service_healthy`);
+    if (shape.dependsOnDb) {
+      lines.push(`    db:`);
+      lines.push(`      condition: service_healthy`);
+    }
+    if (oidc) {
+      lines.push(`    keycloak:`);
+      lines.push(`      condition: service_started`);
+    }
+  }
+  if (oidc) {
+    // The backend reaches Keycloak (JWKS / token exchange) via the same
+    // host-reachable address the browser uses for redirects.
+    lines.push(`  extra_hosts:`);
+    lines.push(`    - "host.docker.internal:host-gateway"`);
   }
   lines.push(`  environment:`);
   for (const [k, v] of shape.env) lines.push(`    ${k}: ${JSON.stringify(v)}`);
+  if (oidc) {
+    const kc = keycloakConfig(sys);
+    lines.push(`    OIDC_ISSUER: ${JSON.stringify(kc.issuer)}`);
+    lines.push(`    OIDC_CLIENT_ID: ${JSON.stringify(kc.clientId)}`);
+    lines.push(
+      `    OIDC_REDIRECT_URI: ${JSON.stringify(`http://localhost:${d.port}/auth/callback`)}`,
+    );
+  }
   lines.push(`  ports:`);
   lines.push(`    - "${d.port}:${shape.internalPort}"`);
   // The healthcheck command runs *inside* the container, so it
