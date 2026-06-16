@@ -92,7 +92,16 @@ export interface ControllerShape {
      *  status. */
     unionAbsent?:
       | { record: string; kind: "none" }
-      | { record: string; kind: "error"; status: number; title: string; typeUri: string };
+      | {
+          record: string;
+          kind: "error";
+          status: number;
+          title: string;
+          typeUri: string;
+          /** Aggregate name for the `resource` extension member, or `undefined`
+           *  when the error payload doesn't declare a `resource` field. */
+          resource?: string;
+        };
   }>;
   /** Prefix prepended to the controller's `[Route(...)]` (e.g.
    *  `"api/"` for fullstack-dotnet — leaves `/orders/*` paths free
@@ -116,6 +125,37 @@ export interface ControllerShape {
    *  Spliced into the using block so each controller imports only
    *  the namespaces its own argument lowering touched. */
   extraUsings?: readonly string[];
+}
+
+/** The `return …` line(s) for a union-find's absent variant.  `none` rides the
+ *  optional-find 404.  An `error` payload returns a ProblemDetails at its mapped
+ *  status: the bare `Problem(...)` helper carries no extension members, so when
+ *  the payload declares `resource` we build an explicit `ProblemDetails` +
+ *  `ObjectResult` and set `Extensions["resource"]` — `[JsonExtensionData]`
+ *  serializes it at the body root, matching the cross-backend absent shape. */
+function absentReturnLines(
+  ua:
+    | Extract<ControllerShape["finds"][number]["unionAbsent"], { kind: "error" }>
+    | { kind: "none" },
+): string[] {
+  if (ua.kind === "none") return ["            return NotFound();"];
+  const detail = JSON.stringify(ua.title);
+  if (!ua.resource) {
+    return [
+      `            return Problem(statusCode: ${ua.status}, title: ${JSON.stringify(
+        ua.title,
+      )}, type: ${JSON.stringify(ua.typeUri)}, detail: ${detail});`,
+    ];
+  }
+  return [
+    "        {",
+    `            var problem = new ProblemDetails { Status = ${ua.status}, Title = ${JSON.stringify(
+      ua.title,
+    )}, Type = ${JSON.stringify(ua.typeUri)}, Detail = ${detail} };`,
+    `            problem.Extensions["resource"] = ${JSON.stringify(ua.resource)};`,
+    `            return new ObjectResult(problem) { StatusCode = ${ua.status}, ContentTypes = { "application/problem+json" } };`,
+    "        }",
+  ];
 }
 
 export function renderController(
@@ -162,9 +202,7 @@ export function renderController(
         : ua
           ? [
               `        if (result is ${ua.record})`,
-              ua.kind === "none"
-                ? "            return NotFound();"
-                : `            return Problem(statusCode: ${ua.status}, title: ${JSON.stringify(ua.title)}, type: ${JSON.stringify(ua.typeUri)}, detail: ${JSON.stringify(ua.title)});`,
+              ...absentReturnLines(ua),
               "        return Ok(result);",
             ]
           : ["        return Ok(result);"];

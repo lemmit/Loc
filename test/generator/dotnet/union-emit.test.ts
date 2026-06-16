@@ -77,11 +77,18 @@ describe("dotnet generator — discriminated-union finds (P4c)", () => {
     expect(find(map, "Repositories/OrderRepository.cs")).not.toContain("OrderOrNotFound");
   });
 
-  it("the controller translates the absent variant to ProblemDetails at its status", async () => {
+  it("the controller translates the absent variant to ProblemDetails at its status, with the resource extension", async () => {
     const ctrl = find(await files(), "OrdersController.cs");
     expect(ctrl).toContain("if (result is OrderOrNotFound_NotFound)");
+    // The error payload declares `resource`, so the absent arm builds an
+    // explicit ProblemDetails (the bare `Problem(...)` helper has no slot for
+    // extension members) and serializes the aggregate name at the body root.
     expect(ctrl).toContain(
-      'return Problem(statusCode: 404, title: "Not Found", type: "/errors/not-found", detail: "Not Found");',
+      'var problem = new ProblemDetails { Status = 404, Title = "Not Found", Type = "/errors/not-found", Detail = "Not Found" };',
+    );
+    expect(ctrl).toContain('problem.Extensions["resource"] = "Order";');
+    expect(ctrl).toContain(
+      'return new ObjectResult(problem) { StatusCode = 404, ContentTypes = { "application/problem+json" } };',
     );
     expect(ctrl).toContain("[ProducesResponseType(typeof(ProblemDetails), 404)]");
   });
