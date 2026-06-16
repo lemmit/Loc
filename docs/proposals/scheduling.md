@@ -67,6 +67,7 @@ context Orders {
   // A tick is an ordinary event — a fact, like OrderPlaced.
   event NightlyTick { at: datetime }
   event SweepTick   { at: datetime }
+  event HealthTick  { at: datetime }
 
   // React with the EXISTING trigger — no new grammar.
   workflow NightlyDigest {
@@ -87,8 +88,9 @@ context Orders {
 
 // System scope — infrastructure binding, mirrors `channelSource`.
 // The cadence lives HERE, swappable per environment.
-timerSource nightly { for: NightlyTick, cron:  "0 2 * * *", in: "Europe/Amsterdam" }
-timerSource sweep   { for: SweepTick,   every: 5m }
+timerSource nightly { for: NightlyTick, cron: "0 2 * * *", in: "Europe/Amsterdam" }
+timerSource sweep   { for: SweepTick,   cron: "*/5 * * * *" }   // every 5 min — standard cron
+timerSource healthz { for: HealthTick,  every: 15s }            // sub-minute — cron can't
 ```
 
 - **`event … { at: datetime }`** — a tick is a normal event. Workflows that don't
@@ -109,10 +111,17 @@ it:
 
 | Field | For | Notes |
 |---|---|---|
-| `cron: "<expr>"` | calendar schedules | a **real 5-field cron expression**, passed through to each backend's native scheduler. Standard cron nicknames work — `cron: "@daily"`, `"@hourly"`, `"@weekly"`, `"@monthly"` — giving readability with *zero* invented vocabulary. |
-| `every: <duration>` | fixed intervals | reuses the existing duration literal (`30s` / `5m` / `90m` / `12h`). Exists because 5-field cron **cannot** express sub-minute ticks or non-hour-dividing intervals, and every backend drives intervals through a separate timer mechanism anyway. |
+| `cron: "<expr>"` | **everything cron can say** — including most intervals | a **real 5-field cron expression**, passed through to each backend's native scheduler. Standard intervals are cron: `*/5 * * * *` (every 5 min), `0 */6 * * *` (every 6 h). Nicknames work too — `@daily` / `@hourly` / `@weekly` / `@monthly` — readability with *zero* invented vocabulary. |
+| `every: <duration>` | only what cron **can't** | sub-minute (`15s` — below 5-field cron's minute granularity) and non-dividing intervals (`90m`, `7m` — where `*/7` is a foot-gun that gaps, not a true interval). The narrow escape hatch, not the primary interval surface. |
 
-Why this over a structured cadence vocabulary:
+**`cron:` is the default for intervals too.** Any interval that evenly divides
+its unit — 5/10/15/30 min, 1/2/3/6/12 h — is a standard cron expression and
+should be written as one. `every:` is *not* a second way to say "every 5
+minutes"; it exists strictly for the cases portable 5-field cron cannot express
+(`loom.timer-cadence` rejects an `every:` whose interval *is* cleanly
+cron-expressible, steering it back to `cron:` and avoiding two-ways-to-say-it).
+
+Why real cron over a structured cadence vocabulary:
 
 - **No translation layer.** A `cron:` value is the cron the backend already runs —
   no parse-and-remap, no half-built sugar that punts to a `cron(...)` escape hatch
@@ -199,8 +208,10 @@ app's Ecto repo). Deployables hosting no `timerSource` are byte-identical.
   (the one new emission category this RFC introduces).
 - `loom.timer-needs-state` — the owning deployable must bind a relational `state`
   resource (single-fire lock).
-- `loom.timer-cadence` — neither or both of `cron:` / `every:` set, an
-  unparseable / out-of-range cron expression, or an interval below the floor.
+- `loom.timer-cadence` — neither or both of `cron:` / `every:` set; an
+  unparseable / out-of-range cron expression; an interval below the floor; or an
+  `every:` whose interval *is* cleanly cron-expressible (steer it to `cron:`,
+  avoiding two-ways-to-say-it).
 - `loom.timer-source-unbound` — a `timerSource` whose `for:` event no workflow
   reacts to (warning — a tick with no listener is dead config).
 - **Print/round-trip:** `timerSource` is a top-level declaration — add a
