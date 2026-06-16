@@ -67,6 +67,20 @@ describe("Phoenix capability filter — base_filter", () => {
     expect(doc).not.toContain("base_filter");
   });
 
+  // Multiple capability filters conjoin with Ash's INFIX `and` operator, each
+  // predicate parenthesised.  `and` is a reserved word in Elixir, so the
+  // function form `and(a, b)` is a parser SyntaxError — never valid in `expr()`.
+  it("conjoins multiple filters with the infix `and` operator (not the `and(...)` function)", async () => {
+    const doc = find(
+      await generate(sys("filter !this.isDeleted\n        filter this.subject != \"\"")),
+      (k) => k.endsWith("/docs/doc.ex"),
+      "doc.ex",
+    );
+    const baseFilterLine = doc.split("\n").find((l) => l.includes("base_filter"))!;
+    expect(baseFilterLine).toBe('    base_filter expr((not is_deleted) and (subject != ""))');
+    expect(doc).not.toContain("expr(and(");
+  });
+
   // A `filter <Criterion>` capability reifies to an Ash boolean calculation
   // (reified-criteria.md, the anonymous-`filter` row): base_filter references
   // the calc by name instead of inlining the predicate — the Phoenix analog of
