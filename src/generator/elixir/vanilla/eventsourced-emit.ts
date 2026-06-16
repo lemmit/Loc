@@ -39,7 +39,8 @@ import type {
 import { snake, upperFirst } from "../../../util/naming.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
-import { renderFindActions } from "./find-controller.js";
+import { aggregateHasUnionFind, renderFindActions } from "./find-controller.js";
+import { renderProblemVariantHelper } from "./operation-returns-emit.js";
 
 /** Truth-kind predicate — an aggregate whose persistence is its event log. */
 export function isEventSourced(agg: AggregateIR): boolean {
@@ -527,6 +528,12 @@ export function renderEsController(
 `
     : "";
 
+  // Union finds translate their absent variant via the shared problem_variant/5
+  // responder — emit it (once) when the aggregate has any union find.
+  const problemVariant = aggregateHasUnionFind(ctx, agg)
+    ? `\n${renderProblemVariantHelper()}\n`
+    : "";
+
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do
   use ${appModule}Web, :controller
@@ -550,7 +557,7 @@ defmodule ${appModule}Web.${aggPascal}Controller do
   end
 ${findActions}
 ${create}${opActions}
-${commandError}
+${commandError}${problemVariant}
   defp serialize(record) do
     record
     |> Map.from_struct()

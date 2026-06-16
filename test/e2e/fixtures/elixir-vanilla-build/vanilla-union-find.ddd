@@ -1,17 +1,16 @@
-// Custom-find HTTP surface.  Compiled by build-generated-elixir-vanilla so the
-// emitted `GET /<plural>/<find>` controller actions — list (map each result),
-// single (one-or-nil), and param-less (`_params`) — pass
-// `mix compile --warnings-as-errors`.  A union find stays internal-only.
+// Union-returning find (the absence producer).  Compiled by
+// build-generated-elixir-vanilla so the union-find controller action — tagged
+// `%{type: "Order", …}` success + `problem_variant/5` absence translation —
+// passes `mix compile --warnings-as-errors`.
 system Catalog {
   subdomain Core {
     context Shop {
+      error NotFound { resource: string }
       aggregate Order with crudish {
         customerId: string
-        total: int
       }
       repository Orders for Order {
-        find byCustomer(customerId: string): Order[] where this.customerId == customerId
-        find latest(): Order?
+        find locate(ref: string): Order or NotFound where this.customerId == ref
       }
     }
   }

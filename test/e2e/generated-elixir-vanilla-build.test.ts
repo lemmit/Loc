@@ -48,6 +48,8 @@ describe.skipIf(!ENABLED)(
       { name: "vanilla-es-dispatch.ddd", deployable: "api" },
       // Custom-find HTTP surface — list / single / param-less GET actions.
       { name: "vanilla-finds.ddd", deployable: "api" },
+      // Union-returning find — tagged success + problem_variant absence.
+      { name: "vanilla-union-find.ddd", deployable: "api" },
     ])("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
