@@ -68,15 +68,14 @@ walker-feature rather than a quick emitter fix. Recorded so they aren't lost:
   (`84231f7`, React Mantine+shadcn; spec in
   `docs/proposals/state-controlled-modal.md`). showcase's ProjectDetail now
   generates a fully controlled, stateful detail page. The controlled-modal
-  template now covers ALL four React packs (Mantine/shadcn/MUI/Chakra —
-  `ec21114`). Remaining: the controlled-modal template for Vue
-  (vuetify/shadcnVue) and Svelte (shadcnSvelte/flowbite) — their state model
-  differs (ref/v-model, $state runes) and the modal area is partly unbuilt
-  (vuetify op-form modal is a TODO), so they want vue-tsc/svelte-check
-  verification; page-level `requires currentUser.role` client-side gating
-  (frontend-acl feature; backend already 403s), and `Avatar { "P" }`'s
-  positional arg (ambiguous fallback-initials vs src + undocumented — left for
-  the language owner). (`Image`'s positional `src` is FIXED — `e94f4b5`.)
+  template now covers ALL EIGHT frontend packs — React (Mantine/shadcn/MUI/
+  Chakra, `ec21114`) and Vue+Svelte (vuetify/shadcnVue/shadcnSvelte/flowbite,
+  `2dc5f0d`). Remaining: Phoenix HEEx controlled modal (parallel walker — a
+  separate engine-specific task; stays on the stub), page-level
+  `requires currentUser.role` client-side gating (frontend-acl feature; backend
+  already 403s), and `Avatar { "P" }`'s positional arg (ambiguous
+  fallback-initials vs src + undocumented — left for the language owner).
+  (`Image`'s positional `src` is FIXED — `e94f4b5`.)
 - **Phoenix** (needs Ash compile to confirm): workflow `add_pipeline_project`
   called map-style vs positional; `requires` guard dereferences a possibly-nil
   actor; `manage_relationship` passes a struct where a map is idiomatic;
