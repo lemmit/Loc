@@ -64,6 +64,22 @@ describe("vanilla orchestrator — Slice 0 shell skeleton", () => {
     expect(paths).toContain("config/test.exs");
   });
 
+  it("dev.exs honors PORT + DATABASE_URL env (so e2e harnesses can boot on a chosen port/db)", () => {
+    const out = generateVanillaElixirProject({
+      contexts: [],
+      deployable: vanillaDeployable(),
+      sys: emptySystem(),
+    });
+    const dev = out.get("config/dev.exs")!;
+    // Endpoint port must come from PORT (not a hardcoded 4000) — the obs
+    // e2e harness boots with PORT=<free port> and fetches it.
+    expect(dev).toContain('System.get_env("PORT")');
+    expect(dev).not.toMatch(/port:\s*4000\b/);
+    // Repo must follow DATABASE_URL when provided (the harness points the
+    // app at a provisioned db on a non-default port).
+    expect(dev).toContain('System.get_env("DATABASE_URL")');
+  });
+
   it("mix.exs has NO Ash deps (the vanilla contract)", () => {
     const out = generateVanillaElixirProject({
       contexts: [],
