@@ -1,0 +1,70 @@
+name: OIDC auth (full-compose runtime e2e)
+
+# Runtime-verifies the OIDC turnkey-auth chain (D-AUTH-OIDC) end-to-end
+# through the GENERATED docker-compose stack — the turnkey `docker compose
+# up` a user gets.  Where hono-oidc-e2e.yml / dotnet-oidc-e2e.yml run the
+# backend natively against a dockerized Keycloak, this boots the emitted
+# `docker-compose.yml` as-is (containerized backend built from ./api + the
+# bundled dev Keycloak), so the generated compose wiring itself is under
+# test: `build: ./api`, the host.docker.internal / KC_HOSTNAME bridge,
+# depends_on health gating, and the OIDC env block.  It then gets a real
+# token for the seeded `demo` user and asserts the backend (inside its
+# container) validates it against Keycloak over host.docker.internal and
+# maps the claims onto User.
+#
+# This is the integration the native suites can't reach — and it can't run
+# in the dev sandbox (in-container package egress is blocked, so the inner
+# image build would hang), so it lives here as a CI gate.
+#
+# Triggers `push: main` + manual dispatch only — NOT per-PR (sibling to the
+# other *-oidc-e2e jobs; same rationale: regression net, not a PR gate, and
+# a full image build + Keycloak boot is heavier than a unit suite).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/typescript/**'
+      - 'src/platform/hono/**'
+      - 'src/system/index.ts'
+      - 'test/e2e/auth-oidc-compose-e2e.test.ts'
+      - 'test/e2e/fixtures/auth-oidc-e2e.ddd'
+      - 'package.json'
+      - '.github/workflows/auth-oidc-compose-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  auth-oidc-compose-e2e:
+    runs-on: ubuntu-latest
+    # The backend image build (cold npm install ~3-4min) + Keycloak boot
+    # dominate.  15min cap.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Run full-compose OIDC runtime e2e
+        env:
+          LOOM_AUTH_E2E_COMPOSE: '1'
+        run: npm run test:auth-e2e-compose -- --reporter=verbose
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## Full-compose OIDC runtime e2e failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the "Run full-compose OIDC runtime e2e" step above for the captured `docker compose logs`.' >> $GITHUB_STEP_SUMMARY
+          echo 'The test boots the generated docker-compose stack (containerized backend + bundled dev Keycloak), gets a token for the seeded `demo` user, and asserts the backend validates it over host.docker.internal and maps the claims onto User.' >> $GITHUB_STEP_SUMMARY

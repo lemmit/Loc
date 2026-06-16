@@ -162,6 +162,23 @@
 > loopback opts out). **Verified passing locally** (booted Keycloak + the
 > .NET backend, ran the flow); `/warnaserror` still clean.
 >
+> **Full-compose OIDC e2e shipped — the turnkey stack is now runtime-tested.**
+> The earlier caveat ("the full-compose `host.docker.internal` wiring stays
+> content-tested") is now closed by `test/e2e/auth-oidc-compose-e2e.test.ts`
+> (`LOOM_AUTH_E2E_COMPOSE=1`, CI workflow `auth-oidc-compose-e2e.yml`), which
+> boots the **generated `docker-compose.yml` as-is** — the containerized
+> backend (`build: ./api`) + the bundled dev Keycloak — and asserts the same
+> flow against the **cross-container** `host.docker.internal` / KC_HOSTNAME
+> bridge the emitted compose ships (the native suites talk to Keycloak over
+> plain localhost; this exercises the host-gateway path). It can't run in the
+> dev sandbox (in-container package egress is blocked, so the inner image
+> build would hang) — it's a CI-only gate. The novel host-side path (the
+> runner password-grants from `localhost:8081` while KC_HOSTNAME pins the
+> issuer to `host.docker.internal:8081`) was **de-risked locally**: booted
+> just the Keycloak service from the generated compose and confirmed the
+> grant returns a token whose `iss` is `host.docker.internal:8081` (matching
+> the api container's `OIDC_ISSUER`) with `realm_access.roles=[agent,user]`.
+>
 > **Status: Phases 0–1, 2 (.NET OIDC complete), 3 (dev Keycloak), 4
 > (partial), 6 (React), 7 + OIDC runtime e2e (Hono + .NET) done; Phase 5 +
 > creates/workflows/finds/views default-deny + non-React frontend guards
