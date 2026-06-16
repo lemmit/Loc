@@ -147,8 +147,23 @@
 > harness sidesteps in-container npm egress; the full-compose
 > `host.docker.internal` wiring stays content-tested.)
 >
+> **.NET OIDC runtime e2e shipped too — and it caught a real bug.** The
+> `.NET` sibling suite (`test/e2e/auth-oidc-dotnet-e2e.test.ts`,
+> `LOOM_AUTH_E2E_DOTNET=1`, CI workflow `dotnet-oidc-e2e.yml`) runs the
+> generated **.NET** backend natively (`dotnet run`) against the same real
+> Keycloak + postgres and asserts the same flow (401 no-token, 200 with a
+> real token, `/auth/me` → `{id←sub, roles←realm_access.roles, email}`, 401
+> forged). It surfaced what the compile-only `/warnaserror` gate couldn't:
+> the generated `OidcUserVerifier` wired `HttpDocumentRetriever` with its
+> default `RequireHttps = true`, so discovery against a plain-**http** issuer
+> (the bundled dev Keycloak / loopback) threw and rejected **every** request
+> with 401. Fixed in `src/generator/dotnet/auth-emit.ts`: `RequireHttps`
+> now tracks the issuer scheme (`https://` stays strict; `http://` dev /
+> loopback opts out). **Verified passing locally** (booted Keycloak + the
+> .NET backend, ran the flow); `/warnaserror` still clean.
+>
 > **Status: Phases 0–1, 2 (.NET OIDC complete), 3 (dev Keycloak), 4
-> (partial), 6 (React), 7 + OIDC runtime e2e done; Phase 5 +
+> (partial), 6 (React), 7 + OIDC runtime e2e (Hono + .NET) done; Phase 5 +
 > creates/workflows/finds/views default-deny + non-React frontend guards
 > pending.** Decisions locked with the maintainer (2026-06-15):
 >

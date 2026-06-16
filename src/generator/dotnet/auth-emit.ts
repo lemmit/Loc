@@ -117,7 +117,10 @@ public sealed class OidcUserVerifier : IUserVerifier
         new(
             Issuer + "/.well-known/openid-configuration",
             new OpenIdConnectConfigurationRetriever(),
-            new HttpDocumentRetriever());
+            // RequireHttps stays on for real (https) issuers; a plain-http
+            // issuer (the bundled dev Keycloak / loopback) opts out so
+            // discovery doesn't throw and reject every request.
+            new HttpDocumentRetriever { RequireHttps = Issuer.StartsWith("https://", StringComparison.OrdinalIgnoreCase) });
     private static readonly JsonWebTokenHandler Handler = new();
 
     public async Task<User?> VerifyAsync(HttpContext httpContext, CancellationToken cancellationToken)
@@ -289,7 +292,10 @@ public static class AuthHandshake
         new(
             Issuer + "/.well-known/openid-configuration",
             new OpenIdConnectConfigurationRetriever(),
-            new HttpDocumentRetriever());
+            // RequireHttps stays on for real (https) issuers; a plain-http
+            // issuer (the bundled dev Keycloak / loopback) opts out so
+            // discovery doesn't throw and reject every request.
+            new HttpDocumentRetriever { RequireHttps = Issuer.StartsWith("https://", StringComparison.OrdinalIgnoreCase) });
     private static readonly HttpClient Http = new();
 
     private static CookieOptions SessionCookie() =>
