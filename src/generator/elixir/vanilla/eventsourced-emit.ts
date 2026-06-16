@@ -29,6 +29,7 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  EnrichedBoundedContextIR,
   EventIR,
   FindIR,
   OperationIR,
@@ -36,6 +37,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { contextHasDispatcher } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 
 /** Truth-kind predicate — an aggregate whose persistence is its event log. */
@@ -75,6 +77,9 @@ export function emitVanillaEventSourcedFiles(
   const appSnake = toAppSnake(appModule);
   const ctxSnake = snake(ctx.name);
   const eventsByName = new Map(ctx.events.map((e) => [e.name, e]));
+  // The context's `Dispatcher` is only emitted when it has resolvable workflow
+  // subscriptions; gate the append-time fan-out on its existence.
+  const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR);
   for (const agg of ctx.aggregates) {
     if (!isEventSourced(agg)) continue;
     const aggSnake = snake(agg.name);
@@ -84,7 +89,14 @@ export function emitVanillaEventSourcedFiles(
     out.set(`${base}/${aggSnake}_fold.ex`, renderFoldModule(appModule, ctxModule, agg));
     out.set(
       `${base}/${aggSnake}_repository.ex`,
-      renderEsRepository(appModule, ctxModule, agg, eventsByName, customFindsOfAgg(ctx, agg)),
+      renderEsRepository(
+        appModule,
+        ctxModule,
+        agg,
+        eventsByName,
+        customFindsOfAgg(ctx, agg),
+        hasDispatcher,
+      ),
     );
   }
 }
@@ -226,13 +238,20 @@ function renderEsRepository(
   agg: AggregateIR,
   eventsByName: Map<string, EventIR>,
   finds: FindIR[],
+  hasDispatcher: boolean,
 ): string {
   const aggPascal = upperFirst(agg.name);
   const aggModule = `${appModule}.${ctxModule}.${aggPascal}`;
   const eventsModule = `${appModule}.${ctxModule}.Events`;
+  const contextModule = `${appModule}.${ctxModule}`;
   const logMod = `${aggModule}EventLog`;
   const foldMod = `${aggModule}Fold`;
   const repoMod = `${aggModule}Repository`;
+  // Fan each appended event into the context Dispatcher so workflow saga /
+  // channel handlers fire (the event-sourced analogue of the state path's
+  // emit→PubSub).  Runs inside the append transaction, like the workflow
+  // `emit` broadcast.  Only when the context emits a Dispatcher at all.
+  const dispatchLine = hasDispatcher ? `\n\n        ${contextModule}.Dispatcher.dispatch(ev)` : "";
 
   // Event types that may appear in this aggregate's stream — its appliers'
   // event set (ES discipline: every emitted event has a matching applier).
@@ -322,7 +341,7 @@ defmodule ${repoMod} do
             data: event_to_data(ev),
             occurred_at: DateTime.utc_now()
           }
-        ])
+        ])${dispatchLine}
       end)
     end)
     |> case do

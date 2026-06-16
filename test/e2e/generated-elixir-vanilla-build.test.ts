@@ -43,6 +43,9 @@ describe.skipIf(!ENABLED)(
       { name: "vanilla-vo-fold.ddd", deployable: "api" },
       // Per-field changeset validators (T2.i) — validate_number/length/format.
       { name: "vanilla-invariants.ddd", deployable: "api" },
+      // Event-sourced append → Dispatcher fan-out (an ES event a workflow saga
+      // consumes) — compile the `<Ctx>.Dispatcher.dispatch/1` call in append.
+      { name: "vanilla-es-dispatch.ddd", deployable: "api" },
     ])("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

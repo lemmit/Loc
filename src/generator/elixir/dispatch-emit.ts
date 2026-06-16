@@ -87,6 +87,16 @@ function resolveSubscriptions(ctx: EnrichedBoundedContextIR): Subscription[] {
   return subs;
 }
 
+/** True when this context emits a `Dispatcher` module — i.e. it has at least
+ *  one resolvable workflow event subscription.  Callers (e.g. the event-sourced
+ *  repository, which fans appended events into the dispatcher) must guard the
+ *  `<Ctx>.Dispatcher.dispatch/1` reference on this, since the module is only
+ *  emitted when subscriptions exist (`emitDispatch` short-circuits otherwise). */
+export function contextHasDispatcher(ctx: EnrichedBoundedContextIR): boolean {
+  if ((ctx.eventSubscriptions ?? []).length === 0) return false;
+  return resolveSubscriptions(ctx).length > 0;
+}
+
 /** The saga-state module name (`<App>.<Ctx>.Workflows.<Wf>State`). */
 export function stateModule(contextModule: string, wf: WorkflowIR): string {
   return `${contextModule}.Workflows.${upperFirst(wf.name)}State`;
