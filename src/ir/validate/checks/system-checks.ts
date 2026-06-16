@@ -78,6 +78,47 @@ export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]):
   }
 }
 
+// Default-deny enforcement (auth.md / quickstart §4.3).  When the system's
+// `auth { enforcement: denyByDefault }` is set, every reachable command on
+// an `auth: required` backend must declare a `requires` gate — otherwise it
+// serves ungated.  `enforcement: opt` (the default) preserves the existing
+// per-`requires` opt-in.  Escape hatch: `requires true` marks a command
+// intentionally public.
+//
+// Scope (v1): public aggregate actions (operations + destroys), which carry
+// `requires` in their bodies.  Creates / workflows / finds / views are a
+// documented follow-up (their gate surface differs).
+export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  if (sys.auth?.enforcement !== "denyByDefault") return;
+  // Contexts hosted by any `auth: required` backend deployable.  A frontend
+  // (auth: ui) has `auth.required === false`, so it's excluded here.
+  const guarded = new Set<string>();
+  for (const d of sys.deployables) {
+    if (!d.auth?.required) continue;
+    for (const cn of d.contextNames) guarded.add(cn);
+  }
+  if (guarded.size === 0) return;
+  for (const sd of sys.subdomains) {
+    for (const c of sd.contexts) {
+      if (!guarded.has(c.name)) continue;
+      for (const a of c.aggregates) {
+        for (const op of [...a.operations, ...(a.destroys ?? [])]) {
+          if (op.visibility !== "public") continue;
+          const gated = op.statements.some((s) => s.kind === "requires");
+          if (!gated) {
+            diags.push({
+              severity: "error",
+              code: "loom.default-deny-ungated",
+              message: `denyByDefault: '${a.name}.${op.name}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
+              source: `${a.name}/${op.name}`,
+            });
+          }
+        }
+      }
+    }
+  }
+}
+
 export function validateReactIdReferences(sys: SystemIR, diags: LoomDiagnostic[]): void {
   // Build an aggregate registry across the whole system so we can
   // look up display fields regardless of which module declares the
