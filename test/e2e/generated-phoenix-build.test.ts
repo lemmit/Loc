@@ -78,6 +78,12 @@ describe.skipIf(!ENABLED)(
       // controller `tag_<union>/1` serializer (struct-pattern clauses → the
       // `%{type: tag, …}` wire) for an `Order or Cancel` find.
       { name: "union.ddd" },
+      // Union-find with an `error` variant (exception-less.md A4): the
+      // controller action maps `%Ctx.NotFound{}` to a 404 ProblemDetails (the
+      // cross-backend absent-variant wire) and tags only the success variant
+      // at 200, while `tag_<union>/1` still declares every variant.  Compiles
+      // the runtime-dead error clause + the new `case` arm clean.
+      { name: "union-absence.ddd" },
       // TPH (sharedTable) inheritance (aggregate-inheritance.md I2): the two
       // concrete Ash resources (Customer, Vendor) share one `parties` table,
       // each `base_filter`'d on a `kind` discriminator, plus the polymorphic
