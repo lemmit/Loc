@@ -32,7 +32,20 @@
 > `tsc --noEmit` → `tsup`), so the emitted verifier + handshake compile
 > against the real `jose` / `hono` types — verified passing locally.
 >
-> **Status: Phases 0–1 done; Phases 2+ pending.** Decisions locked with
+> **Phase 7 shipped (playground identity-injection auth tab).** Two
+> parts: (a) the generated Hono **dev-stub** verifier now honours an
+> injected `x-loom-dev-claims` header (base64 JSON, merged over its
+> built-in identity) — dev-only, tsc-verified; (b) a new **Auth** tab in
+> the playground dock (+ mobile) where you toggle injection and edit the
+> claims JSON, wired into both dispatch paths (Backend tester +
+> Preview app) via a stable `authedRuntime` wrapper so an
+> `auth: required` system is explorable as different users (flip `role`,
+> watch a `requires` gate go 200 ↔ 403) with no IdP. A system with a
+> real `auth { oidc }` block runs the OIDC verifier instead and ignores
+> the header. Web typecheck green; base64/UTF-8 round-trip verified
+> against the dev-stub decoder. (Playwright spec for the tab: follow-up.)
+>
+> **Status: Phases 0–1, 7 done; Phases 2–6 pending.** Decisions locked with
 > the maintainer (2026-06-15):
 >
 > 1. **Scope** = OIDC authentication providers + playground auth stub

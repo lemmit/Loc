@@ -875,7 +875,7 @@ function renderProjectIndexTs(
     ? ""
     : oidc
       ? `\n// OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its\n// JWKS and maps claims onto the typed User.  Configure the issuer /\n// client via the env vars the \`auth { oidc }\` block referenced.\nregisterOidcVerifier();\nbaseLogger.info({ event: "auth_oidc_verifier_registered" });\n`
-      : `\n// Dev-stub verifier — accepts every request as a built-in admin user.\n// REPLACE for production by calling registerUserVerifier(...) with a JWT-\n// decoding implementation, ideally from a separate (non-regenerated) file.\nregisterUserVerifier(() => (${renderStubUserLiteral(userShape)}));\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`;
+      : `\n// Dev-stub verifier — accepts every request as a built-in admin user.\n// Dev-only: the Loom playground (or curl) can override the claims by\n// sending a base64-encoded JSON object in \`x-loom-dev-claims\`; absent the\n// header the built-in identity is used.  REPLACE for production by calling\n// registerUserVerifier(...) with a real JWT-decoding implementation.\nregisterUserVerifier((req) => {\n  const base = ${indentContinuation(renderStubUserLiteral(userShape), "  ")};\n  const injected = req.headers.get("x-loom-dev-claims");\n  if (!injected) return base;\n  try {\n    return { ...base, ...JSON.parse(Buffer.from(injected, "base64").toString("utf8")) };\n  } catch {\n    return base;\n  }\n});\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`;
   // Persistence wiring (D-REALIZATION-AXES `persistence:`) — drizzle (pg pool +
   // boot-time migrate) vs mikroorm (MikroORM.init + schema:update at startup).
   // The drizzle import header is kept byte-identical to the pre-mikroorm shape.
@@ -943,6 +943,17 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 `;
+}
+
+/** Re-indent a multi-line snippet for embedding at a deeper nesting:
+ *  every line after the first gets `pad` prepended (blank lines stay
+ *  blank).  Keeps an interpolated object literal Biome-clean inside a
+ *  nested function body. */
+function indentContinuation(s: string, pad: string): string {
+  return s
+    .split("\n")
+    .map((line, i) => (i === 0 || line.length === 0 ? line : pad + line))
+    .join("\n");
 }
 
 /** Build a TS object literal matching the system's `user {}` shape, with

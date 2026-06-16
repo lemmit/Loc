@@ -1,4 +1,5 @@
 import { Box, Group, Text, UnstyledButton } from "@mantine/core";
+import { AuthConfigPanel, authStubDot } from "./AuthConfigPanel";
 import { BackendBody, BackendHeader } from "./BackendPanel";
 import { TestsBody } from "./TestsPanel";
 import { HistoryBody } from "./HistoryPanel";
@@ -13,7 +14,7 @@ import { type LayoutCtx } from "./ctx";
 // behind a single Output tab (a stream Select); the interactive Backend
 // tester and Tests runner keep their own tabs.  Each tab carries a
 // status dot so the user sees where the red is without opening it.
-export type DockTab = "output" | "backend" | "tests" | "history";
+export type DockTab = "output" | "backend" | "tests" | "history" | "auth";
 
 interface Props {
   ctx: LayoutCtx;
@@ -33,6 +34,7 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
     { id: "backend", label: "Runtime", dot: backendDot },
     { id: "tests", label: "Tests", dot: null },
     { id: "history", label: "History", dot: null },
+    { id: "auth", label: "Auth", dot: authStubDot(ctx) },
   ];
 
   return (
@@ -94,6 +96,7 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
         {tab === "backend" && <BackendBody ctx={ctx} />}
         {tab === "tests" && <TestsBody ctx={ctx} />}
         {tab === "history" && <HistoryBody ctx={ctx} />}
+        {tab === "auth" && <AuthConfigPanel ctx={ctx} />}
       </Box>
     </Box>
   );

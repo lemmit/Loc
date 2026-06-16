@@ -3,6 +3,7 @@ import { Box, Button, Group, Indicator, SegmentedControl, Tabs, Text } from "@ma
 import { EditorPane } from "./EditorPane";
 import { FilesPane } from "./FilesPane";
 import { PreviewPane } from "./PreviewPane";
+import { AuthConfigPanel } from "./AuthConfigPanel";
 import { BackendBody, BackendHeader } from "./BackendPanel";
 import { TestsBody } from "./TestsPanel";
 import { HistoryBody } from "./HistoryPanel";
@@ -28,6 +29,7 @@ const TAB_VALUES: readonly MobileTab[] = [
   "backend",
   "tests",
   "history",
+  "auth",
 ] as const;
 
 function isMobileTab(v: string | null): v is MobileTab {
@@ -157,6 +159,9 @@ export function MobileShell({ ctx }: Props): JSX.Element {
       <Tabs.Panel value="history">
         <HistoryBody ctx={ctx} active={activeTab === "history"} />
       </Tabs.Panel>
+      <Tabs.Panel value="auth">
+        <AuthConfigPanel ctx={ctx} />
+      </Tabs.Panel>
       <Tabs.List grow>
         <Tabs.Tab value="code" data-testid="mobile-tab-code">Code</Tabs.Tab>
         <Tabs.Tab value="preview" data-testid="mobile-tab-preview">Preview</Tabs.Tab>
@@ -176,6 +181,7 @@ export function MobileShell({ ctx }: Props): JSX.Element {
         <Tabs.Tab value="backend" data-testid="mobile-tab-backend">Runtime</Tabs.Tab>
         <Tabs.Tab value="tests" data-testid="mobile-tab-tests">Tests</Tabs.Tab>
         <Tabs.Tab value="history" data-testid="mobile-tab-history">History</Tabs.Tab>
+        <Tabs.Tab value="auth" data-testid="mobile-tab-auth">Auth</Tabs.Tab>
       </Tabs.List>
     </Tabs>
   );
