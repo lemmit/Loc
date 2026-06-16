@@ -19,7 +19,7 @@ import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
 import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
-import { findRoutes, renderFindActions } from "./find-controller.js";
+import { aggregateHasUnionFind, findRoutes, renderFindActions } from "./find-controller.js";
 import {
   aggregateHasReturningOp,
   isReturningOperation,
@@ -167,8 +167,12 @@ function renderController(
     .join("\n");
 
   // Shared error-variant responder, emitted once when the aggregate has any
-  // returning op (else it'd be an unused private fn under --warnings-as-errors).
-  const problemVariant = aggregateHasReturningOp(agg) ? `\n${renderProblemVariantHelper()}\n` : "";
+  // returning op or a union find (else it'd be an unused private fn under
+  // --warnings-as-errors).
+  const problemVariant =
+    aggregateHasReturningOp(agg) || aggregateHasUnionFind(ctx, agg)
+      ? `\n${renderProblemVariantHelper()}\n`
+      : "";
 
   // `GET /<plural>/<find>` actions for the aggregate's custom finds.
   const findActions = renderFindActions(ctxModule, agg, ctx);

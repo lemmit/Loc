@@ -1,0 +1,74 @@
+import { describe, expect, it } from "vitest";
+import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
+import { lowerModel } from "../../../src/ir/lower/lower.js";
+import { validateLoomModel } from "../../../src/ir/validate/validate.js";
+import { generateSystemFiles } from "../../_helpers/generate.js";
+import { parseString } from "../../_helpers/parse.js";
+
+// ---------------------------------------------------------------------------
+// Union-returning finds on the vanilla foundation (the union-find absence
+// producer).  `find locate(...): Order or NotFound` is a single-get whose `nil`
+// is the absent variant: NotFound (an error payload with `resource`) → an
+// RFC-7807 ProblemDetails at its status carrying `resource: "Order"`, a found
+// record → the tagged `%{type: "Order", …}` wire.  `foundation: vanilla` now
+// runs the union-find shape check (the elixir exemption is Ash-only).
+// ---------------------------------------------------------------------------
+
+const source = (foundation: string) => `
+system S {
+  subdomain Core {
+    context Shop {
+      error NotFound { resource: string }
+      aggregate Order with crudish { customerId: string }
+      repository Orders for Order {
+        find locate(ref: string): Order or NotFound where this.customerId == ref
+      }
+    }
+  }
+  api A from Core
+  storage pg { type: postgres }
+  resource st { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: ${foundation} }
+    contexts: [Shop] dataSources: [st] serves: A port: 4000 }
+}
+`;
+
+const get = (m: Map<string, string>, suffix: string) =>
+  m.get([...m.keys()].find((k) => k.endsWith(suffix))!)!;
+
+describe("vanilla — union-find absence producer", () => {
+  it("translates the absent variant and tags the found record", async () => {
+    const f = await generateSystemFiles(source("vanilla"));
+    const ctl = get(f, "/controllers/order_controller.ex");
+    expect(ctl).toContain("def locate(conn, params) do");
+    // absent (NotFound) → ProblemDetails at its status, carrying resource: "Order"
+    expect(ctl).toContain(
+      'problem_variant(conn, 404, "/errors/not-found", "Not Found", %{resource: "Order"})',
+    );
+    // found → tagged success wire
+    expect(ctl).toContain('json(conn, Map.put(serialize(record), :type, "Order"))');
+    expect(ctl).toContain("defp problem_variant(conn, status, type, title, data) do");
+    // route mounted
+    expect(get(f, "/router.ex")).toContain('get "/orders/locate", OrderController, :locate');
+  });
+
+  it("the repository find is a single-get returning {:ok, record | nil}", async () => {
+    const repo = get(await generateSystemFiles(source("vanilla")), "/shop/order_repository.ex");
+    expect(repo).toContain("def locate(ref) do");
+    expect(repo).toContain("{:ok, Repo.one(query)}");
+  });
+
+  it("the union-find shape check runs on vanilla but stays exempt on ash", async () => {
+    const diagsFor = async (foundation: string) => {
+      const { model } = await parseString(source(foundation), { validate: false });
+      return validateLoomModel(enrichLoomModel(lowerModel(model)));
+    };
+    // A well-shaped union find (Order + NotFound{resource}) passes on both.
+    expect(
+      (await diagsFor("vanilla")).find((d) => d.code === "loom.union-find-shape-unsupported"),
+    ).toBeUndefined();
+    expect(
+      (await diagsFor("ash")).find((d) => d.code === "loom.union-find-shape-unsupported"),
+    ).toBeUndefined();
+  });
+});

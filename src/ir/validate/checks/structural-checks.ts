@@ -331,8 +331,18 @@ export function validateUnionFindShapes(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
+  elixirFoundations: Set<string> = new Set(),
 ): void {
-  if (backendPlatforms.size > 0 && [...backendPlatforms].every((p) => p === "elixir")) return;
+  // An elixir-only context is exempt only on the Ash foundation — Phoenix/Ash's
+  // P4d find tagger is success-side only (absence raises), so enforcing the
+  // absent shape would regress it.  The vanilla foundation DOES emit the
+  // absence producer (`find-controller.ts`), so it gets the shape check like
+  // node/dotnet.  Mixed/non-elixir hosts always run the check.
+  const elixirOnly =
+    backendPlatforms.size > 0 && [...backendPlatforms].every((p) => p === "elixir");
+  const allVanilla =
+    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
+  if (elixirOnly && !allVanilla) return;
   const supported = (find: FindIR, aggName: string): string | null => {
     const t = find.returnType;
     // (A named `payload Foo = A | B` reference in find-return position never

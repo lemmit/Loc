@@ -54,11 +54,13 @@ export function customFindsOf(repo: RepositoryIR | undefined): FindIR[] {
 
 /** Does the find's declared return type produce ZERO-OR-ONE record
  *  (vs a list)?  `Customer?` lowers to `{kind:"optional", inner:entity}`;
- *  `Customer` (rare in finds but admissible) is a bare entity.  Anything
- *  else (array, etc.) is the list path. */
+ *  `Customer` (rare in finds but admissible) is a bare entity; a union find
+ *  (`Customer or NotFound`) is also a single-get — the absent variant is the
+ *  `nil` case, translated at the controller.  Anything else (array) is a list. */
 function isSingleReturn(t: TypeIR): boolean {
   if (t.kind === "optional" && t.inner.kind === "entity") return true;
   if (t.kind === "entity") return true;
+  if (t.kind === "union") return true;
   return false;
 }
 

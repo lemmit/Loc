@@ -13,12 +13,10 @@ const SRC = `
 system S {
   subdomain Core {
     context Shop {
-      error NotFound { resource: string }
       aggregate Order with crudish { customerId: string  total: int }
       repository Orders for Order {
         find byCustomer(customerId: string): Order[] where this.customerId == customerId
         find latest(): Order?
-        find lookup(): Order or NotFound
       }
     }
   }
@@ -33,7 +31,7 @@ const get = (m: Map<string, string>, suffix: string) =>
   m.get([...m.keys()].find((k) => k.endsWith(suffix))!)!;
 
 describe("vanilla — custom-find HTTP surface", () => {
-  it("registers find routes before /:id and excludes union finds", async () => {
+  it("registers find routes before /:id", async () => {
     const router = get(await generateSystemFiles(SRC), "/router.ex");
     const byCustomer = router.indexOf('get "/orders/by_customer"');
     const latest = router.indexOf('get "/orders/latest"');
@@ -42,8 +40,6 @@ describe("vanilla — custom-find HTTP surface", () => {
     expect(latest).toBeGreaterThan(-1);
     expect(byCustomer).toBeLessThan(show);
     expect(latest).toBeLessThan(show);
-    // union find `lookup` has no HTTP route (internal-only).
-    expect(router).not.toContain('get "/orders/lookup"');
   });
 
   it("emits list / single / param-less find actions", async () => {
@@ -55,7 +51,5 @@ describe("vanilla — custom-find HTTP surface", () => {
     // single → one-or-nil
     expect(ctl).toContain("def latest(conn, _params) do");
     expect(ctl).toContain("{:ok, nil} -> json(conn, nil)");
-    // union find got no action
-    expect(ctl).not.toContain("def lookup(");
   });
 });

@@ -147,7 +147,12 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       backendPlatformsByContext.get(c.name) ?? new Set(),
     );
     validateUnionsUnimplemented(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
-    validateUnionFindShapes(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateUnionFindShapes(
+      c,
+      diags,
+      backendPlatformsByContext.get(c.name) ?? new Set(),
+      elixirFoundationsByContext.get(c.name) ?? new Set(),
+    );
     validateWhenGateSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateOperationReturnsUnimplemented(
       c,
