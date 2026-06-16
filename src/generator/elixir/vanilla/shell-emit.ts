@@ -285,16 +285,29 @@ import_config "#{config_env()}.exs"
 function renderVanillaDev(appName: string, appModule: string): string {
   return `import Config
 
-config :${appName}, ${appModule}.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "${appName}_dev",
-  show_sensitive_data_on_connection_error: true,
-  pool_size: 10
+# Honor DATABASE_URL when set (containerized dev + e2e harnesses point
+# the app at a provisioned database / port), otherwise fall back to the
+# local default.  Ecto rejects mixing \`url:\` with discrete host/database
+# options, so exactly one branch configures the repo.
+if url = System.get_env("DATABASE_URL") do
+  config :${appName}, ${appModule}.Repo,
+    url: url,
+    show_sensitive_data_on_connection_error: true,
+    pool_size: 10
+else
+  config :${appName}, ${appModule}.Repo,
+    username: "postgres",
+    password: "postgres",
+    hostname: "localhost",
+    database: "${appName}_dev",
+    show_sensitive_data_on_connection_error: true,
+    pool_size: 10
+end
 
 config :${appName}, ${appModule}Web.Endpoint,
-  http: [ip: {127, 0, 0, 1}, port: 4000],
+  # PORT env var overrides the dev default so test harnesses + parallel
+  # dev workflows can avoid port collisions without editing this file.
+  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4000")],
   check_origin: false,
   debug_errors: true,
   secret_key_base: "ZqJBpdEaAxQpgK0d63NydhxsP2VrZLgJ6mhJrShdWf6mYLRVy6Iuc1FdN5lW9bz9"
