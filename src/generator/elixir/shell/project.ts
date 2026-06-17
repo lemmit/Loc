@@ -9,7 +9,14 @@ export function renderMixExs(
   appModule: string,
   extraHexDeps: Record<string, string> = {},
   hasSeeds = false,
+  oidc = false,
 ): string {
+  // OIDC verifier (D-AUTH-OIDC): JOSE verifies the JWT signature against the
+  // issuer's JWKS; :inets/:ssl back the built-in :httpc the verifier uses to
+  // fetch the discovery doc + JWKS.  Pulled in only when an `auth { oidc }`
+  // block is present so non-auth projects stay byte-identical.
+  const oidcDep = oidc ? `,\n      {:jose, "~> 1.11"}` : "";
+  const oidcApps = oidc ? ", :inets, :ssl" : "";
   // Run the seeds script as the last step of `ecto.setup` — only when a
   // `seed` block is declared, so seedless projects stay byte-identical.
   const ectoSetup = hasSeeds
@@ -48,7 +55,7 @@ defmodule ${appModule}.MixProject do
   def application do
     [
       mod: {${appModule}.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :runtime_tools${oidcApps}]
     ]
   end
 
@@ -93,7 +100,7 @@ defmodule ${appModule}.MixProject do
       # --only) so it's available for the static-analysis pass.
       # Ignore filter lives at \`.dialyzer_ignore.exs\`; PLT config
       # in \`def project\`'s \`dialyzer:\` block above.
-      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}${extraDepLines}
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}${extraDepLines}${oidcDep}
     ]
   end
 

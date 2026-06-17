@@ -393,6 +393,19 @@ ${inner}
   // Auth plug line in the :api pipeline — only when auth is enabled.
   const authApiPlug = authEnabled ? `\n    plug ${webModule}.Auth` : "";
 
+  // /auth/me session probe — emitted when auth is enabled.  Piped through
+  // :api so the Auth plug verifies the principal first (the `auth: ui`
+  // frontend guard reads this); parity with the Hono / .NET `/auth/me`.
+  const authScope = authEnabled
+    ? `
+  scope "/auth", ${webModule} do
+    pipe_through :api
+
+    get "/me", AuthController, :me
+  end
+`
+    : "";
+
   // Embedded-React SPA fallback (D-PHOENIX-SURFACE phase 6b): deep links
   // under `/app/*` are client-side routes, so serve the SPA's
   // `index.html` for any unmatched `/app` path — the Phoenix analogue
@@ -437,7 +450,7 @@ ${liveScopeBody}
 
 ${scopedBody}
   end
-${spaFallback}
+${authScope}${spaFallback}
 ${rootLines}
 end
 `;

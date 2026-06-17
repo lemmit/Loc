@@ -180,7 +180,8 @@
 > the api container's `OIDC_ISSUER`) with `realm_access.roles=[agent,user]`.
 >
 > **Status: Phases 0–1, 2 (.NET OIDC complete), 3 (dev Keycloak), 4
-> (partial), 6 (React), 7 + OIDC runtime e2e (Hono + .NET) done; Phase 5 +
+> (partial), 5 (Phoenix verifier — handshake/e2e deferred), 6 (React), 7 +
+> OIDC runtime e2e (Hono + .NET) done; rest of Phase 5 (Python/Java) +
 > creates/workflows/finds/views default-deny + non-React frontend guards
 > pending.** Decisions locked with the maintainer (2026-06-15):
 >
@@ -230,7 +231,7 @@ plumbing, which is done.
 | .NET | `src/generator/dotnet/auth-emit.ts` | `Auth/{User,IUserVerifier,ICurrentUserAccessor,HttpContextCurrentUserAccessor,UserMiddleware,DevStubUserVerifier}.cs` | `IUserVerifier` DI | `DevStubUserVerifier.cs` |
 | Java | `src/generator/java/emit/auth.ts` | `{User,UserVerifier,DevStubUserVerifier,UserFilter,CurrentUserAccessor}.java` | `UserVerifier` bean | `DevStubUserVerifier.java` |
 | Python | `src/generator/python/auth-emit.ts` | `app/auth/{user,verifier,middleware}.py` | `register_user_verifier(fn)` | registry default |
-| Phoenix | `src/generator/elixir/auth-emit.ts` | `auth.ex`, `live_auth.ex` | `verify_token/1` stub | inline stub |
+| Phoenix | `src/generator/elixir/auth-emit.ts` | `auth.ex`, `live_auth.ex`, `auth_controller.ex` | OIDC: JOSE + JWKS (`verify_token/1`); dev stub otherwise | `/auth/me`; redirect handshake deferred |
 | React/Vue/Svelte | — | none | — | — (backend-driven) |
 
 Grammar / IR anchor points (from inventory):
@@ -389,6 +390,30 @@ Extend each backend's `auth-emit.ts` with the OIDC verifier + handshake using
 the idiomatic lib (`oidcc`/`Ueberauth` for Phoenix; `authlib`/`jose` for Python;
 `spring-security-oauth2`/`nimbus` for Java). Parity gated by the per-backend
 build workflows. Sequenced after the two headline backends; can be parallelised.
+
+> **Phoenix OIDC verifier shipped (verifier slice).** `src/generator/elixir/
+> auth-emit.ts` now emits a REAL OIDC verifier in `ApiWeb.Auth` when an
+> `auth { oidc }` block is present (previously the dev stub only): JOSE
+> `verify_strict` against the issuer's JWKS, discovered via `:httpc`
+> (`/.well-known/openid-configuration` → `jwks_uri`) and cached in
+> `:persistent_term` (no supervised process); `iss`/`exp` checked; claims
+> projected onto the `user {}` shape via dotted paths (`id ← sub` default,
+> explicit `claims:` win — e.g. `realm_access.roles`). The issuer is read at
+> **runtime** (a module attribute would freeze the empty compile-time env into
+> the release — the Phoenix analogue of the .NET `RequireHttps` gotcha; here a
+> plain-http dev issuer "just works" since `:httpc` imposes no https). `mix.exs`
+> pulls `{:jose, "~> 1.11"}` + `:inets`/`:ssl` only under OIDC; the dev-stub
+> path stays byte-identical. Adds the `/auth/me` probe (`AuthController`, piped
+> through `:api`) for the `auth: ui` guard. **Compilation is CI-verified** (the
+> `auth-oidc.ddd` phoenix-build fixture in the `elixir-ash-build` gate) — there
+> is no local Elixir toolchain in the dev sandbox. Generator wiring pinned by
+> `test/generator/elixir/auth-oidc-emit.test.ts`.
+>
+> **Deferred (Phoenix follow-ups):** the `/auth/login|callback|logout` redirect
+> handshake (browser code flow) and a Phoenix runtime e2e (boot the backend
+> against the bundled dev Keycloak, mirroring `auth-oidc-dotnet-e2e`). The
+> verifier is the parity core; the handshake + runtime e2e are independently
+> addable.
 
 ### Phase 6 — React `auth: ui` (route guard + sign-in)
 

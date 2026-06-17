@@ -52,6 +52,11 @@ describe.skipIf(!ENABLED)(
   () => {
     it.each([
       { name: "acme-lv.ddd" },
+      // OIDC turnkey auth (D-AUTH-OIDC): compiles the generated ApiWeb.Auth
+      // OIDC verifier (JOSE + JWKS discovery via :httpc), the /auth/me probe
+      // controller, and the {:jose, ...} + :inets/:ssl mix.exs additions under
+      // `mix compile --warnings-as-errors`.
+      { name: "auth-oidc.ddd" },
       // Value-object array (`Money[]`) — Ash stores it inline as an
       // `{:array, Money}` embedded attribute → `{:array, :map}` column (no
       // child table); compiles the embedded-array path.
