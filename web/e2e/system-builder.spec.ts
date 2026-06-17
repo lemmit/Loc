@@ -1003,9 +1003,12 @@ test("persists hand-dragged node positions across a reload, and Reset clears the
   await expect.poll(transform).toBe(derived);
 });
 
-// QUARANTINED (#1261): the enum-case match-guard this exercises is unreachable —
-// `match { status == Case => … }` doesn't parse (needs parens), but parenthesizing
-// breaks the enum-picker detection. Parser/feature gap. Un-fixme when #1261 is fixed.
+// QUARANTINED (#1261): the GRAMMAR half is now fixed — `match { field == Case
+// => … }` parses (the lambda/match-arm `=>` ambiguity was resolved by moving
+// Lambda out of PrimaryExpr). What remains is editor-side: the enum-case picker
+// doesn't activate on the match-arm's RHS leaf in the browser. The candidate
+// detection is correct (`enumPickerCandidates` returns the right `m0cR` map in
+// node), so this is a narrower ExpressionEditor wiring issue, not the grammar.
 test.fixme("offers an enum-case picker on a match-arm cond's other operand", async ({ page }) => {
   // No bundled example has `match { lhs == EnumCase => … }` in a domain-logic
   // slot, so inject a self-contained one through the test seam (robust vs.
@@ -1023,7 +1026,7 @@ test.fixme("offers an enum-case picker on a match-arm cond's other operand", asy
       amount: int
       placedAt: string
       derived label: string = match {
-        (status == Confirmed) => "ready"
+        status == Confirmed => "ready"
         else => "pending"
       }
     }
