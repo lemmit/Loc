@@ -1,0 +1,72 @@
+name: Kubernetes cluster e2e (kind)
+
+# The heavier deployment tier above the per-PR `helm lint` + `kubeconform`
+# gate (k8s-build.yml): install the chart emitted by `generate system --k8s`
+# into a throwaway kind cluster and prove the workloads boot, the DB Secret
+# wires up, and the backend reaches its database (`/ready` → 200).
+# See docs/kubernetes.md.
+#
+# Heavy (it builds + loads container images), so NOT per-PR:
+#   - nightly schedule (full regression),
+#   - on-demand via the `e2e-k8s` label on a PR,
+#   - manual dispatch.
+
+on:
+  schedule:
+    - cron: '0 4 * * *'      # 04:00 UTC nightly
+  pull_request:
+    types: [labeled, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  k8s-smoke:
+    # Schedule / manual always; on a PR only when the `e2e-k8s` label is set
+    # (a `synchronize` push to an already-labelled PR re-runs it).
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'e2e-k8s'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: 'v3.16.3'
+
+      # Provisions a kind cluster + kubectl and wires the kubeconfig.
+      # cluster_name 'kind' matches the `kind load` / kubectl defaults the
+      # smoke script relies on.
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: kind
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Type-check
+        run: npm run build
+
+      - name: Install chart into kind + smoke
+        run: npm run test:k8s-e2e
+
+      - name: Dump cluster state on failure
+        if: failure()
+        run: |
+          kubectl get pods,svc,secrets -A || true
+          kubectl describe pods -n loom-k8s-e2e || true
+          kubectl logs -n loom-k8s-e2e -l app.kubernetes.io/part-of=inheritance-system --all-containers --tail=100 || true

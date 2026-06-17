@@ -154,13 +154,20 @@ Two tiers:
   deterministic; catches schema-level drift (bad apiVersion, wrong field
   types, malformed probes/secretRefs) the substring unit tests can't.
   Requires `helm` + `kubeconform` on PATH; skips cleanly when absent.
-- **Cluster smoke (follow-up tier).** A `kind` (Kubernetes-in-Docker) run:
-  build the emitted Dockerfiles, `kind load` them, stand up a throwaway
-  in-cluster postgres for the test (the chart targets an external DB), wire
-  the `Secret` to it, `helm install`, `kubectl rollout status`, then curl
-  `/ready` through a port-forward. Heavier (per-backend image builds), so
-  it would be a separately-gated `LOOM_K8S_E2E=1` suite focused on one
-  backend + the frontend, mirroring the docker-compose `LOOM_E2E` story.
+- **Cluster smoke (shipped, `npm run test:k8s-e2e`).** `scripts/k8s-e2e-smoke.sh`
+  runs a real `kind` (Kubernetes-in-Docker) install: generate one example
+  (`inheritance-system` — a hono backend + a react frontend) with `--k8s`,
+  `docker build` + `kind load` the deployable images, stand up a throwaway
+  in-cluster postgres (the chart targets an external DB), `helm install
+  --wait` (which gates on the `/ready` readiness probe → proves the DB
+  `Secret` wired up), `kubectl rollout status` every workload, then an
+  explicit `curl /health` + `/ready` through the backend's ClusterIP
+  Service. Heavier (it builds container images), so it is **not** per-PR —
+  the `k8s-e2e.yml` workflow runs it nightly, on the `e2e-k8s` PR label, or
+  by manual dispatch, provisioning the cluster via `helm/kind-action`. Run
+  locally with `kind create cluster && npm run test:k8s-e2e`. First cut is
+  one backend + frontend on one example (not a matrix) — that's the
+  per-backend coverage growth seam.
 
 ## Implementation
 
