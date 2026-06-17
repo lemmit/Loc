@@ -5,8 +5,9 @@
 # The heavier e2e tier above the per-PR `helm lint` + `kubeconform` gate:
 # actually INSTALL the emitted Helm chart into a throwaway kind cluster and
 # prove the workloads boot, the DB Secret wires up, the backend reaches its
-# database (`/ready` → 200), AND a real domain read round-trips end to end
-# (an auto-findAll collection GET → migrated table → wire shape → 200).
+# database (`/ready` → 200), AND real domain round-trips end to end: a read
+# (auto-findAll GET → migrated table → wire shape → 200) and a write (POST a
+# fixture body → invariants → INSERT → read it back through findAll).
 #
 # Scope (first cut, kept fast): one example with a hono backend + a react
 # frontend (examples × backends is deliberately NOT a matrix here — that's
@@ -21,6 +22,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DDD="${REPO_ROOT}/web/src/examples/inheritance-system.ddd"
+FIXTURE="${REPO_ROOT}/scripts/k8s-e2e/inheritance-system.smoke.json"
 OUT="$(mktemp -d -t loom-k8s-e2e-XXXXXX)"
 RELEASE="rel"
 FULLNAME="rel-inheritance-system"          # <release>-<chart>
@@ -171,4 +173,45 @@ const fail = (m) => { console.error("ROUND-TRIP FAILED: " + m); process.exit(1);
 })().catch((e) => fail(String(e?.stack ?? e)));
 NODE
 
-step "OK — chart installs, workloads boot, and a real DB read round-trips."
+step "Real write round-trip: POST a domain object, then read it back"
+# The read above proves the SELECT path; this proves the MUTATION path:
+# POST a create body → the domain validates its invariants → INSERT into the
+# migrated table → the row is persisted and reads back through findAll.  The
+# body comes from a per-example fixture (scripts/k8s-e2e/<example>.smoke.json)
+# because the invariants it must satisfy (e.g. last4.length == 4) live in the
+# domain, not the OpenAPI request schema — a synthesized body would 422.  One
+# fixture is backend-agnostic: Loom's wire shape is identical across backends.
+# The fixture JSON rides in as an env var (kubectl exec passes argv verbatim;
+# the value's embedded quotes are inside the outer "" so the shell keeps them).
+FIX="$(cat "$FIXTURE")"
+kubectl -n "$NS" exec -i "deploy/${FULLNAME}-api" -- env SMOKE_FIXTURE="$FIX" node - <<'NODE'
+const BASE = "http://localhost:3000";
+const fail = (m) => { console.error("WRITE ROUND-TRIP FAILED: " + m); process.exit(1); };
+const fx = JSON.parse(process.env.SMOKE_FIXTURE ?? "{}");
+const idField = fx.idField ?? "id";
+const rows = (b) => (Array.isArray(b) ? b : Array.isArray(b?.items) ? b.items : []);
+
+(async () => {
+  // Baseline count, so the assertion holds no matter what seed data exists.
+  const before = rows(await fetch(`${BASE}${fx.list}`).then((r) => r.ok ? r.json() : fail(`GET ${fx.list} → ${r.status}`)));
+
+  const post = await fetch(`${BASE}${fx.create.path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(fx.create.body),
+  });
+  if (post.status !== 201 && post.status !== 200) fail(`POST ${fx.create.path} → ${post.status} ${await post.text().catch(() => "")}`);
+  const created = await post.json().catch(() => fail(`POST ${fx.create.path} → ${post.status} but body is not JSON`));
+  const id = created?.[idField];
+  if (!id) fail(`POST ${fx.create.path} → ${post.status} but response has no "${idField}"`);
+  console.log(`POST ${fx.create.path} → ${post.status}, ${idField}=${id}`);
+
+  // Read it back: the new row must be present and the count must have grown.
+  const after = rows(await fetch(`${BASE}${fx.list}`).then((r) => r.ok ? r.json() : fail(`GET ${fx.list} → ${r.status}`)));
+  if (!after.some((row) => row?.[idField] === id)) fail(`created ${idField}=${id} not found in GET ${fx.list} (${after.length} row(s))`);
+  if (after.length <= before.length) fail(`row count did not grow (${before.length} → ${after.length})`);
+  console.log(`GET ${fx.list} → ${after.length} row(s), includes ${id} — write path OK (${before.length} → ${after.length})`);
+})().catch((e) => fail(String(e?.stack ?? e)));
+NODE
+
+step "OK — chart installs, workloads boot, and real DB read + write round-trip."
