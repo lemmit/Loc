@@ -298,7 +298,7 @@ plumbing, which is done.
 | .NET | `src/generator/dotnet/auth-emit.ts` | `Auth/{User,IUserVerifier,ICurrentUserAccessor,HttpContextCurrentUserAccessor,UserMiddleware,DevStubUserVerifier}.cs` | `IUserVerifier` DI | `DevStubUserVerifier.cs` |
 | Java | `src/generator/java/emit/auth.ts` | `{User,UserVerifier,DevStubUserVerifier,UserFilter,CurrentUserAccessor}.java` | `UserVerifier` bean | `DevStubUserVerifier.java` |
 | Python | `src/generator/python/auth-emit.ts` | `app/auth/{user,verifier,middleware}.py` | `register_user_verifier(fn)` | registry default |
-| Phoenix | `src/generator/elixir/auth-emit.ts` | `auth.ex`, `live_auth.ex`, `auth_controller.ex` | OIDC: JOSE + JWKS (`verify_token/1`); dev stub otherwise | `/auth/me`; redirect handshake deferred |
+| Phoenix | `src/generator/elixir/auth-emit.ts` | `auth.ex`, `live_auth.ex`, `auth_controller.ex` | OIDC: JOSE + JWKS (`verify_token/1`); dev stub otherwise | `/auth/me` + `/auth/login\|callback\|logout` handshake |
 | React/Vue/Svelte | — | none | — | — (backend-driven) |
 
 Grammar / IR anchor points (from inventory):
@@ -493,9 +493,23 @@ build workflows. Sequenced after the two headline backends; can be parallelised.
 > boot/config/migration — no blind mix orchestration. CI-only (the inner image
 > build needs hex egress); `push: main` + dispatch.
 >
-> **Still deferred (Phoenix):** the `/auth/login|callback|logout` redirect
-> handshake (browser code flow) — independently addable; nothing breaks without
-> it for token-based clients.
+> **Phoenix redirect handshake shipped — Phoenix is now at full backend
+> parity.** Under an `auth { oidc }` block the `AuthController` gains
+> `/auth/login` (authorization-code redirect + `oidc_state` cookie),
+> `/auth/callback` (code→token exchange via OTP `:httpc` + issues the HttpOnly
+> `session` cookie), and `/auth/logout` — the same flow Hono / .NET ship. The
+> Auth plug now reads the token from the Bearer header **or** the `session`
+> cookie, and bypasses the three redirect endpoints (so they're reachable
+> without a verified principal); `/auth/me` stays protected. This closes the
+> browser-login path: a Phoenix LiveView app behind `auth: required`, or a
+> frontend `auth: ui` guard pointed at Phoenix, can now actually sign in.
+> Dev-stub path stays byte-identical. Compile-gated (the `auth-oidc.ddd`
+> phoenix-build fixture now compiles the handshake under
+> `--warnings-as-errors`); generator wiring in `auth-oidc-emit.test.ts`; the
+> runtime e2e adds a `/auth/login` → 302-to-IdP + `oidc_state`-cookie smoke
+> (the full code→token callback needs a browser, out of scope for the headless
+> e2e). **Phoenix now matches Hono / .NET: verifier + /auth/me + full
+> handshake, runtime-verified.**
 
 ### Phase 6 — React `auth: ui` (route guard + sign-in)
 
