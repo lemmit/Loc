@@ -99,7 +99,15 @@ export function emitShellFiles(
   for (const [path, content] of resourceEmission.files) out.set(path, content);
   out.set(
     "mix.exs",
-    renderMixExs(appName, appModule, resourceEmission.hexDeps, contextsHaveSeeds(contexts)),
+    renderMixExs(
+      appName,
+      appModule,
+      resourceEmission.hexDeps,
+      contextsHaveSeeds(contexts),
+      // OIDC verifier deps (JOSE + :inets/:ssl) only when this auth-required
+      // deployable's system declares an `auth { oidc }` block.
+      authEnabled && !!sys.auth,
+    ),
   );
   out.set(".formatter.exs", renderFormatterExs());
   // .dialyzer_ignore.exs template — paired with the mix.exs `dialyzer:`
