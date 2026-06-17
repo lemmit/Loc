@@ -89,8 +89,13 @@ field, the generator emits:
   `ProvLineage` value (rule snapshot id + inputs + post-write
   computed value), and routes it both to the backing field
   (current lineage, persisted on the row) and to `_provTraces`
-  (drained into a history table by the route handler inside the
-  save transaction).
+  (drained into the `provenance_records` history table inside the
+  save transaction).  The drain happens wherever the aggregate is
+  saved: the operation route handler, and equally a **workflow**
+  handler — a provenanced write made inside a workflow step (which
+  invokes ops inline) is captured, not dropped, and the workflow
+  runs the drain inside a child frame so its rows record their
+  call-structure position (see below).
 - A `drainProv(): ProvLineage[]` method on the aggregate that
   empties the buffer after a save.
 
@@ -129,6 +134,23 @@ The .NET backend emits the same runtime shape, in EF Core / CQRS terms:
 The `provenance_records` table + the co-located columns ship as one
 extra EF migration (`Migrations/<late>_ProvenanceAudit.cs`) that sorts
 after every module's initial migration.
+
+## Governance stamps on each history row
+
+Beyond the lineage itself, every `provenance_records` row carries the
+ambient execution-context ids, read from the request carrier at flush
+time: `correlation_id` (which request), `scope_id` (which frame),
+`parent_id` (the caller frame — its call-structure position), and
+`actor_id` (the principal's id — the design's "who computed").  These
+are the carrier's [request-context](architecture/request-context.md)
+slices; the same tuple is stamped on `audit_records`, so a forensic
+query can join the two.  On .NET each Mediator dispatch (command,
+workflow, or reactor notification) opens a child frame, so `parent_id`
+chains to the originating request; on Hono a workflow opens the child
+frame explicitly, while a direct operation route runs in the root frame
+(null `parent_id`).  Under background/outbox delivery the carrier is a
+fresh root frame, so the row still records the write but with a
+correlation orphaned from the original request.
 
 ## Other backends
 
