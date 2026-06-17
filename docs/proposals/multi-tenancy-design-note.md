@@ -5,6 +5,200 @@
 > real-time cache-invalidation ("magic caching") feature, which routes per-tenant and
 > reuses the tenant-claim plumbing built here.
 
+---
+
+## Refinement (2026-06-17) — naming, registry-in-`tenancy by`, derived default, macro-first delivery
+
+> A design session reworked four of the "Decisions locked" below. Where this
+> section and the original decisions disagree, **this section wins** — the
+> originals are kept for the reasoning trail. Net effect: a smaller surface, a
+> safer default, and a Phase-1 that ships with **no grammar/IR/emitter change**.
+
+### R1. The registry is named in `tenancy by …`, not marked on the aggregate
+
+The original decision #4 made the tenant registry a third *aggregate* mode
+(`platform`). That conflated two different roles. The registry is a
+**system-level structural fact** (there is exactly one; it is the root the
+tenant id points *into*), so it belongs in the system declaration:
+
+```ddd
+tenancy by user.tenantId of Organization
+```
+
+This names the claim **and** the registry in one line, and buys three things a
+per-aggregate marker can't:
+
+- **A checkable type link** — the values of the `user.tenantId` claim *are*
+  `Organization` ids (`tenantId ≡ Organization.id`). The self-scope filter
+  (`Organization.id == currentUser.tenantId`) is then **derived**, not
+  hand-written.
+- **"Exactly one registry" enforced structurally** — you name one aggregate.
+- **No registry marker on the aggregate.** `Organization` carries no scope
+  modifier; its registry-ness, its absence of a `TenantId` column, and its
+  claim-less bootstrap `create` are all derived from being the named registry.
+
+**Why the registry *must* be special** (the original note asserts this but
+doesn't justify it): the registry is **self-keyed** — its "tenant" is its own
+primary key — so it has **no `TenantId` column**. The standard global tenant
+filter (`WHERE TenantId = claim`) therefore cannot even be emitted against it.
+`crossTenant` is wrong too (it would expose every org to every tenant — a
+leak). Neither existing mode works, which is exactly why it has to be lifted
+out of the per-aggregate axis into the system declaration.
+
+### R2. The per-aggregate axis: "how many tenants own the row?"
+
+Three values, read as **one / none / all**:
+
+| Modifier | Tenant filter? | `TenantId` column | Default read access | Example |
+|---|---|---|---|---|
+| *(unmarked)* / `tenantOwned` | yes | yes (auto-stamped) | own tenant | `Invoice`, `Customer` |
+| `crossTenant` | no | no | **open** — every tenant reads | `Country`, `Plan` (reference data) |
+| `platform` | no | no | **admin-only (deny by default)** | cross-tenant audit trail, analytics projection |
+
+Key points:
+
+- **`crossTenant` ≠ `platform`.** They are identical on the *tenancy* axis
+  (both unscoped, no `TenantId` column) and differ only on the **access
+  default** — and that difference is the reason both exist under fail-closed
+  reasoning: an unscoped aggregate defaulting to *open* is correct for a
+  country list and a **catastrophic leak** for an audit trail. `crossTenant`
+  fails open (safe for reference data); `platform` fails closed to admin-only.
+- **`platform` is plural** (you can have an audit store *and* a projection);
+  the registry is exactly one (named in `tenancy by`). They are not the same
+  slot. `platform`'s deny-by-default access is best **baked into tenancy** (so
+  it is safe before the authorization layer exists), with finer policy
+  delegated to authorization.
+- **`tenantless` considered.** It is arguably a more accurate name than
+  `crossTenant` for reference data ("a `Country` has no tenant" vs. "crosses
+  tenants"), giving a clean *one / none / all* trio. Deferred only because
+  `crossTenant` is the keyword `authorization.md` already shares, so switching
+  means re-reconciling that doc. Open naming question.
+
+### R3. The default is **derived** from `tenancy by`, never separately configurable
+
+The presence of `tenancy by` *is* the switch:
+
+- **`tenancy by` present** ⇒ an unmarked aggregate is `tenantOwned` (fail-closed).
+- **`tenancy by` absent** ⇒ the tenancy axis is inert (no `TenantId`, no filter —
+  today's single-tenant behaviour, unchanged).
+
+So adding the one `tenancy by …` line is the **safest possible migration**: it
+flips every unmarked aggregate to isolated-by-default, and you opt the
+reference data back out with `crossTenant`. A forgotten marker during that
+migration leaves an aggregate over-isolated (empty), never leaked.
+
+The default is **not** a knob on `tenancy by`. Its only alternative value would
+be `crossTenant`, which reintroduces fail-**open** (forget a marker on real
+tenant data ⇒ shared ⇒ leak) — the exact failure the design exists to avoid.
+The presence of `tenancy by` already declares "default = `tenantOwned`";
+restating it would be redundant, changing it would be unsafe.
+
+Validation corners that fall out:
+
+| | no `tenancy by` | `tenancy by` present |
+|---|---|---|
+| *(unmarked)* | unscoped / inert | **`tenantOwned`** (default) |
+| `tenantOwned` written | **error** — "requires a `tenancy by` declaration" | explicit form of the default (allowed for clarity) |
+| `crossTenant` written | inert — lint "no effect; no tenancy declared" | the real exception marker |
+
+### R4. Delivery is macro-first — Phase 1 needs no grammar/IR/emitter change
+
+`tenantOwned` decomposes to **a field + an `onCreate` stamp + a capability
+filter** — structurally identical to `audit` (`createdBy := currentUser`
+stamp) and `softDelete` (`!this.isDeleted` filter). So it ships as a **stdlib
+capability macro**, built from the existing `contextStamp` / `contextFilter`
+primitives, in the same split-into-two shape (per-aggregate *state* +
+context-level *behavior*):
+
+```ts
+// per-aggregate state: the column + capability opt-in
+tenantOwned   → [ field("tenantId", "string", { internal: true }),
+                  implementsCapability("tenantOwned") ]
+
+// context-level behavior: stamp on create + scope every read
+tenantOwnership →
+  contextStamp({ capability: "tenantOwned",
+    onCreate: [{ field: "tenantId",
+                 value: memberAccess(nameRef("currentUser"), "tenantId") }] }),
+  contextFilter(
+    eq(memberAccess(thisRef(), "tenantId"),
+       memberAccess(nameRef("currentUser"), "tenantId")),
+    { capability: "tenantOwned" })
+```
+
+Spelling: `aggregate Invoice with tenantOwned { … }`, alongside
+`with audit, softDelete`. **No new IR, grammar, or backend emitter** — it
+reuses the `contextStamps` / `contextFilters` pipeline verbatim.
+
+The **only enabling work** under it is runtime, not language: the filter
+`this.tenantId == currentUser.tenantId` is a **principal-referencing** filter,
+and those are wired on .NET only today — node / elixir / java reject them
+(`loom.context-filter-unsupported`, `LIMITED_FAMILIES` in
+`src/ir/validate/checks/system-checks.ts`). That gate is **T2.j** in the global
+plan. So "ship the `tenantOwned` macro" ⊇ "do T2.j"; they are nearly the same
+effort.
+
+**Trade made consciously:** the explicit macro is **fail-open** (forget
+`with tenantOwned` ⇒ unscoped ⇒ leak) — the opposite of R3's fail-closed
+default. Phase 1 accepts this for obviousness, mitigated by a lint ("aggregate
+on a tenant system has no tenancy capability — did you mean `with
+tenantOwned`?"). The fail-closed guarantee is bought back when R3's derived
+default lands in Phase 2.
+
+### Phasing
+
+- **Phase 1 (now):** `with tenantOwned` stdlib capability macro → `internal
+  tenantId` + `onCreate` stamp + principal filter. Lands on/with **T2.j**.
+  Explicit, fail-open + lint. Proves the column/stamp/filter runtime
+  end-to-end behind the smallest surface.
+- **Phase 2:** promote to first-class — `tenancy by user.tenantId of
+  Organization` (R1), `crossTenant` / `platform` markers (R2), the derived
+  fail-closed default (R3), typed `tenantId ≡ Organization id`. The macro keeps
+  working as the explicit form.
+
+### Worked example (Phase-2 surface)
+
+```ddd
+system Billder {
+  user { id: string  email: string  role: string  tenantId: string }
+  auth { provider: keycloak  oidc { issuer: env("OIDC_ISSUER"), clientId: env("OIDC_CLIENT_ID") } }
+
+  tenancy by user.tenantId of Organization   // claim + registry, fail-closed default
+
+  subdomain Billing {
+    context Catalog {
+      aggregate Plan crossTenant    { code: string  monthlyPrice: decimal }   // shared, open
+      aggregate Country crossTenant { iso2: string  name: string }
+    }
+    context Invoicing {
+      aggregate Invoice  { number: string  customerId: Customer id  amountDue: decimal }  // default: tenantOwned
+      aggregate Customer tenantOwned { name: string  email: string  countryRef: Country id }
+    }
+  }
+  subdomain Platform {
+    context Accounts {
+      aggregate Organization { name: string  planRef: Plan id  active: bool = true   // the registry
+        create signUp(name: string, planRef: Plan id)        // claim-less bootstrap
+        operation suspend() { requires currentUser.role == "platformAdmin"  active := false } }
+    }
+    context Ops {
+      aggregate AuditTrail platform { actor: string  action: string  at: datetime }   // all tenants, admin-only
+    }
+  }
+
+  deployable Api { platform: dotnet  contexts: [Catalog, Invoicing, Accounts, Ops]  auth: required }
+}
+```
+
+> **DataKey note.** The hierarchical-scoping extension (`authorization.md` §2:
+> sub-tenant `Self`/`Children`/`Descendants` via a materialized-path column)
+> is the *depth-N generalization* of `tenantOwned` and is **out of scope for
+> Phases 1–2** — flat tenancy covers the common case. See that doc + the
+> reconciliation thread for how DataKey's leftmost segment is exactly the
+> `tenantId` defined here.
+
+---
+
 ## Goal
 
 Add first-class multi-tenancy (B2B isolation) to Loom so generated backends scope data
