@@ -52,7 +52,7 @@ describe("vue auth: ui guard — emission", () => {
 
     const gate = find(files, "web/src/auth/AuthGate.vue");
     expect(gate).toContain('import { provideSession } from "./useSession";');
-    expect(gate).toContain("@click=\"signIn\"");
+    expect(gate).toContain('@click="signIn"');
 
     const main = find(files, "web/src/main.ts");
     expect(main).toContain('import AuthGate from "./auth/AuthGate.vue";');
