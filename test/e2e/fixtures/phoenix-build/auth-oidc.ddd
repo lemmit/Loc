@@ -33,7 +33,7 @@ system Helpdesk {
   resource ticketState { for: Tickets, kind: state, use: primary }
 
   api SupportApi from Support
-  deployable api {
+  deployable phoenixApp {
     platform: phoenix { foundation: ash }
     contexts: [Tickets]
     serves: SupportApi
