@@ -65,19 +65,24 @@ kind load docker-image "${IMAGE}:${TAG}"
 step "Create namespace $NS"
 kubectl create namespace "$NS"
 
-step "Stand up a throwaway postgres with database '${DB}'"
-# POSTGRES_DB=${DB} creates the one database this backend connects to.
+step "Stand up a throwaway postgres (Service name 'db', database '${DB}')"
+# The Service is named `db` to match the host in every backend's chart-default
+# database connection string (postgres://…@db, Host=db, jdbc:postgresql://db,
+# ecto://…@db).  Each backend's URL FORMAT differs (node-postgres URL / Npgsql
+# keywords / asyncpg / JDBC / ecto), so we DON'T override it — we just point the
+# shared `db` host at this pod, with the matching user/password and the one
+# database the backend expects (POSTGRES_DB=${DB}, the serviceSlug).
 kubectl -n "$NS" apply -f - <<YAML
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: pg
-  labels: { app: pg }
+  name: db
+  labels: { app: db }
 spec:
   replicas: 1
-  selector: { matchLabels: { app: pg } }
+  selector: { matchLabels: { app: db } }
   template:
-    metadata: { labels: { app: pg } }
+    metadata: { labels: { app: db } }
     spec:
       containers:
         - name: postgres
@@ -95,12 +100,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: pg
+  name: db
 spec:
-  selector: { app: pg }
+  selector: { app: db }
   ports: [{ port: 5432, targetPort: 5432 }]
 YAML
-kubectl -n "$NS" rollout status deploy/pg --timeout=120s
+kubectl -n "$NS" rollout status deploy/db --timeout=120s
 
 step "helm install the chart with only '${TARGET}' enabled"
 # Disable every other workload (backends + frontends) so this cell installs a
@@ -110,11 +115,12 @@ while read -r k; do
   [ "$k" = "$VK" ] && continue
   DISABLE+=( --set "${k}.enabled=false" )
 done < <(grep -E '^[A-Za-z]' "${OUT}/helm/values.yaml" | grep -vE '^(global|ingress):' | sed 's/:.*//')
+# NB: we do NOT --set database.url — the chart default (host `db`, the right
+# scheme for this backend, db `${DB}`) is exactly what the throwaway pg serves.
 helm install "$RELEASE" "${OUT}/helm" \
   --namespace "$NS" \
   --set global.image.tag="${TAG}" \
   --set global.image.pullPolicy=IfNotPresent \
-  --set "${VK}.database.url=postgres://postgres:postgres@pg:5432/${DB}" \
   "${DISABLE[@]}" \
   --wait --timeout 300s
 
@@ -175,30 +181,40 @@ const fail = (m) => { console.error("ROUND-TRIP FAILED: " + m); process.exit(1);
 const fx = JSON.parse(process.env.SMOKE_FIXTURE ?? "{}");
 const idField = fx.idField ?? "id";
 const rows = (b) => (Array.isArray(b) ? b : Array.isArray(b?.items) ? b.items : []);
-const getList = async (label) =>
-  rows(await fetch(`${BASE}${fx.list}`).then((r) => (r.ok ? r.json() : fail(`${label} GET ${fx.list} → ${r.status}`))));
+// Most backends serve the REST routes at the root; the Elixir foundations
+// mount them under `/api`.  Probe both prefixes against the list endpoint and
+// use whichever answers 200 — keeps the fixture path backend-agnostic.
+const PREFIXES = ["", "/api"];
 
 (async () => {
+  let prefix = null;
+  let before = null;
+  for (const p of PREFIXES) {
+    const r = await fetch(`${BASE}${p}${fx.list}`).catch(() => null);
+    if (r && r.ok) { prefix = p; before = rows(await r.json()); break; }
+  }
+  if (prefix === null) fail(`list endpoint not found at ${PREFIXES.map((p) => `${p}${fx.list}`).join(" or ")}`);
+  const listUrl = `${BASE}${prefix}${fx.list}`;
+  const createUrl = `${BASE}${prefix}${fx.create.path}`;
   // READ: baseline count off the migrated table (holds regardless of seeds).
-  const before = await getList("read");
-  console.log(`GET ${fx.list} → ${before.length} row(s) — DB read path OK`);
+  console.log(`GET ${prefix}${fx.list} → ${before.length} row(s) — DB read path OK`);
 
   // WRITE: create, expect 201, then read it back.
-  const post = await fetch(`${BASE}${fx.create.path}`, {
+  const post = await fetch(createUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(fx.create.body),
   });
-  if (post.status !== 201 && post.status !== 200) fail(`POST ${fx.create.path} → ${post.status} ${await post.text().catch(() => "")}`);
-  const created = await post.json().catch(() => fail(`POST ${fx.create.path} → ${post.status} but body is not JSON`));
+  if (post.status !== 201 && post.status !== 200) fail(`POST ${prefix}${fx.create.path} → ${post.status} ${await post.text().catch(() => "")}`);
+  const created = await post.json().catch(() => fail(`POST ${prefix}${fx.create.path} → ${post.status} but body is not JSON`));
   const id = created?.[idField];
-  if (!id) fail(`POST ${fx.create.path} → ${post.status} but response has no "${idField}"`);
-  console.log(`POST ${fx.create.path} → ${post.status}, ${idField}=${id}`);
+  if (!id) fail(`POST ${prefix}${fx.create.path} → ${post.status} but response has no "${idField}"`);
+  console.log(`POST ${prefix}${fx.create.path} → ${post.status}, ${idField}=${id}`);
 
-  const after = await getList("read-back");
-  if (!after.some((row) => row?.[idField] === id)) fail(`created ${idField}=${id} not found in GET ${fx.list} (${after.length} row(s))`);
+  const after = rows(await fetch(listUrl).then((r) => (r.ok ? r.json() : fail(`read-back GET ${prefix}${fx.list} → ${r.status}`))));
+  if (!after.some((row) => row?.[idField] === id)) fail(`created ${idField}=${id} not found in GET ${prefix}${fx.list} (${after.length} row(s))`);
   if (after.length <= before.length) fail(`row count did not grow (${before.length} → ${after.length})`);
-  console.log(`GET ${fx.list} → ${after.length} row(s), includes ${id} — write path OK (${before.length} → ${after.length})`);
+  console.log(`GET ${prefix}${fx.list} → ${after.length} row(s), includes ${id} — write path OK (${before.length} → ${after.length})`);
 })().catch((e) => fail(String(e?.stack ?? e)));
 NODE
 if ! kubectl -n "$NS" wait --for=jsonpath='{.status.phase}'=Succeeded pod/roundtrip --timeout=120s; then
