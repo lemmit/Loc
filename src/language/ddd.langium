@@ -1682,6 +1682,20 @@ MatchExpr:
 MatchArm:
     cond=Expression '=>' value=Expression;
 
+// Anonymous (inline, unnamed) retrieval literal — the call-site twin of a
+// declared `retrieval`, accepted by `Repo.run(...)` (criterion.md, use site 3).
+// Same `where:` / `sort:` / `loads:` block as the declaration, minus the name
+// and `of <T>` (the candidate is the `run` repository's aggregate).  Keyword-led
+// (`retrieval { … }`) so it is an unambiguous primary expression — a bare `{`
+// would be an ObjectLit.  `where` is a criterion reference in this release;
+// `sort` / `loads` reuse the declared-retrieval `SortItem` / `LoadPath` rules.
+RetrievalLiteral:
+    'retrieval' '{'
+        'where' ':' where=Expression
+        ('sort'  ':' '[' (sort+=SortItem (',' sort+=SortItem)*)? ']')?
+        ('loads' ':' '[' (loads+=LoadPath (',' loads+=LoadPath)*)? ']')?
+    '}';
+
 TernaryExpr infers Expression:
     OrExpr (
         {infer TernaryExpr.cond=current} '?' thenExpr=Expression ':' elseExpr=Expression
@@ -1786,6 +1800,7 @@ Lambda:
 
 PrimaryExpr infers Expression:
       Lambda
+    | RetrievalLiteral
     | BuilderCall
     | ObjectLit
     | ParenExpr

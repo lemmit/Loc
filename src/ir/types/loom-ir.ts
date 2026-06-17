@@ -1075,6 +1075,15 @@ export type WorkflowStmtIR =
        *  the existing retrieval pipeline on every backend.  `name` is the
        *  referenced criterion. */
       synthCriterion?: { name: string };
+      /** `sort:` / `loads:` shaping carried from an anonymous retrieval
+       *  (`Repo.run(retrieval { where: <Criterion> sort: […] loads: […] })`,
+       *  criterion.md use site 3).  Only set alongside `synthCriterion`; the
+       *  enrich pass attaches them to the synthesised retrieval so the existing
+       *  retrieval emitters apply `.orderBy(...)` + the load shape on every
+       *  backend.  `retrievalName` carries a content hash of the shaping, so
+       *  distinct shapes over one criterion get distinct retrievals. */
+      synthSort?: SortTermIR[];
+      synthLoadPlan?: LoadPlanIR;
       /** Element aggregate array type `{ kind: "array", element: entity }`. */
       returnType: TypeIR;
     }

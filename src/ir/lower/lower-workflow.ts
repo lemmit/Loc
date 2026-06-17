@@ -3,8 +3,10 @@ import type {
   BoundedContext,
   Expression,
   HandleDecl,
+  LoadPath,
   OnDecl,
   Repository,
+  SortItem,
   Statement,
   Workflow,
   WorkflowCreateDecl,
@@ -27,6 +29,7 @@ import {
   isProperty,
   isRepository,
   isRequiresStmt,
+  isRetrievalLiteral,
   isWorkflowCreateDecl,
 } from "../../language/generated/ast.js";
 import { findVerb } from "../resource-verbs.js";
@@ -36,8 +39,11 @@ import type {
   ExprIR,
   FieldIR,
   HandleIR,
+  LoadPlanIR,
+  LoadSegmentIR,
   OnIR,
   ParamIR,
+  SortTermIR,
   TypeIR,
   WorkflowIR,
   WorkflowStmtIR,
@@ -332,20 +338,45 @@ function lowerWorkflowStatement(
       const repoName = runCall.repo.name;
       const elementType: TypeIR = { kind: "entity", name: aggName };
       const arrayType: TypeIR = { kind: "array", element: elementType };
+      const pageClause =
+        runCall.pageOffset || runCall.pageLimit
+          ? {
+              page: {
+                ...(runCall.pageOffset ? { offset: lowerExpr(runCall.pageOffset, env) } : {}),
+                ...(runCall.pageLimit ? { limit: lowerExpr(runCall.pageLimit, env) } : {}),
+              },
+            }
+          : {};
+      // Anonymous retrieval (`run(retrieval { where: <Criterion> sort: … loads:
+      // … })`): desugar to a `synthCriterion` repo-run + shaping, materialised
+      // into a synthetic retrieval by enrich (same path as `findAll`).  The
+      // shape signature in the name keeps distinct shapes distinct.
+      const anon = runCall.anon;
+      const sortTerms: SortTermIR[] = (anon?.sort ?? []).map((si) => ({
+        path: loadPathSegments(si.path),
+        direction: (si.direction ?? "asc") as "asc" | "desc",
+      }));
+      const loadPaths = (anon?.loads ?? []).map(loadPathSegments);
+      const hasShaping = sortTerms.length > 0 || loadPaths.length > 0;
+      const loadPlan: LoadPlanIR =
+        loadPaths.length > 0 ? { kind: "explicit", paths: loadPaths } : { kind: "whole" };
+      const retrievalName = anon
+        ? `findAllBy${anon.criterionName}${hasShaping ? `Shaped${shapeSignature(sortTerms, loadPaths)}` : ""}`
+        : runCall.retrievalName;
+      const retrievalArgs = anon ? anon.criterionArgs : runCall.retrievalArgs;
       return {
         stmt: {
           kind: "repo-run",
           name: stmt.name,
           repoName,
           aggName,
-          retrievalName: runCall.retrievalName,
-          retrievalArgs: runCall.retrievalArgs.map((a) => lowerExpr(a, env)),
-          ...(runCall.pageOffset || runCall.pageLimit
+          retrievalName,
+          retrievalArgs: retrievalArgs.map((a) => lowerExpr(a, env)),
+          ...pageClause,
+          ...(anon
             ? {
-                page: {
-                  ...(runCall.pageOffset ? { offset: lowerExpr(runCall.pageOffset, env) } : {}),
-                  ...(runCall.pageLimit ? { limit: lowerExpr(runCall.pageLimit, env) } : {}),
-                },
+                synthCriterion: { name: anon.criterionName },
+                ...(hasShaping ? { synthSort: sortTerms, synthLoadPlan: loadPlan } : {}),
               }
             : {}),
           returnType: arrayType,
@@ -582,9 +613,50 @@ interface RetrievalRunMatch {
   repo: Repository;
   retrievalName: string;
   retrievalArgs: Expression[];
+  /** Set when the run target was an anonymous retrieval literal
+   *  (`retrieval { where: <Criterion> sort: … loads: … }`) rather than a named
+   *  retrieval reference.  Lowers to a `synthCriterion` repo-run + shaping,
+   *  riding the same enrich path as `findAll`. */
+  anon?: {
+    criterionName: string;
+    criterionArgs: Expression[];
+    sort: SortItem[];
+    loads: LoadPath[];
+  };
   /** The `page:` object-literal argument's fields, if supplied. */
   pageOffset?: Expression;
   pageLimit?: Expression;
+}
+
+/** Lower a structural `LoadPath` AST node (`lines[].product`) to its
+ *  candidate-rooted segment list (a leading `this` is already stripped by the
+ *  grammar) — the workflow-side twin of `lowerLoadPath` in lower.ts. */
+function loadPathSegments(p: LoadPath): LoadSegmentIR[] {
+  return p.segments.map((seg) => ({ name: seg.name, collection: !!seg.collection }));
+}
+
+/** A short, deterministic, content-based signature of an anonymous retrieval's
+ *  `sort:` / `loads:` shaping — folded into the synthetic retrieval name so
+ *  distinct shapes over one criterion get distinct retrievals while identical
+ *  shapes dedupe (a plain djb2 string hash over the canonical JSON). */
+function shapeSignature(sort: SortTermIR[], loads: LoadSegmentIR[][]): string {
+  const canon = JSON.stringify({ sort, loads });
+  let h = 5381;
+  for (let i = 0; i < canon.length; i++) h = (h * 33) ^ canon.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+
+/** A criterion reference expression — a bare `Name` (parameterless) or
+ *  `Name(args)`.  Shared by the `findAll` arg and the anonymous-retrieval
+ *  `where:`. */
+function criterionRefFromExpr(ref: Expression): { name: string; args: Expression[] } | undefined {
+  if (isNameRef(ref)) return { name: ref.name, args: [] };
+  if (isPostfixChain(ref) && isNameRef(ref.head) && ref.suffixes.length === 1) {
+    const rs = ref.suffixes[0]!;
+    if (!isCallSuffix(rs)) return undefined;
+    return { name: ref.head.name, args: (rs.args ?? []).map((a) => a.value) };
+  }
+  return undefined;
 }
 
 /** Recognise `<Repo>.run(<RetrievalRef>(args), page?)`.  The first
@@ -607,6 +679,38 @@ function matchRetrievalRunCall(
   const refArg = callArgs.find((a) => !a.name);
   if (!refArg) return undefined;
   const ref = refArg.value;
+  // `page:` is shared by the named and anonymous forms.
+  const readPage = (): { pageOffset?: Expression; pageLimit?: Expression } => {
+    const pageArg = callArgs.find((a) => a.name === "page");
+    const out: { pageOffset?: Expression; pageLimit?: Expression } = {};
+    if (pageArg && isObjectLit(pageArg.value)) {
+      for (const f of pageArg.value.fields) {
+        if (f.name === "offset") out.pageOffset = f.value;
+        else if (f.name === "limit") out.pageLimit = f.value;
+      }
+    }
+    return out;
+  };
+  // Anonymous retrieval literal — `run(retrieval { where: <Criterion> sort: …
+  // loads: … })`.  The `where` must be a criterion reference (this release);
+  // a non-criterion `where` is rejected by the language validator, so a miss
+  // here just declines the match.
+  if (isRetrievalLiteral(ref)) {
+    const critRef = criterionRefFromExpr(ref.where);
+    if (!critRef) return undefined;
+    return {
+      repo,
+      retrievalName: "",
+      retrievalArgs: [],
+      anon: {
+        criterionName: critRef.name,
+        criterionArgs: critRef.args,
+        sort: ref.sort,
+        loads: ref.loads,
+      },
+      ...readPage(),
+    };
+  }
   // Bare `Name` (parameterless retrieval).
   if (isNameRef(ref)) {
     return { repo, retrievalName: ref.name, retrievalArgs: [] };

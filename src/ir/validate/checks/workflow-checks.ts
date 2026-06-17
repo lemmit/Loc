@@ -548,7 +548,7 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.workflow-run-unknown-repository",
-              message: `workflow '${wf.name}': '${st.repoName}.findAll(...)' references unknown repository '${st.repoName}'.`,
+              message: `workflow '${wf.name}': a criterion query on '${st.repoName}' references unknown repository '${st.repoName}'.`,
               source: `${ctx.name}/${wf.name}`,
             });
             break;
@@ -559,7 +559,7 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.findall-unknown-criterion",
-              message: `workflow '${wf.name}': '${st.repoName}.findAll(${critName})' references unknown criterion '${critName}'.`,
+              message: `workflow '${wf.name}': criterion query on '${st.repoName}' references unknown criterion '${critName}'.`,
               source: `${ctx.name}/${wf.name}`,
             });
             break;
@@ -569,7 +569,7 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.findall-criterion-mismatch",
-              message: `workflow '${wf.name}': criterion '${critName}' is over '${candidate || "bool"}', but '${st.repoName}.findAll' queries '${st.aggName}'.  findAll needs a criterion 'of ${st.aggName}'.`,
+              message: `workflow '${wf.name}': criterion '${critName}' is over '${candidate || "bool"}', but the criterion query on '${st.repoName}' queries '${st.aggName}'.  It needs a criterion 'of ${st.aggName}'.`,
               source: `${ctx.name}/${wf.name}`,
             });
             break;
@@ -578,7 +578,7 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.findall-criterion-arity",
-              message: `workflow '${wf.name}': criterion '${critName}' takes ${crit.params.length} argument(s), but '${st.repoName}.findAll' passed ${st.retrievalArgs.length}.`,
+              message: `workflow '${wf.name}': criterion '${critName}' takes ${crit.params.length} argument(s), but the criterion query on '${st.repoName}' passed ${st.retrievalArgs.length}.`,
               source: `${ctx.name}/${wf.name}`,
             });
             break;
@@ -587,7 +587,7 @@ function validateWorkflowBody(
             diags.push({
               severity: "warning",
               code: "loom.findall-no-page",
-              message: `workflow '${wf.name}': '${st.repoName}.findAll(${critName})' reads the full result set — an unbounded list read.  Supply 'page: { offset: 0, limit: N }' to bound it.`,
+              message: `workflow '${wf.name}': criterion query '${critName}' on '${st.repoName}' reads the full result set — an unbounded list read.  Supply 'page: { offset: 0, limit: N }' to bound it.`,
               source: `${ctx.name}/${wf.name}`,
             });
           }

@@ -11,18 +11,22 @@ import type {
   Destroy,
   EmitStmt,
   LValue,
+  Model,
   Operation,
   Statement,
 } from "../generated/ast.js";
 import {
   isAssignOrCallStmt,
+  isCallSuffix,
   isDerivedProp,
   isEmitStmt,
   isLetStmt,
   isMemberSuffix,
+  isNameRef,
   isPostfixChain,
   isPreconditionStmt,
   isRequiresStmt,
+  isRetrievalLiteral,
   isThisRef,
 } from "../generated/ast.js";
 import {
@@ -145,6 +149,30 @@ export function checkCreate(c: Create, agg: Aggregate, accept: ValidationAccepto
 
 export function checkDestroy(d: Destroy, agg: Aggregate, accept: ValidationAcceptor): void {
   checkActionBody(d, agg, accept);
+}
+
+/** Model-wide: an anonymous retrieval literal's `where:` must be a criterion
+ *  reference in this release (`ActiveOrder` / `InRegion(r)`) — composed or
+ *  inline predicates are a follow-up (criterion.md, use site 3).  Streams every
+ *  `RetrievalLiteral` so it fires wherever one appears. */
+export function checkRetrievalLiteral(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isRetrievalLiteral(node)) continue;
+    const w = node.where;
+    const isCriterionRef =
+      isNameRef(w) ||
+      (isPostfixChain(w) &&
+        isNameRef(w.head) &&
+        w.suffixes.length === 1 &&
+        isCallSuffix(w.suffixes[0]));
+    if (!isCriterionRef) {
+      accept(
+        "error",
+        "an anonymous retrieval's 'where:' must be a criterion reference (e.g. 'ActiveOrder' or 'InRegion(r)') in this release.",
+        { node, property: "where" },
+      );
+    }
+  }
 }
 
 export function checkStatement(
