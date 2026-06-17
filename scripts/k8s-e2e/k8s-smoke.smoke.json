@@ -1,0 +1,12 @@
+{
+  "_comment": "Write round-trip recipe for scripts/k8s-e2e/k8s-smoke.ddd, fanned across every backend by the k8s-e2e matrix. The Widget aggregate is auth-free with a trivial {name, quantity} create body, so one fixture drives hono/dotnet/python/java/phoenix identically (the wire shape is the same across backends).",
+  "create": {
+    "path": "/widgets",
+    "body": {
+      "name": "Smoke Widget",
+      "quantity": 7
+    }
+  },
+  "list": "/widgets",
+  "idField": "id"
+}

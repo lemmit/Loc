@@ -93,6 +93,26 @@ describe("kubernetes / helm emitter", () => {
     );
   });
 
+  it("gates every per-deployable workload on a default-true `enabled` flag", async () => {
+    const files = await filesFor(SRC, true);
+    // values.yaml carries the toggle per deployable, defaulting on.
+    const values = files.get("helm/values.yaml")!;
+    expect(values).toMatch(/api:\n(?:.*\n)*?\s+enabled: true/);
+    expect(values).toMatch(/web:\n(?:.*\n)*?\s+enabled: true/);
+    // Each workload template is wrapped so `--set <key>.enabled=false` drops it
+    // (install one backend at a time) without touching the rendered default.
+    for (const f of ["api-deployment", "api-service", "web-deployment", "web-service"]) {
+      const tpl = files.get(`helm/templates/${f}.yaml`)!;
+      const key = f.startsWith("api") ? "api" : "web";
+      expect(tpl.startsWith(`{{- if .Values.${key}.enabled }}\n`)).toBe(true);
+      expect(tpl.trimEnd().endsWith("{{- end }}")).toBe(true);
+    }
+    // The frontend ingress keeps its own inner gate, nested under `enabled`.
+    const ing = files.get("helm/templates/web-ingress.yaml")!;
+    expect(ing.startsWith("{{- if .Values.web.enabled }}\n")).toBe(true);
+    expect(ing).toContain("{{- if .Values.web.ingress.enabled }}");
+  });
+
   it("gives the backend a DB-aware readiness probe and a cheap liveness probe", async () => {
     const files = await filesFor(SRC, true);
     const dep = files.get("k8s/api-deployment.yaml")!;
