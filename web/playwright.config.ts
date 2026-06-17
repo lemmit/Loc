@@ -24,17 +24,18 @@ export default defineConfig({
   // letting a genuinely stuck spec eat unbounded time.
   timeout: 720_000,
   expect: { timeout: 60_000 },
-  // No retries by default — we want a clean signal locally.  CI
-  // can opt in via PWTEST_RETRIES.
-  retries: process.env.CI ? 1 : 0,
-  // Single worker, including on CI.  The heavy Bundle/Boot specs that
-  // motivated 2-worker parallelism are now quarantined (#1242, #1261), so the
-  // wall-time argument is moot — and parallel load was the sole cause of
-  // popover/canvas re-render races (the `workspace-create` button and builder
-  // canvas nodes detaching mid-click).  1 worker matches the green local run
-  // and keeps the suite well under the job cap (~14min).  Tests still use
-  // isolated browser contexts.
-  workers: 1,
+  // No retries locally (clean signal).  On CI, 2 retries: the playground's
+  // React-Flow builder canvas + Mantine popovers re-render under load in ways
+  // that intermittently detach a node/button mid-click on CI's headless
+  // runners (doesn't repro in a local 1-worker run).  These are environmental
+  // flakes, not product bugs, so a couple of retries keep the signal honest
+  // without masking a real regression (a real break fails all 3 attempts).
+  retries: process.env.CI ? 2 : 0,
+  // 2 workers on CI to keep wall time down; tests use isolated browser
+  // contexts so per-worker IDB / cookies don't collide.  (1 worker was tried
+  // and didn't reduce the canvas/popover flakiness — it's CI-headless timing,
+  // not worker contention — so the faster setting stays, backed by retries.)
+  workers: process.env.CI ? 2 : 1,
   // `list` is the live signal: when the job is time-capped mid-run the
   // `github` reporter emits nothing until the end, giving zero
   // diagnostic signal.  `list` prints per-spec ok/✘/timing live so a
