@@ -33,7 +33,7 @@ test("Model v2 on mobile: drill into Sales System → context → aggregate", as
   // Drill all the way to Order: each tap drops one breadcrumb step deeper.
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
   await expect(page.getByTestId("c4system-v2-crumb-0")).toBeVisible({ timeout: 5_000 });
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   await expect(page.getByTestId("c4system-v2-crumb-1")).toBeVisible();
   await page.locator('.react-flow__node[data-id^="context:"]').first().click();
   await expect(page.getByTestId("c4system-v2-crumb-2")).toBeVisible();
@@ -50,7 +50,7 @@ test("Model v2 on mobile: operation body renders as a statement flow", async ({ 
   await page.getByTestId("mobile-doc-tab-model-v2").click({ timeout: 30_000 });
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 20_000 });
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   await page.locator('.react-flow__node[data-id^="context:"]').first().click();
   await page.locator('.react-flow__node[data-id="aggregate:Order"]').click();
   await page.locator('.react-flow__node[data-id="operation:confirm"]').click();
