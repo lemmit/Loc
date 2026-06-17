@@ -155,6 +155,9 @@ default lands in Phase 2.
   Organization` (R1), `crossTenant` / `platform` markers (R2), the derived
   fail-closed default (R3), typed `tenantId ≡ Organization id`. The macro keeps
   working as the explicit form.
+- **Phase 3:** hierarchical tenancy (R5) — self-referential registry + the
+  per-role `local`/`deep`/`global` access levels. Gated on a real parent/child
+  org use case; flat covers the common ~90%.
 
 ### Worked example (Phase-2 surface)
 
@@ -190,12 +193,81 @@ system Billder {
 }
 ```
 
-> **DataKey note.** The hierarchical-scoping extension (`authorization.md` §2:
-> sub-tenant `Self`/`Children`/`Descendants` via a materialized-path column)
-> is the *depth-N generalization* of `tenantOwned` and is **out of scope for
-> Phases 1–2** — flat tenancy covers the common case. See that doc + the
-> reconciliation thread for how DataKey's leftmost segment is exactly the
-> `tenantId` defined here.
+### R5. Hierarchical tenancy — grounded in Dynamics/Salesforce prior art (Phase 3)
+
+`authorization.md` §2 frames `DataKey` as a per-row materialized path and ties
+the directional checks (`Self`/`Children`/`Descendants`) to authorization.
+Re-derived against the macro model **and against how mature systems actually do
+this**, it lands cleaner:
+
+**Prior art.** MS Dynamics 365/Dataverse: a **Business Unit** tree, and an
+access-level ladder on each privilege — **Basic (User) / Local (Business Unit) /
+Deep (Parent-Child BU) / Global (Organization)** — plus a separate Hierarchy
+Security model (Manager/Position). Salesforce: a **Role Hierarchy** with "Grant
+Access Using Hierarchies" (records roll up). The decisive lesson: **none of them
+mark the *entity* as hierarchical.** The table just lives in the tree; **how
+deep you see is a property of the *role*, per entity** — a "Regional Manager"
+sees `Project` Deep but `Invoice` Local. An entity-level flavor
+(`subtenantScoped` / `cascading`) literally cannot express that asymmetry, so it
+was the wrong axis. (`subtenantScoped` is dropped.)
+
+**So the model is:**
+
+1. **Hierarchy is authored on the registry**, which becomes self-referential:
+   `aggregate Organization { … parent: Organization id? }`. The tenant tree *is*
+   that parent-chain.
+2. **The materialized path lives ONLY on the registry** (`Organization.dataKey`,
+   a managed/internal field) — *not* on every business row. Business aggregates
+   stay exactly as flat tenancy left them: they carry only `tenantId`. This is
+   the key simplification — **hierarchical visibility adds no new column to
+   business aggregates**, and reparenting rewrites only the org subtree (bounded
+   by #orgs), never every data row in every table.
+3. **Depth is a per-role authorization access level, not an aggregate marker.**
+   The aggregate stays `tenantOwned`; the policy says how deep each role reads.
+   All three levels are just `tenantId` predicates over the (small) registry:
+
+   | Level (Dynamics term) | Filter on a `tenantOwned` row |
+   |---|---|
+   | `local` (Business Unit) | `row.tenantId == currentUser.tenantId` — *the flat filter we already emit* |
+   | `deep` (Parent-Child BU) | `row.tenantId IN (SELECT id FROM Organization WHERE dataKey LIKE myOrgPath ‖ '%')` |
+   | `global` (Organization) | no filter |
+
+   `deep` is a portable `IN`-subquery (works across Drizzle/EF/Ash/JPA — unlike
+   recursive CTEs) indexed on `Organization.dataKey`. Naming follows Dynamics
+   (`local`/`deep`/`global`) or the directional set (`self`/`descendants`/`all`);
+   it lives in `authorization.md`'s `policy {}`, reading the tenancy column.
+
+```ddd
+aggregate Project tenantOwned { … }          // unchanged — carries only tenantId
+
+policy {
+  role Manager { Project read deep    Invoice read local }   // rolls up Projects only
+  role Clerk   { Project read local   Invoice read local }
+}
+```
+
+**Stamping — the part the tenancy setting does NOT fully cover.** Flat
+`tenantId` is a pure claim copy (`tenantId := currentUser.tenantId`). The
+hierarchy adds three pieces the flat macro can't:
+
+- **Registry path on create** — `Organization.dataKey := parent ? parent.dataKey
+  ‖ "." ‖ id : id`. This reads *another registry row* (the parent), so it's a
+  cross-row derived stamp, not a claim copy — framework-managed, never authored.
+- **Reparent** — assigning a new `parent` must transactionally rewrite the
+  subtree's `dataKey`s. Path integrity can't live in userland. Loom should
+  generate a `reparent(newParent)` operation; consider shipping **immutable
+  parent first (3a)** to dodge the rewrite, then reparent (3b).
+- **The requester's org path at request time** — `deep` needs `currentUser`'s
+  org path as the prefix. Derive it from the registry per request (cached) —
+  **do not bloat the token**; it stays `{ tenantId }`, so a reparent reflects
+  immediately on the next request rather than waiting for token refresh.
+
+So: **the `tenancy by … of Organization` declaration is enough to *derive*
+everything** (it names the claim, the registry, and — via the self-ref — the
+tree), but hierarchical mode needs three *generated* mechanisms beyond the flat
+stamp/filter: the managed registry path, framework-owned path maintenance
+(create + reparent, transactional), and the `deep` join-through-the-registry
+filter. Business aggregates and the token are unchanged.
 
 ---
 
