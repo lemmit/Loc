@@ -1,0 +1,85 @@
+name: Kubernetes/Helm validation
+
+# Renders the Helm chart + raw manifests emitted by `ddd generate system --k8s`
+# for each fixture and statically validates them WITHOUT a cluster:
+#   helm lint → helm template → kubeconform (-strict, against the real
+#   Kubernetes API JSON schemas) → kubeconform on the raw k8s/ render.
+# Catches schema-level emitter drift (bad apiVersion, wrong field types,
+# malformed probes/secretRefs) the substring unit tests can't see.
+#
+# See docs/kubernetes.md.  A real kind-cluster smoke (install + rollout +
+# curl /ready) is the heavier follow-up tier.
+#
+# Triggers:
+#   - PRs that touch the k8s/helm emitters, the platform surfaces they read,
+#     the examples, or this workflow / test.
+#   - Pushes to main (full regression check).
+#   - Manual dispatch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/system/helm.ts'
+      - 'src/system/kubernetes.ts'
+      - 'src/system/index.ts'
+      - 'src/platform/**'
+      - 'examples/**'
+      - 'web/src/examples/**'
+      - 'package.json'
+      - '.github/workflows/k8s-build.yml'
+      - 'test/e2e/k8s-validate.test.ts'
+  pull_request:
+    paths:
+      - 'src/system/helm.ts'
+      - 'src/system/kubernetes.ts'
+      - 'src/system/index.ts'
+      - 'src/platform/**'
+      - 'examples/**'
+      - 'web/src/examples/**'
+      - 'package.json'
+      - '.github/workflows/k8s-build.yml'
+      - 'test/e2e/k8s-validate.test.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-k8s:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Helm renders the chart; kubeconform validates the manifests
+      # against the upstream Kubernetes API JSON schemas.
+      - uses: azure/setup-helm@v4
+        with:
+          version: 'v3.16.3'
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL -o kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar xzf kubeconform.tar.gz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+          kubeconform -v
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Type-check
+        run: npm run build
+
+      - name: helm lint + kubeconform against each fixture
+        run: npm run test:k8s

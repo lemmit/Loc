@@ -141,6 +141,27 @@ Backends default to a heavier resource class than static frontends. The DB
   overlays, CI pipeline generation. See
   [`proposals/kubernetes-helm.md`](proposals/kubernetes-helm.md) §6.
 
+## Testing
+
+Two tiers:
+
+- **Static validation (shipped, `npm run test:k8s`).** The opt-in suite
+  `test/e2e/k8s-validate.test.ts` (gated `LOOM_K8S=1`, CI `k8s-build.yml`)
+  generates the chart for a set of fixtures and runs `helm lint`, then
+  `helm template` → `kubeconform -strict` (validating the *rendered*
+  manifests against the upstream Kubernetes API JSON schemas), then
+  `kubeconform` on the raw `k8s/` render. No cluster — fast and
+  deterministic; catches schema-level drift (bad apiVersion, wrong field
+  types, malformed probes/secretRefs) the substring unit tests can't.
+  Requires `helm` + `kubeconform` on PATH; skips cleanly when absent.
+- **Cluster smoke (follow-up tier).** A `kind` (Kubernetes-in-Docker) run:
+  build the emitted Dockerfiles, `kind load` them, stand up a throwaway
+  in-cluster postgres for the test (the chart targets an external DB), wire
+  the `Secret` to it, `helm install`, `kubectl rollout status`, then curl
+  `/ready` through a port-forward. Heavier (per-backend image builds), so
+  it would be a separately-gated `LOOM_K8S_E2E=1` suite focused on one
+  backend + the frontend, mirroring the docker-compose `LOOM_E2E` story.
+
 ## Implementation
 
 Two sibling emitters under `src/system/`, wired into `emitSystem` next to
@@ -150,3 +171,7 @@ Two sibling emitters under `src/system/`, wired into `emitSystem` next to
   (`buildWorkloads`) and `renderKubernetesManifests` (raw YAML).
 - `src/system/helm.ts` — `renderHelmChart`, consuming the same
   `WorkloadModel` so the chart and raw manifests never drift.
+
+Sensitive env is declared by each backend via
+`ComposeServiceShape.secretEnvKeys` (`src/platform/surface.ts`) — the k8s
+emitter reads that rather than guessing from variable names.
