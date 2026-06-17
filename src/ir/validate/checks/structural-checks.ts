@@ -4,7 +4,7 @@
 // current-user scope, permission refs, and whole-model expr integrity.
 // -------------------------------------------------------------------------
 
-import { allPlatforms } from "../../../platform/registry.js";
+import { allPlatformDescriptors } from "../../../platform/metadata.js";
 import { isStdlibError } from "../../../util/error-defaults.js";
 import type {
   BoundedContextIR,
@@ -149,7 +149,7 @@ export function validateWorkspaceUniqueness(
  * generated for both Hono and .NET stays valid on both. */
 function unionReservedFindNames(): Set<string> {
   const out = new Set<string>();
-  for (const p of allPlatforms()) {
+  for (const p of allPlatformDescriptors()) {
     for (const n of p.reservedRepositoryFindNames) out.add(n);
   }
   return out;

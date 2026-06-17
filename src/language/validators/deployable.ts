@@ -6,10 +6,10 @@ import type { ValidationAcceptor } from "langium";
 import type { Platform } from "../../ir/types/loom-ir.js";
 import {
   backendVersionsForFamily,
+  descriptorFor,
   isRegisteredBackendRef,
   parseBuiltinPlatformRef,
-  platformFor,
-} from "../../platform/registry.js";
+} from "../../platform/metadata.js";
 import {
   BUILTIN_PACK_LATEST,
   builtinVersionsForFamily,
@@ -38,13 +38,14 @@ import {
 void BUILTIN_PACK_LATEST;
 
 /** True iff this platform is a frontend-only deployable.  Consults the
- *  `PlatformSurface.isFrontend` flag via the runtime registry.  Returns
- *  `false` for unknown / typo'd platforms — `checkDeployablePlatform`
- *  surfaces those as a separate unknown-platform diagnostic. */
+ *  `PlatformDescriptor.isFrontend` flag via the client-safe metadata
+ *  table.  Returns `false` for unknown / typo'd platforms —
+ *  `checkDeployablePlatform` surfaces those as a separate
+ *  unknown-platform diagnostic. */
 function isFrontendPlatform(platform: string | undefined): boolean {
   if (platform == null) return false;
   try {
-    return platformFor(platform as Parameters<typeof platformFor>[0]).isFrontend;
+    return descriptorFor(platform as Platform).isFrontend;
   } catch {
     return false;
   }
