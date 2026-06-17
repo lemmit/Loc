@@ -6,7 +6,12 @@ import { lowerModel, lowerProject, mergeLoomModels } from "../../../src/ir/lower
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
 import type { EnrichedLoomModel, LoomModel } from "../../../src/ir/types/loom-ir.js";
 import { validateLoomModel } from "../../../src/ir/validate/validate.js";
-import { generateSystems, generateSystemsFromLoom } from "../../../src/system/index.js";
+// `system/index` (multi-backend system generation) is NOT imported statically:
+// it pulls the generation registry → every backend generator (.NET / Java /
+// Phoenix / Python).  The "system" mode loads it via a dynamic `import()` so
+// those generators land in a SEPARATE chunk, out of the main worker bundle.
+// `web-bundle-boundary.test.ts` pins this.  (The Hono "ts" path below stays a
+// static import — it runs in-browser with no chunk fetch.)
 import { captureSnapshots } from "../../../src/system/loomsnap.js";
 // P2a moved the TS orchestrator into the hono@v4 package; the
 // playground legacy single-context build targets the default Hono
@@ -129,10 +134,10 @@ async function handleGenerateFromPath(entryPath: string): Promise<GenerateResult
 /** Single-document generation path.  Keeps the legacy single-file
  *  shape — `generateSystems(model)` does its own lower+enrich
  *  internally, matching pre-multi-file behaviour exactly. */
-function generateFromAst(input: {
+async function generateFromAst(input: {
   model: Model;
   diagnostics: BuildDiagnostic[];
-}): GenerateResult {
+}): Promise<GenerateResult> {
   let loom: EnrichedLoomModel;
   try {
     loom = enrichLoomModel(lowerModel(input.model));
@@ -143,6 +148,9 @@ function generateFromAst(input: {
   if (hasError(irDiags)) return { ok: false, diagnostics: [...input.diagnostics, ...irDiags] };
 
   if (loom.systems.length > 0) {
+    // Code-split: keep the backend generators out of the main bundle (see the
+    // import-header note + the dynamic-import seam for future server-side gen).
+    const { generateSystems } = await import("../../../src/system/index.js");
     return wrapGenerate("system", input.diagnostics, irDiags, () =>
       generateSystems(input.model).files,
     );
@@ -161,10 +169,10 @@ function generateFromAst(input: {
  *  `generate dotnet` aren't reachable here — those callers stay on
  *  the text path because they don't compose multi-file output
  *  anyway (mirrors the CLI's split). */
-function generateFromLoom(input: {
+async function generateFromLoom(input: {
   loom: LoomModel;
   diagnostics: BuildDiagnostic[];
-}): GenerateResult {
+}): Promise<GenerateResult> {
   let loom: EnrichedLoomModel;
   try {
     loom = enrichLoomModel(input.loom);
@@ -175,6 +183,7 @@ function generateFromLoom(input: {
   if (hasError(irDiags)) return { ok: false, diagnostics: [...input.diagnostics, ...irDiags] };
 
   if (loom.systems.length > 0) {
+    const { generateSystemsFromLoom } = await import("../../../src/system/index.js");
     return wrapGenerate("system", input.diagnostics, irDiags, () =>
       generateSystemsFromLoom(loom).files,
     );
