@@ -37,6 +37,25 @@ export function renderForbiddenException(basePkg: string): string {
   );
 }
 
+export function renderDisallowedException(basePkg: string): string {
+  return lines(
+    `package ${basePkg}.domain.common;`,
+    ``,
+    `/**`,
+    ` * Operation state-gate failure — raised when a {@code when} predicate is`,
+    ` * false at the call site, so the command is disallowed in the aggregate's`,
+    ` * current state (criterion.md, use site 2).  Maps to HTTP 409 (Conflict),`,
+    ` * distinct from DomainException's 400.`,
+    ` */`,
+    `public class DisallowedException extends RuntimeException {`,
+    `    public DisallowedException(String message) {`,
+    `        super(message);`,
+    `    }`,
+    `}`,
+    ``,
+  );
+}
+
 export function renderAggregateNotFoundException(basePkg: string): string {
   return lines(
     `package ${basePkg}.domain.common;`,

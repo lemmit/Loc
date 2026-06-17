@@ -80,6 +80,10 @@ const FIXTURES: Array<[string, string]> = [
   // Principal stamps: `createdBy := currentUser` → currentUser.id() (the
   // guid), threaded from the request-scoped accessor under auth.
   ["test/e2e/fixtures/java-build/stamps-principal.ddd", "api1"],
+  // `when` canCommand state gate (criterion.md, use site 2): the service
+  // throws DisallowedException (→ 409) before mutating, and the controller
+  // auto-exposes `GET /orders/{id}/can_cancel` → CanResponse { allowed }.
+  ["test/e2e/fixtures/java-build/when.ddd", "when_api"],
 ];
 
 describe.skipIf(!ENABLED)(

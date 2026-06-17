@@ -10,7 +10,7 @@ import type {
 import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
-import { javaValueTypeForId, renderJavaType } from "../render-expr.js";
+import { javaValueTypeForId, renderJavaExpr, renderJavaType } from "../render-expr.js";
 import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
 import { aggHasAnyWireValidator, renderJavaValidators } from "./validator.js";
@@ -149,6 +149,18 @@ export function renderJavaService(
     });
 
   // --- operations ----------------------------------------------------------------
+  // `when` canCommand state gate (criterion.md, use site 2): load the
+  // aggregate, evaluate the predicate over its current state, and throw
+  // DisallowedException (→ 409) before mutating.  The predicate reads the
+  // loaded entity through its record-style accessors (`aggregate.status()`),
+  // enum values resolving to `<Enum>.<Value>` — the same expression the
+  // can_<op> companion returns.
+  const gatedOps = agg.operations.filter((op) => op.visibility === "public" && !!op.when);
+  if (gatedOps.length > 0) imports.add(`${ctx.basePkg}.domain.common.DisallowedException`);
+  const whenGateLine = (op: (typeof agg.operations)[number]): string | null =>
+    op.when
+      ? `        if (!(${renderJavaExpr(op.when, { thisName: "aggregate", accessorProps: true })})) throw new DisallowedException("operation '${op.name}' is not allowed in the current state of ${agg.name}.");`
+      : null;
   const anyStampUsesUser = stampUsesUser("create") || stampUsesUser("update");
   const anyOpUsesUser =
     (!!ctx.authed &&
@@ -182,6 +194,7 @@ export function renderJavaService(
             ? `        var currentUser = currentUserAccessor.user();`
             : null,
           `        var aggregate = repository.getById(id);`,
+          whenGateLine(op),
           `        aggregate.check${upperFirst(op.name)}(${args});`,
           `        ${lowerFirst(op.name)}Handler.handle(${handlerArgs});`,
           `        aggregate._assertInvariants();`,
@@ -207,6 +220,7 @@ export function renderJavaService(
           ? `        ${agg.name}Validators.${op.name}(${op.params.map((p) => p.name).join(", ")});`
           : null,
         `        var aggregate = repository.getById(id);`,
+        whenGateLine(op),
         spec
           ? `        var result = aggregate.${op.name}(${args});`
           : `        aggregate.${op.name}(${args});`,
@@ -249,6 +263,18 @@ export function renderJavaService(
       ``,
     ];
   });
+
+  // --- can_<op> companions ---------------------------------------------------------
+  // The side-effect-free twin of each `when`-gated op: load the aggregate and
+  // return the predicate verbatim (the controller wraps it in `CanResponse`),
+  // so a UI can enable/disable the action without invoking it.
+  const canLines = gatedOps.flatMap((op) => [
+    `    public boolean can${upperFirst(op.name)}(${idClass} id) {`,
+    `        var aggregate = repository.getById(id);`,
+    `        return ${renderJavaExpr(op.when!, { thisName: "aggregate", accessorProps: true })};`,
+    `    }`,
+    ``,
+  ]);
 
   return lines(
     `package ${ctx.pkg};`,
@@ -302,6 +328,7 @@ export function renderJavaService(
     ...readLines,
     ...findLines,
     ...opLines,
+    ...canLines,
     ...destroyLines,
     ...voMappers,
     `    private void publishEvents(${agg.name} aggregate) {`,
