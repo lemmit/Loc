@@ -303,7 +303,7 @@ test("Model v2 edits a repository find's filter inline", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
   // Acme has repositories with finds and filters; storefront-dotnet also.
-  await selectExample(page, /Acme/);
+  await selectExample(page, /Acme \(multi-deployable system\)/);
   await page.getByTestId("doc-tab-model-v2").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
 
