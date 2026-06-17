@@ -263,3 +263,79 @@ describe("dotnet per-operation audit runtime", () => {
     );
   });
 });
+
+// An audited op invoked inline in a workflow step produced no audit row — only
+// the per-operation command handler stages one, and a workflow calls ops
+// directly.  The workflow handler now stages it too (the sibling of the Hono
+// gap).  Provenance needs nothing here: its flush lives in repo.SaveAsync, so a
+// workflow's saves already capture it — unlike audit, which the handler stages.
+const WF_SOURCE = `
+system Shop {
+  subdomain Core {
+    context Ordering {
+      aggregate Cart ids guid {
+        label: string
+        status: string
+        operation close() audited { status := "closed" }
+        operation rename(to: string) { label := to }
+      }
+      repository Carts for Cart { }
+      workflow buildCart {
+        create(name: string) {
+          let cart = Cart.create({ label: name, status: "open" })
+          cart.rename(name)
+          cart.close()
+        }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource cartState { for: Ordering, kind: state, use: pg }
+  deployable api { platform: dotnet, contexts: [Ordering], dataSources: [cartState], port: 8080 }
+}
+`;
+
+describe("dotnet workflow audit", () => {
+  async function wfHandler(source = WF_SOURCE): Promise<string> {
+    const model = await build(source);
+    const files = generateSystems(model).files;
+    const key = [...files.keys()].find((k) => /Application\/Workflows\/.*Handler\.cs$/.test(k))!;
+    return files.get(key)!;
+  }
+
+  it("stages an audit row for an audited op invoked inline in a workflow", async () => {
+    const h = await wfHandler();
+    // The handler injects the audit writer + stages a record bracketed by
+    // before/after wire snapshots, mirroring the per-operation command handler.
+    expect(h).toContain("private readonly IAuditWriter _audit;");
+    expect(h).toContain("public BuildCartHandler(ICartRepository carts, IAuditWriter audit)");
+    expect(h).toContain("var __wfAuditBefore0 = System.Text.Json.JsonSerializer.Serialize(");
+    expect(h).toContain("var __wfAuditAfter0 = System.Text.Json.JsonSerializer.Serialize(");
+    expect(h).toContain("_audit.Stage(new AuditRecord");
+    expect(h).toContain('Action = "close",');
+    expect(h).toContain('TargetType = "Cart",');
+    expect(h).toContain("TargetId = cart.Id.Value.ToString(),");
+    expect(h).toContain("Actor = RequestContext.Current?.PrincipalJson(),");
+    // The carrier already opened a child frame for the workflow dispatch, so
+    // the row's scope / parent ids come from it.
+    expect(h).toContain("ParentId = RequestContext.Current?.ParentId,");
+    // Staged before the save so it commits in the same SaveChangesAsync.
+    expect(h.indexOf("_audit.Stage")).toBeLessThan(h.indexOf("SaveAsync"));
+    // Only the audited op (close) is instrumented — the plain `rename` is a
+    // bare call (one audit Stage total).
+    expect(h.match(/_audit\.Stage\(/g)).toHaveLength(1);
+    expect(h).toContain("cart.Rename(command.Name);");
+  });
+
+  it("no duplicate using directives (CS0105 would fail /warnaserror)", async () => {
+    const usings = (await wfHandler()).split("\n").filter((l) => l.startsWith("using "));
+    expect(usings).toHaveLength(new Set(usings).size);
+  });
+
+  it("leaves audit-free workflows without an audit writer or stage", async () => {
+    const src = WF_SOURCE.replace("audited ", "");
+    const h = await wfHandler(src);
+    expect(h).not.toContain("IAuditWriter");
+    expect(h).not.toContain("_audit.Stage");
+  });
+});

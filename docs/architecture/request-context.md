@@ -109,10 +109,19 @@ inline and never drained their lineage nor staged their audit rows. Now the
 workflow flushes each saved aggregate's provenance, and an inline `audited`
 op-call stages an `audit_records` row bracketed by before/after wire snapshots
 (`repo.toWire`), exactly like the route. Both Hono tables carry the `parent_id`
-column, and a workflow's rows chain to the workflow frame. (.NET workflows have
-the same audit/provenance-in-workflow gap — they call ops inline too — and are
-the natural follow-up; only the per-dispatch .NET command path captures them
-today.)
+column, and a workflow's rows chain to the workflow frame.
+
+On **.NET** the picture is asymmetric by construction. The workflow handler is
+itself a Mediator dispatch, so `ExecutionContextBehavior` already opens its
+child frame (`parentId` set). **Provenance** needs nothing extra: its flush
+lives inside `repo.SaveAsync` (drained before `SaveChangesAsync`), so a
+workflow's saves capture it for free. **Audit** was the gap — it is staged in
+the per-operation command handler (`_audit.Stage`), which a workflow's inline
+op-calls bypass. The workflow handler now injects `IAuditWriter` and stages an
+`AuditRecord` for each inline `audited` op-call (before/after via
+`projectEntityExpr` → `new <Agg>Response(...)`), flushed by the same
+`SaveAsync`. So both provenance backends now capture both trails through
+workflows.
 
 ## Frame semantics (from execution-context.md)
 

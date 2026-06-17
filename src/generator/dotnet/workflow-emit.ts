@@ -28,6 +28,7 @@ import {
   csIdValueClrType,
   domainToRequestExpr,
   dtoParam,
+  projectEntityExpr,
   projectToResponse,
   wireToCommandArgument,
   wireType,
@@ -590,6 +591,36 @@ function renderHandler(
     ctorParamPairs.push(`${ifaceName} ${fieldName.replace(/^_/, "")}`);
     ctorAssigns.push(`${fieldName} = ${fieldName.replace(/^_/, "")}`);
   }
+  // Audited op-calls inside the workflow stage AuditRecords via IAuditWriter —
+  // the per-operation handler's audit path, which a workflow's inline op-calls
+  // would otherwise skip (audit-completeness gap, the sibling of the Hono one).
+  // Inject the writer + the usings the staged record and its before/after wire
+  // projection (`new <Agg>Response(...)`) need, when any audited op-call is
+  // present.  Provenance needs nothing here — it already flushes inside SaveAsync.
+  const auditAggs = new Set<string>();
+  const collectAuditAggs = (sts: WorkflowStmtIR[]): void => {
+    for (const s of sts) {
+      if (s.kind === "op-call") {
+        const o = ctx.aggregates
+          .find((a) => a.name === s.aggName)
+          ?.operations.find((x) => x.name === s.op);
+        if (o?.audited && !o.extern) auditAggs.add(s.aggName);
+      } else if (s.kind === "for-each") collectAuditAggs(s.body);
+    }
+  };
+  collectAuditAggs(wf.statements);
+  const auditsOps = auditAggs.size > 0;
+  if (auditsOps) {
+    fields.push("    private readonly IAuditWriter _audit;");
+    ctorParamPairs.push("IAuditWriter audit");
+    ctorAssigns.push("_audit = audit");
+    // `${ns}.Domain.Common` (RequestContext) is already in the hardcoded
+    // preamble below, so adding it here would duplicate the directive (CS0105
+    // → error under /warnaserror).  Only the non-preamble usings are added.
+    usings.add(`${ns}.Application.Common`);
+    usings.add(`${ns}.Infrastructure.Persistence`);
+    for (const aggName of auditAggs) usings.add(`${ns}.Application.${plural(aggName)}.Responses`);
+  }
 
   // Statement rendering.
   const stmtLines: string[] = [];
@@ -628,7 +659,7 @@ function renderHandler(
   stmtLines.push(
     ...renderWorkflowStmts(
       wf.statements,
-      csWorkflowStmtTarget(ctx, renderArg, dereffedLoads),
+      csWorkflowStmtTarget(ctx, renderArg, dereffedLoads, auditsOps),
       INDENT,
     ),
   );
@@ -777,7 +808,14 @@ function csWorkflowStmtTarget(
   ctx: EnrichedBoundedContextIR,
   renderArg: (e: ExprIR) => string,
   guardLoads: boolean | ReadonlySet<string> = false,
+  /** When true (the command-handler path), an inline `audited` op-call stages
+   *  an AuditRecord via the handler's injected `_audit`; the reactor path
+   *  leaves it false (no audit writer injected there). */
+  audit = false,
 ): WorkflowStmtTarget {
+  // Unique suffix per in-body audit capture so multiple audited op-calls don't
+  // collide on the before/after temp-var names.
+  let auditSeq = 0;
   return {
     indentUnit: "    ",
     precondition: (st, indent) => {
@@ -875,7 +913,40 @@ function csWorkflowStmtTarget(
             ? `${argList}, currentUser`
             : "currentUser"
           : argList;
-      return [`${indent}${st.target}.${upperFirst(st.op)}(${callArgs});`];
+      const callLine = `${indent}${st.target}.${upperFirst(st.op)}(${callArgs});`;
+      // Audited op invoked inline → stage an AuditRecord bracketing the call
+      // with before/after wire snapshots, mirroring the per-operation command
+      // handler.  The handler runs inside the Mediator dispatch's child frame,
+      // so the row's scope / parent ids are already set; `_audit.Stage` adds it
+      // to the scoped AppDbContext, flushed by the aggregate's SaveAsync.
+      const agg = ctx.aggregates.find((a) => a.name === st.aggName);
+      if (audit && op?.audited && agg) {
+        const n = auditSeq++;
+        const before = `__wfAuditBefore${n}`;
+        const after = `__wfAuditAfter${n}`;
+        return [
+          `${indent}var ${before} = System.Text.Json.JsonSerializer.Serialize(${projectEntityExpr(st.target, agg, ctx)});`,
+          callLine,
+          `${indent}var ${after} = System.Text.Json.JsonSerializer.Serialize(${projectEntityExpr(st.target, agg, ctx)});`,
+          `${indent}_audit.Stage(new AuditRecord`,
+          `${indent}{`,
+          `${indent}    AuditId = Guid.NewGuid().ToString(),`,
+          `${indent}    OperationId = ${JSON.stringify(`${st.op}${st.aggName}`)},`,
+          `${indent}    Action = ${JSON.stringify(st.op)},`,
+          `${indent}    TargetType = ${JSON.stringify(st.aggName)},`,
+          `${indent}    TargetId = ${st.target}.Id.Value.ToString(),`,
+          `${indent}    Actor = RequestContext.Current?.PrincipalJson(),`,
+          `${indent}    Before = ${before},`,
+          `${indent}    After = ${after},`,
+          `${indent}    At = DateTime.UtcNow,`,
+          `${indent}    Status = "ok",`,
+          `${indent}    CorrelationId = RequestContext.Current?.CorrelationId,`,
+          `${indent}    ScopeId = RequestContext.Current?.ScopeId,`,
+          `${indent}    ParentId = RequestContext.Current?.ParentId,`,
+          `${indent}});`,
+        ];
+      }
+      return [callLine];
     },
     exprLet: (st, indent) => {
       // `let x = files.get(k)` — a resource-op RHS is an async helper, so
