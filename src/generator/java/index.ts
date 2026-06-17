@@ -185,6 +185,10 @@ function emitProjectFromContexts(
     layout.packageFor(category, basePkg, aggregateName);
 
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
+  // OIDC turnkey auth (D-AUTH-OIDC): the generated verifier + handshake +
+  // Nimbus dep land only when an `auth { oidc }` block targets this
+  // (auth: required) deployable.
+  const oidc = authRequired && !!system?.sys.auth;
   // Resource client classes (objectStore / queue / api) + their Gradle
   // deps (Phase 4c) — empty when the deployable wires no consumable
   // resources, leaving build.gradle.kts byte-identical.
@@ -362,7 +366,7 @@ function emitProjectFromContexts(
   // Project shell — stable from S1 on.
   out.set(
     "build.gradle.kts",
-    renderGradleBuild({ flyway: hasMigrations, extraDeps: resourceEmission.deps }),
+    renderGradleBuild({ flyway: hasMigrations, oidc, extraDeps: resourceEmission.deps }),
   );
   out.set("settings.gradle.kts", renderGradleSettings(slug));
   out.set("src/main/resources/application.yml", renderApplicationYml(slug));

@@ -1,0 +1,85 @@
+name: Java OIDC auth (runtime e2e)
+
+# Runtime-verifies the OIDC turnkey-auth chain (D-AUTH-OIDC) on the Java
+# backend, end-to-end: boots a REAL Keycloak (the bundled dev realm import)
+# + postgres in docker, builds + runs the generated Spring Boot backend
+# natively (`gradle bootJar` → `java -jar`), gets a real token for the seeded
+# `demo` user via the password grant, and asserts the generated
+# OidcUserVerifier validates it against Keycloak's live JWKS and maps the
+# configured claims (incl. the dotted realm_access.roles path) onto User.
+#
+# The Java sibling of dotnet-oidc-e2e.yml / hono-oidc-e2e.yml — the runtime
+# check the compile-only `gradle testClasses bootJar` gate can't give.
+# ubuntu-latest ships docker + gradle; the backend runs natively, Keycloak +
+# postgres are pulled images (no build).
+#
+# Triggers `push: main` + manual dispatch only — NOT per-PR (sibling to the
+# *-obs-e2e jobs; same rationale: regression net, not a PR gate, and the
+# Gradle build + Keycloak boot are heavier than a unit suite).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/java/**'
+      - 'src/platform/java.ts'
+      - 'src/system/index.ts'
+      - 'test/e2e/auth-oidc-java-e2e.test.ts'
+      - 'test/e2e/fixtures/auth-oidc-e2e-java.ddd'
+      - 'package.json'
+      - '.github/workflows/java-oidc-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java-oidc-e2e:
+    runs-on: ubuntu-latest
+    # Keycloak boot (~25s) + the generated project's `gradle bootJar` (cold
+    # ~2-3min) dominate.  20min cap.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('src/generator/java/emit/program.ts') }}
+          restore-keys: |
+            gradle-
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Type-check
+        run: npm run build
+
+      - name: Run Java OIDC runtime e2e
+        env:
+          LOOM_AUTH_E2E_JAVA: '1'
+        run: npm run test:auth-e2e-java -- --reporter=verbose
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## Java OIDC runtime e2e failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the "Run Java OIDC runtime e2e" step above for the captured backend stdout.' >> $GITHUB_STEP_SUMMARY
+          echo 'The test boots a real Keycloak + postgres, gets a token for the seeded `demo` user, and asserts the generated Java OIDC verifier validates it (JWKS) and maps the claims onto User.' >> $GITHUB_STEP_SUMMARY

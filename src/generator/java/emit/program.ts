@@ -35,8 +35,15 @@ export const JMOLECULES_VERSION = "1.10.0";
  *  cross-backend conformance harness diffs. */
 export const SPRINGDOC_VERSION = "2.8.17";
 
+/** Nimbus JOSE+JWT — the JWKS/JWT library the generated OIDC verifier uses
+ *  (D-AUTH-OIDC).  Pinned explicitly: unlike Flyway / Spring Security, the
+ *  Spring Boot BOM does NOT manage `nimbus-jose-jwt` on its own (only when
+ *  spring-security-oauth2-jose is on the classpath, which the generated
+ *  backend doesn't pull), so a version-less coordinate fails to resolve. */
+export const NIMBUS_JOSE_JWT_VERSION = "9.48";
+
 export function renderGradleBuild(
-  options: { flyway?: boolean; extraDeps?: Record<string, string> } = {},
+  options: { flyway?: boolean; oidc?: boolean; extraDeps?: Record<string, string> } = {},
 ): string {
   return lines(
     `plugins {`,
@@ -71,6 +78,13 @@ export function renderGradleBuild(
     // imported BOM).  Only shipped when the deployable owns migrations.
     options.flyway ? `    implementation("org.flywaydb:flyway-core")` : null,
     options.flyway ? `    implementation("org.flywaydb:flyway-database-postgresql")` : null,
+    // OIDC turnkey auth (D-AUTH-OIDC): Nimbus JOSE+JWT — the lightweight
+    // JWKS/JWT library Spring Security itself uses, for the generated
+    // OidcUserVerifier.  Version pinned (NOT BOM-managed — see the const).
+    // Shipped only when an `auth { oidc }` block targets this deployable.
+    options.oidc
+      ? `    implementation("com.nimbusds:nimbus-jose-jwt:${NIMBUS_JOSE_JWT_VERSION}")`
+      : null,
     // Resource-client deps (objectStore / queue adapters) — empty for
     // deployables wiring no consumable resources.
     ...Object.entries(options.extraDeps ?? {})
