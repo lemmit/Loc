@@ -328,6 +328,11 @@ function stepNode(id: string, s: WorkflowStmtIR): StepNode {
       };
     case "for-each":
       return { id, decl: `${id}["${label(`for ${s.var} in ...`)}"]` };
+    case "if-let":
+      return {
+        id,
+        decl: `${id}{"${label(`if let ${s.var} = ${s.repoName}.find(${s.synthCriterion.name})`)}"}`,
+      };
     case "expr-let":
       return { id, decl: `${id}["${label(`let ${s.name}`)}"]` };
     case "op-call":
@@ -499,6 +504,16 @@ function sequenceMessages(s: WorkflowStmtIR): string[] {
       return [
         `  note over WF: ${label(`for ${s.var} in ${s.varAggName}[]`)}`,
         ...s.body.flatMap(sequenceMessages),
+      ];
+    case "if-let":
+      return [
+        `  WF->>${s.repoName}: find(${s.synthCriterion.name})`,
+        `  ${s.repoName}-->>WF: ${s.var}?`,
+        `  note over WF: ${label(`if let ${s.var}`)}`,
+        ...s.thenBody.flatMap(sequenceMessages),
+        ...((s.elseBody ?? []).length > 0
+          ? [`  note over WF: else`, ...(s.elseBody ?? []).flatMap(sequenceMessages)]
+          : []),
       ];
     case "expr-let":
       return [];

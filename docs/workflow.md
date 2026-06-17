@@ -63,10 +63,38 @@ context Sales {
 | `requires Expr` | Authorization guard.  Same syntactic shape as `precondition`, but failure → 403 (`ForbiddenException` / `ForbiddenError`).  Use this for `currentUser`-based permission checks; use `precondition` for business-rule checks. |
 | `let x = Agg.create({ field: expr, ... })` | Factory call.  Saved at workflow exit. |
 | `let x = Repo.getById(idExpr)` | Load by id; throws `AggregateNotFound` (→ 404) if missing.  Result is non-nullable. |
-| `let x = Repo.<find>(args)` | Call any repo-declared find whose return is a single non-nullable aggregate.  Arrays / nullables are not yet supported in workflow bodies. |
+| `let x = Repo.<find>(args)` | Call any repo-declared find whose return is a single non-nullable aggregate.  A plain `let` can't bind an array or nullable result. |
+| `let xs = Repo.run(<Retrieval>(args), page?)` / `let xs = Repo.findAll(<Criterion>, page?)` | Bind an aggregate **array**; consumable only by a `for` loop. |
+| `for x in xs { ... }` | Iterate an aggregate array, binding each element to `x`; per-iteration mutations save inside the loop. |
+| `if let x = Repo.find(<Criterion>) { ... } else { ... }` | Look up a **single** aggregate by criterion (the shared `findAllBy<Criterion>` retrieval, capped at one row).  `x` is bound (non-null) only in the then-branch; `else` runs on no match.  The body's only option/null-handling construct.  `else` is optional. |
 | `name.opName(args)` | Invoke a public operation on a let-bound aggregate.  The op's own preconditions / invariants run inside that call. |
 | `let x = expr` | Plain expression binding. |
 | `emit EventName { field: expr, ... }` | Workflow-level event.  Event must be declared in the same context.  Drains through `IDomainEventDispatcher` after all saves (after commit when `transactional`). |
+
+### `if let` — single-result criterion lookup
+
+`Repo.find(<Criterion>)` is the single-result sibling of `Repo.findAll`: it
+returns an optional aggregate.  A workflow body has no standalone way to bind
+or branch on a nullable, so the lookup and the branch are one construct —
+`if let`:
+
+```ddd
+workflow ReserveSeat {
+  create(c: ReserveSeat) {
+    if let seat = Seats.find(AvailableSeat) {
+      seat.reserve(c.holder)          // `seat` is non-null here; saved on exit of the branch
+    } else {
+      emit NoSeatAvailable { event: c.event }
+    }
+  }
+}
+```
+
+Both `find` and `findAll` over one criterion share a single internal
+`findAllBy<Criterion>` retrieval (no public endpoint is exposed — unlike a
+declared `find`).  The else-branch may create a fallback aggregate
+(`let s = Seat.create({...})`); branch-local creations / mutations save at the
+end of their branch.  `if let`'s source is a criterion `find` in this release.
 
 Mutation forms (`:=`, `+=`, `-=`) belong to aggregate operation bodies
 and are rejected inside a workflow.  Workflows can't call private

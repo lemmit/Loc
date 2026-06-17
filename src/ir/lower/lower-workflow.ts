@@ -19,6 +19,7 @@ import {
   isEmitStmt,
   isForStmt,
   isHandleDecl,
+  isIfLetStmt,
   isLetStmt,
   isMemberSuffix,
   isNameRef,
@@ -303,6 +304,56 @@ function lowerWorkflowStatement(
         iterable,
         body,
         savesPerIteration,
+      },
+      envAfter: env,
+    };
+  }
+  if (isIfLetStmt(stmt)) {
+    // `if let <var> = Repo.find(<Criterion>) { then } else { else }`
+    // (criterion.md, use site 3).  The source must be `Repo.find(<Criterion>)`
+    // (the only optional producer this release); a non-matching source leaves
+    // `synthCriterion.name` empty for the validator (`loom.iflet-bad-source`).
+    // The criterion args lower in the OUTER env; `var` (the unwrapped match)
+    // is in scope only in `thenBody`, never in `elseBody`.
+    const findCall = matchFindCall(stmt.source, reposByName);
+    const repo = findCall?.repo;
+    const aggName = repo?.aggregate?.ref?.name ?? "Unknown";
+    const repoName = repo?.name ?? "";
+    const saveRepoName = repoForAgg.get(aggName) ?? plural(aggName);
+    const varType: TypeIR = { kind: "entity", name: aggName };
+    const thenBody: WorkflowStmtIR[] = [];
+    let thenEnv = withLocal(env, stmt.var, "let", varType);
+    for (const s of stmt.thenBody) {
+      const lowered = lowerWorkflowStatement(s, thenEnv, aggsByName, reposByName, repoForAgg);
+      thenBody.push(lowered.stmt);
+      thenEnv = lowered.envAfter;
+    }
+    const elseBody: WorkflowStmtIR[] = [];
+    let elseEnv = env;
+    for (const s of stmt.elseBody ?? []) {
+      const lowered = lowerWorkflowStatement(s, elseEnv, aggsByName, reposByName, repoForAgg);
+      elseBody.push(lowered.stmt);
+      elseEnv = lowered.envAfter;
+    }
+    const savesInThen = computeSaves(thenBody, repoForAgg, {
+      name: stmt.var,
+      aggName,
+      repoName: saveRepoName,
+    });
+    const savesInElse = computeSaves(elseBody, repoForAgg);
+    return {
+      stmt: {
+        kind: "if-let",
+        var: stmt.var,
+        repoName,
+        aggName,
+        retrievalName: findCall ? `findAllBy${findCall.criterionName}` : "",
+        retrievalArgs: (findCall?.criterionArgs ?? []).map((a) => lowerExpr(a, env)),
+        synthCriterion: { name: findCall?.criterionName ?? "" },
+        thenBody,
+        ...(elseBody.length > 0 ? { elseBody } : {}),
+        savesInThen,
+        savesInElse,
       },
       envAfter: env,
     };
@@ -734,6 +785,36 @@ function matchRetrievalRunCall(
     }
   }
   return { repo, retrievalName, retrievalArgs, pageOffset, pageLimit };
+}
+
+interface FindMatch {
+  repo: Repository;
+  criterionName: string;
+  criterionArgs: Expression[];
+}
+
+/** Recognise `<Repo>.find(<CriterionRef>)` — the single-result sibling of
+ *  `findAll` (criterion.md, use site 3), the source of an `if let`.  No
+ *  `page:` (a single result isn't paginated); the only arg is a criterion
+ *  reference (bare `Name` or `Name(args)`).  Declines (→ `undefined`) on any
+ *  other shape, so the `if let` lowering records an empty criterion name and
+ *  the validator surfaces `loom.iflet-bad-source`. */
+function matchFindCall(
+  expr: Expression | undefined,
+  reposByName: Map<string, Repository>,
+): FindMatch | undefined {
+  if (!expr || !isPostfixChain(expr) || expr.suffixes.length !== 1) return undefined;
+  const s = expr.suffixes[0]!;
+  if (!isMemberSuffix(s) || !s.call || s.member !== "find") return undefined;
+  const recv = expr.head;
+  if (!isNameRef(recv)) return undefined;
+  const repo = reposByName.get(recv.name);
+  if (!repo) return undefined;
+  const refArg = (s.args ?? []).find((a) => !a.name);
+  if (!refArg) return undefined;
+  const critRef = criterionRefFromExpr(refArg.value);
+  if (!critRef) return undefined;
+  return { repo, criterionName: critRef.name, criterionArgs: critRef.args };
 }
 
 interface FindAllMatch {

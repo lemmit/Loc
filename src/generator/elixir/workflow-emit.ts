@@ -366,6 +366,53 @@ function renderWorkflowStmt(
       ].join("\n");
       return [{ kind: "loop", text: loop }];
     }
+    case "if-let": {
+      // `if let o = Repo.find(<Criterion>) { … } else { … }` → run the shared
+      // `findAllBy<Criterion>` retrieval bang variant capped at `limit: 1`,
+      // match its `.results` to a head-or-nil, and branch with `if`.  Branch
+      // op-calls run as Ash update bang-actions (Ash persists inline — the
+      // for-each path emits no separate saves either; the enclosing
+      // transaction converts a raise to a rollback).  A `kind: "loop"` block
+      // forces sequential (non-`with`) rendering, like the loop above.
+      const action = `run_${snake(st.retrievalName)}_${snake(st.aggName)}`;
+      const runArgs = [
+        ...st.retrievalArgs.map((a) => renderExpr(a, renderCtx)),
+        "page: [limit: 1]",
+      ];
+      const v = snake(st.var);
+      const renderBranch = (body: WorkflowStmtIR[]): string[] =>
+        body.flatMap((inner) => {
+          if (inner.kind === "op-call") {
+            const op = ctx.aggregates
+              .find((a) => a.name === inner.aggName)
+              ?.operations.find((o) => o.name === inner.op);
+            const argEntries = (op?.params ?? []).map(
+              (p, idx) => `${snake(p.name)}: ${renderExpr(inner.args[idx]!, renderCtx)}`,
+            );
+            const opAction = `${snake(inner.op)}_${snake(inner.aggName)}`;
+            const tgt = snake(inner.target);
+            return [
+              argEntries.length
+                ? `      ${contextModule}.${opAction}!(${tgt}, %{${argEntries.join(", ")}})`
+                : `      ${contextModule}.${opAction}!(${tgt})`,
+            ];
+          }
+          return renderWorkflowStmt(inner, ctx, renderCtx, contextModule).map(
+            (l) => `      ${l.text.trimStart()}`,
+          );
+        });
+      const block = [
+        `    ${v} = case ${contextModule}.${action}!(${runArgs.join(", ")}).results do`,
+        `      [__hit | _] -> __hit`,
+        `      [] -> nil`,
+        `    end`,
+        `    if ${v} != nil do`,
+        ...renderBranch(st.thenBody),
+        ...((st.elseBody ?? []).length > 0 ? [`    else`, ...renderBranch(st.elseBody ?? [])] : []),
+        `    end`,
+      ].join("\n");
+      return [{ kind: "loop", text: block }];
+    }
   }
 }
 

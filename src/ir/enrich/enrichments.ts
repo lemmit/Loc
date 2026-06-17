@@ -421,6 +421,10 @@ function allWorkflowStmts(wf: WorkflowIR): WorkflowStmtIR[] {
     for (const st of stmts) {
       out.push(st);
       if (st.kind === "for-each") walk(st.body);
+      else if (st.kind === "if-let") {
+        walk(st.thenBody);
+        walk(st.elseBody ?? []);
+      }
     }
   };
   for (const r of roots) walk(r);
@@ -446,12 +450,32 @@ function synthesizeFindAllRetrievals(
   const seen = new Set(base.map((r) => r.name));
   for (const wf of workflows) {
     for (const st of allWorkflowStmts(wf)) {
-      if (st.kind !== "repo-run" || !st.synthCriterion || seen.has(st.retrievalName)) continue;
-      const crit = crits.find((c) => c.name === st.synthCriterion!.name);
+      // Both `Repo.findAll(<Criterion>)` (repo-run) and the `if let` /
+      // `Repo.find(<Criterion>)` (if-let) source ride a `findAllBy<Criterion>`
+      // retrieval; an `if let` carries no sort/loads (single-result, takes the
+      // first row).  Collect the criterion + shaping from whichever shape.
+      const synth =
+        st.kind === "repo-run" && st.synthCriterion
+          ? {
+              name: st.synthCriterion.name,
+              retrievalName: st.retrievalName,
+              sort: st.synthSort,
+              loadPlan: st.synthLoadPlan,
+            }
+          : st.kind === "if-let" && st.synthCriterion.name
+            ? {
+                name: st.synthCriterion.name,
+                retrievalName: st.retrievalName,
+                sort: undefined,
+                loadPlan: undefined,
+              }
+            : undefined;
+      if (!synth || seen.has(synth.retrievalName)) continue;
+      const crit = crits.find((c) => c.name === synth.name);
       if (!crit) continue; // a missing criterion is reported by the IR validator
-      seen.add(st.retrievalName);
+      seen.add(synth.retrievalName);
       out.push({
-        name: st.retrievalName,
+        name: synth.retrievalName,
         params: crit.params,
         targetType: crit.targetType,
         where: crit.body,
@@ -463,9 +487,9 @@ function synthesizeFindAllRetrievals(
         },
         // `sort:` / `loads:` shaping from an anonymous retrieval (criterion.md
         // use site 3); the retrieval emitters apply `.orderBy(...)` + the load
-        // shape.  Default to no sort / whole-load for a bare `findAll`.
-        sort: st.synthSort ?? [],
-        loadPlan: st.synthLoadPlan ?? { kind: "whole" },
+        // shape.  Default to no sort / whole-load for a bare `findAll` / `find`.
+        sort: synth.sort ?? [],
+        loadPlan: synth.loadPlan ?? { kind: "whole" },
       });
     }
   }

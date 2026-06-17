@@ -11,6 +11,7 @@ import type {
   ExprIR,
   TypeIR,
   WorkflowIR,
+  WorkflowStmtIR,
 } from "../../types/loom-ir.js";
 import { findUsesCurrentUser } from "../../types/loom-ir.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
@@ -661,6 +662,85 @@ function validateWorkflowBody(
             }
           }
         }
+        break;
+      }
+      case "if-let": {
+        // `if let <var> = Repo.find(<Criterion>) { … } else { … }`
+        // (criterion.md, use site 3).  Validate the criterion query (the same
+        // checks as the repo-run/findAll path; no page warning — a single
+        // result is never paginated), then shallow-check the branch op-call
+        // bindings the way `for-each` does.  `var` is in scope only in the
+        // then-branch.
+        if (!st.synthCriterion.name) {
+          diags.push({
+            severity: "error",
+            code: "loom.iflet-bad-source",
+            message: `workflow '${wf.name}': 'if let ${st.var} = ...' must bind 'Repo.find(<Criterion>)' — the only optional source in v1.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const repo = reposByName.get(st.repoName);
+        if (!repo) {
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-run-unknown-repository",
+            message: `workflow '${wf.name}': a criterion query on '${st.repoName}' references unknown repository '${st.repoName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const critName = st.synthCriterion.name;
+        const crit = ctx.criteria.find((c) => c.name === critName);
+        if (!crit) {
+          diags.push({
+            severity: "error",
+            code: "loom.findall-unknown-criterion",
+            message: `workflow '${wf.name}': criterion query on '${st.repoName}' references unknown criterion '${critName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const candidate = crit.targetType.kind === "entity" ? crit.targetType.name : "";
+        if (candidate !== st.aggName) {
+          diags.push({
+            severity: "error",
+            code: "loom.findall-criterion-mismatch",
+            message: `workflow '${wf.name}': criterion '${critName}' is over '${candidate || "bool"}', but the criterion query on '${st.repoName}' queries '${st.aggName}'.  It needs a criterion 'of ${st.aggName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        if (st.retrievalArgs.length !== crit.params.length) {
+          diags.push({
+            severity: "error",
+            code: "loom.findall-criterion-arity",
+            message: `workflow '${wf.name}': criterion '${critName}' takes ${crit.params.length} argument(s), but the criterion query on '${st.repoName}' passed ${st.retrievalArgs.length}.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const checkBranchOpCalls = (body: WorkflowStmtIR[]): void => {
+          for (const inner of body) {
+            if (inner.kind === "op-call") {
+              mutated = true;
+              if (!bindingAgg.get(inner.target)) {
+                diags.push({
+                  severity: "error",
+                  code: "loom.workflow-foreach-unknown-binding",
+                  message: `workflow '${wf.name}': in 'if let ${st.var}', '${inner.target}.${inner.op}(...)' references unknown binding '${inner.target}'.`,
+                  source: `${ctx.name}/${wf.name}`,
+                });
+              }
+            } else if (inner.kind === "emit" || inner.kind === "factory-let") {
+              mutated = true;
+            }
+          }
+        };
+        bindingAgg.set(st.var, st.aggName); // `var` bound only in the then-branch
+        checkBranchOpCalls(st.thenBody);
+        bindingAgg.delete(st.var);
+        checkBranchOpCalls(st.elseBody ?? []);
         break;
       }
       case "op-call": {
