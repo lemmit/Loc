@@ -102,14 +102,21 @@
 > render-function root. The framework gate now admits `react` **and**
 > `vue` (Svelte joined in Phase 6d).
 >
-> **Phase 4 shipped (default-deny enforcement, partial).** Opt-in via
-> `auth { enforcement: denyByDefault }` (default `opt` is inert). An IR
-> check (`loom.default-deny-ungated`) rejects any **public operation /
-> destroy** reachable on an `auth: required` deployable that declares no
-> `requires` gate; `requires true` is the explicit "intentionally public"
-> escape. Scope v1 covers operations + destroys (OperationIR bodies);
-> canonical creates, workflows, finds, and views are a documented
-> follow-up (different gate surface). 5 tests; full fast suite green.
+> **Phase 4 shipped (default-deny enforcement — full command surface).**
+> Opt-in via `auth { enforcement: denyByDefault }` (default `opt` is inert). An
+> IR check (`loom.default-deny-ungated`) rejects any **client-reachable command**
+> on an `auth: required` deployable that declares no `requires` gate;
+> `requires true` is the explicit "intentionally public" escape. Covers public
+> aggregate **operations + creates + destroys** (OperationIR bodies) **and
+> workflows** — every command-triggered `create … {}` starter and named
+> `handle …(){}` continuation (event-triggered creates / `on(...)` reactors are
+> not client-reachable, so excluded; the validate-layer analogue of the
+> generator's `emitsCommandRoute`). **Reads (repository `find`s + `view`s) stay
+> out of scope by design:** the grammar gives them no `requires` surface (only a
+> `where` filter), so flagging them would leave the author no escape hatch —
+> gating reads needs a `requires`-on-query language addition first (separate
+> follow-up, the one remaining default-deny gap). 9 tests
+> (`test/ir/default-deny.test.ts`); full fast suite green.
 >
 > **Phase 2a shipped (.NET `/auth/me` parity).** The .NET backend now maps
 > `GET /auth/me` (the session probe the React `auth: ui` guard reads) when
@@ -274,8 +281,10 @@
 > (all five backends — Hono/.NET/Phoenix/Java/Python — ship the OIDC verifier
 > + /auth/me + /auth/login|callback|logout handshake, each runtime-e2e'd
 > against a real Keycloak), 6 COMPLETE (React + Vue + Svelte `auth: ui`
-> guards), 7 done. Remaining: creates/workflows/finds/views default-deny
-> (Phase 4 completion) + a Phoenix-LiveView frontend guard.** Decisions locked
+> guards), 7 done. Phase 4 default-deny now covers the full **command** surface
+> (operations + creates + destroys + workflows). Remaining: default-deny for
+> **reads** (finds/views — needs a `requires`-on-query grammar addition) + a
+> Phoenix-LiveView frontend guard.** Decisions locked
 > with the maintainer (2026-06-15):
 >
 > 1. **Scope** = OIDC authentication providers + playground auth stub

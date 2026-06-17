@@ -78,4 +78,59 @@ describe("default-deny enforcement", () => {
     );
     expect(errs).toEqual([]);
   });
+
+  // --- Creates + workflows (the command surface beyond operations/destroys) ---
+
+  /** A system with an aggregate `create`, a command-triggered `workflow`, plus
+   *  a read `find` and `view` — each command body gated by `gate`. */
+  function commandSys(gate: string): string {
+    return `
+system Helpdesk {
+  user { id: string role: string }
+  auth { enforcement: denyByDefault }
+  subdomain S {
+    context Tickets {
+      aggregate Ticket {
+        subject: string
+        open: bool
+        create register(s: string) { ${gate}subject := s open := true }
+      }
+      repository Tickets for Ticket {
+        find openOnes(): Ticket[] where open == true
+      }
+      workflow openTicket {
+        create(s: string) { ${gate}let t = Ticket.register(s) }
+      }
+      view ActiveTickets = Ticket where open == true
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: Tickets, kind: state, use: primary }
+  api SupportApi from S
+  deployable api { platform: hono contexts: [Tickets] serves: SupportApi dataSources: [st] port: 8080 auth: required }
+}
+`;
+  }
+
+  it("rejects an ungated public create under denyByDefault", async () => {
+    const errs = await denyErrors(commandSys(""));
+    expect(errs.some((m) => m.includes("Ticket.register"))).toBe(true);
+  });
+
+  it("rejects an ungated command-triggered workflow under denyByDefault", async () => {
+    const errs = await denyErrors(commandSys(""));
+    expect(errs.some((m) => m.includes("workflow 'openTicket'"))).toBe(true);
+  });
+
+  it("accepts gated creates + workflows (requires on every command body)", async () => {
+    const errs = await denyErrors(commandSys('requires currentUser.role == "agent"\n        '));
+    expect(errs).toEqual([]);
+  });
+
+  it("does not flag reads (finds / views have no requires surface — deferred)", async () => {
+    // Gate the commands so only reads remain ungated; no diagnostic should
+    // mention the find or view (reads are out of default-deny scope).
+    const errs = await denyErrors(commandSys("requires true\n        "));
+    expect(errs).toEqual([]);
+  });
 });
