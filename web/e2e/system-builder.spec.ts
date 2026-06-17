@@ -1005,27 +1005,27 @@ test("persists hand-dragged node positions across a reload, and Reset clears the
 
 test("offers an enum-case picker on a match-arm cond's other operand", async ({ page }) => {
   // No bundled example has `match { lhs == EnumCase => … }` in a domain-logic
-  // slot, so inject one through the editor exactly the way a user would (same
-  // find-then-type pattern preview-shadcn uses). Anchor on Order's `isMutable`
-  // function, append a derived prop whose body is a match with two
-  // `status == <case>` arms — `status` types as the OrderStatus enum, so the
-  // RHS leaf of each arm cond renders as a Select of the enum's cases.
+  // slot, so inject a self-contained one through the test seam (robust vs.
+  // driving Monaco's find widget). Order's `status` types as the OrderStatus
+  // enum, so each arm cond's RHS leaf renders as a Select of the enum's cases.
   await page.goto("/");
   await waitForPlaygroundReady(page);
-  await selectExample(page, /Sales System/);
-
-  const editor = page.locator(".monaco-editor").first();
-  await editor.click();
-  await page.keyboard.press("Control+f");
-  const findInput = page
-    .locator(".monaco-editor .find-widget .find-part textarea, .monaco-editor .find-widget .find-part input")
-    .first();
-  await findInput.fill("function isMutable");
-  await page.keyboard.press("Enter");
-  await page.keyboard.press("Escape");
-  await page.keyboard.press("End");
-  await page.keyboard.press("Enter");
-  await page.keyboard.type('derived label: string = match { status == Confirmed => "ready", status == Cancelled => "no", else => "pending" }');
+  await setSource(
+    page,
+    `system S {
+  context C {
+    enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+    aggregate Order {
+      status: OrderStatus
+      derived label: string = match {
+        status == Confirmed => "ready"
+        status == Cancelled => "no"
+        else => "pending"
+      }
+    }
+  }
+}`,
+  );
   await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 10_000 });
 
   await page.getByTestId("doc-tab-model").click();
