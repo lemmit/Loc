@@ -15,11 +15,13 @@ guards.
 > [`retrieval`](#reification-retrieval-and-find-criteria)'s or a `find`'s
 > `where` additionally **reifies** — it emits a named, constructed
 > predicate object on every backend rather than dissolving at compile time
-> (see "Reification" below). The proposal's further surfaces —
-> `Repo.findAll(criterion, sort?, page?, loads?)`, `when <Criterion>`
-> operation guards with auto-exposed `can-<op>` endpoints, and
-> `from <Criterion>(args)` parameter binding — depend on the
-> exception-less / payload-transport layers and are **not yet shipped**.
+> (see "Reification" below). `when <predicate>` operation guards with their
+> auto-exposed side-effect-free `GET /<plural>/{id}/can_<op>` endpoints are
+> **shipped on node / .NET / python / elixir** (a false gate → 409 Disallowed;
+> the companion returns `{ allowed }`); java is gated (`loom.when-unsupported`).
+> The proposal's remaining surfaces — `Repo.findAll(criterion, sort?, page?,
+> loads?)` and `from <Criterion>(args)` parameter binding — are **not yet
+> shipped**.
 
 ## Declaration
 

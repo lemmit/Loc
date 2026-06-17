@@ -466,18 +466,18 @@ export function validateUnionsUnimplemented(
 
 /**
  * `when` canCommand gate (criterion.md, use site 2) — backend support.
- * Hono + .NET evaluate the predicate before the body (409 Disallowed) and
- * expose the side-effect-free `GET /{id}/can_<op>`; the elixir emitters
- * don't yet, so a `when`-gated operation is a hard error while an elixir
- * backend serves the context (surfacing it beats silently skipping the
- * gate — an unenforced state gate is a correctness hole).
+ * node / .NET / python / elixir evaluate the predicate before the body (409
+ * Disallowed) and expose the side-effect-free `GET /{id}/can_<op>`; the java
+ * emitter doesn't yet, so a `when`-gated operation is a hard error while java
+ * serves the context (surfacing it beats silently skipping the gate — an
+ * unenforced state gate is a correctness hole).
  */
 export function validateWhenGateSupport(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
 ): void {
-  const SUPPORTED_WHEN_BACKENDS = new Set(["node", "dotnet", "python"]);
+  const SUPPORTED_WHEN_BACKENDS = new Set(["node", "dotnet", "python", "elixir"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_WHEN_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 

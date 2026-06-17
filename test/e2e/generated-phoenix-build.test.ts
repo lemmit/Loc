@@ -104,6 +104,11 @@ describe.skipIf(!ENABLED)(
       // Ash 3.x accepts a calculation reference — including an argument-bearing
       // one — inside `base_filter`, alongside a plain inline filter.
       { name: "criterion-filter.ddd" },
+      // `when` canCommand state gate (criterion.md, use site 2): the operation
+      // loads the record, evaluates the predicate (enum → Ash atom), 409s
+      // Disallowed before mutating, and auto-exposes the side-effect-free
+      // `GET /orders/:id/can_cancel` companion + its OpenAPI path/CanResponse.
+      { name: "when.ddd" },
     ])("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

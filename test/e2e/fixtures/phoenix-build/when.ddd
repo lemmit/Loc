@@ -1,0 +1,33 @@
+// `when` canCommand state gate on the Phoenix/Ash backend (criterion.md, use
+// site 2).  A `when`-gated operation loads the record, evaluates the predicate
+// (enum values resolve to Ash atoms — `:shipped`), and 409s Disallowed before
+// mutating; it also auto-exposes the side-effect-free `GET /orders/:id/can_cancel`
+// companion returning `{ allowed }`.  This fixture is the decisive check that
+// the gate + can-query controller actions, routes, and OpenAPI spec compile
+// under `mix compile --warnings-as-errors`.
+system WhenShop {
+  subdomain Sales {
+    context Orders {
+      enum OrderStatus { Draft, Shipped, Cancelled }
+      aggregate Order ids guid {
+        code: string
+        status: OrderStatus
+        operation cancel() when this.status != Shipped && this.status != Cancelled {
+          status := Cancelled
+        }
+      }
+    }
+  }
+  api OrdersApi from Sales
+  ui OrdersAdmin with scaffold(subdomains: [Sales]) { }
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: phoenix
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    ui: OrdersAdmin
+    port: 4000
+  }
+}

@@ -16,6 +16,7 @@ import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type UnionMember, unionMembers } from "../_payload/union-wire.js";
 import { stateModule } from "./dispatch-emit.js";
+import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // API controller emission for Phoenix LiveView / Ash.
@@ -240,7 +241,10 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
         const aggsSnake = snake(plural(agg.name));
         const controllerLocal = `${upperFirst(plural(agg.name))}Controller`;
         const controllerPath = `lib/${appName}_web/controllers/${aggsSnake}_controller.ex`;
-        files.set(controllerPath, renderAggregateController(ctx, agg, appModule, !!args.emitTrace));
+        files.set(
+          controllerPath,
+          renderAggregateController(ctx, agg, appModule, !!args.emitTrace, deployable.foundation),
+        );
 
         const aggPlural = aggsSnake;
         // CRUD-verb names claimed by a public operation (e.g. crudish
@@ -322,6 +326,15 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
             controller: controllerLocal,
             action: `:${opSnake}`,
           });
+          // A `when`-gated op auto-exposes its side-effect-free can-query.
+          if (op.when) {
+            apiRoutes.push({
+              method: "get",
+              path: `/${aggPlural}/:id/can_${opPath}`,
+              controller: controllerLocal,
+              action: `:can_${opSnake}`,
+            });
+          }
         }
       }
     }
@@ -706,6 +719,7 @@ function renderAggregateController(
   agg: import("../../ir/types/loom-ir.js").AggregateIR,
   appModule: string,
   emitTrace: boolean,
+  foundation?: string,
 ): string {
   const webModule = `${appModule}Web`;
   const aggSnake = snake(agg.name);
@@ -885,6 +899,16 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
   // the JSON body (camelCase keys); a successful op returns 204 No
   // Content (matching the Hono/.NET convention — ops are side-
   // effecting and don't return the entity).
+  // Predicate render context for `when` gates (criterion.md, use site 2):
+  // a plain-Elixir boolean over the LOADED record (`record.status != :shipped`)
+  // — not an Ash `filter expr`, so attributes stay `record.<field>` and enum
+  // values render per foundation (Ash atom `:shipped` / vanilla string).
+  const whenCtx: RenderCtx = {
+    thisName: "record",
+    contextModule,
+    agg: agg as import("../../ir/types/loom-ir.js").EnrichedAggregateIR,
+    foundation: foundation === "vanilla" ? "vanilla" : "ash",
+  };
   const opActions: string[] = [];
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     const opSnake = snake(op.name);
@@ -898,6 +922,35 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
     const guarded = op.statements.some((s) => s.kind === "requires");
     const cuLine = guarded ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
     const callOpts = guarded ? ", actor: current_user, authorize?: true" : "";
+    if (op.when) {
+      // `when` canCommand state gate (criterion.md, use site 2): load the
+      // record, evaluate the predicate, and 409 Disallowed before mutating —
+      // matching the Hono/.NET/Python "gate in the route" shape (409 = the
+      // request is well-formed and authorized, but disallowed in this state).
+      const pred = renderExpr(op.when, whenCtx);
+      const detail = `operation '${op.name}' is not allowed in the current state of ${agg.name}.`;
+      opActions.push(`  @doc "POST /api/${aggPlural}/:id/${opPath}"
+  def ${opSnake}(conn, %{"id" => id} = params) do
+    _ = params
+${cuLine}    record = ${contextModule}.get_${aggSnake}!(id)
+
+    if ${pred} do
+      ${contextModule}.${opSnake}_${aggSnake}!(${callArgs}${callOpts})
+      send_resp(conn, 204, "")
+    else
+      ${webModule}.ProblemDetails.problem_response(conn, 409, "Disallowed", ${JSON.stringify(detail)})
+    end
+  end`);
+      // The side-effect-free `GET /<plural>/:id/can_<op>` companion: load,
+      // evaluate the gate, return `{ allowed }` so a UI can enable/disable the
+      // action without invoking it.
+      opActions.push(`  @doc "GET /api/${aggPlural}/:id/can_${opPath}"
+  def can_${opSnake}(conn, %{"id" => id}) do
+    record = ${contextModule}.get_${aggSnake}!(id)
+    json(conn, %{allowed: ${pred}})
+  end`);
+      continue;
+    }
     opActions.push(`  @doc "POST /api/${aggPlural}/:id/${opPath}"
   def ${opSnake}(conn, %{"id" => id} = params) do
     _ = params
