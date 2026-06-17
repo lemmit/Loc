@@ -23,6 +23,7 @@ import {
   opWorkflowInstanceById,
   opWorkflowInstances,
 } from "../../../ir/util/openapi-ids.js";
+import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor, zodForResponse } from "./routes-builder.js";
@@ -260,16 +261,25 @@ export function buildWorkflowsFile(
     imports.push(`import { ${drizzleOps.join(", ")} } from "drizzle-orm";`);
   // The outbox relay logs event_dead_lettered on the module-scope logger.
   if (/\bbaseLogger\./.test(bodyStr)) imports.push(`import { baseLogger } from "../obs/log";`);
-  // The `on`-reactor drop+log path logs `event_unrouted` via the ALS logger.
-  if (/(?<!\.)\brequestLog\(/.test(bodyStr))
-    imports.push(`import { requestLog } from "../obs/als";`);
+  // ALS accessors used by the reactor drop+log path (`requestLog`), the
+  // workflow provenance flush (`requestContext`), and the per-workflow child
+  // frame that gives those rows their call-structure scope (`runInChildContext`).
+  const alsImports = [
+    /(?<!\.)\brequestContext\(/.test(bodyStr) ? "requestContext" : null,
+    /(?<!\.)\brequestLog\(/.test(bodyStr) ? "requestLog" : null,
+    /(?<!\.)\brunInChildContext\(/.test(bodyStr) ? "runInChildContext" : null,
+  ].filter((x): x is string => x !== null);
+  if (alsImports.length > 0) imports.push(`import { ${alsImports.join(", ")} } from "../obs/als";`);
+  // The provenance flush stamps a fresh per-row trace id.
+  if (/(?<!\.)\brandomUUID\(/.test(bodyStr))
+    imports.push(`import { randomUUID } from "node:crypto";`);
   // `schema` is used as a runtime value (`db.select().from(schema.x)`) only by
   // the persisted-workflow helpers; otherwise it's `typeof schema` (a type).
   // `import * as schema` still satisfies `typeof schema`, so the value form is
   // a superset — but stick to `import type` when there are no value uses to
   // keep subscription-free files byte-identical.
   if (usesSchema) {
-    const schemaAsValue = /db\.(?:select|insert|update)\(/.test(bodyStr);
+    const schemaAsValue = /(?:db|tx)\.(?:select|insert|update)\(/.test(bodyStr);
     imports.push(
       schemaAsValue
         ? `import * as schema from "../db/schema";`
@@ -332,7 +342,6 @@ function emitWorkflowRoute(
   ctx: BoundedContextIR,
   aggsByName: Map<string, AggregateIR>,
 ): string[] {
-  void aggsByName;
   const reqName = `${upperFirst(wf.name)}Request`;
   const out: string[] = [];
   out.push(`app.openapi(`);
@@ -413,29 +422,73 @@ function emitWorkflowRoute(
   if (hasEmit) {
     out.push(`    const workflowEvents: Events.DomainEvent[] = [];`);
   }
+  // Provenanced writes accumulated during the workflow's steps must be flushed
+  // to provenance_records here — without it they are silently dropped (the
+  // per-operation route flushes them, but a workflow calls ops inline).  A
+  // saved aggregate has `drainProv()` iff one of its operations has a prov
+  // write-site; gate identically so we never call a missing method.
+  const provSaves = wf.savesAtExit.filter((s) => {
+    const agg = aggsByName.get(s.aggName);
+    return !!agg && agg.operations.some((o) => opHasProvSite(o));
+  });
+  // When the workflow flushes provenance, run its body inside a CHILD frame so
+  // those rows record their call-structure position — a distinct scope under
+  // the request (parentId = the request's root scope), distinguishing a
+  // workflow's lineage from a direct operation's.  Off when there's no
+  // provenance, keeping provenance-free workflows byte-identical.
+  const wrapsFrame = provSaves.length > 0;
+  const bi = wrapsFrame ? "      " : "    ";
+  const provFlush = (indent: string, dbHandle: string): string[] => {
+    if (provSaves.length === 0) return [];
+    const ls: string[] = [`${indent}const reqCtx = requestContext();`];
+    for (const save of provSaves) {
+      ls.push(`${indent}for (const t of ${save.name}.drainProv()) {`);
+      ls.push(`${indent}  await ${dbHandle}.insert(schema.provenanceRecords).values({`);
+      ls.push(`${indent}    traceId: randomUUID(),`);
+      ls.push(`${indent}    snapshotId: t.snapshotId,`);
+      ls.push(`${indent}    targetType: t.target.type,`);
+      ls.push(`${indent}    field: t.target.field,`);
+      ls.push(`${indent}    inputs: t.inputs,`);
+      ls.push(`${indent}    computedValue: t.computedValue,`);
+      ls.push(`${indent}    at: new Date(),`);
+      ls.push(`${indent}    correlationId: reqCtx?.correlationId ?? null,`);
+      ls.push(`${indent}    scopeId: reqCtx?.scopeId ?? null,`);
+      ls.push(`${indent}    actorId: reqCtx?.actorId ?? null,`);
+      ls.push(`${indent}    parentId: reqCtx?.parentId ?? null,`);
+      ls.push(`${indent}  });`);
+      ls.push(`${indent}}`);
+    }
+    return ls;
+  };
+  if (wrapsFrame) {
+    out.push(`    await runInChildContext(async () => {`);
+  }
   if (wf.transactional) {
     const txOpts = wf.isolation ? `, { isolationLevel: "${pgIsolationLevel(wf.isolation)}" }` : ``;
-    out.push(`    await db.transaction(async (tx) => {${""}`);
+    out.push(`${bi}await db.transaction(async (tx) => {${""}`);
     for (const r of reposNeeded) {
-      out.push(`      const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(tx, events);`);
+      out.push(`${bi}  const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(tx, events);`);
     }
     out.push(
-      ...renderWorkflowStmts(wf.statements, honoWorkflowStmtTarget(ctx, paramExprs), "      "),
+      ...renderWorkflowStmts(wf.statements, honoWorkflowStmtTarget(ctx, paramExprs), `${bi}  `),
     );
     for (const save of wf.savesAtExit) {
-      out.push(`      await ${lowerFirst(save.repoName)}.save(${save.name});`);
+      out.push(`${bi}  await ${lowerFirst(save.repoName)}.save(${save.name});`);
     }
-    out.push(`    }${txOpts});`);
+    out.push(...provFlush(`${bi}  `, "tx"));
+    out.push(`${bi}}${txOpts});`);
   } else {
     for (const r of reposNeeded) {
-      out.push(`    const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
+      out.push(`${bi}const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
     }
-    out.push(
-      ...renderWorkflowStmts(wf.statements, honoWorkflowStmtTarget(ctx, paramExprs), "    "),
-    );
+    out.push(...renderWorkflowStmts(wf.statements, honoWorkflowStmtTarget(ctx, paramExprs), bi));
     for (const save of wf.savesAtExit) {
-      out.push(`    await ${lowerFirst(save.repoName)}.save(${save.name});`);
+      out.push(`${bi}await ${lowerFirst(save.repoName)}.save(${save.name});`);
     }
+    out.push(...provFlush(bi, "db"));
+  }
+  if (wrapsFrame) {
+    out.push(`    });`);
   }
   if (hasEmit) {
     out.push(`    for (const ev of workflowEvents) await events.dispatch(ev);`);

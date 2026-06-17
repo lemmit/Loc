@@ -248,6 +248,72 @@ describe("provenanced — snapshot capture", () => {
   });
 });
 
+// A workflow calls aggregate operations inline; the provenanced writes they
+// make used to be dropped (only the per-operation HTTP route flushed them).
+// The workflow now flushes provenance for its saved aggregates, inside a CHILD
+// frame so the rows carry their call-structure scope (parentId = the request).
+const SYSTEM_WF = `
+system S {
+  subdomain M {
+    context C {
+      aggregate Cart ids guid {
+        label: string
+        total: int provenanced
+        discount: int
+        operation applyTotal(base: int, qty: int) {
+          total := base * qty - discount
+        }
+      }
+      repository Carts for Cart { }
+      workflow buildCart {
+        create(base: int, qty: int) {
+          let cart = Cart.create({ label: "seed", discount: 0 })
+          cart.applyTotal(base, qty)
+        }
+      }
+    }
+  }
+  deployable api { platform: hono, contexts: [C], port: 3000 }
+}
+`;
+
+describe("provenanced — workflow capture", () => {
+  it("flushes provenance for workflow-driven writes inside a child frame", async () => {
+    const { model, errors } = await parseModel(SYSTEM_WF);
+    expect(errors).toEqual([]);
+    const files = generateSystems(model).files;
+    const wf = files.get("api/http/workflows.ts")!;
+    expect(wf).toBeDefined();
+    // The workflow body runs in a child frame so its provenance rows record a
+    // distinct scope under the request (parentId chains to the root).
+    expect(wf).toContain("await runInChildContext(async () => {");
+    // The saved aggregate's accumulated lineage is drained + persisted —
+    // previously these writes were lost (no flush in the workflow path).
+    expect(wf).toContain("for (const t of cart.drainProv()) {");
+    expect(wf).toContain(".insert(schema.provenanceRecords).values({");
+    expect(wf).toContain("parentId: reqCtx?.parentId ?? null,");
+    expect(wf).toContain("actorId: reqCtx?.actorId ?? null,");
+    // Imports threaded by the body scan.
+    expect(wf).toContain('import { randomUUID } from "node:crypto";');
+    expect(wf).toMatch(/import \{[^}]*runInChildContext[^}]*\} from "\.\.\/obs\/als"/);
+    expect(wf).toMatch(/import \* as schema from "\.\.\/db\/schema"/);
+    // The history table carries the call-structure column on Hono too.
+    const schema = files.get("api/db/schema.ts")!;
+    expect(schema).toContain('parentId: text("parent_id")');
+  });
+
+  it("leaves provenance-free workflows without a flush or child frame", async () => {
+    // Drop `provenanced` → no aggregate has a prov write-site → no flush, and
+    // the workflow body stays in the root frame (byte-identical to before).
+    const src = SYSTEM_WF.replace("total: int provenanced", "total: int");
+    const { model, errors } = await parseModel(src);
+    expect(errors).toEqual([]);
+    const wf = generateSystems(model).files.get("api/http/workflows.ts")!;
+    expect(wf).not.toContain("runInChildContext");
+    expect(wf).not.toContain("drainProv");
+  });
+});
+
 function findProperty(model: Model, agg: string, field: string): Property {
   for (const node of AstUtils.streamAst(model)) {
     if (
