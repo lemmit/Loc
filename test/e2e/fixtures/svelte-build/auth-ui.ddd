@@ -1,0 +1,54 @@
+// Svelte `auth: ui` guard (D-AUTH-OIDC) — a Hono backend with
+// auth: required + an auth { oidc } block, and a Svelte frontend that
+// mounts the route guard via auth: ui.  The LOOM_SVELTE_BUILD shard
+// svelte-checks + vite-builds the emitted `web/` project so the generated
+// AuthGate.svelte + session client + <AuthGate> wrap compile against the
+// real SvelteKit / svelte-query types under each svelte design pack.
+system Helpdesk {
+  user {
+    id: string
+    role: string
+    email: string
+  }
+
+  auth {
+    provider: keycloak
+    oidc {
+      issuer: env("OIDC_ISSUER")
+      clientId: env("OIDC_CLIENT_ID")
+    }
+    claims: { role: "realm_access.roles" }
+  }
+
+  subdomain Support {
+    context Tickets {
+      aggregate Ticket with crudish {
+        subject: string
+        open: bool
+      }
+      repository Tickets for Ticket { }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource ticketState { for: Tickets, kind: state, use: primary }
+
+  api SupportApi from Support
+  deployable api {
+    platform: hono
+    contexts: [Tickets]
+    serves: SupportApi
+    dataSources: [ticketState]
+    port: 8080
+    auth: required
+  }
+
+  ui WebApp with scaffold(subdomains: [Support]) { }
+  deployable web {
+    platform: svelte
+    targets: api
+    ui: WebApp
+    port: 3001
+    auth: ui
+  }
+}

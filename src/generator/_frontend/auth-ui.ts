@@ -1,17 +1,20 @@
-// Framework-neutral frontend auth files (D-AUTH-OIDC, `auth: ui`).
+// Frontend auth files (D-AUTH-OIDC, `auth: ui`).
 //
-// Emitted into a React or Vue deployable that opts in via `auth: ui`
-// (and whose target backend is `auth: required`).  Pack-agnostic — plain
-// markup + inline styles, no design-system imports — so a single set of
-// files works under every design pack.  The guard probes the backend's
+// Emitted into a frontend deployable that opts in via `auth: ui` (and whose
+// target backend is `auth: required`).  The session client (`AUTH_SESSION_TS`)
+// is framework-neutral TS, shared verbatim across frameworks; the guard
+// component is framework-shaped (`AUTH_GATE_TSX` for React, `AUTH_GATE_VUE`
+// + a provide/inject `useSession` composable for Vue, `AUTH_GATE_SVELTE` for
+// Svelte).  Each is pack-agnostic — inline styles, no design-system imports —
+// so a single file works under every design pack.  The guard probes the
+// backend's
 // `/auth/me` session route (which works for both the OIDC verifier and
 // the in-browser playground dev stub) and gates the app on a verified
 // session; "Sign in" redirects to the backend's `/auth/login` (→ IdP).
 //
-// `session.ts` is shared verbatim by both frameworks (it only touches the
-// api client + config, whose paths are identical across React and Vue);
-// the route guard itself is framework-shaped (`AuthGate.tsx` for React,
-// `AuthGate.vue` + a provide/inject `useSession` composable for Vue).
+// `session.ts` is shared verbatim by every framework (it only touches the
+// api client + config, whose relative paths are identical across React, Vue,
+// and Svelte).
 
 /** `src/auth/session.ts` — session probe + sign-in/out redirects. */
 export const AUTH_SESSION_TS = `// Auto-generated.
@@ -235,4 +238,100 @@ const signOutButton: CSSProperties = {
     <button type="button" :style="signOutButton" @click="signOut">Sign out</button>
   </template>
 </template>
+`;
+
+// ---------------------------------------------------------------------------
+// Svelte 5 sibling (`auth: ui` on a svelte frontend).  The session client
+// (`AUTH_SESSION_TS`) is reused VERBATIM — it's framework-neutral TS whose
+// relative imports (`../api/client`, `../api/config`) resolve the same from
+// `src/lib/auth/session.ts` as they do from React's `src/auth/session.ts`.
+// Only the guard component is framework-shaped: this is the runes-based
+// analogue of `AUTH_GATE_TSX`, pack-agnostic (inline styles, no design
+// imports) so one file works under every svelte design pack.
+// ---------------------------------------------------------------------------
+
+/** `src/lib/auth/AuthGate.svelte` — the route guard + session context. */
+export const AUTH_GATE_SVELTE = `<!-- Auto-generated.  Do not edit by hand. -->
+<script lang="ts" module>
+  import { getContext, setContext } from "svelte";
+  import type { SessionUser } from "./session";
+
+  const SESSION_KEY = Symbol("loom.session");
+
+  export interface Session {
+    readonly user: SessionUser;
+    signOut: () => void;
+  }
+
+  /** Access the verified session from inside the guarded app. */
+  export function useSession(): Session {
+    const ctx = getContext<Session | undefined>(SESSION_KEY);
+    if (!ctx) throw new Error("useSession must be used within <AuthGate>");
+    return ctx;
+  }
+
+  /** Provide the verified session to descendants.  Called once from the
+   *  gate during init; the getter keeps it live as the probe resolves. */
+  export function provideSession(value: Session): void {
+    setContext(SESSION_KEY, value);
+  }
+</script>
+
+<script lang="ts">
+  import { onMount, type Snippet } from "svelte";
+  // SessionUser is imported in the module script above (shared scope).
+  import { fetchSession, signIn, signOut } from "./session";
+
+  let { children }: { children: Snippet } = $props();
+
+  type State =
+    | { kind: "loading" }
+    | { kind: "anon" }
+    | { kind: "authed"; user: SessionUser };
+
+  let state = $state<State>({ kind: "loading" });
+
+  onMount(() => {
+    let active = true;
+    fetchSession()
+      .then((user) => {
+        if (active) state = user ? { kind: "authed", user } : { kind: "anon" };
+      })
+      .catch(() => {
+        if (active) state = { kind: "anon" };
+      });
+    return () => {
+      active = false;
+    };
+  });
+
+  provideSession({
+    get user(): SessionUser {
+      return state.kind === "authed" ? state.user : {};
+    },
+    signOut,
+  });
+</script>
+
+{#if state.kind === "loading"}
+  <div style="display:flex;align-items:center;justify-content:center;min-height:100vh">Loading…</div>
+{:else if state.kind === "anon"}
+  <div style="display:flex;align-items:center;justify-content:center;min-height:100vh">
+    <div style="text-align:center">
+      <h1 style="margin-bottom:16px">Sign in</h1>
+      <button type="button" style="padding:8px 20px;font-size:16px;cursor:pointer" onclick={signIn}>
+        Sign in
+      </button>
+    </div>
+  </div>
+{:else}
+  {@render children()}
+  <button
+    type="button"
+    style="position:fixed;bottom:12px;right:12px;z-index:1000;padding:6px 12px;cursor:pointer"
+    onclick={signOut}
+  >
+    Sign out
+  </button>
+{/if}
 `;

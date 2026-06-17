@@ -62,6 +62,28 @@
 > needed). tsc-gated (the emitted `web/` project type-checks against real
 > React/Mantine types); content + validation tests; full fast suite green.
 >
+> **Phase 6d shipped (Svelte `auth: ui` guard — frontend parity).** The
+> Svelte generator now mirrors the React guard. The session client
+> (`src/lib/auth/session.ts`) is reused **verbatim** from
+> `src/generator/_frontend/auth-ui.ts` (`AUTH_SESSION_TS`) — framework-neutral
+> TS whose relative imports resolve identically; the framework-shaped seam
+> is a new runes-based `AUTH_GATE_SVELTE` → `src/lib/auth/AuthGate.svelte`
+> (probe `/auth/me` on mount, gate the app, "Sign in" → IdP, sign-out
+> button, reactive session context via `useSession`). When a svelte
+> deployable opts in via `auth: ui` (target backend `auth: required`),
+> `src/generator/svelte/index.ts` emits the two files, the shared
+> `sveltekit/root-layout.hbs` wraps the app in `<AuthGate>`, and
+> `sveltekit/api-client.hbs` sends `credentials: "include"`. The framework
+> gate (`loom.auth-ui-unsupported-framework`) now admits `svelte` alongside
+> `react` and `vue`. Non-auth svelte output stays byte-identical. Verified:
+> unit emission test (`test/generator/svelte/auth-ui-emit.test.ts`),
+> framework-gate test updated, full fast suite green, and the emitted `web/`
+> project **svelte-check + vite-build green locally** on both svelte packs
+> (shadcnSvelte@v1, flowbite@v1) via a new build-matrix fixture
+> (`test/e2e/fixtures/svelte-build/auth-ui.ddd`, gated in
+> `generated-svelte-build`). **Phoenix LiveView is the only remaining open
+> frontend-target guard** (a separate generator needing its own component).
+>
 > **Phase 6b shipped (all React packs + framework gate).** The `<App/>`
 > wrap now lands in every React pack's `main.hbs` (mantine v7/v9, shadcn
 > v3/v4, mui v5/v7, chakra v2/v3) — verified per-pack (content test ×4)
@@ -78,9 +100,7 @@
 > composable, the shared `credentials: "include"` client, and the `<App/>`
 > wrap in both Vue packs' `main.hbs` (vuetify@v3, shadcnVue@v1) via a tiny
 > render-function root. The framework gate now admits `react` **and**
-> `vue`. **Svelte / Phoenix LiveView guards remain the open
-> frontend-target work** (each is a separate generator needing its own
-> guard component).
+> `vue` (Svelte joined in Phase 6d).
 >
 > **Phase 4 shipped (default-deny enforcement, partial).** Opt-in via
 > `auth { enforcement: denyByDefault }` (default `opt` is inert). An IR
