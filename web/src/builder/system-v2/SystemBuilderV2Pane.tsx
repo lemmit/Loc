@@ -722,8 +722,11 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       });
     }
     return m;
+    // structuredKey + exprMode drive the inline ƒx editor (buildExprToggle);
+    // without them the toggle flips state but this memo never rebuilds the
+    // node data, so the editor never opens for invariant / find / view slots.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, parsed, path, rev, compact]);
+  }, [graph, parsed, path, rev, compact, structuredKey, exprMode]);
 
   // Per-view persisted positions. The ref mirrors localStorage for the
   // current view and is re-read whenever `path` changes (drilling into a new

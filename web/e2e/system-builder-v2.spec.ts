@@ -25,7 +25,7 @@ test("Model v2 drills system → context → aggregate via clicks, and the bread
   await expect(page.getByTestId("c4system-v2-crumb-0")).toBeVisible({ timeout: 5_000 });
 
   // System view → drill into the first module.
-  const moduleNode = page.locator('.react-flow__node[data-id^="module:"]').first();
+  const moduleNode = page.locator('.react-flow__node[data-id^="subdomain:"]').first();
   await expect(moduleNode).toBeVisible({ timeout: 5_000 });
   await moduleNode.click();
   await expect(page.getByTestId("c4system-v2-crumb-1")).toBeVisible();
@@ -55,7 +55,7 @@ test("Model v2 renders an operation body as a statement flow (read-only)", async
   // Drill all the way into Order.confirm — system → module → context → Order →
   // confirm. Use ids so it works regardless of which aggregate sorts first.
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   await page.locator('.react-flow__node[data-id^="context:"]').first().click();
   await page.locator('.react-flow__node[data-id="aggregate:Order"]').click();
   await page.locator('.react-flow__node[data-id="operation:confirm"]').click();
@@ -98,7 +98,7 @@ test("Model v2 adds a construct via the per-view palette (system + context)", as
     .toBe(storagesBefore + 1);
 
   // Drill into module → context; the context palette adds an aggregate.
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   await page.locator('.react-flow__node[data-id^="context:"]').first().click();
   await expect(page.getByTestId("c4system-v2-add-aggregate")).toBeVisible();
   const aggsBefore = await page.locator('.react-flow__node[data-id^="aggregate:"]').count();
@@ -115,7 +115,7 @@ test("Model v2 renames and deletes a construct from the node itself", async ({ p
   await page.getByTestId("doc-tab-model-v2").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   await page.locator('.react-flow__node[data-id^="context:"]').first().click();
 
   // Rename the Order aggregate to OrderX via the on-node pencil → input.
@@ -153,7 +153,7 @@ test("Model v2 — module / aggregate / operation palettes (context / operation 
 
   // System → module: + Context bumps the context node count by one.
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   await expect(page.getByTestId("c4system-v2-add-context")).toBeVisible();
   const ctxBefore = await page.locator('.react-flow__node[data-id^="context:"]').count();
   await page.getByTestId("c4system-v2-add-context").click();
@@ -197,7 +197,7 @@ test("Model v2 renames a context and deletes an operation (v2-only kinds)", asyn
 
   // Drill in to the module so contexts show as nodes.
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   const ctxNode = page.locator('[data-construct-kind="context"]').first();
   const ctxName = (await ctxNode.getAttribute("data-construct-name"))!;
   expect(ctxName).toBeTruthy();
@@ -234,7 +234,7 @@ test("Model v2 renames and deletes an aggregate field (renameMember + deleteFiel
 
   // Drill into Order's aggregate view to see its fields.
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   await page.locator('.react-flow__node[data-id^="context:"]').first().click();
   await page.locator('.react-flow__node[data-id="aggregate:Order"]').click();
 
@@ -273,7 +273,7 @@ test("Model v2 shows inline modules / serves multi-selects on a deployable", asy
   // The `api` deployable node renders both multi-selects.
   const dep = page.locator('[data-construct-kind="deployable"][data-construct-name="api"]');
   await expect(dep).toBeVisible();
-  await expect(dep.getByTestId("c4system-v2-deployable-modules")).toBeVisible();
+  await expect(dep.getByTestId("c4system-v2-deployable-contexts")).toBeVisible();
   await expect(dep.getByTestId("c4system-v2-deployable-serves")).toBeVisible();
 });
 
@@ -286,7 +286,7 @@ test("Model v2 surfaces invariants as nodes and edits the condition inline", asy
 
   // Banking System's Account aggregate declares two invariants.
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   await page.locator('.react-flow__node[data-id^="context:"]').first().click();
   await page.locator('.react-flow__node[data-id="aggregate:Account"]').click();
 
@@ -303,14 +303,14 @@ test("Model v2 edits a repository find's filter inline", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
   // Acme has repositories with finds and filters; storefront-dotnet also.
-  await selectExample(page, /Acme/);
+  await selectExample(page, /Acme \(multi-deployable system\)/);
   await page.getByTestId("doc-tab-model-v2").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
 
   // Drill to the first repository node (acme has `repository Products` /
   // `repository Orders`) and into its find list.
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   await page.locator('.react-flow__node[data-id^="context:"]').first().click();
   const repo = page.locator('[data-construct-kind="repository"]').first();
   await expect(repo).toBeVisible();
@@ -333,7 +333,7 @@ test("Model v2 persists hand-dragged node positions across a reload, and Reset c
 
   // Drill system → module → context so the aggregate nodes are visible.
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   await page.locator('.react-flow__node[data-id^="context:"]').first().click();
 
   const node = page.locator('[data-testid="rf__node-aggregate:Order"]');
@@ -359,7 +359,7 @@ test("Model v2 persists hand-dragged node positions across a reload, and Reset c
   await page.getByTestId("doc-tab-model-v2").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   await page.locator('.react-flow__node[data-id^="context:"]').first().click();
   await expect(node).toBeVisible({ timeout: 5_000 });
   await expect.poll(transform, { timeout: 10_000 }).toBe(dragged);
@@ -382,7 +382,7 @@ test("Model v2 repoints an emit statement's event inline", async ({ page }) => {
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
 
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
-  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
   await page.locator('.react-flow__node[data-id^="context:"]').first().click();
   await page.locator('.react-flow__node[data-id="aggregate:Account"]').click();
   await page.locator('.react-flow__node[data-id="operation:deposit"]').click();

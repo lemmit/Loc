@@ -72,6 +72,14 @@ jobs:
     #            tell whether the bundle is just slow vs genuinely stuck.
     #            5 preview-runtime/runtime specs × up-to-12min × 2 retries
     #            / 2 workers ≈ 60min worst case — 75 leaves a margin)
+    # A #697 diagnostic run at 120 confirmed the cap was NOT the problem:
+    # several specs (likec4, system-builder-v2{,-mobile}) hung the FULL
+    # 720s per-test timeout because Playwright actions were unbounded
+    # (default actionTimeout=0) — a missing element auto-waited to the
+    # test cap instead of failing fast.  That's now fixed at the
+    # playwright.config.ts level (actionTimeout/navigationTimeout), so a
+    # hung action fails in ~45s and the suite runs to completion well
+    # inside 75 again.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v6

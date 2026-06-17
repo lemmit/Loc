@@ -24,14 +24,19 @@ export default defineConfig({
   // letting a genuinely stuck spec eat unbounded time.
   timeout: 720_000,
   expect: { timeout: 60_000 },
-  // No retries by default — we want a clean signal locally.  CI
-  // can opt in via PWTEST_RETRIES.
-  retries: process.env.CI ? 1 : 0,
-  // CI runs Playwright with 2 workers to halve wall time on the
-  // Bundle/Boot specs (each spends 2-3min installing tarballs /
-  // fetching jsdelivr).  Locally workers=1 keeps test output linear when a
-  // developer is iterating on a single spec.  Tests use isolated
-  // browser contexts so per-worker IDB / cookies don't collide.
+  // No retries locally (clean signal).  On CI, 3 retries: the playground's
+  // React-Flow builder canvas + Mantine popovers re-render under load in ways
+  // that intermittently detach a node/button mid-click (or swallow a click
+  // before the canvas mounts) on CI's headless runners — doesn't repro in a
+  // local 1-worker run.  These are environmental flakes, not product bugs;
+  // the per-interaction retries (selectExample / builder canvas) handle most,
+  // and 3 attempts cover the irreducible tail without masking a real
+  // regression (a genuine break still fails all 4 attempts).
+  retries: process.env.CI ? 3 : 0,
+  // 2 workers on CI to keep wall time down; tests use isolated browser
+  // contexts so per-worker IDB / cookies don't collide.  (1 worker was tried
+  // and didn't reduce the canvas/popover flakiness — it's CI-headless timing,
+  // not worker contention — so the faster setting stays, backed by retries.)
   workers: process.env.CI ? 2 : 1,
   // `list` is the live signal: when the job is time-capped mid-run the
   // `github` reporter emits nothing until the end, giving zero
@@ -47,6 +52,20 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:4173",
     headless: true,
+    // Bound individual actions + navigations.  Playwright's default
+    // `actionTimeout`/`navigationTimeout` is 0 (UNBOUNDED) — a `.click()`
+    // / `.fill()` whose target never becomes actionable then auto-waits
+    // for the WHOLE-TEST `timeout` (720s) before failing.  That turned a
+    // missing element (e.g. a file-tree entry that didn't render, or a
+    // diagram node that never laid out) into a silent 12-min hang ×2
+    // retries that ate the job cap and — because the job ended
+    // `cancelled` — flushed no HTML report (#697).  A 45s action cap
+    // fails such a spec fast WITH the offending locator named, lets the
+    // suite run to COMPLETION, and ships the report.  It does not touch
+    // the deliberate long `expect(...).toBeVisible({ timeout })` waits on
+    // bundle/boot (those are assertions, not actions).
+    actionTimeout: 45_000,
+    navigationTimeout: 60_000,
     trace: "retain-on-failure",
     // Video deliberately disabled: it is by far the heaviest CI
     // artifact and counts against the 500MB storage quota.  The

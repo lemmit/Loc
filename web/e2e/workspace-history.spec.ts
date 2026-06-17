@@ -11,7 +11,10 @@ import { waitForPlaygroundReady } from "./_helpers";
 
 /** Wipe the playground's IndexedDB so each test starts clean (mirrors
  *  workspace-persistence.spec.ts). */
-async function wipeStorage(page: import("@playwright/test").Page): Promise<void> {
+async function wipeStorage(
+  page: import("@playwright/test").Page,
+  opts: { mobile?: boolean } = {},
+): Promise<void> {
   await page.goto("/");
   await page.evaluate(async () => {
     const dbs = await indexedDB.databases?.();
@@ -27,7 +30,14 @@ async function wipeStorage(page: import("@playwright/test").Page): Promise<void>
     }
   });
   await page.reload();
-  await waitForPlaygroundReady(page);
+  // `waitForPlaygroundReady` keys off desktop-only chrome (the title heading +
+  // the footer "0 errors" badge, height-0 on mobile); the mobile shell signals
+  // ready via its tab bar instead.
+  if (opts.mobile) {
+    await expect(page.getByTestId("mobile-tabs")).toBeVisible({ timeout: 60_000 });
+  } else {
+    await waitForPlaygroundReady(page);
+  }
 }
 
 /** Prepend a marker line and wait past the autosave-commit debounce
@@ -98,7 +108,7 @@ test.describe("mobile", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test("History is reachable as a mobile tab and lists commits", async ({ page }) => {
-    await wipeStorage(page);
+    await wipeStorage(page, { mobile: true });
     await editAndCommit(page, `// hist-mobile-${Date.now()}`);
 
     await page.getByTestId("mobile-tab-history").click();

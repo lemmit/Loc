@@ -46,7 +46,16 @@ export async function selectExample(page: Page, label: string | RegExp): Promise
   await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: "Choose example" }).click();
   await page.getByRole("option", { name: label }).first().click();
-  await page.getByTestId("workspace-create").click();
+  // On slow CI runners Mantine's combobox portal briefly overlays the create
+  // button and the dialog re-renders mid-transition, so a single click lands on
+  // the closing overlay or a detached node and times out. Retry the click
+  // (re-finding the button each time) until the dialog actually closes —
+  // `workspace-create` is gone once the workspace is created.
+  const create = page.getByTestId("workspace-create");
+  await expect(async () => {
+    await create.click({ timeout: 10_000 });
+    await expect(create).toBeHidden({ timeout: 5_000 });
+  }).toPass({ timeout: 60_000 });
   // Re-wait for the LSP "0 errors" badge — the new workspace remounts
   // the editor and re-parses the source, so the badge momentarily
   // flickers to "—" before the new source validates.

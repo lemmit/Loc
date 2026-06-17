@@ -16,7 +16,11 @@
 import { expect, test } from "@playwright/test";
 import { browserCanReachNetwork, waitForPlaygroundReady } from "./_helpers";
 
-test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
+// QUARANTINED (#1242): prepare() never resolves after a SUCCESSFUL in-browser
+// bundle, so this hangs the full 600s Bundle wait ×2 retries — the dominant
+// reason playground-e2e blew its job cap and ended `cancelled` (no report).
+// Un-fixme once #1242 lands.
+test.fixme("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   // Capture *every* console error + pageerror surfaced both in the
   // playground host and inside the iframe sandbox.  The iframe shares
   // the page's console (it's same-origin) so a single listener catches

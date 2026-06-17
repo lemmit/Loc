@@ -15,7 +15,10 @@ test("architecture.c4 renders an interactive LikeC4 diagram", async ({ page }) =
     await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible({ timeout: 60_000 });
   });
 
-  // Open the LikeC4 model file from the generated file tree.
+  // Open the LikeC4 model file from the generated file tree.  The explorer was
+  // split into "User code" / "Generated" segments; emitted files (`.loom/…`)
+  // live under the Generated segment, so switch to it first.
+  await page.getByTestId("explorer-mode").getByText("Generated").click();
   await page.getByText("architecture.c4", { exact: true }).click();
 
   // The diagram is built + laid out asynchronously; the LikeC4 canvas

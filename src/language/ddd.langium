@@ -1661,8 +1661,13 @@ LValueIdent returns string:
 // Expressions (precedence climbing, lowest to highest)
 // ---------------------------------------------------------------------------
 
+// `Lambda` lives at the top of the precedence ladder (a whole-expression
+// form: a call arg / handler value), NOT as a `PrimaryExpr`.  Keeping it out
+// of binary operands removes the `ID '=>'` ambiguity with match arms: in
+// `match { status == Confirmed => "x" }` the `Confirmed => "x"` must not be
+// parsed as a lambda inside the `==` RHS, stealing the arm's `=>`.
 Expression:
-    MatchExpr | TernaryExpr;
+    Lambda | MatchExpr | TernaryExpr;
 
 // Predicate-arms expression — first arm whose `cond` evaluates to
 // `true` returns its value; optional `else` is the fallthrough.
@@ -1799,8 +1804,7 @@ Lambda:
     );
 
 PrimaryExpr infers Expression:
-      Lambda
-    | RetrievalLiteral
+      RetrievalLiteral
     | BuilderCall
     | ObjectLit
     | ParenExpr
