@@ -144,6 +144,7 @@ export function renderRepositoryImpl(
         "                CorrelationId = RequestContext.Current?.CorrelationId,",
         "                ScopeId = RequestContext.Current?.ScopeId,",
         "                ActorId = RequestContext.Current?.ActorId,",
+        "                ParentId = RequestContext.Current?.ParentId,",
         "            });",
         "        }",
       ]

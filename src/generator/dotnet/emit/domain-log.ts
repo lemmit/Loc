@@ -47,8 +47,14 @@ public static class DomainLog
 `;
 }
 
-export function renderExecutionContextBehavior(ns: string): string {
-  return `// Auto-generated.
+export function renderExecutionContextBehavior(ns: string, opts: { hasLogger: boolean }): string {
+  // Under --trace the behaviour also binds the request logger slice onto the
+  // frame (and surfaces the ids on a logger scope); without trace it is a pure
+  // per-dispatch frame opener — audit / provenance still read the frame's
+  // scope / parent ids, so the behaviour is emitted whenever any of trace /
+  // audit / provenance is present, not just under --trace.
+  if (opts.hasLogger) {
+    return `// Auto-generated.
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -102,6 +108,56 @@ public sealed class ExecutionContextBehavior<TMessage, TResponse> : IPipelineBeh
             ["scopeId"] = frame.ScopeId,
             ["parentId"] = frame.ParentId,
         }))
+        {
+            return await next(message, cancellationToken);
+        }
+    }
+}
+`;
+  }
+  // No-logger variant (audit / provenance, no --trace): the behaviour exists
+  // only to open the per-dispatch frame so audit / provenance rows stamp a
+  // real per-dispatch scope id and a parent id chaining to the caller.  No
+  // ILogger dependency, no logger scope — those are the trace-only additions.
+  return `// Auto-generated.
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Mediator;
+using ${ns}.Domain.Common;
+
+namespace ${ns}.Application.Common;
+
+/// <summary>
+/// Mediator pipeline behaviour that opens a per-dispatch frame on the
+/// ambient <see cref="RequestContext"/> for the duration of every
+/// command/query.  The frame chains to its caller (a child whose
+/// <see cref="RequestContext.ParentId"/> is the caller's
+/// <see cref="RequestContext.ScopeId"/>), so reentrant Send calls form a
+/// causality chain — and audit / provenance rows written under the dispatch
+/// stamp the frame's scope / parent ids, recording each row's call-structure
+/// position within the request.
+///
+/// When no frame is active — a non-HTTP entrypoint (background job, outbox
+/// relay) where no middleware ran — it opens a root frame for the dispatch,
+/// so the work always runs inside a frame.  The disposable Enter handle
+/// restores the previous frame on exit so reentrant Send calls stack cleanly.
+/// </summary>
+public sealed class ExecutionContextBehavior<TMessage, TResponse> : IPipelineBehavior<TMessage, TResponse>
+    where TMessage : IMessage
+{
+    public async ValueTask<TResponse> Handle(
+        TMessage message,
+        MessageHandlerDelegate<TMessage, TResponse> next,
+        CancellationToken cancellationToken)
+    {
+        var parent = RequestContext.Current;
+        // A child frame under the caller, or a fresh root for a non-HTTP
+        // entrypoint where no middleware opened one.
+        var frame = parent is null
+            ? RequestContext.OpenRoot(Guid.NewGuid().ToString(), "en", DateTimeOffset.UtcNow)
+            : RequestContext.OpenChild(parent);
+        using (RequestContext.Enter(frame))
         {
             return await next(message, cancellationToken);
         }

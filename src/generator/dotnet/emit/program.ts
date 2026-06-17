@@ -76,6 +76,10 @@ export function renderProgram(
      *  block, so register the generated `OidcUserVerifier` (last-wins over the
      *  dev stub).  Implies `authRequired`. */
     oidc?: boolean;
+    /** Field-level provenance (provenance.md): like `hasAudit`, its history
+     *  rows stamp the per-dispatch frame's scope / parent ids, so it also
+     *  forces the `ExecutionContextBehavior` frame-opener to be registered. */
+    hasProvenance?: boolean;
   },
 ): string {
   const authRequired = !!options?.authRequired;
@@ -318,15 +322,15 @@ builder.Services.AddScoped(
 `
     : ""
 }${
-  emitTrace
+  emitTrace || options?.hasAudit || options?.hasProvenance
     ? `
-// ExecutionContextBehavior — Mediator pipeline behaviour that binds the
-// request logger onto the ambient RequestContext for the duration of
-// each dispatch.  --trace-injected log calls in aggregate methods
-// resolve through DomainLog → the frame's logger slice, so the
-// per-request correlation reaches domain code without a
-// constructor-injection refactor.  Emitted only when --trace is on; off
-// path keeps Program.cs free of the registration entirely.
+// ExecutionContextBehavior — Mediator pipeline behaviour that opens a
+// per-dispatch frame on the ambient RequestContext for the duration of each
+// dispatch, so audit / provenance rows stamp a real per-dispatch scope id +
+// a parent id chaining to the caller (and, under --trace, the request logger
+// reaches domain code via DomainLog → the frame's logger slice).  Registered
+// whenever trace / audit / provenance is present; otherwise Program.cs stays
+// free of the registration entirely.
 builder.Services.AddScoped(
     typeof(Mediator.IPipelineBehavior<,>),
     typeof(${ns}.Application.Common.ExecutionContextBehavior<,>));

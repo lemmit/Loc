@@ -57,6 +57,7 @@ export function renderAuditRecord(ns: string): string {
       "    public string Status { get; set; } = default!;",
       "    public string? CorrelationId { get; set; }",
       "    public string? ScopeId { get; set; }",
+      "    public string? ParentId { get; set; }",
       "}",
     ) + "\n"
   );
@@ -91,6 +92,7 @@ export function renderAuditRecordConfiguration(ns: string): string {
       '        builder.Property(x => x.Status).HasColumnName("status");',
       '        builder.Property(x => x.CorrelationId).HasColumnName("correlation_id");',
       '        builder.Property(x => x.ScopeId).HasColumnName("scope_id");',
+      '        builder.Property(x => x.ParentId).HasColumnName("parent_id");',
       "        builder.HasIndex(x => new { x.TargetType, x.TargetId });",
       "        builder.HasIndex(x => x.CorrelationId);",
       "    }",

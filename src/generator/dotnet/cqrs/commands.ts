@@ -306,6 +306,7 @@ export function emitOperationCommandAndHandler(
         `            Status = "ok",\n` +
         `            CorrelationId = RequestContext.Current?.CorrelationId,\n` +
         `            ScopeId = RequestContext.Current?.ScopeId,\n` +
+        `            ParentId = RequestContext.Current?.ParentId,\n` +
         `        });\n`
       : "";
     const auditDeps = audited ? [{ type: "IAuditWriter", field: "_audit" }] : [];
