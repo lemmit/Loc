@@ -81,7 +81,8 @@ export function emitDotnetProvenanceAuditMigration(
         "  at timestamptz NOT NULL,",
         "  correlation_id text,",
         "  scope_id text,",
-        "  actor_id text",
+        "  actor_id text,",
+        "  parent_id text",
         ");",
       ].join("\n"),
     );
@@ -123,7 +124,8 @@ export function emitDotnetProvenanceAuditMigration(
         "  at timestamptz NOT NULL,",
         "  status text NOT NULL,",
         "  correlation_id text,",
-        "  scope_id text",
+        "  scope_id text,",
+        "  parent_id text",
         ");",
       ].join("\n"),
     );

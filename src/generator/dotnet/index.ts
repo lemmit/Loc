@@ -994,6 +994,7 @@ function emitProject(
       hasOutbox: !!options?.hasOutbox,
       hasAudit: !!options?.hasAudit,
       oidc: !!options?.oidc,
+      hasProvenance: !!options?.hasProvenance,
     }),
   );
   // Ardalis.Specification ships only when a retrieval exists (EF Core path;
@@ -1041,10 +1042,20 @@ function emitProject(
   }
   if (emitTrace) {
     // Domain-layer logger plumbing — emitted only on --trace so the
-    // default artefact stays free of the DomainLog shim + the pipeline
-    // behaviour that binds the logger slice onto the frame.
+    // default artefact stays free of the DomainLog shim.
     out.set("Domain/Common/DomainLog.cs", renderDomainLog(ns));
-    out.set("Application/Common/ExecutionContextBehavior.cs", renderExecutionContextBehavior(ns));
+  }
+  // The per-dispatch frame opener is needed whenever a consumer reads the
+  // frame's scope / parent ids: --trace (logger slice) OR audit / provenance
+  // (the call-structure stamp on each row).  Without it those rows would all
+  // read the root frame (degenerate scope id, null parent id).  The logger
+  // binding stays trace-gated inside the behaviour.
+  const opensFrames = emitTrace || !!options?.hasAudit || !!options?.hasProvenance;
+  if (opensFrames) {
+    out.set(
+      "Application/Common/ExecutionContextBehavior.cs",
+      renderExecutionContextBehavior(ns, { hasLogger: emitTrace }),
+    );
   }
 }
 

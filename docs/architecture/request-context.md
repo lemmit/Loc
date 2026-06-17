@@ -88,6 +88,20 @@ the principal's id, sourced from the carrier) on every provenanced write; the
 the actor id as Hono `reqCtx.actorId` / .NET `RequestContext.Current?.ActorId`,
 stamped by auth alongside the principal.
 
+**Per-dispatch frames + `parentId` (.NET).** For `parentId` to carry
+information, each dispatch must open its own child frame — otherwise every row
+in a request reads the root frame (one `scopeId`, null `parentId`). On **.NET**
+the `ExecutionContextBehavior` Mediator pipeline behaviour opens a child frame
+per dispatch (`OpenChild`, chaining `parentId` to the caller's `scopeId`); this
+was previously `--trace`-only and is now emitted/registered whenever
+trace **or** audit **or** provenance is present (the logger binding stays
+trace-gated *inside* the behaviour). Both `audit_records` and
+`provenance_records` then stamp `parent_id = RequestContext.Current?.ParentId`,
+so each row records its call-structure position within the request. Hono has no
+per-dispatch dispatch boundary (routes call repositories directly), so it opens
+only the root frame today — `parentId` stays null there until a per-step frame
+seam (e.g. workflow steps) is added; its tables omit the column.
+
 ## Frame semantics (from execution-context.md)
 
 One **current** frame per flow. `correlationId` is shared by every

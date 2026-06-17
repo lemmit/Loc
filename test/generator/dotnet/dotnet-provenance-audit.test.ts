@@ -124,17 +124,21 @@ describe("dotnet provenance runtime", () => {
     expect(rec).toContain("public string? CorrelationId { get; set; }");
     expect(rec).toContain("public string? ScopeId { get; set; }");
     expect(rec).toContain("public string? ActorId { get; set; }");
+    expect(rec).toContain("public string? ParentId { get; set; }");
     const cfg = f.get(
       "api/Infrastructure/Persistence/Configurations/ProvenanceRecordConfiguration.cs",
     )!;
     expect(cfg).toContain('HasColumnName("correlation_id")');
     expect(cfg).toContain('HasColumnName("scope_id")');
     expect(cfg).toContain('HasColumnName("actor_id")');
+    expect(cfg).toContain('HasColumnName("parent_id")');
     const repo = f.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
     expect(repo).toContain("CorrelationId = RequestContext.Current?.CorrelationId,");
     expect(repo).toContain("ScopeId = RequestContext.Current?.ScopeId,");
     // The carrier's who-computed slice (provenance.md / request-context.md).
     expect(repo).toContain("ActorId = RequestContext.Current?.ActorId,");
+    // The call-structure position — the caller frame's scope id (request-context.md).
+    expect(repo).toContain("ParentId = RequestContext.Current?.ParentId,");
   });
 
   it("exposes the current lineage on the response DTO", async () => {
@@ -150,7 +154,7 @@ describe("dotnet provenance runtime", () => {
     const mig = f.get(key!)!;
     expect(mig).toContain("CREATE TABLE IF NOT EXISTS provenance_records");
     expect(mig).toMatch(
-      /provenance_records \([\s\S]*?correlation_id text,[\s\S]*?scope_id text,[\s\S]*?actor_id text/,
+      /provenance_records \([\s\S]*?correlation_id text,[\s\S]*?scope_id text,[\s\S]*?actor_id text,[\s\S]*?parent_id text/,
     );
     // schema-qualified to the resolved dataSource schema (matching ToTable)
     expect(mig).toContain(
@@ -191,13 +195,17 @@ describe("dotnet per-operation audit runtime", () => {
     const rec = f.get("api/Infrastructure/Persistence/AuditRecord.cs")!;
     expect(rec).toContain("public string? CorrelationId { get; set; }");
     expect(rec).toContain("public string? ScopeId { get; set; }");
+    expect(rec).toContain("public string? ParentId { get; set; }");
     const cfg = f.get("api/Infrastructure/Persistence/Configurations/AuditRecordConfiguration.cs")!;
     expect(cfg).toContain('HasColumnName("correlation_id")');
     expect(cfg).toContain('HasColumnName("scope_id")');
+    expect(cfg).toContain('HasColumnName("parent_id")');
     const handler = f.get("api/Application/Orders/Commands/CancelHandler.cs")!;
     expect(handler).toContain("Actor = RequestContext.Current?.PrincipalJson(),");
     expect(handler).toContain("CorrelationId = RequestContext.Current?.CorrelationId,");
     expect(handler).toContain("ScopeId = RequestContext.Current?.ScopeId,");
+    // The call-structure position — the caller frame's scope id (request-context.md).
+    expect(handler).toContain("ParentId = RequestContext.Current?.ParentId,");
     expect(handler).toContain("using Api.Domain.Common;");
   });
 
@@ -214,6 +222,30 @@ describe("dotnet per-operation audit runtime", () => {
     expect(rc).not.toContain("public User? CurrentUser");
   });
 
+  it("opens a per-dispatch frame for audit/provenance even with no --trace (parentId enablement)", async () => {
+    // The frame opener used to be --trace-only, so without it audit/provenance
+    // rows all read the ROOT frame (degenerate scope id, null parent id).  It
+    // is now emitted + registered whenever audit/provenance is present, so each
+    // dispatch gets its own child frame and parentId chains to the caller.
+    const f = await files();
+    const behavior = f.get("api/Application/Common/ExecutionContextBehavior.cs");
+    expect(behavior).toBeDefined();
+    // It opens a child frame under the caller (root when none is active).
+    expect(behavior!).toContain("var parent = RequestContext.Current;");
+    expect(behavior!).toContain("RequestContext.OpenChild(parent)");
+    expect(behavior!).toContain("RequestContext.OpenRoot(");
+    expect(behavior!).toContain("using (RequestContext.Enter(frame))");
+    // No --trace → the logger-less variant: no ILogger dependency, no logger
+    // scope, no DomainLog shim.  Just the frame opener.
+    expect(behavior!).not.toContain("ILogger");
+    expect(behavior!).not.toContain("frame.Logger");
+    expect(behavior!).not.toContain("BeginScope");
+    expect(f.has("api/Domain/Common/DomainLog.cs")).toBe(false);
+    // Registered in the Mediator pipeline so it actually runs per dispatch.
+    const program = f.get("api/Program.cs")!;
+    expect(program).toContain("typeof(Api.Application.Common.ExecutionContextBehavior<,>));");
+  });
+
   it("registers the IAuditWriter in Program.cs", async () => {
     const program = (await files()).get("api/Program.cs")!;
     expect(program).toMatch(
@@ -226,6 +258,8 @@ describe("dotnet per-operation audit runtime", () => {
     const key = [...f.keys()].find((k) => /api\/Migrations\/.*ProvenanceAudit\.cs$/.test(k));
     const mig = f.get(key!)!;
     expect(mig).toContain("CREATE TABLE IF NOT EXISTS audit_records");
-    expect(mig).toMatch(/audit_records \([\s\S]*?correlation_id text,[\s\S]*?scope_id text/);
+    expect(mig).toMatch(
+      /audit_records \([\s\S]*?correlation_id text,[\s\S]*?scope_id text,[\s\S]*?parent_id text/,
+    );
   });
 });

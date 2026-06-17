@@ -105,6 +105,7 @@ export function renderProvenanceRecord(ns: string): string {
       "    public string? CorrelationId { get; set; }",
       "    public string? ScopeId { get; set; }",
       "    public string? ActorId { get; set; }",
+      "    public string? ParentId { get; set; }",
       "}",
     ) + "\n"
   );
@@ -137,6 +138,7 @@ export function renderProvenanceRecordConfiguration(ns: string): string {
       '        builder.Property(x => x.CorrelationId).HasColumnName("correlation_id");',
       '        builder.Property(x => x.ScopeId).HasColumnName("scope_id");',
       '        builder.Property(x => x.ActorId).HasColumnName("actor_id");',
+      '        builder.Property(x => x.ParentId).HasColumnName("parent_id");',
       "        builder.HasIndex(x => new { x.TargetType, x.Field });",
       "        builder.HasIndex(x => x.CorrelationId);",
       "    }",
