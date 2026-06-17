@@ -26,12 +26,18 @@ What's intentionally **not** here yet:
 
 - **Default-deny enforcement** is now opt-in via
   `auth { enforcement: denyByDefault }` (default `opt` preserves the
-  per-`requires` behaviour).  Under `denyByDefault`, every **public
-  operation / destroy** reachable on an `auth: required` deployable
-  must declare a `requires` gate — `requires true` is the explicit
-  "intentionally public" escape — else `loom.default-deny-ungated`
-  fires.  Still uncovered (follow-up): canonical `create`s, workflows,
-  repository finds, and views (their gate surface differs).
+  per-`requires` behaviour).  Under `denyByDefault`, every **client-reachable
+  command** on an `auth: required` deployable must declare a `requires`
+  gate — `requires true` is the explicit "intentionally public" escape —
+  else `loom.default-deny-ungated` fires.  Covered: public aggregate
+  **operations, creates, and destroys**, plus **workflows** (every
+  command-triggered `create … {}` starter and named `handle …(){}`
+  continuation; event-triggered creates and `on(...)` reactors are not
+  client-reachable and so excluded).  Still uncovered: **reads** —
+  repository `find`s and `view`s.  These have no `requires` surface in the
+  grammar at all (only a `where` filter), so flagging them would leave no
+  escape hatch; gating reads needs a `requires`-on-query language addition
+  first (separate follow-up).
 - Workflow bodies calling currentUser-bound finds — the validator
   currently rejects this with a pointer at `getById` or moving the
   call out to the route layer.

@@ -29,6 +29,8 @@ import type {
   SubdomainIR,
   SystemIR,
   TypeIR,
+  WorkflowIR,
+  WorkflowStmtIR,
 } from "../../types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../types/loom-ir.js";
 import {
@@ -81,15 +83,24 @@ export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]):
 }
 
 // Default-deny enforcement (auth.md / quickstart §4.3).  When the system's
-// `auth { enforcement: denyByDefault }` is set, every reachable command on
+// `auth { enforcement: denyByDefault }` is set, every reachable *command* on
 // an `auth: required` backend must declare a `requires` gate — otherwise it
 // serves ungated.  `enforcement: opt` (the default) preserves the existing
 // per-`requires` opt-in.  Escape hatch: `requires true` marks a command
 // intentionally public.
 //
-// Scope (v1): public aggregate actions (operations + destroys), which carry
-// `requires` in their bodies.  Creates / workflows / finds / views are a
-// documented follow-up (their gate surface differs).
+// Scope: every client-reachable command (mutation) endpoint —
+//   - public aggregate actions: operations, **creates**, destroys (each
+//     carries `requires` in its body);
+//   - **workflows**: every command-triggered starter (`create … {}`) and named
+//     `handle …(){}` continuation command (POST endpoints; their bodies carry
+//     `requires`).  Event-triggered creates / `on(...)` reactors are not
+//     client-reachable, so they are excluded.
+//
+// Out of scope: finds and views.  These are *reads*, and the grammar gives them
+// no `requires` surface at all (only a `where` filter) — so flagging them would
+// leave the author no escape hatch.  Gating reads needs a `requires`-on-query
+// language addition first; tracked as a separate follow-up.
 export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): void {
   if (sys.auth?.enforcement !== "denyByDefault") return;
   // Contexts hosted by any `auth: required` backend deployable.  A frontend
@@ -100,14 +111,17 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
     for (const cn of d.contextNames) guarded.add(cn);
   }
   if (guarded.size === 0) return;
+  const isGated = (statements: { kind: string }[]): boolean =>
+    statements.some((s) => s.kind === "requires");
   for (const sd of sys.subdomains) {
     for (const c of sd.contexts) {
       if (!guarded.has(c.name)) continue;
+      // Aggregate command actions: operations + creates + destroys (all
+      // OperationIR with a `requires`-bearing body).
       for (const a of c.aggregates) {
-        for (const op of [...a.operations, ...(a.destroys ?? [])]) {
+        for (const op of [...a.operations, ...(a.creates ?? []), ...(a.destroys ?? [])]) {
           if (op.visibility !== "public") continue;
-          const gated = op.statements.some((s) => s.kind === "requires");
-          if (!gated) {
+          if (!isGated(op.statements)) {
             diags.push({
               severity: "error",
               code: "loom.default-deny-ungated",
@@ -117,8 +131,45 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
           }
         }
       }
+      // Workflow command endpoints: command-triggered starters + named
+      // handlers.  Each is a POST route a client can reach.
+      for (const wf of c.workflows) {
+        for (const entry of workflowCommandEntries(wf)) {
+          if (!isGated(entry.statements)) {
+            diags.push({
+              severity: "error",
+              code: "loom.default-deny-ungated",
+              message: `denyByDefault: workflow '${entry.label}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
+              source: `${wf.name}/${entry.key}`,
+            });
+          }
+        }
+      }
     }
   }
+}
+
+/** The client-reachable command endpoints of a workflow: each command-triggered
+ *  `create` starter and each named `handle` continuation.  Event-triggered
+ *  creates and `on(...)` reactors fire on internal events, never a client POST,
+ *  so they are excluded — the validate-layer analogue of the generator's
+ *  `emitsCommandRoute`. */
+function workflowCommandEntries(
+  wf: WorkflowIR,
+): { label: string; key: string; statements: WorkflowStmtIR[] }[] {
+  const entries: { label: string; key: string; statements: WorkflowStmtIR[] }[] = [];
+  for (const cr of wf.creates) {
+    if (cr.triggerKind !== "command") continue;
+    entries.push({
+      label: cr.name ? `${wf.name}.${cr.name}` : wf.name,
+      key: cr.name ?? "create",
+      statements: cr.statements,
+    });
+  }
+  for (const h of wf.handlers ?? []) {
+    entries.push({ label: `${wf.name}.${h.name}`, key: h.name, statements: h.statements });
+  }
+  return entries;
 }
 
 export function validateReactIdReferences(sys: SystemIR, diags: LoomDiagnostic[]): void {
