@@ -215,6 +215,15 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     void ctx;
   }
 
+  // CanResponse `{ allowed }` — the side-effect-free `can_<op>` companion of a
+  // `when`-gated operation (criterion.md, use site 2).  One shared schema,
+  // emitted when any served op carries a `when` gate.
+  if (
+    allAggregates.some(({ agg }) => agg.operations.some((o) => o.visibility === "public" && o.when))
+  ) {
+    files.set(`${schemaDir}/can_response.ex`, renderCanResponseSchema(webModule));
+  }
+
   // Workflow request schemas
   for (const { wf } of allWorkflows) {
     files.set(
@@ -461,11 +470,41 @@ function renderApiSpec(
             }
           },
           responses: %{
-            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("operation", schemasModule, operationIsGuarded(op))}
+            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("operation", schemasModule, operationIsGuarded(op))}${
+              op.when
+                ? `,
+            409 => %OpenApiSpex.Response{
+              description: "Conflict",
+              content: %{"${PROBLEM_JSON}" => %OpenApiSpex.MediaType{schema: ${schemasModule}.ProblemDetails}}
+            }`
+                : ""
+            }
           }
         }
       }`,
       );
+      // The auto-exposed `GET /<plural>/{id}/can_<op>` companion of a
+      // `when`-gated op — returns `{ allowed }` (criterion.md, use site 2).
+      if (op.when) {
+        pathEntries.push(
+          `      "/${aggSlug}/{id}/can_${opSnake}" => %OpenApiSpex.PathItem{
+        get: %OpenApiSpex.Operation{
+          summary: "can_${op.name} on ${agg.name}",
+          operationId: "${camelId(opOperation(agg.name, `can_${op.name}`))}",
+          tags: ["${aggSlug}"],
+          parameters: [
+            %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
+          ],
+          responses: %{
+            200 => %OpenApiSpex.Response{
+              description: "OK",
+              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${schemasModule}.CanResponse}}
+            }${errorResponseEntries("getById", schemasModule)}
+          }
+        }
+      }`,
+        );
+      }
     }
 
     // Per-find paths: GET /<plural>/<find>.  Skip auto-`all` (already served
@@ -799,6 +838,25 @@ function renderAggregateResponseSchema(agg: EnrichedAggregateIR, webModule: stri
 
 /** Create-response schema — `{ id }` only, matching Hono/.NET's
  *  `Create<Agg>Response`.  The create endpoint returns just the new id. */
+function renderCanResponseSchema(webModule: string): string {
+  return `# Auto-generated.
+defmodule ${webModule}.Api.Schemas.CanResponse do
+  @moduledoc "OpenApiSpex schema for #{__MODULE__}."
+
+  require OpenApiSpex
+
+  OpenApiSpex.schema(%{
+    title: "CanResponse",
+    type: :object,
+    properties: %{
+      allowed: %OpenApiSpex.Schema{type: :boolean}
+    },
+    required: [:allowed]
+  })
+end
+`;
+}
+
 function renderCreateResponseSchema(agg: AggregateIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.Create${agg.name}Response`;
   const idSchema = OPENAPI_ID_VALUE[agg.idValueType] ?? OPENAPI_ID_VALUE.guid;

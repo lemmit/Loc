@@ -3,9 +3,9 @@
 // `operation x() when <pred> { … }` lowers the predicate into
 // `OperationIR.when` in the AGGREGATE env (op params are out of scope),
 // and the validators pin the surface: param references are rejected, the
-// predicate must be bool, private ops warn (no route → no gate), and an
-// elixir-hosted context is gated (`loom.when-unsupported`) until its
-// emitters land.
+// predicate must be bool, private ops warn (no route → no gate), and a
+// java-hosted context is gated (`loom.when-unsupported`) until its
+// emitters land (node / dotnet / python / elixir emit the gate + can-query).
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -96,14 +96,15 @@ describe("when gate — backend support (loom.when-unsupported)", () => {
       .map((d) => d.message);
   };
 
-  it("passes on node, dotnet and python", async () => {
+  it("passes on node, dotnet, python and elixir", async () => {
     expect(await codes("hono")).toEqual([]);
     expect(await codes("dotnet")).toEqual([]);
     expect(await codes("python")).toEqual([]);
+    expect(await codes("elixir")).toEqual([]);
   });
 
-  it("gates an elixir-hosted context", async () => {
-    const msgs = await codes("elixir");
+  it("gates a java-hosted context (the remaining unsupported backend)", async () => {
+    const msgs = await codes("java");
     expect(msgs).toHaveLength(1);
     expect(msgs[0]).toContain("can-ship");
   });
