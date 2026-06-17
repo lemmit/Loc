@@ -33,6 +33,7 @@
     "test:python": "LOOM_PYTHON_BUILD=1 vitest run test/e2e/generated-python-build.test.ts",
     "test:java": "LOOM_JAVA_BUILD=1 vitest run test/e2e/generated-java-build.test.ts",
     "test:k8s": "LOOM_K8S=1 vitest run test/e2e/k8s-validate.test.ts",
+    "test:k8s-e2e": "bash scripts/k8s-e2e-smoke.sh",
     "test:format-dotnet": "LOOM_DOTNET_FORMAT=1 vitest run test/e2e/generated-dotnet-format.test.ts",
     "test:phoenix": "LOOM_PHOENIX_BUILD=1 vitest run test/e2e/generated-phoenix-build.test.ts",
     "test:phoenix-vanilla": "LOOM_PHOENIX_VANILLA_BUILD=1 vitest run test/e2e/generated-elixir-vanilla-build.test.ts",
