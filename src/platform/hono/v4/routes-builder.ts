@@ -880,6 +880,7 @@ function emitOperationRoute(
       out.push(`        status: "ok",`);
       out.push(`        correlationId: reqCtx?.correlationId ?? null,`);
       out.push(`        scopeId: reqCtx?.scopeId ?? null,`);
+      out.push(`        parentId: reqCtx?.parentId ?? null,`);
       out.push(`      });`);
     }
     if (prov) {
@@ -897,6 +898,7 @@ function emitOperationRoute(
       out.push(`          correlationId: reqCtx?.correlationId ?? null,`);
       out.push(`          scopeId: reqCtx?.scopeId ?? null,`);
       out.push(`          actorId: reqCtx?.actorId ?? null,`);
+      out.push(`          parentId: reqCtx?.parentId ?? null,`);
       out.push(`        });`);
       out.push(`      }`);
     }

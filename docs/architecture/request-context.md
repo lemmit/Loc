@@ -97,10 +97,18 @@ was previously `--trace`-only and is now emitted/registered whenever
 trace **or** audit **or** provenance is present (the logger binding stays
 trace-gated *inside* the behaviour). Both `audit_records` and
 `provenance_records` then stamp `parent_id = RequestContext.Current?.ParentId`,
-so each row records its call-structure position within the request. Hono has no
-per-dispatch dispatch boundary (routes call repositories directly), so it opens
-only the root frame today — `parentId` stays null there until a per-step frame
-seam (e.g. workflow steps) is added; its tables omit the column.
+so each row records its call-structure position within the request.
+
+On **Hono** a direct operation route runs in the root frame (so its rows carry
+a null `parentId`), but a **workflow** is a composite unit: it now runs its body
+inside a child frame (`runInChildContext`, chaining `parentId` to the request's
+root scope) and flushes provenance for its saved aggregates there. Previously a
+provenanced write made *inside* a workflow step was silently dropped — the
+per-operation route flushed `provenance_records`, but a workflow calls
+operations inline and never drained their lineage. Both Hono tables carry the
+`parent_id` column. (Audit rows inside workflows still aren't emitted — they
+need per-step before/after capture, a separate follow-up — so `audit_records`
+on Hono only ever stamps the route-level `parentId`, which is null today.)
 
 ## Frame semantics (from execution-context.md)
 

@@ -65,6 +65,7 @@ export type RequestLogger = Logger;
 
 const ALS_TS = `// Auto-generated.
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import { baseLogger, type RequestLogger } from "./log";
 
 /** The ambient execution context for a single request/flow — the one
@@ -111,6 +112,24 @@ export const requestContextStore = new AsyncLocalStorage<RequestContext>();
 /** The in-flight request context, or undefined outside any request. */
 export function requestContext(): RequestContext | undefined {
   return requestContextStore.getStore();
+}
+
+/** Run \`fn\` inside a fresh CHILD frame of the current request context: a new
+ *  \`scopeId\` whose \`parentId\` chains to the caller's \`scopeId\`, inheriting the
+ *  request-stable tier (correlation id, principal, actor id, locale, logger).
+ *  A nested unit of work (e.g. a workflow) opens one so the audit / provenance
+ *  rows written inside it record their call-structure position — a distinct
+ *  scope under the request, not the flat root frame.  Outside any request
+ *  (no parent frame) it runs \`fn\` directly. */
+export function runInChildContext<T>(fn: () => Promise<T>): Promise<T> {
+  const parent = requestContextStore.getStore();
+  if (parent === undefined) return fn();
+  const child: RequestContext = {
+    ...parent,
+    scopeId: randomUUID(),
+    parentId: parent.scopeId,
+  };
+  return requestContextStore.run(child, fn);
 }
 
 /** Resolve the request-scoped logger.  Falls back to the process-level
