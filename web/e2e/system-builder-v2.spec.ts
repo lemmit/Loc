@@ -277,10 +277,7 @@ test("Model v2 shows inline modules / serves multi-selects on a deployable", asy
   await expect(dep.getByTestId("c4system-v2-deployable-serves")).toBeVisible();
 });
 
-// QUARANTINED (#1261): catches a real bug — the v2 inline ƒx editor never opens
-// for an invariant node (toggle sets the key but c4system-v2-expression-editor
-// doesn't render). Un-fixme when #1261 is fixed.
-test.fixme("Model v2 surfaces invariants as nodes and edits the condition inline", async ({ page }) => {
+test("Model v2 surfaces invariants as nodes and edits the condition inline", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Banking System/);
@@ -302,10 +299,7 @@ test.fixme("Model v2 surfaces invariants as nodes and edits the condition inline
   await expect(first.getByTestId("c4system-v2-expression-editor")).toBeVisible({ timeout: 10_000 });
 });
 
-// QUARANTINED (#1261): catches a real bug — the v2 inline ƒx editor never opens
-// for a repository-find node (same slot-resolution gap as the invariant case).
-// Un-fixme when #1261 is fixed.
-test.fixme("Model v2 edits a repository find's filter inline", async ({ page }) => {
+test("Model v2 edits a repository find's filter inline", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
   // Acme has repositories with finds and filters; storefront-dotnet also.

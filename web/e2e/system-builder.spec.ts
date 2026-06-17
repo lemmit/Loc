@@ -158,10 +158,7 @@ test("renames a field (and its usages) from the inspector", async ({ page }) => 
   await expect(names.nth(0)).toHaveValue("customerId");
 });
 
-// QUARANTINED (#1261): catches a real bug — adding one of each construct kind
-// via the palette doesn't yield before+9 nodes and trips "Source has syntax
-// errors" (a palette add emits invalid source). Un-fixme when #1261 is fixed.
-test.fixme("adds every domain + infra construct kind from the palette", async ({ page }) => {
+test("adds every domain + infra construct kind from the palette", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System/);

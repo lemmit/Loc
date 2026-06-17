@@ -100,7 +100,7 @@ function constructTemplate(
     case "event":
       return `\n    event ${name} {\n    }\n`;
     case "workflow":
-      return `\n    workflow ${name}() {\n    }\n`;
+      return `\n    workflow ${name} {\n    }\n`;
     case "repository": {
       const agg = firstAggregateIn(container as BoundedContext);
       return agg ? `\n    repository ${name} for ${agg} {\n    }\n` : null;
