@@ -1,4 +1,4 @@
-import type { FieldIR, TypeIR, UserIR } from "../../ir/types/loom-ir.js";
+import type { AuthIR, AuthValueIR, FieldIR, TypeIR, UserIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { renderPyType } from "./render-expr.js";
@@ -13,17 +13,46 @@ import { renderPyType } from "./render-expr.js";
 //   app/auth/verifier.py   — registry + helper for the user-supplied
 //                            verifier function
 //   app/auth/middleware.py — Starlette middleware mounted in app/main.py
+//   app/auth/routes.py     — /auth/me session probe (the `auth: ui` guard
+//                            reads it; works for the verifier AND the stub)
+//   app/auth/oidc.py       — (OIDC only) the PyJWT + JWKS token verifier
+//                            and the /auth/login|callback|logout handshake
 //
-// The user calls `register_user_verifier(fn)` before serving.  The
-// middleware bypass list matches the Hono/.NET sides exactly:
-// /health, /ready, /openapi.json, /swagger.
+// Without an `auth { oidc }` block the user calls `register_user_verifier(fn)`
+// by hand (main.py ships a permissive dev stub).  With one, the generated
+// OIDC verifier is auto-registered and the handshake router mounted.  The
+// middleware bypass list matches the Hono/.NET sides: /health, /ready,
+// /openapi.json, /swagger (plus /auth/login|callback|logout under OIDC).
 // ---------------------------------------------------------------------------
 
-export function emitPyAuthFiles(user: UserIR, out: Map<string, string>): void {
+export function emitPyAuthFiles(user: UserIR, out: Map<string, string>, auth?: AuthIR): void {
   out.set("app/auth/__init__.py", "");
   out.set("app/auth/user.py", renderUserModule(user));
   out.set("app/auth/verifier.py", VERIFIER_PY);
-  out.set("app/auth/middleware.py", renderAuthMiddleware(user));
+  out.set("app/auth/middleware.py", renderAuthMiddleware(user, !!auth));
+  // /auth/me is emitted whenever a backend has auth — the frontend `auth: ui`
+  // guard probes it, and it works for both the OIDC verifier and the dev stub.
+  out.set("app/auth/routes.py", ROUTES_PY);
+  if (auth) {
+    out.set("app/auth/oidc.py", renderOidcModule(user, auth));
+  }
+}
+
+/** Render an `AuthValueIR` (literal | env) as a Python expression, read at
+ *  runtime via os.environ (an unset env → "" so a verify fails loudly). */
+function pyAuthValue(v: AuthValueIR | undefined, fallback = '""'): string {
+  if (!v) return fallback;
+  if (v.kind === "literal") return JSON.stringify(v.value);
+  return `os.environ.get(${JSON.stringify(v.env)}, "")`;
+}
+
+/** The IdP claim path projected onto a user field — explicit `claims:` wins;
+ *  else `id` → `sub`, every other field reads its own snake name.  Mirrors the
+ *  Hono / .NET / Phoenix `claimPathFor`. */
+function claimPathFor(field: string, auth: AuthIR): string {
+  const mapped = auth.claims.find((c) => c.field === field);
+  if (mapped) return mapped.path;
+  return field === "id" ? "sub" : snake(field);
 }
 
 /** Python kwargs for the dev-stub User — same defaults as Hono's
@@ -163,8 +192,14 @@ function actorIdAttr(user: UserIR): string | null {
   return field ? snake(field.name) : null;
 }
 
-function renderAuthMiddleware(user: UserIR): string {
+function renderAuthMiddleware(user: UserIR, oidc: boolean): string {
   const idAttr = actorIdAttr(user);
+  // Under OIDC the /auth/login|callback|logout redirect handlers must be
+  // reachable without a verified principal — bypass them.  /auth/me is NOT
+  // bypassed (the guard reads the verified user).
+  const bypass = oidc
+    ? '("/health", "/ready", "/openapi.json", "/swagger", "/auth/login", "/auth/callback", "/auth/logout")'
+    : '("/health", "/ready", "/openapi.json", "/swagger")';
   return lines(
     '"""Auth middleware.  Auto-generated.',
     "",
@@ -182,7 +217,7 @@ function renderAuthMiddleware(user: UserIR): string {
     "from app.auth.verifier import verify_user_or_throw",
     "from app.obs.log import set_actor_id",
     "",
-    'BYPASS_PREFIXES = ("/health", "/ready", "/openapi.json", "/swagger")',
+    `BYPASS_PREFIXES = ${bypass}`,
     "",
     "",
     "class AuthMiddleware(BaseHTTPMiddleware):",
@@ -202,4 +237,250 @@ function renderAuthMiddleware(user: UserIR): string {
     "        return await call_next(request)",
     "",
   );
+}
+
+// ---------------------------------------------------------------------------
+// /auth/me session probe — emitted whenever a backend has auth.  Returns the
+// verified principal the middleware stamped onto request.state (the
+// `auth: ui` frontend guard reads it); works for the verifier AND the stub.
+// Mounted at the app root (not under the embedded-SPA /api prefix).
+// ---------------------------------------------------------------------------
+
+const ROUTES_PY = `"""Auth session-probe route.  Auto-generated.
+
+GET /auth/me echoes the verified current_user (the \`auth: ui\` frontend guard
+reads it).  Runs through AuthMiddleware, so the principal is verified (or the
+request 401'd) before this handler sees it.
+"""
+
+from dataclasses import asdict
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+
+from app.auth.user import User
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+# include_in_schema=False — auth endpoints are not business operations, so they
+# stay out of the OpenAPI contract (cross-backend parity: .NET excludes via
+# ExcludeFromDescription, Java via @Hidden, Hono never adds them to its spec).
+@router.get("/me", include_in_schema=False)
+async def me(request: Request) -> JSONResponse:
+    user: User | None = getattr(request.state, "current_user", None)
+    return JSONResponse(asdict(user) if user is not None else None)
+`;
+
+// ---------------------------------------------------------------------------
+// OIDC verifier + redirect handshake (D-AUTH-OIDC).  PyJWT validates the
+// bearer token's signature against the issuer's JWKS (discovered + cached via
+// PyJWKClient), checks iss / exp / aud, and maps the configured claims onto the
+// typed User.  The handshake router runs the authorization-code flow.  Config
+// is read at runtime from os.environ (issuer read lazily — a module attribute
+// would freeze the empty import-time env).  PyJWKClient / urllib impose no
+// https requirement, so a plain-http dev issuer (the bundled Keycloak) works.
+// ---------------------------------------------------------------------------
+
+function renderBuildUserKwargs(user: UserIR, auth: AuthIR): string {
+  return user.fields
+    .map((f) => {
+      const key = snake(f.name);
+      const pyType = renderPyType(f.optional ? { kind: "optional", inner: f.type } : f.type);
+      const path = claimPathFor(f.name, auth);
+      const isArray =
+        f.type.kind === "array" || (f.type.kind === "optional" && f.type.inner.kind === "array");
+      const read = isArray
+        ? `_claim(payload, ${JSON.stringify(path)}) or []`
+        : `_claim(payload, ${JSON.stringify(path)})`;
+      return `        ${key}=cast(${pyType}, ${read}),`;
+    })
+    .join("\n");
+}
+
+function renderOidcModule(user: UserIR, auth: AuthIR): string {
+  const issuerExpr = pyAuthValue(auth.oidc.issuer);
+  const clientIdExpr = pyAuthValue(auth.oidc.clientId);
+  // A public client has no secret: default to the env read (None when unset)
+  // so the token exchange omits client_secret rather than sending "".
+  const clientSecretExpr = auth.oidc.clientSecret
+    ? pyAuthValue(auth.oidc.clientSecret)
+    : `os.environ.get("OIDC_CLIENT_SECRET")`;
+  const scopes = (auth.oidc.scopes.length ? auth.oidc.scopes : ["openid"]).join(" ");
+  const buildUser = renderBuildUserKwargs(user, auth);
+  return `"""Generated OIDC verifier + redirect handshake (D-AUTH-OIDC).  Auto-generated.
+
+Validates the inbound JWT against the issuer's JWKS and maps the configured
+claims onto User; the handshake router runs the authorization-code flow and
+issues the HttpOnly \`session\` cookie the verifier reads.  Loom owns no auth
+runtime beyond "validate a token / drive the redirect" — the IdP owns the rest.
+"""
+
+import json
+import os
+import secrets
+import urllib.parse
+import urllib.request
+from typing import Any, cast
+
+import jwt
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse, RedirectResponse, Response
+
+from app.auth.user import User
+from app.auth.verifier import register_user_verifier
+
+_SCOPES = ${JSON.stringify(scopes)}
+_AUDIENCE = os.environ.get("OIDC_AUDIENCE")
+
+
+def _issuer() -> str:
+    return (${issuerExpr}).rstrip("/")
+
+
+def _client_id() -> str:
+    return ${clientIdExpr}
+
+
+def _client_secret() -> str | None:
+    return ${clientSecretExpr}
+
+
+def _redirect_uri() -> str:
+    return os.environ.get("OIDC_REDIRECT_URI", "http://localhost:8000/auth/callback")
+
+
+def _post_login() -> str:
+    return os.environ.get("OIDC_POST_LOGIN_REDIRECT", "/")
+
+
+def _get_json(url: str) -> dict[str, Any]:
+    with urllib.request.urlopen(url) as resp:
+        return cast(dict[str, Any], json.loads(resp.read()))
+
+
+def _discovery() -> dict[str, Any]:
+    return _get_json(_issuer() + "/.well-known/openid-configuration")
+
+
+_jwk_client: jwt.PyJWKClient | None = None
+
+
+def _jwks_client() -> jwt.PyJWKClient:
+    global _jwk_client
+    if _jwk_client is None:
+        _jwk_client = jwt.PyJWKClient(cast(str, _discovery()["jwks_uri"]))
+    return _jwk_client
+
+
+def _claim(payload: dict[str, Any], path: str) -> Any:
+    current: Any = payload
+    for segment in path.split("."):
+        if isinstance(current, dict) and segment in current:
+            current = current[segment]
+        else:
+            return None
+    return current
+
+
+def _token_from(request: Request) -> str | None:
+    header = request.headers.get("authorization")
+    if header is not None and header.lower().startswith("bearer "):
+        return header[7:]
+    cookie = request.cookies.get("session")
+    return cookie if cookie else None
+
+
+async def _oidc_verifier(request: Request) -> User | None:
+    token = _token_from(request)
+    if token is None:
+        return None
+    try:
+        signing_key = _jwks_client().get_signing_key_from_jwt(token)
+        payload: dict[str, Any] = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256", "RS384", "RS512", "ES256", "ES384"],
+            issuer=_issuer(),
+            audience=_AUDIENCE,
+            options={"verify_aud": _AUDIENCE is not None},
+        )
+    except Exception:
+        return None
+    return User(
+${buildUser}
+    )
+
+
+def register_oidc_verifier() -> None:
+    """Register the generated verifier.  Called from main.py at startup."""
+    register_user_verifier(_oidc_verifier)
+
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/login", include_in_schema=False)
+async def login() -> RedirectResponse:
+    authorize = cast(str, _discovery()["authorization_endpoint"])
+    state = secrets.token_urlsafe(16)
+    query = urllib.parse.urlencode(
+        {
+            "response_type": "code",
+            "client_id": _client_id(),
+            "redirect_uri": _redirect_uri(),
+            "scope": _SCOPES,
+            "state": state,
+        }
+    )
+    response = RedirectResponse(authorize + "?" + query)
+    response.set_cookie("oidc_state", state, httponly=True, samesite="lax")
+    return response
+
+
+@router.get("/callback", include_in_schema=False)
+async def callback(request: Request) -> Response:
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    if not code or not state or state != request.cookies.get("oidc_state"):
+        return JSONResponse({"error": "invalid_state"}, status_code=400)
+    token = _exchange_code(code)
+    if token is None:
+        return JSONResponse({"error": "token_exchange_failed"}, status_code=401)
+    response: Response = RedirectResponse(_post_login())
+    response.set_cookie("session", token, httponly=True, samesite="lax")
+    response.delete_cookie("oidc_state")
+    return response
+
+
+@router.get("/logout", include_in_schema=False)
+async def logout() -> RedirectResponse:
+    response = RedirectResponse(_post_login())
+    response.delete_cookie("session")
+    return response
+
+
+def _exchange_code(code: str) -> str | None:
+    form: dict[str, str] = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": _redirect_uri(),
+        "client_id": _client_id(),
+    }
+    secret = _client_secret()
+    if secret:
+        form["client_secret"] = secret
+    data = urllib.parse.urlencode(form).encode()
+    headers = {"content-type": "application/x-www-form-urlencoded"}
+    token_request = urllib.request.Request(
+        cast(str, _discovery()["token_endpoint"]), data=data, headers=headers
+    )
+    try:
+        with urllib.request.urlopen(token_request) as resp:
+            doc = cast(dict[str, Any], json.loads(resp.read()))
+    except Exception:
+        return None
+    access = doc.get("access_token")
+    return access if isinstance(access, str) else None
+`;
 }

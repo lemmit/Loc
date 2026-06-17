@@ -209,6 +209,31 @@
 > grant returns a token whose `iss` is `host.docker.internal:8081` (matching
 > the api container's `OIDC_ISSUER`) with `realm_access.roles=[agent,user]`.
 >
+> **Phase 5 — Python OIDC shipped (FastAPI verifier + handshake — backend
+> matrix complete).** Under an `auth { oidc }` block the Python backend now
+> emits `app/auth/oidc.py` — a verifier that validates the bearer token against
+> the issuer's JWKS via **PyJWT** (`PyJWKClient`, discovered from
+> `.well-known/openid-configuration`), checks iss / exp / aud, and projects the
+> configured claims onto the typed `User` (dotted paths like
+> `realm_access.roles`) — plus the `/auth/login|callback|logout` redirect
+> handshake (state cookie → code exchange via `urllib` → HttpOnly `session`
+> cookie, read by the verifier). It's auto-registered in `main.py` in place of
+> the dev stub; `app/auth/routes.py` adds the `/auth/me` probe (always present
+> under `auth: required` — Python previously had **no** `/auth/me`, so a
+> frontend guard targeting Python is now wired); the middleware bypasses the
+> three handshake paths; `pyjwt[crypto]` ships in `pyproject.toml` only under
+> OIDC. Issuer read at runtime; PyJWKClient/urllib impose no https requirement,
+> so the plain-http dev Keycloak works. Dev-stub path stays byte-identical.
+> **Verified locally end-to-end** (`uv run ruff` + `mypy --strict` clean on both
+> paths; a native-uvicorn runtime e2e against a real Keycloak: 401 no-token /
+> 200 with token / `/auth/me` → `{id←sub, roles←realm_access.roles, email}` /
+> 401 forged / `/auth/login` → 307-to-IdP). 5 codegen tests
+> (`test/generator/python/python-auth-oidc.test.ts`); compile gate adds the
+> `auth-oidc.ddd` python-build fixture (ruff + `mypy --strict`); runtime e2e
+> `auth-oidc-python-e2e.test.ts` (`LOOM_AUTH_E2E_PYTHON=1`, workflow
+> `python-oidc-e2e.yml`). **All five backends now ship the OIDC verifier +
+> /auth/me + handshake.**
+>
 > **Phase 5 — Java OIDC shipped (Spring Boot verifier + handshake).** Under an
 > `auth { oidc }` block the Java backend now emits `auth/OidcUserVerifier.java`
 > — a `@Primary` `UserVerifier` bean that validates the bearer token against the
@@ -245,12 +270,13 @@
 > (the dev sandbox has no JDK/Gradle/docker) — the generated output was inspected
 > by hand and the fast-suite codegen tests pin its shape.
 >
-> **Status: Phases 0–1, 2 (.NET OIDC complete), 3 (dev Keycloak), 4
-> (partial), 5 (Java OIDC complete; Phoenix verifier — Phoenix handshake/e2e
-> deferred), 6 (React), 7 + OIDC runtime e2e (Hono + .NET + Java) done; rest of
-> Phase 5 (Python) + Phoenix handshake/e2e +
-> creates/workflows/finds/views default-deny + non-React frontend guards
-> pending.** Decisions locked with the maintainer (2026-06-15):
+> **Status: Phases 0–1, 2 (.NET), 3 (dev Keycloak), 4 (partial), 5 COMPLETE
+> (all five backends — Hono/.NET/Phoenix/Java/Python — ship the OIDC verifier
+> + /auth/me + /auth/login|callback|logout handshake, each runtime-e2e'd
+> against a real Keycloak), 6 COMPLETE (React + Vue + Svelte `auth: ui`
+> guards), 7 done. Remaining: creates/workflows/finds/views default-deny
+> (Phase 4 completion) + a Phoenix-LiveView frontend guard.** Decisions locked
+> with the maintainer (2026-06-15):
 >
 > 1. **Scope** = OIDC authentication providers + playground auth stub
 >    **+ default-deny enforcement** (the known `auth.md` hole, §4.3 of the
@@ -297,7 +323,7 @@ plumbing, which is done.
 | Hono | `src/platform/hono/v4/auth-emit.ts` | `auth/user-types.ts`, `auth/verifier.ts`, `auth/middleware.ts` | `registerUserVerifier(fn)` | registry default |
 | .NET | `src/generator/dotnet/auth-emit.ts` | `Auth/{User,IUserVerifier,ICurrentUserAccessor,HttpContextCurrentUserAccessor,UserMiddleware,DevStubUserVerifier}.cs` | `IUserVerifier` DI | `DevStubUserVerifier.cs` |
 | Java | `src/generator/java/emit/auth.ts` | `{User,UserVerifier,DevStubUserVerifier,UserFilter,CurrentUserAccessor}.java` | `UserVerifier` bean | `DevStubUserVerifier.java` |
-| Python | `src/generator/python/auth-emit.ts` | `app/auth/{user,verifier,middleware}.py` | `register_user_verifier(fn)` | registry default |
+| Python | `src/generator/python/auth-emit.ts` | `app/auth/{user,verifier,middleware,routes}.py` + `oidc.py` (OIDC) | OIDC: PyJWT + JWKS; dev stub otherwise | `/auth/me` + `/auth/login\|callback\|logout` handshake |
 | Phoenix | `src/generator/elixir/auth-emit.ts` | `auth.ex`, `live_auth.ex`, `auth_controller.ex` | OIDC: JOSE + JWKS (`verify_token/1`); dev stub otherwise | `/auth/me` + `/auth/login\|callback\|logout` handshake |
 | React/Vue/Svelte | — | none | — | — (backend-driven) |
 

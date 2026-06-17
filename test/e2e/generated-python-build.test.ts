@@ -46,6 +46,10 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   // `auth: required` — User dataclass + verifier registry + middleware,
   // requires-guarded op/workflow, currentUser-scoped find.
   ["test/e2e/fixtures/python-build/auth.ddd", "api"],
+  // `auth { oidc }` — the PyJWT + JWKS verifier (app/auth/oidc.py), the
+  // /auth/login|callback|logout handshake + /auth/me probe, and the
+  // pyjwt[crypto] dep, under ruff + mypy --strict.
+  ["test/e2e/fixtures/python-build/auth-oidc.ddd", "api"],
   // `seed { ... }` — domain-create + raw datasets, __loom_seed marker.
   ["test/e2e/fixtures/python-build/seeds.ddd", "api"],
   // `operation X() extern` — handler registry + dev-stubs + boot verify,
