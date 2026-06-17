@@ -53,7 +53,7 @@ npm run test:obs-java     # LOOM_OBS_E2E_JAVA=1 — same for the Java backend (d
 npm run test:obs-python   # LOOM_OBS_E2E_PYTHON=1 — same for the Python backend (docker postgres, or LOOM_OBS_PG_URL override)
 npm run test:biome-gen    # LOOM_BIOME=1 — Biome lint against emitted TS/TSX (already run in `test.yml`)
 npm run test:k8s          # LOOM_K8S=1 — `generate system --k8s` → helm lint + helm template | kubeconform (+ raw k8s/); needs helm + kubeconform on PATH
-npm run test:k8s-e2e      # cluster smoke — install the emitted chart into a kind cluster + throwaway postgres, assert workloads boot + backend /ready + a real findAll GET round-trips (migrated table → wire shape); needs kind + kubectl + helm + docker (run `kind create cluster` first)
+npm run test:k8s-e2e      # cluster smoke — install the emitted chart into a kind cluster + throwaway postgres, assert workloads boot + backend /ready + real read (findAll GET) AND write (POST a fixture body → 201 → read back) round-trips; needs kind + kubectl + helm + docker (run `kind create cluster` first)
 ```
 
 `LOOM_E2E_CA_DIR=<dir-of-*.crt>` injects custom CAs when running the e2e suite behind a TLS-intercepting proxy.
@@ -204,7 +204,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `test.yml` — the fast vitest suite (the same one `npm test` runs); also runs `test:biome-gen` against emitted TS/TSX.
 - `langium-generated.yml` — guards that `npm run langium:generate` produces deterministic output (drift between `ddd.langium` and the committed types).
 - `k8s-build.yml` — `generate system --k8s` → `helm lint` + `helm template` | `kubeconform` (rendered chart + raw `k8s/`) against the k8s API schemas. Catches Helm/manifest emitter drift. See `docs/kubernetes.md`.
-- `k8s-e2e.yml` — heavier cluster smoke: installs the emitted chart into a `kind` cluster (+ throwaway postgres) and asserts the workloads boot, the backend reaches `/ready`, and a real auto-`findAll` `GET` (discovered from `/openapi.json`) round-trips through the migrated DB. NOT per-PR — runs nightly, on the `e2e-k8s` PR label, or via manual dispatch. See `docs/kubernetes.md`.
+- `k8s-e2e.yml` — heavier cluster smoke: installs the emitted chart into a `kind` cluster (+ throwaway postgres) and asserts the workloads boot, the backend reaches `/ready`, and real read (auto-`findAll` `GET` discovered from `/openapi.json`) + write (`POST` a per-example fixture body → `201` → read back) round-trips through the migrated DB. NOT per-PR — runs nightly, on the `e2e-k8s` PR label, or via manual dispatch. See `docs/kubernetes.md`.
 - `pages.yml` — typecheck + smoke + build playground + deploy docs/playground to GitHub Pages (main only).
 - `generated-react-build.yml` — matrix `{example × pack}`, generates the React project, `npm install`, `tsc --noEmit`. Catches generator drift invisible to IR-level tests.
 - `generated-svelte-build.yml` — matrix `{example × svelte pack}`, generates the SvelteKit project, `npm install`, `svelte-check --fail-on-warnings`, `vite build`.

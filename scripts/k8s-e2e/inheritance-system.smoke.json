@@ -1,0 +1,15 @@
+{
+  "_comment": "Write round-trip recipe for the k8s-e2e cluster smoke (scripts/k8s-e2e-smoke.sh). A valid CreditCard create body that satisfies the example's domain invariants (holderName.length > 0, last4.length == 4, expiryMonth in 1..12) — these live in the domain, NOT the OpenAPI request schema, so a synthesized body would 422. Loom's wire shape is identical across backends, so this single body is backend-agnostic.",
+  "create": {
+    "path": "/credit_cards",
+    "body": {
+      "holderName": "Ada Lovelace",
+      "last4": "4242",
+      "network": "Visa",
+      "expiryMonth": 12,
+      "expiryYear": 2030
+    }
+  },
+  "list": "/credit_cards",
+  "idField": "id"
+}

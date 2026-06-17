@@ -162,20 +162,30 @@ Two tiers:
   --wait` (which gates on the `/ready` readiness probe → proves the DB
   `Secret` wired up), `kubectl rollout status` every workload, an explicit
   `curl /health` + `/ready` through the backend's ClusterIP Service, and
-  finally a **real domain read round-trip**: it discovers an auto-`findAll`
-  collection `GET` from the backend's `/openapi.json` and calls it (inside
-  the api pod, via the container's own `node`), asserting `200` + JSON.
-  That exercises what `/ready` can't — migrations applied at boot → the
-  repository's `SELECT` hits a real, migrated table → wire-shape
-  serialization → HTTP routing (a missing table would `500`). Endpoint
-  discovery from OpenAPI keeps it example-agnostic; a *write* round-trip is
-  out of scope (a valid `POST` body is domain-specific). Heavier (it builds
-  container images), so it is **not** per-PR —
+  finally **two real domain round-trips** (both inside the api pod, via the
+  container's own `node`):
+  - a **read** — discover an auto-`findAll` collection `GET` from the
+    backend's `/openapi.json` and call it, asserting `200` + JSON. That
+    exercises what `/ready` can't — migrations applied at boot → the
+    repository's `SELECT` hits a real, migrated table → wire-shape
+    serialization → HTTP routing (a missing table would `500`). Endpoint
+    discovery from OpenAPI keeps it example-agnostic.
+  - a **write** — `POST` a create body from a per-example fixture
+    (`scripts/k8s-e2e/<example>.smoke.json`), expect `201`, then read it
+    back through `findAll` and assert the new row is present and the count
+    grew. This proves the mutation path: `POST` → the domain validates its
+    invariants → `INSERT` → persisted. The body is a checked-in fixture
+    because the invariants it must satisfy (e.g. `last4.length == 4`) live
+    in the domain, not the OpenAPI request schema, so a synthesized body
+    would `422`; one fixture is backend-agnostic since the wire shape is
+    identical across backends.
+
+  Heavier (it builds container images), so it is **not** per-PR —
   the `k8s-e2e.yml` workflow runs it nightly, on the `e2e-k8s` PR label, or
   by manual dispatch, provisioning the cluster via `helm/kind-action`. Run
   locally with `kind create cluster && npm run test:k8s-e2e`. First cut is
-  one backend + frontend on one example (not a matrix) — that's the
-  per-backend coverage growth seam.
+  one backend + frontend on one example (not a matrix) — fanning the write
+  round-trip across every backend is the next coverage step.
 
 ## Implementation
 
