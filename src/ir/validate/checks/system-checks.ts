@@ -9,7 +9,7 @@ import {
   platformOwnsBackend,
   platformSavingShapes,
 } from "../../../language/validators/data/platform-rules.js";
-import { platformFor } from "../../../platform/registry.js";
+import { descriptorFor } from "../../../platform/metadata.js";
 import { lowerFirst } from "../../../util/naming.js";
 import {
   capabilitiesFor,
@@ -141,11 +141,11 @@ export function validateReactIdReferences(sys: SystemIR, diags: LoomDiagnostic[]
     // it stays backend-only and skips too — without this guard a
     // backend-only dotnet deployable would trigger spurious
     // Id-reachability errors against the (then irrelevant) UI.
-    if (!platformFor(d.platform).mountsUi) continue;
+    if (!descriptorFor(d.platform).mountsUi) continue;
     // Dual-mode platforms (dotnet) with no `ui:` are backend-only —
     // skip the UI-reachability walk.  `mountsUi && !isFrontend` is the
     // dual-mode shape today (frontend-only platforms always declare ui).
-    if (!d.uiName && !platformFor(d.platform).isFrontend) continue;
+    if (!d.uiName && !descriptorFor(d.platform).isFrontend) continue;
     // Aggregates mounted by this deployable's `contextNames` set —
     // UI generators only emit per-aggregate hooks/queries for
     // these; anything outside is unreachable.
@@ -1014,7 +1014,7 @@ export function backendPlatformsHostingEachContext(
   const out = new Map<string, Set<string>>();
   for (const sys of loom.systems) {
     for (const d of sys.deployables) {
-      if (!platformFor(d.platform).needsDb) continue;
+      if (!descriptorFor(d.platform).needsDb) continue;
       for (const cn of d.contextNames) {
         const set = out.get(cn) ?? new Set<string>();
         set.add(d.platform);

@@ -14,7 +14,7 @@
 // thing each platform is.
 
 import type { Platform, SavingShape } from "../../../ir/types/loom-ir.js";
-import { parseBuiltinPlatformRef, platformFor } from "../../../platform/registry.js";
+import { descriptorFor, parseBuiltinPlatformRef } from "../../../platform/metadata.js";
 import {
   adaptersFor,
   allAdapterNames,
@@ -43,11 +43,11 @@ export const FRONTEND_KEYWORDS: ReadonlySet<string> = new Set(["react", "svelte"
  *  `Platform` grammar enum + the `Framework` enum. */
 export function platformMountsUi(platform: string | undefined): boolean {
   if (platform == null) return false;
-  // The registry's `mountsUi` is the single source of truth.  Cast
-  // is safe because the grammar enum and the registry stay in
-  // lockstep (registry barfs at boot if a platform is missing).
+  // The descriptor's `mountsUi` is the single source of truth.  Cast
+  // is safe because the grammar enum and the descriptor table stay in
+  // lockstep (descriptor-consistency.test.ts pins them).
   try {
-    return platformFor(platform as Platform).mountsUi;
+    return descriptorFor(platform as Platform).mountsUi;
   } catch {
     return false;
   }
@@ -70,7 +70,7 @@ export function canonicalFramework(framework: string | undefined): string | unde
 export function hostableFrameworksFor(platform: string | undefined): ReadonlySet<string> {
   if (platform == null) return new Set();
   try {
-    return platformFor(platform as Platform).hostableFrameworks;
+    return descriptorFor(platform as Platform).hostableFrameworks;
   } catch {
     return new Set();
   }

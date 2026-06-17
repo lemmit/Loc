@@ -86,7 +86,7 @@ import {
   isView,
   isWorkflow,
 } from "../../language/generated/ast.js";
-import { platformFor } from "../../platform/registry.js";
+import { descriptorFor } from "../../platform/metadata.js";
 import type {
   AggregateIR,
   ApiIR,
@@ -484,7 +484,7 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
     //   - `phoenixLiveView` is fullstack — emit BOTH a UI spec (driven
     //     by Playwright page objects) AND an API spec (driven by
     //     fetch against the deployable's HTTP surface).
-    const isFrontendOnly = !!targetPlatform && platformFor(targetPlatform).isFrontend;
+    const isFrontendOnly = !!targetPlatform && descriptorFor(targetPlatform).isFrontend;
     const isFullstack = targetPlatform === "elixir";
     if (isFrontendOnly) {
       e2eTests.push(lowerE2E(b, e2eEnv, "ui"));

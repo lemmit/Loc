@@ -108,7 +108,17 @@ export interface ComposeSidecar {
   internalPort?: number;
 }
 
-export interface PlatformSurface {
+/** The pure-data half of a platform surface — the static descriptor
+ *  fields with NO code-generation behaviour.  Split out from
+ *  `PlatformSurface` so the front half of the toolchain (language
+ *  validators, IR lowering / enrich / validate) can read platform
+ *  facts from `platform/metadata.ts` WITHOUT importing the surface
+ *  objects (which statically pull every backend generator).  The
+ *  descriptor table in `metadata.ts` is the client-safe source of
+ *  truth for these fields; `descriptor-consistency.test.ts` pins it
+ *  against the live surfaces.  See docs/decisions.md / the registry
+ *  metadata/generation split. */
+export interface PlatformDescriptor {
   /** Discriminator value matching `Platform` in the IR / grammar. */
   readonly name: Platform;
   /** Default deployable port when the user doesn't specify one. */
@@ -167,6 +177,16 @@ export interface PlatformSurface {
    * the DSL's casing (lowerCamelCase) — the validator compares
    * against `find.name` directly. */
   readonly reservedRepositoryFindNames: ReadonlySet<string>;
+}
+
+/** The full platform surface — its data descriptor plus the
+ *  code-generation behaviour (`emitProject` / `composeService` / the
+ *  adapter menu and the reserved lifecycle hooks).  Implemented by each
+ *  `src/platform/<name>.ts`; resolved only through the generation
+ *  registry (`platform/registry.ts`), which is server-side / never
+ *  bundled into the client.  The front half consumes
+ *  `PlatformDescriptor` via `metadata.ts` instead. */
+export interface PlatformSurface extends PlatformDescriptor {
   /** All files for one deployable's project, paths relative to the
    * deployable's folder under `<outdir>/`.
    *

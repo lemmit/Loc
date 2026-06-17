@@ -6,7 +6,7 @@
 // in ./lower.ts.
 // -------------------------------------------------------------------------
 
-import { parseBuiltinPlatformRef } from "../../platform/registry.js";
+import { parseBuiltinPlatformRef } from "../../platform/metadata.js";
 import { type BuiltinPackFamily, parseBuiltinDesignRef } from "../../util/builtin-formats.js";
 import type { Platform } from "../types/loom-ir.js";
 

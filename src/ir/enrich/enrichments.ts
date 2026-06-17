@@ -1,4 +1,4 @@
-import { platformFor } from "../../platform/registry.js";
+import { descriptorFor } from "../../platform/metadata.js";
 import { plural, snake } from "../../util/naming.js";
 import { defaultInterfaceFor } from "../../util/source-types.js";
 import { forEachGenericInstance, genericInstanceName, genericShape } from "../stdlib/generics.js";
@@ -282,7 +282,7 @@ function deriveNeeds(subdomains: EnrichedSubdomainIR[]): NeedIR[] {
 // subdomains, etc.).
 //
 // Database-bearing platforms are read from `PlatformSurface.needsDb` via
-// `platformFor()` — single source of truth, mirrors the `isFrontend` check
+// `descriptorFor()` — single source of truth, mirrors the `isFrontend` check
 // in `applyTargetsInheritance` below.
 // ---------------------------------------------------------------------------
 
@@ -292,7 +292,8 @@ function assignMigrationsOwner(
 ): EnrichedSubdomainIR {
   const contextNames = m.contexts.map((c) => c.name);
   const owner = deployables.find(
-    (d) => platformFor(d.platform).needsDb && contextNames.some((c) => d.contextNames.includes(c)),
+    (d) =>
+      descriptorFor(d.platform).needsDb && contextNames.some((c) => d.contextNames.includes(c)),
   );
   if (owner) return { ...m, migrationsOwner: owner.name };
   return m;
@@ -1045,7 +1046,7 @@ function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
     // import back into `ir/`), so no cycle.  The `needsDb` check in
     // `assignMigrationsOwner` above is routed through the same
     // registry — no hardcoded platform-name lists remain.
-    if (!platformFor(d.platform).isFrontend || !d.targetName) return d;
+    if (!descriptorFor(d.platform).isFrontend || !d.targetName) return d;
     const target = deployables.find((t) => t.name === d.targetName);
     if (!target) return d;
     return { ...d, contextNames: [...target.contextNames] };

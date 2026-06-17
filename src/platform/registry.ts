@@ -4,11 +4,36 @@ import elixirPlatform from "./elixir.js";
 import honoPlatform, { loomManifest as honoV4Manifest } from "./hono/v4/index.js";
 import javaPlatform from "./java.js";
 import type { LoomBackendManifest } from "./manifest.js";
+// The pure, client-safe metadata half (descriptor table + `platform:` ref
+// parsing + version helpers) lives in `metadata.ts` — imported here and
+// RE-EXPORTED so existing server-side importers (`system/`, the CLI) keep
+// resolving these symbols from `registry.ts`.  The front half (`language/`
+// + `ir/`) imports them straight from `metadata.ts`, so it never pulls these
+// surface objects (and therefore no backend generators) into a client bundle.
+import {
+  type BackendFamily,
+  BUILTIN_PLATFORM_LATEST,
+  backendVersionsForFamily,
+  isRegisteredBackendRef,
+  type ParsedBuiltinPlatformRef,
+  parseBuiltinPlatformRef,
+  resetBackendVersionSource,
+  setBackendVersionSource,
+} from "./metadata.js";
 import pythonPlatform from "./python.js";
 import reactPlatform from "./react.js";
 import type { PlatformSurface } from "./surface.js";
 import sveltePlatform from "./svelte.js";
 import vuePlatform from "./vue.js";
+
+export {
+  type BackendFamily,
+  BUILTIN_PLATFORM_LATEST,
+  backendVersionsForFamily,
+  isRegisteredBackendRef,
+  type ParsedBuiltinPlatformRef,
+  parseBuiltinPlatformRef,
+};
 
 // ---------------------------------------------------------------------------
 // Single source of truth for which platforms exist + how the system
@@ -57,24 +82,6 @@ const platforms: Record<Platform, PlatformSurface> = {
   // SPA when the deployable declares `ui:`, like dotnet).
   java: javaPlatform,
 };
-
-// ---------------------------------------------------------------------------
-// Backend family → default version.  A bareword `platform: <family>`
-// resolves to `<family>@<this>`.  Frontend platforms (`react`,
-// `static`) are intentionally absent — they version via the design
-// pack / stack axis, not here (backend-packages.md open question #2),
-// so they stay single-version and resolve straight through
-// `platforms`.
-// ---------------------------------------------------------------------------
-export const BUILTIN_PLATFORM_LATEST = {
-  node: "v4",
-  dotnet: "v8",
-  elixir: "v1",
-  python: "v1",
-  java: "v1",
-} as const satisfies Partial<Record<Platform, string>>;
-
-export type BackendFamily = keyof typeof BUILTIN_PLATFORM_LATEST;
 
 // ---------------------------------------------------------------------------
 // Backend discovery (docs/packaging-split.md) — backends are
@@ -140,14 +147,21 @@ let backendSource: () => DiscoveredBackend[] = () => inTreeBackends;
 
 /** Swap the backend discovery source.  The playground injects a
  *  VFS-backed implementation here; tests use it to assert the
- *  resolver is source-agnostic. */
+ *  resolver is source-agnostic.  Also projects the discovered manifests'
+ *  `family@version` identities into the client-safe metadata version
+ *  source, so out-of-tree backends affect version validation (which the
+ *  front half reads from `metadata.ts`, never from here). */
 export function setBackendSource(src: () => DiscoveredBackend[]): void {
   backendSource = src;
+  setBackendVersionSource(() =>
+    src().map((b) => ({ family: b.manifest.family, version: b.manifest.loomVersion })),
+  );
 }
 
-/** Restore the default in-tree discovery source. */
+/** Restore the default in-tree discovery source (surfaces + metadata versions). */
 export function resetBackendSource(): void {
   backendSource = () => inTreeBackends;
+  resetBackendVersionSource();
 }
 
 /** The in-tree backend set the registry was bootstrapped with —
@@ -176,68 +190,6 @@ function qualifiedBackendSurfaces(): Record<string, PlatformSurface> {
   return out;
 }
 
-/** Resolved view of a `platform:` value pointing at a backend
- *  family.  `null` for frontend (`react`/`static`) or unknown
- *  names — callers fall through to plain `platforms[name]`. */
-export interface ParsedBuiltinPlatformRef {
-  family: BackendFamily;
-  version: string;
-  /** `${family}@${version}` — the key into `versionedPlatforms`
-   *  and the value lowering qualifies a bareword to. */
-  qualified: string;
-}
-
-/** Legacy platform name → canonical family.  Each canonical name
- *  decouples the *platform* (runtime / language-ecosystem) from the
- *  *framework* it was once conflated with: `phoenixLiveView` →
- *  `elixir` (D-PHOENIX-SURFACE retired the LiveView-in-the-name part;
- *  the LiveView *framework* keeps the `phoenixLiveView` spelling on
- *  the `ui { framework: … }` axis); `phoenix` → `elixir`
- *  (D-ELIXIR-PLATFORM: the language-ecosystem platform is Elixir; the
- *  Phoenix *web framework* lives on as the `transport: phoenix` value);
- *  `hono` → `node` (D-NODE-PLATFORM; the Hono *web framework* lives
- *  on as the `transport: hono` value); `fastapi` → `python` (same
- *  pattern — FastAPI names the web framework, the platform is the
- *  Python language ecosystem). */
-const LEGACY_PLATFORM_ALIASES: Record<string, string> = {
-  phoenixLiveView: "elixir",
-  phoenix: "elixir",
-  hono: "node",
-  fastapi: "python",
-};
-
-/** Desugar a legacy platform name to its canonical family, preserving any
- *  `@version` pin (`hono@v4` → `node@v4`). */
-function aliasPlatform(s: string): string {
-  const at = s.indexOf("@");
-  const family = at === -1 ? s : s.slice(0, at);
-  const canonical = LEGACY_PLATFORM_ALIASES[family];
-  if (canonical === undefined) return s;
-  return at === -1 ? canonical : `${canonical}${s.slice(at)}`;
-}
-
-/** Parse a `platform:` value.  Mirrors `parseBuiltinDesignRef`
- *  (builtin-formats.ts): bareword backend → default version;
- *  `family@version` → that pin; frontend / unknown → `null`.
- *  Pure; exported so the validator + lowering share one
- *  resolution authority. */
-export function parseBuiltinPlatformRef(s: string): ParsedBuiltinPlatformRef | null {
-  // D-ELIXIR-PLATFORM: `elixir` is the canonical language-ecosystem
-  // platform; legacy `phoenix` and `phoenixLiveView` both desugar to it
-  // via `aliasPlatform`.  Canonicalise here, the shared resolution
-  // authority, so validator + lowering + `platformFor` all accept every
-  // spelling identically.
-  const canonical = aliasPlatform(s);
-  const at = canonical.indexOf("@");
-  const family = (at === -1 ? canonical : canonical.slice(0, at)) as BackendFamily;
-  if (!(family in BUILTIN_PLATFORM_LATEST)) return null;
-  // Slice the version off `canonical`, not the original `s` — the alias may
-  // change the family's length (`phoenixLiveView@v1` → `elixir@v1`), so the
-  // `@` index from `canonical` only lines up with `canonical`.
-  const version = at === -1 ? BUILTIN_PLATFORM_LATEST[family] : canonical.slice(at + 1);
-  return { family, version, qualified: `${family}@${version}` };
-}
-
 /** Resolve any `platform:` ref — bareword (`hono`, `react`) or
  *  pinned (`hono@v4`) — to its surface.  Backend barewords route
  *  through `BUILTIN_PLATFORM_LATEST`; everything else (frontend,
@@ -257,25 +209,6 @@ function resolvePlatformRef(ref: string): PlatformSurface {
     return surface;
   }
   return platforms[ref as Platform];
-}
-
-/** Versions registered for a backend family (e.g. `["v4"]` for
- *  `hono`).  Used by the validator's "no such version" error to
- *  list the available pins — mirrors `builtinVersionsForFamily`
- *  for design packs. */
-export function backendVersionsForFamily(family: BackendFamily): string[] {
-  const prefix = `${family}@`;
-  return Object.keys(qualifiedBackendSurfaces())
-    .filter((k) => k.startsWith(prefix))
-    .map((k) => k.slice(prefix.length))
-    .sort();
-}
-
-/** True when `qualified` (a `family@version` string) is a
- *  registered backend surface.  The validator uses this to reject
- *  a pinned platform whose version doesn't exist. */
-export function isRegisteredBackendRef(qualified: string): boolean {
-  return qualified in qualifiedBackendSurfaces();
 }
 
 export function platformFor(name: Platform): PlatformSurface {

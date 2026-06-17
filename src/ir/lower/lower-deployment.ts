@@ -1,5 +1,5 @@
 import type { Deployable, Ui } from "../../language/generated/ast.js";
-import { platformFor } from "../../platform/registry.js";
+import { descriptorFor } from "../../platform/metadata.js";
 import { defaultsFor } from "../../platform/resolve-adapters.js";
 import { applicationDslToAdapter } from "../../util/platform-axes.js";
 import type { DeployableIR, Platform, UiParamBindingIR } from "../types/loom-ir.js";
@@ -79,7 +79,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
           ? "svelte"
           : platform === "vue"
             ? "vue"
-            : platformFor(platform).isFrontend || platform === "dotnet" || platform === "java"
+            : descriptorFor(platform).isFrontend || platform === "dotnet" || platform === "java"
               ? "react"
               : undefined
       : undefined);
@@ -91,7 +91,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   //    `framework: react` ui (D-PHOENIX-SURFACE), in which case the SPA
   //    needs a tsx pack → `mantine`;
   //  - backends without a `ui:` mount carry no design.
-  const design = platformFor(platform).isFrontend
+  const design = descriptorFor(platform).isFrontend
     ? qualifyDesign(
         d.design,
         platform === "svelte" ? "shadcnSvelte" : platform === "vue" ? "vuetify" : "mantine",
@@ -201,7 +201,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
 function defaultPortFor(platform: Platform | undefined): number {
   if (!platform) return 3000;
   try {
-    return platformFor(platform).defaultPort;
+    return descriptorFor(platform).defaultPort;
   } catch {
     return 3000;
   }
