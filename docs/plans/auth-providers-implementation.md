@@ -409,11 +409,26 @@ build workflows. Sequenced after the two headline backends; can be parallelised.
 > is no local Elixir toolchain in the dev sandbox. Generator wiring pinned by
 > `test/generator/elixir/auth-oidc-emit.test.ts`.
 >
-> **Deferred (Phoenix follow-ups):** the `/auth/login|callback|logout` redirect
-> handshake (browser code flow) and a Phoenix runtime e2e (boot the backend
-> against the bundled dev Keycloak, mirroring `auth-oidc-dotnet-e2e`). The
-> verifier is the parity core; the handshake + runtime e2e are independently
-> addable.
+> **Phoenix runtime e2e shipped — the verifier is now RUNTIME-proven.**
+> `test/e2e/auth-oidc-phoenix-compose-e2e.test.ts` (`LOOM_AUTH_E2E_PHOENIX=1`,
+> CI workflow `phoenix-oidc-e2e.yml`) boots the **generated `docker-compose.yml`
+> as-is** — the containerized Phoenix release (its `bin/server` runs
+> `Release.migrate()` then serves) + the bundled dev Keycloak + postgres —
+> password-grants a real token for the seeded `demo` user, and asserts
+> `ApiWeb.Auth` validates it against Keycloak's JWKS over `host.docker.internal`
+> (401 no-token on `/api/tickets`, 200 with token, `/auth/me` →
+> `{id←sub, roles←realm_access.roles, email}`, 401 forged). This is the runtime
+> proof the compile + Dialyzer gates can't give — the `:httpc` JWKS fetch, the
+> JOSE `verify_strict` alg set, the `:persistent_term` cache, and the `iss`
+> check actually working against a real IdP (the Phoenix analogue of the bug
+> the .NET runtime e2e caught). Uses the full compose (not native
+> `mix phx.server`) so the generated release Dockerfile owns all prod
+> boot/config/migration — no blind mix orchestration. CI-only (the inner image
+> build needs hex egress); `push: main` + dispatch.
+>
+> **Still deferred (Phoenix):** the `/auth/login|callback|logout` redirect
+> handshake (browser code flow) — independently addable; nothing breaks without
+> it for token-based clients.
 
 ### Phase 6 — React `auth: ui` (route guard + sign-in)
 
