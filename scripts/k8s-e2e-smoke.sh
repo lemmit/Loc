@@ -52,12 +52,11 @@ SVC="${OUT}/helm/templates/${TARGET}-service.yaml"
 CHART="$(awk '/^name:/{print $2; exit}' "${OUT}/helm/Chart.yaml")"
 FULLNAME="${RELEASE}-${CHART}"                                   # <release>-<chart>
 VK="$(grep -oE '\.Values\.[A-Za-z0-9]+\.replicas' "$DEP" | head -1 | sed -E 's/\.Values\.([A-Za-z0-9]+)\.replicas/\1/')"
-CPORT="$(grep -oE 'containerPort: [0-9]+' "$DEP" | grep -oE '[0-9]+' | head -1)"
 SPORT="$(grep -oE 'port: [0-9]+' "$SVC" | grep -oE '[0-9]+' | head -1)"
 DB="${TARGET//-/_}"          # workload `hono-api` → db `hono_api` (serviceSlug)
 DIR="${TARGET//-/_}"         # build context dir mirrors the db/slug
 IMAGE="${TARGET}"            # image ref matches the workload name
-echo "backend=${TARGET} valuesKey=${VK} containerPort=${CPORT} servicePort=${SPORT} db=${DB} chart=${CHART}"
+echo "backend=${TARGET} valuesKey=${VK} servicePort=${SPORT} db=${DB} chart=${CHART}"
 
 step "Build + kind-load the ${IMAGE} image"
 docker build -t "${IMAGE}:${TAG}" "${OUT}/${DIR}"
@@ -159,15 +158,19 @@ step "Real read + write round-trip through the backend"
 # domain, not the OpenAPI request schema, so a synthesized body would 422 —
 # and a fixed list path is uniform across backends (the OpenAPI doc path is
 # not).  One fixture is backend-agnostic: Loom's wire shape is identical
-# across backends.  Runs inside the backend pod via the container's own node
-# (global fetch) at the derived container port, so it needs no extra image and
-# no port-forward.  The fixture rides in as an env var (kubectl exec passes
-# argv verbatim; the value's embedded quotes are inside the outer "" so the
-# shell keeps them).  Wrapped in an async IIFE so it runs whether node treats
-# piped stdin as CommonJS (the default — no top-level await) or ESM.
-FIX="$(cat "$FIXTURE")"
-kubectl -n "$NS" exec -i "deploy/${FULLNAME}-${TARGET}" -- env SMOKE_FIXTURE="$FIX" BASE_PORT="$CPORT" node - <<'NODE'
-const BASE = `http://localhost:${process.env.BASE_PORT}`;
+# across backends.  Runs in a throwaway node:alpine pod hitting the backend's
+# ClusterIP Service (NOT `kubectl exec` into the backend — only the hono image
+# is a node container; dotnet/python/java/phoenix have no node).  The fixture
+# rides in as a (single-line) env var; `node -` reads the script from stdin,
+# wrapped in an async IIFE so it runs as CommonJS (the piped-stdin default).
+# Pod phase is the gate (kubectl run's exit code doesn't mirror the container).
+FIX="$(node -e 'process.stdout.write(JSON.stringify(require(process.argv[1])))' "$FIXTURE")"
+kubectl -n "$NS" run roundtrip -i --restart=Never \
+  --image=node:24-alpine \
+  --env="API=http://${FULLNAME}-${TARGET}:${SPORT}" \
+  --env="SMOKE_FIXTURE=${FIX}" \
+  --command -- node - <<'NODE' || true
+const BASE = process.env.API;
 const fail = (m) => { console.error("ROUND-TRIP FAILED: " + m); process.exit(1); };
 const fx = JSON.parse(process.env.SMOKE_FIXTURE ?? "{}");
 const idField = fx.idField ?? "id";
@@ -198,5 +201,20 @@ const getList = async (label) =>
   console.log(`GET ${fx.list} → ${after.length} row(s), includes ${id} — write path OK (${before.length} → ${after.length})`);
 })().catch((e) => fail(String(e?.stack ?? e)));
 NODE
+if ! kubectl -n "$NS" wait --for=jsonpath='{.status.phase}'=Succeeded pod/roundtrip --timeout=120s; then
+  echo "ROUND-TRIP FAILED — pod did not succeed:"
+  kubectl -n "$NS" logs roundtrip || true
+  kubectl -n "$NS" describe pod roundtrip || true
+  exit 1
+fi
+RT_LOG="$(kubectl -n "$NS" logs roundtrip 2>/dev/null || true)"
+echo "$RT_LOG"
+# Guard against a false pass: if the pod won the stdin race and `node -` got
+# empty input, it would exit 0 having run nothing.  Require the success marker.
+echo "$RT_LOG" | grep -q "write path OK" || {
+  echo "ROUND-TRIP FAILED — success marker absent (script did not run to completion)"
+  exit 1
+}
+kubectl -n "$NS" delete pod roundtrip --ignore-not-found
 
 step "OK — '${TARGET}' installs, boots, and real DB read + write round-trip."

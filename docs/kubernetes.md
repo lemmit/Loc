@@ -171,8 +171,9 @@ Two tiers:
   (every other workload `--set …enabled=false`, so the cell builds a single
   image), `kubectl rollout status`, an explicit `curl /health` + `/ready`
   through the backend's ClusterIP Service, and finally **two real domain
-  round-trips** (inside the backend pod, via the container's own `node` at the
-  derived container port):
+  round-trips** (from a throwaway `node:alpine` pod hitting the backend's
+  Service — not `kubectl exec` into the backend, since only the hono image is
+  a node container):
   - a **read** — `GET` the fixture's list endpoint, asserting `200` + JSON.
     That exercises what `/ready` can't — migrations applied at boot → the
     repository's `SELECT` hits a real, migrated table → wire-shape
