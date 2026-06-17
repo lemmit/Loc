@@ -206,10 +206,9 @@ system Billder {
   }
   subdomain Platform {
     context Accounts {
-      aggregate Organization implements "tenantRegistry" {     // the registry — verified, not injected
+      aggregate Organization implements tenantRegistry {       // registry — tree fields from the capability
         name: string  planRef: Plan id  active: bool = true
-        parent: Organization id?                               // YOU write it; immutable; null = root
-        // dataKey: managed path — value computed by Loom, never authored
+        // parent: Self id?  +  dataKey  — PROVIDED by tenantRegistry (immutable; null = root)
         create signUp(name: string, parent: Organization id?, planRef: Plan id)   // claim-less bootstrap
         operation suspend() { requires currentUser.role == "platformAdmin"  active := false } }
     }
@@ -222,12 +221,13 @@ system Billder {
 }
 ```
 
-### R5. Hierarchical tenancy — always-ready, verify-don't-inject, no reparent
+### R5. Hierarchical tenancy — always-ready, capability-provided, no reparent
 
 > Supersedes the earlier "registry-only path / two-mode / generated reparent"
 > design that previously sat here. Net of the design session: **one
-> always-hierarchy-ready mechanism**, fields **verified not injected**, paths
-> **immutable**, `deep` reads as **direct prefix scans**.
+> always-hierarchy-ready mechanism**, fields **from explicit capabilities (not
+> the declaration)**, paths **immutable**, `deep` reads as **direct prefix
+> scans**.
 
 **Prior art.** MS Dynamics 365/Dataverse: a **Business Unit** tree, and an
 access-level ladder on each privilege — **Basic (User) / Local (Business Unit) /
@@ -246,22 +246,25 @@ is just the degenerate case: every org is a root (`parent` null), every read is
 deletes the mode flag, the `hierarchy via` opt-in, and the static-flat-filter
 vs deep-filter swap conflict.
 
-**The registry — verified, not injected.** A system-level declaration must not
-silently mutate an aggregate's shape, so `tenancy by … of Organization` is
-**declaration + verification only**:
+**The registry — its tree fields come from a capability, not the declaration.**
+A system-level declaration must not silently mutate an aggregate's shape, so
+`tenancy by … of Organization` is **declaration + verification only**; the tree
+fields come from an explicit, local, **unfoldable** capability on the registry:
 
-- the registry carries the explicit string capability **`implements
-  "tenantRegistry"`** (the existing capability-tag mechanism, `ImplementsDecl`,
-  `ddd.langium:909`);
-- the registry **author writes** `parent: <self> id?` — Loom does **not** inject
-  it;
-- Loom **verifies** conformance: the `of …` target carries `"tenantRegistry"`,
-  has a self-referential optional `parent`, exactly one such aggregate exists,
-  and the claim field exists on `user`. Capability-*conformance* ("a
-  `"tenantRegistry"` aggregate must have a self-ref `parent`") is a small,
-  general extension to the capability system — not tenancy-specific magic. It is
-  exactly the kind of contract a **typed capability/interface** would formalise
-  (see the follow-up note / new proposal).
+- the registry carries **`implements tenantRegistry`** (`ImplementsDecl`,
+  `ddd.langium:909`) — a capability that **provides** `parent: Self id?`, the
+  managed `dataKey` path, and the path-stamp behavior. The author opts in
+  *locally* (and can unfold to see the fields); the distant `tenancy by` line
+  injects nothing. This is the [`typed-capabilities.md`](./typed-capabilities.md)
+  **pure-mixin** model — the capability *holds* `parent`; there is **no**
+  host-supplied/verified field. (An earlier draft made `parent` a
+  `requires`/`expects` contract; dropped — the capability provides it, so there's
+  nothing to verify.)
+- Loom **verifies** the structural facts that *aren't* field-presence: **exactly
+  one** aggregate implements `tenantRegistry` (the registry is singular), the
+  **`of …` target is that aggregate** (cross-link), and the **claim field
+  exists** on `user`. Field-conformance is moot — the capability *provides*
+  `parent`, so it exists by construction.
 - `parent` is **immutable** (set at create, null = root). **Reparent is out of
   scope** — immutability makes every path permanent, which is what makes the
   rest cheap.
@@ -303,10 +306,10 @@ Columns, all stamped at create from the token, present from v1:
 ```ddd
 tenancy by user.tenantId of Organization      // declaration; verifies ↓
 
-aggregate Organization implements "tenantRegistry" {
+aggregate Organization implements tenantRegistry {
   name: string
-  parent: Organization id?       // author-written, immutable; verified as the self-ref edge
-  // dataKey — managed path; value computed by Loom, presence via the capability
+  // parent: Self id?  +  dataKey  — PROVIDED by tenantRegistry (immutable; null = root)
+  //   unfold the capability to see them; the author writes neither
 }
 
 aggregate Project with tenantOwned { title: string }   // tenantId + dataKey via the capability
