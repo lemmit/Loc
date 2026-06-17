@@ -146,7 +146,9 @@ describe("java generator — /auth/* handshake + /auth/me (D-AUTH-OIDC)", () => 
 
   it("pulls the Nimbus dep into the Gradle build under OIDC", async () => {
     const gradle = (await generateSystemFiles(OIDC_SRC)).get("api/build.gradle.kts")!;
-    expect(gradle).toContain('implementation("com.nimbusds:nimbus-jose-jwt")');
+    // Pinned version (NOT BOM-managed) — a version-less coordinate fails to
+    // resolve against Maven Central.
+    expect(gradle).toMatch(/implementation\("com\.nimbusds:nimbus-jose-jwt:\d/);
   });
 });
 
