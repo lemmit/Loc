@@ -67,10 +67,20 @@
 > v3/v4, mui v5/v7, chakra v2/v3) — verified per-pack (content test ×4)
 > and tsc'd on shadcn + mantine. A new IR check
 > (`loom.auth-ui-unsupported-framework`) rejects `auth: ui` on a frontend
-> whose resolved UI framework isn't react (vue / svelte) so the limitation
-> fails loudly instead of emitting no guard. **Vue / Svelte / Phoenix
-> LiveView guards remain the open frontend-target work** (each is a
-> separate generator needing its own guard component).
+> whose resolved UI framework isn't a supported one so the limitation
+> fails loudly instead of emitting no guard.
+>
+> **Phase 6c shipped (Vue `auth: ui` guard).** The Vue generator now emits
+> the same guard for a `platform: vue` deployable that opts in: the shared
+> `src/auth/session.ts` probe (reused verbatim — it only touches the api
+> client + config), a Vue-shaped `src/auth/AuthGate.vue` (provide/inject
+> session, full-screen "Sign in" redirect, sign-out) + a `useSession`
+> composable, the shared `credentials: "include"` client, and the `<App/>`
+> wrap in both Vue packs' `main.hbs` (vuetify@v3, shadcnVue@v1) via a tiny
+> render-function root. The framework gate now admits `react` **and**
+> `vue`. **Svelte / Phoenix LiveView guards remain the open
+> frontend-target work** (each is a separate generator needing its own
+> guard component).
 >
 > **Phase 4 shipped (default-deny enforcement, partial).** Opt-in via
 > `auth { enforcement: denyByDefault }` (default `opt` is inert). An IR

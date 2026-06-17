@@ -1,16 +1,22 @@
 // Auto-generated.
-import { createApp } from "vue";
+import { createApp{{#if authUi}}, h{{/if}} } from "vue";
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import App from "./App.vue";
-import { router } from "./router";
+{{#if authUi}}import AuthGate from "./auth/AuthGate.vue";
+{{/if}}import { router } from "./router";
 import { vuetify } from "./theme";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5_000, retry: 1 } },
 });
 
-createApp(App)
-  .use(router)
+{{#if authUi}}// auth: ui — gate the app on a verified session.  <AuthGate> probes
+// the backend's /auth/me on mount and redirects to the IdP when
+// unauthenticated, mounting <App /> only once a session is verified.
+const Root = { render: () => h(AuthGate, null, { default: () => h(App) }) };
+createApp(Root)
+{{else}}createApp(App)
+{{/if}}  .use(router)
   .use(vuetify)
   .use(VueQueryPlugin, { queryClient })
   .mount("#app");
