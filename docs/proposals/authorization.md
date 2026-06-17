@@ -167,6 +167,22 @@ The design was settled collaboratively. Key reframings from the raw research:
 
 ## 2. DataKey & tenancy
 
+> **Reconciliation (2026-06-17) — the tenancy half now defers to
+> [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md).** That note is
+> **canonical** for the flat tenancy primitive: it owns `tenancy by … of
+> Organization`, the **two-value** scope axis `tenantOwned` / `crossTenant` (the
+> `platform` scope is **dropped** — admin-only cross-tenant data is `crossTenant`
+> + an authz policy), the immutable-`parent` registry (`implements
+> "tenantRegistry"`), and the `tenantId` + denormalised `dataKey` columns (stamped
+> from the token at create; `parent` immutable ⇒ permanent paths). **This section
+> contributes only the hierarchical extension**: the `DataKey` materialized path
+> + the directional checks below, surfaced as the per-role **access levels**
+> `local` / `deep` / `global` (Dynamics' Business-Unit ladder) — *who may read*,
+> an authorization concern, **not** a tenancy scope. So do **not** re-introduce
+> `crossTenant` / `platform` / the flat floor here; cite the multi-tenancy note
+> and keep only the `DataKey` type + directional predicates. (This resolves §0's
+> recommended option A.)
+
 - **Construction:** `{rootTenantId}.{parentId}.…{tenantId}` — a materialized
   path of **tenant ids**. A record carries the path of its owning tenant. `id`
   identifies the record; `dataKey` scopes it. Ancestor/descendant checks are
