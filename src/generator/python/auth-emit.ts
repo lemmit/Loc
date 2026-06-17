@@ -263,7 +263,10 @@ from app.auth.user import User
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.get("/me")
+# include_in_schema=False — auth endpoints are not business operations, so they
+# stay out of the OpenAPI contract (cross-backend parity: .NET excludes via
+# ExcludeFromDescription, Java via @Hidden, Hono never adds them to its spec).
+@router.get("/me", include_in_schema=False)
 async def me(request: Request) -> JSONResponse:
     user: User | None = getattr(request.state, "current_user", None)
     return JSONResponse(asdict(user) if user is not None else None)
@@ -417,7 +420,7 @@ def register_oidc_verifier() -> None:
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.get("/login")
+@router.get("/login", include_in_schema=False)
 async def login() -> RedirectResponse:
     authorize = cast(str, _discovery()["authorization_endpoint"])
     state = secrets.token_urlsafe(16)
@@ -435,7 +438,7 @@ async def login() -> RedirectResponse:
     return response
 
 
-@router.get("/callback")
+@router.get("/callback", include_in_schema=False)
 async def callback(request: Request) -> Response:
     code = request.query_params.get("code")
     state = request.query_params.get("state")
@@ -450,7 +453,7 @@ async def callback(request: Request) -> Response:
     return response
 
 
-@router.get("/logout")
+@router.get("/logout", include_in_schema=False)
 async def logout() -> RedirectResponse:
     response = RedirectResponse(_post_login())
     response.delete_cookie("session")

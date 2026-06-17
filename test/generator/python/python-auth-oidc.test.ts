@@ -82,13 +82,13 @@ describe("python OIDC verifier + handshake", () => {
   it("emits the /auth/login|callback|logout handshake + /auth/me probe", async () => {
     const files = await build({ oidc: true });
     const oidc = files.get("api/app/auth/oidc.py")!;
-    expect(oidc).toContain('@router.get("/login")');
-    expect(oidc).toContain('@router.get("/callback")');
-    expect(oidc).toContain('@router.get("/logout")');
+    expect(oidc).toContain('@router.get("/login"');
+    expect(oidc).toContain('@router.get("/callback"');
+    expect(oidc).toContain('@router.get("/logout"');
     expect(oidc).toContain('"grant_type": "authorization_code"');
     expect(oidc).toContain('response.set_cookie("session"');
     // /auth/me probe (always present under auth) reads the verified user.
-    expect(files.get("api/app/auth/routes.py")!).toContain('@router.get("/me")');
+    expect(files.get("api/app/auth/routes.py")!).toContain('@router.get("/me"');
   });
 
   it("auto-registers the OIDC verifier (not the dev stub) + mounts both routers", async () => {
