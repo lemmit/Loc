@@ -361,6 +361,31 @@ export function pyWorkflowStmtTarget(
         ...(body.length + saves.length > 0 ? [...body, ...saves] : [`${i}    pass`]),
       ];
     },
+    ifLet: (st, i, thenLines, elseLines) => {
+      // `if let o = Repo.find(<Criterion>) { … } else { … }` → run the shared
+      // `find_all_by_<criterion>` retrieval with `limit=1`, take the first row
+      // (or `None`), and branch.  Each branch's dirty bindings save inside it.
+      const v = snake(st.var);
+      const hits = `__${v}_hits`;
+      const inner = `${i}    `;
+      const args = [...st.retrievalArgs.map((a) => renderPyExpr(a, rctx)), "limit=1"].join(", ");
+      const thenSaves = st.savesInThen.map(
+        (s) => `${inner}await ${snake(s.repoName)}.save(${snake(s.name)})`,
+      );
+      const elseSaves = st.savesInElse.map(
+        (s) => `${inner}await ${snake(s.repoName)}.save(${snake(s.name)})`,
+      );
+      const thenAll = [...thenLines, ...thenSaves];
+      const elseAll = [...elseLines, ...elseSaves];
+      const out = [
+        `${i}${hits} = await ${snake(st.repoName)}.run_${snake(st.retrievalName)}(${args})`,
+        `${i}${v} = ${hits}[0] if ${hits} else None`,
+        `${i}if ${v} is not None:`,
+        ...(thenAll.length > 0 ? thenAll : [`${inner}pass`]),
+      ];
+      if (elseAll.length > 0) out.push(`${i}else:`, ...elseAll);
+      return out;
+    },
     // Bare `<resource>.<verb>(...)` statement — render-expr wraps the
     // resource-op in `(await …)`; a bare statement drops the parens.
     resourceCall: (st, i) => {

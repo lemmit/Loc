@@ -43,6 +43,19 @@ export interface WorkflowStmtTarget {
    *  `indent + indentUnit` by the spine; the target wraps it in the backend's
    *  loop construct and appends the per-iteration saves. */
   forEach(st: ByKind<"for-each">, indent: string, renderedBody: string[]): string[];
+
+  /** `if-let`: `renderedThen` / `renderedElse` are the two branch bodies
+   *  already rendered at `indent + indentUnit` by the spine. The target runs
+   *  the synthetic `findAllBy<Criterion>` retrieval with `limit: 1`, binds the
+   *  first row (or null/none) to `st.var`, and emits the present/absent
+   *  branches — appending each branch's saves (`savesInThen` / `savesInElse`).
+   *  `renderedElse` is empty when the source had no `else`. */
+  ifLet(
+    st: ByKind<"if-let">,
+    indent: string,
+    renderedThen: string[],
+    renderedElse: string[],
+  ): string[];
 }
 
 /** Render a workflow statement sequence at `indent`, dispatching each kind to
@@ -82,6 +95,13 @@ function renderWorkflowStmt(
         st,
         indent,
         renderWorkflowStmts(st.body, target, indent + target.indentUnit),
+      );
+    case "if-let":
+      return target.ifLet(
+        st,
+        indent,
+        renderWorkflowStmts(st.thenBody, target, indent + target.indentUnit),
+        renderWorkflowStmts(st.elseBody ?? [], target, indent + target.indentUnit),
       );
     case "resource-call":
       return target.resourceCall(st, indent);

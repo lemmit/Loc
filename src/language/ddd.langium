@@ -1561,8 +1561,25 @@ Statement:
   | LetStmt
   | EmitStmt
   | ForStmt
+  | IfLetStmt
   | ReturnStmt
   | AssignOrCallStmt;
+
+// `if let <var> = <source> { <then> } else { <else> }` — bind an optional
+// retrieval result (`Repo.find(<Criterion>)`, criterion.md use site 3) and
+// branch on its presence.  `<var>` is bound (unwrapped, non-null) only in the
+// then-body; the optional `else` runs when no row matched.  The single
+// option/null-handling construct in a workflow body — without it a nullable
+// repo return has nowhere to go (see the `loom.workflow-*` checks).  `source`
+// reuses `ForIterable` (NameRef + postfix suffixes), exactly the `Repo.find(C)`
+// shape, which also keeps a trailing `{ }` block from being swallowed by a
+// `BuilderCall` the way the loop iterable does.
+IfLetStmt:
+    'if' 'let' var=ID '=' source=ForIterable '{'
+        thenBody+=Statement*
+    '}' ('else' '{'
+        elseBody+=Statement*
+    '}')?;
 
 // `return <expr>` — an operation's designed-in outcome (exception-less.md).
 // Produces the operation's declared `or`-union return value; the route
@@ -1772,6 +1789,11 @@ MemberName returns string:
        // `Sales.Customer.create.mutate(...)`.  Magic-identifier
        // dispatch lives in lowering, not the grammar.
        | 'create' | 'destroy'
+       // `find` is a hard keyword in `FindDecl` (`find foo(): T ...`) but must
+       // be admissible after `.` so the built-in `Repo.find(<Criterion>)`
+       // criterion lookup (the source of an `if let`, criterion.md use site 3)
+       // parses as a member call — the sibling of the plain-ID `findAll`/`run`.
+       | 'find'
        // `where` is a hard keyword in `FindDecl` (`find foo(): T where ...`)
        // and `View` (`view X = Y where ...` and the full form's `from Y where`),
        // but it's also the collection-op name in `arr.where(λ)` — see

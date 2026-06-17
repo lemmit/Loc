@@ -993,6 +993,12 @@ function collectReposFromStmts(
       else if (st.kind === "for-each") {
         for (const sv of st.savesPerIteration) seen.set(sv.repoName, sv.aggName);
         walk(st.body);
+      } else if (st.kind === "if-let") {
+        seen.set(st.repoName, st.aggName);
+        for (const sv of st.savesInThen) seen.set(sv.repoName, sv.aggName);
+        for (const sv of st.savesInElse) seen.set(sv.repoName, sv.aggName);
+        walk(st.thenBody);
+        walk(st.elseBody ?? []);
       }
     }
   };
@@ -1152,6 +1158,33 @@ function honoWorkflowStmtTarget(
         `${indent}}`,
       ];
     },
+    ifLet: (st, indent, thenLines, elseLines) => {
+      // `if let o = Repo.find(<Criterion>) { … } else { … }` → run the shared
+      // `findAllBy<Criterion>` retrieval with `limit: 1`, take the first row (or
+      // `null`), and branch.  The `!== null` narrows `o` to non-null in the
+      // then-branch; each branch's dirty bindings save INSIDE that branch.
+      const inner = `${indent}  `;
+      const args = st.retrievalArgs.map(renderArg);
+      args.push("{ limit: 1 }");
+      const thenSaves = st.savesInThen.map(
+        (sv) => `${inner}await ${lowerFirst(sv.repoName)}.save(${sv.name});`,
+      );
+      const elseSaves = st.savesInElse.map(
+        (sv) => `${inner}await ${lowerFirst(sv.repoName)}.save(${sv.name});`,
+      );
+      const out = [
+        `${indent}const ${st.var} = (await ${lowerFirst(st.repoName)}.run${upperFirst(st.retrievalName)}(${args.join(", ")}))[0] ?? null;`,
+        `${indent}if (${st.var} !== null) {`,
+        ...thenLines,
+        ...thenSaves,
+      ];
+      if (elseLines.length > 0 || elseSaves.length > 0) {
+        out.push(`${indent}} else {`, ...elseLines, ...elseSaves, `${indent}}`);
+      } else {
+        out.push(`${indent}}`);
+      }
+      return out;
+    },
     // Bare resource-op statement (`files.put(k, v)`).  `renderArg` renders
     // the call as `(await files$put(...))`; emit it as a statement (Phase 4).
     resourceCall: (st, indent) => [`${indent}${renderArg(st.call)};`],
@@ -1195,6 +1228,12 @@ function collectReposForWorkflow(wf: WorkflowIR): {
       else if (st.kind === "for-each") {
         for (const sv of st.savesPerIteration) seen.set(sv.repoName, sv.aggName);
         walk(st.body);
+      } else if (st.kind === "if-let") {
+        seen.set(st.repoName, st.aggName);
+        for (const sv of st.savesInThen) seen.set(sv.repoName, sv.aggName);
+        for (const sv of st.savesInElse) seen.set(sv.repoName, sv.aggName);
+        walk(st.thenBody);
+        walk(st.elseBody ?? []);
       }
     }
   };

@@ -1020,6 +1020,45 @@ function csWorkflowStmtTarget(
         `${indent}}`,
       ];
     },
+    ifLet: (st, indent, thenLines, elseLines) => {
+      // `if let o = Repo.find(<Criterion>) { … } else { … }` → run the shared
+      // `findAllBy<Criterion>` retrieval with `limit: 1`, take the first row
+      // (or `null`), and branch.  `is not null` narrows `o` in the then-branch;
+      // each branch's dirty bindings save inside it.
+      const fieldName = `_${st.repoName.charAt(0).toLowerCase() + st.repoName.slice(1)}`;
+      const args = st.retrievalArgs.map(renderArg);
+      args.push("(null, 1)"); // page: limit 1, no offset — single result
+      const callArgs = [...args, "cancellationToken"].join(", ");
+      const hits = `__${st.var}Hits`;
+      const inner = `${indent}    `;
+      const saveLine = (sv: { repoName: string; name: string }): string => {
+        const f = `_${sv.repoName.charAt(0).toLowerCase() + sv.repoName.slice(1)}`;
+        return `${inner}await ${f}.SaveAsync(${sv.name}, cancellationToken);`;
+      };
+      const thenSaves = st.savesInThen.map(saveLine);
+      const elseSaves = st.savesInElse.map(saveLine);
+      const out = [
+        `${indent}var ${hits} = await ${fieldName}.Run${upperFirst(st.retrievalName)}Async(${callArgs});`,
+        `${indent}var ${st.var} = ${hits}.Count > 0 ? ${hits}[0] : null;`,
+        `${indent}if (${st.var} is not null)`,
+        `${indent}{`,
+        ...thenLines,
+        ...thenSaves,
+      ];
+      if (elseLines.length > 0 || elseSaves.length > 0) {
+        out.push(
+          `${indent}}`,
+          `${indent}else`,
+          `${indent}{`,
+          ...elseLines,
+          ...elseSaves,
+          `${indent}}`,
+        );
+      } else {
+        out.push(`${indent}}`);
+      }
+      return out;
+    },
     // 4c: bare resource-op statement (`files.put(k, v)`) → awaited async
     // helper call.
     resourceCall: (st, indent) => [`${indent}await ${renderArg(st.call)};`],

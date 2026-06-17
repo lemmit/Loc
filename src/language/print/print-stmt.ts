@@ -27,6 +27,13 @@ export function printStmt(node: Statement): string {
       const body = node.body.map((s) => `  ${printStmt(s)}`).join("\n");
       return `for ${node.var} in ${printExpr(node.iterable)} {\n${body}\n}`;
     }
+    case "IfLetStmt": {
+      const thenBody = node.thenBody.map((s) => `  ${printStmt(s)}`).join("\n");
+      const head = `if let ${node.var} = ${printExpr(node.source)} {\n${thenBody}\n}`;
+      if ((node.elseBody ?? []).length === 0) return head;
+      const elseBody = node.elseBody.map((s) => `  ${printStmt(s)}`).join("\n");
+      return `${head} else {\n${elseBody}\n}`;
+    }
     case "ReturnStmt":
       return `return ${printExpr(node.value)}`;
     default: {

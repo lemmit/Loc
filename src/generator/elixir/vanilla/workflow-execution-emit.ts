@@ -362,6 +362,63 @@ function lowerStatement(
         },
       ];
     }
+
+    case "if-let": {
+      // `if let o = Repo.find(<Criterion>) { … } else { … }` → a with-clause
+      // wrapping a parenthesized block: run the shared `run_<ret>_<agg>`
+      // retrieval capped at `limit: 1`, match its `{:ok, [head | _]}` to a
+      // head-or-nil, then `if` over the two branches.  Each branch ends in
+      // `{:ok, _}` so the enclosing `{:ok, _} <-` clause threads through the
+      // with-chain (a raised create/op rolls the transaction back).
+      const action = `run_${snake(st.retrievalName)}_${snake(st.aggName)}`;
+      const runArgs = [...st.retrievalArgs.map((a) => renderExpr(a, renderCtx)), "limit: 1"];
+      const v = snake(st.var);
+      const renderBranch = (body: WorkflowStmtIR[], present: string): string[] => {
+        const stmtLines = body.flatMap((inner) => {
+          if (inner.kind === "op-call") {
+            const argFields = inner.args
+              .map((a, i) => `arg${i}: ${renderExpr(a, renderCtx)}`)
+              .join(", ");
+            return [
+              `${contextModule}.${snake(inner.op)}_${snake(inner.aggName)}(${snake(inner.target)}, %{${argFields}})`,
+            ];
+          }
+          if (inner.kind === "emit") {
+            const fields = inner.fields
+              .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
+              .join(", ");
+            const appModule = contextModule.split(".")[0]!;
+            return [
+              `Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", %${contextModule}.Events.${upperFirst(inner.eventName)}{${fields}})`,
+            ];
+          }
+          if (inner.kind === "factory-let") {
+            const fields = inner.fields
+              .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
+              .join(", ");
+            return [
+              `{:ok, ${snake(inner.name)}} = ${contextModule}.create_${snake(inner.aggName)}(%{${fields}})`,
+            ];
+          }
+          return [`# TODO: lower if-let branch statement kind '${inner.kind}'`];
+        });
+        return [...stmtLines, `{:ok, ${present}}`];
+      };
+      const lines = [
+        `{:ok, _} <- (`,
+        `           ${v} = case ${contextModule}.${action}(${runArgs.join(", ")}) do`,
+        `             {:ok, [__hit | _]} -> __hit`,
+        `             _ -> nil`,
+        `           end`,
+        `           if ${v} != nil do`,
+        ...renderBranch(st.thenBody, v).map((l) => `             ${l}`),
+        `           else`,
+        ...renderBranch(st.elseBody ?? [], "nil").map((l) => `             ${l}`),
+        `           end`,
+        `         )`,
+      ];
+      return [{ kind: "with-clause", text: lines.join("\n"), bindName: undefined }];
+    }
   }
 }
 

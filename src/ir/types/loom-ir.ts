@@ -1114,6 +1114,41 @@ export type WorkflowStmtIR =
       // `expr-let` instead.  `call` is the lowered `resource-op` call IR.
       kind: "resource-call";
       call: ExprIR;
+    }
+  | {
+      // `if let <var> = Repo.find(<Criterion>) { then } else { else }`
+      // (criterion.md, use site 3) — the workflow body's only option/null
+      // handling construct.  Binds the lookup's first match to `var`
+      // (unwrapped, non-null) in `thenBody`; `elseBody` runs on no match.
+      //
+      // Rides the SAME synthetic retrieval as `findAll` (`retrievalName` =
+      // `findAllBy<Criterion>`): the enrich pass materialises it from
+      // `ctx.criteria[name]` via `synthesizeFindAllRetrievals`, so a `find` and
+      // a `findAll` over one criterion share a single internal retrieval.  The
+      // if-let codegen runs it with `limit: 1` and takes the first row (or
+      // null) — retrievals are internal query bundles (no route leak), unlike a
+      // repository `find` which would auto-expose a query endpoint.  This is
+      // why the optional never becomes a standalone `repo-let` (which forbids
+      // nullable returns) nor a public `find`.
+      kind: "if-let";
+      var: string;
+      repoName: string;
+      aggName: string;
+      /** Name of the shared synthetic retrieval (`findAllBy<Criterion>`). */
+      retrievalName: string;
+      retrievalArgs: ExprIR[];
+      synthCriterion: { name: string };
+      thenBody: WorkflowStmtIR[];
+      elseBody?: WorkflowStmtIR[];
+      /** Saves for aggregates created/mutated inside `thenBody` (the bound
+       *  `var` if an op-call targets it, plus factory-lets) — emitted at the
+       *  end of the then-branch, the same dirtiness rule as `for-each`'s
+       *  `savesPerIteration`.  Conditional branches can't hoist their saves to
+       *  the flat `savesAtExit`, so each branch carries its own. */
+      savesInThen: { name: string; aggName: string; repoName: string }[];
+      /** Saves for aggregates created in `elseBody` (e.g. a not-found →
+       *  `Agg.create(...)` fallback) — emitted at the end of the else-branch. */
+      savesInElse: { name: string; aggName: string; repoName: string }[];
     };
 
 export interface LoomModel {
@@ -2651,6 +2686,12 @@ function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
       );
     case "for-each":
       return exprUsesCurrentUser(s.iterable) || s.body.some(workflowStmtUsesCurrentUser);
+    case "if-let":
+      return (
+        s.retrievalArgs.some(exprUsesCurrentUser) ||
+        s.thenBody.some(workflowStmtUsesCurrentUser) ||
+        (s.elseBody ?? []).some(workflowStmtUsesCurrentUser)
+      );
     case "resource-call":
       return exprUsesCurrentUser(s.call);
   }

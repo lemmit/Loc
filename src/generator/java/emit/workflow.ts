@@ -224,6 +224,34 @@ function javaWorkflowStmtTarget(
         `${indent}}`,
       ];
     },
+    ifLet: (s, indent, thenLines, elseLines) => {
+      // `if let o = Repo.find(<Criterion>) { … } else { … }` → run the shared
+      // `findAllBy<Criterion>` retrieval with the `(…, offset, limit)` overload
+      // capped at 1, take the first row via `stream().findFirst().orElse(null)`,
+      // and branch.  Each branch's dirty bindings save inside it.
+      for (const a of s.retrievalArgs) collectJavaExprImports(a, imports);
+      const args = s.retrievalArgs.map((a) => renderJavaExpr(a, renderCtx));
+      args.push("null", "1"); // offset null, limit 1 — single result
+      const inner = `${indent}    `;
+      const thenSaves = s.savesInThen.map(
+        (sv) => `${inner}${repoField(sv.aggName)}.save(${sv.name});`,
+      );
+      const elseSaves = s.savesInElse.map(
+        (sv) => `${inner}${repoField(sv.aggName)}.save(${sv.name});`,
+      );
+      const out = [
+        `${indent}var ${s.var} = ${repoField(s.aggName)}.run${upperFirst(s.retrievalName)}(${args.join(", ")}).stream().findFirst().orElse(null);`,
+        `${indent}if (${s.var} != null) {`,
+        ...thenLines,
+        ...thenSaves,
+      ];
+      if (elseLines.length > 0 || elseSaves.length > 0) {
+        out.push(`${indent}} else {`, ...elseLines, ...elseSaves, `${indent}}`);
+      } else {
+        out.push(`${indent}}`);
+      }
+      return out;
+    },
     // Bare resource-op statement (`files.put(k, v)`) — the expression
     // renderer's `resource-op` arm dispatches through resourceClasses.
     resourceCall: (s, indent) => {

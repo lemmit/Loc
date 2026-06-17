@@ -27,8 +27,14 @@ guards.
 > loads: […] }, page?)` — the call-site twin of a declared `retrieval`; `findAll`
 > stays the bare-criterion shorthand, shaping lives on the (named or anonymous)
 > retrieval.  Its `where:` is a criterion reference in this release.  The
-> single-result `Repo.find(<Criterion>)`, a composed anonymous `where:`, and the
-> `from <Criterion>(args)` parameter binding are **not yet shipped**.
+> single-result `Repo.find(<Criterion>)` is **shipped on every backend** as the
+> source of an `if let` workflow statement — `if let x = Repo.find(<Criterion>)
+> { … } else { … }` — which binds the first match (non-null) in the then-branch
+> and runs `else` on no match (the workflow body's option/null-handling
+> construct; it rides the same shared `findAllBy<Criterion>` retrieval as
+> `findAll`, capped at one row, so no public endpoint leaks).  A composed
+> anonymous `where:` and the `from <Criterion>(args)` parameter binding are
+> **not yet shipped**.
 
 ## Declaration
 
