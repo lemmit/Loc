@@ -295,6 +295,36 @@ function renderEventReactorHandler(
     ctorParamPairs.push(`${ifaceName} ${fieldName.replace(/^_/, "")}`);
     ctorAssigns.push(`${fieldName} = ${fieldName.replace(/^_/, "")}`);
   }
+  // Audited op-calls inside a reactor stage AuditRecords too — a reactor calls
+  // ops inline (like the command handler), so without this an audited change
+  // made in response to an event would be invisible to the audit log.  Same
+  // shape as renderHandler; provenance needs nothing (it flushes in SaveAsync).
+  // The reactor is an INotificationHandler dispatched through the Mediator
+  // pipeline, so ExecutionContextBehavior has already opened its frame — the
+  // staged row's correlation / scope / parent ids resolve from RequestContext.
+  const auditAggs = new Set<string>();
+  const collectAuditAggs = (sts: WorkflowStmtIR[]): void => {
+    for (const s of sts) {
+      if (s.kind === "op-call") {
+        const o = ctx.aggregates
+          .find((a) => a.name === s.aggName)
+          ?.operations.find((x) => x.name === s.op);
+        if (o?.audited && !o.extern) auditAggs.add(s.aggName);
+      } else if (s.kind === "for-each") collectAuditAggs(s.body);
+    }
+  };
+  collectAuditAggs(statements);
+  const auditsOps = auditAggs.size > 0;
+  if (auditsOps) {
+    fields.push("    private readonly IAuditWriter _audit;");
+    ctorParamPairs.push("IAuditWriter audit");
+    ctorAssigns.push("_audit = audit");
+    // `${ns}.Domain.Common` (RequestContext) is in the hardcoded preamble; adding
+    // it here would duplicate the directive (CS0105 → error under /warnaserror).
+    usings.add(`${ns}.Application.Common`);
+    usings.add(`${ns}.Infrastructure.Persistence`);
+    for (const aggName of auditAggs) usings.add(`${ns}.Application.${plural(aggName)}.Responses`);
+  }
   // The saga row lives in the AppDbContext; the `on` drop path logs via ILogger.
   if (persisted) {
     fields.push(`    private readonly ${ns}.Infrastructure.Persistence.AppDbContext _db;`);
@@ -374,7 +404,11 @@ function renderEventReactorHandler(
   }
   // Reactor / event-create bodies always dereference their loads → guard all.
   stmtLines.push(
-    ...renderWorkflowStmts(statements, csWorkflowStmtTarget(ctx, renderArg, true), INDENT),
+    ...renderWorkflowStmts(
+      statements,
+      csWorkflowStmtTarget(ctx, renderArg, true, auditsOps),
+      INDENT,
+    ),
   );
   for (const save of saves) {
     const fieldName = `_${save.repoName.charAt(0).toLowerCase() + save.repoName.slice(1)}`;

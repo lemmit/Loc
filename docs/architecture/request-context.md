@@ -123,6 +123,19 @@ op-calls bypass. The workflow handler now injects `IAuditWriter` and stages an
 `SaveAsync`. So both provenance backends now capture both trails through
 workflows.
 
+The same holds for **event-triggered reactors** (`on <Event>` / event-`create`
+sagas), which also invoke ops inline. On .NET a reactor is an
+`INotificationHandler` dispatched through the Mediator pipeline, so
+`ExecutionContextBehavior` opens its frame too; it injects `IAuditWriter` and
+stages audit for inline `audited` op-calls exactly like the command handler
+(provenance again free via `SaveAsync`). The carrier is fully populated when the
+event is dispatched inline (ephemeral channel, within the originating request);
+under a durable channel the outbox relay redelivers from a background scope, so
+the row records the change but with a fresh root-frame correlation rather than
+the original request's. (Hono reactors remain the one uncovered path — their
+inline functions don't yet flush provenance or stage audit; that's the next
+follow-up.)
+
 ## Frame semantics (from execution-context.md)
 
 One **current** frame per flow. `correlationId` is shared by every
