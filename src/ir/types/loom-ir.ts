@@ -1068,6 +1068,13 @@ export type WorkflowStmtIR =
       retrievalName: string;
       retrievalArgs: ExprIR[];
       page?: { offset?: ExprIR; limit?: ExprIR };
+      /** Set when this `repo-run` was lowered from `Repo.findAll(<Criterion>)`
+       *  (criterion.md, use site 3) rather than `Repo.run(<Retrieval>)`.  The
+       *  enrich pass synthesises a `RetrievalIR` named `retrievalName` (=
+       *  `findAllBy<Criterion>`) from `ctx.criteria[name]` so the call rides
+       *  the existing retrieval pipeline on every backend.  `name` is the
+       *  referenced criterion. */
+      synthCriterion?: { name: string };
       /** Element aggregate array type `{ kind: "array", element: entity }`. */
       returnType: TypeIR;
     }

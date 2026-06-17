@@ -353,6 +353,46 @@ function lowerWorkflowStatement(
         envAfter: withLocal(env, stmt.name, "let", arrayType),
       };
     }
+    // repo-findall: `Repo.findAll(<Criterion>, page?)` (criterion.md, use
+    // site 3).  Desugars to a `repo-run` of a synthetic retrieval (named
+    // `findAllBy<Criterion>`) that the enrich pass materialises from the
+    // context's criteria — so it rides the existing retrieval pipeline on
+    // every backend.  Checked before the generic repo-let so `findAll`
+    // doesn't fall through to the find-method path.
+    const findAllCall = matchFindAllCall(expr, reposByName);
+    if (findAllCall) {
+      const aggName = findAllCall.repo.aggregate?.ref?.name ?? "Unknown";
+      const repoName = findAllCall.repo.name;
+      const arrayType: TypeIR = {
+        kind: "array",
+        element: { kind: "entity", name: aggName },
+      };
+      return {
+        stmt: {
+          kind: "repo-run",
+          name: stmt.name,
+          repoName,
+          aggName,
+          retrievalName: `findAllBy${findAllCall.criterionName}`,
+          retrievalArgs: findAllCall.criterionArgs.map((a) => lowerExpr(a, env)),
+          ...(findAllCall.pageOffset || findAllCall.pageLimit
+            ? {
+                page: {
+                  ...(findAllCall.pageOffset
+                    ? { offset: lowerExpr(findAllCall.pageOffset, env) }
+                    : {}),
+                  ...(findAllCall.pageLimit
+                    ? { limit: lowerExpr(findAllCall.pageLimit, env) }
+                    : {}),
+                },
+              }
+            : {}),
+          synthCriterion: { name: findAllCall.criterionName },
+          returnType: arrayType,
+        },
+        envAfter: withLocal(env, stmt.name, "let", arrayType),
+      };
+    }
     // repo-let: `Repo.method(args)`
     const repoCall = matchRepoCall(expr, reposByName);
     if (repoCall) {
@@ -590,4 +630,60 @@ function matchRetrievalRunCall(
     }
   }
   return { repo, retrievalName, retrievalArgs, pageOffset, pageLimit };
+}
+
+interface FindAllMatch {
+  repo: Repository;
+  /** The referenced criterion name. */
+  criterionName: string;
+  /** Lowered-later argument expressions of `Criterion(args)`. */
+  criterionArgs: Expression[];
+  pageOffset?: Expression;
+  pageLimit?: Expression;
+}
+
+/** Recognise `<Repo>.findAll(<CriterionRef>, page?)` (criterion.md, use
+ *  site 3).  The first positional arg is a criterion reference — a bare
+ *  `Name` (parameterless) or `Name(args)` — and an optional named `page:`
+ *  arg carries `{ offset?, limit? }`.  Structurally the mirror of
+ *  `matchRetrievalRunCall`; only the method name (`findAll`) and the ref's
+ *  meaning (criterion, not retrieval) differ. */
+function matchFindAllCall(
+  expr: Expression | undefined,
+  reposByName: Map<string, Repository>,
+): FindAllMatch | undefined {
+  if (!expr || !isPostfixChain(expr)) return undefined;
+  if (expr.suffixes.length !== 1) return undefined;
+  const s = expr.suffixes[0]!;
+  if (!isMemberSuffix(s) || !s.call || s.member !== "findAll") return undefined;
+  const recv = expr.head;
+  if (!isNameRef(recv)) return undefined;
+  const repo = reposByName.get(recv.name);
+  if (!repo) return undefined;
+  const callArgs = s.args ?? [];
+  const refArg = callArgs.find((a) => !a.name);
+  if (!refArg) return undefined;
+  const ref = refArg.value;
+  let criterionName: string;
+  let criterionArgs: Expression[] = [];
+  if (isNameRef(ref)) {
+    criterionName = ref.name;
+  } else if (isPostfixChain(ref) && isNameRef(ref.head) && ref.suffixes.length === 1) {
+    const rs = ref.suffixes[0]!;
+    if (!isCallSuffix(rs)) return undefined;
+    criterionName = ref.head.name;
+    criterionArgs = (rs.args ?? []).map((a) => a.value);
+  } else {
+    return undefined;
+  }
+  const pageArg = callArgs.find((a) => a.name === "page");
+  let pageOffset: Expression | undefined;
+  let pageLimit: Expression | undefined;
+  if (pageArg && isObjectLit(pageArg.value)) {
+    for (const f of pageArg.value.fields) {
+      if (f.name === "offset") pageOffset = f.value;
+      else if (f.name === "limit") pageLimit = f.value;
+    }
+  }
+  return { repo, criterionName, criterionArgs, pageOffset, pageLimit };
 }

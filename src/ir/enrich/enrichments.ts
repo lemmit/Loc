@@ -9,6 +9,7 @@ import type {
   BoundedContextIR,
   ChannelIR,
   CodeRefKind,
+  CriterionIR,
   DataSourceKind,
   DeployableIR,
   DerivedIR,
@@ -33,6 +34,7 @@ import type {
   PayloadIR,
   RawLoomModel,
   RepositoryIR,
+  RetrievalIR,
   SystemIR,
   TraceabilityIR,
   TypeIR,
@@ -387,6 +389,10 @@ export function enrichContext(
   const workflows = ctx.workflows.map(enrichWorkflowReturnType).map(enrichWorkflowInstanceShape);
   // In-process dispatch slice: the channel-routed subscription join.
   const eventSubscriptions = deriveEventSubscriptions(ctx.channels, workflows);
+  // criterion.md, use site 3: materialise the synthetic retrievals that back
+  // the `Repo.findAll(<Criterion>)` calls lowered into this context's
+  // workflows, so they ride the existing retrieval pipeline on every backend.
+  const retrievals = synthesizeFindAllRetrievals(ctx.retrievals, workflows, ctx.criteria);
   return {
     ...ctx,
     valueObjects,
@@ -395,8 +401,72 @@ export function enrichContext(
     repositories,
     payloads,
     workflows,
+    retrievals,
     eventSubscriptions,
   };
+}
+
+/** Walk every workflow statement body (creates / handlers / reactors / event
+ *  folds), descending into `for-each` loop bodies. */
+function allWorkflowStmts(wf: WorkflowIR): WorkflowStmtIR[] {
+  // `appliers` are pure event folds over workflow state (StmtIR, no repo
+  // calls), so they carry no `Repo.findAll` — excluded from the walk.
+  const roots: WorkflowStmtIR[][] = [
+    ...(wf.creates ?? []).map((c) => c.statements),
+    ...(wf.handlers ?? []).map((h) => h.statements),
+    ...(wf.subscriptions ?? []).map((s) => s.statements),
+  ];
+  const out: WorkflowStmtIR[] = [];
+  const walk = (stmts: WorkflowStmtIR[]): void => {
+    for (const st of stmts) {
+      out.push(st);
+      if (st.kind === "for-each") walk(st.body);
+    }
+  };
+  for (const r of roots) walk(r);
+  return out;
+}
+
+/** criterion.md, use site 3: materialise the synthetic `findAllBy<Criterion>`
+ *  RetrievalIR for every `Repo.findAll(<Criterion>)` a workflow body lowered to
+ *  a `synthCriterion`-marked `repo-run`.  The criterion's lowered `body` is
+ *  already in the retrieval's own scope (params as `param` refs, candidate
+ *  fields as `this-prop`), so it drops straight into `where`; the
+ *  `criterionRef` (criterion params passed through as the retrieval's own
+ *  params) keeps reifying backends calling the predicate fn.  Deduped by
+ *  retrieval name, so many call sites share one retrieval. */
+function synthesizeFindAllRetrievals(
+  existing: RetrievalIR[] | undefined,
+  workflows: WorkflowIR[],
+  criteria: CriterionIR[] | undefined,
+): RetrievalIR[] {
+  const base = existing ?? [];
+  const crits = criteria ?? [];
+  const out = [...base];
+  const seen = new Set(base.map((r) => r.name));
+  for (const wf of workflows) {
+    for (const st of allWorkflowStmts(wf)) {
+      if (st.kind !== "repo-run" || !st.synthCriterion || seen.has(st.retrievalName)) continue;
+      const crit = crits.find((c) => c.name === st.synthCriterion!.name);
+      if (!crit) continue; // a missing criterion is reported by the IR validator
+      seen.add(st.retrievalName);
+      out.push({
+        name: st.retrievalName,
+        params: crit.params,
+        targetType: crit.targetType,
+        where: crit.body,
+        criterionRef: {
+          name: crit.name,
+          args: crit.params.map(
+            (p): ExprIR => ({ kind: "ref", name: p.name, refKind: "param", type: p.type }),
+          ),
+        },
+        sort: [],
+        loadPlan: { kind: "whole" },
+      });
+    }
+  }
+  return out;
 }
 
 /** Attach `returnType` (the tail-position success type) to a workflow, idempotently. */
