@@ -160,9 +160,17 @@ Two tiers:
   `docker build` + `kind load` the deployable images, stand up a throwaway
   in-cluster postgres (the chart targets an external DB), `helm install
   --wait` (which gates on the `/ready` readiness probe → proves the DB
-  `Secret` wired up), `kubectl rollout status` every workload, then an
-  explicit `curl /health` + `/ready` through the backend's ClusterIP
-  Service. Heavier (it builds container images), so it is **not** per-PR —
+  `Secret` wired up), `kubectl rollout status` every workload, an explicit
+  `curl /health` + `/ready` through the backend's ClusterIP Service, and
+  finally a **real domain read round-trip**: it discovers an auto-`findAll`
+  collection `GET` from the backend's `/openapi.json` and calls it (inside
+  the api pod, via the container's own `node`), asserting `200` + JSON.
+  That exercises what `/ready` can't — migrations applied at boot → the
+  repository's `SELECT` hits a real, migrated table → wire-shape
+  serialization → HTTP routing (a missing table would `500`). Endpoint
+  discovery from OpenAPI keeps it example-agnostic; a *write* round-trip is
+  out of scope (a valid `POST` body is domain-specific). Heavier (it builds
+  container images), so it is **not** per-PR —
   the `k8s-e2e.yml` workflow runs it nightly, on the `e2e-k8s` PR label, or
   by manual dispatch, provisioning the cluster via `helm/kind-action`. Run
   locally with `kind create cluster && npm run test:k8s-e2e`. First cut is

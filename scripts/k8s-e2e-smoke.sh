@@ -4,8 +4,9 @@
 #
 # The heavier e2e tier above the per-PR `helm lint` + `kubeconform` gate:
 # actually INSTALL the emitted Helm chart into a throwaway kind cluster and
-# prove the workloads boot, the DB Secret wires up, and the backend reaches
-# its database (`/ready` → 200).
+# prove the workloads boot, the DB Secret wires up, the backend reaches its
+# database (`/ready` → 200), AND a real domain read round-trips end to end
+# (an auto-findAll collection GET → migrated table → wire shape → 200).
 #
 # Scope (first cut, kept fast): one example with a hono backend + a react
 # frontend (examples × backends is deliberately NOT a matrix here — that's
@@ -118,4 +119,56 @@ fi
 kubectl -n "$NS" logs smoke
 kubectl -n "$NS" delete pod smoke --ignore-not-found
 
-step "OK — chart installs, workloads boot, backend reaches its database."
+step "Real round-trip: discover a collection endpoint and read through it"
+# /ready only proves a DB *connection*.  This proves the whole data path:
+# migrations applied at boot (await migrate(db) before serving) → the
+# repository's findAll SELECT hits a real, migrated table → the wire shape
+# serializes → HTTP routing is wired.  A missing table would 500 here, so
+# the 200 has teeth.  We discover the endpoint from /openapi.json (every
+# aggregate gets an auto-findAll GET) so the smoke stays example-agnostic —
+# no hardcoded domain path or request body.  Runs inside the api pod via
+# the container's own node (global fetch), so it needs no extra image and
+# no port-forward.  A write round-trip is deliberately out of scope: a
+# valid POST body is domain-specific and would couple this to the example.
+# Wrapped in an async IIFE so it runs whether node treats piped stdin as
+# CommonJS (the default — no top-level await) or ESM.
+kubectl -n "$NS" exec -i "deploy/${FULLNAME}-api" -- node - <<'NODE'
+const BASE = "http://localhost:3000";
+const SKIP = new Set(["/", "/health", "/ready", "/openapi.json", "/swagger", "/me", "/events"]);
+const fail = (m) => { console.error("ROUND-TRIP FAILED: " + m); process.exit(1); };
+
+(async () => {
+  const doc = await fetch(`${BASE}/openapi.json`).then((r) => r.ok ? r.json() : fail(`/openapi.json → ${r.status}`));
+  // Collection GETs are the auto-findAll list routes: a GET with no `{param}`
+  // path segment, excluding the infra/auth/stream endpoints above.  Prefer
+  // single-segment roots (the bare `/<plural>` findAll) over deeper paths
+  // like `/<plural>/by_network`, which are query routes that may *require*
+  // params we don't know — those sort last and act only as a fallback.
+  const candidates = Object.entries(doc.paths ?? {})
+    .filter(([p, ops]) => ops?.get && !p.includes("{") && !SKIP.has(p))
+    .map(([p]) => p)
+    .sort((a, b) => a.split("/").length - b.split("/").length || a.length - b.length);
+  if (candidates.length === 0) fail("no collection GET route found in /openapi.json");
+
+  // One real 200 + JSON proves the data path (migrated table → repository
+  // SELECT → wire shape).  Tolerate a candidate that needs unknown query
+  // params (e.g. a 400 from a `by_*` route); only fail if NONE read back.
+  const tried = [];
+  for (const p of candidates) {
+    try {
+      const res = await fetch(`${BASE}${p}`);
+      if (!res.ok) { tried.push(`${p} → ${res.status}`); continue; }
+      const body = await res.json();
+      // findAll returns a bare array; paged/enveloped views return an object.
+      const n = Array.isArray(body) ? body.length : Array.isArray(body?.items) ? body.items.length : "n/a";
+      console.log(`GET ${p} → 200, ${n} row(s) — DB read path OK`);
+      process.exit(0);
+    } catch (e) {
+      tried.push(`${p} → ${e?.message ?? e}`);
+    }
+  }
+  fail(`no collection GET returned 200 + JSON; tried: ${tried.join(", ")}`);
+})().catch((e) => fail(String(e?.stack ?? e)));
+NODE
+
+step "OK — chart installs, workloads boot, and a real DB read round-trips."
