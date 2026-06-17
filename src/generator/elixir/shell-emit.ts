@@ -165,7 +165,17 @@ export function emitShellFiles(
   // lib/<app>_web/router.ex
   out.set(
     `lib/${appName}_web/router.ex`,
-    renderRouter(appName, appModule, liveRoutes, apiRoutes, authEnabled, embedReact),
+    renderRouter(
+      appName,
+      appModule,
+      liveRoutes,
+      apiRoutes,
+      authEnabled,
+      embedReact,
+      // OIDC handshake routes (/auth/login|callback|logout) only when this
+      // auth-required deployable's system declares an `auth { oidc }` block.
+      authEnabled && !!sys.auth,
+    ),
   );
 
   // lib/<app>_web/components/core_components.ex — minimal stub so

@@ -343,6 +343,7 @@ export function renderRouter(
   apiRoutes: ApiRoute[],
   authEnabled: boolean,
   embedReact = false,
+  oidc = false,
 ): string {
   void appName;
   const webModule = `${appModule}Web`;
@@ -395,13 +396,22 @@ ${inner}
 
   // /auth/me session probe — emitted when auth is enabled.  Piped through
   // :api so the Auth plug verifies the principal first (the `auth: ui`
-  // frontend guard reads this); parity with the Hono / .NET `/auth/me`.
+  // frontend guard reads this); parity with the Hono / .NET `/auth/me`.  Under
+  // an `auth { oidc }` block the /auth/login|callback|logout redirect handshake
+  // is added too (the Auth plug bypasses those three so they're reachable
+  // without a verified principal).
+  const handshakeRoutes = oidc
+    ? `
+    get "/login", AuthController, :login
+    get "/callback", AuthController, :callback
+    get "/logout", AuthController, :logout`
+    : "";
   const authScope = authEnabled
     ? `
   scope "/auth", ${webModule} do
     pipe_through :api
 
-    get "/me", AuthController, :me
+    get "/me", AuthController, :me${handshakeRoutes}
   end
 `
     : "";

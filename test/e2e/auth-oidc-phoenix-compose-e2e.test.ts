@@ -177,6 +177,17 @@ describe.skipIf(!RUN)(
           (await fetch(`${API_BASE}/auth/me`, { headers: { authorization: "Bearer not.a.token" } }))
             .status,
         ).toBe(401);
+
+        // The /auth/login handshake entry starts the authorization-code flow:
+        // a 302 to the IdP's authorize endpoint (discovered from the issuer)
+        // with an oidc_state cookie.  We don't follow it (the host can't
+        // resolve host.docker.internal), but the redirect target + cookie
+        // prove the generated handshake runs.  (The full code→token callback
+        // needs a browser session — out of scope for this headless smoke.)
+        const login = await fetch(`${API_BASE}/auth/login`, { redirect: "manual" });
+        expect(login.status).toBe(302);
+        expect(login.headers.get("location") ?? "").toContain("/protocol/openid-connect/auth");
+        expect(login.headers.get("set-cookie") ?? "").toContain("oidc_state");
       } catch (err) {
         console.error(`\n===== compose logs =====\n${composeLogs()}\n========================\n`);
         throw err;

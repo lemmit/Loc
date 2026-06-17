@@ -107,6 +107,42 @@ describe("Phoenix OIDC verifier emission", () => {
     expect(router).toContain('get "/me", AuthController, :me');
   });
 
+  it("emits the /auth/login|callback|logout redirect handshake under OIDC", async () => {
+    const files = await build(source({ oidc: true }));
+    const ctrl = files.get("api/lib/api_web/controllers/auth_controller.ex")!;
+    // The three handshake actions + the code→token exchange.
+    expect(ctrl).toContain("def login(conn, _params)");
+    expect(ctrl).toContain('def callback(conn, %{"code" => code, "state" => state})');
+    expect(ctrl).toContain("def logout(conn, _params)");
+    expect(ctrl).toContain('put_resp_cookie("session", access_token');
+    expect(ctrl).toContain('"grant_type" => "authorization_code"');
+    // Routed.
+    const router = files.get("api/lib/api_web/router.ex")!;
+    expect(router).toContain('get "/login", AuthController, :login');
+    expect(router).toContain('get "/callback", AuthController, :callback');
+    expect(router).toContain('get "/logout", AuthController, :logout');
+    // The plug bypasses the three redirect endpoints (no principal yet) and
+    // reads the token from the Bearer header OR the handshake's session cookie.
+    const auth = files.get("api/lib/api_web/auth.ex")!;
+    expect(auth).toContain('defp bypass_path?("/auth/login"), do: true');
+    expect(auth).toContain('defp bypass_path?("/auth/callback"), do: true');
+    expect(auth).toContain('defp bypass_path?("/auth/logout"), do: true');
+    expect(auth).toContain("defp extract_token(conn)");
+    expect(auth).toContain('conn.cookies["session"]');
+  });
+
+  it("emits NO handshake on the dev-stub path (auth required, no oidc)", async () => {
+    const files = await build(source({ oidc: false }));
+    const ctrl = files.get("api/lib/api_web/controllers/auth_controller.ex")!;
+    expect(ctrl).not.toContain("def login(");
+    expect(ctrl).not.toContain("def callback(");
+    const auth = files.get("api/lib/api_web/auth.ex")!;
+    expect(auth).not.toContain("extract_token");
+    expect(auth).not.toContain('bypass_path?("/auth/login")');
+    const router = files.get("api/lib/api_web/router.ex")!;
+    expect(router).not.toContain(":login");
+  });
+
   it("pulls {:jose} + :inets/:ssl into mix.exs only under OIDC", async () => {
     const oidcMix = (await build(source({ oidc: true }))).get("api/mix.exs")!;
     expect(oidcMix).toContain("{:jose,");
