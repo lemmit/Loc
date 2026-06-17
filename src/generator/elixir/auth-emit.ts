@@ -177,24 +177,13 @@ defmodule ${webModule}.Auth do
 
 ${verifierSection}
   # ---------------------------------------------------------------------------
-  # Maps verified JWT claims onto the system's user { } shape.  Dotted claim
-  # paths (e.g. \`realm_access.roles\`) walk nested maps via get_claim/2.
+  # Maps verified JWT claims onto the system's user { } shape.  OIDC walks
+  # dotted claim paths (e.g. \`realm_access.roles\`) via get_claim/2; the dev
+  # stub reads flat claim keys.
   # ---------------------------------------------------------------------------
 
   defp build_user(claims) do
 ${buildUserBody}  end
-
-  # Reads a dotted claim path off the (string-keyed) claims map; nil when any
-  # segment is missing.
-  defp get_claim(claims, path) do
-    path
-    |> String.split(".")
-    |> Enum.reduce(claims, fn
-      _key, nil -> nil
-      key, acc when is_map(acc) -> Map.get(acc, key)
-      _key, _acc -> nil
-    end)
-  end
 end
 `;
 }
@@ -306,6 +295,19 @@ function renderOidcVerifier(): string {
       {:ok, {{_, 200, _}, _headers, body}} -> Jason.decode(body)
       _ -> :error
     end
+  end
+
+  # Reads a dotted claim path off the (string-keyed) claims map; nil when any
+  # segment is missing.  Only the OIDC build_user maps via paths, so this lives
+  # in the OIDC section (the dev stub reads flat claim keys directly).
+  defp get_claim(claims, path) do
+    path
+    |> String.split(".")
+    |> Enum.reduce(claims, fn
+      _key, nil -> nil
+      key, acc when is_map(acc) -> Map.get(acc, key)
+      _key, _acc -> nil
+    end)
   end
 `;
 }
