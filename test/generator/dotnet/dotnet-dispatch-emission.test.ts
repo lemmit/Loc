@@ -2,6 +2,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
+import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
 import { generateDotnet } from "../../../src/generator/dotnet/index.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
@@ -36,6 +37,17 @@ async function generate(file: string): Promise<Map<string, string>> {
   return generateDotnet(doc.parseResult.value as Model);
 }
 
+async function generateSource(src: string): Promise<Map<string, string>> {
+  const services = createDddServices(NodeFileSystem);
+  const doc = await parseHelper<Model>(services.Ddd)(src, { validation: true });
+  const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+  expect(
+    errors.map((d) => d.message),
+    "source validation errors",
+  ).toEqual([]);
+  return generateDotnet(doc.parseResult.value);
+}
+
 describe(".NET in-process event dispatch emission", () => {
   it("emits one INotificationHandler per reactor / event-create", async () => {
     const files = await generate("test/fixtures/dispatch-sample.ddd");
@@ -68,6 +80,66 @@ describe(".NET in-process event dispatch emission", () => {
     );
     expect(onH!).toContain("ship.MarkTracked();");
     expect(onH!).toContain("await _shipments.SaveAsync(ship, cancellationToken);");
+  });
+
+  it("stages an audit row for an audited op invoked inside a reactor", async () => {
+    // A reactor calls ops inline (like the command handler), so an `audited`
+    // op invoked in response to an event would otherwise leave no audit trail.
+    // The reactor is an INotificationHandler dispatched through the Mediator
+    // pipeline, so ExecutionContextBehavior has already opened its frame.
+    const src = `context Fulfillment {
+  aggregate Order { customerId: string  status: string  total: int }
+  repository Orders for Order { }
+  aggregate Shipment {
+    orderRef: Order id
+    status: string
+    operation markTracked() audited { status := "Tracked" }
+  }
+  repository Shipments for Shipment { }
+  event OrderPlaced { order: Order id, at: datetime }
+  event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+  channel Lifecycle { carries: OrderPlaced, ShipmentRequested  delivery: broadcast  retention: ephemeral }
+  workflow OrderFulfillment {
+    orderId: Order id
+    attempts: int
+    create(p: OrderPlaced) by p.order {
+      let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+      emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+    }
+    on(s: ShipmentRequested) by s.order {
+      let ship = Shipments.getById(s.shipment)
+      ship.markTracked()
+    }
+  }
+}`;
+    const onH = (await generateSource(src)).get(
+      "Application/Workflows/OrderFulfillmentOnShipmentRequestedHandler.cs",
+    )!;
+    expect(onH).toBeDefined();
+    // The reactor injects the audit writer and stages a record bracketed by
+    // before/after wire snapshots, mirroring the per-operation handler.
+    expect(onH).toContain("private readonly IAuditWriter _audit;");
+    expect(onH).toContain("var __wfAuditBefore0 = System.Text.Json.JsonSerializer.Serialize(");
+    expect(onH).toContain("var __wfAuditAfter0 = System.Text.Json.JsonSerializer.Serialize(");
+    expect(onH).toContain("_audit.Stage(new AuditRecord");
+    expect(onH).toContain('Action = "markTracked",');
+    expect(onH).toContain('TargetType = "Shipment",');
+    expect(onH).toContain("TargetId = ship.Id.Value.ToString(),");
+    expect(onH).toContain("ParentId = RequestContext.Current?.ParentId,");
+    // Staged before the aggregate save so it commits in the same SaveChangesAsync.
+    expect(onH.indexOf("_audit.Stage")).toBeLessThan(onH.indexOf("_shipments.SaveAsync"));
+    // No duplicate using directives (CS0105 would fail /warnaserror).
+    const usings = onH.split("\n").filter((l) => l.startsWith("using "));
+    expect(usings).toHaveLength(new Set(usings).size);
+  });
+
+  it("a plain (non-audited) reactor op injects no audit writer", async () => {
+    // dispatch-sample's markTracked is not audited → reactor stays audit-free.
+    const onH = (await generate("test/fixtures/dispatch-sample.ddd")).get(
+      "Application/Workflows/OrderFulfillmentOnShipmentRequestedHandler.cs",
+    )!;
+    expect(onH).not.toContain("IAuditWriter");
+    expect(onH).not.toContain("_audit.Stage");
   });
 
   it("persists correlation: state POCO + EF config + DbContext wiring", async () => {
