@@ -537,6 +537,63 @@ function validateWorkflowBody(
         break;
       }
       case "repo-run": {
+        // `let xs = Repo.findAll(<Criterion>, page?)` (criterion.md, use
+        // site 3) lowered to a `synthCriterion`-marked repo-run.  Validate the
+        // criterion directly (clear errors before the enrich-synthesised
+        // `findAllBy<Criterion>` retrieval would otherwise mislead the generic
+        // run checks below), then record the array binding and stop.
+        if (st.synthCriterion) {
+          const repo = reposByName.get(st.repoName);
+          if (!repo) {
+            diags.push({
+              severity: "error",
+              code: "loom.workflow-run-unknown-repository",
+              message: `workflow '${wf.name}': '${st.repoName}.findAll(...)' references unknown repository '${st.repoName}'.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+            break;
+          }
+          const critName = st.synthCriterion.name;
+          const crit = ctx.criteria.find((c) => c.name === critName);
+          if (!crit) {
+            diags.push({
+              severity: "error",
+              code: "loom.findall-unknown-criterion",
+              message: `workflow '${wf.name}': '${st.repoName}.findAll(${critName})' references unknown criterion '${critName}'.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+            break;
+          }
+          const candidate = crit.targetType.kind === "entity" ? crit.targetType.name : "";
+          if (candidate !== st.aggName) {
+            diags.push({
+              severity: "error",
+              code: "loom.findall-criterion-mismatch",
+              message: `workflow '${wf.name}': criterion '${critName}' is over '${candidate || "bool"}', but '${st.repoName}.findAll' queries '${st.aggName}'.  findAll needs a criterion 'of ${st.aggName}'.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+            break;
+          }
+          if (st.retrievalArgs.length !== crit.params.length) {
+            diags.push({
+              severity: "error",
+              code: "loom.findall-criterion-arity",
+              message: `workflow '${wf.name}': criterion '${critName}' takes ${crit.params.length} argument(s), but '${st.repoName}.findAll' passed ${st.retrievalArgs.length}.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+            break;
+          }
+          if (!st.page) {
+            diags.push({
+              severity: "warning",
+              code: "loom.findall-no-page",
+              message: `workflow '${wf.name}': '${st.repoName}.findAll(${critName})' reads the full result set — an unbounded list read.  Supply 'page: { offset: 0, limit: N }' to bound it.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+          }
+          arrayBindingAgg.set(st.name, st.aggName);
+          break;
+        }
         // `let xs = Repo.run(<Retrieval>(args), page?)` — the bound
         // result is an aggregate array, consumable only by a `for-each`.
         const repo = reposByName.get(st.repoName);

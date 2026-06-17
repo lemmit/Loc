@@ -5,14 +5,17 @@
 > `view`/`find` `where`, invariants, operation preconditions) is shipped;
 > see [`docs/criterion.md`](../criterion.md). **`when <pred>` + the
 > auto-exposed `can-<op>` query (use site 2, the canCommand pattern) are
-> SHIPPED on Hono + .NET** (2026-06-10): the route/handler evaluates the
-> predicate against the loaded aggregate (false → 409 "Disallowed"
-> ProblemDetails via `DisallowedError`/`DisallowedException`), and a
-> side-effect-free `GET /{id}/can_<op>` returns `{ allowed }`; op-param
-> references are rejected at validation; elixir hosts are gated
-> (`loom.when-unsupported`).  The remaining surfaces
-> (`Repo.findAll(criterion, …)`, `from <Criterion>(args)`,
-> `private workflow`) stay on paper. **Resolves D23**.
+> SHIPPED on all five backends** (node / .NET / python / elixir / java): the
+> route/handler evaluates the predicate against the loaded aggregate (false →
+> 409 "Disallowed" ProblemDetails via `DisallowedError`/`DisallowedException`),
+> and a side-effect-free `GET /{id}/can_<op>` returns `{ allowed }`; op-param
+> references are rejected at validation; `loom.when-unsupported` is now latent.
+> **`Repo.findAll(<Criterion>, page?)` from workflow bodies is SHIPPED on every
+> backend** — it desugars to a synthetic `findAllBy<Criterion>` retrieval (the
+> enrich pass materialises it from `ctx.criteria`), riding the existing
+> retrieval/`Repo.run` pipeline.  The remaining surfaces (`from
+> <Criterion>(args)`, findAll `sort:`/`loads:` + single-result
+> `Repo.find(<Criterion>)`, `private workflow`) stay on paper. **Resolves D23**.
 > Depends on
 > [`payload-transport-layer.md`](./payload-transport-layer.md) (carrier
 > generics + tagged unions) and
