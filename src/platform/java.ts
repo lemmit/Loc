@@ -72,6 +72,10 @@ const javaPlatform: PlatformSurface = {
         ["SPRING_DATASOURCE_USERNAME", "postgres"],
         ["SPRING_DATASOURCE_PASSWORD", "postgres"],
       ],
+      // The DB password is sensitive — keep it out of any plaintext k8s
+      // ConfigMap (the emitter routes it to a Secret).  The URL is handled
+      // via dependsOnDb; the username stays plain config.
+      secretEnvKeys: ["SPRING_DATASOURCE_PASSWORD"],
       dependsOnDb: true,
       // Compose healthcheck → /ready (DB-aware); /health stays for cheap
       // liveness probing.  Mirrors dotnet.

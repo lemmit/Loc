@@ -1,6 +1,8 @@
 # Proposal: Kubernetes / Helm as a deployment target
 
-**Status:** Draft. Output of a research conversation. Not yet adopted.
+**Status:** Adopted and shipped (v1, emitter-only). The reference doc is
+[`docs/kubernetes.md`](../kubernetes.md); the two non-goal statements called
+out below have been updated. This file is kept as the design rationale.
 **Scope:** Emit a Helm chart (and the raw manifests it renders to) alongside
 the existing `docker-compose.yml`, so a generated Loom system can be deployed
 to a Kubernetes cluster. **Emitter-only** — no `.ddd` grammar or IR change in

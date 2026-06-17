@@ -285,6 +285,10 @@ interface RunOptions {
    * by default keeps the artefact lean and the domain layer pure; on
    * regenerate to diagnose.  See docs/proposals/observability.md. */
   emitTrace?: boolean;
+  /** `--k8s` switch — when true, `generate system` additionally emits a Helm
+   * chart (`helm/`) and the raw manifests it renders to (`k8s/`) alongside
+   * `docker-compose.yml`.  See docs/kubernetes.md. */
+  emitKubernetes?: boolean;
 }
 
 interface RunResult {
@@ -371,6 +375,7 @@ async function runGenerate(
     // builder + `docs/generators.md` § Migrations for the pipeline.
     files = generateSystemsFromLoom(loom, {
       emitTrace: options.emitTrace,
+      emitKubernetes: options.emitKubernetes,
       snapshots: fsSnapshotStore(outDir),
     }).files;
     if (files.size === 0) {
@@ -780,6 +785,10 @@ generate
     "--trace",
     "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/proposals/observability.md",
   )
+  .option(
+    "--k8s",
+    "also emit a Helm chart (helm/) and raw manifests (k8s/) alongside docker-compose.yml; see docs/kubernetes.md",
+  )
   .action(
     async (
       file: string,
@@ -789,6 +798,7 @@ generate
         dryRun?: boolean;
         json?: boolean;
         trace?: boolean;
+        k8s?: boolean;
       },
     ) => {
       if (options.json) {
@@ -802,6 +812,7 @@ generate
       const runOpts = {
         dryRun: options.dryRun,
         emitTrace: !!options.trace,
+        emitKubernetes: !!options.k8s,
       };
       await runGenerate("system", file, options.out, runOpts);
       if (options.watch) {

@@ -81,6 +81,9 @@ const elixirPlatform: PlatformSurface = {
         ["PHX_SERVER", "true"],
         ["PORT", "4000"],
       ],
+      // SECRET_KEY_BASE signs/encrypts sessions — sensitive, so the k8s
+      // emitter routes it to a Secret rather than a plaintext ConfigMap.
+      secretEnvKeys: ["SECRET_KEY_BASE"],
       dependsOnDb: true,
       healthPath: "/health",
       internalPort: 4000,

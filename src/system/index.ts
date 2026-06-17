@@ -16,6 +16,8 @@ import { hasAdapters, resolveLayout, resolveStyle } from "../platform/resolve-ad
 import { renderAsyncApi } from "./asyncapi.js";
 import { renderDataSourcesMd } from "./datasources.js";
 import { renderE2EFile } from "./e2e-render.js";
+import { renderHelmChart } from "./helm.js";
+import { renderKubernetesManifests } from "./kubernetes.js";
 import { renderC4Model, renderC4SpecJson } from "./likec4.js";
 import {
   renderDeploymentDiagram,
@@ -61,6 +63,11 @@ export interface SystemEmission {
 
 export interface GenerateSystemOptions {
   emitTrace?: boolean;
+  /** When true, additionally emit a Helm chart (`helm/`) and the raw
+   *  manifests it renders to (`k8s/`) ALONGSIDE the always-present
+   *  `docker-compose.yml`.  Opt-in (the CLI `--k8s` flag); off keeps the
+   *  output the inner-loop compose stack only.  See docs/kubernetes.md. */
+  emitKubernetes?: boolean;
   /** Source for `.loom/snapshots/<module>.snapshot.json` baselines.  When
    *  omitted, an empty in-memory store is used — every owning module
    *  emits an "Initial" migration.  CLI wires `fsSnapshotStore(outDir)`;
@@ -89,7 +96,11 @@ export function generateSystemsFromLoom(
   const out = new Map<string, string>();
   const snapshots = options.snapshots ?? memorySnapshotStore();
   for (const sys of loom.systems) {
-    emitSystem(sys, loom, out, { emitTrace: options.emitTrace, snapshots });
+    emitSystem(sys, loom, out, {
+      emitTrace: options.emitTrace,
+      emitKubernetes: options.emitKubernetes,
+      snapshots,
+    });
   }
   // Traceability artifacts — model-global (requirements may
   // reference code across systems), so emitted once at the output root
@@ -105,7 +116,7 @@ function emitSystem(
   sys: EnrichedSystemIR,
   loom: EnrichedLoomModel,
   out: Map<string, string>,
-  options: { emitTrace?: boolean; snapshots: SnapshotStore },
+  options: { emitTrace?: boolean; emitKubernetes?: boolean; snapshots: SnapshotStore },
 ): void {
   // Pre-compute a module-name → contexts lookup so a deployable can
   // collect its slice quickly.
@@ -139,6 +150,13 @@ function emitSystem(
 
   out.set("docker-compose.yml", renderDockerCompose(sys));
   out.set("db-init/00-create-databases.sql", renderDbInit(sys));
+  // Opt-in production deployment artifacts (D-K8S-*; docs/kubernetes.md).
+  // Emitted ALONGSIDE compose, never instead of it: compose stays the
+  // inner-loop story, the chart + raw manifests are the cluster story.
+  if (options.emitKubernetes) {
+    for (const [path, content] of renderHelmChart(sys)) out.set(path, content);
+    for (const [path, content] of renderKubernetesManifests(sys)) out.set(path, content);
+  }
   // Bundled dev Keycloak realm import (D-AUTH-OIDC §4.2) — loaded by the
   // compose `keycloak` service's `--import-realm` on first boot.
   if (bundlesKeycloak(sys)) out.set("keycloak/realm.json", renderKeycloakRealm(sys));

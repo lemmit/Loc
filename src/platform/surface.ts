@@ -70,6 +70,16 @@ export const STATIC_BUNDLE_FRAMEWORKS: ReadonlySet<string> = new Set([
 export interface ComposeServiceShape {
   /** Environment variables: ordered tuples to keep yaml output stable. */
   env: Array<[string, string]>;
+  /** Names of the env entries above that are SENSITIVE (passwords, app
+   *  secret keys, tokens) and must NOT be emitted as plaintext in a
+   *  k8s `ConfigMap`.  The backend is the source of truth for this — the
+   *  k8s emitter routes these into a `Secret` instead (see
+   *  docs/kubernetes.md), rather than guessing from the variable name.
+   *  Compose ignores it (dev secrets are inline either way).  The DB
+   *  connection string is handled separately via `dependsOnDb` and does
+   *  not need to be listed here.  Omit / empty when the backend has no
+   *  non-DB secrets (hono / .NET / python / the frontends). */
+  secretEnvKeys?: readonly string[];
   /** Whether this service should `depends_on: db` with a healthcheck wait. */
   dependsOnDb: boolean;
   /** Health-check path relative to the service's HTTP root. */

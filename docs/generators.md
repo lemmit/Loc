@@ -1000,8 +1000,10 @@ Out of scope for v1 (intentional):
   honest spelling and aligns with set semantics across all backends.
 - **Server-side rendering**: client-only Vite.  Next.js variant
   would be a separate platform.
-- **Generated CI / k8s manifests**: project-init concerns, not
-  derived from the `.ddd` source.
+- **Generated CI pipelines**: project-init concerns, not derived from
+  the `.ddd` source.  (k8s manifests are no longer on this list — the
+  opt-in `generate system --k8s` flag emits a Helm chart + raw manifests;
+  see [`kubernetes.md`](kubernetes.md).)
 
 These are all addressable as either generator extensions or
 `.loomignore`-pinned customizations.
