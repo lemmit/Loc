@@ -15,6 +15,7 @@ import { contextUsesMoney, uiUsesMoney } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
+import { AUTH_GATE_VUE, AUTH_SESSION_TS, AUTH_USE_SESSION_VUE } from "../_frontend/auth-ui.js";
 import {
   buildExternFunctionShim,
   buildExternFunctionSignature,
@@ -343,8 +344,19 @@ export function generateVueForContexts(
 
   // Shared shell files (api/ + vue/ + docker/ shared-source layers).
   const hasDelete = aggregates.some((a) => !!a.agg.canonicalDestroy);
-  out.set("src/api/client.ts", renderShell(pack, "api-client", { hasDelete }));
+  // Frontend auth guard (D-AUTH-OIDC, `auth: ui`): when this vue
+  // deployable opts in AND its target backend enforces auth, emit the
+  // session-aware client + the provide/inject route guard.  Mirrors the
+  // React wiring — the `session.ts` probe is shared verbatim; the guard
+  // SFC + `useSession` composable are the Vue-shaped half.
+  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
+  out.set("src/api/client.ts", renderShell(pack, "api-client", { hasDelete, hasAuthUi: authUi }));
   out.set("src/api/config.ts", renderShell(pack, "api-config", { apiBaseUrl }));
+  if (authUi) {
+    out.set("src/auth/session.ts", AUTH_SESSION_TS);
+    out.set("src/auth/useSession.ts", AUTH_USE_SESSION_VUE);
+    out.set("src/auth/AuthGate.vue", AUTH_GATE_VUE);
+  }
   out.set("src/logger.ts", renderShell(pack, "logger", {}));
   out.set("src/lib/format.ts", renderShell(pack, "format-helpers", {}));
   // The reactive()+zod form runtime (vue/ shared source) — the
@@ -374,7 +386,7 @@ export function generateVueForContexts(
 
   // Pack shell tier.
   out.set("src/theme.ts", renderShell(pack, "theme", prepareThemeVM(sys.theme)));
-  out.set("src/main.ts", renderShell(pack, "main", {}));
+  out.set("src/main.ts", renderShell(pack, "main", { authUi }));
   // App root.  Default-only uis render the pack chrome straight into
   // App.vue (the flat-router shape).  When named layouts are in play the
   // chrome moves to `src/layouts/DefaultLayout.vue` and App.vue is a thin

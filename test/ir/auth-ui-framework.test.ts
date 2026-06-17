@@ -1,6 +1,6 @@
 // `auth: ui` framework gate (Phase 6).  The frontend OIDC guard is emitted
-// only by the React generator, so a deployable whose resolved UI framework
-// isn't react (vue / svelte) is rejected at the IR level rather than
+// by the React and Vue generators, so a deployable whose resolved UI
+// framework is neither (svelte) is rejected at the IR level rather than
 // silently emitting no guard.
 
 import { describe, expect, it } from "vitest";
@@ -42,15 +42,13 @@ describe("auth: ui framework gate", () => {
     expect(await authUiErrors(sys("react"))).toEqual([]);
   });
 
-  it("rejects auth: ui on a vue frontend", async () => {
-    const errs = await authUiErrors(sys("vue"));
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("only supported on react");
+  it("allows auth: ui on a vue frontend", async () => {
+    expect(await authUiErrors(sys("vue"))).toEqual([]);
   });
 
   it("rejects auth: ui on a svelte frontend", async () => {
     const errs = await authUiErrors(sys("svelte"));
     expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("only supported on react");
+    expect(errs[0]).toContain("only supported on react and vue");
   });
 });
