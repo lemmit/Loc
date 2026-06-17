@@ -147,17 +147,29 @@ default lands in Phase 2.
 
 ### Phasing
 
-- **Phase 1 (now):** `with tenantOwned` stdlib capability macro → `internal
-  tenantId` + `onCreate` stamp + principal filter. Lands on/with **T2.j**.
-  Explicit, fail-open + lint. Proves the column/stamp/filter runtime
-  end-to-end behind the smallest surface.
-- **Phase 2:** promote to first-class — `tenancy by user.tenantId of
-  Organization` (R1), `crossTenant` / `platform` markers (R2), the derived
-  fail-closed default (R3), typed `tenantId ≡ Organization id`. The macro keeps
-  working as the explicit form.
-- **Phase 3:** hierarchical tenancy (R5) — self-referential registry + the
-  per-role `local`/`deep`/`global` access levels. Gated on a real parent/child
-  org use case; flat covers the common ~90%.
+> **The model is always hierarchy-ready — there is no flat/hierarchical mode
+> switch** (R5). "Flat" is the degenerate case (every org a root, every read
+> `local`). Stamping `dataKey` from day one trades a slightly bigger Phase 1
+> for **no migration when `deep` is later turned on**. This supersedes the
+> earlier "cheapest Phase 1 = `tenantId` only" framing in R4 — the macro
+> *insight* (tenantOwned = the audit+softDelete shape) still holds; the field
+> set grows by the managed `dataKey`.
+
+- **Phase 1 (now):** the tenancy core — `tenancy by user.tenantId of
+  Organization` (R1, **declaration + verification only**), `tenantOwned` /
+  `crossTenant` / `platform` (R2), the fail-closed derived default (R3), the
+  registry (`implements "tenantRegistry"` + author-written **immutable**
+  `parent`, *verified* per R5), and `tenantId` **+ `dataKey`** stamped on every
+  `tenantOwned` aggregate **from the token** at create. `local` reads wired
+  (`tenantId` equality); `deep` waits for authz. Runtime gate: **T2.j**
+  (principal-referencing filters on node/elixir/java). `with tenantOwned` is
+  the explicit, **unfoldable** capability that carries the fields (R4) —
+  nothing is injected by the distant `tenancy by` line.
+- **Phase 2:** the `deep` / `global` access levels in `authorization.md`'s
+  `policy {}` (per role, per entity). **Migration-free** — `dataKey` is already
+  stamped; `deep` is a direct `dataKey LIKE prefix%` scan.
+- **Out of scope:** reparent — `parent` is immutable; the rare org move is an
+  offline data migration, not a runtime feature.
 
 ### Worked example (Phase-2 surface)
 
@@ -180,8 +192,11 @@ system Billder {
   }
   subdomain Platform {
     context Accounts {
-      aggregate Organization { name: string  planRef: Plan id  active: bool = true   // the registry
-        create signUp(name: string, planRef: Plan id)        // claim-less bootstrap
+      aggregate Organization implements "tenantRegistry" {     // the registry — verified, not injected
+        name: string  planRef: Plan id  active: bool = true
+        parent: Organization id?                               // YOU write it; immutable; null = root
+        // dataKey: managed path — value computed by Loom, never authored
+        create signUp(name: string, parent: Organization id?, planRef: Plan id)   // claim-less bootstrap
         operation suspend() { requires currentUser.role == "platformAdmin"  active := false } }
     }
     context Ops {
@@ -193,12 +208,12 @@ system Billder {
 }
 ```
 
-### R5. Hierarchical tenancy — grounded in Dynamics/Salesforce prior art (Phase 3)
+### R5. Hierarchical tenancy — always-ready, verify-don't-inject, no reparent
 
-`authorization.md` §2 frames `DataKey` as a per-row materialized path and ties
-the directional checks (`Self`/`Children`/`Descendants`) to authorization.
-Re-derived against the macro model **and against how mature systems actually do
-this**, it lands cleaner:
+> Supersedes the earlier "registry-only path / two-mode / generated reparent"
+> design that previously sat here. Net of the design session: **one
+> always-hierarchy-ready mechanism**, fields **verified not injected**, paths
+> **immutable**, `deep` reads as **direct prefix scans**.
 
 **Prior art.** MS Dynamics 365/Dataverse: a **Business Unit** tree, and an
 access-level ladder on each privilege — **Basic (User) / Local (Business Unit) /
@@ -211,63 +226,90 @@ sees `Project` Deep but `Invoice` Local. An entity-level flavor
 (`subtenantScoped` / `cascading`) literally cannot express that asymmetry, so it
 was the wrong axis. (`subtenantScoped` is dropped.)
 
-**So the model is:**
+**No flat/hierarchical mode.** `tenantOwned` means one thing — "scoped." "Flat"
+is just the degenerate case: every org is a root (`parent` null), every read is
+`local`, the tree is one level deep. You never *choose* flat; it falls out. This
+deletes the mode flag, the `hierarchy via` opt-in, and the static-flat-filter
+vs deep-filter swap conflict.
 
-1. **Hierarchy is authored on the registry**, which becomes self-referential:
-   `aggregate Organization { … parent: Organization id? }`. The tenant tree *is*
-   that parent-chain.
-2. **The materialized path lives ONLY on the registry** (`Organization.dataKey`,
-   a managed/internal field) — *not* on every business row. Business aggregates
-   stay exactly as flat tenancy left them: they carry only `tenantId`. This is
-   the key simplification — **hierarchical visibility adds no new column to
-   business aggregates**, and reparenting rewrites only the org subtree (bounded
-   by #orgs), never every data row in every table.
-3. **Depth is a per-role authorization access level, not an aggregate marker.**
-   The aggregate stays `tenantOwned`; the policy says how deep each role reads.
-   All three levels are just `tenantId` predicates over the (small) registry:
+**The registry — verified, not injected.** A system-level declaration must not
+silently mutate an aggregate's shape, so `tenancy by … of Organization` is
+**declaration + verification only**:
 
-   | Level (Dynamics term) | Filter on a `tenantOwned` row |
-   |---|---|
-   | `local` (Business Unit) | `row.tenantId == currentUser.tenantId` — *the flat filter we already emit* |
-   | `deep` (Parent-Child BU) | `row.tenantId IN (SELECT id FROM Organization WHERE dataKey LIKE myOrgPath ‖ '%')` |
-   | `global` (Organization) | no filter |
+- the registry carries the explicit string capability **`implements
+  "tenantRegistry"`** (the existing capability-tag mechanism, `ImplementsDecl`,
+  `ddd.langium:909`);
+- the registry **author writes** `parent: <self> id?` — Loom does **not** inject
+  it;
+- Loom **verifies** conformance: the `of …` target carries `"tenantRegistry"`,
+  has a self-referential optional `parent`, exactly one such aggregate exists,
+  and the claim field exists on `user`. Capability-*conformance* ("a
+  `"tenantRegistry"` aggregate must have a self-ref `parent`") is a small,
+  general extension to the capability system — not tenancy-specific magic. It is
+  exactly the kind of contract a **typed capability/interface** would formalise
+  (see the follow-up note / new proposal).
+- `parent` is **immutable** (set at create, null = root). **Reparent is out of
+  scope** — immutability makes every path permanent, which is what makes the
+  rest cheap.
 
-   `deep` is a portable `IN`-subquery (works across Drizzle/EF/Ash/JPA — unlike
-   recursive CTEs) indexed on `Organization.dataKey`. Naming follows Dynamics
-   (`local`/`deep`/`global`) or the directional set (`self`/`descendants`/`all`);
-   it lives in `authorization.md`'s `policy {}`, reading the tenancy column.
+**Fields come from explicit capabilities, never from the declaration.**
+`with tenantOwned` and the registry's `implements "tenantRegistry"` are local,
+visible, **unfoldable** capabilities (the LSP "unfold macro" action) — the
+anti-magic mechanism. They carry the fields; `tenancy by` only verifies.
+`dataKey` is the one **managed** value — a derived materialized path, like an
+index or `wireShape`, never hand-authored: its *presence* is an explicit
+consequence of the capability, its *value* is computed by Loom.
+
+**Stamp `dataKey` on every `tenantOwned` aggregate from day one**, so turning on
+`deep` later is a pure read-shape change with **no schema/data migration**.
+Immutable `parent` is what makes always-stamping cheap rather than expensive:
+
+> permanent paths ⇒ carry `orgPath` in the token (it can never go stale) ⇒ the
+> `dataKey` stamp is a **pure claim copy** (`dataKey := currentUser.orgPath`),
+> exactly like `tenantId := currentUser.tenantId`. **No** per-create or per-read
+> registry lookup. The *only* registry read is at `Organization` create, to read
+> the parent's path (`dataKey := parent.dataKey ‖ "." ‖ id`).
+
+Columns, all stamped at create from the token, present from v1:
+
+| Column | Source at create | Used by |
+|---|---|---|
+| `tenantId` | `currentUser.tenantId` | `local` (equality, fail-closed floor) + `global` |
+| `dataKey` | `currentUser.orgPath` (token) | `deep` (direct `LIKE prefix%`) |
+
+**Depth is a per-role authorization access level** (Dynamics' ladder), set in
+`authorization.md`'s `policy {}` — not an aggregate marker:
+
+| Level (Dynamics) | Filter on a `tenantOwned` row |
+|---|---|
+| `local` (Business Unit) | `row.tenantId == currentUser.tenantId` |
+| `deep` (Parent-Child BU) | `row.dataKey LIKE currentUser.orgPath ‖ '%'` — **direct indexed scan, no join** |
+| `global` (Organization) | none |
 
 ```ddd
-aggregate Project tenantOwned { … }          // unchanged — carries only tenantId
+tenancy by user.tenantId of Organization      // declaration; verifies ↓
 
-policy {
-  role Manager { Project read deep    Invoice read local }   // rolls up Projects only
-  role Clerk   { Project read local   Invoice read local }
+aggregate Organization implements "tenantRegistry" {
+  name: string
+  parent: Organization id?       // author-written, immutable; verified as the self-ref edge
+  // dataKey — managed path; value computed by Loom, presence via the capability
+}
+
+aggregate Project with tenantOwned { title: string }   // tenantId + dataKey via the capability
+
+policy {                                                 // authorization.md
+  role Manager { Project read deep   Invoice read local }
+  role Clerk   { Project read local  Invoice read local }
 }
 ```
 
-**Stamping — the part the tenancy setting does NOT fully cover.** Flat
-`tenantId` is a pure claim copy (`tenantId := currentUser.tenantId`). The
-hierarchy adds three pieces the flat macro can't:
-
-- **Registry path on create** — `Organization.dataKey := parent ? parent.dataKey
-  ‖ "." ‖ id : id`. This reads *another registry row* (the parent), so it's a
-  cross-row derived stamp, not a claim copy — framework-managed, never authored.
-- **Reparent** — assigning a new `parent` must transactionally rewrite the
-  subtree's `dataKey`s. Path integrity can't live in userland. Loom should
-  generate a `reparent(newParent)` operation; consider shipping **immutable
-  parent first (3a)** to dodge the rewrite, then reparent (3b).
-- **The requester's org path at request time** — `deep` needs `currentUser`'s
-  org path as the prefix. Derive it from the registry per request (cached) —
-  **do not bloat the token**; it stays `{ tenantId }`, so a reparent reflects
-  immediately on the next request rather than waiting for token refresh.
-
-So: **the `tenancy by … of Organization` declaration is enough to *derive*
-everything** (it names the claim, the registry, and — via the self-ref — the
-tree), but hierarchical mode needs three *generated* mechanisms beyond the flat
-stamp/filter: the managed registry path, framework-owned path maintenance
-(create + reparent, transactional), and the `deep` join-through-the-registry
-filter. Business aggregates and the token are unchanged.
+**Why a direct prefix scan, not a subquery.** Because `dataKey` lives on the row
+(stamped from the token), `deep` is a single indexed `LIKE prefix%` — not a
+join-through-the-registry on every read. The denormalisation costs nothing to
+maintain *precisely because* `parent` is immutable (the path never changes). Two
+materialized-path footguns Loom owns so users never see them: a path **delimiter**
+(so `org_a` doesn't prefix-match `org_ab`) and a **`text_pattern_ops`/C-collation
+index** (so `LIKE 'x%'` actually uses the index).
 
 ---
 
