@@ -88,7 +88,13 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // / saga `resource-call`s import the verb helpers from these.
   const resources = emitPyResourceFiles(args.sys, args.deployable.dataSourceNames);
   for (const [path, content] of resources.files) out.set(path, content);
-  out.set("pyproject.toml", renderPyproject(slug, resources.deps, resources.devDeps));
+  // PyJWT (with the `crypto` extra for RS256/ES256 JWKS verification) ships
+  // in pyproject only under an `auth { oidc }` block.
+  const oidcDeps = args.deployable.auth?.required && args.sys.auth ? ["pyjwt[crypto]>=2.9,<3"] : [];
+  out.set(
+    "pyproject.toml",
+    renderPyproject(slug, [...resources.deps, ...oidcDeps], resources.devDeps),
+  );
   out.set("Dockerfile", hasEmbeddedSpa ? DOCKERFILE_PY_FULLSTACK : DOCKERFILE_PY);
   out.set(".dockerignore", DOCKERIGNORE_PY);
   out.set("certs/.gitkeep", "");
@@ -114,7 +120,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // (whose system declares a `user { ... }` block) carries the verifier
   // registry + middleware — anonymous deployables stay byte-identical.
   const authRequired = !!(args.deployable.auth?.required && args.sys.user);
-  if (authRequired && args.sys.user) emitPyAuthFiles(args.sys.user, out);
+  // An `auth { oidc }` block drives the generated OIDC verifier + handshake;
+  // absent it, the dev stub keeps a fresh stack callable out of the box.
+  const oidc = authRequired ? args.sys.auth : undefined;
+  if (authRequired && args.sys.user) emitPyAuthFiles(args.sys.user, out, oidc);
   // First-boot seeding (database-seeding.md): emitted only when a
   // dataset survives filtering (rows on concrete aggregates); the
   // lifespan runs seeds right after migrations (Hono/.NET boot order).
@@ -146,6 +155,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       externAggs,
       hasEmbeddedSpa,
       startsRelay,
+      !!oidc,
     ),
   );
   if (hasEmbeddedSpa) {
@@ -392,6 +402,7 @@ function renderMain(
   externAggs: string[] = [],
   hasEmbeddedSpa = false,
   startsRelay = false,
+  oidc = false,
 ): string {
   // Embedded-SPA mode mounts every router under /api/* so the SPA's
   // path namespace stays free for client-side routing.
@@ -416,16 +427,20 @@ function renderMain(
     stubKwargs.includes("datetime.") ? "from datetime import UTC, datetime" : null,
     stubKwargs.includes("Decimal(") ? "from decimal import Decimal" : null,
     "",
-    `from fastapi import FastAPI${authRequired ? ", Request" : ""}`,
+    `from fastapi import FastAPI${authRequired && !oidc ? ", Request" : ""}`,
     "from fastapi.middleware.cors import CORSMiddleware",
     hasEmbeddedSpa ? "from fastapi.responses import FileResponse" : null,
     "from sqlalchemy import text",
     "",
     authRequired ? "from app.auth.middleware import AuthMiddleware" : null,
-    authRequired ? "from app.auth.user import User" : null,
-    authRequired
+    authRequired ? "from app.auth.routes import router as auth_router" : null,
+    authRequired && !oidc ? "from app.auth.user import User" : null,
+    authRequired && !oidc
       ? "from app.auth.verifier import assert_user_verifier_registered, register_user_verifier"
       : null,
+    oidc ? "from app.auth.oidc import register_oidc_verifier" : null,
+    oidc ? "from app.auth.oidc import router as auth_oidc_router" : null,
+    oidc ? "from app.auth.verifier import assert_user_verifier_registered" : null,
     "from app.db.engine import engine",
     "from app.db.migrate import run_migrations",
     hasSeeds ? "from app.db.seed import run_seeds" : null,
@@ -445,22 +460,31 @@ function renderMain(
     "from app.obs.middleware import ObservabilityMiddleware",
     "",
     "",
-    ...(authRequired
+    ...(oidc
       ? [
-          "# Dev-stub verifier — accepts every request as a built-in admin user",
-          "# (EMPTY permissions, so permission-guarded surfaces still deny).",
-          "# REPLACE for production by calling register_user_verifier(...) with a",
-          "# JWT-decoding implementation, ideally from a non-regenerated module.",
-          "async def _dev_stub_verifier(_: Request) -> User:",
-          `    return User(${stubKwargs})`,
-          "",
-          "",
-          "register_user_verifier(_dev_stub_verifier)",
-          'log("warn", "auth_dev_stub_registered")',
+          "# OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its",
+          "# JWKS and maps the configured claims onto User.  Auto-registered here.",
+          "register_oidc_verifier()",
+          'log("info", "auth_oidc_verifier_registered")',
           "",
           "",
         ]
-      : []),
+      : authRequired
+        ? [
+            "# Dev-stub verifier — accepts every request as a built-in admin user",
+            "# (EMPTY permissions, so permission-guarded surfaces still deny).",
+            "# REPLACE for production by calling register_user_verifier(...) with a",
+            "# JWT-decoding implementation, ideally from a non-regenerated module.",
+            "async def _dev_stub_verifier(_: Request) -> User:",
+            `    return User(${stubKwargs})`,
+            "",
+            "",
+            "register_user_verifier(_dev_stub_verifier)",
+            'log("warn", "auth_dev_stub_registered")',
+            "",
+            "",
+          ]
+        : []),
     '_PORT = int(os.environ.get("PORT", "8000"))',
     "",
     "",
@@ -505,6 +529,11 @@ function renderMain(
     ...routerAggs.map((name) => `app.include_router(${snake(name)}_router${routerArgs})`),
     hasViews ? `app.include_router(views_router${routerArgs})` : null,
     hasWorkflows ? `app.include_router(workflows_router${routerArgs})` : null,
+    // Auth routers stay at the app root (NOT under the embedded-SPA /api
+    // prefix): the frontend guard probes /auth/me and the handshake redirect
+    // lands at /auth/callback.
+    authRequired ? "app.include_router(auth_router)" : null,
+    oidc ? "app.include_router(auth_oidc_router)" : null,
     "",
     "",
     `@app.get("/health")`,
