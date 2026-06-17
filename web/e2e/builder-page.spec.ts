@@ -147,8 +147,13 @@ test("palette adds a data primitive with a binding dropdown", async ({ page }) =
   await page.getByTestId("c4palette-CreateForm").click();
   const formNode = page.getByTestId("c4node-CreateForm").first();
   await expect(formNode).toBeVisible();
-  await formNode.click();
-  await expect(page.getByTestId("c4builder-prop-of")).toBeVisible();
+  // The builder canvas re-seeds (re-creating React Flow nodes) after the
+  // palette add, so on slow CI the node detaches mid-click. Retry until the
+  // click lands and the inspector opens.
+  await expect(async () => {
+    await formNode.click({ timeout: 5_000 });
+    await expect(page.getByTestId("c4builder-prop-of")).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
 
   // Applying a binding primitive keeps the source valid (re-seeds cleanly).
   await page.getByTestId("c4builder-apply").click();
