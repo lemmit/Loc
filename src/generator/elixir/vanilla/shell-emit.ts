@@ -217,7 +217,11 @@ defmodule ${appModule}Web.Router do
   end
 
   scope "/health" do
-    get "/", ${appModule}Web.HealthController, :show
+    get "/", ${appModule}Web.HealthController, :liveness
+  end
+
+  scope "/ready" do
+    get "/", ${appModule}Web.HealthController, :readiness
   end
 
   scope "/api", ${appModule}Web do
@@ -233,8 +237,31 @@ function renderVanillaHealthController(appModule: string): string {
 defmodule ${appModule}Web.HealthController do
   use ${appModule}Web, :controller
 
-  def show(conn, _params) do
+  @moduledoc """
+  Liveness and readiness probes — parity with the Ash foundation and the other
+  backends, and with the k8s chart, which probes /health for liveness and
+  /ready for readiness.
+
+  GET /health — cheap liveness check; always 200 while the BEAM is running.
+  GET /ready  — DB-aware readiness check; 503 when the database is unreachable.
+  """
+
+  @doc "GET /health — liveness probe (no DB dependency)."
+  def liveness(conn, _params) do
     json(conn, %{status: "ok"})
+  end
+
+  @doc "GET /ready — readiness probe (pings the database via Ecto)."
+  def readiness(conn, _params) do
+    try do
+      Ecto.Adapters.SQL.query!(${appModule}.Repo, "SELECT 1", [])
+      json(conn, %{status: "ready"})
+    rescue
+      _ ->
+        conn
+        |> put_status(:service_unavailable)
+        |> json(%{status: "not_ready"})
+    end
   end
 end
 `;

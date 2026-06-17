@@ -137,4 +137,27 @@ describe("vanilla orchestrator — Slice 0 shell skeleton", () => {
     expect(router).toContain('scope "/api"');
     expect(router).not.toContain("Ash");
   });
+
+  it("serves both /health (liveness) and a DB-aware /ready (readiness)", () => {
+    const out = generateVanillaElixirProject({
+      contexts: [],
+      deployable: vanillaDeployable(),
+      sys: emptySystem(),
+    });
+    // Router wires liveness → /health and readiness → /ready (the k8s chart
+    // probes /health for liveness, /ready for readiness — without /ready the
+    // pod never goes Ready and `helm --wait` hangs).
+    const router = out.get("lib/api_web/router.ex")!;
+    expect(router).toContain('scope "/ready"');
+    expect(router).toContain("HealthController, :liveness");
+    expect(router).toContain("HealthController, :readiness");
+    // Readiness pings the DB through Ecto and 503s when it is unreachable.
+    const health = out.get("lib/api_web/controllers/health_controller.ex")!;
+    expect(health).toContain("def liveness(");
+    expect(health).toContain("def readiness(");
+    expect(health).toContain("Ecto.Adapters.SQL.query!(Api.Repo");
+    expect(health).toContain(":service_unavailable");
+    // The old single-action shape is gone.
+    expect(health).not.toContain("def show(");
+  });
 });
