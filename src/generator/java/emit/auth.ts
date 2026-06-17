@@ -1,4 +1,4 @@
-import type { SystemIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import type { AuthIR, AuthValueIR, FieldIR, SystemIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { renderJavaType } from "../render-expr.js";
 
@@ -26,6 +26,10 @@ export function renderAuthFiles(
   const out = new Map<string, string>();
   const fields = sys.user?.fields ?? [];
   const pkg = `${basePkg}.auth`;
+  // OIDC turnkey auth (D-AUTH-OIDC): an `auth { oidc }` block turns on the
+  // generated verifier + the /auth/* redirect handshake; without it only
+  // the dev stub + /auth/me probe are emitted (matching .NET).
+  const oidc = sys.auth;
   // The principal's id key — the field named `id`, else the first declared
   // field.  Stamped into MDC (RequestContext.actorId) after the verifier
   // succeeds; only the id rides the carrier, the full principal stays here.
@@ -150,6 +154,12 @@ export function renderAuthFiles(
       `        "/ready",`,
       `        "/openapi.json",`,
       `        "/swagger",`,
+      // OIDC redirect handshake — login/callback/logout must be reachable
+      // without a verified principal; /auth/me stays protected (it is the
+      // session probe the frontend guard reads).
+      ...(oidc
+        ? [`        "/auth/login",`, `        "/auth/callback",`, `        "/auth/logout",`]
+        : []),
       `    };`,
       ``,
       `    private final UserVerifier verifier;`,
@@ -206,7 +216,457 @@ export function renderAuthFiles(
     ),
   );
 
+  // The session probe (`/auth/me`) + — under an `auth { oidc }` block —
+  // the redirect handshake (/auth/login|callback|logout).  Always emitted
+  // when auth is required (this function only runs then), mirroring the
+  // .NET `authMe`/`authHandshake` split in emit/program.ts.
+  out.set("AuthController.java", renderAuthController(pkg, oidc));
+  // The generated OIDC verifier (D-AUTH-OIDC) — JWKS signature + iss/exp +
+  // claim mapping onto the typed User.  @Primary so it wins over the dev
+  // stub the moment an `auth { oidc }` block is present.
+  if (oidc) {
+    out.set("OidcUserVerifier.java", renderOidcVerifier(fields, oidc, pkg));
+  }
+
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// OIDC verifier (D-AUTH-OIDC) — validates the bearer token's signature
+// against the issuer's JWKS (discovered + cached via Nimbus), checks
+// iss / exp, then projects the configured claims onto the User shape.
+// Returns null to reject (→ 401).  Nimbus is the lightweight JOSE library
+// Spring Security itself uses; it slots into the existing UserVerifier seam
+// without dragging in the whole Spring Security filter chain.
+// ---------------------------------------------------------------------------
+
+/** Render an `AuthValueIR` (literal | env reference) as a Java expression.
+ *  An env reference becomes `System.getenv("X")` (may be null — callers
+ *  coalesce); a literal becomes a quoted string. */
+function javaAuthValue(v: AuthValueIR | undefined, fallback = "null"): string {
+  if (!v) return fallback;
+  return v.kind === "literal" ? JSON.stringify(v.value) : `System.getenv(${JSON.stringify(v.env)})`;
+}
+
+/** The IdP claim path projected onto a given user field — explicit `claims:`
+ *  mapping wins; `id` defaults to `sub`, others read their own name. */
+function claimPathFor(field: string, auth: AuthIR): string {
+  const mapped = auth.claims.find((c) => c.field === field);
+  if (mapped) return mapped.path;
+  return field === "id" ? "sub" : field;
+}
+
+/** The User-constructor argument reading a field off the verified payload.
+ *  string / string[] are mapped (dotted paths supported); other field types
+ *  fall back to the dev-stub default (a documented limitation — OIDC claims
+ *  map cleanly onto string / string[] user fields). */
+function javaClaimRead(f: FieldIR, auth: AuthIR): string {
+  const path = JSON.stringify(claimPathFor(f.name, auth));
+  const t = f.type;
+  if (t.kind === "array" && t.element.kind === "primitive" && t.element.name === "string") {
+    return `claimStringList(payload, ${path})`;
+  }
+  if (t.kind === "primitive" && t.name === "string") {
+    return f.optional ? `claimString(payload, ${path})` : `claimStringOrEmpty(payload, ${path})`;
+  }
+  return stubValue(t);
+}
+
+function renderOidcVerifier(fields: FieldIR[], auth: AuthIR, pkg: string): string {
+  // Imports for any stub-fallback field type (guid/datetime/etc.) plus the
+  // List the string[] reader returns.
+  const imports = new Set<string>(["java.util.List"]);
+  for (const f of fields) {
+    const mappableString =
+      (f.type.kind === "primitive" && f.type.name === "string") ||
+      (f.type.kind === "array" &&
+        f.type.element.kind === "primitive" &&
+        f.type.element.name === "string");
+    if (!mappableString) collectAuthImports(f.type, imports);
+  }
+  const issuerExpr = javaAuthValue(auth.oidc.issuer);
+  const audienceExpr = auth.oidc.audience
+    ? javaAuthValue(auth.oidc.audience)
+    : `System.getenv("OIDC_AUDIENCE")`;
+  const args = fields.map((f) => `                ${javaClaimRead(f, auth)}`).join(",\n");
+  return lines(
+    `package ${pkg};`,
+    ``,
+    `import java.net.URI;`,
+    `import java.net.http.HttpClient;`,
+    `import java.net.http.HttpRequest;`,
+    `import java.net.http.HttpResponse;`,
+    `import java.util.ArrayList;`,
+    `import java.util.Map;`,
+    `import java.util.Set;`,
+    ...[...imports].sort().map((i) => `import ${i};`),
+    ``,
+    `import com.fasterxml.jackson.databind.JsonNode;`,
+    `import com.fasterxml.jackson.databind.ObjectMapper;`,
+    `import com.nimbusds.jose.JWSAlgorithm;`,
+    `import com.nimbusds.jose.jwk.source.JWKSource;`,
+    `import com.nimbusds.jose.jwk.source.JWKSourceBuilder;`,
+    `import com.nimbusds.jose.proc.JWSKeySelector;`,
+    `import com.nimbusds.jose.proc.JWSVerificationKeySelector;`,
+    `import com.nimbusds.jose.proc.SecurityContext;`,
+    `import com.nimbusds.jwt.JWTClaimsSet;`,
+    `import com.nimbusds.jwt.proc.ConfigurableJWTProcessor;`,
+    `import com.nimbusds.jwt.proc.DefaultJWTClaimsVerifier;`,
+    `import com.nimbusds.jwt.proc.DefaultJWTProcessor;`,
+    ``,
+    `import org.springframework.context.annotation.Primary;`,
+    `import org.springframework.stereotype.Component;`,
+    ``,
+    `import jakarta.servlet.http.Cookie;`,
+    `import jakarta.servlet.http.HttpServletRequest;`,
+    ``,
+    `/** Generated OIDC verifier (D-AUTH-OIDC).  Validates the bearer token's`,
+    ` *  signature against the issuer's JWKS (discovered + cached via Nimbus),`,
+    ` *  checks iss / exp, then projects the configured claims onto User.`,
+    ` *  Returns null to reject (-> 401).  @Primary so it wins over the dev`,
+    ` *  stub once an auth { oidc } block is present. */`,
+    `@Primary`,
+    `@Component`,
+    `public class OidcUserVerifier implements UserVerifier {`,
+    `    private static final String ISSUER = stripTrailingSlashes(${issuerExpr});`,
+    `    private static final String AUDIENCE = ${audienceExpr};`,
+    `    private static final ObjectMapper MAPPER = new ObjectMapper();`,
+    ``,
+    `    private volatile ConfigurableJWTProcessor<SecurityContext> processor;`,
+    ``,
+    `    @Override`,
+    `    public User verify(HttpServletRequest request) {`,
+    `        String token = extractToken(request);`,
+    `        if (token == null) {`,
+    `            return null;`,
+    `        }`,
+    `        try {`,
+    `            JWTClaimsSet claims = processor().process(token, null);`,
+    `            Map<String, Object> payload = claims.toJSONObject();`,
+    `            return new User(`,
+    args,
+    `            );`,
+    `        } catch (Exception e) {`,
+    `            // Any validation failure (bad signature / iss / exp / forged`,
+    `            // token / discovery error) rejects with 401, never 500.`,
+    `            return null;`,
+    `        }`,
+    `    }`,
+    ``,
+    `    private ConfigurableJWTProcessor<SecurityContext> processor() throws Exception {`,
+    `        ConfigurableJWTProcessor<SecurityContext> p = processor;`,
+    `        if (p == null) {`,
+    `            synchronized (this) {`,
+    `                p = processor;`,
+    `                if (p == null) {`,
+    `                    p = buildProcessor();`,
+    `                    processor = p;`,
+    `                }`,
+    `            }`,
+    `        }`,
+    `        return p;`,
+    `    }`,
+    ``,
+    `    private ConfigurableJWTProcessor<SecurityContext> buildProcessor() throws Exception {`,
+    `        // The discovery + JWKS fetches run over the issuer's own scheme:`,
+    `        // a real https issuer stays TLS, a plain-http dev issuer (the`,
+    `        // bundled Keycloak / loopback) is fetched over http.  Nimbus's`,
+    `        // default resource retriever permits both, so there is no`,
+    `        // RequireHttps trap to disable for the dev path (the bug that bit`,
+    `        // the .NET verifier does not arise here).`,
+    `        String jwksUri = discoverJwksUri();`,
+    `        JWKSource<SecurityContext> jwks = JWKSourceBuilder.create(URI.create(jwksUri).toURL()).build();`,
+    `        JWSKeySelector<SecurityContext> keySelector =`,
+    `            new JWSVerificationKeySelector<>(`,
+    `                Set.of(JWSAlgorithm.RS256, JWSAlgorithm.RS384, JWSAlgorithm.RS512, JWSAlgorithm.ES256),`,
+    `                jwks);`,
+    `        DefaultJWTProcessor<SecurityContext> proc = new DefaultJWTProcessor<>();`,
+    `        proc.setJWSKeySelector(keySelector);`,
+    `        JWTClaimsSet exactMatch = new JWTClaimsSet.Builder().issuer(ISSUER).build();`,
+    `        // AUDIENCE null -> audience validation is skipped (matches Hono/.NET).`,
+    `        proc.setJWTClaimsSetVerifier(`,
+    `            new DefaultJWTClaimsVerifier<>(AUDIENCE, exactMatch, Set.of("exp")));`,
+    `        return proc;`,
+    `    }`,
+    ``,
+    `    private static String discoverJwksUri() throws Exception {`,
+    `        HttpRequest req = HttpRequest.newBuilder(`,
+    `                URI.create(ISSUER + "/.well-known/openid-configuration"))`,
+    `            .GET().build();`,
+    `        HttpResponse<String> resp =`,
+    `            HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());`,
+    `        JsonNode doc = MAPPER.readTree(resp.body());`,
+    `        return doc.get("jwks_uri").asText();`,
+    `    }`,
+    ``,
+    `    /** The bearer token from the Authorization header, or the HttpOnly`,
+    `     *  \`session\` cookie issued by /auth/callback (the browser flow).`,
+    `     *  Null when neither is present. */`,
+    `    private static String extractToken(HttpServletRequest request) {`,
+    `        String header = request.getHeader("Authorization");`,
+    `        if (header != null && header.regionMatches(true, 0, "Bearer ", 0, 7)) {`,
+    `            return header.substring(7).trim();`,
+    `        }`,
+    `        if (request.getCookies() != null) {`,
+    `            for (Cookie c : request.getCookies()) {`,
+    `                if ("session".equals(c.getName()) && c.getValue() != null && !c.getValue().isEmpty()) {`,
+    `                    return c.getValue();`,
+    `                }`,
+    `            }`,
+    `        }`,
+    `        return null;`,
+    `    }`,
+    ``,
+    `    private static String stripTrailingSlashes(String s) {`,
+    `        return s == null ? "" : s.replaceAll("/+$", "");`,
+    `    }`,
+    ``,
+    `    /** Navigate a dotted claim path (e.g. \`realm_access.roles\`) over the`,
+    `     *  decoded payload; null when any segment is missing. */`,
+    `    private static Object navigate(Map<String, Object> payload, String path) {`,
+    `        Object current = payload;`,
+    `        for (String segment : path.split("\\\\.")) {`,
+    `            if (!(current instanceof Map<?, ?> map)) {`,
+    `                return null;`,
+    `            }`,
+    `            current = map.get(segment);`,
+    `        }`,
+    `        return current;`,
+    `    }`,
+    ``,
+    `    private static String claimString(Map<String, Object> payload, String path) {`,
+    `        Object value = navigate(payload, path);`,
+    `        return value == null ? null : String.valueOf(value);`,
+    `    }`,
+    ``,
+    `    private static String claimStringOrEmpty(Map<String, Object> payload, String path) {`,
+    `        String value = claimString(payload, path);`,
+    `        return value == null ? "" : value;`,
+    `    }`,
+    ``,
+    `    private static List<String> claimStringList(Map<String, Object> payload, String path) {`,
+    `        List<String> out = new ArrayList<>();`,
+    `        Object value = navigate(payload, path);`,
+    `        if (value instanceof List<?> list) {`,
+    `            for (Object item : list) {`,
+    `                if (item != null) {`,
+    `                    out.add(String.valueOf(item));`,
+    `                }`,
+    `            }`,
+    `        }`,
+    `        return out;`,
+    `    }`,
+    `}`,
+    ``,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AuthController — the session probe + (under OIDC) the redirect handshake.
+//
+//   GET /auth/me                       — returns the verified User (the probe
+//                                        the frontend `auth: ui` guard reads);
+//                                        protected (NOT in the bypass list).
+//   GET /auth/login|callback|logout    — the OIDC authorization-code flow;
+//                                        only mounted under an auth { oidc }
+//                                        block.  No login form — the IdP hosts
+//                                        the credential pages.
+//
+// @Hidden keeps the whole controller out of the springdoc OpenAPI document
+// (cross-backend parity — Hono/.NET keep /auth/* out of their contracts too).
+// ---------------------------------------------------------------------------
+
+function renderAuthController(pkg: string, auth: AuthIR | undefined): string {
+  const handshake = auth ? renderHandshakeMethods(auth) : [];
+  const handshakeImports = auth
+    ? [
+        `import java.net.URI;`,
+        `import java.net.URLEncoder;`,
+        `import java.net.http.HttpClient;`,
+        `import java.net.http.HttpRequest;`,
+        `import java.net.http.HttpResponse;`,
+        `import java.nio.charset.StandardCharsets;`,
+        `import java.util.Map;`,
+        `import java.util.UUID;`,
+        ``,
+        `import com.fasterxml.jackson.databind.JsonNode;`,
+        `import com.fasterxml.jackson.databind.ObjectMapper;`,
+        ``,
+      ]
+    : [];
+  const handshakeParamImports = auth
+    ? [
+        `import jakarta.servlet.http.Cookie;`,
+        `import jakarta.servlet.http.HttpServletResponse;`,
+        ``,
+        `import org.springframework.web.bind.annotation.CookieValue;`,
+        `import org.springframework.web.bind.annotation.RequestParam;`,
+      ]
+    : [];
+  return lines(
+    `package ${pkg};`,
+    ``,
+    ...handshakeImports,
+    `import io.swagger.v3.oas.annotations.Hidden;`,
+    ``,
+    `import org.springframework.http.ResponseEntity;`,
+    `import org.springframework.web.bind.annotation.GetMapping;`,
+    `import org.springframework.web.bind.annotation.RestController;`,
+    ...(handshakeParamImports.length ? [``, ...handshakeParamImports] : []),
+    ``,
+    `/** Session probe (/auth/me) + the OIDC redirect handshake.  @Hidden`,
+    ` *  keeps these out of the OpenAPI contract (they are probes/redirects,`,
+    ` *  not business operations — cross-backend parity). */`,
+    `@Hidden`,
+    `@RestController`,
+    `public class AuthController {`,
+    `    private final CurrentUserAccessor accessor;`,
+    ``,
+    `    public AuthController(CurrentUserAccessor accessor) {`,
+    `        this.accessor = accessor;`,
+    `    }`,
+    ``,
+    `    /** The frontend guard's session probe.  UserFilter has already`,
+    `     *  resolved (or rejected) the principal by the time this runs. */`,
+    `    @GetMapping("/auth/me")`,
+    `    public ResponseEntity<?> me() {`,
+    `        User user = accessor.user();`,
+    `        if (user == null) {`,
+    `            return ResponseEntity.status(401).body("unauthorized");`,
+    `        }`,
+    `        return ResponseEntity.ok(user);`,
+    `    }`,
+    ...handshake,
+    `}`,
+    ``,
+  );
+}
+
+function renderHandshakeMethods(auth: AuthIR): string[] {
+  const issuerExpr = javaAuthValue(auth.oidc.issuer);
+  const clientIdExpr = javaAuthValue(auth.oidc.clientId);
+  // A public client has no secret: leave it nullable so the token request
+  // omits client_secret when unset.
+  const clientSecretExpr = auth.oidc.clientSecret
+    ? javaAuthValue(auth.oidc.clientSecret)
+    : `System.getenv("OIDC_CLIENT_SECRET")`;
+  const scopes = auth.oidc.scopes.length ? auth.oidc.scopes : ["openid"];
+  const scopesLiteral = JSON.stringify(scopes.join(" "));
+  return [
+    ``,
+    `    // --- OIDC redirect handshake (D-AUTH-OIDC) -------------------------`,
+    `    private static final String ISSUER = stripTrailingSlashes(${issuerExpr});`,
+    `    private static final String CLIENT_ID = orEmpty(${clientIdExpr});`,
+    `    private static final String CLIENT_SECRET = ${clientSecretExpr};`,
+    `    private static final String SCOPES = ${scopesLiteral};`,
+    `    private static final String REDIRECT_URI = orDefault(`,
+    `        System.getenv("OIDC_REDIRECT_URI"), "http://localhost:8080/auth/callback");`,
+    `    private static final String POST_LOGIN = orDefault(`,
+    `        System.getenv("OIDC_POST_LOGIN_REDIRECT"), "/");`,
+    `    private static final ObjectMapper MAPPER = new ObjectMapper();`,
+    ``,
+    `    /** Start the authorization-code flow: redirect to the IdP's authorize`,
+    `     *  endpoint with a CSRF state cookie. */`,
+    `    @GetMapping("/auth/login")`,
+    `    public ResponseEntity<Void> login(HttpServletResponse response) throws Exception {`,
+    `        JsonNode config = discovery();`,
+    `        String authorize = config.get("authorization_endpoint").asText();`,
+    `        String state = UUID.randomUUID().toString().replace("-", "");`,
+    `        response.addCookie(stateCookie("oidc_state", state));`,
+    `        String url = authorize + (authorize.contains("?") ? "&" : "?")`,
+    `            + "response_type=code"`,
+    `            + "&client_id=" + enc(CLIENT_ID)`,
+    `            + "&redirect_uri=" + enc(REDIRECT_URI)`,
+    `            + "&scope=" + enc(SCOPES)`,
+    `            + "&state=" + enc(state);`,
+    `        return ResponseEntity.status(302).location(URI.create(url)).build();`,
+    `    }`,
+    ``,
+    `    /** Exchange the code for a token + issue the local session cookie. */`,
+    `    @GetMapping("/auth/callback")`,
+    `    public ResponseEntity<?> callback(`,
+    `            @RequestParam(required = false) String code,`,
+    `            @RequestParam(required = false) String state,`,
+    `            @CookieValue(value = "oidc_state", required = false) String expected,`,
+    `            HttpServletResponse response) {`,
+    `        if (code == null || state == null || !state.equals(expected)) {`,
+    `            return ResponseEntity.status(400).body(Map.of("error", "invalid_state"));`,
+    `        }`,
+    `        try {`,
+    `            JsonNode config = discovery();`,
+    `            String tokenEndpoint = config.get("token_endpoint").asText();`,
+    `            String form = "grant_type=authorization_code"`,
+    `                + "&code=" + enc(code)`,
+    `                + "&redirect_uri=" + enc(REDIRECT_URI)`,
+    `                + "&client_id=" + enc(CLIENT_ID)`,
+    `                + (CLIENT_SECRET == null ? "" : "&client_secret=" + enc(CLIENT_SECRET));`,
+    `            HttpRequest req = HttpRequest.newBuilder(URI.create(tokenEndpoint))`,
+    `                .header("content-type", "application/x-www-form-urlencoded")`,
+    `                .POST(HttpRequest.BodyPublishers.ofString(form))`,
+    `                .build();`,
+    `            HttpResponse<String> resp =`,
+    `                HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());`,
+    `            if (resp.statusCode() / 100 != 2) {`,
+    `                return ResponseEntity.status(401).body(Map.of("error", "token_exchange_failed"));`,
+    `            }`,
+    `            String accessToken = MAPPER.readTree(resp.body()).get("access_token").asText();`,
+    `            response.addCookie(sessionCookie("session", accessToken));`,
+    `            response.addCookie(expiredCookie("oidc_state"));`,
+    `            return ResponseEntity.status(302).location(URI.create(POST_LOGIN)).build();`,
+    `        } catch (Exception e) {`,
+    `            return ResponseEntity.status(401).body(Map.of("error", "token_exchange_failed"));`,
+    `        }`,
+    `    }`,
+    ``,
+    `    @GetMapping("/auth/logout")`,
+    `    public ResponseEntity<Void> logout(HttpServletResponse response) {`,
+    `        response.addCookie(expiredCookie("session"));`,
+    `        return ResponseEntity.status(302).location(URI.create(POST_LOGIN)).build();`,
+    `    }`,
+    ``,
+    `    private static JsonNode discovery() throws Exception {`,
+    `        HttpRequest req = HttpRequest.newBuilder(`,
+    `                URI.create(ISSUER + "/.well-known/openid-configuration"))`,
+    `            .GET().build();`,
+    `        HttpResponse<String> resp =`,
+    `            HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());`,
+    `        return MAPPER.readTree(resp.body());`,
+    `    }`,
+    ``,
+    `    private static Cookie stateCookie(String name, String value) {`,
+    `        Cookie c = new Cookie(name, value);`,
+    `        c.setHttpOnly(true);`,
+    `        c.setPath("/");`,
+    `        c.setAttribute("SameSite", "Lax");`,
+    `        return c;`,
+    `    }`,
+    ``,
+    `    private static Cookie sessionCookie(String name, String value) {`,
+    `        return stateCookie(name, value);`,
+    `    }`,
+    ``,
+    `    private static Cookie expiredCookie(String name) {`,
+    `        Cookie c = stateCookie(name, "");`,
+    `        c.setMaxAge(0);`,
+    `        return c;`,
+    `    }`,
+    ``,
+    `    private static String enc(String value) {`,
+    `        return URLEncoder.encode(value, StandardCharsets.UTF_8);`,
+    `    }`,
+    ``,
+    `    private static String stripTrailingSlashes(String s) {`,
+    `        return s == null ? "" : s.replaceAll("/+$", "");`,
+    `    }`,
+    ``,
+    `    private static String orEmpty(String s) {`,
+    `        return s == null ? "" : s;`,
+    `    }`,
+    ``,
+    `    private static String orDefault(String s, String fallback) {`,
+    `        return s == null ? fallback : s;`,
+    `    }`,
+  ];
 }
 
 function collectAuthImports(t: TypeIR, into: Set<string>): void {

@@ -189,9 +189,46 @@
 > grant returns a token whose `iss` is `host.docker.internal:8081` (matching
 > the api container's `OIDC_ISSUER`) with `realm_access.roles=[agent,user]`.
 >
+> **Phase 5 — Java OIDC shipped (Spring Boot verifier + handshake).** Under an
+> `auth { oidc }` block the Java backend now emits `auth/OidcUserVerifier.java`
+> — a `@Primary` `UserVerifier` bean that validates the bearer token against the
+> issuer's JWKS (discovered via `.well-known/openid-configuration`, cached via
+> Nimbus `JWKSourceBuilder`), checks iss / exp, and projects the configured
+> claims onto the typed `User` (string / string[], dotted paths like
+> `realm_access.roles`; other field types fall back to the dev-stub default).
+> `@Primary` makes it win over the `@Component` `DevStubUserVerifier` the moment
+> an `auth { oidc }` block is present (the Spring analogue of .NET's last-wins DI
+> + Hono's auto-register). It also emits `auth/AuthController.java` — `@Hidden`
+> (kept out of the springdoc OpenAPI contract, cross-backend parity) — with
+> `/auth/me` (the session probe; protected, always present under `auth:
+> required`) and, under OIDC, the `/auth/login|callback|logout` redirect
+> handshake (state cookie → code exchange → HttpOnly `session` cookie, read by
+> the verifier). `UserFilter` bypasses the three handshake paths; `/auth/me`
+> stays gated. `nimbus-jose-jwt` (pinned version — the Spring Boot BOM does not
+> manage it without spring-security-oauth2-jose) ships in
+> `build.gradle.kts` only under OIDC; non-OIDC `auth: required` projects keep
+> only the dev stub + `/auth/me` (byte-identical otherwise). **The .NET
+> `RequireHttps` trap does not arise here** — Nimbus's default resource
+> retriever fetches http and https alike, so the bundled dev Keycloak (plain
+> http) works without a scheme opt-out (documented in the generated verifier).
+> 8 codegen tests (`test/generator/java/generator-java-auth-oidc.test.ts`);
+> full fast suite green. **Compile-gated:** an `auth-oidc` fixture in the
+> `LOOM_JAVA_BUILD` shard (`test/e2e/fixtures/java-build/auth-oidc.ddd`)
+> `gradle testClasses bootJar`s the generated project — covering the Nimbus API
+> usage + the pinned dependency resolution. **Runtime e2e:**
+> `test/e2e/auth-oidc-java-e2e.test.ts` (`LOOM_AUTH_E2E_JAVA=1`, CI workflow
+> `java-oidc-e2e.yml`) boots a real Keycloak + postgres in docker, builds + runs
+> the generated backend natively (`gradle bootJar` → `java -jar`), password-
+> grants a token for the seeded `demo` user, and asserts 401 no-token / 200 with
+> token / `/auth/me` → `{id←sub, roles←realm_access.roles, email}` / 401 forged.
+> **The container e2e + `LOOM_JAVA_BUILD` gate can only be confirmed in CI**
+> (the dev sandbox has no JDK/Gradle/docker) — the generated output was inspected
+> by hand and the fast-suite codegen tests pin its shape.
+>
 > **Status: Phases 0–1, 2 (.NET OIDC complete), 3 (dev Keycloak), 4
-> (partial), 5 (Phoenix verifier — handshake/e2e deferred), 6 (React), 7 +
-> OIDC runtime e2e (Hono + .NET) done; rest of Phase 5 (Python/Java) +
+> (partial), 5 (Java OIDC complete; Phoenix verifier — Phoenix handshake/e2e
+> deferred), 6 (React), 7 + OIDC runtime e2e (Hono + .NET + Java) done; rest of
+> Phase 5 (Python) + Phoenix handshake/e2e +
 > creates/workflows/finds/views default-deny + non-React frontend guards
 > pending.** Decisions locked with the maintainer (2026-06-15):
 >

@@ -36,7 +36,7 @@ export const JMOLECULES_VERSION = "1.10.0";
 export const SPRINGDOC_VERSION = "2.8.17";
 
 export function renderGradleBuild(
-  options: { flyway?: boolean; extraDeps?: Record<string, string> } = {},
+  options: { flyway?: boolean; oidc?: boolean; extraDeps?: Record<string, string> } = {},
 ): string {
   return lines(
     `plugins {`,
@@ -71,6 +71,11 @@ export function renderGradleBuild(
     // imported BOM).  Only shipped when the deployable owns migrations.
     options.flyway ? `    implementation("org.flywaydb:flyway-core")` : null,
     options.flyway ? `    implementation("org.flywaydb:flyway-database-postgresql")` : null,
+    // OIDC turnkey auth (D-AUTH-OIDC): Nimbus JOSE+JWT — the lightweight
+    // JWKS/JWT library Spring Security itself uses, for the generated
+    // OidcUserVerifier.  Version managed by the Spring Boot BOM.  Shipped
+    // only when an `auth { oidc }` block targets this deployable.
+    options.oidc ? `    implementation("com.nimbusds:nimbus-jose-jwt")` : null,
     // Resource-client deps (objectStore / queue adapters) — empty for
     // deployables wiring no consumable resources.
     ...Object.entries(options.extraDeps ?? {})

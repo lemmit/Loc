@@ -84,6 +84,10 @@ const FIXTURES: Array<[string, string]> = [
   // throws DisallowedException (→ 409) before mutating, and the controller
   // auto-exposes `GET /orders/{id}/can_cancel` → CanResponse { allowed }.
   ["test/e2e/fixtures/java-build/when.ddd", "when_api"],
+  // OIDC turnkey auth (D-AUTH-OIDC): the generated @Primary OidcUserVerifier
+  // (Nimbus JWKS + dotted-path claim mapping), the AuthController /auth/*
+  // handshake + /auth/me probe, and the BOM-managed nimbus-jose-jwt dep.
+  ["test/e2e/fixtures/java-build/auth-oidc.ddd", "api"],
 ];
 
 describe.skipIf(!ENABLED)(

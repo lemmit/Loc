@@ -1,0 +1,52 @@
+// OIDC turnkey auth on Java (D-AUTH-OIDC) — an auth { oidc } block emits the
+// generated OidcUserVerifier (Nimbus JWKS validation + claims->User) as a
+// @Primary bean, the AuthController /auth/* handshake + /auth/me probe, and
+// the nimbus-jose-jwt Gradle dep.  This cell compiles it under
+// `gradle testClasses bootJar` (the Java build gate) — covering the Nimbus API
+// usage + the BOM-managed dependency resolution the runtime e2e can't gate on
+// a PR.  Also exercises a dotted-path claim (realm_access.roles → string[])
+// and a `requires currentUser.role` gate threaded from the verified principal.
+system Helpdesk {
+  user {
+    id: string
+    role: string
+    roles: string[]
+    email: string
+  }
+
+  auth {
+    provider: keycloak
+    oidc {
+      issuer: env("OIDC_ISSUER")
+      clientId: env("OIDC_CLIENT_ID")
+    }
+    claims: { role: "realm_access.roles", roles: "realm_access.roles", email: "email" }
+  }
+
+  subdomain Support {
+    context Tickets {
+      aggregate Ticket {
+        subject: string
+        open: bool
+        operation close() {
+          requires currentUser.role == "agent"
+          open := false
+        }
+      }
+      repository Tickets for Ticket { }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource ticketState { for: Tickets, kind: state, use: primary }
+
+  api SupportApi from Support
+  deployable api {
+    platform: java
+    contexts: [Tickets]
+    serves: SupportApi
+    dataSources: [ticketState]
+    port: 8080
+    auth: required
+  }
+}
