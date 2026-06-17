@@ -19,6 +19,7 @@ import {
 import { durableEventTypes } from "../../../ir/util/channels.js";
 import {
   camelId,
+  opOperation,
   opWorkflow,
   opWorkflowInstanceById,
   opWorkflowInstances,
@@ -436,7 +437,24 @@ function emitWorkflowRoute(
   // the request (parentId = the request's root scope), distinguishing a
   // workflow's lineage from a direct operation's.  Off when there's no
   // provenance, keeping provenance-free workflows byte-identical.
-  const wrapsFrame = provSaves.length > 0;
+  // An `audited` operation invoked inline in a step likewise produces an
+  // audit_records row (the per-operation route audits it; a workflow calling
+  // it inline used to skip it — an audit-completeness gap).  Those rows also
+  // want the child frame's scope / parent ids, so the frame opens for either.
+  const hasAuditedOpCall = (sts: WorkflowStmtIR[]): boolean =>
+    sts.some((s) => {
+      if (s.kind === "op-call") {
+        const o = lookupOp(ctx, s.aggName, s.op);
+        return !!o && o.audited && !o.extern;
+      }
+      if (s.kind === "for-each") return hasAuditedOpCall(s.body);
+      return false;
+    });
+  const auditsOps = hasAuditedOpCall(wf.statements);
+  const wrapsFrame = provSaves.length > 0 || auditsOps;
+  // aggregate name → its repo variable, so an inline audited op-call can take
+  // the before/after wire snapshots through the repo (`repo.toWire(agg)`).
+  const repoVarByAgg = new Map(reposNeeded.map((r) => [r.aggName, lowerFirst(r.repoName)]));
   const bi = wrapsFrame ? "      " : "    ";
   const provFlush = (indent: string, dbHandle: string): string[] => {
     if (provSaves.length === 0) return [];
@@ -470,7 +488,11 @@ function emitWorkflowRoute(
       out.push(`${bi}  const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(tx, events);`);
     }
     out.push(
-      ...renderWorkflowStmts(wf.statements, honoWorkflowStmtTarget(ctx, paramExprs), `${bi}  `),
+      ...renderWorkflowStmts(
+        wf.statements,
+        honoWorkflowStmtTarget(ctx, paramExprs, "this", { dbHandle: "tx", repoVarByAgg }),
+        `${bi}  `,
+      ),
     );
     for (const save of wf.savesAtExit) {
       out.push(`${bi}  await ${lowerFirst(save.repoName)}.save(${save.name});`);
@@ -481,7 +503,13 @@ function emitWorkflowRoute(
     for (const r of reposNeeded) {
       out.push(`${bi}const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
     }
-    out.push(...renderWorkflowStmts(wf.statements, honoWorkflowStmtTarget(ctx, paramExprs), bi));
+    out.push(
+      ...renderWorkflowStmts(
+        wf.statements,
+        honoWorkflowStmtTarget(ctx, paramExprs, "this", { dbHandle: "db", repoVarByAgg }),
+        bi,
+      ),
+    );
     for (const save of wf.savesAtExit) {
       out.push(`${bi}await ${lowerFirst(save.repoName)}.save(${save.name});`);
     }
@@ -982,8 +1010,14 @@ function honoWorkflowStmtTarget(
   ctx: BoundedContextIR,
   paramExprs: Map<string, string>,
   thisName = "this",
+  /** Present only on the command-route path: enables staging an audit_records
+   *  row for an inline `audited` op-call (the reactor path passes none). */
+  audit?: { dbHandle: string; repoVarByAgg: Map<string, string> },
 ): WorkflowStmtTarget {
   const renderArg = (e: ExprIR): string => renderExprWithParams(e, paramExprs, thisName);
+  // Unique suffix per in-body audit capture so multiple audited op-calls in one
+  // workflow don't collide on the before/after temp-var names.
+  let auditSeq = 0;
   return {
     indentUnit: "  ",
     precondition: (st, indent) => [
@@ -1052,7 +1086,41 @@ function honoWorkflowStmtTarget(
         op && operationUsesCurrentUser(op)
           ? [args, "currentUser"].filter(Boolean).join(", ")
           : args;
-      return [`${indent}${st.target}.${lowerFirst(st.op)}(${callArgs});`];
+      const callLine = `${indent}${st.target}.${lowerFirst(st.op)}(${callArgs});`;
+      // Audited op invoked inline → stage an audit_records row bracketing the
+      // call with before/after wire snapshots, mirroring the per-operation
+      // route.  Only on the command-route path (audit context present) and when
+      // the aggregate's repo var is known (needed for `toWire`); otherwise the
+      // plain call is emitted (no audit), never a reference to a missing repo.
+      const repoVar = audit && op?.audited ? audit.repoVarByAgg.get(st.aggName) : undefined;
+      if (audit && op?.audited && repoVar) {
+        const n = auditSeq++;
+        const before = `__auditBefore${n}`;
+        const after = `__auditAfter${n}`;
+        const c = `__auditCtx${n}`;
+        return [
+          `${indent}const ${before} = ${repoVar}.toWire(${st.target});`,
+          callLine,
+          `${indent}const ${after} = ${repoVar}.toWire(${st.target});`,
+          `${indent}const ${c} = requestContext();`,
+          `${indent}await ${audit.dbHandle}.insert(schema.auditRecords).values({`,
+          `${indent}  auditId: randomUUID(),`,
+          `${indent}  operationId: "${camelId(opOperation(st.aggName, st.op))}",`,
+          `${indent}  action: "${st.op}",`,
+          `${indent}  targetType: "${st.aggName}",`,
+          `${indent}  targetId: (${after} as { id: string }).id,`,
+          `${indent}  actor: ${c}?.currentUser ?? null,`,
+          `${indent}  before: ${before},`,
+          `${indent}  after: ${after},`,
+          `${indent}  at: new Date(),`,
+          `${indent}  status: "ok",`,
+          `${indent}  correlationId: ${c}?.correlationId ?? null,`,
+          `${indent}  scopeId: ${c}?.scopeId ?? null,`,
+          `${indent}  parentId: ${c}?.parentId ?? null,`,
+          `${indent}});`,
+        ];
+      }
+      return [callLine];
     },
     exprLet: (st, indent) => [`${indent}const ${st.name} = ${renderArg(st.expr)};`],
     repoRun: (st, indent) => {

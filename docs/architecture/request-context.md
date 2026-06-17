@@ -100,15 +100,19 @@ trace-gated *inside* the behaviour). Both `audit_records` and
 so each row records its call-structure position within the request.
 
 On **Hono** a direct operation route runs in the root frame (so its rows carry
-a null `parentId`), but a **workflow** is a composite unit: it now runs its body
+a null `parentId`), but a **workflow** is a composite unit: it runs its body
 inside a child frame (`runInChildContext`, chaining `parentId` to the request's
-root scope) and flushes provenance for its saved aggregates there. Previously a
-provenanced write made *inside* a workflow step was silently dropped — the
-per-operation route flushed `provenance_records`, but a workflow calls
-operations inline and never drained their lineage. Both Hono tables carry the
-`parent_id` column. (Audit rows inside workflows still aren't emitted — they
-need per-step before/after capture, a separate follow-up — so `audit_records`
-on Hono only ever stamps the route-level `parentId`, which is null today.)
+root scope) and captures both provenance and audit for the ops it invokes
+there. Previously both were silently lost — the per-operation route flushed
+`provenance_records` and staged `audit_records`, but a workflow calls operations
+inline and never drained their lineage nor staged their audit rows. Now the
+workflow flushes each saved aggregate's provenance, and an inline `audited`
+op-call stages an `audit_records` row bracketed by before/after wire snapshots
+(`repo.toWire`), exactly like the route. Both Hono tables carry the `parent_id`
+column, and a workflow's rows chain to the workflow frame. (.NET workflows have
+the same audit/provenance-in-workflow gap — they call ops inline too — and are
+the natural follow-up; only the per-dispatch .NET command path captures them
+today.)
 
 ## Frame semantics (from execution-context.md)
 

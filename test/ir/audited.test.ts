@@ -187,6 +187,68 @@ describe("audited — other-backend no-crash safety", () => {
   });
 });
 
+// An audited op invoked inline in a workflow step produced no audit row (only
+// the per-operation HTTP route audited it) — an audit-completeness gap, the
+// sibling of the workflow provenance gap.  It now stages a row, in a child
+// frame so the row carries its call-structure scope (parentId).
+const SYSTEM_WF = `
+system S {
+  subdomain M {
+    context C {
+      aggregate Cart ids guid {
+        label: string
+        status: int
+        operation cancel(reason: int) audited { status := reason }
+        operation touch(n: int) { status := n }
+      }
+      repository Carts for Cart { }
+      workflow buildCart {
+        create(reason: int) {
+          let cart = Cart.create({ label: "seed", status: 0 })
+          cart.touch(1)
+          cart.cancel(reason)
+        }
+      }
+    }
+  }
+  deployable api { platform: hono, contexts: [C], port: 3000 }
+}
+`;
+
+describe("audited — workflow capture", () => {
+  it("stages an audit_records row for an audited op invoked inline in a workflow", async () => {
+    const { model, errors } = await parseModel(SYSTEM_WF);
+    expect(errors).toEqual([]);
+    const wf = generateSystems(model).files.get("api/http/workflows.ts")!;
+    expect(wf).toBeDefined();
+    // The audited op runs inside a child frame so its row carries a distinct
+    // scope under the request (parentId chains to the root).
+    expect(wf).toContain("await runInChildContext(async () => {");
+    // before/after wire snapshots bracket the audited call (via the repo).
+    expect(wf).toContain("const __auditBefore0 = carts.toWire(cart);");
+    expect(wf).toContain("const __auditAfter0 = carts.toWire(cart);");
+    expect(wf).toContain("await db.insert(schema.auditRecords).values({");
+    expect(wf).toContain('action: "cancel",');
+    expect(wf).toContain('targetType: "Cart",');
+    expect(wf).toContain("targetId: (__auditAfter0 as { id: string }).id,");
+    expect(wf).toContain("actor: __auditCtx0?.currentUser ?? null,");
+    expect(wf).toContain("parentId: __auditCtx0?.parentId ?? null,");
+    // Only the audited op is instrumented — the plain `touch` stays a bare call.
+    expect(wf.match(/insert\(schema\.auditRecords\)/g)).toHaveLength(1);
+    expect(wf).toContain("cart.touch(1);");
+  });
+
+  it("leaves audit-free workflows without an insert or child frame", async () => {
+    // Drop `audited` → no audited op-call → no audit insert, no child frame.
+    const src = SYSTEM_WF.replace("audited ", "");
+    const { model, errors } = await parseModel(src);
+    expect(errors).toEqual([]);
+    const wf = generateSystems(model).files.get("api/http/workflows.ts")!;
+    expect(wf).not.toContain("schema.auditRecords");
+    expect(wf).not.toContain("runInChildContext");
+  });
+});
+
 function findOperation(model: Model, agg: string, name: string): Operation {
   for (const node of AstUtils.streamAst(model)) {
     if (
