@@ -7,7 +7,7 @@
 
 ---
 
-## Refinement (2026-06-17) — naming, registry-in-`tenancy by`, derived default, macro-first delivery
+## Refinement (2026-06-17) — naming, registry-in-`tenancy by`, explicit-stance scope, macro-first delivery
 
 > A design session reworked the registry, scope, and default decisions and added
 > the always-hierarchy-ready model (R1–R5 below). Where this section and the
@@ -15,10 +15,14 @@
 > kept for the reasoning trail. In particular, **original decision #4 ("the
 > tenant registry is a third mode: `platform`") is replaced**: the registry is
 > named in `tenancy by … of Organization` and tagged `implements
-> "tenantRegistry"` (R1/R5), while `platform` is *repurposed* as the **admin-only
-> cross-tenant** aggregate category — audit trails, cross-tenant projections (R2).
-> Net effect: a smaller surface, a safer default, and a Phase-1 with **no field
-> injection** (fields come from explicit, unfoldable capabilities).
+> "tenantRegistry"` (R1/R5). **`platform` is dropped entirely as a scope** — once
+> depth moved to authz access levels (R5) and the registry to the
+> `tenantRegistry` capability (R1), it had no scope meaning left; "admin-only
+> cross-tenant data" (audit trails, projections) is `crossTenant` + an
+> authorization policy (R2). Net effect: a smaller surface (two scope values), an
+> explicit scope (unmarked = unscoped + a recommended-error lint, R3), and a
+> Phase-1 with **no field injection**
+> (fields come from explicit, unfoldable capabilities).
 >
 > **Why Loom owns this rather than a hand-rolled filter:** the dangerous part of
 > tenancy is the *universal, can't-be-forgotten* read scope — miss the filter on
@@ -59,61 +63,67 @@ filter (`WHERE TenantId = claim`) therefore cannot even be emitted against it.
 leak). Neither existing mode works, which is exactly why it has to be lifted
 out of the per-aggregate axis into the system declaration.
 
-### R2. The per-aggregate axis: "how many tenants own the row?"
+### R2. The per-aggregate axis: "is the row owned by a tenant, or not?"
 
-Three values, read as **one / none / all**:
+**Two values** — `scope is tenancy's job; who-may-read is authorization's`:
 
-| Modifier | Tenant filter? | `TenantId` column | Default read access | Example |
-|---|---|---|---|---|
-| *(unmarked)* / `tenantOwned` | yes | yes (auto-stamped) | own tenant | `Invoice`, `Customer` |
-| `crossTenant` | no | no | **open** — every tenant reads | `Country`, `Plan` (reference data) |
-| `platform` | no | no | **admin-only (deny by default)** | cross-tenant audit trail, analytics projection |
+| Modifier | Tenant filter? | `TenantId` column | Example |
+|---|---|---|---|
+| `tenantOwned` | yes | yes (stamped) | `Invoice`, `Customer` |
+| `crossTenant` | no | no | `Country`, `Plan` (reference data) |
 
 Key points:
 
-- **`crossTenant` ≠ `platform`.** They are identical on the *tenancy* axis
-  (both unscoped, no `TenantId` column) and differ only on the **access
-  default** — and that difference is the reason both exist under fail-closed
-  reasoning: an unscoped aggregate defaulting to *open* is correct for a
-  country list and a **catastrophic leak** for an audit trail. `crossTenant`
-  fails open (safe for reference data); `platform` fails closed to admin-only.
-- **`platform` is plural** (you can have an audit store *and* a projection);
-  the registry is exactly one (named in `tenancy by`). They are not the same
-  slot. `platform`'s deny-by-default access is best **baked into tenancy** (so
-  it is safe before the authorization layer exists), with finer policy
-  delegated to authorization.
-- **`tenantless` considered.** It is arguably a more accurate name than
-  `crossTenant` for reference data ("a `Country` has no tenant" vs. "crosses
-  tenants"), giving a clean *one / none / all* trio. Deferred only because
-  `crossTenant` is the keyword `authorization.md` already shares, so switching
-  means re-reconciling that doc. Open naming question.
+- **No third scope.** "Admin-only cross-tenant data" (audit trails, cross-tenant
+  projections) is **`crossTenant` + an authorization policy** restricting the
+  read — *not* a tenancy marker. (An earlier draft added a `platform` scope for
+  this; dropped — once depth moved to authz access levels (R5) and the registry
+  to the `tenantRegistry` capability (R1), `platform` had no scope meaning left.
+  `who may read` is authorization, exactly as for the `local`/`deep`/`global`
+  levels.)
+- **Safety note.** `crossTenant` is fail-**open** at the tenancy layer (readable
+  by all). Sensitive cross-tenant data (an audit trail) therefore relies on an
+  authorization **default-deny** policy (`enforcement: denyByDefault`) to stay
+  admin-only — the fail-closed guarantee for it lives in authz, not in a tenancy
+  scope. A reviewed trade, not a silent gap.
+- **`tenantless` considered** as a more accurate name than `crossTenant` for
+  reference data ("a `Country` has no tenant"). Deferred only because
+  `crossTenant` is the keyword `authorization.md` already shares. Open naming
+  question.
 
-### R3. The default is **derived** from `tenancy by`, never separately configurable
+### R3. Unmarked = unscoped; an explicit-stance lint
 
-The presence of `tenancy by` *is* the switch:
+No silent fail-closed default: "unmarked ⇒ `tenantOwned`" would mean Loom
+*implicitly attaches* the `tenantOwned` capability — injecting
+`tenantId`/`dataKey` — the distant-injection magic the capability model forbids.
+So an **unmarked aggregate is unscoped**: no `tenantOwned` capability ⇒ no tenant
+column ⇒ effectively `crossTenant`. (Writing `crossTenant` explicitly is the same
+behaviour with the *intent* declared.) A **lint** then flags every unmarked
+aggregate under a `tenancy by` system and **suggests the fix** — `with
+tenantOwned` or an explicit `crossTenant`.
 
-- **`tenancy by` present** ⇒ an unmarked aggregate is `tenantOwned` (fail-closed).
-- **`tenancy by` absent** ⇒ the tenancy axis is inert (no `TenantId`, no filter —
-  today's single-tenant behaviour, unchanged).
+**The lint's severity is the fail-open / fail-closed knob — and it bites here**,
+because the *common* case (most aggregates are tenant data) is the one that needs
+`with tenantOwned`, so the unmarked fallback (unscoped) is the **dangerous** one:
 
-So adding the one `tenancy by …` line is the **safest possible migration**: it
-flips every unmarked aggregate to isolated-by-default, and you opt the
-reference data back out with `crossTenant`. A forgotten marker during that
-migration leaves an aggregate over-isolated (empty), never leaked.
+- **warning** ⇒ fail-**open**: a forgotten `with tenantOwned` silently leaks
+  tenant data across tenants, and the warning is suppressible.
+- **error** ⇒ fail-**closed**: nothing builds until each aggregate declares its
+  stance; the suggested-fix message keeps it a one-keyword fix, not a cryptic
+  failure.
 
-The default is **not** a knob on `tenancy by`. Its only alternative value would
-be `crossTenant`, which reintroduces fail-**open** (forget a marker on real
-tenant data ⇒ shared ⇒ leak) — the exact failure the design exists to avoid.
-The presence of `tenancy by` already declares "default = `tenantOwned`";
-restating it would be redundant, changing it would be unsafe.
-
-Validation corners that fall out:
+**Recommendation: error severity** — it's the friendly UX of a suggesting lint
+with the safety of a hard gate, and tenancy is a security boundary where the
+dangerous default is the *frequent* one. A team that accepts the leak risk can
+relax it to a warning via explicit opt-out. Either way there is **no magic
+default** (the capability is always written, never injected); the only question
+is whether the tooling *blocks* or *warns* on the unmarked case.
 
 | | no `tenancy by` | `tenancy by` present |
 |---|---|---|
-| *(unmarked)* | unscoped / inert | **`tenantOwned`** (default) |
-| `tenantOwned` written | **error** — "requires a `tenancy by` declaration" | explicit form of the default (allowed for clarity) |
-| `crossTenant` written | inert — lint "no effect; no tenancy declared" | the real exception marker |
+| *(unmarked)* | inert | unscoped + explicit-stance lint (**recommend error**) |
+| `with tenantOwned` | error — needs `tenancy by` | tenant-scoped |
+| `crossTenant` | no-op (lint: "no tenancy declared") | unscoped, lint silenced (intent declared) |
 
 ### R4. Delivery is macro-first — Phase 1 needs no grammar/IR/emitter change
 
@@ -152,12 +162,12 @@ and those are wired on .NET only today — node / elixir / java reject them
 plan. So "ship the `tenantOwned` macro" ⊇ "do T2.j"; they are nearly the same
 effort.
 
-**Trade made consciously:** the explicit macro is **fail-open** (forget
-`with tenantOwned` ⇒ unscoped ⇒ leak) — the opposite of R3's fail-closed
-default. Phase 1 accepts this for obviousness, mitigated by a lint ("aggregate
-on a tenant system has no tenancy capability — did you mean `with
-tenantOwned`?"). The fail-closed guarantee is bought back when R3's derived
-default lands in Phase 2.
+**Fail-open hole gated by the R3 lint:** the capability is the explicit,
+unfoldable vehicle for the fields, so nothing is ever injected from afar. Whether
+a *forgotten* `with tenantOwned` silently leaks depends on R3's explicit-stance
+lint severity — at the recommended **error** severity there is no silent-leak
+hole (it won't build); at warning severity it's fail-open and suppressible (a
+reviewed trade).
 
 ### Phasing
 
@@ -171,7 +181,7 @@ default lands in Phase 2.
 
 - **Phase 1 (now):** the tenancy core — `tenancy by user.tenantId of
   Organization` (R1, **declaration + verification only**), `tenantOwned` /
-  `crossTenant` / `platform` (R2), the fail-closed derived default (R3), the
+  `crossTenant` (R2), the explicit-stance scope + lint (R3), the
   registry (`implements "tenantRegistry"` + author-written **immutable**
   `parent`, *verified* per R5), and `tenantId` **+ `dataKey`** stamped on every
   `tenantOwned` aggregate **from the token** at create. `local` reads wired
@@ -192,7 +202,7 @@ system Billder {
   user { id: string  email: string  role: string  tenantId: string }
   auth { provider: keycloak  oidc { issuer: env("OIDC_ISSUER"), clientId: env("OIDC_CLIENT_ID") } }
 
-  tenancy by user.tenantId of Organization   // claim + registry, fail-closed default
+  tenancy by user.tenantId of Organization   // claim + registry; every aggregate must declare a scope
 
   subdomain Billing {
     context Catalog {
@@ -200,8 +210,8 @@ system Billder {
       aggregate Country crossTenant { iso2: string  name: string }
     }
     context Invoicing {
-      aggregate Invoice  { number: string  customerId: Customer id  amountDue: decimal }  // default: tenantOwned
-      aggregate Customer tenantOwned { name: string  email: string  countryRef: Country id }
+      aggregate Invoice  with tenantOwned { number: string  customerId: Customer id  amountDue: decimal }  // explicit (lint nudges)
+      aggregate Customer with tenantOwned { name: string  email: string  countryRef: Country id }
     }
   }
   subdomain Platform {
@@ -213,7 +223,7 @@ system Billder {
         operation suspend() { requires currentUser.role == "platformAdmin"  active := false } }
     }
     context Ops {
-      aggregate AuditTrail platform { actor: string  action: string  at: datetime }   // all tenants, admin-only
+      aggregate AuditTrail crossTenant { actor: string  action: string  at: datetime }   // cross-tenant; admin-only via authz default-deny
     }
   }
 
@@ -286,6 +296,18 @@ Immutable `parent` is what makes always-stamping cheap rather than expensive:
 > exactly like `tenantId := currentUser.tenantId`. **No** per-create or per-read
 > registry lookup. The *only* registry read is at `Organization` create, to read
 > the parent's path (`dataKey := parent.dataKey ‖ "." ‖ id`).
+
+> **Assumption to verify — `orgPath` in the token.** `orgPath` is a *derived*
+> value (the registry path for `currentUser.tenantId`), **not** an IdP claim, so
+> carrying it in the token requires the auth layer to **enrich the session** with
+> a derived value at login — a capability `auth.md` (D-AUTH-OIDC) doesn't have
+> today (its `claims:` map projects IdP claims only). It's *safe* because
+> immutable `parent` makes the path permanent (it can't go stale between token
+> refreshes). If session-enrichment isn't available, the fallback is a
+> **per-request cached registry lookup** of the path — same result, one cached
+> read, but then the stamp is **not** a pure claim copy. So the claim-copy framing
+> is contingent on session-enrichment; verify against the auth model before
+> relying on it.
 
 Columns, all stamped at create from the token, present from v1:
 
@@ -370,9 +392,9 @@ backends.
 
 4. **The tenant registry is a third mode: `platform`.** **⚠ SUPERSEDED by R1/R2/R5
    (Refinement, top of file).** The registry is now named in `tenancy by … of
-   Organization` + tagged `implements "tenantRegistry"`; `platform` is repurposed
-   for *admin-only cross-tenant* data (audit trails, projections), which is a
-   distinct concept from the registry. The reasoning below (why the registry can't
+   Organization` + tagged `implements "tenantRegistry"`; `platform` is **dropped
+   as a scope** — admin-only cross-tenant data (audit trails, projections) is
+   `crossTenant` + an authorization policy. The reasoning below (why the registry can't
    be plain `tenant`-scoped or `crossTenant`) still holds — it's *why* the registry
    needs its own treatment — but the mechanism is R1/R5, not a `platform` mode.
    The `Tenant` aggregate itself cannot

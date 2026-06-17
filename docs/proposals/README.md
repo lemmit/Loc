@@ -201,7 +201,7 @@ layer that consumes it.
 | Doc | Status | Core addition |
 |---|---|---|
 | [`authorization.md`](./authorization.md) | PROPOSED | `DataKey` hierarchical scoping; `policy { data { … } operations { … } fields { … } }` reachability, operation/view/workflow gates, field masking. Pinned per D-POLICY-STYLE over the function-style alternative. Phases 1–4 in Phase 3.2; phases 5–7 (`exists`, field rules, `implies`) in Phase 5. |
-| [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md) | PROPOSED | `tenancy by user.tenantId` at system level; `crossTenant` / `platform` aggregate modifiers; auto-stamped `TenantId` column + EF/Drizzle/Ash query filter. Ships before authorization phase 1 (DataKey leftmost = TenantId). |
+| [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md) | PROPOSED — refined 2026-06-17 (R1–R5) | `tenancy by user.tenantId of Organization` (declaration + cardinality/cross-link verification). **Two-value** scope axis `with tenantOwned` / `crossTenant` (no silent default — unmarked = unscoped + an explicit-stance lint, recommend error; **`platform` scope dropped** — admin-only cross-tenant = `crossTenant` + authz). Registry = `implements "tenantRegistry"` capability providing immutable `parent` + `dataKey`; **reparent out of scope**. `tenantId` + `dataKey` stamped from the token at create (so `deep` is migration-free); depth `local`/`deep`/`global` is a per-role authz access level (Dynamics-grounded); `deep` = direct prefix scan. Runtime gate **T2.j**. Cross-refs [`typed-capabilities.md`](./typed-capabilities.md) + [`authorization.md`](./authorization.md) §2. |
 
 ### On-ramp & day-one runtime
 
