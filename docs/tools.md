@@ -367,8 +367,11 @@ For production, use the per-backend migration tools instead of the
 init script + `EnsureCreated` combo (see *Migrations workflow*
 above).
 
-Loom does **not** generate k8s manifests or CI pipelines — those are
-project-init concerns, not derived from the `.ddd` source.
+Compose is the inner-loop story.  For a cluster, `ddd generate system
+--k8s` *additionally* emits a Helm chart (`helm/`) plus the raw manifests
+it renders to (`k8s/`) alongside the compose file — see
+[`kubernetes.md`](kubernetes.md).  Loom still does **not** generate CI
+pipelines (image build/push remains a project-init concern).
 
 ---
 

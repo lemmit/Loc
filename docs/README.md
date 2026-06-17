@@ -13,6 +13,7 @@ section that matches what you need.
 | [`architecture.md`](architecture.md) | You want to know how `module`, `deployable`, `api`, `storage`, and `ui` compose into a runnable system. |
 | [`tools.md`](tools.md) | You're using the `ddd` CLI, `.loomignore`, watch mode, the docker workflow, or the OpenAPI parity check. |
 | [`generators.md`](generators.md) | You want to know exactly what each backend (Hono, .NET, React, Phoenix LiveView) emits for a given DSL construct. |
+| [`kubernetes.md`](kubernetes.md) | You want to deploy the generated system to a cluster — the opt-in `generate system --k8s` Helm chart + raw manifests. |
 
 ## Per-feature references
 

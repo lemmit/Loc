@@ -1,0 +1,312 @@
+import type { SystemIR } from "../ir/types/loom-ir.js";
+import { buildWorkloads, kName, type WorkloadModel } from "./kubernetes.js";
+
+// ---------------------------------------------------------------------------
+// Helm chart emitter (D-K8S-FORMAT — see docs/kubernetes.md).
+//
+// `renderHelmChart(sys)` produces a chart under `helm/`, the PRIMARY
+// deliverable of the k8s path; `src/system/kubernetes.ts` renders the same
+// `WorkloadModel` to raw manifests as the fallback view.  The chart's
+// `values.yaml` is the tuning seam that keeps v1 emitter-only: every infra
+// knob the DSL doesn't model (replicas / resources / ingress host / image
+// registry / DB url) lives there, overridden at install with
+// `--set` / `-f values.prod.yaml`.
+//
+// Layout (proposal §4.1):
+//
+//   helm/
+//     Chart.yaml
+//     values.yaml
+//     templates/
+//       _helpers.tpl
+//       <name>-deployment.yaml   (one per deployable)
+//       <name>-service.yaml      (one per deployable, ClusterIP)
+//       <name>-ingress.yaml      (UI-serving deployables, gated on values)
+//       <name>-config.yaml       (non-secret env ConfigMap)
+//       db-secret.yaml           (external DB connection Secret)
+//     NOTES.txt
+// ---------------------------------------------------------------------------
+
+const FULLNAME = '{{ include "loom.fullname" . }}';
+
+function chartName(sys: SystemIR): string {
+  return kName(sys.name) || "loom";
+}
+
+function renderChartYaml(sys: SystemIR): string {
+  return [
+    "apiVersion: v2",
+    `name: ${chartName(sys)}`,
+    `description: Helm chart for the ${sys.name} Loom system`,
+    "type: application",
+    "version: 0.1.0",
+    'appVersion: "0.1.0"',
+    "",
+  ].join("\n");
+}
+
+function renderHelpers(sys: SystemIR): string {
+  const name = chartName(sys);
+  // Name helpers + a shared label block.  `loom.fullname` is
+  // `<release>-<chart>`, truncated to the 63-char DNS limit.
+  return [
+    '{{- define "loom.name" -}}',
+    `${name}`,
+    "{{- end -}}",
+    "",
+    '{{- define "loom.fullname" -}}',
+    '{{- printf "%s-%s" .Release.Name (include "loom.name" .) | trunc 63 | trimSuffix "-" -}}',
+    "{{- end -}}",
+    "",
+    '{{- define "loom.labels" -}}',
+    'app.kubernetes.io/part-of: {{ include "loom.name" . }}',
+    "app.kubernetes.io/managed-by: {{ .Release.Service }}",
+    "{{- end -}}",
+    "",
+  ].join("\n");
+}
+
+function renderValues(sys: SystemIR, workloads: WorkloadModel[]): string {
+  const lines: string[] = [];
+  lines.push("# Auto-generated chart values.  Override per environment with");
+  lines.push("# `--set key=value` or `-f values.prod.yaml`.");
+  lines.push("global:");
+  lines.push("  image:");
+  lines.push("    # Registry the CI build pushes the per-deployable images to.");
+  lines.push("    # Leave empty to use a local image ref (`<name>:<tag>`).");
+  lines.push('    registry: ""');
+  lines.push("    tag: latest");
+  lines.push("    pullPolicy: IfNotPresent");
+  lines.push("ingress:");
+  lines.push("  # Shared ingress defaults; per-deployable blocks below opt in.");
+  lines.push('  className: ""');
+  lines.push('  host: ""');
+  for (const w of workloads) {
+    const light = w.exposesUi && !w.dependsOnDb;
+    lines.push(`${w.valuesKey}:`);
+    lines.push("  replicas: 1");
+    lines.push("  resources:");
+    lines.push("    requests:");
+    lines.push(`      cpu: ${light ? "50m" : "100m"}`);
+    lines.push(`      memory: ${light ? "128Mi" : "256Mi"}`);
+    lines.push("    limits:");
+    lines.push(`      cpu: ${light ? "250m" : "500m"}`);
+    lines.push(`      memory: ${light ? "256Mi" : "512Mi"}`);
+    lines.push("  # Extra environment overlaid onto the deployable's ConfigMap.");
+    lines.push("  env: {}");
+    if (w.dbEnv.length > 0) {
+      lines.push("  database:");
+      lines.push("    # External / managed DB connection string.  The dev-compose");
+      lines.push("    # value is a placeholder — point this at your managed DB.");
+      // All backends carry exactly one DB-host env var; use its value as the
+      // single placeholder url.
+      lines.push(`    url: ${JSON.stringify(w.dbEnv[0]!.value)}`);
+    }
+    if (w.exposesUi) {
+      lines.push("  ingress:");
+      lines.push("    enabled: false");
+      lines.push('    host: ""');
+    }
+  }
+  return lines.join("\n") + "\n";
+}
+
+function renderDeploymentTemplate(w: WorkloadModel): string {
+  const v = `.Values.${w.valuesKey}`;
+  const lines: string[] = [];
+  lines.push("apiVersion: apps/v1");
+  lines.push("kind: Deployment");
+  lines.push("metadata:");
+  lines.push(`  name: ${FULLNAME}-${w.name}`);
+  lines.push("  labels:");
+  lines.push(`    app.kubernetes.io/name: ${w.name}`);
+  lines.push('    {{- include "loom.labels" . | nindent 4 }}');
+  lines.push("spec:");
+  lines.push(`  replicas: {{ ${v}.replicas }}`);
+  lines.push("  selector:");
+  lines.push("    matchLabels:");
+  lines.push(`      app.kubernetes.io/name: ${w.name}`);
+  lines.push("  template:");
+  lines.push("    metadata:");
+  lines.push("      labels:");
+  lines.push(`        app.kubernetes.io/name: ${w.name}`);
+  lines.push("    spec:");
+  lines.push("      containers:");
+  lines.push(`        - name: ${w.name}`);
+  lines.push(
+    `          image: "{{- with .Values.global.image.registry }}{{ . }}/{{ end }}${w.image}:{{ .Values.global.image.tag }}"`,
+  );
+  lines.push("          imagePullPolicy: {{ .Values.global.image.pullPolicy }}");
+  lines.push("          ports:");
+  lines.push(`            - containerPort: ${w.containerPort}`);
+  if (w.configEnv.length > 0) {
+    lines.push("          envFrom:");
+    lines.push("            - configMapRef:");
+    lines.push(`                name: ${FULLNAME}-${w.name}-config`);
+  }
+  if (w.dbEnv.length > 0) {
+    lines.push("          env:");
+    for (const e of w.dbEnv) {
+      lines.push(`            - name: ${e.name}`);
+      lines.push("              valueFrom:");
+      lines.push("                secretKeyRef:");
+      lines.push(`                  name: ${FULLNAME}-db`);
+      lines.push(`                  key: ${e.secretKey}`);
+    }
+  }
+  lines.push("          livenessProbe:");
+  lines.push("            httpGet:");
+  lines.push(`              path: ${w.livenessPath}`);
+  lines.push(`              port: ${w.containerPort}`);
+  lines.push("            initialDelaySeconds: 10");
+  lines.push("            periodSeconds: 10");
+  lines.push("          readinessProbe:");
+  lines.push("            httpGet:");
+  lines.push(`              path: ${w.readinessPath}`);
+  lines.push(`              port: ${w.containerPort}`);
+  lines.push("            initialDelaySeconds: 5");
+  lines.push("            periodSeconds: 5");
+  lines.push(`          resources: {{- toYaml ${v}.resources | nindent 12 }}`);
+  return lines.join("\n") + "\n";
+}
+
+function renderServiceTemplate(w: WorkloadModel): string {
+  const lines: string[] = [];
+  lines.push("apiVersion: v1");
+  lines.push("kind: Service");
+  lines.push("metadata:");
+  lines.push(`  name: ${FULLNAME}-${w.name}`);
+  lines.push("  labels:");
+  lines.push(`    app.kubernetes.io/name: ${w.name}`);
+  lines.push('    {{- include "loom.labels" . | nindent 4 }}');
+  lines.push("spec:");
+  lines.push("  type: ClusterIP");
+  lines.push("  selector:");
+  lines.push(`    app.kubernetes.io/name: ${w.name}`);
+  lines.push("  ports:");
+  lines.push(`    - port: ${w.servicePort}`);
+  lines.push(`      targetPort: ${w.containerPort}`);
+  lines.push("      protocol: TCP");
+  return lines.join("\n") + "\n";
+}
+
+function renderConfigMapTemplate(w: WorkloadModel): string {
+  const v = `.Values.${w.valuesKey}`;
+  const lines: string[] = [];
+  lines.push("apiVersion: v1");
+  lines.push("kind: ConfigMap");
+  lines.push("metadata:");
+  lines.push(`  name: ${FULLNAME}-${w.name}-config`);
+  lines.push("  labels:");
+  lines.push(`    app.kubernetes.io/name: ${w.name}`);
+  lines.push('    {{- include "loom.labels" . | nindent 4 }}');
+  lines.push("data:");
+  for (const e of w.configEnv) lines.push(`  ${e.name}: ${JSON.stringify(e.value)}`);
+  // Per-deployable env overlay from values.
+  lines.push(`  {{- range $k, $val := ${v}.env }}`);
+  lines.push("  {{ $k }}: {{ $val | quote }}");
+  lines.push("  {{- end }}");
+  return lines.join("\n") + "\n";
+}
+
+function renderIngressTemplate(w: WorkloadModel): string {
+  const v = `.Values.${w.valuesKey}`;
+  const lines: string[] = [];
+  lines.push(`{{- if ${v}.ingress.enabled }}`);
+  lines.push("apiVersion: networking.k8s.io/v1");
+  lines.push("kind: Ingress");
+  lines.push("metadata:");
+  lines.push(`  name: ${FULLNAME}-${w.name}`);
+  lines.push("  labels:");
+  lines.push(`    app.kubernetes.io/name: ${w.name}`);
+  lines.push('    {{- include "loom.labels" . | nindent 4 }}');
+  lines.push("spec:");
+  lines.push("  {{- with .Values.ingress.className }}");
+  lines.push("  ingressClassName: {{ . }}");
+  lines.push("  {{- end }}");
+  lines.push("  rules:");
+  lines.push(`    - host: {{ ${v}.ingress.host | default .Values.ingress.host | quote }}`);
+  lines.push("      http:");
+  lines.push("        paths:");
+  lines.push("          - path: /");
+  lines.push("            pathType: Prefix");
+  lines.push("            backend:");
+  lines.push("              service:");
+  lines.push(`                name: ${FULLNAME}-${w.name}`);
+  lines.push("                port:");
+  lines.push(`                  number: ${w.servicePort}`);
+  lines.push("{{- end }}");
+  return lines.join("\n") + "\n";
+}
+
+function renderDbSecretTemplate(workloads: WorkloadModel[]): string {
+  const lines: string[] = [];
+  lines.push("apiVersion: v1");
+  lines.push("kind: Secret");
+  lines.push("metadata:");
+  lines.push(`  name: ${FULLNAME}-db`);
+  lines.push("  labels:");
+  lines.push('    {{- include "loom.labels" . | nindent 4 }}');
+  lines.push("type: Opaque");
+  lines.push("stringData:");
+  for (const w of workloads) {
+    for (const e of w.dbEnv) {
+      lines.push(`  ${e.secretKey}: {{ .Values.${w.valuesKey}.database.url | quote }}`);
+    }
+  }
+  return lines.join("\n") + "\n";
+}
+
+function renderNotes(sys: SystemIR, workloads: WorkloadModel[]): string {
+  const uiWorkloads = workloads.filter((w) => w.exposesUi);
+  const dbWorkloads = workloads.filter((w) => w.dbEnv.length > 0);
+  const lines: string[] = [];
+  lines.push(`The ${sys.name} system has been deployed as release {{ .Release.Name }}.`);
+  lines.push("");
+  lines.push("IMPORTANT — two seams this chart does NOT cover:");
+  lines.push("");
+  lines.push("  1. Images. Loom emits Dockerfiles, not a registry push. Build and");
+  lines.push("     push each deployable's image, then set:");
+  lines.push("       --set global.image.registry=<your-registry> --set global.image.tag=<tag>");
+  if (dbWorkloads.length > 0) {
+    lines.push("");
+    lines.push("  2. Database. The chart assumes an EXTERNAL / managed database and");
+    lines.push("     ships placeholder connection strings. Supply the real URLs:");
+    for (const w of dbWorkloads) lines.push(`       --set ${w.valuesKey}.database.url=<url>`);
+  }
+  if (uiWorkloads.length > 0) {
+    const w = uiWorkloads[0]!;
+    lines.push("");
+    lines.push("Frontends are ClusterIP by default. Expose one with, e.g.:");
+    lines.push(`  --set ${w.valuesKey}.ingress.enabled=true \\`);
+    lines.push(`        ${w.valuesKey}.ingress.host=app.example.com`);
+  }
+  lines.push("");
+  return lines.join("\n") + "\n";
+}
+
+/** A Helm chart under `helm/` for the system.  Reuses the shared
+ *  `WorkloadModel` (`buildWorkloads`) so it stays in lock-step with the raw
+ *  manifests in `kubernetes.ts`. */
+export function renderHelmChart(sys: SystemIR): Map<string, string> {
+  const out = new Map<string, string>();
+  const workloads = buildWorkloads(sys);
+  out.set("helm/Chart.yaml", renderChartYaml(sys));
+  out.set("helm/values.yaml", renderValues(sys, workloads));
+  out.set("helm/templates/_helpers.tpl", renderHelpers(sys));
+  for (const w of workloads) {
+    out.set(`helm/templates/${w.name}-deployment.yaml`, renderDeploymentTemplate(w));
+    out.set(`helm/templates/${w.name}-service.yaml`, renderServiceTemplate(w));
+    if (w.configEnv.length > 0) {
+      out.set(`helm/templates/${w.name}-config.yaml`, renderConfigMapTemplate(w));
+    }
+    if (w.exposesUi) {
+      out.set(`helm/templates/${w.name}-ingress.yaml`, renderIngressTemplate(w));
+    }
+  }
+  if (workloads.some((w) => w.dbEnv.length > 0)) {
+    out.set("helm/templates/db-secret.yaml", renderDbSecretTemplate(workloads));
+  }
+  out.set("helm/templates/NOTES.txt", renderNotes(sys, workloads));
+  return out;
+}
