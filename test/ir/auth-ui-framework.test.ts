@@ -1,7 +1,7 @@
 // `auth: ui` framework gate (Phase 6).  The frontend OIDC guard is emitted
-// by the React and Vue generators, so a deployable whose resolved UI
-// framework is neither (svelte) is rejected at the IR level rather than
-// silently emitting no guard.
+// by the React, Vue, and Svelte generators, so a deployable whose resolved
+// UI framework is none of those (phoenixLiveView) is rejected at the IR
+// level rather than silently emitting no guard.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -46,9 +46,13 @@ describe("auth: ui framework gate", () => {
     expect(await authUiErrors(sys("vue"))).toEqual([]);
   });
 
-  it("rejects auth: ui on a svelte frontend", async () => {
-    const errs = await authUiErrors(sys("svelte"));
+  it("allows auth: ui on a svelte frontend", async () => {
+    expect(await authUiErrors(sys("svelte"))).toEqual([]);
+  });
+
+  it("rejects auth: ui on an unsupported (phoenixLiveView) frontend", async () => {
+    const errs = await authUiErrors(sys("phoenixLiveView"));
     expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("only supported on react and vue");
+    expect(errs[0]).toContain("only supported on react, vue, and svelte");
   });
 });

@@ -10,6 +10,7 @@ import {
 } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
+import { AUTH_GATE_SVELTE, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
 import {
   E2E_FIXTURES_TS,
   E2E_PACKAGE_JSON_SVELTE,
@@ -155,9 +156,20 @@ export function generateSvelteForContexts(
   out.set("e2e/package.json", E2E_PACKAGE_JSON_SVELTE);
   out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
+  // Frontend auth guard (D-AUTH-OIDC, `auth: ui`): mirrors the react
+  // wiring — when this svelte deployable opts in AND its target backend
+  // enforces auth, emit the session client + the route guard (the root
+  // layout wraps the app in <AuthGate> below).  Probes GET /auth/me,
+  // which both the OIDC verifier and the playground dev stub answer.
+  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
+
   // Shared lib surface.
   const hasDelete = aggregates.some((a) => !!a.agg.canonicalDestroy);
-  out.set("src/lib/api/client.ts", pack.render("api-client", { hasDelete }));
+  out.set("src/lib/api/client.ts", pack.render("api-client", { hasDelete, hasAuthUi: authUi }));
+  if (authUi) {
+    out.set("src/lib/auth/session.ts", AUTH_SESSION_TS);
+    out.set("src/lib/auth/AuthGate.svelte", AUTH_GATE_SVELTE);
+  }
   out.set("src/lib/api/config.ts", pack.render("api-config", { apiBaseUrl }));
   out.set("src/lib/logger.ts", pack.render("logger", {}));
   out.set("src/lib/format.ts", pack.render("format-helpers", {}));
@@ -230,7 +242,7 @@ export function generateSvelteForContexts(
       hasNav: navSections.length > 0,
     }),
   );
-  out.set("src/routes/+layout.svelte", pack.render("root-layout", { hasRealtimeHandlers }));
+  out.set("src/routes/+layout.svelte", pack.render("root-layout", { hasRealtimeHandlers, authUi }));
   out.set("src/routes/+layout.ts", SVELTE_LAYOUT_TS);
 
   // Project shell.

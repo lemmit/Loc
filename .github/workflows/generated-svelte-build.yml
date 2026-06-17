@@ -23,6 +23,7 @@ on:
       - 'sveltekit/**'
       - 'stacks/**'
       - 'test/e2e/generated-svelte-build.test.ts'
+      - 'test/e2e/fixtures/svelte-build/**'
       - 'package.json'
       - 'package-lock.json'
       - 'langium-config.json'
@@ -36,6 +37,7 @@ on:
       - 'sveltekit/**'
       - 'stacks/**'
       - 'test/e2e/generated-svelte-build.test.ts'
+      - 'test/e2e/fixtures/svelte-build/**'
       - 'package.json'
       - 'package-lock.json'
       - 'langium-config.json'
@@ -52,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        example: ['examples/svelte-shop.ddd']
+        example: ['examples/svelte-shop.ddd', 'test/e2e/fixtures/svelte-build/auth-ui.ddd']
         pack: ['shadcnSvelte@v1', 'flowbite@v1']
     timeout-minutes: 10
     name: ${{ matrix.example }} × ${{ matrix.pack }}

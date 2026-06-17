@@ -3,6 +3,7 @@
   import "../app.css";
   import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
 {{#if hasRealtimeHandlers}}  import RealtimeHandlers from "$lib/components/RealtimeHandlers.svelte";
+{{/if}}{{#if authUi}}  import AuthGate from "$lib/auth/AuthGate.svelte";
 {{/if}}  import { toast } from "$lib/toast.svelte";
 
   let { children } = $props();
@@ -13,9 +14,13 @@
 </script>
 
 <QueryClientProvider client={queryClient}>
-{{#if hasRealtimeHandlers}}  <RealtimeHandlers />
+{{#if authUi}}  <AuthGate>
+{{#if hasRealtimeHandlers}}    <RealtimeHandlers />
+{{/if}}    {@render children()}
+  </AuthGate>
+{{else}}{{#if hasRealtimeHandlers}}  <RealtimeHandlers />
 {{/if}}  {@render children()}
-  <div class="pointer-events-none fixed right-4 top-4 z-[100] flex w-80 flex-col gap-2">
+{{/if}}  <div class="pointer-events-none fixed right-4 top-4 z-[100] flex w-80 flex-col gap-2">
     {#each toast.items as t (t.id)}
       <div
         class={"pointer-events-auto rounded-lg border px-4 py-3 text-sm shadow-lg " + (t.kind === "success" ? "border-border bg-background" : "border-destructive bg-background text-destructive")}
