@@ -37,6 +37,7 @@ import {
   checkInheritance,
   checkLayout,
   checkLegacyConstructorCalls,
+  checkLetShaping,
   checkMacroExpansion,
   checkMatchExpressions,
   checkMatcherArity,
@@ -85,6 +86,9 @@ export class DddValidator {
     // preconditions, derived bodies, function bodies, and guards
     // alike — anywhere the operator can appear.
     checkMatchesCalls(model, accept);
+    // `sort:` / `loads:` shaping clauses are only valid on a
+    // `Repo.findAll(<Criterion>)` binding (criterion.md, use site 3).
+    checkLetShaping(model, accept);
     // Test-assertion matchers (`toBe`/`toHaveText`/…) are a known builtin
     // surface — enforce their fixed argument arity.
     checkMatcherArity(model, accept);

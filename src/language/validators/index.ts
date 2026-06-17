@@ -35,6 +35,7 @@ export {
   checkAssignOrCall,
   checkCallStmt,
   checkEmit,
+  checkLetShaping,
   checkOperation,
   checkStatement,
 } from "./statements.js";

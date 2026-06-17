@@ -19,12 +19,12 @@ guards.
 > auto-exposed side-effect-free `GET /<plural>/{id}/can_<op>` endpoints are
 > **shipped on all five backends** — node / .NET / python / elixir / java (a
 > false gate → 409 Disallowed; the companion returns `{ allowed }`).
-> `Repo.findAll(<Criterion>, page?)` from workflow bodies is **shipped on every
-> backend** — it desugars to a synthetic `findAllBy<Criterion>` retrieval (the
-> enrich pass materialises it from the context's criteria), so it rides the
-> existing retrieval pipeline; `sort:` / `loads:` and the single-result
-> `Repo.find(<Criterion>)` are not yet wired. The remaining surface — `from
-> <Criterion>(args)` parameter binding — is **not yet shipped**.
+> `Repo.findAll(<Criterion>, page?) sort: [...] loads: [...]` from workflow
+> bodies is **shipped on every backend** — it desugars to a synthetic
+> `findAllBy<Criterion>` retrieval (the enrich pass materialises it from the
+> context's criteria, threading the `sort:` / `loads:` shaping in), so it rides
+> the existing retrieval pipeline. The single-result `Repo.find(<Criterion>)`
+> and the `from <Criterion>(args)` parameter binding are **not yet shipped**.
 
 ## Declaration
 

@@ -461,8 +461,11 @@ function synthesizeFindAllRetrievals(
             (p): ExprIR => ({ kind: "ref", name: p.name, refKind: "param", type: p.type }),
           ),
         },
-        sort: [],
-        loadPlan: { kind: "whole" },
+        // `sort:` / `loads:` shaping from the call site (criterion.md, use
+        // site 3); the retrieval emitters apply `.orderBy(...)` + the load
+        // shape.  Default to no sort / whole-load when the call was unshaped.
+        sort: st.synthSort ?? [],
+        loadPlan: st.synthLoadPlan ?? { kind: "whole" },
       });
     }
   }

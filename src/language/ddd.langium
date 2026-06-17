@@ -1604,8 +1604,17 @@ PreconditionStmt:
 RequiresStmt:
     'requires' expr=Expression;
 
+// `let x = Repo.findAll(<Criterion>, page?)` admits trailing `sort:` / `loads:`
+// shaping clauses (criterion.md, use site 3 — `findAll(criterion, sort?, page?,
+// loads?)`).  They reuse the retrieval `SortItem` / `LoadPath` rules rather than
+// riding the call's argument list, because `[name desc]` / `[lines[].product]`
+// are structural paths, not expressions.  The validator restricts them to a
+// `findAll` binding (`loom.shaping-only-on-findall`); any other `let` rejects
+// them.
 LetStmt:
-    'let' name=ID '=' expr=Expression;
+    'let' name=ID '=' expr=Expression
+    ('sort'  ':' '[' (sort+=SortItem (',' sort+=SortItem)*)? ']')?
+    ('loads' ':' '[' (loads+=LoadPath (',' loads+=LoadPath)*)? ']')?;
 
 EmitStmt:
     'emit' event=[EventDecl:ID] '{'

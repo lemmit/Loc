@@ -1478,7 +1478,9 @@ export interface LetStmt extends AstNode {
     readonly $container: Apply | Create | Destroy | ForStmt | HandleDecl | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
     readonly $type: 'LetStmt';
     expr: Expression;
+    loads: Array<LoadPath>;
     name: string;
+    sort: Array<SortItem>;
 }
 
 export const LetStmt = 'LetStmt';
@@ -1524,7 +1526,7 @@ export function isLiteralConnectionSource(item: unknown): item is LiteralConnect
 }
 
 export interface LoadPath extends AstNode {
-    readonly $container: Retrieval | SortItem;
+    readonly $container: LetStmt | Retrieval | SortItem;
     readonly $type: 'LoadPath';
     segments: Array<LoadSegment>;
 }
@@ -2293,7 +2295,7 @@ export function isSolution(item: unknown): item is Solution {
 }
 
 export interface SortItem extends AstNode {
-    readonly $container: Retrieval;
+    readonly $container: LetStmt | Retrieval;
     readonly $type: 'SortItem';
     direction?: SortDirection;
     path: LoadPath;
@@ -3798,7 +3800,9 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: LetStmt,
                     properties: [
                         { name: 'expr' },
-                        { name: 'name' }
+                        { name: 'loads', defaultValue: [] },
+                        { name: 'name' },
+                        { name: 'sort', defaultValue: [] }
                     ]
                 };
             }

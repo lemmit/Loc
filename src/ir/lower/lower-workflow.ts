@@ -36,8 +36,11 @@ import type {
   ExprIR,
   FieldIR,
   HandleIR,
+  LoadPlanIR,
+  LoadSegmentIR,
   OnIR,
   ParamIR,
+  SortTermIR,
   TypeIR,
   WorkflowIR,
   WorkflowStmtIR,
@@ -367,13 +370,30 @@ function lowerWorkflowStatement(
         kind: "array",
         element: { kind: "entity", name: aggName },
       };
+      // Trailing `sort:` / `loads:` shaping clauses (structural paths, not
+      // expressions).  Lowered here and threaded onto the repo-run; the enrich
+      // pass attaches them to the synthesised retrieval.  The shape signature
+      // is folded into the retrieval name so two findAlls over one criterion
+      // with different shaping get distinct retrievals (while identical shapes
+      // still dedupe).
+      const sortTerms: SortTermIR[] = stmt.sort.map((s) => ({
+        path: loadPathSegments(s.path),
+        direction: (s.direction ?? "asc") as "asc" | "desc",
+      }));
+      const loadPaths = stmt.loads.map(loadPathSegments);
+      const loadPlan: LoadPlanIR =
+        loadPaths.length > 0 ? { kind: "explicit", paths: loadPaths } : { kind: "whole" };
+      const hasShaping = sortTerms.length > 0 || loadPaths.length > 0;
+      const retrievalName = `findAllBy${findAllCall.criterionName}${
+        hasShaping ? `Shaped${shapeSignature(sortTerms, loadPaths)}` : ""
+      }`;
       return {
         stmt: {
           kind: "repo-run",
           name: stmt.name,
           repoName,
           aggName,
-          retrievalName: `findAllBy${findAllCall.criterionName}`,
+          retrievalName,
           retrievalArgs: findAllCall.criterionArgs.map((a) => lowerExpr(a, env)),
           ...(findAllCall.pageOffset || findAllCall.pageLimit
             ? {
@@ -388,6 +408,7 @@ function lowerWorkflowStatement(
               }
             : {}),
           synthCriterion: { name: findAllCall.criterionName },
+          ...(hasShaping ? { synthSort: sortTerms, synthLoadPlan: loadPlan } : {}),
           returnType: arrayType,
         },
         envAfter: withLocal(env, stmt.name, "let", arrayType),
@@ -630,6 +651,26 @@ function matchRetrievalRunCall(
     }
   }
   return { repo, retrievalName, retrievalArgs, pageOffset, pageLimit };
+}
+
+/** Lower a structural `LoadPath` AST node (`this.lines[].product`) to its
+ *  candidate-rooted segment list — the workflow-side twin of `lowerLoadPath`
+ *  in lower.ts (a leading `this` is already stripped by the grammar). */
+function loadPathSegments(p: {
+  segments: { name: string; collection?: boolean }[];
+}): LoadSegmentIR[] {
+  return p.segments.map((seg) => ({ name: seg.name, collection: !!seg.collection }));
+}
+
+/** A short, deterministic, content-based signature of a findAll's `sort:` /
+ *  `loads:` shaping — folded into the synthetic retrieval name so distinct
+ *  shapes over one criterion get distinct retrievals while identical shapes
+ *  dedupe.  Stable across runs (a plain string hash over the canonical JSON). */
+function shapeSignature(sort: SortTermIR[], loads: LoadSegmentIR[][]): string {
+  const canon = JSON.stringify({ sort, loads });
+  let h = 5381;
+  for (let i = 0; i < canon.length; i++) h = (h * 33) ^ canon.charCodeAt(i);
+  return (h >>> 0).toString(36);
 }
 
 interface FindAllMatch {

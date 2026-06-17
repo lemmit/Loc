@@ -11,6 +11,7 @@ import type {
   Destroy,
   EmitStmt,
   LValue,
+  Model,
   Operation,
   Statement,
 } from "../generated/ast.js";
@@ -145,6 +146,33 @@ export function checkCreate(c: Create, agg: Aggregate, accept: ValidationAccepto
 
 export function checkDestroy(d: Destroy, agg: Aggregate, accept: ValidationAcceptor): void {
   checkActionBody(d, agg, accept);
+}
+
+/** `<Repo>.findAll(...)` — the only `let` binding that admits `sort:` / `loads:`
+ *  shaping clauses (`Repo.find` is single-result, no shaping). */
+function isFindAllExpr(expr: AstNode | undefined): boolean {
+  if (!expr || !isPostfixChain(expr) || expr.suffixes.length !== 1) return false;
+  const s = expr.suffixes[0];
+  return !!s && isMemberSuffix(s) && !!s.call && s.member === "findAll";
+}
+
+/** Model-wide: `sort:` / `loads:` shaping clauses (criterion.md, use site 3)
+ *  are only meaningful on a `Repo.findAll(<Criterion>)` binding — they ride the
+ *  synthesised retrieval.  On any other `let` they would be silently dropped,
+ *  so reject them.  Streams every `LetStmt` (workflow / operation / lifecycle
+ *  bodies alike) since the per-body `checkStatement` walk doesn't reach
+ *  workflow bodies. */
+export function checkLetShaping(model: Model, accept: ValidationAcceptor): void {
+  for (const stmt of AstUtils.streamAllContents(model)) {
+    if (!isLetStmt(stmt)) continue;
+    if ((stmt.sort.length > 0 || stmt.loads.length > 0) && !isFindAllExpr(stmt.expr)) {
+      accept(
+        "error",
+        "'sort:' / 'loads:' clauses are only allowed on a 'Repo.findAll(<Criterion>)' binding.",
+        { node: stmt, property: stmt.sort.length > 0 ? "sort" : "loads" },
+      );
+    }
+  }
 }
 
 export function checkStatement(
