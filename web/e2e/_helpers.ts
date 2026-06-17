@@ -46,7 +46,15 @@ export async function selectExample(page: Page, label: string | RegExp): Promise
   await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: "Choose example" }).click();
   await page.getByRole("option", { name: label }).first().click();
-  await page.getByTestId("workspace-create").click();
+  // Selecting the example re-renders the picker (async source seed), so under
+  // load the create button can detach mid-click (or an overlay transition
+  // briefly intercepts the click). Retry the click until the dialog actually
+  // closes — `workspace-create` is gone once the workspace is created.
+  const create = page.getByTestId("workspace-create");
+  await expect(async () => {
+    await create.click({ timeout: 5_000 });
+    await expect(create).toBeHidden({ timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
   // Re-wait for the LSP "0 errors" badge — the new workspace remounts
   // the editor and re-parses the source, so the badge momentarily
   // flickers to "—" before the new source validates.

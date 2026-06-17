@@ -27,12 +27,14 @@ export default defineConfig({
   // No retries by default — we want a clean signal locally.  CI
   // can opt in via PWTEST_RETRIES.
   retries: process.env.CI ? 1 : 0,
-  // CI runs Playwright with 2 workers to halve wall time on the
-  // Bundle/Boot specs (each spends 2-3min installing tarballs /
-  // fetching jsdelivr).  Locally workers=1 keeps test output linear when a
-  // developer is iterating on a single spec.  Tests use isolated
-  // browser contexts so per-worker IDB / cookies don't collide.
-  workers: process.env.CI ? 2 : 1,
+  // Single worker, including on CI.  The heavy Bundle/Boot specs that
+  // motivated 2-worker parallelism are now quarantined (#1242, #1261), so the
+  // wall-time argument is moot — and parallel load was the sole cause of
+  // popover/canvas re-render races (the `workspace-create` button and builder
+  // canvas nodes detaching mid-click).  1 worker matches the green local run
+  // and keeps the suite well under the job cap (~14min).  Tests still use
+  // isolated browser contexts.
+  workers: 1,
   // `list` is the live signal: when the job is time-capped mid-run the
   // `github` reporter emits nothing until the end, giving zero
   // diagnostic signal.  `list` prints per-spec ok/✘/timing live so a
