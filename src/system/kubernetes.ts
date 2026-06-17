@@ -63,8 +63,26 @@ export interface WorkloadModel {
   /** Non-secret env, emitted via a `ConfigMap`. */
   configEnv: WorkloadEnv[];
   /** DB-connection env, sourced from the shared `Secret`.  `secretKey` is
-   *  the Secret's data key; `name` is the container env var name. */
-  dbEnv: Array<{ name: string; secretKey: string; value: string }>;
+   *  the Secret's data key; `name` is the container env var name.  Wired in
+   *  the chart via `.Values.<key>.database.url` (the friendliest single
+   *  knob). */
+  dbEnv: SecretEnv[];
+  /** Other sensitive env (passwords / app secret keys / tokens), also
+   *  sourced from the shared `Secret` but wired via the generic
+   *  `.Values.<key>.secrets.<NAME>` map.  Keeps secrets out of the
+   *  plaintext `ConfigMap`. */
+  secretEnv: SecretEnv[];
+}
+
+/** A sensitive env entry sourced from the shared `Secret`. */
+export interface SecretEnv {
+  /** Container env var name. */
+  name: string;
+  /** The Secret's data key (deployable-namespaced, DNS-1123). */
+  secretKey: string;
+  /** Dev-default value, used as the placeholder baked into the raw Secret
+   *  and the `values.yaml` default. */
+  value: string;
 }
 
 /** Convert an identifier (camelCase / snake_case) into a DNS-1123 label:
@@ -89,6 +107,17 @@ function isDbConnection(value: string): boolean {
   return value.includes("db:5432") || /Host=db\b/i.test(value);
 }
 
+/** A non-DB env var is sensitive iff its NAME matches this curated pattern —
+ *  passwords, app secret keys (Phoenix `SECRET_KEY_BASE`), tokens,
+ *  credentials.  Such entries go into the `Secret` instead of the plaintext
+ *  `ConfigMap`.  v1 is a name heuristic (the connection-string DB rule is
+ *  value-based and runs first); the principled structural version — each
+ *  backend DECLARING its secret env via a `workloadShape()` peer to
+ *  `composeService` — is the documented follow-up (docs/kubernetes.md). */
+function isSecretKey(name: string): boolean {
+  return /password|secret|token|credential|private[_-]?key|key_base|apikey/i.test(name);
+}
+
 function exposesUi(d: DeployableIR): boolean {
   const platform = platformFor(d.platform);
   // Standalone frontends (react / svelte / vue / static) always serve a
@@ -105,10 +134,13 @@ export function buildWorkloads(sys: SystemIR): WorkloadModel[] {
     const shape = platform.composeService({ deployable: d, sys, slug });
     const name = kName(d.name);
     const configEnv: WorkloadEnv[] = [];
-    const dbEnv: WorkloadModel["dbEnv"] = [];
+    const dbEnv: SecretEnv[] = [];
+    const secretEnv: SecretEnv[] = [];
     for (const [k, v] of shape.env) {
       if (shape.dependsOnDb && isDbConnection(v)) {
         dbEnv.push({ name: k, secretKey: `${name}-${kName(k)}`, value: v });
+      } else if (isSecretKey(k)) {
+        secretEnv.push({ name: k, secretKey: `${name}-${kName(k)}`, value: v });
       } else {
         configEnv.push({ name: k, value: v });
       }
@@ -120,14 +152,21 @@ export function buildWorkloads(sys: SystemIR): WorkloadModel[] {
       image: name,
       servicePort: d.port,
       containerPort: shape.internalPort,
-      // /ready is DB-aware (it waits on the schema); reserve it for readiness
-      // so a transient DB outage gates traffic rather than killing the pod.
+      // Uniform probe endpoints across every DB-backed backend: each emits
+      // BOTH a cheap `/health` (no DB) and a DB-aware `/ready` (verified for
+      // hono / .NET / python / java / phoenix).  Liveness uses /health so a
+      // transient DB outage gates traffic (readiness) instead of restarting
+      // the pod.  Frontends expose neither — probe their static root.  This
+      // is why we don't derive from `healthPath` here: that field reflects
+      // each backend's COMPOSE healthcheck choice (phoenix points it at
+      // /health), which would otherwise leak a non-DB-aware readiness probe.
       livenessPath: shape.dependsOnDb ? "/health" : shape.healthPath,
-      readinessPath: shape.healthPath,
+      readinessPath: shape.dependsOnDb ? "/ready" : shape.healthPath,
       dependsOnDb: shape.dependsOnDb,
       exposesUi: exposesUi(d),
       configEnv,
       dbEnv,
+      secretEnv,
     };
   });
 }
@@ -177,20 +216,19 @@ function renderDeployment(sys: SystemIR, w: WorkloadModel): string {
   lines.push(`          imagePullPolicy: IfNotPresent`);
   lines.push("          ports:");
   lines.push(`            - containerPort: ${w.containerPort}`);
-  if (w.configEnv.length > 0 || w.dbEnv.length > 0) {
+  if (w.configEnv.length > 0) {
     lines.push("          envFrom:");
-    if (w.configEnv.length > 0) {
-      lines.push("            - configMapRef:");
-      lines.push(`                name: ${w.name}-config`);
-    }
+    lines.push("            - configMapRef:");
+    lines.push(`                name: ${w.name}-config`);
   }
-  if (w.dbEnv.length > 0) {
+  const secretRefs = [...w.dbEnv, ...w.secretEnv];
+  if (secretRefs.length > 0) {
     lines.push("          env:");
-    for (const e of w.dbEnv) {
+    for (const e of secretRefs) {
       lines.push(`            - name: ${e.name}`);
       lines.push("              valueFrom:");
       lines.push("                secretKeyRef:");
-      lines.push(`                  name: ${PART_OF(sys)}-db`);
+      lines.push(`                  name: ${PART_OF(sys)}-secrets`);
       lines.push(`                  key: ${e.secretKey}`);
     }
   }
@@ -246,21 +284,23 @@ function renderConfigMap(sys: SystemIR, w: WorkloadModel): string {
   return lines.join("\n") + "\n";
 }
 
-function renderDbSecret(sys: SystemIR, workloads: WorkloadModel[]): string {
+function renderSecret(sys: SystemIR, workloads: WorkloadModel[]): string {
   const lines: string[] = [];
   lines.push("apiVersion: v1");
   lines.push("kind: Secret");
   lines.push("metadata:");
-  lines.push(`  name: ${PART_OF(sys)}-db`);
+  lines.push(`  name: ${PART_OF(sys)}-secrets`);
   lines.push(`  labels:`);
   lines.push(`    app.kubernetes.io/part-of: ${PART_OF(sys)}`);
   lines.push(`    app.kubernetes.io/managed-by: loom`);
   lines.push("type: Opaque");
   lines.push("stringData:");
-  // Placeholder connection strings — REPLACE with your managed-DB URLs.
-  // The dev-compose value is kept as a recognisable default.
+  // Placeholder values — REPLACE with your managed-DB URLs / real secrets.
+  // The dev-compose values are kept as recognisable defaults.
   for (const w of workloads) {
-    for (const e of w.dbEnv) lines.push(`  ${e.secretKey}: ${JSON.stringify(e.value)}`);
+    for (const e of [...w.dbEnv, ...w.secretEnv]) {
+      lines.push(`  ${e.secretKey}: ${JSON.stringify(e.value)}`);
+    }
   }
   return lines.join("\n") + "\n";
 }
@@ -275,8 +315,8 @@ export function renderKubernetesManifests(sys: SystemIR): Map<string, string> {
     out.set(`k8s/${w.name}-service.yaml`, renderService(sys, w));
     if (w.configEnv.length > 0) out.set(`k8s/${w.name}-config.yaml`, renderConfigMap(sys, w));
   }
-  if (workloads.some((w) => w.dbEnv.length > 0)) {
-    out.set("k8s/db-secret.yaml", renderDbSecret(sys, workloads));
+  if (workloads.some((w) => w.dbEnv.length > 0 || w.secretEnv.length > 0)) {
+    out.set("k8s/secret.yaml", renderSecret(sys, workloads));
   }
   return out;
 }

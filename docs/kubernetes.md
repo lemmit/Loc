@@ -31,13 +31,13 @@ out/
       <name>-service.yaml     # one per deployable (ClusterIP)
       <name>-config.yaml      # non-secret env (ConfigMap)
       <name>-ingress.yaml     # UI-serving deployables, gated on values
-      db-secret.yaml          # external DB connection (Secret)
+      secret.yaml             # DB connection + sensitive env (one Secret)
       NOTES.txt
   k8s/                        # the same chart rendered with its defaults
     <name>-deployment.yaml
     <name>-service.yaml
     <name>-config.yaml
-    db-secret.yaml
+    secret.yaml
 ```
 
 Resource names are DNS-1123 (`webApp` → `web-app`); the Helm `values.yaml`
@@ -53,15 +53,30 @@ the two stay structurally aligned:
 |---|---|
 | `internalPort` | container `port` + `Service.targetPort` |
 | deployable `port` | `Service.port` |
-| `healthPath` (`/ready` on DB backends, `/` on frontends) | `readinessProbe` |
-| `/health` (DB backends) / `healthPath` (frontends) | `livenessProbe` |
-| non-DB `env` | `ConfigMap` (via `envFrom`) |
-| DB-connection `env` | `Secret` ref (`secretKeyRef`) |
+| `/ready` on DB backends, `/` on frontends | `readinessProbe` |
+| `/health` on DB backends, `/` on frontends | `livenessProbe` |
+| non-secret `env` | `ConfigMap` (via `envFrom`) |
+| DB-connection + sensitive `env` | `Secret` ref (`secretKeyRef`) |
 | frontend / UI-serving | optional `Ingress` (off by default) |
 
-`/ready` is DB-aware (it waits on the schema), so it backs **readiness** —
-a transient DB outage gates traffic instead of restarting the pod, which is
-why liveness uses the cheap `/health` on backends.
+**Probes are aligned across backends.** Every DB-backed backend
+(hono / .NET / Python / Java / Phoenix) emits *both* a cheap `/health`
+(no DB) and a DB-aware `/ready` (pings the database), so the emitter uses a
+uniform rule — `livenessProbe: /health`, `readinessProbe: /ready` — rather
+than the deployable's `healthPath` (which reflects each backend's *compose*
+healthcheck choice and would otherwise leak a non-DB-aware readiness probe
+for Phoenix). `/ready` backing readiness means a transient DB outage gates
+traffic instead of restarting the pod. Frontends expose neither endpoint, so
+both probes hit the static root `/`.
+
+**Secrets stay out of the ConfigMap.** The DB connection string is routed to
+the `Secret` (it points at the `db` host), and so is any env whose name looks
+sensitive — `*PASSWORD*`, `*SECRET*`, `*TOKEN*`, `*KEY_BASE*`, … This catches
+Java's `SPRING_DATASOURCE_PASSWORD` and Phoenix's `SECRET_KEY_BASE`; only
+non-sensitive config (`PHX_HOST`, `PORT`, `SPRING_DATASOURCE_USERNAME`, …)
+lands in the plaintext `ConfigMap`. The classifier is a name heuristic in v1;
+the principled version — each backend *declaring* its secret env via a
+`workloadShape()` peer to `composeService` — is the deferred follow-up below.
 
 ## `values.yaml` — the tuning seam
 
@@ -81,6 +96,8 @@ api:                      # one block per deployable
   env: {}                 # extra env overlaid onto the ConfigMap
   database:
     url: "postgres://…@db:5432/api"   # placeholder — point at your managed DB
+  secrets: {}             # sensitive env (only present when the backend has any),
+                          # e.g. SECRET_KEY_BASE / SPRING_DATASOURCE_PASSWORD
 webApp:
   replicas: 1
   resources: { ... }
@@ -101,7 +118,8 @@ Backends default to a heavier resource class than static frontends. The DB
 - **D-K8S-DB** — external / managed database. The chart emits a connection
   `Secret` (placeholder) + a `values.yaml` slot; there is **no** in-cluster
   postgres `StatefulSet`. The compose path keeps its in-container postgres
-  for the inner loop.
+  for the inner loop. The same `Secret` also holds any other sensitive env
+  (passwords / app secret keys), kept out of the plaintext `ConfigMap`.
 - **D-K8S-INGRESS** — one optional `Ingress` per UI-serving deployable,
   host/className from `values.yaml`, **off by default**. Backends are
   `ClusterIP`.
@@ -115,6 +133,10 @@ Backends default to a heavier resource class than static frontends. The DB
   image is built, not at install.)
 - **Secret values.** Only references + placeholders; the DB URL and any auth
   secrets are supplied at install time.
+- **Structural secret classification.** v1 classifies sensitive env by a name
+  heuristic; the authoritative version is each backend *declaring* its secret
+  env via a `workloadShape()` peer to `composeService` (so a secret with an
+  unconventional name isn't missed). Deferred.
 - **Deferred:** infra-in-DSL clauses (`replicas` / `resources` / `ingress` on
   `Deployable`), per-platform workload defaults, in-cluster postgres,
   HPA/autoscaling, NetworkPolicy, securityContext hardening, Kustomize

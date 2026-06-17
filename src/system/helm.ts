@@ -102,6 +102,12 @@ function renderValues(sys: SystemIR, workloads: WorkloadModel[]): string {
       // single placeholder url.
       lines.push(`    url: ${JSON.stringify(w.dbEnv[0]!.value)}`);
     }
+    if (w.secretEnv.length > 0) {
+      lines.push("  secrets:");
+      lines.push("    # Sensitive env (passwords / app secret keys).  Dev-compose");
+      lines.push("    # values are placeholders — replace for production.");
+      for (const e of w.secretEnv) lines.push(`    ${e.name}: ${JSON.stringify(e.value)}`);
+    }
     if (w.exposesUi) {
       lines.push("  ingress:");
       lines.push("    enabled: false");
@@ -144,13 +150,14 @@ function renderDeploymentTemplate(w: WorkloadModel): string {
     lines.push("            - configMapRef:");
     lines.push(`                name: ${FULLNAME}-${w.name}-config`);
   }
-  if (w.dbEnv.length > 0) {
+  const secretRefs = [...w.dbEnv, ...w.secretEnv];
+  if (secretRefs.length > 0) {
     lines.push("          env:");
-    for (const e of w.dbEnv) {
+    for (const e of secretRefs) {
       lines.push(`            - name: ${e.name}`);
       lines.push("              valueFrom:");
       lines.push("                secretKeyRef:");
-      lines.push(`                  name: ${FULLNAME}-db`);
+      lines.push(`                  name: ${FULLNAME}-secrets`);
       lines.push(`                  key: ${e.secretKey}`);
     }
   }
@@ -239,12 +246,12 @@ function renderIngressTemplate(w: WorkloadModel): string {
   return lines.join("\n") + "\n";
 }
 
-function renderDbSecretTemplate(workloads: WorkloadModel[]): string {
+function renderSecretTemplate(workloads: WorkloadModel[]): string {
   const lines: string[] = [];
   lines.push("apiVersion: v1");
   lines.push("kind: Secret");
   lines.push("metadata:");
-  lines.push(`  name: ${FULLNAME}-db`);
+  lines.push(`  name: ${FULLNAME}-secrets`);
   lines.push("  labels:");
   lines.push('    {{- include "loom.labels" . | nindent 4 }}');
   lines.push("type: Opaque");
@@ -252,6 +259,9 @@ function renderDbSecretTemplate(workloads: WorkloadModel[]): string {
   for (const w of workloads) {
     for (const e of w.dbEnv) {
       lines.push(`  ${e.secretKey}: {{ .Values.${w.valuesKey}.database.url | quote }}`);
+    }
+    for (const e of w.secretEnv) {
+      lines.push(`  ${e.secretKey}: {{ .Values.${w.valuesKey}.secrets.${e.name} | quote }}`);
     }
   }
   return lines.join("\n") + "\n";
@@ -304,8 +314,8 @@ export function renderHelmChart(sys: SystemIR): Map<string, string> {
       out.set(`helm/templates/${w.name}-ingress.yaml`, renderIngressTemplate(w));
     }
   }
-  if (workloads.some((w) => w.dbEnv.length > 0)) {
-    out.set("helm/templates/db-secret.yaml", renderDbSecretTemplate(workloads));
+  if (workloads.some((w) => w.dbEnv.length > 0 || w.secretEnv.length > 0)) {
+    out.set("helm/templates/secret.yaml", renderSecretTemplate(workloads));
   }
   out.set("helm/templates/NOTES.txt", renderNotes(sys, workloads));
   return out;

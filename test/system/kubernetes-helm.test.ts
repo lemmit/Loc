@@ -71,7 +71,7 @@ describe("kubernetes / helm emitter", () => {
     // The dev connection string is NOT baked into the deployment.
     expect(dep).not.toContain("postgres://postgres:postgres@db");
     // The Secret carries the (placeholder) url via values.
-    const secret = files.get("helm/templates/db-secret.yaml")!;
+    const secret = files.get("helm/templates/secret.yaml")!;
     expect(secret).toContain("kind: Secret");
     expect(secret).toContain(".Values.api.database.url");
     // values.yaml keeps the dev-compose string as the placeholder default.
@@ -100,5 +100,49 @@ describe("kubernetes / helm emitter", () => {
     expect(dep).toContain("path: /health");
     expect(dep).toContain("readinessProbe");
     expect(dep).toContain("path: /ready");
+  });
+});
+
+// A Java backend carries SPRING_DATASOURCE_PASSWORD + a /health vs /ready
+// split that diverges from its compose healthcheck — the two cases the
+// secret-widening + probe-alignment rules exist for.
+const JAVA_SRC = `
+system Shop {
+  subdomain Catalog {
+    context Products {
+      aggregate Product { name: string  price: int }
+      repository Products for Product { }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: Products, kind: state, use: primary }
+  api ShopApi from Catalog
+  deployable api { platform: java contexts: [Products] serves: ShopApi dataSources: [st] port: 8080 }
+}`;
+
+describe("kubernetes / helm — secret widening + probe alignment", () => {
+  it("routes a password env into the Secret, not the ConfigMap", async () => {
+    const files = await filesFor(JAVA_SRC, true);
+    const config = files.get("k8s/api-config.yaml")!;
+    const secret = files.get("k8s/secret.yaml")!;
+    // The password is a Secret entry…
+    expect(secret).toContain("SPRING_DATASOURCE_PASSWORD".toLowerCase().replace(/_/g, "-"));
+    expect(secret).toContain("kind: Secret");
+    // …and never lands in the plaintext ConfigMap.
+    expect(config).not.toContain("SPRING_DATASOURCE_PASSWORD");
+    expect(config).not.toContain("postgres\n"); // password value not in config
+    // The non-secret username stays config.
+    expect(config).toContain("SPRING_DATASOURCE_USERNAME");
+    const dep = files.get("k8s/api-deployment.yaml")!;
+    expect(dep).toContain("name: SPRING_DATASOURCE_PASSWORD");
+    expect(dep).toContain("secretKeyRef");
+  });
+
+  it("aligns probes to /health (liveness) + /ready (readiness) regardless of compose healthPath", async () => {
+    const files = await filesFor(JAVA_SRC, true);
+    const dep = files.get("k8s/api-deployment.yaml")!;
+    // Both endpoints exist on every backend; liveness is the cheap one.
+    expect(dep).toMatch(/livenessProbe[\s\S]*?path: \/health/);
+    expect(dep).toMatch(/readinessProbe[\s\S]*?path: \/ready/);
   });
 });
