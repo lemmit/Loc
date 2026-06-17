@@ -65,6 +65,17 @@ export function printExpr(node: Expression): string {
       return `[${(node.elements ?? []).map((e) => printExpr(e)).join(", ")}]`;
     case "MatchExpr":
       return printMatch(node);
+    case "RetrievalLiteral": {
+      const path = (p: { segments: { name: string; collection?: boolean }[] }): string =>
+        p.segments.map((s) => `${s.name}${s.collection ? "[]" : ""}`).join(".");
+      const parts = [`where: ${printExpr(node.where)}`];
+      if (node.sort.length > 0)
+        parts.push(
+          `sort: [${node.sort.map((s) => `${path(s.path)}${s.direction ? ` ${s.direction}` : ""}`).join(", ")}]`,
+        );
+      if (node.loads.length > 0) parts.push(`loads: [${node.loads.map(path).join(", ")}]`);
+      return `retrieval { ${parts.join("  ")} }`;
+    }
     case "PrimitiveConversion":
       // value is `Expression | undefined` in the generated AST (the
       // grammar's `value=Expression` doesn't force presence — a

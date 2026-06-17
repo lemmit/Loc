@@ -36,6 +36,7 @@ export {
   checkCallStmt,
   checkEmit,
   checkOperation,
+  checkRetrievalLiteral,
   checkStatement,
 } from "./statements.js";
 export {

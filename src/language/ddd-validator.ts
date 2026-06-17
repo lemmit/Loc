@@ -44,6 +44,7 @@ import {
   checkPayloads,
   checkPrimitiveConversions,
   checkProjectSingletons,
+  checkRetrievalLiteral,
   checkSeeds,
   checkSlotMemberAccess,
   checkSlotTypePosition,
@@ -85,6 +86,9 @@ export class DddValidator {
     // preconditions, derived bodies, function bodies, and guards
     // alike — anywhere the operator can appear.
     checkMatchesCalls(model, accept);
+    // An anonymous retrieval literal's `where:` must be a criterion reference
+    // (criterion.md, use site 3).
+    checkRetrievalLiteral(model, accept);
     // Test-assertion matchers (`toBe`/`toHaveText`/…) are a known builtin
     // surface — enforce their fixed argument arity.
     checkMatcherArity(model, accept);
