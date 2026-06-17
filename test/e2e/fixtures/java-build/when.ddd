@@ -1,0 +1,33 @@
+// `when` canCommand state gate on the Java/Spring Boot backend (criterion.md,
+// use site 2).  The operation loads the aggregate, evaluates the predicate
+// (enum → `<Enum>.<Value>` over record accessors), and throws
+// DisallowedException (→ 409 ProblemDetail via ApiExceptionAdvice) before
+// mutating; it also auto-exposes `GET /orders/{id}/can_cancel` returning the
+// shared CanResponse { allowed }.  The decisive check that the gate +
+// can-query controller, service, exception, and CanResponse record compile
+// under `gradle testClasses bootJar`.
+system WhenShop {
+  subdomain Sales {
+    context Orders {
+      enum OrderStatus { Draft, Shipped, Cancelled }
+      aggregate Order {
+        code: string
+        status: OrderStatus
+        operation cancel() when this.status != Shipped && this.status != Cancelled {
+          status := Cancelled
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from Sales
+  storage primary { type: postgres }
+  resource st { for: Orders, kind: state, use: primary }
+  deployable whenApi {
+    platform: java
+    contexts: [Orders]
+    dataSources: [st]
+    serves: A
+    port: 8082
+  }
+}

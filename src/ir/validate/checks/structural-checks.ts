@@ -466,18 +466,20 @@ export function validateUnionsUnimplemented(
 
 /**
  * `when` canCommand gate (criterion.md, use site 2) — backend support.
- * node / .NET / python / elixir evaluate the predicate before the body (409
- * Disallowed) and expose the side-effect-free `GET /{id}/can_<op>`; the java
- * emitter doesn't yet, so a `when`-gated operation is a hard error while java
- * serves the context (surfacing it beats silently skipping the gate — an
- * unenforced state gate is a correctness hole).
+ * All five backends (node / .NET / python / elixir / java) evaluate the
+ * predicate before the body (409 Disallowed) and expose the side-effect-free
+ * `GET /{id}/can_<op>`, so this guard is now latent.  It stays as the safety
+ * net for any future backend that lands before its `when` emitter does — a
+ * `when`-gated op served by an unsupported backend is a hard error (surfacing
+ * it beats silently skipping the gate — an unenforced state gate is a
+ * correctness hole).
  */
 export function validateWhenGateSupport(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
 ): void {
-  const SUPPORTED_WHEN_BACKENDS = new Set(["node", "dotnet", "python", "elixir"]);
+  const SUPPORTED_WHEN_BACKENDS = new Set(["node", "dotnet", "python", "elixir", "java"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_WHEN_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 

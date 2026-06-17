@@ -29,6 +29,7 @@ import { renderApiExceptionAdvice, renderJavaController } from "./emit/api.js";
 import { renderAuthFiles } from "./emit/auth.js";
 import {
   renderAggregateNotFoundException,
+  renderDisallowedException,
   renderDomainEventInterface,
   renderDomainException,
   renderForbiddenException,
@@ -205,6 +206,7 @@ function emitProjectFromContexts(
   // wildcard imports valid even when a package would otherwise be empty.
   place("DomainException.java", "domain-common", renderDomainException(basePkg));
   place("ForbiddenException.java", "domain-common", renderForbiddenException(basePkg));
+  place("DisallowedException.java", "domain-common", renderDisallowedException(basePkg));
   place(
     "AggregateNotFoundException.java",
     "domain-common",

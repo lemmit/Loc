@@ -183,6 +183,18 @@ export function renderDtoFiles(
     });
   }
 
+  // --- can response (`{ allowed }`) -------------------------------------------------
+  // The side-effect-free `can_<op>` companion of a `when`-gated operation
+  // (criterion.md, use site 2) returns this shape.  One per aggregate, emitted
+  // when the aggregate carries any served `when` gate.
+  if (agg.operations.some((op) => op.visibility === "public" && op.when)) {
+    out.push({
+      name: "CanResponse.java",
+      category: "response-dto",
+      content: recordFile(pkg, basePkg, "CanResponse", ["boolean allowed"], [], new Set<string>()),
+    });
+  }
+
   return out;
 }
 

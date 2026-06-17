@@ -68,6 +68,21 @@ export function renderJavaController(
     );
   // Extern ops route identically — the service dispatches to the
   // user-supplied handler instead of an aggregate method.
+  // The side-effect-free `can_<op>` companion of a `when`-gated operation
+  // (criterion.md, use site 2): GET → loads the aggregate, evaluates the
+  // predicate, returns `{ allowed }` so a UI can enable/disable the action
+  // without invoking it.  The service owns the load + predicate; the
+  // controller wraps the boolean in the shared `CanResponse` record.
+  const canRouteLines = (op: (typeof agg.operations)[number]): string[] =>
+    op.when
+      ? [
+          `    @GetMapping("/{id}/can_${snake(op.name)}")`,
+          `    public CanResponse can${upperFirst(op.name)}${agg.name}(@PathVariable ${idJava} id) {`,
+          `        return new CanResponse(service.can${upperFirst(op.name)}(new ${idClass}(id)));`,
+          `    }`,
+          ``,
+        ]
+      : [];
   const opRoutes = agg.operations
     .filter((op) => op.visibility === "public")
     .flatMap((op) => {
@@ -113,6 +128,7 @@ export function renderJavaController(
           `        };`,
           `    }`,
           ``,
+          ...canRouteLines(op),
         ];
       }
       return [
@@ -126,6 +142,7 @@ export function renderJavaController(
           : `        service.${op.name}(new ${idClass}(id));`,
         `    }`,
         ``,
+        ...canRouteLines(op),
       ];
     });
 
@@ -307,6 +324,7 @@ export function renderApiExceptionAdvice(basePkg: string): string {
     `import org.springframework.web.context.request.WebRequest;`,
     ``,
     `import ${basePkg}.domain.common.AggregateNotFoundException;`,
+    `import ${basePkg}.domain.common.DisallowedException;`,
     `import ${basePkg}.domain.common.DomainException;`,
     `import ${basePkg}.domain.common.ForbiddenException;`,
     `import ${basePkg}.domain.common.WireValidationException;`,
@@ -332,6 +350,11 @@ export function renderApiExceptionAdvice(basePkg: string): string {
     `    @ExceptionHandler(DomainException.class)`,
     `    public ResponseEntity<ProblemDetail> onDomain(DomainException e, WebRequest request) {`,
     `        return respond(problem(400, "Bad Request", e.getMessage(), request), 400);`,
+    `    }`,
+    ``,
+    `    @ExceptionHandler(DisallowedException.class)`,
+    `    public ResponseEntity<ProblemDetail> onDisallowed(DisallowedException e, WebRequest request) {`,
+    `        return respond(problem(409, "Disallowed", e.getMessage(), request), 409);`,
     `    }`,
     ``,
     `    @ExceptionHandler(AggregateNotFoundException.class)`,

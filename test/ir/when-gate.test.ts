@@ -96,16 +96,16 @@ describe("when gate — backend support (loom.when-unsupported)", () => {
       .map((d) => d.message);
   };
 
-  it("passes on node, dotnet, python and elixir", async () => {
+  // All five backends now ship the `when` gate + can_<op> companion, so the
+  // `loom.when-unsupported` guard is latent — it can no longer be triggered by
+  // a real `platform:` keyword (the grammar's Platform set is closed).  It
+  // stays in place as the safety net for any future backend that lands before
+  // its `when` emitter does; this test pins that every shipping backend passes.
+  it("passes on every backend — node, dotnet, python, elixir and java all emit the gate", async () => {
     expect(await codes("hono")).toEqual([]);
     expect(await codes("dotnet")).toEqual([]);
     expect(await codes("python")).toEqual([]);
     expect(await codes("elixir")).toEqual([]);
-  });
-
-  it("gates a java-hosted context (the remaining unsupported backend)", async () => {
-    const msgs = await codes("java");
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]).toContain("can-ship");
+    expect(await codes("java")).toEqual([]);
   });
 });
