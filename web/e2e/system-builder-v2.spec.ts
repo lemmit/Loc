@@ -273,7 +273,7 @@ test("Model v2 shows inline modules / serves multi-selects on a deployable", asy
   // The `api` deployable node renders both multi-selects.
   const dep = page.locator('[data-construct-kind="deployable"][data-construct-name="api"]');
   await expect(dep).toBeVisible();
-  await expect(dep.getByTestId("c4system-v2-deployable-modules")).toBeVisible();
+  await expect(dep.getByTestId("c4system-v2-deployable-contexts")).toBeVisible();
   await expect(dep.getByTestId("c4system-v2-deployable-serves")).toBeVisible();
 });
 
