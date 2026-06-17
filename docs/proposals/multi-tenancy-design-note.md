@@ -9,10 +9,24 @@
 
 ## Refinement (2026-06-17) — naming, registry-in-`tenancy by`, derived default, macro-first delivery
 
-> A design session reworked four of the "Decisions locked" below. Where this
-> section and the original decisions disagree, **this section wins** — the
-> originals are kept for the reasoning trail. Net effect: a smaller surface, a
-> safer default, and a Phase-1 that ships with **no grammar/IR/emitter change**.
+> A design session reworked the registry, scope, and default decisions and added
+> the always-hierarchy-ready model (R1–R5 below). Where this section and the
+> original "Decisions locked" disagree, **this section wins** — the originals are
+> kept for the reasoning trail. In particular, **original decision #4 ("the
+> tenant registry is a third mode: `platform`") is replaced**: the registry is
+> named in `tenancy by … of Organization` and tagged `implements
+> "tenantRegistry"` (R1/R5), while `platform` is *repurposed* as the **admin-only
+> cross-tenant** aggregate category — audit trails, cross-tenant projections (R2).
+> Net effect: a smaller surface, a safer default, and a Phase-1 with **no field
+> injection** (fields come from explicit, unfoldable capabilities).
+>
+> **Why Loom owns this rather than a hand-rolled filter:** the dangerous part of
+> tenancy is the *universal, can't-be-forgotten* read scope — miss the filter on
+> one query and you get a silent cross-tenant leak, ×5 backends. That guarantee
+> (a predicate injected into *every* generated query) is exactly what Loom's
+> capability-filter pipeline already provides and a human cannot reliably
+> maintain. Hierarchy's reparent/path mechanics are the genuinely hard-by-hand
+> part — which is why reparent is scoped out (R5) and hierarchy is gated.
 
 ### R1. The registry is named in `tenancy by …`, not marked on the aggregate
 
@@ -351,7 +365,14 @@ backends.
    (Name chosen over `global`/`shared` because it stays in the tenancy vocabulary and reads
    as the literal opposite of "scoped.")
 
-4. **The tenant registry is a third mode: `platform`.** The `Tenant` aggregate itself cannot
+4. **The tenant registry is a third mode: `platform`.** **⚠ SUPERSEDED by R1/R2/R5
+   (Refinement, top of file).** The registry is now named in `tenancy by … of
+   Organization` + tagged `implements "tenantRegistry"`; `platform` is repurposed
+   for *admin-only cross-tenant* data (audit trails, projections), which is a
+   distinct concept from the registry. The reasoning below (why the registry can't
+   be plain `tenant`-scoped or `crossTenant`) still holds — it's *why* the registry
+   needs its own treatment — but the mechanism is R1/R5, not a `platform` mode.
+   The `Tenant` aggregate itself cannot
    be plain tenant-scoped (chicken-and-egg: a tenant is created before its own tenant context
    exists; auto-stamping from a claim has no claim to read) and cannot be `crossTenant`
    (that exposes every org to every tenant). It is **dual-mode**:
