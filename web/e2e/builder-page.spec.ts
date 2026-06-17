@@ -142,11 +142,16 @@ test("palette adds a data primitive with a binding dropdown", async ({ page }) =
 
   await page.getByTestId("doc-tab-builder").click();
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+  // React Flow mounts its nodes asynchronously after the canvas container
+  // becomes visible; on slow CI a palette click before that mount is a no-op
+  // (the node is never added). Wait for the seeded canvas to render a node
+  // first so the add actually takes.
+  await expect(page.locator('[data-testid^="c4node-"]').first()).toBeVisible({ timeout: 30_000 });
 
   // Add a CreateForm and select it; its `of:` binding renders as a dropdown.
   await page.getByTestId("c4palette-CreateForm").click();
   const formNode = page.getByTestId("c4node-CreateForm").first();
-  await expect(formNode).toBeVisible();
+  await expect(formNode).toBeVisible({ timeout: 30_000 });
   // The builder canvas re-seeds (re-creating React Flow nodes) after the
   // palette add, so on slow CI the node detaches mid-click. Retry until the
   // click lands and the inspector opens.

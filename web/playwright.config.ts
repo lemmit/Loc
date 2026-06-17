@@ -24,13 +24,15 @@ export default defineConfig({
   // letting a genuinely stuck spec eat unbounded time.
   timeout: 720_000,
   expect: { timeout: 60_000 },
-  // No retries locally (clean signal).  On CI, 2 retries: the playground's
+  // No retries locally (clean signal).  On CI, 3 retries: the playground's
   // React-Flow builder canvas + Mantine popovers re-render under load in ways
-  // that intermittently detach a node/button mid-click on CI's headless
-  // runners (doesn't repro in a local 1-worker run).  These are environmental
-  // flakes, not product bugs, so a couple of retries keep the signal honest
-  // without masking a real regression (a real break fails all 3 attempts).
-  retries: process.env.CI ? 2 : 0,
+  // that intermittently detach a node/button mid-click (or swallow a click
+  // before the canvas mounts) on CI's headless runners — doesn't repro in a
+  // local 1-worker run.  These are environmental flakes, not product bugs;
+  // the per-interaction retries (selectExample / builder canvas) handle most,
+  // and 3 attempts cover the irreducible tail without masking a real
+  // regression (a genuine break still fails all 4 attempts).
+  retries: process.env.CI ? 3 : 0,
   // 2 workers on CI to keep wall time down; tests use isolated browser
   // contexts so per-worker IDB / cookies don't collide.  (1 worker was tried
   // and didn't reduce the canvas/popover flakiness — it's CI-headless timing,
