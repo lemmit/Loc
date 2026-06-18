@@ -37,6 +37,14 @@ async function gen(): Promise<Map<string, string>> {
 const file = (files: Map<string, string>, suffix: string): string =>
   [...files.entries()].find(([k]) => k.endsWith(suffix))?.[1] ?? "";
 
+/** Slice one @EventListener handler method out of the dispatcher source. */
+const method = (d: string, sig: string): string => {
+  const start = d.indexOf(sig);
+  if (start < 0) return "";
+  const after = d.indexOf("@EventListener", start + sig.length);
+  return d.slice(start, after < 0 ? undefined : after);
+};
+
 describe("java event-sourced workflows", () => {
   it("emits a <Wf>State fold class (appliers + _fromEvents + codec), no JPA", async () => {
     const s = (await gen()).get(`${WF}/TallyState.java`)!;
@@ -63,24 +71,30 @@ describe("java event-sourced workflows", () => {
     expect([...files.keys()].some((k) => k.endsWith("TallyStateRepository.java"))).toBe(false);
   });
 
-  it("the create starter folds the stream and appends its own events", async () => {
-    const d = file(await gen(), "ODispatcher.java");
-    expect(d).toContain("private final JdbcTemplate jdbc;");
-    expect(d).toContain("public void onTallyStartOrderPlaced(OrderPlaced p) {");
+  it("the create starter appends its own events and skips the unused fold", async () => {
+    const d = method(file(await gen(), "ODispatcher.java"), "public void onTallyStartOrderPlaced(");
     expect(d).toContain("var __key = p.order();");
     expect(d).toContain("var __sid = String.valueOf(__key.value());");
-    expect(d).toContain("select type, data from tally_events where stream_id = ? order by version");
-    expect(d).toContain("var state = TallyState._fromEvents(__key, __loaded);");
+    // This starter only emits a constant, so it never reads `state` — the stream
+    // load + fold is a pure no-op and is skipped (parity with the python port).
+    expect(d).not.toContain("_fromEvents");
+    expect(d).not.toContain("__loaded");
+    expect(d).toContain("__events.add(new PaymentRegistered(p.order(), 0));");
     expect(d).toContain("insert into tally_events (stream_id, version, type, data)");
     expect(d).toContain("__sid, __v, __e.getClass().getSimpleName(), TallyState._toData(__e));");
     expect(d).toContain("for (var __e : __events) events.publishEvent(__e);");
   });
 
   it("the on-reactor drops + logs when the stream is empty and reads folded state", async () => {
-    const d = file(await gen(), "ODispatcher.java");
-    expect(d).toContain("public void onTallyOnPaymentRegistered(PaymentRegistered pr) {");
+    const d = method(
+      file(await gen(), "ODispatcher.java"),
+      "public void onTallyOnPaymentRegistered(",
+    );
+    expect(d).toContain("var __rows = jdbc.queryForList(");
     expect(d).toContain("if (__rows.isEmpty()) {");
     expect(d).toContain("event_unrouted");
+    // The reactor reads `total` (a precondition), so it folds the stream.
+    expect(d).toContain("var state = TallyState._fromEvents(__key, __loaded);");
     // The precondition reads the folded state (package-private field, same package).
     expect(d).toContain("if (!(state.total >= 0)) throw new DomainException(");
   });

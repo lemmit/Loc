@@ -323,36 +323,55 @@ function renderEsHandler(
   const cls = esWorkflowStateClass(wf);
   const table = esWorkflowStreamTable(wf);
 
+  // Render the body up front so we know whether it reads the folded snapshot (a
+  // starter that only emits constants never touches `state`) — folding is then a
+  // pure no-op, so we skip the stream load + fold (parity with the python port).
+  const bodyLines = renderWorkflowStmts(
+    resolved.statements,
+    javaWorkflowStmtTarget(ctx, imports, renderCtx, hasEmit ? "__events" : undefined),
+    "        ",
+  );
+  const usesState = bodyLines.some((l) => /\bstate\b/.test(l));
+
+  const loadFold = [
+    `        var __loaded = new ArrayList<DomainEvent>();`,
+    `        for (var __r : __rows) __loaded.add(${cls}._rowToEvent((String) __r.get("type"), String.valueOf(__r.get("data"))));`,
+    `        var state = ${cls}._fromEvents(__key, __loaded);`,
+  ];
+
   const out: string[] = [
     `    @EventListener`,
     `    public void ${handlerName(sub)}(${sub.event} ${param}) {`,
     `        var __key = ${keyExpr};`,
-    `        var __sid = String.valueOf(__key.value());`,
-    `        var __rows = jdbc.queryForList(`,
-    `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
   ];
+  // `__sid` is needed by an `on` reactor's stream load (always), the append
+  // (when the body emits), and the fold load (when the body reads state).
+  if (sub.trigger === "on" || hasEmit || usesState) {
+    out.push(`        var __sid = String.valueOf(__key.value());`);
+  }
   if (sub.trigger === "on") {
     // A continuation needs a started saga (non-empty stream); else drop + log.
+    out.push(`        var __rows = jdbc.queryForList(`);
+    out.push(
+      `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
+    );
     out.push(`        if (__rows.isEmpty()) {`);
     out.push(
       `            log.warn("event_unrouted workflow={} event={} key={}", "${wf.name}", "${sub.event}", __key);`,
     );
     out.push(`            return;`);
     out.push(`        }`);
+    if (usesState) out.push(...loadFold);
+  } else if (usesState) {
+    // A starter that reads state folds the (possibly empty) stream from zero.
+    out.push(`        var __rows = jdbc.queryForList(`);
+    out.push(
+      `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
+    );
+    out.push(...loadFold);
   }
-  out.push(`        var __loaded = new ArrayList<DomainEvent>();`);
-  out.push(
-    `        for (var __r : __rows) __loaded.add(${cls}._rowToEvent((String) __r.get("type"), String.valueOf(__r.get("data"))));`,
-  );
-  out.push(`        var state = ${cls}._fromEvents(__key, __loaded);`);
   if (hasEmit) out.push(`        var __events = new ArrayList<DomainEvent>();`);
-  out.push(
-    ...renderWorkflowStmts(
-      resolved.statements,
-      javaWorkflowStmtTarget(ctx, imports, renderCtx, hasEmit ? "__events" : undefined),
-      "        ",
-    ),
-  );
+  out.push(...bodyLines);
   // Aggregate saves still re-publish their own events (choreography re-entry).
   for (const s of resolved.saves) {
     out.push(`        ${repoField(s.aggName)}.save(${s.name});`);
