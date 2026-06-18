@@ -524,9 +524,14 @@ describe("validation", () => {
       const { isPage, isSystem, isUi } = await import("../../../src/language/generated/ast.js");
       const sys = (model.members ?? []).find(isSystem);
       const ui = (sys?.members ?? []).find(isUi);
-      const orderListPages = (ui?.members ?? [])
-        .filter(isPage)
-        .filter((p) => p.name === "OrderList");
+      // Pages nest in the scaffold's per-aggregate `area`, so collect recursively.
+      const collectPages = (members: any[]): any[] =>
+        (members ?? []).flatMap((m: any) =>
+          isPage(m) ? [m] : m?.$type === "Area" ? collectPages(m.members) : [],
+        );
+      const orderListPages = collectPages(ui?.members ?? []).filter(
+        (p: any) => p.name === "OrderList",
+      );
       expect(orderListPages.length).toBe(1);
     });
 

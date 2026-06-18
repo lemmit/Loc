@@ -7,6 +7,7 @@
 // machinery via `currentOrigin()` from `factories.ts`.
 
 import type {
+  Area,
   BodyProp,
   BoolLit,
   CallArg,
@@ -25,6 +26,7 @@ import type {
   UiMember,
 } from "../../language/generated/ast.js";
 import {
+  mkArea,
   mkBodyProp,
   mkBoolLit,
   mkCallArg,
@@ -197,4 +199,15 @@ export function page(opts: {
     _setContainer(prop, p, "props", i);
   });
   return p as Page & UiMember;
+}
+
+/** An `area <Name> { … }` block grouping pages (and nested areas).  Members
+ * are Pages and/or sub-Areas; their `$container` is wired to this area. */
+export function area(name: string, members: Array<Page | Area>): Area & UiMember {
+  const origin = _currentOrigin();
+  const a: Area = _tag(mkArea({ $type: "Area", name, members }), origin);
+  members.forEach((m, i) => {
+    _setContainer(m, a, "members", i);
+  });
+  return a as Area & UiMember;
 }

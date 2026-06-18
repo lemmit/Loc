@@ -5,8 +5,18 @@
 // shapes.  Keeping them in one place means the per-archetype leaf
 // macros and the top-level composer share one source of truth.
 
-import type { Aggregate, Page, View, Workflow } from "../../api/index.js";
-import { boolLit, callExpr, nameRefExpr, page, stringLit } from "../../api/index.js";
+import type { Aggregate, Area, Page, View, Workflow } from "../../api/index.js";
+import { area, boolLit, callExpr, nameRefExpr, page, stringLit } from "../../api/index.js";
+
+/** Group an aggregate's List/New/Detail pages under a per-aggregate `area`
+ *  named after its plural (`area Orders { … }` → `src/pages/orders/…`).  The
+ *  scaffold returns this instead of loose pages so the generated page tree
+ *  groups by aggregate.  In slice 2 `origin` still drives `emitPath` (output
+ *  byte-identical); slice 3 makes the area authoritative.  See
+ *  docs/proposals/unfoldable-page-scaffolding.md. */
+export function areaForAggregate(agg: Aggregate): Area {
+  return area(plural(agg.name), pagesForAggregate(agg));
+}
 
 export function pagesForAggregate(agg: Aggregate): Page[] {
   const pluralSnake = snake(plural(agg.name));

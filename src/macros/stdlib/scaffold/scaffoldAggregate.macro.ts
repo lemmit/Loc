@@ -1,6 +1,6 @@
 import type { Aggregate } from "../../api/index.js";
 import { defineMacro } from "../../api/index.js";
-import { pagesForAggregate } from "./_pages.js";
+import { areaForAggregate } from "./_pages.js";
 
 /** Synthesise the three default pages for one aggregate: List, New,
  * Detail.
@@ -32,6 +32,9 @@ export default defineMacro({
     // strict tsc).  Skip the base; its concrete `extends` subtypes
     // each get their own pages.
     if (agg.isAbstract) return [];
-    return pagesForAggregate(agg);
+    // Return one `area <Plural> { List, New, Detail }` block (not loose pages)
+    // so the generated page tree groups by aggregate and unfolds to a real
+    // area block.
+    return [areaForAggregate(agg)];
   },
 });

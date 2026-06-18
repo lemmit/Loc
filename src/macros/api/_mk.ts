@@ -27,6 +27,7 @@
 // authors do not see this module.
 
 import type {
+  Area,
   AssignOrCallStmt,
   BodyProp,
   BoolLit,
@@ -204,6 +205,10 @@ export function mkMenuMetaEntry(shape: AstLiteral<MenuMetaEntry>): MenuMetaEntry
 
 export function mkPageMenuMeta(shape: AstLiteral<PageMenuMeta>): PageMenuMeta {
   return mkAst<PageMenuMeta>(shape);
+}
+
+export function mkArea(shape: AstLiteral<Area>): Area {
+  return mkAst<Area>(shape);
 }
 
 export function mkPage(shape: AstLiteral<Page>): Page {

@@ -38,17 +38,29 @@ function findUi(model: Model): Ui {
   throw new Error("ui not found");
 }
 
+// Collect all pages in a ui, descending into `area { … }` blocks — the
+// scaffold groups aggregate pages under per-aggregate areas, so a page can be
+// nested rather than a direct ui member.
+function allPages(ui: Ui): any[] {
+  const out: any[] = [];
+  const walk = (members: any[]): void => {
+    for (const m of members ?? []) {
+      if (isPage(m)) out.push(m);
+      else if (m?.$type === "Area") walk(m.members ?? []);
+    }
+  };
+  walk((ui.members ?? []) as any[]);
+  return out;
+}
+
 function pageNames(model: Model): string[] {
-  const ui = findUi(model);
-  return (ui.members ?? [])
-    .filter(isPage)
+  return allPages(findUi(model))
     .map((p) => p.name)
     .sort();
 }
 
 function pageRoute(model: Model, name: string): string | undefined {
-  const ui = findUi(model);
-  const p = (ui.members ?? []).filter(isPage).find((pg) => pg.name === name);
+  const p = allPages(findUi(model)).find((pg) => pg.name === name);
   if (!p) return undefined;
   for (const prop of p.props ?? []) {
     if (prop.$type === "RouteProp") return (prop as any).value;
@@ -57,8 +69,7 @@ function pageRoute(model: Model, name: string): string | undefined {
 }
 
 function pageBodyCallee(model: Model, name: string): string | undefined {
-  const ui = findUi(model);
-  const p = (ui.members ?? []).filter(isPage).find((pg) => pg.name === name);
+  const p = allPages(findUi(model)).find((pg) => pg.name === name);
   if (!p) return undefined;
   for (const prop of p.props ?? []) {
     if (prop.$type === "BodyProp") {
@@ -175,12 +186,47 @@ describe("scaffold macro: composition rules", () => {
       }
     `);
     const ui = findUi(model);
-    const orderListPages = (ui.members ?? [])
+    // The explicit top-level OrderList wins; the synthesised one is pruned
+    // from the scaffold's `area Orders` (override-by-name reaches into areas).
+    const topLevelOrderList = (ui.members ?? [])
       .filter(isPage)
       .filter((p: Page) => p.name === "OrderList");
-    expect(orderListPages.length).toBe(1);
-    const explicit = orderListPages[0]!;
-    const route = (explicit.props ?? []).find((p) => p.$type === "RouteProp") as any;
+    expect(topLevelOrderList.length).toBe(1);
+    const route = (topLevelOrderList[0]!.props ?? []).find((p) => p.$type === "RouteProp") as any;
     expect(route?.value).toBe("/custom");
+    // exactly one OrderList across the whole ui (the explicit one)
+    expect(allPages(ui).filter((p: any) => p.name === "OrderList").length).toBe(1);
+    const ordersArea = (ui.members ?? []).find(
+      (m: any) => m.$type === "Area" && m.name === "Orders",
+    );
+    const areaPageNames = (ordersArea?.members ?? [])
+      .filter(isPage)
+      .map((p: any) => p.name)
+      .sort();
+    expect(areaPageNames).toEqual(["OrderDetail", "OrderNew"]); // OrderList pruned
+  });
+
+  it("groups an aggregate's List/New/Detail under a per-aggregate `area`", async () => {
+    const { model } = await parseString(`
+      system Demo {
+        subdomain Sales {
+          context Orders {
+            aggregate Order { subject: string }
+            repository Orders for Order { }
+          }
+        }
+        ui App with scaffold(aggregates: [Order]) { }
+      }
+    `);
+    const ui = findUi(model);
+    const ordersArea = (ui.members ?? []).find(
+      (m: any) => m.$type === "Area" && m.name === "Orders",
+    );
+    expect(ordersArea, "scaffold should emit an `area Orders` block").toBeTruthy();
+    const names = (ordersArea.members ?? [])
+      .filter(isPage)
+      .map((p: any) => p.name)
+      .sort();
+    expect(names).toEqual(["OrderDetail", "OrderList", "OrderNew"]);
   });
 });

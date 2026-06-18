@@ -46,6 +46,22 @@ function uiOf(model: Model, name: string): Ui {
   return ui;
 }
 
+// Pages may be nested in `area { … }` blocks — the scaffold groups an
+// aggregate's List/New/Detail under a per-aggregate `area`, so collect
+// page names recursively.
+function allPageNames(ui: Ui): string[] {
+  const out: string[] = [];
+  const walk = (members: unknown[]): void => {
+    for (const m of members ?? []) {
+      if ((m as { $type?: string }).$type === "Page") out.push((m as Page).name);
+      else if ((m as { $type?: string }).$type === "Area")
+        walk(((m as { members?: unknown[] }).members ?? []) as unknown[]);
+    }
+  };
+  walk((ui.members ?? []) as unknown[]);
+  return out;
+}
+
 describe("spike — AST-to-AST scaffold expansion", () => {
   it("synthesises Page AST nodes for `scaffold aggregates: <Name>`", async () => {
     const { model } = await parseFresh(`
@@ -61,10 +77,9 @@ describe("spike — AST-to-AST scaffold expansion", () => {
       }
     `);
     const ui = uiOf(model, "WebApp");
-    // Three synthesised pages: OrderList / OrderNew / OrderDetail.
-    const pageNames = (ui.members ?? [])
-      .filter((m): m is Page => m.$type === "Page")
-      .map((p) => p.name);
+    // Three synthesised pages: OrderList / OrderNew / OrderDetail (nested in
+    // the per-aggregate `area Orders`).
+    const pageNames = allPageNames(ui);
     expect(pageNames).toContain("OrderList");
     expect(pageNames).toContain("OrderNew");
     expect(pageNames).toContain("OrderDetail");
@@ -88,10 +103,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
       }
     `);
     const ui = uiOf(model, "WebApp");
-    const pageNames = (ui.members ?? [])
-      .filter((m): m is Page => m.$type === "Page")
-      .map((p) => p.name)
-      .sort();
+    const pageNames = allPageNames(ui).sort();
     // The full architectural fix synthesises `Home` for any ui
     // that scaffolds at least one aggregate / workflow / view —
     // matches the legacy generator's behaviour.
