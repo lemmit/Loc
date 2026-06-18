@@ -129,6 +129,13 @@ describe.skipIf(!ENABLED)(
       // `^actor(:field)` reference inside base_filter and that the actor-threaded
       // reads compile under --warnings-as-errors.
       { name: "tenancy-filter.ddd" },
+      // DEBT-01 follow-up: actor threading through the two read paths the first
+      // Ash slice deferred — a context retrieval invoked from a workflow
+      // (`run_<ret>_<agg>!(..., actor: current_user)`) and an `or`-union
+      // returning op (`Ash.get(__MODULE__, id, actor: context.actor)` + the
+      // controller call passing the actor).  Both read the tenancy aggregate
+      // under its `^actor(:field)` base_filter; the gate compiles both.
+      { name: "tenancy-ops.ddd" },
     ])("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

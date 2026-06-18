@@ -31,6 +31,7 @@
 
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type { AggregateIR, BoundedContextIR, OperationIR } from "../../ir/types/loom-ir.js";
+import { aggregateUsesPrincipalContextFilter } from "../../ir/types/loom-ir.js";
 import { isReturnDominantOp } from "../../ir/util/operation-returns.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
@@ -129,10 +130,17 @@ export function renderAshReturningOpAction(
   // return) so `mix compile --warnings-as-errors` doesn't trip on an unused var.
   const recordUsed = [...paramBinds, ...bodyLines].some((l) => /\brecord\b/.test(l));
   const recordPat = recordUsed ? "record" : "_record";
+  // A tenancy aggregate's `base_filter expr(... == ^actor(:field))` applies to
+  // the `Ash.get` below too, so the load must run with the request actor (DEBT-01).
+  // The generic action receives it via the run fn's context; pass it through.
+  // Non-tenancy aggregates keep `_context` (unused) so output stays byte-identical.
+  const needsActor = aggregateUsesPrincipalContextFilter(agg);
+  const contextPat = needsActor ? "context" : "_context";
+  const getActorOpt = needsActor ? ", actor: context.actor" : "";
   return `    action :${opSnake}, :term do
 ${argLines.join("\n")}
-      run fn input, _context ->
-        case Ash.get(__MODULE__, input.arguments.id) do
+      run fn input, ${contextPat} ->
+        case Ash.get(__MODULE__, input.arguments.id${getActorOpt}) do
           {:ok, ${recordPat}} ->
 ${bindBlock}${bodyLines.join("\n")}
 
@@ -198,7 +206,12 @@ export function renderAshReturningOpControllerAction(
   // Bind `params` only when an op param actually reads it — an unused `= params`
   // trips `mix compile --warnings-as-errors`.
   const paramReads = op.params.map((p) => `params[${JSON.stringify(snake(p.name))}]`);
-  const callArgs = ["id", ...paramReads].join(", ");
+  // A tenancy aggregate threads the request actor into the generic action so
+  // its `Ash.get` (under the `^actor(:field)` base_filter) resolves (DEBT-01).
+  const actorOpt = aggregateUsesPrincipalContextFilter(agg)
+    ? ", actor: conn.assigns.current_user"
+    : "";
+  const callArgs = ["id", ...paramReads].join(", ") + actorOpt;
   const headPattern = op.params.length > 0 ? `%{"id" => id} = params` : `%{"id" => id}`;
   const errorClauses = errorVariantsOf(op, ctx).map(
     (v) => `      {:ok, {:problem, ${JSON.stringify(v.tag)}, data}} ->
