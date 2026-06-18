@@ -33,7 +33,9 @@ import { getWorkerVfs } from "./worker-vfs.js";
  *  by pack `format` — mirrors `loader-fs.ts`'s `readSharedSources`.
  *  TSX packs read vite/+api/+docker/; HEEx reads phoenix/; svelte reads
  *  sveltekit/ only (its dockerfile diverges, so docker/ stays TSX-side);
- *  vue reads its own vue/ layer plus the framework-neutral api/+docker/.
+ *  vue reads its own vue/ layer plus the framework-neutral api/+docker/;
+ *  angular reads its own angular/ layer (its `ng build` dockerfile
+ *  diverges) plus the neutral api/.
  *  The seeder (`template-bundled.ts`) hydrates every dir; the loader
  *  selects the active subset per pack. */
 const SHARED_SOURCE_DIRS_BY_FORMAT: Record<string, readonly string[]> = {
@@ -41,6 +43,7 @@ const SHARED_SOURCE_DIRS_BY_FORMAT: Record<string, readonly string[]> = {
   heex: ["/phoenix/"],
   svelte: ["/sveltekit/"],
   vue: ["/vue/", "/api/", "/docker/"],
+  angular: ["/angular/", "/api/"],
 };
 
 /** POSIX-style path join — duplicating the relevant slice of

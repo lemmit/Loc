@@ -25,6 +25,7 @@ import type {
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../../ir/util/inheritance.js";
+import { apiRoutePrefix } from "../../../util/api-base.js";
 import { plural } from "../../../util/naming.js";
 import type { EmitCtx, EmittedArtifact, Lines, StyleAdapter } from "../../_adapters/index.js";
 import { emitOperationCommandAndHandler } from "../cqrs/commands.js";
@@ -201,8 +202,9 @@ export const cqrsStyleAdapter: StyleAdapter = {
     const enriched = agg as EnrichedAggregateIR;
     const repo = findRepoFor(owningCtx, agg.name);
     const ns = nsOf(ctx);
-    const hasEmbeddedSpa = !!ctx.deployable.uiName;
-    const routePrefix = hasEmbeddedSpa ? "api/" : undefined;
+    // Domain controllers always live under `/api/*` (the shared API base
+    // path), matching every other backend + the by-layer dotnet adapter.
+    const routePrefix = apiRoutePrefix();
     const collected = new Map<string, string>();
     emitCqrs(enriched, repo, owningCtx, ns, collected, {
       routePrefix,

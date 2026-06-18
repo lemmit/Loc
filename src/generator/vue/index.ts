@@ -13,6 +13,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { contextUsesMoney, uiUsesMoney } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
+import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
 import { AUTH_GATE_VUE, AUTH_SESSION_TS, AUTH_USE_SESSION_VUE } from "../_frontend/auth-ui.js";
@@ -99,7 +100,10 @@ export function generateVueForContexts(
   const out = new Map<string, string>();
 
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
-  const apiBaseUrl = options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
+  // Same-origin relative `/api` base; `vite dev` proxies it to the
+  // target backend, docker-compose overrides via `VITE_API_BASE_URL`.
+  const apiBaseUrl = options.apiBaseUrl ?? API_BASE_PATH;
+  const apiProxyTarget = `http://localhost:${target?.port ?? 8080}`;
   const basePath = options.basePath ?? "";
   const viteBase = basePath ? `${basePath}/` : undefined;
   const routerBasename = basePath || undefined;
@@ -414,7 +418,7 @@ export function generateVueForContexts(
   out.set("package.json", renderShell(pack, "package-json", { usesMoney }));
   out.set("tsconfig.json", renderShell(pack, "tsconfig", {}));
   out.set("tsconfig.node.json", renderShell(pack, "tsconfig-node", {}));
-  out.set("vite.config.ts", renderShell(pack, "vite-config", { base: viteBase }));
+  out.set("vite.config.ts", renderShell(pack, "vite-config", { base: viteBase, apiProxyTarget }));
   out.set("index.html", renderShell(pack, "index-html", prepareIndexHtmlVM(deployable, ui)));
   out.set("Dockerfile", renderShell(pack, "dockerfile", {}));
   out.set(".dockerignore", renderShell(pack, "dockerignore", {}));

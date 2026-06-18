@@ -53,8 +53,8 @@ export function createApp(
       return c.json({ status: "not_ready", error: message }, 503);
     }
   });
-  app.route("/products", productRoutes(new ProductRepository(db, events)));
-  app.route("/customers", customerRoutes(new CustomerRepository(db, events)));
+  app.route("/api/products", productRoutes(new ProductRepository(db, events)));
+  app.route("/api/customers", customerRoutes(new CustomerRepository(db, events)));
   // OpenAPI 3.1 spec assembled from every sub-router's createRoute()
   // calls.  Diffed against the .NET-emitted /swagger/v1/swagger.json by
   // the cross-platform contract check.

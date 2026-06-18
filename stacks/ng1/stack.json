@@ -1,0 +1,18 @@
+{
+  "id": "ng1",
+  "description": "Angular stack — Angular 20 standalone components + signals, typed Reactive Forms, DI-native HttpClient + toSignal data (no external query lib), Zod 4 family.",
+  "deps": {
+    "@angular/core": "20 (^20.0.0 — standalone-by-default, stable signals + @if/@for/@switch control flow)",
+    "@angular/common": "20 (provides HttpClient; httpResource is a later opt-in)",
+    "@angular/forms": "20 (typed Reactive Forms — FormGroup<{…}> / Validators)",
+    "@angular/router": "20 (provideRouter + lazy loadComponent route table)",
+    "rxjs": "7 (Angular peer dep; bridged to signals via toSignal)",
+    "zone.js": "0.15 (default change-detection runtime; zoneless is a later opt-in)",
+    "zod": "4 (^4.0.0 — same family as stack v3/vue1 so wire schemas match the react/vue packs)",
+    "typescript": "5.8 (Angular 20 pairs with TS 5.8+)"
+  },
+  "bundler": {
+    "rdcShim": false,
+    "comment": "No in-browser playground bundling for angular packs yet (angular-frontend-plan.md defers playground preview — needs the Angular compiler in the VFS bundler), so no bundler policy beyond the defaults."
+  }
+}

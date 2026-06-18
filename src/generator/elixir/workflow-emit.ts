@@ -1,4 +1,5 @@
 import {
+  aggregateUsesPrincipalContextFilter,
   type BoundedContextIR,
   type SystemIR,
   type WorkflowIR,
@@ -211,6 +212,17 @@ function renderWorkflowBody(
   return lines;
 }
 
+/** Append `actor: current_user` to a retrieval's code-interface args when the
+ *  target aggregate carries a principal-referencing (tenancy) capability filter
+ *  — its Ash `base_filter expr(... == ^actor(:field))` needs the request actor
+ *  to resolve (DEBT-01).  No-op otherwise, so non-tenancy workflows stay
+ *  byte-identical.  `current_user` is the workflow `run/2` second arg, in scope
+ *  inside the step body (and captured by any enclosing `Ash.transaction`). */
+function pushRetrievalActor(args: string[], ctx: BoundedContextIR, aggName: string): void {
+  const agg = ctx.aggregates.find((a) => a.name === aggName);
+  if (agg && aggregateUsesPrincipalContextFilter(agg)) args.push("actor: current_user");
+}
+
 function renderWorkflowStmt(
   st: WorkflowStmtIR,
   ctx: BoundedContextIR,
@@ -340,6 +352,11 @@ function renderWorkflowStmt(
         if (st.page.limit) entries.push(`limit: ${renderExpr(st.page.limit, renderCtx)}`);
         args.push(`page: [${entries.join(", ")}]`);
       }
+      // A retrieval reading a tenancy aggregate runs under its
+      // `base_filter expr(... == ^actor(:field))`, so the read needs the request
+      // actor (the workflow's `current_user`); else `^actor` is nil → no rows
+      // (DEBT-01).  Threaded as a trailing keyword the code interface accepts.
+      pushRetrievalActor(args, ctx, st.aggName);
       const action = `run_${snake(st.retrievalName)}_${snake(st.aggName)}`;
       return [
         {
@@ -379,6 +396,8 @@ function renderWorkflowStmt(
         ...st.retrievalArgs.map((a) => renderExpr(a, renderCtx)),
         "page: [limit: 1]",
       ];
+      // Tenancy actor (DEBT-01) — see the `repo-run` branch above.
+      pushRetrievalActor(runArgs, ctx, st.aggName);
       const v = snake(st.var);
       const renderBranch = (body: WorkflowStmtIR[]): string[] =>
         body.flatMap((inner) => {

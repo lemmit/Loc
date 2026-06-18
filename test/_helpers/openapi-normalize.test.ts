@@ -27,6 +27,15 @@ describe("openapi-normalize", () => {
       expect(normalisePath("/")).toBe("/");
       expect(normalisePath("")).toBe("/");
     });
+    it("strips the universal /api base so prefix representations collapse", () => {
+      // hono/dotnet/java/python embed /api in the path; phoenix renders it
+      // scope-relative.  Both must compare equal for op-set parity.
+      expect(normalisePath("/api/builds")).toBe("/builds");
+      expect(normalisePath("/api/builds/{id}")).toBe("/builds/{id}");
+      expect(normalisePath("/api")).toBe("/");
+      // …but only as a whole leading segment — `/apiKeys` is untouched.
+      expect(normalisePath("/apiKeys")).toBe("/apiKeys");
+    });
   });
 
   describe("collectOps", () => {

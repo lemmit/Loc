@@ -18,6 +18,7 @@ import {
   resolveDataSourceConfig,
 } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
+import { apiRoutePrefix } from "../../util/api-base.js";
 import { dedupeByName } from "../../util/dedupe.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
@@ -218,7 +219,9 @@ function emitProjectFromContexts(
   // `src/platform/dotnet.ts:mountsUi` + `src/ir/lower/lower.ts` for the
   // upstream wiring.
   const hasEmbeddedSpa = !!system?.deployable.uiName;
-  const routePrefix = hasEmbeddedSpa ? "api/" : undefined;
+  // Domain controllers always live under `/api/*` (the shared API base
+  // path); `hasEmbeddedSpa` separately drives SPA static-file embedding.
+  const routePrefix = apiRoutePrefix();
   // Common files written once per project, regardless of how many
   // contexts contribute their domain code.
   // In-process dispatch (channels.md): does any hosted context have a

@@ -141,12 +141,11 @@ describe("fullstack dotnet — backend-only mode stays untouched", () => {
     expect(program).not.toMatch(/MapFallbackToFile/);
   });
 
-  it("keeps controller routes at the root (no /api/ prefix)", async () => {
+  it("serves controller routes under /api (uniform with every backend)", async () => {
     const model = await build(BACKEND_ONLY_SOURCE);
     const { files } = generateSystems(model);
     const controller = files.get("app/Api/OrdersController.cs")!;
-    expect(controller).toMatch(/\[Route\("orders"\)\]/);
-    expect(controller).not.toMatch(/\[Route\("api\//);
+    expect(controller).toMatch(/\[Route\("api\/orders"\)\]/);
   });
 
   it("uses the single-stage .NET-only Dockerfile", async () => {

@@ -136,12 +136,16 @@ describe("react generator", () => {
     expect(orderPo).not.toMatch(/getByTestId\("orders-op-addLine-input-productId"\)\.fill/);
   });
 
-  it("API base URL is baked from the target deployable's port", async () => {
+  it("bakes the relative /api base and proxies it to the target port in dev", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);
     const config = files.get("web_app/src/api/config.ts")!;
-    // `webApp` targets `api` which is on port 8080.
-    expect(config).toMatch(/http:\/\/localhost:8080/);
+    // Same-origin relative base; docker-compose overrides via env, and
+    // `vite dev` proxies it to the backend (so no CORS in local dev).
+    expect(config).toMatch(/"\/api"/);
+    // `webApp` targets `api` on port 8080 — the dev proxy points there.
+    const vite = files.get("web_app/vite.config.ts")!;
+    expect(vite).toContain('proxy: { "/api": "http://localhost:8080" }');
   });
 
   it("value-object fieldsets render as filled-variant grouped sub-forms", async () => {

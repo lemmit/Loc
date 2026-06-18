@@ -16,7 +16,7 @@ using Api.Domain.Enums;
 namespace Api.Api;
 
 [ApiController]
-[Route("products")]
+[Route("api/products")]
 public sealed class ProductsController : ControllerBase
 {
     private readonly IMediator _mediator;

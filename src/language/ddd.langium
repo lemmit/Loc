@@ -290,7 +290,7 @@ UiBlockBinding:
 // vue-router) against a vue-format design pack
 // (`vuetify`/`shadcnVue`).
 Framework returns string:
-    'react' | 'svelte' | 'vue' | 'phoenixLiveView' | 'liveview';
+    'react' | 'svelte' | 'vue' | 'angular' | 'phoenixLiveView' | 'liveview';
 
 // Backend platforms accept a quoted `family@version` pin
 // (`platform: "hono@v4"`) via the STRING alternative — symmetric
@@ -304,20 +304,21 @@ Framework returns string:
 // FastAPI + SQLAlchemy backend; `fastapi` is its framework-spelled
 // alias and desugars to `python` (mirrors `hono` → `node`).
 Platform returns string:
-    'dotnet' | 'hono' | 'node' | 'react' | 'svelte' | 'vue' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'python' | 'fastapi' | 'java' | STRING;
+    'dotnet' | 'hono' | 'node' | 'react' | 'svelte' | 'vue' | 'angular' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'python' | 'fastapi' | 'java' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,
 // and `mui` are React/TSX packs; `ashPhoenix` is the HEEx pack for
 // the Phoenix LiveView platform; `shadcnSvelte` and `flowbite` are
-// the Svelte packs; `vuetify` and `shadcnVue` are the Vue packs.
+// the Svelte packs; `vuetify` and `shadcnVue` are the Vue packs;
+// `angularMaterial`, `primeng`, and `spartanNg` are the Angular packs.
 // STRING points at a custom pack:
 // a directory with `pack.json` resolved relative to the .ddd file.
 // Only meaningful when the deployable mounts a UI; ignored
 // otherwise.  Named `design` (not `ui`) to avoid colliding with
 // the test-DSL's `ui.workflows.X(...)` accessor.
 DesignPack returns string:
-    'mantine' | 'shadcn' | 'mui' | 'chakra' | 'ashPhoenix' | 'shadcnSvelte' | 'flowbite' | 'vuetify' | 'shadcnVue' | STRING;
+    'mantine' | 'shadcn' | 'mui' | 'chakra' | 'ashPhoenix' | 'shadcnSvelte' | 'flowbite' | 'vuetify' | 'shadcnVue' | 'angularMaterial' | 'primeng' | 'spartanNg' | STRING;
 // Per-deployable auth opt-in.  `required` enables JWT-decode middleware
 // and the user-supplied verifier hook on a backend; `ui` mounts the
 // login redirect + route guard on a frontend (react / LiveView) under a

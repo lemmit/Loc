@@ -190,6 +190,28 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat, RequiredSet> = {
     // the ui Dialog components on shadcnVue).
     form: [...TSX_FORM, "op-dialog"],
   },
+  // Angular packs own forms + field inputs the way TSX/Vue packs do
+  // (typed Reactive Forms + zod cross-check, no AshPhoenix.Form
+  // analogue), so the required surface mirrors Vue's.  Shell delta:
+  // Angular builds with `ng build`, so it emits an `angular-json`
+  // (CLI workspace config) instead of the Vite world's `vite-config`.
+  angular: {
+    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES],
+    shell: [
+      "app-shell",
+      "format-helpers",
+      "main",
+      "package-json",
+      "theme",
+      "tsconfig",
+      "angular-json",
+    ],
+    fieldInput: TSX_FIELD_INPUT,
+    // Angular packs own the operation-dialog wrapper the page shell
+    // renders around op-form fields (MatDialog on angularMaterial,
+    // p-dialog on primeng, the spartan dialog on spartanNg).
+    form: [...TSX_FORM, "op-dialog"],
+  },
 };
 
 /** Flatten a `RequiredSet` to a single list — every name a pack must

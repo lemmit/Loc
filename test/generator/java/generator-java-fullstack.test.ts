@@ -63,14 +63,14 @@ describe("java generator — embedded-SPA fullstack mount", () => {
     expect(docker).toContain("COPY --from=spa-build /spa/dist /app/ui");
   });
 
-  it("a standalone java deployable keeps un-prefixed routes and no SPA files", async () => {
+  it("a standalone java deployable still serves /api routes and emits no SPA files", async () => {
     const standalone = SRC.replace("    ui: Admin\n", "").replace(
       "  ui Admin with scaffold(subdomains: [D]) { }\n",
       "",
     );
     const files_ = await generateSystemFiles(standalone);
     const c = files_.get(`${ROOT}/features/products/ProductsController.java`)!;
-    expect(c).toContain('@RequestMapping("/products")');
+    expect(c).toContain('@RequestMapping("/api/products")');
     expect([...files_.keys()].some((k) => k.includes("ClientApp"))).toBe(false);
     expect(files_.has(`${ROOT}/config/SpaWebConfig.java`)).toBe(false);
   });

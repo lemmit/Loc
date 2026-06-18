@@ -99,17 +99,21 @@ export function checkDeployable(
     );
   }
   // Rule 4b generalises to every frontend SPA platform (`react`,
-  // `svelte`, `vue`) — a frontend deployable without a `ui:` has no
-  // pages to render.  `static` keeps its own wording above.  The
+  // `svelte`, `vue`, `angular`) — a frontend deployable without a `ui:`
+  // has no pages to render.  `static` keeps its own wording above.  The
   // diagnostic code stays per-platform
   // (`loom.react-deployable-missing-ui`,
   // `loom.svelte-deployable-missing-ui`,
-  // `loom.vue-deployable-missing-ui`) so quick-fixes can dispatch.
-  if (
-    (d.platform === "react" || d.platform === "svelte" || d.platform === "vue") &&
-    !hasUiBinding
-  ) {
-    const label = d.platform === "react" ? "React" : d.platform === "svelte" ? "Svelte" : "Vue";
+  // `loom.vue-deployable-missing-ui`,
+  // `loom.angular-deployable-missing-ui`) so quick-fixes can dispatch.
+  const SPA_FRONTEND_LABELS: Record<string, string> = {
+    react: "React",
+    svelte: "Svelte",
+    vue: "Vue",
+    angular: "Angular",
+  };
+  if (d.platform in SPA_FRONTEND_LABELS && !hasUiBinding) {
+    const label = SPA_FRONTEND_LABELS[d.platform];
     accept(
       "error",
       `${label} deployable '${d.name}' must declare a 'ui:' binding — every page now flows through the page metamodel. Add 'ui: <UiName>' (use 'ui <UiName> { with scaffold(subdomains: [...]) }' for the bulk-CRUD case).`,

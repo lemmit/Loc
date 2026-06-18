@@ -17,7 +17,7 @@ using Api.Domain.Enums;
 namespace Api.Api;
 
 [ApiController]
-[Route("orders")]
+[Route("api/orders")]
 public sealed class OrdersController : ControllerBase
 {
     private readonly IMediator _mediator;

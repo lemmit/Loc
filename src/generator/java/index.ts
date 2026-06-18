@@ -12,6 +12,7 @@ import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
+import { API_BASE_PATH } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { findUnionSpec, unionMembers } from "../_payload/union-wire.js";
@@ -38,6 +39,7 @@ import {
   renderWireValidationException,
 } from "./emit/common.js";
 import { criterionEligible, renderJavaCriteriaClasses } from "./emit/criteria.js";
+import { renderJavaDispatcher } from "./emit/dispatch.js";
 import { renderJavaDocumentRepositoryImpl } from "./emit/document-store.js";
 import { renderDtoFiles } from "./emit/dto.js";
 import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
@@ -82,6 +84,13 @@ import {
 import { renderJavaValidators } from "./emit/validator.js";
 import { renderJavaViews, viewFindsFor } from "./emit/view.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
+import { renderJavaWorkflowInstanceReads } from "./emit/workflow-instances.js";
+import {
+  correlationWorkflows,
+  renderWorkflowStateEntity,
+  renderWorkflowStateRepository,
+  workflowStateClass,
+} from "./emit/workflow-state.js";
 import { basePackageFor, javaPackageSegment, mainSourcePath } from "./naming.js";
 
 // ---------------------------------------------------------------------------
@@ -204,7 +213,9 @@ function emitProjectFromContexts(
   // un-prefixed route space; controllers move under /api (the .NET
   // embedded-SPA shape).
   const hasEmbeddedSpa = !!system?.deployable.uiName;
-  const routePrefix = hasEmbeddedSpa ? "/api" : undefined;
+  // Domain controllers always live under `/api/*` (the shared API base
+  // path); `hasEmbeddedSpa` separately drives SPA static-file embedding.
+  const routePrefix = API_BASE_PATH;
 
   // Shared domain types + the package markers that keep the entity files'
   // wildcard imports valid even when a package would otherwise be empty.
@@ -287,6 +298,52 @@ function emitProjectFromContexts(
         place(name, f.category === "controller" ? "api-common" : "workflow-service", f.content);
       }
     }
+    // Saga-state persistence (workflow-debt-backend-parity.md, Java saga slice
+    // 1): a correlation-bearing workflow gets a JPA `@Entity` bound to the
+    // Flyway-owned saga table + a Spring Data repository over it — the
+    // foundation the in-process dispatcher and instance reads build on.
+    for (const wf of correlationWorkflows(ctx.workflows)) {
+      place(
+        `${workflowStateClass(wf)}.java`,
+        "infra-persistence",
+        renderWorkflowStateEntity(wf, ctx, basePkg, pkgFor("infra-persistence")),
+      );
+      place(
+        `${workflowStateClass(wf)}Repository.java`,
+        "spring-data-repository",
+        renderWorkflowStateRepository(
+          wf,
+          basePkg,
+          pkgFor("spring-data-repository"),
+          pkgFor("infra-persistence"),
+        ),
+      );
+    }
+    // In-process saga dispatcher (workflow-debt-backend-parity.md, Java saga
+    // slice 2): a @Component whose @EventListener handlers react to
+    // channel-carried events — load-or-allocate / route-or-drop the saga row,
+    // run the handler body, re-publish so choreography chains re-enter.
+    const dispatcher = renderJavaDispatcher(ctx, {
+      basePkg,
+      pkg: pkgFor("workflow-service"),
+      entityPkgOf: (a) => pkgFor("entity", a),
+      repoPkgOf: (a) => pkgFor("repository-interface", a),
+      statePkg: pkgFor("infra-persistence"),
+      stateRepoPkg: pkgFor("spring-data-repository"),
+    });
+    if (dispatcher) place(dispatcher.name, "workflow-service", dispatcher.content);
+    // Read-only instance endpoints (workflow-debt-backend-parity.md, Java saga
+    // slice 3): every observable (correlation-bearing) saga gets
+    // GET /workflows/<wf>/instances[/{id}] over its persisted state row.
+    const instanceReads = renderJavaWorkflowInstanceReads(ctx, {
+      basePkg,
+      pkg: pkgFor("workflow-service"),
+      routePrefix,
+      stateRepoPkg: pkgFor("spring-data-repository"),
+    });
+    if (instanceReads) {
+      for (const [name, f] of instanceReads) place(name, f.category, f.content);
+    }
     const viewFiles = renderJavaViews(ctx, {
       basePkg,
       pkg: pkgFor("view-service"),
@@ -294,6 +351,7 @@ function emitProjectFromContexts(
       applicationPkgOf: (a) => pkgFor("service", a),
       entityPkgOf: (a) => pkgFor("entity", a),
       repoPkgOf: (a) => pkgFor("repository-interface", a),
+      stateRepoPkg: pkgFor("spring-data-repository"),
     });
     if (viewFiles) {
       for (const [name, f] of viewFiles) place(name, f.category, f.content);

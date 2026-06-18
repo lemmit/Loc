@@ -2126,6 +2126,7 @@ export type Platform =
   | "react"
   | "svelte"
   | "vue"
+  | "angular"
   | "static"
   | "elixir"
   | "python"

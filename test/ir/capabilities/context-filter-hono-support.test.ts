@@ -57,8 +57,16 @@ describe("hono capability-filter support guard", () => {
     ).toEqual([]);
   });
 
-  it("still rejects a principal-referencing filter on elixir and java", async () => {
-    for (const platform of ["elixir", "java"]) {
+  it("accepts a principal filter on elixir/Ash (DEBT-01 — base_filter ^actor)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("elixir", { filter: "filter this.tenantId == currentUser.tenantId" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still rejects a principal-referencing filter on elixir-vanilla and java", async () => {
+    for (const platform of ["elixir { foundation: vanilla }", "java"]) {
       const errs = await honoFilterErrors(
         sys(platform, { filter: "filter this.tenantId == currentUser.tenantId" }),
       );

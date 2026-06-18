@@ -1,8 +1,9 @@
-import type { EnrichedBoundedContextIR, ViewIR } from "../../../ir/types/loom-ir.js";
+import type { EnrichedBoundedContextIR, ViewIR, WorkflowIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
+import { workflowStateClass } from "./workflow-state.js";
 
 // ---------------------------------------------------------------------------
 // Views — read-only projections, served under `GET /views/<snake(name)>`
@@ -43,6 +44,9 @@ export interface ViewCtx {
   applicationPkgOf: (aggName: string) => string;
   entityPkgOf: (aggName: string) => string;
   repoPkgOf: (aggName: string) => string;
+  /** Saga-state Spring Data repository package (workflow-sourced views read
+   *  the persisted correlation row through it). */
+  stateRepoPkg: string;
 }
 
 export function renderJavaViews(
@@ -50,13 +54,26 @@ export function renderJavaViews(
   vctx: ViewCtx,
 ): Map<string, { category: "view-service" | "api-common"; content: string }> | null {
   const views = ctx.views.filter((v) => v.source.kind === "aggregate");
-  if (views.length === 0) return null;
+  // Workflow-sourced views (workflow-instance-views.md): a shorthand
+  // `view X = <Workflow> where …` reads the saga-state row (the source's
+  // `instanceWireShape`) with the filter applied, the read-side analogue of the
+  // instance endpoints.  Only observable (correlation-bearing, non-eventSourced)
+  // workflows have an `instanceWireShape`; full-form workflow views are rejected
+  // upstream (`loom.view-workflow-fullform-unsupported`), so these are always
+  // shorthand (filter-only).
+  const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
+  const wfViews = ctx.views.filter(
+    (v) => v.source.kind === "workflow" && !!wfByName.get(v.source.name)?.instanceWireShape,
+  );
+  if (views.length === 0 && wfViews.length === 0) return null;
   const out = new Map<string, { category: "view-service" | "api-common"; content: string }>();
   const imports = new Set<string>(["java.util.List"]);
   const explicitImports = new Set<string>();
   const methods: string[] = [];
   const repoAggs = new Set<string>();
   const routes: string[] = [];
+  // Source workflows whose saga-state repository the service must inject.
+  const stateWfs: WorkflowIR[] = [];
 
   for (const view of views) {
     const aggName = (view.source as { name: string }).name;
@@ -129,6 +146,64 @@ export function renderJavaViews(
       );
     }
   }
+  // Workflow-sourced views — a `<View>Row` record over the source saga's
+  // `instanceWireShape`, plus a service method reading the saga-state through
+  // its Spring Data repository, filtering in-memory (the filter renders to a
+  // boolean Java predicate over the state accessors via `accessorProps`), and
+  // projecting each row through the same wire shape the instance endpoints use.
+  for (const view of wfViews) {
+    const wf = wfByName.get((view.source as { name: string }).name)!;
+    stateWfs.push(wf);
+    const findName = lowerFirst(view.name);
+    const rowName = `${upperFirst(view.name)}Row`;
+    const shape = wf.instanceWireShape ?? [];
+    // Row record from the saga wire shape (same components as <Wf>InstanceResponse).
+    const rowImports = new Set<string>();
+    const components = shape.map((f) => {
+      collectWireImports(f.type, rowImports);
+      return `${wireJavaType(f.type, "Response")} ${f.name}`;
+    });
+    out.set(`${rowName}.java`, {
+      category: "view-service",
+      content: lines(
+        `package ${vctx.pkg};`,
+        ``,
+        ...[...rowImports].sort().map((i) => `import ${i};`),
+        rowImports.size > 0 ? `` : null,
+        `import ${vctx.basePkg}.domain.enums.*;`,
+        `import ${vctx.basePkg}.domain.ids.*;`,
+        `import ${vctx.basePkg}.domain.valueobjects.*;`,
+        ``,
+        `public record ${rowName}(${components.join(", ")}) {`,
+        `}`,
+        ``,
+      ),
+    });
+    const repo = `${lowerFirst(wf.name)}StateRepository`;
+    const proj = shape.map((f) => domainToWire(f.type, `x.${f.name}()`)).join(", ");
+    const filterLine = view.filter
+      ? (() => {
+          collectJavaExprImports(view.filter, imports);
+          return `            .filter(x -> ${renderJavaExpr(view.filter, { thisName: "x", accessorProps: true })})\n`;
+        })()
+      : "";
+    methods.push(
+      `    public List<${rowName}> ${findName}() {`,
+      `        return ${repo}.findAll().stream()`,
+      ...(filterLine ? [filterLine.trimEnd()] : []),
+      `            .map(x -> new ${rowName}(${proj}))`,
+      `            .toList();`,
+      `    }`,
+      ``,
+    );
+    routes.push(
+      `    @GetMapping("/${snake(view.name)}")`,
+      `    public List<${rowName}> ${findName}() {`,
+      `        return views.${findName}();`,
+      `    }`,
+      ``,
+    );
+  }
   while (methods[methods.length - 1] === "") methods.pop();
   while (routes[routes.length - 1] === "") routes.pop();
 
@@ -138,6 +213,21 @@ export function renderJavaViews(
     if (vctx.repoPkgOf(a) !== vctx.pkg) explicitImports.add(`${vctx.repoPkgOf(a)}.${a}Repository`);
     if (vctx.entityPkgOf(a) !== vctx.pkg) explicitImports.add(`${vctx.entityPkgOf(a)}.${a}`);
   }
+  // Saga-state repos for workflow-sourced views, in declaration order.
+  const stateFields = stateWfs.map(
+    (wf) =>
+      `    private final ${workflowStateClass(wf)}Repository ${lowerFirst(wf.name)}StateRepository;`,
+  );
+  for (const wf of stateWfs) {
+    explicitImports.add(`${vctx.stateRepoPkg}.${workflowStateClass(wf)}Repository`);
+  }
+  const stateCtorParams = stateWfs.map(
+    (wf) => `${workflowStateClass(wf)}Repository ${lowerFirst(wf.name)}StateRepository`,
+  );
+  const stateCtorAssigns = stateWfs.map(
+    (wf) =>
+      `        this.${lowerFirst(wf.name)}StateRepository = ${lowerFirst(wf.name)}StateRepository;`,
+  );
   out.set(`${serviceName}.java`, {
     category: "view-service",
     content: lines(
@@ -157,9 +247,14 @@ export function renderJavaViews(
       `@Transactional(readOnly = true)`,
       `public class ${serviceName} {`,
       ...repoFields.map((a) => `    private final ${a}Repository ${repoField(a)};`),
+      ...stateFields,
       ``,
-      `    public ${serviceName}(${repoFields.map((a) => `${a}Repository ${repoField(a)}`).join(", ")}) {`,
+      `    public ${serviceName}(${[
+        ...repoFields.map((a) => `${a}Repository ${repoField(a)}`),
+        ...stateCtorParams,
+      ].join(", ")}) {`,
       ...repoFields.map((a) => `        this.${repoField(a)} = ${repoField(a)};`),
+      ...stateCtorAssigns,
       `    }`,
       ``,
       ...methods,

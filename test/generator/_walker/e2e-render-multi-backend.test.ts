@@ -93,20 +93,19 @@ describe("e2e expansion — multi-backend replay", () => {
     );
   });
 
-  it("Phoenix replay carries the /api prefix; Hono and .NET don't", async () => {
+  it("every backend replay carries the /api prefix", async () => {
     const files = await generateSystemFiles(BANK_THREE_BACKEND);
     const e2e = files.get("e2e/Bank.e2e.test.ts")!;
-    // Phoenix routes API under `scope "/api"`.  Match the elixir_api
-    // it()-block's POST URL specifically.
+    // Every backend now mounts its domain routes under the shared `/api`
+    // base path — match each it()-block's POST URL specifically.
     expect(e2e).toMatch(
       /it\("create an account against elixir_api"[\s\S]*?__post\(`\$\{base\}\/api\/accounts`/,
     );
-    // Hono and .NET serve at root.
     expect(e2e).toMatch(
-      /it\("create an account against hono_api"[\s\S]*?__post\(`\$\{base\}\/accounts`/,
+      /it\("create an account against hono_api"[\s\S]*?__post\(`\$\{base\}\/api\/accounts`/,
     );
     expect(e2e).toMatch(
-      /it\("create an account against dotnet_api"[\s\S]*?__post\(`\$\{base\}\/accounts`/,
+      /it\("create an account against dotnet_api"[\s\S]*?__post\(`\$\{base\}\/api\/accounts`/,
     );
   });
 
@@ -173,7 +172,7 @@ describe("e2e expansion — toThrow status matcher", () => {
     const e2e = files.get("e2e/Pay.e2e.test.ts")!;
     // The throwing call is wrapped in the rejects-assertion lambda; the status
     // never leaks onto the fetch call itself.
-    expect(e2e).toMatch(/await expect\(async \(\) => \{ await __post\(`\$\{base\}\/accounts`/);
+    expect(e2e).toMatch(/await expect\(async \(\) => \{ await __post\(`\$\{base\}\/api\/accounts`/);
   });
 
   it("a bare toThrow() (no status) emits an unconstrained rejects.toThrow()", async () => {

@@ -1,0 +1,19 @@
+{
+  "name": "loom-angular-app",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "ng build",
+    "start": "ng serve",
+    "ng": "ng"
+  },
+  "dependencies": {
+{{> stack-package-deps}},
+    "@angular/cdk": "^20.0.0",
+    "@angular/material": "^20.0.0"{{#if usesMoney}},
+    "decimal.js": "^10.4.3"{{/if}}
+  },
+  "devDependencies": {
+{{> stack-package-devdeps}}
+  }
+}

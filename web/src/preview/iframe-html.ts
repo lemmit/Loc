@@ -19,6 +19,8 @@
 // chunks, so every component shares one React instance.  A
 // self-contained bundle inlines its deps and needs no importmap.
 
+import { API_BASE_PATH } from "../../../src/util/api-base.js";
+
 // Inline runtime `fetch` bridge.  Classic script so it runs
 // synchronously during parse — before the bundle module fetches —
 // and reads the port the stub left on `window.__LOOM_PORT__`.  Kept
@@ -51,7 +53,11 @@ const RUNTIME_FETCH_SHIM = `
   };
   var realFetch = window.fetch ? window.fetch.bind(window) : null;
   window.fetch = function (input, init) {
-    var apiBase = window.__LOOM_API_BASE__;
+    // Strip the runtime forwarding root (NOT the SPA's API base): the
+    // backend mounts domain routes under \`/api\`, so the \`/api\` segment
+    // must survive into routePath and reach the in-worker app.  Falls
+    // back to __LOOM_API_BASE__ for older hosts that set only that.
+    var apiBase = window.__LOOM_RUNTIME_BASE__ || window.__LOOM_API_BASE__;
     var req;
     try { req = new Request(input, init); }
     catch (e) { return realFetch ? realFetch(input, init) : Promise.reject(e); }
@@ -419,7 +425,11 @@ export function makePreviewHtml(args: MakePreviewArgs): string {
     args.sandboxBase != null
       ? `<script>` +
         `window.__LOOM_BASENAME__ = ${JSON.stringify(args.sandboxBase)};` +
-        `window.__LOOM_API_BASE__ = ${JSON.stringify(args.sandboxBase + "/runtime")};` +
+        // The shim strips this runtime root; the SPA's API base appends
+        // the backend's `/api` mount onto it (so domain fetches forward
+        // to the in-worker app as `/api/<route>`, infra stays at root).
+        `window.__LOOM_RUNTIME_BASE__ = ${JSON.stringify(args.sandboxBase + "/runtime")};` +
+        `window.__LOOM_API_BASE__ = ${JSON.stringify(args.sandboxBase + "/runtime" + API_BASE_PATH)};` +
         // Normalise the start route to the basename root: the stub's
         // own URL ends in `…/sandbox/index.html`, which BrowserRouter
         // would otherwise fail to match against the user's routes.
