@@ -68,6 +68,9 @@ const FIXTURES: Array<[string, string]> = [
   // Event sourcing (persistedAs(eventLog)): JdbcTemplate stream
   // append + applier fold, no state table / Spring Data interface.
   ["test/e2e/fixtures/java-build/event-sourced.ddd", "es_api"],
+  // Event-sourced workflow: append-only `<wf>_events` stream + fold-on-load
+  // + emit→append-own-event dispatch (the saga analogue of event-sourced.ddd).
+  ["test/e2e/fixtures/java-build/eventsourced-workflow.ddd", "eswf_api"],
   // shape(document): whole aggregate in one jsonb column via the
   // field-visibility Jackson mapper, version-bumping upserts.
   ["test/e2e/fixtures/java-build/document.ddd", "doc_api"],

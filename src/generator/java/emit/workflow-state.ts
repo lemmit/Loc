@@ -155,8 +155,9 @@ export function renderWorkflowStateEntity(
 
 /** A typed Java zero for a required saga-state column at allocation — the Java
  *  analogue of dotnet's `csStateDefault` / python's `zeroFor`.  The correlation
- *  field is seeded from the routing key, never this. */
-function javaStateDefault(f: FieldIR, ctx: EnrichedBoundedContextIR): string {
+ *  field is seeded from the routing key, never this.  Shared with the
+ *  event-sourced fold class (`_fromEvents` seeds required non-corr fields). */
+export function javaStateDefault(f: FieldIR, ctx: EnrichedBoundedContextIR): string {
   const t = f.type.kind === "optional" ? f.type.inner : f.type;
   if (t.kind === "primitive") {
     switch (t.name) {
