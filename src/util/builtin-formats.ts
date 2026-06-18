@@ -24,11 +24,12 @@
 
 /** Output format a design pack produces.  `tsx` packs render React
  *  (JSX) markup, `heex` packs render Phoenix LiveView templates,
- *  `svelte` packs render Svelte 5 component markup, and `vue` packs
- *  render Vue 3 SFC template markup.  Canonical home of
+ *  `svelte` packs render Svelte 5 component markup, `vue` packs
+ *  render Vue 3 SFC template markup, and `angular` packs render
+ *  Angular standalone-component templates.  Canonical home of
  *  the union — the pack loader re-exports it so `generator/` consumers
  *  keep their import path. */
-export type PackFormat = "tsx" | "heex" | "svelte" | "vue";
+export type PackFormat = "tsx" | "heex" | "svelte" | "vue" | "angular";
 
 export const BUILTIN_PACK_FORMATS = {
   "mantine@v7": "tsx",
@@ -44,6 +45,9 @@ export const BUILTIN_PACK_FORMATS = {
   "flowbite@v1": "svelte",
   "vuetify@v3": "vue",
   "shadcnVue@v1": "vue",
+  "angularMaterial@v1": "angular",
+  "primeng@v1": "angular",
+  "spartanNg@v1": "angular",
 } as const satisfies Record<string, PackFormat>;
 
 /** What bareword `design: mantine` (no `@version`) resolves to in
@@ -90,6 +94,11 @@ export const BUILTIN_PACK_LATEST = {
   // its first pack version.
   vuetify: "v3",
   shadcnVue: "v1",
+  // Angular packs ship a single version each so far; barewords resolve
+  // straight to v1.  angularMaterial is the default (D-ANGULAR-FRONTEND).
+  angularMaterial: "v1",
+  primeng: "v1",
+  spartanNg: "v1",
 } as const satisfies Record<string, string>;
 
 export type BuiltinPackFamily = keyof typeof BUILTIN_PACK_LATEST;

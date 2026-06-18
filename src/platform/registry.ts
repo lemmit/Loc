@@ -1,4 +1,5 @@
 import type { Platform } from "../ir/types/loom-ir.js";
+import angularPlatform from "./angular.js";
 import dotnetPlatform from "./dotnet.js";
 import elixirPlatform from "./elixir.js";
 import honoPlatform, { loomManifest as honoV4Manifest } from "./hono/v4/index.js";
@@ -64,6 +65,10 @@ const platforms: Record<Platform, PlatformSurface> = {
   // Third frontend-only platform — Vue 3 Vite SPA (vue-router).
   // Same deployable contract as `react` (targets a backend, no DB).
   vue: vuePlatform,
+  // Fourth frontend-only platform — Angular standalone-component app
+  // (signals, provideRouter, ng build → static bundle).
+  // Same deployable contract as `react` (targets a backend, no DB).
+  angular: angularPlatform,
   // `static` is the page-metamodel's UI-only deployable kind.  It
   // shares the React surface — a deployable declared as
   // `platform: static` lowers through the same code path a

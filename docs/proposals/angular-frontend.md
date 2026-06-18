@@ -1,6 +1,16 @@
 # Angular frontend — standalone components + signals generator
 
-> Status: **PROPOSED (vision / not scheduled).** Captures the design and
+> Status: **PLANNED.** This vision has been turned into an actionable,
+> slice-by-slice implementation plan in
+> [`docs/plans/angular-frontend-plan.md`](../plans/angular-frontend-plan.md),
+> recalibrated against the current codebase (the shared walker, Vue, and
+> Svelte have all landed since this proposal was written — notably the
+> `embedded-frontend-composition` reshape this proposal named as a hard
+> prerequisite turned out **not** to be one: Vue and Svelte shipped
+> host-embedding without it). The sections below are the originating
+> design rationale; the plan supersedes the phasing where they differ.
+>
+> Captures the design and
 > effort shape for a second frontend framework alongside React (and the
 > in-flight Vue/Svelte targets). A frontend is **not a domain-logic
 > backend** — it consumes `wireShape` and renders the page-DSL body

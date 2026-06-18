@@ -40,6 +40,14 @@ const SHARED_SOURCE_DIRS_SVELTE: readonly string[] = ["sveltekit"];
 // `error-boundary` template rides along unused) and the neutral
 // `docker/` vite-build/vite-preview two-stage scaffold.
 const SHARED_SOURCE_DIRS_VUE: readonly string[] = ["vue", "api", "docker"];
+// Angular packs share an Angular-specific layer (`angular/`: index.html
+// with `<app-root>`, its own `ng build` → static-serve dockerfile) plus
+// the framework-neutral `api/` fetch-client/config/logger sources.  The
+// neutral `docker/` vite two-stage does NOT apply (Angular builds with
+// `ng build`, not `vite build`/`vite preview`), so `angular/` ships its
+// own dockerfile.hbs — and duplicate logical names across shared dirs
+// throw, so `docker/` stays out (same split as svelte's sveltekit/).
+const SHARED_SOURCE_DIRS_ANGULAR: readonly string[] = ["angular", "api"];
 
 /** Resolve the repo-root directory by walking up from this file
  *  until a `designs/` sibling is found.  Used to anchor both the
@@ -100,7 +108,9 @@ function readSharedSources(format: PackFormat): Record<string, string> {
         ? SHARED_SOURCE_DIRS_SVELTE
         : format === "vue"
           ? SHARED_SOURCE_DIRS_VUE
-          : SHARED_SOURCE_DIRS_TSX;
+          : format === "angular"
+            ? SHARED_SOURCE_DIRS_ANGULAR
+            : SHARED_SOURCE_DIRS_TSX;
   for (const dirName of dirs) {
     const dir = path.join(root, dirName);
     if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) continue;

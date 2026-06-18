@@ -55,6 +55,8 @@ export type DddKeywordNames =
     | "against"
     | "aggregate"
     | "aggregates"
+    | "angular"
+    | "angularMaterial"
     | "api"
     | "application"
     | "apply"
@@ -213,6 +215,7 @@ export type DddKeywordNames =
     | "port"
     | "postgres"
     | "precondition"
+    | "primeng"
     | "private"
     | "provenanced"
     | "provider"
@@ -263,6 +266,7 @@ export type DddKeywordNames =
     | "snapshot"
     | "solution"
     | "sort"
+    | "spartanNg"
     | "sqlite"
     | "stamp"
     | "state"
@@ -394,10 +398,10 @@ export function isDataSourceKind(item: unknown): item is DataSourceKind {
     return item === 'state' || item === 'eventLog' || item === 'snapshot' || item === 'cache' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'api';
 }
 
-export type DesignPack = 'ashPhoenix' | 'chakra' | 'flowbite' | 'mantine' | 'mui' | 'shadcn' | 'shadcnSvelte' | 'shadcnVue' | 'vuetify' | string;
+export type DesignPack = 'angularMaterial' | 'ashPhoenix' | 'chakra' | 'flowbite' | 'mantine' | 'mui' | 'primeng' | 'shadcn' | 'shadcnSvelte' | 'shadcnVue' | 'spartanNg' | 'vuetify' | string;
 
 export function isDesignPack(item: unknown): item is DesignPack {
-    return item === 'mantine' || item === 'shadcn' || item === 'mui' || item === 'chakra' || item === 'ashPhoenix' || item === 'shadcnSvelte' || item === 'flowbite' || item === 'vuetify' || item === 'shadcnVue' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'mantine' || item === 'shadcn' || item === 'mui' || item === 'chakra' || item === 'ashPhoenix' || item === 'shadcnSvelte' || item === 'flowbite' || item === 'vuetify' || item === 'shadcnVue' || item === 'angularMaterial' || item === 'primeng' || item === 'spartanNg' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export type Enforcement = 'denyByDefault' | 'opt';
@@ -428,10 +432,10 @@ export function isFieldAccess(item: unknown): item is FieldAccess {
     return item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret';
 }
 
-export type Framework = 'liveview' | 'phoenixLiveView' | 'react' | 'svelte' | 'vue';
+export type Framework = 'angular' | 'liveview' | 'phoenixLiveView' | 'react' | 'svelte' | 'vue';
 
 export function isFramework(item: unknown): item is Framework {
-    return item === 'react' || item === 'svelte' || item === 'vue' || item === 'phoenixLiveView' || item === 'liveview';
+    return item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'phoenixLiveView' || item === 'liveview';
 }
 
 export type GenericCtor = 'envelope' | 'option' | 'paged';
@@ -542,10 +546,10 @@ export function isPayloadKind(item: unknown): item is PayloadKind {
     return item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error';
 }
 
-export type Platform = 'dotnet' | 'elixir' | 'fastapi' | 'hono' | 'java' | 'node' | 'phoenix' | 'phoenixLiveView' | 'python' | 'react' | 'static' | 'svelte' | 'vue' | string;
+export type Platform = 'angular' | 'dotnet' | 'elixir' | 'fastapi' | 'hono' | 'java' | 'node' | 'phoenix' | 'phoenixLiveView' | 'python' | 'react' | 'static' | 'svelte' | 'vue' | string;
 
 export function isPlatform(item: unknown): item is Platform {
-    return item === 'dotnet' || item === 'hono' || item === 'node' || item === 'react' || item === 'svelte' || item === 'vue' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || item === 'elixir' || item === 'python' || item === 'fastapi' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'dotnet' || item === 'hono' || item === 'node' || item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || item === 'elixir' || item === 'python' || item === 'fastapi' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export type PostfixSuffix = CallSuffix | MemberSuffix;
