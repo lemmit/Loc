@@ -5,6 +5,7 @@ import {
 } from "../../ir/stdlib/generics.js";
 import { unionInstanceName, variantTag } from "../../ir/stdlib/unions.js";
 import {
+  aggregateUsesPrincipalContextFilter,
   type BoundedContextIR,
   type DeployableIR,
   type SystemIR,
@@ -745,13 +746,23 @@ function renderAggregateController(
   // operation (e.g. crudish `update`) is dropped here — the per-op action
   // below owns that `def`, matching the cross-backend `POST /:id/<verb>` form
   // (so the two don't collide into a duplicate `def <verb>/2`).
+  // A principal-referencing capability `filter` (tenancy) is wired as an Ash
+  // `base_filter expr(... == ^actor(:field))` — so every READ of this aggregate
+  // must run with `actor: current_user` (the request principal from the JWT,
+  // on `conn.assigns.current_user`).  `actorOpt` is the trailing keyword for a
+  // call that already has positional args; `actorKw` is the bare keyword for a
+  // zero-arg call.  Empty when the aggregate has no principal filter, so every
+  // other controller stays byte-identical.  (DEBT-01 elixir/Ash slice.)
+  const needsActor = aggregateUsesPrincipalContextFilter(agg);
+  const actorKw = needsActor ? "actor: conn.assigns.current_user" : "";
+  const actorOpt = needsActor ? `, ${actorKw}` : "";
   const crudOps = crudOpNames(agg);
   const crudSegments: { name: string; src: string }[] = [
     {
       name: "list",
       src: `  @doc "GET /api/${aggPlural}"
   def list(conn, _params) do
-    records = ${contextModule}.list_${aggPlural}!()
+    records = ${contextModule}.list_${aggPlural}!(${actorKw})
     json(conn, records)
   end`,
     },
@@ -759,7 +770,7 @@ function renderAggregateController(
       name: "get",
       src: `  @doc "GET /api/${aggPlural}/:id"
   def get(conn, %{"id" => id}) do
-    record = ${contextModule}.get_${aggSnake}!(id)
+    record = ${contextModule}.get_${aggSnake}!(id${actorOpt})
     json(conn, record)
   end`,
     },
@@ -782,7 +793,7 @@ ${wireInLine}    record = ${contextModule}.create_${aggSnake}!(params)
       src: `  @doc "PATCH /api/${aggPlural}/:id"
   def update(conn, %{"id" => id} = params) do
 ${wireInLine}    attrs = Map.drop(params, ["id"])
-    record = ${contextModule}.update_${aggSnake}!(id, attrs)
+    record = ${contextModule}.update_${aggSnake}!(id, attrs${actorOpt})
     json(conn, record)
   end`,
     },
@@ -790,7 +801,7 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
       name: "destroy",
       src: `  @doc "DELETE /api/${aggPlural}/:id"
   def destroy(conn, %{"id" => id}) do
-    ${contextModule}.destroy_${aggSnake}!(id)
+    ${contextModule}.destroy_${aggSnake}!(id${actorOpt})
     send_resp(conn, 204, "")
   end`,
     },
@@ -817,9 +828,13 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
       // Code-interface call: `<Ctx>.<find>_<agg>!(arg1, arg2, ...)` —
       // positional from the GET query string.  Wire keys come in
       // camelCase per the cross-backend convention.
-      const argReads = find.params
-        .map((p) => `params[${JSON.stringify(snake(p.name))}]`)
-        .join(", ");
+      // Reads of a tenancy aggregate thread the actor (DEBT-01): the code
+      // interface accepts it as a trailing keyword, so it joins the positional
+      // arg list last.  `argReads` feeds every non-paged find call form below.
+      const argReads = [
+        ...find.params.map((p) => `params[${JSON.stringify(snake(p.name))}]`),
+        ...(needsActor ? [actorKw] : []),
+      ].join(", ");
       const union = unionForFind(find.returnType, ctx);
       if (union) {
         // Tagged-union return (P4d): the read yields the repo aggregate; the
@@ -878,6 +893,7 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
         const pageArgs = [
           ...find.params.map((p) => `params[${JSON.stringify(snake(p.name))}]`),
           "page: [limit: page_size, offset: offset, count: true]",
+          ...(needsActor ? [actorKw] : []),
         ].join(", ");
         findActions.push(`  @doc "GET /api/${aggPlural}/${findSnake}"
   def ${findSnake}(conn, params) do

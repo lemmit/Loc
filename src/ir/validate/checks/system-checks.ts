@@ -634,8 +634,15 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // Backends that now wire PRINCIPAL-referencing filters (`currentUser.x`) on
   // relational aggregates.  node renders the predicate against the ambient
   // `requireCurrentUser()` accessor inside every root read (DEBT-01) — the
-  // Drizzle analogue of .NET's `HasQueryFilter`.  elixir / java still defer it.
-  const PRINCIPAL_FILTER_FAMILIES = new Set(["node"]);
+  // Drizzle analogue of .NET's `HasQueryFilter`.  elixir wires it on the **Ash**
+  // foundation (`base_filter expr(... == ^actor(:field))` + `actor: current_user`
+  // threaded onto reads); the **vanilla** Ecto foundation still defers it.  java
+  // still defers it entirely (`@SQLRestriction` is static SQL).
+  const supportsPrincipalFilter = (family: string, foundation: string | undefined): boolean => {
+    if (family === "node") return true;
+    if (family === "elixir") return (foundation ?? "ash") === "ash";
+    return false;
+  };
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
@@ -650,7 +657,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
         const usesPrincipal = filters.some((p) => exprUsesCurrentUser(p));
         const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
         const nonRelational = shape !== "relational";
-        const principalUnsupported = usesPrincipal && !PRINCIPAL_FILTER_FAMILIES.has(fam);
+        const principalUnsupported = usesPrincipal && !supportsPrincipalFilter(fam, dep.foundation);
         // A principal filter on a backend that DOES wire it (node) still needs
         // a request principal to scope by — so the deployable must enforce auth
         // (and the system must declare a `user {}` block).  Without it the
@@ -691,7 +698,9 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
             `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
             `'${ctxName}.${agg.name}' with a 'filter' capability predicate that ${reason}. ` +
             `Host this aggregate on a .NET deployable${
-              nonRelational ? "" : " (or a node deployable, which wires tenancy filters)"
+              nonRelational
+                ? ""
+                : " (or a node / elixir-Ash deployable, which wire tenancy filters)"
             }, or remove the unsupported capability filter. ` +
             `Non-principal filters on relational aggregates (e.g. 'filter !this.isDeleted') are emitted.`,
           source: `${sys.name}/${dep.name}`,
