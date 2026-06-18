@@ -197,7 +197,7 @@ export function checkBuilderCallType(
     }
     accept(
       "error",
-      `Unknown builder type '${name}'. Expected a ValueObject, EntityPart, user-defined component, or stdlib walker primitive (e.g., Stack, Form, Card).`,
+      `Unknown builder type '${name}'. Expected a ValueObject, EntityPart, user-defined component, or stdlib walker primitive (e.g., Stack, CreateForm, Card).`,
       { node: bc, property: "type", code: "loom.unknown-builder-type" },
     );
   }

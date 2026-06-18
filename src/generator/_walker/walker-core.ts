@@ -136,7 +136,7 @@ export interface WalkResult {
    *  declaration at page-top + an import.  Body refs are
    *  rewritten to use the local var. */
   usedApiHooks: Map<string, ApiHookUse>;
-  /** Non-null when the body contained a `Form(of: <Agg>)`
+  /** Non-null when the body contained a `CreateForm(of: <Agg>)`
    *  primitive.  Shell consumes this to emit `useForm` / `Controller`
    *  imports, mutation hook, `defaultValues`, and the `onSubmit`
    *  handler that wraps the form's `<form onSubmit={…}>`. */
@@ -144,7 +144,7 @@ export interface WalkResult {
   /** Every static `testid:` literal encountered while
    *  walking the body, plus the synthesised testid bases the walker
    *  generates on the user's behalf (e.g. `<form-namespace>-input-
-   *  <field>` for each `Form(of:)` field, `<form-namespace>-submit`
+   *  <field>` for each `CreateForm(of:)` field, `<form-namespace>-submit`
    *  for the submit button).  The walker-side page-object emitter
    *  reads this set to surface one typed `Locator` getter per
    *  testid in the generated `e2e/pages/<page-snake>.ts` class. */
@@ -298,7 +298,7 @@ export function walkBody(
    *  and rewritten to the local hook variable. */
   apiParams: ReadonlyArray<UiApiParamIR> = [],
   /** Aggregates reachable from this UI's deployable.
-   *  `Form(of: <Agg>)` and `IdLink(of: <Agg>)` look up the
+   *  `CreateForm(of: <Agg>)` and `IdLink(of: <Agg>)` look up the
    *  aggregate's IR here (field list for form dispatch; display-
    *  marked field for IdLink's link text). */
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
@@ -307,7 +307,7 @@ export function walkBody(
    *  object types declared alongside the aggregate. */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
   /** Workflows reachable from this UI's deployable.
-   *  `Form(runs: <wf>)` looks up the workflow's IR here (param
+   *  `WorkflowForm(runs: <wf>)` looks up the workflow's IR here (param
    *  list for form dispatch, owning BC for enum resolution). */
   workflowsByName: ReadonlyMap<string, WorkflowIR> = new Map(),
   /** Owning bounded context per workflow (the form-
@@ -423,12 +423,12 @@ export interface WalkEnv {
   lambdaParams: ReadonlyMap<string, string>;
   /** Identifiers emitted by the page shell that user-
    *  written sub-expressions can reference (e.g. inside a
-   *  `Form(of:, onSubmit:)` lambda, `create` is the mutation hook
+   *  `CreateForm(of:, onSubmit:)` lambda, `create` is the mutation hook
    *  declared at function top).  Refs matching a name in this set
    *  emit as the bare identifier — no `unresolved` comment. */
   shellLocals: ReadonlySet<string>;
   /** Aggregates reachable from this UI's deployable.
-   *  Powers `Form(of: <Agg>)` field dispatch and `IdLink(of: <Agg>)`
+   *  Powers `CreateForm(of: <Agg>)` field dispatch and `IdLink(of: <Agg>)`
    *  display-field resolution. */
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
   /** Map aggregate name → owning bounded context, so the
@@ -436,7 +436,7 @@ export interface WalkEnv {
    *  in the same context. */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
   /** Workflows reachable from this UI's deployable.
-   *  Powers `Form(runs: <wf>)` field dispatch. */
+   *  Powers `WorkflowForm(runs: <wf>)` field dispatch. */
   workflowsByName: ReadonlyMap<string, WorkflowIR>;
   /** Owning bounded context per workflow. */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR>;
@@ -458,7 +458,7 @@ export interface Sink {
   usedUserComponents: Set<string>;
   usesChildren: boolean;
   usedApiHooks: Map<string, ApiHookUse>;
-  /** When `Form(of: <Agg>)` or `Form(runs: <wf>)`
+  /** When `CreateForm(of: <Agg>)` or `WorkflowForm(runs: <wf>)`
    *  is walked, the emitter records the metadata the shell needs
    *  (aggregate or workflow, BC, optional user-supplied
    *  `onSubmit:` lambda body, redirect path) so the shell can
@@ -496,8 +496,8 @@ export interface WalkContext extends WalkEnv, Sink {}
  *  request type + mutation hook + per-field `useAll<TargetX>` hooks
  *  at the top of the function body.
  *
- *  Discriminated union: `kind: "aggregate"` for `Form(of: <Agg>)`,
- *  `kind: "workflow"` for `Form(runs: <wf>)`.  The two share most
+ *  Discriminated union: `kind: "aggregate"` for `CreateForm(of: <Agg>)`,
+ *  `kind: "workflow"` for `WorkflowForm(runs: <wf>)`.  The two share most
  *  fields (the form is rendered identically); they differ only in
  *  the imports / hook decls / default submit redirect that the
  *  shell emits around the form. */
@@ -543,7 +543,7 @@ export interface WorkflowFormState extends FormStateBase {
   fields: WorkflowIR["params"];
 }
 
-/** `Form(<instance>.<operation>)` — an aggregate-operation
+/** `OperationForm(<instance>.<operation>)` — an aggregate-operation
  *  invocation form.  The operation is referenced through an in-scope
  *  instance (`order.confirm` for a component param, `data.confirm` for
  *  a Detail page's loaded record); the receiver's aggregate is
@@ -833,7 +833,7 @@ export function extendLambdaParams(
 // Interactive control primitives (Button, IdLink, QueryView,
 // UserComponent) live in walker/primitives/controls.ts.
 
-/** Form(of: <Aggregate>, onSubmit?: <lambda>, testid?).
+/** CreateForm(of: <Aggregate>, onSubmit?: <lambda>, testid?).
  *
  *  Walker-side counterpart to the scaffold New-page archetype.
  *  Introspects the aggregate's IR field list and emits one input
@@ -857,7 +857,7 @@ export function extendLambdaParams(
  *
  *  Walker records the FormOfState on `ctx.formOf`; the shell reads
  *  it after the body walk completes. */
-// The Form family (Form(of:)/Form(runs:)/Form(of:,op:)) and the Modal
+// The Form family (CreateForm / WorkflowForm / OperationForm) and the Modal
 // that hosts an operation form live in walker/primitives/forms.ts.
 
 // Layout / surface primitives (Stack, Group, Grid, Container, Tabs,
@@ -928,7 +928,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         return expr.name;
       }
       // Refs to shell-emitted locals (e.g. `create`
-      // inside a `Form(of:, onSubmit: v => create.mutateAsync(v))`
+      // inside a `CreateForm(of:, onSubmit: v => create.mutateAsync(v))`
       // lambda) resolve as themselves.
       if (ctx.shellLocals.has(expr.name)) return expr.name;
       // Refs to `let` bindings are in scope as JS
@@ -994,6 +994,30 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // returned the hook var; we just append `.<member>`.
       return `${emitExpr(expr.receiver, ctx)}.${expr.member}`;
     }
+    case "lambda": {
+      // Lambda in EXPRESSION position — the callback of a higher-order
+      // collection op (`orders.filter(o => o.active)`, `.map(o => o.name)`,
+      // `.sortBy(o => o.placedAt)`).  This is the one place a lambda node
+      // reaches `emitExpr` directly: builder primitives that take a lambda
+      // (`For`, `Table` column accessors, `onSubmit`) destructure `.body` /
+      // `.block` themselves and never pass the lambda node here, so this arm
+      // fires only for the inline-collection-op case that used to emit
+      // `/* unsupported expr: lambda */ undefined`.
+      //
+      // The param binds to its own JS name (the JS frontends spell the
+      // binding identically); refs to it inside the body resolve through
+      // `lambdaParams`.  Flags the body writes (state reads, used params,
+      // …) propagate back to the parent sink.
+      const childCtx: WalkContext = {
+        ...ctx,
+        lambdaParams: extendLambdaParams(ctx, expr.param, expr.param),
+      };
+      const rendered = expr.body
+        ? emitExpr(expr.body, childCtx)
+        : `{ ${(expr.block ?? []).map((s) => emitStmt(s, childCtx)).join(" ")} }`;
+      propagateChildFlags(ctx, childCtx);
+      return `(${expr.param}) => ${rendered}`;
+    }
     case "object": {
       // Object literal: `{ name: name, age: 30 }`
       // emits as plain JS `{ name: name, age: 30 }`.  Field values
@@ -1014,7 +1038,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         return `${recvHookUse.varName}.${expr.member}(${args})`;
       }
       // Method calls on plain JS receivers (e.g. a
-      // local `create` mutation hook inside a `Form(of:)` page's
+      // local `create` mutation hook inside a `CreateForm(of:)` page's
       // onSubmit lambda).  Emit the plain `recv.member(args)`
       // form when the receiver resolves cleanly (param / state /
       // lambda param / shell local).  Receivers that emit as the

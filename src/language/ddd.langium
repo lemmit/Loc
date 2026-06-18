@@ -1399,8 +1399,8 @@ LooseName returns string:
     ID
     // `of` is a hard keyword only in the `criterion <Name>(...) of <T>`
     // rule.  Admit it as a soft keyword everywhere LooseName is used so
-    // the page-metamodel arg name `of` keeps parsing — `List(of: Order)`,
-    // `List { of: x }` — and pre-existing files that named a field `of`
+    // the page-metamodel arg name `of` keeps parsing — `CreateForm(of: Order)`,
+    // `CreateForm { of: x }` — and pre-existing files that named a field `of`
     // are unaffected (mirrors the `money` / field-access soft-keyword
     // treatment).
     | 'of'
@@ -1413,7 +1413,7 @@ LooseName returns string:
     // `by` is a hard keyword only in the `on(...) by <expr>` reactor clause
     // (workflow-and-applier.md A2-S3); admit it as a soft keyword in
     // field / parameter / object-field / emit-field name position so
-    // pre-existing identifiers named `by` (e.g. `Detail { by: id }`,
+    // pre-existing identifiers named `by` (e.g.
     // `event Bumped { by: int }`) keep parsing.
     | 'by'
     // `handle` is a hard keyword only as the `handle name(...) { }` workflow
@@ -1771,7 +1771,7 @@ PostfixSuffix:
 
 // Call arguments admit an optional `name:` prefix (Slice 1.5).
 // Positional usage (`Money(10.5, "USD")`) keeps working; named usage
-// (`List(of: Order, scope: Orders.byCustomer(customerId))`) lets
+// (`OperationForm(of: Order, op: confirm)`) lets
 // component invocations in the page metamodel surface the parameter
 // names rather than relying on positional discipline.  Lowering
 // threads the name into `CallExpr.argNames` / `MethodCall.argNames`

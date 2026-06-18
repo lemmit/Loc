@@ -298,6 +298,24 @@ describe("validation", () => {
       expect(errors.some((e) => /Unknown builder type 'Stak'/.test(e))).toBe(true);
     });
 
+    it("rejects the retired polymorphic `Form` (split into the named-leaf forms)", async () => {
+      // The polymorphic `Form { creates: | runs: | of: | <inst>.<op> }`
+      // dispatcher was replaced by the four named-leaf primitives
+      // (CreateForm / OperationForm / WorkflowForm / DestroyForm).  Plain
+      // `Form` must stay rejected so the old spelling can't silently
+      // resurface, and the diagnostic hint must not advertise it as a
+      // valid primitive.
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate Order { status: string } } }
+          ui WebApp { page P { route: "/p"  body: Form { of: Order } } }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type 'Form'/.test(e))).toBe(true);
+      // The hint suggests a real primitive, never the retired `Form`.
+      expect(errors.some((e) => /e\.g\., Stack, Form, Card/.test(e))).toBe(false);
+    });
+
     it("accepts a known walker primitive", async () => {
       const { errors } = await parse(`
         system S {

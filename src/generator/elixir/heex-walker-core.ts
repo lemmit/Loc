@@ -74,7 +74,7 @@ export interface WalkResult {
   /** `handle_event/3` clauses for the LiveView module body. */
   handlers: HandleEventClause[];
   /** Form bindings discovered inside the page body — one entry per
-   *  `Form(of: Agg)` or `Form(runs: Wf)` call.  The LiveView emitter
+   *  `CreateForm(of: Agg)` or `WorkflowForm(runs: Wf)` call.  The LiveView emitter
    *  uses this to assign `@form` in `mount/3` via
    *  `AshPhoenix.Form.for_create(<AggModule>, :create)` (or
    *  `for_action(...)` for workflows) and convert to `to_form(...)`.
@@ -160,7 +160,7 @@ export interface WalkContext {
    *  call qualification (`PhoenixApp.Sales.create_customer!(...)`). */
   appModule: string;
   /** Aggregate registry keyed by PascalCase name — supplied by the
-   *  orchestrator so `Form(of: Agg)` can look up the aggregate's
+   *  orchestrator so `CreateForm(of: Agg)` can look up the aggregate's
    *  fields and emit one `<.input>` per field rather than a single
    *  hardcoded placeholder.  Empty map = no lookup available
    *  (validators upstream will catch missing aggregates). */
@@ -220,7 +220,7 @@ export interface WalkContext {
    *  parameter names (e.g. "rows") to their assign names (e.g. "items"). */
   varRemapping?: ReadonlyMap<string, string>;
   /** In-scope instance variable → aggregate name, for instance-qualified
-   *  operation forms (`Form(data.confirm)`).  Populated when QueryView
+   *  operation forms (`OperationForm(data.confirm)`).  Populated when QueryView
    *  walks its single-record `data:` lambda. */
   instanceTypes?: ReadonlyMap<string, string>;
 }

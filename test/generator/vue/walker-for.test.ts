@@ -31,4 +31,13 @@ describe("vue walker primitive — For", () => {
     expect(vue).not.toContain(".map(");
     expect(vue).not.toContain("not supported");
   });
+
+  it('renders the `empty:` arm as a sibling `<template v-if="!coll.length">`', async () => {
+    const vue = await pageVue(
+      `Stack { For { each: [1, 2], empty: Empty("Nothing here"), n => Heading { "Row" } } }`,
+    );
+    expect(vue).toContain('<template v-for="(n, nIdx) in [1, 2]"');
+    expect(vue).toContain('<template v-if="![1, 2].length">');
+    expect(vue).toContain("Nothing here");
+  });
 });

@@ -739,8 +739,8 @@ A future `hono@v5` would ship its own `pins.ts` + shell next to
 | --- | --- |
 | `index.ts` | Project shell (Vite, package.json, tsconfig, index.html, Dockerfile, certs/ dir, App.tsx with router, main.tsx with providers, e2e/ suite shell). |
 | `api-builder.ts` | Per-aggregate API module: Zod schemas (request + response, walked via `wireFieldsForAggregate`) + React Query hooks (one per route, plus one `use<Op><Agg>` mutation hook per public operation). |
-| `body-walker.ts` | The **single** page-codegen path.  Walks a page's `body:` `ExprIR` and emits TSX by dispatching every walker-stdlib primitive (`Stack`/`Table`/`QueryView`/`Form`/`Modal`/`KeyValueRow`/…) through the active design pack's `primitive-*` templates.  No archetype renderers — `page <Name> { body: … }` and scaffolded pages share this one walker. |
-| `form-helpers.ts` | Per-type form-input dispatch (`prepareFormFieldVM`/`renderFormField`): text/number/switch/select/fieldset/datetime, RHF `register` vs `Controller`, initial-value generation, `X id` → `useAll<Target>()` picker injection.  Shared by `Form { of: }`, `Form { runs: }`, and operation-modal forms. |
+| `body-walker.ts` | The **single** page-codegen path.  Walks a page's `body:` `ExprIR` and emits TSX by dispatching every walker-stdlib primitive (`Stack`/`Table`/`QueryView`/`CreateForm`/`Modal`/`KeyValueRow`/…) through the active design pack's `primitive-*` templates.  No archetype renderers — `page <Name> { body: … }` and scaffolded pages share this one walker. |
+| `form-helpers.ts` | Per-type form-input dispatch (`prepareFormFieldVM`/`renderFormField`): text/number/switch/select/fieldset/datetime, RHF `register` vs `Controller`, initial-value generation, `X id` → `useAll<Target>()` picker injection.  Shared by `CreateForm { of: }`, `WorkflowForm { runs: }`, and operation-modal forms. |
 | `pages-emitter.ts` | Page shell: wraps the walker's body TSX with `useForm`/mutation-hook/`useParams`/import declarations the body recorded on the walk context. |
 | `page-objects-builder.ts` / `walker-page-objects.ts` | Per-aggregate Playwright page-object class — keyed off the `data-testid` strings every primitive threads through (`testid:` named arg). |
 | `layouts-emitter.ts` | Per-layout shell (`<Outlet/>` wrappers, header/footer, sidebar slots). |
@@ -749,7 +749,7 @@ A future `hono@v5` would ship its own `pins.ts` + shell next to
 | `workflow-builder.ts` | Per-workflow page module. |
 | `walker/tsx-target.ts` | `WalkerTarget` implementation for TSX — state read/write, navigation, API call lowering, `match` rendering.  Imported by `body-walker.ts`. |
 | `walker/api-hooks.ts` / `context.ts` / `icons.ts` / `import-lines.ts` / `page-shell.ts` | Walker helpers — TanStack Query hook import collection, walk-context plumbing, design-pack icon resolution, deduped import lines, page-shell wrapping. |
-| `walker/primitives/` | Per-primitive TSX dispatch entries (`Stack`, `Table`, `Form`, `QueryView`, `Modal`, `KeyValueRow`, etc.) called from `body-walker.ts`. |
+| `walker/primitives/` | Per-primitive TSX dispatch entries (`Stack`, `Table`, `CreateForm`, `QueryView`, `Modal`, `KeyValueRow`, etc.) called from `body-walker.ts`. |
 | `templating/` | Procedural TSX assembly helpers shared across the walker. |
 
 The React side has no `render-expr.ts` / `render-stmt.ts`: the
@@ -772,7 +772,7 @@ ui { scaffold modules: Sales }
    The `scaffold` macro (and its sub-macros scaffoldModule /
    scaffoldContext / scaffoldAggregate / scaffoldView /
    scaffoldWorkflow) synthesise `Page` AST nodes (name, route, menu,
-   and a high-level body call: List { of: } / Form { of: } /
+   and a high-level body call: List { of: } / CreateForm { of: } /
    Detail { of:, by: } …) each tagged with a `scaffoldOrigin`
    discriminator.
         │
@@ -794,9 +794,9 @@ page contains*.  Per archetype:
 | Origin | Synthesised body |
 | --- | --- |
 | `aggregate-list` | `Stack { Breadcrumbs, Toolbar { Heading, Button "New" }, QueryView { of: api.Agg.all, …, data: Paper { Table { Column per non-collection field } } } }` |
-| `aggregate-new` | `Stack { Breadcrumbs, Heading, Card { Form { of: Agg } } }` |
-| `aggregate-detail` | `Stack { Breadcrumbs, Heading, QueryView { of: api.Agg.byId(id), single: true, data:` → `Card { Stack { KeyValueRow per scalar field } }` **+ one `Modal { trigger: Button, Form { data.<op> } }` per public operation + one `Card { Heading, Table }` per `contains` collection (related-entity list)** ` } }` |
-| `workflow-form` | `Stack { Breadcrumbs, Heading, Card { Form { runs: wf } } }` |
+| `aggregate-new` | `Stack { Breadcrumbs, Heading, Card { CreateForm { of: Agg } } }` |
+| `aggregate-detail` | `Stack { Breadcrumbs, Heading, QueryView { of: api.Agg.byId(id), single: true, data:` → `Card { Stack { KeyValueRow per scalar field } }` **+ one `Modal { trigger: Button, OperationForm { data.<op> } }` per public operation + one `Card { Heading, Table }` per `contains` collection (related-entity list)** ` } }` |
+| `workflow-form` | `Stack { Breadcrumbs, Heading, Card { WorkflowForm { runs: wf } } }` |
 | `view-list` | `Stack { Heading, QueryView { of: Views.<name>, data: Paper { Table } } }` |
 | `home` / `workflows-index` / `views-index` | `Stack { Heading, Stack { Card per aggregate/workflow/view } }` |
 

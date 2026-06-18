@@ -8,8 +8,8 @@ import type { FormFieldVM } from "../_frontend/view-models.js";
 import type { LoadedPack } from "../_packs/loader.js";
 
 /** Render one form-field input through its per-pack
- *  `field-input-*` template.  Used by the walker's `Form(of:)` /
- *  `Form(runs:)` emission to produce one markup block per field.
+ *  `field-input-*` template.  Used by the walker's `CreateForm(of:)` /
+ *  `WorkflowForm(runs:)` emission to produce one markup block per field.
  *  Value-object fields recursively render their children and pass
  *  the joined HTML as `innerHtml` (the template variable the
  *  `field-input-valueobject.hbs` Fieldset reads). */

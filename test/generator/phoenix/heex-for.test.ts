@@ -58,4 +58,14 @@ describe("HEEx For comprehension (DEBT-05)", () => {
     expect(heex).toContain('"x=" <> ');
     expect(heex).not.toContain("@n");
   });
+
+  it("wraps the comprehension in an `Enum.empty?/1` guard when `empty:` is given", async () => {
+    const heex = await landingHeex(
+      `Stack { For { each: [1, 2, 3], empty: Bold { "Nothing here" }, n => Bold { "Row" } } }`,
+    );
+    expect(heex).toContain("<%= if Enum.empty?([1, 2, 3]) do %>");
+    // The empty arm (rendered markup) sits in the `if` branch, before `else`.
+    expect(heex).toMatch(/Enum\.empty\?\([\s\S]*Nothing here[\s\S]*<% else %>/);
+    expect(heex).toMatch(/<%= for n <- \[1, 2, 3\] do %>/);
+  });
 });

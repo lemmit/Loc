@@ -1,4 +1,5 @@
-// Form family: Form(of:)/Form(runs:)/Form(of:,op:) and the Modal that
+// Form family: CreateForm(of:) / WorkflowForm(runs:) / OperationForm(of:,op:)
+// and the Modal that
 // hosts an operation form. The emitters record a FormOfState on the
 // shared sink (ctx.formOfs) which the page shell reads afterwards to
 // emit the useForm/mutation-hook wiring. emitModal back-patches the
@@ -40,10 +41,9 @@ import {
 } from "../walker-core.js";
 import { emitActionThen } from "./controls.js";
 
-/** `CreateForm(of: <Agg>)` — named-leaf entry for the create-form
- *  variant.  Same shared codegen as `Form(of:)` / `Form(creates:)`:
- *  delegates to `emitFormOfAggregate`, which builds the per-field
- *  view models and pushes a `FormOfState` on the shell sink. */
+/** `CreateForm(of: <Agg>)` — the create-form primitive.  Delegates to
+ *  `emitFormOfAggregate`, which builds the per-field view models and
+ *  pushes a `FormOfState` on the shell sink. */
 export function emitCreateForm(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -53,11 +53,10 @@ export function emitCreateForm(
 }
 
 /** `OperationForm(of: <Agg>, op: <opName>)` or
- *  `OperationForm(<instance>.<op>)` — named-leaf entry for the
- *  operation-modal form.  Accepts both shapes the legacy
- *  `Form(<inst>.<op>)` / `Form(of:, op:)` dispatch covered: the
- *  instance-member form binds to a record in scope (lambda or
- *  param), the flat-named form resolves the id from the route. */
+ *  `OperationForm(<instance>.<op>)` — the operation-modal form.
+ *  Accepts both shapes: the instance-member form binds to a record in
+ *  scope (lambda or param), the flat-named form resolves the id from
+ *  the route. */
 export function emitOperationForm(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -141,9 +140,8 @@ export function emitDestroyForm(
   });
 }
 
-/** `WorkflowForm(runs: <Wf>)` — named-leaf entry for the
- *  workflow-run form.  Delegates to the same `emitFormRuns` the
- *  legacy `Form(runs:)` dispatch used. */
+/** `WorkflowForm(runs: <Wf>)` — the workflow-run form.  Delegates
+ *  to `emitFormRuns`. */
 export function emitWorkflowForm(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -157,7 +155,7 @@ export function emitWorkflowForm(
 }
 
 /** Like `emitFormOfOperation` but addressed by aggregate name +
- *  op name (`Form(of: <Agg>, op: <opName>)`) instead of an
+ *  op name (`OperationForm(of: <Agg>, op: <opName>)`) instead of an
  *  instance-qualified member.  No in-scope record needed — the
  *  mutation hook resolves the id from the route `id`.  Used by
  *  the auto-fanning `scaffoldOperations(of: <Agg>)` primitive. */
@@ -170,12 +168,14 @@ function emitFormOfOperationByName(
   const agg = ctx.aggregatesByName.get(aggName);
   const bc = ctx.bcByAggregate.get(aggName);
   if (!agg || !bc) {
-    return ctx.target.renderComment(`Form(of: ${aggName}, op: ${opName}): aggregate not found`);
+    return ctx.target.renderComment(
+      `OperationForm(of: ${aggName}, op: ${opName}): aggregate not found`,
+    );
   }
   const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
   if (!op) {
     return ctx.target.renderComment(
-      `Form(of: ${aggName}, op: ${opName}): no public operation '${opName}' on ${aggName}`,
+      `OperationForm(of: ${aggName}, op: ${opName}): no public operation '${opName}' on ${aggName}`,
     );
   }
   const fields = op.params;
@@ -315,10 +315,10 @@ interface FormSubmitConfig {
   submitLabel: string;
 }
 
-/** Shared render for the inline create/run forms (`Form(of:)` and
- *  `Form(runs:)`): emits the pack's default submit body when no explicit
+/** Shared render for the inline create/run forms (`CreateForm(of:)` and
+ *  `WorkflowForm(runs:)`): emits the pack's default submit body when no explicit
  *  `onSubmit:` was given, then renders the `primitive-form-of` shell.
- *  The op-form variant (`Form(<instance>.<operation>)`) does NOT use this — it emits
+ *  The op-form variant (`OperationForm(<instance>.<operation>)`) does NOT use this — it emits
  *  no inline JSX; its shell component is rendered from the recorded
  *  OperationFormState by the page shell. */
 function renderFormOfPrimitive(
@@ -374,13 +374,13 @@ function emitFormOfAggregate(
         ? ofArg.value
         : undefined;
   if (!aggName) {
-    return ctx.target.renderComment(`Form(of: …): missing 'of:' aggregate ref`);
+    return ctx.target.renderComment(`CreateForm(of: …): missing 'of:' aggregate ref`);
   }
   const agg = ctx.aggregatesByName.get(aggName);
   const bc = ctx.bcByAggregate.get(aggName);
   if (!agg || !bc) {
     return ctx.target.renderComment(
-      `Form(of: ${aggName}): aggregate not found in this UI's reachable contexts`,
+      `CreateForm(of: ${aggName}): aggregate not found in this UI's reachable contexts`,
     );
   }
   // Optional fields are excluded from create forms — same rule as
@@ -424,7 +424,7 @@ function emitFormOfAggregate(
   });
 }
 
-/** `Form(runs: <wf>)` walker variant.  Same per-field
+/** `WorkflowForm(runs: <wf>)` walker variant.  Same per-field
  *  preparer + same outer <form> JSX as the aggregate form, but
  *  the shell wires a workflow request type + mutation hook + a
  *  default redirect to `/workflows`. */
@@ -441,13 +441,13 @@ function emitFormRuns(
         ? runsArg.value
         : undefined;
   if (!wfName) {
-    return ctx.target.renderComment(`Form(runs: …): missing 'runs:' workflow ref`);
+    return ctx.target.renderComment(`WorkflowForm(runs: …): missing 'runs:' workflow ref`);
   }
   const workflow = ctx.workflowsByName.get(wfName);
   const bc = ctx.bcByWorkflow.get(wfName);
   if (!workflow || !bc) {
     return ctx.target.renderComment(
-      `Form(runs: ${wfName}): workflow not found in this UI's reachable contexts`,
+      `WorkflowForm(runs: ${wfName}): workflow not found in this UI's reachable contexts`,
     );
   }
   const fields = workflow.params;
@@ -495,7 +495,7 @@ function emitFormRuns(
  *  `<Op>Form` component + `open<Op>Modal` opener + the page-scope
  *  `const <op> = use<Op><Agg>(<idExpr>)` mutation hook from the
  *  recorded state.  Field rendering is byte-identical to
- *  `Form(of:)` (same preparer + `field-input-*` templates). */
+ *  `CreateForm(of:)` (same preparer + `field-input-*` templates). */
 function emitFormOfOperation(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -630,15 +630,15 @@ export function emitModal(
   }
   if (!formChild || !triggerArg || triggerArg.kind !== "call") {
     return ctx.target.renderComment(
-      `Modal: expects trigger: Button(...) and a Form(<instance>.<operation>) child`,
+      `Modal: expects trigger: Button(...) and an OperationForm(<instance>.<operation>) child`,
     );
   }
   // Walk the form child first — records the OperationFormState
   // (and returns "" — the form has no inline JSX).
   walk(formChild, ctx, depth);
   // The op-form names its operation either through an instance-
-  // member shape (`Form(data.confirm)`) or through the new
-  // `Form(of: <Agg>, op: <opName>)` flat shape (used by
+  // member shape (`OperationForm(data.confirm)`) or through the
+  // `OperationForm(of: <Agg>, op: <opName>)` flat shape (used by
   // `scaffoldOperations(of:)` so modals can live outside a
   // QueryView data lambda).  Recover the op name from whichever
   // shape the child carries.
@@ -650,7 +650,7 @@ export function emitModal(
   const opName = opRef && opRef.kind === "member" ? opRef.member : opNameNamed;
   if (!opName) {
     return ctx.target.renderComment(
-      `Modal: child Form must be Form(<instance>.<op>) or Form(of:, op:)`,
+      `Modal: child must be OperationForm(<instance>.<op>) or OperationForm(of:, op:)`,
     );
   }
   const label = unwrapTextLiteral(

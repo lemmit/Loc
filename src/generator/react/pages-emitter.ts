@@ -97,7 +97,7 @@ function computeSrcImportPrefix(emitPath: string): string {
 }
 
 /** Derived map: aggregate name → owning bounded context.
- *  Required by `Form(of: <Agg>)` and `IdLink(of: <Agg>)` so the
+ *  Required by `CreateForm(of: <Agg>)` and `IdLink(of: <Agg>)` so the
  *  walker can resolve enum / value-object types declared alongside
  *  the aggregate.  Built from `ctx.contextsByName` once per emit
  *  so the walker doesn't repeatedly scan all contexts. */
@@ -110,7 +110,7 @@ function buildBcByAggregate(ctx: PageEmitContext): Map<string, BoundedContextIR>
 }
 
 /** Derived map: workflow name → workflow IR.  Powers
- *  `Form(runs: <wf>)` field dispatch in the walker. */
+ *  `WorkflowForm(runs: <wf>)` field dispatch in the walker. */
 function buildWorkflowsByName(
   ctx: PageEmitContext,
 ): Map<string, import("../../ir/types/loom-ir.js").WorkflowIR> {

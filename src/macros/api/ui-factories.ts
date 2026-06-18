@@ -94,7 +94,7 @@ export function nameRefExpr(name: string): NameRef {
 // Call expressions — the building block of page bodies
 // ---------------------------------------------------------------------------
 
-/** A named call expression: `List(of: Order)` — `head` is the
+/** A named call expression: `CreateForm(of: Order)` — `head` is the
  * callee name, `args` is a list of (optional-name, value) pairs.
  * Used to build body-prop calls and any other call-shaped
  * expression in macro output.

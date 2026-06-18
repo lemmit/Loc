@@ -253,7 +253,7 @@ function lowerPage(p: Page): PageIR {
   }
   // Pass-1 AST-to-AST scaffold expansion populates
   // synthesised pages with body expressions like
-  // `List(of: Order)` / `Form(creates: T)` / etc.  We infer the
+  // `scaffoldList(of: Order)` / `CreateForm(of: T)` / etc.  We infer the
   // page's `archetype` discriminator and `source` from the
   // body shape so the React emitter dispatches identically
   // whether the page came from source or from the AST expander.

@@ -270,7 +270,15 @@ export interface WalkerTarget {
    *  `indexVar` is the synthesised index identifier — emit it as a
    *  loop binding ONLY when `keyExpr` or `body` references it (unused
    *  bindings trip `noUnusedFunctionParameters` / framework warnings).
-   *  `depth` drives indentation and (TSX) the brace wrap. */
+   *  `depth` drives indentation and (TSX) the brace wrap.
+   *
+   *  `emptyBody` (the optional `empty:` arm, pre-rendered markup) is the
+   *  fallback when `coll` is empty.  When omitted the output is
+   *  byte-identical to the un-`empty:` form; when present each target
+   *  reaches for its native idiom — Svelte's `{:else}`, a TSX
+   *  `coll.length === 0 ? (emptyBody) : (.map(…))` ternary, a Vue
+   *  `v-if="!coll.length"` sibling `<template>`.  (HEEx renders `For`
+   *  through its own engine, not this seam.) */
   renderForEach(
     coll: string,
     itemVar: string,
@@ -278,6 +286,7 @@ export interface WalkerTarget {
     keyExpr: string,
     body: string,
     depth: number,
+    emptyBody?: string,
   ): string;
 
   // --- Navigation seam ----------------------------------------------------

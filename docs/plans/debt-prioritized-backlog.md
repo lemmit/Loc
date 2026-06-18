@@ -52,7 +52,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | DEBT-02 | Non-relational (`shape(document/embedded)`) capability `filter` | node, elixir, java | 4 | M | — |
 | DEBT-03 | Operation `or`-union return (exception-less ProblemDetails) | elixir/ash | 4 | M | `exception-less.md` · **slice 1 landed** (return-dominant; mutation/guard bodies still gated) |
 | DEBT-04 | Audit runtime parity (`audited` ops, lifecycle, `with audit`) | dotnet, elixir | 4 | L | `type-system-feature-migration.md` (DBT) |
-| DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) — **DONE: `For` implemented (all 4 frontends + HEEx); `List`/`Detail`/`MasterDetail` were inert duplicates of `scaffoldList`/`scaffoldDetails` and were REMOVED** ([D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes)) | react (→ vue/svelte) | — | — | resolved |
+| DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) — **DONE: `For` implemented (all 4 frontends + HEEx; now with an optional `empty:` arm); `List`/`Detail`/`MasterDetail` were inert duplicates of `scaffoldList`/`scaffoldDetails` and were REMOVED** ([D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes)) | react (→ vue/svelte) | — | — | resolved |
 | **P1 — parity + frontend completeness** |
 | DEBT-06 | Provenanced fields (lineage SDK + trace capture) | elixir | 3 | L | `provenance.md`, `type-system-feature-migration.md` DBT-1 |
 | DEBT-07 | `shape(document)` persistence | elixir | 3 | M | — |
@@ -82,6 +82,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | DEBT-28 | `loads:` eager-load specs + pagination on `find all` | all backends | 2 | L | — |
 | DEBT-29 | Joined view sources + per-view parameters not emitted | all backends | 2 | M | `views.md` |
 | DEBT-30 | Misc IR-consumed-nowhere: seed create-shape validation, side-effecting-call metadata, block-body lambdas in e2e, method-call hooks binding | varies | 1 | S–M | — |
+| DEBT-31 | Inline collection-op lambdas (`filter`/`map`/`sortBy`) on Phoenix/HEEx — done on the JS frontends, HEEx's parallel engine still renders the un-shaped collection | elixir | 2 | M | — |
 
 ---
 
@@ -112,9 +113,8 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 - **Today:** node ships per-op `audited`, lifecycle `audited create/destroy`, and `with audit` runtime stamping. dotnet/elixir parse `contextStamps` but defer runtime parity; lifecycle audit is node-only.
 - **Scope:** dotnet — finish the `IAuditWriter` unit-of-work path for lifecycle; elixir — emit the audit-record append in the save transaction.
 
-### DEBT-05 · React walker `List` / `Detail` / `For` primitives
-- **Where:** `src/generator/_walker/walker-core.ts` `emitComponent` — registered, source-admissible, but rendered only as `// X: not supported by the React walker yet`.
-- **Why P0:** these are common page primitives silently degrading to comments; the most visible *frontend* hole. Land the TSX renderers, then mirror to vue/svelte targets and (where mappable) HEEx.
+### DEBT-05 · React walker `List` / `Detail` / `For` primitives — DONE
+- **Was:** `List`/`Detail`/`MasterDetail`/`For` were registered + source-admissible but rendered only as `// X: not supported by the React walker yet` — common page primitives silently degrading to comments.
 - **`For` — DONE.** The `For { each:, item => markup }` comprehension now renders on all four frontends via a new `renderForEach` target seam: TSX keyed `.map`/`<Fragment>`, Vue `<template v-for :key>`, Svelte keyed `{#each}`, plus a Phoenix `for … do … end` block (`heex-primitives.ts:renderFor`). It's a child primitive (stays in `NON_PAGE_BODY_LAYOUT_PRIMITIVES`); list key is the loop index (a source-level `key:` is grammar-unwritable next to a brace-body item lambda, so the seam takes a `keyExpr` for programmatic/future use only).
 - **`List` / `Detail` / `MasterDetail` — REMOVED (not implemented).** Investigation showed they were inert: `admissibleInSource` but with no renderer and no expander arm, so they parsed/validated then dead-ended to a comment. They duplicated the working, hand-writable, embeddable `scaffoldList`/`scaffoldDetails` sentinels (which *do* have a phase-⑤c expander). No capability was lost by deleting them — embedding a list in a custom page is `scaffoldList { of: T }`. Decision pinned at [D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes); examples switched to the scaffold sentinels. The residual "scaffold expansion is opaque ⑤c magic, could emit unfoldable named components" idea survives as an OPEN note in `../proposals/unfoldable-page-scaffolding.md` (about the sentinels themselves, not the deleted archetypes).
 
@@ -132,6 +132,7 @@ Concise scope per item; full gate locations in the table above.
 - **DEBT-11 Vue workflow forms:** the workflow-parity slice flagged in `src/generator/vue/walker/page-shell.ts:41`.
 - **DEBT-12 Phoenix page DSL:** `requires` guard (v0 bind-only → full `handle_params/3`), new-parts-in-body stub, `verify_token/1` auth helper.
 - **DEBT-13 Ordered ref collections:** Ash `manage_relationship` ordinal injection + a first-class ordered editor on frontends.
+- **DEBT-31 Inline collection ops on Phoenix/HEEx:** expression-position lambda callbacks (`orders.filter(o => …)`, `.map`, `.sortBy`) render on the JS frontends via the shared `emitExpr` (`walker-core.ts`); HEEx's parallel engine (`heex-walker-core.ts`) still renders the un-shaped collection. Mirror the `emitExpr` lambda arm into the HEEx expr renderer (`Enum.filter/2` etc.).
 
 ---
 
@@ -202,7 +203,7 @@ Sequenced for parity impact and momentum (all are ports of an existing pattern,
 none require a design spike):
 
 1. ~~**DEBT-03** — operation `or`-union return on Elixir/Ash~~ — **slice 1 done** (return-dominant ops; mutation/guard follow-up remains).
-2. ~~**DEBT-05** — React `List`/`Detail`/`For` primitives~~ — **done**: `For` implemented (all 4 frontends + HEEx); `List`/`Detail`/`MasterDetail` removed as inert duplicates ([D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes)).
+2. ~~**DEBT-05** — React `List`/`Detail`/`For` primitives~~ — **done**: `For` implemented (all 4 frontends + HEEx, with an optional `empty:` arm); `List`/`Detail`/`MasterDetail` removed as inert duplicates ([D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes)).
 3. **DEBT-01** — principal-referencing filters on node (then elixir, java) — highest demand.
 4. **DEBT-02** — non-relational filters (rides on DEBT-01's plumbing).
 5. **DEBT-04** — audit runtime parity (dotnet first, then elixir).

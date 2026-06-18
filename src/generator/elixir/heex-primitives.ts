@@ -76,13 +76,13 @@ export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
   return `<a href="${to}"${testidAttr}>${label}</a>`;
 }
 
-/** `Modal(trigger: Button(...), title: "…", Form(of: Agg, op: x))`
+/** `Modal(trigger: Button(...), title: "…", OperationForm(of: Agg, op: x))`
  *  → a `<.button phx-click={show_modal(id)}>` trigger followed by
  *  a `<.modal id=…>` hosting a `<.simple_form for={@<op>_form}>`
  *  whose inputs are the operation's params.  Registers an
  *  `kind:"operation"` FormBinding the LiveView emitter turns into
  *  the `@<op>_form` assign + `validate_<op>`/`submit_<op>`
- *  handle_event clauses.  The `Form(of:, op:)` child is consumed
+ *  handle_event clauses.  The `OperationForm(of:, op:)` child is consumed
  *  here (never visited by renderChild) — mirrors the React
  *  walker's `emitModal`. */
 export function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
@@ -126,11 +126,11 @@ ${heading}${childrenHeex}
   }
   // The op-form names its operation via one of two shapes:
   //
-  //   * `Form(<instance>.<operation>)` — receiver is the in-scope
+  //   * `OperationForm(<instance>.<operation>)` — receiver is the in-scope
   //     aggregate instance (resolved via `instanceTypes`), member
   //     is the op name.  The classic Detail-page form inside a
   //     QueryView lambda binding.
-  //   * `Form(of: <Agg>, op: <opName>)` — flat named args; aggregate
+  //   * `OperationForm(of: <Agg>, op: <opName>)` — flat named args; aggregate
   //     resolved directly by name, id falls back to route.  The
   //     shape `scaffoldOperations(of:)` emits so modals can live
   //     outside a QueryView lambda.
@@ -158,7 +158,7 @@ ${heading}${childrenHeex}
     }
   }
   if (!formChild || !ofName || !opName) {
-    return `<!-- malformed Modal: expected trigger: Button + Form(<instance>.<op>) or Form(of:, op:) -->`;
+    return `<!-- malformed Modal: expected trigger: Button + OperationForm(<instance>.<op>) or OperationForm(of:, op:) -->`;
   }
   const aggSnake = snake(ofName);
   const opSnake = snake(opName);
@@ -219,12 +219,12 @@ ${heading}${childrenHeex}
   ].join("\n");
 }
 
-/** `Form(of: Agg, testid: "...", ...)` → `<.simple_form>` with auto
+/** `CreateForm(of: Agg, testid: "...", ...)` → `<.simple_form>` with auto
  *  inputs derived from the aggregate/workflow args.
  *  `runs: Wf` (workflow form) also emits a `<.simple_form>` but
  *  tied to the workflow action name. */
 export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  // `Form(<instance>.<operation>)` is the operation-modal form —
+  // `OperationForm(<instance>.<operation>)` is the operation-modal form —
   // owned and rendered by `renderModal` (it consumes its Form child
   // directly).  This guard makes the function total if a stray
   // op-form is ever reached without its Modal wrapper: bail before
@@ -440,17 +440,22 @@ function htmlInputTypeForIRType(t: TypeIR): string {
   }
 }
 
-/** `For { each: <coll>, <item> => <markup> }` →
+/** `For { each: <coll>, empty?: <markup>, <item> => <markup> }` →
  *  `<%= for <item> <- <coll> do %> … <% end %>` — LiveView's
  *  for-comprehension block.  No keyed wrapper: the `key:` arg is a
  *  client-framework reconciliation hint (React/Vue/Svelte) with no
  *  HEEx analogue, so it's accepted-and-ignored here.  The loop
  *  variable is a plain local (bare `snake(name)`), so item refs in the
  *  body resolve through `renderRef`'s unknown-refKind fall-through —
- *  same mechanism the Table `<:col :let={row}>` slot relies on. */
+ *  same mechanism the Table `<:col :let={row}>` slot relies on.
+ *
+ *  An `empty:` arm wraps the comprehension in an `Enum.empty?/1` guard
+ *  (`for` has no native else clause).  The collection is read twice —
+ *  fine for the page DSL's simple `each:` refs / assigns. */
 export function renderFor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let coll: ExprIR | undefined;
   let itemLam: Extract<ExprIR, { kind: "lambda" }> | undefined;
+  let emptyExpr: ExprIR | undefined;
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
@@ -461,6 +466,7 @@ export function renderFor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCont
       continue;
     }
     if (name === "each") coll = arg;
+    else if (name === "empty") emptyExpr = arg;
     else if (name === undefined) coll ??= arg;
   }
   if (!coll) {
@@ -472,7 +478,16 @@ export function renderFor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCont
   const itemVar = snake(itemLam.param);
   const collHeex = renderExpr(coll, { ...ctx, position: "template" });
   const body = renderChild(itemLam.body, ctx);
-  return [`<%= for ${itemVar} <- ${collHeex} do %>`, indent(body, 2), `<% end %>`].join("\n");
+  const loop = [`<%= for ${itemVar} <- ${collHeex} do %>`, indent(body, 2), `<% end %>`].join("\n");
+  if (!emptyExpr) return loop;
+  const emptyBody = renderChild(emptyExpr, ctx);
+  return [
+    `<%= if Enum.empty?(${collHeex}) do %>`,
+    indent(emptyBody, 2),
+    `<% else %>`,
+    indent(loop, 2),
+    `<% end %>`,
+  ].join("\n");
 }
 
 /** `Table(Column(...), ..., rows: ref("rows"), ...)` →
@@ -627,7 +642,7 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
         // Build a remapping so ref("rows") → @items, ref("data") → @data, etc.
         const remapping = new Map<string, string>([[dataVar, assignName]]);
         // Type the data binding so a nested instance-qualified op-form
-        // (`Form(data.confirm)`) resolves the aggregate it operates on.
+        // (`OperationForm(data.confirm)`) resolves the aggregate it operates on.
         const recordAgg = isSingle && ofArgNode ? resolveQueryAggregate(ofArgNode) : undefined;
         const innerCtx: WalkContext = {
           ...ctx,

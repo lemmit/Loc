@@ -33,4 +33,14 @@ describe("svelte walker primitive — For", () => {
     expect(svelte).not.toContain("Fragment");
     expect(svelte).not.toContain("not supported");
   });
+
+  it("renders the `empty:` arm through Svelte's native `{:else}` clause", async () => {
+    const svelte = await pageSvelte(
+      `Stack { For { each: [1, 2, 3], empty: Empty("Nothing here"), n => Heading { "Row" } } }`,
+    );
+    expect(svelte).toContain("{#each [1, 2, 3] as n, nIdx (nIdx)}");
+    expect(svelte).toContain("{:else}");
+    expect(svelte).toContain("Nothing here");
+    expect(svelte).toContain("{/each}");
+  });
 });

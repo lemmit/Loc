@@ -187,7 +187,11 @@ export const tsxTarget: WalkerTarget = {
    *  The keyed Fragment satisfies `useJsxKeyInIterable` without
    *  introducing a wrapper DOM node; the index binding is emitted only
    *  when referenced (else `noUnusedFunctionParameters` fires).  Brace-
-   *  wrapped below depth 0, mirroring the ternary/match-child arms. */
+   *  wrapped below depth 0, mirroring the ternary/match-child arms.
+   *
+   *  With an `empty:` arm the `.map` becomes the false branch of a
+   *  `coll.length === 0 ? (empty) : (.map(…))` ternary (the same
+   *  brace-wrap rule applies). */
   renderForEach(
     coll: string,
     itemVar: string,
@@ -195,18 +199,29 @@ export const tsxTarget: WalkerTarget = {
     keyExpr: string,
     body: string,
     depth: number,
+    emptyBody?: string,
   ): string {
     const usesIdx = referencesIdent(keyExpr, indexVar) || referencesIdent(body, indexVar);
     const params = usesIdx ? `(${itemVar}, ${indexVar})` : `(${itemVar})`;
     const inner = "  ".repeat(depth + 1);
     const close = "  ".repeat(depth);
-    const expr = [
+    const mapExpr = [
       `${coll}.map(${params} => (`,
       `${inner}<Fragment key={${keyExpr}}>`,
       `${inner}  ${body}`,
       `${inner}</Fragment>`,
       `${close}))`,
     ].join("\n");
+    const expr =
+      emptyBody === undefined
+        ? mapExpr
+        : [
+            `${coll}.length === 0 ? (`,
+            `${inner}${emptyBody}`,
+            `${close}) : (`,
+            `${inner}${mapExpr}`,
+            `${close})`,
+          ].join("\n");
     return depth === 0 ? expr : `{${expr}}`;
   },
 
