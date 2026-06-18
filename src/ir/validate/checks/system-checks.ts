@@ -1282,7 +1282,7 @@ export function validateEventSourcedStorage(
 // and drop the appliers entirely).  A parsed-but-unemitted feature is a footgun,
 // so it fails fast — exactly like the event-sourced *aggregate* storage gate,
 // and the supported set grows per backend (mirroring `EVENT_SOURCING_BACKENDS`).
-const EVENT_SOURCING_WORKFLOW_BACKENDS = new Set(["node"]);
+const EVENT_SOURCING_WORKFLOW_BACKENDS = new Set(["node", "dotnet"]);
 export function validateEventSourcedWorkflowStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
@@ -1299,8 +1299,9 @@ export function validateEventSourcedWorkflowStorage(
       message:
         `workflow '${wf.name}' is eventSourced, but event-sourced workflow storage ` +
         `(a per-correlation event stream folded through its apply(...) blocks) is ` +
-        `implemented on the Hono (node) backend only — this context is also hosted by ` +
-        `${hosts}. Host the context on a node deployable, drop the eventSourced modifier ` +
+        `implemented on the Hono (node) and .NET (dotnet) backends only — this context is ` +
+        `also hosted by ${hosts}. Host the context on a node / dotnet deployable, drop the ` +
+        `eventSourced modifier ` +
         `to use a state-based saga (a persisted correlation-state row, supported on ` +
         `node / dotnet / java / python / elixir-vanilla), or move the event-fold logic ` +
         `into an event-sourced aggregate (persistedAs(eventLog)). ` +

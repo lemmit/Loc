@@ -393,5 +393,53 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 600_000);
+
+    // Event-sourced WORKFLOW (workflow-and-applier.md A2-S5b): the saga folds
+    // its own emitted events into state via apply(...) and persists as an
+    // append-only `<wf>_events` stream — no mutable correlation-state row.
+    // Compiles the `<Wf>State` fold class, the `<Wf>EventRecord` EF entity +
+    // config + DbSet registration, and the fold-load / append-own-events
+    // dispatch handlers.
+    it("system event-sourced workflow (stream + fold + apply dispatch) — dotnet project builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-eswf-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/eventsourced-workflow.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        // Sanity: the fold class + the event-record entity made it out (and no
+        // mutable saga-state POCO for the event-sourced workflow).
+        expect(
+          fs.readFileSync(
+            path.join(proj, "Application", "Workflows", "OrderFulfillmentState.cs"),
+            "utf8",
+          ),
+        ).toContain("_FromEvents");
+        expect(
+          fs.existsSync(
+            path.join(
+              proj,
+              "Infrastructure",
+              "Persistence",
+              "Events",
+              "OrderFulfillmentEventRecord.cs",
+            ),
+          ),
+        ).toBe(true);
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
   },
 );

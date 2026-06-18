@@ -118,6 +118,7 @@ import { emitRetrievalSpecs, renderPagingExtension } from "./spec-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitDispatchHandlers, emitWorkflowInstanceReads, emitWorkflows } from "./workflow-emit.js";
+import { emitEventSourcedWorkflowFiles } from "./workflow-eventsourced-emit.js";
 import { emitWorkflowStatePersistence } from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -394,6 +395,10 @@ function emitProjectFromContexts(
     // correlation-bearing workflow); the DbSet/ApplyConfiguration wiring is
     // inside renderDbContext above.
     emitWorkflowStatePersistence(merged.workflows, ns, out, durableEventTypes(merged).size > 0);
+    // Event-sourced workflows (workflow-and-applier.md A2-S5b): the `<Wf>State`
+    // fold class + `<Wf>EventRecord` POCO/config (the stream the dispatch
+    // handler folds-on-load / appends to).
+    emitEventSourcedWorkflowFiles(merged.workflows, ns, out);
   }
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
@@ -820,11 +825,11 @@ function emitAggregate(
         idClass,
       }),
     );
-    place(`${agg.name}EventRecord.cs`, "event-record-poco", renderEventRecordPoco(agg, ns));
+    place(`${agg.name}EventRecord.cs`, "event-record-poco", renderEventRecordPoco(agg.name, ns));
     place(
       `${agg.name}EventRecordConfiguration.cs`,
       "ef-configuration",
-      renderEventRecordConfiguration(agg, ns),
+      renderEventRecordConfiguration(agg.name, ns),
     );
   } else {
     place(
@@ -932,6 +937,7 @@ function emitInfrastructure(
     renderDbContext(ctx, ns, documentAggNames([ctx]), eventSourcedAggNames([ctx]), hasOutbox),
   );
   emitWorkflowStatePersistence(ctx.workflows, ns, out, durableEventTypes(ctx).size > 0);
+  emitEventSourcedWorkflowFiles(ctx.workflows, ns, out);
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set("Api/ListResponseWrapperFilter.cs", renderListWrapperFilter(ns, listWrapperPairs([ctx])));

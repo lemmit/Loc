@@ -20,9 +20,12 @@ import { renderCsType } from "./render-expr.js";
 // the migration's, so EF's runtime model and the canonical migration agree.
 // ---------------------------------------------------------------------------
 
-/** Workflows in a context that carry a persisted correlation row. */
+/** Workflows in a context that carry a persisted correlation *row* — a
+ *  state-based saga.  Excludes `eventSourced` workflows: those persist as an
+ *  append-only `<wf>_events` stream (workflow-eventsourced-emit.ts), not a
+ *  mutable state row, so they get no EF state POCO / DbSet / table. */
 export function correlationWorkflows(workflows: readonly WorkflowIR[]): WorkflowIR[] {
-  return workflows.filter((wf) => !!wf.correlationField);
+  return workflows.filter((wf) => !!wf.correlationField && !wf.eventSourced);
 }
 
 /** The EF table name for a workflow's state row — matches

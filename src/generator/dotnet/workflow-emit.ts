@@ -34,7 +34,12 @@ import {
   wireType,
 } from "./dto-mapping.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
-import { workflowAllocateInitializer, workflowStateDbSet } from "./workflow-state-emit.js";
+import { esCorrIdClass, esEventDbSet, esEventRecordClass } from "./workflow-eventsourced-emit.js";
+import {
+  workflowAllocateInitializer,
+  workflowStateClass,
+  workflowStateDbSet,
+} from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
 // .NET workflow emission.
@@ -270,6 +275,9 @@ function renderEventReactorHandler(
   const usage = analyseStmts(statements, saves, aggsByName);
   const usings = new Set<string>();
   const persisted = !!wf.correlationField;
+  // An `eventSourced` workflow folds its `<wf>_events` stream into `state`
+  // rather than loading a mutable row (workflow-and-applier.md A2-S5b).
+  const eventSourced = !!wf.eventSourced;
   // A persisted handler renders `this.<stateField>` against the loaded row.
   const thisName = persisted ? "state" : "this";
 
@@ -325,13 +333,26 @@ function renderEventReactorHandler(
     usings.add(`${ns}.Infrastructure.Persistence`);
     for (const aggName of auditAggs) usings.add(`${ns}.Application.${plural(aggName)}.Responses`);
   }
-  // The saga row lives in the AppDbContext; the `on` drop path logs via ILogger.
+  // The saga state lives in the AppDbContext; the `on` drop path logs via
+  // ILogger.  An event-sourced workflow reads its `<wf>_events` stream
+  // (Persistence.Events) and folds via the `<Wf>State` class (this handler's
+  // own Application.Workflows namespace); a state-based saga reads its row POCO
+  // (Persistence.Workflows).
   if (persisted) {
-    fields.push(`    private readonly ${ns}.Infrastructure.Persistence.AppDbContext _db;`);
-    ctorParamPairs.push(`${ns}.Infrastructure.Persistence.AppDbContext db`);
+    // `global::`-anchor the AppDbContext reference: a deployable named `api`
+    // makes `ns === "Api"`, and a bare `Api.Infrastructure...` inside
+    // `Api.Application.Workflows` mis-resolves the leading `Api` (CS0234).
+    // Mirrors the same fix on the migrations DbContext attribute (emit/migrations.ts).
+    fields.push(`    private readonly global::${ns}.Infrastructure.Persistence.AppDbContext _db;`);
+    ctorParamPairs.push(`global::${ns}.Infrastructure.Persistence.AppDbContext db`);
     ctorAssigns.push("_db = db");
     usings.add("Microsoft.EntityFrameworkCore");
-    usings.add(`${ns}.Infrastructure.Persistence.Workflows`);
+    usings.add(`${ns}.Infrastructure.Persistence.${eventSourced ? "Events" : "Workflows"}`);
+    if (eventSourced) {
+      // Stream fold/append uses System.Linq (`Select`/`ToList`) + DateTime.
+      usings.add("System");
+      usings.add("System.Linq");
+    }
     if (trigger === "on") {
       fields.push(`    private readonly ILogger<${className}> _log;`);
       ctorParamPairs.push(`ILogger<${className}> log`);
@@ -358,7 +379,6 @@ function renderEventReactorHandler(
   // Correlation routing: load-or-allocate (create) / route-or-drop+log (on).
   if (persisted) {
     const corr = wf.correlationField as string;
-    const dbSet = workflowStateDbSet(wf);
     const corrPascal = upperFirst(corr);
     // The routing key: the `by <expr>` value, else the event field that
     // name-matches the correlation field (the omitted-`by` rule).
@@ -366,40 +386,69 @@ function renderEventReactorHandler(
       ? renderExprWithEventParam(correlation, paramName, resourceClasses)
       : `notification.${corrPascal}`;
     stmtLines.push(`        var __key = ${keyExpr};`);
-    stmtLines.push(
-      `        var state = await _db.${dbSet}.FirstOrDefaultAsync(x => x.${corrPascal} == __key, cancellationToken);`,
-    );
-    if (trigger === "create") {
-      // A starter creates the instance if its key is new.
-      stmtLines.push("        if (state is null)");
-      stmtLines.push("        {");
-      stmtLines.push(`            state = ${workflowAllocateInitializer(wf, "__key")};`);
-      stmtLines.push(`            _db.${dbSet}.Add(state);`);
-      stmtLines.push("        }");
-    } else {
-      // A continuation needs a started instance; otherwise drop + log.
-      stmtLines.push("        if (state is null)");
-      stmtLines.push("        {");
+    if (eventSourced) {
+      // Fold the `<wf>_events` stream into `state`.  A `create` starter folds
+      // from-zero (empty stream → seeded defaults); an `on` reactor requires a
+      // started saga (non-empty stream) and otherwise drops + logs.
+      const dbSet = esEventDbSet(wf);
+      const stateCls = workflowStateClass(wf);
+      stmtLines.push("        var __sid = __key.Value.ToString();");
       stmtLines.push(
-        `            ${renderDotnetLogCall("eventUnrouted", [
-          { name: "workflow", valueExpr: JSON.stringify(wf.name) },
-          { name: "event_type", valueExpr: JSON.stringify(eventName) },
-          { name: "key", valueExpr: "__key" },
-        ])}`,
+        `        var __rows = await _db.${dbSet}.Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync(cancellationToken);`,
       );
-      stmtLines.push("            return;");
-      stmtLines.push("        }");
-    }
-    if (durableEventTypes(ctx).size > 0) {
-      // Idempotent-consumer marker (dispatch-delivery-semantics.md §3):
-      // the relay rides the outbox row id on OutboxDelivery.CurrentEventId;
-      // a repeat of the recorded id is a no-op (at-least-once →
-      // effectively-once).  Inline (ephemeral) dispatch carries null.
-      stmtLines.push("        var __eventId = OutboxDelivery.CurrentEventId;");
-      stmtLines.push("        if (__eventId is not null && state.LastEventId == __eventId)");
-      stmtLines.push("        {");
-      stmtLines.push("            return; // already processed — at-least-once redelivery");
-      stmtLines.push("        }");
+      if (trigger === "on") {
+        stmtLines.push("        if (__rows.Count == 0)");
+        stmtLines.push("        {");
+        stmtLines.push(
+          `            ${renderDotnetLogCall("eventUnrouted", [
+            { name: "workflow", valueExpr: JSON.stringify(wf.name) },
+            { name: "event_type", valueExpr: JSON.stringify(eventName) },
+            { name: "key", valueExpr: "__key" },
+          ])}`,
+        );
+        stmtLines.push("            return;");
+        stmtLines.push("        }");
+      }
+      stmtLines.push(
+        `        var state = ${stateCls}._FromEvents(__key, __rows.Select(${stateCls}.RowToEvent).ToList());`,
+      );
+    } else {
+      const dbSet = workflowStateDbSet(wf);
+      stmtLines.push(
+        `        var state = await _db.${dbSet}.FirstOrDefaultAsync(x => x.${corrPascal} == __key, cancellationToken);`,
+      );
+      if (trigger === "create") {
+        // A starter creates the instance if its key is new.
+        stmtLines.push("        if (state is null)");
+        stmtLines.push("        {");
+        stmtLines.push(`            state = ${workflowAllocateInitializer(wf, "__key")};`);
+        stmtLines.push(`            _db.${dbSet}.Add(state);`);
+        stmtLines.push("        }");
+      } else {
+        // A continuation needs a started instance; otherwise drop + log.
+        stmtLines.push("        if (state is null)");
+        stmtLines.push("        {");
+        stmtLines.push(
+          `            ${renderDotnetLogCall("eventUnrouted", [
+            { name: "workflow", valueExpr: JSON.stringify(wf.name) },
+            { name: "event_type", valueExpr: JSON.stringify(eventName) },
+            { name: "key", valueExpr: "__key" },
+          ])}`,
+        );
+        stmtLines.push("            return;");
+        stmtLines.push("        }");
+      }
+      if (durableEventTypes(ctx).size > 0) {
+        // Idempotent-consumer marker (dispatch-delivery-semantics.md §3):
+        // the relay rides the outbox row id on OutboxDelivery.CurrentEventId;
+        // a repeat of the recorded id is a no-op (at-least-once →
+        // effectively-once).  Inline (ephemeral) dispatch carries null.
+        stmtLines.push("        var __eventId = OutboxDelivery.CurrentEventId;");
+        stmtLines.push("        if (__eventId is not null && state.LastEventId == __eventId)");
+        stmtLines.push("        {");
+        stmtLines.push("            return; // already processed — at-least-once redelivery");
+        stmtLines.push("        }");
+      }
     }
   }
   // Reactor / event-create bodies always dereference their loads → guard all.
@@ -414,11 +463,39 @@ function renderEventReactorHandler(
     const fieldName = `_${save.repoName.charAt(0).toLowerCase() + save.repoName.slice(1)}`;
     stmtLines.push(`        await ${fieldName}.SaveAsync(${save.name}, cancellationToken);`);
   }
-  // Persist the saga row (a new allocation, or a `this.<stateField>` mutation).
-  if (persisted && durableEventTypes(ctx).size > 0) {
-    stmtLines.push("        if (__eventId is not null) state.LastEventId = __eventId;");
+  if (persisted && eventSourced) {
+    // Append the workflow's own (folded) emitted events to its stream,
+    // gap-free, then SaveChanges.  Every emit in an event-sourced workflow has
+    // an applier (the A1 discipline), so all `_workflowEvents` are own-events;
+    // they are also re-published below for choreography.
+    if (usage.hasEmit) {
+      const dbSet = esEventDbSet(wf);
+      const recordCls = esEventRecordClass(wf);
+      const stateCls = workflowStateClass(wf);
+      stmtLines.push(
+        `        var __version = await _db.${dbSet}.Where(e => e.StreamId == __sid).Select(e => (int?)e.Version).MaxAsync(cancellationToken) ?? 0;`,
+      );
+      stmtLines.push("        foreach (var __ev in _workflowEvents)");
+      stmtLines.push("        {");
+      stmtLines.push("            __version++;");
+      stmtLines.push(`            _db.${dbSet}.Add(new ${recordCls}`);
+      stmtLines.push("            {");
+      stmtLines.push("                StreamId = __sid,");
+      stmtLines.push("                Version = __version,");
+      stmtLines.push("                Type = __ev.GetType().Name,");
+      stmtLines.push(`                Data = ${stateCls}.ToData(__ev),`);
+      stmtLines.push("                OccurredAt = DateTime.UtcNow,");
+      stmtLines.push("            });");
+      stmtLines.push("        }");
+      stmtLines.push("        await _db.SaveChangesAsync(cancellationToken);");
+    }
+  } else if (persisted) {
+    // Persist the saga row (a new allocation, or a `this.<stateField>` mutation).
+    if (durableEventTypes(ctx).size > 0) {
+      stmtLines.push("        if (__eventId is not null) state.LastEventId = __eventId;");
+    }
+    stmtLines.push("        await _db.SaveChangesAsync(cancellationToken);");
   }
-  if (persisted) stmtLines.push("        await _db.SaveChangesAsync(cancellationToken);");
 
   let body = stmtLines.join("\n") + "\n";
   if (usage.hasEmit) {
