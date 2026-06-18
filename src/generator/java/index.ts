@@ -351,6 +351,7 @@ function emitProjectFromContexts(
       applicationPkgOf: (a) => pkgFor("service", a),
       entityPkgOf: (a) => pkgFor("entity", a),
       repoPkgOf: (a) => pkgFor("repository-interface", a),
+      stateRepoPkg: pkgFor("spring-data-repository"),
     });
     if (viewFiles) {
       for (const [name, f] of viewFiles) place(name, f.category, f.content);
