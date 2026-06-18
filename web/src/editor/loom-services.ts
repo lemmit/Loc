@@ -13,6 +13,7 @@ import "@codingame/monaco-vscode-theme-defaults-default-extension";
 import { MonacoVscodeApiWrapper } from "monaco-languageclient/vscodeApiWrapper";
 import tmGrammar from "../../../vscode/grammars/ddd.tmLanguage.json?raw";
 import langConfig from "../../../vscode/language-configuration.json?raw";
+import loomTheme from "../../../vscode/themes/loom-dark.json?raw";
 
 let initPromise: Promise<void> | undefined;
 
@@ -32,6 +33,15 @@ async function doInit(): Promise<void> {
       ...getThemeServiceOverride(),
       ...getKeybindingsServiceOverride(),
     },
+    // Activate the bespoke Loom palette (see vscode/themes/loom-dark.json).
+    // Without this the editor inherits the stock VS Code dark theme, whose
+    // scope mapping leaves most of the DSL flat grey.
+    userConfiguration: {
+      json: JSON.stringify({
+        "workbench.colorTheme": "Loom Dark",
+        "editor.semanticHighlighting.enabled": true,
+      }),
+    },
     extensions: [
       {
         config: {
@@ -46,11 +56,15 @@ async function doInit(): Promise<void> {
             grammars: [
               { language: "ddd", scopeName: "source.ddd", path: "./ddd.tmLanguage.json" },
             ],
+            themes: [
+              { id: "Loom Dark", label: "Loom Dark", uiTheme: "vs-dark", path: "./loom-dark.json" },
+            ],
           },
         },
         filesOrContents: new Map<string, string>([
           ["/ddd.tmLanguage.json", tmGrammar],
           ["/language-configuration.json", langConfig],
+          ["/loom-dark.json", loomTheme],
         ]),
       },
     ],

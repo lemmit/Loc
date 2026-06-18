@@ -5,15 +5,21 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#strings" },
+    { "include": "#trace-ids" },
     { "include": "#numbers" },
+    { "include": "#capability" },
+    { "include": "#id-type" },
     { "include": "#declaration-keywords" },
+    { "include": "#member-keywords" },
     { "include": "#control-keywords" },
     { "include": "#modifiers" },
-    { "include": "#constants" },
     { "include": "#primitive-types" },
-    { "include": "#id-type" },
+    { "include": "#platform-constants" },
+    { "include": "#language-constants" },
+    { "include": "#property-keys" },
     { "include": "#type-names" },
-    { "include": "#operators" }
+    { "include": "#operators" },
+    { "include": "#punctuation" }
   ],
   "repository": {
     "comments": {
@@ -41,38 +47,61 @@
         }
       ]
     },
+    "trace-ids": {
+      "name": "entity.name.tag.ddd",
+      "match": "\\b[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-[0-9]+\\b"
+    },
     "numbers": {
       "name": "constant.numeric.ddd",
       "match": "\\b[0-9]+(\\.[0-9]+)?\\b"
     },
-    "declaration-keywords": {
-      "name": "keyword.declaration.ddd",
-      "match": "\\b(system|module|context|aggregate|entity|valueobject|enum|event|repository|workflow|view|deployable|ui|api|storage|theme|user|requirement|solution|testCase|operation|function|derived|invariant|contains|find|scaffold|component|page|menu|import|permissions|state|link)\\b"
-    },
-    "control-keywords": {
-      "name": "keyword.control.ddd",
-      "match": "\\b(precondition|requires|let|emit|match|when|where|else|new|for|from|against|test|e2e|expect|expectThrows|covers|verifies|entitles|serves|targets|modules|aggregates|contexts|events|views|workflows|persistenceStrategy|instance|connection|service|env|secret|literal)\\b"
-    },
-    "modifiers": {
-      "name": "storage.modifier.ddd",
-      "match": "\\b(private|extern|display|required|primary|transactional|readCommitted|readUncommitted|repeatableRead|serializable|cache|search|bi)\\b"
-    },
-    "constants": {
-      "name": "constant.language.ddd",
-      "match": "\\b(true|false|null|now|this|id|ids|type|platform|port|route|title|section|role|design|framework|body|parent|helper|bind|stateBased|eventSourced)\\b"
-    },
-    "primitive-types": {
-      "name": "support.type.primitive.ddd",
-      "match": "\\b(int|long|decimal|string|bool|datetime|guid)\\b"
+    "capability": {
+      "match": "\\b(with)\\s+([a-zA-Z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.control.ddd" },
+        "2": { "name": "entity.name.function.ddd" }
+      }
     },
     "id-type": {
       "match": "\\b(Id)\\s*(<)\\s*([A-Z][A-Za-z0-9_]*)\\s*(>)",
       "captures": {
-        "1": { "name": "support.type.id.ddd" },
+        "1": { "name": "support.type.primitive.ddd" },
         "2": { "name": "punctuation.definition.generic.begin.ddd" },
         "3": { "name": "entity.name.type.ddd" },
         "4": { "name": "punctuation.definition.generic.end.ddd" }
       }
+    },
+    "declaration-keywords": {
+      "name": "keyword.declaration.ddd",
+      "match": "\\b(system|subdomain|module|context|aggregate|entity|valueobject|enum|event|repository|workflow|view|deployable|ui|api|storage|resource|theme|user|auth|permission|requirement|solution|testCase|criterion|channel|channelSource|component|page|menu|layout|state|payload|command|query|response|error|seed|foundation|document|operation|function)\\b"
+    },
+    "member-keywords": {
+      "name": "keyword.other.member.ddd",
+      "match": "\\b(derived|invariant|find|contains|create|destroy|apply|onCreate|onUpdate|handle|filter|stamp|implements|retrieval|precondition|requires|import)\\b"
+    },
+    "control-keywords": {
+      "name": "keyword.control.ddd",
+      "match": "\\b(let|emit|match|when|where|else|if|for|in|new|from|against|return|on|by|with|of|use|test|e2e|expect|expectThrows|covers|verifies|entitles|serves|targets|sort|loads|asc|desc|or|paged|envelope|option|modules|aggregates|contexts|events|views|workflows|carries|hosts)\\b"
+    },
+    "modifiers": {
+      "name": "storage.modifier.ddd",
+      "match": "\\b(private|extern|abstract|extends|audited|provenanced|readonly|transactional|required|display|primary|immutable|managed|token|internal|secret|static|sensitive|softDeletable|embedded|ownTable|sharedTable|raw|bi|search|cache|persistedAs|inheritanceUsing|shape|stateBased|eventSourced|readCommitted|readUncommitted|repeatableRead|serializable|denyByDefault|persistence|persistenceStrategy)\\b"
+    },
+    "primitive-types": {
+      "name": "support.type.primitive.ddd",
+      "match": "\\b(int|long|decimal|money|string|bool|datetime|guid|json|slot|action)\\b"
+    },
+    "platform-constants": {
+      "name": "support.constant.platform.ddd",
+      "match": "\\b(react|svelte|vue|angular|phoenixLiveView|liveview|dotnet|hono|node|python|fastapi|java|elixir|phoenix|mantine|shadcn|mui|chakra|ashPhoenix|shadcnSvelte|flowbite|vuetify|shadcnVue|angularMaterial|primeng|spartanNg|postgres|mysql|sqlite|inMemory|redis|elastic|meilisearch|kafka|clickhouse|bigquery|s3|rabbitmq|nats|restApi|oidc|jwt|cookie|eventLog|snapshot|replica|objectStore|queue|broadcast|ephemeral|log|work|relational)\\b"
+    },
+    "language-constants": {
+      "name": "constant.language.ddd",
+      "match": "\\b(true|false|null|now|this|currentUser)\\b"
+    },
+    "property-keys": {
+      "name": "variable.other.property.ddd",
+      "match": "\\b([a-z][A-Za-z0-9_]*)(?=\\s*:)"
     },
     "type-names": {
       "name": "entity.name.type.ddd",
@@ -80,7 +109,14 @@
     },
     "operators": {
       "name": "keyword.operator.ddd",
-      "match": ":=|\\+=|-=|==|!=|<=|>=|&&|\\|\\||[-+*/%<>!?]"
+      "match": ":=|\\+=|-=|==|!=|<=|>=|&&|\\|\\||=>|->|[-+*/%<>!?=]"
+    },
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.accessor.ddd", "match": "\\." },
+        { "name": "punctuation.separator.ddd", "match": "[,;:]" },
+        { "name": "punctuation.bracket.ddd", "match": "[{}\\[\\]()]" }
+      ]
     }
   }
 }
