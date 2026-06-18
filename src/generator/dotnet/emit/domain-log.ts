@@ -107,6 +107,7 @@ public sealed class ExecutionContextBehavior<TMessage, TResponse> : IPipelineBeh
             ["correlationId"] = frame.CorrelationId,
             ["scopeId"] = frame.ScopeId,
             ["parentId"] = frame.ParentId,
+            ["actorId"] = frame.ActorId,
         }))
         {
             return await next(message, cancellationToken);

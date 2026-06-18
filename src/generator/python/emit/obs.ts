@@ -145,6 +145,15 @@ class CatalogFormatter(logging.Formatter):
         cid = correlation_id()
         if cid is not None:
             body["request_id"] = cid
+        # The carrier's frame / actor ids, read at format time so every line
+        # joins to the audit / provenance rows of the same frame (scope_id) and
+        # to the actor (actor_id, once auth has run).
+        sid = scope_id()
+        if sid is not None:
+            body["scope_id"] = sid
+        aid = actor_id()
+        if aid is not None:
+            body["actor_id"] = aid
         fields = getattr(record, "loom_fields", None)
         if isinstance(fields, dict):
             body.update(fields)

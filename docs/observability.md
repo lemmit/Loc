@@ -21,6 +21,21 @@ always present:
 | `event` | string | The catalog identity (see below) |
 | `request_id` | string | Per-request UUID; missing on boot-time lines |
 
+Two further carrier ids ride on every line emitted **inside a request frame**
+(absent on boot-time lines), so a log line joins to the audit / provenance rows
+written in the same frame:
+
+| Key | Type | Notes |
+|---|---|---|
+| `scope_id` | string | The frame's id — matches the `scope_id` column on `audit_records` / `provenance_records`. A workflow's child frame surfaces its own scope (Hono / .NET). |
+| `actor_id` | string | The principal's id; present only once auth has run (omitted under no-auth / on pre-auth lines). |
+
+Both come from the ambient execution-context carrier — see
+[`request-context.md`](architecture/request-context.md).  Each backend binds
+them at its native logging seam (pino `mixin`, ASP.NET `BeginScope`, Java `MDC`,
+the Python contextvar formatter, Elixir `Logger.metadata`), read at log time so
+per-frame accuracy holds.
+
 Catalog-specific structured fields ride alongside the envelope as their
 own top-level keys (`method`, `path`, `status`, `duration_ms`,
 `aggregate`, `workflow`, …) — not nested under a `data` field. This keeps

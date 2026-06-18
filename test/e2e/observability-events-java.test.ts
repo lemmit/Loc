@@ -230,6 +230,10 @@ describe.skipIf(!ENABLED)(
         expect(start!.method).toBe("GET");
         expect(end!.status).toBe(200);
         expect(typeof end!.durationMs).toBe("number");
+        // scope_id rides every request-scoped line (MDC, set at the filter) —
+        // the audit/provenance join key, shared across the request bracket.
+        expect(start!.scope_id).toBeTruthy();
+        expect(end!.scope_id).toBe(start!.scope_id);
       } finally {
         if (app && !app.killed) app.kill("SIGKILL");
         if (pgContainer) {

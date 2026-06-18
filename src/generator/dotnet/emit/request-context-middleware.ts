@@ -55,8 +55,13 @@ public sealed class RequestContextMiddleware
         // Echo the correlation id back to the caller.  Set before _next so
         // it lands before the response headers are sent.
         ctx.Response.Headers["X-Correlation-Id"] = correlationId;
-        using (RequestContext.Enter(RequestContext.OpenRoot(correlationId, locale, DateTimeOffset.UtcNow)))
-        using (log.BeginScope(new Dictionary<string, object?> { ["correlationId"] = correlationId }))
+        var rootFrame = RequestContext.OpenRoot(correlationId, locale, DateTimeOffset.UtcNow);
+        using (RequestContext.Enter(rootFrame))
+        using (log.BeginScope(new Dictionary<string, object?>
+        {
+            ["correlationId"] = correlationId,
+            ["scopeId"] = rootFrame.ScopeId,
+        }))
         {
             await _next(ctx);
         }

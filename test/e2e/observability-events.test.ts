@@ -194,6 +194,11 @@ describe.skipIf(!ENABLED)(
         expect(start!.request_id).toBeTruthy();
         expect(ok!.request_id).toBe(start!.request_id);
         expect(end!.request_id).toBe(start!.request_id);
+        // scope_id rides every request-scoped line (the audit/provenance join
+        // key) and is shared across the bracket — one root frame per request.
+        expect(start!.scope_id).toBeTruthy();
+        expect(ok!.scope_id).toBe(start!.scope_id);
+        expect(end!.scope_id).toBe(start!.scope_id);
         expect(start!.method).toBe("GET");
         expect(start!.path).toBe("/health");
         expect(end!.status).toBe(200);

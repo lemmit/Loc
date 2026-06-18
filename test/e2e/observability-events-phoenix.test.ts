@@ -317,6 +317,10 @@ describe.skipIf(!ENABLED)(
         expect(start!.path).toBe("/health");
         expect(end!.status).toBe(200);
         expect(typeof end!.duration_ms).toBe("number");
+        // scope_id rides every request-scoped line (Logger.metadata, set at the
+        // plug) — the audit/provenance join key, shared across the bracket.
+        expect(start!.scope_id).toBeTruthy();
+        expect(end!.scope_id).toBe(start!.scope_id);
       } finally {
         try {
           if (mixChild?.pid) {
