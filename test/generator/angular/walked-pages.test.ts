@@ -187,3 +187,70 @@ describe("angular generator — Button + event-handler seam", () => {
     expect(page).toContain("imports: [MatButtonModule],");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Pure-markup display + layout primitives (Container / Toolbar / Group /
+// Paper / Stat / Badge / Alert).  No api / state / event needs — they walk to
+// plain styled markup whose `.loom-*` classes the pack's theme owns.  Grows
+// the angularMaterial primitive surface toward the full required set.  (ng
+// build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const DISPLAY_SOURCE = `
+  system Smoke {
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish { total: int }
+      }
+    }
+    ui Web {
+      page Home {
+        route: "/"
+        title: "Home"
+        body: Container {
+          Toolbar {
+            Heading { "Dashboard", testid: "home-title" },
+            Badge { "New" }
+          },
+          Group {
+            Stat { "Orders", "42" }
+          },
+          Paper {
+            Text { "Inside a paper surface." }
+          },
+          Alert { "Something needs attention.", color: "yellow", title: "Heads up" }
+        }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
+  }
+`;
+
+async function displayPage(): Promise<string> {
+  const all = await generateSystemFiles(DISPLAY_SOURCE);
+  return all.get("web/src/app/pages/home.component.ts")!;
+}
+
+describe("angular generator — display + layout primitives", () => {
+  it("walks each primitive to its pack markup", async () => {
+    const page = await displayPage();
+    expect(page).toContain('<div class="loom-container">');
+    expect(page).toContain('<div class="loom-toolbar">');
+    expect(page).toContain('<div class="loom-group">');
+    expect(page).toContain('<div class="loom-paper">');
+    expect(page).toContain('<span class="loom-badge">New</span>');
+    expect(page).toContain(
+      '<div class="loom-stat"><div class="loom-stat-label">Orders</div><div class="loom-stat-value">42</div></div>',
+    );
+    expect(page).toContain('<div class="loom-alert loom-alert-yellow" role="alert">');
+    expect(page).toContain('<div class="loom-alert-title">Heads up</div>');
+  });
+
+  it("needs no Material module imports for the pure-markup primitives", async () => {
+    const page = await displayPage();
+    expect(page).toContain("imports: [],");
+  });
+});
