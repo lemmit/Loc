@@ -914,16 +914,17 @@ export interface WorkflowIR {
   creates: CreateIR[];
   /** Event-subscription reactors declared via `on(e: Event) [by <expr>] { … }`
    *  members (workflow-and-applier.md Phase A2, surface slice).  Omitted when
-   *  the workflow declares none.  Not yet consumed by backends — backend
-   *  emission and the `by` correlation-field type-check are deferred to later
-   *  slices, mirroring how Phase A1 landed `apply(...)` appliers ahead of any
-   *  event-store emission. */
+   *  the workflow declares none.  Consumed by the in-process dispatcher
+   *  emission on node / dotnet / elixir-ash / python (channels.md); the `by`
+   *  correlation-field type-check runs in the IR validator (workflow-checks.ts).
+   *  Java and elixir-vanilla dispatch emission are the remaining gaps. */
   subscriptions?: OnIR[];
   /** Workflow state fields declared as `Property` members — the correlation
    *  field plus saga state (workflow-and-applier.md A2-S2).  Lowered with the
    *  same `lowerField` as aggregate fields.  Omitted when the workflow
-   *  declares none.  Not yet emitted by backends (a persisted workflow row is
-   *  a later slice). */
+   *  declares none.  Emitted as a persisted correlation-state row by the saga
+   *  dispatcher (node / dotnet / elixir / python) and read back through the
+   *  instance endpoints derived from `instanceWireShape`. */
   stateFields?: FieldIR[];
   /** The single id-shaped state field the runtime routes inbound events to
    *  (workflow-and-applier.md §"Identity and correlation").  Set only when
