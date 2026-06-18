@@ -84,31 +84,81 @@ The tree *shape* is reused verbatim — same named-primitive calls, expressed as
 AST; it is **larger for Detail** (containments / derived / associations /
 operation fan-out) than for List.
 
-## The key coupling: origin is inferred from the sentinel
+## The key coupling: `origin` is inferred from the sentinel
 
-The one genuinely hard part. `inferPageOrigin` (`src/ir/lower/lower-ui.ts`)
-classifies a page (`aggregate-list` / `aggregate-detail` / `aggregate-new` /
-`view-list` / `home` / …) by **pattern-matching the body sentinel** during
-lowering — there is **no** separate origin slot (`scaffoldOrigin` is only a
-validator predicate). `applyPageOriginSideEffects` then uses `origin` to set
-the `emitPath` (`pages/orders/list.tsx`), synthesise the detail `:id` param,
-and route page-object emission. (Menu metadata is already emitted explicitly by
-the macro.)
+The one genuinely hard part — but it dissolves rather than needing a stamp.
+`inferPageOrigin` (`src/ir/lower/lower-ui.ts`) classifies a page
+(`aggregate-list` / `aggregate-detail` / `aggregate-new` / `view-list` /
+`home` / …) by **pattern-matching the body sentinel** during lowering — there
+is **no** separate origin slot (`scaffoldOrigin` is only a validator
+predicate). `applyPageOriginSideEffects` then uses `origin` to set the
+`emitPath` (`pages/orders/list.tsx`), synthesise the detail `:id` param, and
+route page-object emission. (Menu metadata is already emitted explicitly by the
+macro.)
 
-So if the body expands to full source *before* lowering, the sentinel — and
-thus the inferred origin — is gone. The relocation therefore needs origin to
-become an **explicit stamp**, not a reverse-engineered one:
+So once the body expands to full source *before* lowering, the sentinel — and
+thus the inferred origin — is gone. Each thing `origin` drove is handled
+*without* re-introducing a classification:
 
-- **The macro stamps origin when it emits the page** (it knows it is making an
-  `aggregate-list` page). This requires a place to put it: an optional `origin`
-  marker on the `Page` AST/IR that lowering reads (preferred over re-inferring
-  from a full body). This is the one grammar/IR addition the refactor needs.
-- A page **ejected** by the user becomes an ordinary `custom` page — it lands
-  at `pages/<name>.tsx`, the user owns it. That is correct: eject = "I own this
-  now", origin no longer applies.
-- The detail `:id` param is emitted **explicitly** by the macro
-  (`page OrderDetail(id: Order id)`) rather than synthesised from origin —
-  cleaner, and visible in the unfolded source.
+- **File placement → `area`** (next section): a structural, declared grouping,
+  not an emitPath reverse-engineered from the body. This is the substantive
+  replacement.
+- **The detail `:id` param** is emitted **explicitly** by the macro
+  (`page Detail(id: Order id)`), not synthesised from origin — cleaner, and
+  visible in the unfolded source.
+- **Page-objects** derive from the complete page body (the `custom`-page path
+  already does this), so the scaffold/custom split collapses to one path.
+
+Net: `origin` and `inferPageOrigin` are **removed**, not stamped. The one
+grammar/IR addition the refactor needs is `area` — which buys file grouping
+*and* (later) route prefixing + shared config, far more than emitPath did.
+
+## Areas — structural page grouping (`area { }`)
+
+`area <Name> { … }` is a first-class `ui` member that **contains** pages (and,
+recursively, sub-areas). Grouping is *containment*, not a stringly per-page
+label — so there are no typo'd/dangling group names, no repetition, and file
+placement is a structural fact:
+
+```ddd
+ui Admin {
+  page Home { route: "/" body: … }          // top-level → pages/home.tsx
+
+  area Sales {                                // → pages/sales/…
+    area Orders {                             // → pages/sales/orders/…
+      page List   { route: "" body: scaffoldList   { of: Order } }
+      page Detail(id: Order id) { route: "/:id" body: scaffoldDetails { of: Order } }
+      page New    { route: "/new" body: scaffoldNewForm { of: Order } }
+    }
+  }
+}
+```
+
+- **Placement from containment** — `pages/<area-path>/<page>.tsx`; the path
+  joins down the nesting. Replaces `origin`'s emitPath as a *declared* fact.
+- **The scaffold returns `area` blocks** — `scaffoldAggregate` returns an
+  `area` node containing its complete list/detail/new pages; unfolding the
+  scaffold reveals exactly that block (readable, editable). The scaffold can
+  mirror the domain hierarchy `subdomain → context → aggregate` as nested
+  areas, so the page tree reflects the bounded contexts it came from — *richer*
+  structure than today's flat-or-per-aggregate layout, not a loss.
+- **Nesting is free** — recursive grammar (`Area` members = `Page | Area`).
+- **Growth path (later, not v1):** an area **base `route:`** that its pages'
+  *relative* routes compose under (React-Router nested routes / ASP.NET area
+  prefixes — file tree and route tree then agree, both from one containment);
+  and area-level `layout` / `requires` / `label` that **cascade** to
+  descendants (declare a guard once for a whole area). A per-page `area:` string
+  could carry none of this — which is why it's a block, not a prop.
+- **Naming:** `area` chosen over `group` (collides with the `Group` primitive),
+  `module` (domain unit), `section` (taken by `menu`, and a different axis);
+  `feature` is the runner-up (rhymes with the `byFeature` layout axis).
+
+Grammar sketch:
+
+```
+UiMember: … | Page | Area | …;
+Area: 'area' name=ID '{' members+=(Page | Area)* '}';   // + later: route?/layout?/requires?/label?
+```
 
 ## Phased implementation (with gates)
 
@@ -118,14 +168,16 @@ become an **explicit stamp**, not a reverse-engineered one:
    data-light `scaffoldNewForm` shape. Test: build → print → re-parse → assert
    valid source + expected structure. *Additive; zero change to the compile
    path; proves AST-derivability + printability.*
-2. **Origin stamp.** Add the explicit `origin` marker on `Page` (grammar +
-   IR + printer + `inferPageOrigin` prefers it, falls back to body-inference).
-   Byte-identical (the stamp duplicates what inference derives). Unblocks
-   moving bodies off the sentinel.
-3. **Relocate List + New.** Build the `scaffoldList`/`scaffoldNewForm` body AST
-   at phase ②; the macro stamps origin + emits params/menu; delete those ⑤c
-   arms. **Gate: byte-identical generated output** across all frontends (the
-   lowered AST body must reproduce the ⑤c `ExprIR`).
+2. **`area` block (v1).** Grammar (`Area` as a `ui` member containing
+   `Page | Area`) + regen + printer + validator; lowering derives `emitPath`
+   from area containment; the scaffold emits `area` blocks (nested to mirror
+   `subdomain → context → aggregate`). This replaces `origin`'s emitPath role
+   structurally. (Area `route:`/`layout`/`requires`/`label` are deferred.)
+3. **Relocate List + New + drop `origin`.** Build the
+   `scaffoldList`/`scaffoldNewForm` body AST at phase ②; emit params/menu
+   explicitly; delete those ⑤c arms and `inferPageOrigin`; page-objects derive
+   from the complete page. **Gate: equivalent generated output** across all
+   frontends (UI identical; files now under their `area` path).
 4. **Relocate Detail + the rest.** `scaffoldDetails`/`scaffoldOperations`/
    `scaffoldViewList`/`scaffoldInstance*`/`scaffoldWorkflowForm` + the index
    singletons; delete the remainder of `walker-primitive-expander.ts`.
@@ -133,6 +185,8 @@ become an **explicit stamp**, not a reverse-engineered one:
    the shared builder.
 6. **(Optional) component emission.** Switch the builders to emit
    `component <Agg>ListView` + a page reference, for reuse/embedding.
+7. **(Later) area growth.** Base `route:` prefix (relative page routes),
+   cascading `layout`/`requires`/`label`.
 
 ## `List` (archetype) vs `<Agg>ListView` (if we emit components)
 
