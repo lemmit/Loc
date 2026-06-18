@@ -38,9 +38,12 @@ landed across most backends:
 | command routes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | saga-state row | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 | `on`/event-`create` dispatch | ✓ | ✓ | ✓ | **gap** | ✓ | **gap** |
-| instance read endpoints | ✓ | ✓ | (Ash defer) | ✓ | ✓ ⟵ this slice | **gap** |
-| view-over-workflow | ✓ | ✓ | (Ash defer) | gap | gap | gap |
+| instance read endpoints | ✓ | ✓ | (Ash defer) | ✓ | ✓ | **gap** |
+| view-over-workflow | ✓ | ✓ | (Ash defer) | gap | ✓ | gap |
 | `eventSourced` workflows (`apply`) | — | — | — | — | — | — |
+
+(python instance reads + view-over-workflow landed as the first two slices off
+this plan; see below.)
 
 ## Done in this slice — python instance read endpoints
 
@@ -56,6 +59,18 @@ has either a command **or** an observable workflow. Operation-ids and response
 component names reuse the shared `opWorkflowInstances` / `opWorkflowInstanceById`
 helpers, so cross-backend OpenAPI parity holds by construction. Tests:
 `test/generator/python/python-workflow-instances.test.ts`.
+
+## Done in this slice — python workflow-as-view-source
+
+`view X = <Workflow> where <pred>` now emits on Python (parity with node /
+dotnet). `src/generator/python/views-builder.ts` reads the source saga's
+`<Wf>Row` with the shorthand filter lowered to a SQLAlchemy `where` (a new
+`lowerWorkflowFilterToSqlAlchemy` reusing `find-predicate.ts`'s leaf logic over
+the saga row instead of an aggregate repository), projecting the same
+`instanceWireShape` the instance endpoints expose (`<View>Row` / `<View>Response`).
+`index.ts`'s `hasViews` gate now counts observable workflow sources. Tests:
+`test/generator/python/python-workflow-view.test.ts` + a `view` on the
+`saga.ddd` python-build gate fixture. (Stacked PR on the instance-reads slice.)
 
 ## Next slices (recommended order)
 

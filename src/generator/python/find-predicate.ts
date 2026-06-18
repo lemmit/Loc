@@ -1,7 +1,9 @@
 import type {
+  AssociationIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { snake } from "../../util/naming.js";
@@ -33,24 +35,36 @@ export function lowerToSqlAlchemy(
   agg: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
 ): PyPredicate | null {
+  // TPH concretes query the base's shared table.
+  return lowerOver(e, rowClassName(tableOwnerName(agg, ctx.aggregates)), agg.associations ?? []);
+}
+
+/** Lower a workflow-sourced view's shorthand filter (workflow-instance-views.md)
+ *  to a predicate over the saga-state `<Wf>Row`.  `this.<stateField>` refs bind
+ *  to the row's columns exactly as an aggregate filter binds to its row; saga
+ *  rows carry no reference collections, so the join-table `contains` arm never
+ *  fires here. */
+export function lowerWorkflowFilterToSqlAlchemy(e: ExprIR, wf: WorkflowIR): PyPredicate | null {
+  return lowerOver(e, rowClassName(wf.name), []);
+}
+
+function lowerOver(e: ExprIR, row: string, associations: AssociationIR[]): PyPredicate | null {
   const ops = new Set<string>();
-  const expr = lower(e, agg, ctx, ops);
+  const expr = lower(e, row, associations, ops);
   if (expr == null) return null;
   return { expr, ops };
 }
 
 function lower(
   e: ExprIR,
-  agg: EnrichedAggregateIR,
-  ctx: EnrichedBoundedContextIR,
+  row: string,
+  associations: AssociationIR[],
   ops: Set<string>,
 ): string | null {
-  // TPH concretes query the base's shared table.
-  const row = rowClassName(tableOwnerName(agg, ctx.aggregates));
   switch (e.kind) {
     case "binary": {
-      const l = lower(e.left, agg, ctx, ops);
-      const r = lower(e.right, agg, ctx, ops);
+      const l = lower(e.left, row, associations, ops);
+      const r = lower(e.right, row, associations, ops);
       if (l == null || r == null) return null;
       if (e.op === "&&") {
         ops.add("and_");
@@ -63,7 +77,7 @@ function lower(
       return `(${l} ${e.op} ${r})`;
     }
     case "unary": {
-      const inner = lower(e.operand, agg, ctx, ops);
+      const inner = lower(e.operand, row, associations, ops);
       if (inner == null) return null;
       if (e.op === "!") {
         ops.add("not_");
@@ -72,7 +86,7 @@ function lower(
       return `${e.op}${inner}`;
     }
     case "paren":
-      return lower(e.inner, agg, ctx, ops);
+      return lower(e.inner, row, associations, ops);
     case "ref":
       // `this.<col>` → the row column; everything else (params, lets,
       // enum values, currentUser) renders as a plain bind value.
@@ -106,10 +120,8 @@ function lower(
             : e.receiver.kind === "member" && e.receiver.receiver.kind === "this"
               ? e.receiver.member
               : null;
-        const assoc = fieldName
-          ? (agg.associations ?? []).find((a) => a.fieldName === fieldName)
-          : undefined;
-        const arg = lower(e.args[0]!, agg, ctx, ops);
+        const assoc = fieldName ? associations.find((a) => a.fieldName === fieldName) : undefined;
+        const arg = lower(e.args[0]!, row, associations, ops);
         if (assoc && arg != null) {
           const join = joinRowClassName(assoc);
           ops.add("select");

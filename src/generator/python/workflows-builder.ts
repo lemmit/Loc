@@ -399,8 +399,9 @@ function instanceRoutes(wf: WorkflowIR): string {
 
 /** One saga-row field projected to its wire value.  Mirrors the aggregate
  *  `wireValue`: datetimes ISO-encode, everything else (id / enum stored as its
- *  value text / scalar) passes through the column verbatim. */
-function instanceFieldValue(rowVar: string, f: WireField): string {
+ *  value text / scalar) passes through the column verbatim.  Shared with the
+ *  workflow-sourced view emitter (views-builder.ts). */
+export function instanceFieldValue(rowVar: string, f: WireField): string {
   const attr = `${rowVar}.${snake(f.name)}`;
   const t = f.type.kind === "optional" ? f.type.inner : f.type;
   if (t.kind === "primitive" && t.name === "datetime") {
