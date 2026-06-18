@@ -1,8 +1,18 @@
-import type { EnrichedBoundedContextIR, ExprIR, TypeIR, ViewIR } from "../../ir/types/loom-ir.js";
+import type {
+  EnrichedBoundedContextIR,
+  ExprIR,
+  TypeIR,
+  ViewIR,
+  WireField,
+  WorkflowIR,
+} from "../../ir/types/loom-ir.js";
 import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { responsePyType } from "./emit/http-models.js";
+import { lowerWorkflowFilterToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
 import { renderPyExpr } from "./render-expr.js";
+import { instanceFieldValue } from "./workflows-builder.js";
 
 // ---------------------------------------------------------------------------
 // View routes — `app/http/views_routes.py`, mounted at `/views`.
@@ -25,7 +35,22 @@ export function buildPyViewsFile(
   hasDispatch = false,
 ): string | null {
   const views = ctx.views.filter((v) => v.source.kind === "aggregate");
-  if (views.length === 0) return null;
+  const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
+  // Workflow-sourced views (workflow-instance-views.md): a shorthand `view X =
+  // <Workflow> where …` reads the saga-state row (the source's
+  // `instanceWireShape`) with the filter lowered to a SQLAlchemy `where`, the
+  // read-side analogue of the instance endpoints.  eventSourced / stateless
+  // workflows have no `instanceWireShape` and emit nothing here.
+  const wfViews = ctx.views.filter(
+    (v) => v.source.kind === "workflow" && wfByName.get(v.source.name)?.instanceWireShape != null,
+  );
+  if (views.length === 0 && wfViews.length === 0) return null;
+  // Lower each workflow view's filter once (reused by the route + import scan).
+  const wfLowered = new Map<string, PyPredicate | null>();
+  for (const v of wfViews) {
+    const wf = wfByName.get(v.source.name)!;
+    wfLowered.set(v.name, v.filter ? lowerWorkflowFilterToSqlAlchemy(v.filter, wf) : null);
+  }
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   // View reads never save, but repos take the deployable's default
   // dispatcher uniformly (Hono parity).
@@ -50,8 +75,20 @@ export function buildPyViewsFile(
     );
   }
 
-  const routes = views.map((v) => viewRoute(v, ctx, dispatcherExpr)).join("\n\n\n");
-  const body = `${models.join("")}router = APIRouter(prefix="/views", tags=["views"])\n\n\n${routes}`;
+  // Workflow-view response DTOs — the saga instance wire shape (`<View>Row` /
+  // `<View>Response`), the same shape the instance endpoints expose.
+  const wfModels = wfViews
+    .map((v) => workflowViewModels(v, wfByName.get(v.source.name)!, ctx))
+    .join("");
+
+  const routeBlocks = [
+    ...views.map((v) => viewRoute(v, ctx, dispatcherExpr)),
+    ...wfViews.map((v) =>
+      workflowViewRoute(v, wfByName.get(v.source.name)!, wfLowered.get(v.name) ?? null),
+    ),
+  ];
+  const routes = routeBlocks.join("\n\n\n");
+  const body = `${models.join("")}${wfModels}router = APIRouter(prefix="/views", tags=["views"])\n\n\n${routes}`;
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
@@ -68,19 +105,30 @@ export function buildPyViewsFile(
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
     .filter(refersTo)
     .sort();
+  // SQLAlchemy helpers a workflow-sourced view route calls: `select` for the
+  // saga read, plus any `and_`/`or_`/`not_` its lowered filter needs.
+  const saOps = new Set<string>(wfViews.length > 0 ? ["select"] : []);
+  for (const p of wfLowered.values()) for (const op of p?.ops ?? []) saOps.add(op);
+  // Saga-state row classes the workflow views read.
+  const wfRows = [...new Set(wfViews.map((v) => `${wfByName.get(v.source.name)!.name}Row`))].sort();
 
   return lines(
     `"""Read-model view routes.  Auto-generated."""`,
     "",
     "from fastapi import APIRouter, Depends",
-    models.length > 0 ? "from pydantic import BaseModel, RootModel" : null,
+    models.length > 0 || wfModels.length > 0 ? "from pydantic import BaseModel, RootModel" : null,
+    saOps.size > 0 ? `from sqlalchemy import ${[...saOps].sort().join(", ")}` : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
     "from app.db.engine import get_session",
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
-    hasDispatch ? "from app.dispatch import make_dispatcher" : null,
-    hasDispatch ? null : "from app.domain.events import NoopDomainEventDispatcher",
+    wfRows.length > 0 ? `from app.db.schema import ${wfRows.join(", ")}` : null,
+    refersTo("iso") ? "from app.db.wire import iso" : null,
+    hasDispatch && refersTo("make_dispatcher") ? "from app.dispatch import make_dispatcher" : null,
+    !hasDispatch && refersTo("NoopDomainEventDispatcher")
+      ? "from app.domain.events import NoopDomainEventDispatcher"
+      : null,
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
@@ -148,6 +196,49 @@ function viewRoute(view: ViewIR, ctx: EnrichedBoundedContextIR, dispatcherExpr: 
   out.push("        for r in rows");
   out.push("    ]");
   return out.join("\n");
+}
+
+// --- workflow-sourced views (workflow-instance-views.md) ------------------------
+
+/** A workflow-sourced view's response DTOs — `<View>Row` (the source saga's
+ *  `instanceWireShape`, id-source rows as `str`) + a `<View>Response` RootModel
+ *  list carrier.  Same wire shape the instance endpoints expose, so a curated
+ *  saga projection and the raw instance list agree field-for-field. */
+function workflowViewModels(view: ViewIR, wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
+  const fieldLines = (wf.instanceWireShape ?? []).map((f) => {
+    const t = f.source === "id" ? "str" : responsePyType(f.type, ctx);
+    const optional = f.optional || f.type.kind === "optional";
+    const suffix = optional && !t.endsWith("| None") ? " | None = None" : optional ? " = None" : "";
+    return `    ${f.name}: ${t}${suffix}`;
+  });
+  return lines(
+    `class ${view.name}Row(BaseModel):`,
+    fieldLines.length > 0 ? fieldLines : ["    pass"],
+    "",
+    "",
+    `class ${view.name}Response(RootModel[list[${view.name}Row]]):`,
+    "    pass",
+    "",
+    "",
+  );
+}
+
+/** `GET /views/<view>` over the source workflow's saga-state row with the
+ *  shorthand filter lowered to a SQLAlchemy `where`; rows project through the
+ *  shared instance wire projection (camelCase key ← snake column). */
+function workflowViewRoute(view: ViewIR, wf: WorkflowIR, pred: PyPredicate | null): string {
+  const fn = snake(view.name);
+  const row = `${wf.name}Row`;
+  const proj = (wf.instanceWireShape ?? [])
+    .map((f: WireField) => `"${f.name}": ${instanceFieldValue("row", f)}`)
+    .join(", ");
+  const where = pred ? `.where(${pred.expr})` : "";
+  return lines(
+    `@router.get("/${fn}", response_model=${view.name}Response, operation_id="${camelId(opView(view.name))}")`,
+    `async def ${fn}_view(session: SessionDep) -> list[dict[str, object]]:`,
+    `    rows = (await session.execute(select(${row})${where})).scalars().all()`,
+    `    return [{${proj}} for row in rows]`,
+  );
 }
 
 /** Money binds serialize as strings on view rows (TS parity — see the
