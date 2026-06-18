@@ -40,7 +40,7 @@ describe("python workflows", () => {
     expect(wf).toContain("c.rename(new_name)");
     expect(wf).toContain("await customers.save(c)");
     const main = files.get("api/app/main.py")!;
-    expect(main).toContain("app.include_router(workflows_router)");
+    expect(main).toContain('app.include_router(workflows_router, prefix="/api")');
   });
 
   it("one transaction per request: repos flush, the dependency commits", async () => {

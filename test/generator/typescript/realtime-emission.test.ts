@@ -64,7 +64,7 @@ describe("realtime SSE wire — Hono (delivery: broadcast)", () => {
     expect(idx).toContain(
       "events: DomainEventDispatcher = realtimeTee(createInProcessDispatcher(db)),",
     );
-    expect(idx).toContain('app.route("/realtime", realtimeRoutes());');
+    expect(idx).toContain('app.route("/api/realtime", realtimeRoutes());');
   });
 
   it("a durable broadcast channel composes outbox → tee → in-process (relay included)", async () => {

@@ -71,7 +71,7 @@ async function files(): Promise<Map<string, string>> {
 describe("java generator — controller routes (S5)", () => {
   it("emits the canonical route set on /<plural_snake>", async () => {
     const ctrl = (await files()).get(`${ROOT}/features/orders/OrdersController.java`)!;
-    expect(ctrl).toContain('@RequestMapping("/orders")');
+    expect(ctrl).toContain('@RequestMapping("/api/orders")');
     expect(ctrl).toContain("    @PostMapping");
     expect(ctrl).toContain('    @GetMapping("/{id}")');
     expect(ctrl).toContain("    @GetMapping");
@@ -82,7 +82,7 @@ describe("java generator — controller routes (S5)", () => {
 
   it("create returns 201 `{ id }` with a Location header; ops return 204", async () => {
     const ctrl = (await files()).get(`${ROOT}/features/orders/OrdersController.java`)!;
-    expect(ctrl).toContain('ResponseEntity.created(URI.create("/orders/" + id.value()))');
+    expect(ctrl).toContain('ResponseEntity.created(URI.create("/api/orders/" + id.value()))');
     expect(ctrl).toContain(".body(new CreateOrderResponse(id.value()));");
     expect(ctrl).toContain("@ResponseStatus(HttpStatus.NO_CONTENT)");
   });

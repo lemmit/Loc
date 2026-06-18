@@ -187,13 +187,13 @@ describe("system / module / deployable", () => {
     expect(e2e).toMatch(/api: process\.env\.E2E_API_BASE/);
     expect(e2e).toMatch(/catalog_web: process\.env\.E2E_CATALOG_WEB_BASE/);
     // POST /products with a JSON body for `api.products.create({...})`.
-    expect(e2e).toMatch(/__post\(`\$\{base\}\/products`, \(\{ sku: "WIDGET-1"/);
-    // GET /products/{id} for `api.products.getById(p)` (auto-`.id`).
-    expect(e2e).toMatch(/__get\(`\$\{base\}\/products\/\$\{p\.id\}`\)/);
-    // POST /orders/{id}/add_line for the operation call with body.
-    expect(e2e).toMatch(/__post\(`\$\{base\}\/orders\/\$\{ord\.id\}\/add_line`,/);
-    // GET /orders/by_customer with the find query name in snake_case.
-    expect(e2e).toMatch(/__getQuery\(`\$\{base\}\/orders\/by_customer`,/);
+    expect(e2e).toMatch(/__post\(`\$\{base\}\/api\/products`, \(\{ sku: "WIDGET-1"/);
+    // GET /api/products/{id} for `api.products.getById(p)` (auto-`.id`).
+    expect(e2e).toMatch(/__get\(`\$\{base\}\/api\/products\/\$\{p\.id\}`\)/);
+    // POST /api/orders/{id}/add_line for the operation call with body.
+    expect(e2e).toMatch(/__post\(`\$\{base\}\/api\/orders\/\$\{ord\.id\}\/add_line`,/);
+    // GET /api/orders/by_customer with the find query name in snake_case.
+    expect(e2e).toMatch(/__getQuery\(`\$\{base\}\/api\/orders\/by_customer`,/);
   });
 
   it("lowers `test e2e ... against <react>` to a Playwright spec via page objects", async () => {
