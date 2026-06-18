@@ -35,6 +35,7 @@ import path from "node:path";
 import os from "node:os";
 import { createDddServices } from "../../out/language/ddd-module.js";
 import { generateTypeScript } from "../../out/platform/hono/v4/emit.js";
+import { API_BASE_PATH } from "../../out/util/api-base.js";
 import { BACKEND_PINS } from "../../out/platform/hono/v4/pins.js";
 import { generateSystems } from "../../out/system/index.js";
 import {
@@ -193,19 +194,24 @@ async function runCase({ label, sourcePath, mode, expectSchemaQualified }) {
   console.log("# app booted");
 
   console.log("# 5/5 dispatching requests against in-process backend…");
-  const list0 = await app.fetch(new Request("http://localhost/products"));
-  if (list0.status !== 200) fail(`GET /products expected 200, got ${list0.status}: ${await list0.text()}`);
+  // Domain routes mount under the shared API base path (`/api`); infra
+  // (`/health`, `/ready`) stays at the root.
+  const productsUrl = `http://localhost${API_BASE_PATH}/products`;
+  const list0 = await app.fetch(new Request(productsUrl));
+  if (list0.status !== 200)
+    fail(`GET ${API_BASE_PATH}/products expected 200, got ${list0.status}: ${await list0.text()}`);
 
   const created = await app.fetch(
-    new Request("http://localhost/products", {
+    new Request(productsUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sku: "WIDGET-1", price: { amount: 5.0, currency: "USD" } }),
     }),
   );
-  if (created.status >= 400) fail(`POST /products returned ${created.status}: ${await created.text()}`);
+  if (created.status >= 400)
+    fail(`POST ${API_BASE_PATH}/products returned ${created.status}: ${await created.text()}`);
 
-  const list1 = await app.fetch(new Request("http://localhost/products"));
+  const list1 = await app.fetch(new Request(productsUrl));
   const body = await list1.text();
   if (list1.status !== 200) fail(`GET /products (after create) expected 200, got ${list1.status}: ${body}`);
   const parsed = JSON.parse(body);
