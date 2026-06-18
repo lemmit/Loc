@@ -338,6 +338,40 @@ function resourceOpsIn(wf: WorkflowIR): { resourceName: string; verb: string }[]
   return out;
 }
 
+/** Drain each provenanced aggregate's accumulated lineage into
+ *  `provenance_records`, stamping the carrier ids.  Shared by the workflow
+ *  command route and the event reactor — both invoke ops inline, so the
+ *  per-operation route's flush would otherwise be missed and the writes lost.
+ *  The caller wraps this in a child frame (`runInChildContext`) so each row
+ *  records its call-structure scope.  Empty when no saved aggregate has a
+ *  provenance write-site (gated identically to the aggregate's `drainProv`). */
+function renderProvFlush(
+  provSaves: { name: string }[],
+  indent: string,
+  dbHandle: string,
+): string[] {
+  if (provSaves.length === 0) return [];
+  const ls: string[] = [`${indent}const reqCtx = requestContext();`];
+  for (const save of provSaves) {
+    ls.push(`${indent}for (const t of ${save.name}.drainProv()) {`);
+    ls.push(`${indent}  await ${dbHandle}.insert(schema.provenanceRecords).values({`);
+    ls.push(`${indent}    traceId: randomUUID(),`);
+    ls.push(`${indent}    snapshotId: t.snapshotId,`);
+    ls.push(`${indent}    targetType: t.target.type,`);
+    ls.push(`${indent}    field: t.target.field,`);
+    ls.push(`${indent}    inputs: t.inputs,`);
+    ls.push(`${indent}    computedValue: t.computedValue,`);
+    ls.push(`${indent}    at: new Date(),`);
+    ls.push(`${indent}    correlationId: reqCtx?.correlationId ?? null,`);
+    ls.push(`${indent}    scopeId: reqCtx?.scopeId ?? null,`);
+    ls.push(`${indent}    actorId: reqCtx?.actorId ?? null,`);
+    ls.push(`${indent}    parentId: reqCtx?.parentId ?? null,`);
+    ls.push(`${indent}  });`);
+    ls.push(`${indent}}`);
+  }
+  return ls;
+}
+
 function emitWorkflowRoute(
   wf: WorkflowIR,
   ctx: BoundedContextIR,
@@ -456,28 +490,6 @@ function emitWorkflowRoute(
   // the before/after wire snapshots through the repo (`repo.toWire(agg)`).
   const repoVarByAgg = new Map(reposNeeded.map((r) => [r.aggName, lowerFirst(r.repoName)]));
   const bi = wrapsFrame ? "      " : "    ";
-  const provFlush = (indent: string, dbHandle: string): string[] => {
-    if (provSaves.length === 0) return [];
-    const ls: string[] = [`${indent}const reqCtx = requestContext();`];
-    for (const save of provSaves) {
-      ls.push(`${indent}for (const t of ${save.name}.drainProv()) {`);
-      ls.push(`${indent}  await ${dbHandle}.insert(schema.provenanceRecords).values({`);
-      ls.push(`${indent}    traceId: randomUUID(),`);
-      ls.push(`${indent}    snapshotId: t.snapshotId,`);
-      ls.push(`${indent}    targetType: t.target.type,`);
-      ls.push(`${indent}    field: t.target.field,`);
-      ls.push(`${indent}    inputs: t.inputs,`);
-      ls.push(`${indent}    computedValue: t.computedValue,`);
-      ls.push(`${indent}    at: new Date(),`);
-      ls.push(`${indent}    correlationId: reqCtx?.correlationId ?? null,`);
-      ls.push(`${indent}    scopeId: reqCtx?.scopeId ?? null,`);
-      ls.push(`${indent}    actorId: reqCtx?.actorId ?? null,`);
-      ls.push(`${indent}    parentId: reqCtx?.parentId ?? null,`);
-      ls.push(`${indent}  });`);
-      ls.push(`${indent}}`);
-    }
-    return ls;
-  };
   if (wrapsFrame) {
     out.push(`    await runInChildContext(async () => {`);
   }
@@ -497,7 +509,7 @@ function emitWorkflowRoute(
     for (const save of wf.savesAtExit) {
       out.push(`${bi}  await ${lowerFirst(save.repoName)}.save(${save.name});`);
     }
-    out.push(...provFlush(`${bi}  `, "tx"));
+    out.push(...renderProvFlush(provSaves, `${bi}  `, "tx"));
     out.push(`${bi}}${txOpts});`);
   } else {
     for (const r of reposNeeded) {
@@ -513,7 +525,7 @@ function emitWorkflowRoute(
     for (const save of wf.savesAtExit) {
       out.push(`${bi}await ${lowerFirst(save.repoName)}.save(${save.name});`);
     }
-    out.push(...provFlush(bi, "db"));
+    out.push(...renderProvFlush(provSaves, bi, "db"));
   }
   if (wrapsFrame) {
     out.push(`    });`);
@@ -935,13 +947,25 @@ function emitHandlerFn(
     }
     thisName = "state";
   }
+  // A reactor invokes ops inline, so a provenanced write it makes would be
+  // dropped — the per-operation route flushes provenance, but the reactor never
+  // drained it.  Mirror the workflow command path: flush each saved aggregate's
+  // lineage, inside a child frame so the rows record their call-structure scope
+  // (parentId chaining to the dispatching request).  Gated on a prov write-site
+  // so provenance-free reactors stay byte-identical (no frame, no flush).
+  const provSaves = saves.filter((s) => {
+    const agg = ctx.aggregates.find((a) => a.name === s.aggName);
+    return !!agg && agg.operations.some((o) => opHasProvSite(o));
+  });
+  const bi = provSaves.length > 0 ? "    " : "  ";
+  if (provSaves.length > 0) out.push(`  await runInChildContext(async () => {`);
   for (const r of collectReposFromStmts(statements, saves)) {
-    out.push(`  const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
+    out.push(`${bi}const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
   }
-  out.push(
-    ...renderWorkflowStmts(statements, honoWorkflowStmtTarget(ctx, noParams, thisName), "  "),
-  );
-  for (const save of saves) out.push(`  await ${lowerFirst(save.repoName)}.save(${save.name});`);
+  out.push(...renderWorkflowStmts(statements, honoWorkflowStmtTarget(ctx, noParams, thisName), bi));
+  for (const save of saves) out.push(`${bi}await ${lowerFirst(save.repoName)}.save(${save.name});`);
+  out.push(...renderProvFlush(provSaves, bi, "db"));
+  if (provSaves.length > 0) out.push(`  });`);
   if (persisted && durable) {
     out.push(`  if (__eventId !== undefined) state.lastEventId = __eventId;`);
   }
