@@ -39,7 +39,11 @@ import { buildPyEventSourcedRepositoryFile } from "./repository-eventsourced-bui
 import { emitPyResourceFiles } from "./resource-clients.js";
 import { buildPyRoutesFile } from "./routes-builder.js";
 import { buildPyViewsFile } from "./views-builder.js";
-import { buildPyWorkflowsFile, commandWorkflowsOf } from "./workflows-builder.js";
+import {
+  buildPyWorkflowsFile,
+  commandWorkflowsOf,
+  observableWorkflowsOf,
+} from "./workflows-builder.js";
 
 // ---------------------------------------------------------------------------
 // Python / FastAPI generator orchestrator.
@@ -109,7 +113,12 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     c.aggregates.filter((a) => !a.isAbstract).map((a) => a.name),
   );
   const hasViews = merged.views.some((v) => v.source.kind === "aggregate");
-  const hasWorkflows = commandWorkflowsOf(merged).length > 0;
+  // A command workflow gets a POST route; an observable (correlation-bearing)
+  // workflow gets read-only instance endpoints — either means `workflows_routes`
+  // exists and `main` mounts it (an event-triggered-only saga is still
+  // observable, parity with Hono / .NET).
+  const hasWorkflows =
+    commandWorkflowsOf(merged).length > 0 || observableWorkflowsOf(merged).length > 0;
   const resolveDs = (agg: import("../../ir/types/loom-ir.js").AggregateIR) => {
     const owning = args.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
     return owning

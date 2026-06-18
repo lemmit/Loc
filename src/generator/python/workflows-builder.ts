@@ -4,16 +4,23 @@ import {
   type OperationIR,
   operationUsesCurrentUser,
   type SystemIR,
+  type WireField,
   type WorkflowIR,
   type WorkflowStmtIR,
   workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
-import { camelId, opWorkflow } from "../../ir/util/openapi-ids.js";
+import {
+  camelId,
+  opWorkflow,
+  opWorkflowInstanceById,
+  opWorkflowInstances,
+} from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
+import { responsePyType } from "./emit/http-models.js";
 import { type PyRenderContext, renderPyExpr } from "./render-expr.js";
 import { resourceImportLines } from "./resource-clients.js";
 import { errorResponsesKwarg, pyWireToDomain, requestFieldDecl } from "./routes-builder.js";
@@ -31,8 +38,17 @@ import { errorResponsesKwarg, pyWireToDomain, requestFieldDecl } from "./routes-
 // `transactional` workflow's saves are atomic by construction.
 //
 // Event-triggered starters / `on(...)` reactors (the saga dispatcher +
-// correlation state tables) are S15b — `emitsCommandRoute` mirrors the
-// Hono facade rule, so reactor-only workflows emit nothing here.
+// correlation state tables) live in `dispatch-builder.ts` / `schema.ts`;
+// `emitsCommandRoute` mirrors the Hono facade rule, so a reactor-only
+// workflow emits no POST route here.
+//
+// Read-only instance endpoints (workflow-instance-visibility.md) — GET
+// `/<snake>/instances` (list) + `/<snake>/instances/{id}` (one by correlation
+// id, 404 if absent) — are emitted for every observable workflow (one with an
+// enriched `instanceWireShape`), reading the persisted saga-state row the
+// dispatcher upserts.  Driven off `instanceWireShape` independently of the
+// command route, so an event-triggered-only saga is still observable — parity
+// with the Hono / .NET / Elixir-vanilla instance reads.
 // ---------------------------------------------------------------------------
 
 function emitsCommandRoute(wf: WorkflowIR): boolean {
@@ -45,13 +61,21 @@ export function commandWorkflowsOf(ctx: EnrichedBoundedContextIR): WorkflowIR[] 
   return ctx.workflows.filter(emitsCommandRoute);
 }
 
+/** Observable workflows — correlation-bearing, state-table-backed sagas the
+ *  enricher gave an `instanceWireShape` (workflow-instance-visibility.md).
+ *  Each gets the read-only instance endpoints over its persisted saga row. */
+export function observableWorkflowsOf(ctx: EnrichedBoundedContextIR): WorkflowIR[] {
+  return ctx.workflows.filter((wf) => wf.instanceWireShape != null);
+}
+
 export function buildPyWorkflowsFile(
   ctx: EnrichedBoundedContextIR,
   hasDispatch = false,
   sys?: SystemIR,
 ): string | null {
   const wfs = commandWorkflowsOf(ctx);
-  if (wfs.length === 0) return null;
+  const obsWfs = observableWorkflowsOf(ctx);
+  if (wfs.length === 0 && obsWfs.length === 0) return null;
   // Resource verb-helper imports for any `<resource>.<verb>(...)` the
   // workflows call (resources.md).
   const resourceImports = sys
@@ -78,8 +102,15 @@ export function buildPyWorkflowsFile(
     )
     .join("");
 
-  const routes = wfs.map((wf) => workflowRoute(wf, ctx, dispatcherExpr, sys)).join("\n\n\n");
-  const body = `${models}router = APIRouter(prefix="/workflows", tags=["workflows"])\n\n\n${routes}`;
+  // Read-only instance response DTOs (+ list carrier) for observable sagas.
+  const instanceModels = obsWfs.map((wf) => instanceResponseModels(wf, ctx)).join("");
+
+  const routeBlocks = [
+    ...wfs.map((wf) => workflowRoute(wf, ctx, dispatcherExpr, sys)),
+    ...obsWfs.map((wf) => instanceRoutes(wf)),
+  ];
+  const routes = routeBlocks.join("\n\n\n");
+  const body = `${models}${instanceModels}router = APIRouter(prefix="/workflows", tags=["workflows"])\n\n\n${routes}`;
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
@@ -102,7 +133,8 @@ export function buildPyWorkflowsFile(
     refersTo("datetime") ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     `from fastapi import APIRouter, Depends, ${anyUser ? "Request, " : ""}Response`,
-    "from pydantic import BaseModel",
+    `from pydantic import ${["BaseModel", refersTo("RootModel") ? "RootModel" : null].filter(Boolean).join(", ")}`,
+    refersTo("select") ? "from sqlalchemy import select" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
@@ -110,15 +142,18 @@ export function buildPyWorkflowsFile(
     "from app.db.engine import get_session",
     ...resourceImports,
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
-    hasDispatch ? "from app.dispatch import make_dispatcher" : null,
-    refersTo("DomainError") || refersTo("ForbiddenError")
-      ? `from app.domain.errors import ${[
-          refersTo("DomainError") ? "DomainError" : null,
-          refersTo("ForbiddenError") ? "ForbiddenError" : null,
-        ]
-          .filter(Boolean)
+    obsWfs.length > 0
+      ? `from app.db.schema import ${obsWfs
+          .map((wf) => `${wf.name}Row`)
+          .sort()
           .join(", ")}`
       : null,
+    refersTo("iso") ? "from app.db.wire import iso" : null,
+    hasDispatch ? "from app.dispatch import make_dispatcher" : null,
+    (() => {
+      const names = ["AggregateNotFoundError", "DomainError", "ForbiddenError"].filter(refersTo);
+      return names.length > 0 ? `from app.domain.errors import ${names.join(", ")}` : null;
+    })(),
     eventsImports(refersTo, hasDispatch, eventNames),
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     ...[
@@ -293,6 +328,80 @@ function workflowRoute(
   }
   out.push("    return Response(status_code=204)");
   return out.join("\n");
+}
+
+// --- instance read endpoints (workflow-instance-visibility.md) ------------------
+
+/** The instance Response DTO + its list carrier for an observable workflow —
+ *  walks `instanceWireShape` the same way `routes-builder.responseModel` walks
+ *  an aggregate's wire shape (id-source rows are `str`, the rest go through the
+ *  shared `responsePyType`).  `<Wf>InstanceListResponse` is a `RootModel` so
+ *  FastAPI emits a `$ref` to a named array component (parity with the aggregate
+ *  `<Agg>ListResponse`). */
+function instanceResponseModels(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
+  const T = upperFirst(wf.name);
+  const shape = wf.instanceWireShape ?? [];
+  const fieldLines = shape.map((f) => {
+    const t = f.source === "id" ? "str" : responsePyType(f.type, ctx);
+    const optional = f.optional || f.type.kind === "optional";
+    const suffix = optional && !t.endsWith("| None") ? " | None = None" : optional ? " = None" : "";
+    return `    ${f.name}: ${t}${suffix}`;
+  });
+  return lines(
+    `class ${T}InstanceResponse(BaseModel):`,
+    fieldLines.length > 0 ? fieldLines : ["    pass"],
+    "",
+    "",
+    `class ${T}InstanceListResponse(RootModel[list[${T}InstanceResponse]]):`,
+    "    pass",
+    "",
+    "",
+  );
+}
+
+/** GET `/<snake>/instances` (list) + `/<snake>/instances/{id}` (by correlation
+ *  id, 404 if absent) over the persisted saga-state row the dispatcher upserts.
+ *  Reads the `<Wf>Row` SQLAlchemy model directly (the same row
+ *  `dispatch-builder` loads-or-allocates); each row projects through
+ *  `instanceWireShape` (camelCase wire key ← snake column), datetimes ISO-coded
+ *  exactly as the aggregate `to_wire`.  `session.get` keys on the PK (the
+ *  correlation field). */
+function instanceRoutes(wf: WorkflowIR): string {
+  const T = upperFirst(wf.name);
+  const slug = snake(wf.name);
+  const row = `${wf.name}Row`;
+  const shape = wf.instanceWireShape ?? [];
+  const proj = (rowVar: string): string =>
+    shape.map((f) => `"${f.name}": ${instanceFieldValue(rowVar, f)}`).join(", ");
+  const list = lines(
+    `@router.get("/${slug}/instances", response_model=${T}InstanceListResponse, operation_id="${camelId(opWorkflowInstances(wf.name))}")`,
+    `async def ${slug}_instances(session: SessionDep) -> list[dict[str, object]]:`,
+    `    rows = (await session.execute(select(${row}))).scalars().all()`,
+    `    return [{${proj("row")}} for row in rows]`,
+  );
+  const byId = lines(
+    `@router.get("/${slug}/instances/{id}", response_model=${T}InstanceResponse, operation_id="${camelId(opWorkflowInstanceById(wf.name))}"${errorResponsesKwarg("getById")})`,
+    `async def ${slug}_instance(id: str, session: SessionDep) -> dict[str, object]:`,
+    `    row = await session.get(${row}, id)`,
+    "    if row is None:",
+    `        raise AggregateNotFoundError("not_found")`,
+    `    return {${proj("row")}}`,
+  );
+  return [list, byId].join("\n\n\n");
+}
+
+/** One saga-row field projected to its wire value.  Mirrors the aggregate
+ *  `wireValue`: datetimes ISO-encode, everything else (id / enum stored as its
+ *  value text / scalar) passes through the column verbatim. */
+function instanceFieldValue(rowVar: string, f: WireField): string {
+  const attr = `${rowVar}.${snake(f.name)}`;
+  const t = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (t.kind === "primitive" && t.name === "datetime") {
+    return f.optional || f.type.kind === "optional"
+      ? `(None if ${attr} is None else iso(${attr}))`
+      : `iso(${attr})`;
+  }
+  return attr;
 }
 
 // The Python leaf table for the shared workflow statement spine
