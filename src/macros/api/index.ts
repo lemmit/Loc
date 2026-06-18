@@ -83,6 +83,7 @@ export {
 // to navigate.
 export {
   area,
+  binaryExpr,
   bodyProp,
   boolLit,
   callExpr,
@@ -93,4 +94,5 @@ export {
   pageMenuMeta,
   routeProp,
   stringLit,
+  ternaryExpr,
 } from "./ui-factories.js";

@@ -29,6 +29,7 @@
 import type {
   Area,
   AssignOrCallStmt,
+  BinaryChain,
   BodyProp,
   BoolLit,
   CallArg,
@@ -58,6 +59,7 @@ import type {
   StateBlock,
   StateField,
   StringLit,
+  TernaryExpr,
   ThisRef,
   TypeRef,
   UnaryExpr,
@@ -149,6 +151,14 @@ export function mkAssignOrCallStmt(shape: AstLiteral<AssignOrCallStmt>): AssignO
 
 export function mkUnaryExpr(shape: AstLiteral<UnaryExpr>): UnaryExpr {
   return mkAst<UnaryExpr>(shape);
+}
+
+export function mkBinaryChain(shape: AstLiteral<BinaryChain>): BinaryChain {
+  return mkAst<BinaryChain>(shape);
+}
+
+export function mkTernaryExpr(shape: AstLiteral<TernaryExpr>): TernaryExpr {
+  return mkAst<TernaryExpr>(shape);
 }
 
 export function mkThisRef(shape: AstLiteral<ThisRef>): ThisRef {
