@@ -37,13 +37,19 @@ landed across most backends:
 |---|:--:|:--:|:--:|:--:|:--:|:--:|
 | command routes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | saga-state row | ✓ | ✓ | ✓ | ✓ | ✓ | — |
-| `on`/event-`create` dispatch | ✓ | ✓ | ✓ | **gap** | ✓ | **gap** |
+| `on`/event-`create` dispatch | ✓ | ✓ | ✓ | ✓ | ✓ | **gap** |
 | instance read endpoints | ✓ | ✓ | (Ash defer) | ✓ | ✓ | **gap** |
-| view-over-workflow | ✓ | ✓ | (Ash defer) | gap | ✓ | gap |
+| view-over-workflow | ✓ | ✓ | (Ash defer) | ✓ | ✓ | **gap** |
 | `eventSourced` workflows (`apply`) | — | — | — | — | — | — |
 
-(python instance reads + view-over-workflow landed as the first two slices off
-this plan; see below.)
+Corrections from earlier matrix drift (verified against code): **elixir-vanilla
+dispatch already ships** (`index.ts` calls the foundation-agnostic
+`emitDispatch(..., "vanilla")`), so it was never a gap. With this slice's
+workflow-view, **vanilla is now at full workflow parity with node/dotnet**. The
+remaining workflow gaps are all **java** (which has *no* saga persistence,
+dispatcher, instance reads, or workflow views — command workflows only) plus the
+universal `eventSourced`-workflow track. python instance reads + view-over-workflow
+and elixir-vanilla view-over-workflow landed as the first slices off this plan.
 
 ## Done in this slice — python instance read endpoints
 
@@ -71,6 +77,20 @@ the saga row instead of an aggregate repository), projecting the same
 `index.ts`'s `hasViews` gate now counts observable workflow sources. Tests:
 `test/generator/python/python-workflow-view.test.ts` + a `view` on the
 `saga.ddd` python-build gate fixture. (Stacked PR on the instance-reads slice.)
+
+## Done in this slice — elixir-vanilla workflow-as-view-source
+
+`view X = <Workflow> where <pred>` now emits on `foundation: vanilla` (closing
+the last vanilla workflow gap; **vanilla now matches node/dotnet**).
+`src/generator/elixir/vanilla/view-emit.ts` emits a view module that reads the
+saga-state `<Wf>State` Ecto schema with the filter (reusing the vanilla
+`render-expr` foundation flag — enum → lowercase string column) and projects
+`instanceWireShape` (camelCase key ← snake struct field; Jason ISO-encodes
+datetimes, so no manual conversion). The project-wide `ViewsController` already
+emitted a `run/1` action per view, so before this it referenced a never-emitted
+module — this also fixes that latent compile break. Tests:
+`test/generator/elixir/vanilla-workflow-view.test.ts` + a `view` on the
+`vanilla-channels.ddd` elixir-vanilla-build gate fixture.
 
 ## Next slices (recommended order)
 
