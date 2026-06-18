@@ -11,11 +11,14 @@
 // Status: the AST builders + a print/re-parse proof.  Wiring them into
 // `_pages.ts` (so the scaffold macro RETURNS these instead of sentinels) and
 // deleting the ⑤c arms + `inferPageOrigin` is the cohesive flip that follows,
-// gated on equivalent generated output.  The filter-bar (find inputs + page
-// state) and per-type column formatters are the remaining tail.
+// gated on equivalent generated output.  `scaffoldList` now carries the
+// per-type column formatters (`columnAccessor` / `scalarColumnsForAggregate`,
+// twins of the ⑤c `columnAccessorFor`) and the `rowTestid` accessor; the
+// filter-bar (find inputs + page state) is the remaining tail.
 
-import type { Expression } from "../../../language/generated/ast.js";
+import type { Aggregate, Expression, TypeRef } from "../../../language/generated/ast.js";
 import {
+  binaryExpr,
   boolLit,
   callExpr,
   intLit,
@@ -23,6 +26,7 @@ import {
   memberAccess,
   nameRefExpr,
   stringLit,
+  ternaryExpr,
 } from "../../api/index.js";
 
 /** `scaffoldNewForm` — scaffolds the create page body:
@@ -54,15 +58,101 @@ export function scaffoldNewForm(aggName: string): Expression {
   ]);
 }
 
+/** The display dispatch a list/table column renders through — the
+ *  macro-layer mirror of `columnAccessorFor`'s type switch in
+ *  `walker-primitive-expander.ts`.  Resolved from the aggregate's AST at
+ *  scaffold time (see `scalarColumnsForAggregate`) so the builder stays
+ *  data-only. */
+export type ColumnKind =
+  | { tag: "id"; targetName: string }
+  | { tag: "datetime" }
+  | { tag: "bool" }
+  | { tag: "numeric" } // decimal / money / int / long — bare text
+  | { tag: "enum" }
+  | { tag: "text" }; // string / guid / json / fallback
+
+export interface ScaffoldColumn {
+  name: string;
+  kind: ColumnKind;
+}
+
+/** One table cell accessor `<rowVar>.<field>`, wrapped per type exactly as
+ *  the ⑤c `columnAccessorFor` does: ids link, datetimes format, bools render
+ *  a Yes/No ternary, enums badge, everything else is plain `Text`. */
+function columnAccessor(fieldName: string, kind: ColumnKind, rowVar: string): Expression {
+  const cell = (): Expression => memberAccess(nameRefExpr(rowVar), fieldName);
+  switch (kind.tag) {
+    case "id":
+      return callExpr("IdLink", [
+        { value: cell() },
+        { name: "of", value: nameRefExpr(kind.targetName) },
+      ]);
+    case "datetime":
+      return callExpr("DateDisplay", [{ value: cell() }]);
+    case "bool":
+      return callExpr("Text", [{ value: ternaryExpr(cell(), stringLit("Yes"), stringLit("No")) }]);
+    case "enum":
+      return callExpr("EnumBadge", [{ value: cell() }]);
+    default: // "numeric" | "text"
+      return callExpr("Text", [{ value: cell() }]);
+  }
+}
+
+/** Resolve an aggregate's scalar list columns from its AST — one `ScaffoldColumn`
+ *  per non-array `Property`, dispatched by the field's resolved type, skipping
+ *  value-object fields (no scalar cell, matching `expandScaffoldList`).  This is
+ *  the "compute it at macro time" twin of the ⑤c loop over lowered `agg.fields`:
+ *  the type kinds it needs (id target, primitive name, enum-vs-VO) are all
+ *  reachable through the post-link cross-references. */
+export function scalarColumnsForAggregate(agg: Aggregate): ScaffoldColumn[] {
+  const out: ScaffoldColumn[] = [];
+  for (const m of agg.members) {
+    if (m.$type !== "Property") continue;
+    const kind = columnKindForType(m.type);
+    if (kind) out.push({ name: m.name, kind });
+  }
+  return out;
+}
+
+function columnKindForType(type: TypeRef): ColumnKind | null {
+  if (type.array) return null; // arrays have no scalar column cell
+  const base = type.base;
+  if (base.$type === "IdType") {
+    return { tag: "id", targetName: base.target.ref?.name ?? base.target.$refText };
+  }
+  if (base.$type === "PrimitiveType") {
+    switch (base.name) {
+      case "datetime":
+        return { tag: "datetime" };
+      case "bool":
+        return { tag: "bool" };
+      case "decimal":
+      case "money":
+      case "int":
+      case "long":
+        return { tag: "numeric" };
+      default: // string / guid / json — plain text
+        return { tag: "text" };
+    }
+  }
+  if (base.$type === "NamedType") {
+    // Enum → badge; a value-object (or any other named type) has no scalar
+    // column cell, mirroring the expander's `valueobject` skip.
+    return base.target.ref?.$type === "EnumDecl" ? { tag: "enum" } : null;
+  }
+  return null;
+}
+
 /** `scaffoldList` — scaffolds the list page body: breadcrumbs, a toolbar with
  *  a "New <agg>" button, and a `QueryView` over `<api?>.<Agg>.all` rendering a
  *  Paper-framed `Table` (ID column + one column per scalar field).  AST twin
- *  of `expandScaffoldList`'s no-filter path.  `columns` are the scalar field
- *  names the caller pulled off the aggregate (skipping value-objects/arrays);
- *  `apiHandle` is the ui's api param when the aggregate is served over one. */
+ *  of `expandScaffoldList`'s no-filter path.  `columns` are the scalar columns
+ *  the caller resolved off the aggregate (`scalarColumnsForAggregate`), each
+ *  carrying its display `kind`; `apiHandle` is the ui's api param when the
+ *  aggregate is served over one. */
 export function scaffoldList(
   aggName: string,
-  columns: readonly string[],
+  columns: readonly ScaffoldColumn[],
   opts: { apiHandle?: string } = {},
 ): Expression {
   const slug = snake(plural(aggName));
@@ -73,7 +163,8 @@ export function scaffoldList(
     ? memberAccess(nameRefExpr(opts.apiHandle), aggName)
     : nameRefExpr(aggName);
 
-  // One Column per field; the ID column links to the detail page.
+  // One Column per field; the ID column links to the detail page, the rest
+  // dispatch their cell renderer by type (`columnAccessor`).
   const cols: Array<{ name?: string; value: Expression }> = [
     {
       value: callExpr("Column", [
@@ -91,8 +182,8 @@ export function scaffoldList(
     },
     ...columns.map((c) => ({
       value: callExpr("Column", [
-        { value: stringLit(humanize(c)) },
-        { value: lambda("o", memberAccess(nameRefExpr("o"), c)) },
+        { value: stringLit(humanize(c.name)) },
+        { value: lambda("o", columnAccessor(c.name, c.kind, "o")) },
       ]),
     })),
   ];
@@ -103,6 +194,13 @@ export function scaffoldList(
     { name: "striped", value: boolLit(true) },
     { name: "highlight", value: boolLit(true) },
     { name: "sticky", value: boolLit(true) },
+    {
+      name: "rowTestid",
+      value: lambda(
+        "r",
+        binaryExpr(stringLit(`${slug}-row-`), "+", memberAccess(nameRefExpr("r"), "id")),
+      ),
+    },
   ]);
 
   const queryView = callExpr("QueryView", [

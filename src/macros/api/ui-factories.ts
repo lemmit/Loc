@@ -8,6 +8,7 @@
 
 import type {
   Area,
+  BinaryChain,
   BodyProp,
   BoolLit,
   CallArg,
@@ -23,10 +24,12 @@ import type {
   PostfixChain,
   RouteProp,
   StringLit,
+  TernaryExpr,
   UiMember,
 } from "../../language/generated/ast.js";
 import {
   mkArea,
+  mkBinaryChain,
   mkBodyProp,
   mkBoolLit,
   mkCallArg,
@@ -40,6 +43,7 @@ import {
   mkPostfixChain,
   mkRouteProp,
   mkStringLit,
+  mkTernaryExpr,
 } from "./_mk.js";
 import { _currentOrigin, _setContainer, _tag } from "./factories-internals.js";
 
@@ -88,6 +92,37 @@ export function lambda(param: string, body: Expression): Lambda {
 export function nameRefExpr(name: string): NameRef {
   const origin = _currentOrigin();
   return _tag(mkNameRef({ $type: "NameRef", name }), origin);
+}
+
+/** A two-operand binary expression: `left <op> right` (e.g. the
+ * `rowTestid` accessor `"orders-row-" + r.id`).  Post grammar-flatten
+ * a binary is a `BinaryChain` carrying parallel `ops`/`rest` lists;
+ * the scaffolders only need the single-operator form. */
+export function binaryExpr(
+  head: Expression,
+  op: BinaryChain["ops"][number],
+  rest: Expression,
+): BinaryChain {
+  const origin = _currentOrigin();
+  const node = _tag(mkBinaryChain({ $type: "BinaryChain", head, ops: [op], rest: [rest] }), origin);
+  _setContainer(head, node, "head");
+  _setContainer(rest, node, "rest", 0);
+  return node;
+}
+
+/** A ternary expression: `cond ? thenExpr : elseExpr` (e.g. a bool
+ * cell renderer `o.active ? "Yes" : "No"`). */
+export function ternaryExpr(
+  cond: Expression,
+  thenExpr: Expression,
+  elseExpr: Expression,
+): TernaryExpr {
+  const origin = _currentOrigin();
+  const node = _tag(mkTernaryExpr({ $type: "TernaryExpr", cond, thenExpr, elseExpr }), origin);
+  _setContainer(cond, node, "cond");
+  _setContainer(thenExpr, node, "thenExpr");
+  _setContainer(elseExpr, node, "elseExpr");
+  return node;
 }
 
 // ---------------------------------------------------------------------------
