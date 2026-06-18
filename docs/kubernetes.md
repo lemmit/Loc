@@ -133,7 +133,13 @@ backend per cell.
   (passwords / app secret keys), kept out of the plaintext `ConfigMap`.
 - **D-K8S-INGRESS** — one optional `Ingress` per UI-serving deployable,
   host/className from `values.yaml`, **off by default**. Backends are
-  `ClusterIP`.
+  `ClusterIP`. When the UI deployable `targets:` a distinct backend, the
+  `Ingress` is **same-origin**: it splits one host into `/api` → the backend
+  service and `/` → the SPA (the built bundle fetches `/api` relative, so this
+  needs no CORS or separate API host; `/api` is listed first so the longer
+  prefix wins, and no path rewrite is required since backends already mount
+  under `/api`). A fullstack host (Phoenix LiveView, or a backend that mounts
+  its own `ui:`) keeps the single `/` catch-all — it already serves its `/api`.
 
 ## Seams this does NOT cover (v1)
 

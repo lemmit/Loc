@@ -1031,29 +1031,24 @@ function emitProject(
   // Catalog-identity request log — always-on.  Cross-backend parity
   // with Phoenix's <App>.Telemetry and Hono's pino access log.
   out.set("Middleware/RequestLoggingMiddleware.cs", renderRequestLoggingMiddleware(ns));
-  // Ambient execution context (docs/architecture/request-context.md).
-  // The one AsyncLocal carrier the principal slice (auth), the request-logger
-  // slice (--trace), and the audit/provenance correlation stamps all ride.
-  // Emitted when any of those is present; a project with none emits neither
-  // file, keeping the default artefact byte-identical.
-  const authRequired = !!options?.authRequired;
-  // The ambient carrier is ALWAYS emitted: the request log
-  // (RequestLoggingMiddleware, always mounted) carries `scope_id` from the
-  // root frame, matching the cross-backend observability envelope
-  // (Hono/Python/Java/Elixir all ride scope_id by default).  The auth /
-  // logger slices are layered on via the render options below; the bare
+  // Ambient execution context (docs/architecture/request-context.md) — the one
+  // AsyncLocal carrier the principal slice (auth), the request-logger slice
+  // (--trace), and the audit/provenance correlation stamps all ride.  ALWAYS
+  // emitted: the request log (RequestLoggingMiddleware, always mounted) carries
+  // `scope_id` from the root frame, matching the cross-backend observability
+  // envelope (Hono/Python/Java/Elixir all ride scope_id by default).  The auth
+  // / logger slices are layered on via the render options below; the bare
   // carrier (no auth, no --trace) still compiles with `ActorId => null`.
-  {
-    out.set(
-      "Domain/Common/RequestContext.cs",
-      renderRequestContext(ns, {
-        hasAuth: authRequired,
-        hasLogger: emitTrace,
-        actorIdProp: options?.actorIdProp,
-      }),
-    );
-    out.set("Middleware/RequestContextMiddleware.cs", renderRequestContextMiddleware(ns));
-  }
+  const authRequired = !!options?.authRequired;
+  out.set(
+    "Domain/Common/RequestContext.cs",
+    renderRequestContext(ns, {
+      hasAuth: authRequired,
+      hasLogger: emitTrace,
+      actorIdProp: options?.actorIdProp,
+    }),
+  );
+  out.set("Middleware/RequestContextMiddleware.cs", renderRequestContextMiddleware(ns));
   if (emitTrace) {
     // Domain-layer logger plumbing — emitted only on --trace so the
     // default artefact stays free of the DomainLog shim.

@@ -85,6 +85,15 @@ describe("kubernetes / helm emitter", () => {
     const ing = files.get("helm/templates/web-ingress.yaml")!;
     expect(ing).toContain("{{- if .Values.web.ingress.enabled }}");
     expect(ing).toContain("kind: Ingress");
+    // Same-origin split: the SPA `targets: api`, so one host fronts both —
+    // `/api` → the backend service (port 8080) and `/` → the SPA (port 3000).
+    expect(ing).toContain("- path: /api");
+    expect(ing).toMatch(/- path: \/api[\s\S]*name: {{ include "loom\.fullname" \. }}-api/);
+    expect(ing).toMatch(/- path: \/api[\s\S]*number: 8080/);
+    expect(ing).toMatch(/- path: \/\n[\s\S]*name: {{ include "loom\.fullname" \. }}-web/);
+    expect(ing).toMatch(/- path: \/\n[\s\S]*number: 3000/);
+    // `/api` must precede the `/` catch-all so the longer prefix wins.
+    expect(ing.indexOf("- path: /api")).toBeLessThan(ing.indexOf("- path: /\n"));
     // Backend gets none.
     expect(files.has("helm/templates/api-ingress.yaml")).toBe(false);
     // Default-off ⇒ raw render (default values) omits ingress entirely.

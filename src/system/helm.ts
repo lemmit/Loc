@@ -1,4 +1,5 @@
 import type { SystemIR } from "../ir/types/loom-ir.js";
+import { API_BASE_PATH } from "../util/api-base.js";
 import { buildWorkloads, kName, type WorkloadModel } from "./kubernetes.js";
 
 // ---------------------------------------------------------------------------
@@ -238,6 +239,21 @@ function renderIngressTemplate(w: WorkloadModel): string {
   lines.push(`    - host: {{ ${v}.ingress.host | default .Values.ingress.host | quote }}`);
   lines.push("      http:");
   lines.push("        paths:");
+  // Same-origin split: the built SPA fetches `/api` relative, so when it
+  // targets a distinct backend, front `/api` → that backend and `/` → the SPA
+  // on one host (one TLS cert).  `/api` is listed FIRST — the longer prefix
+  // must win, and no path rewrite is needed (backends already mount their
+  // routes under `/api`).  Fullstack hosts (apiBackend undefined) keep the
+  // single `/` catch-all, which already serves their own `/api`.
+  if (w.apiBackend) {
+    lines.push(`          - path: ${API_BASE_PATH}`);
+    lines.push("            pathType: Prefix");
+    lines.push("            backend:");
+    lines.push("              service:");
+    lines.push(`                name: ${FULLNAME}-${w.apiBackend.name}`);
+    lines.push("                port:");
+    lines.push(`                  number: ${w.apiBackend.servicePort}`);
+  }
   lines.push("          - path: /");
   lines.push("            pathType: Prefix");
   lines.push("            backend:");
@@ -293,6 +309,14 @@ function renderNotes(sys: SystemIR, workloads: WorkloadModel[]): string {
     lines.push("Frontends are ClusterIP by default. Expose one with, e.g.:");
     lines.push(`  --set ${w.valuesKey}.ingress.enabled=true \\`);
     lines.push(`        ${w.valuesKey}.ingress.host=app.example.com`);
+    if (w.apiBackend) {
+      lines.push("");
+      lines.push(
+        `That Ingress is same-origin: it routes ${API_BASE_PATH} → the ${w.apiBackend.name}`,
+      );
+      lines.push("backend and / → the SPA on one host, so the bundle's relative");
+      lines.push(`${API_BASE_PATH} fetches resolve without CORS or a separate API host.`);
+    }
   }
   lines.push("");
   return lines.join("\n") + "\n";
