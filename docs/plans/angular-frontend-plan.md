@@ -60,9 +60,21 @@ React's `useState` — arguably cleaner, see below.
 ## Decisions (recommended — confirm before Slice 1)
 
 These mirror the "Decisions (locked with the user)" tables the Vue and
-Svelte plans opened with. Recommendations are pinned; the three marked
-**⚠ open** diverge from the original proposal and are the ones worth an
-explicit confirm.
+Svelte plans opened with. Recommendations are pinned.
+
+> **Idiomaticity over reuse-parity (calibration note).** An earlier draft
+> of this table optimized two decisions (data layer, forms) for *generator
+> reuse / parity with Vue+Svelte*. That is the wrong objective: Loom's
+> product thesis is **idiomatic-per-ecosystem output** — a .NET/Java shop
+> adopting Angular wants code that reads like Angular, not
+> React-with-Angular-syntax. And the reuse cost was overstated: the
+> architecture already isolates the framework-facing output (the
+> per-platform page-shell and `angularTarget`) from the shared core (wire
+> shape, `walkBody`, zod, page objects), so an idiomatic data/forms choice
+> only swaps the `api-module`/form *builders* — which are per-platform by
+> design. The data-layer and forms rows below were therefore flipped back
+> toward the proposal's idiomatic picks; the second-pack row is a genuine
+> taste call (marked **⚠ taste**).
 
 | Decision | Recommendation | Notes |
 |---|---|---|
@@ -70,10 +82,12 @@ explicit confirm.
 | Reactivity for `state` | **Signals** (`signal()`/`set()`/`update()`/`computed()`) | Reads are `count()` **in every position** (template *and* class) — simpler than Vue's position-dependent `.value`; under-uses `renderStateRead`'s `position` param (harmless). Proposal-aligned. |
 | `match` rendering | **`@switch` / `@if` control-flow blocks** | `@for (x of xs; track x.id)` for collections. Modern, less verbose than `*ngSwitch`/`*ngFor`. Proposal-aligned. |
 | App shape / build | **Angular CLI standalone app**, `ng build` → static `dist/<app>/browser`, served by a tiny static server in the docker runtime stage | The one real structural break from Vue/Svelte: Angular does **not** ride the shared `vite build`/`vite preview` `docker/` two-stage. See Slice 2 + Risks. |
-| Data layer | **⚠ open — recommend `@tanstack/angular-query-experimental`** (`injectQuery(() => opts)`), preserving the generated `useQuery`/`useMutation` call surface for max reuse of `_frontend/api-module.ts` + `zod-schemas.ts` | Proposal pinned **typed `HttpClient` services**. Tanstack keeps Angular parallel with the other three frontends (cache/refetch parity, shared API-module builder). Fallback: a hand-rolled signal query helper with the same generated surface (the Svelte/Vue fallback pattern). HttpClient services are the alternative if a query-cache dep is unwanted. |
-| Forms | **⚠ open — recommend hand-rolled signal + zod** (a `signal` form object, zod parse on submit, per-field error map, server-error application mirroring `_frontend/form-helpers.ts` / `apply-server-errors.ts`) | Proposal pinned **Reactive Forms** (`FormGroup`/`FormControl`). Hand-rolled signal forms keep parity with Svelte (`$state`) / Vue (`reactive()`), reuse the shared form/zod/apply-server-errors machinery, and avoid a per-command `FormGroup`-construction emit step. Reactive Forms is the Angular-idiomatic alternative. |
-| First design pack | **`angularMaterial@v1`** (npm-package model — the Vuetify/Mantine analog) | Best-documented enterprise pack; deps live in the pack's `package-json.hbs` over the `ng1` stack partials. |
-| Second pack | **⚠ open — recommend `spartanNg@v1`** (shadcn-for-Angular: Tailwind + source-copy, the shadcn/shadcnVue/shadcnSvelte analog) | Gives the same npm-model + source-copy-model pair every other frontend has. `primeng@v1` (npm-model) is the alternative if a source-copy Tailwind pack is undesired. |
+| API layer / DI | **DI-native** — the API client + per-aggregate access as `@Injectable({ providedIn: 'root' })` services consumed via `inject()` | DI is the heart of Angular; the other frontends' module-scope functions/hooks/composables are not the Angular shape. The shared `_frontend/api-module.ts` gains an Angular-idiomatic injectable-service builder variant (per-platform output, like the page-shell). zod schemas reuse unchanged. |
+| Data layer | **Signal-native, first-party** — reads via `httpResource()` / `rxResource()` (signal loading/error/value), wired through the injectable services above | Coherent with the signals decision (signal state **and** signal data-fetching, no React query-cache transplant). **Floor/fallback:** services return `Observable<T>` + `toSignal()` if the `httpResource` Angular-version pin (≥ 19.2) is undesired — version-proof and equally idiomatic. **`@tanstack/angular-query-experimental` is rejected** for Angular: experimental-branded and a React-culture import, the least idiomatic option here. |
+| Forms | **Typed Reactive Forms** (`FormGroup<{…}>` / `FormControl` / `Validators`, strictly-typed since v14) | THE idiomatic, generator-friendly Angular forms story — a typed `FormGroup` is mechanical codegen from the wire shape. Server field errors map onto `control.setErrors(...)` (same `apply-server-errors` semantics as the other frontends, different sink). Observable→signal bridge via `toSignal(form.valueChanges)`. (A hand-rolled signal-form object — the Svelte/Vue shape — is an anti-pattern in Angular; rejected.) |
+| Frontend ACL / auth | **Functional route guards** (`CanActivateFn` + `inject(SessionService)`) on the generated route table + `@if` on a session signal in templates | More idiomatic than porting React's render-time gate component; slots into the `provideRouter` route table this plan already emits. `_frontend/auth-ui.ts` gains an `AUTH_GUARD_ANGULAR` + session service variant. |
+| First design pack | **`angularMaterial@v1`** (npm-package model — the Vuetify/Mantine analog) | Best-documented, first-party (Google) enterprise pack; deps live in the pack's `package-json.hbs` over the `ng1` stack partials. |
+| Second pack | **⚠ taste — recommend `primeng@v1`** (npm-package model, the widely-deployed enterprise Angular suite) | For *idiomatic enterprise Angular* — this plan's stated rationale — PrimeNG is the stronger, most-deployed second pick. `spartanNg@v1` (shadcn-for-Angular: Tailwind + source-copy) is the alternative if cross-frontend consistency with the shadcn source-copy packs is preferred over enterprise idiom. |
 | Default pack | A `platform: angular` deployable without `design:` defaults to **`angularMaterial`** | `lower-deployment.ts` defaulting, mirroring `svelte → shadcnSvelte`, `vue → vuetify`. |
 | Walker strategy | **Reuse, not fork**: drive the shared `walkBody` core with an `angularTarget`; HEEx keeps its parallel engine | Angular is a `{{…}}`/`[bind]`/`(event)` HTML-template framework, structurally like Vue. |
 
@@ -95,7 +109,7 @@ explicit confirm.
 | Page-DSL primitive **registry** (`src/generator/_walker/registry.ts`) + name-only mirror (`src/language/walker-stdlib.ts`) | **Reuse** — closed, framework-neutral set. |
 | Shared `walkBody` core (`src/generator/_walker/walker-core.ts`) | **Reuse** — drive with `angularTarget`. |
 | `WalkerTarget` contract (`src/generator/_walker/target.ts`) | **Reuse the contract** — implement `angularTarget`. The 18 seams already exist (`renderStateRead/Write`, `renderApiCall/Hoisting`, `buildHookUse`, `renderMatch/MatchChild`, `renderForEach`, `renderNavigate`, `defaultInitFor`, `renderComment`, `renderInterpolation`, `renderAttrBinding`, `renderConditionalChild`, `renderStyleAttr`, `escapeText`, optional `formRuntimeImports`/`renderChildrenSlot`). Angular fills them with `[prop]`/`(event)`/`@if`/`@for`/signal syntax. **Expectation: no new seam** (Vue validated the position-aware reads; Svelte added the markup seams). If Angular's `(event)` inline-handler restriction forces one, add it once on the contract + all targets. |
-| Framework-neutral frontend builders (`src/generator/_frontend/`: `api-module.ts`, `zod-schemas.ts`, `views-module.ts`, `workflows-module.ts`, `menu-emitter.ts`, `page-objects-builder.ts`, `walker-page-objects.ts`, `theme-preparer.ts`, `smoke-spec.ts`, `e2e-harness.ts`, `extern-functions.ts`, `realtime.ts`, `auth-ui.ts`) | **Reuse** — Angular adds an `AUTH_GATE_ANGULAR`/`AUTH_USE_SESSION_ANGULAR` to `auth-ui.ts` and an `E2E_PACKAGE_JSON_ANGULAR` to `e2e-harness.ts`, the way Vue/Svelte each added their variants. Page objects + `@loom/ui-test-driver` are framework-neutral (testid/DOM only). |
+| Framework-neutral frontend builders (`src/generator/_frontend/`: `api-module.ts`, `zod-schemas.ts`, `views-module.ts`, `workflows-module.ts`, `menu-emitter.ts`, `page-objects-builder.ts`, `walker-page-objects.ts`, `theme-preparer.ts`, `smoke-spec.ts`, `e2e-harness.ts`, `extern-functions.ts`, `realtime.ts`, `auth-ui.ts`) | **Reuse** — Angular adds an `AUTH_GUARD_ANGULAR` (functional `CanActivateFn` route guard) + session-service variant to `auth-ui.ts`, an injectable-service variant to `api-module.ts`, and an `E2E_PACKAGE_JSON_ANGULAR` to `e2e-harness.ts`, the way Vue/Svelte each added their variants. Page objects + `@loom/ui-test-driver` are framework-neutral (testid/DOM only). |
 | `WalkerTarget` impl `angular-target.ts` | **New** — `src/generator/angular/walker/angular-target.ts`. |
 | Generator orchestrator | **New** — `src/generator/angular/index.ts` (`generateAngularForContexts(...)`), plus siblings mirroring vue/svelte (`walker/page-shell.ts`, `routes-emitter.ts`, `layouts-emitter.ts`, `realtime-handlers-builder.ts`, `emit-templates.ts`). |
 | `PlatformSurface` | **New** — `src/platform/angular.ts`; register in `src/platform/registry.ts`. |
@@ -186,12 +200,16 @@ so the registry's `Record<Platform, PlatformSurface>` stays total.
   dir. **Note the divergence:** Angular does *not* include the shared
   vite `docker/` dir (that two-stage assumes `vite build`/`vite preview`).
 - New `stacks/ng1/`: `stack.json` + dep partials — `@angular/core`,
-  `@angular/common`, `@angular/router`, `@angular/forms`,
+  `@angular/common` (provides `httpResource`/`HttpClient`),
+  `@angular/router`, `@angular/forms` (Reactive Forms),
   `@angular/platform-browser`, `@angular/build` (or `@angular-devkit/build-angular`),
-  `@angular/cli`, `typescript`, `zod`, `dayjs`, `loglevel`, and the data-layer
-  dep (`@tanstack/angular-query-experimental` per the recommended decision).
-  (Material/spartan deps live in each pack's `package-json.hbs` over these
-  partials, like Vuetify over `vue1`.)
+  `@angular/cli`, `typescript`, `zod`, `dayjs`, `loglevel`. **No external
+  data-layer dep** — reads use first-party `httpResource()`/`rxResource()`
+  (the rejected `@tanstack/angular-query-experimental` would have been the
+  only extra). Pin Angular ≥ 19.2 for `httpResource`; if the fallback
+  (`Observable` + `toSignal`) is chosen, ≥ 19 suffices. (Material/PrimeNG
+  deps live in each pack's `package-json.hbs` over these partials, like
+  Vuetify over `vue1`.)
 - Tests: extend `pack-required-primitives.test.ts` / `pack-manifest.test.ts`
   for the new format (negative: an angular pack missing a required
   primitive fails at load).
@@ -214,8 +232,10 @@ emits an Angular project that passes `ng build` (strict `tsc`).
     independent — return the call form in both template and class
     position); `renderStateWrite` → `name.set(value)` (or `.update(...)`
     for functional updates).
-  - **API** via the data-layer handles hoisted in the component class
-    (`injectQuery`/`injectMutation` per the recommended decision).
+  - **API** via signal data handles hoisted in the component class —
+    `httpResource()`/`rxResource()` reads off an `inject()`-ed
+    `@Injectable` API service (mutations call the service method
+    directly), per the DI-native data-layer decision.
   - `renderMatch` → `@switch (expr) { @case (v) { … } @default { … } }`;
     value-position arms keep ternaries.
   - `renderForEach` → `@for (item of coll; track item.id) { … }`.
@@ -236,11 +256,13 @@ emits an Angular project that passes `ng build` (strict `tsc`).
   `withComponentInputBinding`) or `ActivatedRoute`. App shell component +
   error/catch-all route from the pack (`app-shell` emit).
 - API layer: `src/api/<agg>.ts` per aggregate — zod schemas (shared
-  `_frontend/zod-schemas.ts`) + query/mutation factories (shared
-  `_frontend/api-module.ts`); `client.ts`/`config.ts` from the `angular/`
-  shared sources. **Validate `@tanstack/angular-query-experimental` here**;
-  if it fights the generated surface, swap to a hand-rolled signal query
-  helper without changing the generated call surface.
+  `_frontend/zod-schemas.ts`) + an `@Injectable({ providedIn: 'root' })`
+  service exposing typed methods over the shared client (Angular-idiomatic
+  variant of `_frontend/api-module.ts`); `client.ts`/`config.ts` from the
+  `angular/` shared sources. **Validate `httpResource()` against the
+  generated read surface here**; if the version pin is undesired, the
+  service-returns-`Observable` + `toSignal()` floor is the drop-in fallback
+  without changing the consuming component shape.
 - `designs/angularMaterial/v1/` shell tier: `pack.json` (format `angular`,
   stack `ng1`), `package-json` (`@angular/material` + `@angular/cdk` +
   `@angular/material/...` theme), `tsconfig`/`tsconfig.app`,
@@ -268,11 +290,14 @@ pages compile.
 - Angular page shell assembly: signal fields, `computed()` where derived
   state is needed, query/mutation handles, form-helper instantiation,
   `imports: [...]` standalone import aggregation.
-- Forms runtime: generated `src/lib/form.ts` — signal form object, zod
-  parse on submit, per-field error map (nested VO paths + field arrays),
-  server-error application (mirrors `_frontend/form-helpers.ts` /
-  `apply-server-errors.ts` semantics). [Per the recommended forms
-  decision; Reactive Forms is the alternative shape.]
+- Forms: **typed Reactive Forms** — per command, emit a typed
+  `FormGroup<{…}>` built from the wire shape (nested `FormGroup` for VOs,
+  `FormArray` for field arrays), with `Validators` from the field
+  constraints; submit reads `form.getRawValue()`. Server field errors apply
+  via `control.setErrors(...)` (the `apply-server-errors` semantics, Angular
+  sink). A small generated `src/lib/forms.ts` holds the shared error-mapping
+  helper; `toSignal(form.valueChanges)` bridges to the signal world where a
+  template needs reactive reads.
 - Scaffolded pages (list/new/detail per aggregate) + explicit page bodies
   walk through the shared `walkBody` with `angularTarget`.
 - Angular walker test suite: a representative `test/generator/angular/`
@@ -293,7 +318,10 @@ pages compile.
   (`workflow-builder` via `_frontend/workflows-module.ts`), workflow
   instance views.
 - Unions (`A or B` tagged wire), `paged`/`envelope` carriers, frontend ACL
-  emission (`_frontend/auth-ui.ts` + `AUTH_GATE_ANGULAR`), access modifiers
+  emission as **functional route guards** (`CanActivateFn` +
+  `inject(SessionService)` on the route table) + `@if`-on-session-signal in
+  templates (`_frontend/auth-ui.ts` + `AUTH_GUARD_ANGULAR` / session
+  service), access modifiers
   (editable/managed/internal/token/secret), transitive VO/enum zod
   schemas, money handling, formatters, named layouts (`layouts-emitter.ts`
   → nested router routes with an inner `<router-outlet>` as the `main`
@@ -387,8 +415,10 @@ unchanged.
 - Docs: `docs/platforms.md`, `docs/design-packs.md` (angular format +
   authoring), `docs/generators.md` (angular column), `docs/language.md`
   (`platform: angular`), `docs/decisions.md` (**D-ANGULAR-FRONTEND**:
-  reuse-not-fork walker, Angular-CLI static SPA + own docker stage, the
-  signals/forms/data-layer decisions), `CLAUDE.md` (pipeline table, pack
+  reuse-not-fork walker, Angular-CLI static SPA + own docker stage, and the
+  *idiomatic-over-reuse* decisions — signals state, DI-native injectable
+  services + `httpResource` data, typed Reactive Forms, `CanActivateFn`
+  ACL), `CLAUDE.md` (pipeline table, pack
   list, CI surface), `experience_gathered.md` retro entry, and a status
   flip on this plan + the proposal (`docs/proposals/angular-frontend.md`).
 
@@ -416,7 +446,8 @@ diff -r test/fixtures/baseline-output /tmp/angular-final
 |---|---|
 | Handlebars `{{ }}` vs Angular `{{ }}` interpolation collide directly (same class as Vue) | Every Angular-interpolation site in pack templates uses `\{{…}}` escapes (Handlebars renders the literal); the pack tests grep compiled output for unrendered `{{` artifacts; pack tests pin output byte-exact. **Reuse the Vue pack's exact mitigation.** |
 | Angular `(event)="…"` template-expression restriction (no arbitrary statements) blocks an inline handler the walker emits | Signals make the common cases inline-able (`(click)="count.set(count()+1)"`). For anything the template grammar rejects, the page-shell hoists a class method and `angularTarget` references it — a known seam shape (the API-hoisting path already does this). Only if a *new* seam is unavoidable, add it once on `WalkerTarget` + all targets. |
-| `@tanstack/angular-query-experimental` is "experimental" / signal-API churn | Validated first thing in Slice 3; the generated call surface is ours, so a hand-rolled signal query helper is a drop-in fallback (the Svelte/Vue fallback pattern). Typed `HttpClient` services are the larger-blast-radius alternative. |
+| `httpResource()`/`rxResource()` are newer (Angular ≥ 19.2) — version-pin or API churn | Validated first thing in Slice 3; the consuming component shape is ours, so the `@Injectable` service-returns-`Observable` + `toSignal()` floor is a drop-in fallback that needs only Angular ≥ 19 and is equally idiomatic. (TanStack Angular Query was rejected as a React-culture transplant.) |
+| Reactive Forms (observable-based) vs the signals-everywhere model | `toSignal(form.valueChanges)` bridges where a template needs reactive reads; typed `FormGroup` construction is mechanical codegen and `ng build` strict-typing catches shape drift. Reactive Forms is the rock-solid, version-proof idiomatic choice (stable since v14). |
 | Angular doesn't ride the shared vite `docker/` two-stage (`ng build`, not `vite build`/`preview`) | Angular brings its **own** dockerfile in the `angular/` shared-source dir — `ng build` → serve `dist/<app>/browser` with a tiny static server; the embed path (Slice 8) copies that `browser/` dir. Isolated to one dockerfile + the host asset-copy step; covered by `LOOM_ANGULAR_BUILD` + the embed tests. |
 | Standalone `imports: [...]` aggregation drift (a primitive's component not imported) | The pack primitives declare their required Angular imports; the page-shell aggregates them into the component `imports`; `ng build` strict template checking catches a missing import the way `vue-tsc` catches Vue's. |
 | Library version drift (Angular major / Material / spartan pins) | Stack `ng1` pins ranges; the `LOOM_ANGULAR_BUILD` CI matrix catches breakage the way the React/Vue matrices do. |
