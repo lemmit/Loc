@@ -196,6 +196,16 @@ export function registerHelpersOnce(): void {
   Handlebars.registerHelper("concat", function (this: unknown, ...args: unknown[]) {
     return args.slice(0, -1).map(String).join("");
   });
+  // Range helper — `{{#each (range n)}}…{{/each}}` repeats a block n
+  // times at compile time, yielding [0, 1, …, n-1].  Lets a template
+  // unroll a count into static markup (e.g. Angular's multi-skeleton,
+  // which has no runtime `v-for` analogue — the count is known when
+  // the page is generated).  Non-numeric / negative inputs yield [].
+  Handlebars.registerHelper("range", (n: unknown) => {
+    const count = typeof n === "number" ? n : Number(n);
+    if (!Number.isFinite(count) || count <= 0) return [];
+    return Array.from({ length: Math.floor(count) }, (_, i) => i);
+  });
 }
 
 /** Register pack-declared lookup-table helpers.  Each entry in the

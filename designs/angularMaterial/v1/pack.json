@@ -17,6 +17,18 @@
     "primitive-stat": "primitive-stat.hbs",
     "primitive-badge": "primitive-badge.hbs",
     "primitive-alert": "primitive-alert.hbs",
+    "primitive-bold": "primitive-bold.hbs",
+    "primitive-italic": "primitive-italic.hbs",
+    "primitive-inline-code": "primitive-inline-code.hbs",
+    "primitive-key-value-row": "primitive-key-value-row.hbs",
+    "primitive-empty": "primitive-empty.hbs",
+    "primitive-skeleton": "primitive-skeleton.hbs",
+    "primitive-avatar": "primitive-avatar.hbs",
+    "primitive-image": "primitive-image.hbs",
+    "primitive-loader": "primitive-loader.hbs",
+    "primitive-icon": "primitive-icon.hbs",
+    "primitive-grid": "primitive-grid.hbs",
+    "primitive-tabs": "primitive-tabs.hbs",
     "package-json": "package-json.hbs",
     "angular-json": "angular-json.hbs",
     "tsconfig": "tsconfig.hbs",
@@ -30,6 +42,10 @@
   "imports": {
     "primitive-button": [{ "from": "@angular/material/button", "named": ["MatButtonModule"] }],
     "primitive-card": [{ "from": "@angular/material/card", "named": ["MatCardModule"] }],
-    "primitive-divider": [{ "from": "@angular/material/divider", "named": ["MatDividerModule"] }]
+    "primitive-divider": [{ "from": "@angular/material/divider", "named": ["MatDividerModule"] }],
+    "primitive-loader": [
+      { "from": "@angular/material/progress-spinner", "named": ["MatProgressSpinnerModule"] }
+    ],
+    "primitive-tabs": [{ "from": "@angular/material/tabs", "named": ["MatTabsModule"] }]
   }
 }
