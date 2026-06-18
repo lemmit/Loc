@@ -131,3 +131,59 @@ describe("angular generator — Material-module primitives (imports aggregation)
     expect(page).toContain("imports: [MatCardModule, MatDividerModule],");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Button + the event-handler seam.  Angular `(click)` binds a STATEMENT, not
+// a function value — an arrow there is created and discarded (a silent
+// runtime no-op).  The `renderEventHandler` target seam inlines the lambda's
+// statements, so a counter `onClick: e => { count := count + 1 }` lowers to
+// `(click)='count.set((count() + 1))'`.  (ng build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const BUTTON_SOURCE = `
+  system Smoke {
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish { total: int }
+      }
+    }
+    ui Web {
+      page Home {
+        route: "/"
+        title: "Home"
+        state { count: int = 0 }
+        body: Stack {
+          Button { "Increment", onClick: e => { count := count + 1 }, variant: "primary", testid: "inc" },
+          Button { "Reset", onClick: e => { count := 0 }, testid: "reset" }
+        }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
+  }
+`;
+
+async function buttonPage(): Promise<string> {
+  const all = await generateSystemFiles(BUTTON_SOURCE);
+  return all.get("web/src/app/pages/home.component.ts")!;
+}
+
+describe("angular generator — Button + event-handler seam", () => {
+  it("binds the onClick handler as a STATEMENT, not a discarded arrow", async () => {
+    const page = await buttonPage();
+    expect(page).toContain("(click)='count.set((count() + 1))'");
+    expect(page).toContain("(click)='count.set(0)'");
+    // The JSX arrow wrapper must NOT survive into an Angular event binding.
+    expect(page).not.toContain("() =>");
+  });
+
+  it("maps variant → Material button rank and registers MatButtonModule", async () => {
+    const page = await buttonPage();
+    expect(page).toContain("<button mat-raised-button (click)=");
+    expect(page).toContain("<button mat-button (click)=");
+    expect(page).toContain('import { MatButtonModule } from "@angular/material/button";');
+    expect(page).toContain("imports: [MatButtonModule],");
+  });
+});
