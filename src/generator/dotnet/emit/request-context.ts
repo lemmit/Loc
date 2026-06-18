@@ -5,10 +5,12 @@
 // (principal) and ExecutionContextBehavior (logger).  See
 // docs/architecture/request-context.md.
 //
-// Emitted whenever the deployable carries a slice that needs it — i.e.
-// `auth: required` (the principal slice) OR `--trace` (the logger slice).
-// A no-auth, no-trace project emits nothing here, preserving the
-// byte-identical-when-off contract.
+// Always emitted: the always-on request log carries `scope_id` from the root
+// frame this carrier opens (the cross-backend observability envelope).  The
+// optional slices are layered per project — the `CurrentUser` field (+ `Auth`
+// using) only under `auth: required`, the `Logger` field (+ Logging using)
+// only under `--trace`; a no-auth, no-trace project emits the bare carrier
+// (correlation id, locale, scope id) with `ActorId`/`PrincipalJson` as nulls.
 
 /**
  * Render `Domain/Common/RequestContext.cs`.  The shape is minimised to

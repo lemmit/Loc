@@ -200,6 +200,13 @@ app.MapGet("/ready", async (AppDbContext db, CancellationToken cancellationToken
             statusCode: 503);
     }
 });
+// Ambient execution context — births the RequestContext (correlation id,
+// locale, start time, scope id) and opens the root frame.  Mounted FIRST so
+// the frame covers the entire pipeline: the request log below rides its
+// scope_id (the cross-backend observability envelope — every backend carries
+// scope_id on the request bracket), and bypassed (/health) + unauthenticated
+// paths are covered too.  See Middleware/RequestContextMiddleware.cs.
+app.UseMiddleware<CatalogApi.Middleware.RequestContextMiddleware>();
 // Catalog-identity request log — emits the cross-backend
 // request_start / request_end events (same envelope shape Hono
 // and Phoenix produce).  Mounted FIRST so its Stopwatch covers the
