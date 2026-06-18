@@ -338,3 +338,80 @@ describe("angular generator — inline / media / layout primitives", () => {
     expect(page).toContain('<div class="loom-grid">');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Navigation + format-helper primitives — Anchor/IdLink/Breadcrumbs route via
+// `[routerLink]` (the page shell registers the RouterLink directive), and
+// Money/DateDisplay/IdLink call `src/lib/format.ts` helpers, which Angular can
+// only resolve as component members — so the shell re-exposes each used helper
+// as a `protected readonly` field.  EnumBadge interpolates its value; CodeBlock
+// is plain markup.  (ng build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const NAV_SOURCE = `
+  system Smoke {
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish { total: int }
+      }
+    }
+    ui Web {
+      page Home {
+        route: "/"
+        title: "Home"
+        body: Stack {
+          Breadcrumbs {
+            Anchor { "Home", to: "/" }
+          },
+          Anchor { "About", to: "/about" },
+          IdLink { id: "abc12345def", of: Order },
+          Money { value: 1299, currency: "USD" },
+          DateDisplay { value: "2026-06-18T12:00:00Z" },
+          EnumBadge { "active", color: "green" },
+          CodeBlock { "aggregate Order { total: int }", language: "plaintext", title: "orders.ddd" }
+        }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
+  }
+`;
+
+async function navPage(): Promise<string> {
+  const all = await generateSystemFiles(NAV_SOURCE);
+  return all.get("web/src/app/pages/home.component.ts")!;
+}
+
+describe("angular generator — navigation + format-helper primitives", () => {
+  it("routes Anchor/IdLink/Breadcrumbs via [routerLink] + registers RouterLink", async () => {
+    const page = await navPage();
+    expect(page).toContain('<nav class="loom-breadcrumbs">');
+    expect(page).toContain('<a class="loom-anchor" [routerLink]=\'"/about"\'>About</a>');
+    expect(page).toContain('[routerLink]=\'"/orders/" + "abc12345def"\'');
+    expect(page).toContain('import { RouterLink } from "@angular/router";');
+    expect(page).toContain("imports: [RouterLink],");
+  });
+
+  it("re-exposes only the format helpers the markup calls", async () => {
+    const page = await navPage();
+    expect(page).toContain(
+      'import { formatMoney, formatDateTime, shortId } from "../../lib/format";',
+    );
+    expect(page).toContain("protected readonly formatMoney = formatMoney;");
+    expect(page).toContain("protected readonly formatDateTime = formatDateTime;");
+    expect(page).toContain("protected readonly shortId = shortId;");
+    // A helper the page never calls is not imported or exposed.
+    expect(page).not.toContain("formatBool");
+  });
+
+  it("interpolates the helper calls + EnumBadge value and renders CodeBlock markup", async () => {
+    const page = await navPage();
+    expect(page).toContain('{{ formatMoney(1299, "USD") }}');
+    expect(page).toContain('{{ formatDateTime("2026-06-18T12:00:00Z") }}');
+    expect(page).toContain('{{ shortId("abc12345def") }}');
+    expect(page).toContain('<span class="loom-badge" data-color="green">{{ "active" }}</span>');
+    expect(page).toContain('<pre><code class="language-plaintext">');
+  });
+});
