@@ -39,6 +39,7 @@ import {
   renderWireValidationException,
 } from "./emit/common.js";
 import { criterionEligible, renderJavaCriteriaClasses } from "./emit/criteria.js";
+import { renderJavaDispatcher } from "./emit/dispatch.js";
 import { renderJavaDocumentRepositoryImpl } from "./emit/document-store.js";
 import { renderDtoFiles } from "./emit/dto.js";
 import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
@@ -317,6 +318,19 @@ function emitProjectFromContexts(
         ),
       );
     }
+    // In-process saga dispatcher (workflow-debt-backend-parity.md, Java saga
+    // slice 2): a @Component whose @EventListener handlers react to
+    // channel-carried events — load-or-allocate / route-or-drop the saga row,
+    // run the handler body, re-publish so choreography chains re-enter.
+    const dispatcher = renderJavaDispatcher(ctx, {
+      basePkg,
+      pkg: pkgFor("workflow-service"),
+      entityPkgOf: (a) => pkgFor("entity", a),
+      repoPkgOf: (a) => pkgFor("repository-interface", a),
+      statePkg: pkgFor("infra-persistence"),
+      stateRepoPkg: pkgFor("spring-data-repository"),
+    });
+    if (dispatcher) place(dispatcher.name, "workflow-service", dispatcher.content);
     const viewFiles = renderJavaViews(ctx, {
       basePkg,
       pkg: pkgFor("view-service"),
