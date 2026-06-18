@@ -35,7 +35,11 @@ import { snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { stateModule } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
-import { combineWhere, vanillaCapabilityFilter } from "./capability-filter.js";
+import {
+  aggregateUsesPrincipalContextFilter,
+  combineWhere,
+  vanillaCapabilityFilter,
+} from "./capability-filter.js";
 
 /** One project-wide view, paired with its owning context (for module-path
  *  resolution in the controller). */
@@ -151,8 +155,11 @@ function renderVanillaView(
     foundation: "vanilla",
   };
   // The view reads its source aggregate, so it honours that aggregate's
-  // capability filter (soft-delete / scoping) like every other read.
-  const cap = vanillaCapabilityFilter(agg, contextModule);
+  // capability filter (soft-delete / scoping) like every other read.  A
+  // principal (tenancy) filter scopes by the `current_user` the controller
+  // already threads into `run/1`; the predicate pins it (`^(current_user && …)`).
+  const principal = aggregateUsesPrincipalContextFilter(agg);
+  const cap = vanillaCapabilityFilter(agg, contextModule, { actor: principal });
   const isShorthand = !view.output;
   const body = isShorthand
     ? buildShorthandBody(view, aggModule, renderCtx, cap)
@@ -177,8 +184,7 @@ defmodule ${moduleName} do
   @doc "Execute the view query and return results."
   ${runSpec}
   def run(current_user \\\\ nil) do
-    _ = current_user
-${body}
+${principal ? "" : "    _ = current_user\n"}${body}
   end
 end
 `;

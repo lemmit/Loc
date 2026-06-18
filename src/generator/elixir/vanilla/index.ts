@@ -19,6 +19,7 @@ import {
   emitPhoenixResourceFiles,
 } from "../adapters/resource-clients.js";
 import type { ApiRoute } from "../api-emit.js";
+import { emitAuth } from "../auth-emit.js";
 import { emitDispatch, emitWorkflowStateSchemas } from "../dispatch-emit.js";
 import type { GenerateElixirArgs } from "../index.js";
 import { emitMigrations } from "../migrations-emit.js";
@@ -121,10 +122,38 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   }
   apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
 
+  // Auth modules — the foundation-agnostic Auth plug (Bearer-JWT → `conn.assigns
+  // .current_user`), LiveAuth on_mount, and /auth controller.  Emitted when the
+  // deployable requires auth — the request principal a tenancy (principal)
+  // `filter` scopes reads by.  The plug + /auth scope are spliced into the
+  // router below via `authEnabled`.
+  const { files: authFiles, enabled: authEnabled } = emitAuth({
+    sys,
+    deployable,
+    appName,
+    appModule,
+  });
+  for (const [path, content] of authFiles) {
+    // Skip the LiveView `on_mount` hook — it imports `Phoenix.Component` /
+    // `Phoenix.LiveView`, which the vanilla foundation has no dep for (it's a
+    // JSON API with no live_session).  Dead code here, and it would break
+    // `mix compile --warnings-as-errors`.
+    if (path.endsWith("/live_auth.ex")) continue;
+    out.set(path, content);
+  }
+
   // Shell files — emitted AFTER per-context emit so the router has the
   // collected `apiRoutes` to splice into the `/api` scope.  Resource-adapter
   // hex deps (ex_aws_s3, amqp, req) ride into `mix.exs`.
-  emitVanillaShellFiles(appName, appModule, out, apiRoutes, resourceEmission.hexDeps);
+  emitVanillaShellFiles(
+    appName,
+    appModule,
+    out,
+    apiRoutes,
+    resourceEmission.hexDeps,
+    authEnabled,
+    !!sys.auth?.oidc,
+  );
 
   // Deployment + boot machinery — reused verbatim from the Ash shell because
   // the Elixir release, Dockerfile, and Ecto migrations are foundation-neutral

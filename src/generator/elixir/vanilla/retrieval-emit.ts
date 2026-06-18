@@ -31,7 +31,11 @@
 import type { BoundedContextIR, RetrievalIR, SortTermIR } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
-import { combineWhere, vanillaCapabilityFilter } from "./capability-filter.js";
+import {
+  aggregateUsesPrincipalContextFilter,
+  combineWhere,
+  vanillaCapabilityFilter,
+} from "./capability-filter.js";
 
 /** Per-context fan-out: emit one Ecto query module per retrieval. */
 export function emitVanillaRetrievals(
@@ -50,10 +54,17 @@ export function emitVanillaRetrievals(
     // capability filter (soft-delete / scoping) just like the CRUD reads.
     const targetName = r.targetType.name;
     const target = ctx.aggregates.find((a) => a.name === targetName);
-    const cap = target ? vanillaCapabilityFilter(target, contextModule) : null;
+    // A principal (tenancy) filter on the target threads the request actor via
+    // `opts[:current_user]`.  Retrievals are workflow-internal (no HTTP
+    // controller), so a caller that omits it scopes to no rows (fail-closed) —
+    // never a cross-tenant leak.
+    const principal = target ? aggregateUsesPrincipalContextFilter(target) : false;
+    const cap = target
+      ? vanillaCapabilityFilter(target, contextModule, { actor: principal })
+      : null;
     out.set(
       `lib/${appName}/${ctxSnake}/retrievals/${snake(r.name)}.ex`,
-      renderRetrievalModule(r, contextModule, appModule, cap),
+      renderRetrievalModule(r, contextModule, appModule, cap, principal),
     );
   }
 }
@@ -63,6 +74,7 @@ function renderRetrievalModule(
   contextModule: string,
   appModule: string,
   cap: string | null,
+  principal: boolean,
 ): string {
   const aggName = (r.targetType as { kind: "entity"; name: string }).name;
   const moduleName = `${contextModule}.Retrievals.${upperFirst(r.name)}`;
@@ -88,6 +100,8 @@ function renderRetrievalModule(
   // pipe step so the source compiles cleanly even when pagination opts
   // are absent.
   const pipeline: string[] = [];
+  // Principal-filtered retrievals read the threaded actor out of `opts`.
+  if (principal) pipeline.push(`    current_user = opts[:current_user]`);
   pipeline.push(`    query = from(record in ${aggModule}, where: ${whereExpr})`);
   pipeline.push(`    query = if opts[:limit], do: limit(query, ^opts[:limit]), else: query`);
   pipeline.push(`    query = if opts[:offset], do: offset(query, ^opts[:offset]), else: query`);

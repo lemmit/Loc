@@ -634,13 +634,15 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // Backends that now wire PRINCIPAL-referencing filters (`currentUser.x`) on
   // relational aggregates.  node renders the predicate against the ambient
   // `requireCurrentUser()` accessor inside every root read (DEBT-01) — the
-  // Drizzle analogue of .NET's `HasQueryFilter`.  elixir wires it on the **Ash**
-  // foundation (`base_filter expr(... == ^actor(:field))` + `actor: current_user`
-  // threaded onto reads); the **vanilla** Ecto foundation still defers it.  java
-  // still defers it entirely (`@SQLRestriction` is static SQL).
-  const supportsPrincipalFilter = (family: string, foundation: string | undefined): boolean => {
+  // Drizzle analogue of .NET's `HasQueryFilter`.  elixir wires it on BOTH
+  // foundations: **Ash** (`base_filter expr(... == ^actor(:field))` + `actor:
+  // current_user` threaded onto reads) and **vanilla** Ecto (the principal
+  // predicate AND-ed into every read as `^(current_user && current_user.f)`,
+  // with `current_user` threaded from `conn.assigns`).  java still defers it
+  // entirely (`@SQLRestriction` is static SQL).
+  const supportsPrincipalFilter = (family: string, _foundation: string | undefined): boolean => {
     if (family === "node") return true;
-    if (family === "elixir") return (foundation ?? "ash") === "ash";
+    if (family === "elixir") return true;
     return false;
   };
 

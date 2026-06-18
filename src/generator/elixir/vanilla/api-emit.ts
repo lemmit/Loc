@@ -17,6 +17,7 @@
 import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
+import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
 import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
 import { aggregateHasUnionFind, findRoutes, renderFindActions } from "./find-controller.js";
@@ -138,6 +139,15 @@ function renderController(
   const aggPascal = upperFirst(agg.name);
   const facadeMod = `${appModule}.${ctxModule}`;
 
+  // A principal (tenancy) `filter` scopes every read by the request actor, so the
+  // controller pulls `current_user` off `conn.assigns` (set by the Auth plug,
+  // which the validator requires when a principal filter is present) and threads
+  // it into the context reads.  Non-principal aggregates stay byte-identical.
+  const principal = aggregateUsesPrincipalContextFilter(agg);
+  const cuBind = principal ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
+  const listArg = principal ? "current_user" : "";
+  const getActor = principal ? ", current_user" : "";
+
   // Per-operation member actions.  A returning operation (`: A or B`) translates
   // its tagged result to HTTP (success → 200, error variant → ProblemDetails);
   // a plain side-effecting op returns 204.  Validation failures surface as 422;
@@ -151,8 +161,8 @@ function renderController(
       return `
   def ${opSnake}(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
-
-    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id),
+${cuBind}
+    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
          {:ok, _updated} <- ${ctxModule}.${opSnake}_${aggSnake}(record, attrs) do
       send_resp(conn, 204, "")
     else
@@ -184,13 +194,13 @@ defmodule ${appModule}Web.${aggPascal}Controller do
   alias ${appModule}Web.ProblemDetails
 
   def index(conn, _params) do
-    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s() do
+${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) do
       json(conn, %{items: Enum.map(records, &serialize/1)})
     end
   end
 
   def show(conn, %{"id" => id}) do
-    case ${ctxModule}.get_${aggSnake}(id) do
+${cuBind}    case ${ctxModule}.get_${aggSnake}(id${getActor}) do
       {:ok, record} ->
         json(conn, serialize(record))
 
@@ -213,8 +223,8 @@ defmodule ${appModule}Web.${aggPascal}Controller do
 
   def update(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
-
-    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id),
+${cuBind}
+    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
          {:ok, updated} <- ${ctxModule}.update_${aggSnake}(record, attrs) do
       json(conn, serialize(updated))
     else
@@ -227,7 +237,7 @@ defmodule ${appModule}Web.${aggPascal}Controller do
   end
 
   def delete(conn, %{"id" => id}) do
-    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id),
+${cuBind}    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
          {:ok, _} <- ${ctxModule}.delete_${aggSnake}(record) do
       send_resp(conn, 204, "")
     else
