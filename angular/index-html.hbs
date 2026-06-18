@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>{{title}}</title>
+    <base href="/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+{{#if description}}    <meta name="description" content="{{description}}" />
+{{/if}}{{#if ogImage}}    <meta property="og:image" content="{{ogImage}}" />
+{{/if}}{{#if canonical}}    <link rel="canonical" href="{{canonical}}" />
+{{/if}}{{#if favicon}}    <link rel="icon" href="{{favicon}}" />
+{{else}}    <link rel="icon" href="data:," />
+{{/if}}{{#if usesCodeBlock}}    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css" />
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+    <script>
+      // Angular renders AFTER bootstrap, so hljs.highlightAll() alone
+      // would miss the app subtree.  A MutationObserver highlights each
+      // `pre code` once it shows up (idempotent via the data-hljs marker).
+      (function () {
+        function apply() {
+          if (!window.hljs) return;
+          document.querySelectorAll("pre code:not([data-hljs])").forEach(function (el) {
+            try { window.hljs.highlightElement(el); } catch (e) {}
+            el.setAttribute("data-hljs", "1");
+          });
+        }
+        function arm() {
+          apply();
+          new MutationObserver(apply).observe(document.body, { childList: true, subtree: true });
+        }
+        if (document.body) arm();
+        else document.addEventListener("DOMContentLoaded", arm);
+      })();
+    </script>
+{{/if}}  </head>
+  <body>
+    <!-- The Angular CLI injects the compiled bundles; no manual main.ts
+         script tag (unlike the Vite frontends). -->
+    <app-root></app-root>
+  </body>
+</html>
