@@ -325,6 +325,11 @@ Columns, all stamped at create from the token, present from v1:
 | `deep` (Parent-Child BU) | `row.dataKey LIKE currentUser.orgPath ‖ '%'` — **direct indexed scan, no join** |
 | `global` (Organization) | none |
 
+> **Naming.** The canonical access-level vocabulary lives in `authorization.md` —
+> the directional set `Self` / `Descendants` / `All` (`local` ≈ `Self`, `deep` ≈
+> `Self`+`Descendants`, `global` ≈ `All`). The `local`/`deep`/`global` labels here
+> are the Dynamics mnemonic for that same ladder, not a second vocabulary.
+
 ```ddd
 tenancy by user.tenantId of Organization      // declaration; verifies ↓
 
@@ -374,11 +379,18 @@ backends.
    The `user.<field>` reference points into the existing token/user shape (see auth, below).
    No `tenancy` statement ⇒ system is single-tenant; the whole feature is inert.
 
-2. **Default tenant-scoped — fail closed.** Every aggregate is tenant-scoped *by default*.
-   A forgotten annotation therefore leaves an aggregate **isolated** (over-restrictive),
-   never leaked. This is the deciding reason we chose opt-out over the
-   opt-in `tenantScoped`/`IMultiTenant` style: opt-in fails *open* (a forgotten marker =
-   cross-tenant leak).
+2. **Default tenant-scoped — fail closed.** **⚠ MECHANISM SUPERSEDED by R3
+   (Refinement, top of file).** The fail-closed *goal* survives, but **not as a
+   silent default** — "unmarked ⇒ tenant-scoped" would implicitly attach the
+   `tenantOwned` capability (injecting `tenantId`/`dataKey`), the magic the
+   capability model forbids. Instead: **unmarked = unscoped + an explicit-stance
+   lint at the recommended `error` severity** — fail-closed without magic. The
+   opt-out-over-opt-in reasoning below is exactly what motivates that recommended
+   error severity. *(Original text:)* Every aggregate is tenant-scoped *by
+   default*. A forgotten annotation therefore leaves an aggregate **isolated**
+   (over-restrictive), never leaked. This is the deciding reason we chose opt-out
+   over the opt-in `tenantScoped`/`IMultiTenant` style: opt-in fails *open* (a
+   forgotten marker = cross-tenant leak).
 
 3. **`crossTenant` marks the exceptions.** Aggregates that are NOT tenant-owned — shared
    reference data (country/plan catalogs), system config — are marked `crossTenant`:
@@ -408,7 +420,7 @@ backends.
    whose access is role-gated rather than tenant-scoped. Do **not** try to make `Tenant` an
    ordinary aggregate.
 
-5. **Defaults for scoped aggregates** (keep the surface to two keywords; everything else implicit):
+5. **Defaults for scoped aggregates** (keep the surface to the `crossTenant` keyword + the `tenantOwned`/`tenantRegistry` capabilities; everything else implicit):
    - Cross-tenant access returns **404** (hide existence), not 403.
    - `TenantId` is **auto-stamped** from the claim on create; callers never pass it.
    - Column name **`TenantId`**, indexed.
@@ -417,15 +429,24 @@ backends.
 
 ## Where it plugs in (integration seams found during exploration)
 
+> **⚠ Pre-refinement + path-rot.** This section predates the R1–R5 refinement
+> *and* later code moves. `platform` is no longer a scope (use the
+> `tenantRegistry` capability), and several paths below are stale
+> (`src/ir/loom-ir.ts` → `src/ir/types/loom-ir.ts`, `src/ir/lower.ts` →
+> `src/ir/lower/lower.ts`; the .NET `templates/*.tpl.ts` predate the
+> procedural-emit refactor — backends emit via `lines(...)` now). Treat the
+> *seams* as indicative, not the exact paths.
+
 Language:
 - `src/language/ddd.langium` — add `tenancy by <user-field>` (system level) and the
-  `crossTenant` / `platform` aggregate modifiers. Prefer a discriminator field over inferred
-  actions (see CLAUDE.md grammar conventions).
-- `src/ir/loom-ir.ts` — carry tenancy on the system + a per-aggregate scope kind
-  (`tenant` | `crossTenant` | `platform`).
-- `src/ir/lower.ts` — lower the new syntax (structural).
-- `src/language/ddd-validator.ts` — validate the tenant-key field exists on the user shape;
-  validate exactly one registry/`platform` aggregate when tenancy is on, etc.
+  `crossTenant` modifier + the `tenantOwned`/`tenantRegistry` capabilities. Prefer a
+  discriminator field over inferred actions (see CLAUDE.md grammar conventions).
+- `src/ir/types/loom-ir.ts` — carry tenancy on the system + a per-aggregate scope
+  (`crossTenant`; `tenantOwned` via capability).
+- `src/ir/lower/lower.ts` — lower the new syntax (structural).
+- validators (`src/ir/validate/checks/*` + `src/language/validators/*`) — validate the
+  tenant-key field exists on the user shape; validate exactly one `tenantRegistry`
+  aggregate when tenancy is on; the explicit-stance lint (R3), etc.
 
 .NET (`src/generator/dotnet/`):
 - Claim extraction: extend the JWT/user plumbing in `auth-emit.ts:41-198`
@@ -447,7 +468,7 @@ endpoints, so tenant scoping is enforced server-side. Query keys are unaffected.
 ## Open items / things to decide while implementing
 
 - Global EF query filter vs. explicit per-query `WHERE` (global filter is less error-prone but
-  needs `IgnoreQueryFilters()` escape hatch for the `platform`/admin paths).
+  needs `IgnoreQueryFilters()` escape hatch for the admin / `crossTenant` paths).
 - Bootstrap/signup flow for the registry (unauthenticated or platform-admin create path).
 - Scale-out: tenant scoping is per-request and stateless, so no special concern here — but the
   real-time feature layered on top *will* need a backplane (see below).
