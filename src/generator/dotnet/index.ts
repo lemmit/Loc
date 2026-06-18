@@ -1037,8 +1037,13 @@ function emitProject(
   // Emitted when any of those is present; a project with none emits neither
   // file, keeping the default artefact byte-identical.
   const authRequired = !!options?.authRequired;
-  const hasCarrier = authRequired || emitTrace || !!options?.hasAudit || !!options?.hasProvenance;
-  if (hasCarrier) {
+  // The ambient carrier is ALWAYS emitted: the request log
+  // (RequestLoggingMiddleware, always mounted) carries `scope_id` from the
+  // root frame, matching the cross-backend observability envelope
+  // (Hono/Python/Java/Elixir all ride scope_id by default).  The auth /
+  // logger slices are layered on via the render options below; the bare
+  // carrier (no auth, no --trace) still compiles with `ActorId => null`.
+  {
     out.set(
       "Domain/Common/RequestContext.cs",
       renderRequestContext(ns, {

@@ -492,23 +492,29 @@ describe(".NET generator", () => {
       );
     });
 
-    it("--trace off: domain layer stays free of DomainLog shim + behavior + carrier + injections", async () => {
+    it("--trace off: domain layer stays free of DomainLog shim + behavior + injections (carrier stays for scope_id)", async () => {
       // The whole point of the compile-time switch — off path emits
       // NOTHING domain-trace-related.  No DomainLog.cs, no behavior, no
-      // Program.cs registration, no LogTrace calls in entities.  And with
-      // no auth either (legacy path), the ambient carrier + its boundary
-      // middleware stay absent too — the byte-identical-when-off contract.
+      // Program.cs registration, no LogTrace calls in entities.  The ambient
+      // carrier + boundary middleware DO stay (even with no auth/trace): the
+      // always-on request log rides their root-frame `scope_id`, matching the
+      // cross-backend observability envelope.  The carrier is just bare — no
+      // CurrentUser / Logger slice (those are the auth / --trace layers).
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model); // no emitTrace
       expect(files.has("Domain/Common/DomainLog.cs")).toBe(false);
       expect(files.has("Application/Common/ExecutionContextBehavior.cs")).toBe(false);
       expect(files.has("Application/Common/DomainLogBehavior.cs")).toBe(false);
-      expect(files.has("Domain/Common/RequestContext.cs")).toBe(false);
-      expect(files.has("Middleware/RequestContextMiddleware.cs")).toBe(false);
+      // Carrier present for scope_id, but bare (no auth / logger slice).
+      const rc = files.get("Domain/Common/RequestContext.cs")!;
+      expect(rc).toMatch(/public sealed class RequestContext/);
+      expect(rc).not.toMatch(/public User\? CurrentUser/);
+      expect(rc).not.toMatch(/public ILogger\? Logger/);
+      expect(files.has("Middleware/RequestContextMiddleware.cs")).toBe(true);
       const program = files.get("Program.cs")!;
       expect(program).not.toMatch(/DomainLogBehavior/);
       expect(program).not.toMatch(/ExecutionContextBehavior/);
-      expect(program).not.toMatch(/RequestContextMiddleware/);
+      expect(program).toMatch(/app\.UseMiddleware<.+\.Middleware\.RequestContextMiddleware>\(\);/);
       const order = files.get("Domain/Orders/Order.cs")!;
       expect(order).not.toMatch(/DomainLog\./);
       expect(order).not.toMatch(/__pre_\d+_ok/);
