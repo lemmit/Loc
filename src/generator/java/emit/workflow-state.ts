@@ -97,6 +97,23 @@ export function renderWorkflowStateEntity(
     fieldLines.push(`    ${renderJavaType(f.type)} ${f.name};`);
   }
 
+  // Public allocate factory — the dispatcher (a different package) seeds a new
+  // saga row keyed by the correlation id, with typed defaults for every
+  // required non-correlation state field (optional fields stay null).  Sets the
+  // package-private fields directly (same class), so no setters are exposed.
+  const allocateSeeds = stateOnly
+    .filter((f) => !(f.optional || f.type.kind === "optional"))
+    .map((f) => `        __s.${f.name} = ${javaStateDefault(f, ctx)};`);
+  const allocate = [
+    `    public static ${workflowStateClass(wf)} _allocate(${corrIdClass(wf)} ${corr}) {`,
+    `        var __s = new ${workflowStateClass(wf)}();`,
+    `        __s.${corr} = ${corr};`,
+    ...allocateSeeds,
+    `        return __s;`,
+    `    }`,
+    ``,
+  ];
+
   const accessor = (type: string, name: string): string[] => [
     `    public ${type} ${name}() {`,
     `        return ${name};`,
@@ -129,10 +146,43 @@ export function renderWorkflowStateEntity(
     `    ${workflowStateClass(wf)}() {`,
     `    }`,
     ``,
+    ...allocate,
     ...accessors,
     `}`,
     ``,
   );
+}
+
+/** A typed Java zero for a required saga-state column at allocation — the Java
+ *  analogue of dotnet's `csStateDefault` / python's `zeroFor`.  The correlation
+ *  field is seeded from the routing key, never this. */
+function javaStateDefault(f: FieldIR, ctx: EnrichedBoundedContextIR): string {
+  const t = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (t.kind === "primitive") {
+    switch (t.name) {
+      case "int":
+        return "0";
+      case "long":
+        return "0L";
+      case "decimal":
+      case "money":
+        return "java.math.BigDecimal.ZERO";
+      case "bool":
+        return "false";
+      case "datetime":
+        return "java.time.Instant.now()";
+      default:
+        return '""';
+    }
+  }
+  if (t.kind === "enum") {
+    const e = ctx.enums.find((x) => x.name === t.name);
+    const first = e?.values[0];
+    return first ? `${t.name}.${first}` : "null";
+  }
+  // `X id` non-correlation state field — uncommon; left null (optional in
+  // practice; a required one would need an explicit seed the model doesn't give).
+  return "null";
 }
 
 /** The Spring Data repository over the saga-state entity, keyed by the

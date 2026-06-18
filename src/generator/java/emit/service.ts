@@ -48,6 +48,11 @@ export function renderJavaService(
 ): string {
   const imports = new Set<string>(["java.util.List"]);
   const idClass = ctx.idClass ?? `${agg.name}Id`;
+  // When the context has channel-routed subscriptions, drained domain events
+  // are published to the in-process bus (Spring ApplicationEventPublisher →
+  // the `<Ctx>Dispatcher`'s @EventListener handlers) instead of just logged.
+  // No subscriptions ⇒ the log-only path stays byte-identical.
+  const dispatches = (ctx.boundedContext.eventSubscriptions ?? []).length > 0;
   const idJava = javaValueTypeForId(agg.idValueType);
   if (idJava === "UUID") imports.add("java.util.UUID");
   const hasValidators = aggHasAnyWireValidator(agg);
@@ -285,6 +290,7 @@ export function renderJavaService(
     `import org.slf4j.LoggerFactory;`,
     `import org.springframework.stereotype.Service;`,
     `import org.springframework.transaction.annotation.Transactional;`,
+    dispatches ? `import org.springframework.context.ApplicationEventPublisher;` : null,
     ``,
     ctx.entityPkg !== ctx.pkg ? `import ${ctx.entityPkg}.${agg.name};` : null,
     ...(ctx.entityPkg !== ctx.pkg
@@ -309,6 +315,7 @@ export function renderJavaService(
         `    private final ${upperFirst(op.name)}${agg.name}Handler ${lowerFirst(op.name)}Handler;`,
     ),
     anyOpUsesUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
+    dispatches ? `    private final ApplicationEventPublisher eventPublisher;` : null,
     ``,
     `    public ${agg.name}Service(${[
       `${agg.name}Repository repository`,
@@ -316,12 +323,14 @@ export function renderJavaService(
         (op) => `${upperFirst(op.name)}${agg.name}Handler ${lowerFirst(op.name)}Handler`,
       ),
       ...(anyOpUsesUser ? ["CurrentUserAccessor currentUserAccessor"] : []),
+      ...(dispatches ? ["ApplicationEventPublisher eventPublisher"] : []),
     ].join(", ")}) {`,
     `        this.repository = repository;`,
     ...externOps.map(
       (op) => `        this.${lowerFirst(op.name)}Handler = ${lowerFirst(op.name)}Handler;`,
     ),
     anyOpUsesUser ? `        this.currentUserAccessor = currentUserAccessor;` : null,
+    dispatches ? `        this.eventPublisher = eventPublisher;` : null,
     `    }`,
     ``,
     ...createLines,
@@ -333,7 +342,9 @@ export function renderJavaService(
     ...voMappers,
     `    private void publishEvents(${agg.name} aggregate) {`,
     `        for (var event : aggregate.pullEvents()) {`,
-    `            log.info("domain_event type={}", event.getClass().getSimpleName());`,
+    dispatches
+      ? `            eventPublisher.publishEvent(event);`
+      : `            log.info("domain_event type={}", event.getClass().getSimpleName());`,
     `        }`,
     `    }`,
     `}`,

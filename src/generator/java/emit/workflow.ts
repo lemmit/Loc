@@ -101,7 +101,7 @@ function workflowUsesCurrentUser(wf: WorkflowIR): boolean {
 }
 
 /** Repositories a workflow touches (repo-lets, factory-lets, saves). */
-function reposUsed(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
+export function reposUsed(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
   const aggs = new Set<string>();
   const visit = (s: WorkflowStmtIR): void => {
     if (s.kind === "factory-let") aggs.add(s.aggName);
@@ -124,10 +124,14 @@ function reposUsed(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
 // recursion live in the spine; the base indent (8 spaces) is threaded in by
 // the driver and `for-each` bodies step +`indentUnit` (4 spaces), matching
 // the pre-seam hand-indentation exactly.
-function javaWorkflowStmtTarget(
+export function javaWorkflowStmtTarget(
   ctx: EnrichedBoundedContextIR,
   imports: Set<string>,
   renderCtx: typeof baseRenderCtx & { resourceClasses?: Map<string, string> } = baseRenderCtx,
+  /** When set, `emit` appends the constructed event to this list var (the
+   *  saga dispatcher re-publishes it after saves) instead of logging it
+   *  (the command-workflow facade behaviour).  Omitted ⇒ log, byte-identical. */
+  emitSink?: string,
 ): WorkflowStmtTarget {
   return {
     indentUnit: "    ",
@@ -192,9 +196,11 @@ function javaWorkflowStmtTarget(
       const args = declared
         ? declared.fields.map((f) => rendered.get(f.name) ?? "null").join(", ")
         : [...rendered.values()].join(", ");
-      return [
-        `${indent}{ var __ev = new ${s.eventName}(${args}); log.info("domain_event type={}", __ev.getClass().getSimpleName()); }`,
-      ];
+      return emitSink
+        ? [`${indent}${emitSink}.add(new ${s.eventName}(${args}));`]
+        : [
+            `${indent}{ var __ev = new ${s.eventName}(${args}); log.info("domain_event type={}", __ev.getClass().getSimpleName()); }`,
+          ];
     },
     repoRun: (s, indent) => {
       for (const a of s.retrievalArgs) collectJavaExprImports(a, imports);
@@ -265,7 +271,7 @@ function javaWorkflowStmtTarget(
   };
 }
 
-function repoField(aggName: string): string {
+export function repoField(aggName: string): string {
   return `${lowerFirst(plural(aggName))}Repository`;
 }
 
