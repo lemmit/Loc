@@ -1,0 +1,48 @@
+// Auto-generated.  The app shell — a standalone component (selector
+// app-root) rendering the Material toolbar + sidenav chrome around the
+// router outlet.  Nav labels/links are baked at generation time.
+import { Component } from "@angular/core";
+import { MatIconModule } from "@angular/material/icon";
+import { MatListModule } from "@angular/material/list";
+import { MatSidenavModule } from "@angular/material/sidenav";
+import { MatToolbarModule } from "@angular/material/toolbar";
+import { RouterLink, RouterLinkActive, RouterOutlet } from "@angular/router";
+
+@Component({
+  selector: "app-root",
+  imports: [
+    RouterOutlet,
+    RouterLink,
+    RouterLinkActive,
+    MatToolbarModule,
+    MatSidenavModule,
+    MatListModule,
+    MatIconModule,
+  ],
+  template: `
+    <mat-toolbar color="primary">
+      <a routerLink="/" class="loom-brand">{{systemNameHuman}}</a>
+    </mat-toolbar>
+    <mat-sidenav-container class="loom-shell">
+      <mat-sidenav mode="side" opened class="loom-sidenav">
+        <mat-nav-list data-testid="nav-sidebar">
+{{#each navSections}}          <h3 matSubheader>{{label}}</h3>
+{{#each entries}}          <a mat-list-item routerLink="{{to}}" routerLinkActive="loom-active" data-testid="{{testId}}">{{label}}</a>
+{{/each}}{{/each}}        </mat-nav-list>
+      </mat-sidenav>
+      <mat-sidenav-content class="loom-content">
+        <router-outlet />
+      </mat-sidenav-content>
+    </mat-sidenav-container>
+  `,
+  styles: [
+    `
+    .loom-brand { color: inherit; text-decoration: none; font-weight: 600; }
+    .loom-shell { height: calc(100vh - 64px); }
+    .loom-sidenav { width: 240px; }
+    .loom-content { padding: 16px; }
+    .loom-active { background: rgba(0, 0, 0, 0.06); }
+  `,
+  ],
+})
+export class AppComponent {}
