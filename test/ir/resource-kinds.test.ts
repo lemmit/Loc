@@ -25,7 +25,7 @@ system Sys {
   resource salesApi   { for: Sales, kind: api,         use: pay }
 
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Sales]
     dataSources: [salesState, salesFiles, salesJobs, salesApi]
     port: 3000

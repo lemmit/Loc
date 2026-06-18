@@ -54,7 +54,7 @@ describe("top-level subdomain composition", () => {
           resource salesState  { for: Sales,  kind: state, use: primary }
           resource peopleState { for: People, kind: state, use: primary }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [Sales, People]
             dataSources: [salesState, peopleState]
             port: 3000
@@ -145,7 +145,7 @@ describe("top-level subdomain composition", () => {
         storage primary { type: postgres }
         resource salesState { for: Sales, kind: state, use: primary }
         deployable api {
-          platform: hono
+          platform: node
           contexts: [Sales]
           dataSources: [salesState]
           port: 3000

@@ -376,7 +376,7 @@ describe("phoenixLiveView pipeline", () => {
   ui SalesAdmin with scaffold(subdomains: [Sales]) {}
 
   deployable peer {
-    platform: hono,
+    platform: node,
     contexts: [Sales]
   }
   deployable phoenixApp {

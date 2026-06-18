@@ -12,7 +12,7 @@
 ```
 npm i -g @loom/cli            # the compiler + CLI, ships @loom/core
 npm i  @loom/backend-hono@4   # add the Hono backend you want
-# .ddd:  deployable api { platform: hono, ... }   ← resolves automatically
+# .ddd:  deployable api { platform: node, ... }   ← resolves automatically
 ```
 
 The user installs **core + the backend(s) they target**. Core does
@@ -147,7 +147,7 @@ Slice 5 was to `git mv src/platform/hono/v4/* → packages/backend-hono-v4/src/`
 - `src/platform/registry.ts` **statically imports** the backend surfaces (`honoPlatform`, …) into its in-tree set (`inTreeBackends`). That static import is what every *synchronous, non-CLI* caller resolves through.
 - **Only the CLI** installs the fs source (`src/cli/main.ts` → `installFsBackendSource`). The **playground build worker** (`web/src/build/build.worker.ts` → `generateSystems`) and the **fixture/capture script** (`scripts/capture-baseline-fixture.mjs`) call the generator **directly with no fs-discovery**, and the browser can't run `node:fs` discovery at all.
 
-So removing hono from the static set breaks: browser previews (`platform: hono` unresolvable), the fixture script, and any direct-API caller — **not byte-identical.** The intermediate "move source but keep a static import from `packages/`" re-creates the exact `core → backend` static coupling the discovery seam exists to *eliminate* (B2.1 + the manifest seam) — relocation for its own sake, not progress.
+So removing hono from the static set breaks: browser previews (`platform: node` unresolvable), the fixture script, and any direct-API caller — **not byte-identical.** The intermediate "move source but keep a static import from `packages/`" re-creates the exact `core → backend` static coupling the discovery seam exists to *eliminate* (B2.1 + the manifest seam) — relocation for its own sake, not progress.
 
 **Unblock path** (any one):
 1. A **browser-capable, build-time backend discovery** that seeds the in-repo backend packages + their `loom` manifests into the playground worker (the design doc's original "VFS source"), so the generator resolves built-ins without `node:fs` and without a static registry import. NOTE: this is *generator-side* discovery and runs **before** the npm engine populates its VFS — it cannot reuse the #185 npm-engine VFS, which only holds the *generated project's* runtime deps.
@@ -242,7 +242,7 @@ targets a backend, confirm the preview builds. Same discipline as
 every runtime gate this session (lesson #7): the unit-level seam is
 verified locally (`packaging-split-discovery`), the in-browser
 reality is verified on deployed CI. Add a `playground-e2e` spec
-that exercises a `platform: "hono@v4"`-pinned example so a
+that exercises a `platform: "node@v4"`-pinned example so a
 discovery regression is caught there.
 
 ### Non-goal

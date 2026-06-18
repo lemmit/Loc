@@ -350,7 +350,7 @@ describe("RenameProvider — system-scoped declarations", () => {
       `system Acme {
   subdomain Sales { context Orders { aggregate Order { total: int } } }
   deployable <|>backend {
-    platform: hono
+    platform: node
     contexts: [Orders]
     port: 8080
   }

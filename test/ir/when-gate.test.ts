@@ -102,7 +102,7 @@ describe("when gate — backend support (loom.when-unsupported)", () => {
   // stays in place as the safety net for any future backend that lands before
   // its `when` emitter does; this test pins that every shipping backend passes.
   it("passes on every backend — node, dotnet, python, elixir and java all emit the gate", async () => {
-    expect(await codes("hono")).toEqual([]);
+    expect(await codes("node")).toEqual([]);
     expect(await codes("dotnet")).toEqual([]);
     expect(await codes("python")).toEqual([]);
     expect(await codes("elixir")).toEqual([]);

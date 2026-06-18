@@ -22,7 +22,7 @@ system Sys {
   resource ledgerLog   { for: Ledger, kind: eventLog, use: primary }
 
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Orders, Ledger]
     dataSources: [ordersState, ledgerLog]
     port: 3000

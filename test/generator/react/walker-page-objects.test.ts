@@ -41,7 +41,7 @@ describe("walker-side e2e page-object emitter", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -67,7 +67,7 @@ describe("walker-side e2e page-object emitter", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -90,7 +90,7 @@ describe("walker-side e2e page-object emitter", () => {
             body:  Heading { "Order", testid: "order-detail-h" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -121,7 +121,7 @@ describe("walker-side e2e page-object emitter", () => {
             body:  CreateForm { of: Order }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -151,7 +151,7 @@ describe("walker-side e2e page-object emitter", () => {
             body:  CreateForm { of: Order, testid: "place-order" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -177,7 +177,7 @@ describe("walker-side e2e page-object emitter", () => {
         }
         ui WebApp with scaffold(aggregates: [Order]) {
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);

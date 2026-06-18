@@ -34,7 +34,7 @@ system S {
   api A from Sales
   storage pg { type: postgres }
   resource s { for: Orders, kind: state, use: pg }
-  deployable d { platform: hono  contexts: [Orders]  dataSources: [s]  serves: A  port: 3000 }
+  deployable d { platform: node  contexts: [Orders]  dataSources: [s]  serves: A  port: 3000 }
 }`;
 
 async function enriched(wf: string, extra = "") {

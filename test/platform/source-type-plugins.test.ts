@@ -56,7 +56,7 @@ describe("sourceType plugin discovery", () => {
   });
 
   it("skips backend packages and malformed manifests", () => {
-    writePkg("a-backend", { name: "b", loom: { kind: "backend", family: "hono" } });
+    writePkg("a-backend", { name: "b", loom: { kind: "backend", family: "node" } });
     writePkg("not-loom", { name: "n" });
     writePkg("bad-iface", {
       name: "x",

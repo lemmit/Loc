@@ -19,7 +19,7 @@ describe("validator: angular deployable", () => {
       system S {
         ${BASE}
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: angular, targets: api, ui: WebApp, port: 3004 }
       }
     `);
@@ -30,7 +30,7 @@ describe("validator: angular deployable", () => {
     const { errors } = await parseString(`
       system S {
         ${BASE}
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: angular, targets: api, port: 3004 }
       }
     `);
@@ -48,7 +48,7 @@ describe("validator: angular deployable", () => {
       system S {
         ${BASE}
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: angular, ui: WebApp, port: 3004 }
       }
     `);
@@ -63,7 +63,7 @@ describe("validator: angular deployable", () => {
       system S {
         ${BASE}
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web1 { platform: react, targets: api, ui: WebApp, port: 3001 }
         deployable web2 { platform: angular, targets: web1, ui: WebApp, port: 3004 }
       }
@@ -79,7 +79,7 @@ describe("validator: angular deployable", () => {
       system S {
         ${BASE}
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: angular, targets: api, ui: WebApp, design: mantine, port: 3004 }
       }
     `);
@@ -100,7 +100,7 @@ describe("validator: angular deployable", () => {
       system S {
         ${BASE}
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: react, targets: api, ui: WebApp, design: angularMaterial, port: 3001 }
       }
     `);
@@ -115,7 +115,7 @@ describe("validator: angular deployable", () => {
       system S {
         ${BASE}
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: angular { persistence: drizzle }, targets: api, ui: WebApp, port: 3004 }
       }
     `);

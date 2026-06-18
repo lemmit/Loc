@@ -33,7 +33,7 @@ describe("recursive layout walker", () => {
             body:  Stack { Heading { "Welcome to Acme" }, Text { "Pick a destination." } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -65,7 +65,7 @@ describe("recursive layout walker", () => {
             body:  Stack { Heading { "Hello" } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -89,7 +89,7 @@ describe("recursive layout walker", () => {
             body:  Heading { "Big", level: 1 }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -112,7 +112,7 @@ describe("recursive layout walker", () => {
             body:  Card { "Stats", Stack { Text { "a" }, Text { "b" } } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -143,7 +143,7 @@ describe("recursive layout walker", () => {
             body:  Button { "Click me" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -168,7 +168,7 @@ describe("recursive layout walker", () => {
             body:  Stack { Heading { "Real" }, SomeUnknownThing(foo: 42) }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

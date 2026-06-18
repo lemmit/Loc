@@ -18,7 +18,7 @@ system Sys {
   resource salesJobs  { for: Sales, kind: queue,       use: bus }
 
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Sales]
     dataSources: [salesState, salesFiles, salesJobs]
     port: 3000
@@ -46,7 +46,7 @@ system Sys {
   subdomain Sales { context Sales { aggregate Order { name: string } } }
   storage pg { type: postgres }
   resource salesState { for: Sales, kind: state, use: pg }
-  deployable api { platform: hono, contexts: [Sales], dataSources: [salesState], port: 3000 }
+  deployable api { platform: node, contexts: [Sales], dataSources: [salesState], port: 3000 }
 }
 `;
     const { files } = generateSystems(await parseValid(postgresOnly));

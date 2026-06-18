@@ -19,7 +19,7 @@ const DDL = `
     storage pg { type: postgres }
     resource cState { for: C, kind: state, use: pg }
     deployable api {
-      platform: hono  contexts: [C]  dataSources: [cState]
+      platform: node  contexts: [C]  dataSources: [cState]
     }
   }
   testCase TC-001 verifies AC-001 { covers [ M.C.A.go ] }

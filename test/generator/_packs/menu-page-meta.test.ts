@@ -27,7 +27,7 @@ describe("per-page menuMeta drives the sidebar", () => {
             body: Heading { "Reports" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -64,7 +64,7 @@ describe("per-page menuMeta drives the sidebar", () => {
             body: Heading { "Settings" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -99,7 +99,7 @@ describe("per-page menuMeta drives the sidebar", () => {
             body: Heading { "Secret" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -133,7 +133,7 @@ describe("per-page menuMeta drives the sidebar", () => {
             body: Heading { "A" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -167,7 +167,7 @@ describe("per-page menuMeta drives the sidebar", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

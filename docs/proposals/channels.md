@@ -315,7 +315,7 @@ channelSource lifecycleBus { for: Orders.Lifecycle, use: eventLog }  // qualifie
 channelSource paymentsBus  { for: Orders.Payments,  use: bus      }
 
 deployable salesApi {
-  platform:    hono
+  platform:    node
   contexts:    [Orders]
   serves:      SalesApi
   dataSources: [ordersState]
@@ -522,7 +522,7 @@ backend's broker subscription **is** the upstream, its generated SSE/WS endpoint
 
 ```ddd
 // Cross-DU realtime: A produces, B's UI consumes, B's backend relays.
-deployable salesApi  { platform: hono;   contexts: [Orders]    // DU X — producer
+deployable salesApi  { platform: node;   contexts: [Orders]    // DU X — producer
                        channels: [lifecycleBus]; serves: SalesApi; port: 3000 }
 deployable reportsApi{ platform: dotnet; contexts: [Reports]   // DU Y — hosts ctx B
                        channels: [lifecycleBus]    // ← MUST subscribe to relay A's channel to B's UI
@@ -1281,7 +1281,7 @@ system Acme {
       body: For { Sales.Order.all, o => Card { o.id, o.status } } }   // cached query, auto-fresh
   }
 
-  deployable salesApi  { platform: hono; contexts: [Orders];   serves: SalesApi
+  deployable salesApi  { platform: node; contexts: [Orders];   serves: SalesApi
                          dataSources: [ordersState]; channels: [lifecycleBus]; port: 3000 }
   deployable shipApi   { platform: dotnet; contexts: [Shipping]
                          dataSources: [shipState]; channels: [lifecycleBus]; port: 8080 }

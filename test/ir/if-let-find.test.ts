@@ -39,7 +39,7 @@ system S {
   deployable d { platform: ${platform}  contexts: [Orders]  dataSources: [s]  serves: A  port: 3000 }
 }`;
 
-const SYS = (body: string): string => SYSP(body, "hono");
+const SYS = (body: string): string => SYSP(body, "node");
 
 async function ctxOf(body: string) {
   const { model } = await parseString(SYS(body), { validate: false });

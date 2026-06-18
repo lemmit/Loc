@@ -114,7 +114,7 @@ system Acme {
   }
 
   // Pick a runtime per deployable.  Switch any time.
-  deployable api    { platform: hono,            modules: Sales, Catalog, port: 3000 }
+  deployable api    { platform: node,            modules: Sales, Catalog, port: 3000 }
   deployable apiNet { platform: dotnet,          modules: Sales, Catalog, port: 8080 }
   deployable apiPhx { platform: phoenixLiveView, modules: Sales, Catalog, port: 4000 }
 
@@ -245,7 +245,7 @@ src/
     _packs/        # design-pack discovery + loader (Mantine/shadcn/MUI/Chakra/ashPhoenix)
     _walker/       # cross-framework walker registry + WalkerTarget contract
     _obs/          # observability catalog + per-backend log renderers
-  platform/        # PlatformSurface registry + version pinning (hono@v4, dotnet, react, phoenixLiveView)
+  platform/        # PlatformSurface registry + version pinning (node@v4, dotnet, react, phoenixLiveView)
   system/          # multi-deployable orchestrator + docker-compose + .loom/ artifact bundle
   verify/          # ddd verify rollup (joins test results onto traceability)
   cli/             # bin entry point

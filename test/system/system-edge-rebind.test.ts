@@ -34,8 +34,8 @@ const DEPLOY = `system S {
       }
     }
   }
-  deployable api { platform: hono, contexts: [Orders], port: 4000 }
-  deployable apiV2 { platform: hono, contexts: [Orders], port: 4001 }
+  deployable api { platform: node, contexts: [Orders], port: 4000 }
+  deployable apiV2 { platform: node, contexts: [Orders], port: 4001 }
   deployable webApp { platform: react, targets: api, port: 3001 }
 }`;
 

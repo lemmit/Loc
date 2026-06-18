@@ -52,7 +52,7 @@ system M {
   }
   storage pg { type: postgres }
   resource s { for: O, kind: state, use: pg }
-  deployable api { platform: hono { persistence: ${persistence} }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+  deployable api { platform: node { persistence: ${persistence} }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
 
 describe("mikroorm persistence adapter — node/hono (Phase 5d)", () => {
@@ -112,7 +112,7 @@ system D {
   }
   storage pg { type: postgres }
   resource s { for: O, kind: eventLog, use: pg }
-  deployable api { platform: hono { persistence: mikroorm }  contexts: [O]  dataSources: [s]  port: 8080 }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  port: 8080 }
 }`;
 
   it("accepts persistedAs(eventLog) and emits the MikroORM event store", async () => {
@@ -144,7 +144,7 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
           repository Carts for Cart { }
         } }
         storage pg { type: postgres }  resource s { for: O, kind: state, use: pg }
-        deployable api { platform: hono { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 } }`;
+        deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 } }`;
     const { errors } = await emit(src);
     expect(errors.some((e) => /persistence: mikroorm/.test(e) && /shape\(document\)/.test(e))).toBe(
       true,

@@ -532,7 +532,7 @@ async function runNew(name: string, options: NewOptions): Promise<void> {
 
   // --- resolve + validate flags (fail fast, write nothing) ---
   const platformDefaulted = options.platform === undefined;
-  const platform = (options.platform ?? "hono") as StarterPlatform;
+  const platform = (options.platform ?? "node") as StarterPlatform;
   if (!STARTER_PLATFORMS.includes(platform)) {
     fail(`unknown --platform "${options.platform}". Valid: ${STARTER_PLATFORMS.join(" | ")}.`);
   }
@@ -540,7 +540,7 @@ async function runNew(name: string, options: NewOptions): Promise<void> {
   if (!STARTER_TEMPLATES.includes(template)) {
     fail(`unknown --template "${options.template}". Valid: ${STARTER_TEMPLATES.join(" | ")}.`);
   }
-  // Frontend: a React pack for hono/dotnet (default mantine); a Phoenix
+  // Frontend: a React pack for node/dotnet (default mantine); a Phoenix
   // LiveView (ashPhoenix) is the default for elixir.
   const design = (options.design ??
     (platform === "elixir" ? "ashPhoenix" : "mantine")) as DesignPack;
@@ -586,7 +586,7 @@ async function runNew(name: string, options: NewOptions): Promise<void> {
   );
   if (platformDefaulted) {
     console.log(
-      "  platform: hono (default) — also: dotnet, elixir, java, python (re-run with --platform <p>)",
+      "  platform: node (default) — also: dotnet, elixir, java, python (re-run with --platform <p>)",
     );
   }
   console.log(`  next: cd ${where} && ddd generate system main.ddd -o . && docker compose up`);
@@ -853,7 +853,7 @@ program
   )
   .option(
     "--platform <platform>",
-    "backend: hono | dotnet | elixir | java | python (default: hono)",
+    "backend: node | dotnet | elixir | java | python (default: node)",
   )
   .option("--template <template>", "starter model: blank | crud (default: crud)")
   .option(

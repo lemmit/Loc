@@ -36,7 +36,7 @@ system Shop {
       repository Customers for Customer { }
     }
   }
-  deployable api { platform: hono, contexts: [Orders], port: 3000 }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
 }
 `;
 
@@ -77,7 +77,7 @@ describe("schemaFromModule", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
       }`);
     const snap = schemaFromModule(loom.systems[0]!.subdomains[0]!);
     const wf = snap.tables.find((t) => t.name === "fulfillments");
@@ -112,7 +112,7 @@ describe("schemaFromModule", () => {
             repository Invoices for Invoice { }
           }
         }
-        deployable api { platform: hono, contexts: [Money], port: 3000 }
+        deployable api { platform: node, contexts: [Money], port: 3000 }
       }
     `);
     const snap = schemaFromModule(loom.systems[0]!.subdomains[0]!);
@@ -350,7 +350,7 @@ describe("buildMigrations", () => {
 system Twin {
   subdomain A { context Ca { aggregate X ids guid { n: int } } }
   subdomain B { context Cb { aggregate Y ids guid { n: int } } }
-  deployable api { platform: hono, contexts: [Ca], port: 3000 }
+  deployable api { platform: node, contexts: [Ca], port: 3000 }
 }
 `);
     const out = buildMigrations(loom.systems[0]!, memorySnapshotStore());
@@ -369,7 +369,7 @@ describe("migrationsOwner enrichment", () => {
 system S {
   subdomain M { context C { aggregate X ids guid { n: int } } }
   storage pg { type: postgres }
-  deployable first { platform: hono, contexts: [C], port: 3000 }
+  deployable first { platform: node, contexts: [C], port: 3000 }
   deployable second { platform: dotnet, contexts: [C], port: 3001 }
 }
 `);
@@ -415,7 +415,7 @@ system Shop {
       repository Customers for Customer { }
     }
   }
-  deployable api { platform: hono, contexts: [Orders], port: 3000 }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
 }
 `;
 
@@ -464,7 +464,7 @@ system Shop {
       repository Customers for Customer { }
     }
   }
-  deployable api { platform: hono, contexts: [Orders], port: 3000 }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
 }
 `;
 

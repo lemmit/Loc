@@ -51,7 +51,7 @@ system MikroNode {
   resource ordersState { for: Orders, kind: state, use: pg }
 
   deployable api {
-    platform: hono { persistence: mikroorm }
+    platform: node { persistence: mikroorm }
     contexts: [Orders]
     dataSources: [ordersState]
     serves: OrdersApi

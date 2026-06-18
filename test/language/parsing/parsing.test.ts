@@ -721,7 +721,7 @@ describe("page metamodel — grammar smoke tests", () => {
             }
           }
         }
-        deployable AuthApi { platform: hono  contexts: [Auth] }
+        deployable AuthApi { platform: node  contexts: [Auth] }
       }
       solution SOL-001 for US-001 {
         title: "Login via aggregate"
@@ -757,7 +757,7 @@ describe("page metamodel — grammar smoke tests", () => {
       requirement US-001 { type: UserStory  title: "x" }
       system S {
         subdomain M { context C { aggregate A { operation go() {} } } }
-        deployable api { platform: hono  contexts: [C] }
+        deployable api { platform: node  contexts: [C] }
       }
       solution SOL-001 for US-001 { entitles [ M.C.A.go, api ] }
       `,

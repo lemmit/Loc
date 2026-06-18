@@ -369,7 +369,7 @@ system Acme {
     enforcement: denyByDefault                  // denyByDefault | opt (default: opt)
   }
 
-  deployable api { platform: hono, contexts: [...], dataSources: [...], auth: required }
+  deployable api { platform: node, contexts: [...], dataSources: [...], auth: required }
   deployable web { platform: react, targets: api, auth: ui }   // login redirect + guard
 }
 ```

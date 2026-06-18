@@ -32,7 +32,7 @@ const sys = (uiBody: string, extra = "") => `
       api C: Api
 ${uiBody}
     }
-    deployable api { platform: hono, contexts: [C], serves: Api, port: 3000 }
+    deployable api { platform: node, contexts: [C], serves: Api, port: 3000 }
     deployable web { platform: vue, targets: api, ui: WebApp { C: api }, port: 3001 }
   }
 `;
@@ -78,7 +78,7 @@ describe("forms inside user components — Vue", () => {
           }
           page Home { route: "/" body: Heading { "hi" } }
         }
-        deployable api { platform: hono, contexts: [C], serves: Api, port: 3000 }
+        deployable api { platform: node, contexts: [C], serves: Api, port: 3000 }
         deployable web { platform: vue, targets: api, ui: WebApp { C: api }, port: 3001 }
       }`);
     const comp = files.get("src/components/OrderPanel.vue")!;

@@ -19,7 +19,7 @@ describe("validator: svelte deployable", () => {
       system S {
         ${BASE}
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: svelte, targets: api, ui: WebApp, port: 3002 }
       }
     `);
@@ -30,7 +30,7 @@ describe("validator: svelte deployable", () => {
     const { errors } = await parseString(`
       system S {
         ${BASE}
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: svelte, targets: api, port: 3002 }
       }
     `);
@@ -47,7 +47,7 @@ describe("validator: svelte deployable", () => {
       system S {
         ${BASE}
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: svelte, ui: WebApp, port: 3002 }
       }
     `);
@@ -62,7 +62,7 @@ describe("validator: svelte deployable", () => {
       system S {
         ${BASE}
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web1 { platform: react, targets: api, ui: WebApp, port: 3001 }
         deployable web2 { platform: svelte, targets: web1, ui: WebApp, port: 3002 }
       }
@@ -78,7 +78,7 @@ describe("validator: svelte deployable", () => {
       system S {
         ${BASE}
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: svelte, targets: api, ui: WebApp, design: mantine, port: 3002 }
       }
     `);
@@ -98,7 +98,7 @@ describe("validator: svelte deployable", () => {
       system S {
         ${BASE}
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: react, targets: api, ui: WebApp, design: shadcnSvelte, port: 3001 }
       }
     `);
@@ -113,7 +113,7 @@ describe("validator: svelte deployable", () => {
       system S {
         ${BASE}
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: svelte { persistence: drizzle }, targets: api, ui: WebApp, port: 3002 }
       }
     `);

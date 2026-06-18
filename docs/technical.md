@@ -826,7 +826,7 @@ previously-emitted IR snapshots for migration diffing.
 **Platform dispatch.** Each `deployable.platform` IR value resolves
 through `src/platform/registry.ts` to a `PlatformSurface` —
 `platformFor(name)` for barewords, `parseBuiltinPlatformRef` for
-pinned `family@version` strings (e.g. `hono@v4`).  Backend discovery
+pinned `family@version` strings (e.g. `node@v4`).  Backend discovery
 goes through an injectable seam (`setBackendSource`) so the playground
 can back resolution with a VFS instead of `fs` / `node_modules` —
 phase ⑨ is otherwise agnostic to whether a backend is in-tree or an

@@ -27,7 +27,7 @@ system Acme {
   storage primarySql { type: postgres }
   resource sState { for: S, kind: state, use: primarySql }
   deployable api {
-    platform: hono
+    platform: node
     contexts: [S]
     dataSources: [sState]
     serves: SalesApi

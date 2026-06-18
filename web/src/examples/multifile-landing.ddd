@@ -67,7 +67,7 @@ system MultiFileLanding {
   }
 
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Stub]
     port: 3000
   }

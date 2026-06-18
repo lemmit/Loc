@@ -42,7 +42,7 @@ system Shop {
 
 describe("audited-operation capability validation", () => {
   it("accepts an audited operation on a Hono (node) deployable", async () => {
-    expect(await auditErrors(sys("hono"))).toEqual([]);
+    expect(await auditErrors(sys("node"))).toEqual([]);
   });
 
   it("accepts an audited operation on a .NET deployable (audit runtime ported)", async () => {

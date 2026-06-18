@@ -120,7 +120,7 @@ describe("DefinitionProvider — built-in cross references", () => {
             context <|S|> { aggregate Order { x: int } }
           }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [<|>S]
             port: 3000
           }
@@ -138,7 +138,7 @@ describe("DefinitionProvider — built-in cross references", () => {
             context S { aggregate Order { x: int } }
           }
           deployable <|api|> {
-            platform: hono
+            platform: node
             contexts: [S]
             port: 3000
           }

@@ -25,7 +25,7 @@ describe("expressions in text positions", () => {
             body:  Heading { "Hello, " + name }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -56,7 +56,7 @@ describe("expressions in text positions", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -85,7 +85,7 @@ describe("expressions in text positions", () => {
             body:  Stat { "Active: " + count, total - count }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -115,7 +115,7 @@ describe("expressions in text positions", () => {
             body:  Card { "Profile: " + name, Text { "hello" } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -142,7 +142,7 @@ describe("expressions in text positions", () => {
             body:  Card { label, Text { "body" } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -168,7 +168,7 @@ describe("expressions in text positions", () => {
             body:  Card { Text { "just content" } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -193,7 +193,7 @@ describe("expressions in text positions", () => {
             body:  Text { 42 }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

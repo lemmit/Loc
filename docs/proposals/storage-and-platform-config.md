@@ -28,7 +28,7 @@
 >   to the new **`foundation:`** keyword, default `vanilla`). The
 >   adapter *kinds* in `src/generator/_adapters/` stay `style`/`layout`
 >   internally; the DSL spelling differs (`application`↔`style`,
->   `directoryLayout`↔`layout`). The §8.2/§882 **`platform: hono` →
+>   `directoryLayout`↔`layout`). The §8.2/§882 **`platform: node` →
 >   `platform: node { framework: hono }`** rename is **not adopted** —
 >   `hono` remains the platform name; `node` does not exist. The full
 >   axis vocabulary, gating matrix, and examples live in
@@ -362,7 +362,7 @@ Each platform's registry declares which `style:`, `layout:`, `persistence.use:`,
 
 ### 4.1 Note on `platform:` keyword evolution
 
-The current `platform: hono` keyword conflates runtime (Node) with HTTP framework (Hono). The proposed direction (out of v1 scope) is:
+The current `platform: node` keyword conflates runtime (Node) with HTTP framework (Hono). The proposed direction (out of v1 scope) is:
 
 ```
 platform: node   { framework: hono | fastify | express | nestjs | elysia, ... }   # backend-only
@@ -371,7 +371,7 @@ platform: remix  { ... }                                                        
 platform: phoenix { style: ash | contexts, framework: liveview | restApi, ... }   # already fullstack
 ```
 
-For v1, rename `platform: hono` to `platform: node { framework: hono }` (with `hono` as the sole v1 framework value), preserving backward compatibility via desugar of the old keyword.
+For v1, rename `platform: node` to `platform: node { framework: hono }` (with `hono` as the sole v1 framework value), preserving backward compatibility via desugar of the old keyword.
 
 Meta-frameworks (Next.js, Remix, SvelteKit) get their own top-level `platform:` entries because they own the entire stack (routing, rendering, server, deployment). They are not `framework:` options inside `platform: node`. Their concrete grammar shape is deferred.
 
@@ -892,7 +892,7 @@ In `src/system/`:
 | `aggregate Order { ... }` (no `persistenceStrategy:`) | Defaults to `stateBased`. Identical behavior. |
 | `event Placed { ... }` (no `publish:`) | Defaults to `internal`. Identical behavior. |
 | `platform: dotnet` (bare) | Defaults to `{ style: cqrs, layout: byLayer, persistence: efcore, framework: minimalApi }`. Identical generated output. |
-| `platform: hono` | Desugars to `platform: node { framework: hono }`. Identical generated output. |
+| `platform: node` | Desugars to `platform: node { framework: hono }`. Identical generated output. |
 
 Existing `.ddd` files require no edits. All new features are strictly opt-in.
 
@@ -927,7 +927,7 @@ Existing `.ddd` files require no edits. All new features are strictly opt-in.
 - `byFeature` (new).
 
 **Platform rename:**
-- `platform: hono` → `platform: node { framework: hono }` (with desugar for backward compatibility).
+- `platform: node` → `platform: node { framework: hono }` (with desugar for backward compatibility).
 
 ### 9.2 Deferred (grammar slot reserved; emitter v1 may warn and ignore)
 
@@ -1014,7 +1014,7 @@ Each phase is shippable in isolation; later phases depend on the seams introduce
 
 ### Phase 6 — Same arc on `node`
 
-- Rename `platform: hono` to `platform: node { framework: hono }`; add desugar.
+- Rename `platform: node` to `platform: node { framework: hono }`; add desugar.
 - Apply phases 2–5 to the Node platform.
 - Identify and implement one alternative persistence adapter and one ES-capable adapter.
 
@@ -1135,7 +1135,7 @@ The following design decisions were made during the conversation that produced t
 7. **`abstraction: repositoryPerAggregate | none` deferred from v1 emission but grammar slot reserved.** Avoids a future breaking change; v1 ships smaller.
 8. **`layout:` is orthogonal to `style:`.** `byFeature` is a directory-organization choice on top of `cqrs`; it is not the same thing as VSA. Pure VSA (no shared repository abstractions) is what `abstraction: none` would later unlock.
 9. **`outbox: shared` (one table per DB / schema) is the v1 default.** `outbox: perAggregate` is a legitimate alternative and is mentioned in the grammar sketch, but does not ship in v1.
-10. **`platform: hono` becomes `platform: node { framework: hono }`** as the first step toward separating runtime, HTTP framework, and meta-framework tiers. Meta-frameworks (Next.js, Remix, SvelteKit) will get their own `platform:` slots when added; they are not framework values inside `platform: node`.
+10. **`platform: node` becomes `platform: node { framework: hono }`** as the first step toward separating runtime, HTTP framework, and meta-framework tiers. Meta-frameworks (Next.js, Remix, SvelteKit) will get their own `platform:` slots when added; they are not framework values inside `platform: node`.
 11. **Verbose, self-explanatory names over abbreviated ones.** Loom doesn't shorten obvious words elsewhere (`view`, `aggregate`, `workflow` are all full); the convention extends here. `persistenceStrategy:` over `strategy:`; recommended `inheritanceStrategy:` over `storage:`; values `shareTable | ownTable` over `shared | own`. A few extra characters per declaration buy self-explanatory reading without context.
 12. **Both `persistenceStrategy:` and (recommended) `inheritanceStrategy:` are domain-modeling concerns, not pure infrastructure.** Each choice changes capabilities the user can see: persistence model affects the aggregate's API and event semantics; inheritance layout affects whether `Party id` refs are legal, whether `find all Party` is single-scan vs UNION ALL, how views project. Surface these as visible, named attributes inside the aggregate block — not as quiet annotations.
 13. **All aggregate attributes live inside the `{ ... }` block.** Only modifiers (like `abstract`) appear before the keyword. The recommended fix to #549's `abstract aggregate Party storage: shared { ... }` shape moves `inheritanceStrategy:` inside the block — matching the convention `persistenceStrategy:` already follows.

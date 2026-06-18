@@ -26,7 +26,7 @@ const sys = (uiBody: string) => `
     ui WebApp {
 ${uiBody}
     }
-    deployable api { platform: hono, contexts: [C], port: 3000 }
+    deployable api { platform: node, contexts: [C], port: 3000 }
     deployable web { platform: vue, targets: api, ui: WebApp, port: 3001 }
   }
 `;
@@ -111,7 +111,7 @@ describe("user-defined components — Vue", () => {
           component OrderChart(order: Order, caption: string) extern from "widgets/order-chart"
           page Home { route: "/" body: Heading { "hi" } }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: vue, targets: api, ui: WebApp, port: 3001 }
       }
     `);

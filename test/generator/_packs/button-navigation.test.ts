@@ -20,7 +20,7 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
             body:  Stack { Heading { "Welcome" }, Button { "Go to orders", to: "/orders" } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -53,7 +53,7 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -83,7 +83,7 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
             body:  Button { "Click me" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -108,7 +108,7 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
             body:  Stack { Heading { slug }, Button { "Back", to: "/" } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -136,7 +136,7 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
             body:  Button { "Open", to: slug }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

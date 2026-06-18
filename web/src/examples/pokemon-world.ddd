@@ -254,7 +254,7 @@ system PokemonWorld {
     resource arenasState    { for: Arenas,    kind: state, use: primarySql }
 
     deployable api {
-        platform: hono
+        platform: node
         contexts: [Creatures, Trainers, Battles, Arenas]
         dataSources: [creaturesState, trainersState, battlesState, arenasState]
         serves: RosterApi, CombatApi

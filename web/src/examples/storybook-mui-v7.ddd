@@ -201,7 +201,7 @@ system Storybook {
   resource storybookState { for: Storybook, kind: state, use: primary }
 
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Storybook]
     dataSources: [storybookState]
     port: 3000

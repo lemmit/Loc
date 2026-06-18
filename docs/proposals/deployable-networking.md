@@ -17,7 +17,7 @@ treats `deployable` as the only place networking exists — but the
 networking surface on `deployable` is thin and has silent failure
 modes:
 
-- **Port collisions are silent.** Two `platform: hono` deployables that
+- **Port collisions are silent.** Two `platform: node` deployables that
   both omit `port:` both resolve to `3000` (the platform default). The
   validator does not flag this; compose simply fails to start.
 - **No api-level URL identity.** A deployable can `serves: SalesApi,
@@ -361,7 +361,7 @@ system Shop {
 
   // EDGE BACKEND — multi-api on one process, per-api routing prefixes.
   deployable shopApi {
-    platform: hono
+    platform: node
     contexts: [Sales, Catalog]
     dataSources: [salesState, catalogState]
     serves: SalesApi at "/sales", CatalogApi at "/catalog"

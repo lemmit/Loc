@@ -29,7 +29,7 @@ describe("+= / -= in onClick mutations", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -54,7 +54,7 @@ describe("+= / -= in onClick mutations", () => {
             body:  Button { "-", onClick: e => { count -= 1 } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -81,7 +81,7 @@ describe("+= / -= in onClick mutations", () => {
             body:  Button { "Bump", onClick: e => { count += step * 2 } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -114,7 +114,7 @@ describe("+= / -= in onClick mutations", () => {
             }}
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -188,7 +188,7 @@ describe("+= / -= in onClick mutations", () => {
             body:  Button { "x", onClick: e => { e.note := 1 } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

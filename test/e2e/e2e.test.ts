@@ -319,10 +319,10 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     // `diffSpecs` is pure — see test/_helpers/openapi-normalize.test.ts
     // for the unit-test coverage of each divergence class.
     const pairs: Array<[keyof typeof specs, keyof typeof specs]> = [
-      ["hono", "dotnet"],
-      ["hono", "phoenix"],
+      ["node", "dotnet"],
+      ["node", "phoenix"],
       ["dotnet", "phoenix"],
-      ["hono", "python"],
+      ["node", "python"],
       ["dotnet", "python"],
       ["phoenix", "python"],
     ];

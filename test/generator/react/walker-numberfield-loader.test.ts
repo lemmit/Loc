@@ -23,7 +23,7 @@ describe("NumberField + Loader primitives", () => {
             body:  NumberField { "Quantity", bind: qty }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -52,7 +52,7 @@ describe("NumberField + Loader primitives", () => {
             body:  NumberField { "Price", bind: price }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -76,7 +76,7 @@ describe("NumberField + Loader primitives", () => {
             body:  NumberField { "Bare" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -101,7 +101,7 @@ describe("NumberField + Loader primitives", () => {
             body:  loading ? Loader {} : Heading { "Done" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -125,7 +125,7 @@ describe("NumberField + Loader primitives", () => {
             body:  Loader { size: "lg" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

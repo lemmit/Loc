@@ -33,7 +33,7 @@ describe("ternary conditional rendering in walker pages", () => {
             body:  loading ? Empty { "Loading..." } : Stack { Heading { "Done" } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -70,7 +70,7 @@ describe("ternary conditional rendering in walker pages", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -100,7 +100,7 @@ describe("ternary conditional rendering in walker pages", () => {
             body:  count > limit ? Heading { "Over" } : Heading { "Under" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -125,7 +125,7 @@ describe("ternary conditional rendering in walker pages", () => {
             body:  active ? Heading { "Yes" } : Heading { "No" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

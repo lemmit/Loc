@@ -36,7 +36,7 @@ async function parseModel(
 
 // A Cart with an audited `cancel` op + a plain `touch` op, on a hono
 // deployable.  `extra` is appended into the aggregate body verbatim.
-const SYSTEM = (extra = "", platform = "hono", targets = "") => `
+const SYSTEM = (extra = "", platform = "node", targets = "") => `
 system S {
   subdomain M {
     context C {
@@ -211,7 +211,7 @@ system S {
       }
     }
   }
-  deployable api { platform: hono, contexts: [C], port: 3000 }
+  deployable api { platform: node, contexts: [C], port: 3000 }
 }
 `;
 
@@ -279,7 +279,7 @@ system S {
       }
     }
   }
-  deployable api { platform: hono, contexts: [C], port: 3000 }
+  deployable api { platform: node, contexts: [C], port: 3000 }
 }
 `;
 

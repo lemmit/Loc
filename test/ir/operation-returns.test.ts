@@ -81,7 +81,7 @@ describe("operation returns — platform-aware emission gate (exception-less spi
   };
 
   it("does NOT gate a return-typed operation served by hono/node (route translation implemented)", async () => {
-    expect(await gateDiags("hono")).toEqual([]);
+    expect(await gateDiags("node")).toEqual([]);
   });
 
   it("does NOT gate a return-typed operation served by dotnet (producer translation implemented)", async () => {

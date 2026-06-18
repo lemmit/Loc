@@ -77,7 +77,7 @@ system Acme {
 
   // ── COMPOSITION: deployables ────────────────────────────────
   deployable salesApi {
-    platform: hono
+    platform: node
     contexts: [Orders]
     serves: SalesApi
     port: 3000
@@ -87,7 +87,7 @@ system Acme {
   resource campaignsCache { for: Campaigns, kind: cache, use: hotCache }
 
   deployable mktgApi {
-    platform: hono
+    platform: node
     contexts: [Campaigns]
     dataSources: [campaignsState, campaignsCache]
     serves: MarketingApi

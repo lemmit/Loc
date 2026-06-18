@@ -51,7 +51,7 @@ ${body}
       }
     }
   }
-  deployable api { platform: hono, contexts: [C], port: 3000 }
+  deployable api { platform: node, contexts: [C], port: 3000 }
 }
 `;
 
@@ -94,7 +94,7 @@ system S { subdomain M { context C {
     operation noop(x: int) { precondition x > 0 }
   }
   repository Carts for Cart { find byLabel(label: string): Cart? where this.label == label }
-} } deployable api { platform: hono, contexts: [C], port: 3000 } }
+} } deployable api { platform: node, contexts: [C], port: 3000 } }
 `;
     const { warnings } = await parseModel(src);
     expect(warnings.some((w) => /Provenanced field 'total'.*never written/.test(w))).toBe(true);
@@ -273,7 +273,7 @@ system S {
       }
     }
   }
-  deployable api { platform: hono, contexts: [C], port: 3000 }
+  deployable api { platform: node, contexts: [C], port: 3000 }
 }
 `;
 
@@ -345,7 +345,7 @@ system S {
       }
     }
   }
-  deployable api { platform: hono, contexts: [C], port: 3000 }
+  deployable api { platform: node, contexts: [C], port: 3000 }
 }
 `;
 

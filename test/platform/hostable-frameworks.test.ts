@@ -22,8 +22,8 @@ const sorted = (s: ReadonlySet<string>) => [...s].sort();
 describe("hostableFrameworks — the host-capability rule", () => {
   it("every static-asset host serves exactly the static-bundle frameworks", () => {
     // The standalone frontend hosts plus every backend that serves a
-    // static root (dotnet → wwwroot, hono → static middleware).
-    for (const p of ["react", "svelte", "static", "vue", "dotnet", "hono"] as Platform[]) {
+    // static root (dotnet → wwwroot, node → static middleware).
+    for (const p of ["react", "svelte", "static", "vue", "dotnet", "node"] as Platform[]) {
       expect(sorted(platformFor(p).hostableFrameworks)).toEqual(sorted(STATIC_BUNDLE_FRAMEWORKS));
     }
   });
@@ -44,7 +44,7 @@ describe("hostableFrameworks — the host-capability rule", () => {
 
   it("LiveView is hostable ONLY by Phoenix (runtime-coupled, not a static bundle)", () => {
     expect(STATIC_BUNDLE_FRAMEWORKS.has("phoenixLiveView")).toBe(false);
-    for (const p of ["react", "svelte", "static", "vue", "dotnet", "hono"] as Platform[]) {
+    for (const p of ["react", "svelte", "static", "vue", "dotnet", "node"] as Platform[]) {
       expect(platformFor(p).hostableFrameworks.has("phoenixLiveView")).toBe(false);
     }
   });

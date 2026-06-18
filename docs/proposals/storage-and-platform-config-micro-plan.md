@@ -32,7 +32,7 @@ The full implementation plan is ~65 implementer-days serialized. Most of the dep
 - **From full plan Phase 2**: Validator + capability matrix — complete.
 - **Downstream consumer alignment**: VS Code TextMate grammar, playground editor (Monaco) tokens, visual builders (`web/src/builder/system{,-v2}/` audit and round-trip preservation), playground examples, Playwright suite. **Round-trip preservation is the bar; full builder UI for new constructs is deferred to stream N.**
 - **From full plan Phase 3**: .NET adapter seam refactor — complete.
-- **From full plan Phase 10**: `platform: hono` → `platform: node { framework: hono }` rename — complete.
+- **From full plan Phase 10**: `platform: node` → `platform: node { framework: hono }` rename — complete.
 - **From full plan Phase 11**: Node adapter seam refactor — complete (seams only, no new adapters).
 - **From full plan Phase 12**: Phoenix adapter seam refactor — complete (seams only, no `ashCommanded`).
 - **Stub registrations** for: `persistence.dapper`, `persistence.marten`, `persistence.ashCommanded`, `style.layered`, `style.contexts`, `layout.byFeature`, EF Core eventSourced, Node ES adapter, outbox emission, per-deployable overrides.
@@ -456,15 +456,15 @@ This entry is retained only to keep F3–F8 numbering stable for downstream cros
 
 ---
 
-### F6 — Node adapter seam refactor + `platform: hono` rename
+### F6 — Node adapter seam refactor + `platform: node` rename
 
-**Goal:** Mirror F5 on Node. Rename `platform: hono` → `platform: node { framework: hono }`. Wrap existing emitter as default. Stub everything else.
+**Goal:** Mirror F5 on Node. Rename `platform: node` → `platform: node { framework: hono }`. Wrap existing emitter as default. Stub everything else.
 
 **Prerequisites:** F3. Independent of F4 and F5 (can run in parallel with both once F3 is merged).
 
 **Deliverables:**
 
-1. **`platform: hono` → `platform: node { framework: hono }`**:
+1. **`platform: node` → `platform: node { framework: hono }`**:
    - Grammar: accept `node` and `hono` as platform names; lower `hono` → `node { framework: hono }`.
    - Deprecation warning on the old form.
    - Update `examples/` and `web/src/examples/` to use the new form (coordinated single-PR, since all users internal).

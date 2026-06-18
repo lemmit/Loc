@@ -38,7 +38,7 @@ system S {
   storage primary { type: postgres }
   resource salesState { for: Sales, kind: state, use: primary }
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Sales]
     dataSources: [salesState]
     serves: SalesApi

@@ -49,7 +49,7 @@ system Sys {
   }
   storage primary { type: postgres }
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Orders, Invoices]
     port: 3000
   }

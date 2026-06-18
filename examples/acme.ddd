@@ -283,7 +283,7 @@ system Acme {
     // Lightweight read-API on Hono — Catalog data + Customers (for
     // the v21 wire-validation showcase across both backends).
     deployable catalogWeb {
-        platform: hono
+        platform: node
         contexts: [Products, Customers]
         dataSources: [productsState, customersState]
         serves: CatalogApi, CustomerMgmtApi

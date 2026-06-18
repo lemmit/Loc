@@ -47,10 +47,10 @@ const BANK_THREE_BACKEND = `
         repository Campaigns for Campaign { }
       }
     }
-    deployable honoApi { platform: hono, contexts: [Banking], port: 3000 }
+    deployable honoApi { platform: node, contexts: [Banking], port: 3000 }
     deployable dotnetApi { platform: dotnet, contexts: [Banking], port: 3001 }
     deployable elixirApi { platform: phoenix, contexts: [Banking], port: 4000 }
-    deployable marketingApi { platform: hono, contexts: [Promo], port: 3010 }
+    deployable marketingApi { platform: node, contexts: [Promo], port: 3010 }
     ui WebUi { with scaffold(subdomains: [Accounts]) }
     deployable webApp { platform: static, targets: honoApi, ui: WebUi, port: 8080 }
 
@@ -143,7 +143,7 @@ const TO_THROW = `
         repository Accounts for Account { }
       }
     }
-    deployable honoApi { platform: hono, contexts: [Banking], port: 3000 }
+    deployable honoApi { platform: node, contexts: [Banking], port: 3000 }
 
     test e2e "negative balance is rejected" against honoApi {
       expect(api.accounts.create({ balance: -1 })).toThrow(400)

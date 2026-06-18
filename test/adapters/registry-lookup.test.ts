@@ -20,7 +20,7 @@ import {
 describe("adapter registry — lookup", () => {
   it("backends carry adapter menus; frontends don't", () => {
     expect(hasAdapters("dotnet")).toBe(true);
-    expect(hasAdapters("hono")).toBe(true);
+    expect(hasAdapters("node")).toBe(true);
     expect(hasAdapters("phoenixLiveView")).toBe(true);
     expect(hasAdapters("react")).toBe(false);
     expect(hasAdapters("static")).toBe(false);
@@ -34,8 +34,8 @@ describe("adapter registry — lookup", () => {
     expect(d.layout).toBe("byLayer");
   });
 
-  it("exposes the hono defaults", () => {
-    const d = defaultsFor("hono")!;
+  it("exposes the node defaults", () => {
+    const d = defaultsFor("node")!;
     expect(d.persistence.state).toBe("drizzle");
     expect(d.style).toBe("layered");
     expect(d.layout).toBe("byLayer");
@@ -86,7 +86,7 @@ describe("adapter registry — lookup", () => {
   });
 
   it("every registered persistence adapter is a valid PersistenceAdapter shape", () => {
-    for (const platform of ["dotnet", "hono", "phoenixLiveView"] as const) {
+    for (const platform of ["dotnet", "node", "phoenixLiveView"] as const) {
       const menu = adaptersFor(platform)!;
       for (const [name, adapter] of Object.entries(menu.persistence)) {
         expect(adapter.name).toBe(name);
@@ -97,7 +97,7 @@ describe("adapter registry — lookup", () => {
   });
 
   it("every registered style adapter declares strategies + layouts", () => {
-    for (const platform of ["dotnet", "hono", "phoenixLiveView"] as const) {
+    for (const platform of ["dotnet", "node", "phoenixLiveView"] as const) {
       const menu = adaptersFor(platform)!;
       for (const [name, adapter] of Object.entries(menu.styles)) {
         expect(adapter.name).toBe(name);
@@ -120,8 +120,8 @@ describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 me
   it("excludes stubs on hono (drizzle/mikroorm/layered/byLayer real)", () => {
     // mikroorm became real in Phase 5d — the node persistence menu is now
     // exactly { drizzle, mikroorm } (the speculative prisma stub was removed).
-    expect(availableAdapterNames("hono", "persistence")).toEqual(["drizzle", "mikroorm"]);
-    expect(availableAdapterNames("hono", "style")).toEqual(["layered"]);
+    expect(availableAdapterNames("node", "persistence")).toEqual(["drizzle", "mikroorm"]);
+    expect(availableAdapterNames("node", "style")).toEqual(["layered"]);
   });
 
   it("phoenix is 100% real", () => {
@@ -154,17 +154,17 @@ describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 me
 describe("transport — adapter-backed axis (realization-axes-alignment.md slice 3)", () => {
   it("each backend exposes its real transport (alternatives are stubs)", () => {
     expect(availableAdapterNames("dotnet", "transport")).toEqual(["controllers"]);
-    expect(availableAdapterNames("hono", "transport")).toEqual(["hono"]);
+    expect(availableAdapterNames("node", "transport")).toEqual(["hono"]);
     expect(availableAdapterNames("phoenixLiveView", "transport")).toEqual(["phoenix"]);
     // Reserved stubs — present in allAdapterNames, excluded from the real menu:
     // controllers (dotnet); express + fastify (node).
     expect(allAdapterNames("dotnet", "transport")).toEqual(["controllers", "minimalApi"]);
-    expect(allAdapterNames("hono", "transport")).toEqual(["express", "fastify", "hono"]);
+    expect(allAdapterNames("node", "transport")).toEqual(["express", "fastify", "hono"]);
   });
 
   it("exposes the transport default per backend", () => {
     expect(defaultsFor("dotnet")!.transport).toBe("controllers");
-    expect(defaultsFor("hono")!.transport).toBe("hono");
+    expect(defaultsFor("node")!.transport).toBe("hono");
     expect(defaultsFor("phoenixLiveView")!.transport).toBe("phoenix");
   });
 
@@ -185,19 +185,19 @@ describe("transport — adapter-backed axis (realization-axes-alignment.md slice
 describe("runtime — adapter-backed axis (realization-axes-alignment.md slice 5)", () => {
   it("each backend exposes `transactional`; actor runtimes are reserved stubs", () => {
     expect(availableAdapterNames("dotnet", "runtime")).toEqual(["transactional"]);
-    expect(availableAdapterNames("hono", "runtime")).toEqual(["transactional"]);
+    expect(availableAdapterNames("node", "runtime")).toEqual(["transactional"]);
     expect(availableAdapterNames("phoenixLiveView", "runtime")).toEqual(["transactional"]);
     // Actor runtimes are registered stubs — present in allAdapterNames,
     // excluded from the real menu: orleans (dotnet), genserver (elixir),
     // worker (node — worker_threads).
     expect(allAdapterNames("dotnet", "runtime")).toEqual(["orleans", "transactional"]);
     expect(allAdapterNames("phoenixLiveView", "runtime")).toEqual(["genserver", "transactional"]);
-    expect(allAdapterNames("hono", "runtime")).toEqual(["transactional", "worker"]);
+    expect(allAdapterNames("node", "runtime")).toEqual(["transactional", "worker"]);
   });
 
   it("exposes the runtime default per backend (transactional)", () => {
     expect(defaultsFor("dotnet")!.runtime).toBe("transactional");
-    expect(defaultsFor("hono")!.runtime).toBe("transactional");
+    expect(defaultsFor("node")!.runtime).toBe("transactional");
     expect(defaultsFor("phoenixLiveView")!.runtime).toBe("transactional");
   });
 
@@ -206,6 +206,6 @@ describe("runtime — adapter-backed axis (realization-axes-alignment.md slice 5
     expect(resolveRuntime("elixir", "transactional").name).toBe("transactional");
     expect(resolveRuntime("dotnet", "orleans").name).toBe("orleans");
     expect(resolveRuntime("elixir", "genserver").name).toBe("genserver");
-    expect(resolveRuntime("hono", "worker").name).toBe("worker");
+    expect(resolveRuntime("node", "worker").name).toBe("worker");
   });
 });

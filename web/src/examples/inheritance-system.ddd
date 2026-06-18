@@ -106,7 +106,7 @@ system InheritanceSystem {
   resource walletEvents { for: Wallet, kind: eventLog, use: primary }
 
   deployable api {
-    platform: hono, contexts: [Wallet],
+    platform: node, contexts: [Wallet],
     dataSources: [walletState, walletEvents], port: 3000
   }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }

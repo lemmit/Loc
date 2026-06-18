@@ -48,7 +48,7 @@ Three findings from this session point at the same gap:
 - Old pack versions stay available (`design: "mantine@v7"`) so existing projects don't break when new packs land.
 - `design: mantine` (bareword) auto-resolves to the toolchain's current default; flipping the default rolls every bareword source forward.
 - New pack versions adopt the new APIs properly — no technical debt (e.g. react-router 7 framework mode, Tailwind 4 CSS-first, Chakra 3 compound components).
-- Architecture generalises to backends if/when needed (`platform: hono@4`), but we don't pre-build it.
+- Architecture generalises to backends if/when needed (`platform: node@4`), but we don't pre-build it.
 
 ## Non-goals
 
@@ -65,7 +65,7 @@ Three findings from this session point at the same gap:
 | Bareword default | Auto-rolls to `BUILTIN_PACK_LATEST[family]` | User choice — cutting-safe-edge default. Pinning is opt-in via the quoted form. |
 | Manifest `version` field | Load-bearing — must equal parent dir name (`v9`); loader cross-checks | Today the field is metadata-only; repurpose to prevent copy-paste shadowing. |
 | Cross-pack deps (react/vite/tsconfig) | Live in each pack's `package-json.hbs`, already pack-owned | Each pack version carries its full manifest, so `mantine@v7` stays on React 18 while `mantine@v9` runs on React 19. |
-| Backend pinning | Inline strings; bump in place | Hono/drizzle/.NET/Phoenix each have one consumer. YAGNI for `platform: hono@4` syntax. |
+| Backend pinning | Inline strings; bump in place | Hono/drizzle/.NET/Phoenix each have one consumer. YAGNI for `platform: node@4` syntax. |
 | react-router 7 mode | Framework mode in new packs | User rule: "no technical debt". Library mode is a transitional shim. |
 | TS version target | 6.0 in new packs | Latest stable; ship a tsconfig that opts into TS 6 defaults explicitly. |
 | Vite version target | 8 in new packs | Latest stable; new packs accept oxc/rolldown. |

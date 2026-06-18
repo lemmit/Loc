@@ -22,7 +22,7 @@ describe(".loom/datasources.md", () => {
         storage pg { type: postgres }
         resource cState { for: C, kind: state, use: pg }
         deployable api {
-          platform: hono, contexts: [C], dataSources: [cState], port: 3000
+          platform: node, contexts: [C], dataSources: [cState], port: 3000
         }
       }
     `);
@@ -37,7 +37,7 @@ describe(".loom/datasources.md", () => {
         storage pg { type: postgres }
         resource ordersState { for: Orders, kind: state, use: pg }
         deployable api {
-          platform: hono, contexts: [Orders],
+          platform: node, contexts: [Orders],
           dataSources: [ordersState], port: 3000
         }
       }
@@ -56,7 +56,7 @@ describe(".loom/datasources.md", () => {
         storage pg { type: postgres }
         resource s { for: CustomerOrders, kind: state, use: pg }
         deployable api {
-          platform: hono, contexts: [CustomerOrders],
+          platform: node, contexts: [CustomerOrders],
           dataSources: [s], port: 3000
         }
       }
@@ -72,7 +72,7 @@ describe(".loom/datasources.md", () => {
         storage pg { type: postgres }
         resource s { for: C, kind: state, use: pg, schema: "legacy_app" }
         deployable api {
-          platform: hono, contexts: [C], dataSources: [s], port: 3000
+          platform: node, contexts: [C], dataSources: [s], port: 3000
         }
       }
     `);
@@ -90,7 +90,7 @@ describe(".loom/datasources.md", () => {
         resource cState { for: C, kind: state, use: pg }
         resource cCache { for: C, kind: cache, use: r }
         deployable api {
-          platform: hono, contexts: [C],
+          platform: node, contexts: [C],
           dataSources: [cState, cCache], port: 3000
         }
       }
@@ -111,7 +111,7 @@ describe(".loom/datasources.md", () => {
         resource aState { for: A, kind: state, use: pg }
         resource bState { for: B, kind: state, use: pg }
         deployable api {
-          platform: hono, contexts: [A, B],
+          platform: node, contexts: [A, B],
           dataSources: [aState, bState], port: 3000
         }
       }
@@ -129,7 +129,7 @@ describe(".loom/datasources.md", () => {
         storage unused { type: redis }
         resource s { for: C, kind: state, use: pg }
         deployable api {
-          platform: hono, contexts: [C], dataSources: [s], port: 3000
+          platform: node, contexts: [C], dataSources: [s], port: 3000
         }
       }
     `);
@@ -145,7 +145,7 @@ describe(".loom/datasources.md", () => {
         resource s     { for: C, kind: state, use: pg }
         resource extra { for: C, kind: cache, use: pg }
         deployable api {
-          platform: hono, contexts: [C], dataSources: [s], port: 3000
+          platform: node, contexts: [C], dataSources: [s], port: 3000
         }
       }
     `);
@@ -161,7 +161,7 @@ describe(".loom/datasources.md", () => {
         storage pg { type: postgres }
         resource s { for: C, kind: state, use: pg }
         deployable api {
-          platform: hono, contexts: [C], dataSources: [s], port: 3000
+          platform: node, contexts: [C], dataSources: [s], port: 3000
         }
         deployable web { platform: react, targets: api, port: 3001 }
       }

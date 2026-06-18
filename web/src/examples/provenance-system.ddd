@@ -63,7 +63,7 @@ system OrderingSystem {
   resource orderingState { for: Ordering, kind: state, use: primary }
 
   deployable api {
-    platform: hono, contexts: [Ordering],
+    platform: node, contexts: [Ordering],
     dataSources: [orderingState], port: 3000
   }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }

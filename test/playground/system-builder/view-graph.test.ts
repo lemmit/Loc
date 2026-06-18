@@ -358,7 +358,7 @@ describe("Model v2 — view-graph per level", () => {
   }
   ui Web {
   }
-  deployable api { platform: hono, contexts: [Orders], port: 3000 }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
   deployable webApp { platform: react, targets: api, ui: Web, port: 3001 }
 }`;
     const g = buildViewGraph(parse(SRC_D), [{ kind: "system", name: "S" }]);

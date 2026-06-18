@@ -6,7 +6,7 @@
 //   storage warehouse   { type: clickhouse }
 //
 //   deployable salesApi {
-//     platform: hono
+//     platform: node
 //     contexts: [C] {
 //       primary: primarySql
 //       cache:   hotCache
@@ -50,7 +50,7 @@ describe.skip("storage declarations + module-storage map (legacy — superseded 
           ${SALES_DOMAIN}
           storage mainDb { type: postgres }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -75,7 +75,7 @@ describe.skip("storage declarations + module-storage map (legacy — superseded 
           storage ch     { type: clickhouse }
           storage bq     { type: bigquery }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -93,7 +93,7 @@ describe.skip("storage declarations + module-storage map (legacy — superseded 
           storage db { type: postgres }
           storage db { type: postgres }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -111,7 +111,7 @@ describe.skip("storage declarations + module-storage map (legacy — superseded 
           ${SALES_DOMAIN}
           storage pg { type: postgres }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -129,7 +129,7 @@ describe.skip("storage declarations + module-storage map (legacy — superseded 
           storage cache  { type: redis      }
           storage wh     { type: clickhouse }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -145,7 +145,7 @@ describe.skip("storage declarations + module-storage map (legacy — superseded 
           ${SALES_DOMAIN}
           storage cache { type: redis }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -162,7 +162,7 @@ describe.skip("storage declarations + module-storage map (legacy — superseded 
           storage db1 { type: postgres }
           storage db2 { type: postgres }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -177,7 +177,7 @@ describe.skip("storage declarations + module-storage map (legacy — superseded 
         system S {
           ${SALES_DOMAIN}
           deployable api {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -196,7 +196,7 @@ describe.skip("storage declarations + module-storage map (legacy — superseded 
           storage pg { type: postgres }
           ui WebApp { page X { route: "/x" body: Heading { "hi" } } }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -226,7 +226,7 @@ describe.skip("storage declarations + module-storage map (legacy — superseded 
           storage mktgPg   { type: postgres }
           storage shared   { type: clickhouse }
           deployable api {
-            platform: hono
+            platform: node
             modules:
               Sales     { primary: salesPg, bi: shared },
               Marketing { primary: mktgPg, bi: shared }
@@ -244,7 +244,7 @@ describe.skip("storage declarations + module-storage map (legacy — superseded 
           subdomain Sales { context C { } }
           subdomain Marketing { context C { } }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [Sales, Marketing]
             port: 3000
           }

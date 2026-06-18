@@ -16,7 +16,7 @@ versioning works.
 
 | `platform:` keyword | Surface file | Default port | Needs DB | Mounts UI |
 |---|---|---|---|---|
-| `hono` (default `hono@v4`) | `src/platform/hono/v4/index.ts` | 3000 | ✓ | ✗ |
+| `node` (default `node@v4`; Hono web framework) | `src/platform/hono/v4/index.ts` | 3000 | ✓ | ✗ |
 | `dotnet` (default `dotnet@v8`) | `src/platform/dotnet.ts` | 8080 | ✓ | ✓ (when `ui:` is declared) |
 | `elixir` (default `elixir@v1`; legacy aliases `phoenix` / `phoenixLiveView` desugar to it) | `src/platform/elixir.ts` | 4000 | ✓ | ✓ (fullstack) |
 | `python` (default `python@v1`; framework alias `fastapi`) | `src/platform/python.ts` | 8000 | ✓ | ✓ (when `ui:` is declared — dotnet-style dual mode) |
@@ -34,22 +34,22 @@ versioning works.
   binding on this platform.  `react` / `vue` / `svelte` / `static`
   always mount; `dotnet`, `java` and `python` are
   dual-mode (mount when `ui:` is declared, otherwise backend-only);
-  `elixir` always mounts (fullstack LiveView); `hono` never does.
+  `elixir` always mounts (fullstack LiveView); `node` never does.
 
 ## Resolving a `platform:` value
 
 The grammar accepts two forms:
 
 ```ddd
-deployable api1 { platform: hono,        ... }              // bareword
-deployable api2 { platform: "hono@v4",   ... }              // pinned
+deployable api1 { platform: node,        ... }              // bareword
+deployable api2 { platform: "node@v4",   ... }              // pinned
 ```
 
 Resolution happens in two parts (see `parseBuiltinPlatformRef` in
 `src/platform/registry.ts`):
 
 1. **Bareword backend** — resolves through `BUILTIN_PLATFORM_LATEST`
-   to today's default version.  Currently: `node (hono) → v4`,
+   to today's default version.  Currently: `node → v4`,
    `dotnet → v8`, `elixir → v1`, `python → v1`, `java → v1`.
    Frontend platforms (`react`, `vue`, `svelte`, `static`)
    intentionally aren't versioned at the platform layer — their
@@ -83,7 +83,7 @@ available. The matured axis today is **`persistence:`**:
 | Platform | `persistence:` | Default |
 |---|---|---|
 | `dotnet` | `efcore`, `dapper` | `efcore` |
-| `node` (also spelled `hono`) | `drizzle`, `mikroorm` | `drizzle` |
+| `node` | `drizzle`, `mikroorm` | `drizzle` |
 | `elixir` | `ashPostgres` | `ashPostgres` |
 
 - **The default (`efcore` / `drizzle`) is the full-surface adapter** — every

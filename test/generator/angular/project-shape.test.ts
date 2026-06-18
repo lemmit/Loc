@@ -21,7 +21,7 @@ const SOURCE = `
     ui Web { }
     storage primary { type: postgres }
     resource ordersState { for: Orders, kind: state, use: primary }
-    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 3000 }
+    deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], port: 3000 }
     deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
   }
 `;

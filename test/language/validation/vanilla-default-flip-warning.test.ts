@@ -81,7 +81,7 @@ describe("D-VANILLA-DEFAULT — warn-then-flip sequencing", () => {
   });
 
   it("does NOT warn on other backend platforms (hono / dotnet / java / python)", async () => {
-    for (const plat of ["hono", "dotnet", "java", "python"]) {
+    for (const plat of ["node", "dotnet", "java", "python"]) {
       const { warnings } = await parse(sys(plat));
       expect(
         warnings.some((w) => /D-VANILLA-DEFAULT/.test(w)),

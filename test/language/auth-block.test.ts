@@ -158,7 +158,7 @@ describe("auth block — validation", () => {
         ${USER}
         subdomain S { context C { aggregate Item with crudish { name: string } repository Items for Item {} } }
         api SApi from S
-        deployable api { platform: hono contexts: [C] serves: SApi port: 8080 }
+        deployable api { platform: node contexts: [C] serves: SApi port: 8080 }
         ui W with scaffold(subdomains: [S]) { }
         deployable web { platform: react targets: api ui: W auth: ui }
       }`,
@@ -174,7 +174,7 @@ describe("auth block — validation", () => {
         ${USER}
         subdomain S { context C { aggregate Item with crudish { name: string } repository Items for Item {} } }
         api SApi from S
-        deployable api { platform: hono contexts: [C] serves: SApi port: 8080 auth: ui }
+        deployable api { platform: node contexts: [C] serves: SApi port: 8080 auth: ui }
       }`,
     );
     expect(errors.some((e) => e.includes("only valid on a frontend"))).toBe(true);

@@ -32,7 +32,7 @@ system Demo {
     }
   }
   api ProjectsApi from Projects
-  deployable honoApi    { platform: hono            contexts: [Catalog] serves: ProjectsApi port: 3000 }
+  deployable honoApi    { platform: node            contexts: [Catalog] serves: ProjectsApi port: 3000 }
   deployable dotnetApi  { platform: dotnet          contexts: [Catalog] serves: ProjectsApi port: 8080 }
   deployable phoenixApi { platform: phoenix contexts: [Catalog] serves: ProjectsApi port: 4000 }
 }

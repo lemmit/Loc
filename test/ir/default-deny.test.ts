@@ -34,7 +34,7 @@ system Helpdesk {
   storage primary { type: postgres }
   resource st { for: Tickets, kind: state, use: primary }
   api SupportApi from S
-  deployable api { platform: hono contexts: [Tickets] serves: SupportApi dataSources: [st] port: 8080${opts.authRequired ? " auth: required" : ""} }
+  deployable api { platform: node contexts: [Tickets] serves: SupportApi dataSources: [st] port: 8080${opts.authRequired ? " auth: required" : ""} }
 }
 `;
 }
@@ -107,7 +107,7 @@ system Helpdesk {
   storage primary { type: postgres }
   resource st { for: Tickets, kind: state, use: primary }
   api SupportApi from S
-  deployable api { platform: hono contexts: [Tickets] serves: SupportApi dataSources: [st] port: 8080 auth: required }
+  deployable api { platform: node contexts: [Tickets] serves: SupportApi dataSources: [st] port: 8080 auth: required }
 }
 `;
   }

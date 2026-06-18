@@ -48,7 +48,7 @@ const baseOrderSystem = (body: string) => `
         body:  ${body}
       }
     }
-    deployable api { platform: hono, contexts: [C], port: 3000 }
+    deployable api { platform: node, contexts: [C], port: 3000 }
     deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
   }
 `;
@@ -92,7 +92,7 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
         ui WebApp {
           page CreateOrder { route: "/orders/new"  body: CreateForm { of: Order } }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -124,7 +124,7 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
         ui WebApp {
           page CreateOrder { route: "/orders/new"  body: CreateForm { of: Order } }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -164,7 +164,7 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
         ui WebApp {
           page CreateOrder { route: "/orders/new"  body: CreateForm { of: Order } }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -219,7 +219,7 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
         ui WebApp {
           page Broken { route: "/x"  body: CreateForm {} }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);

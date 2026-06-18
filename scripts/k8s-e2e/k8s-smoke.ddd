@@ -27,7 +27,7 @@ system K8sSmoke {
 
   // One deployable per backend platform — same context for OpenAPI parity, so
   // the matrix installs exactly one at a time via the chart's `enabled` toggle.
-  deployable honoApi    { platform: hono                        contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 3000 }
+  deployable honoApi    { platform: node                        contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 3000 }
   deployable dotnetApi  { platform: dotnet                      contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 8080 }
   deployable pythonApi  { platform: python                      contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 8000 }
   deployable javaApi    { platform: java                        contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 8081 }

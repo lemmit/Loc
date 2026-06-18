@@ -32,7 +32,7 @@ const SRC = `
       page Dash { route: "/dash" body: Heading { "Dashboard" } }
       page Kiosk { route: "/kiosk" layout: none body: Heading { "Kiosk" } }
     }
-    deployable api { platform: hono, contexts: [Cart], serves: ShopApi, port: 3000 }
+    deployable api { platform: node, contexts: [Cart], serves: ShopApi, port: 3000 }
     deployable web { platform: vue, targets: api, ui: Web { Cart: api }, port: 3001 }
   }
 `;
@@ -98,7 +98,7 @@ describe("named layouts — Vue", () => {
           api Cart: ShopApi
           page Dash { route: "/dash" body: Heading { "Dashboard" } }
         }
-        deployable api { platform: hono, contexts: [Cart], serves: ShopApi, port: 3000 }
+        deployable api { platform: node, contexts: [Cart], serves: ShopApi, port: 3000 }
         deployable web { platform: vue, targets: api, ui: Web { Cart: api }, port: 3001 }
       }`);
     expect(files.has("src/layouts/Marketing.vue")).toBe(false);

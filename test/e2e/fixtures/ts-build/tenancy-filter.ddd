@@ -29,7 +29,7 @@ system Tenancy {
   resource ledgerState { for: Ledger, kind: state, use: pg }
 
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Ledger]
     dataSources: [ledgerState]
     serves: LedgerApi

@@ -1449,7 +1449,7 @@ describe("typescript generator", () => {
           }
         }
         deployable api {
-          platform: hono
+          platform: node
           contexts: [Orders]
           port: 3000
           auth: required
@@ -1467,7 +1467,7 @@ describe("typescript generator", () => {
           }
         }
         deployable api {
-          platform: hono
+          platform: node
           contexts: [Orders]
           port: 3000
         }
@@ -1571,7 +1571,7 @@ describe("typescript generator", () => {
           }
         }
         deployable api {
-          platform: hono
+          platform: node
           contexts: [Orders]
           port: 3000
           auth: required
@@ -1628,7 +1628,7 @@ describe("typescript generator", () => {
               repository Orders for Order { }
             }
           }
-          deployable api { platform: hono, contexts: [Orders], port: 3000, auth: required }
+          deployable api { platform: node, contexts: [Orders], port: 3000, auth: required }
         }
       `;
       const files = await emitForAuthSystem(src);
@@ -1664,7 +1664,7 @@ describe("typescript generator", () => {
           }
         }
         deployable api {
-          platform: hono
+          platform: node
           contexts: [Orders]
           port: 3000
           auth: required
@@ -1718,7 +1718,7 @@ describe("typescript generator", () => {
           }
         }
         deployable api {
-          platform: hono
+          platform: node
           contexts: [Orders]
           port: 3000
           auth: required

@@ -95,11 +95,11 @@ describe("workspace-uniqueness validation (multi-file)", () => {
       `,
       "a.ddd": `system Shop {
         subdomain M { }
-        deployable api { platform: hono, contexts: [Sales] }
+        deployable api { platform: node, contexts: [Sales] }
       }`,
       "b.ddd": `system Shop {
         subdomain M2 { }
-        deployable api2 { platform: hono, contexts: [M2] }
+        deployable api2 { platform: node, contexts: [M2] }
       }`,
     });
     const diags = await validateProject(path.join(tmp, "main.ddd"));
@@ -138,7 +138,7 @@ describe("workspace-uniqueness validation (multi-file)", () => {
         import "./sales.ddd"
         system Shop {
           subdomain M { }
-          deployable api { platform: hono, contexts: [Sales] }
+          deployable api { platform: node, contexts: [Sales] }
         }
       `,
       "shared.ddd": `

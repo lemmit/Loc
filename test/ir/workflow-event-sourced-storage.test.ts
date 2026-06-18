@@ -59,7 +59,7 @@ describe("event-sourced workflow storage gate", () => {
     });
   }
 
-  for (const plat of ["hono", "dotnet", "python", "java"]) {
+  for (const plat of ["node", "dotnet", "python", "java"]) {
     it(`is supported on ${plat} — no gate error`, async () => {
       const diags = await diagnose(mk(plat, true));
       expect(diags.some((d) => d.code === "loom.event-sourced-workflow-unsupported")).toBe(false);

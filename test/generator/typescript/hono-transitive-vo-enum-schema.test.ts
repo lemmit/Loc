@@ -37,7 +37,7 @@ const SRC = `
     }
     storage primary { type: postgres }
     deployable api {
-      platform: hono
+      platform: node
       contexts: [Sales]
       port: 3000
     }

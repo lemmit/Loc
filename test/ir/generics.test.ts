@@ -238,7 +238,7 @@ describe("generics — platform-aware emission gate (P3b)", () => {
   };
 
   it("does NOT gate a paged find served only by hono (emission implemented)", async () => {
-    expect(await gateDiags("hono")).toEqual([]);
+    expect(await gateDiags("node")).toEqual([]);
   });
 
   it("does NOT gate a paged find served by dotnet (emission implemented)", async () => {

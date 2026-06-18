@@ -29,7 +29,7 @@ const SOURCE = `
     }
     storage primary { type: postgres }
     resource ordersState { for: Orders, kind: state, use: primary }
-    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], port: 8080 }
     deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
   }
 `;
@@ -105,7 +105,7 @@ const CARD_SOURCE = `
     }
     storage primary { type: postgres }
     resource ordersState { for: Orders, kind: state, use: primary }
-    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], port: 8080 }
     deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
   }
 `;
@@ -160,7 +160,7 @@ const BUTTON_SOURCE = `
     }
     storage primary { type: postgres }
     resource ordersState { for: Orders, kind: state, use: primary }
-    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], port: 8080 }
     deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
   }
 `;
@@ -224,7 +224,7 @@ const DISPLAY_SOURCE = `
     }
     storage primary { type: postgres }
     resource ordersState { for: Orders, kind: state, use: primary }
-    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], port: 8080 }
     deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
   }
 `;

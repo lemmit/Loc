@@ -554,7 +554,7 @@ describe("page metamodel — IR shape", () => {
       const loom = await buildLoom(`
         system Acme {
           subdomain M { context C { } }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: node, contexts: [C], port: 3000 }
         }
       `);
       expect(deployableByName(loom, "api").hostedUiNames).toEqual([]);

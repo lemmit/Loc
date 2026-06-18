@@ -579,7 +579,7 @@ system Storefront {
   }
 
   deployable billingApi {
-    platform: hono,            contexts: [Billing],   port: 3001
+    platform: node,            contexts: [Billing],   port: 3001
   }
   deployable inventoryApi {
     platform: phoenixLiveView, contexts: [Inventory], port: 3002
@@ -640,7 +640,7 @@ system Acme {
   }
 
   deployable marketingApi {
-    platform: hono, contexts: [Marketing], port: 4001
+    platform: node, contexts: [Marketing], port: 4001
   }
 
   deployable acmeHost {
@@ -777,11 +777,11 @@ on each backend explicitly:
 
 ```ddd
   deployable salesApi {
-    platform: hono, contexts: [Sales],
+    platform: node, contexts: [Sales],
     cors: { allowOrigin: "https://app.acme.test" }, port: 3001
   }
   deployable marketingApi {
-    platform: hono, contexts: [Marketing],
+    platform: node, contexts: [Marketing],
     cors: { allowOrigin: "https://app.acme.test" }, port: 3002
   }
 

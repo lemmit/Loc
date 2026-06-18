@@ -37,7 +37,7 @@ system Sys {
   resource salesFiles { for: Sales, kind: objectStore, use: files }
   resource salesJobs  { for: Sales, kind: queue, use: bus }
   resource salesApi   { for: Sales, kind: api, use: pay }
-  deployable api { platform: hono, contexts: [Sales], dataSources: [salesState, salesFiles, salesJobs, salesApi], port: 3000 }
+  deployable api { platform: node, contexts: [Sales], dataSources: [salesState, salesFiles, salesJobs, salesApi], port: 3000 }
 }`;
 }
 

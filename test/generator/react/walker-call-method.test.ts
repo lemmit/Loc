@@ -37,7 +37,7 @@ describe("function + method calls in walker bodies", () => {
             body:  Button { "Save", onClick: e => { saveOrder() } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -64,7 +64,7 @@ describe("function + method calls in walker bodies", () => {
             }}
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -96,7 +96,7 @@ describe("function + method calls in walker bodies", () => {
             body:  Button { "Sync", onClick: e => { Orders.create(draft) } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -122,7 +122,7 @@ describe("function + method calls in walker bodies", () => {
             body:  Text { "doubled: " + double(count) }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -149,7 +149,7 @@ describe("function + method calls in walker bodies", () => {
             body:  Button { "Mix", onClick: e => { mixer.combine(a, b, "extra") } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

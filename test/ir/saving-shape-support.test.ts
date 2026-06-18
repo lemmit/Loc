@@ -43,8 +43,8 @@ describe("saving-shape capability validation", () => {
   });
 
   it("accepts shape(document) / shape(embedded) on a hono deployable", async () => {
-    expect(await shapeErrors(sys("hono", "document"))).toEqual([]);
-    expect(await shapeErrors(sys("hono", "embedded"))).toEqual([]);
+    expect(await shapeErrors(sys("node", "document"))).toEqual([]);
+    expect(await shapeErrors(sys("node", "embedded"))).toEqual([]);
   });
 
   it("rejects shape(document) on a phoenix deployable (no Ash document emitter)", async () => {

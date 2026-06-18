@@ -33,7 +33,7 @@ system Shop {
     ${uiMembers}
     page Home { route: "/" body: Heading { "hi" } }
   }
-  deployable backend { platform: hono  contexts: [Fulfillment]  serves: FulfillmentApi  port: 3000 }
+  deployable backend { platform: node  contexts: [Fulfillment]  serves: FulfillmentApi  port: 3000 }
 }
 `;
 

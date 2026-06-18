@@ -39,7 +39,7 @@ system S {
     page Dash { route: "/dash" body: Heading { "Dashboard" } }
   }
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Cart]
     dataSources: [cartState]
     serves: ShopApi

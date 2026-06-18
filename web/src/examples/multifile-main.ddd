@@ -29,7 +29,7 @@ system MultiFileStore {
   resource productsState { for: Products, kind: state, use: primary }
 
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Products]
     dataSources: [productsState]
     port: 8080

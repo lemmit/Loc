@@ -19,7 +19,7 @@ const sys = (stateDecl: string, handler: string): string => `
         }
       }
     }
-    deployable api { platform: hono, contexts: [C], port: 3000 }
+    deployable api { platform: node, contexts: [C], port: 3000 }
     deployable web { platform: static
       targets: api
       ui: WebApp

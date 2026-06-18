@@ -58,7 +58,7 @@ system Acme {
         dataSources: [productsState, ordersState], port: 8080
     }
     deployable web {
-        platform: hono, contexts: [Products],
+        platform: node, contexts: [Products],
         dataSources: [productsState], port: 3000
     }
 }
@@ -84,7 +84,7 @@ system Shop {
     storage primary { type: postgres }
     resource ordersState { for: Orders, kind: state, use: primary }
     deployable api {
-        platform: hono, contexts: [Orders], dataSources: [ordersState]
+        platform: node, contexts: [Orders], dataSources: [ordersState]
     }
 }
 ```
@@ -180,10 +180,10 @@ used in operation / workflow expression bodies.  The
 | `platform:` | Stack |
 | --- | --- |
 | `dotnet` | ASP.NET Core + EF Core + Mediator (martinothamar) + Swashbuckle.  Default port 8080. |
-| `hono`   | Hono + Drizzle ORM + Zod with `@hono/zod-openapi`.  Default port 3000. |
+| `node`   | Hono + Drizzle ORM + Zod with `@hono/zod-openapi`.  Default port 3000. |
 | `react`  | Vite + React Router + React Query + Zod + Mantine + Playwright page objects.  Default port 3001. |
 
-Backend deployables (`dotnet`, `hono`, `phoenixLiveView`) declare
+Backend deployables (`dotnet`, `node`, `phoenixLiveView`) declare
 `contexts: [...]` (which bounded contexts they host) and
 `dataSources: [...]` (the system-scope `resource` decls that route
 those contexts' persistence).  React deployables declare
@@ -203,7 +203,7 @@ order:
 | --- | --- |
 | `enum Name { A, B, C }` | Closed enumeration; values are referenced bare. |
 | `valueobject Name { … }` | Immutable record with optional invariants and derived members. |
-| `aggregate Name [ids guid\|int\|long\|string] [persistedAs(eventLog\|state)] [shape(relational\|embedded\|document)] { … }` | Aggregate root with implicit `Name id` field.  Header modifiers (D-DOCUMENT-AXIS): `persistedAs(…)` picks the primary truth kind (default `state`); `shape(…)` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ash embedded resources); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on `dotnet`/`hono` (a `shape(…)` a backend can't emit is a validation error — see `supportedShapes`). |
+| `aggregate Name [ids guid\|int\|long\|string] [persistedAs(eventLog\|state)] [shape(relational\|embedded\|document)] { … }` | Aggregate root with implicit `Name id` field.  Header modifiers (D-DOCUMENT-AXIS): `persistedAs(…)` picks the primary truth kind (default `state`); `shape(…)` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ash embedded resources); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on `dotnet`/`node` (a `shape(…)` a backend can't emit is a validation error — see `supportedShapes`). |
 | `event Name { field: Type, … }` | Flat record raised via `emit`. |
 | `repository Name for Aggregate { find … }` | Repository declaration with optional find queries. |
 

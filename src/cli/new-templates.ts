@@ -7,7 +7,7 @@
 // so a template that drifts from the grammar fails fast rather than shipping
 // a broken starter — `test/cli/new.test.ts` pins every combination.
 
-export type StarterPlatform = "hono" | "dotnet" | "elixir" | "java" | "python";
+export type StarterPlatform = "node" | "dotnet" | "elixir" | "java" | "python";
 export type StarterTemplate = "blank" | "crud";
 export type DesignPack =
   | "mantine"
@@ -21,7 +21,7 @@ export type DesignPack =
   | "shadcnVue";
 
 export const STARTER_PLATFORMS: readonly StarterPlatform[] = [
-  "hono",
+  "node",
   "dotnet",
   "elixir",
   "java",
@@ -43,7 +43,7 @@ export const DESIGN_PACKS: readonly DesignPack[] = [
 /** Backend listen port per platform (mirrors `defaultPort` in
  *  `src/platform/registry.ts`). The frontend scaffold (react or svelte) always uses 3001. */
 export const BACKEND_PORT: Record<StarterPlatform, number> = {
-  hono: 3000,
+  node: 3000,
   dotnet: 8080,
   elixir: 4000,
   java: 8081,

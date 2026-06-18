@@ -453,7 +453,7 @@ system DevPlatform {
     }
 
     deployable honoApi {
-        platform: hono
+        platform: node
         contexts: [Catalog, Builds, People]
         dataSources: [catalogState, buildsState, peopleState]
         serves: ProjectsApi, DeliveryApi, AccountsApi

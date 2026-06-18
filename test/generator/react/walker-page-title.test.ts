@@ -21,7 +21,7 @@ describe("page title via useEffect(document.title)", () => {
             body:  Heading { "Welcome" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -47,7 +47,7 @@ describe("page title via useEffect(document.title)", () => {
             body:  Heading { name }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -75,7 +75,7 @@ describe("page title via useEffect(document.title)", () => {
             body:  Button { "+", onClick: e => { count += 1 } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -109,7 +109,7 @@ describe("page title via useEffect(document.title)", () => {
             body:  Text { "hi" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -136,7 +136,7 @@ describe("page title via useEffect(document.title)", () => {
             body:  Heading { "hi" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

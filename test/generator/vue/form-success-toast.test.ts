@@ -40,7 +40,7 @@ const sys = (pageBody: string, design = "") => `
     ui WebApp {
       page Run { route: "/run" body: ${pageBody} }
     }
-    deployable api { platform: hono, contexts: [C], serves: Api, port: 3000 }
+    deployable api { platform: node, contexts: [C], serves: Api, port: 3000 }
     deployable web { platform: vue, targets: api, ui: WebApp, port: 3003${design ? `, design: "${design}"` : ""} }
   }
 `;

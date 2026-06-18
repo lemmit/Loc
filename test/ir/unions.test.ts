@@ -193,11 +193,11 @@ describe("unions — platform-aware emission gate (P4b)", () => {
   };
 
   it("does NOT gate a union find served by hono (emission implemented in P4b)", async () => {
-    expect(await gate("hono", "Order or Cancel")).toEqual([]);
+    expect(await gate("node", "Order or Cancel")).toEqual([]);
   });
 
   it("does NOT gate an `option` find served by hono", async () => {
-    expect(await gate("hono", "Order option")).toEqual([]);
+    expect(await gate("node", "Order option")).toEqual([]);
   });
 
   it("does NOT gate a union find served by dotnet (emission implemented in P4c)", async () => {

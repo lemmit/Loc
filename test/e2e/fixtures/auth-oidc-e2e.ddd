@@ -33,7 +33,7 @@ system Helpdesk {
 
   api SupportApi from Support
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Tickets]
     serves: SupportApi
     dataSources: [ticketState]

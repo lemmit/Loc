@@ -292,7 +292,7 @@ system Sys {
   storage primary { type: postgres }
   resource partiesState { for: Parties, kind: state, use: primary }
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Parties]
     dataSources: [partiesState]
     port: 3000
@@ -477,7 +477,7 @@ system Sys {
   }
   storage primary { type: postgres }
   resource partiesState { for: Parties, kind: state, use: primary }
-  deployable api { platform: hono contexts: [Parties] dataSources: [partiesState] port: 3000 }
+  deployable api { platform: node contexts: [Parties] dataSources: [partiesState] port: 3000 }
 }`;
 
   it("does not gate a TPH hierarchy hosted by a Hono backend", async () => {
@@ -487,7 +487,7 @@ system Sys {
 
   it("does not gate a TPH hierarchy hosted by a .NET backend", async () => {
     // .NET ships TPH via EF Core `HasDiscriminator` (aggregate-inheritance.md I2).
-    const ON_DOTNET = TPH.replace("platform: hono", "platform: dotnet").replace(
+    const ON_DOTNET = TPH.replace("platform: node", "platform: dotnet").replace(
       "port: 3000",
       "port: 5000",
     );
@@ -499,7 +499,7 @@ system Sys {
     // Phoenix ships TPH via Ash shared-table multi-resource + base_filter on
     // `kind` (aggregate-inheritance.md I2).  All three DB backends now support
     // TPH, so the gate has no triggering host left.
-    const ON_PHOENIX = TPH.replace("platform: hono", "platform: phoenix").replace(
+    const ON_PHOENIX = TPH.replace("platform: node", "platform: phoenix").replace(
       "port: 3000",
       "port: 5000",
     );
@@ -647,7 +647,7 @@ system Sys {
   }
   storage primary { type: postgres }
   resource partiesState { for: Parties, kind: state, use: primary }
-  deployable api { platform: hono contexts: [Parties] dataSources: [partiesState] port: 3000 }
+  deployable api { platform: node contexts: [Parties] dataSources: [partiesState] port: 3000 }
 }`;
     const { files } = generateSystems(await parseValid(SRC));
     const schema = files.get("api/db/schema.ts") ?? "";

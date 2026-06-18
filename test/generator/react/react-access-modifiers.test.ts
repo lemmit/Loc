@@ -28,7 +28,7 @@ system Demo {
   ui Web {
     page Home { body: Text("hi") }
   }
-  deployable api { platform: hono, contexts: [Accounts], port: 3000 }
+  deployable api { platform: node, contexts: [Accounts], port: 3000 }
   deployable web { platform: react, contexts: [Accounts], targets: api, ui: Web, port: 3001 }
 }
 `;

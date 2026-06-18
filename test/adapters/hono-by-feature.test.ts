@@ -89,7 +89,7 @@ system Sys {
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
   deployable api {
-    platform: hono${layout}
+    platform: node${layout}
     contexts: [Orders]
     dataSources: [ordersState]
     port: 3000

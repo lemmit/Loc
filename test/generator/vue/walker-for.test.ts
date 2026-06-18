@@ -14,7 +14,7 @@ async function pageVue(body: string): Promise<string> {
       ui WebApp {
         page P { route: "/p" body: ${body} }
       }
-      deployable api { platform: hono, contexts: [C], port: 3000 }
+      deployable api { platform: node, contexts: [C], port: 3000 }
       deployable web { platform: vue, targets: api, ui: WebApp, port: 3003 }
     }
   `);
