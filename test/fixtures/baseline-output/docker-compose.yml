@@ -63,7 +63,7 @@ services:
   web_app:
     build: ./web_app
     environment:
-      VITE_API_BASE_URL: "http://localhost:8080"
+      VITE_API_BASE_URL: "http://localhost:8080/api"
     ports:
       - "3001:3000"
     healthcheck:

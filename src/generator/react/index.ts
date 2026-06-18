@@ -11,6 +11,7 @@ import {
   uiUsesMoney,
 } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
+import { API_BASE_PATH } from "../../util/api-base.js";
 import { lowerFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
 import { AUTH_GATE_TSX, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
@@ -105,7 +106,8 @@ export function generateReactForContexts(
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
   // Standalone react picks the target deployable's port; fullstack
   // dotnet overrides with `"/api"` for same-origin SPA fetches.
-  const apiBaseUrl = options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
+  const apiBaseUrl =
+    options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}${API_BASE_PATH}`;
   // Sub-path the bundle is served under (Phoenix `/app`).  `viteBase`
   // is the trailing-slashed form vite wants (`/app/`); `basename` is
   // the slashless router basename.  Unset for root-served hosts.

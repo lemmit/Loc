@@ -937,7 +937,7 @@ describe("typescript generator", () => {
     // http/index.ts mounts /workflows.
     const httpIndex = files.get("http/index.ts")!;
     expect(httpIndex).toMatch(/import \{ workflowsRoutes \} from "\.\/workflows";/);
-    expect(httpIndex).toMatch(/app\.route\("\/workflows", workflowsRoutes\(db, events\)\);/);
+    expect(httpIndex).toMatch(/app\.route\("\/api\/workflows", workflowsRoutes\(db, events\)\);/);
   });
 
   it("emits a transactional workflow wrapped in db.transaction", async () => {
@@ -1013,7 +1013,7 @@ describe("typescript generator", () => {
     // 2. http/index.ts mounts /views.
     const httpIndex = files.get("http/index.ts")!;
     expect(httpIndex).toMatch(/import \{ viewsRoutes \} from "\.\/views"/);
-    expect(httpIndex).toMatch(/app\.route\("\/views", viewsRoutes\(db, events\)\)/);
+    expect(httpIndex).toMatch(/app\.route\("\/api\/views", viewsRoutes\(db, events\)\)/);
 
     // 3. The repository file gained an activeOrders() method whose
     //    Drizzle query embeds the lowered predicate.

@@ -117,7 +117,7 @@ describe("java generator — workflows (S6)", () => {
   it("routes POST /workflows/<snake> through the per-context workflows service", async () => {
     const f = await files();
     const ctrl = f.get(`${ROOT}/api/CatalogWorkflowsController.java`)!;
-    expect(ctrl).toContain('@RequestMapping("/workflows")');
+    expect(ctrl).toContain('@RequestMapping("/api/workflows")');
     expect(ctrl).toContain('@PostMapping("/register_project")');
     expect(ctrl).toContain("workflows.registerProject(request);");
     const svc = f.get(`${ROOT}/application/workflows/CatalogWorkflows.java`)!;
@@ -137,7 +137,7 @@ describe("java generator — views (S6)", () => {
   it("shorthand views reuse the aggregate response; full-form views get Row records", async () => {
     const f = await files();
     const ctrl = f.get(`${ROOT}/api/CatalogViewsController.java`)!;
-    expect(ctrl).toContain('@RequestMapping("/views")');
+    expect(ctrl).toContain('@RequestMapping("/api/views")');
     expect(ctrl).toContain('@GetMapping("/active_projects")');
     expect(ctrl).toContain('@GetMapping("/project_summary")');
     const svc = f.get(`${ROOT}/application/views/CatalogViews.java`)!;

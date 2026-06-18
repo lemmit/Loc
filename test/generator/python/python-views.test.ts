@@ -72,6 +72,6 @@ describe("python views", () => {
     expect(views).toContain('"lineCount": len(r.lines),');
     const main = files.get("api/app/main.py")!;
     expect(main).toContain("from app.http.views_routes import router as views_router");
-    expect(main).toContain("app.include_router(views_router)");
+    expect(main).toContain('app.include_router(views_router, prefix="/api")');
   });
 });

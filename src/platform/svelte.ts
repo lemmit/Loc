@@ -1,5 +1,6 @@
 import { generateReactForContexts } from "../generator/react/index.js";
 import { generateSvelteForContexts } from "../generator/svelte/index.js";
+import { API_BASE_PATH } from "../util/api-base.js";
 import {
   type ComposeServiceShape,
   type PlatformSurface,
@@ -43,7 +44,7 @@ const sveltePlatform: PlatformSurface = {
   composeService({ deployable, sys }): ComposeServiceShape {
     const target = sys.deployables.find((t) => t.name === deployable.targetName);
     return {
-      env: [["VITE_API_BASE_URL", `http://localhost:${target?.port ?? 8080}`]],
+      env: [["VITE_API_BASE_URL", `http://localhost:${target?.port ?? 8080}${API_BASE_PATH}`]],
       dependsOnDb: false,
       healthPath: "/",
       internalPort: 3000,

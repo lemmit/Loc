@@ -350,7 +350,7 @@ system Sys {
     expect(paths.some((p) => /customer/i.test(p))).toBe(true);
     expect(paths.some((p) => /party\.routes/i.test(p))).toBe(false);
     const idx = files.get("api/http/index.ts") ?? "";
-    expect(idx).not.toMatch(/app\.route\("\/parties"/);
+    expect(idx).not.toMatch(/app\.route\("\/api\/parties"/);
     // …but on Hono it DOES emit the polymorphic read home: the `Party` union
     // + a read-only `PartyRepository` that delegates to the concrete repos
     // (the `find all Party` reader — covered in detail below).
@@ -546,8 +546,8 @@ system Sys {
     // test below — but those are read-side data plumbing, not HTTP surface.)
     expect(paths.some((p) => /party\.routes/i.test(p))).toBe(false);
     const idx = files.get("api/http/index.ts") ?? "";
-    expect(idx).toMatch(/app\.route\("\/customers"/);
-    expect(idx).not.toMatch(/app\.route\("\/parties"/);
+    expect(idx).toMatch(/app\.route\("\/api\/customers"/);
+    expect(idx).not.toMatch(/app\.route\("\/api\/parties"/);
   });
 
   it("emits a matching shared-table migration (no per-concrete tables)", async () => {

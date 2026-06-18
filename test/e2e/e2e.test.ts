@@ -404,11 +404,11 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
   // real server-side error (e.g. the .NET stacktrace) surfaces in CI.
   it("cross-backend: a guarded workflow denies with 403 (runtime authorization)", async () => {
     const targets: Record<string, string> = {
-      hono: "http://localhost:3000/workflows/register_project",
-      dotnet: "http://localhost:8080/workflows/register_project",
+      hono: "http://localhost:3000/api/workflows/register_project",
+      dotnet: "http://localhost:8080/api/workflows/register_project",
       phoenix: "http://localhost:4000/api/workflows/register_project",
-      python: "http://localhost:8000/workflows/register_project",
-      java: "http://localhost:8081/workflows/register_project",
+      python: "http://localhost:8000/api/workflows/register_project",
+      java: "http://localhost:8081/api/workflows/register_project",
     };
     const statuses: Record<string, number> = {};
     const bodies: Record<string, string> = {};

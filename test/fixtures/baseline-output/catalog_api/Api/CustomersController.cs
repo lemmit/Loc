@@ -16,7 +16,7 @@ using CatalogApi.Domain.Enums;
 namespace CatalogApi.Api;
 
 [ApiController]
-[Route("customers")]
+[Route("api/customers")]
 public sealed class CustomersController : ControllerBase
 {
     private readonly IMediator _mediator;

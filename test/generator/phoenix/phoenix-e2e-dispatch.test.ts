@@ -128,9 +128,9 @@ describe("e2e dispatch to phoenixLiveView", () => {
     expect(e2e).toMatch(/__getQuery\(`\$\{base\}\/api\/items\/by_name`/);
   });
 
-  it("does NOT add /api prefix to hono/dotnet deployables (backward compat)", async () => {
+  it("adds the /api prefix to hono/dotnet deployables too", async () => {
     // The existing acme.ddd system has dotnet and hono deployables.
-    // Their e2e paths must stay unchanged at /products, /orders, etc.
+    // Every backend now mounts its domain routes under the shared /api base.
     const services = createDddServices(NodeFileSystem);
     const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
       URI.file(path.join(repoRoot, "examples/acme.ddd")),
@@ -141,10 +141,8 @@ describe("e2e dispatch to phoenixLiveView", () => {
     const model = doc.parseResult.value as Model;
     const { files } = generateSystems(model);
     const e2e = files.get("e2e/Acme.e2e.test.ts")!;
-    // These must hit /products, NOT /api/products.
-    expect(e2e).toMatch(/__post\(`\$\{base\}\/products`/);
-    expect(e2e).not.toMatch(/__post\(`\$\{base\}\/api\/products`/);
-    expect(e2e).toMatch(/__get\(`\$\{base\}\/products\/\$\{p\.id\}`\)/);
-    expect(e2e).not.toMatch(/__get\(`\$\{base\}\/api\/products\//);
+    // These must hit /api/products (every backend mounts under /api now).
+    expect(e2e).toMatch(/__post\(`\$\{base\}\/api\/products`/);
+    expect(e2e).toMatch(/__get\(`\$\{base\}\/api\/products\/\$\{p\.id\}`\)/);
   });
 });

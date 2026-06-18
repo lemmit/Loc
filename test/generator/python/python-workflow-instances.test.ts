@@ -37,7 +37,7 @@ describe("python workflow-instance endpoints", () => {
     expect(wf, "workflows_routes.py not emitted for an observable-only saga").toBeDefined();
     const main = files.get("api/app/main.py")!;
     expect(main).toContain("from app.http.workflows_routes import router as workflows_router");
-    expect(main).toContain("app.include_router(workflows_router)");
+    expect(main).toContain('app.include_router(workflows_router, prefix="/api")');
   });
 
   it("emits the instance Response DTO + RootModel list carrier", async () => {

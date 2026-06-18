@@ -80,6 +80,6 @@ describe("Python workflow-sourced view", () => {
     const files = (await generateSystems(await parseValid(SRC))).files;
     const main = files.get("api/app/main.py")!;
     expect(main).toContain("from app.http.views_routes import router as views_router");
-    expect(main).toContain("app.include_router(views_router)");
+    expect(main).toContain('app.include_router(views_router, prefix="/api")');
   });
 });

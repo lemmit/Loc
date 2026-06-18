@@ -299,7 +299,17 @@ export function classifyShape(
  * emitters, and trailing slashes drop.
  */
 export function normalisePath(p: string): string {
-  return p.replace(/\{[^}]+\}/g, "{id}").replace(/\/+$/, "") || "/";
+  return (
+    p
+      // Strip the universal `/api` base mount so parity compares logical
+      // operations regardless of how each backend renders the prefix in its
+      // OpenAPI: path-embedded for hono/dotnet/java/python (`/api/builds`),
+      // scope/servers-relative for phoenix (`/builds`).  `/api` is the shared
+      // base across every backend, so it's noise for op-set parity.
+      .replace(/^\/api(?=\/|$)/, "")
+      .replace(/\{[^}]+\}/g, "{id}")
+      .replace(/\/+$/, "") || "/"
+  );
 }
 
 /**

@@ -10,7 +10,7 @@ using Api.Domain.Enums;
 namespace Api.Api;
 
 [ApiController]
-[Route("workflows")]
+[Route("api/workflows")]
 public sealed class OrdersWorkflowsController : ControllerBase
 {
     private readonly IMediator _mediator;

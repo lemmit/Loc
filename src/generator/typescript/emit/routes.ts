@@ -1,6 +1,7 @@
 import type { EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
+import { API_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import { renderHonoBaseLogCall, renderHonoLogCall } from "../../_obs/render-hono.js";
@@ -36,7 +37,7 @@ export function renderHttpIndex(
     );
     const repoArg = `new ${a.name}Repository(db, events)`;
     const args = needsTx ? `${repoArg}, db, events` : repoArg;
-    return `  app.route("/${snake(plural(a.name))}", ${lowerFirst(a.name)}Routes(${args}));`;
+    return `  app.route("${API_BASE_PATH}/${snake(plural(a.name))}", ${lowerFirst(a.name)}Routes(${args}));`;
   });
   const externAggs = aggregates.filter((a) => a.operations.some((o) => o.extern));
   const externImports = externAggs.map(
@@ -85,7 +86,9 @@ export function renderHttpIndex(
   const realtimeImport = wireRealtime
     ? `import { realtimeRoutes, realtimeTee } from "./realtime";`
     : null;
-  const realtimeMount = wireRealtime ? `  app.route("/realtime", realtimeRoutes());` : null;
+  const realtimeMount = wireRealtime
+    ? `  app.route("${API_BASE_PATH}/realtime", realtimeRoutes());`
+    : null;
   // Compose the default dispatcher chain: outbox short-circuits durable
   // events to the table (the relay re-enters through the tee), the tee
   // copies every dispatched event onto the SSE wire, the in-process
@@ -103,11 +106,13 @@ export function renderHttpIndex(
       : `import { workflowsRoutes } from "./workflows";`
     : null;
   const workflowMount = hasWorkflows
-    ? `  app.route("/workflows", workflowsRoutes(db, events));`
+    ? `  app.route("${API_BASE_PATH}/workflows", workflowsRoutes(db, events));`
     : null;
   const hasViews = ctx.views.length > 0;
   const viewImport = hasViews ? `import { viewsRoutes } from "./views";` : null;
-  const viewMount = hasViews ? `  app.route("/views", viewsRoutes(db, events));` : null;
+  const viewMount = hasViews
+    ? `  app.route("${API_BASE_PATH}/views", viewsRoutes(db, events));`
+    : null;
   // Auth wiring — when the deployable opts in via `auth: required`,
   // we import the middleware + verifier registry, assert at startup
   // that the user supplied a verifier, and mount the middleware

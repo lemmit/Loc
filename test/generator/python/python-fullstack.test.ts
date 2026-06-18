@@ -63,11 +63,11 @@ describe("fullstack python — embedded SPA alongside the API", () => {
     expect(docker).toContain('CMD ["uvicorn", "app.main:app"');
   });
 
-  it("backend-only python stays byte-identical (no SPA surface)", async () => {
+  it("backend-only python serves /api routes and emits no SPA surface", async () => {
     const source = FIXTURE.replace(/ {2}ui WebApp[^\n]*\n\n?/, "").replace(/\n {4}ui: WebApp/, "");
     const files = await build(source);
     const main = files.get("app/app/main.py")!;
-    expect(main).toContain("app.include_router(order_router)");
+    expect(main).toContain('app.include_router(order_router, prefix="/api")');
     expect(main).not.toContain("spa_path");
     expect(main).not.toContain("wwwroot");
     expect([...files.keys()].some((k) => k.includes("ClientApp"))).toBe(false);

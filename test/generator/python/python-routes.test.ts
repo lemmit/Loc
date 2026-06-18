@@ -142,7 +142,7 @@ describe("python routes", () => {
     expect(routes).toContain('router = APIRouter(prefix="/orders", tags=["orders"])');
     const main = files.get("api/app/main.py")!;
     expect(main).toContain("from app.http.order_routes import router as order_router");
-    expect(main).toContain("app.include_router(order_router)");
+    expect(main).toContain('app.include_router(order_router, prefix="/api")');
     expect(main).toContain("install_error_handlers(app)");
   });
 

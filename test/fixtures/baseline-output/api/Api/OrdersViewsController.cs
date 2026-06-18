@@ -8,7 +8,7 @@ using Api.Application.Orders.Responses;
 namespace Api.Api;
 
 [ApiController]
-[Route("views")]
+[Route("api/views")]
 public sealed class OrdersViewsController : ControllerBase
 {
     private readonly IMediator _mediator;
