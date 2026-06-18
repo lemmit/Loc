@@ -104,10 +104,14 @@ export function generateReactForContexts(
   const out = new Map<string, string>();
 
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
-  // Standalone react picks the target deployable's port; fullstack
-  // dotnet overrides with `"/api"` for same-origin SPA fetches.
-  const apiBaseUrl =
-    options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}${API_BASE_PATH}`;
+  // Standalone react fetches the API same-origin via the relative
+  // `/api` base; `vite dev` proxies it to the target backend (below),
+  // docker-compose overrides via `VITE_API_BASE_URL`, and fullstack
+  // dotnet passes `apiBaseUrl: "/api"` for its embedded same-origin API.
+  const apiBaseUrl = options.apiBaseUrl ?? API_BASE_PATH;
+  // `vite dev` same-origin proxy target: the standalone backend's dev
+  // URL, so a relative `/api/*` fetch reaches it without CORS.
+  const apiProxyTarget = `http://localhost:${target?.port ?? 8080}`;
   // Sub-path the bundle is served under (Phoenix `/app`).  `viteBase`
   // is the trailing-slashed form vite wants (`/app/`); `basename` is
   // the slashless router basename.  Unset for root-served hosts.
@@ -378,7 +382,10 @@ export function generateReactForContexts(
   out.set("package.json", renderShellFile("package-json", { usesMoney }, pack));
   out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));
   out.set("tsconfig.node.json", renderShellFile("tsconfig-node", {}, pack));
-  out.set("vite.config.ts", renderShellFile("vite-config", { base: viteBase }, pack));
+  out.set(
+    "vite.config.ts",
+    renderShellFile("vite-config", { base: viteBase, apiProxyTarget }, pack),
+  );
   // Pages that use the `CodeBlock { ... }` primitive need the
   // highlight.js CDN payload injected into the shell HTML — every
   // page's CDN tags are identical, so a single per-deployable

@@ -14,4 +14,4 @@ const fromWindow =
     ? (window as { __LOOM_API_BASE__?: string }).__LOOM_API_BASE__
     : undefined;
 const fromEnv = (import.meta as { env?: { VITE_API_BASE_URL?: string } }).env?.VITE_API_BASE_URL;
-export const API_BASE_URL: string = fromWindow ?? fromEnv ?? "http://localhost:8080/api";
+export const API_BASE_URL: string = fromWindow ?? fromEnv ?? "/api";

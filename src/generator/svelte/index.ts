@@ -79,8 +79,10 @@ export function generateSvelteForContexts(
   const out = new Map<string, string>();
 
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
-  const apiBaseUrl =
-    options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}${API_BASE_PATH}`;
+  // Same-origin relative `/api` base; `vite dev` proxies it to the
+  // target backend, docker-compose overrides via `VITE_API_BASE_URL`.
+  const apiBaseUrl = options.apiBaseUrl ?? API_BASE_PATH;
+  const apiProxyTarget = `http://localhost:${target?.port ?? 8080}`;
   const base = options.basePath || undefined;
 
   const aggregates: Array<{ agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }> = [];
@@ -254,7 +256,7 @@ export function generateSvelteForContexts(
   out.set("package.json", pack.render("package-json", { usesMoney }));
   out.set("tsconfig.json", pack.render("tsconfig", {}));
   out.set("svelte.config.js", pack.render("svelte-config", { base }));
-  out.set("vite.config.ts", pack.render("vite-config", {}));
+  out.set("vite.config.ts", pack.render("vite-config", { apiProxyTarget }));
   out.set("Dockerfile", pack.render("dockerfile", {}));
   out.set(".dockerignore", pack.render("dockerignore", {}));
   out.set("certs/.gitkeep", "");
