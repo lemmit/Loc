@@ -157,3 +157,56 @@ system Sys {
     expect(doc).toContain("calculate :in_region, :boolean, expr(record.region == ^arg(:region))");
   });
 });
+
+// ---------------------------------------------------------------------------
+// DEBT-01 — principal-referencing (tenancy) filter on Phoenix/Ash.
+// `filter this.tenantId == currentUser.tenantId` becomes an Ash
+// `base_filter expr(tenant_id == ^actor(:tenant_id))`, and every read of the
+// aggregate runs with `actor: current_user` (the request principal) so the
+// actor template resolves.  vanilla Ecto still defers it (validator-gated).
+// ---------------------------------------------------------------------------
+
+function tenancySys(): string {
+  return `
+system Bank {
+  user { id: string  tenantId: string }
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+        filter this.tenantId == currentUser.tenantId
+      }
+      repository Accounts for Account {}
+    }
+  }
+  api LedgerApi from Core
+  storage primary { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: primary }
+  deployable api {
+    platform: phoenix
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    auth: required
+    port: 4000
+  }
+}
+`;
+}
+
+describe("Phoenix capability filter — principal (tenancy) base_filter (DEBT-01)", () => {
+  it("renders the principal predicate with ^actor(:field) and threads actor on reads", async () => {
+    const files = await generate(tenancySys());
+    const acct = find(files, (k) => k.endsWith("/ledger/account.ex"), "account.ex");
+    // currentUser.tenantId binds the request actor, not a bare current_user.
+    expect(acct).toContain("base_filter expr(tenant_id == ^actor(:tenant_id))");
+    expect(acct).not.toContain("current_user");
+
+    // The controller threads the actor into the standard reads so the
+    // ^actor template resolves (else the base_filter is fail-closed → no rows).
+    const ctrl = find(files, (k) => k.endsWith("_controller.ex"), "controller");
+    expect(ctrl).toContain("list_accounts!(actor: conn.assigns.current_user)");
+    expect(ctrl).toContain("get_account!(id, actor: conn.assigns.current_user)");
+  });
+});

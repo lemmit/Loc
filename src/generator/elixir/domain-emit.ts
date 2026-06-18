@@ -387,8 +387,18 @@ function renderBaseFilter(
   const refs = agg.contextFilterRefs ?? [];
   const capability = (agg.contextFilters ?? [])
     .map((predicate, i) => ({ predicate, ref: refs[i] }))
-    .filter(({ predicate }) => !exprUsesCurrentUser(predicate))
     .map(({ predicate, ref }) => {
+      // A principal-referencing filter (tenancy, `currentUser.tenantId`) binds
+      // the request actor: Ash evaluates `^actor(:field)` against the
+      // `actor: current_user` threaded onto every read (DEBT-01).  It never
+      // reifies (a boolean calc has no actor in scope), so it always inlines —
+      // the rendered `current_user.<field>` member access is rewritten to
+      // `^actor(:<field>)` (the `record.` strip already normalises the row side).
+      if (exprUsesCurrentUser(predicate)) {
+        return renderExpr(predicate, { ...ctx, thisName: "record" })
+          .replace(/\brecord\./g, "")
+          .replace(/\bcurrent_user\.([a-z0-9_]+)/g, "^actor(:$1)");
+      }
       // A filter that is *exactly* one named `criterion` reifies: reference
       // its boolean calculation (defined alongside via `reifiedCriteriaFor`)
       // instead of inlining the predicate — the Phoenix analog of Hono's

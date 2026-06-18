@@ -121,6 +121,14 @@ describe.skipIf(!ENABLED)(
       // ProblemDetails).  The decisive check that Ash 3.x accepts the generic
       // action + its `:id`-first code interface.
       { name: "operation-returns.ddd" },
+      // Principal-referencing (tenancy) capability filter on Ash (DEBT-01):
+      // `filter this.tenantId == currentUser.tenantId` → `base_filter
+      // expr(tenant_id == ^actor(:tenant_id))`, with `actor: current_user`
+      // threaded onto every read (CRUD list/get/update/destroy + the context
+      // view's `Ash.read!`).  The decisive check that Ash 3.x accepts an
+      // `^actor(:field)` reference inside base_filter and that the actor-threaded
+      // reads compile under --warnings-as-errors.
+      { name: "tenancy-filter.ddd" },
     ])("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
