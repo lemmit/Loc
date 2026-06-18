@@ -61,6 +61,14 @@ export const vueTarget: WalkerTarget = {
     return `${ref.name} = ${value}`;
   },
 
+  /** In-place nested mutation — `order.shipping.zip = v`.  The SFC
+   *  compiler unwraps the top-level ref (`order` → `order.value`) inside
+   *  the inline handler, so the deep assignment is reactive; no spread,
+   *  no setter (unlike React). */
+  renderNestedStateWrite(segments: readonly string[], valueJs: string): string {
+    return `${segments.join(".")} = ${valueJs}`;
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Turn a detected api call into vue-query composable naming +

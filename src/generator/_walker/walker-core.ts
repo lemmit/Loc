@@ -1110,7 +1110,6 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       // reads as the plain member chain (the state root is in scope).
       const seg = stmt.target.segments;
       if (ctx.stateNames.has(seg[0]!)) {
-        const op = stmt.kind === "add" ? "+" : "-";
         // Single-segment current-value reads delegate to the target
         // (position-aware — HEEx/Vue diverge in handler position);
         // a nested target reads the plain member chain.  TSX-identical
@@ -1122,7 +1121,16 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
         };
         const read =
           seg.length === 1 ? ctx.target.renderStateRead(stateRef, "handler") : seg.join(".");
-        const value = `${read} ${op} ${emitExpr(stmt.value, ctx)}`;
+        const rhs = emitExpr(stmt.value, ctx);
+        // Collection target → append / remove-by-value (immutable; the
+        // JS frontends share this and the per-target state-write seam
+        // wraps it).  Scalar target → arithmetic compound assignment.
+        // `__v` avoids colliding with the handler's event-lambda param.
+        const value = stmt.collection
+          ? stmt.kind === "add"
+            ? `[...${read}, ${rhs}]`
+            : `${read}.filter((__v) => __v !== ${rhs})`
+          : `${read} ${stmt.kind === "add" ? "+" : "-"} ${rhs}`;
         return stateWrite(seg, value, ctx);
       }
       return unsupportedPageStmt(
@@ -1171,16 +1179,18 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
 function stateWrite(seg: readonly string[], valueJs: string, ctx: WalkContext): string {
   ctx.usesState = true;
   const root = seg[0]!;
-  const stateRef = {
-    field: { name: root, type: { kind: "primitive" as const, name: "string" as const } },
-    name: root,
-  };
-  let value = valueJs;
-  for (let i = seg.length - 1; i >= 1; i--) {
-    const prefix = seg.slice(0, i).join(".");
-    value = `{ ...${prefix}, ${seg[i]!}: ${value} }`;
+  // Single-segment write delegates to the target's setter/assignment;
+  // a multi-segment (nested) write goes through the dedicated seam,
+  // since the idiom diverges (React immutable spread vs Vue/Svelte
+  // in-place mutation).
+  if (seg.length === 1) {
+    const stateRef = {
+      field: { name: root, type: { kind: "primitive" as const, name: "string" as const } },
+      name: root,
+    };
+    return `${ctx.target.renderStateWrite(stateRef, valueJs)};`;
   }
-  return `${ctx.target.renderStateWrite(stateRef, value)};`;
+  return `${ctx.target.renderNestedStateWrite(seg, valueJs)};`;
 }
 
 function unsupportedPageStmt(what: string, why: string): never {

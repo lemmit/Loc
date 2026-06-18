@@ -56,6 +56,13 @@ export const svelteTarget: WalkerTarget = {
     return `${ref.name} = ${value}`;
   },
 
+  /** In-place nested mutation — `order.shipping.zip = v`.  Svelte 5
+   *  `$state` is deeply reactive, so a member assignment triggers an
+   *  update; no immutable spread (unlike React). */
+  renderNestedStateWrite(segments: readonly string[], valueJs: string): string {
+    return `${segments.join(".")} = ${valueJs}`;
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Identical naming to the TSX target — the svelte api modules
