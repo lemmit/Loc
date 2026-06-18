@@ -425,19 +425,63 @@ function spliceMembers(
 function spliceIntoTarget(target: object, members: unknown[]): void {
   const targetList = (target as { members: unknown[] }).members;
   if (!Array.isArray(targetList)) return;
+
+  // Collect existing member names, descending into `area` blocks so an
+  // explicit page (top-level OR inside an area) suppresses a synthesised page
+  // of the same name even when the synthesised one is nested in an area.
   const existingNames = new Set<string>();
-  for (const m of targetList) {
-    const n = (m as { name?: unknown }).name;
-    if (typeof n === "string") existingNames.add(n);
-  }
+  const collectNames = (list: unknown[]): void => {
+    for (const m of list) {
+      const n = (m as { name?: unknown }).name;
+      if (typeof n === "string") existingNames.add(n);
+      if ((m as { $type?: unknown }).$type === "Area") {
+        collectNames(((m as { members?: unknown[] }).members ?? []) as unknown[]);
+      }
+    }
+  };
+  collectNames(targetList);
+
+  // Drop the members of a synthesised `area` whose name is already declared
+  // (override-by-name reaches into areas), re-wiring kept members' containers.
+  // Returns true if the area still has ≥1 member after filtering.
+  const pruneArea = (areaNode: { members?: unknown[] }): boolean => {
+    const kept: unknown[] = [];
+    for (const inner of areaNode.members ?? []) {
+      const innerName = (inner as { name?: unknown }).name;
+      if ((inner as { $type?: unknown }).$type === "Area") {
+        if (pruneArea(inner as { members?: unknown[] })) kept.push(inner);
+      } else if (typeof innerName === "string" && existingNames.has(innerName)) {
+        // overridden by an explicit declaration — drop it
+      } else {
+        kept.push(inner);
+      }
+    }
+    areaNode.members = kept;
+    kept.forEach((inner, i) => {
+      (inner as Record<string, unknown>).$container = areaNode;
+      (inner as Record<string, unknown>).$containerProperty = "members";
+      (inner as Record<string, unknown>).$containerIndex = i;
+    });
+    return kept.length > 0;
+  };
+
   for (const m of members) {
     const name = (m as { name?: unknown }).name;
-    if (typeof name === "string" && existingNames.has(name)) continue;
+    const isArea = (m as { $type?: unknown }).$type === "Area";
+    if (isArea) {
+      // Dedup: an area with the same name is already present (e.g. the same
+      // aggregate listed twice in one scaffold call) — drop the duplicate.
+      if (typeof name === "string" && existingNames.has(name)) continue;
+      if (!pruneArea(m as { members?: unknown[] })) continue; // whole area overridden
+    } else if (typeof name === "string" && existingNames.has(name)) {
+      continue;
+    }
     (m as Record<string, unknown>).$container = target;
     (m as Record<string, unknown>).$containerProperty = "members";
     (m as Record<string, unknown>).$containerIndex = targetList.length;
     targetList.push(m);
     if (typeof name === "string") existingNames.add(name);
+    if (isArea) collectNames(((m as { members?: unknown[] }).members ?? []) as unknown[]);
   }
 }
 

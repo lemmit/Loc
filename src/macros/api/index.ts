@@ -7,6 +7,7 @@
 export type {
   Aggregate,
   AggregateMember,
+  Area,
   BoundedContext,
   FieldAccess,
   Operation,
@@ -81,6 +82,7 @@ export {
 // overlap and bundling everything into one file makes both harder
 // to navigate.
 export {
+  area,
   bodyProp,
   boolLit,
   callExpr,
