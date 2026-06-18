@@ -12,13 +12,19 @@ import { lambdaArg, namedArgValue, positionalArgs } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { emitExpr, extendLambdaParams, propagateChildFlags, walk } from "../walker-core.js";
 
-/** `For { each: <coll>, <item> => <markup> }`.
+/** `For { each: <coll>, empty?: <markup>, <item> => <markup> }`.
  *
  *  Surface:
  *    - `each:` — the collection expression (or the first positional
  *      non-lambda arg).  Required.
  *    - the item renderer — the first positional lambda (`o => Card { … }`),
  *      whose param binds to the emitted iteration variable.  Required.
+ *    - `empty:` — optional markup rendered when the collection is empty
+ *      (`empty: Empty("No orders yet.")`).  A plain markup arg (no item
+ *      binding), so it's grammar-clean — unlike `key:` below.  Lowers to
+ *      Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)`
+ *      ternary, a Vue `v-if` sibling `<template>`, and a HEEx
+ *      `Enum.empty?/1` guard.
  *
  *  The list key is the synthesised loop index.  A source-level `key:`
  *  override isn't offered: the grammar can't place a second lambda arg
@@ -65,9 +71,14 @@ export function emitFor(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth
   const body = walk(itemLam.body, bodyCtx, depth + 1);
   propagateChildFlags(ctx, bodyCtx);
 
+  // Optional empty-state arm — plain markup (no item binding), walked in
+  // the parent ctx so its child flags mutate `ctx` directly.
+  const emptyArg = namedArgValue(call, "empty");
+  const emptyBody = emptyArg ? walk(emptyArg, ctx, depth + 1) : undefined;
+
   // TSX wraps each iteration in a keyed `<Fragment>` — flag the shell
   // to import it.  Vue/Svelte iterate natively and never read this.
   if (ctx.target.framework === "react") ctx.usesFragment = true;
 
-  return ctx.target.renderForEach(collExpr, itemVar, indexVar, indexVar, body, depth);
+  return ctx.target.renderForEach(collExpr, itemVar, indexVar, indexVar, body, depth, emptyBody);
 }

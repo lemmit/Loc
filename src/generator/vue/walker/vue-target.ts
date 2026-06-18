@@ -191,6 +191,7 @@ export const vueTarget: WalkerTarget = {
     keyExpr: string,
     body: string,
     depth: number,
+    emptyBody?: string,
   ): string {
     const usesIdx = referencesIdent(keyExpr, indexVar) || referencesIdent(body, indexVar);
     const binding = usesIdx ? `(${itemVar}, ${indexVar})` : itemVar;
@@ -206,9 +207,20 @@ export const vueTarget: WalkerTarget = {
     const inner = "  ".repeat(depth + 1);
     // `renderAttrBinding` returns the `:key` attr with a leading space.
     const keyAttr = vueTarget.renderAttrBinding("key", keyExpr);
-    return [
+    const forLines = [
       `<template v-for=${quoteFor(forExpr)}${keyAttr}>`,
       `${inner}${body}`,
+      `${pad}</template>`,
+    ];
+    if (emptyBody === undefined) return forLines.join("\n");
+    // Vue forbids `v-for` + `v-if` on one node, so the empty arm is a
+    // sibling `<template v-if="!coll.length">` (the comprehension stays
+    // a `v-for` template).  Both re-read `coll` — fine for the page DSL's
+    // simple `each:` refs.
+    return [
+      ...forLines,
+      `${pad}<template v-if=${quoteFor(`!${coll}.length`)}>`,
+      `${inner}${emptyBody}`,
       `${pad}</template>`,
     ].join("\n");
   },

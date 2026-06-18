@@ -275,6 +275,44 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
     expect(vue).toContain(':key="o.id"');
   });
 
+  it("renderForEach `empty:` arm: each frontend reaches for its native idiom", () => {
+    const tsx = tsxTarget.renderForEach("orders", "o", "oIdx", "oIdx", "<Card />", 0, "<Empty />");
+    expect(tsx).toContain("orders.length === 0 ? (");
+    expect(tsx).toContain("<Empty />");
+    expect(tsx).toMatch(/\) : \([\s\S]*orders\.map\(/);
+
+    const svelte = svelteTarget.renderForEach(
+      "orders",
+      "o",
+      "oIdx",
+      "oIdx",
+      "<Card />",
+      0,
+      "<Empty />",
+    );
+    expect(svelte).toContain("{:else}");
+    expect(svelte).toMatch(/\{:else\}[\s\S]*<Empty \/>[\s\S]*\{\/each\}/);
+
+    const vue = vueTarget.renderForEach("orders", "o", "oIdx", "oIdx", "<Card />", 0, "<Empty />");
+    expect(vue).toContain('<template v-if="!orders.length">');
+    expect(vue).toContain("<Empty />");
+  });
+
+  it("renderForEach `empty:` undefined stays byte-identical to the un-empty form", () => {
+    const withUndef = tsxTarget.renderForEach("orders", "o", "oIdx", "oIdx", "<Card />", 0);
+    const explicit = tsxTarget.renderForEach(
+      "orders",
+      "o",
+      "oIdx",
+      "oIdx",
+      "<Card />",
+      0,
+      undefined,
+    );
+    expect(explicit).toBe(withUndef);
+    expect(withUndef).not.toContain("length === 0");
+  });
+
   it("renderNavigate diverges: TSX React-Router call, HEEx `push_navigate` + ~p", () => {
     const tsx = tsxTarget.renderNavigate("/orders", []);
     const heex = heexTarget.renderNavigate("/orders", []);

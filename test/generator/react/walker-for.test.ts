@@ -58,4 +58,20 @@ describe("walker primitive — For (list comprehension)", () => {
     const tsx = await emit(`Stack { For { each: [1], n => Heading { "x" } } }`);
     expect(tsx).toMatch(/\{\[1\]\.map\(/);
   });
+
+  it("renders the `empty:` arm as a `length === 0 ? … : .map(…)` ternary", async () => {
+    const tsx = await emit(
+      `Stack { For { each: [1, 2], empty: Empty("Nothing here"), n => Heading { "x" } } }`,
+    );
+    expect(tsx).toContain("[1, 2].length === 0 ? (");
+    expect(tsx).toContain("Nothing here");
+    expect(tsx).toContain("[1, 2].map(");
+    // The map is still the populated branch.
+    expect(tsx).toMatch(/\) : \([\s\S]*\[1, 2\]\.map\(/);
+  });
+
+  it("omits the ternary entirely when no `empty:` arm is given", async () => {
+    const tsx = await emit(`Stack { For { each: [1, 2], n => Heading { "x" } } }`);
+    expect(tsx).not.toContain("length === 0");
+  });
 });

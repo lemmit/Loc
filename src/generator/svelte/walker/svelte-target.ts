@@ -160,7 +160,10 @@ export const svelteTarget: WalkerTarget = {
   /** `{#each coll as item, idx (key)}body{/each}` — Svelte's native
    *  keyed iteration block (no wrapper element, no `.map`).  The index
    *  binding is emitted only when referenced; the `(key)` keyed-each
-   *  expression is always present (the default key is the index). */
+   *  expression is always present (the default key is the index).
+   *
+   *  An `empty:` arm slots into Svelte's native `{:else}` clause — no
+   *  re-evaluation of `coll`, unlike the TSX/Vue idioms. */
   renderForEach(
     coll: string,
     itemVar: string,
@@ -168,6 +171,7 @@ export const svelteTarget: WalkerTarget = {
     keyExpr: string,
     body: string,
     depth: number,
+    emptyBody?: string,
   ): string {
     const usesIdx = referencesIdent(keyExpr, indexVar) || referencesIdent(body, indexVar);
     const binding = usesIdx ? `${itemVar}, ${indexVar}` : itemVar;
@@ -176,6 +180,7 @@ export const svelteTarget: WalkerTarget = {
     return [
       `{#each ${coll} as ${binding} (${keyExpr})}`,
       `${inner}${body}`,
+      ...(emptyBody === undefined ? [] : [`${close}{:else}`, `${inner}${emptyBody}`]),
       `${close}{/each}`,
     ].join("\n");
   },

@@ -440,17 +440,22 @@ function htmlInputTypeForIRType(t: TypeIR): string {
   }
 }
 
-/** `For { each: <coll>, <item> => <markup> }` →
+/** `For { each: <coll>, empty?: <markup>, <item> => <markup> }` →
  *  `<%= for <item> <- <coll> do %> … <% end %>` — LiveView's
  *  for-comprehension block.  No keyed wrapper: the `key:` arg is a
  *  client-framework reconciliation hint (React/Vue/Svelte) with no
  *  HEEx analogue, so it's accepted-and-ignored here.  The loop
  *  variable is a plain local (bare `snake(name)`), so item refs in the
  *  body resolve through `renderRef`'s unknown-refKind fall-through —
- *  same mechanism the Table `<:col :let={row}>` slot relies on. */
+ *  same mechanism the Table `<:col :let={row}>` slot relies on.
+ *
+ *  An `empty:` arm wraps the comprehension in an `Enum.empty?/1` guard
+ *  (`for` has no native else clause).  The collection is read twice —
+ *  fine for the page DSL's simple `each:` refs / assigns. */
 export function renderFor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let coll: ExprIR | undefined;
   let itemLam: Extract<ExprIR, { kind: "lambda" }> | undefined;
+  let emptyExpr: ExprIR | undefined;
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
@@ -461,6 +466,7 @@ export function renderFor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCont
       continue;
     }
     if (name === "each") coll = arg;
+    else if (name === "empty") emptyExpr = arg;
     else if (name === undefined) coll ??= arg;
   }
   if (!coll) {
@@ -472,7 +478,16 @@ export function renderFor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCont
   const itemVar = snake(itemLam.param);
   const collHeex = renderExpr(coll, { ...ctx, position: "template" });
   const body = renderChild(itemLam.body, ctx);
-  return [`<%= for ${itemVar} <- ${collHeex} do %>`, indent(body, 2), `<% end %>`].join("\n");
+  const loop = [`<%= for ${itemVar} <- ${collHeex} do %>`, indent(body, 2), `<% end %>`].join("\n");
+  if (!emptyExpr) return loop;
+  const emptyBody = renderChild(emptyExpr, ctx);
+  return [
+    `<%= if Enum.empty?(${collHeex}) do %>`,
+    indent(emptyBody, 2),
+    `<% else %>`,
+    indent(loop, 2),
+    `<% end %>`,
+  ].join("\n");
 }
 
 /** `Table(Column(...), ..., rows: ref("rows"), ...)` →
