@@ -12,6 +12,7 @@ import { emitAggregateResources } from "./domain-emit.js";
 import { renderEventModule } from "./events-emit.js";
 import { renderJasonEncoderImpl } from "./jason-camel-emit.js";
 import { joinEntityName, renderJoinResource } from "./join-resource-emit.js";
+import { isAshReturningOpSupported } from "./operation-returns-ash-emit.js";
 import { renderAshType, renderTypespec } from "./render-expr.js";
 import {
   buildFindActions,
@@ -280,9 +281,12 @@ function renderDomainModule(
     // Operation actions (`update :<op>`) get a code-interface define so a
     // one-click `Action(<instance>.<op>)` can invoke them directly
     // (`<Ctx>.<op>_<agg>!(record)`).  Op params become positional args.
+    // A return-dominant `or`-union op (DEBT-03) is a *generic* action that
+    // loads the record itself, so its interface takes `:id` first.
     for (const op of agg.operations.filter((o) => o.visibility === "public")) {
-      const argsList = op.params.map((p) => `:${snake(p.name)}`).join(", ");
-      const argsClause = argsList ? `, args: [${argsList}]` : "";
+      const paramArgs = op.params.map((p) => `:${snake(p.name)}`);
+      const args = isAshReturningOpSupported(op) ? [":id", ...paramArgs] : paramArgs;
+      const argsClause = args.length > 0 ? `, args: [${args.join(", ")}]` : "";
       defines.push(
         `      define :${snake(op.name)}_${snake(agg.name)}, action: :${snake(op.name)}${argsClause}`,
       );

@@ -114,6 +114,13 @@ describe.skipIf(!ENABLED)(
       // Disallowed before mutating, and auto-exposes the side-effect-free
       // `GET /orders/:id/can_cancel` companion + its OpenAPI path/CanResponse.
       { name: "when.ddd" },
+      // Operation `or`-union returns on foundation: ash (exception-less.md A3,
+      // DEBT-03): a return-dominant `operation foo(): Agg or NotFound` lowers to
+      // an Ash generic action whose run fn loads the record and returns a tagged
+      // term; the controller translates it (success → 200, error variant →
+      // ProblemDetails).  The decisive check that Ash 3.x accepts the generic
+      // action + its `:id`-first code interface.
+      { name: "operation-returns.ddd" },
     ])("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

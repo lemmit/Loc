@@ -12,10 +12,12 @@ import type {
   ExprIR,
   FindIR,
   FunctionIR,
+  OperationIR,
   StmtIR,
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allContexts } from "../../types/loom-ir.js";
+import { isReturnDominantOp } from "../../util/operation-returns.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 
@@ -509,20 +511,38 @@ export function validateOperationReturnsUnimplemented(
 ): void {
   // Backends that emit the operation-return ProblemDetails translation today.
   // `"node"` is the Hono/TS backend (exception-less.md spike); python/java/dotnet
-  // followed.  Elixir emits it on the **vanilla** foundation only (the
-  // `{:ok,_} | {:error, tag, data}` controller carrier) — `ash` stays gated.
+  // followed.  Elixir emits it on the **vanilla** foundation for any returning
+  // op, and on the **ash** foundation for *return-dominant* ops (DEBT-03 — a
+  // generic action; mutation-then-return / guarded bodies stay deferred on ash).
   // No backend (legacy single-context path) → emittable, gate stays quiet.
   const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java"]);
-  const elixirReturnsCapable =
-    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
-  const isCapable = (p: string): boolean =>
-    SUPPORTED_RETURN_BACKENDS.has(p) || (p === "elixir" && elixirReturnsCapable);
-  const unsupported = [...backendPlatforms].filter((p) => !isCapable(p));
-  if (unsupported.length === 0) return;
+
+  // Elixir capability is per-op: vanilla handles every returning op; ash handles
+  // only return-dominant ones.  So elixir can serve an op iff every foundation
+  // it runs under can — `vanilla` always, `ash` only when the body is
+  // return-dominant.
+  const elixirCapableForOp = (op: OperationIR): boolean =>
+    elixirFoundations.size > 0 &&
+    [...elixirFoundations].every((f) => f === "vanilla" || isReturnDominantOp(op));
+
+  const isCapable = (p: string, op: OperationIR): boolean =>
+    SUPPORTED_RETURN_BACKENDS.has(p) || (p === "elixir" && elixirCapableForOp(op));
 
   for (const agg of ctx.aggregates) {
     for (const op of agg.operations) {
       if (!op.returnType) continue;
+      const unsupported = [...backendPlatforms].filter((p) => !isCapable(p, op));
+      if (unsupported.length === 0) continue;
+      // An ash deployable that can't emit *this* op (a mutating/guarded body)
+      // gets a targeted hint; otherwise the generic "backend doesn't emit it"
+      // message.
+      const ashDeferred =
+        unsupported.includes("elixir") && elixirFoundations.has("ash") && !isReturnDominantOp(op);
+      const ashNote = ashDeferred
+        ? ` On foundation: ash only *return-dominant* bodies (statements limited to ` +
+          `\`return\`/\`let\`) are emitted today; this op mutates state or declares a guard, ` +
+          `so host it on foundation: vanilla.`
+        : "";
       diags.push({
         severity: "error",
         code: "loom.operation-return-unsupported",
@@ -530,7 +550,8 @@ export function validateOperationReturnsUnimplemented(
           `operation '${agg.name}.${op.name}' declares an \`or\`-union return type, but the ` +
           `backend(s) serving this context (${unsupported.sort().join(", ")}) don't emit the ` +
           `producer-side route translation yet (exception-less.md). It's supported on: node, ` +
-          `dotnet, python, java, and elixir on foundation: vanilla.`,
+          `dotnet, python, java, elixir on foundation: vanilla, and return-dominant ops on ` +
+          `foundation: ash.${ashNote}`,
         source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
       });
     }

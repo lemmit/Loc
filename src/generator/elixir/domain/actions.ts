@@ -8,6 +8,10 @@
 import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
 import { classifyForWire, singleFieldShape } from "../../../ir/validate/invariant-classify.js";
 import { snake } from "../../../util/naming.js";
+import {
+  isAshReturningOpSupported,
+  renderAshReturningOpAction,
+} from "../operation-returns-ash-emit.js";
 import type { RenderCtx } from "../render-expr.js";
 import { renderAshType, renderExpr } from "../render-expr.js";
 import { renderElixirStatements } from "../render-stmt.js";
@@ -94,7 +98,7 @@ end`;
 
 export function renderActions(
   agg: AggregateIR,
-  _ctx: BoundedContextIR,
+  ctx: BoundedContextIR,
   renderCtx: RenderCtx,
   ctxModule: string,
 ): string {
@@ -113,7 +117,15 @@ export function renderActions(
       accept [${fieldNames.join(", ")}]
     end`;
 
-  const opActions = ops.map((op) => renderOperationAction(op, renderCtx, ctxModule));
+  // Return-dominant `or`-union ops (exception-less.md A3, DEBT-03) lower to an
+  // Ash generic action that hands back a tagged term — an `update` action's
+  // result can't carry a discriminated union.  Everything else stays an
+  // `update` action.
+  const opActions = ops.map((op) =>
+    isAshReturningOpSupported(op)
+      ? renderAshReturningOpAction(ctx, agg, op)
+      : renderOperationAction(op, renderCtx, ctxModule),
+  );
 
   // Ash forbids two actions of the same name.  A mutate operation whose
   // name collides with a default action (notably `crudish`'s `update`,

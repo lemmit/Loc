@@ -10,7 +10,8 @@ import { parseString } from "../../_helpers/parse.js";
 // (exception-less.md A3).  `operation reserve(): Order or NotFound` produces a
 // tagged result the controller translates to HTTP: success → 200, error variant
 // → RFC-7807 ProblemDetails at the variant's mapped status.  Foundation-aware:
-// accepted on `vanilla`, still rejected on `ash`.
+// accepted on `vanilla` (any returning op) and on `ash` for *return-dominant*
+// ops (DEBT-03 — a generic action).
 // ---------------------------------------------------------------------------
 
 const source = (foundation: string) => `
@@ -51,9 +52,9 @@ describe("vanilla — T2.c operation-return gate (foundation-aware)", () => {
     expect(diags.find((d) => d.code === RET_GATE)).toBeUndefined();
   });
 
-  it("still rejects it on foundation: ash", async () => {
+  it("now accepts the same return-dominant op on foundation: ash (DEBT-03 — generic action)", async () => {
     const diags = await diagnostics("ash");
-    expect(diags.find((d) => d.code === RET_GATE)).toBeDefined();
+    expect(diags.find((d) => d.code === RET_GATE)).toBeUndefined();
   });
 });
 
