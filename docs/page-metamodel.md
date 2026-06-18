@@ -312,20 +312,21 @@ body: Stack {
 }
 ```
 
-`filter` / `map` / `sortBy` (and any other JS array method) render verbatim
-through the body walker — the callback's parameter binds in scope exactly
-like a `For` item or a `Table` column accessor. Chains compose
-(`orders.filter(…).map(…)`).
+`filter` / `map` (native JS array methods) render verbatim through the body
+walker — the callback's parameter binds in scope exactly like a `For` item
+or a `Table` column accessor. Chains compose (`orders.filter(…).map(…)`).
 
 Two boundaries to know:
 
 - **Single-param callbacks only** — the grammar's `Lambda` is `param=ID =>
-  …`, so a two-arg comparator (`sort((a, b) => …)`) isn't expressible; use
-  `sortBy(o => o.key)`.
-- **JS frontends today.** React, Vue, and Svelte share the `emitExpr`
-  engine, so this works on all three. Phoenix/HEEx runs a parallel engine
-  and still renders the un-shaped collection — inline ops on the LiveView
-  backend are a follow-up.
+  …`, so a two-arg comparator (`sort((a, b) => …)`) isn't expressible. A
+  single-arg key-sort (`sortBy(o => o.key)`) has no native array method or
+  runtime helper yet on any frontend, so pre-shape ordering in a backend
+  `view`/`find` for now.
+- **All frontends.** React, Vue, and Svelte share the `emitExpr` engine;
+  Phoenix/HEEx runs a parallel engine that mirrors the same ops to Elixir
+  idioms (`filter`/`map` → `Enum.filter/2` / `Enum.map/2`), so inline
+  `filter`/`map` shaping works on every frontend.
 
 ---
 

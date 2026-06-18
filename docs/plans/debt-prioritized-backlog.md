@@ -82,7 +82,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | DEBT-28 | `loads:` eager-load specs + pagination on `find all` | all backends | 2 | L | — |
 | DEBT-29 | Joined view sources + per-view parameters not emitted | all backends | 2 | M | `views.md` |
 | DEBT-30 | Misc IR-consumed-nowhere: seed create-shape validation, side-effecting-call metadata, block-body lambdas in e2e, method-call hooks binding | varies | 1 | S–M | — |
-| DEBT-31 | Inline collection-op lambdas (`filter`/`map`/`sortBy`) on Phoenix/HEEx — done on the JS frontends, HEEx's parallel engine still renders the un-shaped collection | elixir | 2 | M | — |
+| DEBT-31 | ~~Inline collection-op lambdas on Phoenix/HEEx~~ **DONE** — `filter`/`map` now route to `Enum.filter/2`/`Enum.map/2` (was: lambda hoisted to a `handle_event`, invalid `recv.filter(…)` chain). `sortBy` dropped from scope — it's a non-native JS method with no runtime helper, so it's unsupported on the JS frontends too (no parity target) | elixir | 2 | M | — |
 
 ---
 
@@ -133,7 +133,7 @@ Concise scope per item; full gate locations in the table above.
 - **DEBT-11 Vue workflow forms — DONE:** the structural workflow form (fields, typed defaults, submit, navigate) and server/validation error mapping (`useLoomForm` → inline field + `__global` alert) were already shipped; the remaining React/Svelte gap was the **success toast**. The Vue packs' `form-default-onsubmit` now `pushToast(...)`s on completion, and the toast queue + app-shell host are gated on `realtime || forms` (`vue/index.ts` `hasToastHost`) so a form-only project still mounts a host.
 - **DEBT-12 Phoenix page DSL:** `requires` guard (v0 bind-only → full `handle_params/3`), new-parts-in-body stub, `verify_token/1` auth helper.
 - **DEBT-13 Ordered ref collections:** Ash `manage_relationship` ordinal injection + a first-class ordered editor on frontends.
-- **DEBT-31 Inline collection ops on Phoenix/HEEx:** expression-position lambda callbacks (`orders.filter(o => …)`, `.map`, `.sortBy`) render on the JS frontends via the shared `emitExpr` (`walker-core.ts`); HEEx's parallel engine (`heex-walker-core.ts`) still renders the un-shaped collection. Mirror the `emitExpr` lambda arm into the HEEx expr renderer (`Enum.filter/2` etc.).
+- **DEBT-31 Inline collection ops on Phoenix/HEEx — DONE:** expression-position lambda callbacks (`xs.filter(o => …)`, `.map`) render on the JS frontends via the shared `emitExpr` (native `Array.prototype` methods). HEEx's parallel engine (`heex-walker-core.ts`) used to hoist the callback into a `handle_event` clause and emit an invalid `recv.filter(event_N)` chain — because `filter`/`map` aren't in the shared `isCollectionOp` catalogue. `renderMethodCall` now routes a `filter`/`map`/`select` method-call with a lambda arg to `renderCollectionOp` (whose `Enum.filter/2` / `Enum.map/2` arms already existed but were unreachable). **`sortBy` was dropped:** it's not a native JS array method and has no runtime helper, so it's broken on the JS frontends too (`xs.sortBy(...)` → a non-existent method) — there's no parity target to mirror. A real `sortBy` is a separate cross-frontend feature (JS runtime helper + `Enum.sort_by/2` + catalogue/type-system entry).
 
 ---
 

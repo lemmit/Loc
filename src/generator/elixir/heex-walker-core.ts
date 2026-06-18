@@ -453,11 +453,24 @@ function renderMember(expr: Extract<ExprIR, { kind: "member" }>, ctx: WalkContex
   return `${renderExpr(expr.receiver, ctx)}.${snake(expr.member)}`;
 }
 
+/** JS-frontend collection ops that aren't in the shared `isCollectionOp`
+ *  catalogue (`src/util/collection-ops.ts`) but DO render verbatim on the
+ *  JS frontends via `emitExpr` (native `Array.prototype` methods).  In a
+ *  page body these reach HEEx as a `method-call` whose first arg is a
+ *  lambda; without this routing their lambda would be hoisted to a
+ *  `handle_event` clause and the op emitted as an invalid `recv.filter(…)`
+ *  chain.  `renderCollectionOp` already shapes them into `Enum.filter/2` /
+ *  `Enum.map/2` — they just weren't reaching it (DEBT-31). */
+const INLINE_LAMBDA_COLLECTION_OPS: ReadonlySet<string> = new Set(["filter", "map", "select"]);
+
 function renderMethodCall(
   expr: Extract<ExprIR, { kind: "method-call" }>,
   ctx: WalkContext,
 ): string {
-  if (expr.isCollectionOp) {
+  if (
+    expr.isCollectionOp ||
+    (INLINE_LAMBDA_COLLECTION_OPS.has(expr.member) && expr.args[0]?.kind === "lambda")
+  ) {
     return renderCollectionOp(expr, ctx);
   }
   // API binding shape: `<ApiHandle>.<Agg>.<op>(args)`.
