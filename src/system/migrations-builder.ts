@@ -120,7 +120,7 @@ export function schemaFromModule(
     // from the stream at load time (appliers A2).  Mirrors the Drizzle
     // schema's `emitEventLogTable`.
     if (agg.persistedAs === "eventLog") {
-      return [eventLogTableForAggregate(agg, module.name)];
+      return [eventLogTableForStream(snake(agg.name), module.name)];
     }
     const shape = shapeOf(agg);
     if (shape === "document") {
@@ -172,7 +172,13 @@ export function schemaFromModule(
   for (const ctx of module.contexts) {
     const durable = durableEventTypes(ctx).size > 0;
     for (const wf of ctx.workflows) {
-      if (wf.correlationField) {
+      // An `eventSourced` workflow persists as an append-only `<wf>_events`
+      // stream (folded on load), not a mutable correlation-state row — the saga
+      // analogue of a `persistedAs(eventLog)` aggregate (workflow-and-applier.md
+      // A2-S5b).  A plain correlation-bearing workflow keeps its state table.
+      if (wf.eventSourced) {
+        tables.push(eventLogTableForStream(snake(wf.name), module.name));
+      } else if (wf.correlationField) {
         tables.push(workflowStateTableShape(wf, module.name, voLookup, durable));
       }
     }
@@ -356,14 +362,15 @@ function documentTableForAggregate(agg: AggregateIR, ownerModule: string): Table
   };
 }
 
-/** Event-sourced aggregate (`persistedAs(eventLog)`): one append-only
- *  `<agg>_events` stream table.  A row is one recorded event keyed by
- *  `(stream_id, version)` — `stream_id` is the aggregate id, `version` its
- *  gap-free position in the stream.  `type` discriminates the event for the
+/** One append-only `<name>_events` stream table — the shared event-sourcing
+ *  store shape, used by both a `persistedAs(eventLog)` aggregate (`stream_id` =
+ *  aggregate id) and an `eventSourced` workflow (`stream_id` = correlation key).
+ *  A row is one recorded event keyed by `(stream_id, version)` — `version` is
+ *  its gap-free position in the stream.  `type` discriminates the event for the
  *  fold; `data` is the JSON payload; `occurred_at` defaults to insert time.
  *  No state / part / join tables — the read model is folded at load. */
-function eventLogTableForAggregate(agg: AggregateIR, ownerModule: string): TableShape {
-  const tableName = `${snake(agg.name)}_events`;
+function eventLogTableForStream(snakeName: string, ownerModule: string): TableShape {
+  const tableName = `${snakeName}_events`;
   return {
     name: tableName,
     ownerModule,

@@ -261,6 +261,41 @@ describe.skipIf(!ENABLED)(
       }
     }, 300_000);
 
+    // Event-sourced WORKFLOW (workflow-and-applier.md A2-S5b): the saga folds
+    // its own emitted events into state via apply(...) and persists as an
+    // append-only `<wf>_events` stream — no mutable correlation-state row.
+    // Compiles the fold helpers (state type / fold / apply / load / append) and
+    // the fold-load / append-own-events dispatch handlers.  `generate system`
+    // (channels + the ES-workflow storage validator require a Hono host).
+    it("system event-sourced workflow (stream + fold + apply dispatch) — generated project type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-eswf-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/eventsourced-workflow.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        // Sanity: the workflow event stream + the fold made it out (not a state table).
+        const schema = fs.readFileSync(path.join(proj, "db", "schema.ts"), "utf8");
+        expect(schema).toContain("order_fulfillment_events");
+        const wf = fs.readFileSync(path.join(proj, "http", "workflows.ts"), "utf8");
+        expect(wf).toContain("function foldOrderFulfillment");
+        expect(wf).toContain("appendOrderFulfillmentEvents");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
     // Multi-context Acme ERP bundle (web/src/examples/erp): a single Hono
     // deployable (`core_api`) hosts five bounded contexts that share an ambient
     // kernel (root-level value objects + enums in sibling files), a TPH

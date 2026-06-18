@@ -28,6 +28,12 @@ import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor, zodForResponse } from "./routes-builder.js";
+import {
+  emitWorkflowFoldHelpers,
+  emitWorkflowStreamSerializers,
+  esHelperNames,
+  eventSourcedWorkflows,
+} from "./workflow-eventsourced-builder.js";
 
 // ---------------------------------------------------------------------------
 // Hono workflow emission.
@@ -140,9 +146,16 @@ export function buildWorkflowsFile(
   // OpenAPI dedupes the component definition.
   body.push("");
 
+  // A context whose only workflows are event-sourced sagas (invoked via the
+  // dispatcher, never an HTTP route) emits an empty `workflowsRoutes` router —
+  // no command POSTs, no instance GETs (ES workflows have no `instanceWireShape`).
+  // Underscore the then-unused `db` / `events` params so the generated-code lint
+  // stays clean; a context with any route keeps them (and stays byte-identical).
+  const hasHttpRoutes =
+    ctx.workflows.some(emitsCommandRoute) || ctx.workflows.some((w) => !!w.instanceWireShape);
   body.push(`export function workflowsRoutes(`);
-  body.push(`  db: NodePgDatabase<typeof schema>,`);
-  body.push(`  events: DomainEventDispatcher,`);
+  body.push(`  ${hasHttpRoutes ? "db" : "_db"}: NodePgDatabase<typeof schema>,`);
+  body.push(`  ${hasHttpRoutes ? "events" : "_events"}: DomainEventDispatcher,`);
   body.push(`): OpenAPIHono {`);
   // `newApp()` from `./problem-details` pre-wires the validation hook
   // that maps Zod parse failures to 422 ProblemDetails with `errors[]`.
@@ -244,8 +257,22 @@ export function buildWorkflowsFile(
 
   const imports: string[] = [];
   imports.push("// Auto-generated.  Do not edit by hand.");
-  imports.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
-  imports.push(`import { ProblemDetails, newApp } from "./problem-details";`);
+  // `OpenAPIHono` (the router return type) and `newApp` (the validation-hooked
+  // factory) are always referenced; `createRoute` / `z` / `ProblemDetails` only
+  // when the router actually emits HTTP routes (an event-sourced-only context
+  // emits none).  Conditional on body reference so a routed context stays
+  // byte-identical while an ES-only one drops the now-unused names.
+  const honoNamed = [
+    "OpenAPIHono",
+    /(?<!\.)\bcreateRoute\(/.test(bodyStr) ? "createRoute" : null,
+    /(?<!\.)\bz\./.test(bodyStr) ? "z" : null,
+  ].filter((n): n is string => n !== null);
+  imports.push(`import { ${honoNamed.join(", ")} } from "@hono/zod-openapi";`);
+  const problemNamed = [
+    /(?<!\.)\bProblemDetails\b/.test(bodyStr) ? "ProblemDetails" : null,
+    "newApp",
+  ].filter((n): n is string => n !== null);
+  imports.push(`import { ${problemNamed.join(", ")} } from "./problem-details";`);
   if (usesIds) imports.push(`import * as Ids from "../domain/ids";`);
   if (errorClasses.length > 0) {
     imports.push(`import { ${errorClasses.join(", ")} } from "../domain/errors";`);
@@ -253,6 +280,9 @@ export function buildWorkflowsFile(
   if (usesDispatcher)
     imports.push(`import type { DomainEventDispatcher } from "../domain/events";`);
   if (usesEvents) imports.push(`import type * as Events from "../domain/events";`);
+  // An event-sourced workflow's folded state may carry a money field, whose
+  // typed default (`new Decimal(0)`) and arithmetic need decimal.js.
+  if (/(?<!\.)\bDecimal\b/.test(bodyStr)) imports.push(`import Decimal from "decimal.js";`);
   if (usesDb) imports.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   // The persisted-workflow load helper filters by the correlation column.
   const drizzleOps = ["and", "asc", "eq", "isNull", "lt"].filter((op) =>
@@ -668,13 +698,24 @@ function handlerName(workflow: string, trigger: "on" | "create", event: string):
 function emitSubscriptionHandlers(ctx: EnrichedBoundedContextIR): string[] {
   const subs = ctx.eventSubscriptions;
   const out: string[] = [];
-  // load/save helpers, once per correlation-bearing workflow that any handler
-  // (event-create starter OR on-reactor continuation) loads/saves its row from.
+  // Stream (de)serialisers shared by every event-sourced workflow's fold —
+  // emitted once when any ES workflow is subscribed (workflow-and-applier.md
+  // A2-S5b).  Reuses the aggregate event store's `eventToData` / `rowToEvent`.
+  if (eventSourcedWorkflows(ctx).length > 0) {
+    out.push(...emitWorkflowStreamSerializers(ctx));
+    out.push("");
+  }
+  // Per-workflow persistence helpers, once per correlation-bearing workflow any
+  // handler loads from: an `eventSourced` workflow gets its fold-from-stream
+  // helpers (fold / apply / load / append); a state-based saga gets its
+  // load/save row helpers.
   const helperDone = new Set<string>();
   for (const sub of subs) {
     const wf = ctx.workflows.find((w) => w.name === sub.workflow);
     if (wf?.correlationField && !helperDone.has(wf.name)) {
-      out.push(...emitWorkflowStateHelpers(wf));
+      out.push(
+        ...(wf.eventSourced ? emitWorkflowFoldHelpers(wf, ctx) : emitWorkflowStateHelpers(wf)),
+      );
       out.push("");
       helperDone.add(wf.name);
     }
@@ -704,18 +745,30 @@ function emitSubscriptionHandlers(ctx: EnrichedBoundedContextIR): string[] {
     }
     const fn = handlerName(sub.workflow, sub.trigger, sub.event);
     out.push(
-      ...emitHandlerFn(
-        fn,
-        wf,
-        sub.trigger,
-        sub.event,
-        sub.param,
-        correlation,
-        statements,
-        saves,
-        ctx,
-        durableEventTypes(ctx).size > 0,
-      ),
+      ...(wf.eventSourced
+        ? emitEventSourcedHandlerFn(
+            fn,
+            wf,
+            sub.trigger,
+            sub.event,
+            sub.param,
+            correlation,
+            statements,
+            saves,
+            ctx,
+          )
+        : emitHandlerFn(
+            fn,
+            wf,
+            sub.trigger,
+            sub.event,
+            sub.param,
+            correlation,
+            statements,
+            saves,
+            ctx,
+            durableEventTypes(ctx).size > 0,
+          )),
     );
     out.push("");
     const list = byEvent.get(sub.event) ?? [];
@@ -989,6 +1042,99 @@ function emitHandlerFn(
   }
   if (persisted) out.push(`  await save${upperFirst(wf.name)}(db, state);`);
   if (hasEmit) out.push(`  for (const ev of workflowEvents) await events.dispatch(ev);`);
+  out.push(`}`);
+  return out;
+}
+
+/** One reactor / event-create handler for an **event-sourced** workflow
+ *  (workflow-and-applier.md A2-S5b).  The saga analogue of an event-sourced
+ *  aggregate's command: instead of loading-or-allocating a mutable state row,
+ *  it folds the workflow's `<wf>_events` stream into `state` (the appliers),
+ *  runs the emit-only body (which reads `state` and orchestrates other
+ *  aggregates), then **appends its own emitted events** (those it folds) to the
+ *  stream gap-free and re-publishes every emit for choreography.
+ *
+ *  Mirrors `emitHandlerFn` exactly except the persistence seam: fold-on-load in
+ *  place of `loadX`, append-own-events in place of `saveX`.  A `create` starter
+ *  folds a possibly-empty stream (initial state); an `on` reactor requires a
+ *  non-empty stream (the saga must have started) and otherwise drops + logs
+ *  `event_unrouted`.  Own-state is never written via `:=` (the A1 discipline
+ *  forbids it — state changes only through folded events). */
+function emitEventSourcedHandlerFn(
+  fn: string,
+  wf: WorkflowIR,
+  trigger: "on" | "create",
+  eventName: string,
+  paramName: string,
+  correlation: ExprIR | undefined,
+  statements: WorkflowStmtIR[],
+  saves: { name: string; aggName: string; repoName: string }[],
+  ctx: BoundedContextIR,
+): string[] {
+  const out: string[] = [];
+  const corr = wf.correlationField as string;
+  const helpers = esHelperNames(wf);
+  out.push(`export async function ${fn}(`);
+  out.push(`  db: NodePgDatabase<typeof schema>,`);
+  out.push(`  events: DomainEventDispatcher,`);
+  out.push(`  ${paramName}: Events.${eventName},`);
+  out.push(`): Promise<void> {`);
+  out.push(`  const workflowEvents: Events.DomainEvent[] = [];`);
+  const noParams = new Map<string, string>();
+  // Correlation key: the `by <expr>` routing value, else the event field that
+  // name-matches the correlation field (the omitted-`by` rule).
+  const keyExpr = correlation
+    ? renderExprWithParams(correlation, noParams)
+    : `${paramName}.${corr}`;
+  out.push(`  const __key = ${keyExpr};`);
+  out.push(`  const __stream = await ${helpers.load}(db, __key as string);`);
+  if (trigger === "on") {
+    // A continuation needs a started saga — an empty stream means none exists.
+    out.push(`  if (__stream.length === 0) {`);
+    out.push(
+      `    ${renderHonoStoreLogCall("eventUnrouted", `workflow: "${wf.name}", event_type: "${eventName}", key: __key`)}`,
+    );
+    out.push(`    return;`);
+    out.push(`  }`);
+  }
+  out.push(`  const state = ${helpers.fold}(__key as string, __stream);`);
+  // `state` is read by the body's `this.<field>` refs (thisName: "state"); a
+  // pure-emit body that never reads it would leave it unused — `void` keeps the
+  // generated-code lint clean either way (same pattern as the apply param).
+  out.push(`  void state;`);
+  // Same body-rendering machinery as the state-based reactor: inline op-calls
+  // may flush provenance / stage audit, so wrap a child frame when either is
+  // present; build the orchestrated repos on `db` with the re-entrant
+  // dispatcher so a body `emit` re-routes (choreography chains).
+  const provSaves = saves.filter((s) => {
+    const agg = ctx.aggregates.find((a) => a.name === s.aggName);
+    return !!agg && agg.operations.some((o) => opHasProvSite(o));
+  });
+  const auditsOps = hasAuditedOpCall(ctx, statements);
+  const wrapsFrame = provSaves.length > 0 || auditsOps;
+  const reactorRepos = collectReposFromStmts(statements, saves);
+  const repoVarByAgg = new Map(reactorRepos.map((r) => [r.aggName, lowerFirst(r.repoName)]));
+  const bi = wrapsFrame ? "    " : "  ";
+  if (wrapsFrame) out.push(`  await runInChildContext(async () => {`);
+  for (const r of reactorRepos) {
+    out.push(`${bi}const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
+  }
+  out.push(
+    ...renderWorkflowStmts(
+      statements,
+      honoWorkflowStmtTarget(ctx, noParams, "state", { dbHandle: "db", repoVarByAgg }),
+      bi,
+    ),
+  );
+  for (const save of saves) out.push(`${bi}await ${lowerFirst(save.repoName)}.save(${save.name});`);
+  out.push(...renderProvFlush(provSaves, bi, "db"));
+  if (wrapsFrame) out.push(`  });`);
+  // Append the workflow's OWN events (the ones it folds) to its stream,
+  // gap-free; every emitted event (own + choreography) is then re-published.
+  out.push(
+    `  await ${helpers.append}(db, __key as string, workflowEvents.filter((e) => ${helpers.foldedSet}.has(e.type)));`,
+  );
+  out.push(`  for (const ev of workflowEvents) await events.dispatch(ev);`);
   out.push(`}`);
   return out;
 }

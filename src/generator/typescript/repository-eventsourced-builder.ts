@@ -221,7 +221,7 @@ function eventSourcedFindMethod(
 
 // --- stream (de)serialisers -----------------------------------------------
 
-function eventToDataFn(events: EventIR[], ctx: EnrichedBoundedContextIR): string {
+export function eventToDataFn(events: EventIR[], ctx: EnrichedBoundedContextIR): string {
   const arms = events.flatMap((e) => {
     const entries = e.fields.map(
       (f) => `${f.name}: ${serializeField(f.type, `ev.${f.name}`, ctx)}`,
@@ -239,7 +239,7 @@ function eventToDataFn(events: EventIR[], ctx: EnrichedBoundedContextIR): string
   );
 }
 
-function rowToEventFn(events: EventIR[], ctx: EnrichedBoundedContextIR): string {
+export function rowToEventFn(events: EventIR[], ctx: EnrichedBoundedContextIR): string {
   const arms = events.flatMap((e) => {
     const entries = [
       `type: ${JSON.stringify(e.name)}`,

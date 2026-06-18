@@ -40,26 +40,29 @@ landed across most backends:
 | `on`/event-`create` dispatch | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | instance read endpoints | ✓ | ✓ | (Ash defer) | ✓ | ✓ | ✓ |
 | view-over-workflow | ✓ | ✓ | (Ash defer) | ✓ | ✓ | ✓ |
-| `eventSourced` workflows (`apply`) | gated | gated | gated | gated | gated | gated |
+| `eventSourced` workflows (`apply`) | ✓ | gated | gated | gated | gated | gated |
 
-**`eventSourced` workflows are gated, not silently emitted.** The surface
-(grammar → `WorkflowIR.eventSourced` / `.appliers`) and the emit-only/pure-fold
-discipline (A1) have landed, but no backend emits the event-sourced workflow
-runtime (per-correlation event stream + fold-on-load + apply dispatch). Until
-one does, an `eventSourced` workflow on any backend is a **hard error**
-(`loom.event-sourced-workflow-unsupported`, `validateEventSourcedWorkflowStorage`)
-— before this, it silently misgenerated as a state-based saga with the appliers
-dropped. This mirrors the event-sourced *aggregate* storage gate
-(`validateEventSourcedStorage`): a parsed-but-unemitted feature fails fast.
+**`eventSourced` workflows now ship on Hono (node); gated elsewhere.** The
+surface (grammar → `WorkflowIR.eventSourced` / `.appliers`) + emit-only/pure-fold
+discipline (A1) landed long ago; the **Hono runtime** landed in this slice — an
+`eventSourced` workflow persists as an append-only `<wf>_events` stream (reusing
+the aggregate event store's table shape + `eventToData`/`rowToEvent`), folds it
+through its `apply(...)` blocks on load, and the dispatch handlers append their
+own emitted events to the stream (gap-free) and re-publish for choreography. On
+the other backends an `eventSourced` workflow stays a **hard error**
+(`loom.event-sourced-workflow-unsupported`, `validateEventSourcedWorkflowStorage`,
+gated by `EVENT_SOURCING_WORKFLOW_BACKENDS`) — before the gate it silently
+misgenerated as a state-based saga with the appliers dropped. The supported set
+grows per backend, mirroring the event-sourced *aggregate* `EVENT_SOURCING_BACKENDS`.
 
 Corrections from earlier matrix drift (verified against code): **elixir-vanilla
 dispatch already ships** (`index.ts` calls the foundation-agnostic
 `emitDispatch(..., "vanilla")`), so it was never a gap. The Java saga track has
 landed its saga-state row (#1288), in-process dispatcher (#1291), instance read
 endpoints (#1293), and view-over-workflow (#1296) — so **java is now at full
-workflow parity with node / dotnet / elixir-vanilla / python**. The **only
-remaining workflow gap across all backends is the universal `eventSourced`-workflow
-track**.
+state-based workflow parity with node / dotnet / elixir-vanilla / python**. The
+remaining workflow gap is the `eventSourced`-workflow track, now **landed on Hono**
+and growing per backend.
 
 ## Done in this slice — python instance read endpoints
 
@@ -141,14 +144,33 @@ entity + dispatcher + instance reads + state table) and **dropped its appliers**
 fail fast, exactly like the ES-aggregate storage gate. Tests:
 `test/ir/workflow-event-sourced-storage.test.ts`.
 
+## Done — eventSourced workflow runtime on Hono (node)
+
+The first backend off the gate. `src/platform/hono/v4/workflow-eventsourced-builder.ts`
+(+ the `emitEventSourcedHandlerFn` seam in `workflow-builder.ts`) emits, for an
+`eventSourced` workflow: a `<Wf>State` type + `fold<Wf>` / `apply<Wf>` (the
+appliers fold against a plain `state` record via `renderTsExpr`'s `thisName`
+seam) + `load<Wf>Events` / `append<Wf>Events` over the `<wf>_events` stream,
+reusing the aggregate event store's `eventToData` / `rowToEvent`. The dispatch
+handlers fold-on-load (create: from-zero; on: drop+`event_unrouted` if the
+stream is empty), run the emit-only body, append the workflow's own (folded)
+events gap-free, and re-publish every emit for choreography. The migration +
+Drizzle schema emit `<wf>_events` (not a state row); `instanceWireShape` is
+suppressed for ES workflows (no read-model row). `EVENT_SOURCING_WORKFLOW_BACKENDS`
+= `{ node }`. Tests: `test/generator/typescript/hono-workflow-event-sourced.test.ts`
++ a `generate system → tsc` case on the `build-generated-ts` gate
+(`test/e2e/fixtures/ts-build/eventsourced-workflow.ddd`).
+
 ## Next slices (recommended order)
 
-1. **`eventSourced` workflows (`apply(...)` folds) — codegen** — the only remaining
-   workflow *feature* gap (currently gated, see above). A multi-backend epic
-   comparable to the aggregate event-store path: a per-correlation `<wf>_events`
-   stream (reusing the `MigrationsIR` event-table shape), an apply-fold rehydrator,
-   emit→append→fold command/reactor handlers, and instance reads that fold-on-load
-   — across the five ES-capable backends (node / dotnet / java / python /
-   elixir-vanilla). Design-first (`workflow-and-applier.md` A2-S5b); lift the gate
-   per-backend as each lands (mirroring `EVENT_SOURCING_BACKENDS`). Pairs with the
-   landed aggregate event-store path.
+1. **`eventSourced` workflows — fan out to dotnet / python / java / elixir-vanilla.**
+   The Hono runtime above is the reference; each backend adapts its aggregate
+   event-store machinery (fold/append repository, `<wf>_events` table — already
+   derived by `MigrationsIR` for every backend) + rebinds its dispatcher's
+   persistence seam (fold-load / append-own-events), then adds its platform to
+   `EVENT_SOURCING_WORKFLOW_BACKENDS` to lift the gate. Design-first
+   (`workflow-and-applier.md` A2-S5b).
+2. **eventSourced-workflow instance reads (fold-on-load)** — optional read surface:
+   `GET /workflows/<wf>/instances[/{id}]` folding the stream per correlation
+   (today ES workflows have no `instanceWireShape`, so no read API). Lower priority
+   — the saga is fully functional via dispatch + choreography without it.

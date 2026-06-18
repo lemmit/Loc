@@ -196,7 +196,11 @@ export function renderSchema(
   // without a correlation field (a plain command workflow) gets no table —
   // byte-identical.
   for (const wf of ctx.workflows) {
-    if (wf.correlationField) tables.push(emitWorkflowStateTable(wf, ctx));
+    // An `eventSourced` workflow persists as an append-only `<wf>_events`
+    // stream (folded on load), the saga analogue of a `persistedAs(eventLog)`
+    // aggregate — not a mutable state row (workflow-and-applier.md A2-S5b).
+    if (wf.eventSourced) tables.push(emitEventLogTable(wf.name));
+    else if (wf.correlationField) tables.push(emitWorkflowStateTable(wf, ctx));
   }
   const schemaDecls = schemaNames.map(
     (name) => `export const ${schemaConstName(name)} = pgSchema("${name}");`,
