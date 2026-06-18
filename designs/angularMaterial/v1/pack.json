@@ -7,6 +7,7 @@
     "primitive-heading": "primitive-heading.hbs",
     "primitive-text": "primitive-text.hbs",
     "primitive-stack": "primitive-stack.hbs",
+    "primitive-button": "primitive-button.hbs",
     "primitive-card": "primitive-card.hbs",
     "primitive-divider": "primitive-divider.hbs",
     "package-json": "package-json.hbs",
@@ -20,6 +21,7 @@
     "format-helpers": "format-helpers.hbs"
   },
   "imports": {
+    "primitive-button": [{ "from": "@angular/material/button", "named": ["MatButtonModule"] }],
     "primitive-card": [{ "from": "@angular/material/card", "named": ["MatCardModule"] }],
     "primitive-divider": [{ "from": "@angular/material/divider", "named": ["MatDividerModule"] }]
   }

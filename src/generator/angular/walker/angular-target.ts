@@ -279,4 +279,17 @@ export const angularTarget: WalkerTarget = {
   renderChildrenSlot(): string {
     return "<ng-content></ng-content>";
   },
+
+  /** Event handler in `(click)`-style binding position.  Angular binds
+   *  a STATEMENT, not a function value, so the lambda's arrow wrapper is
+   *  dropped: the block form inlines its statements (`;`-joined, each
+   *  trailing `;` trimmed — the binding is one statement context); the
+   *  expression form passes through verbatim.  An empty handler is the
+   *  empty string. */
+  renderEventHandler(statements: readonly string[] | undefined, expr: string | undefined): string {
+    if (statements && statements.length > 0) {
+      return statements.map((s) => s.replace(/;\s*$/, "")).join("; ");
+    }
+    return expr ?? "";
+  },
 };

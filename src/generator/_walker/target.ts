@@ -397,4 +397,16 @@ export interface WalkerTarget {
    *  Vue's render path); Svelte 5 overrides with
    *  `{@render children?.()}` (snippets aren't interpolatable). */
   renderChildrenSlot?(): string;
+
+  /** OPTIONAL — assemble a lambda event-handler body (a `Button`'s
+   *  `onClick:` etc.) from its already-rendered pieces.  The JSX-family
+   *  frameworks (TSX / Vue / Svelte) bind a function VALUE in event
+   *  position — `onClick={() => { … }}` / `@click="() => { … }"` — so
+   *  the omitted default returns the arrow form.  Angular `(click)`
+   *  binds a STATEMENT, not a function (an arrow there is created and
+   *  immediately discarded — a silent no-op), so its target inlines the
+   *  statements (`count.set(count() + 1)`).  `statements` is the
+   *  block-body form (each entry already `;`-terminated); `expr` the
+   *  expression-body form; both undefined means an empty handler. */
+  renderEventHandler?(statements: readonly string[] | undefined, expr: string | undefined): string;
 }

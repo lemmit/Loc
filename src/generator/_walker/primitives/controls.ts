@@ -250,13 +250,17 @@ function anyNamedArgExpr(
  *  warnings).  Block-body lambdas emit a brace-wrapped sequence of
  *  statements; expression-body lambdas emit a single expression. */
 function emitLambdaBody(lam: ExprIR & { kind: "lambda" }, ctx: WalkContext): string {
-  if (lam.block && lam.block.length > 0) {
-    const stmts = lam.block.map((s) => emitStmt(s, ctx)).join(" ");
-    return `() => { ${stmts} }`;
+  const statements =
+    lam.block && lam.block.length > 0 ? lam.block.map((s) => emitStmt(s, ctx)) : undefined;
+  const expr = !statements && lam.body ? emitExpr(lam.body, ctx) : undefined;
+  // Frameworks whose event bindings take a STATEMENT, not a function
+  // value (Angular `(click)`), override the wrapping; the JSX family
+  // keeps the arrow default.
+  if (ctx.target.renderEventHandler) {
+    return ctx.target.renderEventHandler(statements, expr);
   }
-  if (lam.body) {
-    return `() => ${emitExpr(lam.body, ctx)}`;
-  }
+  if (statements) return `() => { ${statements.join(" ")} }`;
+  if (expr !== undefined) return `() => ${expr}`;
   return `() => {}`;
 }
 
