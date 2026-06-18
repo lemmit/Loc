@@ -241,10 +241,12 @@ function renderIngressTemplate(w: WorkloadModel): string {
   lines.push("        paths:");
   // Same-origin split: the built SPA fetches `/api` relative, so when it
   // targets a distinct backend, front `/api` → that backend and `/` → the SPA
-  // on one host (one TLS cert).  `/api` is listed FIRST — the longer prefix
-  // must win, and no path rewrite is needed (backends already mount their
-  // routes under `/api`).  Fullstack hosts (apiBackend undefined) keep the
-  // single `/` catch-all, which already serves their own `/api`.
+  // on one host (same-origin — no CORS, no separate API host; TLS termination
+  // for that host stays the operator's, the chart emits routing only).  `/api`
+  // is listed FIRST — the longer prefix must win, and no path rewrite is
+  // needed (backends already mount their routes under `/api`).  Fullstack
+  // hosts (apiBackend undefined) keep the single `/` catch-all, which already
+  // serves their own `/api`.
   if (w.apiBackend) {
     lines.push(`          - path: ${API_BASE_PATH}`);
     lines.push("            pathType: Prefix");

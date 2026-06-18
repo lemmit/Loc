@@ -368,7 +368,7 @@ web_app/
 │   ├── App.tsx                      # AppShell + <Routes>: home, /<plural>, /<plural>/new, /<plural>/:id
 │   ├── api/
 │   │   ├── client.ts                # fetch wrapper, ApiError
-│   │   ├── config.ts                # API_BASE_URL = http://localhost:<target.port> (overridable via VITE_API_BASE_URL)
+│   │   ├── config.ts                # API_BASE_URL = /api (relative, same-origin); window.__LOOM_API_BASE__ or VITE_API_BASE_URL override
 │   │   ├── order.ts                 # Zod schemas + RQ hooks
 │   │   └── product.ts
 │   └── pages/
@@ -899,7 +899,7 @@ writes everything to a flat tree:
 | --- | --- | --- | --- | --- |
 | `dotnet` | 8080 | `ConnectionStrings__Default=Host=db;Port=5432;Database=<slug>;…` | yes | `/ready` |
 | `hono` | 3000 | `DATABASE_URL=postgres://…/<slug>` | yes | `/ready` |
-| `react` / `static` | 3000 | `VITE_API_BASE_URL=http://localhost:<target.port>` | no | `/` |
+| `react` / `static` | 3000 | `VITE_API_BASE_URL=http://localhost:<target.port>/api` (dev/compose; the built bundle defaults to a relative `/api`) | no | `/` |
 | `phoenixLiveView` | 4000 | `DATABASE_URL=ecto://…/<slug>`, `SECRET_KEY_BASE`, `PHX_HOST`, `PHX_SERVER=true`, `PORT=4000` | yes | `/health` |
 
 The platform contract decides UI mount admissibility and DB ownership
