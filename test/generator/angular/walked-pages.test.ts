@@ -254,3 +254,87 @@ describe("angular generator — display + layout primitives", () => {
     expect(page).toContain("imports: [],");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Inline / media / layout primitives — Bold/Italic/InlineCode/KeyValueRow/
+// Empty/Skeleton/Avatar/Image/Loader/Icon/Grid/Tabs.  Tabs (mat-tab-group)
+// manages its own selection so it needs no page state; Icon inlines the
+// trusted builtin SVG directly (no sanitizer); the multi-Skeleton unrolls via
+// the new `range` Handlebars helper.  (ng build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const INLINE_SOURCE = `
+  system Smoke {
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish { total: int }
+      }
+    }
+    ui Web {
+      page Home {
+        route: "/"
+        title: "Home"
+        body: Stack {
+          Bold { "bold" },
+          Italic { "italic" },
+          InlineCode { ".ddd" },
+          KeyValueRow { "Status", Text { "Active" } },
+          Grid {
+            Card { "One", Text { "first" } }
+          },
+          Tabs {
+            Tab { "Overview", Text { "overview body" } }
+          },
+          Avatar { src: "/a.png", alt: "user" },
+          Image { src: "/logo.png", alt: "logo" },
+          Loader { size: "lg" },
+          Skeleton { count: 3, height: 20 },
+          Icon { name: "github", size: "md" },
+          Empty { "Nothing here yet" }
+        }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
+  }
+`;
+
+async function inlinePage(): Promise<string> {
+  const all = await generateSystemFiles(INLINE_SOURCE);
+  return all.get("web/src/app/pages/home.component.ts")!;
+}
+
+describe("angular generator — inline / media / layout primitives", () => {
+  it("walks the inline + media primitives to their markup", async () => {
+    const page = await inlinePage();
+    expect(page).toContain("<strong>bold</strong>");
+    expect(page).toContain("<em>italic</em>");
+    expect(page).toContain('<code class="loom-inline-code">.ddd</code>');
+    expect(page).toContain('<div class="loom-key-value-row">');
+    expect(page).toContain('<img class="loom-avatar" src="/a.png" alt="user" />');
+    expect(page).toContain('<img class="loom-image" src="/logo.png" alt="logo" />');
+    expect(page).toContain('<div class="loom-empty">Nothing here yet</div>');
+  });
+
+  it("inlines the builtin Icon SVG and unrolls the multi-Skeleton via range", async () => {
+    const page = await inlinePage();
+    expect(page).toContain('<span class="loom-icon loom-icon-md"><svg');
+    // count: 3 → three skeleton blocks unrolled at generation time.
+    expect(page.match(/loom-skeleton" style="height: 20px"/g)?.length).toBe(3);
+  });
+
+  it("registers MatTabsModule + MatProgressSpinnerModule (Grid/Avatar etc. stay import-free)", async () => {
+    const page = await inlinePage();
+    expect(page).toContain("<mat-tab-group>");
+    expect(page).toContain('<mat-tab label="Overview">');
+    expect(page).toContain('<mat-progress-spinner mode="indeterminate"');
+    expect(page).toContain('import { MatTabsModule } from "@angular/material/tabs";');
+    expect(page).toContain(
+      'import { MatProgressSpinnerModule } from "@angular/material/progress-spinner";',
+    );
+    // Grid is CSS-only — no module pulled in for it.
+    expect(page).toContain('<div class="loom-grid">');
+  });
+});
