@@ -40,6 +40,7 @@ import {
   emitVanillaViewsController,
   type VanillaViewRef,
 } from "./view-emit.js";
+import { emitVanillaEsWorkflowFiles } from "./workflow-eventsourced-emit.js";
 import { emitVanillaWorkflowExecution } from "./workflow-execution-emit.js";
 import { emitVanillaWorkflowInstances } from "./workflow-instances-emit.js";
 
@@ -117,6 +118,11 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // `WorkflowInstancesController` (the deferred-Phoenix gap closer) has
     // the table to read from even on a command-only saga.
     emitWorkflowStateSchemas(appName, ctx, appModule, out);
+    // Event-sourced workflows (workflow-and-applier.md A2-S5b): the per-workflow
+    // fold struct + `<wf>_events` Ecto schema + fold + stream IO modules (the
+    // saga analogue of the ES aggregate files above).  The dispatcher branches
+    // their handlers to fold-on-load + append-own-events.
+    emitVanillaEsWorkflowFiles(appName, appModule, ctx, out);
     emitDispatch(appName, ctx, appModule, out, sys, "vanilla");
   }
   apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));

@@ -35,10 +35,19 @@ async function diagnose(src: string) {
   return validateLoomModel(enrichLoomModel(lowerModel(model)));
 }
 
+// Vanilla variant — `platform: elixir { foundation: vanilla }` (the only elixir
+// foundation that hosts pure ES, D-VANILLA-ES-HOME).
+const mkVanilla = (eventSourced: boolean): string =>
+  mk("elixir", eventSourced).replace(
+    "platform: elixir contexts:",
+    "platform: elixir { foundation: vanilla } contexts:",
+  );
+
 describe("event-sourced workflow storage gate", () => {
   // The Hono (node) + .NET (dotnet) + Python (FastAPI) + Java (Spring) backends
-  // now emit the event-sourced workflow runtime, so the gate does NOT fire
-  // there; the rest stay gated.
+  // and elixir-vanilla now emit the event-sourced workflow runtime, so the gate
+  // does NOT fire there; the rest stay gated.  Bare `platform: elixir` defaults
+  // to the Ash foundation, which has no pure-ES fit → still gated.
   for (const plat of ["elixir"]) {
     it(`errors when an eventSourced workflow is hosted by ${plat}`, async () => {
       const diags = await diagnose(mk(plat, true));
@@ -56,6 +65,11 @@ describe("event-sourced workflow storage gate", () => {
       expect(diags.some((d) => d.code === "loom.event-sourced-workflow-unsupported")).toBe(false);
     });
   }
+
+  it("is supported on elixir + foundation: vanilla — no gate error", async () => {
+    const diags = await diagnose(mkVanilla(true));
+    expect(diags.some((d) => d.code === "loom.event-sourced-workflow-unsupported")).toBe(false);
+  });
 
   it("does not fire for a state-based saga (non-eventSourced workflow)", async () => {
     const diags = await diagnose(mk("java", false));

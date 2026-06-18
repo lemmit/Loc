@@ -13,6 +13,7 @@ import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { buildPhoenixResourceModules } from "./adapters/resource-clients.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
+import { renderEsWorkflowHandler } from "./vanilla/workflow-eventsourced-emit.js";
 
 // ---------------------------------------------------------------------------
 // In-process event dispatch for Phoenix LiveView / Ash (channels.md).
@@ -116,7 +117,7 @@ export function emitWorkflowStateSchemas(
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   for (const wf of ctx.workflows) {
-    if (!wf.correlationField) continue;
+    if (!wf.correlationField || wf.eventSourced) continue;
     out.set(
       `lib/${appName}/${ctxSnake}/workflows/${snake(wf.name)}_state.ex`,
       renderStateSchema(contextModule, wf),
@@ -148,9 +149,13 @@ export function emitDispatch(
   // --- Saga-state Ecto schemas — one per correlation-bearing workflow that
   //     a subscription references (matches the saga table the migrations
   //     builder derives for the same workflow). ----------------------------
+  // Event-sourced workflows fold a `<wf>_events` stream — they have no mutable
+  // `<wf>_state` row (their `<wf>_state.ex` carries the plain fold struct,
+  // emitted by `emitVanillaEsWorkflowFiles`), so skip the saga schema here.
   const correlationWfs = new Map<string, WorkflowIR>();
   for (const sub of subs) {
-    if (sub.workflow.correlationField) correlationWfs.set(sub.workflow.name, sub.workflow);
+    if (sub.workflow.correlationField && !sub.workflow.eventSourced)
+      correlationWfs.set(sub.workflow.name, sub.workflow);
   }
   for (const wf of correlationWfs.values()) {
     out.set(
@@ -162,9 +167,16 @@ export function emitDispatch(
   // --- Handler modules — one per subscription. --------------------------
   for (const sub of subs) {
     const verb = sub.trigger === "on" ? "on" : "start";
+    // An event-sourced workflow's handler folds the stream on load and appends
+    // its own emitted events (the saga analogue of the ES aggregate); vanilla
+    // only (the gate keeps ES workflows off the Ash foundation).
+    const content =
+      foundation === "vanilla" && sub.workflow.eventSourced
+        ? renderEsWorkflowHandler(contextModule, sub)
+        : renderHandler(appModule, contextModule, ctx, sub, sys, foundation);
     out.set(
       `lib/${appName}/${ctxSnake}/workflows/${snake(sub.workflow.name)}/${verb}_${snake(sub.event)}.ex`,
-      renderHandler(appModule, contextModule, ctx, sub, sys, foundation),
+      content,
     );
   }
 

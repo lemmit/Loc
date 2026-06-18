@@ -1287,10 +1287,19 @@ export function validateEventSourcedWorkflowStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
+  elixirFoundations: Set<string> = new Set(),
 ): void {
-  const unsupported = [...backendPlatforms].filter((p) => !EVENT_SOURCING_WORKFLOW_BACKENDS.has(p));
+  // elixir hosts event-sourced workflows only on the vanilla foundation
+  // (D-VANILLA-ES-HOME) — the Ash foundation has no pure-ES fit, exactly like
+  // event-sourced aggregates (`validateEventSourcedStorage`).
+  const elixirEsCapable =
+    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
+  const isEsCapable = (p: string): boolean =>
+    EVENT_SOURCING_WORKFLOW_BACKENDS.has(p) || (p === "elixir" && elixirEsCapable);
+  const unsupported = [...backendPlatforms].filter((p) => !isEsCapable(p));
   if (unsupported.length === 0) return;
   const hosts = unsupported.sort().join(", ");
+  const includesPhoenix = unsupported.includes("elixir");
   for (const wf of ctx.workflows) {
     if (!wf.eventSourced) continue;
     diags.push({
@@ -1299,9 +1308,13 @@ export function validateEventSourcedWorkflowStorage(
       message:
         `workflow '${wf.name}' is eventSourced, but event-sourced workflow storage ` +
         `(a per-correlation event stream folded through its apply(...) blocks) is ` +
-        `implemented on the Hono (node) and .NET (dotnet) backends only — this context is ` +
-        `also hosted by ${hosts}. Host the context on a node / dotnet deployable, drop the ` +
-        `eventSourced modifier ` +
+        `implemented on the Hono (node), .NET (dotnet), Python (FastAPI), Java (Spring) ` +
+        `and elixir-vanilla backends — this context is also hosted by ${hosts}. ` +
+        (includesPhoenix
+          ? `On Phoenix this is a foundation constraint: the Ash foundation has no pure-ES ` +
+            `fit, so switch the deployable to foundation: vanilla (D-VANILLA-ES-HOME). Otherwise host `
+          : `Host `) +
+        `the context on a supported deployable, drop the eventSourced modifier ` +
         `to use a state-based saga (a persisted correlation-state row, supported on ` +
         `node / dotnet / java / python / elixir-vanilla), or move the event-fold logic ` +
         `into an event-sourced aggregate (persistedAs(eventLog)). ` +
