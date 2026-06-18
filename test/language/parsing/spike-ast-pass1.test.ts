@@ -77,12 +77,12 @@ describe("spike — AST-to-AST scaffold expansion", () => {
       }
     `);
     const ui = uiOf(model, "WebApp");
-    // Three synthesised pages: OrderList / OrderNew / OrderDetail (nested in
-    // the per-aggregate `area Orders`).
+    // Three synthesised pages named by role (List / New / Detail), nested in
+    // the per-aggregate `area Orders`.
     const pageNames = allPageNames(ui);
-    expect(pageNames).toContain("OrderList");
-    expect(pageNames).toContain("OrderNew");
-    expect(pageNames).toContain("OrderDetail");
+    expect(pageNames).toContain("List");
+    expect(pageNames).toContain("New");
+    expect(pageNames).toContain("Detail");
   });
 
   it("synthesises pages for `scaffold modules: <Name>` recursively", async () => {
@@ -106,16 +106,10 @@ describe("spike — AST-to-AST scaffold expansion", () => {
     const pageNames = allPageNames(ui).sort();
     // The full architectural fix synthesises `Home` for any ui
     // that scaffolds at least one aggregate / workflow / view —
-    // matches the legacy generator's behaviour.
-    expect(pageNames).toEqual([
-      "CustomerDetail",
-      "CustomerList",
-      "CustomerNew",
-      "Home",
-      "OrderDetail",
-      "OrderList",
-      "OrderNew",
-    ]);
+    // matches the legacy generator's behaviour.  Aggregate pages are
+    // role-named inside their per-aggregate `area`, so the flattened list
+    // carries one Home plus List/New/Detail per aggregate (×2 here).
+    expect(pageNames).toEqual(["Detail", "Detail", "Home", "List", "List", "New", "New"]);
   });
 
   it("synthesises pages for workflows + views", async () => {
@@ -161,8 +155,10 @@ describe("spike — AST-to-AST scaffold expansion", () => {
       }
     `);
     const ui = uiOf(model, "WebApp");
-    // Exactly ONE page named OrderList — the explicit one (with the
-    // custom route).  Synthesised OrderList is suppressed.
+    // Exactly ONE page named OrderList — the explicit one (with the custom
+    // route).  The scaffold now names its pages by role inside `area Orders`
+    // (`List`/`New`/`Detail`), so a top-level explicit `OrderList` coexists
+    // with them rather than colliding — it is the only `OrderList`.
     const orderLists = (ui.members ?? []).filter(
       (m): m is Page => m.$type === "Page" && m.name === "OrderList",
     );

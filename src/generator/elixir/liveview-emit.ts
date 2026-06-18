@@ -119,10 +119,28 @@ export function emitLiveViewPages(args: {
     });
   }
 
+  // Area-qualified module + file stems for a page.  `page.area` is a snake
+  // containment path (`["orders"]`); the module joins PascalCase segments
+  // (`OrdersDetail`), the file joins snake segments (`orders_detail`).
+  const pascalSeg = (s: string): string => s.split("_").map(upperFirst).join("");
+  const pageIdent = (page: PageIR): { module: string; file: string } => {
+    const area = page.area ?? [];
+    return {
+      module: [...area.map(pascalSeg), upperFirst(page.name)].join(""),
+      file: [...area, snake(page.name)].join("_"),
+    };
+  };
+
   for (const page of ui.pages) {
     if (!page.route) continue; // can't emit a router entry without one
-    const liveModule = `${appModule}Web.${upperFirst(page.name)}Live`;
-    const filePath = `lib/${appName}_web/live/${snake(page.name)}_live.ex`;
+    // A page declared inside an `area { … }` block is qualified by its
+    // containment path so role-named pages (`List`/`Detail`, repeated across
+    // per-aggregate areas) yield distinct module + file names
+    // (`OrdersDetailLive` → `orders_detail_live.ex`).  Area-less pages keep the
+    // flat `<page>_live.ex` shape.
+    const ident = pageIdent(page);
+    const liveModule = `${appModule}Web.${ident.module}Live`;
+    const filePath = `lib/${appName}_web/live/${ident.file}_live.ex`;
     const source = renderLiveView({
       page,
       liveModule,
@@ -148,7 +166,7 @@ export function emitLiveViewPages(args: {
       aggregatesByName,
       contextByAggName,
     });
-    out.set(`e2e/pages/${snake(page.name)}.ts`, pageObjectSource);
+    out.set(`e2e/pages/${pageIdent(page).file}.ts`, pageObjectSource);
   }
 
   // User-defined components → one HEEx function component per

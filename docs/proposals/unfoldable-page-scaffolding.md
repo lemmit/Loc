@@ -163,7 +163,7 @@ Area: 'area' name=ID '{' members+=(Page | Area)* '}';   // + later: route?/layou
 
 ## Phased implementation (with gates)
 
-**Status:** slices 1–2 SHIPPED — the `_body-builders` foundation + `intLit`/`lambda`/`area` factories + the `area { }` grammar/lowering (#1301), and the scaffold emitting per-aggregate `area` blocks (#1306). Slice 3 below is the remaining work.
+**Status:** slices 1–2 SHIPPED — the `_body-builders` foundation + `intLit`/`lambda`/`area` factories + the `area { }` grammar/lowering (#1301), and the scaffold emitting per-aggregate `area` blocks (#1306). **Slice 3a SHIPPED** — the scaffold now names its pages by role (`List`/`New`/`Detail`) inside their area, page-name uniqueness is per-area, the macro splice merges same-named areas with scope-local override, and `area` is authoritative for `emitPath` (`applyPageOriginSideEffects` no longer overrides when a page has an `area`). React page paths stay byte-identical (the page component's internal function name became the role name; route imports remain origin-bound); Phoenix LiveView modules/files moved to area-qualified names (`OrdersDetailLive` → `orders_detail_live.ex`); the e2e smoke titles are area-qualified for uniqueness. **Deferred follow-up:** qualified `Area.Page` menu-link references (grammar + scope provider) — not needed today since no shipping example links to a scaffolded page by name (area-nested role names already resolve when unique). Slices 3b/3c below remain.
 
 1. **Foundation (this slice).** Add the missing AST expression factories
    (`intLit`, …) and a shared `src/macros/stdlib/scaffold/_body-builders.ts`

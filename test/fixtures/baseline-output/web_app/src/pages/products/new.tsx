@@ -7,7 +7,7 @@ import { Anchor, Breadcrumbs, Button, Card, Fieldset, Group, NumberInput, Stack,
 import { notifications } from "@mantine/notifications";
 import { Controller, useForm } from "react-hook-form";
 
-export default function ProductNew() {
+export default function New() {
   const navigate = useNavigate();
   const create = useCreateProduct();
   const { register, handleSubmit, setError, control, formState: { errors } } = useForm<CreateProductRequest>({

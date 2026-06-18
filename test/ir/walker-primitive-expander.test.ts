@@ -191,14 +191,14 @@ const SCAFFOLD_VIEW_DDD = `
 describe("walker-primitive-expander — aggregate scaffolds", () => {
   it("scaffoldList page body is rewritten to a Stack tree (no `scaffoldList` call remains)", async () => {
     const loom = await buildLoomModel(SCAFFOLD_AGGREGATE_DDD);
-    const list = findPage(uiPages(loom, "App"), "OrderList");
+    const list = findPage(uiPages(loom, "App"), "List");
     expect(topCallee(list.body)).toBe("Stack");
     expect(containsScaffoldCall(list.body)).toBe(false);
   });
 
   it("scaffoldList expansion places Breadcrumbs at top and Heading inside a Toolbar", async () => {
     const loom = await buildLoomModel(SCAFFOLD_AGGREGATE_DDD);
-    const list = findPage(uiPages(loom, "App"), "OrderList");
+    const list = findPage(uiPages(loom, "App"), "List");
     const body = list.body as Extract<ExprIR, { kind: "call" }>;
     expect(body.name).toBe("Stack");
     const calleeNames = body.args.map(topCallee);
@@ -212,7 +212,7 @@ describe("walker-primitive-expander — aggregate scaffolds", () => {
 
   it("scaffoldList expansion lands on a QueryView whose `data:` arg is a lambda", async () => {
     const loom = await buildLoomModel(SCAFFOLD_AGGREGATE_DDD);
-    const list = findPage(uiPages(loom, "App"), "OrderList");
+    const list = findPage(uiPages(loom, "App"), "List");
     const stack = list.body as Extract<ExprIR, { kind: "call" }>;
     const queryView = stack.args.find(
       (a): a is Extract<ExprIR, { kind: "call" }> => topCallee(a) === "QueryView",
@@ -226,7 +226,7 @@ describe("walker-primitive-expander — aggregate scaffolds", () => {
 
   it("scaffoldDetails+Operations page (Detail) body has both expanded — Stack with QueryView + Group", async () => {
     const loom = await buildLoomModel(SCAFFOLD_AGGREGATE_DDD);
-    const detail = findPage(uiPages(loom, "App"), "OrderDetail");
+    const detail = findPage(uiPages(loom, "App"), "Detail");
     expect(topCallee(detail.body)).toBe("Stack");
     expect(containsScaffoldCall(detail.body)).toBe(false);
     const stack = detail.body as Extract<ExprIR, { kind: "call" }>;
@@ -239,9 +239,9 @@ describe("walker-primitive-expander — aggregate scaffolds", () => {
     expect(calleeNames).toContain("QueryView");
   });
 
-  it("scaffoldNewForm page (OrderNew) body expands to a Stack with a CreateForm", async () => {
+  it("scaffoldNewForm page (New) body expands to a Stack with a CreateForm", async () => {
     const loom = await buildLoomModel(SCAFFOLD_AGGREGATE_DDD);
-    const newPage = findPage(uiPages(loom, "App"), "OrderNew");
+    const newPage = findPage(uiPages(loom, "App"), "New");
     expect(topCallee(newPage.body)).toBe("Stack");
     expect(containsScaffoldCall(newPage.body)).toBe(false);
     const stack = newPage.body as Extract<ExprIR, { kind: "call" }>;

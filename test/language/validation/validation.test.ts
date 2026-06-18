@@ -529,10 +529,14 @@ describe("validation", () => {
         (members ?? []).flatMap((m: any) =>
           isPage(m) ? [m] : m?.$type === "Area" ? collectPages(m.members) : [],
         );
-      const orderListPages = collectPages(ui?.members ?? []).filter(
-        (p: any) => p.name === "OrderList",
+      // One `area Orders` (the duplicate merges into the first), holding one
+      // role-named `List` page — not two.
+      const ordersAreas = (ui?.members ?? []).filter(
+        (m: any) => m?.$type === "Area" && m.name === "Orders",
       );
-      expect(orderListPages.length).toBe(1);
+      expect(ordersAreas.length).toBe(1);
+      const listPages = collectPages(ui?.members ?? []).filter((p: any) => p.name === "List");
+      expect(listPages.length).toBe(1);
     });
 
     it("accepts well-formed scaffold directives (modules / aggregates / views)", async () => {

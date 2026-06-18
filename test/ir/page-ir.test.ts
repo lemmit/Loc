@@ -87,10 +87,16 @@ describe("page metamodel — IR shape", () => {
       }
     `);
     const ui = uiByName(loom, "WebApp");
+    // Scaffold names its pages by role inside a per-aggregate `area`
+    // (`area Orders { page List; page New; page Detail }`); the flat
+    // `ui.pages` list therefore carries the role names, scoped by `page.area`.
     const pageNames = ui.pages.map((p) => p.name).sort();
-    expect(pageNames).toContain("OrderList");
-    expect(pageNames).toContain("OrderNew");
-    expect(pageNames).toContain("OrderDetail");
+    expect(pageNames).toContain("List");
+    expect(pageNames).toContain("New");
+    expect(pageNames).toContain("Detail");
+    // Each scaffolded aggregate page is grouped under its plural area.
+    const orderArea = ui.pages.filter((p) => (p.area ?? []).join("/") === "orders");
+    expect(orderArea.map((p) => p.name).sort()).toEqual(["Detail", "List", "New"]);
   });
 
   it("lowers a `page` with route/title/requires/state/body/menu meta", async () => {

@@ -7,7 +7,7 @@ import { Anchor, Breadcrumbs, Button, Card, Group, Select, Stack, Text, TextInpu
 import { notifications } from "@mantine/notifications";
 import { Controller, useForm } from "react-hook-form";
 
-export default function OrderNew() {
+export default function New() {
   const navigate = useNavigate();
   const create = useCreateOrder();
   const { register, handleSubmit, setError, control, formState: { errors } } = useForm<CreateOrderRequest>({

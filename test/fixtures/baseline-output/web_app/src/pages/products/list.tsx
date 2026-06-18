@@ -4,7 +4,7 @@ import { IdValue } from "../../lib/format";
 import { Alert, Anchor, Breadcrumbs, Button, Center, Group, Paper, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
 import { useAllProducts } from "../../api/product";
 
-export default function ProductList() {
+export default function List() {
   const navigate = useNavigate();
   const productAll = useAllProducts();
   return (

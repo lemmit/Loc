@@ -31,8 +31,12 @@ export function smokeSpec(ui: UiIR): string {
     const route = page.route;
     if (!route || route.includes(":")) continue;
     const routeRe = `${route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`;
+    // Title qualifies the page by its `area` containment path so role-named
+    // pages (`List`/`Detail`, repeated across per-aggregate areas) yield
+    // distinct test titles (`Orders List loads`, `Products List loads`).
+    const title = [...(page.area ?? []).map(titleCase), page.name].join(" ");
     cases.push(
-      `test(${JSON.stringify(`${page.name} loads`)}, async ({ page }) => {\n` +
+      `test(${JSON.stringify(`${title} loads`)}, async ({ page }) => {\n` +
         `  await page.goto(${JSON.stringify(route)});\n` +
         `  await expect(page).toHaveURL(new RegExp(${JSON.stringify(routeRe)}));\n` +
         `});`,
@@ -54,4 +58,9 @@ import { test, expect } from "./fixtures";
 
 ${cases.join("\n\n")}
 `;
+}
+
+// `orders` → `Orders` for a readable, unique smoke-test title segment.
+function titleCase(segment: string): string {
+  return segment.length === 0 ? segment : segment[0]!.toUpperCase() + segment.slice(1);
 }

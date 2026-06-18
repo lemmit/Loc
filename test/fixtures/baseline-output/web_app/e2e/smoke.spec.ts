@@ -1,22 +1,22 @@
 // Auto-generated smoke spec.
 import { test, expect } from "./fixtures";
 
-test("ProductList loads", async ({ page }) => {
+test("Products List loads", async ({ page }) => {
   await page.goto("/products");
   await expect(page).toHaveURL(new RegExp("/products$"));
 });
 
-test("ProductNew loads", async ({ page }) => {
+test("Products New loads", async ({ page }) => {
   await page.goto("/products/new");
   await expect(page).toHaveURL(new RegExp("/products/new$"));
 });
 
-test("OrderList loads", async ({ page }) => {
+test("Orders List loads", async ({ page }) => {
   await page.goto("/orders");
   await expect(page).toHaveURL(new RegExp("/orders$"));
 });
 
-test("OrderNew loads", async ({ page }) => {
+test("Orders New loads", async ({ page }) => {
   await page.goto("/orders/new");
   await expect(page).toHaveURL(new RegExp("/orders/new$"));
 });
@@ -36,12 +36,12 @@ test("OrderSummaryView loads", async ({ page }) => {
   await expect(page).toHaveURL(new RegExp("/views/order_summary$"));
 });
 
-test("CustomerList loads", async ({ page }) => {
+test("Customers List loads", async ({ page }) => {
   await page.goto("/customers");
   await expect(page).toHaveURL(new RegExp("/customers$"));
 });
 
-test("CustomerNew loads", async ({ page }) => {
+test("Customers New loads", async ({ page }) => {
   await page.goto("/customers/new");
   await expect(page).toHaveURL(new RegExp("/customers/new$"));
 });

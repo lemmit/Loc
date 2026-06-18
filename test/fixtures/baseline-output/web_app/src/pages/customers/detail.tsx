@@ -61,7 +61,7 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateCustomer
   );
 }
 
-export default function CustomerDetail() {
+export default function Detail() {
   const { id } = useParams<{ id: string }>();
   const customerById = useCustomerById(id);
   const update = useUpdateCustomer(id ?? "");

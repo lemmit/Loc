@@ -192,8 +192,9 @@ describe("react generator", () => {
     const smoke = files.get("web_app/e2e/smoke.spec.ts")!;
     // Smoke navigates by ROUTE per param-less page (no page-object imports
     // — those broke on uis with custom/partial pages, see smokeSpec).
-    expect(smoke).toMatch(/OrderList loads/);
-    expect(smoke).toMatch(/ProductList loads/);
+    // Role-named pages are qualified by their area path so titles stay unique.
+    expect(smoke).toMatch(/Orders List loads/);
+    expect(smoke).toMatch(/Products List loads/);
     expect(smoke).toMatch(/await page\.goto\("\/orders"\)/);
     expect(smoke).toMatch(/await page\.goto\("\/products"\)/);
     // Parameterised detail pages (`/orders/:id`) are excluded from the smoke.

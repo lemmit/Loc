@@ -65,7 +65,11 @@ describe("explicit Order DSL ↔ scaffold Order equivalence", () => {
     // Explicit page emits at /pages/order_list.tsx (snake of page name).
     const explicitList = explicit.get("web/src/pages/order_list.tsx");
     expect(explicitList).toBeDefined();
-    expect(scaffold).toMatch(/export default function OrderList/);
+    // The scaffold groups its page under `area Orders` and names it by role,
+    // so its component is `List` (file `orders/list.tsx`); the hand-written
+    // explicit page keeps its descriptive top-level name.  Equivalence here is
+    // the testid/hook surface (below), not the component identifier.
+    expect(scaffold).toMatch(/export default function List/);
     expect(explicitList).toMatch(/export default function OrderList/);
   });
 

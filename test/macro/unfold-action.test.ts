@@ -225,10 +225,12 @@ system Demo {
     result = await unfold(result, "scaffoldContext");
     expect(result).toMatch(/with scaffoldAggregate\(of: Order\)/);
     result = await unfold(result, "scaffoldAggregate");
-    // Final level: the three pages land as source.
-    expect(result).toMatch(/page OrderList/);
-    expect(result).toMatch(/page OrderNew/);
-    expect(result).toMatch(/page OrderDetail/);
+    // Final level: the per-aggregate `area Orders` lands as source, holding the
+    // three role-named pages.
+    expect(result).toMatch(/area Orders/);
+    expect(result).toMatch(/page List/);
+    expect(result).toMatch(/page New/);
+    expect(result).toMatch(/page Detail/);
     // And the source re-parses cleanly:
     const reparse = await validate(result);
     expect(reparse.diagnostics.filter((d) => d.severity === 1)).toEqual([]);

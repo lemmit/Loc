@@ -129,8 +129,12 @@ describe("byte-equivalence — page emitter vs legacy direct walk", () => {
     expect(pageNames).toContain("Home");
     expect(pageNames).toContain("WorkflowsIndex");
     expect(pageNames).toContain("ViewsIndex");
-    expect(pageNames).toContain("OrderList");
-    expect(pageNames).toContain("CustomerList");
-    expect(pageNames).toContain("ProductList");
+    // Aggregate pages are role-named inside per-aggregate areas; assert one
+    // role-named `List` exists per served aggregate, grouped by area path.
+    expect(pageNames).toContain("List");
+    const areaPaths = ui!.pages.map((p) => (p.area ?? []).join("/")).filter(Boolean);
+    expect(areaPaths).toContain("orders");
+    expect(areaPaths).toContain("customers");
+    expect(areaPaths).toContain("products");
   });
 });

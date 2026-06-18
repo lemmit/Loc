@@ -5,7 +5,7 @@ import { DateTimeValue, IdValue } from "../../lib/format";
 import { Alert, Anchor, Badge, Breadcrumbs, Button, Center, Group, Paper, Skeleton, Stack, Table, Text, TextInput, Title } from "@mantine/core";
 import { useAllOrders, useByCustomerOrder } from "../../api/order";
 
-export default function OrderList() {
+export default function List() {
   const navigate = useNavigate();
   const [byCustomerCustomerId, setByCustomerCustomerId] = useState<string>("");
   const orderByCustomer = useByCustomerOrder({ customerId: byCustomerCustomerId });

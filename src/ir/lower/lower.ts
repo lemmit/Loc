@@ -655,7 +655,11 @@ function applyPageOriginSideEffects(sys: SystemIR): void {
     const ctx = buildExpandContext(sys, ui);
     for (const page of ui.pages) {
       if (!page.origin || page.origin.kind === "custom") continue;
-      page.emitPath = conventionalEmitPath(page.origin, ctx);
+      // `area` is authoritative for file placement: a page declared inside an
+      // `area { … }` already had its `emitPath` set from the area containment
+      // path in `lowerUi`.  Only fall back to the origin-conventional path for
+      // area-less scaffold pages (e.g. the Home / index singletons).
+      if (!page.area) page.emitPath = conventionalEmitPath(page.origin, ctx);
       // Detail page bodies reference `id` as a route param
       // (`api.Order.byId(id)`).  Scaffold emits the detail page with
       // route `/<plural>/:id` but no declarative `params` block, so

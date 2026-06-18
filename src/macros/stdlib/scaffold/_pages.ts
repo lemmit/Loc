@@ -11,9 +11,9 @@ import { area, boolLit, callExpr, nameRefExpr, page, stringLit } from "../../api
 /** Group an aggregate's List/New/Detail pages under a per-aggregate `area`
  *  named after its plural (`area Orders { … }` → `src/pages/orders/…`).  The
  *  scaffold returns this instead of loose pages so the generated page tree
- *  groups by aggregate.  In slice 2 `origin` still drives `emitPath` (output
- *  byte-identical); slice 3 makes the area authoritative.  See
- *  docs/proposals/unfoldable-page-scaffolding.md. */
+ *  groups by aggregate.  The pages are named by role (`List`/`New`/`Detail`),
+ *  scoped to the area; the `area` is authoritative for `emitPath` (slice 3a).
+ *  See docs/proposals/unfoldable-page-scaffolding.md. */
 export function areaForAggregate(agg: Aggregate): Area {
   return area(plural(agg.name), pagesForAggregate(agg));
 }
@@ -24,7 +24,7 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
   const labelPlural = humanize(plural(aggName));
   return [
     page({
-      name: `${aggName}List`,
+      name: "List",
       route: `/${pluralSnake}`,
       // Canonical body primitive — expands inline to the full
       // Breadcrumbs/Toolbar/QueryView/Table tree via
@@ -36,7 +36,7 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
       },
     }),
     page({
-      name: `${aggName}New`,
+      name: "New",
       route: `/${pluralSnake}/new`,
       // Canonical body primitive — expands to Stack(Breadcrumbs,
       // Heading, Card(CreateForm(of:))).
@@ -44,7 +44,7 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
       menu: { hidden: boolLit(true) },
     }),
     page({
-      name: `${aggName}Detail`,
+      name: "Detail",
       route: `/${pluralSnake}/:id`,
       // Explicit Stack of two body primitives — see
       // `expandInlineScaffoldPrimitives` in

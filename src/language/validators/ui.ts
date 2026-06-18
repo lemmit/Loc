@@ -3,6 +3,7 @@
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type {
   Api,
+  AreaMember,
   Component,
   Layout,
   MenuBlock,
@@ -14,6 +15,7 @@ import type {
   Ui,
   UiApiParam,
   UiChannelParam,
+  UiMember,
   UiNotification,
 } from "../generated/ast.js";
 import { isComponent, isMemberSuffix, isPostfixChain } from "../generated/ast.js";
@@ -154,24 +156,33 @@ export function checkTheme(block: ThemeBlock, accept: ValidationAcceptor): void 
 // ---------------------------------------------------------------------------
 
 export function checkUi(ui: Ui, sys: System, accept: ValidationAcceptor): void {
-  // Page name uniqueness within the ui (Rule 7).  Override-by-name
-  // is the SAME mechanism — the explicit page must displace exactly
-  // one scaffolded page; multiple explicit pages with the same name
-  // are still an error.
-  const pageNamesSeen = new Map<string, Page>();
-  for (const m of ui.members) {
-    if (m.$type !== "Page") continue;
-    const prior = pageNamesSeen.get(m.name);
-    if (prior) {
-      accept(
-        "error",
-        `Duplicate page '${m.name}' in ui '${ui.name}'.  Pages within a ui must have unique names; an explicit override-by-name displaces a single scaffolded page, not another explicit one.`,
-        { node: m, property: "name" },
-      );
-    } else {
-      pageNamesSeen.set(m.name, m);
+  // Page name uniqueness is PER-AREA (and per-ui at top level): the same role
+  // name (`List`/`Detail`/…) may recur in different `area` blocks, but must be
+  // unique within one scope.  Override-by-name is the same mechanism — an
+  // explicit page displaces exactly one scaffolded page in its scope; two
+  // explicit pages with the same name in one scope are still an error.
+  const checkUniqueIn = (
+    members: readonly UiMember[] | readonly AreaMember[],
+    scope: string,
+  ): void => {
+    const seen = new Set<string>();
+    for (const m of members) {
+      if (m.$type === "Page") {
+        if (seen.has(m.name)) {
+          accept(
+            "error",
+            `Duplicate page '${m.name}' in ${scope}.  Page names must be unique within their area (or the ui at top level); an explicit override-by-name displaces a single scaffolded page, not another explicit one.`,
+            { node: m, property: "name" },
+          );
+        } else {
+          seen.add(m.name);
+        }
+      } else if (m.$type === "Area") {
+        checkUniqueIn(m.members, `area '${m.name}'`);
+      }
     }
-  }
+  };
+  checkUniqueIn(ui.members, `ui '${ui.name}'`);
 
   // At most one ui-level menu block (Rule 8 part).
   const menuBlocks = ui.members.filter((m) => m.$type === "MenuBlock");

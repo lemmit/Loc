@@ -158,7 +158,7 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateOrder>; 
   );
 }
 
-export default function OrderDetail() {
+export default function Detail() {
   const { id } = useParams<{ id: string }>();
   const orderById = useOrderById(id);
   const addLine = useAddLineOrder(id ?? "");

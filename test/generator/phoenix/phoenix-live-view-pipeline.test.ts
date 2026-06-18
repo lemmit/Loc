@@ -308,7 +308,7 @@ describe("phoenixLiveView pipeline", () => {
     // the CoreComponents module must define `modal` + the JS helpers.
     const model = await buildFixture();
     const { files } = generateSystems(model);
-    const detail = files.get("phoenix_app/lib/phoenix_app_web/live/customer_detail_live.ex")!;
+    const detail = files.get("phoenix_app/lib/phoenix_app_web/live/customers_detail_live.ex")!;
     expect(detail, "detail LiveView is emitted").toBeDefined();
 
     // (a) record load + idiomatic not-found/error mapping.
@@ -2145,7 +2145,7 @@ async function buildFormFixture() {
 describe("scaffold-form regression — CreateForm { of: Agg } resolves fields + mount assigns @form", () => {
   it("emits one <.input> per aggregate field (id excluded), not a single _placeholder", async () => {
     const files = await buildFormFixture();
-    const customerNew = files.get("phoenix_app/lib/phoenix_app_web/live/customer_new_live.ex")!;
+    const customerNew = files.get("phoenix_app/lib/phoenix_app_web/live/customers_new_live.ex")!;
     expect(customerNew).toBeDefined();
     expect(customerNew).not.toMatch(/@form\[:_placeholder\]/);
     expect(customerNew).toMatch(/@form\[:name\].*?label="Name"/);
@@ -2155,13 +2155,13 @@ describe("scaffold-form regression — CreateForm { of: Agg } resolves fields + 
 
   it("emits type=number step=0.01 for decimal fields", async () => {
     const files = await buildFormFixture();
-    const orderNew = files.get("phoenix_app/lib/phoenix_app_web/live/order_new_live.ex")!;
+    const orderNew = files.get("phoenix_app/lib/phoenix_app_web/live/orders_new_live.ex")!;
     expect(orderNew).toMatch(/@form\[:total\].*?type="number".*?step="0\.01"/);
   });
 
   it("mount/3 assigns @form via AshPhoenix.Form.for_create(<Ctx>.<Agg>, :create)", async () => {
     const files = await buildFormFixture();
-    const customerNew = files.get("phoenix_app/lib/phoenix_app_web/live/customer_new_live.ex")!;
+    const customerNew = files.get("phoenix_app/lib/phoenix_app_web/live/customers_new_live.ex")!;
     expect(customerNew).toMatch(
       /assign\(:form, AshPhoenix\.Form\.for_create\(PhoenixApp\.Sales\.Customer, :create\) \|> to_form\(\)\)/,
     );
@@ -2170,7 +2170,7 @@ describe("scaffold-form regression — CreateForm { of: Agg } resolves fields + 
   it("pages with no form do not gain a stray @form assign", async () => {
     const files = await buildFormFixture();
     // The list page has no form binding — its mount stub must stay empty.
-    const customerList = files.get("phoenix_app/lib/phoenix_app_web/live/customer_list_live.ex")!;
+    const customerList = files.get("phoenix_app/lib/phoenix_app_web/live/customers_list_live.ex")!;
     expect(customerList).toBeDefined();
     expect(customerList).not.toMatch(/AshPhoenix\.Form\.for_create/);
   });

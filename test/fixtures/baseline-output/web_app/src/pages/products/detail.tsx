@@ -66,7 +66,7 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateProduct>
   );
 }
 
-export default function ProductDetail() {
+export default function Detail() {
   const { id } = useParams<{ id: string }>();
   const productById = useProductById(id);
   const update = useUpdateProduct(id ?? "");
