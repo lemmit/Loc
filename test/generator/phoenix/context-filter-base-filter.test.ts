@@ -210,3 +210,73 @@ describe("Phoenix capability filter — principal (tenancy) base_filter (DEBT-01
     expect(ctrl).toContain("get_account!(id, actor: conn.assigns.current_user)");
   });
 });
+
+// ---------------------------------------------------------------------------
+// DEBT-01 follow-up — actor threading through the two read paths the first
+// Ash slice deferred: an `or`-union returning op (Ash.get) and a context
+// retrieval invoked from a workflow (Repo.run).  Both read the tenancy
+// aggregate under its `^actor(:field)` base_filter, so both must pass the
+// request actor; else `^actor` is nil and the read is fail-closed (no rows).
+// ---------------------------------------------------------------------------
+
+function tenancyOpsSys(): string {
+  return `
+system Bank {
+  user { id: string  tenantId: string }
+  subdomain Core {
+    context Ledger {
+      error NotFound { resource: string }
+      criterion Rich(min: int) of Account = balance >= min
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+        verified: bool
+        filter this.tenantId == currentUser.tenantId
+        operation verify() { verified := true }
+        operation balanceOf(): int or NotFound { return balance }
+      }
+      repository Accounts for Account {}
+      retrieval RichAccounts(min: int) of Account { where: Rich(min)  sort: [balance desc] }
+      workflow verifyRich {
+        create(min: int) {
+          let matched = Accounts.run(RichAccounts(min), page: { offset: 0, limit: 100 })
+          for a in matched { a.verify() }
+        }
+      }
+    }
+  }
+  api LedgerApi from Core
+  storage primary { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: primary }
+  deployable api {
+    platform: phoenix { foundation: ash }
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    auth: required
+    port: 4000
+  }
+}
+`;
+}
+
+describe("Phoenix tenancy — retrieval + returning-op actor threading (DEBT-01)", () => {
+  it("threads the actor into the returning-op Ash.get + its controller call", async () => {
+    const files = await generate(tenancyOpsSys());
+    const acct = find(files, (k) => k.endsWith("/ledger/account.ex"), "account.ex");
+    // The generic action's run fn reads the record with the request actor.
+    expect(acct).toContain("run fn input, context ->");
+    expect(acct).toContain("Ash.get(__MODULE__, input.arguments.id, actor: context.actor)");
+
+    const ctrl = find(files, (k) => k.endsWith("accounts_controller.ex"), "controller");
+    expect(ctrl).toContain("balance_of_account(id, actor: conn.assigns.current_user)");
+  });
+
+  it("threads the actor into the workflow retrieval (Repo.run) call", async () => {
+    const files = await generate(tenancyOpsSys());
+    const wf = find(files, (k) => k.endsWith("/workflows/verify_rich.ex"), "workflow");
+    expect(wf).toContain(
+      "run_rich_accounts_account!(min, page: [offset: 0, limit: 100], actor: current_user)",
+    );
+  });
+});
