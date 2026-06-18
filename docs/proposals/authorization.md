@@ -54,8 +54,9 @@ this doc was reinventing what multi-tenancy already nailed down.
 ### Coping options
 
 **A. Layered (recommended).** Multi-tenancy owns the **flat** tenancy
-primitive (`tenancy by`, `crossTenant`, `platform`, `TenantId` column +
-filter, claim plumbing). This doc *consumes* those primitives and adds
+primitive (`tenancy by`, `crossTenant`, the `tenantRegistry` registry capability,
+`TenantId` column + filter, claim plumbing — note `platform` was dropped as a
+scope; see the §2 reconciliation banner). This doc *consumes* those primitives and adds
 `DataKey` as a **hierarchical extension**: the leftmost segment of a
 `DataKey` is exactly the `TenantId` multi-tenancy already auto-stamps; the
 extra segments encode org hierarchy and are only needed when a `policy {}`
@@ -176,9 +177,9 @@ The design was settled collaboratively. Key reframings from the raw research:
 > "tenantRegistry"`), and the `tenantId` + denormalised `dataKey` columns (stamped
 > from the token at create; `parent` immutable ⇒ permanent paths). **This section
 > contributes only the hierarchical extension**: the `DataKey` materialized path
-> + the directional checks below, surfaced as the per-role **access levels**
-> `local` / `deep` / `global` (Dynamics' Business-Unit ladder) — *who may read*,
-> an authorization concern, **not** a tenancy scope. So do **not** re-introduce
+> + the **directional access levels** this doc already uses (`Self` / `Descendants`
+> / `All`; Dynamics' `local`/`deep`/`global` ladder is the same thing, a mnemonic)
+> — *who may read*, an authorization concern, **not** a tenancy scope. So do **not** re-introduce
 > `crossTenant` / `platform` / the flat floor here; cite the multi-tenancy note
 > and keep only the `DataKey` type + directional predicates. (This resolves §0's
 > recommended option A.)
