@@ -102,11 +102,12 @@ test("stub handshake → document.write → fetch shim round-trips, CSP blocks e
     });
   }, html);
 
-  // The shim derived "/ping" (API base prefix stripped) and the
+  // The shim stripped the runtime base and forwarded "/api/ping" (the
+  // SPA's API base now carries the backend's `/api` mount), and the
   // parent's reply was reconstructed into a real Response over the
   // bridge — proving `connect-src 'none'` doesn't break the API path —
   // while the arbitrary cross-origin fetch was refused by the CSP.
-  expect(result).toBe("BRIDGE:200:pong /ping|ext:BLOCKED");
+  expect(result).toBe("BRIDGE:200:pong /api/ping|ext:BLOCKED");
 });
 
 test("loom-reload swaps the bundle in place — document, window and route survive", async ({
