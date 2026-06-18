@@ -314,6 +314,68 @@ describe("provenanced — workflow capture", () => {
   });
 });
 
+// An event-triggered reactor (`on <Event>`) also invokes ops inline, so a
+// provenanced write it makes used to be dropped (the reactor never drained it).
+// It now flushes inside a child frame, exactly like the workflow command path.
+const SYSTEM_REACTOR = `
+system S {
+  subdomain M {
+    context C {
+      aggregate Order { customerId: string  status: string }
+      repository Orders for Order { }
+      aggregate Shipment {
+        orderRef: Order id
+        fee: int provenanced
+        operation rate(base: int) { fee := base * 2 }
+      }
+      repository Shipments for Shipment { }
+      event OrderPlaced { order: Order id, at: datetime }
+      event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+      channel Lifecycle { carries: OrderPlaced, ShipmentRequested  delivery: broadcast  retention: ephemeral }
+      workflow Fulfillment {
+        orderId: Order id
+        create(p: OrderPlaced) by p.order {
+          let ship = Shipment.create({ orderRef: p.order, fee: 0 })
+          emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+        }
+        on(s: ShipmentRequested) by s.order {
+          let ship = Shipments.getById(s.shipment)
+          ship.rate(10)
+        }
+      }
+    }
+  }
+  deployable api { platform: hono, contexts: [C], port: 3000 }
+}
+`;
+
+describe("provenanced — reactor capture", () => {
+  it("flushes provenance for reactor-driven writes inside a child frame", async () => {
+    const { model, errors } = await parseModel(SYSTEM_REACTOR);
+    expect(errors).toEqual([]);
+    const wf = generateSystems(model).files.get("api/http/workflows.ts")!;
+    expect(wf).toBeDefined();
+    // The reactor's inline op-call drains + persists its lineage (previously
+    // dropped), in a child frame so the rows carry their call-structure scope.
+    expect(wf).toContain("await runInChildContext(async () => {");
+    expect(wf).toContain("for (const t of ship.drainProv()) {");
+    expect(wf).toContain(".insert(schema.provenanceRecords).values({");
+    expect(wf).toContain("parentId: reqCtx?.parentId ?? null,");
+    // The route-to-existing drop+log guard stays at function level, before the
+    // frame opens (the early return must not be swallowed by the wrapper).
+    expect(wf).toMatch(/event_unrouted[\s\S]*?return;[\s\S]*?await runInChildContext/);
+  });
+
+  it("leaves a provenance-free reactor without a flush or child frame", async () => {
+    const src = SYSTEM_REACTOR.replace("fee: int provenanced", "fee: int");
+    const { model, errors } = await parseModel(src);
+    expect(errors).toEqual([]);
+    const wf = generateSystems(model).files.get("api/http/workflows.ts")!;
+    expect(wf).not.toContain("runInChildContext");
+    expect(wf).not.toContain("drainProv");
+  });
+});
+
 function findProperty(model: Model, agg: string, field: string): Property {
   for (const node of AstUtils.streamAst(model)) {
     if (
