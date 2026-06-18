@@ -1,0 +1,145 @@
+{
+  "name": "Loom Dark",
+  "type": "dark",
+  "semanticHighlighting": true,
+  "colors": {
+    "editor.background": "#1a1b26",
+    "editor.foreground": "#c0caf5",
+    "editorCursor.foreground": "#c0caf5",
+    "editor.selectionBackground": "#283457",
+    "editor.selectionHighlightBackground": "#283457a0",
+    "editor.lineHighlightBackground": "#1f2335",
+    "editor.lineHighlightBorder": "#00000000",
+    "editorLineNumber.foreground": "#3b4261",
+    "editorLineNumber.activeForeground": "#737aa2",
+    "editorIndentGuide.background1": "#232433",
+    "editorIndentGuide.activeBackground1": "#3b4261",
+    "editorWhitespace.foreground": "#2a2c3d",
+    "editorBracketMatch.background": "#283457",
+    "editorBracketMatch.border": "#545c7e",
+    "editorGutter.background": "#1a1b26",
+    "editorError.foreground": "#f7768e",
+    "editorWarning.foreground": "#e0af68",
+    "editorInfo.foreground": "#7dcfff",
+    "editorHoverWidget.background": "#1f2335",
+    "editorHoverWidget.border": "#292e42",
+    "editorSuggestWidget.background": "#1f2335",
+    "editorSuggestWidget.selectedBackground": "#283457",
+    "editorSuggestWidget.border": "#292e42",
+    "editorWidget.background": "#1f2335"
+  },
+  "tokenColors": [
+    {
+      "name": "Comments",
+      "scope": ["comment", "comment.line.double-slash.ddd", "comment.block.ddd"],
+      "settings": { "foreground": "#565f89", "fontStyle": "italic" }
+    },
+    {
+      "name": "Strings",
+      "scope": ["string", "string.quoted.double.ddd"],
+      "settings": { "foreground": "#9ece6a" }
+    },
+    {
+      "name": "String escapes",
+      "scope": "constant.character.escape.ddd",
+      "settings": { "foreground": "#89ddff" }
+    },
+    {
+      "name": "Numbers",
+      "scope": "constant.numeric.ddd",
+      "settings": { "foreground": "#ff9e64" }
+    },
+    {
+      "name": "Language constants",
+      "scope": "constant.language.ddd",
+      "settings": { "foreground": "#ff9e64" }
+    },
+    {
+      "name": "Trace / requirement ids",
+      "scope": "entity.name.tag.ddd",
+      "settings": { "foreground": "#ff9e64" }
+    },
+    {
+      "name": "Structural declaration keywords",
+      "scope": "keyword.declaration.ddd",
+      "settings": { "foreground": "#bb9af7" }
+    },
+    {
+      "name": "Domain member keywords",
+      "scope": "keyword.other.member.ddd",
+      "settings": { "foreground": "#7dcfff" }
+    },
+    {
+      "name": "Control / expression keywords",
+      "scope": "keyword.control.ddd",
+      "settings": { "foreground": "#f7768e" }
+    },
+    {
+      "name": "Modifiers",
+      "scope": "storage.modifier.ddd",
+      "settings": { "foreground": "#ff9e64", "fontStyle": "italic" }
+    },
+    {
+      "name": "Primitive types",
+      "scope": "support.type.primitive.ddd",
+      "settings": { "foreground": "#2ac3de" }
+    },
+    {
+      "name": "Platform / storage / design values",
+      "scope": "support.constant.platform.ddd",
+      "settings": { "foreground": "#ff9e64" }
+    },
+    {
+      "name": "Property keys",
+      "scope": "variable.other.property.ddd",
+      "settings": { "foreground": "#7aa2f7" }
+    },
+    {
+      "name": "Type / component names",
+      "scope": "entity.name.type.ddd",
+      "settings": { "foreground": "#e0af68" }
+    },
+    {
+      "name": "Capability / macro names",
+      "scope": "entity.name.function.ddd",
+      "settings": { "foreground": "#73daca" }
+    },
+    {
+      "name": "Operators",
+      "scope": "keyword.operator.ddd",
+      "settings": { "foreground": "#89ddff" }
+    },
+    {
+      "name": "Generic punctuation",
+      "scope": [
+        "punctuation.definition.generic.begin.ddd",
+        "punctuation.definition.generic.end.ddd"
+      ],
+      "settings": { "foreground": "#89ddff" }
+    },
+    {
+      "name": "Punctuation",
+      "scope": [
+        "punctuation.accessor.ddd",
+        "punctuation.separator.ddd",
+        "punctuation.bracket.ddd"
+      ],
+      "settings": { "foreground": "#9aa5ce" }
+    }
+  ],
+  "semanticTokenColors": {
+    "type": "#e0af68",
+    "enum": "#e0af68",
+    "enumMember": "#73daca",
+    "interface": "#e0af68",
+    "class": "#e0af68",
+    "property": "#7aa2f7",
+    "parameter": "#e0af68",
+    "variable": "#c0caf5",
+    "keyword": "#bb9af7",
+    "function": "#7aa2f7",
+    "string": "#9ece6a",
+    "number": "#ff9e64",
+    "comment": { "foreground": "#565f89", "fontStyle": "italic" }
+  }
+}

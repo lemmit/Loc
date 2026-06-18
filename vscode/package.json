@@ -36,6 +36,13 @@
         "path": "./syntaxes/ddd.tmLanguage.json"
       }
     ],
+    "themes": [
+      {
+        "label": "Loom Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/loom-dark.json"
+      }
+    ],
     "commands": [
       {
         "command": "loom.generate",
