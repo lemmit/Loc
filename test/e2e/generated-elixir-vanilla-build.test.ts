@@ -54,6 +54,10 @@ describe.skipIf(!ENABLED)(
       { name: "vanilla-finds.ddd", deployable: "api" },
       // Union-returning find — tagged success + problem_variant absence.
       { name: "vanilla-union-find.ddd", deployable: "api" },
+      // Capability `filter` AND-ed into every Ecto read (list/find_by_id/find/
+      // retrieval/view) — plain Ecto has no Ash base_filter, so the conjoined
+      // `from(... where: ...)` reads must compile (and not silently drop the filter).
+      { name: "vanilla-capability-filter.ddd", deployable: "api" },
     ])("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

@@ -1,0 +1,39 @@
+// Capability `filter` on the vanilla (plain Ecto) foundation.  A `filter <expr>`
+// AND-s into every root read of the aggregate — list/0, find_by_id/1, each
+// custom find, every retrieval, and every view — since plain Ecto has no Ash
+// `base_filter`.  Compiled by build-generated-elixir-vanilla so the conjoined
+// `from(record in <Agg>, where: ...)` reads pass `mix compile
+// --warnings-as-errors`.  (Before this, a vanilla capability filter was
+// silently dropped — reads returned soft-deleted rows.)
+system Catalog {
+  subdomain Core {
+    context Shop {
+      aggregate Order ids guid {
+        customerId: string
+        total: int
+        archived: bool
+
+        // Soft-delete style scoping — must reach every read below.
+        filter !this.archived
+
+        operation archive() { archived := true }
+      }
+      repository Orders for Order {
+        find byCustomer(customerId: string): Order[] where this.customerId == customerId
+        find latest(): Order?
+      }
+      retrieval BigOrders(min: int) of Order { where: total >= min  sort: [total desc] }
+      view ActiveOrders = Order where total > 0
+    }
+  }
+  api CatalogApi from Core
+  storage pg { type: postgres }
+  resource orderState { for: Shop, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Shop]
+    dataSources: [orderState]
+    serves: CatalogApi
+    port: 4000
+  }
+}

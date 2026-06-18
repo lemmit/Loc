@@ -35,6 +35,7 @@ import { snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { stateModule } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { combineWhere, vanillaCapabilityFilter } from "./capability-filter.js";
 
 /** One project-wide view, paired with its owning context (for module-path
  *  resolution in the controller). */
@@ -149,10 +150,13 @@ function renderVanillaView(
     typesModule,
     foundation: "vanilla",
   };
+  // The view reads its source aggregate, so it honours that aggregate's
+  // capability filter (soft-delete / scoping) like every other read.
+  const cap = vanillaCapabilityFilter(agg, contextModule);
   const isShorthand = !view.output;
   const body = isShorthand
-    ? buildShorthandBody(view, aggModule, renderCtx)
-    : buildFullFormBody(view, aggModule, renderCtx);
+    ? buildShorthandBody(view, aggModule, renderCtx, cap)
+    : buildFullFormBody(view, aggModule, renderCtx, cap);
   const runSpec = isShorthand
     ? `@spec run(any()) :: [${aggModule}.t()]`
     : "@spec run(any()) :: [map()]";
@@ -184,12 +188,17 @@ end
 // Shorthand form — filter only, returns the aggregate's structs.
 // ---------------------------------------------------------------------------
 
-function buildShorthandBody(view: ViewIR, aggModule: string, ctx: RenderCtx): string {
-  if (!view.filter) {
+function buildShorthandBody(
+  view: ViewIR,
+  aggModule: string,
+  ctx: RenderCtx,
+  cap: string | null,
+): string {
+  const where = combineWhere(view.filter ? renderExpr(view.filter, ctx) : null, cap);
+  if (!where) {
     return `    Repo.all(${aggModule})`;
   }
-  const filterExpr = renderExpr(view.filter, ctx);
-  return `    from(record in ${aggModule}, where: ${filterExpr})
+  return `    from(record in ${aggModule}, where: ${where})
     |> Repo.all()`;
 }
 
@@ -197,13 +206,18 @@ function buildShorthandBody(view: ViewIR, aggModule: string, ctx: RenderCtx): st
 // Full form — filter + association preloads + Enum.map projection.
 // ---------------------------------------------------------------------------
 
-function buildFullFormBody(view: ViewIR, aggModule: string, ctx: RenderCtx): string {
+function buildFullFormBody(
+  view: ViewIR,
+  aggModule: string,
+  ctx: RenderCtx,
+  cap: string | null,
+): string {
   const output = view.output!;
   const lines: string[] = [];
 
-  if (view.filter) {
-    const filterExpr = renderExpr(view.filter, ctx);
-    lines.push(`    from(record in ${aggModule}, where: ${filterExpr})`);
+  const where = combineWhere(view.filter ? renderExpr(view.filter, ctx) : null, cap);
+  if (where) {
+    lines.push(`    from(record in ${aggModule}, where: ${where})`);
     lines.push(`    |> Repo.all()`);
   } else {
     lines.push(`    Repo.all(${aggModule})`);

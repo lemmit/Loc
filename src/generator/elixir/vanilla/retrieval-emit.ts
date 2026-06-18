@@ -31,6 +31,7 @@
 import type { BoundedContextIR, RetrievalIR, SortTermIR } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { combineWhere, vanillaCapabilityFilter } from "./capability-filter.js";
 
 /** Per-context fan-out: emit one Ecto query module per retrieval. */
 export function emitVanillaRetrievals(
@@ -45,14 +46,24 @@ export function emitVanillaRetrievals(
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   for (const r of retrievals) {
     if (r.targetType.kind !== "entity") continue;
+    // The retrieval reads its target aggregate, so it honours that aggregate's
+    // capability filter (soft-delete / scoping) just like the CRUD reads.
+    const targetName = r.targetType.name;
+    const target = ctx.aggregates.find((a) => a.name === targetName);
+    const cap = target ? vanillaCapabilityFilter(target, contextModule) : null;
     out.set(
       `lib/${appName}/${ctxSnake}/retrievals/${snake(r.name)}.ex`,
-      renderRetrievalModule(r, contextModule, appModule),
+      renderRetrievalModule(r, contextModule, appModule, cap),
     );
   }
 }
 
-function renderRetrievalModule(r: RetrievalIR, contextModule: string, appModule: string): string {
+function renderRetrievalModule(
+  r: RetrievalIR,
+  contextModule: string,
+  appModule: string,
+  cap: string | null,
+): string {
   const aggName = (r.targetType as { kind: "entity"; name: string }).name;
   const moduleName = `${contextModule}.Retrievals.${upperFirst(r.name)}`;
   const aggModule = `${contextModule}.${upperFirst(aggName)}`;
@@ -66,7 +77,8 @@ function renderRetrievalModule(r: RetrievalIR, contextModule: string, appModule:
   };
   const args = r.params.map((p) => snake(p.name));
   const argList = args.length > 0 ? `${args.join(", ")}, opts \\\\ []` : "opts \\\\ []";
-  const whereExpr = renderExpr(r.where, renderCtx);
+  // AND the target aggregate's capability filter into the retrieval predicate.
+  const whereExpr = combineWhere(renderExpr(r.where, renderCtx), cap)!;
   const sortClause = renderSortClause(r.sort);
 
   // Build the Ecto pipeline in stages.  `from(...)` opens, conditional
