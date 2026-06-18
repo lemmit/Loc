@@ -177,6 +177,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       c,
       diags,
       backendPlatformsByContext.get(c.name) ?? new Set(),
+      elixirFoundationsByContext.get(c.name) ?? new Set(),
     );
     validateProvenancedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateAuditedOperationSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());

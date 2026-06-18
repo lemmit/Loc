@@ -50,6 +50,9 @@ describe.skipIf(!ENABLED)(
       // Event-sourced append → Dispatcher fan-out (an ES event a workflow saga
       // consumes) — compile the `<Ctx>.Dispatcher.dispatch/1` call in append.
       { name: "vanilla-es-dispatch.ddd", deployable: "api" },
+      // Event-sourced WORKFLOW (A2-S5b): `<Wf>State` fold struct + `<wf>_events`
+      // schema + fold + stream IO + fold-on-load / append-own-events handlers.
+      { name: "vanilla-eventsourced-workflow.ddd", deployable: "api" },
       // Custom-find HTTP surface — list / single / param-less GET actions.
       { name: "vanilla-finds.ddd", deployable: "api" },
       // Union-returning find — tagged success + problem_variant absence.
