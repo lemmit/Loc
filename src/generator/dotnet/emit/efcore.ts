@@ -14,6 +14,11 @@ import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
 import {
+  esEventDbSet,
+  esEventRecordClass,
+  eventSourcedWorkflows as esWorkflows,
+} from "../workflow-eventsourced-emit.js";
+import {
   correlationWorkflows,
   workflowStateClass,
   workflowStateDbSet,
@@ -145,6 +150,22 @@ export function renderDbContext(
     (wf) =>
       `        modelBuilder.ApplyConfiguration(new Configurations.${workflowStateClass(wf)}Configuration());`,
   );
+  // Event-sourced workflows (workflow-and-applier.md A2-S5b): each persists as
+  // an append-only `<wf>_events` stream — a `DbSet<<Wf>EventRecord>` + its
+  // configuration, the saga analogue of the aggregate event store (its
+  // `<Wf>EventRecord` POCO shares the Persistence.Events namespace, so the
+  // `anyEs` aggregate using already covers it; add it when no ES aggregate did).
+  const esWfs = esWorkflows(ctx.workflows);
+  const esWfUsings =
+    esWfs.length > 0 && !anyEs ? [`using ${ns}.Infrastructure.Persistence.Events;`] : [];
+  const wfEventDbSets = esWfs.map(
+    (wf) =>
+      `    public DbSet<${esEventRecordClass(wf)}> ${esEventDbSet(wf)} => Set<${esEventRecordClass(wf)}>();`,
+  );
+  const wfEventApplyConfigs = esWfs.map(
+    (wf) =>
+      `        modelBuilder.ApplyConfiguration(new Configurations.${esEventRecordClass(wf)}Configuration());`,
+  );
   const outboxDbSets = hasOutbox
     ? ["    public DbSet<OutboxMessage> LoomOutbox => Set<OutboxMessage>();"]
     : [];
@@ -182,6 +203,7 @@ export function renderDbContext(
       ...aggUsings,
       ...joinUsings,
       ...wfStateUsings,
+      ...esWfUsings,
       `namespace ${ns}.Infrastructure.Persistence;`,
       "",
       "public sealed class AppDbContext : DbContext",
@@ -192,6 +214,7 @@ export function renderDbContext(
       ...tphBaseDbSets,
       ...joinDbSets,
       ...wfStateDbSets,
+      ...wfEventDbSets,
       ...outboxDbSets,
       ...provenanceDbSets,
       ...auditDbSets,
@@ -202,6 +225,7 @@ export function renderDbContext(
       ...applyConfigs,
       ...joinApplyConfigs,
       ...wfStateApplyConfigs,
+      ...wfEventApplyConfigs,
       ...outboxApplyConfigs,
       ...provenanceApplyConfigs,
       ...auditApplyConfigs,
