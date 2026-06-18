@@ -10,7 +10,16 @@ import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize } from "../../util/naming.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
-import { renderAngularRoutes } from "./routes-emitter.js";
+import { walkBody } from "../_walker/walker-core.js";
+import { type AngularRouteDesc, renderAngularRoutes, routePath } from "./routes-emitter.js";
+import { angularTarget } from "./walker/angular-target.js";
+import {
+  pageComponentName,
+  pageNeedsDeferredFeatures,
+  pageSlug,
+  renderAngularPage,
+  renderAngularPageStub,
+} from "./walker/page-shell.js";
 
 // ---------------------------------------------------------------------------
 // Angular frontend generator — orchestrator (angular-frontend-plan.md
@@ -68,22 +77,62 @@ export function generateAngularForContexts(
   out.set("src/styles.css", pack.render("theme", prepareThemeVM(sys.theme)));
   out.set("src/lib/format.ts", pack.render("format-helpers", {}));
 
-  // The app shell (Material toolbar + sidenav).  No pages yet, so the
-  // nav is empty (Slice 4 derives sections from the ui's pages).
+  // --- Pages — bodies walk through the SHARED markup walker with
+  // `angularTarget`; the angularMaterial pack templates own the markup
+  // the primitives emit.  Each page becomes a standalone component under
+  // `src/app/pages/`.  Bodies needing api services / forms are stubbed
+  // until those Slice 4b batches land.
+  const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
+  const pages = (ui?.pages ?? []).filter((p) => p.route);
+  const routeDescs: AngularRouteDesc[] = [];
+  for (const page of pages) {
+    const slug = pageSlug(page);
+    let content: string;
+    if (!page.body) {
+      content = renderAngularPageStub(page);
+    } else {
+      const result = walkBody(
+        page.body,
+        angularTarget,
+        pack,
+        new Set(page.params.map((p) => p.name)),
+        new Set(page.state.map((s) => s.name)),
+      );
+      content = pageNeedsDeferredFeatures(result)
+        ? renderAngularPageStub(page)
+        : renderAngularPage({ page, result });
+    }
+    out.set(`src/app/pages/${slug}.component.ts`, content);
+    routeDescs.push({ route: page.route!, component: pageComponentName(page), slug });
+  }
+
+  // Nav sidebar — one entry per routed page (routerLink keeps the
+  // leading-slash absolute path; the route table strips it).
+  const navEntries = pages.map((p) => ({
+    to: p.route!,
+    label: humanize(p.name),
+    testId: `nav-${pageSlug(p)}`,
+  }));
+  const navSections =
+    navEntries.length > 0 ? [{ label: humanize(sys.name), entries: navEntries }] : [];
+
+  // The app shell (Material toolbar + sidenav).
   out.set(
     "src/app/app.component.ts",
     pack.render("app-shell", {
       systemNameHuman: humanize(sys.name),
-      navSections: [],
-      hasNav: false,
+      navSections,
+      hasNav: navEntries.length > 0,
     }),
   );
   out.set("src/app/app.config.ts", pack.render("app-config", {}));
 
-  // --- Routes + skeleton page components (hand-rendered) --------------
-  out.set("src/app/app.routes.ts", renderAngularRoutes());
-  out.set("src/app/home.component.ts", HOME_COMPONENT);
+  // Routes: one per page; a synthetic Home only when no page owns the
+  // index route; a wildcard NotFound always.
+  const hasIndex = routeDescs.some((d) => routePath(d.route) === "");
+  out.set("src/app/app.routes.ts", renderAngularRoutes(routeDescs, !hasIndex));
   out.set("src/app/not-found.component.ts", NOT_FOUND_COMPONENT);
+  if (!hasIndex) out.set("src/app/home.component.ts", HOME_COMPONENT);
 
   // --- Shared neutral sources (angular/ + api/) ----------------------
   out.set(

@@ -4,6 +4,9 @@
   "format": "angular",
   "stack": "ng1",
   "emits": {
+    "primitive-heading": "primitive-heading.hbs",
+    "primitive-text": "primitive-text.hbs",
+    "primitive-stack": "primitive-stack.hbs",
     "package-json": "package-json.hbs",
     "angular-json": "angular-json.hbs",
     "tsconfig": "tsconfig.hbs",
