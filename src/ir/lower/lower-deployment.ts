@@ -79,9 +79,11 @@ export function lowerDeployable(d: Deployable): DeployableIR {
           ? "svelte"
           : platform === "vue"
             ? "vue"
-            : descriptorFor(platform).isFrontend || platform === "dotnet" || platform === "java"
-              ? "react"
-              : undefined
+            : platform === "angular"
+              ? "angular"
+              : descriptorFor(platform).isFrontend || platform === "dotnet" || platform === "java"
+                ? "react"
+                : undefined
       : undefined);
   // Design pack default depends on what actually renders:
   //  - react/static frontends + fullstack-dotnet render React → `mantine`;

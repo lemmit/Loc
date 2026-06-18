@@ -1,0 +1,17 @@
+{
+  "name": "angularMaterial",
+  "version": "v1",
+  "format": "angular",
+  "stack": "ng1",
+  "emits": {
+    "package-json": "package-json.hbs",
+    "angular-json": "angular-json.hbs",
+    "tsconfig": "tsconfig.hbs",
+    "tsconfig-app": "tsconfig-app.hbs",
+    "main": "main.hbs",
+    "app-config": "app-config.hbs",
+    "app-shell": "app-shell.hbs",
+    "theme": "theme.hbs",
+    "format-helpers": "format-helpers.hbs"
+  }
+}
