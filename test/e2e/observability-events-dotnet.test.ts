@@ -100,6 +100,20 @@ function parseCatalogLines(raw: string): DotnetLogLine[] {
   return out;
 }
 
+/** Extract the carrier `scopeId` from a line's AddJsonConsole `Scopes` array
+ *  (emitted because `IncludeScopes = true`).  The boundary RequestContext
+ *  middleware opens `BeginScope({ correlationId, scopeId })`, so every line
+ *  inside the request carries a scope entry with `scopeId` — the join key to
+ *  the audit / provenance rows of the same frame.  Undefined when absent. */
+function scopeIdOf(l: DotnetLogLine): string | undefined {
+  const scopes = (l.Scopes as Array<Record<string, unknown>> | undefined) ?? [];
+  for (const s of scopes) {
+    const v = s.scopeId;
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return undefined;
+}
+
 describe.skipIf(!ENABLED)(
   "generated .NET backend emits the observability catalog on stdout (LOOM_OBS_E2E_DOTNET=1)",
   () => {
@@ -256,6 +270,13 @@ describe.skipIf(!ENABLED)(
         expect(end!.State?.Status).toBe(200);
         // Duration_ms is rendered as DurationMs by snakeToPascal.
         expect(typeof end!.State?.DurationMs).toBe("number");
+        // scope_id rides the `Scopes` array (IncludeScopes) on every
+        // request-bracket line — the audit/provenance join key, shared across
+        // the bracket (one root frame per request). The .NET analogue of the
+        // flat-envelope backends' top-level scope_id.
+        const startScope = scopeIdOf(start!);
+        expect(startScope, ctx).toBeTruthy();
+        expect(scopeIdOf(end!), ctx).toBe(startScope);
       } finally {
         // Best-effort teardown.
         try {
