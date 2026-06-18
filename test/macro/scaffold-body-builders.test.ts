@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { printExpr } from "../../src/language/print/print-expr.js";
 import type { ScaffoldColumn } from "../../src/macros/stdlib/scaffold/_body-builders.js";
 import {
+  filterFindsForAggregate,
+  filterStateFields,
   scaffoldList,
   scaffoldNewForm,
   scalarColumnsForAggregate,
@@ -132,6 +134,87 @@ function findNode(root: unknown, type: string, name: string): any {
   walk(root);
   return found;
 }
+
+describe("scaffoldList filter-bar — find inputs + match switch", () => {
+  it("emits a Group of bound inputs and a match that switches the list per find", () => {
+    const src = printExpr(
+      scaffoldList("Order", [text("status")], {
+        filters: [{ name: "byStatus", params: ["status"] }],
+      }),
+    );
+    // one bound text input per param, testid keyed by the snake state name
+    expect(src).toContain(
+      'Group(Field("Status", bind: byStatusStatus, testid: "orders-filter-by_status_status"))',
+    );
+    // a match: when the input is non-empty, query the find; else fall back to all
+    expect(src).toContain('byStatusStatus != "" => QueryView(of: Order.byStatus(byStatusStatus)');
+    expect(src).toContain("else => QueryView(of: Order.all");
+    expect(
+      parseRawResult(inPage(src))
+        .parserErrors.map((e) => e.message)
+        .join("\n"),
+    ).toBe("");
+  });
+
+  it("ANDs a multi-param find's inputs into one arm condition", () => {
+    const src = printExpr(
+      scaffoldList("Order", [text("name")], {
+        filters: [{ name: "search", params: ["name", "city"] }],
+      }),
+    );
+    expect(src).toContain('Field("Name", bind: searchName');
+    expect(src).toContain('Field("City", bind: searchCity');
+    expect(src).toContain(
+      'searchName != "" && searchCity != "" => QueryView(of: Order.search(searchName, searchCity)',
+    );
+    expect(
+      parseRawResult(inPage(src))
+        .parserErrors.map((e) => e.message)
+        .join("\n"),
+    ).toBe("");
+  });
+
+  it("no filters → no Group, plain all-query list (unchanged)", () => {
+    const src = printExpr(scaffoldList("Order", [text("status")]));
+    expect(src).not.toContain("Group(");
+    expect(src).not.toContain("match {");
+    expect(src).toContain("QueryView(of: Order.all");
+  });
+
+  it("filterStateFields names one string field per find param", () => {
+    expect(
+      filterStateFields([
+        { name: "byStatus", params: ["status"] },
+        { name: "search", params: ["name", "city"] },
+      ]),
+    ).toEqual([{ name: "byStatusStatus" }, { name: "searchName" }, { name: "searchCity" }]);
+  });
+});
+
+describe("filterFindsForAggregate — resolves filter finds from the repository AST", () => {
+  it("keeps string-param list finds, drops all / scalar / non-array / non-string", async () => {
+    const { model, errors } = await parseString(`
+      system S {
+        context C {
+          aggregate Order { reference: string }
+          repository Orders for Order {
+            find byStatus(status: string): Order[]
+            find search(name: string, city: string): Order[]
+            find byTotal(total: int): Order[]
+            find one(ref: string): Order
+            find count(): int
+          }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+    const order = findNode(model, "Aggregate", "Order");
+    expect(filterFindsForAggregate(order)).toEqual([
+      { name: "byStatus", params: ["status"] },
+      { name: "search", params: ["name", "city"] },
+    ]);
+  });
+});
 
 describe("scalarColumnsForAggregate — resolves columns from the aggregate AST", () => {
   it("dispatches each field by type and skips value-objects / arrays", async () => {

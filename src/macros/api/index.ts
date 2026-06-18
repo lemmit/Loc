@@ -89,6 +89,7 @@ export {
   callExpr,
   intLit,
   lambda,
+  matchExpr,
   nameRefExpr,
   page,
   pageMenuMeta,
