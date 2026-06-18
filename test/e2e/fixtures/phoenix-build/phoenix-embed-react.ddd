@@ -38,7 +38,7 @@ system PhoenixEmbedReact {
     page Products {
       route: "/products"
       title: "Products"
-      body: List { of: Product }
+      body: scaffoldList { of: Product }
     }
   }
 
