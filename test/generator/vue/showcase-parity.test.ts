@@ -45,9 +45,10 @@ describe("vue showcase — views + workflows parity", () => {
     const page = files.get("src/pages/workflows/place_order.vue")!;
     expect(page).toContain("const run = reactive(usePlaceOrderWorkflow());");
     expect(page).toContain("const form = useLoomForm(PlaceOrderRequest,");
-    // Default submit: run + redirect to the workflows index.
+    expect(page).toContain(`import { pushToast } from "../../lib/toast";`);
+    // Default submit: run + success toast + redirect to the workflows index.
     expect(page).toContain(
-      `@submit.prevent='form.handleSubmit(async (vals) => { await run.mutateAsync(vals); navigate("/workflows"); })($event)'`,
+      `@submit.prevent='form.handleSubmit(async (vals) => { await run.mutateAsync(vals); pushToast("Place Order completed"); navigate("/workflows"); })($event)'`,
     );
     // `X id` workflow param renders as a select fed by the
     // idTargetHookVar-named useAll lookup.

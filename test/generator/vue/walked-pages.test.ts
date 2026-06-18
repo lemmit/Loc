@@ -88,14 +88,17 @@ describe("vue walker — scaffold pages", () => {
     const files = await vueFiles();
     const newPage = files.get("src/pages/customers/new.vue")!;
     expect(newPage).toContain(`import { useLoomForm } from "../../lib/form";`);
+    // Default-submit create form imports the toast queue for its success toast.
+    expect(newPage).toContain(`import { pushToast } from "../../lib/toast";`);
     expect(newPage).toContain("const create = reactive(useCreateCustomer());");
     expect(newPage).toContain(
       'const form = useLoomForm(CreateCustomerRequest, { name: "", email: "" });',
     );
     // The pack's v-form markup: zod-parsed submit with the default
-    // create-then-redirect body, single-quoted handler attr.
+    // create-then-redirect body (success toast then redirect), single-
+    // quoted handler attr.
     expect(newPage).toContain(
-      "@submit.prevent='form.handleSubmit(async (vals) => { const out = await create.mutateAsync(vals); navigate(`/customers/${out.id}`); })($event)'",
+      "@submit.prevent='form.handleSubmit(async (vals) => { const out = await create.mutateAsync(vals); pushToast(\"Customer created\"); navigate(`/customers/${out.id}`); })($event)'",
     );
     expect(newPage).toContain('v-model="form.values.name"');
     expect(newPage).toContain(`:error-messages='form.errors["name"]'`);

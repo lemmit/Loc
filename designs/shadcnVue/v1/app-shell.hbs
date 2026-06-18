@@ -5,7 +5,7 @@ import { useRoute } from "vue-router";
 import { Menu } from "lucide-vue-next";
 import { Alert, AlertDescription, AlertTitle, Button } from "@/components/ui";
 {{#if hasRealtimeHandlers}}import RealtimeHandlers from "@/components/RealtimeHandlers.vue";
-import { toastQueue } from "@/lib/toast";
+{{/if}}{{#if hasToastHost}}import { toastQueue } from "@/lib/toast";
 {{/if}}
 
 // Mobile sidebar toggle — hidden below the `sm` breakpoint until the
@@ -70,7 +70,7 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
       </main>
     </div>
 {{#if hasRealtimeHandlers}}    <RealtimeHandlers />
-    <div class="fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2" data-testid="channel-toast-host">
+{{/if}}{{#if hasToastHost}}    <div class="fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2" data-testid="channel-toast-host">
       <Alert v-for="t in toastQueue.items" :key="t.id" data-testid="channel-toast">
         <AlertDescription>\{{ t.message }}</AlertDescription>
       </Alert>

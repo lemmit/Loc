@@ -10,7 +10,12 @@ import type {
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
-import { type OperationFormState, type WalkResult, walkBody } from "../../_walker/walker-core.js";
+import {
+  type FormOfState,
+  type OperationFormState,
+  type WalkResult,
+  walkBody,
+} from "../../_walker/walker-core.js";
 import { idTargetHookVar } from "../../react/form-helpers.js";
 import { vueTarget } from "./vue-target.js";
 
@@ -35,10 +40,12 @@ import { vueTarget } from "./vue-target.js";
 //   - form wiring assembles from the FormOfState records: an
 //     aggregate create-form gets the `form` LoomForm instance + the
 //     `create` mutation handle the pack's primitive-form-of markup
-//     references; each operation form gets a v-dialog appended after
-//     the walked body, dialog state, an open-fn, and its own
-//     `<op>Form` instance.  Workflow forms are the workflow parity
-//     slice's TODO.
+//     references; a workflow run-form gets the same with the `run`
+//     mutation handle; each operation form gets a v-dialog appended
+//     after the walked body, dialog state, an open-fn, and its own
+//     `<op>Form` instance.  A default-submit create/workflow form
+//     imports `pushToast` for its success toast (the host is mounted
+//     by the app-shell — see `hasToastHost` in index.ts).
 // ---------------------------------------------------------------------------
 
 /** Everything the SFC assembler needs beyond the walk result. */
@@ -82,6 +89,11 @@ export function renderVuePage(input: VuePageShellInput): string {
   const wfFormState = result.formOfs.find((f) => f.kind === "workflow");
   const usesLoomForm =
     aggFormState !== undefined || wfFormState !== undefined || opFormStates.length > 0;
+  // A default-submit create/workflow form (no custom `onSubmit:`) renders
+  // the pack's `form-default-onsubmit` body, which pushes a success toast
+  // on completion — so the page imports `pushToast` and the app-shell
+  // mounts the toast host (gated on `hasToastHost` in index.ts).
+  const usesFormToast = formNeedsToast(aggFormState) || formNeedsToast(wfFormState);
   // Create + workflow forms' default submit bodies navigate.
   const needsNavigate =
     result.usesNavigate || aggFormState !== undefined || wfFormState !== undefined;
@@ -302,6 +314,9 @@ export function renderVuePage(input: VuePageShellInput): string {
   );
   if (usesLoomForm) {
     script.push(`import { useLoomForm } from "${relPrefix(input)}lib/form";`);
+  }
+  if (usesFormToast) {
+    script.push(`import { pushToast } from "${relPrefix(input)}lib/toast";`);
   }
   // Extern frontend functions called from the body — one conformance-
   // shim import per used name (`src/lib/<name>.ts`).  The shim re-exports
@@ -567,7 +582,7 @@ export function renderVueComponentFile(
   pageRoutes: ReadonlyMap<string, string> = new Map(),
   externFunctions: ReadonlySet<string> = new Set(),
   externComponents: ReadonlySet<string> = new Set(),
-): string {
+): { source: string; usesFormToast: boolean } {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
   // Aggregate-typed params power `Action(<inst>.<op>)` resolution.
@@ -603,6 +618,10 @@ export function renderVueComponentFile(
   );
   const aggFormState = result.formOfs.find((f) => f.kind === "aggregate");
   const wfFormState = result.formOfs.find((f) => f.kind === "workflow");
+  // Default-submit create/workflow form → the pack body pushes a success
+  // toast, so the component imports `pushToast` (the host is mounted by
+  // the app-shell — see `hasToastHost` in index.ts).
+  const usesFormToast = formNeedsToast(aggFormState) || formNeedsToast(wfFormState);
 
   const script: string[] = [];
   const vueImports = new Set<string>();
@@ -795,6 +814,9 @@ export function renderVueComponentFile(
   if (usesLoomForm) {
     script.push(`import { useLoomForm } from "../lib/form";`);
   }
+  if (usesFormToast) {
+    script.push(`import { pushToast } from "../lib/toast";`);
+  }
   for (const [from, names] of [...apiImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     script.push(`import { ${[...names].sort().join(", ")} } from "${from}";`);
   }
@@ -835,7 +857,7 @@ export function renderVueComponentFile(
   while (script.length > 0 && script[script.length - 1] === "") script.pop();
 
   const dialogs = dialogBlocks.length > 0 ? `\n${dialogBlocks.join("\n")}` : "";
-  return `<!-- Auto-generated.  Do not edit by hand.  (${name}) -->
+  const source = `<!-- Auto-generated.  Do not edit by hand.  (${name}) -->
 <script setup lang="ts">
 ${script.join("\n")}
 </script>
@@ -844,4 +866,18 @@ ${script.join("\n")}
 ${indent(result.tsx, "  ")}${dialogs}
 </template>
 `;
+  return { source, usesFormToast };
+}
+
+/** True when a form state renders the pack's default-submit body — an
+ *  aggregate create-form or a workflow run-form with no custom
+ *  `onSubmit:` (so the `form-default-onsubmit` template, which pushes a
+ *  success toast, is what runs).  Drives both the per-page/component
+ *  `pushToast` import and the app-shell toast-host gate. */
+function formNeedsToast(state: FormOfState | undefined): boolean {
+  return (
+    state !== undefined &&
+    (state.kind === "aggregate" || state.kind === "workflow") &&
+    state.onSubmitJs === null
+  );
 }

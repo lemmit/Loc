@@ -196,6 +196,10 @@ export function generateVueForContexts(
   for (const c of options.topLevelComponents ?? []) emittedComponents.set(c.name, c);
   for (const c of ui.components) emittedComponents.set(c.name, c);
   const externComponentNames = new Set<string>();
+  // True once any page or component emits a default-submit create/workflow
+  // form: those push a success toast, so `lib/toast.ts` must exist and the
+  // app-shell must mount the toast host (`hasToastHost` below).
+  let hasFormToast = false;
   for (const c of emittedComponents.values()) {
     if (c.extern) {
       externComponentNames.add(c.name);
@@ -217,22 +221,21 @@ export function generateVueForContexts(
       );
       continue;
     }
-    out.set(
-      `src/components/${c.name}.vue`,
-      renderVueComponentFile(
-        c.name,
-        c.params,
-        c.state,
-        c.body!,
-        pack,
-        userComponents,
-        aggregatesIRByName,
-        bcByAggregate,
-        pageRoutes,
-        externFunctionNames,
-        externComponentNames,
-      ),
+    const component = renderVueComponentFile(
+      c.name,
+      c.params,
+      c.state,
+      c.body!,
+      pack,
+      userComponents,
+      aggregatesIRByName,
+      bcByAggregate,
+      pageRoutes,
+      externFunctionNames,
+      externComponentNames,
     );
+    if (component.usesFormToast) hasFormToast = true;
+    out.set(`src/components/${c.name}.vue`, component.source);
   }
 
   for (const page of pages) {
@@ -258,6 +261,13 @@ export function generateVueForContexts(
       pageRoutes,
       externFunctionNames,
     );
+    if (
+      result.formOfs.some(
+        (f) => (f.kind === "aggregate" || f.kind === "workflow") && f.onSubmitJs === null,
+      )
+    ) {
+      hasFormToast = true;
+    }
     out.set(
       pagePath(page),
       renderVuePage({
@@ -385,6 +395,11 @@ export function generateVueForContexts(
   const hasRealtimeHandlers = realtimeTypes.length > 0 && (ui.notifications?.length ?? 0) > 0;
   if (hasRealtimeHandlers) {
     out.set("src/components/RealtimeHandlers.vue", buildVueRealtimeHandlers(ui, pack));
+  }
+  // The toast queue + app-shell host serve realtime `on` handlers AND
+  // form-submit success toasts; emit `lib/toast.ts` when either needs it.
+  const hasToastHost = hasRealtimeHandlers || hasFormToast;
+  if (hasToastHost) {
     out.set("src/lib/toast.ts", renderShell(pack, "toast", {}));
   }
 
@@ -400,11 +415,22 @@ export function generateVueForContexts(
     systemNameHuman: humanize(sys.name),
     navSections: deriveNavSections(defaultPages),
     hasRealtimeHandlers,
+    hasToastHost,
   };
   if (useLayouts) {
+    // The chrome (and its toast/realtime hosts) move OUT of App.vue into
+    // DefaultLayout — but that file sits a directory deeper than `src/`,
+    // so the app-shell's `./lib/toast` / `./components` imports wouldn't
+    // resolve there.  Both hosts stay off the layout (matching the
+    // realtime host's existing behaviour); RealtimeHandlers re-mounts once
+    // in App.vue via app-root.
     out.set(
       "src/layouts/DefaultLayout.vue",
-      renderShell(pack, "app-shell", { ...chromeVM, hasRealtimeHandlers: false }),
+      renderShell(pack, "app-shell", {
+        ...chromeVM,
+        hasRealtimeHandlers: false,
+        hasToastHost: false,
+      }),
     );
     out.set("src/App.vue", renderShell(pack, "app-root", { hasRealtimeHandlers }));
   } else {
