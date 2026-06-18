@@ -21,6 +21,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { combineWhere, vanillaCapabilityFilter } from "./capability-filter.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 
 export function emitVanillaRepositories(
@@ -75,12 +76,27 @@ function renderRepository(
   const contextModule = `${appModule}.${ctxModule}`;
 
   const finds = customFindsOf(repo);
-  const findFns = finds.map((f) => renderFindFn(f, aggModule, contextModule));
+  const cap = vanillaCapabilityFilter(agg, contextModule);
+  const findFns = finds.map((f) => renderFindFn(f, aggModule, contextModule, cap));
   const findBlock = findFns.length > 0 ? `\n\n${findFns.join("\n\n")}\n` : "";
-  // `import Ecto.Query` is required for `from(...)` in custom finds —
-  // emit it only when there's at least one find, to keep param-free
-  // repositories byte-identical to before.
-  const ectoImport = finds.length > 0 ? `\n  import Ecto.Query` : "";
+  // A `filter <expr>` capability (`contextFilters`) AND-s into every root read
+  // (soft-delete et al.).  Plain Ecto has no global filter, so `cap` is conjoined
+  // into `list/0`, `find_by_id/1` (below), and each custom find (above).
+  // `import Ecto.Query` is required for `from(...)` — needed when there's a
+  // custom find OR a capability filter (which turns `list`/`find_by_id` into
+  // `from(...)` reads).  Omit it otherwise to keep plain repositories
+  // byte-identical to before.
+  const ectoImport = finds.length > 0 || cap ? `\n  import Ecto.Query` : "";
+  // `list/0`: bare `Repo.all(<Agg>)` unless a capability filter scopes it.
+  const listBody = cap
+    ? `from(record in ${aggModule}, where: ${cap}) |> Repo.all()`
+    : `Repo.all(${aggModule})`;
+  // `find_by_id/1`: `Repo.get` can't carry the capability `where`, so a scoped
+  // read becomes a `from(... where: id and cap) |> Repo.one()` (a soft-deleted
+  // / out-of-scope row then reads as `:not_found`, matching every other backend).
+  const findByIdBody = cap
+    ? `case Repo.one(from(record in ${aggModule}, where: record.id == ^id and (${cap}))) do`
+    : `case Repo.get(${aggModule}, id) do`;
 
   return `# Auto-generated.
 defmodule ${repoMod} do
@@ -89,12 +105,12 @@ defmodule ${repoMod} do
 
   @spec list() :: {:ok, [${aggModule}.t()]} | {:error, term()}
   def list do
-    {:ok, Repo.all(${aggModule})}
+    {:ok, ${listBody}}
   end
 
   @spec find_by_id(binary()) :: {:ok, ${aggModule}.t()} | {:error, :not_found}
   def find_by_id(id) when is_binary(id) do
-    case Repo.get(${aggModule}, id) do
+    ${findByIdBody}
       nil -> {:error, :not_found}
       record -> {:ok, record}
     end
@@ -137,7 +153,12 @@ end
  *  fall through to a per-param `record.<param> == ^<param>` predicate
  *  generated here, matching the source-level convention spelled out in
  *  examples/sales.ddd. */
-function renderFindFn(f: FindIR, aggModule: string, contextModule: string): string {
+function renderFindFn(
+  f: FindIR,
+  aggModule: string,
+  contextModule: string,
+  cap: string | null,
+): string {
   const fnName = snake(f.name);
   const argNames = f.params.map((p) => snake(p.name));
   const argList = argNames.join(", ");
@@ -161,6 +182,9 @@ function renderFindFn(f: FindIR, aggModule: string, contextModule: string): stri
     // examples/sales.ddd's `find byCustomer(customerId: Customer id)`).
     whereExpr = argNames.map((n) => `record.${n} == ^${n}`).join(" and ");
   }
+  // AND the aggregate's capability filter into the find's own predicate
+  // (a find must honour the same soft-delete / scoping the CRUD reads do).
+  whereExpr = combineWhere(whereExpr || null, cap) ?? "";
 
   const fetchCall = single ? `Repo.one(query)` : `Repo.all(query)`;
   const specTail = single
