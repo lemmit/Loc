@@ -34,7 +34,7 @@ system Orders {
   storage pg { type: postgres }
   resource orderState { for: Reservations, kind: state, use: pg }
 
-  deployable api {
+  deployable phoenixApp {
     platform: phoenix
     contexts: [Reservations]
     dataSources: [orderState]

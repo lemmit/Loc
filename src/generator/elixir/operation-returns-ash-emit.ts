@@ -125,11 +125,15 @@ export function renderAshReturningOpAction(
   }
 
   const bindBlock = paramBinds.length > 0 ? `${paramBinds.join("\n")}\n` : "";
+  // Bind `_record` when the body never touches the loaded struct (a literal-only
+  // return) so `mix compile --warnings-as-errors` doesn't trip on an unused var.
+  const recordUsed = [...paramBinds, ...bodyLines].some((l) => /\brecord\b/.test(l));
+  const recordPat = recordUsed ? "record" : "_record";
   return `    action :${opSnake}, :term do
 ${argLines.join("\n")}
       run fn input, _context ->
         case Ash.get(__MODULE__, input.arguments.id) do
-          {:ok, record} ->
+          {:ok, ${recordPat}} ->
 ${bindBlock}${bodyLines.join("\n")}
 
           {:error, _} ->
