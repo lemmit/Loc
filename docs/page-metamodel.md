@@ -292,12 +292,26 @@ Required for "mutate then navigate" event handlers.
 
 ```ddd
 onSubmit: c => {
-  draft.customerId := c.customerId
-  step := 1
+  draft.customerId := c.customerId   // nested state write
+  step := 1                          // scalar state write
+  tags  += newTag                    // collection append
+  tags  -= oldTag                    // collection remove
+  count += 1                         // scalar increment
 }
 ```
 
 Reuses the existing `Statement` rule (covers `let`, `:=`, calls, `emit`).
+
+State-mutation lowering across the frontends:
+
+- **`:=` nested** (`addr.zip := v`) — React rebuilds the object immutably
+  (`setAddr({ ...addr, zip: v })`); Vue refs / Svelte `$state` / Angular
+  signals mutate in their native idiom (Vue/Svelte in place, Angular via
+  `set`).
+- **`+=` / `-=` are type-driven.** On a **collection** target they append /
+  remove (`[...tags, v]` / `tags.filter(x => x !== v)`); on a **scalar**
+  target they're arithmetic (`count + 1`). The collection-vs-scalar signal
+  rides the lowered target type.
 
 ### 8.1 Inline collection ops
 

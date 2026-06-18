@@ -148,7 +148,8 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
     }
     if (stmt.op === "+=" || stmt.op === "-=") {
       const targetType = pathType(path, env);
-      const elementType = targetType.kind === "array" ? targetType.element : targetType;
+      const collection = targetType.kind === "array";
+      const elementType = collection ? targetType.element : targetType;
       // Element-type context applies for both array push (`+=`) and
       // remove (`-=`) — same numeric-literal-into-money elaboration.
       const value = lowerExprInContext(stmt.value, elementType, env);
@@ -158,6 +159,12 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
           target: path,
           value,
           elementType,
+          // True when the target is a collection (`xs += item` →
+          // append / `xs -= item` → remove); false for scalar compound
+          // assignment (`count += 1` → arithmetic).  Domain `add`/`remove`
+          // are always collection mutations; page handlers overload the
+          // kinds for scalar counters, so the walker needs the signal.
+          collection,
           prov,
         },
         envAfter: env,

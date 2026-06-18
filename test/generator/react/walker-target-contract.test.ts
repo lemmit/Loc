@@ -126,6 +126,19 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
     expect(heex).toBe("|> assign(:step, value)");
   });
 
+  it("renderNestedStateWrite diverges: TSX immutable spread+setter, Vue/Svelte in-place, HEEx throws", () => {
+    const seg = ["order", "shipping", "zip"];
+    // React rebuilds the object inside-out and calls the root setter.
+    expect(tsxTarget.renderNestedStateWrite(seg, "v")).toBe(
+      "setOrder({ ...order, shipping: { ...order.shipping, zip: v } })",
+    );
+    // Vue + Svelte mutate the reactive object in place — no spread.
+    expect(vueTarget.renderNestedStateWrite(seg, "v")).toBe("order.shipping.zip = v");
+    expect(svelteTarget.renderNestedStateWrite(seg, "v")).toBe("order.shipping.zip = v");
+    // HEEx renders state through its own engine and never reaches the seam.
+    expect(() => heexTarget.renderNestedStateWrite()).toThrow(/own engine/);
+  });
+
   it("svelteTarget diverges from TSX where runes differ, matches where shared", () => {
     // `$state` runes read as the bare name (same spelling as TSX —
     // position-invariant), but writes are plain assignment, not the

@@ -68,6 +68,20 @@ export const tsxTarget: WalkerTarget = {
     return `${setter}(${value})`;
   },
 
+  /** Immutable nested update: build the spread inside-out, then call the
+   *  root's setter — `setOrder({ ...order, shipping: { ...order.shipping,
+   *  zip: v } })`.  React state can't be mutated in place or it won't
+   *  re-render. */
+  renderNestedStateWrite(segments: readonly string[], valueJs: string): string {
+    let value = valueJs;
+    for (let i = segments.length - 1; i >= 1; i--) {
+      value = `{ ...${segments.slice(0, i).join(".")}, ${segments[i]!}: ${value} }`;
+    }
+    const root = segments[0]!;
+    const setter = `set${root[0]!.toUpperCase()}${root.slice(1)}`;
+    return `${setter}(${value})`;
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Turn a detected api call into React-Query naming + import.

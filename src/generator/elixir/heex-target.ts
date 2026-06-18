@@ -45,6 +45,14 @@ export const heexTarget: WalkerTarget = {
     return `|> assign(:${snakeLocal(ref.name)}, ${value})`;
   },
 
+  /** Unreachable: the HEEx walker (heex-walker-core.ts) renders state
+   *  mutation through its own engine, never the shared `stateWrite`. */
+  renderNestedStateWrite(): never {
+    throw new Error(
+      "heexTarget.renderNestedStateWrite: HEEx renders state through its own engine; this should never be called.",
+    );
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Phoenix calls the Ash domain code interface directly — no hook

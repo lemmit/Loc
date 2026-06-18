@@ -172,6 +172,17 @@ export interface WalkerTarget {
    *  rendered via `renderExpression`. */
   renderStateWrite(ref: StateRef, value: string): string;
 
+  /** Render a write to a MULTI-SEGMENT state target (`order.shipping.zip
+   *  := v`, `cart.items += x`).  `segments` is the full dotted path (its
+   *  root is a `state` field); `valueJs` is the already-rendered RHS.
+   *  React state is immutable, so TSX builds a nested-spread update +
+   *  setter (`setOrder({ ...order, shipping: { ...order.shipping, zip: v }})`);
+   *  Vue refs and Svelte `$state` are mutated in place
+   *  (`order.shipping.zip = v`).  Single-segment writes go through
+   *  `renderStateWrite`; HEEx renders state through its own engine and
+   *  never reaches this seam. */
+  renderNestedStateWrite(segments: readonly string[], valueJs: string): string;
+
   // --- API binding seam ---------------------------------------------------
 
   /** Turn a framework-agnostic `DetectedApiCall` (produced by the

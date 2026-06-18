@@ -55,6 +55,20 @@ export const angularTarget: WalkerTarget = {
     return `${ref.name}.set(${value})`;
   },
 
+  /** Immutable nested update via the signal's `set` — reads the current
+   *  value through the signal call (`order()`), builds the spread inside-
+   *  out, then `order.set({ ...order(), shipping: { ...order().shipping,
+   *  zip: v } })`.  Angular signals don't react to in-place mutation. */
+  renderNestedStateWrite(segments: readonly string[], valueJs: string): string {
+    const root = segments[0]!;
+    let value = valueJs;
+    for (let i = segments.length - 1; i >= 1; i--) {
+      const prefix = [`${root}()`, ...segments.slice(1, i)].join(".");
+      value = `{ ...${prefix}, ${segments[i]!}: ${value} }`;
+    }
+    return `${root}.set(${value})`;
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Same `use*` naming + `../api/<agg>` import as React/Vue — the

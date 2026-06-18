@@ -129,6 +129,47 @@ describe("+= / -= in onClick mutations", () => {
     );
   });
 
+  it("collection += appends immutably (setTags([...tags, v]), not arithmetic)", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        subdomain M { context C { } }
+        ui WebApp {
+          page Tags {
+            route: "/t"
+            state { tags: string[] = [] }
+            body:  Button { "add", onClick: e => { tags += "new" } }
+          }
+        }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+      }
+    `);
+    const content = files.get("web/src/pages/tags.tsx")!;
+    expect(content).toContain('setTags([...tags, "new"]);');
+    // The old arithmetic reading (string concat) must be gone.
+    expect(content).not.toContain('setTags(tags + "new")');
+  });
+
+  it("collection -= removes by value (filter), not subtraction", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        subdomain M { context C { } }
+        ui WebApp {
+          page Tags {
+            route: "/t"
+            state { tags: string[] = [] }
+            body:  Button { "drop", onClick: e => { tags -= "old" } }
+          }
+        }
+        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+      }
+    `);
+    const content = files.get("web/src/pages/tags.tsx")!;
+    expect(content).toContain('setTags(tags.filter((__v) => __v !== "old"));');
+    expect(content).not.toContain('setTags(tags - "old")');
+  });
+
   it("fails loud on an unlowerable assignment target (no silent drop)", async () => {
     // A handler statement the walker can't lower used to emit a
     // `/* unsupported assign */` comment — compiling fine but silently

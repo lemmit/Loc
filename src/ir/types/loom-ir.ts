@@ -2276,8 +2276,28 @@ export type StmtIR =
   | { kind: "requires"; expr: ExprIR; source: string }
   | { kind: "let"; name: string; expr: ExprIR; type: TypeIR }
   | { kind: "assign"; target: PathIR; value: ExprIR; targetType: TypeIR; prov?: ProvSite }
-  | { kind: "add"; target: PathIR; value: ExprIR; elementType: TypeIR; prov?: ProvSite }
-  | { kind: "remove"; target: PathIR; value: ExprIR; elementType: TypeIR; prov?: ProvSite }
+  | {
+      kind: "add";
+      target: PathIR;
+      value: ExprIR;
+      elementType: TypeIR;
+      /** True when the target is a collection (append); false for a
+       *  scalar compound `+=` (arithmetic).  Domain bodies only ever emit
+       *  collection `add`; page handlers overload it for counters, so the
+       *  walker reads this to choose `[...xs, v]` vs `x + v`. */
+      collection: boolean;
+      prov?: ProvSite;
+    }
+  | {
+      kind: "remove";
+      target: PathIR;
+      value: ExprIR;
+      elementType: TypeIR;
+      /** True when the target is a collection (remove element); false for
+       *  a scalar compound `-=` (arithmetic). */
+      collection: boolean;
+      prov?: ProvSite;
+    }
   | {
       kind: "emit";
       eventName: string;

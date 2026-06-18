@@ -58,7 +58,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | DEBT-07 | `shape(document)` persistence | elixir | 3 | M | — |
 | DEBT-08 | Generic carriers (`paged<T>`/`envelope<T>`) on the wire consumer | react, vue, svelte | 3 | M | `payload-transport-layer.md` P3b |
 | DEBT-09 | Non-constructible aggregates (omit the create surface) | elixir, react, vue, svelte | 3 | M | — |
-| DEBT-10 | Multi-segment / nested state mutation in page handlers | react, vue, svelte | 3 | M | — |
+| DEBT-10 | ~~Multi-segment / nested state mutation in page handlers~~ **DONE** — collection `+=`/`-=` now append/remove (was numeric `+`/`-` → broken list code); nested `:=` mutates in place on Vue/Svelte/Angular vs React's immutable spread | react, vue, svelte (+ angular) | 3 | M | — |
 | DEBT-11 | ~~Vue workflow forms~~ **DONE** — structural render + error mapping already shipped; the success-toast parity (React/Svelte gap) now lands too | vue | 3 | M | `vue-frontend-plan.md` |
 | DEBT-12 | Phoenix page DSL: `requires` guard, new-parts-in-body, `verify_token` | elixir | 2 | M | — |
 | DEBT-13 | Ordered `X id[]` reference collections | elixir (set-only), frontends (editor) | 2 | M | `experience_gathered.md` §8.4 |
@@ -129,7 +129,7 @@ Concise scope per item; full gate locations in the table above.
 - **DEBT-07 `shape(document)` (elixir):** the single opaque Ash `:map` path (`src/util/platform-axes.ts`).
 - **DEBT-08 Generic carriers (frontends):** consume `paged<T>`/`envelope<T>` in the wire layer — pagination UI + envelope unwrap on react/vue/svelte. Gate `loom.generic-carrier-unsupported`.
 - **DEBT-09 Non-constructible aggregates (elixir + frontends):** suppress the create route/form when the aggregate omits a create surface (Ash defaults to all-CRUD; frontends keep create always-on).
-- **DEBT-10 Nested state mutation (frontends):** multi-segment `nested.field := v` and `parent.items += x` (`walker-core.ts`; was `body-walker.ts:972/999`).
+- **DEBT-10 Nested state mutation (frontends) — DONE:** two fixes in `walker-core.ts` `emitStmt`/`stateWrite`. (1) **Collection `+=`/`-=`** — `parent.items += x` was rendered as numeric `items + x` (broken: `[] - v` → `NaN`); now type-driven append/remove (`[...items, x]` / `items.filter(e => e !== x)`), the signal carried on the `add`/`remove` IR (`collection` flag from the lowered target type). (2) **Nested `:=`** — `addr.zip := v` keeps React's immutable spread but now diverges per target via a new `renderNestedStateWrite` seam: Vue refs / Svelte `$state` / Angular signals mutate in their native idiom (in-place for Vue/Svelte, `set` for Angular signals).
 - **DEBT-11 Vue workflow forms — DONE:** the structural workflow form (fields, typed defaults, submit, navigate) and server/validation error mapping (`useLoomForm` → inline field + `__global` alert) were already shipped; the remaining React/Svelte gap was the **success toast**. The Vue packs' `form-default-onsubmit` now `pushToast(...)`s on completion, and the toast queue + app-shell host are gated on `realtime || forms` (`vue/index.ts` `hasToastHost`) so a form-only project still mounts a host.
 - **DEBT-12 Phoenix page DSL:** `requires` guard (v0 bind-only → full `handle_params/3`), new-parts-in-body stub, `verify_token/1` auth helper.
 - **DEBT-13 Ordered ref collections:** Ash `manage_relationship` ordinal injection + a first-class ordered editor on frontends.
