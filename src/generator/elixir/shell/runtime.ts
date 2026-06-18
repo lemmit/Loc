@@ -1,3 +1,4 @@
+import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { ApiRoute } from "../api-emit.js";
 import type { LiveRoute } from "../liveview-emit.js";
@@ -394,12 +395,12 @@ ${inner}
   // Auth plug line in the :api pipeline — only when auth is enabled.
   const authApiPlug = authEnabled ? `\n    plug ${webModule}.Auth` : "";
 
-  // /auth/me session probe — emitted when auth is enabled.  Piped through
+  // /api/auth/me session probe — emitted when auth is enabled.  Piped through
   // :api so the Auth plug verifies the principal first (the `auth: ui`
-  // frontend guard reads this); parity with the Hono / .NET `/auth/me`.  Under
-  // an `auth { oidc }` block the /auth/login|callback|logout redirect handshake
-  // is added too (the Auth plug bypasses those three so they're reachable
-  // without a verified principal).
+  // frontend guard reads this); parity with the Hono / .NET `/api/auth/me`.
+  // Under an `auth { oidc }` block the /api/auth/login|callback|logout redirect
+  // handshake is added too (the Auth plug bypasses those three so they're
+  // reachable without a verified principal).
   const handshakeRoutes = oidc
     ? `
     get "/login", AuthController, :login
@@ -408,7 +409,7 @@ ${inner}
     : "";
   const authScope = authEnabled
     ? `
-  scope "/auth", ${webModule} do
+  scope "${AUTH_BASE_PATH}", ${webModule} do
     pipe_through :api
 
     get "/me", AuthController, :me${handshakeRoutes}

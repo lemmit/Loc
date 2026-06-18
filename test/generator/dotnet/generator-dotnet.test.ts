@@ -1465,10 +1465,10 @@ describe(".NET generator", () => {
     it("maps GET /auth/me when `auth: required`, and not otherwise", async () => {
       const program = (await emitForAuthSystem(SRC_AUTH_REQUIRED)).get("Program.cs")!;
       expect(program).toContain(
-        'app.MapGet("/auth/me", (ICurrentUserAccessor accessor) => Results.Json(accessor.User)).ExcludeFromDescription();',
+        'app.MapGet("/api/auth/me", (ICurrentUserAccessor accessor) => Results.Json(accessor.User)).ExcludeFromDescription();',
       );
       const noAuth = (await emitForAuthSystem(SRC_NO_AUTH)).get("Program.cs")!;
-      expect(noAuth).not.toContain("/auth/me");
+      expect(noAuth).not.toContain("/api/auth/me");
     });
 
     // OIDC turnkey auth (D-AUTH-OIDC): an `auth { oidc }` block emits a
@@ -1519,13 +1519,13 @@ describe(".NET generator", () => {
       const files = await emitForAuthSystem(SRC_OIDC);
       const handshake = files.get("Auth/AuthHandshake.cs")!;
       expect(handshake).toContain("public static void MapAuthHandshake(this WebApplication app)");
-      expect(handshake).toContain('app.MapGet("/auth/login"');
-      expect(handshake).toContain('app.MapGet("/auth/callback"');
-      expect(handshake).toContain('app.MapGet("/auth/logout"');
+      expect(handshake).toContain('app.MapGet("/api/auth/login"');
+      expect(handshake).toContain('app.MapGet("/api/auth/callback"');
+      expect(handshake).toContain('app.MapGet("/api/auth/logout"');
       expect(handshake).toContain('"grant_type"] = "authorization_code"');
       // mounted + bypassed (redirect endpoints reachable without a principal)
       expect(files.get("Program.cs")!).toContain("app.MapAuthHandshake();");
-      expect(files.get("Auth/UserMiddleware.cs")!).toContain('"/auth/login"');
+      expect(files.get("Auth/UserMiddleware.cs")!).toContain('"/api/auth/login"');
     });
 
     it("does not emit the OIDC verifier or handshake without an `auth { oidc }` block", async () => {
@@ -1533,7 +1533,7 @@ describe(".NET generator", () => {
       expect(files.has("Auth/OidcUserVerifier.cs")).toBe(false);
       expect(files.has("Auth/AuthHandshake.cs")).toBe(false);
       expect(files.get("Api.csproj")!).not.toContain("Microsoft.IdentityModel");
-      expect(files.get("Auth/UserMiddleware.cs")!).not.toContain("/auth/login");
+      expect(files.get("Auth/UserMiddleware.cs")!).not.toContain("/api/auth/login");
     });
 
     // A `requires`-guarded op / workflow denies with ForbiddenException →

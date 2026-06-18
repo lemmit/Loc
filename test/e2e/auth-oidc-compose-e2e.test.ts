@@ -153,7 +153,7 @@ describe.skipIf(!RUN)(
     it("the compose-booted backend validates a real Keycloak token over host.docker.internal", async () => {
       try {
         // Unauthenticated → 401 (middleware + verifier reject).
-        expect((await fetch(`${API_BASE}/tickets`)).status).toBe(401);
+        expect((await fetch(`${API_BASE}/api/tickets`)).status).toBe(401);
 
         const token = await passwordGrantToken();
         const bearer = { authorization: `Bearer ${token}` };
@@ -161,11 +161,11 @@ describe.skipIf(!RUN)(
         // Authenticated → 200.  The backend (in its container) validated the
         // token against Keycloak's JWKS reached over host.docker.internal —
         // the cross-container bridge the generated compose wires.
-        expect((await fetch(`${API_BASE}/tickets`, { headers: bearer })).status).toBe(200);
+        expect((await fetch(`${API_BASE}/api/tickets`, { headers: bearer })).status).toBe(200);
 
         // /auth/me projects the verified claims: id ← sub, roles ←
         // realm_access.roles (dotted), email ← email.
-        const me = await fetch(`${API_BASE}/auth/me`, { headers: bearer });
+        const me = await fetch(`${API_BASE}/api/auth/me`, { headers: bearer });
         expect(me.status).toBe(200);
         const user = (await me.json()) as { id?: string; roles?: string[]; email?: string };
         expect(user.id).toBeTruthy();
@@ -174,8 +174,11 @@ describe.skipIf(!RUN)(
 
         // A forged token is rejected (signature fails against the JWKS).
         expect(
-          (await fetch(`${API_BASE}/auth/me`, { headers: { authorization: "Bearer not.a.token" } }))
-            .status,
+          (
+            await fetch(`${API_BASE}/api/auth/me`, {
+              headers: { authorization: "Bearer not.a.token" },
+            })
+          ).status,
         ).toBe(401);
       } catch (err) {
         console.error(`\n===== compose logs =====\n${composeLogs()}\n========================\n`);

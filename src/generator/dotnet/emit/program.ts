@@ -1,5 +1,6 @@
 import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { isTphBase } from "../../../ir/util/inheritance.js";
+import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { DAPPER_PROJECT_DEPS, renderDapperConnectionSetup } from "./dapper.js";
@@ -232,7 +233,7 @@ using (var scope = app.Services.CreateScope())
   // an internal probe, not a business operation, and the Hono `/auth/me`
   // lives outside its OpenAPI doc too (cross-backend parity).
   const authMe = authRequired
-    ? `app.MapGet("/auth/me", (ICurrentUserAccessor accessor) => Results.Json(accessor.User)).ExcludeFromDescription();
+    ? `app.MapGet("${AUTH_BASE_PATH}/me", (ICurrentUserAccessor accessor) => Results.Json(accessor.User)).ExcludeFromDescription();
 `
     : "";
   // OIDC redirect handshake (/auth/login|callback|logout) — mounted under an

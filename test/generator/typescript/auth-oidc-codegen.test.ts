@@ -116,11 +116,11 @@ describe("hono OIDC turnkey auth — codegen", () => {
     const files = await generateSystemFiles(OIDC);
     const httpIndex = findFile(files, /http\/index\.ts$/);
     expect(httpIndex).toContain('import { authRoutes } from "../auth/handshake";');
-    expect(httpIndex).toContain('app.route("/auth", authRoutes());');
+    expect(httpIndex).toContain('app.route("/api/auth", authRoutes());');
     const mw = findFile(files, /auth\/middleware\.ts$/);
-    // Only the redirect endpoints bypass auth; /auth/me stays protected.
-    expect(mw).toContain('"/auth/login"');
-    expect(mw).not.toContain('"/auth/me"');
+    // Only the redirect endpoints bypass auth; /api/auth/me stays protected.
+    expect(mw).toContain('"/api/auth/login"');
+    expect(mw).not.toContain('"/api/auth/me"');
   });
 
   it("without an auth{} block keeps the dev stub and emits /auth/me but no OIDC", async () => {

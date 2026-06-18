@@ -232,18 +232,18 @@ describe.skipIf(!RUN)(
     it("the generated Java OIDC verifier validates a real Keycloak token + maps claims", async () => {
       try {
         // Unauthenticated → 401 (filter + verifier reject).
-        expect((await fetch(`${apiBase}/tickets`)).status).toBe(401);
+        expect((await fetch(`${apiBase}/api/tickets`)).status).toBe(401);
 
         const token = await passwordGrantToken();
         const bearer = { authorization: `Bearer ${token}` };
 
         // Authenticated with the real token → 200 (verifier validated it
         // against Keycloak's live JWKS).
-        expect((await fetch(`${apiBase}/tickets`, { headers: bearer })).status).toBe(200);
+        expect((await fetch(`${apiBase}/api/tickets`, { headers: bearer })).status).toBe(200);
 
         // /auth/me projects the verified claims onto User: id ← sub, the roles
         // array ← realm_access.roles (a dotted path), email ← email.
-        const me = await fetch(`${apiBase}/auth/me`, { headers: bearer });
+        const me = await fetch(`${apiBase}/api/auth/me`, { headers: bearer });
         expect(me.status).toBe(200);
         const user = (await me.json()) as { id?: string; roles?: string[]; email?: string };
         expect(user.id).toBeTruthy();
@@ -252,8 +252,11 @@ describe.skipIf(!RUN)(
 
         // A forged token is rejected (signature fails against the JWKS).
         expect(
-          (await fetch(`${apiBase}/auth/me`, { headers: { authorization: "Bearer not.a.token" } }))
-            .status,
+          (
+            await fetch(`${apiBase}/api/auth/me`, {
+              headers: { authorization: "Bearer not.a.token" },
+            })
+          ).status,
         ).toBe(401);
       } catch (err) {
         console.error(`\n===== backend log =====\n${backendLog}\n=======================\n`);

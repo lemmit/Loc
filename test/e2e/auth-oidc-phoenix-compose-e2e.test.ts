@@ -47,8 +47,8 @@ const RUN = ENABLED && hasComposeDocker();
 
 // The generated compose pins host ports (the turnkey defaults): the Phoenix
 // backend on 4000, Keycloak on 8081 with issuer host.docker.internal:8081.
-// Phoenix serves the domain API under /api (the Hono backend serves it at
-// root); /auth/me + /health sit at the root.
+// The whole stack serves domain + auth under /api (`/api/tickets`,
+// `/api/auth/me`); only the infra probes (`/health`, `/ready`) sit at the root.
 const API_BASE = "http://localhost:4000";
 const KC_BASE = "http://localhost:8081";
 
@@ -165,7 +165,7 @@ describe.skipIf(!RUN)(
 
         // /auth/me projects the verified claims: id ← sub, roles ←
         // realm_access.roles (dotted), email ← email.
-        const me = await fetch(`${API_BASE}/auth/me`, { headers: bearer });
+        const me = await fetch(`${API_BASE}/api/auth/me`, { headers: bearer });
         expect(me.status).toBe(200);
         const user = (await me.json()) as { id?: string; roles?: string[]; email?: string };
         expect(user.id).toBeTruthy();
@@ -174,8 +174,11 @@ describe.skipIf(!RUN)(
 
         // A forged token is rejected (signature fails against the JWKS).
         expect(
-          (await fetch(`${API_BASE}/auth/me`, { headers: { authorization: "Bearer not.a.token" } }))
-            .status,
+          (
+            await fetch(`${API_BASE}/api/auth/me`, {
+              headers: { authorization: "Bearer not.a.token" },
+            })
+          ).status,
         ).toBe(401);
 
         // The /auth/login handshake entry starts the authorization-code flow:
@@ -184,7 +187,7 @@ describe.skipIf(!RUN)(
         // resolve host.docker.internal), but the redirect target + cookie
         // prove the generated handshake runs.  (The full code→token callback
         // needs a browser session — out of scope for this headless smoke.)
-        const login = await fetch(`${API_BASE}/auth/login`, { redirect: "manual" });
+        const login = await fetch(`${API_BASE}/api/auth/login`, { redirect: "manual" });
         expect(login.status).toBe(302);
         expect(login.headers.get("location") ?? "").toContain("/protocol/openid-connect/auth");
         expect(login.headers.get("set-cookie") ?? "").toContain("oidc_state");

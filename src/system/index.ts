@@ -13,6 +13,7 @@ import type { MigrationsIR } from "../ir/types/migrations-ir.js";
 import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
 import { hasAdapters, resolveLayout, resolveStyle } from "../platform/resolve-adapters.js";
+import { AUTH_BASE_PATH } from "../util/api-base.js";
 import { renderAsyncApi } from "./asyncapi.js";
 import { renderDataSourcesMd } from "./datasources.js";
 import { renderE2EFile } from "./e2e-render.js";
@@ -613,7 +614,7 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
     lines.push(`    OIDC_ISSUER: ${JSON.stringify(kc.issuer)}`);
     lines.push(`    OIDC_CLIENT_ID: ${JSON.stringify(kc.clientId)}`);
     lines.push(
-      `    OIDC_REDIRECT_URI: ${JSON.stringify(`http://localhost:${d.port}/auth/callback`)}`,
+      `    OIDC_REDIRECT_URI: ${JSON.stringify(`http://localhost:${d.port}${AUTH_BASE_PATH}/callback`)}`,
     );
   }
   lines.push(`  ports:`);

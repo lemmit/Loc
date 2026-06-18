@@ -546,9 +546,9 @@ function renderMain(
     ...routerAggs.map((name) => `app.include_router(${snake(name)}_router${routerArgs})`),
     hasViews ? `app.include_router(views_router${routerArgs})` : null,
     hasWorkflows ? `app.include_router(workflows_router${routerArgs})` : null,
-    // Auth routers stay at the app root (NOT under the embedded-SPA /api
-    // prefix): the frontend guard probes /auth/me and the handshake redirect
-    // lands at /auth/callback.
+    // Auth routers mount under the shared API base (`/api/auth`, set by each
+    // router's prefix): the frontend guard probes `${API_BASE_URL}/auth/me`
+    // and the handshake redirect lands at `/api/auth/callback`.
     authRequired ? "app.include_router(auth_router)" : null,
     oidc ? "app.include_router(auth_oidc_router)" : null,
     "",

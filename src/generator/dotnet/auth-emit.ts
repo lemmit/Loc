@@ -6,6 +6,7 @@ import type {
   TypeIR,
   UserIR,
 } from "../../ir/types/loom-ir.js";
+import { AUTH_BASE_PATH } from "../../util/api-base.js";
 import { upperFirst } from "../../util/naming.js";
 import { renderCsType } from "./render-expr.js";
 
@@ -285,7 +286,7 @@ public static class AuthHandshake
     private static readonly string? ClientSecret = ${clientSecretExpr};
     private static readonly string Scopes = ${scopesLiteral};
     private static readonly string RedirectUri =
-        Environment.GetEnvironmentVariable("OIDC_REDIRECT_URI") ?? "http://localhost:8080/auth/callback";
+        Environment.GetEnvironmentVariable("OIDC_REDIRECT_URI") ?? "http://localhost:8080${AUTH_BASE_PATH}/callback";
     private static readonly string PostLogin =
         Environment.GetEnvironmentVariable("OIDC_POST_LOGIN_REDIRECT") ?? "/";
     private static readonly ConfigurationManager<OpenIdConnectConfiguration> Configuration =
@@ -305,7 +306,7 @@ public static class AuthHandshake
     /// OpenAPI contract — they are redirects, not business operations.</summary>
     public static void MapAuthHandshake(this WebApplication app)
     {
-        app.MapGet("/auth/login", async (HttpContext ctx) =>
+        app.MapGet("${AUTH_BASE_PATH}/login", async (HttpContext ctx) =>
         {
             OpenIdConnectConfiguration config = await Configuration.GetConfigurationAsync(ctx.RequestAborted);
             string state = Guid.NewGuid().ToString("N");
@@ -321,7 +322,7 @@ public static class AuthHandshake
             return Results.Redirect(QueryHelpers.AddQueryString(config.AuthorizationEndpoint, query));
         }).ExcludeFromDescription();
 
-        app.MapGet("/auth/callback", async (HttpContext ctx) =>
+        app.MapGet("${AUTH_BASE_PATH}/callback", async (HttpContext ctx) =>
         {
             string code = ctx.Request.Query["code"].ToString();
             string state = ctx.Request.Query["state"].ToString();
@@ -365,7 +366,7 @@ public static class AuthHandshake
             return Results.Redirect(PostLogin);
         }).ExcludeFromDescription();
 
-        app.MapGet("/auth/logout", (HttpContext ctx) =>
+        app.MapGet("${AUTH_BASE_PATH}/logout", (HttpContext ctx) =>
         {
             ctx.Response.Cookies.Delete("session");
             return Results.Redirect(PostLogin);
@@ -540,9 +541,9 @@ function renderMiddleware(ns: string, oidc: boolean): string {
   // verified principal; /auth/me stays protected.
   const handshakeBypass = oidc
     ? `
-        "/auth/login",
-        "/auth/callback",
-        "/auth/logout",`
+        "${AUTH_BASE_PATH}/login",
+        "${AUTH_BASE_PATH}/callback",
+        "${AUTH_BASE_PATH}/logout",`
     : "";
   return `// Auto-generated.
 using System.Threading.Tasks;
