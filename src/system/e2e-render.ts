@@ -12,6 +12,7 @@ import type {
   TestStmtIR,
 } from "../ir/types/loom-ir.js";
 import { platformFor } from "../platform/registry.js";
+import { API_BASE_PATH } from "../util/api-base.js";
 import { lowerFirst, plural, snake } from "../util/naming.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 
@@ -54,12 +55,11 @@ interface RenderCtx {
 
 /**
  * Returns the URL prefix that the deployable's API is mounted under.
- * Phoenix LiveView serves its HTTP API inside `scope "/api", …`, so
- * every aggregate, workflow, and view route is reachable at
- * `/api/<route>`.  Hono and dotnet serve at the root, so no prefix.
+ * Every backend now mounts its domain routes under the shared
+ * `API_BASE_PATH` (`/api`); infra endpoints stay at the root.
  */
-function apiBasePath(platform: string): string {
-  return platform === "elixir" ? "/api" : "";
+function apiBasePath(_platform: string): string {
+  return API_BASE_PATH;
 }
 
 export function renderE2EFile(

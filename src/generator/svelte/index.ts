@@ -9,6 +9,7 @@ import {
   uiUsesMoney,
 } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
+import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
 import { AUTH_GATE_SVELTE, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
 import {
@@ -78,7 +79,8 @@ export function generateSvelteForContexts(
   const out = new Map<string, string>();
 
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
-  const apiBaseUrl = options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
+  const apiBaseUrl =
+    options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}${API_BASE_PATH}`;
   const base = options.basePath || undefined;
 
   const aggregates: Array<{ agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }> = [];

@@ -8,6 +8,7 @@ import type {
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
+import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { generateReactForContexts } from "../react/index.js";
@@ -420,9 +421,9 @@ function renderMain(
   startsRelay = false,
   oidc = false,
 ): string {
-  // Embedded-SPA mode mounts every router under /api/* so the SPA's
-  // path namespace stays free for client-side routing.
-  const routerArgs = hasEmbeddedSpa ? ', prefix="/api"' : "";
+  // Every router mounts under the shared API base path (`/api/*`) so the
+  // SPA's root path namespace stays free for client-side routing.
+  const routerArgs = `, prefix="${API_BASE_PATH}"`;
   const authRequired = authUser != null;
   // Dev-stub verifier (Hono index.ts parity): accepts every request as
   // a built-in admin user with EMPTY permissions so the generated

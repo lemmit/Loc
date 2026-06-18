@@ -12,6 +12,7 @@ import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
+import { API_BASE_PATH } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { findUnionSpec, unionMembers } from "../_payload/union-wire.js";
@@ -204,7 +205,9 @@ function emitProjectFromContexts(
   // un-prefixed route space; controllers move under /api (the .NET
   // embedded-SPA shape).
   const hasEmbeddedSpa = !!system?.deployable.uiName;
-  const routePrefix = hasEmbeddedSpa ? "/api" : undefined;
+  // Domain controllers always live under `/api/*` (the shared API base
+  // path); `hasEmbeddedSpa` separately drives SPA static-file embedding.
+  const routePrefix = API_BASE_PATH;
 
   // Shared domain types + the package markers that keep the entity files'
   // wildcard imports valid even when a package would otherwise be empty.
