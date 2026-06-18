@@ -79,7 +79,7 @@ export class DddValidator {
     // pass.  Surfaced here so unknown macros, bad args, and
     // composition collisions show up alongside other validator
     // diagnostics rather than in a separate diagnostic pipeline.
-    checkMacroExpansion(model, accept);
+    checkMacroExpansion(model, accept, this.services);
     // Validate every `string.matches(regex)` call's
     // argument is a string literal that compiles as a RegExp.
     // Walks the entire AST so the rule applies in invariants,

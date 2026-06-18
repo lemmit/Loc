@@ -227,7 +227,7 @@ function expandOneCall(
     });
     return;
   }
-  const argResult = bindArgs(macro, call, inv, (d) => recordDiagnostic(doc, d));
+  const argResult = bindArgs(macro, call, inv, (d) => recordDiagnostic(doc, d), true);
   if (!argResult.ok) return;
   const origin: OriginToken = {
     _kind: "macro-origin",
@@ -504,6 +504,13 @@ function bindArgs(
   call: MacroCall,
   inv: Inventory,
   record: DiagnosticRecorder,
+  // When expanding (the pre-link IndexedContent pass) we suppress the
+  // "references unknown <kind>" ref-resolution diagnostics: at that point the
+  // workspace may still be loading sibling files, so a cross-file ref-list
+  // argument can spuriously appear unresolved.  Those errors are re-checked
+  // against the settled workspace at validation time via
+  // `collectUnresolvedMacroRefs`, which re-runs on every (re)validation.
+  silentRefs = false,
 ): BindResult | BindFailure {
   const spec: ParamSpec = macro.params ?? {};
   const provided = new Map<string, MacroArg>();
@@ -539,7 +546,7 @@ function bindArgs(
       failed = true;
       continue;
     }
-    const v = coerceArg(macro.name, name, arg, ps, inv, record);
+    const v = coerceArg(macro.name, name, arg, ps, inv, record, silentRefs);
     if (v.ok) out[name] = v.value;
     else failed = true;
   }
@@ -573,6 +580,7 @@ function coerceArg(
   spec: ParamType,
   inv: Inventory,
   record: DiagnosticRecorder,
+  silentRefs = false,
 ): { ok: true; value: unknown } | { ok: false } {
   const v = arg.value;
   switch (spec.kind) {
@@ -594,12 +602,14 @@ function coerceArg(
         if (!refText) return { ok: false };
         const resolved = resolveRef(inv, spec.of, refText);
         if (!resolved) {
-          record({
-            severity: "error",
-            message: `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
-            node: arg,
-            property: "value",
-          });
+          if (!silentRefs) {
+            record({
+              severity: "error",
+              message: `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
+              node: arg,
+              property: "value",
+            });
+          }
           return { ok: false };
         }
         return { ok: true, value: resolved };
@@ -614,12 +624,14 @@ function coerceArg(
           if (!refText) continue;
           const node = resolveRef(inv, spec.of, refText);
           if (!node) {
-            record({
-              severity: "error",
-              message: `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
-              node: arg,
-              property: "value",
-            });
+            if (!silentRefs) {
+              record({
+                severity: "error",
+                message: `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
+                node: arg,
+                property: "value",
+              });
+            }
             anyBad = true;
             continue;
           }
@@ -654,6 +666,52 @@ export function resolveMacroArgs(
   const inv = buildInventory(model);
   const result = bindArgs(macro, call, inv, () => {});
   return result.ok ? result.values : undefined;
+}
+
+/** Re-check every macro call's `ref` / `refList` arguments against the
+ * *settled* workspace and report any that name a declaration which still
+ * doesn't exist.  Unlike the expansion pass (which runs once at
+ * IndexedContent, before sibling files may have loaded, and therefore stays
+ * silent about unresolved refs), this runs from the validator on every
+ * (re)validation with a workspace-aware inventory — so a cross-file
+ * `with scaffold(subdomains: [...])` clears the moment its target file is
+ * indexed, and a genuinely unknown ref keeps erroring.  Pair with the
+ * `isAffected` override in `ddd-module.ts`, which re-validates macro-host
+ * documents when the workspace document set changes. */
+export function collectUnresolvedMacroRefs(
+  model: Model,
+  shared: LangiumSharedServices | undefined,
+  record: DiagnosticRecorder,
+): void {
+  const inv = buildInventory(model, shared);
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isAggregate(node) && !isUi(node) && !isBoundedContext(node)) continue;
+    const host = node as Aggregate | Ui | import("../language/generated/ast.js").BoundedContext;
+    for (const call of host.withClause?.calls ?? []) {
+      const macro = call.name ? lookupMacro(call.name) : undefined;
+      if (!macro?.params) continue;
+      for (const arg of call.args ?? []) {
+        const ps = arg.name ? macro.params[arg.name] : undefined;
+        if (!ps) continue;
+        const v = arg.value;
+        const report = (kind: NamedDeclKind, refText: string): void =>
+          record({
+            severity: "error",
+            message: `Argument '${arg.name}' to macro '${macro.name}' references unknown ${kind} '${refText}'.`,
+            node: arg,
+            property: "value",
+          });
+        if (ps.kind === "ref" && v.$type === "MacroArgRef") {
+          const t = readArgRef(v);
+          if (t && !resolveRef(inv, ps.of, t)) report(ps.of, t);
+        } else if (ps.kind === "refList" && v.$type === "MacroArgRefList") {
+          for (const t of readArgRefs(v)) {
+            if (t && !resolveRef(inv, ps.of, t)) report(ps.of, t);
+          }
+        }
+      }
+    }
+  }
 }
 
 function resolveRef(inv: Inventory, kind: NamedDeclKind, name: string): AstNode | undefined {

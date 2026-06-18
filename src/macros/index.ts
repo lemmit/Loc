@@ -20,5 +20,10 @@ export function bootMacros(shared: LangiumSharedServices): void {
 
 // Re-export the public surface for callers that still want direct
 // access (validators, LSP code-actions, tests).
-export { drainMacroDiagnostics, registerMacroExpander, resolveMacroArgs } from "./expander.js";
+export {
+  collectUnresolvedMacroRefs,
+  drainMacroDiagnostics,
+  registerMacroExpander,
+  resolveMacroArgs,
+} from "./expander.js";
 export { _resetRegistryForTests, allMacros, lookupMacro, registerMacro } from "./registry.js";
