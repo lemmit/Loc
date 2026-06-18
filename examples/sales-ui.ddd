@@ -6,13 +6,17 @@
 // shell it would slot into).
 //
 // New keywords used: 6 declaration (ui, page, component, scaffold,
-// state, menu) + 2 expression (match, else).  Builtin components
-// used (closed v0 stdlib): List, Detail, Form, MasterDetail,
-// Dashboard, Review, Stack, Toolbar, Heading, Badge, Card, Stat,
-// Action, Empty.
+// state, menu) + 2 expression (match, else).
 //
 // This file does NOT parse with the current Langium grammar; it is
-// the target syntax driving the discussion.
+// the target syntax driving the discussion.  It is a HISTORICAL
+// prototype: several names below were never shipped or were later
+// retired — `Form` split into the named-leaf forms (`CreateForm` /
+// `OperationForm` / `WorkflowForm` / `DestroyForm`); `List` / `Detail`
+// became `scaffoldList` / `scaffoldDetails`; `MasterDetail`,
+// `Dashboard`, and `Review` were dropped (compose them from a list +
+// `state {}` + display primitives).  See docs/page-metamodel.md §9 for
+// the current closed set.
 
 ui SalesAdmin with scaffold(subdomains: [Catalog], aggregates: [Customer, Product], workflows: [placeOrder], views: [ActiveOrders, OrderSummary, CustomerOrders]) {
 

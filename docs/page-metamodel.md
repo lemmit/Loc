@@ -359,13 +359,24 @@ predate that split — read them as the corresponding named-leaf form (the
 `into:` / `fields:` draft-binding shapes remain illustrative; multi-step
 draft forms are a §14 non-goal, not a shipped primitive).
 
-Four names from earlier drafts of this table never shipped as primitives
-either: `Dashboard` and `Review` (composite read-only pages — express them
-as a `Stack`/`Grid` of the display primitives; the `Review(…)` calls in the
-§12 wizard sketches are illustrative, like the draft-form shapes above),
-`Select` (use `SelectField`), and `Fieldset` (an internal value-object
-render shape, not a hand-writable input). The closed set is exactly the
-rows above.
+`List` / `Detail` / `MasterDetail` were also retired: they were legacy
+archetype names that never had walker renderers (they silently degraded to a
+`// not supported` comment), so they're gone as standalone primitives. The
+list / detail use case is served by `scaffoldList { of: T }` /
+`scaffoldDetails { of: T }` (the scaffold archetypes, usable as explicit
+bodies — `List { of: T }` is now spelled `scaffoldList { of: T }`) or by
+composing `QueryView` + `Table` directly. The `List`/`Detail`/`MasterDetail`
+snippets in §4, §5, and §12 predate that removal — read them as the
+`scaffold*` archetypes (`MasterDetail`'s split-pane has no built-in
+archetype; compose it from a list + selection `state {}` + a detail panel).
+
+Four further names from earlier drafts of this table never shipped as
+primitives at all: `Dashboard` and `Review` (composite read-only pages —
+express them as a `Stack`/`Grid` of the display primitives; the `Review(…)`
+calls in the §12 wizard sketches are illustrative, like the draft-form
+shapes above), `Select` (use `SelectField`), and `Fieldset` (an internal
+value-object render shape, not a hand-writable input). The closed set is
+exactly the rows above.
 
 Users freely define their own `component`s, which compose these builtins.
 
