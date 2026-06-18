@@ -54,6 +54,13 @@ describe("forms inside user components — Vue", () => {
     // The pack form markup is present, bound to the form instance.
     expect(comp).toContain('v-model="form.values.name"');
     expect(comp).toContain('data-testid="cust-new-submit"');
+    // Default submit pushes a success toast → the component imports
+    // pushToast and the app-shell mounts the toast host even with no
+    // realtime channels.
+    expect(comp).toContain('import { pushToast } from "../lib/toast";');
+    expect(comp).toContain('pushToast("Customer created");');
+    expect(files.get("src/lib/toast.ts")).toBeDefined();
+    expect(files.get("src/App.vue")).toContain('data-testid="channel-toast-host"');
   });
 
   it("an operation form inside a component wires the op-dialog (instance from a prop)", async () => {

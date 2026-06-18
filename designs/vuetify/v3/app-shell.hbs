@@ -3,7 +3,7 @@
 import { onErrorCaptured, ref } from "vue";
 import { useRoute } from "vue-router";
 {{#if hasRealtimeHandlers}}import RealtimeHandlers from "./components/RealtimeHandlers.vue";
-import { toastQueue } from "./lib/toast";
+{{/if}}{{#if hasToastHost}}import { toastQueue } from "./lib/toast";
 {{/if}}
 const drawer = ref(true);
 // App-level error capture — a render-time crash in any page lands
@@ -50,7 +50,7 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
       </v-container>
     </v-main>
 {{#if hasRealtimeHandlers}}    <RealtimeHandlers />
-    <div class="loom-toast-host" style="position: fixed; bottom: 16px; right: 16px; z-index: 2400; display: flex; flex-direction: column; gap: 8px;" data-testid="channel-toast-host">
+{{/if}}{{#if hasToastHost}}    <div class="loom-toast-host" style="position: fixed; bottom: 16px; right: 16px; z-index: 2400; display: flex; flex-direction: column; gap: 8px;" data-testid="channel-toast-host">
       <v-alert v-for="t in toastQueue.items" :key="t.id" type="info" variant="elevated" density="comfortable" data-testid="channel-toast">\{{ t.message }}</v-alert>
     </div>
 {{/if}}  </v-app>
