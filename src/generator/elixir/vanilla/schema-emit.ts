@@ -10,7 +10,15 @@
 //     `:binary_id` column; optional wrapper unwraps the inner type.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, BoundedContextIR, EnumIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  EnrichedAggregateIR,
+  EnumIR,
+  SystemIR,
+  TypeIR,
+} from "../../../ir/types/loom-ir.js";
+import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 
@@ -18,6 +26,7 @@ export function emitVanillaSchemas(
   appModule: string,
   ctx: BoundedContextIR,
   out: Map<string, string>,
+  sys?: SystemIR,
 ): void {
   const ctxModule = upperFirst(ctx.name);
   // Per-context enum-lookup table so the schema can pull each enum's
@@ -30,9 +39,17 @@ export function emitVanillaSchemas(
     const aggSnake = snake(agg.name);
     const ctxSnake = snake(ctx.name);
     const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());
+    // The Postgres schema the table lands in (the migration creates it with
+    // the SAME `resolveDataSourceConfig(...).schema` — owning context's schema
+    // by default).  Setting `@schema_prefix` makes every Repo query/insert
+    // through this module schema-qualified; without it Ecto hits `public.<t>`
+    // while the migration created `<schema>.<t>`, so every query 500s.
+    const schemaPrefix = sys
+      ? resolveDataSourceConfig(agg as EnrichedAggregateIR, ctx, sys)?.schema
+      : undefined;
     out.set(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}.ex`,
-      renderSchema(appModule, ctxModule, agg, enumsByName),
+      renderSchema(appModule, ctxModule, agg, enumsByName, schemaPrefix),
     );
   }
 }
@@ -42,6 +59,7 @@ function renderSchema(
   ctxModule: string,
   agg: AggregateIR,
   enumsByName: Map<string, EnumIR>,
+  schemaPrefix?: string,
 ): string {
   const moduleName = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const tableName = snake(plural(agg.name));
@@ -49,6 +67,7 @@ function renderSchema(
     .map((f) => renderFieldLine(f, enumsByName))
     .filter(Boolean)
     .join("\n");
+  const prefixLine = schemaPrefix ? `  @schema_prefix ${JSON.stringify(schemaPrefix)}\n` : "";
 
   return `# Auto-generated.
 defmodule ${moduleName} do
@@ -57,7 +76,7 @@ defmodule ${moduleName} do
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
-
+${prefixLine}
   schema "${tableName}" do
 ${fieldLines}
     timestamps(type: :utc_datetime)

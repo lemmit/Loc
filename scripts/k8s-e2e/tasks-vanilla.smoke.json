@@ -1,0 +1,12 @@
+{
+  "_comment": "Write round-trip recipe for the vanilla-Elixir (foundation: vanilla) cell of the k8s-e2e matrix, over examples/tasks-vanilla.ddd. Auth-free Task CRUD; the routes mount under /api (the script's round-trip probes that prefix), and the list returns a {items:[...]} envelope (handled by the round-trip's rows() helper).",
+  "create": {
+    "path": "/tasks",
+    "body": {
+      "title": "Smoke task",
+      "done": false
+    }
+  },
+  "list": "/tasks",
+  "idField": "id"
+}
