@@ -132,7 +132,14 @@ export function buildPyWorkflowsFile(
     "",
     refersTo("datetime") ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
-    `from fastapi import APIRouter, Depends, ${anyUser ? "Request, " : ""}Response`,
+    `from fastapi import ${[
+      "APIRouter",
+      "Depends",
+      refersTo("Request") ? "Request" : null,
+      refersTo("Response") ? "Response" : null,
+    ]
+      .filter(Boolean)
+      .join(", ")}`,
     `from pydantic import ${["BaseModel", refersTo("RootModel") ? "RootModel" : null].filter(Boolean).join(", ")}`,
     refersTo("select") ? "from sqlalchemy import select" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
@@ -149,7 +156,7 @@ export function buildPyWorkflowsFile(
           .join(", ")}`
       : null,
     refersTo("iso") ? "from app.db.wire import iso" : null,
-    hasDispatch ? "from app.dispatch import make_dispatcher" : null,
+    hasDispatch && refersTo("make_dispatcher") ? "from app.dispatch import make_dispatcher" : null,
     (() => {
       const names = ["AggregateNotFoundError", "DomainError", "ForbiddenError"].filter(refersTo);
       return names.length > 0 ? `from app.domain.errors import ${names.join(", ")}` : null;
