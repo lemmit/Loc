@@ -73,7 +73,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   const apiRoutes: ApiRoute[] = [];
   const allViews: VanillaViewRef[] = [];
   for (const ctx of contexts) {
-    emitVanillaSchemas(appModule, ctx, out);
+    emitVanillaSchemas(appModule, ctx, out, sys);
     emitVanillaChangesets(appModule, ctx, out);
     emitVanillaRepositories(appModule, ctx, out);
     // Event-sourced aggregates (persistedAs(eventLog)) — struct + event-log
