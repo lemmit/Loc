@@ -1,0 +1,39 @@
+// DEBT-01 — principal-referencing (tenancy) capability filter on the
+// Hono/Drizzle backend.  `filter this.tenantId == currentUser.tenantId` is
+// AND-ed into every root read, rendered against the ambient
+// `requireCurrentUser()` accessor (auth/middleware.ts) — the Drizzle analogue
+// of EF Core's HasQueryFilter reading RequestContext.Current.  Generated via
+// `generate system` (the user block + auth middleware are system-level), so the
+// `build-generated-ts` gate type-checks the emitted repository + the
+// requireCurrentUser import end-to-end.
+system Tenancy {
+  user { id: string  tenantId: string }
+
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+        // Always-on row scoping: every read of Account is constrained to the
+        // requesting principal's tenant.
+        filter this.tenantId == currentUser.tenantId
+      }
+      repository Accounts for Account {
+        find rich(min: int): Account[] where balance >= min
+      }
+    }
+  }
+
+  api LedgerApi from Core
+  storage pg { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: pg }
+
+  deployable api {
+    platform: hono
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    auth: required
+    port: 4000
+  }
+}

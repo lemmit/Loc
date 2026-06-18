@@ -8,7 +8,7 @@
 // Half-applying it would be a soft-delete correctness hole.
 
 import { describe, expect, it } from "vitest";
-import { generateHono } from "../../_helpers/generate.js";
+import { generateHono, generateSystemFiles } from "../../_helpers/generate.js";
 import { parseString } from "../../_helpers/parse.js";
 
 const SRC = `
@@ -95,5 +95,59 @@ describe("typescript generator — capability filter (contextFilters)", () => {
     const repo = files.get("db/repositories/plain-repository.ts")!;
     // Plain findById keeps the bare id predicate (no and-wrapping).
     expect(repo).toMatch(/findById[\s\S]*?\.where\(eq\(schema\.plains\.id, id\)\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DEBT-01 — principal-referencing (tenancy) filter on the Hono/Drizzle backend.
+// `filter this.tenantId == currentUser.tenantId` renders against the ambient
+// `requireCurrentUser()` accessor (the analogue of EF Core's HasQueryFilter
+// reading RequestContext.Current), so it AND-s into every root read with NO
+// `currentUser` parameter threaded onto the read methods.
+// ---------------------------------------------------------------------------
+
+const PRINCIPAL_SRC = `
+system Bank {
+  user { id: string  tenantId: string }
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+        filter this.tenantId == currentUser.tenantId
+      }
+      repository Accounts for Account {
+        find rich(min: int): Account[] where balance >= min
+      }
+    }
+  }
+  api LedgerApi from Core
+  storage pg { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: pg }
+  deployable api { platform: hono, contexts: [Ledger], dataSources: [ledgerState], serves: LedgerApi, auth: required, port: 4000 }
+}
+`;
+
+describe("typescript generator — principal capability filter (DEBT-01)", () => {
+  it("AND-s the tenancy predicate (via requireCurrentUser()) into every root read", async () => {
+    const repo = (await generateSystemFiles(PRINCIPAL_SRC)).get(
+      "api/db/repositories/account-repository.ts",
+    )!;
+    expect(repo).toBeDefined();
+
+    const tenancy = "eq(schema.accounts.tenantId, requireCurrentUser().tenantId)";
+    // findById and findManyByIds both AND the tenancy predicate in.
+    expect(repo).toContain(`.where(and(eq(schema.accounts.id, id), ${tenancy}))`);
+    expect(repo).toContain(`.where(and(inArray(schema.accounts.id, ids), ${tenancy}))`);
+    // The ambient accessor is imported; no read method takes a currentUser param.
+    expect(repo).toContain('import { requireCurrentUser } from "../../auth/middleware";');
+    expect(repo).toContain("async findById(id: Ids.AccountId): Promise<Account | null>");
+  });
+
+  it("does not import requireCurrentUser when the filter is non-principal", async () => {
+    const { model, errors } = await parseString(SRC);
+    expect(errors).toEqual([]);
+    const repo = generateHono(model).get("db/repositories/doc-repository.ts")!;
+    expect(repo).not.toContain("requireCurrentUser");
   });
 });

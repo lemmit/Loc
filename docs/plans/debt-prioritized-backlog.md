@@ -48,7 +48,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | ID | Item | Target(s) to close | Impact | Effort | Existing plan |
 |---|---|---|:--:|:--:|---|
 | **P0 — parity completion, common, tractable** |
-| DEBT-01 | Principal-referencing capability `filter` (`currentUser` / tenancy) | node, elixir, java | 5 | L | `proposals/criterion-everywhere.md` |
+| DEBT-01 | Principal-referencing capability `filter` (`currentUser` / tenancy) | node, elixir, java | 5 | L | `proposals/criterion-everywhere.md` · **node slice landed** (elixir/java follow-ups) |
 | DEBT-02 | Non-relational (`shape(document/embedded)`) capability `filter` | node, elixir, java | 4 | M | — |
 | DEBT-03 | Operation `or`-union return (exception-less ProblemDetails) | elixir/ash | 4 | M | `exception-less.md` · **slice 1 landed** (return-dominant; mutation/guard bodies still gated) |
 | DEBT-04 | Audit runtime parity (`audited` ops, lifecycle, `with audit`) | dotnet, elixir | 4 | L | `type-system-feature-migration.md` (DBT) |
@@ -88,11 +88,11 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 ## P0 — do these first
 
 ### DEBT-01 · Principal-referencing capability filters
-- **Where:** `src/ir/validate/checks/system-checks.ts:625` (`validateContextFilterSupport`, `LIMITED_FAMILIES = {node, elixir, java}`); diagnostic `loom.context-filter-unsupported`.
-- **Today:** only **.NET** wires `filter this.tenantId == currentUser.tenantId` (EF `HasQueryFilter`, DI-resolved). node/elixir/java reject it.
-- **Why P0:** multi-tenancy and `currentUser`-scoped reads are core line-of-business needs; this is the single most-requested "works on .NET only" gap.
-- **Scope:** thread the request principal into the always-on read path — node: `findById` + every read site; elixir: an actor-bound `base_filter`; java: a JPA filter / `@Where` analogue.
-- **Done when:** a `filter` referencing `currentUser` generates and round-trips on node, elixir, and java, with the gate narrowed accordingly.
+- **Where:** `src/ir/validate/checks/system-checks.ts` (`validateContextFilterSupport`); diagnostic `loom.context-filter-unsupported`.
+- **Today (after node slice):** **.NET** (EF `HasQueryFilter`) and **node** (Hono/Drizzle) wire `filter this.tenantId == currentUser.tenantId`. elixir/java still reject it.
+- **Why P0:** multi-tenancy and `currentUser`-scoped reads are core line-of-business needs.
+- **Node slice (landed):** the principal predicate is AND-ed into every root read, rendered against the ambient `requireCurrentUser()` accessor (`auth/middleware.ts`) — the Drizzle analogue of EF Core reading `RequestContext.Current` inside `HasQueryFilter`, so **no read method gains a `currentUser` parameter**. `lowerToDrizzle` takes a `principalAccessor` option (`repository-find-predicate.ts`); `aggregateUsesPrincipalContextFilter` (`loom-ir.ts`) drives the `requireCurrentUser` import. A principal filter now requires the deployable to set `auth: required` (validated, mirroring `validateJavaStampSupport`). Verified end-to-end: the generated project `tsc --noEmit`s clean (fixture `test/e2e/fixtures/ts-build/tenancy-filter.ddd`, wired into `build-generated-ts`).
+- **Follow-ups (still gated):** **elixir** — Ash `base_filter` can reference the request actor via `^actor(:field)` with `actor: current_user` set on reads (vanilla needs Ecto threading); **java** — `@SQLRestriction` is static SQL, so principal filters need a Hibernate `@Filter` (session-enabled with params) or query-level AND.
 
 ### DEBT-02 · Non-relational capability filters
 - **Where:** same gate as DEBT-01 (the `shape(document/embedded)` branch).

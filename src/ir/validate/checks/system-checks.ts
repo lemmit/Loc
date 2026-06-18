@@ -626,11 +626,16 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
 
-  // Backends that consume contextFilters with the principal / shape
-  // limitation.  .NET (HasQueryFilter) is deliberately absent — it
-  // supports both deferred cases.  Canonical families (D-NODE-PLATFORM /
-  // D-ELIXIR-PLATFORM): `node` (was `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
+  // Backends that gate one or both of the deferred capability-filter cases.
+  // .NET (EF `HasQueryFilter`) supports BOTH, so it's deliberately absent.
+  // Canonical families (D-NODE-PLATFORM / D-ELIXIR-PLATFORM): `node` (was
+  // `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
   const LIMITED_FAMILIES = new Set(["node", "elixir", "java"]);
+  // Backends that now wire PRINCIPAL-referencing filters (`currentUser.x`) on
+  // relational aggregates.  node renders the predicate against the ambient
+  // `requireCurrentUser()` accessor inside every root read (DEBT-01) — the
+  // Drizzle analogue of .NET's `HasQueryFilter`.  elixir / java still defer it.
+  const PRINCIPAL_FILTER_FAMILIES = new Set(["node"]);
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
@@ -645,18 +650,49 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
         const usesPrincipal = filters.some((p) => exprUsesCurrentUser(p));
         const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
         const nonRelational = shape !== "relational";
-        if (!usesPrincipal && !nonRelational) continue;
-        const reason = usesPrincipal
-          ? `references currentUser (e.g. a tenancy filter); principal-referencing capability ` +
-            `filters are not yet wired on the ${fam} backend`
-          : `is persisted as shape(${shape}); capability filters are only wired for ` +
-            `relational aggregates on the ${fam} backend today`;
+        const principalUnsupported = usesPrincipal && !PRINCIPAL_FILTER_FAMILIES.has(fam);
+        // A principal filter on a backend that DOES wire it (node) still needs
+        // a request principal to scope by — so the deployable must enforce auth
+        // (and the system must declare a `user {}` block).  Without it the
+        // ambient `requireCurrentUser()` accessor isn't even emitted.  Mirror
+        // the `validateJavaStampSupport` precedent with a clear, actionable error.
+        if (
+          usesPrincipal &&
+          !principalUnsupported &&
+          !nonRelational &&
+          !(dep.auth?.required && sys.user)
+        ) {
+          diags.push({
+            severity: "error",
+            code: "loom.context-filter-unsupported",
+            message:
+              `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
+              `'${ctxName}.${agg.name}' with a 'filter' capability predicate that references ` +
+              `currentUser (e.g. a tenancy filter), but the deployable has no auth — there is no ` +
+              `request-scoped principal to scope reads by. Add 'auth: required' (and a system ` +
+              `'user {}' block), or remove the principal-referencing filter.`,
+            source: `${sys.name}/${dep.name}`,
+          });
+          continue;
+        }
+        // A non-relational shape gates on EVERY limited family (DEBT-02);
+        // a principal filter gates everywhere except the families above.
+        if (!principalUnsupported && !nonRelational) continue;
+        // Non-relational is the harder limitation — report it first when both
+        // apply (e.g. a principal filter on a document-shaped aggregate).
+        const reason = nonRelational
+          ? `is persisted as shape(${shape}); capability filters are only wired for ` +
+            `relational aggregates on the ${fam} backend today`
+          : `references currentUser (e.g. a tenancy filter); principal-referencing capability ` +
+            `filters are not yet wired on the ${fam} backend`;
         diags.push({
           severity: "error",
           message:
             `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
             `'${ctxName}.${agg.name}' with a 'filter' capability predicate that ${reason}. ` +
-            `Host this aggregate on a .NET deployable, or remove the unsupported capability filter. ` +
+            `Host this aggregate on a .NET deployable${
+              nonRelational ? "" : " (or a node deployable, which wires tenancy filters)"
+            }, or remove the unsupported capability filter. ` +
             `Non-principal filters on relational aggregates (e.g. 'filter !this.isDeleted') are emitted.`,
           source: `${sys.name}/${dep.name}`,
           code: "loom.context-filter-unsupported",
