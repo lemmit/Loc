@@ -83,9 +83,12 @@ describe("phoenix generator — exception-less operation returns (DEBT-03)", () 
     // NotFound's stdlib default status / type / title ride the problem responder.
     expect(ctrl).toContain('{:ok, {:problem, "NotFound", data}} ->');
     expect(ctrl).toContain('problem_variant(conn, 404, "/errors/not-found", "Not Found", data)');
-    // Absent record → the shared 404; an action-level failure → 422.
+    // Absent record → 404 via the Ash ProblemDetails `problem_response/4`
+    // (the Ash module has no `not_found_response/3` — that's vanilla-only).
     expect(ctrl).toContain("{:ok, {:not_found, _}} ->");
-    expect(ctrl).toContain('ApiWeb.ProblemDetails.not_found_response(conn, "Order", id)');
+    expect(ctrl).toContain(
+      'ApiWeb.ProblemDetails.problem_response(conn, 404, "Not Found", "Order not found")',
+    );
   });
 
   it("emits the shared problem_variant/5 responder once per controller with a returning op", async () => {

@@ -213,7 +213,7 @@ export function renderAshReturningOpControllerAction(
 ${errorClauses.join("\n\n")}
 
       {:ok, {:not_found, _}} ->
-        ${webModule}.ProblemDetails.not_found_response(conn, "${aggPascal}", id)
+        ${webModule}.ProblemDetails.problem_response(conn, 404, "Not Found", "${aggPascal} not found")
 
       {:error, _} ->
         ${webModule}.ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "Operation '${op.name}' failed")
