@@ -1,17 +1,32 @@
-// Macro-expansion diagnostic surfacing.  The expander records its
-// diagnostics into a per-document side channel during the pre-link
-// pass; we drain them here so unknown macros, bad args, and
-// composition collisions show up alongside other validator
-// diagnostics rather than in a separate diagnostic pipeline.
+// Macro-expansion diagnostic surfacing.  Two sources feed this check:
+//
+//   1. The one-shot expander side channel (unknown macro, bad arg shapes,
+//      composition collisions) — recorded during the pre-link IndexedContent
+//      pass and drained here.
+//   2. A fresh, workspace-aware re-resolution of every `ref` / `refList`
+//      argument (`collectUnresolvedMacroRefs`).  The expander stays silent
+//      about unresolved refs because at expansion time sibling files may not
+//      have loaded yet; re-checking here — on every (re)validation, against
+//      the settled workspace — makes a cross-file `with scaffold(subdomains:
+//      [...])` clear once its target file is indexed, while a genuinely
+//      unknown ref keeps erroring.  Paired with the `isAffected` override in
+//      `ddd-module.ts`, which re-validates macro-host docs on workspace change.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
-import { drainMacroDiagnostics } from "../../macros/expander.js";
+import { collectUnresolvedMacroRefs, drainMacroDiagnostics } from "../../macros/expander.js";
+import type { DddServices } from "../ddd-module.js";
 import type { Model } from "../generated/ast.js";
 
-export function checkMacroExpansion(model: Model, accept: ValidationAcceptor): void {
+export function checkMacroExpansion(
+  model: Model,
+  accept: ValidationAcceptor,
+  services?: DddServices,
+): void {
   const doc = AstUtils.getDocument(model);
-  const diagnostics = drainMacroDiagnostics(doc);
-  for (const d of diagnostics) {
+  for (const d of drainMacroDiagnostics(doc)) {
     accept(d.severity, d.message, { node: d.node as AstNode, property: d.property });
   }
+  collectUnresolvedMacroRefs(model, services?.shared, (d) => {
+    accept(d.severity, d.message, { node: d.node as AstNode, property: d.property });
+  });
 }
