@@ -82,6 +82,12 @@ import {
 import { renderJavaValidators } from "./emit/validator.js";
 import { renderJavaViews, viewFindsFor } from "./emit/view.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
+import {
+  correlationWorkflows,
+  renderWorkflowStateEntity,
+  renderWorkflowStateRepository,
+  workflowStateClass,
+} from "./emit/workflow-state.js";
 import { basePackageFor, javaPackageSegment, mainSourcePath } from "./naming.js";
 
 // ---------------------------------------------------------------------------
@@ -286,6 +292,27 @@ function emitProjectFromContexts(
       for (const [name, f] of workflowFiles) {
         place(name, f.category === "controller" ? "api-common" : "workflow-service", f.content);
       }
+    }
+    // Saga-state persistence (workflow-debt-backend-parity.md, Java saga slice
+    // 1): a correlation-bearing workflow gets a JPA `@Entity` bound to the
+    // Flyway-owned saga table + a Spring Data repository over it — the
+    // foundation the in-process dispatcher and instance reads build on.
+    for (const wf of correlationWorkflows(ctx.workflows)) {
+      place(
+        `${workflowStateClass(wf)}.java`,
+        "infra-persistence",
+        renderWorkflowStateEntity(wf, ctx, basePkg, pkgFor("infra-persistence")),
+      );
+      place(
+        `${workflowStateClass(wf)}Repository.java`,
+        "spring-data-repository",
+        renderWorkflowStateRepository(
+          wf,
+          basePkg,
+          pkgFor("spring-data-repository"),
+          pkgFor("infra-persistence"),
+        ),
+      );
     }
     const viewFiles = renderJavaViews(ctx, {
       basePkg,
