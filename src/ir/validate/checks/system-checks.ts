@@ -1268,7 +1268,49 @@ export function validateEventSourcedStorage(
   }
 }
 
-// Provenanced-field runtime (trace capture + write-site history) is emitted for
+// Event-sourced *workflow* storage gate (workflow-and-applier.md A2-S5b).  A
+// `workflow X eventSourced { … apply(…) }` folds its own emitted events into
+// state via appliers — the saga analogue of a `persistedAs(eventLog)`
+// aggregate (emit-only handlers + pure `apply` folds, no mutable state table).
+// The surface (grammar → `WorkflowIR.eventSourced` / `.appliers`) and the
+// emit-only / pure-fold discipline (A1) have landed, but **no backend emits the
+// event-sourced workflow runtime yet** (no per-correlation event stream, no
+// fold-on-load, no apply dispatch) — the `eventSourced` row of the
+// DEBT-26 backend-parity matrix is empty across the board.
+//
+// Without this gate an `eventSourced` workflow silently misgenerates: the saga
+// emitters key off `correlationField` alone, so they emit a *state-based* saga
+// (a mutable `<Wf>State` row + dispatcher + instance reads) and drop the
+// appliers entirely — the event-fold semantics the author asked for vanish.
+// A parsed-but-unemitted feature is a footgun, so it fails fast — exactly like
+// the event-sourced *aggregate* storage gate above.
+export function validateEventSourcedWorkflowStorage(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  // No backend implements the event-sourced workflow runtime today, so any
+  // backend host is unsupported.
+  if (backendPlatforms.size === 0) return;
+  const hosts = [...backendPlatforms].sort().join(", ");
+  for (const wf of ctx.workflows) {
+    if (!wf.eventSourced) continue;
+    diags.push({
+      severity: "error",
+      code: "loom.event-sourced-workflow-unsupported",
+      message:
+        `workflow '${wf.name}' is eventSourced, but event-sourced workflow storage ` +
+        `(a per-correlation event stream folded through its apply(...) blocks) is not ` +
+        `implemented on any backend yet — this context is hosted by ${hosts}. Drop the ` +
+        `eventSourced modifier to use a state-based saga (a persisted correlation-state ` +
+        `row, supported on node / dotnet / java / python / elixir-vanilla), or move the ` +
+        `event-fold logic into an event-sourced aggregate (persistedAs(eventLog)). ` +
+        `Tracked in workflow-and-applier.md (A2-S5b).`,
+      source: `${ctx.name}/${wf.name}`,
+    });
+  }
+}
+
 // the Hono (`node`) and .NET (`dotnet`) backends — the lineage SDK + co-located
 // `<field>_provenance` column + the `provenance_records` flush.  On a backend
 // that doesn't (phoenix today) a `provenanced` field silently behaves like a

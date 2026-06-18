@@ -29,6 +29,7 @@ import {
   validateDataSourceUnwiredKnobs,
   validateDefaultDeny,
   validateEventSourcedStorage,
+  validateEventSourcedWorkflowStorage,
   validateInheritanceStorage,
   validateJavaContainmentSupport,
   validateJavaFullstackSupport,
@@ -171,6 +172,11 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       diags,
       backendPlatformsByContext.get(c.name) ?? new Set(),
       elixirFoundationsByContext.get(c.name) ?? new Set(),
+    );
+    validateEventSourcedWorkflowStorage(
+      c,
+      diags,
+      backendPlatformsByContext.get(c.name) ?? new Set(),
     );
     validateProvenancedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateAuditedOperationSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
