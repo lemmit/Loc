@@ -7,6 +7,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import {
   aggregateUsesMoney,
+  aggregateUsesPrincipalContextFilter,
   findUsesCurrentUser,
   viewUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
@@ -133,6 +134,11 @@ export function buildRepositoryFile(
     ctx.views
       .filter((v) => v.source.kind === "aggregate" && v.source.name === agg.name)
       .some(viewUsesCurrentUser);
+  // A principal-referencing capability `filter` (`filter this.tenantId ==
+  // currentUser.tenantId`) reads the ambient principal via `requireCurrentUser()`
+  // inside every root read's predicate — so the repo imports that accessor
+  // (DEBT-01).  Unlike a per-find `currentUser` use, no method signature changes.
+  const usesPrincipalFilter = aggregateUsesPrincipalContextFilter(agg);
   const partNames = agg.parts.map((p) => p.name);
   const domainImports = [agg.name, ...partNames].join(", ");
   const valueObjectsUsed = collectValueObjects(agg, ctx);
@@ -234,6 +240,7 @@ export function buildRepositoryFile(
     usedDrizzleOps.length > 0 && `import { ${usedDrizzleOps.join(", ")} } from "drizzle-orm";`,
     `import * as schema from "../schema";`,
     repoUsesUser && `import type { User } from "../../auth/user-types";`,
+    usesPrincipalFilter && `import { requireCurrentUser } from "../../auth/middleware";`,
     `import { ${domainImports} } from "../../domain/${lowerFirst(agg.name)}";`,
     voOrEnumImportLine,
     `import * as Ids from "../../domain/ids";`,

@@ -2716,6 +2716,18 @@ export function viewUsesCurrentUser(view: ViewIR): boolean {
   return false;
 }
 
+/** True when the aggregate carries a *principal-referencing* capability
+ *  `filter` — one whose predicate reads `currentUser` (e.g. a tenancy filter
+ *  `filter this.tenantId == currentUser.tenantId`).  Such a filter is AND-ed
+ *  into EVERY root read, so — unlike a per-find `currentUser` use — it forces
+ *  the `currentUser: User` parameter onto *all* of the aggregate's repository
+ *  read methods (findById / findAll / each find), threaded from the route's
+ *  `c.get("currentUser")`.  (DEBT-01; the Hono/Drizzle analogue of EF Core's
+ *  closure-captured `HasQueryFilter`.) */
+export function aggregateUsesPrincipalContextFilter(agg: { contextFilters?: ExprIR[] }): boolean {
+  return (agg.contextFilters ?? []).some(exprUsesCurrentUser);
+}
+
 function stmtUsesCurrentUser(s: StmtIR): boolean {
   switch (s.kind) {
     case "precondition":

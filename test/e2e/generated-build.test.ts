@@ -167,6 +167,35 @@ describe.skipIf(!ENABLED)(
     // (src/auth/AuthGate.tsx), wraps <App/> in <AuthGate>, and sends
     // credentials.  Generated via `generate system` and the emitted `web/`
     // React project is type-checked against the real React / Mantine types.
+    // DEBT-01: a principal-referencing (tenancy) capability filter
+    // (`filter this.tenantId == currentUser.tenantId`) AND-ed into every root
+    // read via the ambient `requireCurrentUser()` accessor.  Generated via
+    // `generate system` (the user block + auth/middleware.ts are system-level);
+    // this gate compiles the emitted repository + the requireCurrentUser import.
+    it("system tenancy filter (principal capability filter) — generated project type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-tenancy-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/tenancy-filter.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        expect(fs.existsSync(path.join(proj, "auth", "middleware.ts"))).toBe(true);
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 120_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
     it("system react auth: ui guard — generated web project type-checks + builds", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-authui-"));
       try {
