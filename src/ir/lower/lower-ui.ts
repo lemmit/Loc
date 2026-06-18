@@ -13,6 +13,7 @@ import type {
   StateField,
   Ui,
 } from "../../language/generated/ast.js";
+import { snake } from "../../util/naming.js";
 import type {
   ComponentIR,
   ExprIR,
@@ -91,8 +92,27 @@ export function lowerUi(ui: Ui): UiIR {
   const notifications: UiNotificationIR[] = [];
   const functions: UiFunctionIR[] = [];
   let menu: MenuBlockIR | undefined;
+  // Pages inside `area { … }` blocks group by containment: the file lands at
+  // `src/pages/<area-path>/<page>.tsx`, the path joining down the nesting.
+  const collectArea = (
+    area: import("../../language/generated/ast.js").Area,
+    parent: string[],
+  ): void => {
+    const path = [...parent, snake(area.name)];
+    for (const member of area.members) {
+      if (member.$type === "Page") {
+        const p = lowerPage(member);
+        p.area = path;
+        p.emitPath = `src/pages/${path.join("/")}/${snake(p.name)}.tsx`;
+        pages.push(p);
+      } else if (member.$type === "Area") {
+        collectArea(member, path);
+      }
+    }
+  };
   for (const m of ui.members) {
     if (m.$type === "Page") pages.push(lowerPage(m));
+    else if (m.$type === "Area") collectArea(m, []);
     else if (m.$type === "Component") components.push(lowerComponent(m));
     else if (m.$type === "UiApiParam") {
       apiParams.push({

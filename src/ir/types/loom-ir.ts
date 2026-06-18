@@ -1878,6 +1878,11 @@ export interface PageIR {
    *  its conventional path (`src/pages/<plural>/list.tsx` for an
    *  `aggregate-list` origin, etc.) — preserves URL/file shape. */
   emitPath?: string;
+  /** Containing-area path (outermost → innermost), when the page is
+   *  declared inside one or more `area { … }` blocks.  Drives `emitPath`
+   *  (`src/pages/<area-path>/<page>.tsx`); empty/absent for a top-level
+   *  page.  Each segment is the snake-cased area name. */
+  area?: string[];
   /** Optional layout selector.  When undefined, the page receives
    *  the deployable's default app-shell chrome.  See `PageLayoutIR`
    *  for the preset value set; undefined is intentionally distinct

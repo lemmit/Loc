@@ -223,6 +223,8 @@ export function printStructural(node: AstNode): string {
       return printPage(node as Page);
     case "Component":
       return printComponent(node as Component);
+    case "Area":
+      return printArea(node as import("../generated/ast.js").Area);
     case "StateBlock":
       return printStateBlock(node as StateBlock);
     case "MenuBlock":
@@ -446,6 +448,12 @@ function printUi(node: Ui): string {
     `ui ${node.name}${printWithClause(node.withClause)}`,
     node.members.map(printStructural),
   );
+}
+
+/** `area <Name> { …pages / sub-areas… }` — members are Pages and nested
+ *  Areas, each printed through the structural printer. */
+function printArea(node: import("../generated/ast.js").Area): string {
+  return block(`area ${node.name}`, node.members.map(printStructural));
 }
 
 function printUiApiParam(node: UiApiParam): string {

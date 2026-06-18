@@ -58,6 +58,7 @@ export type DddKeywordNames =
     | "api"
     | "application"
     | "apply"
+    | "area"
     | "asc"
     | "ashPhoenix"
     | "audience"
@@ -314,6 +315,14 @@ export const AggregateMember = 'AggregateMember';
 
 export function isAggregateMember(item: unknown): item is AggregateMember {
     return reflection.isInstance(item, AggregateMember);
+}
+
+export type AreaMember = Area | Page;
+
+export const AreaMember = 'AreaMember';
+
+export function isAreaMember(item: unknown): item is AreaMember {
+    return reflection.isInstance(item, AreaMember);
 }
 
 export type AuthConfigValue = EnvAuthValue | LiteralAuthValue;
@@ -648,7 +657,7 @@ export function isTruthKind(item: unknown): item is TruthKind {
     return item === 'eventLog' || item === 'state';
 }
 
-export type UiMember = Component | MenuBlock | Page | UiApiParam | UiChannelParam | UiFunction | UiNotification;
+export type UiMember = Area | Component | MenuBlock | Page | UiApiParam | UiChannelParam | UiFunction | UiNotification;
 
 export const UiMember = 'UiMember';
 
@@ -759,6 +768,19 @@ export const Apply = 'Apply';
 
 export function isApply(item: unknown): item is Apply {
     return reflection.isInstance(item, Apply);
+}
+
+export interface Area extends AstNode {
+    readonly $container: Area | Ui;
+    readonly $type: 'Area';
+    members: Array<AreaMember>;
+    name: string;
+}
+
+export const Area = 'Area';
+
+export function isArea(item: unknown): item is Area {
+    return reflection.isInstance(item, Area);
 }
 
 export interface AssignOrCallStmt extends AstNode {
@@ -1930,7 +1952,7 @@ export function isOperation(item: unknown): item is Operation {
 }
 
 export interface Page extends AstNode {
-    readonly $container: Ui;
+    readonly $container: Area | Ui;
     readonly $type: 'Page';
     name: string;
     params: Array<Parameter>;
@@ -2819,6 +2841,8 @@ export type DddAstType = {
     Api: Api
     ApiStatus: ApiStatus
     Apply: Apply
+    Area: Area
+    AreaMember: AreaMember
     AssignOrCallStmt: AssignOrCallStmt
     AuthBlock: AuthBlock
     AuthConfigValue: AuthConfigValue
@@ -3000,7 +3024,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [ActionType, Aggregate, AggregateMember, Api, ApiStatus, Apply, AssignOrCallStmt, AuthBlock, AuthConfigValue, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, ClaimEntry, ClaimsMap, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvAuthValue, EnvConnectionSource, EventDecl, ExpectStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, IfLetStmt, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralAuthValue, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OidcConfig, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RetrievalLiteral, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiChannelParam, UiComposeBinding, UiFunction, UiMember, UiNotification, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
+        return [ActionType, Aggregate, AggregateMember, Api, ApiStatus, Apply, Area, AreaMember, AssignOrCallStmt, AuthBlock, AuthConfigValue, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, ClaimEntry, ClaimsMap, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvAuthValue, EnvConnectionSource, EventDecl, ExpectStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, IfLetStmt, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralAuthValue, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OidcConfig, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RetrievalLiteral, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiChannelParam, UiComposeBinding, UiFunction, UiMember, UiNotification, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -3023,6 +3047,10 @@ export class DddAstReflection extends AbstractAstReflection {
             }
             case Apply: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(WorkflowMember, supertype);
+            }
+            case Area:
+            case Page: {
+                return this.isSubtype(AreaMember, supertype) || this.isSubtype(UiMember, supertype);
             }
             case AssignOrCallStmt:
             case EmitStmt:
@@ -3161,7 +3189,6 @@ export class DddAstReflection extends AbstractAstReflection {
                 return this.isSubtype(MacroArgValue, supertype);
             }
             case MenuBlock:
-            case Page:
             case UiApiParam:
             case UiChannelParam:
             case UiFunction:
@@ -3336,6 +3363,15 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'body', defaultValue: [] },
                         { name: 'event' },
                         { name: 'param' }
+                    ]
+                };
+            }
+            case Area: {
+                return {
+                    name: Area,
+                    properties: [
+                        { name: 'members', defaultValue: [] },
+                        { name: 'name' }
                     ]
                 };
             }
