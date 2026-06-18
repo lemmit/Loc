@@ -263,7 +263,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     let specs: Record<string, OpenApiSpec>;
     try {
       specs = {
-        hono: await fetchSpec("http://localhost:3000/openapi.json"),
+        node: await fetchSpec("http://localhost:3000/openapi.json"),
         dotnet: await fetchSpec("http://localhost:8080/swagger/v1/swagger.json"),
         phoenix: await fetchSpec("http://localhost:4000/api/openapi.json"),
         python: await fetchSpec("http://localhost:8000/openapi.json"),
@@ -308,11 +308,11 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       expect(collectOps(spec).size, `${name} emits at least one operation`).toBeGreaterThan(0);
     }
 
-    // Compare each pair of backends.  Ten pairs total (5 choose 2) — hono↔dotnet,
-    // hono↔phoenix, dotnet↔phoenix.  The third pair catches drift
-    // where two non-Hono backends diverge from each other in a way
-    // that's NOT a Hono divergence (e.g., both Phoenix and .NET
-    // shipping a contract change Hono hasn't picked up yet).  Without
+    // Compare each pair of backends.  Ten pairs total (5 choose 2) — node↔dotnet,
+    // node↔phoenix, dotnet↔phoenix.  The third pair catches drift
+    // where two non-node backends diverge from each other in a way
+    // that's NOT a node divergence (e.g., both Phoenix and .NET
+    // shipping a contract change the node backend hasn't picked up yet).  Without
     // the direct pair we'd see two "ref drift" reports that don't
     // make their joint relationship explicit.
     //
@@ -404,7 +404,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
   // real server-side error (e.g. the .NET stacktrace) surfaces in CI.
   it("cross-backend: a guarded workflow denies with 403 (runtime authorization)", async () => {
     const targets: Record<string, string> = {
-      hono: "http://localhost:3000/api/workflows/register_project",
+      node: "http://localhost:3000/api/workflows/register_project",
       dotnet: "http://localhost:8080/api/workflows/register_project",
       phoenix: "http://localhost:4000/api/workflows/register_project",
       python: "http://localhost:8000/api/workflows/register_project",
