@@ -81,13 +81,28 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     imports.push(`import { ${[...routerSymbols].sort().join(", ")} } from "@angular/router";`);
   }
 
+  // Primitive imports collected by `renderPrimitive` (pack-declared) —
+  // each becomes an import line, and Angular declarables (the `*Module`
+  // symbols a standalone component must register) go into `imports: []`.
+  const componentImports = new Set<string>();
+  for (const [from, names] of [...result.imports.entries()].sort(([a], [b]) =>
+    a.localeCompare(b),
+  )) {
+    const sorted = [...names].sort();
+    imports.push(`import { ${sorted.join(", ")} } from ${JSON.stringify(from)};`);
+    for (const n of sorted) {
+      if (n.endsWith("Module")) componentImports.add(n);
+    }
+  }
+  const componentImportsList = [...componentImports].sort();
+
   return [
     "// Auto-generated.",
     ...imports,
     "",
     "@Component({",
     `  selector: ${JSON.stringify(pageSelector(page))},`,
-    "  imports: [],",
+    `  imports: [${componentImportsList.join(", ")}],`,
     "  template: `",
     indentTemplate(result.tsx),
     "  `,",

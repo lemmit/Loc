@@ -76,3 +76,58 @@ describe("angular generator — walked pages", () => {
     expect(shell).toContain('data-testid="nav-home"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Material-module primitives (Card, Divider) prove the `imports: []`
+// aggregation: the pack declares the `*Module` each primitive needs, and the
+// page shell hoists those into both the import lines and the standalone
+// component's `imports: []`.  (Card + Divider carry no event handlers, so they
+// land in batch 2 ahead of the event-handler seam.)
+// ---------------------------------------------------------------------------
+
+const CARD_SOURCE = `
+  system Smoke {
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish { total: int }
+      }
+    }
+    ui Web {
+      page Home {
+        route: "/"
+        title: "Home"
+        body: Stack {
+          Card { "Summary", Text { "Inside the card." } },
+          Divider {},
+          Text { "After the divider." }
+        }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
+  }
+`;
+
+async function cardPage(): Promise<string> {
+  const all = await generateSystemFiles(CARD_SOURCE);
+  return all.get("web/src/app/pages/home.component.ts")!;
+}
+
+describe("angular generator — Material-module primitives (imports aggregation)", () => {
+  it("renders Card → <mat-card> and Divider → <mat-divider>", async () => {
+    const page = await cardPage();
+    expect(page).toContain("<mat-card>");
+    expect(page).toContain("<mat-card-title>Summary</mat-card-title>");
+    expect(page).toContain("<mat-card-content><div>Inside the card.</div></mat-card-content>");
+    expect(page).toContain("<mat-divider></mat-divider>");
+  });
+
+  it("hoists each primitive's declared module into imports + the component imports: []", async () => {
+    const page = await cardPage();
+    expect(page).toContain('import { MatCardModule } from "@angular/material/card";');
+    expect(page).toContain('import { MatDividerModule } from "@angular/material/divider";');
+    expect(page).toContain("imports: [MatCardModule, MatDividerModule],");
+  });
+});

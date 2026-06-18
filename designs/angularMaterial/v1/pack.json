@@ -7,6 +7,8 @@
     "primitive-heading": "primitive-heading.hbs",
     "primitive-text": "primitive-text.hbs",
     "primitive-stack": "primitive-stack.hbs",
+    "primitive-card": "primitive-card.hbs",
+    "primitive-divider": "primitive-divider.hbs",
     "package-json": "package-json.hbs",
     "angular-json": "angular-json.hbs",
     "tsconfig": "tsconfig.hbs",
@@ -16,5 +18,9 @@
     "app-shell": "app-shell.hbs",
     "theme": "theme.hbs",
     "format-helpers": "format-helpers.hbs"
+  },
+  "imports": {
+    "primitive-card": [{ "from": "@angular/material/card", "named": ["MatCardModule"] }],
+    "primitive-divider": [{ "from": "@angular/material/divider", "named": ["MatDividerModule"] }]
   }
 }
