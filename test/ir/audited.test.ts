@@ -249,6 +249,67 @@ describe("audited — workflow capture", () => {
   });
 });
 
+// An event-triggered reactor invokes ops inline too, so an audited op it calls
+// must stage an audit_records row (the reactor sibling of the workflow case).
+const SYSTEM_REACTOR = `
+system S {
+  subdomain M {
+    context C {
+      aggregate Order { customerId: string  status: string }
+      repository Orders for Order { }
+      aggregate Shipment {
+        orderRef: Order id
+        status: string
+        operation markTracked() audited { status := "Tracked" }
+      }
+      repository Shipments for Shipment { }
+      event OrderPlaced { order: Order id, at: datetime }
+      event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+      channel Lifecycle { carries: OrderPlaced, ShipmentRequested  delivery: broadcast  retention: ephemeral }
+      workflow Fulfillment {
+        orderId: Order id
+        create(p: OrderPlaced) by p.order {
+          let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+          emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+        }
+        on(s: ShipmentRequested) by s.order {
+          let ship = Shipments.getById(s.shipment)
+          ship.markTracked()
+        }
+      }
+    }
+  }
+  deployable api { platform: hono, contexts: [C], port: 3000 }
+}
+`;
+
+describe("audited — reactor capture", () => {
+  it("stages an audit_records row for an audited op invoked inline in a reactor", async () => {
+    const { model, errors } = await parseModel(SYSTEM_REACTOR);
+    expect(errors).toEqual([]);
+    const wf = generateSystems(model).files.get("api/http/workflows.ts")!;
+    expect(wf).toBeDefined();
+    // The reactor body runs in a child frame; the audited op stages a row
+    // bracketed by before/after wire snapshots, exactly like the workflow path.
+    expect(wf).toContain("await runInChildContext(async () => {");
+    expect(wf).toContain("const __auditBefore0 = shipments.toWire(ship);");
+    expect(wf).toContain("const __auditAfter0 = shipments.toWire(ship);");
+    expect(wf).toContain("await db.insert(schema.auditRecords).values({");
+    expect(wf).toContain('action: "markTracked",');
+    expect(wf).toContain('targetType: "Shipment",');
+    expect(wf).toContain("parentId: __auditCtx0?.parentId ?? null,");
+  });
+
+  it("leaves an audit-free reactor without an insert or child frame", async () => {
+    const src = SYSTEM_REACTOR.replace("audited ", "");
+    const { model, errors } = await parseModel(src);
+    expect(errors).toEqual([]);
+    const wf = generateSystems(model).files.get("api/http/workflows.ts")!;
+    expect(wf).not.toContain("schema.auditRecords");
+    expect(wf).not.toContain("runInChildContext");
+  });
+});
+
 function findOperation(model: Model, agg: string, name: string): Operation {
   for (const node of AstUtils.streamAst(model)) {
     if (
