@@ -1,0 +1,35 @@
+// Minimal, auth-free system used ONLY by the Kubernetes cluster smoke
+// (scripts/k8s-e2e-smoke.sh).  One trivial CRUD aggregate served by every
+// backend platform, so the nightly k8s-e2e matrix can fan the chart install +
+// read/write round-trip across all backends with a SINGLE fixture (Loom's wire
+// shape is identical across backends — scripts/k8s-e2e/k8s-smoke.smoke.json).
+//
+// Deliberately no auth / permissions / rich types: those make a generic write
+// round-trip fragile (showcase needs an injected dev-claims header, a heavy
+// datetime/decimal create body, and per-backend parsing parity).  A bare
+// `Widget { name, quantity }` keeps the create body trivial and uniform.  The
+// vanilla-Elixir backend is covered by a separate matrix cell over the proven
+// examples/tasks-vanilla.ddd, so this system stays single-foundation.
+system K8sSmoke {
+  subdomain Catalog {
+    context Inventory {
+      aggregate Widget with crudish {
+        name: string
+        quantity: int
+      }
+      repository Widgets for Widget { }
+    }
+  }
+
+  api InventoryApi from Catalog
+  storage primary { type: postgres }
+  resource inventoryState { for: Inventory, kind: state, use: primary }
+
+  // One deployable per backend platform — same context for OpenAPI parity, so
+  // the matrix installs exactly one at a time via the chart's `enabled` toggle.
+  deployable honoApi    { platform: hono                        contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 3000 }
+  deployable dotnetApi  { platform: dotnet                      contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 8080 }
+  deployable pythonApi  { platform: python                      contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 8000 }
+  deployable javaApi    { platform: java                        contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 8081 }
+  deployable phoenixApi { platform: phoenix { foundation: ash } contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 4000 }
+}

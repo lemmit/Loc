@@ -2,9 +2,13 @@ name: Kubernetes cluster e2e (kind)
 
 # The heavier deployment tier above the per-PR `helm lint` + `kubeconform`
 # gate (k8s-build.yml): install the chart emitted by `generate system --k8s`
-# into a throwaway kind cluster and prove the workloads boot, the DB Secret
-# wires up, and the backend reaches its database (`/ready` → 200).
-# See docs/kubernetes.md.
+# into a throwaway kind cluster and prove the workload boots, the DB Secret
+# wires up, the backend reaches its database (`/ready` → 200), and a real
+# read + write round-trip persists through it.  See docs/kubernetes.md.
+#
+# Fanned across every backend: one matrix cell per backend installs just that
+# workload (the chart's per-deployable `enabled` toggle) from the dedicated
+# scripts/k8s-e2e/k8s-smoke.ddd, so each cell builds a single image in parallel.
 #
 # Heavy (it builds + loads container images), so NOT per-PR:
 #   - nightly schedule (full regression),
@@ -35,7 +39,13 @@ jobs:
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'e2e-k8s'))
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # One backend deployable per cell (workload names from k8s-smoke.ddd).
+        backend: [hono-api, dotnet-api, python-api, java-api, phoenix-api]
+    name: k8s-smoke (${{ matrix.backend }})
     steps:
       - uses: actions/checkout@v6
 
@@ -62,6 +72,10 @@ jobs:
         run: npm run build
 
       - name: Install chart into kind + smoke
+        env:
+          SMOKE_DDD: ${{ github.workspace }}/scripts/k8s-e2e/k8s-smoke.ddd
+          SMOKE_BACKEND: ${{ matrix.backend }}
+          SMOKE_FIXTURE: ${{ github.workspace }}/scripts/k8s-e2e/k8s-smoke.smoke.json
         run: npm run test:k8s-e2e
 
       - name: Dump cluster state on failure
@@ -69,4 +83,4 @@ jobs:
         run: |
           kubectl get pods,svc,secrets -A || true
           kubectl describe pods -n loom-k8s-e2e || true
-          kubectl logs -n loom-k8s-e2e -l app.kubernetes.io/part-of=inheritance-system --all-containers --tail=100 || true
+          kubectl logs -n loom-k8s-e2e -l app.kubernetes.io/name=${{ matrix.backend }} --all-containers --tail=120 || true

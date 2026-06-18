@@ -84,6 +84,9 @@ function renderValues(sys: SystemIR, workloads: WorkloadModel[]): string {
   for (const w of workloads) {
     const light = w.exposesUi && !w.dependsOnDb;
     lines.push(`${w.valuesKey}:`);
+    lines.push("  # Whether to render this deployable's workload.  Set false to");
+    lines.push("  # install a subset of the system (e.g. one backend at a time).");
+    lines.push("  enabled: true");
     lines.push("  replicas: 1");
     lines.push("  resources:");
     lines.push("    requests:");
@@ -295,6 +298,15 @@ function renderNotes(sys: SystemIR, workloads: WorkloadModel[]): string {
   return lines.join("\n") + "\n";
 }
 
+/** Wrap a per-deployable template in an `enabled` guard so a subset of the
+ *  system can be installed (e.g. one backend at a time in CI / per-cell e2e).
+ *  Defaults to true in values.yaml, so the rendered set is byte-unchanged
+ *  unless `--set <key>.enabled=false` is passed.  When disabled the file
+ *  renders empty, which Helm/kubeconform treat as no document. */
+function gated(w: WorkloadModel, body: string): string {
+  return `{{- if .Values.${w.valuesKey}.enabled }}\n${body}{{- end }}\n`;
+}
+
 /** A Helm chart under `helm/` for the system.  Reuses the shared
  *  `WorkloadModel` (`buildWorkloads`) so it stays in lock-step with the raw
  *  manifests in `kubernetes.ts`. */
@@ -305,13 +317,13 @@ export function renderHelmChart(sys: SystemIR): Map<string, string> {
   out.set("helm/values.yaml", renderValues(sys, workloads));
   out.set("helm/templates/_helpers.tpl", renderHelpers(sys));
   for (const w of workloads) {
-    out.set(`helm/templates/${w.name}-deployment.yaml`, renderDeploymentTemplate(w));
-    out.set(`helm/templates/${w.name}-service.yaml`, renderServiceTemplate(w));
+    out.set(`helm/templates/${w.name}-deployment.yaml`, gated(w, renderDeploymentTemplate(w)));
+    out.set(`helm/templates/${w.name}-service.yaml`, gated(w, renderServiceTemplate(w)));
     if (w.configEnv.length > 0) {
-      out.set(`helm/templates/${w.name}-config.yaml`, renderConfigMapTemplate(w));
+      out.set(`helm/templates/${w.name}-config.yaml`, gated(w, renderConfigMapTemplate(w)));
     }
     if (w.exposesUi) {
-      out.set(`helm/templates/${w.name}-ingress.yaml`, renderIngressTemplate(w));
+      out.set(`helm/templates/${w.name}-ingress.yaml`, gated(w, renderIngressTemplate(w)));
     }
   }
   if (workloads.some((w) => w.dbEnv.length > 0 || w.secretEnv.length > 0)) {

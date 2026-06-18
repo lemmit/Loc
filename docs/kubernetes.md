@@ -93,6 +93,7 @@ ingress:
   host: ""
 
 api:                      # one block per deployable
+  enabled: true           # render this workload; --set api.enabled=false drops it
   replicas: 1
   resources: { requests: {...}, limits: {...} }
   env: {}                 # extra env overlaid onto the ConfigMap
@@ -101,6 +102,7 @@ api:                      # one block per deployable
   secrets: {}             # sensitive env (only present when the backend has any),
                           # e.g. SECRET_KEY_BASE / SPRING_DATASOURCE_PASSWORD
 webApp:
+  enabled: true
   replicas: 1
   resources: { ... }
   env: {}
@@ -110,6 +112,13 @@ webApp:
 Backends default to a heavier resource class than static frontends. The DB
 `database.url` defaults to the dev-compose connection string as a recognisable
 **placeholder** — production overrides it with the real managed-DB URL.
+
+Every deployable carries a default-true `enabled` toggle; each
+Deployment/Service/ConfigMap/Ingress template is wrapped in
+`{{- if .Values.<key>.enabled }}`, so `--set <key>.enabled=false` installs a
+**subset** of the system — one backend at a time, say. The default render is
+byte-unchanged (all on); the k8s-e2e matrix uses it to install a single
+backend per cell.
 
 ## Decisions (v1)
 
@@ -155,37 +164,41 @@ Two tiers:
   types, malformed probes/secretRefs) the substring unit tests can't.
   Requires `helm` + `kubeconform` on PATH; skips cleanly when absent.
 - **Cluster smoke (shipped, `npm run test:k8s-e2e`).** `scripts/k8s-e2e-smoke.sh`
-  runs a real `kind` (Kubernetes-in-Docker) install: generate one example
-  (`inheritance-system` — a hono backend + a react frontend) with `--k8s`,
-  `docker build` + `kind load` the deployable images, stand up a throwaway
-  in-cluster postgres (the chart targets an external DB), `helm install
-  --wait` (which gates on the `/ready` readiness probe → proves the DB
-  `Secret` wired up), `kubectl rollout status` every workload, an explicit
-  `curl /health` + `/ready` through the backend's ClusterIP Service, and
-  finally **two real domain round-trips** (both inside the api pod, via the
-  container's own `node`):
-  - a **read** — discover an auto-`findAll` collection `GET` from the
-    backend's `/openapi.json` and call it, asserting `200` + JSON. That
-    exercises what `/ready` can't — migrations applied at boot → the
+  runs a real `kind` (Kubernetes-in-Docker) install of **one backend**:
+  generate a system with `--k8s`, `docker build` + `kind load` that backend's
+  image, stand up a throwaway in-cluster postgres (the chart targets an
+  external DB), `helm install --wait` with only that deployable `enabled`
+  (every other workload `--set …enabled=false`, so the cell builds a single
+  image), `kubectl rollout status`, an explicit `curl /health` + `/ready`
+  through the backend's ClusterIP Service, and finally **two real domain
+  round-trips** (from a throwaway `node:alpine` pod hitting the backend's
+  Service — not `kubectl exec` into the backend, since only the hono image is
+  a node container):
+  - a **read** — `GET` the fixture's list endpoint, asserting `200` + JSON.
+    That exercises what `/ready` can't — migrations applied at boot → the
     repository's `SELECT` hits a real, migrated table → wire-shape
-    serialization → HTTP routing (a missing table would `500`). Endpoint
-    discovery from OpenAPI keeps it example-agnostic.
-  - a **write** — `POST` a create body from a per-example fixture
-    (`scripts/k8s-e2e/<example>.smoke.json`), expect `201`, then read it
-    back through `findAll` and assert the new row is present and the count
-    grew. This proves the mutation path: `POST` → the domain validates its
-    invariants → `INSERT` → persisted. The body is a checked-in fixture
-    because the invariants it must satisfy (e.g. `last4.length == 4`) live
-    in the domain, not the OpenAPI request schema, so a synthesized body
-    would `422`; one fixture is backend-agnostic since the wire shape is
-    identical across backends.
+    serialization → HTTP routing (a missing table would `500`).
+  - a **write** — `POST` the fixture's create body, expect `201`, then read it
+    back and assert the new row is present and the count grew. This proves the
+    mutation path: `POST` → the domain validates its invariants → `INSERT` →
+    persisted. The body is a checked-in per-example fixture
+    (`scripts/k8s-e2e/<example>.smoke.json`) because the invariants it must
+    satisfy live in the domain, not the OpenAPI request schema, so a
+    synthesized body would `422`; one fixture is backend-agnostic since the
+    wire shape is identical across backends.
 
-  Heavier (it builds container images), so it is **not** per-PR —
-  the `k8s-e2e.yml` workflow runs it nightly, on the `e2e-k8s` PR label, or
-  by manual dispatch, provisioning the cluster via `helm/kind-action`. Run
-  locally with `kind create cluster && npm run test:k8s-e2e`. First cut is
-  one backend + frontend on one example (not a matrix) — fanning the write
-  round-trip across every backend is the next coverage step.
+  The script is parametrized (`SMOKE_DDD` / `SMOKE_BACKEND` / `SMOKE_FIXTURE`,
+  defaulting to the `inheritance-system` hono case) and derives the values
+  key, container/service ports, db name, image and build dir from the
+  generated chart — so a CI cell needs only those three vars. Heavier (it
+  builds container images), so it is **not** per-PR — the `k8s-e2e.yml`
+  workflow **fans it across every backend** as a matrix (one cell per backend,
+  in parallel) over the dedicated, auth-free `scripts/k8s-e2e/k8s-smoke.ddd`
+  (a trivial `Widget` CRUD served by hono / dotnet / python / java / phoenix),
+  running nightly, on the `e2e-k8s` PR label, or by manual dispatch. Run
+  locally with `kind create cluster && npm run test:k8s-e2e`. The
+  vanilla-Elixir backend is not yet in the matrix — it only serves `/health`,
+  not the `/ready` the chart probes, so it needs a readiness-parity fix first.
 
 ## Implementation
 
