@@ -154,7 +154,7 @@ describe("macro expander diagnostics", () => {
     const { errors } = await parseString(
       wrap(`
         ui App with auditable {
-          page Home { route: "/" body: List { of: x } }
+          page Home { route: "/" body: Text { "x" } }
         }
       `),
     );

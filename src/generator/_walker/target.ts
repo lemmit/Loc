@@ -2,7 +2,7 @@
 // Walker target contract — framework-specific lowering seams.
 //
 // The body walker traverses Loom's expression IR (closed primitive
-// library: List/Detail/Form/MasterDetail/Stack/Toolbar/match/...,
+// library: Stack/Toolbar/Table/QueryView/CreateForm/match/...,
 // plus state := and block-body lambdas) and dispatches per-primitive
 // rendering through the active design pack.  Most of that traversal
 // is framework-neutral — pack templates own the framework-specific

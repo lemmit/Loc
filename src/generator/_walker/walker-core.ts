@@ -213,11 +213,9 @@ export interface ApiHookUse {
  *  showcase fixture exercises every walker primitive.
  *
  *  Note: this is a STRICT SUBSET of the registry's layout-group TSX
- *  renderers — `Action` and a few others (`For`, `List`, `Detail`,
- *  `MasterDetail`) have valid TSX renderers but are not meaningful
- *  as top-level page bodies (Action is a button child of a Toolbar;
- *  the archetype names lower to `custom` page origins instead of
- *  driving the walker).  Kept as a hand-list so editing one
+ *  renderers — `Action` and `For` are child primitives, not meaningful
+ *  as top-level page bodies (Action is a button child of a Toolbar; For
+ *  renders as JSX children).  Kept as a hand-list so editing one
  *  primitive in the registry doesn't accidentally promote it to
  *  page-body-eligible.  The completeness test
  *  (`test/language/walker-stdlib-completeness.test.ts`) pins the
@@ -231,10 +229,6 @@ const NON_PAGE_BODY_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
   "Action",
   // For — list-comprehension; renders as JSX children, not a page body.
   "For",
-  // Archetype names that lower to `custom` page origins post-#515.
-  "List",
-  "Detail",
-  "MasterDetail",
   // (MultilineField / SelectField used to sit here while they had no
   // renderer; they are real controlled inputs now — page-body-eligible
   // exactly like Field / Toggle.  `Switch` left the stdlib entirely:

@@ -16,8 +16,8 @@
 //
 // What this walker DOES NOT cover in v0:
 //
-//   - Full closed-primitive library (List/Detail/Form/MasterDetail/
-//     Dashboard/Review/Tabs/Grid/Card/Toolbar/Heading/Text/Badge/Stat/
+//   - Full closed-primitive library (Form/Dashboard/Review/
+//     Tabs/Grid/Card/Toolbar/Heading/Text/Badge/Stat/
 //     Empty/Field/Toggle/Select/Fieldset/Action/Button).  v0 supports
 //     the structural set (Stack/Heading/Text/Card/Toolbar/Empty/
 //     Badge/Action/Button); the rest emit a HEEx comment with the

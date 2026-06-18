@@ -356,7 +356,22 @@ Ui:
     '}';
 
 UiMember:
-    UiApiParam | UiChannelParam | UiNotification | UiFunction | Page | Component | MenuBlock;
+    UiApiParam | UiChannelParam | UiNotification | UiFunction | Page | Component | Area | MenuBlock;
+
+// Page grouping — an `area` clusters pages (and sub-areas) into a named
+// functional division.  Grouping is by containment: a contained page's file
+// lands at `src/pages/<area-path>/<page>.tsx`, the path joining down the
+// nesting.  Optional + additive — area-less pages stay flat.  v1 carries
+// name + members only; a base `route:` prefix and cascading
+// layout/requires/label are the documented growth path
+// (docs/proposals/unfoldable-page-scaffolding.md).
+Area:
+    'area' name=ID '{'
+        members+=AreaMember*
+    '}';
+
+AreaMember:
+    Page | Area;
 
 // ---- api declaration (system-level) ----------------------------
 //

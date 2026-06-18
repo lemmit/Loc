@@ -12,6 +12,8 @@ import type {
   CallArg,
   CallSuffix,
   Expression,
+  IntLit,
+  Lambda,
   MenuMetaEntry,
   NameRef,
   Page,
@@ -27,6 +29,8 @@ import {
   mkBoolLit,
   mkCallArg,
   mkCallSuffix,
+  mkIntLit,
+  mkLambda,
   mkMenuMetaEntry,
   mkNameRef,
   mkPage,
@@ -55,6 +59,24 @@ export function stringLit(value: string): StringLit {
 export function boolLit(value: boolean): BoolLit {
   const origin = _currentOrigin();
   return _tag(mkBoolLit({ $type: "BoolLit", value: value ? "true" : "false" }), origin);
+}
+
+/** An integer literal expression (`level: 2`).  `IntLit.value` is a
+ * number (the parser coerces the `INT` terminal). */
+export function intLit(value: number): IntLit {
+  const origin = _currentOrigin();
+  return _tag(mkIntLit({ $type: "IntLit", value }), origin);
+}
+
+/** An expression-bodied lambda: `param => body` (e.g. a `Column`
+ * accessor `o => o.name` or a `QueryView` `data:` lambda).  Block-body
+ * lambdas (`p => { … }`) aren't needed by the scaffolders, so this only
+ * builds the expression form (`stmts` stays empty). */
+export function lambda(param: string, body: Expression): Lambda {
+  const origin = _currentOrigin();
+  const node = _tag(mkLambda({ $type: "Lambda", param, body, stmts: [] }), origin);
+  _setContainer(body, node, "body");
+  return node;
 }
 
 /** A bare name reference, suitable for use in expression positions

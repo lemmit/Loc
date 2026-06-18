@@ -194,10 +194,8 @@ export interface PrimitiveDef {
    *  can opt out by setting this to false. */
   admissibleInSource: boolean;
   /** React/TSX target renderer, or undefined if the TSX walker does
-   *  NOT dispatch on this primitive directly (e.g. the legacy
-   *  archetype names `List`/`Detail`/`MasterDetail` lower as `custom`
-   *  page origins; `Tab`/`Column` only appear as children of their
-   *  parent which consumes them inline). */
+   *  NOT dispatch on this primitive directly (e.g. `Tab`/`Column` only
+   *  appear as children of their parent, which consumes them inline). */
   tsx?: TsxRenderer;
   /** Phoenix/HEEx target renderer, or undefined if the HEEx walker
    *  does NOT support this primitive — Phoenix supports a subset
@@ -388,11 +386,6 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     tsx: emitDestroyForm,
     heex: renderDestroyFormHeex,
   },
-  // --- Legacy archetype names (admissible, lower as `custom` page
-  //     origins post-#515; no walker renderer needed) -------------------
-  List: { group: "layout", admissibleInSource: true },
-  Detail: { group: "layout", admissibleInSource: true },
-  MasterDetail: { group: "layout", admissibleInSource: true },
   // --- Action primitive --------------------------------------------------
   Action: { group: "layout", admissibleInSource: true, tsx: emitAction, heex: renderActionHeex },
   // --- For-comprehension — list rendering with an item lambda.
