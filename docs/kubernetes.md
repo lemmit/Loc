@@ -57,7 +57,7 @@ the two stay structurally aligned:
 | `/health` on DB backends, `/` on frontends | `livenessProbe` |
 | non-secret `env` | `ConfigMap` (via `envFrom`) |
 | DB-connection + sensitive `env` | `Secret` ref (`secretKeyRef`) |
-| frontend / UI-serving | optional `Ingress` (off by default) |
+| frontend / UI-serving | optional `Ingress` (off by default; same-origin `/api` + `/` split when it targets a backend — see below) |
 
 **Probes are aligned across backends.** Every DB-backed backend
 (hono / .NET / Python / Java / Phoenix) emits *both* a cheap `/health`
@@ -120,6 +120,47 @@ Deployment/Service/ConfigMap/Ingress template is wrapped in
 byte-unchanged (all on); the k8s-e2e matrix uses it to install a single
 backend per cell.
 
+## Ingress — same-origin routing
+
+A UI-serving deployable gets one optional `Ingress`, **off by default** —
+enable it per deployable:
+
+```bash
+--set webApp.ingress.enabled=true webApp.ingress.host=app.example.com
+```
+
+When that deployable `targets:` a **distinct backend**, the `Ingress` is
+**same-origin**: one host, two path rules.
+
+```yaml
+rules:
+  - host: app.example.com
+    http:
+      paths:
+        - path: /api                 # → the targeted backend's Service
+          pathType: Prefix
+          backend: { service: { name: <release>-api,     port: { number: 8080 } } }
+        - path: /                     # → the SPA's own Service
+          pathType: Prefix
+          backend: { service: { name: <release>-web-app, port: { number: 3000 } } }
+```
+
+`/api` is listed **first** so the longer prefix wins, and **no path rewrite**
+is needed — every backend already mounts its routes under `/api`, the
+toolchain-wide base path (`src/util/api-base.ts`). That is why the split needs
+**zero per-deployable config**: the built SPA fetches `/api` *relative* (its
+`src/api/config.ts` defaults to `/api`), so on one host the browser stays
+same-origin and the `Ingress` fans `/api` to the backend and everything else
+to the bundle — no CORS, no second hostname.
+
+A **fullstack host** (Phoenix LiveView, or a backend that mounts its own
+`ui:`) keeps a single `/` catch-all — it already serves its own `/api` from
+the same process, so there is nothing to split.
+
+> **The relative base is load-bearing.** If you bake an absolute
+> `VITE_API_BASE_URL` into the bundle at build time, the browser calls that URL
+> directly and bypasses the `Ingress`. Leave it unset for same-origin.
+
 ## Decisions (v1)
 
 - **D-K8S-FORMAT** — Helm chart is the primary deliverable; the raw `k8s/`
@@ -146,8 +187,14 @@ backend per cell.
 - **Image build/push.** Loom emits Dockerfiles, not a registry push. The
   chart references `<registry>/<name>:<tag>`; build and push the images, then
   `--set global.image.registry=… global.image.tag=…`. (Frontend `VITE_*` env
-  is baked into the static bundle at build time, so it must be set when the
-  image is built, not at install.)
+  is baked into the static bundle at *build* time, not at install. The bundle
+  defaults to a **relative** `/api` base for the same-origin Ingress above —
+  only bake an absolute `VITE_API_BASE_URL` if you deliberately want a
+  cross-origin API URL, which bypasses the split.)
+- **TLS termination.** The `Ingress` emits host-based routing only — no `tls:`
+  block or cert-manager annotations. Same-origin means **one hostname**, so the
+  cluster operator terminates TLS once for that host (add the `tls:` section /
+  issuer annotation to taste); the chart does not presume a cert story.
 - **Secret values.** Only references + placeholders; the DB URL and any auth
   secrets are supplied at install time.
 - **Deferred:** infra-in-DSL clauses (`replicas` / `resources` / `ingress` on
