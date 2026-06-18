@@ -40,13 +40,23 @@ landed across most backends:
 | `on`/event-`create` dispatch | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | instance read endpoints | ✓ | ✓ | (Ash defer) | ✓ | ✓ | ✓ |
 | view-over-workflow | ✓ | ✓ | (Ash defer) | ✓ | ✓ | ✓ |
-| `eventSourced` workflows (`apply`) | — | — | — | — | — | — |
+| `eventSourced` workflows (`apply`) | gated | gated | gated | gated | gated | gated |
+
+**`eventSourced` workflows are gated, not silently emitted.** The surface
+(grammar → `WorkflowIR.eventSourced` / `.appliers`) and the emit-only/pure-fold
+discipline (A1) have landed, but no backend emits the event-sourced workflow
+runtime (per-correlation event stream + fold-on-load + apply dispatch). Until
+one does, an `eventSourced` workflow on any backend is a **hard error**
+(`loom.event-sourced-workflow-unsupported`, `validateEventSourcedWorkflowStorage`)
+— before this, it silently misgenerated as a state-based saga with the appliers
+dropped. This mirrors the event-sourced *aggregate* storage gate
+(`validateEventSourcedStorage`): a parsed-but-unemitted feature fails fast.
 
 Corrections from earlier matrix drift (verified against code): **elixir-vanilla
 dispatch already ships** (`index.ts` calls the foundation-agnostic
 `emitDispatch(..., "vanilla")`), so it was never a gap. The Java saga track has
 landed its saga-state row (#1288), in-process dispatcher (#1291), instance read
-endpoints (#1293), and view-over-workflow (this slice) — so **java is now at full
+endpoints (#1293), and view-over-workflow (#1296) — so **java is now at full
 workflow parity with node / dotnet / elixir-vanilla / python**. The **only
 remaining workflow gap across all backends is the universal `eventSourced`-workflow
 track**.
@@ -120,10 +130,25 @@ The Java saga stack landed in four stacked slices:
    `saga.ddd` java-build gate fixture carries a workflow view, so both slices 3 & 4 compile
    on `gradle testClasses bootJar`.
 
+## Done — eventSourced workflow gate (footgun closed)
+
+`validateEventSourcedWorkflowStorage` (`src/ir/validate/checks/system-checks.ts`)
+now hard-errors an `eventSourced` workflow hosted by any backend
+(`loom.event-sourced-workflow-unsupported`). Before it, an `eventSourced`
+workflow with a correlation field silently emitted a *state-based* saga (state
+entity + dispatcher + instance reads + state table) and **dropped its appliers**
+— the event-fold semantics vanished. The gate makes the unimplemented feature
+fail fast, exactly like the ES-aggregate storage gate. Tests:
+`test/ir/workflow-event-sourced-storage.test.ts`.
+
 ## Next slices (recommended order)
 
-1. **elixir-vanilla dispatch** — port the ash-foundation dispatcher to the
-   vanilla foundation (raw `Repo.transaction` + `Phoenix.PubSub`).
-2. **`eventSourced` workflows (`apply(...)` folds)** — the only remaining workflow
-   gap across all backends; design-first (`workflow-and-applier.md` A2-S5b). Pairs
-   with the aggregate event-store path.
+1. **`eventSourced` workflows (`apply(...)` folds) — codegen** — the only remaining
+   workflow *feature* gap (currently gated, see above). A multi-backend epic
+   comparable to the aggregate event-store path: a per-correlation `<wf>_events`
+   stream (reusing the `MigrationsIR` event-table shape), an apply-fold rehydrator,
+   emit→append→fold command/reactor handlers, and instance reads that fold-on-load
+   — across the five ES-capable backends (node / dotnet / java / python /
+   elixir-vanilla). Design-first (`workflow-and-applier.md` A2-S5b); lift the gate
+   per-backend as each lands (mirroring `EVENT_SOURCING_BACKENDS`). Pairs with the
+   landed aggregate event-store path.
