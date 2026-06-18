@@ -6,6 +6,9 @@ import {
   filterStateFields,
   scaffoldList,
   scaffoldNewForm,
+  scaffoldOperations,
+  scaffoldViewList,
+  scaffoldWorkflowForm,
   scalarColumnsForAggregate,
 } from "../../src/macros/stdlib/scaffold/_body-builders.js";
 import { parseRawResult } from "../_helpers/index.js";
@@ -134,6 +137,88 @@ function findNode(root: unknown, type: string, name: string): any {
   walk(root);
   return found;
 }
+
+describe("scaffoldWorkflowForm — workflow command page body", () => {
+  it("scaffolds Breadcrumbs/Heading/Card(WorkflowForm)", () => {
+    const src = printExpr(scaffoldWorkflowForm("placeOrder"));
+    expect(src).toContain(
+      'Breadcrumbs(Anchor("Home", to: "/"), Anchor("Workflows", to: "/workflows"), Text("Place Order"))',
+    );
+    expect(src).toContain('Heading("Place Order", level: 2)');
+    expect(src).toContain('Card(WorkflowForm(runs: placeOrder, testid: "workflow-place_order"))');
+    expect(src).toContain('testid: "workflow-place_order-page"');
+    expect(
+      parseRawResult(inPage(src))
+        .parserErrors.map((e) => e.message)
+        .join("\n"),
+    ).toBe("");
+  });
+});
+
+describe("scaffoldOperations — per-operation modals", () => {
+  const withOps = (members: string) => `
+    system S {
+      context C {
+        aggregate Order {
+          reference: string
+          ${members}
+        }
+        repository Orders for Order { }
+      }
+    }`;
+
+  it("emits one Modal per public operation; first trigger is primary", async () => {
+    const { model, errors } = await parseString(
+      withOps("operation approve() { } operation cancel() { }"),
+    );
+    expect(errors).toEqual([]);
+    const order = findNode(model, "Aggregate", "Order");
+    const src = printExpr(scaffoldOperations(order));
+    expect(src).toContain(
+      'Modal(OperationForm(of: Order, op: approve, testid: "orders-op-approve"), title: "Approve", trigger: Button("Approve", emphasis: "primary", testid: "orders-op-approve"))',
+    );
+    expect(src).toContain('emphasis: "secondary", testid: "orders-op-cancel"');
+    expect(
+      parseRawResult(inPage(src))
+        .parserErrors.map((e) => e.message)
+        .join("\n"),
+    ).toBe("");
+  });
+
+  it("skips private operations and yields an empty Group when none are public", async () => {
+    const { model } = await parseString(withOps("private operation recompute() { }"));
+    const order = findNode(model, "Aggregate", "Order");
+    expect(printExpr(scaffoldOperations(order))).toBe("Group()");
+  });
+});
+
+describe("scaffoldViewList — view read page body", () => {
+  it("scaffolds Heading + QueryView over Views.<View> with the source's columns", async () => {
+    const { model, errors } = await parseString(`
+      system S {
+        context C {
+          aggregate Order { reference: string  status: string }
+          repository Orders for Order { }
+          view ActiveOrders = Order where status == "open"
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+    const view = findNode(model, "View", "ActiveOrders");
+    const src = printExpr(scaffoldViewList(view));
+    expect(src).toContain('Heading("Active Orders", level: 2)');
+    expect(src).toContain("QueryView(of: Views.ActiveOrders");
+    expect(src).toContain('Column("Reference", o => Text(o.reference))');
+    expect(src).toContain('Column("Status", o => Text(o.status))');
+    expect(src).toContain('keyExpr: "idx"');
+    expect(src).toContain('testid: "view-active_orders"');
+    expect(
+      parseRawResult(inPage(src))
+        .parserErrors.map((e) => e.message)
+        .join("\n"),
+    ).toBe("");
+  });
+});
 
 describe("scaffoldList filter-bar — find inputs + match switch", () => {
   it("emits a Group of bound inputs and a match that switches the list per find", () => {
