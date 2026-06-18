@@ -49,6 +49,7 @@ describe("java platform — surface shape", () => {
     expect(javaPlatform.isFrontend).toBe(false);
     expect(javaPlatform.mountsUi).toBe(true);
     expect([...javaPlatform.hostableFrameworks].sort()).toEqual([
+      "angular",
       "react",
       "static",
       "svelte",
