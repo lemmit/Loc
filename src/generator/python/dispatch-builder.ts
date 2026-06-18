@@ -15,6 +15,7 @@ import { snake } from "../../util/naming.js";
 import { renderWorkflowStmts } from "../_workflow/stmt-target.js";
 import { renderPyExpr } from "./render-expr.js";
 import { resourceImportLines } from "./resource-clients.js";
+import { esEventRow, esFns, esWorkflowFoldBlock } from "./workflow-eventsourced-emit.js";
 import { pyWorkflowStmtTarget } from "./workflows-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -74,7 +75,9 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR, sys?: SystemI
     const wf = ctx.workflows.find((w) => w.name === sub.workflow);
     if (!wf) continue;
     if (wf.correlationField && !helperDone.has(wf.name)) {
-      out.push(stateHelpers(wf), "");
+      // Event-sourced workflows emit a fold block (state class + appliers +
+      // fold/load/append/codec) instead of the mutable-row load/save helper.
+      out.push(wf.eventSourced ? esWorkflowFoldBlock(wf, ctx) : stateHelpers(wf), "");
       helperDone.add(wf.name);
     }
     const resolved = resolveHandlerBody(wf, sub);
@@ -147,8 +150,18 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR, sys?: SystemI
     return r ? r.statements : [];
   });
   const resourceImports = sys ? resourceImportLines(sys, handlerStmts) : [];
-  const stateRows = [...helperDone].map((n) => `${n}Row`);
+  // An event-sourced workflow's schema model is its `<Wf>EventRow` stream,
+  // not a mutable `<Wf>Row` correlation row.
+  const touchedWorkflows = [...helperDone]
+    .map((n) => ctx.workflows.find((w) => w.name === n))
+    .filter((w): w is WorkflowIR => w != null);
+  const stateRows = touchedWorkflows.map((w) => (w.eventSourced ? esEventRow(w) : `${w.name}Row`));
   const schemaRows = [...stateRows, ...(hasOutbox ? ["LoomOutboxRow"] : [])].sort();
+  // The folded events of an ES workflow are constructed/dispatched in its
+  // codec + isinstance fold, so import them alongside the subscribed events.
+  const esEventNames = touchedWorkflows
+    .filter((w) => w.eventSourced)
+    .flatMap((w) => (w.appliers ?? []).map((a) => a.event));
   const idNames = ctx.aggregates
     .map((a) => `${a.name}Id`)
     .filter((n) => refersTo(n))
@@ -166,14 +179,24 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR, sys?: SystemI
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     refersTo("cast") ? "from typing import cast" : null,
     "",
-    hasOutbox ? "from sqlalchemy import select, update" : "from sqlalchemy import select",
+    `from sqlalchemy import ${[
+      "select",
+      ...(refersTo("func") ? ["func"] : []),
+      ...(hasOutbox ? ["update"] : []),
+    ]
+      .sort()
+      .join(", ")}`,
+    refersTo("insert") ? "from sqlalchemy.dialects.postgresql import insert" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
     hasOutbox ? "from app.db.engine import engine" : null,
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
     schemaRows.length > 0 ? `from app.db.schema import ${schemaRows.join(", ")}` : null,
     refersTo("DomainError") ? "from app.domain.errors import DomainError" : null,
-    `from app.domain.events import ${["DomainEvent", ...eventNames].join(", ")}`,
+    `from app.domain.events import ${[
+      "DomainEvent",
+      ...[...new Set([...eventNames, ...esEventNames])].sort(),
+    ].join(", ")}`,
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     ...factoryAggs.map((n) => `from app.domain.${snake(n)} import ${n}`),
     ...resourceImports,
@@ -297,6 +320,9 @@ function handlerFn(
   saves: { name: string; aggName: string; repoName: string }[],
   hasOutbox: boolean,
 ): string {
+  if (wf.correlationField && wf.eventSourced) {
+    return esHandlerFn(fn, wf, sub, correlation, statements, saves, hasOutbox);
+  }
   const param = snake(sub.param);
   const out: string[] = [
     `async def ${fn}(`,
@@ -358,6 +384,74 @@ function handlerFn(
     );
   }
   if (out[out.length - 1] === ") -> None:") out.push("    return None");
+  return out.join("\n");
+}
+
+/** The event-sourced handler (workflow-and-applier.md A2-S5b): fold the
+ *  `<wf>_events` stream into `state` on load, run the emit-only body against
+ *  that folded snapshot, append the workflow's own events gap-free, then
+ *  re-publish for choreography.  The saga analogue of the aggregate event
+ *  store — there is no mutable correlation row. */
+function esHandlerFn(
+  fn: string,
+  wf: WorkflowIR,
+  sub: EventSubscriptionIR,
+  correlation: ExprIR | undefined,
+  statements: WorkflowStmtIR[],
+  saves: { name: string; aggName: string; repoName: string }[],
+  hasOutbox: boolean,
+): string {
+  const param = snake(sub.param);
+  const corr = wf.correlationField as string;
+  const fns = esFns(wf);
+  const rctx = { thisName: "state" } as const;
+  const keyExpr = correlation ? renderPyExpr(correlation, rctx) : `${param}.${snake(corr)}`;
+  // Render the body up front so we know whether it reads the folded snapshot
+  // (a starter that only emits constants never touches `state`) — folding is a
+  // pure no-op then, so we skip the unused binding (ruff F841).
+  const bodyLines = renderWorkflowStmts(statements, pyWorkflowStmtTarget(rctx), "    ");
+  const usesState = bodyLines.some((l) => /\bstate\b/.test(l));
+  const out: string[] = [
+    `async def ${fn}(`,
+    `    session: AsyncSession, events: "InProcessDispatcher", ${param}: ${sub.event}`,
+    ") -> None:",
+    `    __key = str(${keyExpr})`,
+  ];
+  // `__events` is needed by an `on` reactor's empty-stream check (always) and
+  // by the fold (only when the body reads state) — skip the load otherwise.
+  if (sub.trigger === "on" || usesState) {
+    out.push(`    __events = await ${fns.load}(session, __key)`);
+  }
+  if (sub.trigger === "on") {
+    // A continuation needs a started saga (non-empty stream); else drop + log.
+    out.push("    if not __events:");
+    out.push(
+      `        log("warn", "event_unrouted", workflow=${JSON.stringify(wf.name)}, event_type=${JSON.stringify(sub.event)}, key=__key)`,
+    );
+    out.push("        return");
+  }
+  if (usesState) out.push(`    state = ${fns.fold}(__key, __events)`);
+  for (const r of reposIn(statements, saves)) {
+    out.push(`    ${snake(r.repoName)} = ${r.aggName}Repository(session, events)`);
+  }
+  const hasEmit = statements.some((st) => st.kind === "emit");
+  if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
+  out.push(...bodyLines);
+  for (const save of saves) {
+    out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
+  }
+  // Every emit in an ES workflow has an applier (A1 discipline), so the
+  // emitted events ARE the workflow's own stream — append them gap-free.
+  if (hasEmit) out.push(`    await ${fns.append}(session, __key, workflow_events)`);
+  out.push("    await session.flush()");
+  if (hasEmit) {
+    out.push("    for ev in workflow_events:");
+    out.push(
+      hasOutbox
+        ? "        await _dispatch_chained(events, ev)"
+        : "        await events.dispatch(ev)",
+    );
+  }
   return out.join("\n");
 }
 

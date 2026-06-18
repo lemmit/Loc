@@ -36,9 +36,10 @@ async function diagnose(src: string) {
 }
 
 describe("event-sourced workflow storage gate", () => {
-  // The Hono (node) + .NET (dotnet) backends now emit the event-sourced
-  // workflow runtime, so the gate does NOT fire there; the rest stay gated.
-  for (const plat of ["java", "python", "elixir"]) {
+  // The Hono (node) + .NET (dotnet) + Python (FastAPI) backends now emit the
+  // event-sourced workflow runtime, so the gate does NOT fire there; the rest
+  // stay gated.
+  for (const plat of ["java", "elixir"]) {
     it(`errors when an eventSourced workflow is hosted by ${plat}`, async () => {
       const diags = await diagnose(mk(plat, true));
       const gate = diags.find((d) => d.code === "loom.event-sourced-workflow-unsupported");
@@ -49,7 +50,7 @@ describe("event-sourced workflow storage gate", () => {
     });
   }
 
-  for (const plat of ["hono", "dotnet"]) {
+  for (const plat of ["hono", "dotnet", "python"]) {
     it(`is supported on ${plat} — no gate error`, async () => {
       const diags = await diagnose(mk(plat, true));
       expect(diags.some((d) => d.code === "loom.event-sourced-workflow-unsupported")).toBe(false);

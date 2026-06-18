@@ -198,7 +198,7 @@ function rowToEvent(agg: EnrichedAggregateIR, events: EventIR[], row: string): s
   );
 }
 
-function fromData(name: string, t: TypeIR): string {
+export function fromData(name: string, t: TypeIR): string {
   const access = `data["${name}"]`;
   const inner = t.kind === "optional" ? t.inner : t;
   switch (inner.kind) {
@@ -240,7 +240,7 @@ function eventToData(events: EventIR[]): string {
   );
 }
 
-function toData(expr: string, t: TypeIR): string {
+export function toData(expr: string, t: TypeIR): string {
   const inner = t.kind === "optional" ? t.inner : t;
   if (inner.kind === "primitive" && inner.name === "datetime") return `${expr}.isoformat()`;
   if (inner.kind === "primitive" && inner.name === "money") return `str(${expr})`;
