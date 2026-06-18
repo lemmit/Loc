@@ -5,6 +5,7 @@ import type {
   FieldIR,
   ViewIR,
 } from "../../ir/types/loom-ir.js";
+import { aggregateUsesPrincipalContextFilter } from "../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "./render-expr.js";
 
@@ -139,15 +140,25 @@ function buildShorthandBody(
 
   if (!view.filter) {
     lines.push(`    ${aggModule}`);
-    lines.push(`    |> Ash.read!()`);
+    lines.push(`    |> Ash.read!(${viewActorArg(agg)})`);
     return lines.join("\n");
   }
 
   const filterExpr = renderExpr(view.filter, renderCtx);
   lines.push(`    ${aggModule}`);
   lines.push(`    |> Ash.Query.filter(${filterExpr})`);
-  lines.push(`    |> Ash.read!()`);
+  lines.push(`    |> Ash.read!(${viewActorArg(agg)})`);
   return lines.join("\n");
+}
+
+/** The `Ash.read!` actor argument for a view sourced from `agg`.  A tenancy
+ *  (principal-referencing) capability filter on the source aggregate compiles to
+ *  `base_filter expr(... == ^actor(:field))`, so the view's read must run with
+ *  `actor: current_user` (already threaded into the view's `run/1`, the value
+ *  the controller passes from `conn.assigns.current_user`).  Empty otherwise, so
+ *  non-tenancy views stay byte-identical.  (DEBT-01 elixir/Ash slice.) */
+function viewActorArg(agg: AggregateIR): string {
+  return aggregateUsesPrincipalContextFilter(agg) ? "actor: current_user" : "";
 }
 
 // ---------------------------------------------------------------------------
@@ -183,7 +194,7 @@ function buildFullFormBody(
     lines.push(`    |> Ash.Query.load([${keyList}])`);
   }
 
-  lines.push(`    |> Ash.read!()`);
+  lines.push(`    |> Ash.read!(${viewActorArg(agg)})`);
 
   // Emit Enum.map projection
   lines.push(`    |> Enum.map(fn record ->`);

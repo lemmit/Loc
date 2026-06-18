@@ -29,6 +29,7 @@ import {
   hookFnName,
   hookVarName,
   lowerFirstName,
+  referencesIdent,
   renderJsMatch,
   renderJsNavigate,
   upperFirstName,
@@ -178,6 +179,35 @@ export const tsxTarget: WalkerTarget = {
   ): string {
     const inner = tsxTarget.renderMatch(arms, elseArm);
     return depth === 0 ? inner : `{${inner}}`;
+  },
+
+  // --- List-comprehension seam --------------------------------------------
+
+  /** `coll.map((item, idx) => (<Fragment key={key}>body</Fragment>))`.
+   *  The keyed Fragment satisfies `useJsxKeyInIterable` without
+   *  introducing a wrapper DOM node; the index binding is emitted only
+   *  when referenced (else `noUnusedFunctionParameters` fires).  Brace-
+   *  wrapped below depth 0, mirroring the ternary/match-child arms. */
+  renderForEach(
+    coll: string,
+    itemVar: string,
+    indexVar: string,
+    keyExpr: string,
+    body: string,
+    depth: number,
+  ): string {
+    const usesIdx = referencesIdent(keyExpr, indexVar) || referencesIdent(body, indexVar);
+    const params = usesIdx ? `(${itemVar}, ${indexVar})` : `(${itemVar})`;
+    const inner = "  ".repeat(depth + 1);
+    const close = "  ".repeat(depth);
+    const expr = [
+      `${coll}.map(${params} => (`,
+      `${inner}<Fragment key={${keyExpr}}>`,
+      `${inner}  ${body}`,
+      `${inner}</Fragment>`,
+      `${close}))`,
+    ].join("\n");
+    return depth === 0 ? expr : `{${expr}}`;
   },
 
   // --- Navigation seam ----------------------------------------------------

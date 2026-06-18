@@ -329,6 +329,7 @@ Reuses the existing `Statement` rule (covers `let`, `:=`, calls, `emit`).
 | `Action(operation, then?)`, `Button { label, on? }` | Action primitives. |
 | `Money`, `DateDisplay`, `EnumBadge`, `IdLink` | Formatter primitives. |
 | `Table`, `Column` | Tabular display (data lambda accessors). |
+| `For { each: T[], item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. |
 | `Form { of: <Agg> }`, `Form { runs: <wf> }`, `Form { <instance>.<operation> }` | RHF-bound form auto-dispatched off the aggregate / workflow / operation IR. The operation form references the op through an in-scope aggregate instance (like `Action`). Named-leaf twins: `CreateForm { of: }`, `OperationForm { of:, op: }`, `WorkflowForm { runs: }`, and `DestroyForm { of: <Agg>, then? }` — the confirmation-only canonical-destroy form (confirm → delete → navigate to the list). |
 | `QueryView { of:, loading:, error:, empty:, data:, single?: }` | 4-arm query-state branching (collection or single-record). |
 

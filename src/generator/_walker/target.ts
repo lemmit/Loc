@@ -247,6 +247,39 @@ export interface WalkerTarget {
     depth: number,
   ): string;
 
+  // --- List-comprehension seam --------------------------------------------
+
+  /** Render a `For { each: <coll>, <item> => <markup> }` list
+   *  comprehension in markup-child position.  This is the structural
+   *  iteration seam — distinct from the DOMAIN collection ops
+   *  (`xs.map(...)` / `xs.sum(...)`) the walker leaves to each
+   *  backend's expression renderer; here the per-item lambda body is
+   *  MARKUP, so the output topology is framework-shaped exactly like
+   *  `renderMatchChild` / `renderConditionalChild`.
+   *
+   *    TSX:    `coll.map((item, idx) => (<Fragment key={key}>body</Fragment>))`
+   *            — brace-wrapped below depth 0 (JSX-child syntax); the
+   *            keyed Fragment satisfies `useJsxKeyInIterable` without
+   *            wrapping a DOM node, and the caller flags `usesFragment`
+   *            so the shell imports `Fragment`.
+   *    Vue:    `<template v-for="(item, idx) in coll" :key="key">body</template>`.
+   *    Svelte: `{#each coll as item, idx (key)}body{/each}`.
+   *
+   *  `coll` / `keyExpr` are pre-rendered JS expressions; `itemVar` is
+   *  the emitted iteration identifier (the source lambda param);
+   *  `indexVar` is the synthesised index identifier — emit it as a
+   *  loop binding ONLY when `keyExpr` or `body` references it (unused
+   *  bindings trip `noUnusedFunctionParameters` / framework warnings).
+   *  `depth` drives indentation and (TSX) the brace wrap. */
+  renderForEach(
+    coll: string,
+    itemVar: string,
+    indexVar: string,
+    keyExpr: string,
+    body: string,
+    depth: number,
+  ): string;
+
   // --- Navigation seam ----------------------------------------------------
 
   /** Render a cross-page navigation call — `navigate(<TargetPage>,

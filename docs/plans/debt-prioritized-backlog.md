@@ -48,11 +48,11 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | ID | Item | Target(s) to close | Impact | Effort | Existing plan |
 |---|---|---|:--:|:--:|---|
 | **P0 — parity completion, common, tractable** |
-| DEBT-01 | Principal-referencing capability `filter` (`currentUser` / tenancy) | node, elixir, java | 5 | L | `proposals/criterion-everywhere.md` |
+| DEBT-01 | Principal-referencing capability `filter` (`currentUser` / tenancy) | node, elixir, java | 5 | L | `proposals/criterion-everywhere.md` · **node + elixir-Ash slices landed** (elixir-vanilla / java follow-ups) |
 | DEBT-02 | Non-relational (`shape(document/embedded)`) capability `filter` | node, elixir, java | 4 | M | — |
 | DEBT-03 | Operation `or`-union return (exception-less ProblemDetails) | elixir/ash | 4 | M | `exception-less.md` · **slice 1 landed** (return-dominant; mutation/guard bodies still gated) |
 | DEBT-04 | Audit runtime parity (`audited` ops, lifecycle, `with audit`) | dotnet, elixir | 4 | L | `type-system-feature-migration.md` (DBT) |
-| DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) | react (→ vue/svelte) | 4 | M | — |
+| DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) — **`For` done (all 4 frontends + HEEx); `List`/`Detail`/`MasterDetail` open** | react (→ vue/svelte) | 4 | M | — |
 | **P1 — parity + frontend completeness** |
 | DEBT-06 | Provenanced fields (lineage SDK + trace capture) | elixir | 3 | L | `provenance.md`, `type-system-feature-migration.md` DBT-1 |
 | DEBT-07 | `shape(document)` persistence | elixir | 3 | M | — |
@@ -88,11 +88,13 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 ## P0 — do these first
 
 ### DEBT-01 · Principal-referencing capability filters
-- **Where:** `src/ir/validate/checks/system-checks.ts:625` (`validateContextFilterSupport`, `LIMITED_FAMILIES = {node, elixir, java}`); diagnostic `loom.context-filter-unsupported`.
-- **Today:** only **.NET** wires `filter this.tenantId == currentUser.tenantId` (EF `HasQueryFilter`, DI-resolved). node/elixir/java reject it.
-- **Why P0:** multi-tenancy and `currentUser`-scoped reads are core line-of-business needs; this is the single most-requested "works on .NET only" gap.
-- **Scope:** thread the request principal into the always-on read path — node: `findById` + every read site; elixir: an actor-bound `base_filter`; java: a JPA filter / `@Where` analogue.
-- **Done when:** a `filter` referencing `currentUser` generates and round-trips on node, elixir, and java, with the gate narrowed accordingly.
+- **Where:** `src/ir/validate/checks/system-checks.ts` (`validateContextFilterSupport`); diagnostic `loom.context-filter-unsupported`.
+- **Today (after node + elixir-Ash slices):** **.NET** (EF `HasQueryFilter`), **node** (Hono/Drizzle) and **elixir/Ash** (`base_filter` + `^actor`) wire `filter this.tenantId == currentUser.tenantId`. elixir-vanilla and java still reject it.
+- **Why P0:** multi-tenancy and `currentUser`-scoped reads are core line-of-business needs.
+- **Node slice (landed):** the principal predicate is AND-ed into every root read, rendered against the ambient `requireCurrentUser()` accessor (`auth/middleware.ts`) — the Drizzle analogue of EF Core reading `RequestContext.Current` inside `HasQueryFilter`, so **no read method gains a `currentUser` parameter**. `lowerToDrizzle` takes a `principalAccessor` option (`repository-find-predicate.ts`); `aggregateUsesPrincipalContextFilter` (`loom-ir.ts`) drives the `requireCurrentUser` import. A principal filter now requires the deployable to set `auth: required` (validated, mirroring `validateJavaStampSupport`). Verified end-to-end: the generated project `tsc --noEmit`s clean (fixture `test/e2e/fixtures/ts-build/tenancy-filter.ddd`, wired into `build-generated-ts`).
+- **elixir/Ash slice (landed):** `renderBaseFilter` (`domain-emit.ts`) now keeps the principal predicate and rewrites the `current_user.<field>` member access to `^actor(:<field>)` — Ash's request-actor template — so it emits `base_filter expr(tenant_id == ^actor(:tenant_id))`. For the template to resolve, every read runs with `actor: current_user` (the JWT principal on `conn.assigns.current_user`): threaded into the CRUD controller reads (list/get/update/destroy + finds, `api-emit.ts`) and the context-view `Ash.read!` (`view-emit.ts`), all conditional on `aggregateUsesPrincipalContextFilter` so non-tenancy output stays byte-identical. The gate is now foundation-aware (`foundation: ash` allowed; `vanilla` still rejected). Fixture `test/e2e/fixtures/phoenix-build/tenancy-filter.ddd`, wired into the `elixir-ash-build` gate.
+  - *Known follow-up (fail-closed, not a leak):* context **retrievals** (`run<Name>`) and **`or`-union returning operations** that read a tenancy aggregate aren't actor-threaded yet — with a nil actor the `^actor` template yields no rows, so they return empty / not-found rather than leaking cross-tenant data.
+- **Follow-ups (still gated):** **elixir-vanilla** — plain Ecto has no actor; `current_user` must be threaded into each `Repo` query (`from(... where: ... == ^current_user.tenant_id)`); **java** — `@SQLRestriction` is static SQL, so principal filters need a Hibernate `@Filter` (session-enabled with params) or query-level AND.
 
 ### DEBT-02 · Non-relational capability filters
 - **Where:** same gate as DEBT-01 (the `shape(document/embedded)` branch).
@@ -111,8 +113,10 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 - **Scope:** dotnet — finish the `IAuditWriter` unit-of-work path for lifecycle; elixir — emit the audit-record append in the save transaction.
 
 ### DEBT-05 · React walker `List` / `Detail` / `For` primitives
-- **Where:** `src/generator/_walker/walker-core.ts:730` — registered, source-admissible, but render only as `// X: not supported by the React walker yet`.
+- **Where:** `src/generator/_walker/walker-core.ts` `emitComponent` — registered, source-admissible, but rendered only as `// X: not supported by the React walker yet`.
 - **Why P0:** these are common page primitives silently degrading to comments; the most visible *frontend* hole. Land the TSX renderers, then mirror to vue/svelte targets and (where mappable) HEEx.
+- **`For` — DONE.** The `For { each:, item => markup }` comprehension now renders on all four frontends via a new `renderForEach` target seam: TSX keyed `.map`/`<Fragment>`, Vue `<template v-for :key>`, Svelte keyed `{#each}`, plus a Phoenix `for … do … end` block (`heex-primitives.ts:renderFor`). It's a child primitive (stays in `NON_PAGE_BODY_LAYOUT_PRIMITIVES`); list key is the loop index (a source-level `key:` is grammar-unwritable next to a brace-body item lambda, so the seam takes a `keyExpr` for programmatic/future use only).
+- **`List` / `Detail` / `MasterDetail` — still open.** These are legacy archetype names that lower as `custom` page origins and overlap the `scaffoldList`/`scaffoldDetails` expander; closing them is a separate slice (expander delegation vs. direct renderer — decide first).
 
 ---
 
@@ -198,7 +202,7 @@ Sequenced for parity impact and momentum (all are ports of an existing pattern,
 none require a design spike):
 
 1. ~~**DEBT-03** — operation `or`-union return on Elixir/Ash~~ — **slice 1 done** (return-dominant ops; mutation/guard follow-up remains).
-2. **DEBT-05** — React `List`/`Detail`/`For` primitives (visible frontend correctness).
+2. **DEBT-05** — React `List`/`Detail`/`For` primitives (visible frontend correctness) — **`For` done** (all 4 frontends + HEEx); `List`/`Detail`/`MasterDetail` remain.
 3. **DEBT-01** — principal-referencing filters on node (then elixir, java) — highest demand.
 4. **DEBT-02** — non-relational filters (rides on DEBT-01's plumbing).
 5. **DEBT-04** — audit runtime parity (dotnet first, then elixir).

@@ -7,7 +7,11 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import {
+  exprUsesCurrentUser,
+  operationUsesCurrentUser,
+  workflowEmitsCommandRoute,
+} from "../../../ir/types/loom-ir.js";
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
@@ -279,7 +283,14 @@ export function renderJavaWorkflows(
   authed: boolean,
   sys?: SystemIR,
 ): Map<string, { category: "service" | "controller" | "request-dto"; content: string }> | null {
-  if (ctx.workflows.length === 0) return null;
+  // Only command-surfaced workflows get a service method + POST route.  An
+  // event-triggered (saga) workflow is invoked by the in-process dispatcher,
+  // never an inbound call, so emitting a Request/route with an event-typed
+  // param is bogus — `workflowEmitsCommandRoute` is the shared facade rule
+  // every other backend already honours (channels.md).  A reactor-only
+  // context emits no workflow files.
+  const cmdWorkflows = ctx.workflows.filter(workflowEmitsCommandRoute);
+  if (cmdWorkflows.length === 0) return null;
   const out = new Map<
     string,
     { category: "service" | "controller" | "request-dto"; content: string }
@@ -291,7 +302,7 @@ export function renderJavaWorkflows(
   const repoAggs = new Set<string>();
   const methods: string[] = [];
 
-  for (const wf of ctx.workflows) {
+  for (const wf of cmdWorkflows) {
     const usesUser = workflowUsesCurrentUser(wf);
     for (const agg of reposUsed(wf, ctx)) repoAggs.add(agg);
     const reqType = `${upperFirst(wf.name)}Request`;
@@ -351,8 +362,8 @@ export function renderJavaWorkflows(
   while (methods[methods.length - 1] === "") methods.pop();
 
   const repoFields = [...repoAggs].sort();
-  const anyUser = authed && ctx.workflows.some(workflowUsesCurrentUser);
-  const hasEmit = ctx.workflows.some((wf) => {
+  const anyUser = authed && cmdWorkflows.some(workflowUsesCurrentUser);
+  const hasEmit = cmdWorkflows.some((wf) => {
     const walk = (ss: WorkflowStmtIR[]): boolean =>
       ss.some((s) => s.kind === "emit" || (s.kind === "for-each" && walk(s.body)));
     return walk(wf.statements);
@@ -414,7 +425,7 @@ export function renderJavaWorkflows(
     ),
   });
 
-  const routes = ctx.workflows.flatMap((wf) => [
+  const routes = cmdWorkflows.flatMap((wf) => [
     `    @PostMapping("/${snake(wf.name)}")`,
     `    @ResponseStatus(HttpStatus.NO_CONTENT)`,
     wf.params.length > 0

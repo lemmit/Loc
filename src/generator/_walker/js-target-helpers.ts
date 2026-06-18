@@ -120,3 +120,13 @@ function pluralName_(s: string): string {
   if (/(s|x|z|ch|sh)$/.test(s)) return `${s}es`;
   return `${s}s`;
 }
+
+/** True when `ident` appears as a whole-word token in `code`.  Used by
+ *  the list-comprehension targets to decide whether to emit the
+ *  synthesised index binding — an unused loop index trips
+ *  `noUnusedFunctionParameters` (TSX) / framework lints.  `ident` is a
+ *  generated identifier (`<item>Idx`), so the word-boundary test is
+ *  safe without escaping. */
+export function referencesIdent(code: string, ident: string): boolean {
+  return new RegExp(`\\b${ident}\\b`).test(code);
+}

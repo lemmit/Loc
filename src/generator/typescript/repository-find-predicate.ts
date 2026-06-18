@@ -53,7 +53,17 @@ export function lowerToDrizzle(
   expr: ExprIR,
   tableName: string,
   ctx: EnrichedBoundedContextIR,
+  opts?: {
+    /** How a `currentUser.<field>` reference renders.  Defaults to the bare
+     *  `currentUser` parameter (the per-find `where` path threads it in).  The
+     *  always-on capability-filter path passes `"requireCurrentUser()"` — the
+     *  ambient principal accessor — so no read method needs a `currentUser`
+     *  parameter (DEBT-01; the Drizzle analogue of EF Core reading
+     *  `RequestContext.Current` inside `HasQueryFilter`). */
+    principalAccessor?: string;
+  },
 ): DrizzleLowering | null {
+  const principal = opts?.principalAccessor ?? "currentUser";
   const ops = new Set<string>();
   const text = lowerExpr(expr);
   if (text === null) return null;
@@ -218,7 +228,7 @@ export function lowerToDrizzle(
     // the column-side branded type and the User field's plain type
     // is structurally assignable.
     if (e.kind === "member" && e.receiver.kind === "ref" && e.receiver.refKind === "current-user") {
-      return `currentUser.${e.member}`;
+      return `${principal}.${e.member}`;
     }
     void ctx;
     return null;
@@ -254,6 +264,20 @@ export function nonPrincipalContextFilterEntries(
   return (agg.contextFilters ?? [])
     .map((predicate, i) => ({ predicate, criterionRef: agg.contextFilterRefs?.[i] }))
     .filter((e) => !exprUsesCurrentUser(e.predicate));
+}
+
+/** ALL capability-filter entries for an aggregate (principal-referencing
+ *  included), index-aligned with their `criterionRef`.  A principal filter
+ *  (`currentUser.tenantId`) renders to `currentUser.<field>` against the
+ *  `currentUser: User` parameter the read method gains — see
+ *  `aggregateUsesPrincipalContextFilter`.  (DEBT-01.) */
+export function allContextFilterEntries(
+  agg: EnrichedAggregateIR,
+): { predicate: ExprIR; criterionRef?: { name: string; args: ExprIR[] } }[] {
+  return (agg.contextFilters ?? []).map((predicate, i) => ({
+    predicate,
+    criterionRef: agg.contextFilterRefs?.[i],
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +329,7 @@ export function contextFilterPredicate(
   ctx: EnrichedBoundedContextIR,
   ops: Set<string>,
 ): string | null {
-  const entries = nonPrincipalContextFilterEntries(agg);
+  const entries = allContextFilterEntries(agg);
   if (entries.length === 0) return null;
   const lowered: string[] = [];
   for (const e of entries) {
@@ -314,7 +338,12 @@ export function contextFilterPredicate(
     // repository-builder, deduped with find/retrieval consumers) instead
     // of re-inlining the body.  Behaviour-identical — the fn body IS the
     // lowered predicate.  Its Drizzle ops still join the import walk.
-    const c = reifiableCriterion(e.criterionRef, ctx, tableName);
+    // A principal-referencing filter (`currentUser.x`) never reifies — the
+    // module-level `<name>Criterion()` fn has no `currentUser` in scope — so
+    // it always inlines (the inline render emits `currentUser.<field>`).
+    const c = exprUsesCurrentUser(e.predicate)
+      ? undefined
+      : reifiableCriterion(e.criterionRef, ctx, tableName);
     if (c) {
       const body = lowerToDrizzle(c.body, tableName, ctx)!;
       for (const op of body.ops) ops.add(op);
@@ -322,7 +351,12 @@ export function contextFilterPredicate(
       lowered.push(`${criterionFnName(c.name)}(${args})`);
       continue;
     }
-    const l = lowerToDrizzle(e.predicate, tableName, ctx);
+    // A principal-referencing filter renders its `currentUser.<field>` against
+    // the ambient `requireCurrentUser()` accessor, so the read needs no
+    // `currentUser` parameter (DEBT-01).
+    const l = lowerToDrizzle(e.predicate, tableName, ctx, {
+      principalAccessor: "requireCurrentUser()",
+    });
     if (!l) return null;
     for (const op of l.ops) ops.add(op);
     lowered.push(l.expr);

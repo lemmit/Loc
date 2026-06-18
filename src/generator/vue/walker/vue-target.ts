@@ -22,6 +22,7 @@ import {
   hookFnName,
   hookVarName,
   lowerFirstName,
+  referencesIdent,
   renderJsMatch,
   upperFirstName,
 } from "../../_walker/js-target-helpers.js";
@@ -173,6 +174,43 @@ export const vueTarget: WalkerTarget = {
       blocks.push(`<template v-else>\n${inner}${elseArm}\n${pad}</template>`);
     }
     return blocks.join(`\n${pad}`);
+  },
+
+  // --- List-comprehension seam --------------------------------------------
+
+  /** `<template v-for="(item, idx) in coll" :key="key">body</template>`.
+   *  The non-rendering `<template>` carries `v-for` + the required
+   *  `:key` without introducing a wrapper element.  The index binding
+   *  is emitted only when referenced.  The `v-for` expression is
+   *  attribute-quoted, so the collection expression must not collide
+   *  with the chosen quote (same constraint as `renderAttrBinding`). */
+  renderForEach(
+    coll: string,
+    itemVar: string,
+    indexVar: string,
+    keyExpr: string,
+    body: string,
+    depth: number,
+  ): string {
+    const usesIdx = referencesIdent(keyExpr, indexVar) || referencesIdent(body, indexVar);
+    const binding = usesIdx ? `(${itemVar}, ${indexVar})` : itemVar;
+    const forExpr = `${binding} in ${coll}`;
+    const quoteFor = (expr: string): string => {
+      if (!expr.includes('"')) return `"${expr}"`;
+      if (!expr.includes("'")) return `'${expr}'`;
+      throw new Error(
+        `vueTarget.renderForEach: v-for expression mixes single and double quotes — cannot be attribute-quoted: ${expr}`,
+      );
+    };
+    const pad = "  ".repeat(depth);
+    const inner = "  ".repeat(depth + 1);
+    // `renderAttrBinding` returns the `:key` attr with a leading space.
+    const keyAttr = vueTarget.renderAttrBinding("key", keyExpr);
+    return [
+      `<template v-for=${quoteFor(forExpr)}${keyAttr}>`,
+      `${inner}${body}`,
+      `${pad}</template>`,
+    ].join("\n");
   },
 
   // --- Navigation seam ----------------------------------------------------
