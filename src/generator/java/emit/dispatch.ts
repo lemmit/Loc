@@ -10,7 +10,8 @@ import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { renderWorkflowStmts } from "../../_workflow/stmt-target.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import { javaWorkflowStmtTarget, repoField, reposUsed } from "./workflow.js";
-import { correlationWorkflows, workflowStateClass } from "./workflow-state.js";
+import { esWorkflowStateClass, esWorkflowStreamTable } from "./workflow-eventsourced.js";
+import { workflowStateClass } from "./workflow-state.js";
 
 // ---------------------------------------------------------------------------
 // In-process saga dispatcher (Java / Spring) — `<Ctx>Dispatcher`, a
@@ -110,7 +111,11 @@ export function renderJavaDispatcher(
     if (!wf?.correlationField) continue;
     const resolved = resolveHandler(wf, sub);
     if (!resolved) continue;
-    methods.push(...renderHandler(ctx, wf, sub, resolved, imports));
+    methods.push(
+      ...(wf.eventSourced
+        ? renderEsHandler(ctx, wf, sub, resolved, imports)
+        : renderHandler(ctx, wf, sub, resolved, imports)),
+    );
   }
   if (methods.length === 0) return null;
 
@@ -121,6 +126,10 @@ export function renderJavaDispatcher(
   ]
     .map((n) => wfByName.get(n)!)
     .sort((a, b) => a.name.localeCompare(b.name));
+  // State-based sagas inject a Spring Data state repo; event-sourced workflows
+  // fold their `<wf>_events` stream over a shared JdbcTemplate instead.
+  const stateWfs = subscribedWfs.filter((wf) => !wf.eventSourced);
+  const esPresent = subscribedWfs.some((wf) => wf.eventSourced);
   const repoAggs = [...new Set(subscribedWfs.flatMap((wf) => reposUsed(wf, ctx)))].sort();
   const factoryAggs = [
     ...new Set(
@@ -137,19 +146,22 @@ export function renderJavaDispatcher(
     `    private static final Logger log = LoggerFactory.getLogger(${className}.class);`,
     `    private final ApplicationEventPublisher events;`,
     ...repoAggs.map((a) => `    private final ${a}Repository ${repoField(a)};`),
-    ...subscribedWfs.map(
+    ...(esPresent ? [`    private final JdbcTemplate jdbc;`] : []),
+    ...stateWfs.map(
       (wf) => `    private final ${workflowStateClass(wf)}Repository ${stateRepoField(wf)};`,
     ),
   ];
   const ctorParams = [
     "ApplicationEventPublisher events",
     ...repoAggs.map((a) => `${a}Repository ${repoField(a)}`),
-    ...subscribedWfs.map((wf) => `${workflowStateClass(wf)}Repository ${stateRepoField(wf)}`),
+    ...(esPresent ? ["JdbcTemplate jdbc"] : []),
+    ...stateWfs.map((wf) => `${workflowStateClass(wf)}Repository ${stateRepoField(wf)}`),
   ].join(", ");
   const ctorAssigns = [
     "        this.events = events;",
     ...repoAggs.map((a) => `        this.${repoField(a)} = ${repoField(a)};`),
-    ...subscribedWfs.map((wf) => `        this.${stateRepoField(wf)} = ${stateRepoField(wf)};`),
+    ...(esPresent ? ["        this.jdbc = jdbc;"] : []),
+    ...stateWfs.map((wf) => `        this.${stateRepoField(wf)} = ${stateRepoField(wf)};`),
   ];
 
   // Cross-package imports (entities for factory-lets, repos, saga entities +
@@ -166,7 +178,9 @@ export function renderJavaDispatcher(
     ...factoryAggs
       .map((a) => dctx.entityPkgOf(a))
       .flatMap((ep, i) => (ep !== dctx.pkg ? [`import ${ep}.${factoryAggs[i]};`] : [])),
-    ...subscribedWfs.flatMap((wf) => [
+    // State-based sagas import their JPA state entity + Spring Data repo; an
+    // event-sourced workflow's fold class lives in this same package (no import).
+    ...stateWfs.flatMap((wf) => [
       `import ${dctx.statePkg}.${workflowStateClass(wf)};`,
       `import ${dctx.stateRepoPkg}.${workflowStateClass(wf)}Repository;`,
     ]),
@@ -175,6 +189,16 @@ export function renderJavaDispatcher(
   const uniqueImports = [...new Set(importLines)].sort();
 
   if (methods.some((m) => m.includes("new ArrayList<"))) imports.add("java.util.ArrayList");
+  if (esPresent) imports.add("org.springframework.jdbc.core.JdbcTemplate");
+  // Handler bodies can guard with `precondition` / `requires`, which throw the
+  // domain.common exceptions — import them when a body uses one (the stmt target
+  // emits the `throw` but leaves the import to the host).
+  if (methods.some((m) => m.includes("DomainException"))) {
+    imports.add(`${dctx.basePkg}.domain.common.DomainException`);
+  }
+  if (methods.some((m) => m.includes("ForbiddenException"))) {
+    imports.add(`${dctx.basePkg}.domain.common.ForbiddenException`);
+  }
 
   return {
     name: `${className}.java`,
@@ -270,6 +294,85 @@ function renderHandler(
   out.push(`        ${repo}.save(state);`);
   if (hasEmit) {
     out.push(`        for (var __e : __events) events.publishEvent(__e);`);
+  }
+  out.push(`    }`, ``);
+  return out;
+}
+
+/** The event-sourced handler (workflow-and-applier.md A2-S5b): fold the
+ *  `<wf>_events` stream into `state` on load, run the emit-only body against
+ *  that folded snapshot, append the workflow's own events gap-free, then
+ *  re-publish for choreography.  The saga analogue of the aggregate event store
+ *  — there is no mutable correlation row, only the JdbcTemplate-backed stream. */
+function renderEsHandler(
+  ctx: EnrichedBoundedContextIR,
+  wf: WorkflowIR,
+  sub: EventSubscriptionIR,
+  resolved: ResolvedHandler,
+  imports: Set<string>,
+): string[] {
+  const corr = wf.correlationField as string;
+  const param = sub.param;
+  const renderCtx = { thisName: "state" };
+  const keyExpr = resolved.correlation
+    ? renderJavaExpr(resolved.correlation, renderCtx)
+    : `${param}.${snake(corr)}()`;
+  if (resolved.correlation) collectJavaExprImports(resolved.correlation, imports);
+
+  const hasEmit = bodyHasEmit(resolved.statements);
+  const cls = esWorkflowStateClass(wf);
+  const table = esWorkflowStreamTable(wf);
+
+  const out: string[] = [
+    `    @EventListener`,
+    `    public void ${handlerName(sub)}(${sub.event} ${param}) {`,
+    `        var __key = ${keyExpr};`,
+    `        var __sid = String.valueOf(__key.value());`,
+    `        var __rows = jdbc.queryForList(`,
+    `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
+  ];
+  if (sub.trigger === "on") {
+    // A continuation needs a started saga (non-empty stream); else drop + log.
+    out.push(`        if (__rows.isEmpty()) {`);
+    out.push(
+      `            log.warn("event_unrouted workflow={} event={} key={}", "${wf.name}", "${sub.event}", __key);`,
+    );
+    out.push(`            return;`);
+    out.push(`        }`);
+  }
+  out.push(`        var __loaded = new ArrayList<DomainEvent>();`);
+  out.push(
+    `        for (var __r : __rows) __loaded.add(${cls}._rowToEvent((String) __r.get("type"), String.valueOf(__r.get("data"))));`,
+  );
+  out.push(`        var state = ${cls}._fromEvents(__key, __loaded);`);
+  if (hasEmit) out.push(`        var __events = new ArrayList<DomainEvent>();`);
+  out.push(
+    ...renderWorkflowStmts(
+      resolved.statements,
+      javaWorkflowStmtTarget(ctx, imports, renderCtx, hasEmit ? "__events" : undefined),
+      "        ",
+    ),
+  );
+  // Aggregate saves still re-publish their own events (choreography re-entry).
+  for (const s of resolved.saves) {
+    out.push(`        ${repoField(s.aggName)}.save(${s.name});`);
+    out.push(`        for (var __e : ${s.name}.pullEvents()) events.publishEvent(__e);`);
+  }
+  // Every emit in an ES workflow has an applier (A1 discipline), so the emitted
+  // events ARE the workflow's own stream — append them gap-free, then publish.
+  if (hasEmit) {
+    out.push(
+      `        Integer __max = jdbc.queryForObject(`,
+      `            "select max(version) from ${table} where stream_id = ?", Integer.class, __sid);`,
+      `        int __v = __max == null ? 0 : __max;`,
+      `        for (var __e : __events) {`,
+      `            __v++;`,
+      `            jdbc.update(`,
+      `                "insert into ${table} (stream_id, version, type, data) values (?, ?, ?, ?::jsonb)",`,
+      `                __sid, __v, __e.getClass().getSimpleName(), ${cls}._toData(__e));`,
+      `        }`,
+      `        for (var __e : __events) events.publishEvent(__e);`,
+    );
   }
   out.push(`    }`, ``);
   return out;

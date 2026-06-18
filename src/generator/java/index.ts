@@ -84,6 +84,11 @@ import {
 import { renderJavaValidators } from "./emit/validator.js";
 import { renderJavaViews, viewFindsFor } from "./emit/view.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
+import {
+  esWorkflowStateClass,
+  eventSourcedWorkflows,
+  renderEsWorkflowFoldClass,
+} from "./emit/workflow-eventsourced.js";
 import { renderJavaWorkflowInstanceReads } from "./emit/workflow-instances.js";
 import {
   correlationWorkflows,
@@ -303,6 +308,12 @@ function emitProjectFromContexts(
     // Flyway-owned saga table + a Spring Data repository over it — the
     // foundation the in-process dispatcher and instance reads build on.
     for (const wf of correlationWorkflows(ctx.workflows)) {
+      // An `eventSourced` workflow persists as an append-only `<wf>_events`
+      // stream (the saga analogue of a `persistedAs(eventLog)` aggregate), not a
+      // mutable JPA state row — emit the in-memory fold class instead, into the
+      // dispatcher's package so the handler body reaches its package-private
+      // state fields (workflow-and-applier.md A2-S5b).
+      if (wf.eventSourced) continue;
       place(
         `${workflowStateClass(wf)}.java`,
         "infra-persistence",
@@ -317,6 +328,13 @@ function emitProjectFromContexts(
           pkgFor("spring-data-repository"),
           pkgFor("infra-persistence"),
         ),
+      );
+    }
+    for (const wf of eventSourcedWorkflows(ctx.workflows)) {
+      place(
+        `${esWorkflowStateClass(wf)}.java`,
+        "workflow-service",
+        renderEsWorkflowFoldClass(wf, ctx, basePkg, pkgFor("workflow-service")),
       );
     }
     // In-process saga dispatcher (workflow-debt-backend-parity.md, Java saga
