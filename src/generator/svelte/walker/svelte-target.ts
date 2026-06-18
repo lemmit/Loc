@@ -26,6 +26,7 @@ import {
   hookFnName,
   hookVarName,
   lowerFirstName,
+  referencesIdent,
   renderJsMatch,
   renderJsNavigate,
   upperFirstName,
@@ -152,6 +153,31 @@ export const svelteTarget: WalkerTarget = {
       parts.push(`{:else}\n${inner}${elseArm}`);
     }
     return `${parts.join(`\n${close}`)}\n${close}{/if}`;
+  },
+
+  // --- List-comprehension seam --------------------------------------------
+
+  /** `{#each coll as item, idx (key)}body{/each}` — Svelte's native
+   *  keyed iteration block (no wrapper element, no `.map`).  The index
+   *  binding is emitted only when referenced; the `(key)` keyed-each
+   *  expression is always present (the default key is the index). */
+  renderForEach(
+    coll: string,
+    itemVar: string,
+    indexVar: string,
+    keyExpr: string,
+    body: string,
+    depth: number,
+  ): string {
+    const usesIdx = referencesIdent(keyExpr, indexVar) || referencesIdent(body, indexVar);
+    const binding = usesIdx ? `${itemVar}, ${indexVar}` : itemVar;
+    const inner = "  ".repeat(depth + 1);
+    const close = "  ".repeat(depth);
+    return [
+      `{#each ${coll} as ${binding} (${keyExpr})}`,
+      `${inner}${body}`,
+      `${close}{/each}`,
+    ].join("\n");
   },
 
   // --- Navigation seam ----------------------------------------------------

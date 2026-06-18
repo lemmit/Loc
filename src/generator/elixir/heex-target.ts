@@ -166,6 +166,15 @@ export const heexTarget: WalkerTarget = {
     );
   },
 
+  /** Unreachable for HEEx — the parallel heex-walker renders the
+   *  `For` comprehension through `heex-primitives.ts:renderFor` (a
+   *  `for … do … end` block), not this seam. */
+  renderForEach(): never {
+    throw new Error(
+      "heexTarget.renderForEach: the HEEx walker renders For via renderFor; this should never be called.",
+    );
+  },
+
   /** Flat quoted CSS string — the HEEx spelling of the `style: {…}`
    *  escape hatch.  Behaviour-identical to the old body-walker
    *  `styleAttrHeex` helper: string-literal values verbatim, other

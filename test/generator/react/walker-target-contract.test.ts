@@ -78,6 +78,7 @@ describe("WalkerTarget — every shipped target conforms", () => {
       expect(typeof target.renderApiCall).toBe("function");
       expect(typeof target.renderApiHoisting).toBe("function");
       expect(typeof target.renderMatch).toBe("function");
+      expect(typeof target.renderForEach).toBe("function");
       expect(typeof target.renderNavigate).toBe("function");
       expect(typeof target.defaultInitFor).toBe("function");
       expect(typeof target.renderInterpolation).toBe("function");
@@ -228,6 +229,48 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
     expect(tsx).toBe('(x > 0) ? ("pos") : "zero"');
     expect(heex).toContain("cond do");
     expect(heex).toContain("true -> ");
+  });
+
+  it("renderForEach diverges: TSX keyed `.map` Fragment, HEEx throws (own engine)", () => {
+    // depth 0 → no brace wrap; default key references the synthesised
+    // index var, so the loop binds `(o, oIdx)`.
+    const tsx = tsxTarget.renderForEach("orders", "o", "oIdx", "oIdx", "<Card />", 0);
+    expect(tsx).toContain("orders.map((o, oIdx) =>");
+    expect(tsx).toContain("<Fragment key={oIdx}>");
+    expect(tsx).toContain("<Card />");
+    expect(tsx).not.toMatch(/^\{/); // depth 0 — no JSX-child brace wrap
+    // HEEx renders For through its own `renderFor` block, not this seam.
+    expect(() => heexTarget.renderForEach()).toThrow(/renderFor/);
+  });
+
+  it("renderForEach: nested depth brace-wraps the TSX `.map` (JSX child position)", () => {
+    const tsx = tsxTarget.renderForEach("orders", "o", "oIdx", "o.id", "<Card />", 1);
+    expect(tsx.startsWith("{")).toBe(true);
+    expect(tsx.endsWith("}")).toBe(true);
+    // Custom key not referencing the index → index binding dropped.
+    expect(tsx).toContain("orders.map((o) =>");
+    expect(tsx).toContain("<Fragment key={o.id}>");
+  });
+
+  it("renderForEach: Svelte `{#each}` and Vue `v-for` are structural, not `.map`", () => {
+    const svelte = svelteTarget.renderForEach("orders", "o", "oIdx", "oIdx", "<Card />", 0);
+    expect(svelte).toContain("{#each orders as o, oIdx (oIdx)}");
+    expect(svelte).toContain("{/each}");
+    expect(svelte).not.toContain(".map(");
+
+    const vue = vueTarget.renderForEach("orders", "o", "oIdx", "oIdx", "<Card />", 0);
+    expect(vue).toContain('<template v-for="(o, oIdx) in orders"');
+    expect(vue).toContain(':key="oIdx"');
+    expect(vue).toContain("</template>");
+    expect(vue).not.toContain(".map(");
+  });
+
+  it("renderForEach: custom key drops the unused index binding (Svelte/Vue)", () => {
+    const svelte = svelteTarget.renderForEach("orders", "o", "oIdx", "o.id", "<Card />", 0);
+    expect(svelte).toContain("{#each orders as o (o.id)}");
+    const vue = vueTarget.renderForEach("orders", "o", "oIdx", "o.id", "<Card />", 0);
+    expect(vue).toContain('<template v-for="o in orders"');
+    expect(vue).toContain(':key="o.id"');
   });
 
   it("renderNavigate diverges: TSX React-Router call, HEEx `push_navigate` + ~p", () => {
