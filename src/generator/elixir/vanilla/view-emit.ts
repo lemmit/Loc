@@ -24,9 +24,16 @@
 // the routes are spliced into the `/api` scope by `shell-emit.ts`.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, BoundedContextIR, ExprIR, ViewIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ExprIR,
+  ViewIR,
+  WorkflowIR,
+} from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
+import { stateModule } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 
 /** One project-wide view, paired with its owning context (for module-path
@@ -51,6 +58,20 @@ export function emitVanillaViewModules(
   const typesModule = `${appModule}.Types`;
 
   for (const view of ctx.views) {
+    // Workflow-sourced view (workflow-instance-views.md): a curated saga
+    // projection over the persisted correlation state — a plain Ecto read of
+    // the workflow's `<Wf>State` schema, the read-side sibling of the instance
+    // endpoints (workflow-instances-emit.ts).  Only observable (correlation-
+    // bearing, non-eventSourced) workflows have an `instanceWireShape`.
+    if (view.source.kind === "workflow") {
+      const wf = ctx.workflows.find((w) => w.name === view.source.name);
+      if (!wf?.instanceWireShape) continue; // validator gated / not observable
+      out.set(
+        `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`,
+        renderVanillaWorkflowView(view, wf, appModule, contextModule, typesModule),
+      );
+      continue;
+    }
     const agg = aggsByName.get(view.source.name);
     if (!agg) continue; // validator already errored / non-aggregate source
     out.set(
@@ -58,6 +79,59 @@ export function emitVanillaViewModules(
       renderVanillaView(view, agg, appModule, contextModule, typesModule),
     );
   }
+}
+
+/** A workflow-sourced view module — a shorthand Ecto read of the saga-state
+ *  schema with the view's filter, projecting `instanceWireShape` (camelCase
+ *  wire key ← snake struct field; Jason ISO-encodes any datetime).  `run/1`
+ *  returns plain maps, so the project-wide `ViewsController` action's
+ *  `serialize/1` is the identity on them — no struct handling needed.  Full-form
+ *  workflow views are rejected upstream (`loom.view-workflow-fullform-unsupported`),
+ *  so this only handles the shorthand (filter-only) form. */
+function renderVanillaWorkflowView(
+  view: ViewIR,
+  wf: WorkflowIR,
+  appModule: string,
+  contextModule: string,
+  typesModule: string,
+): string {
+  const moduleName = `${contextModule}.Views.${upperFirst(view.name)}`;
+  const stateMod = stateModule(contextModule, wf);
+  const renderCtx: RenderCtx = {
+    thisName: "record",
+    contextModule,
+    typesModule,
+    foundation: "vanilla",
+  };
+  const query = view.filter
+    ? `    from(record in ${stateMod}, where: ${renderExpr(view.filter, renderCtx)})
+    |> Repo.all()`
+    : `    Repo.all(${stateMod})`;
+  const proj = (wf.instanceWireShape ?? [])
+    .map((f) => `${f.name}: record.${snake(f.name)}`)
+    .join(", ");
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc """
+  View: ${upperFirst(view.name)}
+
+  Source workflow: ${upperFirst(wf.name)} (saga instance state)
+  Form: shorthand
+  Foundation: vanilla (plain Ecto).
+  """
+
+  import Ecto.Query
+  alias ${appModule}.Repo
+
+  @doc "Execute the view query and return the matching saga instances."
+  @spec run(any()) :: [map()]
+  def run(current_user \\\\ nil) do
+    _ = current_user
+${query}
+    |> Enum.map(fn record -> %{${proj}} end)
+  end
+end
+`;
 }
 
 function renderVanillaView(
