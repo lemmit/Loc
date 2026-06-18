@@ -59,13 +59,31 @@ page actually renders — is exactly the part you can't open.
 
 The same opacity is why the `List` / `Detail` / `MasterDetail`
 *archetype components* (page-metamodel.md §4, §9) read as confusing
-"legacy" today: they're documented as the canonical page bodies, they
-appear in committed examples (`examples/sales-ui.ddd`,
-`web/src/examples/extern-showcase.ddd`), yet they render as
-`// not supported by the React walker yet` comments because they were
-never given the IR-phase expansion the scaffold sentinels have. They
-are a parallel surface to scaffolding with no shared, inspectable
-lowering.
+"legacy" today. The registry makes the asymmetry exact:
+
+```
+List:         { group: "layout",   admissibleInSource: true }   // no tsx, no heex, no expander
+scaffoldList: { group: "scaffold", admissibleInSource: true }   // no tsx — but HAS a ⑤c expander arm
+```
+
+- A **scaffold sentinel** (`scaffoldList`) is renderer-less *but
+  generative*: phase ⑤c has an expander arm that rewrites it into the
+  full `Breadcrumbs`/`QueryView`/`Table` `ExprIR` tree, which then
+  renders. So `scaffold` → AST page + sentinel → ⑤c expansion → working
+  IR → output.
+- An **archetype** (`List`/`Detail`/`MasterDetail`) is renderer-less
+  *with nothing behind it*: no `tsx`, no `heex`, no expander arm.
+  `body: List { of: Order }` parses to a `CallExpr`, lowers to a plain
+  `call` ExprIR named `"List"`, and dead-ends — the walker emits
+  `// List: not supported by the React walker yet` (and they sit in
+  `NON_PAGE_BODY_LAYOUT_PRIMITIVES`, excluded as a page body outright).
+
+So the archetypes are **inert reserved names** — they parse and
+validate, then produce nothing — even though they're documented as the
+canonical page bodies and appear in committed examples
+(`examples/sales-ui.ddd`, `web/src/examples/extern-showcase.ddd`). The
+fix gives them the generative path the sentinels have, but routed to
+emit a `component` (the unfoldable artifact) rather than an inline tree.
 
 ## Proposed model — scaffold to real components, at the macro layer
 
@@ -141,6 +159,34 @@ IR:
   `Detail`** (more model to read) than for `List`.
 - A small **`component(...)` macro factory** is needed in
   `src/macros/api/ui-factories.ts` (today there is only `page(...)`).
+
+**The output is a live path, not a new one.** A non-extern,
+body-bearing `component` already lowers and renders today — grammar
+(`ddd.langium:590`, `component Name(params) { state {…} body: Expr }`),
+IR (`ComponentIR { params, state, body? }`, `loom-ir.ts:1930`), lowering
+(`lowerComponent`, `lower-ui.ts:321`), and emission
+(`renderUserComponentFile` → `src/components/<Name>.tsx`,
+`pages-emitter.ts:239`, with call sites referencing `components/<Name>`).
+What the scaffold expanders produce *today* is an inline `ExprIR` page
+body, **not** a component; this proposal redirects them to emit a
+`component`, reusing the existing component render path rather than
+building one.
+
+### `List` (archetype) vs `OrderListView` (emitted component)
+
+These are two layers, and the gap between them *is* the scaffold step:
+
+- **`List { of: X }`** is a **polymorphic archetype** — the sugar the
+  user writes. It can *not* be one shared `List` component, because the
+  table columns must be derived from `X`'s fields and baked in at build
+  time (no runtime reflection — the model-investigation rule above).
+- So the macro **monomorphizes** `List { of: Order }` into a **concrete
+  component** with Order's columns baked in. That concrete component
+  needs a name distinct from the scaffold *page* `OrderList`
+  (`_pages.ts:17`) — hence the placeholder `OrderListView` (open: rename
+  the page, or `OrdersList`, etc.; see Open questions). The indirection
+  itself is required — it is exactly the build-time specialization that
+  makes `List` scaffold rather than a plain runtime component.
 
 ## Relationship to existing work
 
