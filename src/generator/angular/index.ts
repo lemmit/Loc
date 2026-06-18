@@ -72,7 +72,11 @@ export function generateAngularForContexts(
   // nav is empty (Slice 4 derives sections from the ui's pages).
   out.set(
     "src/app/app.component.ts",
-    pack.render("app-shell", { systemNameHuman: humanize(sys.name), navSections: [] }),
+    pack.render("app-shell", {
+      systemNameHuman: humanize(sys.name),
+      navSections: [],
+      hasNav: false,
+    }),
   );
   out.set("src/app/app.config.ts", pack.render("app-config", {}));
 
