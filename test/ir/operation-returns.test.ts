@@ -88,8 +88,60 @@ describe("operation returns — platform-aware emission gate (exception-less spi
     expect(await gateDiags("dotnet")).toEqual([]);
   });
 
-  it("fires `loom.operation-return-unsupported` when served by phoenix (not implemented yet)", async () => {
-    expect(await gateDiags("elixir")).not.toEqual([]);
+  it("does NOT gate a return-dominant operation served by elixir/ash (DEBT-03 — generic action)", async () => {
+    // `platform: elixir` defaults to `foundation: ash`; a return-dominant body
+    // (`return code`) now lowers to an Ash generic action, so parity is restored.
+    expect(await gateDiags("elixir")).toEqual([]);
+  });
+
+  it("STILL gates a mutation-then-return operation on elixir/ash (vanilla-only today)", async () => {
+    const sys = `
+      system Shop {
+        subdomain Sales {
+          context Shop {
+            error NotFound { resource: string }
+            aggregate Order ids guid {
+              code: string
+              reserved: bool
+              operation accept(): string or NotFound { reserved := true  return code }
+            }
+          }
+        }
+        storage pg { type: postgres }
+        resource shopState { for: Shop, kind: state, use: pg }
+        deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], port: 4000 }
+      }`;
+    const { model } = await parseString(sys, { validate: false });
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(model)))
+      .filter((d) => d.code === "loom.operation-return-unsupported")
+      .map((d) => d.message);
+    expect(diags.length).toBe(1);
+    expect(diags[0]).toContain("foundation: ash");
+    expect(diags[0]).toContain("return-dominant");
+  });
+
+  it("does NOT gate the same mutation-then-return operation on elixir/vanilla", async () => {
+    const sys = `
+      system Shop {
+        subdomain Sales {
+          context Shop {
+            error NotFound { resource: string }
+            aggregate Order ids guid {
+              code: string
+              reserved: bool
+              operation accept(): string or NotFound { reserved := true  return code }
+            }
+          }
+        }
+        storage pg { type: postgres }
+        resource shopState { for: Shop, kind: state, use: pg }
+        deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+      }`;
+    const { model } = await parseString(sys, { validate: false });
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(model))).filter(
+      (d) => d.code === "loom.operation-return-unsupported",
+    );
+    expect(diags).toEqual([]);
   });
 
   it("does not fire on a plain mutation operation (no return type)", async () => {

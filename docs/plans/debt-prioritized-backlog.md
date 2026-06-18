@@ -50,7 +50,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | **P0 — parity completion, common, tractable** |
 | DEBT-01 | Principal-referencing capability `filter` (`currentUser` / tenancy) | node, elixir, java | 5 | L | `proposals/criterion-everywhere.md` |
 | DEBT-02 | Non-relational (`shape(document/embedded)`) capability `filter` | node, elixir, java | 4 | M | — |
-| DEBT-03 | Operation `or`-union return (exception-less ProblemDetails) | elixir/ash | 4 | M | `exception-less.md` |
+| DEBT-03 | Operation `or`-union return (exception-less ProblemDetails) | elixir/ash | 4 | M | `exception-less.md` · **slice 1 landed** (return-dominant; mutation/guard bodies still gated) |
 | DEBT-04 | Audit runtime parity (`audited` ops, lifecycle, `with audit`) | dotnet, elixir | 4 | L | `type-system-feature-migration.md` (DBT) |
 | DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) | react (→ vue/svelte) | 4 | M | — |
 | **P1 — parity + frontend completeness** |
@@ -100,8 +100,10 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 - **Scope:** JSON-path lowering of the predicate against the document column.
 
 ### DEBT-03 · Operation `or`-union return on Elixir/Ash
-- **Where:** `src/ir/validate/checks/structural-checks.ts:504` (`validateOperationReturnsUnimplemented`); ships on node/dotnet/python/java **and elixir `foundation: vanilla`** — only **elixir/ash** is gated.
-- **Why P0:** N−1 backends ship it; closing one foundation restores full parity. The vanilla `{:ok,_} | {:error, tag, data}` carrier is the reference to port to Ash.
+- **Where:** `src/ir/validate/checks/structural-checks.ts:504` (`validateOperationReturnsUnimplemented`); ships on node/dotnet/python/java **and elixir `foundation: vanilla`** — only **elixir/ash** was gated.
+- **Why P0:** N−1 backends ship it; closing one foundation restores full parity. The vanilla `{:ok,_} | {:error, tag, data}` carrier is the reference ported to Ash.
+- **Slice 1 (landed):** *return-dominant* ops (body is only `return`/`let`) emit as an Ash 3.x **generic action** (`action :<op>, :term do … run fn input, _ctx -> {:ok, tagged} end end`) that loads the record via `Ash.get(__MODULE__, id)` and hands back a tagged term; the controller translates it (success → 200, error variant → `problem_variant/5` ProblemDetails, absent record → 404). Emitter: `src/generator/elixir/operation-returns-ash-emit.ts`. Shared predicate `isReturnDominantOp` (`src/ir/util/operation-returns.ts`) keeps the validator gate and generator in lock-step. Real-Ash compile verified by the `elixir-ash-build` CI job (fixture `test/e2e/fixtures/phoenix-build/operation-returns.ddd`).
+- **Follow-up (still gated on ash):** mutation-then-return (`assign`/`add`/`remove`/`emit` before the `return`) and `requires`/`precondition` guards — they need the generic-action → changeset bridge. The validator emits a targeted hint pointing these to `foundation: vanilla`.
 
 ### DEBT-04 · Audit runtime parity
 - **Where:** `gated-features-inventory.md` §3.2–3.3; `validateAuditedOperationSupport` (`AUDIT_OP_BACKENDS = {node, dotnet}`, `AUDIT_LIFECYCLE_BACKENDS = {node}`).
@@ -195,7 +197,7 @@ method-call hooks binding in page handlers (`walker-core.ts:1021`).
 Sequenced for parity impact and momentum (all are ports of an existing pattern,
 none require a design spike):
 
-1. **DEBT-03** — operation `or`-union return on Elixir/Ash (smallest, restores full parity).
+1. ~~**DEBT-03** — operation `or`-union return on Elixir/Ash~~ — **slice 1 done** (return-dominant ops; mutation/guard follow-up remains).
 2. **DEBT-05** — React `List`/`Detail`/`For` primitives (visible frontend correctness).
 3. **DEBT-01** — principal-referencing filters on node (then elixir, java) — highest demand.
 4. **DEBT-02** — non-relational filters (rides on DEBT-01's plumbing).

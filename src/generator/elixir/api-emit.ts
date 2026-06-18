@@ -16,6 +16,12 @@ import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type UnionMember, unionMembers } from "../_payload/union-wire.js";
 import { stateModule } from "./dispatch-emit.js";
+import {
+  aggregateHasAshReturningOp,
+  isAshReturningOpSupported,
+  renderAshProblemVariantHelper,
+  renderAshReturningOpControllerAction,
+} from "./operation-returns-ash-emit.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -911,6 +917,16 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
   };
   const opActions: string[] = [];
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+    // Return-dominant `or`-union ops (exception-less.md A3, DEBT-03): call the
+    // generic action's code interface and translate the tagged term to HTTP
+    // (success → 200 + body, error variant → ProblemDetails) — not the
+    // fire-and-forget 204 the plain mutate ops below emit.
+    if (isAshReturningOpSupported(op)) {
+      opActions.push(
+        renderAshReturningOpControllerAction(webModule, contextModule, agg, op, ctx, aggPlural),
+      );
+      continue;
+    }
     const opSnake = snake(op.name);
     const opPath = snake(op.routeSlug ?? op.name);
     const argReads = op.params.map((p) => `params[${JSON.stringify(snake(p.name))}]`).join(", ");
@@ -964,7 +980,18 @@ ${cuLine}    ${contextModule}.${opSnake}_${aggSnake}!(${callArgs}${callOpts})
     renderUnionTagger(name, variants, ctx, contextModule),
   );
 
-  const allActions = [crud, ...findActions, ...opActions, ...unionTaggers].join("\n\n");
+  // Returning ops share one `problem_variant/5` responder per controller.
+  const problemVariantHelper = aggregateHasAshReturningOp(agg)
+    ? [renderAshProblemVariantHelper()]
+    : [];
+
+  const allActions = [
+    crud,
+    ...findActions,
+    ...opActions,
+    ...unionTaggers,
+    ...problemVariantHelper,
+  ].join("\n\n");
 
   return `# Auto-generated.
 defmodule ${controllerModule} do
