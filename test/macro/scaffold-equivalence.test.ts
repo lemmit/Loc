@@ -170,7 +170,7 @@ describe("scaffold macro: composition rules", () => {
           }
         }
         ui App with scaffold(aggregates: [Order]) {
-          page OrderList { route: "/custom"  body: List { of: Order } }
+          page OrderList { route: "/custom"  body: scaffoldList { of: Order } }
         }
       }
     `);

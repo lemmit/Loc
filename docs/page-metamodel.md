@@ -114,32 +114,21 @@ colon-separator idiom (matches `Deployable`, `ThemeProp`, `EmitField`).
 ```ddd
 page OrderList {
   route: "/orders"
-  body:  List { of: Order }
+  body:  scaffoldList { of: Order }
 }
 
 page OrderDetail(id: Order id) {
   route: "/orders/:id"
-  body:  Detail { of: Order, by: id }
-}
-
-page OrderConsole(customerId: Customer id) {
-  route:    "/customers/:customerId/orders"
-  title:    "Orders for " + customer.name
-  requires  currentUser.permissions.contains(sales.viewOrders)
-
-  state {
-    selectedId: Order id?
-  }
-
-  body: MasterDetail {
-    of:      Order,
-    scope:   Orders.byCustomer(customerId),
-    actions: [confirm, cancel]
-  }
-
-  menu { section: "Sales", label: "Order console" }
+  body:  scaffoldDetails { of: Order }
 }
 ```
+
+List/detail pages are normally produced wholesale by `scaffold(aggregates:
+[…])`; the `scaffoldList`/`scaffoldDetails` body sentinels above are the
+hand-writable form — useful when you want a list or detail *embedded* in a
+larger custom page body (a `Stack` alongside other components), or to declare
+a page the scaffold selector didn't cover. They expand at lowering time into
+the full Breadcrumbs · Toolbar · QueryView · Table tree.
 
 | Property | Meaning |
 |---|---|
@@ -172,10 +161,9 @@ component OrderPanel(order: Order) {
 ```
 
 The compiler enforces parameter relationships at every call site:
-`MasterDetail { of: Order, scope: … }` requires `scope` to produce `Order[]`;
-`Detail { of: Order, by: x }` requires `x: Order id`; `actions:` items must
-be operations on the `of:` aggregate; `Form { creates: Order }` binds form
-fields to `wireShape(Order.create)`.
+`Form { creates: Order }` binds form fields to `wireShape(Order.create)`;
+`scaffoldDetails { of: Order }` resolves the `of:` aggregate and exposes its
+operations as actions.
 
 User-defined components are pure functions over their parameters and local
 state — they cannot synthesise pages, routes, or menu entries.
@@ -317,10 +305,8 @@ Reuses the existing `Statement` rule (covers `let`, `:=`, calls, `emit`).
 
 | Component | Purpose |
 |---|---|
-| `List { of: T, source? }` | Table over `T[]`; row click navigates to `T`'s detail. |
-| `Detail { of: T, by: T id }` | Single-record view; fields, embeds `contains`, exposes operations as actions. |
+| `scaffoldList { of: T }`, `scaffoldDetails { of: T }` | Canonical list / single-record page bodies (Breadcrumbs · Toolbar · QueryView · Table; field card · operation actions). Emitted by `scaffold(aggregates: […])`; also hand-writable to embed a list/detail in a custom page body. *(The earlier `List` / `Detail` / `MasterDetail` archetype names were inert, never-rendered duplicates of these and were **removed** — see [decisions.md → D-NO-PAGE-ARCHETYPES](decisions.md#d-no-page-archetypes).)* |
 | `Form { creates: T \| runs: workflow \| into: state, fields, onSubmit, then? }` | Input form bound to a typed request slice. |
-| `MasterDetail { of: T, scope, actions?, detail? }` | Split-pane: list + selection state + detail panel. |
 | `Dashboard(items: […])` | Composite read-only page; grid layout. |
 | `Review(of: T, onSubmit)` | Read-only summary view of a typed value, with a submit action. |
 | `Stack`, `Group`, `Grid`, `Tabs`, `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider` | Layout primitives. |

@@ -1,13 +1,30 @@
 # Unfoldable page scaffolding — list/detail as real components
 
-**Status:** PROPOSED · **Created:** 2026-06-18
+**Status:** PARTLY SUPERSEDED · **Created:** 2026-06-18
+
+> **Update (decided).** The `List` / `Detail` / `MasterDetail` *archetypes*
+> this proposal first set out to implement were found to be **inert
+> duplicates** of the working `scaffoldList` / `scaffoldDetails` sentinels
+> (no renderer, no expander arm — they parsed, validated, then dead-ended to
+> a comment) and have been **removed** — see
+> [decisions.md → D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes).
+> So the archetype half of this doc is moot.
+>
+> What **survives** as an open idea: the phase-⑤c scaffold expansion
+> (`scaffoldList`/`scaffoldDetails` → an inline ~100-line tree) is opaque
+> "magic" — it has no printer arm and can't be unfolded like a macro. The
+> proposal below — have scaffold emit a **real, named `component`** the page
+> references, so the body is inspectable/unfoldable/embeddable — still applies
+> **to the sentinels themselves**. Read it with `List`/`Detail`/`MasterDetail`
+> mentally replaced by `scaffoldList`/`scaffoldDetails`; the cost analysis and
+> the "investigate the model → scaffold; output a component" framing are
+> unchanged.
 
 > One-line thesis: page-body scaffolding (`scaffoldList(of:)` /
-> `scaffoldDetails(of:)`, and the `List` / `Detail` / `MasterDetail`
-> archetypes) should be **macros that emit a real, named `component`**
-> the page references — not an inline tree exploded at IR lowering phase
-> ⑤c, where nothing can see, edit, or unfold it. This is the UI-side
-> twin of [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md).
+> `scaffoldDetails(of:)`) should be **a macro/expander that emits a real,
+> named `component`** the page references — not an inline tree exploded at IR
+> lowering phase ⑤c, where nothing can see, edit, or unfold it. This is the
+> UI-side twin of [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md).
 
 ## The dividing line: does it need to investigate the model?
 

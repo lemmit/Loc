@@ -94,7 +94,6 @@ const SPECS = {
   Alert: { kind: "leaf", positional: [{ key: "message", kind: "text" }], named: [{ key: "color", kind: "color" }] },
   Empty: { kind: "leaf", positional: [{ key: "message", kind: "text" }] },
   Divider: { kind: "leaf" },
-  List: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
   // Named-leaf form primitives — one entry per shape, no
   // argument-introspection dispatch:
   //   * CreateForm(of:)       — create-form for the aggregate
@@ -132,11 +131,6 @@ const SPECS = {
   // `rows => …` lambda).  Modal pairs a `trigger:` node with its body child.
   QueryView: { kind: "container", named: [{ key: "of", kind: "expr" }], namedChildren: ["loading", "error", "empty", "data"] },
   Modal: { kind: "container", namedChildren: ["trigger"] },
-  // Detail renders one aggregate instance (`of:` + a `by:` key); MasterDetail
-  // pairs a list with a `detail:` panel lambda (a named child).  `scope:` /
-  // `actions:` and other modifiers ride along as passthrough props.
-  Detail: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "by", kind: "expr" }] },
-  MasterDetail: { kind: "container", named: [{ key: "of", kind: "ref", options: "aggregate" }], namedChildren: ["detail"] },
 } satisfies Record<string, PrimitiveSpec>;
 
 // Synthetic nodes model expression-syntax constructs that aren't CallExpr-

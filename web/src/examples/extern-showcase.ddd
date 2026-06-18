@@ -80,7 +80,7 @@ system ExternShowcase {
       body: Stack {
         Heading { "Orders", level: 1 },
         RiskBadge { score: 42, label: "Sample" },
-        List { of: Order }
+        scaffoldList { of: Order }
       }
     }
   }

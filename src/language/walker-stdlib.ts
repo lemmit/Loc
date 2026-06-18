@@ -8,9 +8,7 @@
 // Three sets:
 //   WALKER_LAYOUT_PRIMITIVES — top-level layout / formatter primitives
 //     (`Stack`, `Heading`, `Money` as a UI formatter, …) + the named-leaf
-//     form variants (`CreateForm`, `OperationForm`, `WorkflowForm`) +
-//     scaffold-archetype names that lower to `custom` page origins on
-//     post-#515 main (`List`, `Detail`, `MasterDetail`).
+//     form variants (`CreateForm`, `OperationForm`, `WorkflowForm`).
 //   WALKER_SUB_PRIMITIVES    — sub-elements that only appear nested inside
 //     a parent (`Tab` inside `Tabs`, `Column` inside `Table`).
 //   WALKER_SCAFFOLD_PRIMITIVES — `scaffoldList`/`scaffoldDetails`/…
@@ -85,11 +83,6 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
   "OperationForm",
   "WorkflowForm",
   "DestroyForm",
-  // Legacy archetype names — admissible in user pages, lower as
-  // `custom` page origins post-#515.
-  "List",
-  "Detail",
-  "MasterDetail",
   // Action primitive — single-button operation invocation.
   "Action",
   // For-comprehension — list rendering with an item lambda.

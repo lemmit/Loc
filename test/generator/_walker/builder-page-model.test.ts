@@ -99,7 +99,6 @@ describe("page-builder model — primitive coverage", () => {
   };
 
   for (const bodyExpr of [
-    "List { of: Order }",
     'CreateForm { of: Order, testid: "orders-new" }',
     "CreateForm { of: Product }",
     "OperationForm { account.withdraw }",
@@ -116,7 +115,7 @@ describe("page-builder model — primitive coverage", () => {
     'Empty { "Nothing here" }',
     'Grid { Text { "a" }, Text { "b" }, Text { "c" } }',
     'Toolbar { Button { "Save" }, Button { "Cancel" } }',
-    'Stack { Heading { "Title", level: 2 }, List { of: Order } }',
+    'Stack { Heading { "Title", level: 2 }, CreateForm { of: Order } }',
     // Containers with props: titled/modified containers whose
     // children must remain editable nodes, not collapse to Opaque.
     'Card { "Summary", Stack { Text { "hi" } } }',
@@ -144,17 +143,17 @@ describe("page-builder model — primitive coverage", () => {
     'KeyValueRow { "Total", Text { "42" } }',
     'KeyValueRow { "Total", order.total }',
     // Tabs holds editable Tab children, each with a title + body.
-    'Tabs { Tab { "Overview", Text { "a" } }, Tab { "Details", List { of: Order } } }',
+    'Tabs { Tab { "Overview", Text { "a" } }, Tab { "Details", CreateForm { of: Order } } }',
     'Card { "Tabs", Tabs { Tab { "Overview", Text { "Overview tab body" } } } }',
     // lambdas (expression body) and Table/Column accessors.
     'Table { rows: orders, Column { "ID", o => IdLink { o.id, of: Order } }, Column { "Status", o => EnumBadge { o.status } } }',
     'Column { "Name", o => Text { o.name } }',
     // match: predicate arms with value children + optional else.
     'match {\n  step == 0 => Text { "first" }\n  step == 1 => Text { "second" }\n}',
-    'match {\n  step == 1 => List { of: Order },\n  else => Empty { "loading" }\n}',
+    'match {\n  step == 1 => CreateForm { of: Order },\n  else => Empty { "loading" }\n}',
     // Named-arg child slots: QueryView branches, Table callbacks, Modal trigger
     // are nested editable nodes rather than collapsing the parent to Opaque.
-    'QueryView { of: orders, loading: Skeleton { count: 5 }, empty: Empty { "none" }, data: List { of: Order } }',
+    'QueryView { of: orders, loading: Skeleton { count: 5 }, empty: Empty { "none" }, data: CreateForm { of: Order } }',
     'QueryView { of: orders, data: rows => Table { Column { "ID", o => Text { o.id } }, rows: rows } }',
     'Table { Column { "Name", o => Text { o.name } }, rows: orders, rowTestid: r => "row-" + r.id }',
     'Modal { CreateForm { of: Order }, trigger: Button { "Edit" } }',
@@ -180,9 +179,6 @@ describe("page-builder model — primitive coverage", () => {
     // Qualified refs in a `ref` slot.
     "CreateForm { of: Sales.Order }",
     "IdLink { o.id, of: Catalog.Product }",
-    // Detail / MasterDetail primitives.
-    "Detail { of: Order, by: id }",
-    "MasterDetail { of: Order, scope: Orders.byCustomer(c), detail: o => Stack { Text { o.name } } }",
     // Block-bodied (statement) handler lambdas in a named-child slot.
     'Table { rows: orders, onRowClick: r => {\n  select(r.id)\n}, Column { "ID", o => Text { o.id } } }',
     'Table { rows: orders, onRowClick: r => {\n  let x = r.id\n  select(x)\n}, Column { "ID", o => Text { o.id } } }',
@@ -219,17 +215,6 @@ describe("page-builder model — user-defined component calls", () => {
     const node = seedWith("Text { format(amount) }", { OrderPanel: ["order"] });
     expect(node.name).toBe("Text");
     expect(node.props.text).toBe("format(amount)");
-  });
-
-  it("recognises a component nested in a MasterDetail detail lambda", () => {
-    const node = seedWith("MasterDetail { of: Order, detail: o => OrderPanel { o } }", {
-      OrderPanel: ["order"],
-    });
-    expect(node.name).toBe("MasterDetail");
-    const detail = node.children.find((c) => c.slot === "detail")!;
-    expect(detail.name).toBe("Lambda");
-    expect(detail.children[0].name).toBe("OrderPanel");
-    expect(detail.children[0].props.order).toBe("o");
   });
 });
 
@@ -523,7 +508,7 @@ describe("page-builder model — container-with-props seed shape", () => {
 
   it("recognises Tabs with nested editable Tab children", () => {
     const node = seed(
-      'Tabs { Tab { "Overview", Text { "a" } }, Tab { "Details", List { of: Order } } }',
+      'Tabs { Tab { "Overview", Text { "a" } }, Tab { "Details", CreateForm { of: Order } } }',
     );
     expect(node.name).toBe("Tabs");
     expect(node.children.map((c) => c.name)).toEqual(["Tab", "Tab"]);

@@ -76,12 +76,13 @@ text stays the source of truth.
   slot children too) — instead of a raw passthrough string or Opaque; and a
   `ref` slot accepts a qualified ref (`Form { of: Sales.Order }`), surfaced as the
   current value in its dropdown.
-- **`Detail` / `MasterDetail` + user-component calls**: `Detail { of:, by: }` and
-  `MasterDetail { of:, …, detail: o => … }` are recognised; and a call to a
-  user-defined `component` (collected from the source with its param names,
-  registered in the craft resolver) is recognised, its positional args modelled
-  as props **labelled by the declared param name**. A non-component value call
-  (`format(x)`) stays an expression.
+- **User-component calls**: a call to a user-defined `component` (collected
+  from the source with its param names, registered in the craft resolver) is
+  recognised, its positional args modelled as props **labelled by the declared
+  param name**. A non-component value call (`format(x)`) stays an expression.
+  *(The `Detail`/`MasterDetail` archetypes once recognised here were removed —
+  [D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes); the list/detail
+  surface is the `scaffoldList`/`scaffoldDetails` sentinels.)*
 - **Typed binding pickers**: `Form { op: }` is a dropdown of the bound `of:`
   aggregate's operations (contextual — it follows the selected `of:`);
   `Form { runs: }` lists workflows. Aggregate/workflow/view option sets are
