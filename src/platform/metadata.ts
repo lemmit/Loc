@@ -201,6 +201,15 @@ const PLATFORM_DESCRIPTORS: Record<Platform, PlatformDescriptor> = {
     hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
     reservedRepositoryFindNames: new Set(),
   },
+  angular: {
+    name: "angular",
+    defaultPort: 3004,
+    needsDb: false,
+    mountsUi: true,
+    isFrontend: true,
+    hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
+    reservedRepositoryFindNames: new Set(),
+  },
   elixir: {
     name: "elixir",
     defaultPort: 4000,

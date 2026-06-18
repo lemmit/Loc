@@ -87,6 +87,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   //  - react/static frontends + fullstack-dotnet render React → `mantine`;
   //  - svelte frontends render Svelte → `shadcnSvelte`;
   //  - vue frontends render Vue → `vuetify`;
+  //  - angular frontends render Angular → `angularMaterial`;
   //  - phoenixLiveView renders HEEx → `ashPhoenix`, UNLESS it embeds a
   //    `framework: react` ui (D-PHOENIX-SURFACE), in which case the SPA
   //    needs a tsx pack → `mantine`;
@@ -94,7 +95,13 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   const design = descriptorFor(platform).isFrontend
     ? qualifyDesign(
         d.design,
-        platform === "svelte" ? "shadcnSvelte" : platform === "vue" ? "vuetify" : "mantine",
+        platform === "svelte"
+          ? "shadcnSvelte"
+          : platform === "vue"
+            ? "vuetify"
+            : platform === "angular"
+              ? "angularMaterial"
+              : "mantine",
       )
     : platform === "elixir"
       ? qualifyDesign(
@@ -105,7 +112,9 @@ export function lowerDeployable(d: Deployable): DeployableIR {
               ? "vuetify"
               : uiFramework === "svelte"
                 ? "shadcnSvelte"
-                : "ashPhoenix",
+                : uiFramework === "angular"
+                  ? "angularMaterial"
+                  : "ashPhoenix",
         )
       : (platform === "dotnet" || platform === "java") && uiName
         ? qualifyDesign(
@@ -114,7 +123,9 @@ export function lowerDeployable(d: Deployable): DeployableIR {
               ? "shadcnSvelte"
               : uiFramework === "vue"
                 ? "vuetify"
-                : "mantine",
+                : uiFramework === "angular"
+                  ? "angularMaterial"
+                  : "mantine",
           )
         : undefined;
   // Explicit api composition.

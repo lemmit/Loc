@@ -35,7 +35,13 @@ import {
 
 /** Frontend keyword platforms — those that are valid as bareword
  *  `platform:` values without being registered as a backend family. */
-export const FRONTEND_KEYWORDS: ReadonlySet<string> = new Set(["react", "svelte", "vue", "static"]);
+export const FRONTEND_KEYWORDS: ReadonlySet<string> = new Set([
+  "react",
+  "svelte",
+  "vue",
+  "angular",
+  "static",
+]);
 
 /** True iff this platform mounts a UI (admits a `ui:` binding).
  *  Consults the runtime PlatformSurface registry so adding a new
@@ -124,6 +130,7 @@ export function expectedFrameworkFor(
   if (fam === "react" || fam === "static") return "react";
   if (fam === "svelte") return "svelte";
   if (fam === "vue") return "vue";
+  if (fam === "angular") return "angular";
   if (fam === "elixir") return "phoenixLiveView";
   // dotnet and java are dual-mode: backend-only without `ui:`, embedded
   // React SPA host with it.
@@ -138,6 +145,7 @@ export function expectedPackFormatFor(framework: string | undefined): PackFormat
   if (framework === "react") return "tsx";
   if (framework === "svelte") return "svelte";
   if (framework === "vue") return "vue";
+  if (framework === "angular") return "angular";
   if (framework === "phoenixLiveView") return "heex";
   return undefined;
 }
