@@ -81,6 +81,26 @@ describe("Java execution-context carrier", () => {
     expect(filter).toContain("MDC.clear();");
   });
 
+  it("CatalogLog stamps the MDC carrier ids onto every log line", async () => {
+    // Log-line enrichment: the catalog writer reads the ambient frame from MDC
+    // so request_id / scope_id / actor_id ride every line emitted in a request,
+    // joining logs to the audit / provenance rows of the same frame.  (Java's
+    // catalog is a hand-rolled writer, not logback — without this it emitted
+    // only `event` + the explicit fields, the gap that reddened java-obs-e2e.)
+    const catalog = get(await generateSystemFiles(SYSTEM("")), "/config/CatalogLog.java");
+    expect(catalog).toContain("import org.slf4j.MDC;");
+    expect(catalog).toContain(
+      'appendId(sb, "request_id", MDC.get(RequestContext.CORRELATION_ID));',
+    );
+    expect(catalog).toContain('appendId(sb, "scope_id", MDC.get(RequestContext.SCOPE_ID));');
+    expect(catalog).toContain('appendId(sb, "actor_id", MDC.get(RequestContext.ACTOR_ID));');
+    // Only present-in-MDC ids are appended → boot-time lines (no frame) stay bare.
+    expect(catalog).toContain(
+      "private static void appendId(StringBuilder sb, String key, String value) {",
+    );
+    expect(catalog).toContain("if (value != null) {");
+  });
+
   it("UserFilter stamps the principal's actor_id after the verifier succeeds", async () => {
     const files = await generateSystemFiles(
       `
