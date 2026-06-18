@@ -1,7 +1,8 @@
 # Unfoldable page scaffolding — lift the ⑤c expander into the macro layer
 
-**Status:** PROPOSED (adopted direction; phased implementation underway) ·
-**Created:** 2026-06-18
+**Status:** PROPOSED — **design sealed** (see "Sealed decisions"); v1 ready to
+build, foundation landed (`_body-builders.ts` + `scaffoldList`/`scaffoldNewForm`
++ `intLit`/`lambda` factories). · **Created:** 2026-06-18
 
 > One-line thesis: the scaffold **page-body expansion**
 > (`scaffoldList` / `scaffoldDetails` / `scaffoldNewForm` / … → the
@@ -170,9 +171,10 @@ Area: 'area' name=ID '{' members+=(Page | Area)* '}';   // + later: route?/layou
    path; proves AST-derivability + printability.*
 2. **`area` block (v1).** Grammar (`Area` as a `ui` member containing
    `Page | Area`) + regen + printer + validator; lowering derives `emitPath`
-   from area containment; the scaffold emits `area` blocks (nested to mirror
-   `subdomain → context → aggregate`). This replaces `origin`'s emitPath role
-   structurally. (Area `route:`/`layout`/`requires`/`label` are deferred.)
+   from area containment. The scaffold emits **per-aggregate leaf areas** named
+   plural (`area Orders` → `pages/orders/…`), preserving today's paths; nesting
+   is grammar-supported but not yet emitted (decision 4). Replaces `origin`'s
+   emitPath role structurally. Area `route:`/`layout`/`requires`/`label` deferred.
 3. **Relocate List + New + drop `origin`.** Build the
    `scaffoldList`/`scaffoldNewForm` body AST at phase ②; emit params/menu
    explicitly; delete those ⑤c arms and `inferPageOrigin`; page-objects derive
@@ -196,14 +198,41 @@ runtime reflection) — so the macro **monomorphizes** it into a concrete
 `<Agg>ListView` (distinct from the scaffold *page* name `OrderList`). The
 indirection *is* the scaffold step.
 
-## Open questions
+## Sealed decisions (v1)
 
-- **Origin marker surface.** Is the `Page` `origin` stamp a user-writable
-  keyword or a macro-only annotation that the printer round-trips? (Leaning:
-  printer round-trips it, so an unfolded scaffold page still shows its origin.)
-- **Byte-identical vs. accepted-diff.** Phases 3–4 aim byte-identical; if the
-  state-on-page → state-where-it-belongs move forces a diff, gate on
-  equivalent-UI + reviewed diff instead.
-- **Component emission (phase 6) naming/placement** — `<Agg>ListView` vs
-  `OrdersList`; where the generated component source lives.
-- **Decision tag.** Requests `D-UNFOLDABLE-SCAFFOLD` once ratified.
+1. **Name = `area`** (over `feature` runner-up; `group`/`module`/`section` collide).
+2. **`area <Name> { (Page | Area)* }`** — a `ui` member only (pages live in uis),
+   nestable via the recursive rule. v1 grammar carries **name + members only**;
+   `route:` / `layout:` / `requires:` / `label:` are added when those features
+   land, not reserved now.
+3. **v1 scope = file placement only.** `area` sets `emitPath`
+   (`pages/<area-path>/<page>.tsx`; folder = `snake(name)`, joined down the
+   nesting); area-less pages stay flat at `pages/<name>.tsx`. **Routes stay
+   absolute and unchanged; nav stays on `menu` metadata, unchanged.** The base
+   `route:` prefix (+ relative page routes) and cascading
+   `layout`/`requires`/`label` are the documented growth path — *not* v1.
+4. **Scaffold v1 emits per-aggregate leaf areas**, named plural (`area Orders`
+   → `pages/orders/…`), so **today's paths are preserved exactly**. The grammar
+   supports domain-hierarchy nesting (`area Sales { area Orders { … } }` →
+   `pages/sales/orders/…`); the scaffold MAY adopt it as an immediate
+   follow-up, but v1 keeps paths stable to minimise the flip's diff.
+5. **`origin` / `inferPageOrigin` are removed**, not stamped: placement → `area`;
+   detail `:id` param emitted explicitly; page-objects derive from the complete
+   page; the scaffold/custom emitter split collapses to one path. **Flip gate =
+   equivalent generated output across all frontends** (react/vue/svelte/elixir)
+   — UI identical, files now under their area path.
+6. **Areas are optional & additive** — existing area-less UIs behave exactly as
+   today (flat pages).
+7. **Validator:** area + page names unique within their `ui`; containment makes
+   cycles structurally impossible.
+8. **Decision tags to pin** (in `decisions.md` once building starts):
+   **`D-PAGE-AREAS`** — page grouping is a containment-based `area { }` block;
+   file placement derives from containment; routes/nav stay independent in v1.
+   **`D-UNFOLDABLE-SCAFFOLD`** — the scaffold body expansion is a macro-layer
+   AST→AST transform (`src/macros/stdlib/scaffold/`); `walker-primitive-expander.ts`
+   (⑤c) and `origin`/`inferPageOrigin` are removed.
+
+Nothing else is open: the component-emission (phase 6) and the filter-bar /
+per-type-formatter tail are **deferred-but-specified**, not unresolved. The
+only judgment call left for *later* is the phase-6 component name
+(`<Agg>ListView` vs `OrdersList`), decided when/if phase 6 is taken.
