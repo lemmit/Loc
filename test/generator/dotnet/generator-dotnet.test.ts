@@ -441,13 +441,12 @@ describe(".NET generator", () => {
       expect(rc).not.toMatch(/CurrentUser/);
       expect(files.has("Middleware/RequestContextMiddleware.cs")).toBe(true);
       // The boundary middleware echoes the correlation id on the response and
-      // opens a request-wide logging scope so every request log carries it
-      // (without touching the cross-backend catalog).
+      // opens a request-wide logging scope binding correlationId + scopeId so
+      // every request-bracket log carries them (without touching the catalog).
       const rcm = files.get("Middleware/RequestContextMiddleware.cs")!;
       expect(rcm).toMatch(/ctx\.Response\.Headers\["X-Correlation-Id"\] = correlationId;/);
-      expect(rcm).toMatch(
-        /log\.BeginScope\(new Dictionary<string, object\?> \{ \["correlationId"\] = correlationId \}\)/,
-      );
+      expect(rcm).toMatch(/\["correlationId"\] = correlationId,/);
+      expect(rcm).toMatch(/\["scopeId"\] = rootFrame\.ScopeId,/);
       expect(rcm).toMatch(/InvokeAsync\(HttpContext ctx, ILogger<RequestContextMiddleware> log\)/);
 
       // 3. ExecutionContextBehavior opens a per-dispatch child frame (root
@@ -463,6 +462,7 @@ describe(".NET generator", () => {
       expect(behavior).toMatch(/using \(RequestContext\.Enter\(frame\)\)/);
       expect(behavior).toMatch(/\["scopeId"\] = frame\.ScopeId,/);
       expect(behavior).toMatch(/\["parentId"\] = frame\.ParentId,/);
+      expect(behavior).toMatch(/\["actorId"\] = frame\.ActorId,/);
       expect(files.has("Application/Common/DomainLogBehavior.cs")).toBe(false);
 
       // 3b. The carrier exposes the child-frame factory chaining ParentId

@@ -27,7 +27,6 @@ export const requestIdMiddleware = createMiddleware<{
   c.set("log", log);
 
   const url = new URL(c.req.url);
-  log.info({ event: "request_start", method: c.req.method, path: url.pathname });
 
   const acceptLanguage = c.req.header("Accept-Language");
   const startedAt = Date.now();
@@ -48,6 +47,9 @@ export const requestIdMiddleware = createMiddleware<{
   // context (repositories, dispatcher, domain on --trace) — resolves the
   // same context via `requestContext()` / `requestLog()`.
   await requestContextStore.run(ctx, async () => {
+    // Emitted inside the frame so request_start carries the same scope_id as
+    // request_end and every line between (the mixin reads the ambient frame).
+    log.info({ event: "request_start", method: c.req.method, path: url.pathname });
     try {
       await next();
     } finally {

@@ -79,7 +79,10 @@ feature.
 | `startedAt` | boundary middleware | audit (timestamp), observability (duration) |
 
 **Consumer reads emitted today.** Observability reads `correlationId` on every
-log line (all five backends). On **Hono** and **.NET** (the backends with a
+log line (all five backends), and now also stamps `scope_id` (+ `actor_id` once
+auth has run) onto every line emitted inside a request frame — read at log time
+from this carrier, so a log line joins to the audit / provenance rows of the
+same frame by `scope_id` (see [observability.md](../observability.md)). On **Hono** and **.NET** (the backends with a
 provenance/audit runtime): the **provenance** `provenance_records` history
 stamps `correlation_id` + `scope_id` + `actor_id` (the design's "who computed" —
 the principal's id, sourced from the carrier) on every provenanced write; the
