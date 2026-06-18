@@ -31,7 +31,7 @@ export function addMantineImport(ctx: WalkContext, ...names: string[]): void {
 }
 
 /** Register the imports a non-rendered primitive needs.  Used by
- *  `Form(of:)` / `Form(runs:)` emission: the form-
+ *  `CreateForm(of:)` / `WorkflowForm(runs:)` emission: the form-
  *  shell JSX uses `<Stack>` / `<Button>` / `<Group>` (Mantine) /
  *  `<div className="...">` / `<Button>` (shadcn) etc., but the
  *  walker emits them as literal JSX (not via `renderPrimitive`),

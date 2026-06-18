@@ -65,7 +65,7 @@ export function emitLiveViewPages(args: {
   // Workspace-wide aggregate registry — needed by the page-object
   // emitter's domain-method synthesis (fill, submit, expectRow) AND
   // by the form-binding lookup in renderForm (heex-walker.ts) so
-  // `Form(of: Agg)` resolves to the aggregate's fields.
+  // `CreateForm(of: Agg)` resolves to the aggregate's fields.
   const aggregatesByName = new Map<string, AggregateIR>();
   const contextByAggName = new Map<string, BoundedContextIR>();
   // Module-qualified context name per aggregate, e.g.
@@ -73,7 +73,7 @@ export function emitLiveViewPages(args: {
   // `AshPhoenix.Form.for_create(PhoenixApp.Sales.Customer, :create)`.
   const contextModuleByAggName = new Map<string, string>();
   // Workspace-wide enum registry — threaded into the walker so
-  // `Form(of: Agg)` with enum-typed fields renders `<.input
+  // `CreateForm(of: Agg)` with enum-typed fields renders `<.input
   // type="select" options={...}>` instead of the legacy text input.
   // Built once across every loaded context.
   const enumsByName = new Map<string, EnumIR>();
@@ -387,7 +387,7 @@ function renderMount(
       : `fn r -> {to_string(r.id), r.id} end`;
     assigns.push(`      |> assign(:${aggSnake}_options, ${listCall} |> Enum.map(${tupleFn}))`);
   }
-  // @form assignment — one per Form(of:/runs:) call in the page body.
+  // @form assignment — one per CreateForm / WorkflowForm call in the page body.
   // For aggregate-of: AshPhoenix.Form.for_create(<Ctx>.<Agg>, :create);
   // for workflow-runs: a placeholder for_action (workflow-form
   // resolution is wider and tracked separately).  Multiple forms on

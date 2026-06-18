@@ -16,7 +16,7 @@
 //   - `renderMain`       — `src/main.tsx`.
 //   - `renderFormField`  — drives the per-field input templates
 //                          (`field-input-*.hbs`); used by the
-//                          walker's `Form(of: <Agg>)` emission.
+//                          walker's `CreateForm(of: <Agg>)` emission.
 // ---------------------------------------------------------------------------
 
 import type {

@@ -100,7 +100,7 @@ export function renderCustomLayoutPage(
    *  page-top by the walker. */
   apiParams: ReadonlyArray<UiApiParamIR> = [],
   /** Aggregates reachable from this UI's deployable.
-   *  Required for `Form(of: <Agg>)` field dispatch and
+   *  Required for `CreateForm(of: <Agg>)` field dispatch and
    *  `IdLink(of: <Agg>)` display-field resolution. */
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
   /** Owning bounded context per aggregate (drives
@@ -115,7 +115,7 @@ export function renderCustomLayoutPage(
    *  imports the shell emits at function-top. */
   srcImportPrefix: string = "../",
   /** Workflows reachable from this UI's deployable.
-   *  Required for `Form(runs: <wf>)` field dispatch. */
+   *  Required for `WorkflowForm(runs: <wf>)` field dispatch. */
   workflowsByName: ReadonlyMap<string, WorkflowIR> = new Map(),
   /** Owning bounded context per workflow. */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR> = new Map(),
@@ -247,8 +247,8 @@ export function renderCustomLayoutPage(
     )
     .map((line) => `  ${line}\n`)
     .join("");
-  // RHF wiring when the body included `Form(of:)` /
-  // `Form(runs:)` / `Form(of:, op:)` primitives.  Emits the
+  // RHF wiring when the body included `CreateForm(of:)` /
+  // `WorkflowForm(runs:)` / `OperationForm(of:, op:)` primitives.  Emits the
   // mutation-hook import, per-X id target `useAllX()` hooks, the
   // `useForm` declaration, and the `react-hook-form` import.  A
   // detail page can host several forms (one per operation modal)
@@ -329,7 +329,7 @@ ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${f
 }
 
 /** Assemble the RHF + create-mutation wiring around a
- *  `Form(of: <Agg>)` body emission.  Rendered through per-pack
+ *  `CreateForm(of: <Agg>)` body emission.  Rendered through per-pack
  *  templates (`form-of-imports.hbs` + `form-of-decls.hbs`) so the
  *  pack controls exactly which packages it imports and how it
  *  destructures the RHF result (`form.handleSubmit` for shadcn,
@@ -395,7 +395,7 @@ function renderFormOfWiring(
   };
 }
 
-/** `Form(of: <Agg>, op: <name>)` wiring.  Splits into three
+/** `OperationForm(of: <Agg>, op: <name>)` wiring.  Splits into three
  *  emission sites: page-scope `decls` (the mutation hook
  *  `const <op> = use<Op><Agg>(id ?? "")`), `imports` (op hook +
  *  request type + RHF + notifications + modals manager), and

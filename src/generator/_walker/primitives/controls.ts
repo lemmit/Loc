@@ -312,7 +312,7 @@ export function emitQueryView(
   let dataJsx: string;
   if (data && data.kind === "lambda") {
     // When the query yields a single known aggregate record, type the
-    // data-lambda binding so `Form(data.<op>)` / `Action(data.<op>)`
+    // data-lambda binding so `OperationForm(data.<op>)` / `Action(data.<op>)`
     // inside it resolve the aggregate (the IR carries no receiverType
     // for page bodies).
     const recordAgg = single ? singleAggregateOfQuery(ofArg, ctx) : undefined;

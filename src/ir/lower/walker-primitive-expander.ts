@@ -37,11 +37,11 @@ export interface WalkerExpandContext {
    *  display-marked field (for IdLink resolution). */
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
   /** Owning bounded context per aggregate.  Used by the
-   *  `Form(of:)` field-type dispatch (enums / value-objects live
+   *  `CreateForm(of:)` field-type dispatch (enums / value-objects live
    *  in the BC, not on the aggregate). */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
   /** Workflow by name.  Powers `workflow-form`
-   *  expander coverage (`Form(runs: <wf>)` field dispatch). */
+   *  expander coverage (`WorkflowForm(runs: <wf>)` field dispatch). */
   workflowsByName: ReadonlyMap<string, import("../types/loom-ir.js").WorkflowIR>;
   /** View by name + per-view shape lookup. */
   viewsByName: ReadonlyMap<string, import("../types/loom-ir.js").ViewIR>;
@@ -93,8 +93,8 @@ export function buildExpandContext(sys: SystemIR, ui: UiIR): WalkerExpandContext
  * `scaffoldDetails` is self-contained — the QueryView wrapper is
  * inside, so the loading/error/empty lifecycle stays with the read
  * side.  `scaffoldOperations` lives at top level (sibling, no
- * `data` binding); each modal's Form uses the new
- * `Form(of: <Agg>, op: <name>)` shape which resolves the aggregate
+ * `data` binding); each modal's form uses the
+ * `OperationForm(of: <Agg>, op: <name>)` shape which resolves the aggregate
  * id from the route — no loaded record required.
  *
  * Returns the rewritten ExprIR (new tree if anything changed; the
@@ -637,9 +637,7 @@ function expandScaffoldInstanceDetails(wf: import("../types/loom-ir.js").Workflo
 
 /** Expand `scaffoldNewForm(of: <Agg>)`: Stack(Breadcrumbs, Heading,
  *  Card(CreateForm(of: <Agg>))) — the wrapping page chrome around the
- *  named-leaf create form.  Emits `CreateForm` (new) rather than
- *  `Form(of:)` (legacy); both produce the same JSX through the body
- *  walker's shared field-preparer. */
+ *  create form. */
 function expandScaffoldNewForm(agg: AggregateIR): ExprIR {
   const slug = snake(plural(agg.name));
   const humanPlural = humanize(plural(agg.name));
@@ -669,8 +667,7 @@ function expandScaffoldNewForm(agg: AggregateIR): ExprIR {
 }
 
 /** Expand `scaffoldWorkflowForm(runs: <Wf>)`: Stack(Breadcrumbs,
- *  Heading, Card(WorkflowForm(runs: <Wf>))).  Emits `WorkflowForm`
- *  (new named primitive) rather than `Form(runs:)` (legacy). */
+ *  Heading, Card(WorkflowForm(runs: <Wf>))). */
 function expandScaffoldWorkflowForm(wf: import("../types/loom-ir.js").WorkflowIR): ExprIR {
   const wfSlug = snake(wf.name);
   const humanWf = humanize(wf.name);
