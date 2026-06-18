@@ -163,6 +163,8 @@ Area: 'area' name=ID '{' members+=(Page | Area)* '}';   // + later: route?/layou
 
 ## Phased implementation (with gates)
 
+**Status:** slices 1–2 SHIPPED — the `_body-builders` foundation + `intLit`/`lambda`/`area` factories + the `area { }` grammar/lowering (#1301), and the scaffold emitting per-aggregate `area` blocks (#1306). Slice 3 below is the remaining work.
+
 1. **Foundation (this slice).** Add the missing AST expression factories
    (`intLit`, …) and a shared `src/macros/stdlib/scaffold/_body-builders.ts`
    that builds page-body AST from the AST aggregate, starting with the
@@ -175,14 +177,26 @@ Area: 'area' name=ID '{' members+=(Page | Area)* '}';   // + later: route?/layou
    plural (`area Orders` → `pages/orders/…`), preserving today's paths; nesting
    is grammar-supported but not yet emitted (decision 4). Replaces `origin`'s
    emitPath role structurally. Area `route:`/`layout`/`requires`/`label` deferred.
-3. **Relocate List + New + drop `origin`.** Build the
-   `scaffoldList`/`scaffoldNewForm` body AST at phase ②; emit params/menu
-   explicitly; delete those ⑤c arms and `inferPageOrigin`; page-objects derive
-   from the complete page. **Gate: equivalent generated output** across all
-   frontends (UI identical; files now under their `area` path).
-4. **Relocate Detail + the rest.** `scaffoldDetails`/`scaffoldOperations`/
-   `scaffoldViewList`/`scaffoldInstance*`/`scaffoldWorkflowForm` + the index
-   singletons; delete the remainder of `walker-primitive-expander.ts`.
+3. **Slice 3 — make `area` authoritative + flip bodies + drop `origin`.**
+   Multi-PR; the entangled core. **Naming decided: role names, area-scoped**
+   (`area Orders { page List; page New; page Detail }` → `pages/orders/{list,
+   new,detail}.tsx`), so:
+   - **3a — area-scoped page naming (prerequisite, a Langium change).**
+     Page-name uniqueness moves from ui-global to **per-area**
+     (`validators/ui.ts`), and the `[Page:LooseName]` scope provider
+     (`ddd-scope.ts`) resolves a `menu { link … }` ref within its area
+     (qualified `Area.Page` for cross-area). The scaffold names its pages
+     `List`/`New`/`Detail` inside the area; `area` becomes authoritative for
+     `emitPath` (`applyPageOriginSideEffects` no longer overrides when a page
+     has an `area`). Gate: byte-identical paths.
+   - **3b — flip the bodies.** `scaffoldList`/`scaffoldNewForm` (then
+     `scaffoldDetails`/`scaffoldOperations`) return the real `_body-builders`
+     AST; delete those ⑤c arms. Byte-identical (lowered AST = the ⑤c `ExprIR`).
+   - **3c — remove `origin`/`inferPageOrigin`.** Its remaining consumers
+     (page-objects, index/landing detection, menu derivation across
+     react/vue/svelte/elixir) rework to read the complete page + area; delete
+     the rest of `walker-primitive-expander.ts` and the singleton/workflow/view
+     sentinels. **Gate: equivalent generated output** across all frontends.
 5. **Unfold wiring.** Extend the LSP code action to eject a body sentinel via
    the shared builder.
 6. **(Optional) component emission.** Switch the builders to emit
@@ -211,11 +225,16 @@ indirection *is* the scaffold step.
    absolute and unchanged; nav stays on `menu` metadata, unchanged.** The base
    `route:` prefix (+ relative page routes) and cascading
    `layout`/`requires`/`label` are the documented growth path — *not* v1.
-4. **Scaffold v1 emits per-aggregate leaf areas**, named plural (`area Orders`
+4. **Scaffold emits per-aggregate areas** named plural (`area Orders`
    → `pages/orders/…`), so **today's paths are preserved exactly**. The grammar
    supports domain-hierarchy nesting (`area Sales { area Orders { … } }` →
-   `pages/sales/orders/…`); the scaffold MAY adopt it as an immediate
-   follow-up, but v1 keeps paths stable to minimise the flip's diff.
+   `pages/sales/orders/…`); the scaffold MAY adopt it as a follow-up.
+   **Pages inside an area are named by role** (`page List` / `New` / `Detail`),
+   so the file is `snake(role).tsx` (decided; option A). This requires
+   **per-area page-name scoping** (uniqueness + `[Page]` ref resolution become
+   area-scoped) — landed in slice 3a. (Shipped through slice 2: the scaffold
+   still emits the long `OrderList` names; the rename to role names lands with
+   the scoping change in 3a.)
 5. **`origin` / `inferPageOrigin` are removed**, not stamped: placement → `area`;
    detail `:id` param emitted explicitly; page-objects derive from the complete
    page; the scaffold/custom emitter split collapses to one path. **Flip gate =
