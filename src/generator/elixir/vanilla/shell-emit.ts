@@ -58,7 +58,7 @@ export function emitVanillaShellFiles(
   );
   out.set("config/config.exs", renderVanillaConfig(appName, appModule));
   out.set("config/dev.exs", renderVanillaDev(appName, appModule));
-  out.set("config/prod.exs", renderVanillaProd(appName));
+  out.set("config/prod.exs", renderVanillaProd(appName, appModule));
   out.set("config/runtime.exs", renderVanillaRuntime(appName, appModule));
   out.set("config/test.exs", renderVanillaTest(appName, appModule));
 }
@@ -341,12 +341,16 @@ config :${appName}, ${appModule}Web.Endpoint,
 `;
 }
 
-function renderVanillaProd(_appName: string): string {
+function renderVanillaProd(appName: string, appModule: string): string {
   return `import Config
 
-# Runtime production configuration, including reading the database url
-# and the secret key base from environment variables, is loaded at
-# runtime via config/runtime.exs.
+# Start the Phoenix endpoint's HTTP server in a release (a \`mix release\`
+# doesn't run \`mix phx.server\`, so without this the released container boots
+# but never listens — and the k8s readiness probe never passes).
+config :${appName}, ${appModule}Web.Endpoint, server: true
+
+# The database url and secret key base are read at runtime from environment
+# variables via config/runtime.exs.
 `;
 }
 

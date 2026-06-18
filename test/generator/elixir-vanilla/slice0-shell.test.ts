@@ -160,4 +160,25 @@ describe("vanilla orchestrator — Slice 0 shell skeleton", () => {
     // The old single-action shape is gone.
     expect(health).not.toContain("def show(");
   });
+
+  it("emits the release + Dockerfile so the foundation is k8s-deployable", () => {
+    const out = generateVanillaElixirProject({
+      contexts: [],
+      deployable: vanillaDeployable(),
+      sys: emptySystem(),
+    });
+    // Container image + release packaging (mirrors the Ash foundation).
+    expect(out.has("Dockerfile")).toBe(true);
+    expect(out.has(".dockerignore")).toBe(true);
+    expect(out.has("certs/.gitkeep")).toBe(true);
+    expect(out.has("rel/env.sh.eex")).toBe(true);
+    expect(out.has("lib/api/release.ex")).toBe(true);
+    // bin/server migrates before booting (fresh per-backend DB has no schema).
+    const server = out.get("rel/overlays/bin/server")!;
+    expect(server).toContain("Api.Release.migrate()");
+    expect(server).toContain("./bin/api");
+    expect(out.get("lib/api/release.ex")!).toContain("Ecto.Migrator");
+    // prod.exs starts the endpoint server (a release doesn't run mix phx.server).
+    expect(out.get("config/prod.exs")!).toContain("server: true");
+  });
 });

@@ -21,6 +21,9 @@ import {
 import type { ApiRoute } from "../api-emit.js";
 import { emitDispatch, emitWorkflowStateSchemas } from "../dispatch-emit.js";
 import type { GenerateElixirArgs } from "../index.js";
+import { emitMigrations } from "../migrations-emit.js";
+import { renderRelEnv, renderRelease, renderRelServer } from "../shell/config.js";
+import { renderDockerfile, renderDockerignore } from "../shell/project.js";
 import { toModulePrefix, toSnakeApp } from "../shell-emit.js";
 import { emitVanillaApiControllers } from "./api-emit.js";
 import { emitVanillaChangesets } from "./changeset-emit.js";
@@ -122,6 +125,21 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // collected `apiRoutes` to splice into the `/api` scope.  Resource-adapter
   // hex deps (ex_aws_s3, amqp, req) ride into `mix.exs`.
   emitVanillaShellFiles(appName, appModule, out, apiRoutes, resourceEmission.hexDeps);
+
+  // Deployment + boot machinery — reused verbatim from the Ash shell because
+  // the Elixir release, Dockerfile, and Ecto migrations are foundation-neutral
+  // (plain Ecto runs the same generated migrations).  Without these the
+  // vanilla project isn't container/k8s-deployable: no image to build, and the
+  // per-backend database has no schema on first boot, so every query 500s.
+  // `rel/overlays/bin/server` evals `Release.migrate()` before starting, and
+  // config/prod.exs sets `server: true` so the released endpoint listens.
+  emitMigrations(appName, args.migrations ?? [], appModule, out);
+  out.set("Dockerfile", renderDockerfile(appName));
+  out.set(".dockerignore", renderDockerignore());
+  out.set("certs/.gitkeep", "");
+  out.set("rel/env.sh.eex", renderRelEnv(appName));
+  out.set("rel/overlays/bin/server", renderRelServer(appName));
+  out.set(`lib/${appName}/release.ex`, renderRelease(appName, appModule));
 
   return out;
 }
