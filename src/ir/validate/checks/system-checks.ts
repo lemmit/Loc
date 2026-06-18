@@ -1273,26 +1273,24 @@ export function validateEventSourcedStorage(
 // state via appliers — the saga analogue of a `persistedAs(eventLog)`
 // aggregate (emit-only handlers + pure `apply` folds, no mutable state table).
 // The surface (grammar → `WorkflowIR.eventSourced` / `.appliers`) and the
-// emit-only / pure-fold discipline (A1) have landed, but **no backend emits the
-// event-sourced workflow runtime yet** (no per-correlation event stream, no
-// fold-on-load, no apply dispatch) — the `eventSourced` row of the
-// DEBT-26 backend-parity matrix is empty across the board.
-//
-// Without this gate an `eventSourced` workflow silently misgenerates: the saga
-// emitters key off `correlationField` alone, so they emit a *state-based* saga
-// (a mutable `<Wf>State` row + dispatcher + instance reads) and drop the
-// appliers entirely — the event-fold semantics the author asked for vanish.
-// A parsed-but-unemitted feature is a footgun, so it fails fast — exactly like
-// the event-sourced *aggregate* storage gate above.
+// emit-only / pure-fold discipline (A1) have landed; the **Hono (node) backend
+// now emits the event-sourced workflow runtime** (per-correlation `<wf>_events`
+// stream, fold-on-load, emit→append-own-event dispatch).  The other backends
+// don't yet, so an `eventSourced` workflow hosted by them stays gated —
+// otherwise it silently misgenerates as a state-based saga (the saga emitters
+// key off `correlationField` alone, emit a mutable `<Wf>State` row + dispatcher,
+// and drop the appliers entirely).  A parsed-but-unemitted feature is a footgun,
+// so it fails fast — exactly like the event-sourced *aggregate* storage gate,
+// and the supported set grows per backend (mirroring `EVENT_SOURCING_BACKENDS`).
+const EVENT_SOURCING_WORKFLOW_BACKENDS = new Set(["node"]);
 export function validateEventSourcedWorkflowStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
 ): void {
-  // No backend implements the event-sourced workflow runtime today, so any
-  // backend host is unsupported.
-  if (backendPlatforms.size === 0) return;
-  const hosts = [...backendPlatforms].sort().join(", ");
+  const unsupported = [...backendPlatforms].filter((p) => !EVENT_SOURCING_WORKFLOW_BACKENDS.has(p));
+  if (unsupported.length === 0) return;
+  const hosts = unsupported.sort().join(", ");
   for (const wf of ctx.workflows) {
     if (!wf.eventSourced) continue;
     diags.push({
@@ -1300,11 +1298,12 @@ export function validateEventSourcedWorkflowStorage(
       code: "loom.event-sourced-workflow-unsupported",
       message:
         `workflow '${wf.name}' is eventSourced, but event-sourced workflow storage ` +
-        `(a per-correlation event stream folded through its apply(...) blocks) is not ` +
-        `implemented on any backend yet — this context is hosted by ${hosts}. Drop the ` +
-        `eventSourced modifier to use a state-based saga (a persisted correlation-state ` +
-        `row, supported on node / dotnet / java / python / elixir-vanilla), or move the ` +
-        `event-fold logic into an event-sourced aggregate (persistedAs(eventLog)). ` +
+        `(a per-correlation event stream folded through its apply(...) blocks) is ` +
+        `implemented on the Hono (node) backend only — this context is also hosted by ` +
+        `${hosts}. Host the context on a node deployable, drop the eventSourced modifier ` +
+        `to use a state-based saga (a persisted correlation-state row, supported on ` +
+        `node / dotnet / java / python / elixir-vanilla), or move the event-fold logic ` +
+        `into an event-sourced aggregate (persistedAs(eventLog)). ` +
         `Tracked in workflow-and-applier.md (A2-S5b).`,
       source: `${ctx.name}/${wf.name}`,
     });

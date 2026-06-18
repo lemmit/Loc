@@ -508,7 +508,7 @@ function enrichWorkflowReturnType(wf: WorkflowIR): WorkflowIR {
  *  (workflow-instance-visibility.md).  No-op for stateless / `eventSourced`
  *  workflows (no correlation field ⇒ no state table to read). */
 function enrichWorkflowInstanceShape(wf: WorkflowIR): WorkflowIR {
-  if (!wf.correlationField) return wf;
+  if (!wf.correlationField || wf.eventSourced) return wf;
   return { ...wf, instanceWireShape: wireFieldsForWorkflow(wf) };
 }
 

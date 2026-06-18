@@ -1,0 +1,62 @@
+// Event-sourced workflow on Hono (workflow-and-applier.md A2-S5b): the saga
+// folds its own emitted events into state via apply(...) blocks and persists as
+// an append-only `<wf>_events` stream (no mutable correlation-state row).  This
+// fixture compiles the fold helpers, the fold-load / append-own-events dispatch
+// handlers, and the `<wf>_events` Drizzle schema on the `build-generated-ts`
+// gate (`generate system` → npm install → tsc --noEmit → tsup).
+system FulfillmentSys {
+  subdomain Fulfillment {
+    context Fulfillment {
+      aggregate Order {
+        status: string
+        operation place() {
+          precondition status == "Draft"
+          status := "Placed"
+          emit OrderPlaced { order: id, at: now() }
+        }
+      }
+      repository Orders for Order { }
+
+      event OrderPlaced { order: Order id, at: datetime }
+      event PaymentRegistered { order: Order id, amount: int }
+      event FulfillmentCancelled { order: Order id }
+
+      channel Lifecycle {
+        carries: OrderPlaced, PaymentRegistered, FulfillmentCancelled
+        delivery: broadcast
+        retention: ephemeral
+      }
+
+      // The event-sourced saga: started by OrderPlaced, accrues paid amounts and
+      // a cancellation flag through its OWN emitted events (every emit is folded
+      // by an apply(...)).  The reactor reads folded state in a precondition.
+      workflow OrderFulfillment eventSourced {
+        orderId: Order id          // correlation field → stream key
+        paid: int                  // folded state
+        cancelled: bool
+
+        create(p: OrderPlaced) by p.order {
+          emit PaymentRegistered { order: p.order, amount: 0 }
+        }
+        on(pr: PaymentRegistered) by pr.order {
+          precondition paid >= 0
+          emit FulfillmentCancelled { order: pr.order }
+        }
+
+        apply(pr: PaymentRegistered) { paid := paid + pr.amount }
+        apply(fc: FulfillmentCancelled) { cancelled := true }
+      }
+    }
+  }
+
+  api FulfillmentApi from Fulfillment
+  storage pg { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: pg }
+  deployable api {
+    platform: hono
+    contexts: [Fulfillment]
+    serves: FulfillmentApi
+    dataSources: [fulfillmentState]
+    port: 8080
+  }
+}
