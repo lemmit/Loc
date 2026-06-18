@@ -28,6 +28,7 @@
 import { describe, expect, it } from "vitest";
 import type { DetectedApiCall } from "../../../src/generator/_walker/api-hook-detector.js";
 import type { ApiCallSite, StateRef, WalkerTarget } from "../../../src/generator/_walker/target.js";
+import { angularTarget } from "../../../src/generator/angular/walker/angular-target.js";
 import { heexTarget } from "../../../src/generator/elixir/heex-target.js";
 import { tsxTarget } from "../../../src/generator/react/walker/tsx-target.js";
 import { svelteTarget } from "../../../src/generator/svelte/walker/svelte-target.js";
@@ -59,6 +60,7 @@ const TARGETS: ReadonlyArray<{ name: string; target: WalkerTarget }> = [
   { name: "heexTarget", target: heexTarget },
   { name: "svelteTarget", target: svelteTarget },
   { name: "vueTarget", target: vueTarget },
+  { name: "angularTarget", target: angularTarget },
 ];
 
 describe("WalkerTarget — every shipped target conforms", () => {
@@ -509,5 +511,132 @@ describe("WalkerTarget — vueTarget (vue-frontend-plan.md)", () => {
     // Both quote kinds present — fail loud rather than emit a
     // template Vue can't parse.
     expect(() => vueTarget.renderAttrBinding("x", `"a" + 'b'`)).toThrow(/mixes single and double/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Angular target — the signal-call state seams, the router.navigateByUrl
+// navigation shape, the `@if` / `@for` control-flow blocks, and `[prop]`
+// bindings that distinguish `angularTarget` from the other markup targets,
+// plus the naming parities that are DELIBERATE (hook naming matches React
+// so the api-builder is shareable).  See angular-frontend-plan.md.
+// ---------------------------------------------------------------------------
+
+describe("WalkerTarget — angularTarget (angular-frontend-plan.md)", () => {
+  it("renderStateRead is signal call syntax in BOTH positions", () => {
+    // Angular signals are position-invariant getters: `step()` reads in
+    // templates and class code alike (no Vue-style `.value`).
+    expect(angularTarget.renderStateRead(SAMPLE_STATE_REF, "template")).toBe("step()");
+    expect(angularTarget.renderStateRead(SAMPLE_STATE_REF, "handler")).toBe("step()");
+  });
+
+  it("renderStateWrite is a signal `.set(...)` call", () => {
+    expect(angularTarget.renderStateWrite(SAMPLE_STATE_REF, "value")).toBe("step.set(value)");
+  });
+
+  it("renderApiCall is var-only and hoisting matches the shared TSX/Vue shape", () => {
+    expect(angularTarget.renderApiCall(SAMPLE_API_CALL_MUTATION, "{}")).toBe("customerCreate");
+    expect(
+      angularTarget.renderApiHoisting([SAMPLE_API_CALL_MUTATION, SAMPLE_API_CALL_QUERY]),
+    ).toEqual([
+      "const customerCreate = useCreateCustomer();",
+      "const customerAll = useAllCustomers();",
+    ]);
+  });
+
+  it("buildHookUse naming deliberately matches TSX (shared api-module surface)", () => {
+    const detected: DetectedApiCall = {
+      aggregateName: "Customer",
+      operation: "all",
+      args: [],
+      kind: "aggregate",
+    };
+    expect(angularTarget.buildHookUse(detected, () => "")).toEqual(
+      tsxTarget.buildHookUse(detected, () => ""),
+    );
+  });
+
+  it("renderNavigate is router.navigateByUrl with NavigationBehaviorOptions state", () => {
+    expect(angularTarget.renderNavigate("/orders", [])).toBe('router.navigateByUrl("/orders")');
+    expect(angularTarget.renderNavigate("/orders", [{ name: "id", value: "x" }])).toBe(
+      'router.navigateByUrl("/orders", { state: { id: x } })',
+    );
+    expect(
+      angularTarget.renderNavigate("/orders", [{ name: "ignored", value: "1" }], "myStateObj"),
+    ).toBe('router.navigateByUrl("/orders", { state: myStateObj })');
+  });
+
+  it("renderForEach is an `@for` block with a mandatory track (bare index → $index)", () => {
+    const out = angularTarget.renderForEach("orders", "o", "oIdx", "oIdx", "<app-card />", 0);
+    expect(out).toContain("@for (o of orders; track $index) {");
+    expect(out).toContain("<app-card />");
+    expect(out).toContain("}");
+    expect(out).not.toContain(".map(");
+    // A custom key is the track expression; index alias dropped when unused.
+    const keyed = angularTarget.renderForEach("orders", "o", "oIdx", "o.id", "<app-card />", 0);
+    expect(keyed).toContain("@for (o of orders; track o.id) {");
+    // Body referencing the index declares the `let` alias.
+    const idxBody = angularTarget.renderForEach("orders", "o", "oIdx", "o.id", "{{ oIdx }}", 0);
+    expect(idxBody).toContain("track o.id; let oIdx = $index)");
+  });
+
+  it("renderConditionalChild is an `@if`/`@else` control-flow block pair", () => {
+    const out = angularTarget.renderConditionalChild("ok", "<app-a />", "<app-b />", 1);
+    expect(out).toContain("@if (ok) {");
+    expect(out).toContain("} @else {");
+    expect(out).toContain("<app-a />");
+    expect(out).toContain("<app-b />");
+    expect(out).not.toContain("?"); // structural, not a markup ternary
+  });
+
+  it("renderMatchChild is an `@if`/`@else if`/`@else` chain", () => {
+    const out = angularTarget.renderMatchChild(
+      [
+        { predicate: "x > 0", value: "<app-pos />" },
+        { predicate: "x < 0", value: "<app-neg />" },
+      ],
+      "<app-zero />",
+      0,
+    );
+    expect(out).toContain("@if (x > 0) {");
+    expect(out).toContain("} @else if (x < 0) {");
+    expect(out).toContain("} @else {");
+  });
+
+  it("renderAttrBinding is `[name]=` with collision-free quoting", () => {
+    expect(angularTarget.renderAttrBinding("data-testid", "id")).toBe(' [data-testid]="id"');
+    expect(angularTarget.renderAttrBinding("data-testid", '"row-" + id')).toBe(
+      " [data-testid]='\"row-\" + id'",
+    );
+    expect(() => angularTarget.renderAttrBinding("x", `"a" + 'b'`)).toThrow(
+      /mixes single and double/,
+    );
+  });
+
+  it("renderInterpolation + renderComment are Angular-shaped; escapeText matches the JSX family", () => {
+    expect(angularTarget.renderInterpolation("count + 1")).toBe("{{ count + 1 }}");
+    expect(angularTarget.renderComment("todo")).toBe("<!-- todo -->");
+    expect(angularTarget.escapeText("a {{ b }} <c> & d")).toBe(
+      vueTarget.escapeText("a {{ b }} <c> & d"),
+    );
+  });
+
+  it("renderStyleAttr: literals collapse to a string; a dynamic entry forces `[style]`", () => {
+    expect(
+      angularTarget.renderStyleAttr([
+        { key: "background-color", rendered: '"red"', literal: "red" },
+        { key: "margin-top", rendered: '"4px"', literal: "4px" },
+      ]),
+    ).toBe(' style="background-color: red; margin-top: 4px"');
+    expect(
+      angularTarget.renderStyleAttr([
+        { key: "background-color", rendered: "color" },
+        { key: "margin-top", rendered: '"4px"', literal: "4px" },
+      ]),
+    ).toBe(" [style]='{ backgroundColor: color, marginTop: \"4px\" }'");
+  });
+
+  it("renderChildrenSlot is Angular content projection", () => {
+    expect(angularTarget.renderChildrenSlot?.()).toBe("<ng-content></ng-content>");
   });
 });
