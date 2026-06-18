@@ -100,8 +100,10 @@ export function generateVueForContexts(
   const out = new Map<string, string>();
 
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
-  const apiBaseUrl =
-    options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}${API_BASE_PATH}`;
+  // Same-origin relative `/api` base; `vite dev` proxies it to the
+  // target backend, docker-compose overrides via `VITE_API_BASE_URL`.
+  const apiBaseUrl = options.apiBaseUrl ?? API_BASE_PATH;
+  const apiProxyTarget = `http://localhost:${target?.port ?? 8080}`;
   const basePath = options.basePath ?? "";
   const viteBase = basePath ? `${basePath}/` : undefined;
   const routerBasename = basePath || undefined;
@@ -416,7 +418,7 @@ export function generateVueForContexts(
   out.set("package.json", renderShell(pack, "package-json", { usesMoney }));
   out.set("tsconfig.json", renderShell(pack, "tsconfig", {}));
   out.set("tsconfig.node.json", renderShell(pack, "tsconfig-node", {}));
-  out.set("vite.config.ts", renderShell(pack, "vite-config", { base: viteBase }));
+  out.set("vite.config.ts", renderShell(pack, "vite-config", { base: viteBase, apiProxyTarget }));
   out.set("index.html", renderShell(pack, "index-html", prepareIndexHtmlVM(deployable, ui)));
   out.set("Dockerfile", renderShell(pack, "dockerfile", {}));
   out.set(".dockerignore", renderShell(pack, "dockerignore", {}));
