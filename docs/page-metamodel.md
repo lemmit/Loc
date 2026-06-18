@@ -299,6 +299,34 @@ onSubmit: c => {
 
 Reuses the existing `Statement` rule (covers `let`, `:=`, calls, `emit`).
 
+### 8.1 Inline collection ops
+
+A lambda is also admissible in plain **expression** position — as the
+callback of a higher-order collection op on a list value. This lets a page
+shape a collection inline instead of pushing every variant back into a
+backend `view`/`find` `where`-clause:
+
+```ddd
+body: Stack {
+  For { each: orders.filter(o => o.status == Confirmed), o => OrderCard(o) }
+}
+```
+
+`filter` / `map` / `sortBy` (and any other JS array method) render verbatim
+through the body walker — the callback's parameter binds in scope exactly
+like a `For` item or a `Table` column accessor. Chains compose
+(`orders.filter(…).map(…)`).
+
+Two boundaries to know:
+
+- **Single-param callbacks only** — the grammar's `Lambda` is `param=ID =>
+  …`, so a two-arg comparator (`sort((a, b) => …)`) isn't expressible; use
+  `sortBy(o => o.key)`.
+- **JS frontends today.** React, Vue, and Svelte share the `emitExpr`
+  engine, so this works on all three. Phoenix/HEEx runs a parallel engine
+  and still renders the un-shaped collection — inline ops on the LiveView
+  backend are a follow-up.
+
 ---
 
 ## 9. Builtin component library — closed v0

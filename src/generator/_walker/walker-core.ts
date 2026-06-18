@@ -994,6 +994,30 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // returned the hook var; we just append `.<member>`.
       return `${emitExpr(expr.receiver, ctx)}.${expr.member}`;
     }
+    case "lambda": {
+      // Lambda in EXPRESSION position — the callback of a higher-order
+      // collection op (`orders.filter(o => o.active)`, `.map(o => o.name)`,
+      // `.sortBy(o => o.placedAt)`).  This is the one place a lambda node
+      // reaches `emitExpr` directly: builder primitives that take a lambda
+      // (`For`, `Table` column accessors, `onSubmit`) destructure `.body` /
+      // `.block` themselves and never pass the lambda node here, so this arm
+      // fires only for the inline-collection-op case that used to emit
+      // `/* unsupported expr: lambda */ undefined`.
+      //
+      // The param binds to its own JS name (the JS frontends spell the
+      // binding identically); refs to it inside the body resolve through
+      // `lambdaParams`.  Flags the body writes (state reads, used params,
+      // …) propagate back to the parent sink.
+      const childCtx: WalkContext = {
+        ...ctx,
+        lambdaParams: extendLambdaParams(ctx, expr.param, expr.param),
+      };
+      const rendered = expr.body
+        ? emitExpr(expr.body, childCtx)
+        : `{ ${(expr.block ?? []).map((s) => emitStmt(s, childCtx)).join(" ")} }`;
+      propagateChildFlags(ctx, childCtx);
+      return `(${expr.param}) => ${rendered}`;
+    }
     case "object": {
       // Object literal: `{ name: name, age: 30 }`
       // emits as plain JS `{ name: name, age: 30 }`.  Field values

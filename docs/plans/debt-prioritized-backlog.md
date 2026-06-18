@@ -132,6 +132,7 @@ Concise scope per item; full gate locations in the table above.
 - **DEBT-11 Vue workflow forms:** the workflow-parity slice flagged in `src/generator/vue/walker/page-shell.ts:41`.
 - **DEBT-12 Phoenix page DSL:** `requires` guard (v0 bind-only → full `handle_params/3`), new-parts-in-body stub, `verify_token/1` auth helper.
 - **DEBT-13 Ordered ref collections:** Ash `manage_relationship` ordinal injection + a first-class ordered editor on frontends.
+- **DEBT-14 Inline collection ops on Phoenix/HEEx:** expression-position lambda callbacks (`orders.filter(o => …)`, `.map`, `.sortBy`) render on the JS frontends via the shared `emitExpr` (`walker-core.ts`); HEEx's parallel engine (`heex-walker-core.ts`) still renders the un-shaped collection. Mirror the `emitExpr` lambda arm into the HEEx expr renderer (`Enum.filter/2` etc.).
 
 ---
 
