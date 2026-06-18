@@ -1,4 +1,5 @@
 import type { AuthIR, AuthValueIR, FieldIR, SystemIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
 import { renderJavaType } from "../render-expr.js";
 
@@ -158,7 +159,11 @@ export function renderAuthFiles(
       // without a verified principal; /auth/me stays protected (it is the
       // session probe the frontend guard reads).
       ...(oidc
-        ? [`        "/auth/login",`, `        "/auth/callback",`, `        "/auth/logout",`]
+        ? [
+            `        "${AUTH_BASE_PATH}/login",`,
+            `        "${AUTH_BASE_PATH}/callback",`,
+            `        "${AUTH_BASE_PATH}/logout",`,
+          ]
         : []),
       `    };`,
       ``,
@@ -528,7 +533,7 @@ function renderAuthController(pkg: string, auth: AuthIR | undefined): string {
     ``,
     `    /** The frontend guard's session probe.  UserFilter has already`,
     `     *  resolved (or rejected) the principal by the time this runs. */`,
-    `    @GetMapping("/auth/me")`,
+    `    @GetMapping("${AUTH_BASE_PATH}/me")`,
     `    public ResponseEntity<?> me() {`,
     `        User user = accessor.user();`,
     `        if (user == null) {`,
@@ -560,14 +565,14 @@ function renderHandshakeMethods(auth: AuthIR): string[] {
     `    private static final String CLIENT_SECRET = ${clientSecretExpr};`,
     `    private static final String SCOPES = ${scopesLiteral};`,
     `    private static final String REDIRECT_URI = orDefault(`,
-    `        System.getenv("OIDC_REDIRECT_URI"), "http://localhost:8080/auth/callback");`,
+    `        System.getenv("OIDC_REDIRECT_URI"), "http://localhost:8080${AUTH_BASE_PATH}/callback");`,
     `    private static final String POST_LOGIN = orDefault(`,
     `        System.getenv("OIDC_POST_LOGIN_REDIRECT"), "/");`,
     `    private static final ObjectMapper MAPPER = new ObjectMapper();`,
     ``,
     `    /** Start the authorization-code flow: redirect to the IdP's authorize`,
     `     *  endpoint with a CSRF state cookie. */`,
-    `    @GetMapping("/auth/login")`,
+    `    @GetMapping("${AUTH_BASE_PATH}/login")`,
     `    public ResponseEntity<Void> login(HttpServletResponse response) throws Exception {`,
     `        JsonNode config = discovery();`,
     `        String authorize = config.get("authorization_endpoint").asText();`,
@@ -583,7 +588,7 @@ function renderHandshakeMethods(auth: AuthIR): string[] {
     `    }`,
     ``,
     `    /** Exchange the code for a token + issue the local session cookie. */`,
-    `    @GetMapping("/auth/callback")`,
+    `    @GetMapping("${AUTH_BASE_PATH}/callback")`,
     `    public ResponseEntity<?> callback(`,
     `            @RequestParam(required = false) String code,`,
     `            @RequestParam(required = false) String state,`,
@@ -618,7 +623,7 @@ function renderHandshakeMethods(auth: AuthIR): string[] {
     `        }`,
     `    }`,
     ``,
-    `    @GetMapping("/auth/logout")`,
+    `    @GetMapping("${AUTH_BASE_PATH}/logout")`,
     `    public ResponseEntity<Void> logout(HttpServletResponse response) {`,
     `        response.addCookie(expiredCookie("session"));`,
     `        return ResponseEntity.status(302).location(URI.create(POST_LOGIN)).build();`,

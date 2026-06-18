@@ -125,10 +125,10 @@ describe("java generator — /auth/* handshake + /auth/me (D-AUTH-OIDC)", () => 
   it("emits the AuthController handshake when an oidc block is present", async () => {
     const c = (await generateSystemFiles(OIDC_SRC)).get(`${ROOT}/auth/AuthController.java`)!;
     expect(c).toContain("@Hidden");
-    expect(c).toContain('@GetMapping("/auth/me")');
-    expect(c).toContain('@GetMapping("/auth/login")');
-    expect(c).toContain('@GetMapping("/auth/callback")');
-    expect(c).toContain('@GetMapping("/auth/logout")');
+    expect(c).toContain('@GetMapping("/api/auth/me")');
+    expect(c).toContain('@GetMapping("/api/auth/login")');
+    expect(c).toContain('@GetMapping("/api/auth/callback")');
+    expect(c).toContain('@GetMapping("/api/auth/logout")');
     // CSRF state cookie + authorization-code exchange.
     expect(c).toContain("oidc_state");
     expect(c).toContain("grant_type=authorization_code");
@@ -137,11 +137,11 @@ describe("java generator — /auth/* handshake + /auth/me (D-AUTH-OIDC)", () => 
 
   it("bypasses the handshake paths but keeps /auth/me protected", async () => {
     const filter = (await generateSystemFiles(OIDC_SRC)).get(`${ROOT}/auth/UserFilter.java`)!;
-    expect(filter).toContain('"/auth/login",');
-    expect(filter).toContain('"/auth/callback",');
-    expect(filter).toContain('"/auth/logout",');
-    // /auth/me must NOT be bypassed — it is the protected session probe.
-    expect(filter).not.toContain('"/auth/me"');
+    expect(filter).toContain('"/api/auth/login",');
+    expect(filter).toContain('"/api/auth/callback",');
+    expect(filter).toContain('"/api/auth/logout",');
+    // /api/auth/me must NOT be bypassed — it is the protected session probe.
+    expect(filter).not.toContain('"/api/auth/me"');
   });
 
   it("pulls the Nimbus dep into the Gradle build under OIDC", async () => {
@@ -157,12 +157,12 @@ describe("java generator — plain auth: required (no oidc block)", () => {
     const f = await generateSystemFiles(PLAIN_AUTH_SRC);
     // The session probe is still emitted (frontend guard parity).
     const c = f.get(`${ROOT}/auth/AuthController.java`)!;
-    expect(c).toContain('@GetMapping("/auth/me")');
-    expect(c).not.toContain('@GetMapping("/auth/login")');
+    expect(c).toContain('@GetMapping("/api/auth/me")');
+    expect(c).not.toContain('@GetMapping("/api/auth/login")');
     // No OIDC verifier, no Nimbus dep, no handshake bypass.
     expect(f.get(`${ROOT}/auth/OidcUserVerifier.java`)).toBeUndefined();
     expect(f.get("api/build.gradle.kts")!).not.toContain("nimbus-jose-jwt");
-    expect(f.get(`${ROOT}/auth/UserFilter.java`)!).not.toContain('"/auth/login"');
+    expect(f.get(`${ROOT}/auth/UserFilter.java`)!).not.toContain('"/api/auth/login"');
     // The dev stub is still there for a verifier-less boot.
     expect(f.get(`${ROOT}/auth/DevStubUserVerifier.java`)).toBeDefined();
   });

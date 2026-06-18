@@ -103,7 +103,7 @@ describe("python OIDC verifier + handshake", () => {
   it("adds pyjwt[crypto] to pyproject only under OIDC, and bypasses the handshake", async () => {
     const oidcFiles = await build({ oidc: true });
     expect(oidcFiles.get("api/pyproject.toml")!).toContain("pyjwt[crypto]");
-    expect(oidcFiles.get("api/app/auth/middleware.py")!).toContain('"/auth/login"');
+    expect(oidcFiles.get("api/app/auth/middleware.py")!).toContain('"/api/auth/login"');
 
     const stub = await build({ oidc: false });
     expect(stub.get("api/pyproject.toml")!).not.toContain("pyjwt");

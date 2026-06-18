@@ -23,3 +23,13 @@ export const API_BASE_PATH = "/api";
 export function apiRoutePrefix(): string {
   return `${API_BASE_PATH}/`.replace(/^\//, "");
 }
+
+/** Where auth mounts — the session probe (`/me`) and the OIDC redirect
+ *  handshake (`/login`/`/callback`/`/logout`) — i.e. `/api/auth`. Auth is
+ *  browser-facing traffic, same class as the domain routes, so it lives
+ *  UNDER the API base: a single reverse-proxy / k8s-ingress rule
+ *  (`/api → backend`) covers it, and the standalone + compose frontends
+ *  (which call `${API_BASE_URL}/auth/...` with `API_BASE_URL` already `/api`)
+ *  line up. Contrast the infra probes (`/health`, `/ready`), which are hit
+ *  directly by Docker/k8s and stay at the root. */
+export const AUTH_BASE_PATH = `${API_BASE_PATH}/auth`;

@@ -1,7 +1,7 @@
 import type { EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
-import { API_BASE_PATH } from "../../../util/api-base.js";
+import { API_BASE_PATH, AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import { renderHonoBaseLogCall, renderHonoLogCall } from "../../_obs/render-hono.js";
@@ -127,10 +127,12 @@ export function renderHttpIndex(
     ? `  assertUserVerifierRegistered();\n  ${renderHonoBaseLogCall("authEnabled", "required: true")}`
     : null;
   const authMount = authRequired ? '  app.use("*", authMiddleware);' : null;
-  // Auth session routes mount at /auth: `/auth/me` (the frontend guard's
-  // session probe) always, plus the OIDC login redirect + callback (which
-  // the middleware bypasses) when an `auth { oidc }` block is present.
-  const authRoutesMount = authRequired ? '  app.route("/auth", authRoutes());' : null;
+  // Auth session routes mount under the API base (`/api/auth`): `/api/auth/me`
+  // (the frontend guard's session probe) always, plus the OIDC login redirect
+  // + callback (which the middleware bypasses) when an `auth { oidc }` block is
+  // present.  Same origin as the domain routes — the frontend already targets
+  // `${API_BASE_URL}/auth/...`.
+  const authRoutesMount = authRequired ? `  app.route("${AUTH_BASE_PATH}", authRoutes());` : null;
   return (
     lines(
       "// Auto-generated.",

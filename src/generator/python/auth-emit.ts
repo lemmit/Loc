@@ -1,4 +1,5 @@
 import type { AuthIR, AuthValueIR, FieldIR, TypeIR, UserIR } from "../../ir/types/loom-ir.js";
+import { AUTH_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { renderPyType } from "./render-expr.js";
@@ -198,7 +199,7 @@ function renderAuthMiddleware(user: UserIR, oidc: boolean): string {
   // reachable without a verified principal — bypass them.  /auth/me is NOT
   // bypassed (the guard reads the verified user).
   const bypass = oidc
-    ? '("/health", "/ready", "/openapi.json", "/swagger", "/auth/login", "/auth/callback", "/auth/logout")'
+    ? `("/health", "/ready", "/openapi.json", "/swagger", "${AUTH_BASE_PATH}/login", "${AUTH_BASE_PATH}/callback", "${AUTH_BASE_PATH}/logout")`
     : '("/health", "/ready", "/openapi.json", "/swagger")';
   return lines(
     '"""Auth middleware.  Auto-generated.',
@@ -240,17 +241,18 @@ function renderAuthMiddleware(user: UserIR, oidc: boolean): string {
 }
 
 // ---------------------------------------------------------------------------
-// /auth/me session probe — emitted whenever a backend has auth.  Returns the
-// verified principal the middleware stamped onto request.state (the
+// /api/auth/me session probe — emitted whenever a backend has auth.  Returns
+// the verified principal the middleware stamped onto request.state (the
 // `auth: ui` frontend guard reads it); works for the verifier AND the stub.
-// Mounted at the app root (not under the embedded-SPA /api prefix).
+// Mounted under the shared API base (`/api/auth`), same origin as the domain
+// routes — the frontend probes `${API_BASE_URL}/auth/me`.
 // ---------------------------------------------------------------------------
 
 const ROUTES_PY = `"""Auth session-probe route.  Auto-generated.
 
-GET /auth/me echoes the verified current_user (the \`auth: ui\` frontend guard
-reads it).  Runs through AuthMiddleware, so the principal is verified (or the
-request 401'd) before this handler sees it.
+GET /api/auth/me echoes the verified current_user (the \`auth: ui\` frontend
+guard reads it).  Runs through AuthMiddleware, so the principal is verified (or
+the request 401'd) before this handler sees it.
 """
 
 from dataclasses import asdict
@@ -260,7 +262,7 @@ from fastapi.responses import JSONResponse
 
 from app.auth.user import User
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="${AUTH_BASE_PATH}", tags=["auth"])
 
 
 # include_in_schema=False — auth endpoints are not business operations, so they
@@ -347,7 +349,7 @@ def _client_secret() -> str | None:
 
 
 def _redirect_uri() -> str:
-    return os.environ.get("OIDC_REDIRECT_URI", "http://localhost:8000/auth/callback")
+    return os.environ.get("OIDC_REDIRECT_URI", "http://localhost:8000${AUTH_BASE_PATH}/callback")
 
 
 def _post_login() -> str:
@@ -417,7 +419,7 @@ def register_oidc_verifier() -> None:
     register_user_verifier(_oidc_verifier)
 
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="${AUTH_BASE_PATH}", tags=["auth"])
 
 
 @router.get("/login", include_in_schema=False)

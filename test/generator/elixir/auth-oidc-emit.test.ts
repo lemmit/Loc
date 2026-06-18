@@ -103,7 +103,7 @@ describe("Phoenix OIDC verifier emission", () => {
       "def me(conn, _params)",
     );
     const router = files.get("api/lib/api_web/router.ex")!;
-    expect(router).toContain('scope "/auth", ApiWeb do');
+    expect(router).toContain('scope "/api/auth", ApiWeb do');
     expect(router).toContain('get "/me", AuthController, :me');
   });
 
@@ -124,9 +124,9 @@ describe("Phoenix OIDC verifier emission", () => {
     // The plug bypasses the three redirect endpoints (no principal yet) and
     // reads the token from the Bearer header OR the handshake's session cookie.
     const auth = files.get("api/lib/api_web/auth.ex")!;
-    expect(auth).toContain('defp bypass_path?("/auth/login"), do: true');
-    expect(auth).toContain('defp bypass_path?("/auth/callback"), do: true');
-    expect(auth).toContain('defp bypass_path?("/auth/logout"), do: true');
+    expect(auth).toContain('defp bypass_path?("/api/auth/login"), do: true');
+    expect(auth).toContain('defp bypass_path?("/api/auth/callback"), do: true');
+    expect(auth).toContain('defp bypass_path?("/api/auth/logout"), do: true');
     expect(auth).toContain("defp extract_token(conn)");
     expect(auth).toContain('conn.cookies["session"]');
   });
@@ -138,7 +138,7 @@ describe("Phoenix OIDC verifier emission", () => {
     expect(ctrl).not.toContain("def callback(");
     const auth = files.get("api/lib/api_web/auth.ex")!;
     expect(auth).not.toContain("extract_token");
-    expect(auth).not.toContain('bypass_path?("/auth/login")');
+    expect(auth).not.toContain('bypass_path?("/api/auth/login")');
     const router = files.get("api/lib/api_web/router.ex")!;
     expect(router).not.toContain(":login");
   });

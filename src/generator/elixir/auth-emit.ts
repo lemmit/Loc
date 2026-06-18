@@ -6,6 +6,7 @@ import type {
   SystemIR,
   UserIR,
 } from "../../ir/types/loom-ir.js";
+import { AUTH_BASE_PATH } from "../../util/api-base.js";
 import { snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -128,13 +129,13 @@ function renderAuthPlug(
           _ -> nil
         end`;
 
-  // OIDC: the /auth/login|callback|logout redirect handlers run inside the
+  // OIDC: the /api/auth/login|callback|logout redirect handlers run inside the
   // :api pipeline (so the plug fires) but must be reachable WITHOUT a verified
-  // principal — bypass them.  /auth/me is deliberately NOT bypassed.
+  // principal — bypass them.  /api/auth/me is deliberately NOT bypassed.
   const handshakeBypass = auth
-    ? `  defp bypass_path?("/auth/login"), do: true
-  defp bypass_path?("/auth/callback"), do: true
-  defp bypass_path?("/auth/logout"), do: true
+    ? `  defp bypass_path?("${AUTH_BASE_PATH}/login"), do: true
+  defp bypass_path?("${AUTH_BASE_PATH}/callback"), do: true
+  defp bypass_path?("${AUTH_BASE_PATH}/logout"), do: true
 `
     : "";
 
@@ -540,7 +541,7 @@ ${me}
   defp client_secret, do: ${clientSecretExpr}
 
   defp redirect_uri,
-    do: System.get_env("OIDC_REDIRECT_URI", "http://localhost:${port}/auth/callback")
+    do: System.get_env("OIDC_REDIRECT_URI", "http://localhost:${port}${AUTH_BASE_PATH}/callback")
 
   defp post_login, do: System.get_env("OIDC_POST_LOGIN_REDIRECT", "/")
 

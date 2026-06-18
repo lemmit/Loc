@@ -292,6 +292,26 @@ When an aggregate operation references `currentUser`, the route
 handler reads `c.get("currentUser") as User` at the top and passes
 it as the trailing argument to the aggregate method.
 
+## Auth routes
+
+Every backend mounts its auth routes under the shared API base, i.e.
+`/api/auth`, alongside the domain routes (`/api/...`):
+
+- `/api/auth/me` — the session probe the `auth: ui` frontend guard reads;
+  always present under `auth: required`, and **not** bypassed (the
+  middleware verifies the principal or returns 401 first).
+- `/api/auth/login`, `/api/auth/callback`, `/api/auth/logout` — the OIDC
+  authorization-code redirect handshake, emitted only under an
+  `auth { oidc { … } }` block.
+
+Auth is browser-facing traffic, the same class as the domain routes, so it
+lives under `/api` — one reverse-proxy / k8s-ingress rule (`/api → backend`)
+covers it, and the generated frontends (which fetch `${API_BASE_URL}/auth/…`
+with `API_BASE_URL` already `/api`) line up. The infra probes (`/health`,
+`/ready`) stay at the root: they're hit directly by Docker/k8s, never through
+the public proxy. Set `OIDC_REDIRECT_URI` to a `…/api/auth/callback` URL when
+overriding the default.
+
 ## Bypass list
 
 Both backends bypass auth on these paths so docker-compose health

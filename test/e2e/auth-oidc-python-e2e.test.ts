@@ -226,18 +226,18 @@ describe.skipIf(!RUN)(
     it("the generated Python OIDC verifier validates a real Keycloak token + maps claims", async () => {
       try {
         // Unauthenticated → 401 (middleware + verifier reject).
-        expect((await fetch(`${apiBase}/tickets`)).status).toBe(401);
+        expect((await fetch(`${apiBase}/api/tickets`)).status).toBe(401);
 
         const token = await passwordGrantToken();
         const bearer = { authorization: `Bearer ${token}` };
 
         // Authenticated with the real token → 200 (PyJWT validated it against
         // Keycloak's live JWKS).
-        expect((await fetch(`${apiBase}/tickets`, { headers: bearer })).status).toBe(200);
+        expect((await fetch(`${apiBase}/api/tickets`, { headers: bearer })).status).toBe(200);
 
         // /auth/me projects the verified claims: id ← sub, roles ←
         // realm_access.roles (a dotted path), email ← email.
-        const me = await fetch(`${apiBase}/auth/me`, { headers: bearer });
+        const me = await fetch(`${apiBase}/api/auth/me`, { headers: bearer });
         expect(me.status).toBe(200);
         const user = (await me.json()) as { id?: string; roles?: string[]; email?: string };
         expect(user.id).toBeTruthy();
@@ -246,13 +246,16 @@ describe.skipIf(!RUN)(
 
         // A forged token is rejected (signature fails against the JWKS).
         expect(
-          (await fetch(`${apiBase}/auth/me`, { headers: { authorization: "Bearer not.a.token" } }))
-            .status,
+          (
+            await fetch(`${apiBase}/api/auth/me`, {
+              headers: { authorization: "Bearer not.a.token" },
+            })
+          ).status,
         ).toBe(401);
 
         // The /auth/login handshake entry starts the authorization-code flow:
         // a 302 to the IdP's authorize endpoint with an oidc_state cookie.
-        const login = await fetch(`${apiBase}/auth/login`, { redirect: "manual" });
+        const login = await fetch(`${apiBase}/api/auth/login`, { redirect: "manual" });
         expect(login.status).toBe(307);
         expect(login.headers.get("location") ?? "").toContain("/protocol/openid-connect/auth");
         expect(login.headers.get("set-cookie") ?? "").toContain("oidc_state");

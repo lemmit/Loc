@@ -1,5 +1,6 @@
 import { renderTsType } from "../../../generator/typescript/render-expr.js";
 import type { AuthIR, AuthValueIR, SystemIR, UserIR } from "../../../ir/types/loom-ir.js";
+import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -146,11 +147,11 @@ function renderMiddleware(user: UserIR, oidc: boolean): string {
   const idField = actorIdField(user);
   const stampActorId = idField ? `\n  if (ctx) ctx.actorId = String(user.${idField});` : "";
   // Only the handshake's redirect endpoints bypass auth — they must be
-  // reachable without a verified principal.  `/auth/me` (the session probe
+  // reachable without a verified principal.  `/api/auth/me` (the session probe
   // the frontend guard reads) is deliberately NOT bypassed, so the
   // middleware populates `currentUser` or rejects with 401.
   const bypass = oidc
-    ? '["/health", "/ready", "/openapi.json", "/swagger", "/auth/login", "/auth/callback", "/auth/logout"]'
+    ? `["/health", "/ready", "/openapi.json", "/swagger", "${AUTH_BASE_PATH}/login", "${AUTH_BASE_PATH}/callback", "${AUTH_BASE_PATH}/logout"]`
     : '["/health", "/ready", "/openapi.json", "/swagger"]';
   return `// Auto-generated.
 import { createMiddleware } from "hono/factory";
@@ -357,7 +358,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 const ISSUER = ${issuerExpr};
 const CLIENT_ID = ${clientIdExpr};
 ${clientSecretConst}const SCOPES = ${JSON.stringify(scopes)};
-const REDIRECT_URI = process.env.OIDC_REDIRECT_URI ?? "http://localhost:3000/auth/callback";
+const REDIRECT_URI = process.env.OIDC_REDIRECT_URI ?? "http://localhost:3000${AUTH_BASE_PATH}/callback";
 const POST_LOGIN = process.env.OIDC_POST_LOGIN_REDIRECT ?? "/";
 
 interface Endpoints {
