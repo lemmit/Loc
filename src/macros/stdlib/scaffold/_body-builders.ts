@@ -1,48 +1,39 @@
-// Macro-layer (AST→AST) page-body builders for the scaffold family.
+// Macro-layer (AST→AST) scaffolders for page bodies.
 //
-// These are the unfoldable-source twins of the IR-phase expanders in
-// `src/ir/lower/walker-primitive-expander.ts`.  Where the ⑤c expanders
-// build `ExprIR` (opaque, never printable), these build the SAME tree as
-// Langium AST (`callExpr`/`stringLit`/`intLit`/`nameRefExpr`), so the result
-// prints to literal `.ddd` source and can be unfolded/ejected like any other
-// macro output.  See `docs/proposals/unfoldable-page-scaffolding.md`.
+// These are the unfoldable twins of the IR-phase expanders in
+// `src/ir/lower/walker-primitive-expander.ts`.  Where the ⑤c expanders build
+// `ExprIR` (opaque, never printable), these build the SAME tree as Langium
+// AST, so a scaffolder's output prints to literal `.ddd` source and unfolds
+// like any other macro.  `scaffoldList` scaffolds a list; `scaffoldNewForm`
+// scaffolds a new-form — the name is the spec.  See
+// `docs/proposals/unfoldable-page-scaffolding.md`.
 //
-// Phase 1 (foundation): the data-light `scaffoldNewForm` shape, proving the
-// AST-builder + printability path end to end.  The data-rich builders
-// (`scaffoldList` columns + filter bar, `scaffoldDetails` field card +
-// related cards) and the compile-path relocation (deleting the ⑤c arms) land
-// in later phases, behind a byte-identical gate.
+// Status: the AST builders + a print/re-parse proof.  Wiring them into
+// `_pages.ts` (so the scaffold macro RETURNS these instead of sentinels) and
+// deleting the ⑤c arms + `inferPageOrigin` is the cohesive flip that follows,
+// gated on equivalent generated output.  The filter-bar (find inputs + page
+// state) and per-type column formatters are the remaining tail.
 
 import type { Expression } from "../../../language/generated/ast.js";
-import { callExpr, intLit, nameRefExpr, stringLit } from "../../api/index.js";
+import {
+  boolLit,
+  callExpr,
+  intLit,
+  lambda,
+  memberAccess,
+  nameRefExpr,
+  stringLit,
+} from "../../api/index.js";
 
-/** AST twin of `expandScaffoldNewForm` (walker-primitive-expander.ts):
+/** `scaffoldNewForm` — scaffolds the create page body:
  *  `Stack(Breadcrumbs, Heading "Create <agg>", Card(CreateForm(of:)))`.
- *  Built from the aggregate NAME alone — the create form needs no field
- *  reflection (its fields come from `wireShape(<Agg>.create)` at lower
- *  time), so this is the simplest sentinel to relocate. */
-export function scaffoldNewFormBody(aggName: string): Expression {
+ *  AST twin of `expandScaffoldNewForm`. */
+export function scaffoldNewForm(aggName: string): Expression {
   const slug = snake(plural(aggName));
   const humanPlural = humanize(plural(aggName));
   const humanAgg = humanize(aggName);
   return callExpr("Stack", [
-    {
-      value: callExpr("Breadcrumbs", [
-        {
-          value: callExpr("Anchor", [
-            { value: stringLit("Home") },
-            { name: "to", value: stringLit("/") },
-          ]),
-        },
-        {
-          value: callExpr("Anchor", [
-            { value: stringLit(humanPlural) },
-            { name: "to", value: stringLit(`/${slug}`) },
-          ]),
-        },
-        { value: callExpr("Text", [{ value: stringLit("New") }]) },
-      ]),
-    },
+    { value: breadcrumbs(humanPlural, slug, "New") },
     {
       value: callExpr("Heading", [
         { value: stringLit(`Create ${humanAgg.toLowerCase()}`) },
@@ -61,6 +52,117 @@ export function scaffoldNewFormBody(aggName: string): Expression {
     },
     { name: "testid", value: stringLit(`${slug}-new-page`) },
   ]);
+}
+
+/** `scaffoldList` — scaffolds the list page body: breadcrumbs, a toolbar with
+ *  a "New <agg>" button, and a `QueryView` over `<api?>.<Agg>.all` rendering a
+ *  Paper-framed `Table` (ID column + one column per scalar field).  AST twin
+ *  of `expandScaffoldList`'s no-filter path.  `columns` are the scalar field
+ *  names the caller pulled off the aggregate (skipping value-objects/arrays);
+ *  `apiHandle` is the ui's api param when the aggregate is served over one. */
+export function scaffoldList(
+  aggName: string,
+  columns: readonly string[],
+  opts: { apiHandle?: string } = {},
+): Expression {
+  const slug = snake(plural(aggName));
+  const humanPlural = humanize(plural(aggName));
+  const humanLower = humanPlural.toLowerCase();
+  const singular = humanize(aggName).toLowerCase();
+  const queryRoot = opts.apiHandle
+    ? memberAccess(nameRefExpr(opts.apiHandle), aggName)
+    : nameRefExpr(aggName);
+
+  // One Column per field; the ID column links to the detail page.
+  const cols: Array<{ name?: string; value: Expression }> = [
+    {
+      value: callExpr("Column", [
+        { value: stringLit("ID") },
+        {
+          value: lambda(
+            "o",
+            callExpr("IdLink", [
+              { value: memberAccess(nameRefExpr("o"), "id") },
+              { name: "of", value: nameRefExpr(aggName) },
+            ]),
+          ),
+        },
+      ]),
+    },
+    ...columns.map((c) => ({
+      value: callExpr("Column", [
+        { value: stringLit(humanize(c)) },
+        { value: lambda("o", memberAccess(nameRefExpr("o"), c)) },
+      ]),
+    })),
+  ];
+
+  const table = callExpr("Table", [
+    ...cols,
+    { name: "rows", value: nameRefExpr("rows") },
+    { name: "striped", value: boolLit(true) },
+    { name: "highlight", value: boolLit(true) },
+    { name: "sticky", value: boolLit(true) },
+  ]);
+
+  const queryView = callExpr("QueryView", [
+    { name: "of", value: memberAccess(queryRoot, "all") },
+    { name: "loading", value: callExpr("Skeleton", [{ name: "count", value: intLit(5) }]) },
+    {
+      name: "error",
+      value: callExpr("Alert", [{ value: stringLit(`Couldn't load ${humanLower}`) }]),
+    },
+    { name: "empty", value: callExpr("Empty", [{ value: stringLit(`No ${humanLower} yet.`) }]) },
+    { name: "data", value: lambda("rows", callExpr("Paper", [{ value: table }])) },
+  ]);
+
+  return callExpr("Stack", [
+    { value: breadcrumbs(humanPlural, slug) },
+    {
+      value: callExpr("Toolbar", [
+        {
+          value: callExpr("Heading", [
+            { value: stringLit(humanPlural) },
+            { name: "level", value: intLit(2) },
+          ]),
+        },
+        {
+          value: callExpr("Button", [
+            { value: stringLit(`New ${singular}`) },
+            { name: "to", value: stringLit(`/${slug}/new`) },
+            { name: "testid", value: stringLit(`${slug}-list-create`) },
+          ]),
+        },
+      ]),
+    },
+    { value: queryView },
+    { name: "testid", value: stringLit(`${slug}-list`) },
+  ]);
+}
+
+/** `Breadcrumbs(Anchor("Home", to:"/"), …)` — the list page ends at a plain
+ *  `Text(<plural>)`; the new/detail pages add a trailing crumb (`leaf`). */
+function breadcrumbs(humanPlural: string, slug: string, leaf?: string): Expression {
+  const crumbs: Array<{ name?: string; value: Expression }> = [
+    {
+      value: callExpr("Anchor", [
+        { value: stringLit("Home") },
+        { name: "to", value: stringLit("/") },
+      ]),
+    },
+  ];
+  if (leaf) {
+    crumbs.push({
+      value: callExpr("Anchor", [
+        { value: stringLit(humanPlural) },
+        { name: "to", value: stringLit(`/${slug}`) },
+      ]),
+    });
+    crumbs.push({ value: callExpr("Text", [{ value: stringLit(leaf) }]) });
+  } else {
+    crumbs.push({ value: callExpr("Text", [{ value: stringLit(humanPlural) }]) });
+  }
+  return callExpr("Breadcrumbs", crumbs);
 }
 
 // Naming helpers — copied verbatim from `_pages.ts` (kept module-local so the

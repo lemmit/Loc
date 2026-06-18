@@ -85,6 +85,7 @@ export {
   boolLit,
   callExpr,
   intLit,
+  lambda,
   nameRefExpr,
   page,
   pageMenuMeta,

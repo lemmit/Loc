@@ -38,6 +38,7 @@ import type {
   IdType,
   ImplementsDecl,
   IntLit,
+  Lambda,
   LValue,
   MemberSuffix,
   MenuMetaEntry,
@@ -183,6 +184,10 @@ export function mkBoolLit(shape: AstLiteral<BoolLit>): BoolLit {
 
 export function mkIntLit(shape: AstLiteral<IntLit>): IntLit {
   return mkAst<IntLit>(shape);
+}
+
+export function mkLambda(shape: AstLiteral<Lambda>): Lambda {
+  return mkAst<Lambda>(shape);
 }
 
 export function mkRouteProp(shape: AstLiteral<RouteProp>): RouteProp {
