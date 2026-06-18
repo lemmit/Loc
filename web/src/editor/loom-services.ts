@@ -56,7 +56,9 @@ async function doInit(): Promise<void> {
             grammars: [
               { language: "ddd", scopeName: "source.ddd", path: "./ddd.tmLanguage.json" },
             ],
-            themes: [{ label: "Loom Dark", uiTheme: "vs-dark", path: "./loom-dark.json" }],
+            themes: [
+              { id: "Loom Dark", label: "Loom Dark", uiTheme: "vs-dark", path: "./loom-dark.json" },
+            ],
           },
         },
         filesOrContents: new Map<string, string>([
