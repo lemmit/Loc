@@ -42,6 +42,8 @@ import type {
   IntLit,
   Lambda,
   LValue,
+  MatchArm,
+  MatchExpr,
   MemberSuffix,
   MenuMetaEntry,
   NamedType,
@@ -159,6 +161,14 @@ export function mkBinaryChain(shape: AstLiteral<BinaryChain>): BinaryChain {
 
 export function mkTernaryExpr(shape: AstLiteral<TernaryExpr>): TernaryExpr {
   return mkAst<TernaryExpr>(shape);
+}
+
+export function mkMatchExpr(shape: AstLiteral<MatchExpr>): MatchExpr {
+  return mkAst<MatchExpr>(shape);
+}
+
+export function mkMatchArm(shape: AstLiteral<MatchArm>): MatchArm {
+  return mkAst<MatchArm>(shape);
 }
 
 export function mkThisRef(shape: AstLiteral<ThisRef>): ThisRef {

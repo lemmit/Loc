@@ -16,6 +16,8 @@ import type {
   Expression,
   IntLit,
   Lambda,
+  MatchArm,
+  MatchExpr,
   MenuMetaEntry,
   NameRef,
   Page,
@@ -36,6 +38,8 @@ import {
   mkCallSuffix,
   mkIntLit,
   mkLambda,
+  mkMatchArm,
+  mkMatchExpr,
   mkMenuMetaEntry,
   mkNameRef,
   mkPage,
@@ -122,6 +126,28 @@ export function ternaryExpr(
   _setContainer(cond, node, "cond");
   _setContainer(thenExpr, node, "thenExpr");
   _setContainer(elseExpr, node, "elseExpr");
+  return node;
+}
+
+/** A predicate-arms `match { cond => value, … else => elseExpr }` expression
+ * (e.g. the scaffolded list's filter switch).  Each arm's first matching
+ * `cond` wins; `elseExpr` is the fallthrough. */
+export function matchExpr(
+  arms: Array<{ cond: Expression; value: Expression }>,
+  elseExpr?: Expression,
+): MatchExpr {
+  const origin = _currentOrigin();
+  const armNodes: MatchArm[] = arms.map(({ cond, value }) => {
+    const arm = _tag(mkMatchArm({ $type: "MatchArm", cond, value }), origin);
+    _setContainer(cond, arm, "cond");
+    _setContainer(value, arm, "value");
+    return arm;
+  });
+  const node = _tag(mkMatchExpr({ $type: "MatchExpr", arms: armNodes, elseExpr }), origin);
+  armNodes.forEach((a, i) => {
+    _setContainer(a, node, "arms", i);
+  });
+  if (elseExpr) _setContainer(elseExpr, node, "elseExpr");
   return node;
 }
 

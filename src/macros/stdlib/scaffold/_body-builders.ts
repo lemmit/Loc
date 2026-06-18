@@ -12,9 +12,12 @@
 // `_pages.ts` (so the scaffold macro RETURNS these instead of sentinels) and
 // deleting the ⑤c arms + `inferPageOrigin` is the cohesive flip that follows,
 // gated on equivalent generated output.  `scaffoldList` now carries the
-// per-type column formatters (`columnAccessor` / `scalarColumnsForAggregate`,
-// twins of the ⑤c `columnAccessorFor`) and the `rowTestid` accessor; the
-// filter-bar (find inputs + page state) is the remaining tail.
+// per-type column formatters (`columnAccessor` / `scalarColumnsForAggregate`),
+// the `rowTestid` accessor, and the find-filter bar (`filterFindsForAggregate`
+// builds the bound inputs + the `match` switch; `filterStateFields` names the
+// page-state the inputs bind to) — full twins of the ⑤c `expandScaffoldList`.
+// Attaching the filter state as the page's `state { }` block, and the
+// Detail/Operations/Workflow/View/Instance builders, are the remaining tail.
 
 import type { Aggregate, Expression, TypeRef } from "../../../language/generated/ast.js";
 import {
@@ -23,6 +26,7 @@ import {
   callExpr,
   intLit,
   lambda,
+  matchExpr,
   memberAccess,
   nameRefExpr,
   stringLit,
@@ -143,6 +147,57 @@ function columnKindForType(type: TypeRef): ColumnKind | null {
   return null;
 }
 
+/** A repository `find` the list filter-bar turns into a text-input arm — its
+ *  name and the (all-string) param names the inputs bind to. */
+export interface FilterFind {
+  name: string;
+  params: readonly string[];
+}
+
+/** Resolve a list's filter finds from the aggregate's repository in the same
+ *  context: each `find` (excluding the synthetic `all`) whose params are all
+ *  plain non-array/non-optional strings and whose return is an unwrapped list.
+ *  Twin of the ⑤c `filterFinds` filter over the lowered repo — the repository
+ *  is a sibling `ContextMember`, so it's reachable from the aggregate's AST
+ *  without lowering. */
+export function filterFindsForAggregate(agg: Aggregate): FilterFind[] {
+  const out: FilterFind[] = [];
+  for (const m of agg.$container.members) {
+    if (m.$type !== "Repository") continue;
+    if (m.aggregate.ref?.name !== agg.name && m.aggregate.$refText !== agg.name) continue;
+    for (const f of m.finds) {
+      if (f.name === "all") continue;
+      if (!f.returnType.array) continue;
+      if (f.params.length === 0) continue;
+      if (!f.params.every((p) => isPlainString(p.type))) continue;
+      out.push({ name: f.name, params: f.params.map((p) => String(p.name)) });
+    }
+  }
+  return out;
+}
+
+function isPlainString(type: TypeRef): boolean {
+  return (
+    !type.array &&
+    !type.optional &&
+    type.base.$type === "PrimitiveType" &&
+    type.base.name === "string"
+  );
+}
+
+/** The page-state field name a filter input binds to: `<find><Param>`
+ *  (camel-joined), matching the ⑤c `stateNameFor`. */
+export function stateNameFor(findName: string, param: string): string {
+  return `${findName}${param[0]!.toUpperCase()}${param.slice(1)}`;
+}
+
+/** The page-state fields the scaffolded filter inputs bind to — one `string`
+ *  field (init `""`) per find param.  The page builder attaches these as the
+ *  page's `state { }` block when wiring `scaffoldList`'s filter form. */
+export function filterStateFields(filters: readonly FilterFind[]): Array<{ name: string }> {
+  return filters.flatMap((f) => f.params.map((p) => ({ name: stateNameFor(f.name, p) })));
+}
+
 /** `scaffoldList` — scaffolds the list page body: breadcrumbs, a toolbar with
  *  a "New <agg>" button, and a `QueryView` over `<api?>.<Agg>.all` rendering a
  *  Paper-framed `Table` (ID column + one column per scalar field).  AST twin
@@ -153,19 +208,24 @@ function columnKindForType(type: TypeRef): ColumnKind | null {
 export function scaffoldList(
   aggName: string,
   columns: readonly ScaffoldColumn[],
-  opts: { apiHandle?: string } = {},
+  opts: { apiHandle?: string; filters?: readonly FilterFind[] } = {},
 ): Expression {
   const slug = snake(plural(aggName));
   const humanPlural = humanize(plural(aggName));
   const humanLower = humanPlural.toLowerCase();
   const singular = humanize(aggName).toLowerCase();
-  const queryRoot = opts.apiHandle
-    ? memberAccess(nameRefExpr(opts.apiHandle), aggName)
-    : nameRefExpr(aggName);
+  const filters = opts.filters ?? [];
+
+  // `<api?>.<Agg>` query root, rebuilt per use — AST nodes can't be shared
+  // across parents, and the filter `match` reads it once per arm + the `all`
+  // fallback.
+  const queryRoot = (): Expression =>
+    opts.apiHandle ? memberAccess(nameRefExpr(opts.apiHandle), aggName) : nameRefExpr(aggName);
 
   // One Column per field; the ID column links to the detail page, the rest
-  // dispatch their cell renderer by type (`columnAccessor`).
-  const cols: Array<{ name?: string; value: Expression }> = [
+  // dispatch their cell renderer by type (`columnAccessor`).  Rebuilt per
+  // QueryView so the filter `match`'s several views never share nodes.
+  const makeCols = (): Array<{ name?: string; value: Expression }> => [
     {
       value: callExpr("Column", [
         { value: stringLit("ID") },
@@ -188,31 +248,76 @@ export function scaffoldList(
     })),
   ];
 
-  const table = callExpr("Table", [
-    ...cols,
-    { name: "rows", value: nameRefExpr("rows") },
-    { name: "striped", value: boolLit(true) },
-    { name: "highlight", value: boolLit(true) },
-    { name: "sticky", value: boolLit(true) },
-    {
-      name: "rowTestid",
-      value: lambda(
-        "r",
-        binaryExpr(stringLit(`${slug}-row-`), "+", memberAccess(nameRefExpr("r"), "id")),
-      ),
-    },
-  ]);
+  const makeTable = (): Expression =>
+    callExpr("Table", [
+      ...makeCols(),
+      { name: "rows", value: nameRefExpr("rows") },
+      { name: "striped", value: boolLit(true) },
+      { name: "highlight", value: boolLit(true) },
+      { name: "sticky", value: boolLit(true) },
+      {
+        name: "rowTestid",
+        value: lambda(
+          "r",
+          binaryExpr(stringLit(`${slug}-row-`), "+", memberAccess(nameRefExpr("r"), "id")),
+        ),
+      },
+    ]);
 
-  const queryView = callExpr("QueryView", [
-    { name: "of", value: memberAccess(queryRoot, "all") },
-    { name: "loading", value: callExpr("Skeleton", [{ name: "count", value: intLit(5) }]) },
-    {
-      name: "error",
-      value: callExpr("Alert", [{ value: stringLit(`Couldn't load ${humanLower}`) }]),
-    },
-    { name: "empty", value: callExpr("Empty", [{ value: stringLit(`No ${humanLower} yet.`) }]) },
-    { name: "data", value: lambda("rows", callExpr("Paper", [{ value: table }])) },
-  ]);
+  // One QueryView per query expression — built per call so the filter arms
+  // below never share `ExprIR`/AST nodes.
+  const makeQueryView = (ofExpr: Expression): Expression =>
+    callExpr("QueryView", [
+      { name: "of", value: ofExpr },
+      { name: "loading", value: callExpr("Skeleton", [{ name: "count", value: intLit(5) }]) },
+      {
+        name: "error",
+        value: callExpr("Alert", [{ value: stringLit(`Couldn't load ${humanLower}`) }]),
+      },
+      { name: "empty", value: callExpr("Empty", [{ value: stringLit(`No ${humanLower} yet.`) }]) },
+      { name: "data", value: lambda("rows", callExpr("Paper", [{ value: makeTable() }])) },
+    ]);
+
+  const allView = (): Expression => makeQueryView(memberAccess(queryRoot(), "all"));
+
+  // Find-filter bar (T3.14): each qualifying `find` gets one text input per
+  // param; when every input of a find is non-empty the list switches to that
+  // find's results (first matching arm wins), else `all` renders.  Twin of
+  // `expandScaffoldList`'s filter block; the page-state fields the inputs bind
+  // to are resolved by `filterStateFields`, attached by the page builder.
+  const filterFields: Array<{ name?: string; value: Expression }> = [];
+  let listRegion: Expression = allView();
+  if (filters.length > 0) {
+    for (const f of filters) {
+      for (const p of f.params) {
+        const stateName = stateNameFor(f.name, p);
+        filterFields.push({
+          value: callExpr("Field", [
+            { value: stringLit(humanize(p)) },
+            { name: "bind", value: nameRefExpr(stateName) },
+            { name: "testid", value: stringLit(`${slug}-filter-${snake(stateName)}`) },
+          ]),
+        });
+      }
+    }
+    listRegion = matchExpr(
+      filters.map((f) => ({
+        cond: f.params
+          .map(
+            (p): Expression =>
+              binaryExpr(nameRefExpr(stateNameFor(f.name, p)), "!=", stringLit("")),
+          )
+          .reduce((acc, e) => binaryExpr(acc, "&&", e)),
+        value: makeQueryView(
+          memberAccess(queryRoot(), f.name, {
+            call: true,
+            args: f.params.map((p) => nameRefExpr(stateNameFor(f.name, p))),
+          }),
+        ),
+      })),
+      allView(),
+    );
+  }
 
   return callExpr("Stack", [
     { value: breadcrumbs(humanPlural, slug) },
@@ -233,7 +338,8 @@ export function scaffoldList(
         },
       ]),
     },
-    { value: queryView },
+    ...(filterFields.length > 0 ? [{ value: callExpr("Group", filterFields) }] : []),
+    { value: listRegion },
     { name: "testid", value: stringLit(`${slug}-list`) },
   ]);
 }
