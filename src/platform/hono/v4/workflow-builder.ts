@@ -372,6 +372,21 @@ function renderProvFlush(
   return ls;
 }
 
+/** True when any inline op-call in `sts` targets an `audited` (non-extern)
+ *  operation — the trigger for staging an audit_records row (and opening a
+ *  child frame).  Shared by the workflow command route and the event reactor,
+ *  both of which invoke ops inline (bypassing the per-operation route's audit). */
+function hasAuditedOpCall(ctx: BoundedContextIR, sts: WorkflowStmtIR[]): boolean {
+  return sts.some((s) => {
+    if (s.kind === "op-call") {
+      const o = lookupOp(ctx, s.aggName, s.op);
+      return !!o && o.audited && !o.extern;
+    }
+    if (s.kind === "for-each") return hasAuditedOpCall(ctx, s.body);
+    return false;
+  });
+}
+
 function emitWorkflowRoute(
   wf: WorkflowIR,
   ctx: BoundedContextIR,
@@ -475,16 +490,7 @@ function emitWorkflowRoute(
   // audit_records row (the per-operation route audits it; a workflow calling
   // it inline used to skip it — an audit-completeness gap).  Those rows also
   // want the child frame's scope / parent ids, so the frame opens for either.
-  const hasAuditedOpCall = (sts: WorkflowStmtIR[]): boolean =>
-    sts.some((s) => {
-      if (s.kind === "op-call") {
-        const o = lookupOp(ctx, s.aggName, s.op);
-        return !!o && o.audited && !o.extern;
-      }
-      if (s.kind === "for-each") return hasAuditedOpCall(s.body);
-      return false;
-    });
-  const auditsOps = hasAuditedOpCall(wf.statements);
+  const auditsOps = hasAuditedOpCall(ctx, wf.statements);
   const wrapsFrame = provSaves.length > 0 || auditsOps;
   // aggregate name → its repo variable, so an inline audited op-call can take
   // the before/after wire snapshots through the repo (`repo.toWire(agg)`).
@@ -947,25 +953,37 @@ function emitHandlerFn(
     }
     thisName = "state";
   }
-  // A reactor invokes ops inline, so a provenanced write it makes would be
-  // dropped — the per-operation route flushes provenance, but the reactor never
-  // drained it.  Mirror the workflow command path: flush each saved aggregate's
-  // lineage, inside a child frame so the rows record their call-structure scope
-  // (parentId chaining to the dispatching request).  Gated on a prov write-site
-  // so provenance-free reactors stay byte-identical (no frame, no flush).
+  // A reactor invokes ops inline, so a provenanced write OR an `audited` op-call
+  // it makes would be missed — the per-operation route flushes provenance and
+  // stages audit, but the reactor's inline path did neither.  Mirror the
+  // workflow command path: run the body in a child frame (so the rows record
+  // their call-structure scope, parentId chaining to the dispatching request),
+  // flush each saved aggregate's lineage, and stage audit for inline audited
+  // op-calls (via the target's `audit` context).  Gated so a reactor with
+  // neither stays byte-identical (no frame, no flush, no audit).
   const provSaves = saves.filter((s) => {
     const agg = ctx.aggregates.find((a) => a.name === s.aggName);
     return !!agg && agg.operations.some((o) => opHasProvSite(o));
   });
-  const bi = provSaves.length > 0 ? "    " : "  ";
-  if (provSaves.length > 0) out.push(`  await runInChildContext(async () => {`);
-  for (const r of collectReposFromStmts(statements, saves)) {
+  const auditsOps = hasAuditedOpCall(ctx, statements);
+  const wrapsFrame = provSaves.length > 0 || auditsOps;
+  const reactorRepos = collectReposFromStmts(statements, saves);
+  const repoVarByAgg = new Map(reactorRepos.map((r) => [r.aggName, lowerFirst(r.repoName)]));
+  const bi = wrapsFrame ? "    " : "  ";
+  if (wrapsFrame) out.push(`  await runInChildContext(async () => {`);
+  for (const r of reactorRepos) {
     out.push(`${bi}const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
   }
-  out.push(...renderWorkflowStmts(statements, honoWorkflowStmtTarget(ctx, noParams, thisName), bi));
+  out.push(
+    ...renderWorkflowStmts(
+      statements,
+      honoWorkflowStmtTarget(ctx, noParams, thisName, { dbHandle: "db", repoVarByAgg }),
+      bi,
+    ),
+  );
   for (const save of saves) out.push(`${bi}await ${lowerFirst(save.repoName)}.save(${save.name});`);
   out.push(...renderProvFlush(provSaves, bi, "db"));
-  if (provSaves.length > 0) out.push(`  });`);
+  if (wrapsFrame) out.push(`  });`);
   if (persisted && durable) {
     out.push(`  if (__eventId !== undefined) state.lastEventId = __eventId;`);
   }
