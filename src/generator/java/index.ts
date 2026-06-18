@@ -84,6 +84,7 @@ import {
 import { renderJavaValidators } from "./emit/validator.js";
 import { renderJavaViews, viewFindsFor } from "./emit/view.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
+import { renderJavaWorkflowInstanceReads } from "./emit/workflow-instances.js";
 import {
   correlationWorkflows,
   renderWorkflowStateEntity,
@@ -331,6 +332,18 @@ function emitProjectFromContexts(
       stateRepoPkg: pkgFor("spring-data-repository"),
     });
     if (dispatcher) place(dispatcher.name, "workflow-service", dispatcher.content);
+    // Read-only instance endpoints (workflow-debt-backend-parity.md, Java saga
+    // slice 3): every observable (correlation-bearing) saga gets
+    // GET /workflows/<wf>/instances[/{id}] over its persisted state row.
+    const instanceReads = renderJavaWorkflowInstanceReads(ctx, {
+      basePkg,
+      pkg: pkgFor("workflow-service"),
+      routePrefix,
+      stateRepoPkg: pkgFor("spring-data-repository"),
+    });
+    if (instanceReads) {
+      for (const [name, f] of instanceReads) place(name, f.category, f.content);
+    }
     const viewFiles = renderJavaViews(ctx, {
       basePkg,
       pkg: pkgFor("view-service"),

@@ -36,20 +36,20 @@ landed across most backends:
 | Feature | node | dotnet | elixir-ash | elixir-vanilla | python | java |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|
 | command routes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| saga-state row | ✓ | ✓ | ✓ | ✓ | ✓ | — |
-| `on`/event-`create` dispatch | ✓ | ✓ | ✓ | ✓ | ✓ | **gap** |
-| instance read endpoints | ✓ | ✓ | (Ash defer) | ✓ | ✓ | **gap** |
+| saga-state row | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `on`/event-`create` dispatch | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| instance read endpoints | ✓ | ✓ | (Ash defer) | ✓ | ✓ | ✓ |
 | view-over-workflow | ✓ | ✓ | (Ash defer) | ✓ | ✓ | **gap** |
 | `eventSourced` workflows (`apply`) | — | — | — | — | — | — |
 
 Corrections from earlier matrix drift (verified against code): **elixir-vanilla
 dispatch already ships** (`index.ts` calls the foundation-agnostic
-`emitDispatch(..., "vanilla")`), so it was never a gap. With this slice's
-workflow-view, **vanilla is now at full workflow parity with node/dotnet**. The
-remaining workflow gaps are all **java** (which has *no* saga persistence,
-dispatcher, instance reads, or workflow views — command workflows only) plus the
-universal `eventSourced`-workflow track. python instance reads + view-over-workflow
-and elixir-vanilla view-over-workflow landed as the first slices off this plan.
+`emitDispatch(..., "vanilla")`), so it was never a gap. With the python /
+elixir-vanilla workflow-view slices, **vanilla is now at full workflow parity
+with node/dotnet**. The Java saga track has since landed its
+saga-state row (#1288), in-process dispatcher (#1291), and instance read
+endpoints (this slice) — so the **only remaining workflow gap is java
+view-over-workflow**, plus the universal `eventSourced`-workflow track.
 
 ## Done in this slice — python instance read endpoints
 
@@ -92,16 +92,33 @@ module — this also fixes that latent compile break. Tests:
 `test/generator/elixir/vanilla-workflow-view.test.ts` + a `view` on the
 `vanilla-channels.ddd` elixir-vanilla-build gate fixture.
 
+## Done — Java saga track (slices 1–3)
+
+The Java saga stack landed in three stacked slices:
+
+1. **Saga-state row** (#1288) — `renderWorkflowStateEntity` / `renderWorkflowStateRepository`
+   (`emit/workflow-state.ts`): a JPA `@Entity` (`@EmbeddedId` correlation key,
+   `@Enumerated(STRING)` enums) bound to the Flyway-owned `plural(snake(wf.name))`
+   table + a Spring Data `JpaRepository` over it.
+2. **In-process dispatcher** (#1291) — `renderJavaDispatcher` (`emit/dispatch.ts`):
+   a `<Ctx>Dispatcher` `@Component` whose `@EventListener` handlers load-or-allocate
+   (event `create`) / route-or-drop (`on`) the saga row, run the body, and
+   re-publish via `ApplicationEventPublisher` so choreography chains re-enter.
+3. **Instance read endpoints** (this slice) — `renderJavaWorkflowInstanceReads`
+   (`emit/workflow-instances.ts`): every observable saga gets a `<Wf>InstanceResponse`
+   record + a `<Ctx>WorkflowInstancesController` exposing `GET /api/workflows/<wf>/instances[/{id}]`
+   over the saga-state repository (`findAll` / `findById`, 404 via `Optional.orElse(notFound)`),
+   projecting `instanceWireShape` (id → `.value()`, the camelCase wire keys the .NET
+   `<Wf>InstanceResponse` uses). The `saga.ddd` java-build gate fixture exercises it on
+   `gradle testClasses bootJar`. Tests: `test/generator/java/java-workflow-instances.test.ts`.
+
 ## Next slices (recommended order)
 
-1. **Java instance read endpoints** — the direct sibling of this slice, but
-   bigger: Java has no saga-state JPA entity yet (the migration table exists but
-   no `@Entity`), so this slice carries the state-entity emission too. Reference:
-   the .NET `<Wf>State` POCO + instances controller.
-2. **Java `on`/event-`create` dispatch** — Java has no in-process dispatcher at
-   all; the largest remaining workflow gap. Reference: the python dispatcher
-   (`dispatch-builder.ts`) is the closest async-ish shape.
-3. **elixir-vanilla dispatch** — port the ash-foundation dispatcher to the
+1. **Java view-over-workflow** — the last Java workflow gap: `view X = <Workflow> where <pred>`.
+   `renderJavaViews` currently filters `source.kind === "aggregate"`; add a workflow-source
+   path that reads the `<Wf>State` saga row with the filter lowered to a query and projects
+   `instanceWireShape`. Reference: python's `views-builder.ts` + `lowerWorkflowFilterToSqlAlchemy`.
+2. **elixir-vanilla dispatch** — port the ash-foundation dispatcher to the
    vanilla foundation (raw `Repo.transaction` + `Phoenix.PubSub`).
-4. **`eventSourced` workflows (`apply(...)` folds)** — universal gap; design-first
+3. **`eventSourced` workflows (`apply(...)` folds)** — universal gap; design-first
    (`workflow-and-applier.md` A2-S5b). Pairs with the aggregate event-store path.
