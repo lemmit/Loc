@@ -55,6 +55,17 @@ Resolution happens in two parts (see `parseBuiltinPlatformRef` in
    intentionally aren't versioned at the platform layer — their
    version lives on the design pack / stack axis (see
    [`design-packs.md`](design-packs.md)).
+
+   > **What `vN` means.** A backend package's Loom version mirrors the
+   > **major version of its defining framework/runtime**, *not* the
+   > platform's own name. So `node@v4` tracks **Hono 4** (the `hono:
+   > ^4.x` pin in `src/platform/hono/v4/pins.ts`; `v5` is reserved for
+   > the next Hono major), exactly as `dotnet@v8` tracks **.NET 8** and
+   > `mantine@v9` tracks Mantine 9. `node@v4` is therefore *not* "Node.js
+   > 4" — the `node` platform names the JS runtime, while the `4` versions
+   > the Hono web framework it emits. (Sources never spell this out: every
+   > deployable uses the bareword `platform: node`, and `@v4` is only the
+   > internal qualified ref the resolver fills in.)
 2. **Pinned `family@version`** — looked up directly in the
    registered backend surfaces.  Unknown versions are a validation
    error that lists the available pins (`backendVersionsForFamily`).
