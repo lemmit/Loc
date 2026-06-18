@@ -108,7 +108,16 @@ export function renderPySchema(
   // channel adds the `last_event_id` idempotent-consumer marker.
   const durable = durableEventTypes(ctx).size > 0;
   for (const wf of ctx.workflows) {
-    if (wf.correlationField) models.push(renderWorkflowStateModel(wf, ctx, durable));
+    if (!wf.correlationField) continue;
+    // An `eventSourced` workflow persists as an append-only `<wf>_events`
+    // stream (the saga analogue of a `persistedAs(eventLog)` aggregate),
+    // not a mutable correlation row — same unqualified stream table the
+    // migration derives (migrations-builder.eventLogTableForStream).
+    if (wf.eventSourced) {
+      models.push(renderEventLogModel(wf.name));
+      continue;
+    }
+    models.push(renderWorkflowStateModel(wf, ctx, durable));
   }
   // Transactional outbox (dispatch-delivery-semantics.md): the shared
   // `__loom_outbox` table when any channel asks for durability.

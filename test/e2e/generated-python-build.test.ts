@@ -40,6 +40,9 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   // Channels + event-triggered saga (in-process dispatcher, persisted
   // correlation state).
   ["test/e2e/fixtures/python-build/saga.ddd", "api"],
+  // Event-sourced workflow: append-only `<wf>_events` stream + fold-on-load
+  // + emit→append-own-event dispatch (the saga analogue of eventLog.ddd).
+  ["test/e2e/fixtures/python-build/eventsourced-workflow.ddd", "api"],
   // Durable channel (`retention: log`): transactional outbox + relay +
   // last_event_id idempotent-consumer dedup.
   ["test/e2e/fixtures/python-build/outbox.ddd", "api"],

@@ -1282,7 +1282,7 @@ export function validateEventSourcedStorage(
 // and drop the appliers entirely).  A parsed-but-unemitted feature is a footgun,
 // so it fails fast — exactly like the event-sourced *aggregate* storage gate,
 // and the supported set grows per backend (mirroring `EVENT_SOURCING_BACKENDS`).
-const EVENT_SOURCING_WORKFLOW_BACKENDS = new Set(["node", "dotnet"]);
+const EVENT_SOURCING_WORKFLOW_BACKENDS = new Set(["node", "dotnet", "python"]);
 export function validateEventSourcedWorkflowStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
