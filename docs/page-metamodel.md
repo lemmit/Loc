@@ -344,12 +344,18 @@ Two boundaries to know:
 | `Money`, `DateDisplay`, `EnumBadge`, `IdLink` | Formatter primitives. |
 | `Table`, `Column` | Tabular display (data lambda accessors). |
 | `For { each: T[], item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. |
-| `Form { of: <Agg> }`, `Form { runs: <wf> }`, `Form { <instance>.<operation> }` | RHF-bound form auto-dispatched off the aggregate / workflow / operation IR. The operation form references the op through an in-scope aggregate instance (like `Action`). Named-leaf twins: `CreateForm { of: }`, `OperationForm { of:, op: }`, `WorkflowForm { runs: }`, and `DestroyForm { of: <Agg>, then? }` — the confirmation-only canonical-destroy form (confirm → delete → navigate to the list). |
 | `QueryView { of:, loading:, error:, empty:, data:, single?: }` | 4-arm query-state branching (collection or single-record). |
 
 The set is closed in v0. **Removed from earlier drafts:** `Wizard`, `Stage`,
 `Switch`, `Case`, `When`, `Sequence` — all subsumed by `match` plus the
-state/transition primitives.
+state/transition primitives. The polymorphic `Form { creates: | runs: |
+into: | <instance>.<op> }` dispatcher is also gone: it split into the four
+named-leaf forms above (`CreateForm` / `OperationForm` / `WorkflowForm` /
+`DestroyForm`), each a distinct primitive rather than one overloaded name.
+The narrative `Form { … }` snippets in §7 and the §12 wizard sketches
+predate that split — read them as the corresponding named-leaf form (the
+`into:` / `fields:` draft-binding shapes remain illustrative; multi-step
+draft forms are a §14 non-goal, not a shipped primitive).
 
 Users freely define their own `component`s, which compose these builtins.
 
@@ -380,9 +386,9 @@ to one the user could hand-write. The contract per page:
 | Page | Body |
 |---|---|
 | `<Agg>List` | Breadcrumbs · Toolbar (heading + "New" button) · `QueryView { of: api.<Agg>.all }` → `Table` with one `Column` per **non-collection** scalar field (`IdLink` / `EnumBadge` / `DateDisplay` / text by type), per-row testid. |
-| `<Agg>New` | Breadcrumbs · heading · `Card { Form { of: <Agg> } }` — RHF + Zod + `useCreate<Agg>`, one input per required field. |
-| `<Agg>Detail` | Breadcrumbs · heading · `QueryView { of: api.<Agg>.byId(id), single: true }` whose data card holds **three** sections: ① `KeyValueRow` per scalar field; ② one **operation control** per `public operation` — a button that opens a `Modal` hosting an auto-generated `Form { data.<operation> }` (the operation referenced through the loaded record) bound to the `use<Op><Agg>` mutation hook (params dispatched by the same type rules as `Form { of: }`); ③ one **related-entity list** per `contains` collection — a titled `Card { Table }` over `data.<containment>` with a `Column` per part field. |
-| `<Workflow>Workflow` | Breadcrumbs · heading · `Card { Form { runs: <wf> } }`. |
+| `<Agg>New` | Breadcrumbs · heading · `Card { CreateForm { of: <Agg> } }` — RHF + Zod + `useCreate<Agg>`, one input per required field. |
+| `<Agg>Detail` | Breadcrumbs · heading · `QueryView { of: api.<Agg>.byId(id), single: true }` whose data card holds **three** sections: ① `KeyValueRow` per scalar field; ② one **operation control** per `public operation` — a button that opens a `Modal` hosting an auto-generated `OperationForm { data.<operation> }` (the operation referenced through the loaded record) bound to the `use<Op><Agg>` mutation hook (params dispatched by the same type rules as `CreateForm { of: }`); ③ one **related-entity list** per `contains` collection — a titled `Card { Table }` over `data.<containment>` with a `Column` per part field. |
+| `<Workflow>Workflow` | Breadcrumbs · heading · `Card { WorkflowForm { runs: <wf> } }`. |
 | `<View>View` | Heading · `QueryView { of: Views.<name> }` → `Table`. |
 
 The Detail page's operations + related-entity lists are the
@@ -726,7 +732,7 @@ lowers the IR onto Phoenix LiveView semantics.  Per-construct mapping:
 | `match { p1 => v1, … else => fallback }` | `cond do p1 -> v1; … true -> fallback end` (expressions); `<%= cond do … end %>` in HEEx templates. |
 | `requires <expr>` (page-level) | guard in `handle_params/3` that `push_navigate`s home with a `flash` on failure (v0 stub: bind only — full guard is a follow-up). |
 | `navigate(<Page>, {…})` (in a lambda) | `push_navigate(socket, to: ~p"/route?…")` with the target page's route + interpolated args. |
-| `Form { creates: T }` / `Form { into: state }` | `<.simple_form for={@form} phx-submit="save">` over `AshPhoenix.Form.for_create/3` (or a draft assign for wizard steps). |
+| `CreateForm { of: T }` (and the illustrative `into: state` draft binding) | `<.simple_form for={@form} phx-submit="save">` over `AshPhoenix.Form.for_create/3` (or a draft assign for wizard steps). |
 | Body of an aggregate-scaffolded page | `pack.render("page-list" | "page-new" | "page-detail", vm)` → HEEx inline in the LiveView's `render/1` — the same framework-neutral preparer VMs the React generator uses (`src/generator/react/templating/preparers/`). |
 | `Sales.Customer.create.mutate(args)` (api binding) | direct context call `<App>.Sales.create_customer!(args)` — no hook hoisting, since LiveView reads in `mount/3` / `handle_event/3`. |
 | Page object emission | unchanged — Playwright drives any rendered HTML, including LiveView, via the same testid-keyed page objects. |
