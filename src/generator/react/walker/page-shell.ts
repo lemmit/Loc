@@ -140,6 +140,7 @@ export function renderCustomLayoutPage(
     formOfs,
     actionMutations,
     usedExternFunctions,
+    usesFragment,
   } = walkBodyToTsx(
     body,
     pack,
@@ -290,6 +291,7 @@ export function renderCustomLayoutPage(
   // how `usedParams` shapes the useParams destructure).
   // `useEffect` joins the same React import line.
   const reactSpecifiers: string[] = [];
+  if (usesFragment) reactSpecifiers.push("Fragment");
   if (effectiveUsesState) reactSpecifiers.push("useState");
   if (usesEffect) reactSpecifiers.push("useEffect");
   const reactImport =
@@ -531,6 +533,7 @@ export function renderUserComponentFile(
     actionMutations,
     formOfs,
     usedExternFunctions,
+    usesFragment,
   } = walkBodyToTsx(
     body,
     pack,
@@ -578,7 +581,11 @@ export function renderUserComponentFile(
     routerSpecifiers.length > 0
       ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
       : "";
-  const reactImport = usesState ? `import { useState } from "react";\n` : "";
+  const reactSpecifiers: string[] = [];
+  if (usesFragment) reactSpecifiers.push("Fragment");
+  if (usesState) reactSpecifiers.push("useState");
+  const reactImport =
+    reactSpecifiers.length > 0 ? `import { ${reactSpecifiers.join(", ")} } from "react";\n` : "";
   const decimalImport =
     usesState && state.some((f) => typeUsesMoney(f.type))
       ? `import Decimal from "decimal.js";\n`

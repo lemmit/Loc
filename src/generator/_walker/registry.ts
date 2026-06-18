@@ -69,6 +69,7 @@ import {
   renderEmpty as renderEmptyHeex,
   renderEnumBadge as renderEnumBadgeHeex,
   renderField as renderFieldHeex,
+  renderFor as renderForHeex,
   renderForm as renderFormHeex,
   renderGrid as renderGridHeex,
   renderGroup as renderGroupHeex,
@@ -115,6 +116,7 @@ import {
   emitSlot,
   emitStat,
 } from "./primitives/display.js";
+import { emitFor } from "./primitives/for.js";
 import {
   emitCreateForm,
   emitDestroyForm,
@@ -192,10 +194,10 @@ export interface PrimitiveDef {
    *  can opt out by setting this to false. */
   admissibleInSource: boolean;
   /** React/TSX target renderer, or undefined if the TSX walker does
-   *  NOT dispatch on this primitive directly (e.g. `For` is
-   *  source-admissible but unimplemented; `Tab`/`Column` only
-   *  appear as children of their parent which consumes them
-   *  inline). */
+   *  NOT dispatch on this primitive directly (e.g. the legacy
+   *  archetype names `List`/`Detail`/`MasterDetail` lower as `custom`
+   *  page origins; `Tab`/`Column` only appear as children of their
+   *  parent which consumes them inline). */
   tsx?: TsxRenderer;
   /** Phoenix/HEEx target renderer, or undefined if the HEEx walker
    *  does NOT support this primitive — Phoenix supports a subset
@@ -393,8 +395,10 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   MasterDetail: { group: "layout", admissibleInSource: true },
   // --- Action primitive --------------------------------------------------
   Action: { group: "layout", admissibleInSource: true, tsx: emitAction, heex: renderActionHeex },
-  // --- For-comprehension (source-admissible only today) -----------------
-  For: { group: "layout", admissibleInSource: true },
+  // --- For-comprehension — list rendering with an item lambda.
+  // TSX `.map` + keyed Fragment / Vue `v-for` / Svelte `{#each}` via
+  // the target's `renderForEach` seam; HEEx `for`-comprehension block.
+  For: { group: "layout", admissibleInSource: true, tsx: emitFor, heex: renderForHeex },
   // --- Sub-element primitives (always nested inside a parent) ----------
   // `Tab` is consumed inline by `Tabs`; `Column` by `Table`.  Validator
   // accepts them as builder-call types; the HEEx `Column` renderer is

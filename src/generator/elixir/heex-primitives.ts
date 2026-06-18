@@ -440,6 +440,41 @@ function htmlInputTypeForIRType(t: TypeIR): string {
   }
 }
 
+/** `For { each: <coll>, <item> => <markup> }` →
+ *  `<%= for <item> <- <coll> do %> … <% end %>` — LiveView's
+ *  for-comprehension block.  No keyed wrapper: the `key:` arg is a
+ *  client-framework reconciliation hint (React/Vue/Svelte) with no
+ *  HEEx analogue, so it's accepted-and-ignored here.  The loop
+ *  variable is a plain local (bare `snake(name)`), so item refs in the
+ *  body resolve through `renderRef`'s unknown-refKind fall-through —
+ *  same mechanism the Table `<:col :let={row}>` slot relies on. */
+export function renderFor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  let coll: ExprIR | undefined;
+  let itemLam: Extract<ExprIR, { kind: "lambda" }> | undefined;
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (arg.kind === "lambda") {
+      // First positional (or `render:`) lambda is the item renderer;
+      // a `key:` lambda has no HEEx analogue and is skipped.
+      if (name === undefined || name === "render") itemLam ??= arg;
+      continue;
+    }
+    if (name === "each") coll = arg;
+    else if (name === undefined) coll ??= arg;
+  }
+  if (!coll) {
+    return `<%!-- For: missing 'each:' collection expression --%>`;
+  }
+  if (!itemLam?.body) {
+    return `<%!-- For: missing item lambda --%>`;
+  }
+  const itemVar = snake(itemLam.param);
+  const collHeex = renderExpr(coll, { ...ctx, position: "template" });
+  const body = renderChild(itemLam.body, ctx);
+  return [`<%= for ${itemVar} <- ${collHeex} do %>`, indent(body, 2), `<% end %>`].join("\n");
+}
+
 /** `Table(Column(...), ..., rows: ref("rows"), ...)` →
  *  `<.table id="..." rows={@rows}>` with `<:col :let={row}>` slots. */
 export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {

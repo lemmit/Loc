@@ -52,7 +52,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | DEBT-02 | Non-relational (`shape(document/embedded)`) capability `filter` | node, elixir, java | 4 | M | — |
 | DEBT-03 | Operation `or`-union return (exception-less ProblemDetails) | elixir/ash | 4 | M | `exception-less.md` · **slice 1 landed** (return-dominant; mutation/guard bodies still gated) |
 | DEBT-04 | Audit runtime parity (`audited` ops, lifecycle, `with audit`) | dotnet, elixir | 4 | L | `type-system-feature-migration.md` (DBT) |
-| DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) | react (→ vue/svelte) | 4 | M | — |
+| DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) — **`For` done (all 4 frontends + HEEx); `List`/`Detail`/`MasterDetail` open** | react (→ vue/svelte) | 4 | M | — |
 | **P1 — parity + frontend completeness** |
 | DEBT-06 | Provenanced fields (lineage SDK + trace capture) | elixir | 3 | L | `provenance.md`, `type-system-feature-migration.md` DBT-1 |
 | DEBT-07 | `shape(document)` persistence | elixir | 3 | M | — |
@@ -111,8 +111,10 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 - **Scope:** dotnet — finish the `IAuditWriter` unit-of-work path for lifecycle; elixir — emit the audit-record append in the save transaction.
 
 ### DEBT-05 · React walker `List` / `Detail` / `For` primitives
-- **Where:** `src/generator/_walker/walker-core.ts:730` — registered, source-admissible, but render only as `// X: not supported by the React walker yet`.
+- **Where:** `src/generator/_walker/walker-core.ts` `emitComponent` — registered, source-admissible, but rendered only as `// X: not supported by the React walker yet`.
 - **Why P0:** these are common page primitives silently degrading to comments; the most visible *frontend* hole. Land the TSX renderers, then mirror to vue/svelte targets and (where mappable) HEEx.
+- **`For` — DONE.** The `For { each:, item => markup }` comprehension now renders on all four frontends via a new `renderForEach` target seam: TSX keyed `.map`/`<Fragment>`, Vue `<template v-for :key>`, Svelte keyed `{#each}`, plus a Phoenix `for … do … end` block (`heex-primitives.ts:renderFor`). It's a child primitive (stays in `NON_PAGE_BODY_LAYOUT_PRIMITIVES`); list key is the loop index (a source-level `key:` is grammar-unwritable next to a brace-body item lambda, so the seam takes a `keyExpr` for programmatic/future use only).
+- **`List` / `Detail` / `MasterDetail` — still open.** These are legacy archetype names that lower as `custom` page origins and overlap the `scaffoldList`/`scaffoldDetails` expander; closing them is a separate slice (expander delegation vs. direct renderer — decide first).
 
 ---
 
@@ -198,7 +200,7 @@ Sequenced for parity impact and momentum (all are ports of an existing pattern,
 none require a design spike):
 
 1. ~~**DEBT-03** — operation `or`-union return on Elixir/Ash~~ — **slice 1 done** (return-dominant ops; mutation/guard follow-up remains).
-2. **DEBT-05** — React `List`/`Detail`/`For` primitives (visible frontend correctness).
+2. **DEBT-05** — React `List`/`Detail`/`For` primitives (visible frontend correctness) — **`For` done** (all 4 frontends + HEEx); `List`/`Detail`/`MasterDetail` remain.
 3. **DEBT-01** — principal-referencing filters on node (then elixir, java) — highest demand.
 4. **DEBT-02** — non-relational filters (rides on DEBT-01's plumbing).
 5. **DEBT-04** — audit runtime parity (dotnet first, then elixir).

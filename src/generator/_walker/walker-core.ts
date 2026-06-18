@@ -91,6 +91,10 @@ export interface WalkResult {
   /** Extern functions called from the body — the shell emits one
    *  conformance-shim import line per name. */
   usedExternFunctions?: Set<string>;
+  /** True when a `For { … }` comprehension emitted a keyed React
+   *  `<Fragment>` (TSX target only).  The React shell adds `Fragment`
+   *  to its `react` import line when set. */
+  usesFragment?: boolean;
   imports: ImportMap;
   /** Names of route params the walker actually used
    *  while emitting (e.g. `Heading(name)` referenced `name`).  The
@@ -353,6 +357,7 @@ export function walkBody(
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
+    usesFragment: false,
     externFunctions,
     usedExternFunctions: new Set(),
   };
@@ -371,6 +376,7 @@ export function walkBody(
     actionMutations: ctx.actionMutations,
     collectedTestids: ctx.collectedTestids,
     usesCodeBlock: ctx.usesCodeBlock,
+    usesFragment: ctx.usesFragment,
     usedExternFunctions: ctx.usedExternFunctions ?? new Set(),
   };
 }
@@ -479,6 +485,12 @@ export interface Sink {
    *  to drive conditional injection of the highlight.js CDN payload
    *  into the shell's `index.html`. */
   usesCodeBlock: boolean;
+  /** True when a `For { … }` comprehension emitted a keyed React
+   *  `<Fragment>` wrapper (TSX target only — Vue/Svelte iterate with
+   *  native `v-for` / `{#each}` and never set it).  The React page /
+   *  component shell adds `Fragment` to its `import … from "react"`
+   *  line when set. */
+  usesFragment?: boolean;
 }
 
 /** The combined context the shared core threads. Structurally
@@ -776,6 +788,7 @@ export function propagateChildFlags(parent: WalkContext, child: WalkContext): vo
   if (child.usesState) parent.usesState = true;
   if (child.usesChildren) parent.usesChildren = true;
   if (child.usesCodeBlock) parent.usesCodeBlock = true;
+  if (child.usesFragment) parent.usesFragment = true;
   for (const f of child.formOfs) {
     if (!parent.formOfs.includes(f)) parent.formOfs.push(f);
   }
