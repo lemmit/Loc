@@ -1,273 +1,155 @@
-# Unfoldable page scaffolding — list/detail as real components
+# Unfoldable page scaffolding — lift the ⑤c expander into the macro layer
 
-**Status:** PARTLY SUPERSEDED · **Created:** 2026-06-18
+**Status:** PROPOSED (adopted direction; phased implementation underway) ·
+**Created:** 2026-06-18
 
-> **Update (decided).** The `List` / `Detail` / `MasterDetail` *archetypes*
-> this proposal first set out to implement were found to be **inert
-> duplicates** of the working `scaffoldList` / `scaffoldDetails` sentinels
-> (no renderer, no expander arm — they parsed, validated, then dead-ended to
-> a comment) and have been **removed** — see
-> [decisions.md → D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes).
-> So the archetype half of this doc is moot.
->
-> What **survives** as an open idea: the phase-⑤c scaffold expansion
-> (`scaffoldList`/`scaffoldDetails` → an inline ~100-line tree) is opaque
-> "magic" — it has no printer arm and can't be unfolded like a macro. The
-> proposal below — have scaffold emit a **real, named `component`** the page
-> references, so the body is inspectable/unfoldable/embeddable — still applies
-> **to the sentinels themselves**. Read it with `List`/`Detail`/`MasterDetail`
-> mentally replaced by `scaffoldList`/`scaffoldDetails`; the cost analysis and
-> the "investigate the model → scaffold; output a component" framing are
-> unchanged.
+> One-line thesis: the scaffold **page-body expansion**
+> (`scaffoldList` / `scaffoldDetails` / `scaffoldNewForm` / … → the
+> `Stack`/`Breadcrumbs`/`QueryView`/`Table` tree) must be a **macro-layer
+> (AST→AST) transform that is unfoldable to literal `.ddd` source** — not an
+> IR-phase ⑤c rewrite. Scaffolds are macros; macros are unfoldable; this one
+> isn't, and that is a layering defect, not a cosmetic gap. UI-side twin of
+> [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md).
 
-> One-line thesis: page-body scaffolding (`scaffoldList(of:)` /
-> `scaffoldDetails(of:)`) should be **a macro/expander that emits a real,
-> named `component`** the page references — not an inline tree exploded at IR
-> lowering phase ⑤c, where nothing can see, edit, or unfold it. This is the
-> UI-side twin of [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md).
+> **Context.** This doc began as "implement the `List`/`Detail`/`MasterDetail`
+> archetypes." Those turned out to be **inert duplicates** of the
+> `scaffoldList`/`scaffoldDetails` sentinels and were **removed**
+> ([D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes)). What remains
+> — and what this rewrite is about — is the real defect the investigation
+> surfaced: the sentinels themselves expand as opaque IR magic.
 
-## The dividing line: does it need to investigate the model?
+## The defect
 
-The clean rule for "macro vs component":
+`with scaffold(…)` is a real macro and unfolds one level at a time
+(subdomain → context → aggregate → pages) through the structural printer
+(`src/language/lsp/unfold-macro.ts` + `src/language/print/`). But the **page
+bodies** it emits are sentinel calls — `callExpr("scaffoldList", { of })`
+(`src/macros/stdlib/scaffold/_pages.ts`) — and the actual ~100-line body tree
+is produced by `expandScaffoldList` / `expandScaffoldDetails` / … in
+`src/ir/lower/walker-primitive-expander.ts`, called as the **last step of
+`lowerSystem` (phase ⑤c)**. That step is **IR → IR**, so it:
 
-- A **component is not magical** — it carries no build-time logic; it
-  just lowers to its target (the walker renders it). `For { each:, item
-  => … }` is a true component: it iterates a value *at render time* and
-  needs **zero** model knowledge. Correctly a walker primitive (shipped
-  as one).
-- A **scaffold/macro runs at build time and investigates the model** —
-  `List` derives table columns from `agg.fields` + a filter bar from the
-  repository's `finds`; `Detail` needs *more* (containments, derived
-  fields, related-entity cards from associations); `MasterDetail` needs
-  list + selection + detail together. None can render without reflecting
-  over the model, and there is no runtime reflection. So **all three are
-  scaffold**, not components.
-- **The scaffold's output is a real `component`** (returned, and
-  referenced by the page). Once a `component` is what comes out, nothing
-  is magic: it is named, printable, unfoldable, and lowers like any
-  hand-written component. *"If somewhere we are returning a component,
-  then it is good."*
+- has **no printer arm** (the printer is AST→source; this runs in IR-space),
+- has **no unfold** (unfold targets `with X(…)` clauses at the AST layer),
+- and produces a tree that exists only transiently as IR, then as generated
+  TSX — **never** as `.ddd` source the user can see, edit, or eject.
 
-## Problem — the transparency chain dead-ends at the page body
+The transparency chain — Loom's stated value (everything scaffolded is
+ejectable to literal source) — dead-ends exactly at the page body. It is also
+a one-directional-layering smell: a language-surface construct (`scaffoldList`)
+carries its semantics as a hardcoded IR transform in the lowering pass.
 
-Loom's macro layer is transparent and **ejectable**: `with scaffold(…)`
-unfolds one level at a time (subdomain → context → aggregate → pages)
-through the structural printer (`src/language/lsp/unfold-macro.ts` +
-`src/language/print/`). A user can drill into a scaffold and turn any
-level into literal, editable source.
+## Design — move the expansion to phase ② (AST→AST)
 
-But the **page bodies** the scaffold macro emits are not part of that
-chain. Those bodies are sentinel calls — `scaffoldList(of: <Agg>)`,
-`scaffoldDetails(of: <Agg>)`, `scaffoldNewForm(of:)`, … (and the
-user-facing archetypes `List { of: T }`, `Detail { of: T, by: id }`,
-`MasterDetail { … }`) — which explode into a ~100-line inline
-`Stack`/`Breadcrumbs`/`QueryView`/`Table` tree at **IR lowering phase
-⑤c** (`src/ir/lower/walker-primitive-expander.ts`). That step:
+Relocate the body-builders from `src/ir/lower/walker-primitive-expander.ts`
+(IR→IR, ⑤c) into the scaffold macro family (`src/macros/stdlib/scaffold/`) as
+**AST→AST builders** that read the AST and emit AST builder-calls
+(`callExpr`/`nameRefExpr`/`stringLit`/`intLit`/lambda — the `_pages.ts`-style
+factories, extended). One shared module serves three consumers:
 
-- has **no printer arm** (`src/language/print/` has nothing for the
-  scaffold sentinels — confirmed),
-- has **no unfold** (it runs after parsing/scope, inside lowering),
-- and produces a tree the user **cannot see, edit, or eject**.
+1. **The compile path** — the scaffold macro (or a phase-② pass right after
+   macro expansion, before scope/link ③) expands the sentinel into the full
+   body AST. Downstream just lowers a normal page body; the ⑤c scaffold pass
+   is **deleted** (~1k LOC of IR magic gone). A correctness bonus: the expanded
+   body now flows through scope/link (③) and AST-validate (④), which the ⑤c
+   output bypasses today.
+2. **Unfold (eject)** — the LSP code action runs the *same* builder on a
+   selected sentinel, prints the result, and splices it in. `scaffoldList
+   { of: Order }` → the literal `Stack { Breadcrumbs … QueryView … Table … }`,
+   editable.
+3. **Hand-written sentinels** — `extern-showcase.ddd`'s embedded `scaffoldList
+   { of: Order }` expands by the same pass, so emitted and hand-written
+   sentinels behave (and unfold) identically.
 
-So the chain is: `with scaffold(…)` *(unfoldable)* → `page <Agg>List
-{ body: scaffoldList(of: X) }` *(unfoldable to here)* → **inline IR
-tree** *(opaque magic)*. The interesting part — what the list/detail
-page actually renders — is exactly the part you can't open.
+Optionally the builder can emit a **named `component` + a page reference**
+instead of an inline body (the monomorphized `<Agg>ListView` discussed
+below) — a reusable, embeddable artifact. That is a refinement on top of the
+relocation, not a prerequisite.
 
-The same opacity is why the `List` / `Detail` / `MasterDetail`
-*archetype components* (page-metamodel.md §4, §9) read as confusing
-"legacy" today. The registry makes the asymmetry exact:
+### The data is AST-derivable (this is why it can leave ⑤c)
 
-```
-List:         { group: "layout",   admissibleInSource: true }   // no tsx, no heex, no expander
-scaffoldList: { group: "scaffold", admissibleInSource: true }   // no tsx — but HAS a ⑤c expander arm
-```
+The only reason body-building was deferred to ⑤c is that it read *enriched* IR.
+Every input has an AST-layer equivalent:
 
-- A **scaffold sentinel** (`scaffoldList`) is renderer-less *but
-  generative*: phase ⑤c has an expander arm that rewrites it into the
-  full `Breadcrumbs`/`QueryView`/`Table` `ExprIR` tree, which then
-  renders. So `scaffold` → AST page + sentinel → ⑤c expansion → working
-  IR → output.
-- An **archetype** (`List`/`Detail`/`MasterDetail`) is renderer-less
-  *with nothing behind it*: no `tsx`, no `heex`, no expander arm.
-  `body: List { of: Order }` parses to a `CallExpr`, lowers to a plain
-  `call` ExprIR named `"List"`, and dead-ends — the walker emits
-  `// List: not supported by the React walker yet` (and they sit in
-  `NON_PAGE_BODY_LAYOUT_PRIMITIVES`, excluded as a page body outright).
+| ⑤c reads (IR) | AST/macro-layer equivalent |
+|---|---|
+| `agg.fields` (typed; skip VO/array) | the aggregate's `Property` members + type AST |
+| repo `finds` (filter bar) | the `repository`'s `find` members (string params, array return) |
+| `findApiHandleFor` | the `ui`'s api params + the system's `api` decls (all AST) |
+| auto-`findAll` → `api.X.all` | **convention** (`.all`) — no enrichment needed |
+| wireShape order / containments / derived | declared field order + containment/derived/`X id[]` members |
 
-So the archetypes are **inert reserved names** — they parse and
-validate, then produce nothing — even though they're documented as the
-canonical page bodies and appear in committed examples
-(`examples/sales-ui.ddd`, `web/src/examples/extern-showcase.ddd`). The
-fix gives them the generative path the sentinels have, but routed to
-emit a `component` (the unfoldable artifact) rather than an inline tree.
+The tree *shape* is reused verbatim — same named-primitive calls, expressed as
+`callExpr(...)` instead of `call(...)`. The work is re-reading these from the
+AST; it is **larger for Detail** (containments / derived / associations /
+operation fan-out) than for List.
 
-## Proposed model — scaffold to real components, at the macro layer
+## The key coupling: origin is inferred from the sentinel
 
-Move list/detail/master-detail body generation **out of phase ⑤c and
-into the macro layer**, and have it emit **real `component`
-declarations** that pages reference:
+The one genuinely hard part. `inferPageOrigin` (`src/ir/lower/lower-ui.ts`)
+classifies a page (`aggregate-list` / `aggregate-detail` / `aggregate-new` /
+`view-list` / `home` / …) by **pattern-matching the body sentinel** during
+lowering — there is **no** separate origin slot (`scaffoldOrigin` is only a
+validator predicate). `applyPageOriginSideEffects` then uses `origin` to set
+the `emitPath` (`pages/orders/list.tsx`), synthesise the detail `:id` param,
+and route page-object emission. (Menu metadata is already emitted explicitly by
+the macro.)
 
-```ddd
-// today (opaque): a page whose body explodes in the IR
-page OrderList { route: "/orders"  body: scaffoldList(of: Order) }
+So if the body expands to full source *before* lowering, the sentinel — and
+thus the inferred origin — is gone. The relocation therefore needs origin to
+become an **explicit stamp**, not a reverse-engineered one:
 
-// proposed (unfoldable): scaffold emits a real component + a thin page
-component OrderListView {
-  body: Stack {
-    Breadcrumbs { … }
-    Toolbar { Heading { "Orders" }, Button { "New order", to: "/orders/new" } }
-    QueryView { of: api.Order.all, data: rows => Paper { Table { … } } }
-  }
-}
-page OrderList { route: "/orders"  body: OrderListView() }
-```
+- **The macro stamps origin when it emits the page** (it knows it is making an
+  `aggregate-list` page). This requires a place to put it: an optional `origin`
+  marker on the `Page` AST/IR that lowering reads (preferred over re-inferring
+  from a full body). This is the one grammar/IR addition the refactor needs.
+- A page **ejected** by the user becomes an ordinary `custom` page — it lands
+  at `pages/<name>.tsx`, the user owns it. That is correct: eject = "I own this
+  now", origin no longer applies.
+- The detail `:id` param is emitted **explicitly** by the macro
+  (`page OrderDetail(id: Order id)`) rather than synthesised from origin —
+  cleaner, and visible in the unfolded source.
 
-- **Higher granularity (the "unfold all the way down" ask):** the chain
-  becomes `with scaffold(…)` → page + `component <Agg>ListView` →
-  the component's literal `Stack`/`QueryView`/`Table` body — every step
-  printable and unfoldable. A user can unfold to the component, then
-  unfold again (or just hand-edit it) to customise the table columns,
-  the empty state, the toolbar.
-- **`List` / `Detail` / `MasterDetail` become macros that emit a
-  component**, not IR-phase sentinels: `List { of: Order }` expands (at
-  macro time, so it unfolds) to a `component OrderListView` + a
-  reference `OrderListView()` at the call site. Embedding a list in a
-  hand-written page
-  (`extern-showcase.ddd`'s `Stack { Heading{…}, RiskBadge{…}, List { of:
-  Order } }`) just drops the component reference inline; the walker
-  already renders user-component invocations. **DEBT-05 dissolves** —
-  there is no new walker renderer to write; the component body is
-  ordinary primitives the walker (and every frontend) already handles.
-- **Scaffold and the archetypes stop being two mechanisms.** Both route
-  through one macro that builds the component; scaffold *also* emits the
-  wrapping page, the archetype just references the component. No
-  duplicate tree-builder, no parallel surface.
+## Phased implementation (with gates)
 
-### The real cost: re-homing the builder to where it can see the model
+1. **Foundation (this slice).** Add the missing AST expression factories
+   (`intLit`, …) and a shared `src/macros/stdlib/scaffold/_body-builders.ts`
+   that builds page-body AST from the AST aggregate, starting with the
+   data-light `scaffoldNewForm` shape. Test: build → print → re-parse → assert
+   valid source + expected structure. *Additive; zero change to the compile
+   path; proves AST-derivability + printability.*
+2. **Origin stamp.** Add the explicit `origin` marker on `Page` (grammar +
+   IR + printer + `inferPageOrigin` prefers it, falls back to body-inference).
+   Byte-identical (the stamp duplicates what inference derives). Unblocks
+   moving bodies off the sentinel.
+3. **Relocate List + New.** Build the `scaffoldList`/`scaffoldNewForm` body AST
+   at phase ②; the macro stamps origin + emits params/menu; delete those ⑤c
+   arms. **Gate: byte-identical generated output** across all frontends (the
+   lowered AST body must reproduce the ⑤c `ExprIR`).
+4. **Relocate Detail + the rest.** `scaffoldDetails`/`scaffoldOperations`/
+   `scaffoldViewList`/`scaffoldInstance*`/`scaffoldWorkflowForm` + the index
+   singletons; delete the remainder of `walker-primitive-expander.ts`.
+5. **Unfold wiring.** Extend the LSP code action to eject a body sentinel via
+   the shared builder.
+6. **(Optional) component emission.** Switch the builders to emit
+   `component <Agg>ListView` + a page reference, for reuse/embedding.
 
-Today there is a deliberate **two-stage split**:
+## `List` (archetype) vs `<Agg>ListView` (if we emit components)
 
-- **Stage A — macro (phase ②, AST):** `scaffold` emits *pages* whose
-  bodies are sentinel calls (`callExpr("scaffoldList", …)` in
-  `src/macros/stdlib/scaffold/_pages.ts`). It chooses page name / route /
-  menu, but not the body tree.
-- **Stage B — phase ⑤c (IR):** `expandScaffoldList` /
-  `expandScaffoldDetails` (`walker-primitive-expander.ts`) replace each
-  sentinel with the full tree, reading **IR-level** data — `agg.fields`,
-  the repository's `finds` (`ctx.bcByAggregate…`), and `findApiHandleFor`.
-
-The split exists *because* body-building wanted resolved model data the
-AST layer doesn't hand you for free. So the work is **collapsing A+B into
-one macro-level emit that produces a `component`** — and the cost is
-giving the builder its model data at the macro/AST layer instead of the
-IR:
-
-- The **tree *shape*** (the `QueryView`/`Table`/`Paper` structure) is
-  reused — it is the same tree of named primitive calls, expressed as
-  `callExpr(...)` AST builders instead of `call(...)` IR.
-- What must be *re-derived from the AST* is exactly the model
-  investigation: columns from the AST aggregate's `Property` members;
-  the filter bar from the AST `repository`'s `find`s; the api handle by
-  convention; `.all` by convention (the enriched auto-`findAll`);
-  Detail's containments / derived / associations from the AST. This is
-  "scaffold investigating context" — the thing you said scaffold should
-  do. It is bounded, but it is the actual work, and it is **larger for
-  `Detail`** (more model to read) than for `List`.
-- A small **`component(...)` macro factory** is needed in
-  `src/macros/api/ui-factories.ts` (today there is only `page(...)`).
-
-**The output is a live path, not a new one.** A non-extern,
-body-bearing `component` already lowers and renders today — grammar
-(`ddd.langium:590`, `component Name(params) { state {…} body: Expr }`),
-IR (`ComponentIR { params, state, body? }`, `loom-ir.ts:1930`), lowering
-(`lowerComponent`, `lower-ui.ts:321`), and emission
-(`renderUserComponentFile` → `src/components/<Name>.tsx`,
-`pages-emitter.ts:239`, with call sites referencing `components/<Name>`).
-What the scaffold expanders produce *today* is an inline `ExprIR` page
-body, **not** a component; this proposal redirects them to emit a
-`component`, reusing the existing component render path rather than
-building one.
-
-### `List` (archetype) vs `OrderListView` (emitted component)
-
-These are two layers, and the gap between them *is* the scaffold step:
-
-- **`List { of: X }`** is a **polymorphic archetype** — the sugar the
-  user writes. It can *not* be one shared `List` component, because the
-  table columns must be derived from `X`'s fields and baked in at build
-  time (no runtime reflection — the model-investigation rule above).
-- So the macro **monomorphizes** `List { of: Order }` into a **concrete
-  component** with Order's columns baked in. That concrete component
-  needs a name distinct from the scaffold *page* `OrderList`
-  (`_pages.ts:17`) — hence the placeholder `OrderListView` (open: rename
-  the page, or `OrdersList`, etc.; see Open questions). The indirection
-  itself is required — it is exactly the build-time specialization that
-  makes `List` scaffold rather than a plain runtime component.
-
-## Relationship to existing work
-
-- **[`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md)** —
-  the *same principle on the API side*: "every layer is macro-scaffolded
-  by default, unfoldable to literal source," expanding through
-  `scaffoldContext` / `scaffoldAggregate` / … down to per-output leaves.
-  This proposal is its UI-side twin and should share the
-  scaffold-aggregator vocabulary where it can.
-- **DEBT-05** (prioritized backlog) — currently "implement the
-  `List`/`Detail`/`For` walker primitives." `For` shipped as a genuine
-  walker primitive (#1283). This proposal **reframes the `List`/`Detail`/
-  `MasterDetail` half**: the fix is not a per-frontend renderer but
-  macro-emitted components. DEBT-05's List/Detail line should point here.
-- **Macro stdlib** (`src/macros/stdlib/scaffold/`) — the existing
-  `scaffold` / `scaffoldAggregate` / … macros are where the new
-  component-emitting expansion lands.
-
-## Scope (Medium → Large, phaseable — *not* XL)
-
-Re-estimated after reading the code: the tree shape is reused and the
-walker already renders the output, so this is a bounded refactor, not a
-multi-month epic. Phase it so List proves the pattern first.
-
-1. **List (Medium).** Add the `component(...)` macro factory; port
-   `expandScaffoldList` to emit a `component <Agg>ListView` (reading the
-   AST aggregate + repository) + a page body `<Agg>ListView()`; delete
-   the `scaffoldList` ⑤c arm. Filter state moves from the host page onto
-   the component (*cleaner* there). Highest-value, lowest-cost — proves
-   the unfold-to-component chain end to end.
-2. **Detail (Medium–Large).** Same, for `expandScaffoldDetails`, plus the
-   `:id` route-param threading and the extra model reads (containments /
-   derived / associations / `scaffoldOperations` fan-out).
-3. **`MasterDetail` (new builder).** The one piece with *no* existing
-   tree-builder — list + selection state + detail, two child component
-   references. Largest single new piece; a fair follow-up phase.
-4. **Archetypes + cleanup.** `List`/`Detail`/`MasterDetail` become the
-   macros from 1–3; remove them from `NON_PAGE_BODY_LAYOUT_PRIMITIVES`
-   and the "legacy archetype" registry notes; wire print/unfold arms.
-5. **Docs/examples.** Rewrite page-metamodel.md §4/§9; update
-   `examples/sales-ui.ddd` + `extern-showcase.ddd`.
-
-**Gate.** This is *behaviour-preserving, not byte-identical* — the page
-output changes (a new `<Agg>ListView.tsx` component file; the page
-imports and references it instead of inlining the JSX). So the gate is
-"equivalent rendered UI + reviewed diff" (the React/Vue/Svelte build
-suites + a Playwright smoke), **not** a sha256 fixture match. (Correcting
-an earlier draft that claimed byte-identical.)
+Kept for the component-emission option (phase 6): `List { of: X }` could not be
+one shared component — columns are baked per-aggregate at build time (no
+runtime reflection) — so the macro **monomorphizes** it into a concrete
+`<Agg>ListView` (distinct from the scaffold *page* name `OrderList`). The
+indirection *is* the scaffold step.
 
 ## Open questions
 
-- **Component naming / placement.** `<Agg>ListView` vs `<Agg>List`
-  (collision with the scaffold *page* name `<Agg>List`); where the
-  generated component source lives relative to the page.
-- **The `id` route param for Detail.** `scaffoldDetails` hardcodes
-  `ref("id")`; a referencing page must thread its route param into the
-  component (`OrderDetailView(id)`), generalising the hardcoded `id`.
-- **List filter state.** `expandScaffoldList` synthesises find-filter
-  state onto the *host page* (`ctx.pendingPageState`). As a component
-  this gets *cleaner* — the component owns its own `state {}` — but the
-  migration must move that state from page to component.
-- **`MasterDetail`.** No scaffold analog today (split-pane list +
-  selection + detail); it needs a new component builder (selection
-  state + two child component references). Largest single piece; can be
-  a follow-up phase.
-- **Decision tag.** Requests a `D-UNFOLDABLE-PAGES` pin once the
-  direction is accepted (mirroring the API-side decision).
+- **Origin marker surface.** Is the `Page` `origin` stamp a user-writable
+  keyword or a macro-only annotation that the printer round-trips? (Leaning:
+  printer round-trips it, so an unfolded scaffold page still shows its origin.)
+- **Byte-identical vs. accepted-diff.** Phases 3–4 aim byte-identical; if the
+  state-on-page → state-where-it-belongs move forces a diff, gate on
+  equivalent-UI + reviewed diff instead.
+- **Component emission (phase 6) naming/placement** — `<Agg>ListView` vs
+  `OrdersList`; where the generated component source lives.
+- **Decision tag.** Requests `D-UNFOLDABLE-SCAFFOLD` once ratified.

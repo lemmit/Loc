@@ -84,6 +84,7 @@ export {
   bodyProp,
   boolLit,
   callExpr,
+  intLit,
   nameRefExpr,
   page,
   pageMenuMeta,

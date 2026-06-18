@@ -37,6 +37,7 @@ import type {
   FilterDecl,
   IdType,
   ImplementsDecl,
+  IntLit,
   LValue,
   MemberSuffix,
   MenuMetaEntry,
@@ -178,6 +179,10 @@ export function mkStringLit(shape: AstLiteral<StringLit>): StringLit {
 
 export function mkBoolLit(shape: AstLiteral<BoolLit>): BoolLit {
   return mkAst<BoolLit>(shape);
+}
+
+export function mkIntLit(shape: AstLiteral<IntLit>): IntLit {
+  return mkAst<IntLit>(shape);
 }
 
 export function mkRouteProp(shape: AstLiteral<RouteProp>): RouteProp {

@@ -12,6 +12,7 @@ import type {
   CallArg,
   CallSuffix,
   Expression,
+  IntLit,
   MenuMetaEntry,
   NameRef,
   Page,
@@ -27,6 +28,7 @@ import {
   mkBoolLit,
   mkCallArg,
   mkCallSuffix,
+  mkIntLit,
   mkMenuMetaEntry,
   mkNameRef,
   mkPage,
@@ -55,6 +57,13 @@ export function stringLit(value: string): StringLit {
 export function boolLit(value: boolean): BoolLit {
   const origin = _currentOrigin();
   return _tag(mkBoolLit({ $type: "BoolLit", value: value ? "true" : "false" }), origin);
+}
+
+/** An integer literal expression (`level: 2`).  `IntLit.value` is a
+ * number (the parser coerces the `INT` terminal). */
+export function intLit(value: number): IntLit {
+  const origin = _currentOrigin();
+  return _tag(mkIntLit({ $type: "IntLit", value }), origin);
 }
 
 /** A bare name reference, suitable for use in expression positions
