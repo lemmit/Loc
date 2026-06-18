@@ -337,11 +337,13 @@ Two boundaries to know:
 | `Form { creates: T \| runs: workflow \| into: state, fields, onSubmit, then? }` | Input form bound to a typed request slice. |
 | `Dashboard(items: […])` | Composite read-only page; grid layout. |
 | `Review(of: T, onSubmit)` | Read-only summary view of a typed value, with a submit action. |
-| `Stack`, `Group`, `Grid`, `Tabs`, `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider` | Layout primitives. |
-| `Heading`, `Text`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow` | Display primitives. |
+| `Stack`, `Group`, `Grid`, `Tabs` (+ `Tab`), `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider`, `Section`, `Sticky` | Layout primitives. `Section` is a semantic anchor target; `Sticky` a sticky-position wrapper; `Tab` is the sub-element of `Tabs`. |
+| `Heading`, `Text`, `Bold`, `Italic`, `InlineCode`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow`, `Icon` | Display primitives. `Bold`/`Italic`/`InlineCode` are inline-emphasis spans; `Icon` is a builtin-name or `svg:` literal. |
 | `Field`, `NumberField`, `PasswordField`, `MultilineField`, `Toggle`, `SelectField { label, bind, options }`, `Select`, `Fieldset` | Bindable inputs. `MultilineField` is the textarea twin of `Field`; `SelectField` is a controlled single-select over a string-array `options:` expression. |
 | `Action(operation, then?)`, `Button { label, on? }` | Action primitives. |
+| `Modal { trigger, … }` | Disclosure surface — hosts an `OperationForm` (scaffold detail pages) or a state-controlled `open:` body. |
 | `Money`, `DateDisplay`, `EnumBadge`, `IdLink` | Formatter primitives. |
+| `CodeBlock` | Syntax-highlighted code block (highlight.js at runtime). |
 | `Table`, `Column` | Tabular display (data lambda accessors). |
 | `For { each: T[], item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. |
 | `QueryView { of:, loading:, error:, empty:, data:, single?: }` | 4-arm query-state branching (collection or single-record). |
@@ -356,6 +358,14 @@ The narrative `Form { … }` snippets in §7 and the §12 wizard sketches
 predate that split — read them as the corresponding named-leaf form (the
 `into:` / `fields:` draft-binding shapes remain illustrative; multi-step
 draft forms are a §14 non-goal, not a shipped primitive).
+
+Four names from earlier drafts of this table never shipped as primitives
+either: `Dashboard` and `Review` (composite read-only pages — express them
+as a `Stack`/`Grid` of the display primitives; the `Review(…)` calls in the
+§12 wizard sketches are illustrative, like the draft-form shapes above),
+`Select` (use `SelectField`), and `Fieldset` (an internal value-object
+render shape, not a hand-writable input). The closed set is exactly the
+rows above.
 
 Users freely define their own `component`s, which compose these builtins.
 
