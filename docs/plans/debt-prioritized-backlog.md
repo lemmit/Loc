@@ -51,7 +51,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | DEBT-01 | ~~Principal-referencing capability `filter` (`currentUser` / tenancy)~~ **DONE** — all five backends (node, .NET, elixir Ash + vanilla, java) wire it, incl. java reified-criterion retrievals | ~~node, elixir, java~~ | 5 | L | `proposals/criterion-everywhere.md` · **fully landed on every backend** |
 | DEBT-02 | Non-relational (`shape(document/embedded)`) capability `filter` — **node `shape(document)` landed** (in-app filter over the rehydrated doc: findById gate + findAll/find `.filter`); follow-ups: node `embedded`, elixir, java | ~~node-doc~~ · node-embedded, elixir, java | 4 | M | — |
 | DEBT-03 | Operation `or`-union return (exception-less ProblemDetails) | elixir/ash | 4 | M | `exception-less.md` · **slice 1 landed** (return-dominant; mutation/guard bodies still gated) |
-| DEBT-04 | Audit runtime parity (`audited` ops, lifecycle, `with audit`) | dotnet, elixir | 4 | L | `type-system-feature-migration.md` (DBT) |
+| DEBT-04 | Audit runtime parity — **RE-SCOPED** (see detail): `audited` ops → **elixir greenfield Ash audit** (real); `audited` lifecycle → **vaporware** (no grammar slot → DEBT-16); `with audit` stamping → vanilla-foundation | elixir | 4 | L | `type-system-feature-migration.md` (DBT) |
 | DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) — **DONE: `For` implemented (all 4 frontends + HEEx; now with an optional `empty:` arm); `List`/`Detail`/`MasterDetail` were inert duplicates of `scaffoldList`/`scaffoldDetails` and were REMOVED** ([D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes)) | react (→ vue/svelte) | — | — | resolved |
 | **P1 — parity + frontend completeness** |
 | DEBT-06 | Provenanced fields (lineage SDK + trace capture) | elixir | 3 | L | `provenance.md`, `type-system-feature-migration.md` DBT-1 |
@@ -65,7 +65,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | **P2 — backend structural gaps + minimal-v1 adapter completion** |
 | DEBT-14 | `hosts:` separate React bundle (only embedded `ui:` works) | java | 3 | L | `java-backend-implementation.md` |
 | DEBT-15 | Part-declared single (non-collection) containments | java | 2 | M | `java-backend-implementation.md` |
-| DEBT-16 | Audited *lifecycle* actions (`audited create`/`destroy`) | dotnet, java | 2 | M | — |
+| DEBT-16 | Audited *lifecycle* actions (`audited create`/`destroy`) — **blocked on grammar**: `Create`/`Destroy` have no `audited` slot (lowering hardcodes `audited: false`); needs the grammar surface before any backend instrumentation. Also no backend emits it today (node's gate is aspirational) | grammar, then dotnet, java, node | 2 | M | — |
 | DEBT-17 | MikroORM v1 → full surface (retrieval, assoc, inheritance, filters, …) | node | 3 | L | `retrieval-implementation.md` |
 | DEBT-18 | Dapper v1 → full surface (find/retrieval predicate + same set) | dotnet | 2 | L | — |
 | DEBT-19 | TPH inheritance (`inheritanceUsing(sharedTable)`) | dotnet, elixir, python, java | 3 | L | `tph-unionall-and-contains.md` |
@@ -110,10 +110,13 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 - **Slice 1 (landed):** *return-dominant* ops (body is only `return`/`let`) emit as an Ash 3.x **generic action** (`action :<op>, :term do … run fn input, _ctx -> {:ok, tagged} end end`) that loads the record via `Ash.get(__MODULE__, id)` and hands back a tagged term; the controller translates it (success → 200, error variant → `problem_variant/5` ProblemDetails, absent record → 404). Emitter: `src/generator/elixir/operation-returns-ash-emit.ts`. Shared predicate `isReturnDominantOp` (`src/ir/util/operation-returns.ts`) keeps the validator gate and generator in lock-step. Real-Ash compile verified by the `elixir-ash-build` CI job (fixture `test/e2e/fixtures/phoenix-build/operation-returns.ddd`).
 - **Follow-up (still gated on ash):** mutation-then-return (`assign`/`add`/`remove`/`emit` before the `return`) and `requires`/`precondition` guards — they need the generic-action → changeset bridge. The validator emits a targeted hint pointing these to `foundation: vanilla`.
 
-### DEBT-04 · Audit runtime parity
-- **Where:** `gated-features-inventory.md` §3.2–3.3; `validateAuditedOperationSupport` (`AUDIT_OP_BACKENDS = {node, dotnet}`, `AUDIT_LIFECYCLE_BACKENDS = {node}`).
-- **Today:** node ships per-op `audited`, lifecycle `audited create/destroy`, and `with audit` runtime stamping. dotnet/elixir parse `contextStamps` but defer runtime parity; lifecycle audit is node-only.
-- **Scope:** dotnet — finish the `IAuditWriter` unit-of-work path for lifecycle; elixir — emit the audit-record append in the save transaction.
+### DEBT-04 · Audit runtime parity — RE-SCOPED (investigated 2026-06-19)
+- **Where:** `validateAuditedOperationSupport` (`AUDIT_OP_BACKENDS = {node, dotnet}`, `AUDIT_LIFECYCLE_BACKENDS = {node}`).
+- **Finding — the entry conflated three things, one of which is vaporware:**
+  1. **`audited` operations** (`operation foo() audited`) — REAL and reachable (grammar has the `audited` slot on `Operation`). Runtime ships on node + dotnet (audit-record append in the save transaction). **elixir is the genuine gap** — the Ash backend emits *no* audit runtime, so audited ops are validation-gated off elixir. Closing it is a **greenfield Ash audit-record implementation** (`audit_records` resource/table + an Ash change capturing actor + before/after, staged in the action's transaction) — mirroring node/.NET from scratch (~L).
+  2. **`audited` lifecycle** (`audited create`/`destroy`) — **VAPORWARE.** The grammar's `Create`/`Destroy` rules have *no `audited` slot*; `lowerCreate`/`lowerDestroy` hardcode `audited: false` ("no grammar slot"); no macro sets it; and **node doesn't actually emit lifecycle audit rows either** (its routes-builder only instruments operations — the `AUDIT_LIFECYCLE_BACKENDS = {node}` gate is aspirational). So no `.ddd` program can express it and no backend honours it. Making it real needs a **grammar** addition first — that belongs to **DEBT-16**, and DEBT-16 is itself blocked on the grammar slot.
+  3. **`with audit` stamping** (`contextStamps` — audit fields stamped onCreate/onUpdate) — a *separate* capability; gated only on the **vanilla (Ecto) elixir foundation** (`system-checks.ts` `reject(…, "uses audit stamping")`). Smaller piece.
+- **Recommendation:** split this entry — lifecycle → DEBT-16 (grammar-first); operations → an elixir-greenfield ticket; stamping → vanilla-foundation. A `.NET`-lifecycle slice was prototyped and **discarded** as dead code (instrumentation for an unexpressible feature).
 
 ### DEBT-05 · React walker `List` / `Detail` / `For` primitives — DONE
 - **Was:** `List`/`Detail`/`MasterDetail`/`For` were registered + source-admissible but rendered only as `// X: not supported by the React walker yet` — common page primitives silently degrading to comments.
