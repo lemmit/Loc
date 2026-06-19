@@ -12,6 +12,7 @@
 // Ash, Hono, .NET, Java, and Python backends.
 // ---------------------------------------------------------------------------
 
+import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import type { ApiRoute } from "../api-emit.js";
 import { renderApplication, renderLogFormatter, renderRequestContext } from "../shell/runtime.js";
 import { renderTelemetry } from "../telemetry-emit.js";
@@ -22,8 +23,10 @@ export function emitVanillaShellFiles(
   out: Map<string, string>,
   apiRoutes: ApiRoute[] = [],
   extraHexDeps: Record<string, string> = {},
+  authEnabled = false,
+  oidc = false,
 ): void {
-  out.set("mix.exs", renderVanillaMixExs(appName, appModule, extraHexDeps));
+  out.set("mix.exs", renderVanillaMixExs(appName, appModule, extraHexDeps, authEnabled && oidc));
   out.set(".formatter.exs", renderVanillaFormatterExs());
   // Application boot — shared renderer emits the catalog
   // `server_starting` / `server_listening` / `server_shutdown` /
@@ -50,7 +53,10 @@ export function emitVanillaShellFiles(
   out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
   out.set(`lib/${appName}_web.ex`, renderVanillaWebModule(appName, appModule));
   out.set(`lib/${appName}_web/endpoint.ex`, renderVanillaEndpoint(appName, appModule));
-  out.set(`lib/${appName}_web/router.ex`, renderVanillaRouter(appModule, apiRoutes));
+  out.set(
+    `lib/${appName}_web/router.ex`,
+    renderVanillaRouter(appModule, apiRoutes, authEnabled, oidc),
+  );
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderVanillaErrorJson(appModule));
   out.set(
     `lib/${appName}_web/controllers/health_controller.ex`,
@@ -67,6 +73,7 @@ function renderVanillaMixExs(
   appName: string,
   appModule: string,
   extraHexDeps: Record<string, string>,
+  oidc: boolean,
 ): string {
   // Resource-adapter hex deps (s3 → ex_aws_s3, rabbitmq → amqp, restApi →
   // req) ride alongside the core Phoenix/Ecto set.  Sorted for stable output.
@@ -76,6 +83,11 @@ function renderVanillaMixExs(
     .sort()
     .map((k) => `,\n      {:${k}, ${extraHexDeps[k]}}`)
     .join("");
+  // The generated Auth plug verifies the Bearer JWT with JOSE and fetches the
+  // issuer's JWKS over the built-in `:httpc` (`:inets`/`:ssl`) — added only when
+  // an `auth { oidc }` block is present, mirroring the Ash `renderMixExs`.
+  const oidcDep = oidc ? `,\n      {:jose, "~> 1.11"}` : "";
+  const oidcApps = oidc ? ", :inets, :ssl" : "";
   return `# Auto-generated.
 defmodule ${appModule}.MixProject do
   use Mix.Project
@@ -95,7 +107,7 @@ defmodule ${appModule}.MixProject do
   def application do
     [
       mod: {${appModule}.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :runtime_tools${oidcApps}]
     ]
   end
 
@@ -110,7 +122,7 @@ defmodule ${appModule}.MixProject do
       {:postgrex, "~> 0.20"},
       {:phoenix_html, "~> 4.1"},
       {:jason, "~> 1.4"},
-      {:plug_cowboy, "~> 2.6"}${extraBlock}
+      {:plug_cowboy, "~> 2.6"}${extraBlock}${oidcDep}
     ]
   end
 
@@ -204,16 +216,43 @@ end
 `;
 }
 
-function renderVanillaRouter(appModule: string, apiRoutes: ApiRoute[]): string {
+function renderVanillaRouter(
+  appModule: string,
+  apiRoutes: ApiRoute[],
+  authEnabled: boolean,
+  oidc: boolean,
+): string {
   const routeLines = apiRoutes
     .map((r) => `    ${r.method} "${r.path}", ${r.controller}, ${r.action}`)
     .join("\n");
+  // Auth plug in the :api pipeline — populates `conn.assigns.current_user` from
+  // the Bearer JWT so principal (tenancy) filters can scope reads by the actor.
+  // Mirrors the Ash router (`shell/runtime.ts`).
+  const authApiPlug = authEnabled ? `\n    plug ${appModule}Web.Auth` : "";
+  // `/api/auth/me` session probe (+ OIDC login/callback/logout handshake when an
+  // `auth { oidc }` block is present).  Piped through :api so the Auth plug
+  // verifies the principal first.
+  const handshakeRoutes = oidc
+    ? `
+    get "/login", AuthController, :login
+    get "/callback", AuthController, :callback
+    get "/logout", AuthController, :logout`
+    : "";
+  const authScope = authEnabled
+    ? `
+  scope "${AUTH_BASE_PATH}", ${appModule}Web do
+    pipe_through :api
+
+    get "/me", AuthController, :me${handshakeRoutes}
+  end
+`
+    : "";
   return `# Auto-generated.
 defmodule ${appModule}Web.Router do
   use ${appModule}Web, :router
 
   pipeline :api do
-    plug :accepts, ["json"]
+    plug :accepts, ["json"]${authApiPlug}
   end
 
   scope "/health" do
@@ -223,7 +262,7 @@ defmodule ${appModule}Web.Router do
   scope "/ready" do
     get "/", ${appModule}Web.HealthController, :readiness
   end
-
+${authScope}
   scope "/api", ${appModule}Web do
     pipe_through :api
 ${routeLines}

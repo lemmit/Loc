@@ -21,7 +21,11 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
-import { combineWhere, vanillaCapabilityFilter } from "./capability-filter.js";
+import {
+  aggregateUsesPrincipalContextFilter,
+  combineWhere,
+  vanillaCapabilityFilter,
+} from "./capability-filter.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 
 export function emitVanillaRepositories(
@@ -76,22 +80,37 @@ function renderRepository(
   const contextModule = `${appModule}.${ctxModule}`;
 
   const finds = customFindsOf(repo);
-  const cap = vanillaCapabilityFilter(agg, contextModule);
-  const findFns = finds.map((f) => renderFindFn(f, aggModule, contextModule, cap));
+  // A principal (tenancy) `filter` threads `current_user` (from the request) into
+  // the scoped reads; a non-principal filter (soft-delete) needs no actor.  Only
+  // principal aggregates gain the extra `current_user \\ nil` parameter — every
+  // other repository stays byte-identical.  The `\\ nil` default keeps internal
+  // callers (workflows) compiling and fail-closed (a nil actor scopes to no rows).
+  const principal = aggregateUsesPrincipalContextFilter(agg);
+  const cap = vanillaCapabilityFilter(agg, contextModule, { actor: principal });
+  const findFns = finds.map((f) => renderFindFn(f, aggModule, contextModule, cap, principal));
   const findBlock = findFns.length > 0 ? `\n\n${findFns.join("\n\n")}\n` : "";
-  // A `filter <expr>` capability (`contextFilters`) AND-s into every root read
-  // (soft-delete et al.).  Plain Ecto has no global filter, so `cap` is conjoined
-  // into `list/0`, `find_by_id/1` (below), and each custom find (above).
   // `import Ecto.Query` is required for `from(...)` — needed when there's a
   // custom find OR a capability filter (which turns `list`/`find_by_id` into
   // `from(...)` reads).  Omit it otherwise to keep plain repositories
   // byte-identical to before.
   const ectoImport = finds.length > 0 || cap ? `\n  import Ecto.Query` : "";
-  // `list/0`: bare `Repo.all(<Agg>)` unless a capability filter scopes it.
+  // The threaded actor parameter (principal filters only).
+  const actorParam = principal ? "current_user \\\\ nil" : "";
+  const listHead = principal ? `def list(${actorParam}) do` : "def list do";
+  const listSpec = principal
+    ? `@spec list(map() | nil) :: {:ok, [${aggModule}.t()]} | {:error, term()}`
+    : `@spec list() :: {:ok, [${aggModule}.t()]} | {:error, term()}`;
+  // `list`: bare `Repo.all(<Agg>)` unless a capability filter scopes it.
   const listBody = cap
     ? `from(record in ${aggModule}, where: ${cap}) |> Repo.all()`
     : `Repo.all(${aggModule})`;
-  // `find_by_id/1`: `Repo.get` can't carry the capability `where`, so a scoped
+  const findByIdHead = principal
+    ? `def find_by_id(id, ${actorParam}) when is_binary(id) do`
+    : "def find_by_id(id) when is_binary(id) do";
+  const findByIdSpec = principal
+    ? `@spec find_by_id(binary(), map() | nil) :: {:ok, ${aggModule}.t()} | {:error, :not_found}`
+    : `@spec find_by_id(binary()) :: {:ok, ${aggModule}.t()} | {:error, :not_found}`;
+  // `find_by_id`: `Repo.get` can't carry the capability `where`, so a scoped
   // read becomes a `from(... where: id and cap) |> Repo.one()` (a soft-deleted
   // / out-of-scope row then reads as `:not_found`, matching every other backend).
   const findByIdBody = cap
@@ -103,13 +122,13 @@ defmodule ${repoMod} do
   @moduledoc false${ectoImport}
   alias ${appModule}.Repo
 
-  @spec list() :: {:ok, [${aggModule}.t()]} | {:error, term()}
-  def list do
+  ${listSpec}
+  ${listHead}
     {:ok, ${listBody}}
   end
 
-  @spec find_by_id(binary()) :: {:ok, ${aggModule}.t()} | {:error, :not_found}
-  def find_by_id(id) when is_binary(id) do
+  ${findByIdSpec}
+  ${findByIdHead}
     ${findByIdBody}
       nil -> {:error, :not_found}
       record -> {:ok, record}
@@ -158,10 +177,14 @@ function renderFindFn(
   aggModule: string,
   contextModule: string,
   cap: string | null,
+  principal: boolean,
 ): string {
   const fnName = snake(f.name);
   const argNames = f.params.map((p) => snake(p.name));
-  const argList = argNames.join(", ");
+  // A principal-filtered aggregate threads the request actor into the find too
+  // (the `cap` references `current_user`).  `\\ nil` keeps the workflow callers
+  // compiling + fail-closed.
+  const argList = [...argNames, ...(principal ? ["current_user \\\\ nil"] : [])].join(", ");
   const single = isSingleReturn(f.returnType);
 
   const renderCtx: RenderCtx = {
@@ -190,8 +213,8 @@ function renderFindFn(
   const specTail = single
     ? `{:ok, ${aggModule}.t() | nil} | {:error, term()}`
     : `{:ok, [${aggModule}.t()]} | {:error, term()}`;
-  const specHead = argNames.length > 0 ? argNames.map(() => "term()").join(", ") : "";
-  const spec = `  @spec ${fnName}(${specHead}) :: ${specTail}`;
+  const specArgs = [...argNames.map(() => "term()"), ...(principal ? ["map() | nil"] : [])];
+  const spec = `  @spec ${fnName}(${specArgs.join(", ")}) :: ${specTail}`;
   // A find with neither a `where` clause nor convention params (e.g. an
   // unfiltered `find recent(): Order`) has an empty predicate — emit a bare
   // `from(record in Mod)` rather than `where: ` (which is invalid Elixir).

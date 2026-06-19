@@ -65,14 +65,22 @@ describe("hono capability-filter support guard", () => {
     ).toEqual([]);
   });
 
-  it("still rejects a principal-referencing filter on elixir-vanilla and java", async () => {
-    for (const platform of ["elixir { foundation: vanilla }", "java"]) {
-      const errs = await honoFilterErrors(
-        sys(platform, { filter: "filter this.tenantId == currentUser.tenantId" }),
-      );
-      expect(errs.length).toBe(1);
-      expect(errs[0]).toContain("currentUser");
-    }
+  it("accepts a principal filter on elixir-vanilla (DEBT-01 — threaded current_user + pinned predicate)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("elixir { foundation: vanilla }", {
+          filter: "filter this.tenantId == currentUser.tenantId",
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still rejects a principal-referencing filter on java", async () => {
+    const errs = await honoFilterErrors(
+      sys("java", { filter: "filter this.tenantId == currentUser.tenantId" }),
+    );
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("currentUser");
   });
 
   it("requires 'auth: required' for a principal filter on hono (no principal to scope by otherwise)", async () => {

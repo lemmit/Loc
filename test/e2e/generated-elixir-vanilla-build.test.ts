@@ -61,6 +61,12 @@ describe.skipIf(!ENABLED)(
       // retrieval/view) — plain Ecto has no Ash base_filter, so the conjoined
       // `from(... where: ...)` reads must compile (and not silently drop the filter).
       { name: "vanilla-capability-filter.ddd", deployable: "api" },
+      // Principal (tenancy) `filter this.tenantId == currentUser.tenantId` — the
+      // request actor is threaded from `conn.assigns.current_user` (Auth plug)
+      // into every read and pinned (`^(current_user && current_user.tenant_id)`).
+      // Compiles the threaded repository/context/controller/retrieval/view + the
+      // auth plug spliced into the router.
+      { name: "vanilla-tenancy.ddd", deployable: "api" },
     ])("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

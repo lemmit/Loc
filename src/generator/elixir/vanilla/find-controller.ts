@@ -17,6 +17,7 @@ import type { AggregateIR, BoundedContextIR, FindIR, TypeIR } from "../../../ir/
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
+import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 
 /** Non-`all` custom finds an aggregate's repository declares — the ones that
  *  earn an HTTP `GET /<plural>/<find>` endpoint (`all` is the
@@ -91,12 +92,20 @@ export function renderFindActions(
 ): string {
   const aggSnake = snake(agg.name);
   const aggPascal = upperFirst(agg.name);
+  // A principal (tenancy) find threads the request actor; pull it off
+  // `conn.assigns` and pass it as the trailing find arg.  Non-principal finds
+  // stay byte-identical.
+  const principal = aggregateUsesPrincipalContextFilter(agg);
+  const cuLine = principal ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
   const actions = httpFindsOf(ctx, agg).map((f) => {
     const findSnake = snake(f.name);
     // A param-less find never reads `params` — bind `_params` so it doesn't
     // trip the unused-variable check.
     const paramArg = f.params.length > 0 ? "params" : "_params";
-    const argReads = f.params.map((p) => `params[${JSON.stringify(p.name)}]`).join(", ");
+    const argReads = [
+      ...f.params.map((p) => `params[${JSON.stringify(p.name)}]`),
+      ...(principal ? ["current_user"] : []),
+    ].join(", ");
     const call = `${ctxModule}.${findSnake}_${aggSnake}(${argReads})`;
 
     const absent = absentSpec(agg, f.returnType, ctx);
@@ -108,7 +117,7 @@ export function renderFindActions(
           : `        problem_variant(conn, ${absent.status}, ${JSON.stringify(absent.type)}, ${JSON.stringify(absent.title)}, ${absent.hasResource ? `%{resource: ${JSON.stringify(aggPascal)}}` : "%{}"})`;
       return `
   def ${findSnake}(conn, ${paramArg}) do
-    case ${call} do
+${cuLine}    case ${call} do
       {:ok, nil} ->
 ${absentArm}
 
@@ -121,7 +130,7 @@ ${absentArm}
     if (isSingleReturn(f.returnType)) {
       return `
   def ${findSnake}(conn, ${paramArg}) do
-    case ${call} do
+${cuLine}    case ${call} do
       {:ok, nil} -> json(conn, nil)
       {:ok, record} -> json(conn, serialize(record))
     end
@@ -129,7 +138,7 @@ ${absentArm}
     }
     return `
   def ${findSnake}(conn, ${paramArg}) do
-    with {:ok, records} <- ${call} do
+${cuLine}    with {:ok, records} <- ${call} do
       json(conn, Enum.map(records, &serialize/1))
     end
   end`;

@@ -11,6 +11,7 @@
 
 import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import {
   customFindsOfAgg,
   esContextNeedsEnsure,
@@ -60,6 +61,12 @@ function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedC
     const aggPascal = upperFirst(agg.name);
     const aggSnake = snake(agg.name);
     const repoMod = `${facadeMod}.${aggPascal}Repository`;
+    // A principal (tenancy) filter threads the request actor through the read
+    // seam, so the defdelegates that front a scoped read (`list`/`get` + custom
+    // finds) carry the matching `current_user \\ nil` arity.  Non-principal
+    // aggregates keep the original parameterless seam (byte-identical).
+    const principal = aggregateUsesPrincipalContextFilter(agg);
+    const actorArg = principal ? ", current_user \\\\ nil" : "";
     // Skip ops whose names collide with the CRUD defdelegates above —
     // notably `update`/`destroy` from `with crudish` would redefine
     // `update_<agg>/2`/`delete_<agg>/1` otherwise.  The CRUD seam
@@ -77,13 +84,14 @@ function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedC
     const repo = (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name);
     const findLines = customFindsOf(repo).map((f) => {
       const findSnake = snake(f.name);
-      const findArgs = f.params.map((p) => snake(p.name)).join(", ");
+      const baseArgs = f.params.map((p) => snake(p.name));
+      const findArgs = [...baseArgs, ...(principal ? ["current_user \\\\ nil"] : [])].join(", ");
       return `  defdelegate ${findSnake}_${aggSnake}(${findArgs}), to: ${repoMod}, as: :${findSnake}`;
     });
     const findBlock = findLines.length > 0 ? `\n${findLines.join("\n")}\n` : "";
     return `  # ${aggPascal}
-  defdelegate list_${aggSnake}s(), to: ${repoMod}, as: :list
-  defdelegate get_${aggSnake}(id), to: ${repoMod}, as: :find_by_id
+  defdelegate list_${aggSnake}s(${principal ? "current_user \\\\ nil" : ""}), to: ${repoMod}, as: :list
+  defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id
   defdelegate create_${aggSnake}(attrs), to: ${repoMod}, as: :insert
   defdelegate update_${aggSnake}(record, attrs), to: ${repoMod}, as: :update
   defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete

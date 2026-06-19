@@ -1,0 +1,61 @@
+// DEBT-01 — principal-referencing (tenancy) capability filter on the VANILLA
+// (plain Ecto) foundation.  `filter this.tenantId == currentUser.tenantId`
+// AND-s `record.tenant_id == ^(current_user && current_user.tenant_id)` into
+// every root read — list/find_by_id/custom-find (repository), retrieval, and
+// view — with `current_user` threaded from `conn.assigns` (the Auth plug the
+// validator requires when a principal filter is present).  A nil actor pins to
+// `nil`, which Ecto binds as `= NULL` → no rows (fail-closed, never a
+// cross-tenant leak), mirroring Ash's `actor: nil` behaviour.
+//
+// This is the decisive check that the actor-threaded vanilla reads compile
+// under `mix compile --warnings-as-errors` (the elixir-vanilla-build gate).
+// Auth is wired like the Ash `tenancy-filter.ddd` sibling.
+system TenancyShop {
+  user {
+    id: string
+    tenantId: string
+  }
+
+  auth {
+    provider: keycloak
+    oidc {
+      issuer: env("OIDC_ISSUER")
+      clientId: env("OIDC_CLIENT_ID")
+    }
+    claims: { tenantId: "tenant_id" }
+  }
+
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+        // Always-on row scoping: every read is constrained to the principal's tenant.
+        filter this.tenantId == currentUser.tenantId
+      }
+      // A custom find exercises the threaded-actor find path.
+      repository Accounts for Account {
+        find byMinBalance(min: int): Account[] where this.balance >= min
+      }
+
+      // A retrieval (workflow-internal; fail-closed when no actor is threaded).
+      retrieval RichAccounts(min: int) of Account { where: balance >= min  sort: [balance desc] }
+
+      // A view sourced from the tenancy aggregate — exercises the view read path.
+      view BigAccounts = Account where balance >= 1000
+    }
+  }
+
+  storage primary { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: primary }
+
+  api LedgerApi from Core
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Ledger]
+    serves: LedgerApi
+    dataSources: [ledgerState]
+    port: 4000
+    auth: required
+  }
+}
