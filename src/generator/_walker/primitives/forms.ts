@@ -49,6 +49,10 @@ export function emitCreateForm(
   ctx: WalkContext,
   depth: number,
 ): string {
+  // A target may fork the whole primitive (Angular emits typed Reactive
+  // Forms instead of the shared react-hook-form path).
+  const override = ctx.target.renderCreateForm?.(call, ctx, depth);
+  if (override != null) return override;
   return emitFormOfAggregate(call, ctx, depth);
 }
 
