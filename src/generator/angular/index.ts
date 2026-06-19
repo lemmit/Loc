@@ -7,10 +7,11 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { contextUsesMoney } from "../../ir/types/loom-ir.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
-import { humanize } from "../../util/naming.js";
+import { humanize, lowerFirst } from "../../util/naming.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { walkBody } from "../_walker/walker-core.js";
+import { buildAngularApiModule } from "./api-module.js";
 import { type AngularRouteDesc, renderAngularRoutes, routePath } from "./routes-emitter.js";
 import { angularTarget } from "./walker/angular-target.js";
 import {
@@ -148,6 +149,13 @@ export function generateAngularForContexts(
   );
   out.set("src/api/client.ts", pack.render("api-client", { hasDelete, hasAuthUi: authUi }));
   out.set("src/api/config.ts", pack.render("api-config", { apiBaseUrl }));
+
+  // Per-aggregate API modules — the idiomatic-Angular `@Injectable` service +
+  // signal-backed `use<Op><Agg>` read factory (data-path sub-slice A; the
+  // QueryView read path that consumes them lands in the next sub-slice).
+  for (const { agg } of aggregates) {
+    out.set(`src/api/${lowerFirst(agg.name)}.ts`, buildAngularApiModule(agg));
+  }
   out.set("src/logger.ts", pack.render("logger", {}));
   out.set("Dockerfile", pack.render("dockerfile", {}));
   out.set(".dockerignore", pack.render("dockerignore", {}));

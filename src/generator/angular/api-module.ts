@@ -1,0 +1,119 @@
+import { wireShapeFor } from "../../ir/enrich/enrichments.js";
+import { forApiRead } from "../../ir/enrich/wire-projection.js";
+import type { EnrichedAggregateIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { peelCollection, peelNullable, wireTypeInfo } from "../../ir/types/wire-types.js";
+import { lines } from "../../util/code-builder.js";
+import { lowerFirst, plural, snake } from "../../util/naming.js";
+
+// ---------------------------------------------------------------------------
+// Per-aggregate Angular API module (`src/api/<agg>.ts`).
+//
+// IDIOMATIC ANGULAR, not the React/Vue TanStack module: a `@Injectable`
+// service wraps `HttpClient`, and a `use<Op><Agg>()` factory returns a
+// signal-backed read handle (`{ data, isLoading, isError }`) the page-shell
+// hoists as a class field.  The factory mirrors the TanStack result shape so
+// the SHARED QueryView walker's `<handle>.isLoading` / `.data` accesses line
+// up — only the read syntax diverges (Angular signals are called: `()`),
+// which the angular QueryView template + the `renderQueryDataAccess` seam own.
+//
+// Response types are plain TS interfaces derived from the aggregate's
+// `wireShape` (the same ordered field list every backend's DTO emitter
+// consumes).  Primitive + id fields map precisely; value-object / enum /
+// nested-entity fields fall back to `unknown` for now (the read path only
+// needs the collection shape — precise nested typing is a later slice).
+//
+// Batch scope (Slice 4b — data path sub-slice A): the `findAll` collection
+// read only.  `byId` / mutations / find-params land in following sub-slices.
+// ---------------------------------------------------------------------------
+
+/** Map a wire `TypeIR` to a TS type string for a response interface field. */
+function wireTsType(t: TypeIR): string {
+  const info = wireTypeInfo(t, "response");
+  if (info.isNullable) return `${wireTsType(peelNullable(t))} | null`;
+  if (info.isCollection) return `${wireTsType(peelCollection(t))}[]`;
+  switch (info.refKind) {
+    case "primitive":
+      switch (info.primitive) {
+        case "int":
+        case "long":
+        case "decimal":
+          return "number";
+        // Money rides the wire as a decimal string; `formatMoney` accepts it.
+        case "money":
+          return "string";
+        case "bool":
+          return "boolean";
+        case "string":
+        case "datetime":
+        case "guid":
+          return "string";
+        default:
+          return "unknown";
+      }
+    case "id":
+      return "string";
+    // Enums / value objects / nested entities: the collection read path
+    // doesn't dereference them yet — keep the field present but untyped.
+    default:
+      return "unknown";
+  }
+}
+
+/** Emit the `src/api/<agg>.ts` module for one aggregate. */
+export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
+  const single = agg.name;
+  const serviceName = `${single}Service`;
+  const responseName = `${single}Response`;
+  const tag = snake(plural(single));
+  const allFn = `useAll${plural(single)}`;
+  const allVar = `${lowerFirst(single)}All`;
+
+  const fields = forApiRead(wireShapeFor(agg));
+
+  return lines(
+    "// Auto-generated.  Do not edit by hand.",
+    'import { HttpClient } from "@angular/common/http";',
+    'import { Injectable, inject, signal } from "@angular/core";',
+    'import { API_BASE_URL } from "./config";',
+    "",
+    `export interface ${responseName} {`,
+    ...fields.map((f) => `  ${f.name}: ${f.source === "id" ? "string" : wireTsType(f.type)};`),
+    "}",
+    "",
+    `@Injectable({ providedIn: "root" })`,
+    `export class ${serviceName} {`,
+    "  private readonly http = inject(HttpClient);",
+    "",
+    `  findAll() {`,
+    `    return this.http.get<${responseName}[]>(\`\${API_BASE_URL}/${tag}\`);`,
+    "  }",
+    "}",
+    "",
+    "/** Signal-backed `findAll` read — hoisted as a component field; the",
+    " *  injection context is the field initializer.  Mirrors the TanStack",
+    " *  result shape (`data` / `isLoading` / `isError`) the shared QueryView",
+    " *  walker consumes, with signals read via `()` in the angular template. */",
+    `export function ${allFn}() {`,
+    `  const service = inject(${serviceName});`,
+    `  const data = signal<${responseName}[]>([]);`,
+    "  const isLoading = signal(true);",
+    "  const isError = signal(false);",
+    "  service.findAll().subscribe({",
+    "    next: (rows) => {",
+    "      data.set(rows);",
+    "      isLoading.set(false);",
+    "    },",
+    "    error: () => {",
+    "      isError.set(true);",
+    "      isLoading.set(false);",
+    "    },",
+    "  });",
+    "  return { data, isLoading, isError };",
+    "}",
+    "",
+    // Reference the var name the page-shell will hoist (`<agg>All`) so the
+    // naming stays discoverable next to the factory it calls.
+    `// hoisted as: readonly ${allVar} = ${allFn}();`,
+    "",
+  );
+}
