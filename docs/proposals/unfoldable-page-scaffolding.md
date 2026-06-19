@@ -1,8 +1,15 @@
 # Unfoldable page scaffolding — lift the ⑤c expander into the macro layer
 
-**Status:** PROPOSED — **design sealed** (see "Sealed decisions"); v1 ready to
-build, foundation landed (`_body-builders.ts` + `scaffoldList`/`scaffoldNewForm`
-+ `intLit`/`lambda` factories). · **Created:** 2026-06-18
+**Status:** LANDED (sentinel removal) — 2026-06-19. The scaffold page-body
+expansion now lives entirely in the macro layer (`_body-builders.ts`, AST→AST,
+unfoldable). The `scaffold*(of:)` body sentinels and their IR-phase ⑤c expander
+arms have been **removed**; the only ⑤c work that remains is expanding the three
+singleton index-page sentinels (`Home` / `WorkflowsIndex` / `ViewsIndex`), which
+the macro still emits as bare sentinel bodies. A hand-written `scaffold*` body
+primitive is no longer admissible (fails validation). See
+[D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes) for the dated
+supersede note. The prose below is the original proposal, kept for context.
+· **Created:** 2026-06-18
 
 > One-line thesis: the scaffold **page-body expansion**
 > (`scaffoldList` / `scaffoldDetails` / `scaffoldNewForm` / … → the

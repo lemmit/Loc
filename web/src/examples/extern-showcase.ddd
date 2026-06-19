@@ -80,7 +80,7 @@ system ExternShowcase {
       body: Stack {
         Heading { "Orders", level: 1 },
         RiskBadge { score: 42, label: "Sample" },
-        scaffoldList { of: Order }
+        Stack { Breadcrumbs { Anchor { "Home", to: "/" }, Text { "Orders" } }, Toolbar { Heading { "Orders", level: 2 }, Button { "New order", to: "/orders/new", testid: "orders-list-create" } }, QueryView { of: Order.all, loading: Skeleton { count: 5 }, error: Alert { "Couldn't load orders" }, empty: Empty { "No orders yet." }, data: rows => Paper { Table { Column { "ID", o => IdLink { o.id, of: Order } }, Column { "Reference", o => Text { o.reference } }, Column { "Status", o => EnumBadge { o.status } }, Column { "Risk Score", o => Text { o.riskScore } }, rows: rows, striped: true, highlight: true, sticky: true, rowTestid: r => "orders-row-" + r.id } } }, testid: "orders-list" }
       }
     }
   }

@@ -55,12 +55,13 @@ them was costing readers an accurate mental model.
                                          (5a) structural walk,
                                          (5b) expression / name-resolution
                                               walk,
-                                         (5c) inline scaffold expansion
-                                              (rewrites scaffoldDetails /
-                                               scaffoldOperations primitives
-                                               in page bodies; runs at the
-                                               END of lowerModel — NOT a
-                                               separate post-IR phase).
+                                         (5c) singleton index-page sentinel
+                                              expansion (rewrites the
+                                               Home / WorkflowsIndex /
+                                               ViewsIndex sentinel page
+                                               bodies; runs at the END of
+                                               lowerModel — NOT a separate
+                                               post-IR phase).
                                        ─ Output: a LoomModel per file.
                                          Multi-file projects merge here
                                          via `mergeLoomModels`.
@@ -353,7 +354,8 @@ phase ⑤b.
 
 It performs one **in-lowering side-effect** before returning:
 `applyPageOriginSideEffects(built)` and then
-`expandInlineScaffoldPrimitiveCalls(built)` (phase ⑤c). Auto-`findAll`,
+`expandInlineScaffoldPrimitiveCalls(built)` (phase ⑤c — the singleton
+index-page sentinel expansion). Auto-`findAll`,
 react `targets:` module inheritance, and the rest of the cross-cutting
 derivations now live in **phase ⑥ (enrichment)**, not in the structure
 layer.
@@ -393,24 +395,32 @@ lives in the expression layer because expressions reference types
 (via `memberType`); the structure layer pulls `lowerType` in via
 the same import direction.
 
-### Phase ⑤c — Inline scaffold expansion
+### Phase ⑤c — Singleton index-page sentinel expansion
 
-**File**: `src/ir/lower/walker-primitive-expander.ts` (~1055 lines).
+**File**: `src/ir/lower/walker-primitive-expander.ts`.
 
 **Why it's a sub-pass of lowering, not its own phase**: `lower.ts`
 calls `expandInlineScaffoldPrimitiveCalls(built)` as the final
 statement of `lowerSystem(...)`. The LoomModel
-returned by `lowerModel(...)` already has its page bodies expanded.
-No downstream phase ever sees the un-expanded form.
+returned by `lowerModel(...)` already has its index-page bodies
+expanded. No downstream phase ever sees the un-expanded sentinel.
 
 **Responsibilities**
-- Walk every `page.body: ExprIR` and rewrite the inline scaffold
-  primitives (`scaffoldDetails(of:)`, `scaffoldOperations(of:)`)
-  into their fully-expanded walker-stdlib `ExprIR` form
-  (`Stack { Card { KeyValueRow … } }`, etc.).
-- Pages whose body never uses these primitives are a no-op — the
-  rewriter walks the tree once and returns the same reference when
-  nothing changed.
+- Walk every `page.body: ExprIR` and rewrite the three singleton
+  index-page sentinels (`Home()` / `WorkflowsIndex()` / `ViewsIndex()`)
+  into their fully-expanded walker-stdlib `ExprIR` trees
+  (`Stack { Heading, Card { … } }`), derived from the system shape
+  (counts of reachable aggregates / workflows / views).
+- Pages whose body never uses a sentinel are a no-op — the rewriter
+  walks the tree once and returns the same reference when nothing
+  changed.
+
+> Note: the `scaffold*(of:)` page-body primitives (`scaffoldList` /
+> `scaffoldDetails` / …) and their dedicated expander arms were removed.
+> Scaffolded list / detail / form pages now carry their full body tree
+> directly from the `with scaffold(...)` page macro
+> (`src/macros/stdlib/scaffold/_body-builders.ts`); only the three
+> singleton index-page sentinels are expanded here.
 
 **Non-responsibilities**
 - No platform-aware decisions (TS vs C# vs React).
@@ -771,25 +781,30 @@ ui { scaffold modules: Sales }
         ▼  Pass 1 — phase ② macro expansion   src/macros/stdlib/scaffold/
    The `scaffold` macro (and its sub-macros scaffoldModule /
    scaffoldContext / scaffoldAggregate / scaffoldView /
-   scaffoldWorkflow) synthesise `Page` AST nodes (name, route, menu,
-   and a high-level body call: List { of: } / CreateForm { of: } /
-   Detail { of:, by: } …) each tagged with a `scaffoldOrigin`
-   discriminator.
+   scaffoldWorkflow) synthesise `Page` AST nodes (name, route, menu)
+   whose body is the FULL walker-stdlib tree, built directly as Langium
+   AST by the scaffolders in
+   `src/macros/stdlib/scaffold/_body-builders.ts` (Stack / Breadcrumbs /
+   QueryView / Table / CreateForm …).  The body is unfoldable real
+   `.ddd` source, not a `scaffold*(of:)` sentinel.  The three per-UI
+   index pages (Home / Workflows / Views) are the one exception — they
+   carry a bare singleton sentinel body (`Home` / `WorkflowsIndex` /
+   `ViewsIndex`) expanded in Pass 2.
         │
-        ▼  Pass 2 — phase ⑤c inline scaffold expansion
+        ▼  Pass 2 — phase ⑤c singleton index-page sentinel expansion
                     src/ir/lower/walker-primitive-expander.ts
-   At the end of `lowerModel`, every page whose body uses the
-   `scaffoldDetails(of:)` / `scaffoldOperations(of:)` primitives gets
-   its `body` rewritten to the fully-expanded walker-stdlib `ExprIR`
-   (`Stack { Card { KeyValueRow … } }`, etc.) via
-   `expandInlineScaffoldPrimitives`.
+   At the end of `lowerModel`, every page whose body is a `Home()` /
+   `WorkflowsIndex()` / `ViewsIndex()` sentinel gets its `body`
+   rewritten to the fully-expanded walker-stdlib `ExprIR`
+   (`Stack { Heading, Card per aggregate/workflow/view }`) via
+   `expandInlineScaffoldPrimitives`, derived from the system shape.
         │
         ▼  phase ⑧ — the ordinary body-walker renders it through the
                     active design pack
 ```
 
-The walker-primitive expander is the contract for *what a scaffolded
-page contains*.  Per archetype:
+The macro scaffolders + the singleton expander are the contract for
+*what a scaffolded page contains*.  Per origin:
 
 | Origin | Synthesised body |
 | --- | --- |

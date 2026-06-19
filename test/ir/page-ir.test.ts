@@ -156,17 +156,15 @@ describe("page metamodel — IR shape", () => {
   it("lowers a page with parameters (typed) — including `id` as a param name", async () => {
     // `Parameter.name` uses `LooseName`, so `id` no longer collides
     // with the IdRef magic-identifier keyword and can be used as a
-    // route-param name.  Uses the canonical Detail-page body shape
-    // (`Stack { scaffoldDetails(of:), scaffoldOperations(of:) }`) which
-    // the inline-primitive expander rewrites at lowering time into
-    // the full Breadcrumbs/Heading/QueryView tree.
+    // route-param name.  The page body references `id` directly so the
+    // route param is exercised end-to-end.
     const loom = await buildLoom(`
       system Acme {
         subdomain M { context C { aggregate Customer { name: string } repository Customers for Customer { } } }
         ui WebApp {
           page CustomerDetail(id: Customer id) {
             route: "/customers/:id"
-            body: Stack { scaffoldDetails(of: Customer), scaffoldOperations(of: Customer) }
+            body: Stack { Heading { "Customer" }, Text { id } }
           }
         }
       }
@@ -177,8 +175,7 @@ describe("page metamodel — IR shape", () => {
     expect(page.params.length).toBeGreaterThanOrEqual(1);
     const idParam = page.params.find((p) => p.name === "id")!;
     expect(idParam.name).toBe("id");
-    // Body root is the expanded Stack {Breadcrumbs, Heading,
-    // QueryView, …} call after inline-primitive expansion.
+    // Body root is the hand-written Stack {...} call.
     expect(page.body?.kind).toBe("call");
     if (page.body?.kind === "call") {
       expect(page.body.name).toBe("Stack");

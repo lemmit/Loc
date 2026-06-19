@@ -1810,3 +1810,21 @@ phase-⑤c scaffold expansion is opaque "magic" that could instead emit
 unfoldable, named components — remains an OPEN, separate consideration for the
 `scaffoldList`/`scaffoldDetails` sentinels themselves; it is not blocked by
 this removal.
+
+**Superseded (2026-06-19).** The `scaffold*` page-body sentinels
+(`scaffoldList` / `scaffoldDetails` / `scaffoldNewForm` / `scaffoldOperations`
+/ `scaffoldWorkflowForm` / `scaffoldViewList` / `scaffoldInstanceList` /
+`scaffoldInstanceDetails`) — together with their phase-⑤c expander
+(`src/ir/lower/walker-primitive-expander.ts`) — have now been **removed
+entirely**: they were "scaffolds that aren't scaffolds" — opaque,
+permanently-in-source indirections with no `unfold`. The only scaffold surface
+is the `with scaffold(...)` **page macro**, which emits full unfoldable AST
+trees (`src/macros/stdlib/scaffold/_body-builders.ts`). The sentinels are no
+longer `admissibleInSource` — a hand-written `body: scaffoldList { of: X }`
+now fails validation with "Unknown builder type". Embedding a list/detail in a
+custom page therefore means writing the body explicitly (the example
+`web/src/examples/extern-showcase.ddd` shows the inlined list tree). The three
+**singleton index-page sentinels** (`Home` / `WorkflowsIndex` / `ViewsIndex`)
+remain — the macro still emits them as the body of the per-UI index pages, and
+a slimmed `expandInlineScaffoldPrimitives` expands those three from the system
+shape.

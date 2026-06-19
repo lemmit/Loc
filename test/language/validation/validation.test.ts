@@ -316,6 +316,21 @@ describe("validation", () => {
       expect(errors.some((e) => /e\.g\., Stack, Form, Card/.test(e))).toBe(false);
     });
 
+    it("rejects the removed `scaffold*` body sentinels (no longer admissible)", async () => {
+      // The hand-written `scaffold*` page-body primitives (and their IR
+      // phase ⑤c expander) were removed — the only scaffold surface is now
+      // the `with scaffold(...)` page macro, which emits full unfoldable
+      // trees.  A bare `scaffoldList { of: X }` in a page body must fail
+      // validation as an unknown builder type.
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate Order { name: string } repository Orders for Order {} } }
+          ui WebApp { page P { route: "/p"  body: scaffoldList { of: Order } } }
+        }
+      `);
+      expect(errors.some((e) => /Unknown builder type 'scaffoldList'/.test(e))).toBe(true);
+    });
+
     it("accepts a known walker primitive", async () => {
       const { errors } = await parse(`
         system S {
@@ -701,9 +716,9 @@ describe("validation", () => {
     });
 
     it("Phase 8: `layout:` is allowed on scaffold-synthesised pages (v1 restriction lifted)", async () => {
-      // The body shapes here are the same ones the scaffold stdlib
-      // synthesises (see `src/stdlib/scaffold/_pages.ts`).  Phase 8
-      // lifts the v1 restriction so a scaffold Home / OrdersList can
+      // The singleton Home body shape here is what the scaffold stdlib
+      // synthesises for the index page (`src/macros/stdlib/scaffold/_pages.ts`).
+      // Phase 8 lifts the v1 restriction so a scaffold Home / OrdersList can
       // opt into a named-layout SystemMember chrome.  The presets
       // `default` / `none` are similarly admitted on these pages.
       const { errors } = await parse(`
@@ -717,7 +732,7 @@ describe("validation", () => {
             page OrdersList {
               route: "/orders"
               layout: default
-              body: scaffoldList { of: Order }
+              body: Stack { Heading { "Orders" } }
             }
           }
         }

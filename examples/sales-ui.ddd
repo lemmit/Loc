@@ -12,11 +12,12 @@
 // the target syntax driving the discussion.  It is a HISTORICAL
 // prototype: several names below were never shipped or were later
 // retired — `Form` split into the named-leaf forms (`CreateForm` /
-// `OperationForm` / `WorkflowForm` / `DestroyForm`); `List` / `Detail`
-// became `scaffoldList` / `scaffoldDetails`; `MasterDetail`,
-// `Dashboard`, and `Review` were dropped (compose them from a list +
-// `state {}` + display primitives).  See docs/page-metamodel.md §9 for
-// the current closed set.
+// `OperationForm` / `WorkflowForm` / `DestroyForm`); page scaffolding is
+// now driven entirely by the `with scaffold(...)` page macro (which emits
+// full unfoldable page-body trees), not by `scaffold*` body sentinels;
+// `MasterDetail`, `Dashboard`, and `Review` were dropped (compose them
+// from a list + `state {}` + display primitives).  See
+// docs/page-metamodel.md §9 for the current closed set.
 
 ui SalesAdmin with scaffold(subdomains: [Catalog], aggregates: [Customer, Product], workflows: [placeOrder], views: [ActiveOrders, OrderSummary, CustomerOrders]) {
 
