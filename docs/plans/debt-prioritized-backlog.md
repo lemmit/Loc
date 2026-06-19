@@ -68,7 +68,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | DEBT-16 | Audited *lifecycle* actions (`audited create`/`destroy`) — **blocked on grammar**: `Create`/`Destroy` have no `audited` slot (lowering hardcodes `audited: false`); needs the grammar surface before any backend instrumentation. Also no backend emits it today (node's gate is aspirational) | grammar, then dotnet, java, node | 2 | M | — |
 | DEBT-17 | MikroORM v1 → full surface (retrieval, assoc, inheritance, filters, …) | node | 3 | L | `retrieval-implementation.md` |
 | DEBT-18 | Dapper v1 → full surface (find/retrieval predicate + same set) | dotnet | 2 | L | — |
-| DEBT-19 | TPH inheritance (`inheritanceUsing(sharedTable)`) | dotnet, elixir, python, java | 3 | L | `tph-unionall-and-contains.md` |
+| DEBT-19 | ~~TPH inheritance (`inheritanceUsing(sharedTable)`)~~ **DONE (stale entry)** — the validator's `TPH_CAPABLE` set is `{node, dotnet, elixir, python, java}` (all DB backends), so a TPH hierarchy is accepted on every backend; emission ships (Hono shared table + `kind`, .NET EF `HasDiscriminator`, Ash shared-table + `base_filter`). Verified 2026-06-19 | ~~dotnet, elixir, python, java~~ | 3 | L | `tph-unionall-and-contains.md` |
 | DEBT-20 | Event-sourced storage (`persistedAs(eventLog)`) | elixir, java (`axon`) | 3 | L | `elixir-eventsourcing-vanilla-plan.md` |
 | **P3 — reserved adapter un-stubbing (greenfield axes, by demand) + half-landed** |
 | DEBT-21 | Application styles: `cqrs` (node/java), `layered`/`flat` (dotnet), `flat` (node) | node, dotnet, java | 2 | L | `realization-axes-rollout.md` |
@@ -147,7 +147,7 @@ Concise scope per item; full gate locations in the table above.
 - **DEBT-15 Java single part-containments** — map a part-declared `contains x: P` (non-collection) via the shadow-parent FK. `system-checks.ts:600`, `loom.java-single-containment-unsupported`.
 - **DEBT-16 Audited lifecycle (dotnet, java)** — `audited create`/`destroy` instrumentation.
 - **DEBT-17 / DEBT-18 MikroORM & Dapper v1 → full surface** — both reject the same set (retrieval bundles, seed, event-sourced, non-relational, inheritance, `Id[]` associations, nested parts, audit stamping, capability filters, provenanced, managed access) and throw on complex find predicates (`emit/mikroorm.ts:437`, `emit/dapper.ts:405`). Close incrementally toward the default-adapter surface.
-- **DEBT-19 TPH inheritance** — `inheritanceUsing(sharedTable)` storage emission beyond node.
+- **DEBT-19 TPH inheritance — DONE (stale):** `inheritanceUsing(sharedTable)` emission already ships on every DB backend — `validateInheritanceStorage`'s `TPH_CAPABLE = {node, dotnet, elixir, python, java}` accepts a TPH hierarchy on any of them (Hono Drizzle shared table + `kind` discriminator; .NET EF Core `HasDiscriminator`; Phoenix/Ash shared-table multi-resource + `base_filter` on `kind`). The "beyond node" framing was stale.
 - **DEBT-20 Event-sourcing (elixir, java)** — `persistedAs(eventLog)`; elixir has an in-flight vanilla plan, java needs `axon` (DEBT-23).
 
 ---
