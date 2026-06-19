@@ -15,6 +15,7 @@ import {
   hydrateRootExpr,
   lowerToDrizzle,
 } from "./repository-find-builder.js";
+import { combinePredicate, contextFilterPredicate } from "./repository-find-predicate.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { projectFieldEntries } from "./repository-save-builder.js";
 import { toWireMethod } from "./repository-wire-builder.js";
@@ -83,6 +84,11 @@ export function buildEmbeddedRepositoryFile(
     const lowered = lowerToDrizzle(f.filter, tableName, ctx);
     if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
   }
+  // A `shape(embedded)` aggregate keeps its root scalars as real columns, so a
+  // (non-principal) capability `filter` AND-s into every root read as a Drizzle
+  // SQL predicate — the same machinery the relational repository uses (DEBT-02).
+  // null when the aggregate has no such filter → embedded reads stay identical.
+  const filterPred = contextFilterPredicate(agg, tableName, ctx, drizzleOps);
 
   // Root-row column entries (reused from the relational save projection)
   // + ref-collection jsonb arrays + one jsonb entry per containment.
@@ -106,7 +112,9 @@ export function buildEmbeddedRepositoryFile(
   }
   const rootRow = `{ ${rootEntries.join(", ")} }`;
 
-  const findMethods = (repo?.finds ?? []).map((find) => embeddedFindMethod(agg, find, ctx));
+  const findMethods = (repo?.finds ?? []).map((find) =>
+    embeddedFindMethod(agg, find, ctx, filterPred),
+  );
 
   const bodyStr = lines(
     `export class ${agg.name}Repository {`,
@@ -116,7 +124,7 @@ export function buildEmbeddedRepositoryFile(
     `  ) {}`,
     "",
     `  async findById(id: ${idVar}): Promise<${agg.name} | null> {`,
-    `    const rows = await this.db.select().from(schema.${tableName}).where(eq(schema.${tableName}.id, id));`,
+    `    const rows = await this.db.select().from(schema.${tableName}).where(${combinePredicate(`eq(schema.${tableName}.id, id)`, filterPred)});`,
     `    const row = rows[0];`,
     `    ${renderHonoStoreLogCall("aggregateLoaded", `aggregate: "${agg.name}", id: id as string, found: !!row`)}`,
     `    if (!row) return null;`,
@@ -132,7 +140,7 @@ export function buildEmbeddedRepositoryFile(
     "",
     `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
-    `    const rows = await this.db.select().from(schema.${tableName}).where(inArray(schema.${tableName}.id, ids));`,
+    `    const rows = await this.db.select().from(schema.${tableName}).where(${combinePredicate(`inArray(schema.${tableName}.id, ids)`, filterPred)});`,
     `    return rows.map((row) => {`,
     ...hydrateLocals(agg, "row", "      "),
     `      return ${hydrateRootExpr(agg, "row", ctx)};`,
@@ -207,12 +215,13 @@ function embeddedFindMethod(
   agg: EnrichedAggregateIR,
   find: FindIR,
   ctx: EnrichedBoundedContextIR,
+  filterPred: string | null,
 ): string {
   const tableName = lowerFirst(plural(agg.name));
   const usesUser = findUsesCurrentUser(find);
   const baseParams = find.params.map((p) => `${p.name}: ${tsFindParamType(p.type)}`);
   const params = (usesUser ? [...baseParams, "currentUser: User"] : baseParams).join(", ");
-  const whereClause = buildFindWhereClause(agg, find, tableName, ctx);
+  const whereClause = buildFindWhereClause(agg, find, tableName, ctx, filterPred);
   const isArray = find.returnType.kind === "array";
   const isOptional = find.returnType.kind === "optional";
   const ret = isArray ? `${agg.name}[]` : isOptional ? `${agg.name} | null` : agg.name;

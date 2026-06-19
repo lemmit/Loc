@@ -653,14 +653,15 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
     return false;
   };
   // Backends that wire a NON-principal capability filter into a NON-relational
-  // (document/embedded) aggregate, whose fields live in a jsonb column.  node
-  // applies the predicate in-app over the rehydrated document (DEBT-02, document
-  // shape).  .NET handles all shapes (it's not in LIMITED_FAMILIES).  A
-  // PRINCIPAL filter on a non-relational shape stays gated everywhere for now
-  // (the actor + json intersection isn't wired) — hence the `!usesPrincipal`
-  // condition at the call site.
+  // (document/embedded) aggregate.  node handles both shapes: a `document`
+  // aggregate filters in-app over the rehydrated doc; an `embedded` aggregate's
+  // root scalars are real columns, so the predicate AND-s into the SQL read like
+  // the relational path (DEBT-02).  .NET handles all shapes (it's not in
+  // LIMITED_FAMILIES).  A PRINCIPAL filter on a non-relational shape stays gated
+  // everywhere for now (the actor + json intersection isn't wired) — hence the
+  // `!usesPrincipal` condition at the call site.
   const supportsNonRelationalFilter = (family: string, shp: string): boolean =>
-    family === "node" && shp === "document";
+    family === "node" && (shp === "document" || shp === "embedded");
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);

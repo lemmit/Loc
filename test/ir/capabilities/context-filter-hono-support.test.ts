@@ -119,12 +119,10 @@ system Shop {
     ).toEqual([]);
   });
 
-  it("still gates a node EMBEDDED capability filter (DEBT-02 follow-up)", async () => {
-    const errs = await honoFilterErrors(
-      sys("node", { shape: "embedded", filter: "filter !this.isDeleted" }),
-    );
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("shape(embedded)");
+  it("accepts a non-principal capability filter on a node EMBEDDED aggregate (DEBT-02 — SQL where)", async () => {
+    expect(
+      await honoFilterErrors(sys("node", { shape: "embedded", filter: "filter !this.isDeleted" })),
+    ).toEqual([]);
   });
 
   it("still gates a non-relational capability filter on elixir / java (DEBT-02 follow-up)", async () => {
