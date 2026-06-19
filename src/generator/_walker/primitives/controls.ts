@@ -140,6 +140,10 @@ export function emitAction(
   ctx: WalkContext,
   depth: number,
 ): string {
+  // A target may fork the whole primitive (Angular renders an inline
+  // statement-bound button + an id-at-mutate hoist instead of a JSX arrow).
+  const override = ctx.target.renderAction?.(call, ctx, depth);
+  if (override != null) return override;
   void depth;
   const opRef = positionalArgs(call)[0];
   if (!opRef || opRef.kind !== "member" || opRef.receiver.kind !== "ref") {

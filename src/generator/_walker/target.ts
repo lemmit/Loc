@@ -442,4 +442,13 @@ export interface WalkerTarget {
    *  wiring on `ctx.angularForms` for the page-shell; the other frameworks
    *  omit it and keep the shared react-hook-form pipeline. */
   renderCreateForm?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
+
+  /** OPTIONAL — whole-primitive override for `Action(inst.op)`.  The shared
+   *  `emitAction` delegates here first; a non-null return is used verbatim and
+   *  the default (React-shaped `() => void <hook>.mutateAsync({})`) is skipped.
+   *  Angular renders an inline `(click)="<var>.mutate(<id>, {})"` button and
+   *  records the `use<Op><Agg>()` hoist on `ctx.angularActions`; returning null
+   *  (e.g. a `then:` effect it can't express inline) falls back to the shared
+   *  path, which records an `actionMutations` entry and stubs the page. */
+  renderAction?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
 }

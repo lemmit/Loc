@@ -93,13 +93,15 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
   const opFactories = ops.flatMap((op) => {
     const reqType = `${upperFirst(op.name)}${single}Request`;
     return [
-      `/** Signal-backed \`${op.name}\` operation mutation — hoisted with the record`,
-      " *  id; `mutate` POSTs the op params and resolves when the command lands. */",
-      `export function use${upperFirst(op.name)}${single}(id: string) {`,
+      `/** Signal-backed \`${op.name}\` operation mutation.  \`mutate\` takes the`,
+      " *  record id AT CALL TIME (not hoist time) so an async QueryView record —",
+      " *  resolved after the component's field initialisers run — still targets the",
+      " *  right row; it POSTs the op params and resolves when the command lands. */",
+      `export function use${upperFirst(op.name)}${single}() {`,
       `  const service = inject(${serviceName});`,
       "  const isPending = signal(false);",
       "  const error = signal<unknown>(null);",
-      `  const mutate = (input: ${reqType}): Promise<void> => {`,
+      `  const mutate = (id: string, input: ${reqType}): Promise<void> => {`,
       "    isPending.set(true);",
       "    error.set(null);",
       `    return firstValueFrom(service.${op.name}(id, input))`,

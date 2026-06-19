@@ -190,9 +190,11 @@ describe("angular generator — per-operation mutations", () => {
     expect(api).toContain("this.http.post<void>(");
     expect(api).toContain("/cancel`, input)");
     expect(api).toContain("note(id: string, input: NoteOrderRequest) {");
-    // Hooked-with-id mutation factories.
-    expect(api).toContain("export function useCancelOrder(id: string) {");
-    expect(api).toContain("export function useNoteOrder(id: string) {");
+    // Mutation factories take the id AT CALL TIME (`mutate(id, input)`), so an
+    // async record id resolves at click time rather than in the field init.
+    expect(api).toContain("export function useCancelOrder() {");
+    expect(api).toContain("export function useNoteOrder() {");
+    expect(api).toContain("const mutate = (id: string, input: CancelOrderRequest)");
     expect(api).toContain("return firstValueFrom(service.cancel(id, input))");
   });
 });
