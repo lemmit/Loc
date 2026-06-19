@@ -131,10 +131,12 @@ export function generateAngularForContexts(
         bcByWorkflow,
         new Map(),
         pageRoutes,
+        new Set(),
+        new Set(page.derived.map((d) => d.name)),
       );
       content = pageNeedsDeferredFeatures(result)
         ? renderAngularPageStub(page)
-        : renderAngularPage({ page, result });
+        : renderAngularPage({ page, result, derived: page.derived, pack });
     }
     out.set(`src/app/pages/${slug}.component.ts`, content);
     routeDescs.push({ route: page.route!, component: pageComponentName(page), slug });

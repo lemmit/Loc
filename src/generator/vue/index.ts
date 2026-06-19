@@ -233,6 +233,7 @@ export function generateVueForContexts(
       pageRoutes,
       externFunctionNames,
       externComponentNames,
+      c.derived,
     );
     if (component.usesFormToast) hasFormToast = true;
     out.set(`src/components/${c.name}.vue`, component.source);
@@ -245,6 +246,7 @@ export function generateVueForContexts(
     }
     const paramNames = new Set(page.params.map((p) => p.name));
     const stateNames = new Set(page.state.map((s) => s.name));
+    const derivedNames = new Set(page.derived.map((d) => d.name));
     const result = walkBody(
       page.body,
       vueTarget,
@@ -260,6 +262,7 @@ export function generateVueForContexts(
       new Map(),
       pageRoutes,
       externFunctionNames,
+      derivedNames,
     );
     if (
       result.formOfs.some(

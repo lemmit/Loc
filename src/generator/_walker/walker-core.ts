@@ -327,6 +327,10 @@ export function walkBody(
   pageRoutes: ReadonlyMap<string, string> = new Map(),
   /** Extern frontend function names declared on this ui. */
   externFunctions: ReadonlySet<string> = new Set(),
+  /** Page/component `derived` binding names — refs resolve to the hoisted
+   *  computed (read like state); the shell hoists each as
+   *  `useMemo`/`computed`/`$derived`. */
+  derivedNames: ReadonlySet<string> = new Set(),
 ): WalkResult {
   const apiParamNames = new Map<string, string>();
   for (const p of apiParams) apiParamNames.set(p.name, p.apiName);
@@ -340,6 +344,7 @@ export function walkBody(
     usedParams: new Set(),
     usesNavigate: false,
     stateNames,
+    derivedNames,
     usesState: false,
     usesRouterLink: false,
     userComponents,
@@ -412,6 +417,12 @@ export interface WalkEnv {
   pack: LoadedPack;
   paramNames: ReadonlySet<string>;
   stateNames: ReadonlySet<string>;
+  /** Page/component `derived` binding names.  A body ref to one resolves
+   *  to the hoisted computed (read with the same per-framework idiom as a
+   *  state read — React bare, Vue `.value` in handler, Angular `()`); the
+   *  shell hoists each as `useMemo`/`computed`/`$derived`.  Read-only:
+   *  there's no write path (unlike `stateNames`). */
+  derivedNames: ReadonlySet<string>;
   userComponents: ReadonlyMap<string, readonly ParamIR[]>;
   /** In-scope instance variable name → aggregate name, for the
    *  current body's params whose declared type is an aggregate (e.g.
@@ -696,6 +707,16 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
         };
         return ctx.target.renderInterpolation(ctx.target.renderStateRead(stateRef, "template"));
       }
+      // A `derived` binding — read with the same per-framework idiom as a
+      // state field (computed refs unwrap identically), but no `usesState`
+      // (the shell hoists it as a computed, not `useState`).
+      if (ctx.derivedNames.has(expr.name)) {
+        const derivedRef = {
+          field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
+          name: expr.name,
+        };
+        return ctx.target.renderInterpolation(ctx.target.renderStateRead(derivedRef, "template"));
+      }
       return ctx.target.renderComment(`ref: ${expr.name}`);
     case "match": {
       // Predicate-arms conditional rendering (page-metamodel §7).
@@ -935,6 +956,15 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
           name: expr.name,
         };
         return ctx.target.renderStateRead(stateRef, "handler");
+      }
+      // A `derived` binding — read like a state field (handler position),
+      // no `usesState` (hoisted as a computed, not `useState`).
+      if (ctx.derivedNames.has(expr.name)) {
+        const derivedRef = {
+          field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
+          name: expr.name,
+        };
+        return ctx.target.renderStateRead(derivedRef, "handler");
       }
       if (ctx.paramNames.has(expr.name)) {
         ctx.usedParams.add(expr.name);
@@ -1374,6 +1404,14 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
         name: expr.name,
       };
       return ctx.target.renderInterpolation(ctx.target.renderStateRead(stateRef, "template"));
+    }
+    // A `derived` binding — read like state (interpolated), no `usesState`.
+    if (ctx.derivedNames.has(expr.name)) {
+      const derivedRef = {
+        field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
+        name: expr.name,
+      };
+      return ctx.target.renderInterpolation(ctx.target.renderStateRead(derivedRef, "template"));
     }
     // Unresolved ref in text position emits a JSX
     // comment so the user sees the unresolved name in the

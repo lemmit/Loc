@@ -82,6 +82,11 @@ export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]):
   }
 }
 
+// Page/component `derived name: T = expr` bindings are supported on every
+// frontend now — React/Vue/Svelte/Angular hoist a reactive computed
+// (`useMemo` / `computed` / `$derived` / `computed`); Phoenix/HEEx
+// inline-recomputes the expr at each use.  No framework gate is needed.
+
 // Default-deny enforcement (auth.md / quickstart §4.3).  When the system's
 // `auth { enforcement: denyByDefault }` is set, every reachable *command* on
 // an `auth: required` backend must declare a `requires` gate — otherwise it

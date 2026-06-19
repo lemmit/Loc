@@ -176,6 +176,7 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
         buildBcByAggregate(ctx),
         pageRoutes,
         externFunctionNames,
+        c.derived,
       ),
     );
   }
@@ -209,6 +210,7 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
         buildBcByWorkflow(ctx),
         pageRoutes,
         externFunctionNames,
+        page.derived,
       ),
     );
   }

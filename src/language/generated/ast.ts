@@ -368,7 +368,7 @@ export function isChannelRetention(item: unknown): item is ChannelRetention {
     return item === 'ephemeral' || item === 'log' || item === 'work';
 }
 
-export type ComponentDecl = StateBlock;
+export type ComponentDecl = DerivedProp | StateBlock;
 
 export const ComponentDecl = 'ComponentDecl';
 
@@ -540,7 +540,7 @@ export function isNameRefIdent(item: unknown): item is NameRefIdent {
     return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'create' || item === 'destroy' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'by' || item === 'handle' || item === 'cache' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type PageProp = BodyProp | CanonicalProp | DescriptionProp | LayoutProp | OgImageProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
+export type PageProp = BodyProp | CanonicalProp | DerivedProp | DescriptionProp | LayoutProp | OgImageProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
 
 export const PageProp = 'PageProp';
 
@@ -1129,7 +1129,7 @@ export function isDeployable(item: unknown): item is Deployable {
 }
 
 export interface DerivedProp extends AstNode {
-    readonly $container: Aggregate | EntityPart | ValueObject;
+    readonly $container: Aggregate | Component | EntityPart | Page | ValueObject;
     readonly $type: 'DerivedProp';
     expr: Expression;
     name: string;
@@ -3136,10 +3136,8 @@ export class DddAstReflection extends AbstractAstReflection {
             case TestBlock: {
                 return this.isSubtype(AggregateMember, supertype);
             }
-            case DerivedProp:
-            case FunctionDecl:
-            case Invariant: {
-                return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype) || this.isSubtype(ValueObjectMember, supertype);
+            case DerivedProp: {
+                return this.isSubtype(AggregateMember, supertype) || this.isSubtype(ComponentDecl, supertype) || this.isSubtype(EntityPartMember, supertype) || this.isSubtype(PageProp, supertype) || this.isSubtype(ValueObjectMember, supertype);
             }
             case EntityPart: {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(NamedDecl, supertype);
@@ -3174,6 +3172,10 @@ export class DddAstReflection extends AbstractAstReflection {
             case RequiresStmt:
             case ReturnStmt: {
                 return this.isSubtype(Statement, supertype);
+            }
+            case FunctionDecl:
+            case Invariant: {
+                return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype) || this.isSubtype(ValueObjectMember, supertype);
             }
             case HandleDecl:
             case OnDecl:

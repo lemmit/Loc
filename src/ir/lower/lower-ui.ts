@@ -6,6 +6,7 @@
 
 import type {
   Component,
+  DerivedProp,
   Layout,
   LayoutNamedSlot,
   MenuBlock,
@@ -16,6 +17,7 @@ import type {
 import { snake } from "../../util/naming.js";
 import type {
   ComponentIR,
+  DerivedIR,
   ExprIR,
   LayoutIR,
   MenuBlockIR,
@@ -33,6 +35,7 @@ import type {
   UiNotificationIR,
 } from "../types/loom-ir.js";
 import { lowerExpr } from "./lower-expr.js";
+import { lowerDerived } from "./lower-members.js";
 import { canonicalFramework } from "./lower-platform.js";
 import { type Env, lowerType, withLocal } from "./lower-types.js";
 
@@ -208,6 +211,19 @@ function lowerPage(p: Page): PageIR {
       }
     }
   }
+  // Page-derived bindings — read-only computed values in the render scope.
+  // Lowered sequentially (in source order) so a derived may reference
+  // params, state, and EARLIER derived; each name binds into `env` after
+  // lowering so the body (and later derived / title / requires) resolve
+  // their refs to it.
+  const derived: DerivedIR[] = [];
+  for (const prop of p.props) {
+    if (prop.$type === "DerivedProp") {
+      const d = lowerDerived(prop, env);
+      derived.push(d);
+      env = withLocal(env, d.name, "let", d.type);
+    }
+  }
   for (const prop of p.props) {
     if (prop.$type === "RouteProp") route = prop.value;
     else if (prop.$type === "TitleProp") title = lowerExpr(prop.value, env);
@@ -265,6 +281,7 @@ function lowerPage(p: Page): PageIR {
     title,
     requires,
     state,
+    derived,
     body,
     menuMeta,
     source: inferred.kind === "custom" ? "explicit" : "scaffold",
@@ -348,7 +365,7 @@ export function lowerComponent(c: Component): ComponentIR {
   // path; the React generator emits a `<Name>.props.ts` interface and
   // imports the user's module at call sites.
   if (c.extern) {
-    return { name: c.name, params, state: [], extern: true, externPath: c.externPath };
+    return { name: c.name, params, state: [], derived: [], extern: true, externPath: c.externPath };
   }
   // Component-scoped env: params + state bind so `inferExprType`
   // resolves refs to their declared types (same reason as
@@ -366,10 +383,20 @@ export function lowerComponent(c: Component): ComponentIR {
       }
     }
   }
+  // Component-derived bindings — same sequential, reactive-over-state
+  // semantics as `lowerPage`.
+  const derived: DerivedIR[] = [];
+  for (const decl of c.decls ?? []) {
+    if (decl.$type === "DerivedProp") {
+      const d = lowerDerived(decl, env);
+      derived.push(d);
+      env = withLocal(env, d.name, "let", d.type);
+    }
+  }
   // Non-extern components always carry a body (validator-enforced);
   // guard defensively so lowering an invalid model can't crash.
   const body = c.body ? lowerExpr(c.body, env) : undefined;
-  return { name: c.name, params, state, body };
+  return { name: c.name, params, state, derived, body };
 }
 
 function lowerStateField(f: StateField, env: Env): StateFieldIR {

@@ -8,6 +8,7 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  DerivedIR,
   ExprIR,
   ParamIR,
   StateFieldIR,
@@ -125,9 +126,13 @@ export function renderCustomLayoutPage(
    *  register a use; the shell imports each used one from its
    *  `src/lib/<name>` conformance shim. */
   externFunctions: ReadonlySet<string> = new Set(),
+  /** Page-level `derived name: T = expr` bindings — read-only computed
+   *  values hoisted as `useMemo` before the body. */
+  derived: DerivedIR[] = [],
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
+  const derivedNames = new Set(derived.map((d) => d.name));
   const {
     tsx,
     imports,
@@ -155,7 +160,56 @@ export function renderCustomLayoutPage(
     aggregateParamTypes(params, aggregatesByName),
     pageRoutes,
     externFunctions,
+    derivedNames,
   );
+  // Page-derived bindings → hoisted `useMemo` computeds, in declaration
+  // order (a derived may reference state, params, and EARLIER derived).
+  // Body refs resolve to the bare const via the walker's `derivedNames`.
+  // The deps array is the referenced state/param/earlier-derived names so
+  // the memo recomputes reactively (over state).
+  let derivedLines = "";
+  let usesMemo = false;
+  let usesStateForDerived = false;
+  const seenDerived = new Set<string>();
+  for (const d of derived) {
+    const dctx: WalkContext = {
+      target: tsxTarget,
+      imports,
+      pack,
+      paramNames,
+      usedParams,
+      usesNavigate,
+      stateNames,
+      derivedNames: seenDerived,
+      usesState: false,
+      usesRouterLink: false,
+      userComponents: new Map(),
+      usedUserComponents: new Set(),
+      usesChildren: false,
+      apiParamNames: new Map(),
+      usedApiHooks: new Map(),
+      lambdaParams: new Map(),
+      shellLocals: new Set(),
+      aggregatesByName: new Map(),
+      bcByAggregate: new Map(),
+      workflowsByName: new Map(),
+      bcByWorkflow: new Map(),
+      formOfs: [],
+      actionMutations: [],
+      collectedTestids: new Set(),
+      usesCodeBlock: false,
+    };
+    const exprStr = emitExpr(d.expr, dctx);
+    if (dctx.usesState) usesStateForDerived = true;
+    const refs = new Set<string>();
+    collectExprRefs(d.expr, refs);
+    const deps = [...refs]
+      .filter((n) => paramNames.has(n) || stateNames.has(n) || seenDerived.has(n))
+      .sort();
+    derivedLines += `  const ${d.name} = useMemo(() => ${exprStr}, [${deps.join(", ")}]);\n`;
+    seenDerived.add(d.name);
+    usesMemo = true;
+  }
   // Render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
   // any param/state the title references).  Compute the deps
@@ -173,6 +227,7 @@ export function renderCustomLayoutPage(
       usedParams,
       usesNavigate,
       stateNames,
+      derivedNames,
       usesState,
       usesRouterLink: false,
       userComponents: new Map(),
@@ -201,7 +256,7 @@ export function renderCustomLayoutPage(
     titleEffect = `  useEffect(() => { document.title = ${titleExpr}; }, [${deps.join(", ")}]);\n`;
     usesEffect = true;
   }
-  const effectiveUsesState = usesState || usesStateForTitle;
+  const effectiveUsesState = usesState || usesStateForTitle || usesStateForDerived;
 
   const mantineImport = renderImportLines(imports, srcImportPrefix);
   // One default-import line per user component
@@ -294,6 +349,7 @@ export function renderCustomLayoutPage(
   if (usesFragment) reactSpecifiers.push("Fragment");
   if (effectiveUsesState) reactSpecifiers.push("useState");
   if (usesEffect) reactSpecifiers.push("useEffect");
+  if (usesMemo) reactSpecifiers.push("useMemo");
   const reactImport =
     reactSpecifiers.length > 0 ? `import { ${reactSpecifiers.join(", ")} } from "react";\n` : "";
   const stateLines = effectiveUsesState
@@ -321,7 +377,7 @@ export function renderCustomLayoutPage(
   return `// Auto-generated.  Do not edit by hand.
 ${reactImport}${decimalImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}
 export default function ${pageName}() {
-${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}  return (
+${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${titleEffect}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
@@ -518,9 +574,13 @@ export function renderUserComponentFile(
   /** Extern frontend functions declared on this ui (shim imports for
    *  body calls — same seam as pages). */
   externFunctions: ReadonlySet<string> = new Set(),
+  /** Component-level `derived` bindings — read-only computed values
+   *  hoisted as `useMemo` before the body (same as pages). */
+  derived: DerivedIR[] = [],
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
+  const derivedNames = new Set(derived.map((d) => d.name));
   const {
     tsx,
     imports,
@@ -548,7 +608,54 @@ export function renderUserComponentFile(
     aggregateParamTypes(params, aggregatesByName),
     pageRoutes,
     externFunctions,
+    derivedNames,
   );
+  // Component-derived bindings → hoisted `useMemo` computeds (same as the
+  // page shell). Body refs resolve to the bare const via `derivedNames`.
+  let derivedLines = "";
+  let usesMemo = false;
+  let usesStateForDerived = false;
+  const seenDerived = new Set<string>();
+  for (const d of derived) {
+    const dctx: WalkContext = {
+      target: tsxTarget,
+      imports,
+      pack,
+      paramNames,
+      usedParams,
+      usesNavigate,
+      stateNames,
+      derivedNames: seenDerived,
+      usesState: false,
+      usesRouterLink: false,
+      userComponents: new Map(),
+      usedUserComponents: new Set(),
+      usesChildren: false,
+      apiParamNames: new Map(),
+      usedApiHooks: new Map(),
+      lambdaParams: new Map(),
+      shellLocals: new Set(),
+      aggregatesByName: new Map(),
+      bcByAggregate: new Map(),
+      workflowsByName: new Map(),
+      bcByWorkflow: new Map(),
+      formOfs: [],
+      actionMutations: [],
+      collectedTestids: new Set(),
+      usesCodeBlock: false,
+    };
+    const exprStr = emitExpr(d.expr, dctx);
+    if (dctx.usesState) usesStateForDerived = true;
+    const refs = new Set<string>();
+    collectExprRefs(d.expr, refs);
+    const deps = [...refs]
+      .filter((n) => paramNames.has(n) || stateNames.has(n) || seenDerived.has(n))
+      .sort();
+    derivedLines += `  const ${d.name} = useMemo(() => ${exprStr}, [${deps.join(", ")}]);\n`;
+    seenDerived.add(d.name);
+    usesMemo = true;
+  }
+  const compUsesState = usesState || usesStateForDerived;
   // Components live at `src/components/<Name>.tsx` (one hop to `src/`),
   // so api imports for Action mutation hooks resolve via `../api/<agg>`.
   const actionWiring = renderActionMutations(actionMutations, "../");
@@ -583,7 +690,8 @@ export function renderUserComponentFile(
       : "";
   const reactSpecifiers: string[] = [];
   if (usesFragment) reactSpecifiers.push("Fragment");
-  if (usesState) reactSpecifiers.push("useState");
+  if (compUsesState) reactSpecifiers.push("useState");
+  if (usesMemo) reactSpecifiers.push("useMemo");
   const reactImport =
     reactSpecifiers.length > 0 ? `import { ${reactSpecifiers.join(", ")} } from "react";\n` : "";
   const decimalImport =
@@ -659,7 +767,9 @@ export function renderUserComponentFile(
     destructureNames.length > 0 ? `{ ${destructureNames.join(", ")} }: ${name}Props` : "";
   const navigateLine =
     usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
-  const stateLines = usesState ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("") : "";
+  const stateLines = compUsesState
+    ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("")
+    : "";
   // Suppress used-prop warnings — params declared but unused at
   // walker-emit time (e.g. typed pass-through to a child component
   // not yet wired) shouldn't trigger TS lint noise.  We reference
@@ -668,7 +778,7 @@ export function renderUserComponentFile(
   return `// Auto-generated.  Do not edit by hand.
 ${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}
 export default function ${name}(${propDestructure}) {
-${navigateLine}${actionWiring.decls}${form.decls}${stateLines}  return (
+${navigateLine}${actionWiring.decls}${form.decls}${stateLines}${derivedLines}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
@@ -826,6 +936,7 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     usedParams: new Set(),
     usesNavigate: false,
     stateNames: new Set(),
+    derivedNames: new Set(),
     usesState: false,
     usesRouterLink: false,
     userComponents: new Map(),

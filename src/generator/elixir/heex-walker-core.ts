@@ -419,6 +419,16 @@ function renderRef(expr: Extract<ExprIR, { kind: "ref" }>, ctx: WalkContext): st
       ? `@${snake(expr.name)}`
       : `socket.assigns.${snake(expr.name)}`;
   }
+  // Page/component `derived` binding — LiveView has no render-scope hoist
+  // site, so we INLINE-RECOMPUTE: substitute the derived's expr at each
+  // use (LiveView re-renders on assign change, so each use stays fresh; a
+  // derived referencing an earlier derived resolves via this same
+  // substitution; the lowering forbids cycles).  Parenthesised to keep
+  // precedence safe when the binding sits inside a larger expression.
+  const derivedHit = ctx.page.derived?.find((d) => snake(d.name) === snake(expr.name));
+  if (derivedHit) {
+    return `(${renderExpr(derivedHit.expr, ctx)})`;
+  }
   // Page route param.
   if (ctx.page.params.some((p) => p.name === expr.name)) {
     return ctx.position === "template"

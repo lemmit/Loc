@@ -1853,6 +1853,12 @@ export interface PageIR {
   /** Reactive local fields.  Multiple `state { }` blocks merge here
    *  (matches the `permissions` block multiplicity rule). */
   state: StateFieldIR[];
+  /** Read-only computed values in the render scope — `derived total: T =
+   *  expr`.  Reactive over `state` (recompute on change); sequential (a
+   *  derived may reference params, state, and *earlier* derived).  Each
+   *  frontend hoists these before the body (React `useMemo`, Vue
+   *  `computed`, Svelte `$derived`, HEEx inline-recompute). */
+  derived: DerivedIR[];
   /** Single body expression.  Conditional rendering uses `match` in
    *  the expression engine, not a guarded-declaration form. */
   body?: ExprIR;
@@ -1936,6 +1942,11 @@ export interface ComponentIR {
   name: string;
   params: ParamIR[];
   state: StateFieldIR[];
+  /** Read-only computed values in the render scope — the component twin of
+   *  `PageIR.derived` (same `derived total: T = expr` surface, same
+   *  reactive/sequential semantics).  Absent (empty) on an `extern`
+   *  component. */
+  derived: DerivedIR[];
   /** Walked region tree.  Absent for an `extern` component, whose
    *  rendering is owned by a hand-written file. */
   body?: ExprIR;
