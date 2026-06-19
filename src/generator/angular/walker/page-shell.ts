@@ -39,10 +39,17 @@ export function pageSlug(page: PageIR): string {
   return pageSelector(page).slice("app-".length);
 }
 
-/** True when the walked body needs features batch 1 doesn't assemble yet
- *  (api services / forms) — such a page is stubbed until a later batch. */
+/** True when the walked body needs features not assembled yet — such a page
+ *  is stubbed until a later sub-slice.  Reactive Forms (`formOfs`) are still
+ *  deferred; of the api reads, only the collection `findAll` (`useAll*`) is
+ *  wired, so a page using `byId` / mutations / parameterised finds stays
+ *  stubbed until those sub-slices land. */
 export function pageNeedsDeferredFeatures(result: WalkResult): boolean {
-  return result.usedApiHooks.size > 0 || result.formOfs.length > 0;
+  if (result.formOfs.length > 0) return true;
+  for (const h of result.usedApiHooks.values()) {
+    if (!h.hookName.startsWith("useAll")) return true;
+  }
+  return false;
 }
 
 function indentTemplate(markup: string): string {
@@ -112,6 +119,37 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   if (usedHelpers.length > 0) {
     imports.push(`import { ${usedHelpers.join(", ")} } from "../../lib/format";`);
     for (const h of usedHelpers) members.push(`  protected readonly ${h} = ${h};`);
+  }
+
+  // Per-aggregate api reads — import each `use*` read factory from
+  // `src/api/<agg>.ts` and hoist it as a class field (`readonly <var> =
+  // use…();`).  The field initializer is the injection context the factory's
+  // `inject()` needs; pages sit two hops under `src/`, so the pack's default
+  // `../api/<agg>` import path rewrites to `../../api/<agg>`.
+  if (result.usedApiHooks.size > 0) {
+    const byPath = new Map<string, Set<string>>();
+    for (const h of result.usedApiHooks.values()) {
+      const from = h.importFrom.replace(/^\.\.\/api\//, "../../api/");
+      const names = byPath.get(from) ?? new Set<string>();
+      names.add(h.hookName);
+      byPath.set(from, names);
+    }
+    for (const [from, names] of [...byPath.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      imports.push(`import { ${[...names].sort().join(", ")} } from ${JSON.stringify(from)};`);
+    }
+    const hoisted = angularTarget.renderApiHoisting(
+      [...result.usedApiHooks.values()].map((h) => ({
+        apiHandle: "",
+        aggregateName: "",
+        operation: "",
+        kind: "query" as const,
+        args: [],
+        varName: h.varName,
+        hookName: h.hookName,
+        argsRendered: h.argsRendered,
+      })),
+    );
+    for (const line of hoisted) members.push(`  ${line}`);
   }
 
   // Primitive imports collected by `renderPrimitive` (pack-declared) —

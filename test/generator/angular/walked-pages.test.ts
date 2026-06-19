@@ -415,3 +415,88 @@ describe("angular generator — navigation + format-helper primitives", () => {
     expect(page).toContain('<pre><code class="language-plaintext">');
   });
 });
+
+// ---------------------------------------------------------------------------
+// QueryView collection read (data path sub-slice B).  A `QueryView { of:
+// <handle>.<Agg>.all, … }` un-stubs: the shared walker detects the api call,
+// the page shell imports the `useAll<Agg>s` factory from `../../api/<agg>` and
+// hoists it as a `readonly` class field, and the Angular QueryView template
+// branches on the signal-backed handle (`isLoading()`/`isError()`/`data()`).
+// The `data:` lambda binds rows to `<handle>.data()` (the renderQueryDataAccess
+// seam — signals are called), so the `For` iterates the array.  (ng
+// build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const QUERY_SOURCE = `
+  system Smoke {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish { customerId: string }
+        repository Orders for Order { }
+      }
+    }
+    ui WebApp {
+      api Sales: SalesApi
+      page OrderList {
+        route: "/"
+        body: QueryView {
+          of: Sales.Order.all,
+          loading: Loader {},
+          error: Alert { "Couldn't load orders" },
+          empty: Empty { "No orders yet" },
+          data: rows => Stack {
+            For { each: rows, o => Card { "Order", Text { o.customerId } } }
+          },
+          testid: "orders-query"
+        }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api {
+      platform: hono
+      contexts: [Orders]
+      dataSources: [ordersState]
+      serves: SalesApi
+      port: 8080
+    }
+    deployable web {
+      platform: angular
+      targets: api
+      ui: WebApp { Sales: api }
+      port: 3004
+    }
+  }
+`;
+
+async function queryPage(): Promise<string> {
+  const all = await generateSystemFiles(QUERY_SOURCE);
+  return all.get("web/src/app/pages/order-list.component.ts")!;
+}
+
+describe("angular generator — QueryView collection read", () => {
+  it("un-stubs the page: imports the read factory and hoists it as a class field", async () => {
+    const page = await queryPage();
+    expect(page).toContain('import { useAllOrders } from "../../api/order";');
+    expect(page).toContain("readonly orderAll = useAllOrders();");
+    // Not the stub.
+    expect(page).not.toContain("body needs api/forms support");
+  });
+
+  it("branches the QueryView on the signal-backed handle (called signals)", async () => {
+    const page = await queryPage();
+    expect(page).toContain("@if (orderAll.isLoading()) {");
+    expect(page).toContain("@if (orderAll.isError()) {");
+    expect(page).toContain(
+      "@if (!orderAll.isLoading() && !orderAll.isError() && orderAll.data().length === 0) {",
+    );
+    expect(page).toContain("@if (orderAll.data().length > 0) {");
+  });
+
+  it("binds the data lambda to the called data signal and iterates rows", async () => {
+    const page = await queryPage();
+    expect(page).toContain("@for (o of orderAll.data(); track $index) {");
+    expect(page).toContain("<div>{{ o.customerId }}</div>");
+  });
+});

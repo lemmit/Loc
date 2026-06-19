@@ -36,6 +36,7 @@
     "primitive-date-display": "primitive-date-display.hbs",
     "primitive-enum-badge": "primitive-enum-badge.hbs",
     "primitive-code-block": "primitive-code-block.hbs",
+    "primitive-query-view": "primitive-query-view.hbs",
     "package-json": "package-json.hbs",
     "angular-json": "angular-json.hbs",
     "tsconfig": "tsconfig.hbs",

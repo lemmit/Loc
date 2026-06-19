@@ -420,4 +420,14 @@ export interface WalkerTarget {
    *  block-body form (each entry already `;`-terminated); `expr` the
    *  expression-body form; both undefined means an empty handler. */
   renderEventHandler?(statements: readonly string[] | undefined, expr: string | undefined): string;
+
+  /** OPTIONAL — how a QueryView read handle's data is dereferenced.  The
+   *  shared QueryView walker binds the `data:` lambda param to the handle's
+   *  data (`<handle>.data`), the TanStack-result shape the TSX/Vue/Svelte
+   *  packs read directly — so the omitted default returns `${handle}.data`.
+   *  Angular's read handle exposes `data` as a SIGNAL, so its target returns
+   *  `${handle}.data()` (signals are called to read).  The QueryView template
+   *  itself owns the `isLoading` / `isError` reads; this seam is only the
+   *  data-lambda binding the walker injects. */
+  renderQueryDataAccess?(handle: string): string;
 }
