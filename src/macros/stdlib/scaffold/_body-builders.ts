@@ -8,24 +8,26 @@
 // scaffolds a new-form — the name is the spec.  See
 // `docs/proposals/unfoldable-page-scaffolding.md`.
 //
-// Status: the AST builders + a print/re-parse proof.  Wiring them into
-// `_pages.ts` (so the scaffold macro RETURNS these instead of sentinels) and
-// deleting the ⑤c arms + `inferPageOrigin` is the cohesive flip that follows,
-// gated on equivalent generated output.  Built so far, all faithful twins of
-// the matching ⑤c expanders: `scaffoldList` (per-type columns + `rowTestid` +
-// the find-filter bar), `scaffoldNewForm`, `scaffoldOperations`,
-// `scaffoldWorkflowForm`, `scaffoldViewList`, and the workflow-instance
-// list/detail (`scaffoldInstanceList`/`scaffoldInstanceDetails`).  The Detail
-// builder (`scaffoldDetails` — value-object sub-rows + related-entity cards)
-// and attaching the filter state as the page's `state { }` block when wiring
-// are the remaining tail.
+// Status: the AST builders + a print/re-parse proof.  The full family of
+// faithful twins of the ⑤c expanders is now in place: `scaffoldList` (per-type
+// columns + `rowTestid` + the find-filter bar), `scaffoldNewForm`,
+// `scaffoldDetails` (value-object sub-rows + related-entity cards),
+// `scaffoldOperations`, `scaffoldWorkflowForm`, `scaffoldViewList`, and the
+// workflow-instance list/detail.  What remains is the flip itself: wiring these
+// into `_pages.ts` (so the scaffold macro RETURNS them instead of the
+// sentinels), attaching the filter state as the page's `state { }` block,
+// re-sourcing `inferPageOrigin`, and slimming the ⑤c arms — gated on equivalent
+// generated output across the frontends.
 
 import type {
   Aggregate,
+  Containment,
+  EntityPart,
   Expression,
   Operation,
   Property,
   TypeRef,
+  ValueObject,
   View,
   Workflow,
 } from "../../../language/generated/ast.js";
@@ -375,6 +377,201 @@ export function scaffoldInstanceDetails(wf: Workflow): Expression {
       ]),
     },
   ]);
+}
+
+/** `scaffoldDetails` — scaffolds an aggregate's read-side Detail section:
+ *  `Stack(Breadcrumbs, Heading, QueryView(byId) → Card of field rows + related
+ *  cards)`.  AST twin of `expandScaffoldDetails` + `buildDataCardParts`.  Pairs
+ *  with `scaffoldOperations` on the Detail page; `apiHandle` is the ui's api
+ *  param when the aggregate is served over one. */
+export function scaffoldDetails(agg: Aggregate, opts: { apiHandle?: string } = {}): Expression {
+  const slug = snake(plural(agg.name));
+  const humanPlural = humanize(plural(agg.name));
+  const humanAgg = humanize(agg.name);
+  const lowerAgg = humanAgg.toLowerCase();
+  const cellVar = "data";
+  const queryRoot = (): Expression =>
+    opts.apiHandle ? memberAccess(nameRefExpr(opts.apiHandle), agg.name) : nameRefExpr(agg.name);
+
+  const { card, related } = buildDataCardParts(agg, cellVar);
+  const dataBody =
+    related.length === 0
+      ? card
+      : callExpr("Stack", [{ value: card }, ...related.map((r) => ({ value: r }))]);
+
+  return callExpr("Stack", [
+    {
+      value: callExpr("Breadcrumbs", [
+        {
+          value: callExpr("Anchor", [
+            { value: stringLit("Home") },
+            { name: "to", value: stringLit("/") },
+          ]),
+        },
+        {
+          value: callExpr("Anchor", [
+            { value: stringLit(humanPlural) },
+            { name: "to", value: stringLit(`/${slug}`) },
+          ]),
+        },
+        { value: callExpr("Text", [{ value: stringLit("Detail") }]) },
+      ]),
+    },
+    {
+      value: callExpr("Heading", [
+        { value: stringLit(`${humanAgg} detail`) },
+        { name: "level", value: intLit(2) },
+      ]),
+    },
+    {
+      value: callExpr("QueryView", [
+        {
+          name: "of",
+          value: memberAccess(queryRoot(), "byId", { call: true, args: [nameRefExpr("id")] }),
+        },
+        { name: "single", value: boolLit(true) },
+        { name: "loading", value: callExpr("Skeleton", [{ name: "count", value: intLit(3) }]) },
+        {
+          name: "error",
+          value: callExpr("Alert", [{ value: stringLit(`Couldn't load ${lowerAgg}`) }]),
+        },
+        {
+          name: "empty",
+          value: callExpr("Alert", [
+            { value: stringLit(`No ${lowerAgg} matches that id.`) },
+            { name: "color", value: stringLit("yellow") },
+          ]),
+        },
+        { name: "data", value: lambda(cellVar, dataBody) },
+      ]),
+    },
+  ]);
+}
+
+/** The Detail page's field card + related-entity cards.  Each scalar field is a
+ *  `KeyValueRow`; value-object fields flatten into labelled leaf rows
+ *  (`valueObjectRows`); each containment becomes a `Card` — a `Table` for a
+ *  collection, a labelled `KeyValueRow` stack for a single part.  AST twin of
+ *  `buildDataCardParts`. */
+function buildDataCardParts(
+  agg: Aggregate,
+  cellVar: string,
+): { card: Expression; related: Expression[] } {
+  const slug = snake(plural(agg.name));
+  const rows: Array<{ name?: string; value: Expression }> = [];
+  for (const f of propertiesOf(agg.members)) {
+    if (f.type.array) continue;
+    const name = String(f.name);
+    const vo = valueObjectTarget(f.type);
+    if (vo) {
+      rows.push(
+        ...valueObjectRows(() => memberAccess(nameRefExpr(cellVar), name), humanize(name), vo),
+      );
+      continue;
+    }
+    const kind = kindForType(f.type, true)!; // non-array, VO handled above ⇒ always a cell
+    rows.push({
+      value: callExpr("KeyValueRow", [
+        { value: stringLit(humanize(name)) },
+        { value: typedCell(() => memberAccess(nameRefExpr(cellVar), name), kind) },
+        { name: "testid", value: stringLit(`${slug}-detail-${name}`) },
+      ]),
+    });
+  }
+
+  const related: Expression[] = [];
+  for (const c of agg.members.filter((m): m is Containment => m.$type === "Containment")) {
+    const part = c.partType.ref;
+    if (!part) continue;
+    related.push(relatedCard(c, part, cellVar, slug));
+  }
+
+  return { card: callExpr("Card", [{ value: callExpr("Stack", rows) }]), related };
+}
+
+/** One related-entity `Card` for a containment — a framed `Table` over the
+ *  collection, or a labelled `KeyValueRow` stack for a single part. */
+function relatedCard(c: Containment, part: EntityPart, cellVar: string, slug: string): Expression {
+  const humanPart = humanize(c.name);
+  const heading = callExpr("Heading", [
+    { value: stringLit(humanPart) },
+    { name: "level", value: intLit(4) },
+  ]);
+  const testid = { name: "testid", value: stringLit(`${slug}-detail-${snake(c.name)}`) };
+  if (c.collection) {
+    const cols = columnsFromProperties(propertiesOf(part.members)).map((col) => ({
+      value: callExpr("Column", [
+        { value: stringLit(humanize(col.name)) },
+        { value: lambda("row", columnAccessor(col.name, col.kind, "row")) },
+      ]),
+    }));
+    const table = callExpr("Table", [
+      ...cols,
+      { name: "rows", value: memberAccess(nameRefExpr(cellVar), c.name) },
+      { name: "striped", value: boolLit(true) },
+      { name: "highlight", value: boolLit(true) },
+      { name: "keyExpr", value: stringLit("idx") },
+    ]);
+    return callExpr("Card", [
+      { value: callExpr("Stack", [{ value: heading }, { value: table }]) },
+      testid,
+    ]);
+  }
+  // Single part: one KeyValueRow per scalar field, rooted at `<cell>.<part>.<f>`.
+  const singleRows = columnsFromProperties(propertiesOf(part.members)).map((col) => ({
+    value: callExpr("KeyValueRow", [
+      { value: stringLit(humanize(col.name)) },
+      {
+        value: typedCell(
+          () => memberAccess(memberAccess(nameRefExpr(cellVar), c.name), col.name),
+          col.kind,
+        ),
+      },
+    ]),
+  }));
+  return callExpr("Card", [
+    { value: callExpr("Stack", [{ value: heading }, { value: callExpr("Stack", singleRows) }]) },
+    testid,
+  ]);
+}
+
+/** Flatten a value-object field into labelled leaf rows, recursing through
+ *  nested value objects.  AST twin of `valueObjectRows`; the VO is resolved
+ *  straight off the field's type cross-reference. */
+function valueObjectRows(
+  receiver: () => Expression,
+  labelPrefix: string,
+  vo: ValueObject,
+): Array<{ name?: string; value: Expression }> {
+  const out: Array<{ name?: string; value: Expression }> = [];
+  for (const lf of propertiesOf(vo.members)) {
+    if (lf.type.array) continue;
+    const name = String(lf.name);
+    const label = `${labelPrefix} ${humanize(name)}`;
+    const nested = valueObjectTarget(lf.type);
+    if (nested) {
+      out.push(...valueObjectRows(() => memberAccess(receiver(), name), label, nested));
+      continue;
+    }
+    const kind = kindForType(lf.type, true)!;
+    out.push({
+      value: callExpr("KeyValueRow", [
+        { value: stringLit(label) },
+        { value: typedCell(() => memberAccess(receiver(), name), kind) },
+      ]),
+    });
+  }
+  return out;
+}
+
+/** The `ValueObject` a field's type points at, or `undefined` when it isn't a
+ *  value-object reference. */
+function valueObjectTarget(type: TypeRef): ValueObject | undefined {
+  if (type.array) return undefined;
+  const base = type.base;
+  if (base.$type !== "NamedType") return undefined;
+  const ref = base.target.ref;
+  return ref?.$type === "ValueObject" ? ref : undefined;
 }
 
 /** The property list a view's columns walk: its declared output record when

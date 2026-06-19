@@ -4,6 +4,7 @@ import type { ScaffoldColumn } from "../../src/macros/stdlib/scaffold/_body-buil
 import {
   filterFindsForAggregate,
   filterStateFields,
+  scaffoldDetails,
   scaffoldInstanceDetails,
   scaffoldInstanceList,
   scaffoldList,
@@ -191,6 +192,55 @@ describe("scaffoldOperations — per-operation modals", () => {
     const { model } = await parseString(withOps("private operation recompute() { }"));
     const order = findNode(model, "Aggregate", "Order");
     expect(printExpr(scaffoldOperations(order))).toBe("Group()");
+  });
+});
+
+describe("scaffoldDetails — aggregate read view + related cards", () => {
+  it("builds a field card (scalars + flattened value-objects) and a related table card", async () => {
+    const { model, errors } = await parseString(`
+      system S {
+        context C {
+          valueobject Money { amount: decimal  currency: string }
+          aggregate Order {
+            reference: string
+            total: Money
+            contains lines: OrderLine[]
+            entity OrderLine {
+              sku: string
+              quantity: int
+            }
+          }
+          repository Orders for Order { }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+    const order = findNode(model, "Aggregate", "Order");
+    const src = printExpr(scaffoldDetails(order));
+    // shell: breadcrumbs / heading / by-id query
+    expect(src).toContain(
+      'Breadcrumbs(Anchor("Home", to: "/"), Anchor("Orders", to: "/orders"), Text("Detail"))',
+    );
+    expect(src).toContain('Heading("Order detail", level: 2)');
+    expect(src).toContain("QueryView(of: Order.byId(id), single: true");
+    expect(src).toContain('Alert("No order matches that id.", color: "yellow")');
+    // field card: scalar row carries a testid; value-object flattens to labelled leaves
+    expect(src).toContain(
+      'KeyValueRow("Reference", Text(data.reference), testid: "orders-detail-reference")',
+    );
+    expect(src).toContain('KeyValueRow("Total Amount", Text(data.total.amount))');
+    expect(src).toContain('KeyValueRow("Total Currency", Text(data.total.currency))');
+    // related collection → a framed table card over data.lines
+    expect(src).toContain('Heading("Lines", level: 4)');
+    expect(src).toContain('Column("Sku", row => Text(row.sku))');
+    expect(src).toContain('Column("Quantity", row => Text(row.quantity))');
+    expect(src).toContain("rows: data.lines");
+    expect(src).toContain('testid: "orders-detail-lines"');
+    expect(
+      parseRawResult(inPage(src))
+        .parserErrors.map((e) => e.message)
+        .join("\n"),
+    ).toBe("");
   });
 });
 
