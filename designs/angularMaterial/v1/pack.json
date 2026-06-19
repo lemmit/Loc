@@ -38,6 +38,12 @@
     "primitive-code-block": "primitive-code-block.hbs",
     "primitive-query-view": "primitive-query-view.hbs",
     "primitive-table": "primitive-table.hbs",
+    "primitive-field": "primitive-field.hbs",
+    "primitive-number-field": "primitive-number-field.hbs",
+    "primitive-multiline-field": "primitive-multiline-field.hbs",
+    "primitive-password-field": "primitive-password-field.hbs",
+    "primitive-toggle": "primitive-toggle.hbs",
+    "primitive-select-field": "primitive-select-field.hbs",
     "package-json": "package-json.hbs",
     "angular-json": "angular-json.hbs",
     "tsconfig": "tsconfig.hbs",
@@ -55,6 +61,29 @@
     "primitive-loader": [
       { "from": "@angular/material/progress-spinner", "named": ["MatProgressSpinnerModule"] }
     ],
-    "primitive-tabs": [{ "from": "@angular/material/tabs", "named": ["MatTabsModule"] }]
+    "primitive-tabs": [{ "from": "@angular/material/tabs", "named": ["MatTabsModule"] }],
+    "primitive-field": [
+      { "from": "@angular/material/form-field", "named": ["MatFormFieldModule"] },
+      { "from": "@angular/material/input", "named": ["MatInputModule"] }
+    ],
+    "primitive-number-field": [
+      { "from": "@angular/material/form-field", "named": ["MatFormFieldModule"] },
+      { "from": "@angular/material/input", "named": ["MatInputModule"] }
+    ],
+    "primitive-multiline-field": [
+      { "from": "@angular/material/form-field", "named": ["MatFormFieldModule"] },
+      { "from": "@angular/material/input", "named": ["MatInputModule"] }
+    ],
+    "primitive-password-field": [
+      { "from": "@angular/material/form-field", "named": ["MatFormFieldModule"] },
+      { "from": "@angular/material/input", "named": ["MatInputModule"] }
+    ],
+    "primitive-toggle": [
+      { "from": "@angular/material/slide-toggle", "named": ["MatSlideToggleModule"] }
+    ],
+    "primitive-select-field": [
+      { "from": "@angular/material/form-field", "named": ["MatFormFieldModule"] },
+      { "from": "@angular/material/select", "named": ["MatSelectModule"] }
+    ]
   }
 }
