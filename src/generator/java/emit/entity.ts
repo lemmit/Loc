@@ -545,10 +545,14 @@ export function renderJavaEntity(
     (needsHibernateTypes(entity.fields) ||
       (persistence.embedded &&
         (entity.contains.length > 0 || entity.fields.some((f) => isRefCollection(f.type)))));
-  // Capability filters (non-principal, relational — the validator gates
-  // the rest) ride Hibernate's @SQLRestriction: one static WHERE
-  // fragment appended to every SELECT (the HasQueryFilter analog).
-  const contextFilters = isRoot && isAgg(entity) ? (entity.contextFilters ?? []) : [];
+  // Non-principal capability filters (relational soft-delete et al.) ride
+  // Hibernate's @SQLRestriction: one static WHERE fragment appended to every
+  // SELECT (the HasQueryFilter analog).  PRINCIPAL (tenancy) filters can't —
+  // @SQLRestriction is static SQL with no runtime principal — so they're AND-ed
+  // into the repository's per-query JPQL instead (see emit/repository.ts).
+  const contextFilters = (isRoot && isAgg(entity) ? (entity.contextFilters ?? []) : []).filter(
+    (p) => !exprUsesCurrentUser(p),
+  );
   const sqlRestriction =
     persistence && contextFilters.length > 0
       ? `@SQLRestriction(${JSON.stringify(contextFilters.map(renderSqlRestriction).join(" and "))})`

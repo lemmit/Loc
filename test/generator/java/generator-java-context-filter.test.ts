@@ -1,13 +1,13 @@
 // ---------------------------------------------------------------------------
-// Java backend — capability filters (`filter for "..."`) ride
-// Hibernate's @SQLRestriction: the non-principal, relational predicate
-// renders to a static SQL fragment appended to every SELECT (the
-// HasQueryFilter / Drizzle-WHERE analog).  Principal-referencing
-// filters and non-relational shapes stay gated
-// (loom.context-filter-unsupported — java joined the limited-families
-// set).  Boot-verified end-to-end against Postgres via
-// test/e2e/fixtures/java-build/context-filter.ddd (soft-deleted row
-// hidden from list + by-id, still physically present).
+// Java backend — capability filters.  A NON-principal, relational predicate
+// rides Hibernate's @SQLRestriction: a static SQL fragment appended to every
+// SELECT (the HasQueryFilter / Drizzle-WHERE analog).  A PRINCIPAL (tenancy)
+// predicate instead AND-s a SpEL-principal JPQL clause into every read (see
+// generator-java-tenancy-filter.test.ts) — but still requires `auth: required`
+// (a request principal to scope by); a non-relational shape stays gated
+// (loom.context-filter-unsupported).  Boot-verified end-to-end against Postgres
+// via test/e2e/fixtures/java-build/context-filter.ddd (soft-deleted row hidden
+// from list + by-id, still physically present).
 // ---------------------------------------------------------------------------
 
 import { readFileSync } from "node:fs";
@@ -28,7 +28,7 @@ describe("java generator — capability filters (@SQLRestriction)", () => {
     expect(doc).toContain("import org.hibernate.annotations.SQLRestriction;");
   });
 
-  it("gates a principal-referencing filter (tenancy) fail-fast", async () => {
+  it("requires auth for a principal filter — rejects when the deployable has none", async () => {
     const tenancy = `
 system CF {
   user { id: string  name: string }

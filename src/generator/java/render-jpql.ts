@@ -12,8 +12,17 @@ import type { ExprIR } from "../../ir/types/loom-ir.js";
 // bug, not a user error.
 //
 // `this` → the query alias (`e`); `param` refs → `:name` bind parameters;
-// enum values render as fully-qualified JPQL enum literals.
+// enum values render as fully-qualified JPQL enum literals.  A
+// `currentUser.<field>` access (principal/tenancy filter) renders as a Spring
+// Data SpEL parameter resolving the ambient request principal through the
+// generated `CurrentUserAccessor` bean — the JPA analogue of node's
+// `requireCurrentUser()`: `:#{@currentUserAccessor.user()?.<field>()}`.  The
+// null-safe `?.` keeps it fail-closed (no actor → null → `= NULL` → no rows),
+// mirroring the .NET / Ash / vanilla behaviour.
 // ---------------------------------------------------------------------------
+
+/** Spring bean name of the generated `CurrentUserAccessor` @Component. */
+const CURRENT_USER_BEAN = "currentUserAccessor";
 
 export interface JpqlCtx {
   /** Query alias for the aggregate root (`e`). */
@@ -37,6 +46,11 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
     case "ref":
       return renderRef(e, ctx);
     case "member":
+      // `currentUser.<field>` → SpEL reading the ambient request principal off
+      // the CurrentUserAccessor bean (null-safe → fail-closed).
+      if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user") {
+        return `:#{@${CURRENT_USER_BEAN}.user()?.${e.member}()}`;
+      }
       // Property navigation: `this.shipTo.city` → `e.shipTo.city`
       // (embedded path).  JPQL navigates record components by name.
       return `${render(e.receiver, ctx)}.${e.member}`;

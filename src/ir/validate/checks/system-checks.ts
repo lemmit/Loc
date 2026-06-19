@@ -632,17 +632,19 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
   const LIMITED_FAMILIES = new Set(["node", "elixir", "java"]);
   // Backends that now wire PRINCIPAL-referencing filters (`currentUser.x`) on
-  // relational aggregates.  node renders the predicate against the ambient
-  // `requireCurrentUser()` accessor inside every root read (DEBT-01) — the
-  // Drizzle analogue of .NET's `HasQueryFilter`.  elixir wires it on BOTH
-  // foundations: **Ash** (`base_filter expr(... == ^actor(:field))` + `actor:
-  // current_user` threaded onto reads) and **vanilla** Ecto (the principal
-  // predicate AND-ed into every read as `^(current_user && current_user.f)`,
-  // with `current_user` threaded from `conn.assigns`).  java still defers it
-  // entirely (`@SQLRestriction` is static SQL).
+  // relational aggregates — every limited family does.  node renders the
+  // predicate against the ambient `requireCurrentUser()` accessor inside every
+  // root read (the Drizzle analogue of .NET's `HasQueryFilter`).  elixir wires
+  // it on BOTH foundations: **Ash** (`base_filter expr(... == ^actor(:field))` +
+  // `actor: current_user`) and **vanilla** Ecto (the predicate AND-ed into each
+  // read as `^(current_user && current_user.f)`).  **java** AND-s a SpEL-
+  // principal JPQL clause (`:#{@currentUserAccessor.user()?.f()}`) into every
+  // find/retrieval/view + the scoped `findAll`/`findById` overrides (the static
+  // `@SQLRestriction` still carries the non-principal filters).
   const supportsPrincipalFilter = (family: string, _foundation: string | undefined): boolean => {
     if (family === "node") return true;
     if (family === "elixir") return true;
+    if (family === "java") return true;
     return false;
   };
 
