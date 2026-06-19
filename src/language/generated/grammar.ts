@@ -14937,6 +14937,34 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "action"
+          },
+          {
+            "$type": "Keyword",
+            "value": "description"
+          },
+          {
+            "$type": "Keyword",
+            "value": "ogImage"
+          },
+          {
+            "$type": "Keyword",
+            "value": "canonical"
+          },
+          {
+            "$type": "Keyword",
+            "value": "favicon"
+          },
+          {
+            "$type": "Keyword",
+            "value": "title"
+          },
+          {
+            "$type": "Keyword",
+            "value": "body"
+          },
+          {
+            "$type": "Keyword",
+            "value": "state"
           }
         ]
       },

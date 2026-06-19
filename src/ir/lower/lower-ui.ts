@@ -267,12 +267,11 @@ function lowerPage(p: Page): PageIR {
   if (description !== undefined || ogImage !== undefined || canonical !== undefined) {
     metadata = { description, ogImage, canonical };
   }
-  // Pass-1 AST-to-AST scaffold expansion populates
-  // synthesised pages with body expressions like
-  // `scaffoldList(of: Order)` / `CreateForm(of: T)` / etc.  We infer the
-  // page's `archetype` discriminator and `source` from the
-  // body shape so the React emitter dispatches identically
-  // whether the page came from source or from the AST expander.
+  // Infer the page's origin discriminator + `source` from its body
+  // shape.  Only the three singleton index-page sentinels (`Home` /
+  // `WorkflowsIndex` / `ViewsIndex`) are recognised here; scaffolded
+  // list / detail / form pages carry full body trees and get their
+  // origin re-sourced by name in `resourceScaffoldOrigins` (lower.ts).
   const inferred = inferPageOrigin(body);
   return {
     name: p.name,
@@ -292,66 +291,20 @@ function lowerPage(p: Page): PageIR {
 }
 
 /** Infer a page's `origin` from its body shape.  The scaffold macro
- *  emits canonical body primitives (`scaffoldList(of:)`,
- *  `scaffoldNewForm(of:)`, `scaffoldWorkflowForm(runs:)`,
- *  `scaffoldViewList(of:)`, `Stack(scaffoldDetails(of:), …)`,
- *  `Home()` / `WorkflowsIndex()` / `ViewsIndex()`) — each call name
- *  maps one-to-one to an origin kind.  Anything else is a
- *  user-written page → `{ kind: "custom" }`. */
+ *  emits the three singleton index pages with a sentinel-call body
+ *  (`Home()` / `WorkflowsIndex()` / `ViewsIndex()`) whose name maps
+ *  one-to-one to an origin kind.  Anything else is a user-written page
+ *  → `{ kind: "custom" }`; scaffolded list / detail / form pages carry
+ *  their full body tree directly and get their origin re-sourced by
+ *  name in `resourceScaffoldOrigins` (`src/ir/lower/lower.ts`). */
 function inferPageOrigin(body: ExprIR | undefined): PageOriginIR {
   if (!body || body.kind !== "call") return { kind: "custom" };
   const callName = body.name;
-  const argNames = body.argNames ?? [];
-  const refArg = (i: number): string | undefined => {
-    const arg = body.args[i];
-    return arg && arg.kind === "ref" ? arg.name : undefined;
-  };
   // Singleton index pages — synthesised by the scaffold macro with
   // sentinel-call bodies whose name matches the page's role.
   if (callName === "Home") return { kind: "home" };
   if (callName === "WorkflowsIndex") return { kind: "workflows-index" };
   if (callName === "ViewsIndex") return { kind: "views-index" };
-  // Canonical scaffold body primitives — one call name per origin
-  // kind.  Each names its target explicitly via `of:` / `runs:`.
-  if (callName === "scaffoldList" && argNames[0] === "of") {
-    const aggName = refArg(0);
-    if (aggName) return { kind: "aggregate-list", aggregateName: aggName, contextName: "" };
-  }
-  if (callName === "scaffoldNewForm" && argNames[0] === "of") {
-    const aggName = refArg(0);
-    if (aggName) return { kind: "aggregate-new", aggregateName: aggName, contextName: "" };
-  }
-  if (callName === "scaffoldWorkflowForm" && argNames[0] === "runs") {
-    const wfName = refArg(0);
-    if (wfName) return { kind: "workflow-form", workflowName: wfName, contextName: "" };
-  }
-  if (callName === "scaffoldViewList" && argNames[0] === "of") {
-    const viewName = refArg(0);
-    if (viewName) return { kind: "view-list", viewName, contextName: "" };
-  }
-  // Workflow-instance read pages (workflow-instance-visibility.md) — list /
-  // detail over a saga's persisted correlation-state rows.
-  if (callName === "scaffoldInstanceList" && argNames[0] === "of") {
-    const wfName = refArg(0);
-    if (wfName) return { kind: "workflow-instances-list", workflowName: wfName, contextName: "" };
-  }
-  if (callName === "scaffoldInstanceDetails" && argNames[0] === "of") {
-    const wfName = refArg(0);
-    if (wfName) return { kind: "workflow-instance-detail", workflowName: wfName, contextName: "" };
-  }
-  // Detail pages emit `Stack(scaffoldDetails(of:),
-  // scaffoldOperations(of:), testid:)` — recognised by scanning for
-  // a `scaffoldDetails` child at the top of the Stack.
-  if (callName === "Stack") {
-    for (const arg of body.args) {
-      if (arg.kind !== "call") continue;
-      if (arg.name !== "scaffoldDetails") continue;
-      const ofIdx = (arg.argNames ?? []).indexOf("of");
-      const ofArg = ofIdx >= 0 ? arg.args[ofIdx] : undefined;
-      if (!ofArg || ofArg.kind !== "ref") continue;
-      return { kind: "aggregate-detail", aggregateName: ofArg.name, contextName: "" };
-    }
-  }
   return { kind: "custom" };
 }
 

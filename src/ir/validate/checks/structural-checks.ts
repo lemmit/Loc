@@ -863,12 +863,6 @@ export function validateEventSourcedDiscipline(
 // ---------------------------------------------------------------------------
 
 const SCAFFOLD_PRIMITIVE_NAMES: ReadonlySet<string> = new Set([
-  "scaffoldDetails",
-  "scaffoldOperations",
-  "scaffoldList",
-  "scaffoldNewForm",
-  "scaffoldWorkflowForm",
-  "scaffoldViewList",
   "Home",
   "WorkflowsIndex",
   "ViewsIndex",

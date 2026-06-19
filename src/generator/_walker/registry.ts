@@ -180,9 +180,9 @@ export type HeexRenderer = (call: ExprIR & { kind: "call" }, ctx: HeexWalkContex
  *    layout   → top-level layout / display / formatter primitives.
  *    sub      → sub-elements only valid nested inside a parent
  *               (`Tab` inside `Tabs`, `Column` inside `Table`).
- *    scaffold → `scaffoldList`/`scaffoldDetails`/… expander
- *               sentinels + the singleton page sentinels (`Home`,
- *               `WorkflowsIndex`, `ViewsIndex`). */
+ *    scaffold → the singleton index-page sentinels (`Home`,
+ *               `WorkflowsIndex`, `ViewsIndex`) recognised by
+ *               `inferPageOrigin`. */
 export type PrimitiveGroup = "layout" | "sub" | "scaffold";
 
 export interface PrimitiveDef {
@@ -398,15 +398,11 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   // wired through Table so it stays out of the top-level dispatch.
   Tab: { group: "sub", admissibleInSource: true },
   Column: { group: "sub", admissibleInSource: true, heex: renderTableColumnHeex },
-  // --- Scaffold-internal sentinels (recognised by inferPageOrigin) ----
-  scaffoldList: { group: "scaffold", admissibleInSource: true },
-  scaffoldDetails: { group: "scaffold", admissibleInSource: true },
-  scaffoldOperations: { group: "scaffold", admissibleInSource: true },
-  scaffoldNewForm: { group: "scaffold", admissibleInSource: true },
-  scaffoldWorkflowForm: { group: "scaffold", admissibleInSource: true },
-  scaffoldViewList: { group: "scaffold", admissibleInSource: true },
-  scaffoldInstanceList: { group: "scaffold", admissibleInSource: true },
-  scaffoldInstanceDetails: { group: "scaffold", admissibleInSource: true },
+  // --- Singleton index-page sentinels (recognised by inferPageOrigin) ----
+  // The scaffold macro still emits these as the body of the per-UI
+  // Home / Workflows / Views index pages; they classify the page origin.
+  // (The `scaffold*(of:)` body primitives were removed — scaffolded list /
+  // detail / form pages now carry their full body tree directly.)
   Home: { group: "scaffold", admissibleInSource: true },
   WorkflowsIndex: { group: "scaffold", admissibleInSource: true },
   ViewsIndex: { group: "scaffold", admissibleInSource: true },

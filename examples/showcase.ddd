@@ -407,8 +407,9 @@ system DevPlatform {
             body: Stack { Badge { label }, Slot { "extra" } }
         }
 
-        // Active-projects view page — exercises the `scaffoldViewList` view
-        // primitive and gives the "browse projects via the console UI" e2e a
+        // Active-projects view page — the inlined view-list body (the tree the
+        // scaffold view-list builder emits) gives the "browse projects via the
+        // console UI" e2e a
         // real route + view-list page-object to drive.  Route/testids line up
         // with the generated `ActiveProjectsViewPage.goto()` (`/views/<snake>`,
         // `view-active_projects`), so the UI spec resolves its import and the
@@ -416,7 +417,7 @@ system DevPlatform {
         page ActiveProjectsView {
             route: "/views/active_projects"
             title: "Active projects"
-            body: scaffoldViewList(of: ActiveProjects)
+            body: Stack { Heading { "Active Projects", level: 2 }, QueryView { of: Views.ActiveProjects, loading: Skeleton { count: 5 }, error: Alert { "Couldn't load active projects" }, empty: Empty { "No rows." }, data: rows => Paper { Table { Column { "Name", o => Text { o.name } }, Column { "Description", o => Text { o.description } }, Column { "Visibility", o => EnumBadge { o.visibility } }, Column { "Active", o => Text { o.active ? "Yes" : "No" } }, Column { "Sequence", o => Text { o.sequence } }, Column { "External Id", o => Text { o.externalId } }, Column { "Budget", o => Text { o.budget } }, Column { "Created At", o => DateDisplay { o.createdAt } }, rows: rows, striped: true, highlight: true, sticky: true, keyExpr: "idx" } } }, testid: "view-active_projects" }
         }
 
         // UI-level sidebar menu — internal link + external link.

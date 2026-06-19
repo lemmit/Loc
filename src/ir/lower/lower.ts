@@ -581,15 +581,16 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
     channelSources,
     layouts,
   };
-  // Scaffold post-passes.  Scaffolded pages now carry their full body tree
-  // directly (the macro emits the `_body-builders.ts` scaffolders), so
-  // `resourceScaffoldOrigins` recovers each one's `page.origin` from its NAME
-  // (`<Agg>List|New|Detail`, `<Wf>Workflow`, …) rather than a body sentinel.
+  // Scaffold post-passes.  Scaffolded list / detail / form pages carry their
+  // full body tree directly (the macro emits the `_body-builders.ts`
+  // scaffolders), so `resourceScaffoldOrigins` recovers each one's
+  // `page.origin` from its NAME (`<Agg>List|New|Detail`, `<Wf>Workflow`, …).
   // `origin` then drives the per-page side effects (emit path, auto-`id` param
   // for detail pages) and the per-aggregate page-object emitter
-  // (`e2e/pages/<agg>.ts`).  `expandInlineScaffoldPrimitiveCalls` still runs,
-  // but now only rewrites HAND-WRITTEN `scaffold*(of:)` body primitives — for
-  // macro-emitted pages it's a no-op (no sentinels left to expand).
+  // (`e2e/pages/<agg>.ts`).  `expandInlineScaffoldPrimitiveCalls` rewrites the
+  // three singleton index-page sentinels (`Home`/`WorkflowsIndex`/`ViewsIndex`)
+  // — the macro emits those as bare sentinel calls, expanded here from the
+  // system shape; every other page is a no-op.
   resourceScaffoldOrigins(built);
   dropNonConstructibleNewPages(built);
   stripNonConstructibleListCreate(built);
@@ -739,35 +740,27 @@ function lowerConnectionSource(node: ConnectionSource): ConnectionSourceIR {
   }
 }
 
-/** Rewrite the inline body primitives `scaffoldDetails(of:)` and
- *  `scaffoldOperations(of:)` into their expanded ExprIR forms.
- *  Runs against EVERY page's body (regardless of origin) because the
- *  scaffold detail page emits an explicit body whose `origin`
- *  doesn't carry the primitive-call info.  Pages whose body never
- *  uses these primitives are no-ops — the rewriter walks each tree
- *  once and returns the same reference when nothing changed. */
+/** Rewrite the singleton index-page sentinels — `Home()` /
+ *  `WorkflowsIndex()` / `ViewsIndex()` — into their expanded ExprIR
+ *  trees (the scaffold macro emits them as bare sentinel-call bodies,
+ *  derived here from the system shape).  Runs against EVERY page's
+ *  body; pages whose body never uses a sentinel are no-ops — the
+ *  rewriter walks each tree once and returns the same reference when
+ *  nothing changed. */
 function expandInlineScaffoldPrimitiveCalls(sys: SystemIR): void {
   for (const ui of sys.uis) {
     const ctx = buildExpandContext(sys, ui);
     for (const page of ui.pages) {
       if (!page.body) continue;
-      // Per-page state sink: an expansion may synthesise state fields
-      // onto its host page (the find-filter inputs of
-      // `expandScaffoldList`).  Reset before, drain after.
-      ctx.pendingPageState = [];
       page.body = expandInlineScaffoldPrimitives(page.body, ctx);
-      if (ctx.pendingPageState.length > 0) {
-        page.state = [...page.state, ...ctx.pendingPageState];
-      }
     }
   }
 }
 
 /** Per-page side effects driven by `page.origin`: compute the
  *  conventional emit path and synthesise the `id` route param on
- *  aggregate-detail pages.  Body content is left alone — pages
- *  scaffold-emitted with canonical body primitives
- *  (`scaffoldList(of:)` etc.) are rewritten in a separate pass by
+ *  aggregate-detail pages.  Body content is left alone — the singleton
+ *  index-page sentinels are expanded in a separate pass by
  *  `expandInlineScaffoldPrimitiveCalls`. */
 function applyPageOriginSideEffects(sys: SystemIR): void {
   for (const ui of sys.uis) {

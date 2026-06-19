@@ -11,9 +11,9 @@
 //     form variants (`CreateForm`, `OperationForm`, `WorkflowForm`).
 //   WALKER_SUB_PRIMITIVES    — sub-elements that only appear nested inside
 //     a parent (`Tab` inside `Tabs`, `Column` inside `Table`).
-//   WALKER_SCAFFOLD_PRIMITIVES — `scaffoldList`/`scaffoldDetails`/…
-//     and the singleton sentinels (`Home`/`WorkflowsIndex`/`ViewsIndex`)
-//     recognised by `inferPageOrigin`.
+//   WALKER_SCAFFOLD_PRIMITIVES — the singleton index-page sentinels
+//     (`Home`/`WorkflowsIndex`/`ViewsIndex`) recognised by
+//     `inferPageOrigin`.
 //
 // These three sets are DERIVED — the single source of truth is the
 // typed dispatch table at src/generator/_walker/registry.ts, which
@@ -91,20 +91,11 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
 
 export const WALKER_SUB_PRIMITIVES: ReadonlySet<string> = new Set(["Tab", "Column"]);
 
-/** Scaffold-internal primitive names recognised by `inferPageOrigin`.
- *  Admissible as BuilderCall types so hand-written canonical bodies
- *  (`body: Stack { scaffoldDetails { of: X }, scaffoldOperations { of: X } }`)
+/** Singleton index-page sentinel names recognised by `inferPageOrigin`.
+ *  Admissible as BuilderCall types so the scaffold-emitted index-page
+ *  bodies (`body: Home`, `body: WorkflowsIndex`, `body: ViewsIndex`)
  *  validate. */
 export const WALKER_SCAFFOLD_PRIMITIVES: ReadonlySet<string> = new Set([
-  "scaffoldList",
-  "scaffoldDetails",
-  "scaffoldOperations",
-  "scaffoldNewForm",
-  "scaffoldWorkflowForm",
-  "scaffoldViewList",
-  "scaffoldInstanceList",
-  "scaffoldInstanceDetails",
-  // Singleton sentinels.
   "Home",
   "WorkflowsIndex",
   "ViewsIndex",

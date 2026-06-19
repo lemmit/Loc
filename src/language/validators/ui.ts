@@ -20,7 +20,6 @@ import { isComponent, isMemberSuffix, isPostfixChain } from "../generated/ast.js
 import { isWalkerPrimitive } from "../walker-stdlib.js";
 import {
   findAggregateInModule,
-  isScaffoldOriginPageBody,
   isValidApiOperation,
   listValidApiOperations,
   pagePropDisplayName,
@@ -352,7 +351,6 @@ export function checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
   // is intentionally dropped — named layouts make
   // `Home: layout AdminFrame` meaningful (a scaffold Home page can
   // now opt into a custom chrome).
-  void isScaffoldOriginPageBody; // imported but unused after the v1 restriction lifted
   const system = ui.$container;
   const declaredLayouts = new Set<string>();
   if (system?.$type === "System") {

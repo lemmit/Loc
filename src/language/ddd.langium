@@ -1830,7 +1830,15 @@ MemberName returns string:
        | 'paged' | 'envelope' | 'option' | 'or'
        // `action` admitted after `.` (Tier 2 `ActionType` is the only hard
        // position).
-       | 'action';
+       | 'action'
+       // Page-metadata + favicon soft keywords admitted after `.` so member
+       // access on a field named `description` / `title` / `body` / `state` /
+       // etc. parses — e.g. a scaffolded view-list column over a `description`
+       // field (`o => Text { o.description }`).  These are already soft in
+       // `Property.name` / `LooseName`; hard only in the page DSL metadata
+       // slots (`title:` / `body:` / `description:` / the `state { … }` block).
+       | 'description' | 'ogImage' | 'canonical' | 'favicon'
+       | 'title' | 'body' | 'state';
 
 // Lambdas accept either a single expression body (the only form
 // in v22) or a brace-wrapped block of statements.  Block bodies

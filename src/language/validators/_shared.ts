@@ -23,16 +23,12 @@ import {
   type DerivedProp,
   type EntityPart,
   type FunctionDecl,
-  isCallSuffix,
   isContainment,
   isDecLit,
   isDerivedProp,
   isIntLit,
-  isPostfixChain,
   isProperty,
   type LValue,
-  type NameRef,
-  type Page,
   type Subdomain,
   type ValueObject,
 } from "../generated/ast.js";
@@ -311,58 +307,6 @@ export function pagePropDisplayName(typeName: string): string {
     default:
       return typeName;
   }
-}
-
-// Names of body-call expressions produced by the scaffold stdlib
-// (see `src/stdlib/scaffold/_pages.ts`).  Used by the layout
-// validator to refuse `layout:` on scaffold-synthesised pages in
-// v1 — the AST shape is the source of truth here because the
-// validator runs before IR lowering, and `inferPageOrigin`
-// (`src/ir/lower/lower.ts:1028`) is the lowering's same-shape mirror.
-const SCAFFOLD_BODY_CALL_NAMES = new Set([
-  "Home",
-  "WorkflowsIndex",
-  "ViewsIndex",
-  "scaffoldList",
-  "scaffoldNewForm",
-  "scaffoldWorkflowForm",
-  "scaffoldViewList",
-]);
-
-export function isScaffoldOriginPageBody(p: Page): boolean {
-  const bodyProp = p.props.find((prop) => prop.$type === "BodyProp");
-  if (!bodyProp || bodyProp.$type !== "BodyProp") return false;
-  const expr = bodyProp.expr;
-  // Post-flatten: a bare `Name(args)` is a PostfixChain with head=NameRef
-  // and one CallSuffix.  Reach into that shape.
-  if (!expr || !isPostfixChain(expr)) return false;
-  const first = expr.suffixes[0];
-  if (!first || !isCallSuffix(first)) return false;
-  const head = expr.head;
-  if (!head || head.$type !== "NameRef") return false;
-  const headName = (head as NameRef).name;
-  if (SCAFFOLD_BODY_CALL_NAMES.has(headName)) return true;
-  // Aggregate-detail pages are emitted as `Stack(scaffoldDetails(of:),
-  // …)` — recognise by scanning the Stack's args for a
-  // `scaffoldDetails` call (matches the lowering-side discriminator
-  // in `inferPageOrigin`).
-  if (headName === "Stack") {
-    for (const arg of first.args) {
-      const v = arg.value;
-      if (!v || !isPostfixChain(v)) continue;
-      const innerFirst = v.suffixes[0];
-      if (!innerFirst || !isCallSuffix(innerFirst)) continue;
-      const innerHead = v.head;
-      if (
-        innerHead &&
-        innerHead.$type === "NameRef" &&
-        (innerHead as NameRef).name === "scaffoldDetails"
-      ) {
-        return true;
-      }
-    }
-  }
-  return false;
 }
 
 // Used by derived-prop check on aggregates / value objects to test

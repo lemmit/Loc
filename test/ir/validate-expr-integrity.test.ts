@@ -1,14 +1,14 @@
 // IR validator — expression-integrity pass.
 //
-// Catches un-expanded scaffold primitives that escape the
+// Catches un-expanded singleton index-page sentinels (`Home` /
+// `WorkflowsIndex` / `ViewsIndex`) that escape the
 // `walker-primitive-expander` (`src/ir/lower/walker-primitive-expander.ts`).
 // The expander's documented contract is that downstream phases never see
-// the un-expanded form; its early-exit branches at lines 104, 117, 127
-// silently violate that when the target aggregate/workflow/view can't be
-// resolved.  Backends have no handler for the un-expanded shape — pre-fix
-// they either crashed mid-codegen or emitted something nonsensical.  The
-// new validator pass turns the failure into a clear error pointing at the
-// offending page.
+// the un-expanded sentinel form.  Backends have no handler for it — left
+// un-expanded they'd crash mid-codegen or emit something nonsensical.  The
+// validator pass turns the failure into a clear error pointing at the
+// offending page.  (The `scaffold*(of:)` body primitives were removed, so
+// only the three singleton sentinels remain in the guarded set.)
 //
 // What this file does NOT cover: `refKind: "unknown"` ref handling.  That
 // shape is INTENTIONAL for e2e test bodies and member-chain receivers
@@ -93,41 +93,26 @@ describe("validate-expr-integrity — clean fixture passes", () => {
   });
 });
 
-describe("validate-expr-integrity — un-expanded scaffold-primitive rejection", () => {
-  it("rejects a `scaffoldDetails` call left over from expansion", async () => {
+describe("validate-expr-integrity — un-expanded sentinel rejection", () => {
+  it("rejects a bare `Home` sentinel left over from expansion", async () => {
     const loom = await loadFixture();
-    // Replace the page body with the shape the scaffold expander
-    // returns when it can't resolve the target aggregate — the call
-    // node passes through unchanged.
+    // Replace the page body with the shape the singleton expander
+    // returns when it can't resolve the UI context — the sentinel
+    // call node passes through unchanged.
     const page = loom.systems[0]!.uis[0]!.pages[0]!;
-    page.body = {
-      kind: "call",
-      name: "scaffoldDetails",
-      args: [{ kind: "ref", name: "Unknown", refKind: "param", type: { kind: "any" } }],
-      argNames: ["of"],
-    } as ExprIR;
+    page.body = { kind: "call", name: "Home", args: [] } as ExprIR;
 
     const diags = validateLoomModel(loom);
     const scaffoldDiags = diags.filter((d) => d.message.includes("un-expanded scaffold primitive"));
     expect(scaffoldDiags.length).toBeGreaterThanOrEqual(1);
-    expect(scaffoldDiags[0]!.message).toContain("'scaffoldDetails'");
+    expect(scaffoldDiags[0]!.message).toContain("'Home'");
     expect(scaffoldDiags[0]!.source).toContain("Landing");
   });
 
-  it("rejects each of the documented scaffold-primitive names", async () => {
+  it("rejects each of the singleton sentinel names", async () => {
     // Iterates the full set — guards against silently dropping any
     // name from the SCAFFOLD_PRIMITIVE_NAMES list in validate.ts.
-    const names = [
-      "scaffoldDetails",
-      "scaffoldOperations",
-      "scaffoldList",
-      "scaffoldNewForm",
-      "scaffoldWorkflowForm",
-      "scaffoldViewList",
-      "Home",
-      "WorkflowsIndex",
-      "ViewsIndex",
-    ];
+    const names = ["Home", "WorkflowsIndex", "ViewsIndex"];
     for (const name of names) {
       const loom = await loadFixture();
       const page = loom.systems[0]!.uis[0]!.pages[0]!;
@@ -141,22 +126,22 @@ describe("validate-expr-integrity — un-expanded scaffold-primitive rejection",
     }
   });
 
-  it("rejects a scaffold primitive nested inside another expression", async () => {
+  it("rejects a sentinel nested inside another expression", async () => {
     const loom = await loadFixture();
-    // Wrap the un-expanded scaffold in a parent Stack — the walker
+    // Wrap the un-expanded sentinel in a parent Stack — the walker
     // must recurse into nested positions, not just inspect the root.
     const page = loom.systems[0]!.uis[0]!.pages[0]!;
     page.body = {
       kind: "call",
       name: "Stack",
-      args: [{ kind: "call", name: "scaffoldList", args: [] }],
+      args: [{ kind: "call", name: "WorkflowsIndex", args: [] }],
     } as ExprIR;
 
     const diags = validateLoomModel(loom);
     const scaffoldDiags = diags.filter(
       (d) =>
         d.message.includes("un-expanded scaffold primitive") &&
-        d.message.includes("'scaffoldList'"),
+        d.message.includes("'WorkflowsIndex'"),
     );
     expect(scaffoldDiags.length).toBeGreaterThanOrEqual(1);
   });
