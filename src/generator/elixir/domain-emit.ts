@@ -17,12 +17,16 @@ import { discriminatorValue, isTphConcrete, tableOwnerName } from "../../ir/util
 import { effectiveSavingShape } from "../../ir/util/resolve-datasource.js";
 import { singleFieldShape } from "../../ir/validate/invariant-classify.js";
 import { snake, upperFirst } from "../../util/naming.js";
-import { renderActions, renderPolicies, renderPolicyChecks } from "./domain/actions.js";
+import {
+  isAshPolicyGuardedOperation,
+  renderActions,
+  renderPolicies,
+  renderPolicyChecks,
+} from "./domain/actions.js";
 import {
   ashBuiltinValidate,
   exprRefsNonAttribute,
   exprUsesThis,
-  isGuardedOperation,
   isRefCollection,
   isRelationshipCountDerive,
   plural,
@@ -216,7 +220,7 @@ function renderAggregateResource(
   // calls `Check.init/1` at the resource's compile time, so the check must
   // already be compiled (a forward reference in the same file fails with
   // "module is not available").
-  const hasGuards = agg.operations.some(isGuardedOperation);
+  const hasGuards = agg.operations.some(isAshPolicyGuardedOperation);
   const authorizerLine = hasGuards ? ",\n    authorizers: [Ash.Policy.Authorizer]" : "";
   const policiesBlock = renderPolicies(agg, moduleName);
   const policyChecks = renderPolicyChecks(agg, renderCtx, moduleName);
