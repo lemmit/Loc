@@ -5,6 +5,7 @@
 // renderer (domain-emit.ts).
 // -------------------------------------------------------------------------
 
+import { isConstructible } from "../../../ir/enrich/wire-projection.js";
 import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
 import { classifyForWire, singleFieldShape } from "../../../ir/validate/invariant-classify.js";
 import { snake } from "../../../util/naming.js";
@@ -112,10 +113,17 @@ export function renderActions(
     .filter((f) => !isRefCollection(f.type))
     .map((f) => `:${snake(f.name)}`);
 
-  const defaultCreate = `    create :create do
+  // A non-constructible aggregate (no create surface — `!isConstructible`)
+  // emits no `:create` action, matching the Hono/.NET backends and the
+  // suppressed frontend create page.  Ash otherwise defaults to all-CRUD;
+  // this is the DEBT-09 gate for the Phoenix backend.  It's reached only
+  // through its own operations / events.
+  const defaultCreate = isConstructible(agg)
+    ? `    create :create do
       primary? true
       accept [${fieldNames.join(", ")}]
-    end`;
+    end`
+    : "";
 
   // Return-dominant `or`-union ops (exception-less.md A3, DEBT-03) lower to an
   // Ash generic action that hands back a tagged term — an `update` action's
