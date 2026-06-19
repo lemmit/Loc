@@ -91,6 +91,10 @@ const FIXTURES: Array<[string, string]> = [
   // shape(embedded): containments fold into jsonb columns via the
   // Hibernate JSON FormatMapper; scalar columns stay queryable.
   ["test/e2e/fixtures/java-build/embedded.ddd", "emb_api"],
+  // DEBT-02: a capability `filter` on an embedded aggregate — the root scalars
+  // are real columns, so it rides @SQLRestriction (static SQL) on the root
+  // entity, exactly like the relational path (no in-app filtering).
+  ["test/e2e/fixtures/java-build/embedded-filter.ddd", "emb_api"],
   // Lifecycle stamps (audit / softDelete): _stampOnCreate/_stampOnUpdate
   // entity methods the service calls before save (now() over a field).
   ["test/e2e/fixtures/java-build/stamps.ddd", "api1"],

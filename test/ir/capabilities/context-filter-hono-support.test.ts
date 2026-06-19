@@ -139,12 +139,10 @@ system Shop {
     expect(errs[0]).toContain("shape(document)");
   });
 
-  it("still gates a java EMBEDDED capability filter (DEBT-02 follow-up)", async () => {
-    const errs = await honoFilterErrors(
-      sys("java", { shape: "embedded", filter: "filter !this.isDeleted" }),
-    );
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("shape(embedded)");
+  it("accepts a non-principal capability filter on a java EMBEDDED aggregate (DEBT-02 — @SQLRestriction)", async () => {
+    expect(
+      await honoFilterErrors(sys("java", { shape: "embedded", filter: "filter !this.isDeleted" })),
+    ).toEqual([]);
   });
 
   it("accepts both cases on a dotnet deployable (HasQueryFilter handles them)", async () => {
