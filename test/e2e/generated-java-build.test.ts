@@ -53,6 +53,11 @@ const FIXTURES: Array<[string, string]> = [
   // Capability filters: @SQLRestriction from the non-principal filter
   // predicate (softDelete pattern).
   ["test/e2e/fixtures/java-build/context-filter.ddd", "cf_api"],
+  // Principal (tenancy) capability filter: SpEL-principal JPQL clause
+  // (`:#{@currentUserAccessor.user()?.tenantId()}`) AND-ed into the scoped
+  // findAll/findById overrides + custom find + view, with the auth
+  // (CurrentUserAccessor/UserFilter) the SpEL resolves through.
+  ["test/e2e/fixtures/java-build/tenancy-filter.ddd", "api1"],
   // TPH (sharedTable) inheritance: JPA SINGLE_TABLE + @DiscriminatorColumn
   // on the abstract base, @DiscriminatorValue per concrete, shared <Base>Id.
   ["test/e2e/fixtures/java-build/tph.ddd", "tph_api"],

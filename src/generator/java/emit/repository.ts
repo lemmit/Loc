@@ -6,6 +6,7 @@ import type {
   SortTermIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
 import {
@@ -195,10 +196,23 @@ export function renderJavaSpringDataRepository(
     imports.add("org.springframework.data.jpa.repository.JpaSpecificationExecutor");
   }
   const enumsPkg = `${ctx.basePkg}.domain.enums`;
+  // A principal (tenancy) `filter` (`this.tenantId == currentUser.tenantId`)
+  // renders to JPQL with a SpEL accessor for the ambient request principal —
+  // unlike a non-principal filter (which rides the entity's static
+  // `@SQLRestriction`), it must be AND-ed into every query that can return a
+  // row: each find/retrieval/view below, plus `findAll`/`findById` (which JPA
+  // derives, so we override them with a scoped @Query).  `null` when the
+  // aggregate has no principal filter — every other repository stays identical.
+  const principalClause = principalJpqlClause(agg, enumsPkg);
+  const jpqlWhere = (base: string | null): string => {
+    const combined =
+      base && principalClause ? `(${base}) and ${principalClause}` : (base ?? principalClause);
+    return combined ? ` where ${combined}` : "";
+  };
   const methodLines = finds.flatMap((f) => {
     if (f.params.length > 0) imports.add("org.springframework.data.repository.query.Param");
     imports.add("org.springframework.data.jpa.repository.Query");
-    const where = f.filter ? ` where ${renderJpqlWhere(f.filter, { alias: "e", enumsPkg })}` : "";
+    const where = jpqlWhere(f.filter ? renderJpqlWhere(f.filter, { alias: "e", enumsPkg }) : null);
     const declaredParams = f.params.map((p) => {
       collectJavaTypeImports(p.type, imports);
       return `@Param("${p.name}") ${renderJavaType(p.type)} ${p.name}`;
@@ -233,7 +247,7 @@ export function renderJavaSpringDataRepository(
       // impl passes Pageable.unpaged() for the bare run.  The `order by`
       // is baked into the JPQL (an unsorted Pageable leaves it alone).
       imports.add("org.springframework.data.domain.Pageable");
-      const where = ` where ${renderJpqlWhere(r.where, { alias: "e", enumsPkg })}`;
+      const where = jpqlWhere(renderJpqlWhere(r.where, { alias: "e", enumsPkg }));
       const params = r.params
         .map((p) => {
           collectJavaTypeImports(p.type, imports);
@@ -247,7 +261,26 @@ export function renderJavaSpringDataRepository(
         ``,
       ];
     });
-  const allMethodLines = [...methodLines, ...retrievalLines];
+  // Scope the JPA-derived `findAll`/`findById` by re-declaring them with a
+  // principal @Query — otherwise an unauthenticated-scope read or a guessed id
+  // on another tenant's row would leak (the static @SQLRestriction can't carry
+  // the runtime principal).
+  const principalOverrides: string[] = [];
+  if (principalClause) {
+    imports.add("org.springframework.data.jpa.repository.Query");
+    imports.add("org.springframework.data.repository.query.Param");
+    imports.add("java.util.List");
+    imports.add("java.util.Optional");
+    principalOverrides.push(
+      `    @Query("select e from ${agg.name} e where ${principalClause}")`,
+      `    List<${agg.name}> findAll();`,
+      ``,
+      `    @Query("select e from ${agg.name} e where e.id = :id and ${principalClause}")`,
+      `    Optional<${agg.name}> findById(@Param("id") ${idClass} id);`,
+      ``,
+    );
+  }
+  const allMethodLines = [...principalOverrides, ...methodLines, ...retrievalLines];
   while (allMethodLines.length > 0 && allMethodLines[allMethodLines.length - 1] === "")
     allMethodLines.pop();
   return lines(
@@ -263,6 +296,17 @@ export function renderJavaSpringDataRepository(
     `}`,
     ``,
   );
+}
+
+/** The aggregate's PRINCIPAL (tenancy) capability filters as a single JPQL
+ *  predicate (each parenthesised, AND-ed) under the `e` alias, or null when it
+ *  has none.  Non-principal filters are excluded — they ride the entity's
+ *  static `@SQLRestriction` (see `emit/entity.ts`); only principal filters need
+ *  the per-query SpEL-principal form. */
+function principalJpqlClause(agg: EnrichedAggregateIR, enumsPkg: string): string | null {
+  const preds = (agg.contextFilters ?? []).filter(exprUsesCurrentUser);
+  if (preds.length === 0) return null;
+  return preds.map((p) => `(${renderJpqlWhere(p, { alias: "e", enumsPkg })})`).join(" and ");
 }
 
 export function renderJavaRepositoryImpl(
@@ -285,6 +329,12 @@ export function renderJavaRepositoryImpl(
     const pagedParams = [params, "Integer offset, Integer limit"].filter(Boolean).join(", ");
     const bareArgs = r.params.map((p) => p.name).join(", ");
     if (ctx.isReified?.(r) && r.criterionRef) {
+      // NOTE (DEBT-01 / DEBT-24 intersection): a reified `criterion` retrieval
+      // reads via `JpaSpecificationExecutor.findAll(spec)`, which the scoped
+      // findAll/findById @Query overrides above don't cover — so a PRINCIPAL
+      // (tenancy) filter is NOT yet AND-ed into a reified retrieval. Narrow
+      // intersection (criterion reification is itself partial); the
+      // non-reified retrieval path below IS scoped via `jpqlWhere`.
       imports.add("org.springframework.data.domain.Sort");
       const args = r.criterionRef.args.map((a) => {
         collectJavaExprImports(a, imports);

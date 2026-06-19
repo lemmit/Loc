@@ -75,12 +75,12 @@ describe("hono capability-filter support guard", () => {
     ).toEqual([]);
   });
 
-  it("still rejects a principal-referencing filter on java", async () => {
-    const errs = await honoFilterErrors(
-      sys("java", { filter: "filter this.tenantId == currentUser.tenantId" }),
-    );
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("currentUser");
+  it("accepts a principal filter on java (DEBT-01 — SpEL-principal JPQL clause)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("java", { filter: "filter this.tenantId == currentUser.tenantId" }),
+      ),
+    ).toEqual([]);
   });
 
   it("requires 'auth: required' for a principal filter on hono (no principal to scope by otherwise)", async () => {

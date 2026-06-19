@@ -1,0 +1,42 @@
+// DEBT-01 — principal-referencing (tenancy) capability filter on the JAVA
+// (Spring Boot + JPA/Hibernate) backend.  `filter this.tenantId ==
+// currentUser.tenantId` AND-s a SpEL-principal JPQL clause
+// (`:#{@currentUserAccessor.user()?.tenantId()}`) — the JPA analogue of node's
+// ambient `requireCurrentUser()` — into every read: the scoped
+// findAll/findById overrides, each custom find, and each view (views merge into
+// repository finds on java).  The non-principal `@SQLRestriction` path is
+// unaffected.  `auth: required` emits the CurrentUserAccessor / UserFilter the
+// SpEL resolves the request principal through (DevStub verifier here).
+//
+// Decisive check that the generated Spring Data @Query + SpEL compile under
+// `gradle testClasses bootJar` (the java-build gate).
+system JavaTenancy {
+  user { id: guid  tenantId: string }
+
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+        // Always-on row scoping by the requesting principal's tenant.
+        filter this.tenantId == currentUser.tenantId
+      }
+      repository Accounts for Account {
+        find byMinBalance(min: int): Account[] where this.balance >= min
+      }
+      view BigAccounts = Account where balance >= 1000
+    }
+  }
+
+  api LedgerApi from Core
+  storage primary { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: primary }
+  deployable api1 {
+    platform: java
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    port: 8081
+    auth: required
+  }
+}
