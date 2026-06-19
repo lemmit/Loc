@@ -42,11 +42,16 @@ describe("cross-file scaffold ref-list resolution", () => {
       shared.workspace.LangiumDocuments.addDocument(doc);
       await shared.workspace.DocumentBuilder.update([uri(rel)], []);
     };
-    const macroErrors = (rel: string): string[] =>
+    const remove = async (rel: string): Promise<void> => {
+      fs.rmSync(path.join(dir, rel));
+      await shared.workspace.DocumentBuilder.update([], [uri(rel)]);
+    };
+    const errors = (rel: string, match: RegExp): string[] =>
       (shared.workspace.LangiumDocuments.getDocument(uri(rel))?.diagnostics ?? [])
-        .filter((d) => (d.severity ?? 4) <= 2 && UNKNOWN_SUBDOMAIN.test(d.message))
+        .filter((d) => (d.severity ?? 4) <= 2 && match.test(d.message))
         .map((d) => d.message);
-    return { open, macroErrors };
+    const macroErrors = (rel: string): string[] => errors(rel, UNKNOWN_SUBDOMAIN);
+    return { open, remove, errors, macroErrors };
   }
 
   const SALES = `subdomain Sales {
@@ -75,5 +80,42 @@ describe("cross-file scaffold ref-list resolution", () => {
     // An unrelated sibling appears — the bogus ref must NOT be silently hidden.
     await open("sales.ddd", SALES);
     expect(macroErrors("main.ddd")).toHaveLength(1);
+  });
+
+  it("re-errors when the resolved provider file is removed", async () => {
+    const { open, remove, macroErrors } = harness();
+    await open("sales.ddd", SALES);
+    await open(
+      "main.ddd",
+      `import "./sales.ddd"\nsystem S { }\nui Web with scaffold(subdomains: [Sales]) { }\n`,
+    );
+    // Clean to start with — Sales resolves.
+    expect(macroErrors("main.ddd")).toEqual([]);
+
+    // Deleting the provider must re-validate the host (its refs tracked Sales's
+    // document) and surface the now-dangling ref — not leave a stale green.
+    await remove("sales.ddd");
+    expect(macroErrors("main.ddd")).toHaveLength(1);
+  });
+
+  // A page body referencing a top-level `component` by name is the *same* class
+  // of by-name cross-document reference as a macro arg (resolved in the
+  // validator against the workspace index, not via Langium's linker), and is
+  // re-validated through the same affected-doc path (the `loom.unknown-builder-type`
+  // hungry-retry).  This is what the ERP example's deploy.ddd relies on.
+  it("clears a cross-file top-level component reference once its file loads", async () => {
+    const { open, errors } = harness();
+    const UNKNOWN_BUILDER = /Unknown builder type 'Banner'/;
+
+    // Page uses `Banner`, declared in a sibling that hasn't loaded yet.
+    await open(
+      "main.ddd",
+      `system S { }\nui Web {\n  page Home { route: "/", body: Stack { Banner { } } }\n}\n`,
+    );
+    expect(errors("main.ddd", UNKNOWN_BUILDER)).toHaveLength(1);
+
+    // The component's file lands later: the page must re-validate and clear.
+    await open("lib.ddd", `component Banner { body: Text { "hi" } }\n`);
+    expect(errors("main.ddd", UNKNOWN_BUILDER)).toEqual([]);
   });
 });

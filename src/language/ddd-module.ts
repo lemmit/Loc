@@ -1,4 +1,4 @@
-import { AstUtils, DefaultIndexManager, inject, type LangiumDocument, type Module } from "langium";
+import { DefaultIndexManager, inject, type LangiumDocument, type Module } from "langium";
 import {
   createDefaultModule,
   createDefaultSharedModule,
@@ -8,10 +8,9 @@ import {
   type PartialLangiumServices,
   type PartialLangiumSharedServices,
 } from "langium/lsp";
-import { bootMacros } from "../macros/index.js";
+import { bootMacros, getMacroRefDeps } from "../macros/index.js";
 import { DddScopeComputation, DddScopeProvider } from "./ddd-scope.js";
 import { DddValidator, registerValidationChecks } from "./ddd-validator.js";
-import { isAggregate, isBoundedContext, isUi } from "./generated/ast.js";
 import { DddGeneratedModule, DddGeneratedSharedModule } from "./generated/module.js";
 import { DddCodeActionProvider } from "./lsp/ddd-code-actions.js";
 import { DddCompletionProvider } from "./lsp/ddd-completion.js";
@@ -51,41 +50,53 @@ export const DddModule: Module<DddServices, PartialLangiumServices & DddAddedSer
   },
 };
 
-/** True when a document contains any macro host (`with X(...)` on an
- *  aggregate / ui / context).  Cheap early-exit walk used by the affected-doc
- *  override below. */
-function hasMacroHost(document: LangiumDocument): boolean {
-  const root = document.parseResult?.value;
-  if (!root) return false;
-  for (const node of AstUtils.streamAllContents(root)) {
-    if (
-      (isAggregate(node) || isUi(node) || isBoundedContext(node)) &&
-      node.withClause !== undefined
-    ) {
-      return true;
-    }
-  }
-  return false;
+/** Diagnostic codes for Loom's *by-name, cross-document* references — names
+ *  resolved against the workspace in the validator rather than through
+ *  Langium's linker (so the default affected-doc computation can't see them).
+ *  A document carrying one of these is "hungry": a file that loads later may
+ *  satisfy it, so it must be reconsidered on any workspace change — the direct
+ *  analogue of Langium retrying documents whose Langium references error.
+ *  (`loom.unknown-builder-type` is emitted by `validators/builder-call.ts` for
+ *  unresolved top-level component references in page bodies.) */
+const BY_NAME_XREF_CODES: ReadonlySet<string | number> = new Set(["loom.unknown-builder-type"]);
+
+function hasUnresolvedByNameXref(document: LangiumDocument): boolean {
+  return (document.diagnostics ?? []).some(
+    (d) => d.code !== undefined && BY_NAME_XREF_CODES.has(d.code),
+  );
 }
 
-/** Macro ref-list arguments (`with scaffold(subdomains: [Sales, ...])`) are
- *  resolved by *name* against the whole workspace during the pre-link
- *  expansion pass — they are deliberately not Langium cross-references (the
- *  expander runs before linking).  As a result the default affected-doc
- *  computation, which keys off resolved cross-references, never re-validates a
- *  macro-host document when a *sibling* file it names is added, changed, or
- *  removed.  In a multi-file project that leaves a stale "references unknown
- *  Subdomain" error on the scaffold line even after the target file loads.
+/** Macro ref-list arguments (`with scaffold(subdomains: [Sales, ...])`) — and,
+ *  more broadly, Loom's by-name cross-document references (top-level
+ *  components in page bodies, etc.) — are resolved by *name* against the
+ *  workspace in the validator, not through Langium's linker.  The default
+ *  affected-doc computation keys off resolved cross-references, so it never
+ *  re-validates such a document when a *sibling* it names is added, changed, or
+ *  removed — leaving a stale "references unknown …" error after the target
+ *  file loads.
  *
- *  We widen `isAffected` so any macro-host document is reconsidered whenever
- *  the workspace document set changes; the validator's
- *  `collectUnresolvedMacroRefs` re-resolves the refs against the now-settled
- *  workspace, clearing spurious errors (and keeping genuine ones). */
+ *  Rather than re-validate every macro host on every edit, we mirror Langium's
+ *  own reference-index + linking-error-retry approach.  A document is affected
+ *  when
+ *   - the validator recorded a still-unresolved macro ref (`MacroRefDeps`), or
+ *     it currently carries any by-name cross-doc diagnostic — retry on any
+ *     change, since a newly *added* provider isn't parsed yet at this point
+ *     (exactly as Langium retries documents with linking errors); or
+ *   - one of the documents its macro refs resolved into is in the changed set
+ *     (a provider was edited or removed).
+ *  Clean documents with unrelated edits are left untouched. */
 class DddIndexManager extends DefaultIndexManager {
   override isAffected(document: LangiumDocument, changedUris: Set<string>): boolean {
     if (super.isAffected(document, changedUris)) return true;
     if (changedUris.size === 0) return false;
-    return hasMacroHost(document);
+    if (hasUnresolvedByNameXref(document)) return true;
+    const deps = getMacroRefDeps(document);
+    if (!deps) return false;
+    if (deps.unresolved) return true;
+    for (const providerUri of deps.providers) {
+      if (changedUris.has(providerUri)) return true;
+    }
+    return false;
   }
 }
 

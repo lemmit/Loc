@@ -23,6 +23,8 @@ export function bootMacros(shared: LangiumSharedServices): void {
 export {
   collectUnresolvedMacroRefs,
   drainMacroDiagnostics,
+  getMacroRefDeps,
+  type MacroRefDeps,
   registerMacroExpander,
   resolveMacroArgs,
 } from "./expander.js";
