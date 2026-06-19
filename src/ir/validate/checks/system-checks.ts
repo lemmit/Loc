@@ -82,12 +82,13 @@ export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]):
   }
 }
 
-// Page/component `derived name: T = expr` bindings hoist as `useMemo` —
-// only the React generator emits the hoist today.  A non-react frontend
-// would resolve the body ref to a const that's never declared (broken
-// output), so reject it loudly until the Vue / Svelte / Angular / HEEx
-// shells learn to hoist (`computed` / `$derived` / inline-recompute).
-const DERIVED_FRAMEWORKS = new Set(["react"]);
+// Page/component `derived name: T = expr` bindings hoist as a reactive
+// computed before the body — `useMemo` (React), `computed` (Vue/Angular),
+// `$derived` (Svelte).  The JS frontends all emit the hoist; only
+// Phoenix/HEEx stays gated (LiveView's render topology has no equivalent
+// hoist site yet), so a `derived` there would resolve the body ref to a
+// binding that's never declared (broken output) — reject it loudly.
+const DERIVED_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular"]);
 
 export function validateDerivedFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const uiByName = new Map(sys.uis.map((u) => [u.name, u]));
@@ -103,7 +104,7 @@ export function validateDerivedFramework(sys: SystemIR, diags: LoomDiagnostic[])
       diags.push({
         severity: "error",
         code: "loom.derived-unsupported-framework",
-        message: `Deployable '${d.name}': page/component 'derived' bindings (${offenders.join(", ")}) are currently only supported on the react frontend; framework '${d.uiFramework ?? "unknown"}' isn't supported yet.`,
+        message: `Deployable '${d.name}': page/component 'derived' bindings (${offenders.join(", ")}) are currently only supported on the react, vue, svelte, and angular frontends; framework '${d.uiFramework ?? "unknown"}' isn't supported yet.`,
         source: d.name,
       });
     }

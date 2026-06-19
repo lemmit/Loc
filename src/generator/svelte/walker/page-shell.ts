@@ -22,6 +22,7 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  DerivedIR,
   ExprIR,
   ParamIR,
   StateFieldIR,
@@ -195,10 +196,14 @@ export function renderSveltePage(
   pageRoutes: ReadonlyMap<string, string> = new Map(),
   /** Extern frontend function names declared on this ui. */
   externFunctions: ReadonlySet<string> = new Set(),
+  /** Page-level `derived name: T = expr` bindings — hoisted as `$derived`
+   *  consts before the body. */
+  derived: DerivedIR[] = [],
 ): string {
   void pageName;
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
+  const derivedNames = new Set(derived.map((d) => d.name));
   const {
     tsx,
     imports,
@@ -225,7 +230,13 @@ export function renderSveltePage(
     aggregateParamTypes(params, aggregatesByName),
     pageRoutes,
     externFunctions,
+    derivedNames,
   );
+  // Page `derived` bindings → hoisted `$derived` consts (runes auto-track).
+  // A derived reading a state field forces the `$state` declaration even
+  // when the body never reads it directly.
+  const derivedResult = buildDerivedLines(derived, pack, paramNames, stateNames);
+  const derivedLines = derivedResult.lines;
 
   // Title — a plain `$effect`; runes auto-track any param/state the
   // expression reads, so no deps array is derived.
@@ -237,7 +248,7 @@ export function renderSveltePage(
     usesStateForTitle = titleCtx.usesState && !usesState;
     titleEffect = `  $effect(() => {\n    document.title = ${titleExpr};\n  });\n`;
   }
-  const effectiveUsesState = usesState || usesStateForTitle;
+  const effectiveUsesState = usesState || usesStateForTitle || derivedResult.usesState;
 
   const packImports = renderSvelteImportLines(imports);
   const userComponentImports = [...usedUserComponents]
@@ -305,7 +316,7 @@ export function renderSveltePage(
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${navigateImport}${pageStateImport}${decimalImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}</script>
+${navigateImport}${pageStateImport}${decimalImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${titleEffect}</script>
 
 ${indentJsx(tsx, "")}
 ${templateScope}`;
@@ -326,10 +337,13 @@ export function renderSvelteComponentFile(
   pageRoutes: ReadonlyMap<string, string> = new Map(),
   /** Extern frontend function names declared on this ui. */
   externFunctions: ReadonlySet<string> = new Set(),
+  /** Component-level `derived` bindings — hoisted as `$derived` consts. */
+  derived: DerivedIR[] = [],
 ): string {
   void name;
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
+  const derivedNames = new Set(derived.map((d) => d.name));
   const {
     tsx,
     imports,
@@ -356,7 +370,12 @@ export function renderSvelteComponentFile(
     aggregateParamTypes(params, aggregatesByName),
     pageRoutes,
     externFunctions,
+    derivedNames,
   );
+  // Component `derived` bindings → hoisted `$derived` consts.  A derived
+  // reading a state field forces the `$state` declaration.
+  const derivedResult = buildDerivedLines(derived, pack, paramNames, stateNames);
+  const derivedLines = derivedResult.lines;
   const actionWiring = renderActionMutations(actionMutations);
   const form = formOfs.reduce<FormWiring>(
     (acc, st) => {
@@ -433,15 +452,18 @@ export function renderSvelteComponentFile(
     if (!isSlotShape(p.type)) continue;
     markup = markup.split(`{${p.name}}`).join(`{@render ${p.name}?.()}`);
   }
-  const stateLines = usesState ? state.map((f) => `  ${renderRunesState(f, pack)}\n`).join("") : "";
+  const effectiveUsesState = usesState || derivedResult.usesState;
+  const stateLines = effectiveUsesState
+    ? state.map((f) => `  ${renderRunesState(f, pack)}\n`).join("")
+    : "";
   const decimalImport =
-    usesState && state.some((f) => typeUsesMoney(f.type))
+    effectiveUsesState && state.some((f) => typeUsesMoney(f.type))
       ? `  import Decimal from "decimal.js";\n`
       : "";
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${snippetImport}${navigateImport}${decimalImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}</script>
+${snippetImport}${navigateImport}${decimalImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}</script>
 
 ${indentJsx(markup, "")}
 ${templateScope}`;
@@ -584,6 +606,35 @@ function dummyCtx(
     collectedTestids: new Set(),
     usesCodeBlock: false,
   };
+}
+
+/** Build the `<script>` hoist lines for a page/component's
+ *  `derived name: T = expr` bindings — each lands as a
+ *  `const <name> = $derived(<expr>);`.  Svelte 5's `$derived` rune takes
+ *  the expression DIRECTLY (not a thunk) and auto-tracks its `$state` /
+ *  `$props` dependencies, so no deps array is derived.  Bindings emit in
+ *  declaration order, accumulating `seenDerived` so a later derived can
+ *  reference an earlier one (resolved as a bare ref via `derivedNames`).
+ *  Runes reads are bare names everywhere, so no `.value` re-pointing is
+ *  needed (unlike Vue/React). */
+function buildDerivedLines(
+  derived: readonly DerivedIR[],
+  pack: LoadedPack,
+  paramNames: ReadonlySet<string>,
+  stateNames: ReadonlySet<string>,
+): { lines: string; usesState: boolean } {
+  const seenDerived = new Set<string>();
+  let lines = "";
+  let usesState = false;
+  for (const d of derived) {
+    const dctx = dummyCtx(pack, paramNames, stateNames, new Set());
+    dctx.derivedNames = seenDerived;
+    const exprStr = emitExpr(d.expr, dctx);
+    if (dctx.usesState) usesState = true;
+    lines += `  const ${d.name} = $derived(${exprStr});\n`;
+    seenDerived.add(d.name);
+  }
+  return { lines, usesState };
 }
 
 function stateTypeAsTsString(type: TypeIR): string {

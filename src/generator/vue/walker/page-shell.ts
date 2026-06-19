@@ -1,6 +1,7 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  DerivedIR,
   ExprIR,
   PageIR,
   ParamIR,
@@ -11,8 +12,10 @@ import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
 import {
+  emitExpr,
   type FormOfState,
   type OperationFormState,
+  type WalkContext,
   type WalkResult,
   walkBody,
 } from "../../_walker/walker-core.js";
@@ -109,23 +112,6 @@ export function renderVuePage(input: VuePageShellInput): string {
   ];
   const needsRoute = usedParams.length > 0;
 
-  // State fields — `ref()` per declared field; the walked markup
-  // reads bare names (template auto-unwrap) per vueTarget.
-  const stateLines: string[] = [];
-  if (result.usesState) {
-    for (const f of page.state) {
-      stateLines.push(`const ${f.name} = ref(${vueTarget.defaultInitFor(f.type)});`);
-      // The shared input primitives' VM carries the React-style
-      // `set<Pascal>` setter name (`@update:model-value` callbacks in
-      // the vue packs call it) — provide it as a plain function.
-      const pascal = f.name[0]!.toUpperCase() + f.name.slice(1);
-      stateLines.push(
-        `const set${pascal} = (v: typeof ${f.name}.value) => { ${f.name}.value = v; };`,
-      );
-      vueImports.add("ref");
-    }
-  }
-
   // Api-composable hoists, deduped by var name; `reactive()` wrapper
   // per the header note.
   const hookLines: string[] = [];
@@ -138,6 +124,45 @@ export function renderVuePage(input: VuePageShellInput): string {
   // live-refetch yet (the api module would need MaybeRefOrGetter
   // params — tracked as a parity follow-up).
   const stateNames = new Set(page.state.map((f) => f.name));
+
+  // Page `derived` bindings → hoisted `computed`s.  The expression runs
+  // in script position, so state reads re-point to `.value` (the same
+  // rewrite the hoisted hook args use); `computed` auto-tracks deps.
+  const repointDerived = (s: string): string => {
+    let out = s;
+    for (const n of stateNames) {
+      out = out.replace(new RegExp(`\\b${n}\\b(?!\\.value)`, "g"), `${n}.value`);
+    }
+    return out;
+  };
+  const derivedResult = buildDerivedLines(
+    page.derived,
+    input.pack,
+    new Set(page.params.map((p) => p.name)),
+    stateNames,
+    repointDerived,
+  );
+  const derivedLines = derivedResult.lines;
+  if (derivedLines.length > 0) vueImports.add("computed");
+
+  // State fields — `ref()` per declared field; the walked markup
+  // reads bare names (template auto-unwrap) per vueTarget.  A `derived`
+  // that reads a state field also forces the `ref()` declaration even
+  // when the body never reads it directly.
+  const stateLines: string[] = [];
+  if (result.usesState || derivedResult.usesState) {
+    for (const f of page.state) {
+      stateLines.push(`const ${f.name} = ref(${vueTarget.defaultInitFor(f.type)});`);
+      // The shared input primitives' VM carries the React-style
+      // `set<Pascal>` setter name (`@update:model-value` callbacks in
+      // the vue packs call it) — provide it as a plain function.
+      const pascal = f.name[0]!.toUpperCase() + f.name.slice(1);
+      stateLines.push(
+        `const set${pascal} = (v: typeof ${f.name}.value) => { ${f.name}.value = v; };`,
+      );
+      vueImports.add("ref");
+    }
+  }
   const scriptArgs = (rendered: readonly string[]): string =>
     rendered
       .map((a) => {
@@ -377,6 +402,7 @@ export function renderVuePage(input: VuePageShellInput): string {
   script.push(...stateLines);
   script.push(...hookLines);
   script.push(...opFormLines);
+  script.push(...derivedLines);
   // Trim trailing blanks.
   while (script.length > 0 && script[script.length - 1] === "") script.pop();
 
@@ -582,9 +608,11 @@ export function renderVueComponentFile(
   pageRoutes: ReadonlyMap<string, string> = new Map(),
   externFunctions: ReadonlySet<string> = new Set(),
   externComponents: ReadonlySet<string> = new Set(),
+  derived: readonly DerivedIR[] = [],
 ): { source: string; usesFormToast: boolean } {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
+  const derivedNames = new Set(derived.map((d) => d.name));
   // Aggregate-typed params power `Action(<inst>.<op>)` resolution.
   const paramTypes = new Map<string, string>();
   for (const p of params) {
@@ -607,6 +635,7 @@ export function renderVueComponentFile(
     paramTypes,
     pageRoutes,
     externFunctions,
+    derivedNames,
   );
   // Operation forms (Action dialogs).  Same op-dialog host + per-op
   // LoomForm the page shell emits — the only twist is the instance
@@ -632,20 +661,6 @@ export function renderVueComponentFile(
     (p) => `${p.name}: ${componentPropTsType(p.type, aggregatesByName, dtoImports)};`,
   );
 
-  // State — `ref()` per field + a `set<Pascal>` setter (the shared input
-  // primitives' VM references it), matching the page shell.
-  const stateLines: string[] = [];
-  if (result.usesState) {
-    for (const f of state) {
-      stateLines.push(`const ${f.name} = ref(${vueTarget.defaultInitFor(f.type)});`);
-      const pascal = upperFirst(f.name);
-      stateLines.push(
-        `const set${pascal} = (v: typeof ${f.name}.value) => { ${f.name}.value = v; };`,
-      );
-      vueImports.add("ref");
-    }
-  }
-
   // `Action(<inst>.<op>)` mutation hoists — the only api a component
   // body reaches (no apiParams in component scope).  Hoist args (when
   // present) reference props/state; re-point them for script position.
@@ -659,6 +674,30 @@ export function renderVueComponentFile(
     }
     return out;
   };
+
+  // Component `derived` bindings → hoisted `computed`s.  `rewriteScript`
+  // re-points state reads to `.value` and param reads to `props.<name>`
+  // (the same rewrite the action-mutation hoists use), so a derived can
+  // read both; `computed` auto-tracks deps.
+  const derivedResult = buildDerivedLines(derived, pack, paramNames, stateNames, rewriteScript);
+  const derivedLines = derivedResult.lines;
+  if (derivedLines.length > 0) vueImports.add("computed");
+
+  // State — `ref()` per field + a `set<Pascal>` setter (the shared input
+  // primitives' VM references it), matching the page shell.  A `derived`
+  // reading a state field also forces the `ref()` declaration.
+  const stateLines: string[] = [];
+  if (result.usesState || derivedResult.usesState) {
+    for (const f of state) {
+      stateLines.push(`const ${f.name} = ref(${vueTarget.defaultInitFor(f.type)});`);
+      const pascal = upperFirst(f.name);
+      stateLines.push(
+        `const set${pascal} = (v: typeof ${f.name}.value) => { ${f.name}.value = v; };`,
+      );
+      vueImports.add("ref");
+    }
+  }
+
   const apiImports = new Map<string, Set<string>>();
   const seenVars = new Set<string>();
   const hookLines: string[] = [];
@@ -785,8 +824,10 @@ export function renderVueComponentFile(
       apiImports.set(from, names);
     }
   }
-  // `const props =` when any hoist/form line reads a prop.
-  const propsReferenced = [...rewrittenHooks, ...formLines].some((l) => l.includes("props."));
+  // `const props =` when any hoist/form/derived line reads a prop.
+  const propsReferenced = [...rewrittenHooks, ...formLines, ...derivedLines].some((l) =>
+    l.includes("props."),
+  );
   // Create / workflow forms' default submit navigates.
   const needsNavigate =
     result.usesNavigate || aggFormState !== undefined || wfFormState !== undefined;
@@ -854,6 +895,7 @@ export function renderVueComponentFile(
   script.push(...stateLines);
   script.push(...rewrittenHooks);
   script.push(...formLines);
+  script.push(...derivedLines);
   while (script.length > 0 && script[script.length - 1] === "") script.pop();
 
   const dialogs = dialogBlocks.length > 0 ? `\n${dialogBlocks.join("\n")}` : "";
@@ -867,6 +909,68 @@ ${indent(result.tsx, "  ")}${dialogs}
 </template>
 `;
   return { source, usesFormToast };
+}
+
+/** Build the `<script setup>` hoist lines for a page/component's
+ *  `derived name: T = expr` bindings — each lands as a
+ *  `const <name> = computed(() => <expr>);`.  Vue's `computed` tracks
+ *  its dependencies automatically, so no deps array is derived.  Bindings
+ *  emit in declaration order, accumulating `seenDerived` so a later
+ *  derived can reference an earlier one (resolved as a bare ref via
+ *  `derivedNames`).  The expression is walked in SCRIPT position, where
+ *  state refs are `ref`s — `repointToScript` rewrites them to `.value`
+ *  (and a component rewrites param refs to `props.<name>`), matching the
+ *  api-hook hoists. */
+function buildDerivedLines(
+  derived: readonly DerivedIR[],
+  pack: LoadedPack,
+  paramNames: ReadonlySet<string>,
+  stateNames: ReadonlySet<string>,
+  repointToScript: (s: string) => string,
+): { lines: string[]; usesState: boolean } {
+  const lines: string[] = [];
+  const seenDerived = new Set<string>();
+  let usesState = false;
+  for (const d of derived) {
+    const dctx: WalkContext = {
+      target: vueTarget,
+      imports: new Map(),
+      pack,
+      paramNames,
+      usedParams: new Set(),
+      usesNavigate: false,
+      stateNames,
+      derivedNames: seenDerived,
+      usesState: false,
+      usesRouterLink: false,
+      userComponents: new Map(),
+      usedUserComponents: new Set(),
+      usesChildren: false,
+      apiParamNames: new Map(),
+      usedApiHooks: new Map(),
+      lambdaParams: new Map(),
+      shellLocals: new Set(),
+      aggregatesByName: new Map(),
+      bcByAggregate: new Map(),
+      workflowsByName: new Map(),
+      bcByWorkflow: new Map(),
+      formOfs: [],
+      actionMutations: [],
+      collectedTestids: new Set(),
+      usesCodeBlock: false,
+    };
+    let exprStr = repointToScript(emitExpr(d.expr, dctx));
+    if (dctx.usesState) usesState = true;
+    // Earlier-derived reads land as bare `name` (walker reads a derived
+    // like a state field), but each hoisted derived is a `ComputedRef`, so
+    // in SCRIPT position the read must `.value`-deref — same as state.
+    for (const prior of seenDerived) {
+      exprStr = exprStr.replace(new RegExp(`\\b${prior}\\b(?!\\.value)`, "g"), `${prior}.value`);
+    }
+    lines.push(`const ${d.name} = computed(() => ${exprStr});`);
+    seenDerived.add(d.name);
+  }
+  return { lines, usesState };
 }
 
 /** True when a form state renders the pack's default-submit body — an

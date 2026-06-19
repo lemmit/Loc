@@ -1,6 +1,7 @@
-import type { ExprIR, PageIR, StateFieldIR } from "../../../ir/types/loom-ir.js";
+import type { DerivedIR, ExprIR, PageIR, StateFieldIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
-import type { WalkResult } from "../../_walker/walker-core.js";
+import type { LoadedPack } from "../../_packs/loader.js";
+import { emitExpr, type WalkContext, type WalkResult } from "../../_walker/walker-core.js";
 import type { AngularCreateFormSpec } from "../create-form.js";
 import { angularTarget } from "./angular-target.js";
 
@@ -19,6 +20,12 @@ import { angularTarget } from "./angular-target.js";
 export interface AngularPageShellInput {
   page: PageIR;
   result: WalkResult;
+  /** Page-level `derived name: T = expr` bindings — hoisted as
+   *  `readonly <name> = computed(() => <expr>)` class fields. */
+  derived?: readonly DerivedIR[];
+  /** Active design pack — required to build the `WalkContext` the derived
+   *  expressions emit through. */
+  pack?: LoadedPack;
 }
 
 /** PascalCase component class name (`CustomerHome` → `CustomerHomeComponent`). */
@@ -109,13 +116,46 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // pack-declared `*Module`s plus `RouterLink`.
   const componentImports = new Set<string>();
 
-  // State fields → signals (read `name()`, write `name.set()`).
-  if (result.usesState) {
+  // `derived name: T = expr` → `readonly <name> = computed(() => <expr>)`
+  // class fields, in declaration order (a later derived may reference an
+  // earlier one — resolved as a `<name>()` signal call via `derivedNames`).
+  // Angular's `computed` auto-tracks the signals the expression reads, so
+  // no deps array is derived; signal reads (`n()`) come from angularTarget.
+  // Built first so a derived that reads a state field forces the `signal`
+  // declaration below even when the body never reads it directly.
+  const derived = input.derived ?? [];
+  const derivedLines: string[] = [];
+  let derivedUsesState = false;
+  if (derived.length > 0 && input.pack) {
+    coreSymbols.add("computed");
+    const paramNames = new Set(page.params.map((p) => p.name));
+    const stateNames = new Set(page.state.map((s) => s.name));
+    const seenDerived = new Set<string>();
+    for (const d of derived) {
+      const dctx = derivedCtx(input.pack, paramNames, stateNames, seenDerived);
+      const exprStr = emitExpr(d.expr, dctx);
+      if (dctx.usesState) derivedUsesState = true;
+      // The `computed(() => …)` body is a CLASS-FIELD initializer (not a
+      // template), so signal/computed reads — which angularTarget emits as
+      // bare `name()` for the template instance scope — must resolve against
+      // `this`.  Prefix `this.` before each state-field / earlier-derived
+      // signal call so the field initializer typechecks.
+      const refNames = new Set<string>([...stateNames, ...seenDerived]);
+      const body = prefixSignalReadsWithThis(exprStr, refNames);
+      derivedLines.push(`  readonly ${d.name} = computed(() => ${body});`);
+      seenDerived.add(d.name);
+    }
+  }
+
+  // State fields → signals (read `name()`, write `name.set()`).  Declared
+  // before the derived `computed`s that may read them.
+  if (result.usesState || derivedUsesState) {
     coreSymbols.add("signal");
     for (const f of page.state) {
       members.push(`  readonly ${f.name} = signal(${renderStateInit(f)});`);
     }
   }
+  members.push(...derivedLines);
 
   // Navigation → `inject(Router)`; the walked handler calls
   // `router.navigateByUrl(...)`.
@@ -257,6 +297,59 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     `export class ${pageComponentName(page)} {${members.length > 0 ? "\n" + members.join("\n") + "\n" : ""}}`,
     "",
   ].join("\n");
+}
+
+/** Prefix `this.` before each signal-call read (`<name>()`) whose name is
+ *  in `refNames` (state fields + earlier-derived).  angularTarget emits
+ *  these as bare `name()` for the template instance scope, but a `derived`
+ *  hoist is a class-field initializer where the names must resolve against
+ *  `this`.  The negative lookbehind keeps an already-prefixed `this.name()`
+ *  (and any `x.name()` member access) untouched. */
+function prefixSignalReadsWithThis(expr: string, refNames: ReadonlySet<string>): string {
+  let out = expr;
+  for (const n of refNames) {
+    out = out.replace(new RegExp(`(?<![.\\w])${n}\\(\\)`, "g"), `this.${n}()`);
+  }
+  return out;
+}
+
+/** A minimal `WalkContext` for rendering a single `derived` expression
+ *  to an Angular `computed(...)` body.  `derivedNames` (accumulating
+ *  `seenDerived`) lets a later derived reference an earlier one as a
+ *  `<name>()` signal call. */
+function derivedCtx(
+  pack: LoadedPack,
+  paramNames: ReadonlySet<string>,
+  stateNames: ReadonlySet<string>,
+  derivedNames: ReadonlySet<string>,
+): WalkContext {
+  return {
+    target: angularTarget,
+    imports: new Map(),
+    pack,
+    paramNames,
+    usedParams: new Set(),
+    usesNavigate: false,
+    stateNames,
+    derivedNames,
+    usesState: false,
+    usesRouterLink: false,
+    userComponents: new Map(),
+    usedUserComponents: new Set(),
+    usesChildren: false,
+    apiParamNames: new Map(),
+    usedApiHooks: new Map(),
+    lambdaParams: new Map(),
+    shellLocals: new Set(),
+    aggregatesByName: new Map(),
+    bcByAggregate: new Map(),
+    workflowsByName: new Map(),
+    bcByWorkflow: new Map(),
+    formOfs: [],
+    actionMutations: [],
+    collectedTestids: new Set(),
+    usesCodeBlock: false,
+  };
 }
 
 /** Stub component for a page whose body needs deferred features. */
