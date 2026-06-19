@@ -593,3 +593,88 @@ describe("angular generator — Table in a QueryView data branch", () => {
     expect(page).toContain("{{ formatDateTime(row.placedAt) }}");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Standalone state-bound inputs (Field / NumberField / MultilineField /
+// PasswordField / Toggle / SelectField).  Each `bind:`s to a page-state signal
+// — read via `<bind>()`, written via `<bind>.set(...)` from an `(input)` /
+// `(change)` / `(selectionChange)` handler — distinct from the `form-of`
+// Reactive-Forms machinery.  Also covers the page-shell honouring each state
+// field's declared `= <init>`.  (ng build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const INPUT_SOURCE = `
+  system Smoke {
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish { total: int }
+      }
+    }
+    ui Web {
+      page Settings {
+        route: "/"
+        title: "Settings"
+        state {
+          name: string = ""
+          count: int = 3
+          bio: string = ""
+          passcode: string = ""
+          notify: bool = true
+          size: string = "M"
+        }
+        body: Stack {
+          Field { "Name", bind: name },
+          NumberField { "Count", bind: count },
+          MultilineField { "Bio", bind: bio },
+          PasswordField { "Secret", bind: passcode },
+          Toggle { "Notify me", bind: notify },
+          SelectField { "Size", bind: size, options: ["S", "M", "L"] }
+        }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
+  }
+`;
+
+async function inputPage(): Promise<string> {
+  const all = await generateSystemFiles(INPUT_SOURCE);
+  return all.get("web/src/app/pages/settings.component.ts")!;
+}
+
+describe("angular generator — standalone state-bound inputs", () => {
+  it("binds each input to its state signal (read () / write .set())", async () => {
+    const page = await inputPage();
+    expect(page).toContain(
+      '<input matInput [value]="name()" (input)="name.set($any($event.target).value)" />',
+    );
+    expect(page).toContain(
+      '<input matInput type="number" [value]="count()" (input)="count.set(+$any($event.target).value)" />',
+    );
+    expect(page).toContain('<textarea matInput [value]="bio()"');
+    expect(page).toContain('<input matInput type="password" [value]="passcode()"');
+    expect(page).toContain(
+      '<mat-slide-toggle [checked]="notify()" (change)="notify.set($event.checked)">Notify me</mat-slide-toggle>',
+    );
+    expect(page).toContain(
+      '<mat-select [value]="size()" (selectionChange)="size.set($event.value)">',
+    );
+    expect(page).toContain('@for (opt of ["S", "M", "L"]; track opt) {<mat-option [value]="opt">');
+  });
+
+  it("aggregates the field MatModules and honours each state field's declared init", async () => {
+    const page = await inputPage();
+    expect(page).toContain('import { MatFormFieldModule } from "@angular/material/form-field";');
+    expect(page).toContain('import { MatInputModule } from "@angular/material/input";');
+    expect(page).toContain('import { MatSelectModule } from "@angular/material/select";');
+    expect(page).toContain(
+      'import { MatSlideToggleModule } from "@angular/material/slide-toggle";',
+    );
+    // Declared inits, not type zero values.
+    expect(page).toContain("readonly count = signal(3);");
+    expect(page).toContain("readonly notify = signal(true);");
+    expect(page).toContain('readonly size = signal("M");');
+  });
+});

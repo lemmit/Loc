@@ -1,4 +1,4 @@
-import type { PageIR } from "../../../ir/types/loom-ir.js";
+import type { ExprIR, PageIR, StateFieldIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
 import type { WalkResult } from "../../_walker/walker-core.js";
 import { angularTarget } from "./angular-target.js";
@@ -52,6 +52,30 @@ export function pageNeedsDeferredFeatures(result: WalkResult): boolean {
   return false;
 }
 
+/** Render a `state {}` field's `signal(...)` initial value.  Uses the field's
+ *  declared `= <init>` when it's a literal (string / number / bool / null) or a
+ *  list of literals; otherwise falls back to the type's zero value.  (Init
+ *  expressions evaluate before any signal exists, so they can't reference
+ *  state/params — literals cover the realistic surface.) */
+function renderStateInit(field: StateFieldIR): string {
+  const lit = field.init !== undefined ? renderInitLiteral(field.init) : undefined;
+  return lit ?? angularTarget.defaultInitFor(field.type);
+}
+
+function renderInitLiteral(e: ExprIR): string | undefined {
+  if (e.kind === "literal") {
+    if (e.lit === "string") return JSON.stringify(e.value);
+    if (e.lit === "null") return "null";
+    // int / decimal / bool already carry their JS-literal text.
+    return e.value;
+  }
+  if (e.kind === "list") {
+    const els = e.elements.map(renderInitLiteral);
+    return els.every((x): x is string => x !== undefined) ? `[${els.join(", ")}]` : undefined;
+  }
+  return undefined;
+}
+
 function indentTemplate(markup: string): string {
   return markup
     .split("\n")
@@ -86,7 +110,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   if (result.usesState) {
     coreSymbols.add("signal");
     for (const f of page.state) {
-      members.push(`  readonly ${f.name} = signal(${angularTarget.defaultInitFor(f.type)});`);
+      members.push(`  readonly ${f.name} = signal(${renderStateInit(f)});`);
     }
   }
 
