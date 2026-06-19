@@ -873,13 +873,20 @@ describe("angular generator — byId single-record reads", () => {
     expect(api).toContain("const mutate = (id: string, input: CancelOrderRequest)");
   });
 
-  it("stubs a then-bearing Action (the .then continuation can't be inlined in a template)", async () => {
+  it("renders a then-bearing Action via an id-capture signal + an async method", async () => {
     const all = await generateSystemFiles(
       opSource("Action { o.cancel, then: navigate(OrderDetail) }"),
     );
     const page = all.get("web/src/app/pages/order-detail.component.ts")!;
-    expect(page).toContain("stub — body needs api/forms support");
-    expect(page).not.toContain("cancelOrder");
+    expect(page).not.toContain("stub — body needs api/forms support");
+    // The click captures the record id into a signal, then calls the method —
+    // the `.then` effect can't inline, so it lives in a component method.
+    expect(page).toContain("(click)='cancelOrderId.set(orderById.data()!.id); onCancelOrder()'");
+    expect(page).toContain('readonly cancelOrderId = signal("");');
+    expect(page).toContain("async onCancelOrder(): Promise<void> {");
+    expect(page).toContain("await this.cancelOrder.mutate(this.cancelOrderId(), {});");
+    // The `then:` effect runs after the mutation resolves, `this.`-prefixed.
+    expect(page).toContain("this.router.navigateByUrl(");
   });
 });
 
