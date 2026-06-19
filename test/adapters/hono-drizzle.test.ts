@@ -33,7 +33,7 @@ system Sys {
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Orders]
     dataSources: [ordersState]
     port: 3000
@@ -52,7 +52,7 @@ async function buildCtx(): Promise<EmitCtx> {
 
 describe("drizzle PersistenceAdapter (real)", () => {
   it("is registered as the hono drizzle persistence adapter", () => {
-    const resolved = resolvePersistence("hono", "drizzle");
+    const resolved = resolvePersistence("node", "drizzle");
     expect(resolved).toBe(drizzlePersistenceAdapter);
     expect(resolved.name).toBe("drizzle");
   });

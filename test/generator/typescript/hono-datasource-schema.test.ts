@@ -35,7 +35,7 @@ system Sys {
   storage primary { type: postgres }
   ${dataSourceClauses}
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Orders]
     dataSources: [${dataSourceNames}]
     port: 3000

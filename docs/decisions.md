@@ -1093,6 +1093,17 @@ be read as *"`dotnet`/`elixir` name the language-ecosystem"*.) (Mirrors
 the `transport:` axis. Rollout in `proposals/realization-axes-rollout.md`
 Phase 3.)
 
+**Amendment (alias retired).** The `hono` → `node` back-compat alias described
+below has since been **removed** — `node` is now the only spelling. The
+`hono` keyword is gone from the grammar `Platform` rule, `LEGACY_PLATFORM_ALIASES`
+(`src/platform/metadata.ts`) and `canonicalPlatform` (`src/ir/lower/lower-platform.ts`)
+no longer map it, and `platform: hono` / `platform: "hono@v4"` now fail validation
+as unknown platforms. All in-tree sources, fixtures and docs were migrated to
+`platform: node`. The Hono web framework keeps its name only as the `transport:`
+value on `platform: node` (and as the `src/platform/hono/` / `@loom/backend-hono-v4`
+package directory). The historical body below is preserved as the original
+rationale for the rename.
+
 **Problem.** `platform: hono` conflates the **JS runtime** (Node) with the **web
 framework** (Hono) in one token — the same conflation just resolved for
 `phoenixLiveView`. `dotnet` / `phoenix` name the language-ecosystem; `hono` names

@@ -80,7 +80,7 @@ describe("validation", () => {
             repository Accounts for Account { }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         test e2e "negative balance is rejected" against api {
           expect(api.accounts.create({ balance: -1 })).toThrow("400")
         }
@@ -192,7 +192,7 @@ describe("validation", () => {
     const { errors } = await parse(`
       system S {
         subdomain M { context T { aggregate A { x: int } } }
-        deployable api { platform: hono, contexts: [T], port: 3000 }
+        deployable api { platform: node, contexts: [T], port: 3000 }
         deployable web { platform: react, port: 3001 }
       }
     `);
@@ -203,8 +203,8 @@ describe("validation", () => {
     const { errors } = await parse(`
       system S {
         subdomain M { context T { aggregate A { x: int } } }
-        deployable api { platform: hono, contexts: [T], port: 3000 }
-        deployable other { platform: hono, contexts: [T], targets: api, port: 3010 }
+        deployable api { platform: node, contexts: [T], port: 3000 }
+        deployable other { platform: node, contexts: [T], targets: api, port: 3010 }
       }
     `);
     expect(errors.some((e) => /targets/i.test(e))).toBe(true);
@@ -214,7 +214,7 @@ describe("validation", () => {
     const { errors } = await parse(`
       system S {
         subdomain M { context T { aggregate A { x: int } } }
-        deployable api { platform: hono, contexts: [T], port: 3000 }
+        deployable api { platform: node, contexts: [T], port: 3000 }
         deployable webA { platform: react, targets: api, port: 3001 }
         deployable webB { platform: react, targets: webA, port: 3002 }
       }
@@ -409,12 +409,12 @@ describe("validation", () => {
       expect(errors.some((e) => /Duplicate ui block 'WebApp'/.test(e))).toBe(true);
     });
 
-    it("rejects 'ui:' on a 'platform: hono' deployable", async () => {
+    it("rejects 'ui:' on a 'platform: node' deployable", async () => {
       const { errors } = await parse(`
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [T], ui: WebApp, port: 3000 }
+          deployable api { platform: node, contexts: [T], ui: WebApp, port: 3000 }
         }
       `);
       expect(errors.some((e) => /binding is only valid on platforms that mount a UI/.test(e))).toBe(
@@ -441,7 +441,7 @@ describe("validation", () => {
       const { errors } = await parse(`
         system S {
           subdomain M { context T { } }
-          deployable api { platform: hono, contexts: [T], port: 3000 }
+          deployable api { platform: node, contexts: [T], port: 3000 }
           deployable web { platform: static, targets: api, port: 3001 }
         }
       `);
@@ -453,7 +453,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [T], port: 3000 }
+          deployable api { platform: node, contexts: [T], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -465,7 +465,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [T], port: 3000 }
+          deployable api { platform: node, contexts: [T], port: 3000 }
           deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -481,7 +481,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [T], port: 3000 }
+          deployable api { platform: node, contexts: [T], port: 3000 }
           deployable web {
             platform: static
             targets: api
@@ -827,7 +827,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [T], port: 3000 }
+          deployable api { platform: node, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -870,7 +870,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [T], port: 3000 }
+          deployable api { platform: node, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -888,7 +888,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [T], port: 3000 }
+          deployable api { platform: node, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -915,7 +915,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [T], port: 3000 }
+          deployable api { platform: node, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -937,7 +937,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           ui WebApp { }
-          deployable api { platform: hono, contexts: [T], port: 3000 }
+          deployable api { platform: node, contexts: [T], port: 3000 }
           deployable web {
             platform: react
             targets: api
@@ -961,7 +961,7 @@ describe("validation", () => {
         system S {
           subdomain M { context T { } }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [T]
             port: 3000
             design: shadcn
@@ -1376,7 +1376,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context T { aggregate Order { x: int } } }
-        deployable api { platform: hono, contexts: [T], port: 3000 }
+        deployable api { platform: node, contexts: [T], port: 3000 }
         test e2e "missing aggregate" against api {
           let _ = api.unknown.create({})
         }
@@ -1394,7 +1394,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context T { aggregate Order { x: int } } }
-        deployable api { platform: hono, contexts: [T], port: 3000 }
+        deployable api { platform: node, contexts: [T], port: 3000 }
         test e2e "bad verb" against api {
           let _ = api.orders.frobnicate({})
         }
@@ -1415,7 +1415,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         storage pg { type: postgres }
         resource tState { for: T, kind: state, use: pg }
         deployable api {
-          platform: hono, contexts: [T], dataSources: [tState], port: 3000
+          platform: node, contexts: [T], dataSources: [tState], port: 3000
         }
         test e2e "good" against api {
           let o = api.orders.create({ customerId: "c-1" })
@@ -1434,7 +1434,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context T { aggregate Order { x: int } } }
-        deployable api { platform: hono, contexts: [T], port: 3000 }
+        deployable api { platform: node, contexts: [T], port: 3000 }
         test e2e "mutating body" against api {
           x := 1
         }
@@ -1677,7 +1677,7 @@ describe("Loom IR validation (post-lowering)", async () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [T], port: 3000 }
+        deployable api { platform: node, contexts: [T], port: 3000 }
         deployable web { platform: react, targets: api, port: 3001 }
       }
     `);
@@ -1701,7 +1701,7 @@ describe("Loom IR validation (post-lowering)", async () => {
             aggregate Order { customerId: Customer id }
           }
         }
-        deployable api { platform: hono, contexts: [T], port: 3000 }
+        deployable api { platform: node, contexts: [T], port: 3000 }
         deployable web { platform: react, targets: api, port: 3001 }
       }
     `);
@@ -1767,7 +1767,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         storage pg { type: postgres }
         resource tState { for: T, kind: state, use: pg }
         deployable api {
-          platform: hono, contexts: [T], dataSources: [tState], port: 3000
+          platform: node, contexts: [T], dataSources: [tState], port: 3000
         }
         deployable web { platform: react, targets: api, port: 3001 }
       }
@@ -2703,7 +2703,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         storage pg { type: postgres }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
       }
     `);
     const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
@@ -2726,7 +2726,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         storage pg { type: postgres }
         resource cState { for: C, kind: state, use: pg }
         deployable api {
-          platform: hono, contexts: [C], dataSources: [cState], port: 3000
+          platform: node, contexts: [C], dataSources: [cState], port: 3000
         }
       }
     `);
@@ -2749,7 +2749,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         storage pg { type: postgres }
         resource cState { for: C, kind: state, use: pg }
         deployable api {
-          platform: hono, contexts: [C], dataSources: [cState], port: 3000
+          platform: node, contexts: [C], dataSources: [cState], port: 3000
         }
       }
     `);
@@ -2764,7 +2764,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         storage pg { type: postgres }
         resource cState { for: C, kind: state, use: pg }
         deployable api {
-          platform: hono, contexts: [C], dataSources: [cState], port: 3000
+          platform: node, contexts: [C], dataSources: [cState], port: 3000
         }
         deployable web { platform: react, targets: api, port: 3001 }
       }
@@ -2777,7 +2777,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const loom = await loomFrom(`
       system S {
         subdomain M { context Empty { } }
-        deployable api { platform: hono, contexts: [Empty], port: 3000 }
+        deployable api { platform: node, contexts: [Empty], port: 3000 }
       }
     `);
     const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
@@ -2799,7 +2799,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         resource cState { for: C, kind: state, use: pg }
         resource cLog   { for: C, kind: eventLog, use: pg }
         deployable api {
-          platform: hono, contexts: [C],
+          platform: node, contexts: [C],
           dataSources: [cState, cLog], port: 3000
         }
       }
@@ -2825,7 +2825,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         resource cState { for: C, kind: state, use: pg }
         resource cLog   { for: C, kind: eventLog, use: pg }
         deployable api {
-          platform: hono, contexts: [C],
+          platform: node, contexts: [C],
           dataSources: [cState, cLog], port: 3000
         }
       }
@@ -2849,7 +2849,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         resource cState { for: C, kind: state, use: pg }
         resource cSnap  { for: C, kind: snapshot, use: pg }
         deployable api {
-          platform: hono, contexts: [C],
+          platform: node, contexts: [C],
           dataSources: [cState, cSnap], port: 3000
         }
       }
@@ -2875,7 +2875,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         resource cCache   { for: C, kind: cache, use: r }
         resource cReplica { for: C, kind: replica, use: pg }
         deployable api {
-          platform: hono, contexts: [C],
+          platform: node, contexts: [C],
           dataSources: [cState, cCache, cReplica], port: 3000
         }
       }
@@ -2898,7 +2898,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         resource cState { for: C, kind: state, use: pg }
         resource cLog   { for: C, kind: eventLog, use: pg }
         deployable api {
-          platform: hono, contexts: [C],
+          platform: node, contexts: [C],
           dataSources: [cState, cLog], port: 3000
         }
       }
@@ -2923,7 +2923,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         resource cState { for: C, kind: state, use: pg }
         resource cCache { for: C, kind: cache, use: r, ttl: 60 }
         deployable api {
-          platform: hono, contexts: [C],
+          platform: node, contexts: [C],
           dataSources: [cState, cCache], port: 3000
         }
       }
@@ -2948,7 +2948,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         storage pg { type: postgres }
         resource cLog { for: C, kind: eventLog, use: pg, every: 100, retain: 5 }
         deployable api {
-          platform: hono, contexts: [C],
+          platform: node, contexts: [C],
           dataSources: [cLog], port: 3000
         }
       }
@@ -2974,7 +2974,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           isolationLevel: serializable
         }
         deployable api {
-          platform: hono, contexts: [C],
+          platform: node, contexts: [C],
           dataSources: [cState], port: 3000
         }
       }
@@ -2995,7 +2995,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         resource cState { for: C, kind: state, use: pg }
         resource cCache { for: C, kind: cache, use: r, keyPrefix: "x:" }
         deployable api {
-          platform: hono, contexts: [C],
+          platform: node, contexts: [C],
           dataSources: [cState, cCache], port: 3000
         }
       }
@@ -3017,7 +3017,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           schema: "custom", tablePrefix: "p_"
         }
         deployable api {
-          platform: hono, contexts: [C],
+          platform: node, contexts: [C],
           dataSources: [cState], port: 3000
         }
       }

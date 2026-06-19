@@ -459,7 +459,7 @@ The full set of validator rules + error codes that previously belonged to Phase 
 
 ---
 
-## Phase 10 — `platform: hono` → `platform: node` rename
+## Phase 10 — `platform: node` → `platform: node` rename
 
 **Goal:** Rename the Hono platform to expose runtime/framework separation, preserving backward compatibility.
 
@@ -469,7 +469,7 @@ The full set of validator rules + error codes that previously belonged to Phase 
 
 1. **`src/language/ddd.langium`** — `Platform` rule accepts `node` as a value.
 
-2. **Backward-compat desugar** — `platform: hono` (or `platform: hono { ... }`) parses, and during lowering is desugared to `platform: node { framework: hono, ... }`. Emit a one-time deprecation warning at validation time.
+2. **Backward-compat desugar** — `platform: node` (or `platform: node { ... }`) parses, and during lowering is desugared to `platform: node { framework: hono, ... }`. Emit a one-time deprecation warning at validation time.
 
 3. **`src/platform/registry.ts`** — register `node` with `framework: { hono }` (only v1 value); deprecate the `hono` top-level entry.
 
@@ -480,7 +480,7 @@ The full set of validator rules + error codes that previously belonged to Phase 
 **Test additions:**
 
 - `test/parsing/platform-node.test.ts` — both forms parse; old form warns.
-- `test/generator/node/rename-equivalence.test.ts` — `platform: hono` and `platform: node { framework: hono }` produce byte-identical output.
+- `test/generator/node/rename-equivalence.test.ts` — `platform: node` and `platform: node { framework: hono }` produce byte-identical output.
 
 **Acceptance gate:**
 - All existing `hono` fixtures continue producing byte-identical output under the new keyword.
@@ -489,7 +489,7 @@ The full set of validator rules + error codes that previously belonged to Phase 
 **Effort:** 2 days.
 
 **Risks:**
-- Internal projects may have committed `.ddd` files with `platform: hono`; coordinate the rename PR with the projects-using-Loom team.
+- Internal projects may have committed `.ddd` files with `platform: node`; coordinate the rename PR with the projects-using-Loom team.
 
 ---
 
@@ -729,7 +729,7 @@ Per RFC §8, every old form continues to work. Sanity-check at the start of Phas
 - `aggregate Order { ... }` (no `persistenceStrategy`) — defaults to `stateBased`.
 - `event Placed { ... }` (no `publish`) — defaults to `internal`.
 - `platform: dotnet` (bare) — defaults applied from registry.
-- `platform: hono` — desugars to `platform: node { framework: hono }`.
+- `platform: node` — desugars to `platform: node { framework: hono }`.
 
 Each of these has a regression test in `test/parsing/` and a byte-identical fixture in `test/fixtures/`.
 
@@ -792,7 +792,7 @@ Sequential bottlenecks: 1 → 2 → 3 → 7 → 8 → 9.
 | Outbox publisher under load / multiple replicas | 8 | low | `FOR UPDATE SKIP LOCKED`; document v2 sidecar option |
 | Snapshot cross-store best-effort semantics surprise users | 7 | low | Document in `docs/generators.md`; warn in validator if user wires it cross-store |
 | `ash_commanded` immaturity | 12 | medium | Prototype Phase 12 before committing scope; have hand-rolled Commanded fallback |
-| Internal `.ddd` projects use `platform: hono` heavily | 10 | low | Synchronous rename PR; deprecation warning gives grace period |
+| Internal `.ddd` projects use `platform: node` heavily | 10 | low | Synchronous rename PR; deprecation warning gives grace period |
 
 ---
 

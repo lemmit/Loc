@@ -15,8 +15,8 @@ const SRC = `system S {
   }
   ui Mobile {
   }
-  deployable api { platform: hono, contexts: [Orders], port: 3000 }
-  deployable other { platform: hono, contexts: [Orders], port: 3100 }
+  deployable api { platform: node, contexts: [Orders], port: 3000 }
+  deployable other { platform: node, contexts: [Orders], port: 3100 }
   deployable webApp { platform: react, targets: api, ui: Web, port: 3001 }
 }`;
 

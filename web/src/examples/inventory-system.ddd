@@ -76,7 +76,7 @@ system InventorySystem {
   resource inventoryState { for: Inventory, kind: state, use: primary }
 
   deployable api {
-    platform: hono, contexts: [Inventory],
+    platform: node, contexts: [Inventory],
     dataSources: [inventoryState], port: 3000
   }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }

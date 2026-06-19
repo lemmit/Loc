@@ -33,7 +33,7 @@ system Helpdesk {
   storage primary { type: postgres }
   resource st { for: Tickets, kind: state, use: primary }
   api SApi from Support
-  deployable api { platform: hono contexts: [Tickets] serves: SApi dataSources: [st] port: 8080 auth: required }
+  deployable api { platform: node contexts: [Tickets] serves: SApi dataSources: [st] port: 8080 auth: required }
 }`;
 }
 

@@ -136,7 +136,7 @@ system FulfillmentSystem {
   channelSource orderBus { for: OrderEvents, use: bus }
 
   deployable api {
-    platform: hono, contexts: [Orders],
+    platform: node, contexts: [Orders],
     dataSources: [ordersState], port: 3000
   }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }

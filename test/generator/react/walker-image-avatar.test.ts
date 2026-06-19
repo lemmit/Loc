@@ -23,7 +23,7 @@ describe("Image + Avatar in walker stdlib", () => {
             body:  Image { src: "/logo.png", alt: "Acme" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -48,7 +48,7 @@ describe("Image + Avatar in walker stdlib", () => {
             body:  Avatar { src: "/u.png", alt: "User" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -72,7 +72,7 @@ describe("Image + Avatar in walker stdlib", () => {
             body:  Image {}
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -95,7 +95,7 @@ describe("Image + Avatar in walker stdlib", () => {
             body:  Avatar { src: slug, alt: "User" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -125,7 +125,7 @@ describe("Image + Avatar in walker stdlib", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

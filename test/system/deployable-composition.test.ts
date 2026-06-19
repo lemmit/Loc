@@ -43,7 +43,7 @@ describe("deployable composition (serves + ui-compose)", () => {
         system S {
           ${SALES_DOMAIN}
           deployable salesApi {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -58,7 +58,7 @@ describe("deployable composition (serves + ui-compose)", () => {
         system S {
           ${SALES_DOMAIN}
           ui WebApp { page X { route: "/x" body: Heading { "hi" } } }
-          deployable api { platform: hono, contexts: [Orders], port: 3000 }
+          deployable api { platform: node, contexts: [Orders], port: 3000 }
           deployable webApp {
             platform: static
             targets: api
@@ -78,7 +78,7 @@ describe("deployable composition (serves + ui-compose)", () => {
         system S {
           ${SALES_DOMAIN}
           deployable salesApi {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi, SalesApi
             port: 3000
@@ -99,7 +99,7 @@ describe("deployable composition (serves + ui-compose)", () => {
             page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -124,7 +124,7 @@ describe("deployable composition (serves + ui-compose)", () => {
             page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
-            platform: hono
+            platform: node
             contexts: [Orders]
             port: 3000
           }
@@ -148,7 +148,7 @@ describe("deployable composition (serves + ui-compose)", () => {
             page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -179,7 +179,7 @@ describe("deployable composition (serves + ui-compose)", () => {
             page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -215,13 +215,13 @@ describe("deployable composition (serves + ui-compose)", () => {
             page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
           }
           deployable mktgApi {
-            platform: hono
+            platform: node
             contexts: [Campaigns]
             serves: MktgApi
             port: 3001
@@ -250,7 +250,7 @@ describe("deployable composition (serves + ui-compose)", () => {
             page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
@@ -279,13 +279,13 @@ describe("deployable composition (serves + ui-compose)", () => {
             page X { route: "/x" body: Heading { "hi" } }
           }
           deployable salesApi {
-            platform: hono
+            platform: node
             contexts: [Orders]
             serves: SalesApi
             port: 3000
           }
           deployable mktgApi {
-            platform: hono
+            platform: node
             contexts: [Campaigns]
             serves: MktgApi
             port: 3001
@@ -306,7 +306,7 @@ describe("deployable composition (serves + ui-compose)", () => {
         system S {
           subdomain M { context C { } }
           ui WebApp { page X { route: "/x" body: Heading { "hi" } } }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: node, contexts: [C], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);

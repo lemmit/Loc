@@ -33,7 +33,7 @@ const SRC = `
       api Sales: SalesApi
     }
     deployable api {
-      platform: hono
+      platform: node
       contexts: [Sales]
       serves: SalesApi
       port: 3000
@@ -116,7 +116,7 @@ const COMPONENT_SRC = `
       }
       page Home { route: "/" body: Text { "hi" } }
     }
-    deployable api { platform: hono contexts: [Sales] serves: SalesApi port: 3000 }
+    deployable api { platform: node contexts: [Sales] serves: SalesApi port: 3000 }
     deployable web {
       platform: static
       targets: api

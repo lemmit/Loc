@@ -94,7 +94,7 @@ precedent.
   `family@version` into the IR so the orchestrator never
   re-resolves — identical to how `design` is qualified post-lower.
 - **DSL surface**: `platform: "hono@v5"` (quoted pin, symmetric
-  with `design: "mantine@v9"`); bareword `platform: hono` →
+  with `design: "mantine@v9"`); bareword `platform: node` →
   default. Preferred over a separate `stack:` slot — one less
   concept, full symmetry with packs.
 
@@ -159,7 +159,7 @@ never apply to backends (no in-browser bundling of backends).
 | Phase | Scope | Risk gate |
 | --- | --- | --- |
 | **B0** ✅ | Registry generalisation: family@version keying + `BUILTIN_PLATFORM_LATEST`, single versions registered. Bareword resolves to the sole version. **Byte-identical.** (PR #175) | `npm test` 888 + baseline fixture clean |
-| **B1** ✅ | Grammar `Platform \| STRING` + validator/lower qualify. `platform: "hono@v4"` pins; bareword unchanged. **Byte-identical.** (branch `claude/backend-pkg-b1-grammar`) | `npm test` 896 + parsing/validation tests + fixture clean |
+| **B1** ✅ | Grammar `Platform \| STRING` + validator/lower qualify. `platform: "node@v4"` pins; bareword unchanged. **Byte-identical.** (branch `claude/backend-pkg-b1-grammar`) | `npm test` 896 + parsing/validation tests + fixture clean |
 | **B2** ✅ | `hono@v4` becomes a versioned package: `src/platform/hono/v4/{index.ts,pins.ts}`, registry points at it, `BACKEND_PINS` ownership moved into the package. The bulk emitter stays shared under `src/generator/typescript/` — a future `hono@v5` forks only what changes, by ordinary import. **Byte-identical.** (branch `claude/backend-pkg-b2-hono-package`) | fixture clean + `LOOM_TS_BUILD` 3/3 |
 | **B2.1** ✅ | **Layering fix.** B2 left a shared→package edge (the shared emitter `import`ed v4's `BACKEND_PINS`), which would block `hono@v5` and any future per-backend packaging split. Inverted: the shared emitter takes `pins: BackendPins` as a parameter; the package's surface (and the CLI/test entrypoints) supply it. **Zero `src/generator/ → src/platform/` edges.** Byte-identical. (branch `claude/backend-pkg-b2.1-pins-inversion`) | fixture clean + `LOOM_TS_BUILD` 3/3 + grep-asserted no reverse edge |
 | **B3** | First real new major: `hono@v5` as a separate package reusing v4's stable slices, passing its own pins to the (now version-agnostic) shared emitter. Bareword stays v4; opt-in via pin. | new `LOOM_TS_BUILD` shard for `@v5`; promote later |

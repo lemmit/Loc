@@ -19,7 +19,7 @@ system VA {
     }
   }
   api SApi from S
-  deployable api { platform: hono            contexts: [C] serves: SApi port: 3000 }
+  deployable api { platform: node            contexts: [C] serves: SApi port: 3000 }
   deployable px  { platform: phoenixLiveView contexts: [C] serves: SApi port: 4000 }
 }
 `;
@@ -106,7 +106,7 @@ system VB {
     }
   }
   api SApi from S
-  deployable api { platform: hono contexts: [C] serves: SApi port: 3000 }
+  deployable api { platform: node contexts: [C] serves: SApi port: 3000 }
 }
 `;
 

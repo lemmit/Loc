@@ -44,7 +44,7 @@ system AuthArray {
     }
   }
   api SApi from S
-  deployable api { platform: hono contexts: [C] serves: SApi port: 3000 auth: required }
+  deployable api { platform: node contexts: [C] serves: SApi port: 3000 auth: required }
 }
 `;
 

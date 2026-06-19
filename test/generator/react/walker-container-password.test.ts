@@ -23,7 +23,7 @@ describe("Container + PasswordField primitives", () => {
             body:  Container { Stack { Heading { "Hi" }, Text { "body" } } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -50,7 +50,7 @@ describe("Container + PasswordField primitives", () => {
             body:  Container { Heading { "Compact" }, size: "sm" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -73,7 +73,7 @@ describe("Container + PasswordField primitives", () => {
             body:  Container {}
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -97,7 +97,7 @@ describe("Container + PasswordField primitives", () => {
             body:  PasswordField { "Password", bind: pwd }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -124,7 +124,7 @@ describe("Container + PasswordField primitives", () => {
             body:  PasswordField { "Bare" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -160,7 +160,7 @@ describe("Container + PasswordField primitives", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

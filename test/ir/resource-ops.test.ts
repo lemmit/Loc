@@ -19,7 +19,7 @@ system Sys {
   storage files { type: s3, config: { bucket: "b" } }
   resource salesState { for: Sales, kind: state, use: pg }
   resource salesFiles { for: Sales, kind: objectStore, use: files }
-  deployable api { platform: hono, contexts: [Sales], dataSources: [salesState, salesFiles], port: 3000 }
+  deployable api { platform: node, contexts: [Sales], dataSources: [salesState, salesFiles], port: 3000 }
 }`;
 }
 

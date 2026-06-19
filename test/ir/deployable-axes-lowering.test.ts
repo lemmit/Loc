@@ -37,8 +37,8 @@ describe("realization axes — lowering defaults", () => {
     expect(d.runtime).toBe("transactional");
   });
 
-  it("bare hono → layered/drizzle defaults", async () => {
-    const d = await lowerDeployable("hono");
+  it("bare node → layered/drizzle defaults", async () => {
+    const d = await lowerDeployable("node");
     expect(d.application).toBe("layered");
     expect(d.persistence).toBe("drizzle");
     expect(d.directoryLayout).toBe("byLayer");
@@ -100,7 +100,7 @@ describe("realization axes — lowering defaults", () => {
       system S {
         subdomain M { context C { } }
         ui W { page Home() { route: "/" body: Heading { "hi" } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: W, port: 3001 }
       }
     `,

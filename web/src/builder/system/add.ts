@@ -114,7 +114,7 @@ function constructTemplate(
     case "ui":
       return `\n  ui ${name} {\n  }\n`;
     case "deployable":
-      return `\n  deployable ${name} {\n    platform: hono\n  }\n`;
+      return `\n  deployable ${name} {\n    platform: node\n  }\n`;
     case "api": {
       const sub = opts.subdomain ?? listSubdomainNames(ast)[0];
       return sub ? `\n  api ${name} from ${sub}\n` : null;

@@ -13,7 +13,7 @@ async function emit(body: string, state = ""): Promise<string> {
       ui WebApp {
         page P { route: "/p" ${state} body: ${body} }
       }
-      deployable api { platform: hono, contexts: [C], port: 3000 }
+      deployable api { platform: node, contexts: [C], port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
     }
   `);

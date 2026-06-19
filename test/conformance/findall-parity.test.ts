@@ -60,7 +60,7 @@ system S {
 }
 
 const BACKENDS = [
-  "hono",
+  "node",
   "dotnet",
   "java",
   "python",

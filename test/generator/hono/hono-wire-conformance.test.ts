@@ -63,7 +63,7 @@ const HONO_FIXTURE = `system AcmeHono {
   }
   api SalesApi from Sales
   deployable honoApi {
-    platform: hono
+    platform: node
     contexts: [Sales]
     serves: SalesApi
     port: 3000

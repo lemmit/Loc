@@ -27,7 +27,7 @@ describe("typed page parameters in walker-rendered pages", () => {
             body:  Heading { name }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -60,7 +60,7 @@ describe("typed page parameters in walker-rendered pages", () => {
             body:  Stack { Heading { name }, Text { "Welcome." } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -89,7 +89,7 @@ describe("typed page parameters in walker-rendered pages", () => {
             body:  Heading { "static title" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -116,7 +116,7 @@ describe("typed page parameters in walker-rendered pages", () => {
             body:  Heading { "Welcome" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -141,7 +141,7 @@ describe("typed page parameters in walker-rendered pages", () => {
             body:  Text { name }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -164,7 +164,7 @@ describe("typed page parameters in walker-rendered pages", () => {
             body:  Heading { unknownThing }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -189,7 +189,7 @@ describe("typed page parameters in walker-rendered pages", () => {
             body:  Card { userName, Stack { Text { "hello" } } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

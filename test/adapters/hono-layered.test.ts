@@ -28,7 +28,7 @@ system Sys {
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Orders]
     dataSources: [ordersState]
     port: 3000
@@ -47,7 +47,7 @@ async function buildCtx(): Promise<EmitCtx> {
 
 describe("layered StyleAdapter — hono (real)", () => {
   it("is registered as the hono layered style adapter", () => {
-    const resolved = resolveStyle("hono", "layered");
+    const resolved = resolveStyle("node", "layered");
     expect(resolved).toBe(layeredStyleAdapter);
     expect(resolved.name).toBe("layered");
   });

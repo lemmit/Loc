@@ -149,7 +149,7 @@ system Storybook {
   // preview pipeline has something to bundle/boot.  No dataSource
   // needed because the Empty context declares no aggregates.
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Empty]
     port: 3000
   }

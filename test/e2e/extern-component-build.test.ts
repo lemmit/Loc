@@ -40,7 +40,7 @@ system Demo {
   }
   storage primary { type: postgres }
   resource salesState { for: Sales, kind: state, use: primary }
-  deployable api { platform: hono, contexts: [Sales], dataSources: [salesState], port: 3000 }
+  deployable api { platform: node, contexts: [Sales], dataSources: [salesState], port: 3000 }
   deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
 }
 `;

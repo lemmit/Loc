@@ -23,7 +23,7 @@ describe("Slot + children prop", () => {
             body:  Heading { "home" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -58,7 +58,7 @@ describe("Slot + children prop", () => {
             body:  PageBox { "Welcome", Text { "hi" }, Text { "world" } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -88,7 +88,7 @@ describe("Slot + children prop", () => {
             body:  Plain { "hi" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -115,7 +115,7 @@ describe("Slot + children prop", () => {
             body:  Box { "Title", color: "red", Text { "body" } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -143,7 +143,7 @@ describe("Slot + children prop", () => {
             body:  Ghost()
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

@@ -68,10 +68,10 @@ swap the repository/schema layer (minimal-v1 surface, validator-gated).
 
 ---
 
-## TypeScript backend (`platform: hono`)
+## TypeScript backend (`platform: node`)
 
 `generate ts` for legacy single-context sources; `generate system` for
-deployables marked `platform: hono`.
+deployables marked `platform: node`.
 
 ### File map
 
@@ -550,7 +550,7 @@ Pack selection per platform when `design:` is omitted:
 |---|---|
 | `react`, `static`, fullstack `dotnet` (with `ui:`) | `mantine` |
 | `phoenixLiveView` | `ashPhoenix` (forced — only HEEx pack supported) |
-| `hono`, backend-only `dotnet` | none (no UI mount) |
+| `node`, backend-only `dotnet` | none (no UI mount) |
 
 Picking a pack also locks in a **stack** (a coherent React + router +
 Zod + Vite + TypeScript dep bundle).  Each pack version declares its
@@ -829,8 +829,8 @@ FastAPI / SQLAlchemy 2 (typed declarative, async) / asyncpg / Postgres,
 managed by **uv** (Python 3.12) and held to `ruff check` + `mypy
 --strict` + `pytest` by the `LOOM_PYTHON_BUILD` gate.  Emission lives in
 `src/generator/python/`; the surface is `src/platform/python.ts`
-(`python@v1`; `platform: fastapi` desugars to `python` the way `hono` →
-`node`).  Async end-to-end: `async def` handlers over a per-request
+(`python@v1`; `platform: fastapi` desugars to `python` the way `phoenix` →
+`elixir`).  Async end-to-end: `async def` handlers over a per-request
 `AsyncSession` — repositories `flush()`, the session dependency commits
 once after the handler returns, so multi-save workflows are atomic by
 construction.
@@ -898,14 +898,14 @@ writes everything to a flat tree:
 | Platform | Internal port | Env | Depends on `db` | Healthcheck path |
 | --- | --- | --- | --- | --- |
 | `dotnet` | 8080 | `ConnectionStrings__Default=Host=db;Port=5432;Database=<slug>;…` | yes | `/ready` |
-| `hono` | 3000 | `DATABASE_URL=postgres://…/<slug>` | yes | `/ready` |
+| `node` | 3000 | `DATABASE_URL=postgres://…/<slug>` | yes | `/ready` |
 | `react` / `static` | 3000 | `VITE_API_BASE_URL=http://localhost:<target.port>/api` (dev/compose; the built bundle defaults to a relative `/api`) | no | `/` |
 | `phoenixLiveView` | 4000 | `DATABASE_URL=ecto://…/<slug>`, `SECRET_KEY_BASE`, `PHX_HOST`, `PHX_SERVER=true`, `PORT=4000` | yes | `/health` |
 
 The platform contract decides UI mount admissibility and DB ownership
 via two `PlatformSurface` flags (`src/platform/surface.ts`):
 `mountsUi` (true on `react`, `static`, `phoenixLiveView`) and
-`needsDb` (true on `dotnet`, `hono`, `phoenixLiveView`).  The system
+`needsDb` (true on `dotnet`, `node`, `phoenixLiveView`).  The system
 orchestrator consults these instead of hardcoding platform names, so
 adding a new platform extends the registry + the two flags only.
 

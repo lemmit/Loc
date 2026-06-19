@@ -64,7 +64,7 @@ clause:
 
 ```ddd
 deployable api {
-  platform: hono
+  platform: node
   contexts: [Orders]
   dataSources: [ordersDb, ordersFiles, orderJobs, payApi]
   port: 3000

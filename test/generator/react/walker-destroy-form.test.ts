@@ -22,7 +22,7 @@ const sys = (body: string, aggExtras = ""): string => `
     }
     storage pg { type: postgres }
     resource s { for: C, kind: state, use: pg }
-    deployable api { platform: hono, contexts: [C], dataSources: [s], serves: A, port: 3000 }
+    deployable api { platform: node, contexts: [C], dataSources: [s], serves: A, port: 3000 }
     deployable web { platform: static
       targets: api
       ui: WebApp
@@ -57,7 +57,7 @@ describe("DestroyForm — canonical destroy confirmation", () => {
             body: Stack { DestroyForm { of: Note } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static
           targets: api
           ui: WebApp

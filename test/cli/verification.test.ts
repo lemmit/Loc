@@ -21,7 +21,7 @@ const SOURCE = `
         }
       }
     }
-    deployable api { platform: hono  contexts: [Auth] }
+    deployable api { platform: node  contexts: [Auth] }
     test e2e "session can be started" against api verifies TC-002 {}
   }
 
@@ -101,7 +101,7 @@ describe("computeVerification", () => {
           aggregate Alpha { operation go() {}  test "create works" verifies T1 {} }
           aggregate Beta  { operation go() {}  test "create works" verifies T2 {} }
         } }
-        deployable api { platform: hono  contexts: [C] }
+        deployable api { platform: node  contexts: [C] }
       }
       testCase T1 verifies R1 { covers [ M.C.Alpha.go ] }
       testCase T2 verifies R2 { covers [ M.C.Beta.go ] }

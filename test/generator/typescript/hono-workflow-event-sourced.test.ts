@@ -22,7 +22,7 @@ const SRC = `system S { subdomain O { context O {
     on(pr: PaymentReceived) by pr.order { emit PaymentReceived { order: pr.order, amount: total } }
     apply(pr: PaymentReceived) { total := total + pr.amount }
   }
-} } api A from O storage pg { type: postgres } deployable api { platform: hono contexts: [O] serves: A port: 8080 } }`;
+} } api A from O storage pg { type: postgres } deployable api { platform: node contexts: [O] serves: A port: 8080 } }`;
 
 async function gen(): Promise<Map<string, string>> {
   const { model, errors } = await parseString(SRC);

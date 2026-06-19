@@ -42,7 +42,7 @@ describe("deployable field order-independence", () => {
           targets: api
         }
         deployable api {
-          platform: hono,
+          platform: node,
           port: 3000,
           dataSources: [cState],
           contexts: [C]
@@ -61,7 +61,7 @@ describe("deployable field order-independence", () => {
     expect(byName.web?.targets?.$refText).toBe("api");
 
     // Backend: dataSources-before-contexts is accepted and both bind.
-    expect(byName.api?.platform).toBe("hono");
+    expect(byName.api?.platform).toBe("node");
     expect(byName.api?.port).toBe(3000);
     expect(byName.api?.contextRefs.map((r) => r.$refText)).toEqual(["C"]);
     expect(byName.api?.dataSourceRefs.map((r) => r.$refText)).toEqual(["cState"]);
@@ -79,7 +79,7 @@ describe("deployable field order-independence", () => {
         resource cState { for: C, kind: state, use: primary }
 
         deployable api {
-          platform: hono,
+          platform: node,
           contexts: [C],
           dataSources: [cState],
           port: 3000

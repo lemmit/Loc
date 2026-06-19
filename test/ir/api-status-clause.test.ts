@@ -25,7 +25,7 @@ const SYS = (apiBody: string) => `
     api SalesApi from Sales ${apiBody}
     storage pg { type: postgres }
     resource shopState { for: Shop, kind: state, use: pg }
-    deployable api { platform: hono, contexts: [Shop], dataSources: [shopState], port: 4000 }
+    deployable api { platform: node, contexts: [Shop], dataSources: [shopState], port: 4000 }
   }
 `;
 

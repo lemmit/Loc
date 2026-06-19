@@ -135,7 +135,7 @@ describe("enrichment — idempotency", () => {
           valueobject Money { amount: int  currency: string }
         }
       }
-      deployable api { platform: hono, contexts: [Orders], port: 3000 }
+      deployable api { platform: node, contexts: [Orders], port: 3000 }
     }
   `;
 

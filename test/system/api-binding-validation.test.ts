@@ -33,7 +33,7 @@ describe("api binding validator", () => {
           subdomain Sales { context C { } }
           api Foo from Sales
           api Foo from Sales
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: node, contexts: [C], port: 3000 }
         }
       `);
       expect(errors.some((e) => /Duplicate api 'Foo'/.test(e))).toBe(true);
@@ -43,7 +43,7 @@ describe("api binding validator", () => {
       const { errors } = await parse(`
         system S {
           api Foo from MissingSubdomain
-          deployable api { platform: hono, port: 3000 }
+          deployable api { platform: node, port: 3000 }
         }
       `);
       expect(
@@ -56,7 +56,7 @@ describe("api binding validator", () => {
         system S {
           subdomain Sales { context Orders { aggregate Customer { name: string } } }
           api SalesApi from Sales
-          deployable api { platform: hono, contexts: [Orders], port: 3000 }
+          deployable api { platform: node, contexts: [Orders], port: 3000 }
         }
       `);
       expect(errors.filter((e) => /api/.test(e))).toEqual([]);
@@ -74,7 +74,7 @@ describe("api binding validator", () => {
             api Sales: SalesApi
             page X { route: "/x" body: Heading { "hi" } }
           }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: node, contexts: [C], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -91,7 +91,7 @@ describe("api binding validator", () => {
             api Sales: NoSuchApi
             page X { route: "/x" body: Heading { "hi" } }
           }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: node, contexts: [C], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -114,7 +114,7 @@ describe("api binding validator", () => {
             api Sales: SalesApi
             page X { route: "/x" body: Text { Sales.NoSuchAggregate.all.isLoading } }
           }
-          deployable api { platform: hono, contexts: [Orders], port: 3000 }
+          deployable api { platform: node, contexts: [Orders], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -137,7 +137,7 @@ describe("api binding validator", () => {
             api Sales: SalesApi
             page X { route: "/x" body: Text { Sales.Customer.allll.isLoading } }
           }
-          deployable api { platform: hono, contexts: [Orders], port: 3000 }
+          deployable api { platform: node, contexts: [Orders], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -169,7 +169,7 @@ describe("api binding validator", () => {
               }
             }
           }
-          deployable api { platform: hono, contexts: [Orders], port: 3000 }
+          deployable api { platform: node, contexts: [Orders], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -193,7 +193,7 @@ describe("api binding validator", () => {
               body: Text { Sales.Customer.byEmail(email).isLoading }
             }
           }
-          deployable api { platform: hono, contexts: [Orders], port: 3000 }
+          deployable api { platform: node, contexts: [Orders], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
@@ -214,7 +214,7 @@ describe("api binding validator", () => {
               body: Button { "Foo", onClick: e => { lodash.compact.foo(items) } }
             }
           }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: node, contexts: [C], port: 3000 }
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);

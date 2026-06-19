@@ -50,7 +50,7 @@ folded into that system.
 main.ddd     system AcmeErp { theme {…} user {…}
                   storage primary { type: postgres }
                   resource salesState { for: Sales, kind: state, use: primary }
-                  deployable coreApi { platform: hono, contexts: [Sales, Inventory] … }
+                  deployable coreApi { platform: node, contexts: [Sales, Inventory] … }
                   ui BackOffice with scaffold(subdomains: [Sales, Inventory]) { … } }
 sales.ddd       subdomain Sales { context Sales { … } }
 inventory.ddd   subdomain Inventory { context Inventory { … } }

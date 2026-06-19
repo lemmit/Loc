@@ -62,7 +62,7 @@ system Tally {
   storage pg { type: postgres }
   resource counterLog { for: Core, kind: eventLog, use: pg }
   resource counterState { for: Core, kind: state, use: pg }
-  deployable api { platform: hono, contexts: [Core], dataSources: [counterLog, counterState], port: 4000 }
+  deployable api { platform: node, contexts: [Core], dataSources: [counterLog, counterState], port: 4000 }
 }
 `;
 }

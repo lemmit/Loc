@@ -183,7 +183,7 @@ system BankingSystem {
   resource bankingState { for: Banking, kind: state, use: primary }
 
   deployable api {
-    platform: hono, contexts: [Banking],
+    platform: node, contexts: [Banking],
     dataSources: [bankingState], port: 3000
   }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }

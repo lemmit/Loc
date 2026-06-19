@@ -2146,7 +2146,7 @@ export interface DeployableIR {
    *  family so `platform === "node"` etc. stay valid. */
   platform: Platform;
   /** The fully-qualified backend ref (`"hono@v4"`) after lowering,
-   *  mirroring `design?`.  Bareword `platform: hono` resolves through
+   *  mirroring `design?`.  Bareword `platform: node` resolves through
    *  `BUILTIN_PLATFORM_LATEST`; a pin (`platform: "hono@v4"`) flows
    *  through as written.  For frontend platforms (`react`/`static`)
    *  this equals `platform` (they version via the design/stack axis,

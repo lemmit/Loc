@@ -224,7 +224,7 @@ system Acme {
   }
 
   // existing per-deployable opt-in is unchanged
-  deployable api  { platform: hono, contexts: [...], dataSources: [...], auth: required }
+  deployable api  { platform: node, contexts: [...], dataSources: [...], auth: required }
   deployable web  { platform: react, targets: api, auth: ui }   // mounts the login redirect + guard
 }
 ```

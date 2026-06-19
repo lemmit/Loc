@@ -32,7 +32,7 @@ system Acme {
   storage primarySql { type: postgres }
   resource pState { for: P, kind: state, use: primarySql }
   deployable api {
-    platform: hono
+    platform: node
     contexts: [P]
     dataSources: [pState]
     serves: PeopleApi

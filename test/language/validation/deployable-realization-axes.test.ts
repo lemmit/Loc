@@ -10,7 +10,7 @@ import type { Model } from "../../../src/language/generated/ast.js";
 // the grammar admits the block, lowering normalizes defaults, and the
 // validator enforces R1 (out-of-menu, against the live REAL-adapter menu)
 // and R4 (a `foundation:` framework owns some axes).  Menus list only
-// implemented adapters, so on dotnet/hono the adapter axes are size-1
+// implemented adapters, so on dotnet/node the adapter axes are size-1
 // today (selecting a stub is rejected, not run).
 // ---------------------------------------------------------------------------
 
@@ -52,8 +52,8 @@ describe("realization axes — grammar admits the block", () => {
     expect(errors).toEqual([]);
   });
 
-  it('a pin carries a block: `platform: "hono@v4" { persistence: drizzle }`', async () => {
-    const { errors } = await parse(sys(`"hono@v4" { persistence: drizzle }`));
+  it('a pin carries a block: `platform: "node@v4" { persistence: drizzle }`', async () => {
+    const { errors } = await parse(sys(`"node@v4" { persistence: drizzle }`));
     expect(errors).toEqual([]);
   });
 });
@@ -96,15 +96,15 @@ describe("realization axes — R1 out-of-menu", () => {
     expect(errors).toEqual([]);
   });
 
-  it("accepts `application: serviceLayer` on hono (where `layered` is the real adapter)", async () => {
-    const { errors } = await parse(sys("hono { application: serviceLayer }"));
+  it("accepts `application: serviceLayer` on node (where `layered` is the real adapter)", async () => {
+    const { errors } = await parse(sys("node { application: serviceLayer }"));
     expect(errors).toEqual([]);
   });
 
   it("recognises `application: flat` as reserved (vocabulary parity flat→serviceLayer→cqrs)", async () => {
     // `flat` is the spec's simplest application topology — registered as a stub
     // so it's reserved-not-implemented (not 'unknown') on dotnet and node.
-    for (const plat of ["dotnet", "hono"]) {
+    for (const plat of ["dotnet", "node"]) {
       const { errors } = await parse(sys(`${plat} { application: flat }`));
       expect(errors.some((e) => /application: flat.*reserved.*not yet implemented/.test(e))).toBe(
         true,
@@ -117,7 +117,7 @@ describe("realization axes — R1 out-of-menu", () => {
       system S {
         subdomain M { context C { } }
         ui W { page Home() { route: "/" body: Heading { "hi" } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static { persistence: efcore }, targets: api, ui: W, port: 3001 }
       }
     `);
@@ -140,10 +140,10 @@ describe("realization axes — R1 out-of-menu", () => {
 describe("realization axes — R3 style ↔ directoryLayout compatibility", () => {
   it("accepts node `serviceLayer` (layered) + either layout — style/layout orthogonal", async () => {
     expect(
-      (await parse(sys("hono { application: serviceLayer, directoryLayout: byLayer }"))).errors,
+      (await parse(sys("node { application: serviceLayer, directoryLayout: byLayer }"))).errors,
     ).toEqual([]);
     expect(
-      (await parse(sys("hono { application: serviceLayer, directoryLayout: byFeature }"))).errors,
+      (await parse(sys("node { application: serviceLayer, directoryLayout: byFeature }"))).errors,
     ).toEqual([]);
   });
 
@@ -157,7 +157,7 @@ describe("realization axes — R3 style ↔ directoryLayout compatibility", () =
   });
 
   it("bare platforms (default style × default layout) never trip R3", async () => {
-    expect((await parse(sys("hono"))).errors).toEqual([]);
+    expect((await parse(sys("node"))).errors).toEqual([]);
     expect((await parse(sys("dotnet"))).errors).toEqual([]);
     expect((await parse(sys("elixir"))).errors).toEqual([]);
   });
@@ -288,9 +288,9 @@ describe("realization axes — R6 foundation ↔ persistence/application compati
 // ---------------------------------------------------------------------------
 describe("realization axes — transport is adapter-backed", () => {
   it("accepts the real transport (dotnet `controllers`)", async () => {
-    // The canonical node/elixir transports (`hono` / `phoenix`) are hard
-    // platform keywords, so they aren't user-writable axis values — they're
-    // set by the lowering default.  dotnet's `controllers` is a plain ID.
+    // The canonical node/elixir transports (`hono` / `phoenix`) are set by
+    // the lowering default rather than written by hand, so they aren't
+    // exercised as user axis values here.  dotnet's `controllers` is a plain ID.
     expect((await parse(sys("dotnet { transport: controllers }"))).errors).toEqual([]);
   });
 
@@ -309,7 +309,7 @@ describe("realization axes — transport is adapter-backed", () => {
 
   it("recognises node transport alternatives as reserved (`express` / `fastify`)", async () => {
     for (const t of ["express", "fastify"]) {
-      const { errors } = await parse(sys(`hono { transport: ${t} }`));
+      const { errors } = await parse(sys(`node { transport: ${t} }`));
       expect(
         errors.some((e) => new RegExp(`transport: ${t}.*reserved.*not yet implemented`).test(e)),
       ).toBe(true);
@@ -330,7 +330,7 @@ describe("realization axes — transport is adapter-backed", () => {
 describe("realization axes — runtime is adapter-backed", () => {
   it("accepts the real `transactional` runtime on every backend", async () => {
     expect((await parse(sys("dotnet { runtime: transactional }"))).errors).toEqual([]);
-    expect((await parse(sys("hono { runtime: transactional }"))).errors).toEqual([]);
+    expect((await parse(sys("node { runtime: transactional }"))).errors).toEqual([]);
     expect((await parse(sys("elixir { runtime: transactional }"))).errors).toEqual([]);
   });
 
@@ -343,14 +343,14 @@ describe("realization axes — runtime is adapter-backed", () => {
     expect(e.errors.some((m) => /runtime: genserver.*reserved.*not yet implemented/.test(m))).toBe(
       true,
     );
-    const n = await parse(sys("hono { runtime: worker }"));
+    const n = await parse(sys("node { runtime: worker }"));
     expect(n.errors.some((m) => /runtime: worker.*reserved.*not yet implemented/.test(m))).toBe(
       true,
     );
   });
 
-  it("rejects an actor runtime on a backend that doesn't reserve it (`orleans` on hono)", async () => {
-    const { errors } = await parse(sys("hono { runtime: orleans }"));
+  it("rejects an actor runtime on a backend that doesn't reserve it (`orleans` on node)", async () => {
+    const { errors } = await parse(sys("node { runtime: orleans }"));
     expect(errors.some((e) => /runtime: orleans.*is not available/.test(e))).toBe(true);
   });
 });

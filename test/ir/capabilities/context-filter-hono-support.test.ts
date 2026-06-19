@@ -46,13 +46,13 @@ system Shop {
 
 describe("hono capability-filter support guard", () => {
   it("accepts a non-principal relational filter on hono", async () => {
-    expect(await honoFilterErrors(sys("hono", { filter: "filter !this.isDeleted" }))).toEqual([]);
+    expect(await honoFilterErrors(sys("node", { filter: "filter !this.isDeleted" }))).toEqual([]);
   });
 
   it("accepts a principal-referencing (tenancy) filter on a relational hono aggregate (DEBT-01)", async () => {
     expect(
       await honoFilterErrors(
-        sys("hono", { filter: "filter this.tenantId == currentUser.tenantId" }),
+        sys("node", { filter: "filter this.tenantId == currentUser.tenantId" }),
       ),
     ).toEqual([]);
   });
@@ -96,7 +96,7 @@ system Shop {
   api ShopApi from Sales
   storage pg { type: postgres }
   resource shopState { for: Shop, kind: state, use: pg }
-  deployable api { platform: hono, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }
+  deployable api { platform: node, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }
 }`;
     const errs = await honoFilterErrors(noAuth);
     expect(errs.length).toBe(1);
@@ -107,7 +107,7 @@ system Shop {
     // Non-relational gates on node too — the principal-filter wiring is
     // relational-only.  Report the shape limitation.
     const errs = await honoFilterErrors(
-      sys("hono", { shape: "document", filter: "filter this.tenantId == currentUser.tenantId" }),
+      sys("node", { shape: "document", filter: "filter this.tenantId == currentUser.tenantId" }),
     );
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("shape(document)");
@@ -115,7 +115,7 @@ system Shop {
 
   it("rejects a capability filter on a non-relational (document) hono aggregate", async () => {
     const errs = await honoFilterErrors(
-      sys("hono", { shape: "document", filter: "filter !this.isDeleted" }),
+      sys("node", { shape: "document", filter: "filter !this.isDeleted" }),
     );
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("shape(document)");

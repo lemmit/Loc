@@ -41,7 +41,7 @@ disentanglement applies (the *runtime* → `node`; the *web framework* → a
 - `registry.ts`: `node` canonical key/family/surface name; `aliasPlatform`
   maps legacy `hono` → `node`; `BUILTIN_PLATFORM_LATEST` key `node`.
 - `transport:` menu for `node` = `hono`\* (default) — size-1 until Phase 6 adds
-  `express`/`fastify`; legacy `platform: hono` desugars to
+  `express`/`fastify`; legacy `platform: node` desugars to
   `node { transport: hono }`.
 - Add the **derived `language` property** to `PlatformSurface`
   (`node`→`typescript`, `dotnet`→`csharp`, `phoenix`→`elixir`, `react`→
@@ -49,7 +49,7 @@ disentanglement applies (the *runtime* → `node`; the *web framework* → a
 - `src/platform/hono/` reframed in docs/comments as "node's Hono transport";
   `src/generator/typescript/` is the (unchanged) language codegen.
 - Update tests/examples to the new canonical with back-compat assertions
-  (`platform: hono` → `"node"`), exactly as Phase 2 did for phoenix.
+  (`platform: node` → `"node"`), exactly as Phase 2 did for phoenix.
 - **Verification:** build + lint + full fast suite; `hono-build.yml` (the
   TS/tsup gate) is the CI check for the emit path. Surface-only — no output
   change (transport stays `hono`).

@@ -105,7 +105,7 @@ describe("multi-file regression — byte-identical with the single-file baseline
               repository Products for Product { }
             }
           }
-          deployable api { platform: hono, contexts: [Catalog] }
+          deployable api { platform: node, contexts: [Catalog] }
         }
       `,
       "shared/money.ddd": `

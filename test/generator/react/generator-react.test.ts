@@ -292,7 +292,7 @@ describe("react generator", () => {
             }
           }
           ui WebApp with scaffold(subdomains: [M]) { }
-          deployable api { platform: hono, contexts: [C], port: 3000 }
+          deployable api { platform: node, contexts: [C], port: 3000 }
           deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
         }
       `,
@@ -342,7 +342,7 @@ describe("react generator", () => {
           }
           storage primarySql { type: postgres }
           deployable api {
-            platform: hono
+            platform: node
             contexts: [S]
             serves: SalesApi
             port: 3001

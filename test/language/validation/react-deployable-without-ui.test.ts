@@ -17,7 +17,7 @@ describe("validator: react deployable requires `ui:`", () => {
     const { errors } = await parseString(`
       system S {
         subdomain M { context C { aggregate A { x: int } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: react, targets: api, port: 3001 }
       }
     `);
@@ -36,7 +36,7 @@ describe("validator: react deployable requires `ui:`", () => {
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         ui WebApp { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -59,7 +59,7 @@ describe("validator: react deployable requires `ui:`", () => {
           }
         }
         ui WebApp with scaffold(subdomains: [M]) { }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -75,7 +75,7 @@ describe("validator: react deployable requires `ui:`", () => {
     const { errors } = await parseString(`
       system S {
         subdomain M { context C { aggregate A { x: int } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, port: 3001 }
       }
     `);

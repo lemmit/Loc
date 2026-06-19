@@ -23,7 +23,7 @@ describe("user-defined components", () => {
             body:  Heading { "home" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -57,7 +57,7 @@ describe("user-defined components", () => {
             body:  WelcomeBox("Alice")
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -87,7 +87,7 @@ describe("user-defined components", () => {
             body:  CounterBadge(x)
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -116,7 +116,7 @@ describe("user-defined components", () => {
             body:  LabeledIcon(icon: "star", label: "Featured")
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -146,7 +146,7 @@ describe("user-defined components", () => {
             body:  Stack { Foo("a"), Bar("b"), Foo("c") }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -181,7 +181,7 @@ describe("user-defined components", () => {
             body:  Outer("X")
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -206,7 +206,7 @@ describe("user-defined components", () => {
             body:  Heading { "hi" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -242,7 +242,7 @@ describe("user-defined components", () => {
             body: Hero("Welcome")
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -283,7 +283,7 @@ describe("user-defined components", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -330,7 +330,7 @@ describe("user-defined components", () => {
             body: Panel { body: Text { "no heading provided" } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -372,7 +372,7 @@ describe("user-defined components", () => {
             body: Hero("World")
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -411,7 +411,7 @@ describe("user-defined components", () => {
             body: Heading { "Hi", level: 1 }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

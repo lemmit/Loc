@@ -35,7 +35,7 @@ system MoneyState {
     }
   }
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Cart]
     dataSources: [cartState]
     serves: ShopApi

@@ -42,7 +42,7 @@ export {
 //
 // Backend packages (see docs/backend-packages.md): the registry
 // resolves a backend by `family@version`, with a defaults map
-// so a bareword `platform: hono` keeps resolving to a concrete
+// so a bareword `platform: node` keeps resolving to a concrete
 // version.  Every backend family currently has exactly ONE registered
 // version, aliased to the same surface object the bareword returns
 // — so the resolution paths yield identical `PlatformSurface` instances

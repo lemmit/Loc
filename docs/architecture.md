@@ -224,7 +224,7 @@ declaration is self-contained.
 
 ```ddd
 deployable salesApi {
-  platform: hono                       // runtime
+  platform: node                       // runtime
   contexts: [Orders, Customers]        // domain contexts hosted
   dataSources: [ordersState, customersState, ordersCache]  // routing
   serves: SalesApi                     // contract this deployable implements
@@ -349,7 +349,7 @@ system Acme {
   }
 
   deployable salesApi {
-    platform: hono
+    platform: node
     contexts: [Orders]
     dataSources: [ordersState]
     serves: SalesApi

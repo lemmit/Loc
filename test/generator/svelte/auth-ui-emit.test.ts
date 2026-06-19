@@ -25,7 +25,7 @@ system Helpdesk {
   storage primary { type: postgres }
   resource st { for: Tickets, kind: state, use: primary }
   api SupportApi from Support
-  deployable api { platform: hono contexts: [Tickets] serves: SupportApi dataSources: [st] port: 8080 auth: required }
+  deployable api { platform: node contexts: [Tickets] serves: SupportApi dataSources: [st] port: 8080 auth: required }
   ui WebApp with scaffold(subdomains: [Support]) { }
   deployable web { platform: svelte targets: api ui: WebApp port: 3001${design ? ` design: ${design}` : ""}${authUi ? " auth: ui" : ""} }
 }

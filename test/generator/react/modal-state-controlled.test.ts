@@ -28,7 +28,7 @@ system Acme {
   }
   storage primarySql { type: postgres }
   resource sState { for: S, kind: state, use: primarySql }
-  deployable api { platform: hono contexts: [S] dataSources: [sState] serves: SalesApi port: 3001 }
+  deployable api { platform: node contexts: [S] dataSources: [sState] serves: SalesApi port: 3001 }
   deployable web_app {
     platform: static
     targets: api

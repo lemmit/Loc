@@ -219,7 +219,7 @@ system StorefrontSystem {
   resource storefrontState { for: Storefront, kind: state, use: primary }
 
   deployable api {
-    platform: hono, contexts: [Storefront],
+    platform: node, contexts: [Storefront],
     dataSources: [storefrontState], port: 3000
   }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }

@@ -24,7 +24,7 @@ const SRC = `
       function orderLabel(order: Order): string extern from "./helpers/order-label"
       page Home { route: "/" body: Heading { initials("Ada Lovelace") } }
     }
-    deployable api { platform: hono, contexts: [Sales], serves: SalesApi, port: 3000 }
+    deployable api { platform: node, contexts: [Sales], serves: SalesApi, port: 3000 }
     deployable web { platform: vue, targets: api, ui: WebApp { Sales: api }, port: 3001 }
   }
 `;

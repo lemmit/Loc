@@ -146,7 +146,7 @@ by id, not by reference") baked into the grammar.
 ```ddd
 deployable api          { platform: dotnet, modules: Catalog, Sales, port: 8080 }
 deployable catalogApi   { platform: dotnet, modules: Catalog,         port: 8081 }
-deployable catalogWeb   { platform: hono,   modules: Catalog,         port: 3000 }
+deployable catalogWeb   { platform: node,   modules: Catalog,         port: 3000 }
 deployable webApp       { platform: react,  targets: api,             port: 3001 }
 ```
 

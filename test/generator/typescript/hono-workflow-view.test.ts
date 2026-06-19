@@ -25,7 +25,7 @@ const SRC = `
       }
     }
     storage primary { type: postgres }
-    deployable api { platform: hono  contexts: [Ops]  port: 3000 }
+    deployable api { platform: node  contexts: [Ops]  port: 3000 }
   }
 `;
 

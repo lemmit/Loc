@@ -57,7 +57,7 @@ const FIXTURE = `system Mini {
     }
   }
   deployable api {
-    platform: hono
+    platform: node
     contexts: [C]
     serves: MiniApi
     port: 3000

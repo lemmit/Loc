@@ -507,7 +507,7 @@ system LoomLanding {
   // preview pipeline has something to bundle and boot alongside the
   // React frontend.
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Empty]
     port: 3000
   }

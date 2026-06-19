@@ -36,7 +36,7 @@ const SRC = `
       page OrderHome { route: "/order-home" body: Text { "home" } }
     }
     deployable api {
-      platform: hono
+      platform: node
       contexts: [Sales]
       serves: SalesApi
       port: 3000

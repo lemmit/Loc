@@ -124,7 +124,7 @@ system Bank {
   api LedgerApi from Core
   storage pg { type: postgres }
   resource ledgerState { for: Ledger, kind: state, use: pg }
-  deployable api { platform: hono, contexts: [Ledger], dataSources: [ledgerState], serves: LedgerApi, auth: required, port: 4000 }
+  deployable api { platform: node, contexts: [Ledger], dataSources: [ledgerState], serves: LedgerApi, auth: required, port: 4000 }
 }
 `;
 

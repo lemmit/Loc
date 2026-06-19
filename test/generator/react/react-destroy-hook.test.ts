@@ -32,7 +32,7 @@ const FIXTURE = `
         }
       }
     }
-    deployable api { platform: hono, contexts: [Ops], port: 3000 }
+    deployable api { platform: node, contexts: [Ops], port: 3000 }
     deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
   }
 `;

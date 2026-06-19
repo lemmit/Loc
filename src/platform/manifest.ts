@@ -2,7 +2,7 @@
 // Backend package manifest (see docs/packaging-split.md).
 //
 // The small, declarative descriptor a backend package ships so the
-// core can resolve `platform: hono` / `platform: "hono@v4"`
+// core can resolve `platform: node` / `platform: "hono@v4"`
 // *automagically* without statically importing every backend.
 //
 // Today this is paired with an in-tree discovery seam (backends are

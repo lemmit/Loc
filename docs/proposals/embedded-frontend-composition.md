@@ -187,7 +187,7 @@ is retired as a *platform* — it was always "Vite hosts React," now spelled
 
 A desugaring shim (`platform: react` → vite-host + the referenced `ui` gaining
 `framework: react`) keeps existing `.ddd` sources parsing during transition,
-mirroring how `platform: "hono@v4"` desugars to family+version.
+mirroring how `platform: "node@v4"` desugars to family+version.
 
 ## 5. What this buys (and the success test)
 

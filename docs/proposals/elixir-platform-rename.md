@@ -13,7 +13,7 @@
 
 ## TL;DR
 
-D-NODE-PLATFORM (PINNED) renamed `platform: hono` → `platform: node` on
+D-NODE-PLATFORM (PINNED) renamed `platform: node` → `platform: node` on
 the principle that **platform names the language-ecosystem, transport
 names the web framework**. The decision text justifies itself by
 asserting *"`dotnet` / `phoenix` name the language-ecosystem"* and

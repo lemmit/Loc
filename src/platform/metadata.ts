@@ -40,17 +40,18 @@ export type BackendFamily = keyof typeof BUILTIN_PLATFORM_LATEST;
 /** Legacy platform name → canonical family.  Each canonical name
  *  decouples the *platform* (runtime / language-ecosystem) from the
  *  *framework* it was once conflated with: `phoenixLiveView` / `phoenix`
- *  → `elixir`; `hono` → `node`; `fastapi` → `python`.  (See the
- *  D-ELIXIR-PLATFORM / D-NODE-PLATFORM decisions.) */
+ *  → `elixir`; `fastapi` → `python`.  (See the D-ELIXIR-PLATFORM /
+ *  D-NODE-PLATFORM decisions.)  The former `hono` → `node` alias was
+ *  retired (D-NODE-PLATFORM): `node` is the only spelling, and the Hono
+ *  framework name surfaces only as the `transport:` value. */
 const LEGACY_PLATFORM_ALIASES: Record<string, string> = {
   phoenixLiveView: "elixir",
   phoenix: "elixir",
-  hono: "node",
   fastapi: "python",
 };
 
 /** Desugar a legacy platform name to its canonical family, preserving any
- *  `@version` pin (`hono@v4` → `node@v4`). */
+ *  `@version` pin (`fastapi@v1` → `python@v1`). */
 function aliasPlatform(s: string): string {
   const at = s.indexOf("@");
   const family = at === -1 ? s : s.slice(0, at);
@@ -244,7 +245,7 @@ const PLATFORM_DESCRIPTORS: Record<Platform, PlatformDescriptor> = {
  *
  *  Canonicalises legacy spellings and version pins exactly as registry's
  *  `resolvePlatformRef` does, so callers can pass a raw source value
- *  (`"hono"`, `"hono@v4"`, `"phoenix"`) or a canonical `Platform` and get
+ *  (`"node@v4"`, `"phoenix"`, `"fastapi"`) or a canonical `Platform` and get
  *  the same descriptor — `platformFor(x).<field>` and `descriptorFor(x).<field>`
  *  agree for every input. */
 export function descriptorFor(name: Platform): PlatformDescriptor {

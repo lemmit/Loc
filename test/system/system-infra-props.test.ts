@@ -39,7 +39,7 @@ describe("System builder — infra construct properties", () => {
   });
 
   it("reads and sets a deployable platform (preserving the rest)", () => {
-    expect(deployablePlatform(node("Deployable", "catalogWeb"))).toBe("hono");
+    expect(deployablePlatform(node("Deployable", "catalogWeb"))).toBe("node");
     const out = setDeployablePlatform(acme, "catalogWeb", "react")!;
     expect(out).toMatch(/deployable catalogWeb \{\s*platform: react/);
     expect(out).toMatch(/deployable api \{\s*platform: dotnet/); // sibling untouched

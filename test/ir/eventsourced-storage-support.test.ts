@@ -41,7 +41,7 @@ system Ledger {
 
 describe("event-sourced storage capability validation", () => {
   it("accepts persistedAs(eventLog) on a Hono (node) deployable", async () => {
-    expect(await esErrors(sys("hono"))).toEqual([]);
+    expect(await esErrors(sys("node"))).toEqual([]);
   });
 
   it("accepts persistedAs(eventLog) on a .NET deployable (EF Core event store, A2.2b)", async () => {

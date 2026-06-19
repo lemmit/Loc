@@ -3174,10 +3174,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "hono"
-          },
-          {
-            "$type": "Keyword",
             "value": "node"
           },
           {

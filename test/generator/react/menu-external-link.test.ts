@@ -32,7 +32,7 @@ system S {
   }
   storage primarySql { type: postgres }
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Sales]
     serves: SalesApi
     port: 3001

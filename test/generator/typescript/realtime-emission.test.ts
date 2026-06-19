@@ -132,7 +132,7 @@ system RealtimeShop {
     page Home { route: "/" body: Heading { "hi" } }
   }
   deployable backend {
-    platform: hono
+    platform: node
     contexts: [Fulfillment]
     serves: FulfillmentApi
     port: 3000

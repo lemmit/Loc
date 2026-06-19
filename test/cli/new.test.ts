@@ -26,9 +26,9 @@ function tmpdir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "loom-new-"));
 }
 
-const platforms = ["hono", "dotnet", "elixir", "java"] as const;
+const platforms = ["node", "dotnet", "elixir", "java"] as const;
 const templates = ["blank", "crud"] as const;
-const backendPort: Record<string, number> = { hono: 3000, dotnet: 8080, elixir: 4000, java: 8081 };
+const backendPort: Record<string, number> = { node: 3000, dotnet: 8080, elixir: 4000, java: 8081 };
 
 describe("ddd new — scaffold matrix", () => {
   for (const platform of platforms) {
@@ -67,10 +67,7 @@ describe("ddd new — scaffold matrix", () => {
           deployables: { name: string; platform: string; port: number }[];
         };
         expect(report.ok).toBe(true);
-        // `hono` is a legacy alias that resolves to `node` in the IR.
-        // (`elixir` is the new canonical name; `phoenix` aliases to it.)
-        const resolved = platform === "hono" ? "node" : platform;
-        expect(report.deployables.some((d) => d.platform === resolved)).toBe(true);
+        expect(report.deployables.some((d) => d.platform === platform)).toBe(true);
 
         fs.rmSync(tmp, { recursive: true });
       });
@@ -79,10 +76,10 @@ describe("ddd new — scaffold matrix", () => {
 });
 
 describe("ddd new — platform/frontend wiring", () => {
-  it("hono scaffolds a separate React frontend (default mantine)", () => {
+  it("node scaffolds a separate React frontend (default mantine)", () => {
     const tmp = tmpdir();
     const out = path.join(tmp, "p");
-    runCli(["new", "app", "-o", out]); // hono is the default platform
+    runCli(["new", "app", "-o", out]); // node is the default platform
     const src = fs.readFileSync(path.join(out, "main.ddd"), "utf8");
     expect(src).toContain("platform: react");
     expect(src).toContain("design: mantine");
@@ -138,7 +135,7 @@ describe("ddd new — guards and ergonomics", () => {
   it("prints the platform hint when --platform is defaulted", () => {
     const tmp = tmpdir();
     const r = runCli(["new", "app", "-o", path.join(tmp, "p")]);
-    expect(r.stdout).toContain("platform: hono (default)");
+    expect(r.stdout).toContain("platform: node (default)");
     fs.rmSync(tmp, { recursive: true });
   });
 
@@ -150,7 +147,7 @@ describe("ddd new — guards and ergonomics", () => {
       "-o",
       path.join(tmp, "p"),
       "--platform",
-      "hono",
+      "node",
       "--design",
       "ashPhoenix",
     ]);

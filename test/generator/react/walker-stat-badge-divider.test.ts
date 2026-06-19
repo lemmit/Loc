@@ -22,7 +22,7 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
             body:  Stat { "Active orders", "47" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -48,7 +48,7 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
             body:  Stat { label, value }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -74,7 +74,7 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
             body:  Stack { Heading { "Status" }, Badge { "Live" } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -98,7 +98,7 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
             body:  Stack { Heading { "A" }, Divider {}, Heading { "B" } }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -122,7 +122,7 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
             body:  Divider { label: "Section break" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -150,7 +150,7 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

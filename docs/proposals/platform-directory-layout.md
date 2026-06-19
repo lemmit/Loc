@@ -39,7 +39,7 @@
   `src/platform/registry.ts`.
 - The shared `src/generator/_adapters/{persistence,style,layout}-surface.ts`
   contracts and the `AdapterNotImplementedError` stub helper.
-- The `platform: hono` → `platform: node { framework: hono }` rename
+- The `platform: node` → `platform: node { framework: hono }` rename
   that makes "node" the language-level platform and `hono` / `express` /
   `fastify` / `nestjs` framework choices within it.
 - F5/F6/F7's per-platform emitter reshape into

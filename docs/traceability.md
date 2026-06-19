@@ -41,7 +41,7 @@ system Shop {
       }
     }
   }
-  deployable AuthApi { platform: hono  modules: Identity }
+  deployable AuthApi { platform: node  modules: Identity }
 }
 
 solution SOL-001 for US-001 {

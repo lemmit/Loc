@@ -23,7 +23,7 @@ describe("extern components", () => {
             extern from "widgets/order-chart"
           page Home { route: "/" body: Heading { "hi" } }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -56,7 +56,7 @@ describe("extern components", () => {
           component Banner(text: string) extern from "widgets/banner"
           page Home { route: "/" body: Banner(text: "hello") }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -75,7 +75,7 @@ describe("extern components", () => {
           component Spinner() extern from "widgets/spinner"
           page Home { route: "/" body: Heading { "hi" } }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -106,7 +106,7 @@ describe("extern components — action params (Tier 2)", () => {
           body: OrderGrid { orders: C.Order.all, onPick: o => { note := o.status } }
         }
       }
-      deployable api { platform: hono, contexts: [C], port: 3000 }
+      deployable api { platform: node, contexts: [C], port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp { C: api }, port: 3001 }
     }
   `;

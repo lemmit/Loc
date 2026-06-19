@@ -39,7 +39,7 @@ system Shop {
 
 describe("provenanced-field storage capability validation", () => {
   it("accepts a provenanced field on a Hono (node) deployable", async () => {
-    expect(await provErrors(sys("hono"))).toEqual([]);
+    expect(await provErrors(sys("node"))).toEqual([]);
   });
 
   it("accepts a provenanced field on a .NET deployable (provenance runtime ported)", async () => {
@@ -66,7 +66,7 @@ system Shop {
   }
   storage pg { type: postgres }
   resource ordersState { for: Ordering, kind: state, use: pg }
-  deployable honoApi { platform: hono, contexts: [Ordering], dataSources: [ordersState], port: 3000 }
+  deployable honoApi { platform: node, contexts: [Ordering], dataSources: [ordersState], port: 3000 }
   deployable dotnetApi { platform: dotnet, contexts: [Ordering], dataSources: [ordersState], port: 8080 }
 }
 `;
@@ -87,7 +87,7 @@ system Shop {
   }
   storage pg { type: postgres }
   resource ordersState { for: Ordering, kind: state, use: pg }
-  deployable honoApi { platform: hono, contexts: [Ordering], dataSources: [ordersState], port: 3000 }
+  deployable honoApi { platform: node, contexts: [Ordering], dataSources: [ordersState], port: 3000 }
   deployable phx { platform: phoenixLiveView, contexts: [Ordering], dataSources: [ordersState], port: 8080 }
 }
 `;

@@ -20,7 +20,7 @@ system Sys { subdomain Sales { context Sales {
 } }
 storage bus { type: rabbitmq }
 resource jobs { for: Sales, kind: queue, use: bus }
-deployable api { platform: hono, contexts: [Sales], dataSources: [jobs], port: 3000 }
+deployable api { platform: node, contexts: [Sales], dataSources: [jobs], port: 3000 }
 }`;
 
 describe("object literal — reserved-keyword field keys", () => {

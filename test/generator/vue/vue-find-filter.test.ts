@@ -23,7 +23,7 @@ const SRC = (platform: string) => `
     } }
     api SalesApi from Sub
     ui WebApp with scaffold(subdomains: [Sub]) { api Sub: SalesApi }
-    deployable api { platform: hono, contexts: [Sales], serves: SalesApi, port: 3000 }
+    deployable api { platform: node, contexts: [Sales], serves: SalesApi, port: 3000 }
     deployable web { platform: ${platform}, targets: api, ui: WebApp { Sub: api }, port: 3001 }
   }
 `;

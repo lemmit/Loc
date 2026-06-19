@@ -6,10 +6,12 @@ import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 
 // ---------------------------------------------------------------------------
-// The grammar admits `platform: "hono@v4"`
+// The grammar admits `platform: "node@v4"`
 // (STRING alternative).  Lowering normalises it to the family
 // (byte-identical `platform`) + a qualified `platformRef`; the
-// validator rejects unknown versions / unknown platforms.  See
+// validator rejects unknown versions / unknown platforms.  The legacy
+// `hono` / `hono@v4` spellings were retired (D-NODE-PLATFORM) — they now
+// fail validation like any other unknown platform.  See
 // docs/backend-packages.md.
 // ---------------------------------------------------------------------------
 
@@ -31,18 +33,25 @@ const sys = (platform: string) => `
 `;
 
 describe("platform pin grammar + validation", () => {
-  it("accepts a bareword backend platform (unchanged)", async () => {
-    const { errors } = await parse(sys("hono"));
+  it("accepts a bareword backend platform", async () => {
+    const { errors } = await parse(sys("node"));
     expect(errors).toEqual([]);
   });
 
-  it('accepts a registered pin `platform: "hono@v4"`', async () => {
-    const { errors } = await parse(sys(`"hono@v4"`));
+  it('accepts a registered pin `platform: "node@v4"`', async () => {
+    const { errors } = await parse(sys(`"node@v4"`));
     expect(errors).toEqual([]);
+  });
+
+  it("rejects the retired `hono` alias (D-NODE-PLATFORM)", async () => {
+    const { errors } = await parse(sys(`"hono"`));
+    expect(errors.some((e) => /Unknown platform 'hono'/.test(e))).toBe(true);
+    const pinned = await parse(sys(`"hono@v4"`));
+    expect(pinned.errors.some((e) => /Unknown platform 'hono@v4'/.test(e))).toBe(true);
   });
 
   it("rejects an unregistered version with an available-list error", async () => {
-    const { errors } = await parse(sys(`"hono@v9"`));
+    const { errors } = await parse(sys(`"node@v9"`));
     expect(errors.some((e) => /no version 'v9' of backend 'node'/.test(e))).toBe(true);
     expect(errors.some((e) => /'node@v4'/.test(e))).toBe(true);
   });
@@ -57,7 +66,7 @@ describe("platform pin grammar + validation", () => {
       system S {
         subdomain M { context C { } }
         ui W { page Home() { route: "/" body: Heading { "hi" } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: "static", targets: api, ui: W, port: 3001 }
       }
     `);
@@ -76,15 +85,15 @@ describe("lowering normalises platform + platformRef", () => {
   }
 
   it("bareword: platform=family, platformRef=family@latest", async () => {
-    const d = await lowerDeployable("hono");
+    const d = await lowerDeployable("node");
     expect(d.platform).toBe("node"); // byte-identical union value
     expect(d.platformRef).toBe("node@v4");
   });
 
   it("pin: platform=family (NOT the pin), platformRef=the pin", async () => {
-    const d = await lowerDeployable(`"hono@v4"`);
-    // The legacy `hono@v4` pin desugars to the canonical `node@v4`
-    // family; the pin is carried separately on platformRef.
+    const d = await lowerDeployable(`"node@v4"`);
+    // The pin's family lands on `platform`; the pin is carried
+    // separately on platformRef.
     expect(d.platform).toBe("node");
     expect(d.platformRef).toBe("node@v4");
   });
@@ -96,7 +105,7 @@ describe("lowering normalises platform + platformRef", () => {
       system S {
         subdomain M { context C { } }
         ui W { page Home() { route: "/" body: Heading { "hi" } } }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: static, targets: api, ui: W, port: 3001 }
       }
     `,

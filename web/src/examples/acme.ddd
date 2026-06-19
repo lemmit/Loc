@@ -96,7 +96,7 @@ system Acme {
 
     // Lightweight read-API on Hono — same Catalog data, no Sales code.
     deployable catalogWeb {
-        platform: hono
+        platform: node
         contexts: [Products]
         port: 3000
     }

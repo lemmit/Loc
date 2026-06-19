@@ -34,7 +34,7 @@ system Shop {
       }
     }
   }
-  deployable AuthApi { platform: hono  contexts: [Auth] }
+  deployable AuthApi { platform: node  contexts: [Auth] }
 }
 
 solution SOL-001 for US-001 {

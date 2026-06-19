@@ -112,7 +112,7 @@ system AcmeOrderExplicit {
     resource ordersState { for: Orders, kind: state, use: primarySql }
 
     deployable api {
-        platform: hono
+        platform: node
         contexts: [Orders]
         dataSources: [ordersState]
         serves: SalesApi

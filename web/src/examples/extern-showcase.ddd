@@ -89,7 +89,7 @@ system ExternShowcase {
   resource salesState { for: Sales, kind: state, use: primary }
 
   deployable api {
-    platform: hono, contexts: [Sales],
+    platform: node, contexts: [Sales],
     dataSources: [salesState], port: 3000
   }
   deployable webApp { platform: react, targets: api, ui: Console, port: 3001 }

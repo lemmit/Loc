@@ -59,7 +59,7 @@ system Shop {
         }
     }
     deployable api {
-        platform: hono
+        platform: node
         contexts: [Orders]
         dataSources: [ordersState]
         serves: SalesApi

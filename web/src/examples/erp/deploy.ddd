@@ -76,7 +76,7 @@ ui BackOffice with scaffold(subdomains: [Sales, Inventory, Procurement, Crm]) {
 }
 
 deployable coreApi {
-  platform: hono
+  platform: node
   contexts: [Sales, Inventory, Procurement, Crm, Ledger]
   dataSources: [salesState, inventoryState, procurementState, crmState, ledgerState, ledgerEvents]
   port: 3000

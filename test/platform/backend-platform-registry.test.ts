@@ -16,7 +16,7 @@ import {
 
 describe("parseBuiltinPlatformRef", () => {
   it("maps a backend bareword to its default version", () => {
-    expect(parseBuiltinPlatformRef("hono")).toEqual({
+    expect(parseBuiltinPlatformRef("node")).toEqual({
       family: "node",
       version: "v4",
       qualified: "node@v4",
@@ -30,29 +30,32 @@ describe("parseBuiltinPlatformRef", () => {
   });
 
   it("parses an explicit family@version pin", () => {
-    expect(parseBuiltinPlatformRef("hono@v4")).toEqual({
+    expect(parseBuiltinPlatformRef("node@v4")).toEqual({
       family: "node",
       version: "v4",
       qualified: "node@v4",
     });
     // Version need not exist yet — the parse is purely syntactic;
     // resolution (platformFor) is what rejects unknown versions.
-    expect(parseBuiltinPlatformRef("hono@v5")?.qualified).toBe("node@v5");
+    expect(parseBuiltinPlatformRef("node@v5")?.qualified).toBe("node@v5");
   });
 
   it("returns null for frontend / unknown platforms", () => {
     expect(parseBuiltinPlatformRef("react")).toBeNull();
     expect(parseBuiltinPlatformRef("static")).toBeNull();
     expect(parseBuiltinPlatformRef("frobnicator")).toBeNull();
+    // The retired `hono` alias is now just an unknown name
+    // (D-NODE-PLATFORM removed the `hono` → `node` mapping).
+    expect(parseBuiltinPlatformRef("hono")).toBeNull();
+    expect(parseBuiltinPlatformRef("hono@v4")).toBeNull();
   });
 });
 
 describe("platformFor — byte-identity guarantee", () => {
   it("bareword and its default pin resolve to the SAME surface", () => {
-    // The crux: `platform: hono` must yield the exact instance
-    // it did before the registry generalisation, so emitted output
-    // is unchanged.
-    expect(platformFor("hono")).toBe(platformFor("hono@v4" as never));
+    // The crux: `platform: node` must yield the exact instance
+    // its default pin resolves to, so emitted output is unchanged.
+    expect(platformFor("node")).toBe(platformFor("node@v4" as never));
     expect(platformFor("dotnet")).toBe(platformFor("dotnet@v8" as never));
     expect(platformFor("elixir")).toBe(platformFor("elixir@v1" as never));
     // Back-compat: the legacy `phoenix` and `phoenixLiveView` spellings
@@ -80,9 +83,7 @@ describe("platformFor — byte-identity guarantee", () => {
   });
 
   it("throws a clear error for an unregistered backend version", () => {
-    // The legacy `hono@v5` pin desugars to the canonical `node` family
-    // before resolution, so the error names `node@v5`.
-    expect(() => platformFor("hono@v5" as never)).toThrow(
+    expect(() => platformFor("node@v5" as never)).toThrow(
       /Unknown backend platform version "node@v5"/,
     );
   });

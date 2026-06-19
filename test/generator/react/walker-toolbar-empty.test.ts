@@ -25,7 +25,7 @@ describe("Toolbar + Empty in walker stdlib", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -55,7 +55,7 @@ describe("Toolbar + Empty in walker stdlib", () => {
             body:  Toolbar {}
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -78,7 +78,7 @@ describe("Toolbar + Empty in walker stdlib", () => {
             body:  Empty { "No orders yet" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -102,7 +102,7 @@ describe("Toolbar + Empty in walker stdlib", () => {
             body:  Empty {}
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -126,7 +126,7 @@ describe("Toolbar + Empty in walker stdlib", () => {
             body:  Empty { "No " + kind + " here" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

@@ -39,7 +39,7 @@ describe("Field + Toggle with bind: state binding", () => {
             body:  Field { "Your name", bind: name }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -69,7 +69,7 @@ describe("Field + Toggle with bind: state binding", () => {
             body:  Toggle { "Active", bind: active }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -106,7 +106,7 @@ describe("Field + Toggle with bind: state binding", () => {
             }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -140,7 +140,7 @@ describe("Field + Toggle with bind: state binding", () => {
             body:  Field { "Bare" }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -170,7 +170,7 @@ describe("Field + Toggle with bind: state binding", () => {
             body:  Field { kind + ":", bind: v }
           }
         }
-        deployable api { platform: hono, contexts: [C], port: 3000 }
+        deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web {
           platform: static
           targets: api

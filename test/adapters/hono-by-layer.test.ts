@@ -21,7 +21,7 @@ function p(
 
 describe("byLayer LayoutAdapter — hono (real)", () => {
   it("is registered as the hono byLayer layout adapter", () => {
-    const resolved = resolveLayout("hono", "byLayer");
+    const resolved = resolveLayout("node", "byLayer");
     expect(resolved).toBe(byLayerLayoutAdapter);
     expect(resolved.name).toBe("byLayer");
   });

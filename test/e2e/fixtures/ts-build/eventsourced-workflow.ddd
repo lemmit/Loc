@@ -53,7 +53,7 @@ system FulfillmentSys {
   storage pg { type: postgres }
   resource fulfillmentState { for: Fulfillment, kind: state, use: pg }
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Fulfillment]
     serves: FulfillmentApi
     dataSources: [fulfillmentState]

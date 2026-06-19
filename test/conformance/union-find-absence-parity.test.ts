@@ -72,7 +72,7 @@ type Backend = {
 
 const BACKENDS: Backend[] = [
   {
-    platform: "hono",
+    platform: "node",
     ui: false,
     file: "d/http/order.routes.ts",
     anchor: /result == null/,

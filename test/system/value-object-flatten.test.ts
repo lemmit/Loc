@@ -22,7 +22,7 @@ system TV {
     }
   }
   api SApi from S
-  deployable h { platform: hono            contexts: [C] serves: SApi port: 3000 }
+  deployable h { platform: node            contexts: [C] serves: SApi port: 3000 }
   deployable d { platform: dotnet          contexts: [C] serves: SApi port: 8080 }
   deployable p { platform: phoenixLiveView contexts: [C] serves: SApi port: 4000 }
 }

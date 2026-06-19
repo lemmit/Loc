@@ -50,6 +50,6 @@ system Ledger {
   }
   storage pg { type: postgres }
   resource accountsLog { for: Accounts, kind: eventLog, use: pg }
-  deployable api { platform: hono, contexts: [Accounts], dataSources: [accountsLog], port: 4000 }
+  deployable api { platform: node, contexts: [Accounts], dataSources: [accountsLog], port: 4000 }
   deployable dotnetApi { platform: dotnet, contexts: [Accounts], dataSources: [accountsLog], port: 4001 }
 }

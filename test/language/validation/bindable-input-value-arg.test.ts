@@ -29,7 +29,7 @@ system S {
       body: ${input}
     }
   }
-  deployable api { platform: hono, contexts: [C], port: 3000 }
+  deployable api { platform: node, contexts: [C], port: 3000 }
 }
 `;
 

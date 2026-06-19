@@ -30,7 +30,7 @@ const FIXTURE = `system AcmeDel {
   }
   api OpsApi from Ops
   deployable opsApi {
-    platform: hono
+    platform: node
     contexts: [Ops]
     serves: OpsApi
     port: 3000

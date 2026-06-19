@@ -29,7 +29,7 @@ const FIXTURE = `system AcmeSeed {
   }
   api ShopApi from Shop
   deployable api {
-    platform: hono
+    platform: node
     contexts: [Catalog]
     serves: ShopApi
     port: 3000
@@ -97,7 +97,7 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
         }
       }}
       api A from S
-      deployable api { platform: hono contexts: [C] serves: A port: 3000 }
+      deployable api { platform: node contexts: [C] serves: A port: 3000 }
     }`;
     const { model, errors } = await parseString(src);
     if (errors.length) throw new Error(errors.join("\n"));
@@ -164,7 +164,7 @@ describe("Hono seeding — raw explicit-id path", () => {
       }
     } }
     api A from Sales
-    deployable api { platform: hono contexts: [Sales] serves: A port: 3000 }
+    deployable api { platform: node contexts: [Sales] serves: A port: 3000 }
   }`;
 
   it("emits direct INSERTs via db.execute(sql.raw(...)) with explicit id + FK", async () => {
