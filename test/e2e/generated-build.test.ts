@@ -132,6 +132,36 @@ describe.skipIf(!ENABLED)(
     // `generate system` (auth files are system-mode only) and type-checked
     // against the real `jose` types — the gate that proves the emitted
     // verifier + handshake compile (content tests can't see a type error).
+    // DEBT-02 slice 1: a capability `filter` on a `shape(document)` aggregate is
+    // applied in-app over the rehydrated document (findById gate + findAll/find
+    // `.filter`).  System-mode only (the filter + shape live on a deployable), so
+    // it type-checks the node project to prove the emitted in-app predicate
+    // compiles against the domain accessors.
+    it("system document-shape capability filter (in-app) — generated project type-checks + bundles", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-docfilter-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/document-filter.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        execSync(`npm run build`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        expect(fs.existsSync(path.join(proj, "dist", "index.js"))).toBe(true);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
     it("system OIDC auth (verifier + /auth/* handshake) — generated project type-checks + bundles", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-oidc-"));
       try {

@@ -113,12 +113,28 @@ system Shop {
     expect(errs[0]).toContain("shape(document)");
   });
 
-  it("rejects a capability filter on a non-relational (document) hono aggregate", async () => {
+  it("accepts a non-principal capability filter on a node DOCUMENT aggregate (DEBT-02 — in-app)", async () => {
+    expect(
+      await honoFilterErrors(sys("node", { shape: "document", filter: "filter !this.isDeleted" })),
+    ).toEqual([]);
+  });
+
+  it("still gates a node EMBEDDED capability filter (DEBT-02 follow-up)", async () => {
     const errs = await honoFilterErrors(
-      sys("node", { shape: "document", filter: "filter !this.isDeleted" }),
+      sys("node", { shape: "embedded", filter: "filter !this.isDeleted" }),
     );
     expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("shape(document)");
+    expect(errs[0]).toContain("shape(embedded)");
+  });
+
+  it("still gates a non-relational capability filter on elixir / java (DEBT-02 follow-up)", async () => {
+    for (const platform of ["elixir", "java"]) {
+      const errs = await honoFilterErrors(
+        sys(platform, { shape: "document", filter: "filter !this.isDeleted" }),
+      );
+      expect(errs.length).toBe(1);
+      expect(errs[0]).toContain("shape(document)");
+    }
   });
 
   it("accepts both cases on a dotnet deployable (HasQueryFilter handles them)", async () => {
