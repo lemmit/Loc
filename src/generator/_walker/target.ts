@@ -429,8 +429,10 @@ export interface WalkerTarget {
    *  Angular's read handle exposes `data` as a SIGNAL, so its target returns
    *  `${handle}.data()` (signals are called to read).  The QueryView template
    *  itself owns the `isLoading` / `isError` reads; this seam is only the
-   *  data-lambda binding the walker injects. */
-  renderQueryDataAccess?(handle: string): string;
+   *  data-lambda binding the walker injects.  `single` is set for byId reads
+   *  (`T | null` data) so a target can non-null-assert inside the truthy
+   *  guard — Angular's template typechecker won't narrow a `data()` call. */
+  renderQueryDataAccess?(handle: string, single?: boolean): string;
 
   /** OPTIONAL — whole-primitive override for `CreateForm(of: <Agg>)`.  The
    *  shared `emitCreateForm` delegates here first; a non-null return is used
