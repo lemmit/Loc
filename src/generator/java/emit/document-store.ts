@@ -2,7 +2,7 @@ import type { EnrichedAggregateIR, RepositoryIR } from "../../../ir/types/loom-i
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
-import { renderJavaExpr, renderJavaType } from "../render-expr.js";
+import { collectJavaExprImports, renderJavaExpr, renderJavaType } from "../render-expr.js";
 import type { JavaRepoCtx } from "./repository.js";
 import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
 
@@ -51,6 +51,14 @@ export function renderJavaDocumentRepositoryImpl(
   const capRec = capBody("rec");
   const capX = capBody("x");
 
+  // Expression imports the in-app find / capability predicates need — notably
+  // `java.util.Objects` for a string/ref `==` (renders to `Objects.equals`).
+  // (The pre-existing emit hardcoded a fixed import list and omitted this, so a
+  // document aggregate with a string-equality find failed to compile.)
+  const exprImports = new Set<string>();
+  for (const f of finds) if (f.filter) collectJavaExprImports(f.filter, exprImports);
+  for (const p of agg.contextFilters ?? []) collectJavaExprImports(p, exprImports);
+
   const findLines = finds.flatMap((f) => {
     const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`);
     const filter = f.filter
@@ -92,6 +100,7 @@ export function renderJavaDocumentRepositoryImpl(
     ``,
     `import java.util.ArrayList;`,
     `import java.util.List;`,
+    exprImports.has("java.util.Objects") ? `import java.util.Objects;` : null,
     `import java.util.Optional;`,
     ``,
     `import com.fasterxml.jackson.annotation.JsonAutoDetect;`,

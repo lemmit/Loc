@@ -36,6 +36,9 @@ describe("java document capability filter (DEBT-02)", () => {
     // separate capability filter is duplicated onto the find.
     const r = await repo();
     expect(r).toContain("findAll().stream().filter(x -> Objects.equals(x.title(), t)).toList();");
+    // A string-equality find renders `Objects.equals` — the document store must
+    // import it (a pre-existing gap this fixture surfaced).
+    expect(r).toContain("import java.util.Objects;");
   });
 
   it("leaves a filter-free document aggregate's reads byte-identical", async () => {
