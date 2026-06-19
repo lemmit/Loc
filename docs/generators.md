@@ -930,8 +930,17 @@ writes everything to a flat tree:
 | --- | --- | --- | --- | --- |
 | `dotnet` | 8080 | `ConnectionStrings__Default=Host=db;Port=5432;Database=<slug>;…` | yes | `/ready` |
 | `node` | 3000 | `DATABASE_URL=postgres://…/<slug>` | yes | `/ready` |
-| `react` / `static` | 3000 | `VITE_API_BASE_URL=http://localhost:<target.port>/api` (dev/compose; the built bundle defaults to a relative `/api`) | no | `/` |
+| `react` / `static` (also `vue`, `svelte`) | 3000 | `VITE_API_BASE_URL=…/api` (build-time base override; the bundle defaults to a relative `/api`) + `VITE_API_PROXY_TARGET=http://<backend-svc>:<port>` | no | `/` |
 | `phoenixLiveView` | 4000 | `DATABASE_URL=ecto://…/<slug>`, `SECRET_KEY_BASE`, `PHX_HOST`, `PHX_SERVER=true`, `PORT=4000` | yes | `/health` |
+
+**Frontend same-origin in compose.** A vite-served frontend's built bundle
+fetches `/api` **relative**, and its image runs `vite preview`. So compose
+injects `VITE_API_PROXY_TARGET` (→ the target backend's compose **service**,
+e.g. `http://api:3000`, not `localhost`) and the generated `vite.config.ts`
+proxies `/api` to it on **both** `server` (dev) and `preview` (the compose
+runtime). Result: one origin, no CORS, no separate API host — the compose twin
+of the k8s same-origin Ingress. (Local `vite dev` falls back to the baked
+`http://localhost:<port>` target.)
 
 The platform contract decides UI mount admissibility and DB ownership
 via two `PlatformSurface` flags (`src/platform/surface.ts`):

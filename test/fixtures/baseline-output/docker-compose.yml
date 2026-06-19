@@ -64,6 +64,7 @@ services:
     build: ./web_app
     environment:
       VITE_API_BASE_URL: "http://localhost:8080/api"
+      VITE_API_PROXY_TARGET: "http://api:8080"
     ports:
       - "3001:3000"
     healthcheck:

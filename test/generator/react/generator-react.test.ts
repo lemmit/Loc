@@ -143,9 +143,16 @@ describe("react generator", () => {
     // Same-origin relative base; docker-compose overrides via env, and
     // `vite dev` proxies it to the backend (so no CORS in local dev).
     expect(config).toMatch(/"\/api"/);
-    // `webApp` targets `api` on port 8080 — the dev proxy points there.
+    // `webApp` targets `api` on port 8080 — the proxy points there, but the
+    // target is env-overridable (VITE_API_PROXY_TARGET) so `vite preview` in
+    // compose can retarget the backend SERVICE.  BOTH `server` (vite dev) and
+    // `preview` (the compose runtime) proxy `/api` — preview is the one that
+    // was previously missing, breaking same-origin under docker compose.
     const vite = files.get("web_app/vite.config.ts")!;
-    expect(vite).toContain('proxy: { "/api": "http://localhost:8080" }');
+    expect(vite).toContain('VITE_API_PROXY_TARGET ?? "http://localhost:8080"');
+    expect(vite.match(/proxy: \{ "\/api":/g)?.length).toBe(2);
+    expect(vite).toMatch(/server: \{.*proxy:/);
+    expect(vite).toMatch(/preview: \{.*proxy:/);
   });
 
   it("value-object fieldsets render as filled-variant grouped sub-forms", async () => {
@@ -229,6 +236,10 @@ describe("react generator", () => {
     expect(compose).toMatch(/VITE_API_BASE_URL/);
     // The webApp section should not declare a DATABASE_URL or
     // ConnectionStrings__Default.
+    // Same-origin: compose points the preview proxy at the backend SERVICE
+    // (compose-network host, not localhost), so the bundle's relative `/api`
+    // reaches it through `vite preview`.  Only the web_app service carries it.
+    expect(compose).toMatch(/VITE_API_PROXY_TARGET: "http:\/\/\w[\w-]*:\d+"/);
     const webAppBlock = compose.match(/web_app:[\s\S]*?(?=\n\s*\w[\w_]*:|$)/)![0];
     expect(webAppBlock).not.toMatch(/DATABASE_URL/);
     expect(webAppBlock).not.toMatch(/ConnectionStrings__Default/);

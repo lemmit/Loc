@@ -88,6 +88,15 @@ export interface ComposeServiceShape {
   healthPath: string;
   /** The internal port the service's HTTP listener binds to. */
   internalPort: number;
+  /** Frontend whose built bundle fetches the API at a RELATIVE `/api`, served
+   *  in compose by an in-process proxy (vite `preview` for react/vue/svelte; a
+   *  tiny static+proxy `server.mjs` for angular).  That proxy needs to know
+   *  where the backend is — and inside the compose network the backend is its
+   *  SERVICE name, not `localhost`.  When set, the orchestrator injects
+   *  `VITE_API_PROXY_TARGET` (→ the target backend's compose service) into the
+   *  frontend's env so the proxy reaches it; the bundle stays same-origin
+   *  (no CORS, no separate API host). */
+  injectsApiProxyTarget?: boolean;
   // -------------------------------------------------------------------------
   // Reserved slots for future cross-cutting concerns (Phase 3 / 4 of the
   // proposal corpus).  Currently undefined on every backend; the
