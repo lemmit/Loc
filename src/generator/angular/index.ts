@@ -1,9 +1,12 @@
 import type {
+  AggregateIR,
+  BoundedContextIR,
   ComponentIR,
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   SystemIR,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { contextUsesMoney } from "../../ir/types/loom-ir.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
@@ -85,6 +88,28 @@ export function generateAngularForContexts(
   // until those Slice 4b batches land.
   const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
   const pages = (ui?.pages ?? []).filter((p) => p.route);
+
+  // Walk context shared across every page: the aggregate / BC / workflow
+  // lookups + the ui's api params power the shared walker's api-hook
+  // detection (`<handle>.<Agg>.all` → `useAll<Agg>s`) and form/IdLink
+  // resolution.  Mirrors the React/Vue generators' assembly.
+  const aggregatesIRByName = new Map<string, AggregateIR>();
+  const bcByAggregate = new Map<string, BoundedContextIR>();
+  const workflowsByName = new Map<string, WorkflowIR>();
+  const bcByWorkflow = new Map<string, BoundedContextIR>();
+  for (const ctx of contexts) {
+    for (const agg of ctx.aggregates) {
+      aggregatesIRByName.set(agg.name, agg);
+      bcByAggregate.set(agg.name, ctx);
+    }
+    for (const wf of ctx.workflows) {
+      workflowsByName.set(wf.name, wf);
+      bcByWorkflow.set(wf.name, ctx);
+    }
+  }
+  const pageRoutes = new Map<string, string>();
+  for (const page of pages) pageRoutes.set(page.name, page.route!);
+
   const routeDescs: AngularRouteDesc[] = [];
   for (const page of pages) {
     const slug = pageSlug(page);
@@ -98,6 +123,14 @@ export function generateAngularForContexts(
         pack,
         new Set(page.params.map((p) => p.name)),
         new Set(page.state.map((s) => s.name)),
+        new Map(),
+        ui?.apiParams ?? [],
+        aggregatesIRByName,
+        bcByAggregate,
+        workflowsByName,
+        bcByWorkflow,
+        new Map(),
+        pageRoutes,
       );
       content = pageNeedsDeferredFeatures(result)
         ? renderAngularPageStub(page)

@@ -585,13 +585,16 @@ describe("WalkerTarget — angularTarget (angular-frontend-plan.md)", () => {
     expect(angularTarget.renderStateWrite(SAMPLE_STATE_REF, "value")).toBe("step.set(value)");
   });
 
-  it("renderApiCall is var-only and hoisting matches the shared TSX/Vue shape", () => {
+  it("renderApiCall is var-only; hoisting emits class fields (the component has no fn body)", () => {
     expect(angularTarget.renderApiCall(SAMPLE_API_CALL_MUTATION, "{}")).toBe("customerCreate");
+    // Angular components have no function body, so the read handles live as
+    // `readonly` class fields (the field initializer is the injection context
+    // the `use*` factory's `inject()` needs) — not the TSX/Vue `const` lines.
     expect(
       angularTarget.renderApiHoisting([SAMPLE_API_CALL_MUTATION, SAMPLE_API_CALL_QUERY]),
     ).toEqual([
-      "const customerCreate = useCreateCustomer();",
-      "const customerAll = useAllCustomers();",
+      "readonly customerCreate = useCreateCustomer();",
+      "readonly customerAll = useAllCustomers();",
     ]);
   });
 

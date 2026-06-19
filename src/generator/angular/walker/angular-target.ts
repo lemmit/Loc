@@ -115,9 +115,12 @@ export const angularTarget: WalkerTarget = {
     return call.varName ?? hookVarName(call.aggregateName, call.operation);
   },
 
-  /** Hoist one `const <var> = <hook>(args);` line per unique hook usage
-   *  in the component class body.  Same de-dupe + fallback semantics as
-   *  the TSX/Vue targets. */
+  /** Hoist one `readonly <var> = <hook>(args);` CLASS FIELD per unique hook
+   *  usage — the field initializer is the injection context the `use*`
+   *  factory's `inject()` needs.  (TSX/Vue hoist `const` lines into the
+   *  function body; Angular components have no function body, so the reads
+   *  live as members.)  Same de-dupe + fallback semantics as the other
+   *  targets. */
   renderApiHoisting(uses: ApiCallSite[]): string[] {
     const seen = new Set<string>();
     const lines: string[] = [];
@@ -127,9 +130,16 @@ export const angularTarget: WalkerTarget = {
       seen.add(varName);
       const hookName = u.hookName ?? hookFnName(u.aggregateName, u.operation);
       const args = u.argsRendered ?? [];
-      lines.push(`const ${varName} = ${hookName}(${args.join(", ")});`);
+      lines.push(`readonly ${varName} = ${hookName}(${args.join(", ")});`);
     }
     return lines;
+  },
+
+  /** Angular's read handle exposes `data` as a SIGNAL, so the QueryView
+   *  data-lambda binding calls it (`<handle>.data()`).  TSX/Vue read the
+   *  TanStack `.data` property directly (the omitted-default path). */
+  renderQueryDataAccess(handle: string): string {
+    return `${handle}.data()`;
   },
 
   // --- Match expression seam ----------------------------------------------
