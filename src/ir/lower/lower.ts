@@ -591,10 +591,70 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
   // per-aggregate page-object emitter also dispatches on
   // `page.origin` to produce the rich `e2e/pages/<agg>.ts`
   // helper classes.
+  resourceScaffoldOrigins(built);
   dropNonConstructibleNewPages(built);
+  stripNonConstructibleListCreate(built);
   applyPageOriginSideEffects(built);
   expandInlineScaffoldPrimitiveCalls(built);
   return built;
+}
+
+/** Re-source `page.origin` for scaffold pages whose body is emitted as a full
+ *  AST tree (the unfoldable scaffolders) rather than a `scaffold*` sentinel.
+ *  Such pages lower to `origin: custom` (the body is no longer a recognisable
+ *  primitive), so we recover the origin from the page's *name* — which the
+ *  scaffold mints as `<Agg>List|New|Detail`, `<Wf>Workflow`,
+ *  `<Wf>InstancesList|InstanceDetail`, `<View>View` — matched exactly against
+ *  the system's aggregates / workflows / views.  Hand-written `scaffold*`
+ *  sentinel pages keep the origin `inferPageOrigin` already gave them (not
+ *  custom ⇒ skipped here); the singleton index pages likewise. */
+function resourceScaffoldOrigins(sys: SystemIR): void {
+  const up = (s: string): string => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
+  for (const ui of sys.uis) {
+    const ctx = buildExpandContext(sys, ui);
+    for (const page of ui.pages) {
+      if (page.origin && page.origin.kind !== "custom") continue;
+      const origin = classifyScaffoldPageByName(page.name, page.area ?? [], ctx, up);
+      if (origin) {
+        page.origin = origin;
+        page.source = "scaffold";
+      }
+    }
+  }
+}
+
+function classifyScaffoldPageByName(
+  name: string,
+  area: readonly string[],
+  ctx: WalkerExpandContext,
+  up: (s: string) => string,
+): PageOriginIR | undefined {
+  // Aggregate pages live in the per-aggregate `area <Plural>` block — gate on
+  // the area so a hand-written top-level page that merely shares a scaffold's
+  // name (e.g. an explicit `CustomerNew`) keeps its `custom` origin.
+  const inArea = (aggName: string): boolean => area[area.length - 1] === pluralSnake(aggName);
+  for (const aggName of ctx.aggregatesByName.keys()) {
+    if (!inArea(aggName)) continue;
+    if (name === `${aggName}List`)
+      return { kind: "aggregate-list", aggregateName: aggName, contextName: "" };
+    if (name === `${aggName}New`)
+      return { kind: "aggregate-new", aggregateName: aggName, contextName: "" };
+    if (name === `${aggName}Detail`)
+      return { kind: "aggregate-detail", aggregateName: aggName, contextName: "" };
+  }
+  for (const wfName of ctx.workflowsByName.keys()) {
+    const p = up(wfName);
+    if (name === `${p}Workflow`)
+      return { kind: "workflow-form", workflowName: wfName, contextName: "" };
+    if (name === `${p}InstancesList`)
+      return { kind: "workflow-instances-list", workflowName: wfName, contextName: "" };
+    if (name === `${p}InstanceDetail`)
+      return { kind: "workflow-instance-detail", workflowName: wfName, contextName: "" };
+  }
+  for (const viewName of ctx.viewsByName.keys()) {
+    if (name === `${viewName}View`) return { kind: "view-list", viewName, contextName: "" };
+  }
+  return undefined;
 }
 
 /** Drop the scaffolded `<Agg>New` page for a non-constructible aggregate
@@ -613,6 +673,46 @@ function dropNonConstructibleNewPages(sys: SystemIR): void {
       return !agg || isConstructible(agg);
     });
   }
+}
+
+/** Suppress the list "New <agg>" button for a non-constructible aggregate — the
+ *  backends emit no POST route, so the create surface must not appear.  The ⑤c
+ *  `expandScaffoldList` omitted the button inline; the flipped (macro-emitted)
+ *  list body always carries it, so we strip it here, where `isConstructible`
+ *  (an enriched-IR analysis the macro can't run) is available.  Mirrors
+ *  `dropNonConstructibleNewPages`, which drops the matching `New` page. */
+function stripNonConstructibleListCreate(sys: SystemIR): void {
+  for (const ui of sys.uis) {
+    const ctx = buildExpandContext(sys, ui);
+    for (const page of ui.pages) {
+      if (page.origin?.kind !== "aggregate-list" || !page.body) continue;
+      const agg = ctx.aggregatesByName.get(page.origin.aggregateName);
+      if (!agg || isConstructible(agg)) continue;
+      page.body = stripCreateButton(page.body, `${pluralSnake(agg.name)}-list-create`);
+    }
+  }
+}
+
+/** Remove any `Button(…, testid: <testid>)` call node from `e`'s subtree
+ *  (the scaffolded list's "New" button), keeping `args`/`argNames` aligned. */
+function stripCreateButton(e: ExprIR, testid: string): ExprIR {
+  if (e.kind !== "call") return e;
+  const keep: number[] = [];
+  e.args.forEach((a, i) => {
+    if (!isButtonWithTestid(a, testid)) keep.push(i);
+  });
+  const args = keep.map((i) => stripCreateButton(e.args[i]!, testid));
+  const argNames = e.argNames ? keep.map((i) => e.argNames![i]) : e.argNames;
+  return { ...e, args, argNames };
+}
+
+function isButtonWithTestid(e: ExprIR, testid: string): boolean {
+  if (e.kind !== "call" || e.name !== "Button") return false;
+  return (e.argNames ?? []).some((n, i) => {
+    if (n !== "testid") return false;
+    const v = e.args[i];
+    return v?.kind === "literal" && v.value === testid;
+  });
 }
 
 function lowerConfigEntry(entry: ConfigEntry): ConfigEntryIR {

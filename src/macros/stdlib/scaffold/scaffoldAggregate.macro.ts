@@ -1,4 +1,4 @@
-import type { Aggregate } from "../../api/index.js";
+import type { Aggregate, Ui } from "../../api/index.js";
 import { defineMacro } from "../../api/index.js";
 import { areaForAggregate } from "./_pages.js";
 
@@ -21,7 +21,7 @@ export default defineMacro({
   params: {
     of: { kind: "ref", of: "Aggregate" },
   },
-  expand({ args }) {
+  expand({ args, target }) {
     const agg = args.of as Aggregate;
     // An `abstract aggregate` base owns no table, repository, or HTTP
     // routes — only the polymorphic union reader is emitted, as
@@ -35,6 +35,6 @@ export default defineMacro({
     // Return one `area <Plural> { List, New, Detail }` block (not loose pages)
     // so the generated page tree groups by aggregate and unfolds to a real
     // area block.
-    return [areaForAggregate(agg)];
+    return [areaForAggregate(agg, target as Ui)];
   },
 });

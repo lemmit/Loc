@@ -109,17 +109,13 @@ describe("scaffold macro: aggregate selector", () => {
     expect(pageRoute(model, "OrderDetail")).toBe("/orders/:id");
   });
 
-  it("body calls are the canonical scaffold primitives", async () => {
+  it("bodies are emitted as full unfoldable trees (the flip)", async () => {
     const { model } = await parseString(wrapWith("aggregates: [Order]"));
-    // List / New / Workflow / View now emit the canonical
-    // `scaffold<X>(of:|runs:)` body primitive, one per page.  The
-    // expander rewrites it inline at lowering to the same Stack /
-    // QueryView / Form trees the legacy archetype path produced.
-    expect(pageBodyCallee(model, "OrderList")).toBe("scaffoldList");
-    expect(pageBodyCallee(model, "OrderNew")).toBe("scaffoldNewForm");
-    // Detail page emits the explicit Stack {scaffoldDetails,
-    // scaffoldOperations} shape so users can unfold into per-slot
-    // customisation while leaving auto-op-modal generation intact.
+    // The scaffold macro now emits the FULL page-body tree directly (the
+    // unfoldable scaffolders) instead of a `scaffold<X>(of:|runs:)` sentinel
+    // the IR phase later expanded — every page body is a top-level `Stack`.
+    expect(pageBodyCallee(model, "OrderList")).toBe("Stack");
+    expect(pageBodyCallee(model, "OrderNew")).toBe("Stack");
     expect(pageBodyCallee(model, "OrderDetail")).toBe("Stack");
   });
 });
@@ -129,9 +125,9 @@ describe("scaffold macro: workflow / view / module selectors", () => {
     const { model, errors } = await parseString(wrapWith("workflows: [placeOrder]"));
     expect(errors).toEqual([]);
     expect(pageNames(model)).toContain("PlaceOrderWorkflow");
-    // Canonical body primitive — expands inline to Stack {Breadcrumbs,
-    // Heading, Card { WorkflowForm { runs: } }} at lowering.
-    expect(pageBodyCallee(model, "PlaceOrderWorkflow")).toBe("scaffoldWorkflowForm");
+    // Flipped: the body is the full `Stack(Breadcrumbs, Heading,
+    // Card(WorkflowForm(runs:)))` tree, not a `scaffoldWorkflowForm` sentinel.
+    expect(pageBodyCallee(model, "PlaceOrderWorkflow")).toBe("Stack");
     expect(pageNames(model)).toContain("WorkflowsIndex");
   });
 

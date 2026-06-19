@@ -5,8 +5,32 @@
 // shapes.  Keeping them in one place means the per-archetype leaf
 // macros and the top-level composer share one source of truth.
 
-import type { Aggregate, Area, Page, View, Workflow } from "../../api/index.js";
-import { area, boolLit, callExpr, nameRefExpr, page, stringLit } from "../../api/index.js";
+import type { Aggregate, Area, Page, Ui, View, Workflow } from "../../api/index.js";
+import { area, boolLit, callExpr, page, stringLit } from "../../api/index.js";
+import {
+  filterFindsForAggregate,
+  filterStateFields,
+  scaffoldDetailsParts,
+  scaffoldInstanceDetails,
+  scaffoldInstanceList,
+  scaffoldList,
+  scaffoldNewForm,
+  scaffoldOperations,
+  scaffoldViewList,
+  scaffoldWorkflowForm,
+  scalarColumnsForAggregate,
+} from "./_body-builders.js";
+
+/** The ui's first api handle (`api <name>: <Api>`), or `undefined` when the ui
+ *  serves no api — the receiver root the scaffolded aggregate queries reach
+ *  through (`<handle>.<Agg>.all`).  Macro-time twin of the expander's
+ *  `findApiHandleFor` (first-api-param-wins). */
+function firstApiHandle(ui: Ui): string | undefined {
+  for (const m of ui.members) {
+    if (m.$type === "UiApiParam") return m.name;
+  }
+  return undefined;
+}
 
 /** Group an aggregate's List/New/Detail pages under a per-aggregate `area`
  *  named after its plural (`area Orders { … }` → `src/pages/orders/…`).  The
@@ -14,22 +38,25 @@ import { area, boolLit, callExpr, nameRefExpr, page, stringLit } from "../../api
  *  groups by aggregate.  In slice 2 `origin` still drives `emitPath` (output
  *  byte-identical); slice 3 makes the area authoritative.  See
  *  docs/proposals/unfoldable-page-scaffolding.md. */
-export function areaForAggregate(agg: Aggregate): Area {
-  return area(plural(agg.name), pagesForAggregate(agg));
+export function areaForAggregate(agg: Aggregate, ui: Ui): Area {
+  return area(plural(agg.name), pagesForAggregate(agg, ui));
 }
 
-export function pagesForAggregate(agg: Aggregate): Page[] {
+export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
   const pluralSnake = snake(plural(agg.name));
   const aggName = agg.name;
   const labelPlural = humanize(plural(aggName));
+  const apiHandle = firstApiHandle(ui);
+  const filters = filterFindsForAggregate(agg);
   return [
     page({
       name: `${aggName}List`,
       route: `/${pluralSnake}`,
-      // Canonical body primitive — expands inline to the full
-      // Breadcrumbs/Toolbar/QueryView/Table tree via
-      // `expandInlineScaffoldPrimitives`.
-      body: callExpr("scaffoldList", [{ name: "of", value: nameRefExpr(aggName) }]),
+      // The full Breadcrumbs/Toolbar/QueryView/Table tree, emitted directly as
+      // unfoldable source (no IR-phase sentinel expansion).  The find-filter
+      // inputs bind to page state named by `filterStateFields`.
+      body: scaffoldList(aggName, scalarColumnsForAggregate(agg), { apiHandle, filters }),
+      state: filterStateFields(filters).map((f) => f.name),
       menu: {
         section: stringLit("Aggregates"),
         label: stringLit(labelPlural),
@@ -38,35 +65,20 @@ export function pagesForAggregate(agg: Aggregate): Page[] {
     page({
       name: `${aggName}New`,
       route: `/${pluralSnake}/new`,
-      // Canonical body primitive — expands to Stack(Breadcrumbs,
-      // Heading, Card(CreateForm(of:))).
-      body: callExpr("scaffoldNewForm", [{ name: "of", value: nameRefExpr(aggName) }]),
+      body: scaffoldNewForm(aggName),
       menu: { hidden: boolLit(true) },
     }),
     page({
       name: `${aggName}Detail`,
       route: `/${pluralSnake}/:id`,
-      // Explicit Stack of two body primitives — see
-      // `expandInlineScaffoldPrimitives` in
-      // src/ir/lower/walker-primitive-expander.ts.
-      //
-      //   * scaffoldDetails(of: <Agg>)    — full read view
-      //     (Breadcrumbs, Heading, QueryView wrapping the field
-      //     card + related-entity cards).  Customisable: replacing
-      //     this slot with custom JSX doesn't disturb operations.
-      //   * scaffoldOperations(of: <Agg>) — Group(Modal × N), one
-      //     per public operation.  Auto-fans at lowering time, so
-      //     adding `operation reactivate()` to the aggregate makes
-      //     its modal appear without touching this page.
+      // `Stack { Breadcrumbs, Heading, QueryView, <operations> }` — the read
+      // view's parts flattened directly into the page Stack (matching the ⑤c
+      // expander, which splices rather than nests), then the auto-fanned
+      // per-operation modals.  The outer Stack testid (`<plural>-detail`)
+      // anchors the e2e page-objects.
       body: callExpr("Stack", [
-        {
-          value: callExpr("scaffoldDetails", [{ name: "of", value: nameRefExpr(aggName) }]),
-        },
-        {
-          value: callExpr("scaffoldOperations", [{ name: "of", value: nameRefExpr(aggName) }]),
-        },
-        // testid on the outer Stack — the e2e page-objects anchor
-        // on `<plural>-detail`.
+        ...scaffoldDetailsParts(agg, { apiHandle }),
+        { value: scaffoldOperations(agg) },
         { name: "testid", value: stringLit(`${pluralSnake}-detail`) },
       ]),
       menu: { hidden: boolLit(true) },
@@ -121,7 +133,7 @@ export function pagesForWorkflowInstances(wf: Workflow): Page[] {
     page({
       name: `${pascal(wfName)}InstancesList`,
       route: `/workflows/${slug}/instances`,
-      body: callExpr("scaffoldInstanceList", [{ name: "of", value: nameRefExpr(wfName) }]),
+      body: scaffoldInstanceList(wf),
       menu: {
         section: stringLit("Workflows"),
         label: stringLit(`${humanize(wfName)} Instances`),
@@ -130,7 +142,7 @@ export function pagesForWorkflowInstances(wf: Workflow): Page[] {
     page({
       name: `${pascal(wfName)}InstanceDetail`,
       route: `/workflows/${slug}/instances/:id`,
-      body: callExpr("scaffoldInstanceDetails", [{ name: "of", value: nameRefExpr(wfName) }]),
+      body: scaffoldInstanceDetails(wf),
       menu: { hidden: boolLit(true) },
     }),
   ];
@@ -140,9 +152,7 @@ export function pageForWorkflow(wf: Workflow): Page {
   return page({
     name: `${pascal(wf.name)}Workflow`,
     route: `/workflows/${snake(wf.name)}`,
-    // Canonical body primitive — expands to Stack(Breadcrumbs,
-    // Heading, Card(WorkflowForm(runs:))).
-    body: callExpr("scaffoldWorkflowForm", [{ name: "runs", value: nameRefExpr(wf.name) }]),
+    body: scaffoldWorkflowForm(wf.name),
     menu: {
       section: stringLit("Workflows"),
       label: stringLit(humanize(wf.name)),
@@ -154,9 +164,7 @@ export function pageForView(v: View): Page {
   return page({
     name: `${v.name}View`,
     route: `/views/${snake(v.name)}`,
-    // Canonical body primitive — expands to Heading + QueryView
-    // wrapping a Paper-framed Table over the view's projected rows.
-    body: callExpr("scaffoldViewList", [{ name: "of", value: nameRefExpr(v.name) }]),
+    body: scaffoldViewList(v),
     menu: {
       section: stringLit("Views"),
       label: stringLit(humanize(v.name)),
