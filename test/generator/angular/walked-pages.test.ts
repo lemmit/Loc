@@ -296,7 +296,7 @@ const INLINE_SOURCE = `
     }
     storage primary { type: postgres }
     resource ordersState { for: Orders, kind: state, use: primary }
-    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], port: 8080 }
     deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
   }
 `;
@@ -374,7 +374,7 @@ const NAV_SOURCE = `
     }
     storage primary { type: postgres }
     resource ordersState { for: Orders, kind: state, use: primary }
-    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], port: 8080 }
     deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
   }
 `;
@@ -455,7 +455,7 @@ const QUERY_SOURCE = `
     storage primary { type: postgres }
     resource ordersState { for: Orders, kind: state, use: primary }
     deployable api {
-      platform: hono
+      platform: node
       contexts: [Orders]
       dataSources: [ordersState]
       serves: SalesApi
@@ -551,7 +551,7 @@ const TABLE_SOURCE = `
     storage primary { type: postgres }
     resource ordersState { for: Orders, kind: state, use: primary }
     deployable api {
-      platform: hono
+      platform: node
       contexts: [Orders]
       dataSources: [ordersState]
       serves: SalesApi
@@ -634,7 +634,7 @@ const INPUT_SOURCE = `
     }
     storage primary { type: postgres }
     resource ordersState { for: Orders, kind: state, use: primary }
-    deployable api { platform: hono, contexts: [Orders], dataSources: [ordersState], port: 8080 }
+    deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], port: 8080 }
     deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
   }
 `;

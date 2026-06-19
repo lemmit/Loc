@@ -29,7 +29,7 @@ system Demo {
   } }
   api ShopApi from Shop
   ui Admin with scaffold(subdomains: [Shop]) { }
-  deployable api { platform: hono, contexts: [Catalog], serves: ShopApi, port: 3000 }
+  deployable api { platform: node, contexts: [Catalog], serves: ShopApi, port: 3000 }
   deployable web { platform: react, targets: api, ui: Admin, port: 3001 }
 }`;
 
