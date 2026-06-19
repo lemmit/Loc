@@ -8,16 +8,15 @@
 // scaffolds a new-form — the name is the spec.  See
 // `docs/proposals/unfoldable-page-scaffolding.md`.
 //
-// Status: the AST builders + a print/re-parse proof.  The full family of
-// faithful twins of the ⑤c expanders is now in place: `scaffoldList` (per-type
-// columns + `rowTestid` + the find-filter bar), `scaffoldNewForm`,
-// `scaffoldDetails` (value-object sub-rows + related-entity cards),
-// `scaffoldOperations`, `scaffoldWorkflowForm`, `scaffoldViewList`, and the
-// workflow-instance list/detail.  What remains is the flip itself: wiring these
-// into `_pages.ts` (so the scaffold macro RETURNS them instead of the
-// sentinels), attaching the filter state as the page's `state { }` block,
-// re-sourcing `inferPageOrigin`, and slimming the ⑤c arms — gated on equivalent
-// generated output across the frontends.
+// Status: wired.  The scaffold macro family (`_pages.ts`) returns these full
+// AST trees directly as page bodies — `unfold` on a scaffolded page reveals
+// real `.ddd` source rather than a `scaffold*(of:)` sentinel.  The full family
+// is in place: `scaffoldList` (per-type columns + `rowTestid` + the find-filter
+// bar), `scaffoldNewForm`, `scaffoldDetails` (value-object sub-rows +
+// related-entity cards), `scaffoldOperations`, `scaffoldWorkflowForm`,
+// `scaffoldViewList`, and the workflow-instance list/detail.  The ⑤c expander
+// twins stay live for HAND-WRITTEN `scaffold*` body primitives (a
+// validator-admissible user surface) — the macro no longer emits them.
 
 import type {
   Aggregate,
