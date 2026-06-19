@@ -581,16 +581,15 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
     channelSources,
     layouts,
   };
-  // Scaffold expander always runs.  `page.origin` (set during page
-  // lowering from the synthesised body's primitive shape) drives the
-  // per-page side effects (emit path, auto-`id` param for detail
-  // pages).  Bodies are left alone — pages scaffold-emitted with
-  // canonical body primitives are rewritten by
-  // `expandInlineScaffoldPrimitiveCalls` below, which produces the
-  // full Stack/QueryView/Table tree the walker consumes.  The
-  // per-aggregate page-object emitter also dispatches on
-  // `page.origin` to produce the rich `e2e/pages/<agg>.ts`
-  // helper classes.
+  // Scaffold post-passes.  Scaffolded pages now carry their full body tree
+  // directly (the macro emits the `_body-builders.ts` scaffolders), so
+  // `resourceScaffoldOrigins` recovers each one's `page.origin` from its NAME
+  // (`<Agg>List|New|Detail`, `<Wf>Workflow`, …) rather than a body sentinel.
+  // `origin` then drives the per-page side effects (emit path, auto-`id` param
+  // for detail pages) and the per-aggregate page-object emitter
+  // (`e2e/pages/<agg>.ts`).  `expandInlineScaffoldPrimitiveCalls` still runs,
+  // but now only rewrites HAND-WRITTEN `scaffold*(of:)` body primitives — for
+  // macro-emitted pages it's a no-op (no sentinels left to expand).
   resourceScaffoldOrigins(built);
   dropNonConstructibleNewPages(built);
   stripNonConstructibleListCreate(built);
