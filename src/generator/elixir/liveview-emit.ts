@@ -101,6 +101,7 @@ export function emitLiveViewPages(args: {
       name: c.name,
       params: c.params,
       state: c.state,
+      derived: c.derived,
       body: c.body,
       source: "explicit",
     } as PageIR;
@@ -632,6 +633,7 @@ function renderUiComponents(args: {
       name: c.name,
       params: c.params,
       state: c.state,
+      derived: c.derived,
       body: c.body,
       source: "explicit",
     } as PageIR;

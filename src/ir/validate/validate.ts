@@ -28,7 +28,6 @@ import {
   validateDataSourceCoverage,
   validateDataSourceUnwiredKnobs,
   validateDefaultDeny,
-  validateDerivedFramework,
   validateEventSourcedStorage,
   validateEventSourcedWorkflowStorage,
   validateInheritanceStorage,
@@ -113,7 +112,6 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);
-    validateDerivedFramework(sys, diags);
     validateDefaultDeny(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);

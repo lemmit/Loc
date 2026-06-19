@@ -1,11 +1,12 @@
 # Page & component `derived` bindings — named computed values in a render scope
 
-**Status:** PARTIAL — **React shipped** (grammar, IR, lowering, shared
-walker read-path, and the React shell hoist as `useMemo`). A validator gate
-(`loom.derived-unsupported-framework`) rejects `derived` on Vue / Svelte /
-Angular / Phoenix until their shells learn to hoist (`computed` /
-`$derived` / `computed` / HEEx inline-recompute) — those are the remaining
-slices.
+**Status:** SHIPPED — **every frontend**. JS frontends hoist a reactive
+computed before the body (React `useMemo`, Vue `computed`, Svelte
+`$derived`, Angular `readonly … = computed`); Phoenix/HEEx inline-recomputes
+the binding's expr at each use (LiveView re-renders on assign change, so each
+use stays fresh; the assign-hoist optimization stays deferred). No framework
+gate remains. Pages + components on all; sequential `derived` (referencing an
+earlier one) works everywhere.
 
 ## TL;DR
 
