@@ -13,6 +13,58 @@ This is the **prioritized** companion to the empirical
 supersedes its target lists). When a cited file disagrees with either doc, the
 **code wins**.
 
+---
+
+## Code-verified audit pass (2026-06-19)
+
+Every open entry was checked **against the actual validator gates / generator
+emitters** (not the prose). Headline: the **backend & adapter tier (DEBT-02,
+03, 06, 07, 13, 14, 15, 17, 20–25, 27–29) is accurate** — those gaps are
+genuinely gated (`loom.*-unsupported`) or stubbed (`AdapterNotImplementedError`).
+The **stale/over-stated entries were the frontend & "aspirational completeness"
+ones** — corrected this session: DEBT-08 (paged done, envelope no-live-use),
+DEBT-19 (TPH ships on all 5 backends), DEBT-04 lifecycle (vaporware → DEBT-16
+grammar-blocked), DEBT-12 (`requires` guard already ships; new-parts-in-body is
+an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
+
+| ID | Verified | Note |
+|---|---|---|
+| 01 | ✅ DONE | tenancy filter on all 5 backends |
+| 02 | 🟡 OPEN (partial) | node+java-doc ship; **elixir + java-embedded** non-relational `filter` gated |
+| 03 | 🟡 OPEN (partial) | Ash return-dominant union returns ship; **mutation/guard bodies** still gated |
+| 04 | ⚠️ RE-SCOPED | elixir audit-ops = real greenfield; lifecycle = vaporware (→16) |
+| 05 | ✅ DONE | `For` shipped; List/Detail removed |
+| 06 | 🔴 OPEN | `PROVENANCE_BACKENDS = {node, dotnet}` — **elixir** excluded |
+| 07 | 🔴 OPEN | elixir saving shapes `["relational","embedded"]` — no `document` |
+| 08 | ✅/⚠️ | paged done; envelope deferred (no live use) |
+| 09–11 | ✅ DONE | this session |
+| 12 | ✅ mostly DONE | `requires` guard ships (handle_params); new-parts unreachable; verify_token niche |
+| 13 | 🔴 OPEN | elixir `Id[]` joins are set-only (Ash never populates `ordinal`) |
+| 14 | 🔴 OPEN | java `hosts:` → `loom.java-fullstack-unsupported` |
+| 15 | 🔴 OPEN | java nested-part single containments → `loom.java-single-containment-unsupported` |
+| 16 | ⛔ BLOCKED | grammar has no `audited` slot on Create/Destroy |
+| 17 | 🟡 OPEN (partial) | MikroORM real adapter, v1-minimal (retrievals/assoc/inheritance stubbed) |
+| 18 | 🟡 OPEN (partial, **narrowed**) | Dapper **retrievals now ship**; only out-of-subset predicates stub (`NotImplementedException`) |
+| 19 | ✅ DONE | TPH on all 5 DB backends |
+| 20 | 🟡 OPEN (partial) | java JPA + node do ES; **elixir-vanilla emit exists but its ecto/ashPostgres adapters declare `["state"]`**, and **java's default `eventLog: "axon"` points at a STUB** — latent misalignment worth a fix |
+| 21 | 🟡 OPEN (partial) | one real app-`style:` per backend (dotnet=cqrs, node/java=layered); rest reserved stubs |
+| 22 | 🟡 OPEN (partial) | one real `transport:` per backend (node=hono, dotnet=controllers); express/fastify/minimalApi stubbed |
+| 23 | 🔴 OPEN | marten/axon/jooq all `AdapterNotImplementedError` stubs |
+| 24 | 🟡 OPEN (**narrowed**) | criterion reification ships on java/dotnet/node/elixir (python non-reifying *by design*); only **principal-binding in the criterion query-face** is deferred |
+| 25 | 🔴 OPEN | worker/orleans/genserver all stubs |
+| 26 | 🟡 OPEN (**narrowed**) | instance **visibility** ships on all 5 backends; the **execution/persistence epic** (choreographer seam) remains |
+| 27 | 🔴 OPEN | 5 `PlatformSurface` hooks (authGate/auditInit/compliance/tenancy/i18n) are optional no-ops, zero impls (tenancy+audit landed via *other* paths) |
+| 28 | 🟡 OPEN (partial) | `loads:` lowered but **unconsumed** by every backend (hardcoded full-load); `find all` pagination grammar-gated |
+| 29 | 🔴 OPEN | views are single-source only (no joins, no per-view params) — grammar-level |
+| 30 | 🔴 OPEN (a/b/c), ❓ STALE (d) | seed create-validation / appliers / block-body-lambdas genuinely stubbed; **(d) "method-call hooks binding" — no such IR field found; likely a stale/mislabeled entry** |
+
+**Takeaway for picking work:** trust the backend-tier rows; the highest-value
+*real* items are DEBT-06/07 (elixir parity), DEBT-03 (Ash union bodies),
+DEBT-20 (fix the ES adapter misalignment), and DEBT-24 (principal criterion
+query-face). The frontend tier is essentially cleared.
+
+---
+
 Targets: **node** (Hono/TS) · **dotnet** (.NET/EF) · **elixir** (Phoenix
 Ash/vanilla) · **python** (FastAPI) · **java** (Spring Boot) · **react** /
 **vue** / **svelte** (frontends).
