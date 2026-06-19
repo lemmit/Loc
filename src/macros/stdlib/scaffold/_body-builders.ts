@@ -11,15 +11,23 @@
 // Status: the AST builders + a print/re-parse proof.  Wiring them into
 // `_pages.ts` (so the scaffold macro RETURNS these instead of sentinels) and
 // deleting the ⑤c arms + `inferPageOrigin` is the cohesive flip that follows,
-// gated on equivalent generated output.  `scaffoldList` now carries the
-// per-type column formatters (`columnAccessor` / `scalarColumnsForAggregate`),
-// the `rowTestid` accessor, and the find-filter bar (`filterFindsForAggregate`
-// builds the bound inputs + the `match` switch; `filterStateFields` names the
-// page-state the inputs bind to) — full twins of the ⑤c `expandScaffoldList`.
-// Attaching the filter state as the page's `state { }` block, and the
-// Detail/Operations/Workflow/View/Instance builders, are the remaining tail.
+// gated on equivalent generated output.  Built so far, all faithful twins of
+// the matching ⑤c expanders: `scaffoldList` (per-type columns + `rowTestid` +
+// the find-filter bar), `scaffoldNewForm`, `scaffoldOperations`,
+// `scaffoldWorkflowForm`, `scaffoldViewList`.  The Detail builder
+// (`scaffoldDetails`/value-object + related cards) and the workflow-instance
+// list/detail builders, plus attaching the filter state as the page's
+// `state { }` block when wiring, are the remaining tail.
 
-import type { Aggregate, Expression, TypeRef } from "../../../language/generated/ast.js";
+import type {
+  Aggregate,
+  Expression,
+  Operation,
+  Property,
+  TypeRef,
+  View,
+  Workflow,
+} from "../../../language/generated/ast.js";
 import {
   binaryExpr,
   boolLit,
@@ -60,6 +68,157 @@ export function scaffoldNewForm(aggName: string): Expression {
     },
     { name: "testid", value: stringLit(`${slug}-new-page`) },
   ]);
+}
+
+/** `scaffoldOperations` — scaffolds the Detail page's operation surface:
+ *  `Group(Modal × N)`, one Modal per public operation, each holding an
+ *  `OperationForm(of: <Agg>, op: <opName>)` and triggered by a button (the
+ *  first operation's button is primary, the rest secondary).  No public
+ *  operations ⇒ an empty `Group()`.  AST twin of `expandScaffoldOperations`;
+ *  public = the aggregate's non-`private` operations. */
+export function scaffoldOperations(agg: Aggregate): Expression {
+  const slug = snake(plural(agg.name));
+  const publicOps = agg.members.filter(
+    (m): m is Operation => m.$type === "Operation" && !m.private,
+  );
+  if (publicOps.length === 0) return callExpr("Group", []);
+  return callExpr(
+    "Group",
+    publicOps.map((op, i) => ({
+      value: callExpr("Modal", [
+        {
+          value: callExpr("OperationForm", [
+            { name: "of", value: nameRefExpr(agg.name) },
+            { name: "op", value: nameRefExpr(op.name) },
+            { name: "testid", value: stringLit(`${slug}-op-${op.name}`) },
+          ]),
+        },
+        { name: "title", value: stringLit(humanize(op.name)) },
+        {
+          name: "trigger",
+          value: callExpr("Button", [
+            { value: stringLit(humanize(op.name)) },
+            { name: "emphasis", value: stringLit(i === 0 ? "primary" : "secondary") },
+            { name: "testid", value: stringLit(`${slug}-op-${op.name}`) },
+          ]),
+        },
+      ]),
+    })),
+  );
+}
+
+/** `scaffoldWorkflowForm` — scaffolds a workflow's command page body:
+ *  `Stack(Breadcrumbs, Heading, Card(WorkflowForm(runs: <Wf>)))`.  AST twin of
+ *  `expandScaffoldWorkflowForm`. */
+export function scaffoldWorkflowForm(wfName: string): Expression {
+  const wfSlug = snake(wfName);
+  const humanWf = humanize(wfName);
+  return callExpr("Stack", [
+    {
+      value: callExpr("Breadcrumbs", [
+        {
+          value: callExpr("Anchor", [
+            { value: stringLit("Home") },
+            { name: "to", value: stringLit("/") },
+          ]),
+        },
+        {
+          value: callExpr("Anchor", [
+            { value: stringLit("Workflows") },
+            { name: "to", value: stringLit("/workflows") },
+          ]),
+        },
+        { value: callExpr("Text", [{ value: stringLit(humanWf) }]) },
+      ]),
+    },
+    {
+      value: callExpr("Heading", [
+        { value: stringLit(humanWf) },
+        { name: "level", value: intLit(2) },
+      ]),
+    },
+    {
+      value: callExpr("Card", [
+        {
+          value: callExpr("WorkflowForm", [
+            { name: "runs", value: nameRefExpr(wfName) },
+            { name: "testid", value: stringLit(`workflow-${wfSlug}`) },
+          ]),
+        },
+      ]),
+    },
+    { name: "testid", value: stringLit(`workflow-${wfSlug}-page`) },
+  ]);
+}
+
+/** `scaffoldViewList` — scaffolds a view's read page body:
+ *  `Stack(Heading, QueryView(of: Views.<View>, …, Paper(Table)))`.  AST twin of
+ *  `expandScaffoldViewList`.  Columns come from the view's own output record
+ *  when it declares one, else the source's shape — a workflow source's instance
+ *  wire shape, or the source aggregate's fields. */
+export function scaffoldViewList(view: View): Expression {
+  const humanView = humanize(view.name);
+  const cols = columnsFromProperties(viewColumnFields(view)).map((c) => ({
+    value: callExpr("Column", [
+      { value: stringLit(humanize(c.name)) },
+      { value: lambda("o", columnAccessor(c.name, c.kind, "o")) },
+    ]),
+  }));
+  const table = callExpr("Table", [
+    ...cols,
+    { name: "rows", value: nameRefExpr("rows") },
+    { name: "striped", value: boolLit(true) },
+    { name: "highlight", value: boolLit(true) },
+    { name: "sticky", value: boolLit(true) },
+    { name: "keyExpr", value: stringLit("idx") },
+  ]);
+  return callExpr("Stack", [
+    {
+      value: callExpr("Heading", [
+        { value: stringLit(humanView) },
+        { name: "level", value: intLit(2) },
+      ]),
+    },
+    {
+      value: callExpr("QueryView", [
+        { name: "of", value: memberAccess(nameRefExpr("Views"), view.name) },
+        { name: "loading", value: callExpr("Skeleton", [{ name: "count", value: intLit(5) }]) },
+        {
+          name: "error",
+          value: callExpr("Alert", [
+            { value: stringLit(`Couldn't load ${humanView.toLowerCase()}`) },
+          ]),
+        },
+        { name: "empty", value: callExpr("Empty", [{ value: stringLit("No rows.") }]) },
+        { name: "data", value: lambda("rows", callExpr("Paper", [{ value: table }])) },
+      ]),
+    },
+    { name: "testid", value: stringLit(`view-${snake(view.name)}`) },
+  ]);
+}
+
+/** The property list a view's columns walk: its declared output record when
+ *  present, else the source shape — a workflow source's instance wire shape or
+ *  the source aggregate's fields. */
+function viewColumnFields(view: View): Property[] {
+  if (view.fields.length > 0) return view.fields;
+  const src = view.source.ref;
+  if (src?.$type === "Workflow") return workflowInstanceProperties(src);
+  if (src?.$type === "Aggregate") return propertiesOf(src.members);
+  return [];
+}
+
+/** A workflow's persisted-instance properties in wire-shape order — the single
+ *  id-shaped correlation field first (the `token`), then the remaining state
+ *  fields in declaration order.  Twin of `wireFieldsForWorkflow`; an absent or
+ *  ambiguous correlation ⇒ no instance shape (empty), matching the enrichment
+ *  gate.  Shared by the view-list and (later) the instance builders. */
+function workflowInstanceProperties(wf: Workflow): Property[] {
+  const props = propertiesOf(wf.members);
+  const idProps = props.filter((p) => p.type.base.$type === "IdType" && !p.type.array);
+  if (idProps.length !== 1) return [];
+  const corr = idProps[0]!;
+  return [corr, ...props.filter((p) => p.name !== corr.name)];
 }
 
 /** The display dispatch a list/table column renders through — the
@@ -109,13 +268,22 @@ function columnAccessor(fieldName: string, kind: ColumnKind, rowVar: string): Ex
  *  the type kinds it needs (id target, primitive name, enum-vs-VO) are all
  *  reachable through the post-link cross-references. */
 export function scalarColumnsForAggregate(agg: Aggregate): ScaffoldColumn[] {
+  return columnsFromProperties(propertiesOf(agg.members));
+}
+
+/** One `ScaffoldColumn` per displayable property — dispatched by type, skipping
+ *  value-objects/arrays.  Shared by the aggregate-list and view-list columns. */
+function columnsFromProperties(props: readonly Property[]): ScaffoldColumn[] {
   const out: ScaffoldColumn[] = [];
-  for (const m of agg.members) {
-    if (m.$type !== "Property") continue;
-    const kind = columnKindForType(m.type);
-    if (kind) out.push({ name: m.name, kind });
+  for (const p of props) {
+    const kind = columnKindForType(p.type);
+    if (kind) out.push({ name: String(p.name), kind });
   }
   return out;
+}
+
+function propertiesOf(members: readonly { $type: string }[]): Property[] {
+  return members.filter((m): m is Property => m.$type === "Property");
 }
 
 function columnKindForType(type: TypeRef): ColumnKind | null {
