@@ -12,7 +12,7 @@ section that matches what you need.
 | [`page-metamodel.md`](page-metamodel.md) | You're writing `ui` / `page` / `component` blocks. |
 | [`architecture.md`](architecture.md) | You want to know how `module`, `deployable`, `api`, `storage`, and `ui` compose into a runnable system. |
 | [`tools.md`](tools.md) | You're using the `ddd` CLI, `.loomignore`, watch mode, the docker workflow, or the OpenAPI parity check. |
-| [`generators.md`](generators.md) | You want to know exactly what each backend (Hono, .NET, React, Phoenix LiveView) emits for a given DSL construct. |
+| [`generators.md`](generators.md) | You want to know exactly what each backend (Hono, .NET, Phoenix LiveView, Java, Python) or frontend (React, Vue, Svelte, Angular) emits for a given DSL construct. |
 | [`kubernetes.md`](kubernetes.md) | You want to deploy the generated system to a cluster — the opt-in `generate system --k8s` Helm chart + raw manifests. |
 
 ## Per-feature references
@@ -40,7 +40,7 @@ These cover a single language feature each.  Each one is self-contained.
 | Doc | When to read |
 | --- | --- |
 | [`platforms.md`](platforms.md) | You want to know which `platform:` values exist, how `family@version` pins resolve, and what the `PlatformSurface` contract is. |
-| [`design-packs.md`](design-packs.md) | You're authoring a design pack (Mantine / shadcn / MUI / Chakra / ashPhoenix). Covers manifest, stacks (v1/v2/v3 framework baselines), required emits, template language, validation, and the recipe for adding a new pack version. |
+| [`design-packs.md`](design-packs.md) | You're authoring a design pack (Mantine / shadcn / MUI / Chakra / Vuetify / shadcnVue / shadcnSvelte / flowbite / angularMaterial / ashPhoenix). Covers manifest, stacks (v1/v2/v3 framework baselines), required emits, template language, validation, and the recipe for adding a new pack version. |
 
 ## Internals
 

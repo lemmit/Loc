@@ -24,6 +24,7 @@ versioning works.
 | `react` | `src/platform/react.ts` | 3001 | ✗ | ✓ |
 | `vue` | `src/platform/vue.ts` | 3003 | ✗ | ✓ |
 | `svelte` | `src/platform/svelte.ts` | 3002 | ✗ | ✓ |
+| `angular` | `src/platform/angular.ts` | 3004 | ✗ | ✓ |
 | `static` | aliased to `react.ts` | 3001 | ✗ | ✓ |
 
 - **Needs DB** — the system orchestrator (`src/system/index.ts`)
@@ -31,7 +32,7 @@ versioning works.
   `CREATE DATABASE` line in `db-init/00-create-databases.sql` and
   wire a `depends_on: db` healthcheck in `docker-compose.yml`.
 - **Mounts UI** — whether the deployable validator allows a `ui:`
-  binding on this platform.  `react` / `vue` / `svelte` / `static`
+  binding on this platform.  `react` / `vue` / `svelte` / `angular` / `static`
   always mount; `dotnet`, `java` and `python` are
   dual-mode (mount when `ui:` is declared, otherwise backend-only);
   `elixir` always mounts (fullstack LiveView); `node` never does.
@@ -51,7 +52,7 @@ Resolution happens in two parts (see `parseBuiltinPlatformRef` in
 1. **Bareword backend** — resolves through `BUILTIN_PLATFORM_LATEST`
    to today's default version.  Currently: `node → v4`,
    `dotnet → v8`, `elixir → v1`, `python → v1`, `java → v1`.
-   Frontend platforms (`react`, `vue`, `svelte`, `static`)
+   Frontend platforms (`react`, `vue`, `svelte`, `angular`, `static`)
    intentionally aren't versioned at the platform layer — their
    version lives on the design pack / stack axis (see
    [`design-packs.md`](design-packs.md)).
