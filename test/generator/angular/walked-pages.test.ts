@@ -846,4 +846,19 @@ describe("angular generator — byId single-record reads", () => {
     expect(api).toContain("const data = signal<OrderResponse | null>(null);");
     expect(api).toContain("if (id) {");
   });
+
+  it("stubs an Action / operation page instead of emitting a dangling mutation ref", async () => {
+    const src = DETAIL_SOURCE.replace(
+      'data: o => Stack { Heading { "Order" }, Text { o.customerId } }',
+      "data: o => Stack { Action { o.cancel } }",
+    ).replace(
+      "aggregate Order with crudish {\n          customerId: string\n          total: int\n        }",
+      "aggregate Order with crudish {\n          customerId: string\n          operation cancel() { }\n        }",
+    );
+    const all = await generateSystemFiles(src);
+    const page = all.get("web/src/app/pages/order-detail.component.ts")!;
+    // Deferred → stub; must NOT reference an un-hoisted `cancelOrder` mutation.
+    expect(page).toContain("stub — body needs api/forms support");
+    expect(page).not.toContain("cancelOrder");
+  });
 });

@@ -54,6 +54,9 @@ export function pageSlug(page: PageIR): string {
  *  stubbed until those sub-slices land. */
 export function pageNeedsDeferredFeatures(result: WalkResult): boolean {
   if (result.formOfs.length > 0) return true;
+  // `Action(inst.op)` / operation forms record a mutation hook the shell does
+  // not assemble yet — stub rather than emit a dangling `<op><Agg>` reference.
+  if (result.actionMutations.length > 0) return true;
   for (const h of result.usedApiHooks.values()) {
     // Collection (`useAll…`) and single-record (`use…ById`) reads are
     // supported; anything else (action mutations) still defers.

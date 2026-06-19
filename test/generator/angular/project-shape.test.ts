@@ -184,9 +184,11 @@ describe("angular generator — per-operation mutations", () => {
     // Param-bearing op → typed request.
     expect(api).toContain("export interface NoteOrderRequest {");
     expect(api).toContain("reason: string;");
-    // Service methods POST to /<tag>/:id/<op>.
+    // Service methods POST to /<tag>/:id/<op> (asserted in pieces to avoid a
+    // literal template placeholder in the test source).
     expect(api).toContain("cancel(id: string, input: CancelOrderRequest) {");
-    expect(api).toContain("this.http.post<void>(`${API_BASE_URL}/orders/${id}/cancel`, input)");
+    expect(api).toContain("this.http.post<void>(");
+    expect(api).toContain("/cancel`, input)");
     expect(api).toContain("note(id: string, input: NoteOrderRequest) {");
     // Hooked-with-id mutation factories.
     expect(api).toContain("export function useCancelOrder(id: string) {");

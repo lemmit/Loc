@@ -55,11 +55,11 @@ export function generateAngularForContexts(
 ): Map<string, string> {
   const out = new Map<string, string>();
 
-  // TODO(angular Slice 4): drop `validateRequired: false` once the
-  // angularMaterial pack ships the full primitive/field/form tiers.
-  const pack = loadPack(resolvePackDir(deployable.design ?? DEFAULT_DESIGN), {
-    validateRequired: false,
-  });
+  // The angularMaterial pack satisfies the (Angular-specific) required-primitive
+  // surface in `required-primitives.ts` — display / layout / input templates;
+  // forms render inline via the walker seam, so `form-of` / `field-input-*` /
+  // `modal` are deliberately not pack templates.  Required-validation is on.
+  const pack = loadPack(resolvePackDir(deployable.design ?? DEFAULT_DESIGN));
 
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
   const apiBaseUrl = options.apiBaseUrl ?? API_BASE_PATH;
