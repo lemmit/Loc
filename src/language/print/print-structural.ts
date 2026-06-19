@@ -14,6 +14,7 @@ import type {
   BindEntry,
   BoundedContext,
   Component,
+  ComponentDecl,
   Containment,
   ContextMember,
   Deployable,
@@ -505,11 +506,17 @@ function printPageProp(node: PageProp): string {
       return `ogImage: ${quote(node.value)}`;
     case "CanonicalProp":
       return `canonical: ${quote(node.value)}`;
+    case "DerivedProp":
+      return printDerivedProp(node);
     default: {
       const exhaustive: never = node;
       throw new Error(`printPageProp: unhandled ${(exhaustive as { $type: string }).$type}`);
     }
   }
+}
+
+function printComponentDecl(node: ComponentDecl): string {
+  return node.$type === "DerivedProp" ? printDerivedProp(node) : printStateBlock(node);
 }
 
 function printComponent(node: Component): string {
@@ -518,10 +525,10 @@ function printComponent(node: Component): string {
   // hand-written module at the `from` path.
   if (node.extern) {
     const header = `component ${node.name}(${params}) extern from ${quote(node.externPath ?? "")}`;
-    return block(header, node.decls.map(printStateBlock));
+    return block(header, node.decls.map(printComponentDecl));
   }
   const items = [
-    ...node.decls.map(printStateBlock),
+    ...node.decls.map(printComponentDecl),
     `body: ${node.body ? printExpr(node.body) : ""}`,
   ];
   return block(`component ${node.name}(${params})`, items);

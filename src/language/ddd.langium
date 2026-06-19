@@ -513,8 +513,8 @@ Page:
     '}';
 
 PageProp:
-      RouteProp | TitleProp | RequiresProp | StateBlock | BodyProp | PageMenuMeta | LayoutProp
-    | DescriptionProp | OgImageProp | CanonicalProp;
+      RouteProp | TitleProp | RequiresProp | StateBlock | DerivedProp | BodyProp | PageMenuMeta
+    | LayoutProp | DescriptionProp | OgImageProp | CanonicalProp;
 
 RouteProp:
     'route' ':' value=STRING;
@@ -615,7 +615,7 @@ Component:
         '}')?;
 
 ComponentDecl:
-    StateBlock;
+    StateBlock | DerivedProp;
 
 // ---- state --------------------------------------------------------------
 

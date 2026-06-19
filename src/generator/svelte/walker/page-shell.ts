@@ -565,6 +565,7 @@ function dummyCtx(
     usedParams,
     usesNavigate: false,
     stateNames,
+    derivedNames: new Set(),
     usesState: false,
     usesRouterLink: false,
     userComponents: new Map(),
