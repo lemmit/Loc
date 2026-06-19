@@ -113,4 +113,22 @@ describe("angular generator — project shape", () => {
     expect(html).toContain('<base href="/" />');
     expect(html).not.toContain("/src/main.ts");
   });
+
+  // --- Per-aggregate API module (data path sub-slice A) ------------------
+  it("emits an idiomatic @Injectable service + signal-backed read factory per aggregate", async () => {
+    const api = (await angularFiles()).get("src/api/customer.ts")!;
+    // Response interface derived from the aggregate's wire shape.
+    expect(api).toContain("export interface CustomerResponse {");
+    expect(api).toContain("id: string;");
+    expect(api).toContain("name: string;");
+    // DI-native HttpClient service — not a fetch wrapper, no TanStack.
+    expect(api).toContain('import { HttpClient } from "@angular/common/http";');
+    expect(api).toContain('@Injectable({ providedIn: "root" })');
+    expect(api).toContain("export class CustomerService {");
+    expect(api).toContain("this.http.get<CustomerResponse[]>(`${API_BASE_URL}/customers`)");
+    // Signal-backed read factory mirrors the TanStack result shape.
+    expect(api).toContain("export function useAllCustomers() {");
+    expect(api).toContain("const data = signal<CustomerResponse[]>([]);");
+    expect(api).toContain("return { data, isLoading, isError };");
+  });
 });
