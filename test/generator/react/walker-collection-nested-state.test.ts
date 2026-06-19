@@ -23,7 +23,7 @@ const sys = (plat: string, state: string, handler: string): string => `
         body: Stack { Button { "Go", onClick: e => { ${handler} } } }
       }
     }
-    deployable api { platform: hono, contexts: [C], port: 3000 }
+    deployable api { platform: node, contexts: [C], port: 3000 }
     deployable web { platform: ${plat}, targets: api, ui: WebApp, port: 3001 }
   }
 `;
