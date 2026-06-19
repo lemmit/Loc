@@ -404,6 +404,60 @@ directory holding the proxy's `*.crt` files; the test will splice
 them into each generated Dockerfile before building.  In a normal
 environment this variable is unnecessary.
 
+## Compiling generated backends in Docker
+
+The opt-in per-backend build suites (`test:dotnet`, `test:java`,
+`test:phoenix`, `test:python`, plus their `obs-*` / `auth-e2e-*`
+siblings) emit a project from a fixture and compile it with the real
+toolchain.  Two of them run the toolchain **inside Docker** rather than
+on the host:
+
+| Suite | Toolchain | Runs in |
+|---|---|---|
+| `test:java` | JDK 21 + Gradle | host (no container) |
+| `test:dotnet` | .NET SDK 8 | host (no container) |
+| `test:phoenix` / `test:phoenix-vanilla` | `mix` (Elixir/Ash) | **`hexpm/elixir` container** |
+| `test:python` | `uv` + ruff + mypy + pytest | host |
+
+A managed remote/sandbox environment usually ships the Docker **client**
+but not a running daemon — start one with `dockerd` (root /
+passwordless-sudo) before any Docker-backed suite, e.g. `sudo dockerd
+>/tmp/dockerd.log 2>&1 &`.  Image pulls from Docker Hub / `mcr.microsoft.com`
+work through the standard egress.  An agent verifying a backend change
+can generate a project (`node bin/cli.js generate system <f.ddd> -o out`)
+and compile it directly: Gradle/.NET on the host, or
+`docker run … hexpm/elixir … 'mix deps.get && mix compile'` for Phoenix.
+
+### `LOOM_HEX_MIRROR` — Elixir builds behind a fingerprinting proxy
+
+Some egress proxies allowlist by the **client's TLS fingerprint**: the
+system OpenSSL fingerprint (curl, .NET, Gradle, Python's stdlib `ssl`)
+is accepted, but **Erlang/OTP's `:ssl` is rejected with a bare HTTP 503**
+even though the CA is trusted and SNI is correct.  That makes
+`mix local.hex` / `mix deps.get` fail inside the Elixir container, which
+otherwise blocks every Dockerised Phoenix build — the daemon, the image
+pull, and `ddd generate system` all succeed; only Hex's network calls
+fail.
+
+Set `LOOM_HEX_MIRROR=1` to work around it.  `test/e2e/support/hex-mirror.ts`
+starts a loopback TLS-terminating mirror (`scripts/hex-mirror.py`, stdlib
+Python only) that re-originates hex.pm traffic with the accepted
+fingerprint, and runs the build container with
+`--network host --add-host {builds,repo,hex}.hex.pm:127.0.0.1`, the mirror
+CA mounted, and `HEX_CACERTS_PATH` pointed at it (Hex uses its own CA
+bundle, not the OS store).  Bytes pass through verbatim, so Hex's registry
+signature and tarball checksums still verify.
+
+```bash
+# Phoenix build behind a TLS-fingerprinting proxy (needs python3 + openssl
+# on the host and the privilege to bind :443):
+LOOM_PHOENIX_BUILD=1 LOOM_HEX_MIRROR=1 npx vitest run \
+  test/e2e/generated-phoenix-build.test.ts -t "paged.ddd"
+```
+
+Unset (the default, and every CI runner with direct hex.pm access) the
+flag is a no-op and the suite runs `docker run` exactly as before.
+
 ### Generated DSL-level e2e suite
 
 When the source declares `test e2e` blocks (see

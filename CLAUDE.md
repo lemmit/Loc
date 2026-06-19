@@ -58,6 +58,10 @@ npm run test:k8s-e2e      # cluster smoke — install ONE backend's chart (per-d
 
 `LOOM_E2E_CA_DIR=<dir-of-*.crt>` injects custom CAs when running the e2e suite behind a TLS-intercepting proxy.
 
+**Docker is runnable in the remote/sandbox environment**, so the Docker-backed suites above are not off-limits — the container ships the Docker *client* but usually no running daemon: start one with `dockerd >/tmp/dockerd.log 2>&1 &` (root + passwordless sudo; it doesn't persist, so re-launch if `docker info` fails mid-session). Image pulls from Docker Hub / `mcr.microsoft.com` work. Verified end-to-end here: **Java** (`gradle bootJar`, host) and **.NET** (`dotnet build`, `mcr…/dotnet/sdk:8.0` container) build clean, and **Phoenix/Elixir** compiles against real Ash 3.x in the `hexpm/elixir` container.
+
+The one wrinkle: some egress proxies allowlist by *TLS fingerprint* — system OpenSSL (curl/.NET/Gradle/Python `ssl`) passes, but Erlang/OTP's `:ssl` gets a bare HTTP 503, so `mix deps.get` can't reach hex.pm from the container. Set **`LOOM_HEX_MIRROR=1`** to route hex.pm through a loopback TLS-terminating mirror (`scripts/hex-mirror.py` via `test/e2e/support/hex-mirror.ts`) that re-originates with the accepted fingerprint — `LOOM_PHOENIX_BUILD=1 LOOM_HEX_MIRROR=1 npm run test:phoenix` then runs green. Needs `python3` + `openssl` and the privilege to bind `:443`. Unset, it's a no-op (CI runners have direct hex.pm access). See [`docs/tools.md`](docs/tools.md) → "Compiling generated backends in Docker".
+
 ### CLI
 
 ```bash
