@@ -1,6 +1,11 @@
 # Page & component `derived` bindings — named computed values in a render scope
 
-**Status:** PROPOSED (no code yet; grammar/IR/semantics specified)
+**Status:** PARTIAL — **React shipped** (grammar, IR, lowering, shared
+walker read-path, and the React shell hoist as `useMemo`). A validator gate
+(`loom.derived-unsupported-framework`) rejects `derived` on Vue / Svelte /
+Angular / Phoenix until their shells learn to hoist (`computed` /
+`$derived` / `computed` / HEEx inline-recompute) — those are the remaining
+slices.
 
 ## TL;DR
 

@@ -249,6 +249,7 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
         buildBcByAggregate(ctx),
         pageRoutes,
         externFunctionNames,
+        c.derived,
       ),
     );
   }
@@ -295,6 +296,7 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
           buildBcByWorkflow(ctx),
           pageRoutes,
           externFunctionNames,
+          page.derived,
         ),
       );
     }

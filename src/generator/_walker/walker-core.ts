@@ -1405,6 +1405,14 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
       };
       return ctx.target.renderInterpolation(ctx.target.renderStateRead(stateRef, "template"));
     }
+    // A `derived` binding — read like state (interpolated), no `usesState`.
+    if (ctx.derivedNames.has(expr.name)) {
+      const derivedRef = {
+        field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
+        name: expr.name,
+      };
+      return ctx.target.renderInterpolation(ctx.target.renderStateRead(derivedRef, "template"));
+    }
     // Unresolved ref in text position emits a JSX
     // comment so the user sees the unresolved name in the
     // generated file (the page still compiles; the comment makes

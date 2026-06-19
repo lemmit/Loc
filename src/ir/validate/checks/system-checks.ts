@@ -82,6 +82,34 @@ export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]):
   }
 }
 
+// Page/component `derived name: T = expr` bindings hoist as `useMemo` —
+// only the React generator emits the hoist today.  A non-react frontend
+// would resolve the body ref to a const that's never declared (broken
+// output), so reject it loudly until the Vue / Svelte / Angular / HEEx
+// shells learn to hoist (`computed` / `$derived` / inline-recompute).
+const DERIVED_FRAMEWORKS = new Set(["react"]);
+
+export function validateDerivedFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const uiByName = new Map(sys.uis.map((u) => [u.name, u]));
+  for (const d of sys.deployables) {
+    if (!d.uiName || DERIVED_FRAMEWORKS.has(d.uiFramework ?? "")) continue;
+    const ui = uiByName.get(d.uiName);
+    if (!ui) continue;
+    const offenders = [
+      ...ui.pages.filter((p) => p.derived.length > 0).map((p) => `page ${p.name}`),
+      ...ui.components.filter((c) => c.derived.length > 0).map((c) => `component ${c.name}`),
+    ];
+    if (offenders.length > 0) {
+      diags.push({
+        severity: "error",
+        code: "loom.derived-unsupported-framework",
+        message: `Deployable '${d.name}': page/component 'derived' bindings (${offenders.join(", ")}) are currently only supported on the react frontend; framework '${d.uiFramework ?? "unknown"}' isn't supported yet.`,
+        source: d.name,
+      });
+    }
+  }
+}
+
 // Default-deny enforcement (auth.md / quickstart §4.3).  When the system's
 // `auth { enforcement: denyByDefault }` is set, every reachable *command* on
 // an `auth: required` backend must declare a `requires` gate — otherwise it

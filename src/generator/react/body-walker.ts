@@ -39,6 +39,9 @@ export function walkBodyToTsx(
   pageRoutes: ReadonlyMap<string, string> = new Map(),
   /** Extern frontend function names declared on this ui. */
   externFunctions: ReadonlySet<string> = new Set(),
+  /** Page/component `derived` binding names — body refs resolve to the
+   *  hoisted `useMemo` const. */
+  derivedNames: ReadonlySet<string> = new Set(),
 ): WalkResult {
   return walkBody(
     body,
@@ -55,5 +58,6 @@ export function walkBodyToTsx(
     paramTypes,
     pageRoutes,
     externFunctions,
+    derivedNames,
   );
 }
