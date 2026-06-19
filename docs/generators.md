@@ -549,6 +549,9 @@ Pack selection per platform when `design:` is omitted:
 | Platform | Default family |
 |---|---|
 | `react`, `static`, fullstack `dotnet` (with `ui:`) | `mantine` |
+| `vue` | `vuetify` |
+| `svelte` | `shadcnSvelte` |
+| `angular` | `angularMaterial` |
 | `phoenixLiveView` | `ashPhoenix` (forced — only HEEx pack supported) |
 | `node`, backend-only `dotnet` | none (no UI mount) |
 
@@ -665,6 +668,34 @@ web_app/
   `<slot>` template content, not props).
 - No known gaps — full parity with the React page DSL, with compile-time
   (`LOOM_VUE_BUILD`) and runtime (`LOOM_VUE_E2E`) CI coverage.
+
+## Angular frontend (`platform: angular`)
+
+The fourth frontend generator (`src/generator/angular/`).  Emits a **standalone
+Angular 20 SPA** per angular deployable — `bootstrapApplication` + `appConfig`
+(no NgModules), built with the `@angular/build:application` builder and served
+the same `vite preview`-style way as the other SPAs in docker.  Pages flow
+through the **same shared markup walker** the React / Vue / Svelte generators use
+(`src/generator/_walker/walker-core.ts`) with `angularTarget` + the
+`angularMaterial` design pack.  See `docs/plans/angular-frontend-plan.md`.
+
+The defining difference from the TanStack-based frontends is that **Angular is
+idiomatic, not a TanStack port**: the data layer is DI-native and the reactive
+primitive is the **signal**, not a query cache.  Several walker seams fork the
+shared (React-shaped) emission rather than reuse it — each is opt-in (only
+`angularTarget` implements it), so the other three frontends stay byte-identical
+(`pipeline-layering` + the full suite gate this).
+
+| Concern | Emission |
+|---|---|
+| Pages | Each `page` becomes a standalone `@Component` under `src/app/pages/<slug>.component.ts` with an inline `template`.  The route table (`src/app/app.routes.ts`) maps `/orders/:id` → the component via `provideRouter`; a wildcard `**` mounts `NotFound`.  The app shell (`app.component.ts`) derives the sidebar from the page set. |
+| State / derived | `state { x: T = init }` → `readonly x = signal(init)` (read `x()`, write `x.set(…)`); the `:=` walker write lowers to `.set(…)`.  `derived n = expr` → `readonly n = computed(() => …)` (signal reads `this.`-prefixed in the class-field initialiser). |
+| Events | Angular `(click)` binds a **statement**, not a function value (and forbids arrow functions) — the `renderEventHandler` seam inlines the lambda body (`(click)='count.set(count() + 1)'`). `Button(to:)` routes through `renderNavigateExpr` → `router.navigateByUrl(<to>)`. |
+| Data | DI-native, **no TanStack**: per aggregate `src/api/<agg>.ts` ships an `@Injectable` `HttpClient` service + signal-backed factories (`useAll<Agg>s`, `use<Agg>ById`, `useCreate<Agg>`, `use<Op><Agg>`) that mirror the `data` / `isLoading` / `isError` / `mutate` surface the shared `QueryView` walker reads — signals are *called* (`handle.data()`), owned by the `renderQueryDataAccess` seam.  byId reads bind the route param from the `ActivatedRoute` snapshot. |
+| Forms | Idiomatic **typed Reactive Forms** (the `renderCreateForm` seam), not react-hook-form: a `[formGroup]` / `(ngSubmit)` shell over a `FormGroup` of `nonNullable` `FormControl`s (per-field Material inputs from `src/generator/angular/form-fields.ts`), submit → `mutate(getRawValue())` → navigate.  So the pack ships **no** `field-input-*` / `form-of` templates — the Angular required-primitive surface is display/layout/input only. |
+| Operations | `Action(inst.op)` → an inline statement-bound button (`renderAction` seam) hoisting an **id-at-mutate** `use<Op><Agg>()` factory (the id is read at click time, so an async QueryView record resolves correctly).  `Modal { OperationForm(…) }` → a **signal-toggled** inline Reactive Form (`renderModal` seam): the trigger captures the record id into an `<op>Id` signal and flips `<op>Open`; an `@if (<op>Open())` block holds the op `FormGroup`; submit reads the id signal, mutates, then closes. |
+| Deferred | `then:`-bearing `Action`s (the `.then` continuation can't inline in a template) and `WorkflowForm` stub cleanly to a placeholder page — `validateRequired` is on, so unsupported constructs never crash codegen. |
+| CI | `generated-angular-build.yml` — per `{case × pack}` (`minimal` / `scaffold` / `showcase` × `angularMaterial`): `npm install` + `ng build` (the Angular CLI typechecks + bundles in one step; `npm run test:angular-build` locally). |
 
 ## Phoenix LiveView fullstack (`platform: phoenixLiveView`)
 

@@ -80,6 +80,18 @@ string literals.  Vue packs additionally own the `op-dialog` template
 (the operation-modal wrapper the page shell renders) — see
 `REQUIRED_PRIMITIVES.vue`.
 
+`"angular"` is the format for standalone Angular packs (Handlebars over
+`.hbs` files yielding Angular component markup, e.g. the built-in
+`angularMaterial` pack — it declares the `ng1` stack and emits an
+`angular-json` shell instead of the Vite world's `vite-config`).  Angular's
+**forms render inline through the walker** (the `renderCreateForm` /
+`renderModal` seams emit typed Reactive Forms directly, not pack templates),
+so an angular pack owns the **display / layout / input surface only** — it
+ships **no** `form-of` / `field-input-*` / `form-*` / `op-dialog` / `modal`
+templates (see `REQUIRED_PRIMITIVES.angular`, the one frontend required-set
+that subtracts the form family).  Like Vue, JS-splicing event bindings use
+single quotes (`(click)='{{{onClick}}}'`).
+
 The Handlebars compiler is content-agnostic, so `format` does not
 change template compilation.  It DOES gate which repo-root shared
 template directories the loader pulls in:
