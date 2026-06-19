@@ -36,6 +36,7 @@ import type {
 import type { WalkContext } from "../../_walker/walker-core.js";
 import { renderAngularAction } from "../action.js";
 import { renderAngularCreateForm } from "../create-form.js";
+import { renderAngularModal } from "../modal.js";
 
 /** Angular-flavoured `WalkerTarget`.  Stateless and pure — no walker
  *  context is captured; every method takes the data it needs.  Consumed
@@ -168,8 +169,10 @@ export const angularTarget: WalkerTarget = {
     return "<!-- OperationForm: the operation-dialog form is not yet supported on Angular -->";
   },
 
-  renderModal(_call: ExprIR): string | null {
-    return "<!-- Modal: the operation-dialog form is not yet supported on Angular -->";
+  /** Fork `Modal { OperationForm(…), trigger: … }` to a signal-toggled inline
+   *  Reactive Form (the operation-dialog form). */
+  renderModal(call: ExprIR, ctx: WalkContext, depth: number): string | null {
+    return call.kind === "call" ? renderAngularModal(call, ctx, depth) : null;
   },
 
   /** `Button(to:)` → `router.navigateByUrl(<to>)` (bound as a statement by

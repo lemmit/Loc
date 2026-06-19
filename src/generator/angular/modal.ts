@@ -1,0 +1,144 @@
+import type { ExprIR, OperationIR } from "../../ir/types/loom-ir.js";
+import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { namedArgValue, positionalArgs, stringNamed } from "../_walker/shared/args.js";
+import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
+import { type AngularFormControlSpec, addNg, controlInit, fieldInput } from "./form-fields.js";
+
+// ---------------------------------------------------------------------------
+// Angular `Modal { OperationForm(…), trigger: Button(…) }` renderer — the
+// operation-dialog form, forked from the shared RHF path via the `renderModal`
+// walker seam.
+//
+// Rendered as a SIGNAL-TOGGLED inline form (not a MatDialog component): a
+// trigger button flips an `<op>Open` signal; an `@if (<op>Open())` block holds
+// the typed Reactive `FormGroup` over the operation's params.  The record id is
+// captured into an `<op>Id` signal BY THE TRIGGER (`set(<idExpr>)`) at click
+// time — so the submit method reads it via the signal (`this.<op>Id()`) without
+// having to `this`-prefix a template-scope id expression.  Submit calls the
+// id-at-mutate `use<Op><Agg>()` factory, then closes.
+// ---------------------------------------------------------------------------
+
+/** Everything the page-shell needs to wire one operation-dialog form. */
+export interface AngularModalSpec {
+  openSig: string;
+  idSig: string;
+  formVar: string;
+  mutationVar: string;
+  mutationFn: string;
+  importFrom: string;
+  submitMethod: string;
+  controls: AngularFormControlSpec[];
+}
+
+/** Resolve the operation a Modal's `OperationForm` child targets, plus the
+ *  template-scope id expression to mutate. */
+function resolveOpForm(
+  formChild: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+): { aggName: string; op: OperationIR; idExpr: string } | undefined {
+  // Flat form: `OperationForm(of: <Agg>, op: <opName>)` — the scaffold shape;
+  // targets the route `id`.
+  const ofArg = namedArgValue(formChild, "of");
+  const opArg = namedArgValue(formChild, "op");
+  if (ofArg?.kind === "ref" && opArg?.kind === "ref") {
+    const agg = ctx.aggregatesByName.get(ofArg.name);
+    const op = agg?.operations.find((o) => o.name === opArg.name && o.visibility === "public");
+    if (!agg || !op) return undefined;
+    ctx.usedParams.add("id"); // the route id the mutate targets
+    // The angular page-shell binds `readonly id = …paramMap.get("id") ?? ""`
+    // (already non-null `string`), so the bare ref suffices — no `?? ""`
+    // (which would trip NG8102 "nullish coalescing can be removed").
+    return { aggName: agg.name, op, idExpr: "id" };
+  }
+  // Instance form: `OperationForm(<inst>.<op>)` — targets the in-scope record.
+  const ref = positionalArgs(formChild)[0];
+  if (ref?.kind === "member" && ref.receiver.kind === "ref") {
+    const aggName = ctx.paramTypes?.get(ref.receiver.name);
+    const agg = aggName ? ctx.aggregatesByName.get(aggName) : undefined;
+    const op = agg?.operations.find((o) => o.name === ref.member && o.visibility === "public");
+    if (!agg || !op) return undefined;
+    return { aggName: agg.name, op, idExpr: `${emitExpr(ref.receiver, ctx)}.id` };
+  }
+  return undefined;
+}
+
+export function renderAngularModal(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string | null {
+  if (call.kind !== "call") return null;
+  const formChild = positionalArgs(call).find(
+    (a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "OperationForm",
+  );
+  if (!formChild) {
+    return ctx.target.renderComment("Modal: expected an OperationForm child");
+  }
+  const resolved = resolveOpForm(formChild, ctx);
+  if (!resolved) {
+    return ctx.target.renderComment("Modal: could not resolve the OperationForm operation");
+  }
+  const { aggName, op, idExpr } = resolved;
+
+  const opKey = `${lowerFirst(op.name)}${aggName}`;
+  const openSig = `${opKey}Open`;
+  const idSig = `${opKey}Id`;
+  const formVar = `${opKey}Form`;
+  const mutationVar = opKey;
+  const mutationFn = `use${upperFirst(op.name)}${aggName}`;
+  const importFrom = `../../api/${lowerFirst(aggName)}`;
+  const submitMethod = `submit${upperFirst(op.name)}${aggName}`;
+  const ns = stringNamed(formChild, "testid") ?? `${snake(plural(aggName))}-op-${op.name}`;
+
+  const trigger = namedArgValue(call, "trigger");
+  const triggerPositional = trigger?.kind === "call" ? positionalArgs(trigger)[0] : undefined;
+  const triggerLabel =
+    triggerPositional?.kind === "literal" && triggerPositional.lit === "string"
+      ? triggerPositional.value
+      : humanize(op.name);
+  const emphasis =
+    trigger?.kind === "call" ? (stringNamed(trigger, "emphasis") ?? "primary") : "primary";
+  const triggerBtn = emphasis === "primary" ? "mat-raised-button" : "mat-stroked-button";
+
+  const bc = ctx.bcByAggregate?.get(aggName);
+  addNg(ctx, "@angular/forms", "FormControl", "FormGroup", "ReactiveFormsModule");
+  addNg(ctx, "@angular/material/button", "MatButtonModule");
+  addNg(ctx, importFrom, mutationFn);
+
+  const fields = bc ? op.params : [];
+  const fieldMarkup = fields.map((f) => (bc ? fieldInput(f.name, f.type, bc, ns, ctx) : ""));
+
+  ctx.collectedTestids.add(ns);
+  ctx.collectedTestids.add(`${ns}-form`);
+  ctx.collectedTestids.add(`${ns}-submit`);
+
+  const spec: AngularModalSpec = {
+    openSig,
+    idSig,
+    formVar,
+    mutationVar,
+    mutationFn,
+    importFrom,
+    submitMethod,
+    controls: fields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
+  };
+  ctx.angularModals ??= [];
+  (ctx.angularModals as AngularModalSpec[]).push(spec);
+
+  const inner = "  ".repeat(depth + 1);
+  const deep = "  ".repeat(depth + 2);
+  const close = "  ".repeat(depth);
+  const label = humanize(op.name);
+  return [
+    `<div class="loom-modal">`,
+    `${inner}<button ${triggerBtn} (click)='${idSig}.set(${idExpr}); ${openSig}.set(true)' data-testid="${ns}">${triggerLabel}</button>`,
+    `${inner}@if (${openSig}()) {`,
+    `${deep}<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}-form">`,
+    ...fieldMarkup.map((m) => `${deep}  ${m}`),
+    `${deep}  <button mat-raised-button type="submit" [disabled]="${mutationVar}.isPending()" data-testid="${ns}-submit">${label}</button>`,
+    `${deep}  <button mat-button type="button" (click)='${openSig}.set(false)'>Cancel</button>`,
+    `${deep}</form>`,
+    `${inner}}`,
+    `${close}</div>`,
+  ].join("\n");
+}
