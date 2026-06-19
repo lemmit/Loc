@@ -1,8 +1,10 @@
-// DEBT-02 (slice 1) — a capability `filter` on a `shape(document)` aggregate
-// (node/Hono+Drizzle).  The aggregate lives in one `data` jsonb column, so the
-// filter is applied in-app over the rehydrated document on every read.  This
-// fixture exists to prove the emitted in-app `.filter((x) => …)` / findById
-// gate type-checks under `tsc --noEmit` (content tests can't see a type error).
+// DEBT-02 — a capability `filter` on NON-relational aggregates (node/Hono+Drizzle).
+//   - shape(document) (Cart): one `data` jsonb column → the filter is applied
+//     in-app over the rehydrated document on every read (slice 1).
+//   - shape(embedded) (Wishlist): root scalars are real columns → the filter
+//     AND-s into the SQL read like the relational path (slice 2).
+// This fixture proves the emitted reads type-check under `tsc --noEmit`
+// (content tests can't see a type error).
 system DocumentFilter {
   subdomain Sales {
     context Shop {
@@ -16,6 +18,19 @@ system DocumentFilter {
       repository Carts for Cart {
         find byLabel(l: string): Cart[] where label == l
         find first(l: string): Cart? where label == l
+      }
+
+      aggregate Wishlist ids guid shape(embedded) {
+        label: string
+        archived: bool
+        // soft-delete on a root scalar column — AND-ed into the SQL where.
+        filter !this.archived
+        contains items: WishItem[]
+        operation archive() { archived := true }
+        entity WishItem { sku: string }
+      }
+      repository Wishlists for Wishlist {
+        find byLabel(l: string): Wishlist[] where label == l
       }
     }
   }

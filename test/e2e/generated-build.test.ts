@@ -132,12 +132,11 @@ describe.skipIf(!ENABLED)(
     // `generate system` (auth files are system-mode only) and type-checked
     // against the real `jose` types — the gate that proves the emitted
     // verifier + handshake compile (content tests can't see a type error).
-    // DEBT-02 slice 1: a capability `filter` on a `shape(document)` aggregate is
-    // applied in-app over the rehydrated document (findById gate + findAll/find
-    // `.filter`).  System-mode only (the filter + shape live on a deployable), so
-    // it type-checks the node project to prove the emitted in-app predicate
-    // compiles against the domain accessors.
-    it("system document-shape capability filter (in-app) — generated project type-checks + bundles", () => {
+    // DEBT-02: a capability `filter` on NON-relational aggregates — `document`
+    // (in-app over the rehydrated doc) + `embedded` (SQL where on the root
+    // column).  System-mode only (the filter + shape live on a deployable), so it
+    // type-checks the node project to prove both emitted read paths compile.
+    it("system non-relational capability filter (document + embedded) — generated project type-checks + bundles", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-docfilter-"));
       try {
         execSync(
