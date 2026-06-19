@@ -105,7 +105,7 @@ elixir items form one coherent track (a→e order).
 | T2.g | **Reified-criteria tail** — capability-`filter` reification: **Hono shipped** (`contextFilterRefs` in the IR; the repo calls the module-level criterion fn) and **Phoenix/Ash shipped** (`renderBaseFilter` references an Ash boolean calculation — `base_filter expr(active)` / `expr(in_region(region: …))` — deduped with find/retrieval consumers via `reifiedCriteriaFor`; build-gated by `criterion-filter.ddd`). The principal/tenancy constructor factory (`currentUser.<field>` as ctor arg — gates T2.j, **excluded from the current run per maintainer**) and ambient (`of bool`) criteria (`src/generator/dotnet/criteria-emit.ts:~64-70`) remain. | ~~elixir~~ principal factory | [reified-criteria](./reified-criteria.md) |
 | T2.h | **`shape(document)` on elixir** — `PLATFORM_SAVING_SHAPES` allows `relational`+`embedded` only (`src/util/platform-axes.ts:~127`). | elixir | [document-and-json-hierarchies](./document-and-json-hierarchies.md) |
 | T2.i | **IR field-constraint metadata** — ✅ **SHIPPED** (#1214). The shared `singleFieldConstraints` classifier (`src/ir/validate/invariant-classify.ts` → min/max/between/len-*/regex), already consumed by Zod / .NET FluentValidation / the Java validator, is now consumed by elixir's `vanilla/changeset-emit.ts` too — numeric bounds → `validate_number`, length → `validate_length`, regex → `validate_format` on `base_changeset` (no-invariant aggregates stay byte-identical). A FieldIR *data* carrier would duplicate the classifier without new capability — only add it if a consumer needs constraints away from invariant context. | ~~elixir~~ done | [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) §validators |
-| T2.j | **Principal-referencing context filters on node/elixir** — `LIMITED_FAMILIES = {node, elixir}` in `validateContextFilterSupport` (`system-checks.ts:~365-407`); only .NET (`HasQueryFilter`) supports principal/tenancy filters today. Prereq for multi-tenancy (T4). | node, elixir | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
+| T2.j | **Principal-referencing context filters on node/elixir/java** — `LIMITED_FAMILIES = {node, elixir, java}` in `validateContextFilterSupport` (`system-checks.ts`); only .NET (`HasQueryFilter`) supports principal/tenancy filters today. **Prereq for — and the first build slice of — multi-tenancy** (the `tenantOwned` filter is principal-referencing; see the D-TENANCY-* decisions). | node, elixir, java | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
 | T2.k | **Provenance + audit runtimes on dotnet/elixir** — DONE for dotnet (`PROVENANCE_BACKENDS = {node, dotnet}`, `AUDIT_OP_BACKENDS = {node, dotnet}`); the .NET backend emits the lineage SDK + co-located column + transactional `provenance_records` flush + wire exposure, and audited operations stage `audit_records` in the save transaction. Elixir still owed (audited lifecycle actions also remain node-only). | ~~dotnet~~, elixir | [provenance](./provenance.md), [audit-and-logging](./audit-and-logging.md) |
 
 ## Tier 3 — partially-shipped families (the bigger remainders)
@@ -140,10 +140,20 @@ Ordered by the dependency spine, not by size.
    frames (`correlationId`/`scopeId`/`parentId`). **Lands before any
    governance tier**; audit promotion (T3.13), provenance parity
    (T2.k), and authorization all reference it.
-2. **multi-tenancy** (`tenancy by user.tenantId`, auto-stamped
-   `TenantId`, query filters) — ships **before** authorization Phase 1
-   (DataKey leftmost = TenantId). Prereq: principal context filters on
-   node/elixir (T2.j).
+2. **multi-tenancy** — design **refined 2026-06-17** (R1–R5; pinned
+   **D-TENANCY-SCOPE / -REGISTRY / -DEFAULT / -HIERARCHY**): `tenancy by
+   user.tenantId of Organization`; **two-value** scope (`with tenantOwned`
+   / `crossTenant`; **no `platform` scope**); **no silent default** (unmarked
+   = unscoped + an explicit-stance lint, recommend `error`); registry =
+   `implements "tenantRegistry"` capability (provides immutable `parent` +
+   `dataKey`; **reparent out of scope**); always hierarchy-ready with `dataKey`
+   stamped from the token (so `deep` is migration-free); depth
+   `local`/`deep`/`global` is a **per-role authz access level**. Ships
+   **before** authorization Phase 1 (DataKey leftmost = TenantId). **Prereq +
+   first build slice: T2.j** — principal-referencing context filters on
+   node/elixir/java (the `tenantOwned` filter *is* principal-referencing).
+   Delivery is capability-first (rides D-TYPED-CAPABILITIES, or the existing
+   string capability in the interim).
 3. **authorization** phases 1–4 (`DataKey`, `policy { data /
    operations / fields }`, gates; D-POLICY-STYLE pinned). Phases 5–7
    deferred tail.
@@ -166,7 +176,13 @@ Ordered by the dependency spine, not by size.
 9. **Structural reframes** — bounded-context-model,
    per-package-output-tree (deferred on fixture/CI cost),
    unfoldable-api-derivation (coordinate with payload P2 before
-   building more on `wireShape`).
+   building more on `wireShape`), and **typed-capabilities**
+   (**D-TYPED-CAPABILITIES**, new 2026-06-17) — promote the stringly-typed
+   `implements "X"` / `filter for` / `stamp for` surface to a first-class
+   pure-mixin `capability` declaration; **byte-identical** migration;
+   subsumes the `audit`/`softDelete` macros (`crudish`/`scaffold*` stay
+   macros). Low-risk and independently landable; the
+   `tenantOwned`/`tenantRegistry` capabilities are its first clients.
 10. **java-backend** — **SHIPPED** (#1110 + follow-ups; execution
     record in `../plans/java-backend-implementation.md`).  Landed as
     planned on the reified `Specification<T>` model and the
