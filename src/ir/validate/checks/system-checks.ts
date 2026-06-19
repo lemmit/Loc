@@ -652,6 +652,15 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
     if (family === "java") return true;
     return false;
   };
+  // Backends that wire a NON-principal capability filter into a NON-relational
+  // (document/embedded) aggregate, whose fields live in a jsonb column.  node
+  // applies the predicate in-app over the rehydrated document (DEBT-02, document
+  // shape).  .NET handles all shapes (it's not in LIMITED_FAMILIES).  A
+  // PRINCIPAL filter on a non-relational shape stays gated everywhere for now
+  // (the actor + json intersection isn't wired) — hence the `!usesPrincipal`
+  // condition at the call site.
+  const supportsNonRelationalFilter = (family: string, shp: string): boolean =>
+    family === "node" && shp === "document";
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
@@ -666,6 +675,8 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
         const usesPrincipal = filters.some((p) => exprUsesCurrentUser(p));
         const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
         const nonRelational = shape !== "relational";
+        const nonRelationalUnsupported =
+          nonRelational && !(supportsNonRelationalFilter(fam, shape) && !usesPrincipal);
         const principalUnsupported = usesPrincipal && !supportsPrincipalFilter(fam, dep.foundation);
         // A principal filter on a backend that DOES wire it (node) still needs
         // a request principal to scope by — so the deployable must enforce auth
@@ -691,12 +702,12 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
           });
           continue;
         }
-        // A non-relational shape gates on EVERY limited family (DEBT-02);
-        // a principal filter gates everywhere except the families above.
-        if (!principalUnsupported && !nonRelational) continue;
+        // A non-relational shape gates on the families that don't yet wire it
+        // (DEBT-02); a principal filter gates everywhere except the families above.
+        if (!principalUnsupported && !nonRelationalUnsupported) continue;
         // Non-relational is the harder limitation — report it first when both
         // apply (e.g. a principal filter on a document-shaped aggregate).
-        const reason = nonRelational
+        const reason = nonRelationalUnsupported
           ? `is persisted as shape(${shape}); capability filters are only wired for ` +
             `relational aggregates on the ${fam} backend today`
           : `references currentUser (e.g. a tenancy filter); principal-referencing capability ` +
@@ -707,7 +718,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
             `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
             `'${ctxName}.${agg.name}' with a 'filter' capability predicate that ${reason}. ` +
             `Host this aggregate on a .NET deployable${
-              nonRelational
+              nonRelationalUnsupported
                 ? ""
                 : " (or a node / elixir-Ash deployable, which wire tenancy filters)"
             }, or remove the unsupported capability filter. ` +

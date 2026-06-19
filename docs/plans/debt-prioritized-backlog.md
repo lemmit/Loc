@@ -49,7 +49,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 |---|---|---|:--:|:--:|---|
 | **P0 — parity completion, common, tractable** |
 | DEBT-01 | ~~Principal-referencing capability `filter` (`currentUser` / tenancy)~~ **DONE** — all five backends (node, .NET, elixir Ash + vanilla, java) wire it, incl. java reified-criterion retrievals | ~~node, elixir, java~~ | 5 | L | `proposals/criterion-everywhere.md` · **fully landed on every backend** |
-| DEBT-02 | Non-relational (`shape(document/embedded)`) capability `filter` | node, elixir, java | 4 | M | — |
+| DEBT-02 | Non-relational (`shape(document/embedded)`) capability `filter` — **node `shape(document)` landed** (in-app filter over the rehydrated doc: findById gate + findAll/find `.filter`); follow-ups: node `embedded`, elixir, java | ~~node-doc~~ · node-embedded, elixir, java | 4 | M | — |
 | DEBT-03 | Operation `or`-union return (exception-less ProblemDetails) | elixir/ash | 4 | M | `exception-less.md` · **slice 1 landed** (return-dominant; mutation/guard bodies still gated) |
 | DEBT-04 | Audit runtime parity (`audited` ops, lifecycle, `with audit`) | dotnet, elixir | 4 | L | `type-system-feature-migration.md` (DBT) |
 | DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) — **DONE: `For` implemented (all 4 frontends + HEEx; now with an optional `empty:` arm); `List`/`Detail`/`MasterDetail` were inert duplicates of `scaffoldList`/`scaffoldDetails` and were REMOVED** ([D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes)) | react (→ vue/svelte) | — | — | resolved |

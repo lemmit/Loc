@@ -7,7 +7,11 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
-import { aggregateUsesMoney, findUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import {
+  aggregateUsesMoney,
+  exprUsesCurrentUser,
+  findUsesCurrentUser,
+} from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
@@ -45,6 +49,11 @@ export function buildDocumentRepositoryFile(
 
   const findMethods = (repo?.finds ?? []).map((find) => documentFindMethod(agg, find, ctx));
 
+  // Capability filter (e.g. soft-delete) applied in-app on the by-id reads so a
+  // hidden record reads as not-found, matching the find paths above.
+  const capRec = documentCapabilityBody(agg, "rec");
+  const capX = documentCapabilityBody(agg, "x");
+
   const bodyStr = lines(
     `export class ${agg.name}Repository {`,
     `  constructor(`,
@@ -57,7 +66,15 @@ export function buildDocumentRepositoryFile(
     `    const row = rows[0];`,
     `    ${renderHonoStoreLogCall("aggregateLoaded", `aggregate: "${agg.name}", id: id as string, found: !!row`)}`,
     `    if (!row) return null;`,
-    `    return ${lowerFirst(agg.name)}FromDoc(row.data as ${agg.name}Doc);`,
+    // No capability filter → return the rehydrated doc directly (byte-identical
+    // to the pre-DEBT-02 emission); with one, bind it and gate by the predicate.
+    ...(capRec
+      ? [
+          `    const rec = ${lowerFirst(agg.name)}FromDoc(row.data as ${agg.name}Doc);`,
+          `    if (!(${capRec})) return null;`,
+          `    return rec;`,
+        ]
+      : [`    return ${lowerFirst(agg.name)}FromDoc(row.data as ${agg.name}Doc);`]),
     `  }`,
     "",
     `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
@@ -69,7 +86,7 @@ export function buildDocumentRepositoryFile(
     `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
     `    const rows = await this.db.select().from(schema.${tableName}).where(inArray(schema.${tableName}.id, ids));`,
-    `    return rows.map((r) => ${lowerFirst(agg.name)}FromDoc(r.data as ${agg.name}Doc));`,
+    `    return rows.map((r) => ${lowerFirst(agg.name)}FromDoc(r.data as ${agg.name}Doc))${capX ? `.filter((x) => ${capX})` : ""};`,
     `  }`,
     "",
     `  async save(aggregate: ${agg.name}): Promise<void> {`,
@@ -148,6 +165,20 @@ export function buildDocumentRepositoryFile(
 
 // --- find methods (in-memory over rehydrated documents) -------------------
 
+/** A `shape(document)` aggregate stores every field inside the `data` jsonb
+ *  column, so a capability `filter` can't be a SQL column predicate — it's
+ *  applied in-app against the rehydrated aggregate (the read already
+ *  deserialises every row, so this matches the document read model).  Returns
+ *  the boolean body under `varName` (`!varName.isDeleted`), AND-ed across the
+ *  aggregate's NON-principal filters, or null.  (Principal/tenancy filters on a
+ *  document aggregate stay gated — see validateContextFilterSupport.) */
+export function documentCapabilityBody(agg: EnrichedAggregateIR, varName: string): string | null {
+  const preds = (agg.contextFilters ?? [])
+    .filter((p) => !exprUsesCurrentUser(p))
+    .map((p) => `(${renderTsExpr(p, { thisName: varName })})`);
+  return preds.length > 0 ? preds.join(" && ") : null;
+}
+
 function documentFindMethod(
   agg: EnrichedAggregateIR,
   find: FindIR,
@@ -161,13 +192,18 @@ function documentFindMethod(
   const isArray = find.returnType.kind === "array";
   const isOptional = find.returnType.kind === "optional";
   const ret = isArray ? `${agg.name}[]` : isOptional ? `${agg.name} | null` : agg.name;
+  // Capability filter narrows `all` to the visible set BEFORE the find's own
+  // predicate runs, so a find never returns a capability-hidden (soft-deleted)
+  // record.
+  const cap = documentCapabilityBody(agg, "x");
+  const allExpr = cap ? `all.filter((x) => ${cap})` : "all";
   const selector = isArray
     ? pred
-      ? `all.filter(${pred})`
-      : `all`
+      ? `${allExpr}.filter(${pred})`
+      : allExpr
     : isOptional
-      ? `all.find(${pred ?? "() => true"}) ?? null`
-      : `all.find(${pred ?? "() => true"})!`;
+      ? `${allExpr}.find(${pred ?? "() => true"}) ?? null`
+      : `${allExpr}.find(${pred ?? "() => true"})!`;
   const rowsExpr = isArray ? "result.length" : "result == null ? 0 : 1";
   return lines(
     `  async ${find.name}(${params}): Promise<${ret}> {`,

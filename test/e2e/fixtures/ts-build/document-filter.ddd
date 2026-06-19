@@ -1,0 +1,32 @@
+// DEBT-02 (slice 1) — a capability `filter` on a `shape(document)` aggregate
+// (node/Hono+Drizzle).  The aggregate lives in one `data` jsonb column, so the
+// filter is applied in-app over the rehydrated document on every read.  This
+// fixture exists to prove the emitted in-app `.filter((x) => …)` / findById
+// gate type-checks under `tsc --noEmit` (content tests can't see a type error).
+system DocumentFilter {
+  subdomain Sales {
+    context Shop {
+      aggregate Cart ids guid shape(document) {
+        label: string
+        isDeleted: bool
+        // soft-delete capability — every read hides a deleted cart.
+        filter !this.isDeleted
+        operation softDelete() { isDeleted := true }
+      }
+      repository Carts for Cart {
+        find byLabel(l: string): Cart[] where label == l
+        find first(l: string): Cart? where label == l
+      }
+    }
+  }
+  api ShopApi from Sales
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api {
+    platform: node
+    contexts: [Shop]
+    dataSources: [shopState]
+    serves: ShopApi
+    port: 4000
+  }
+}
