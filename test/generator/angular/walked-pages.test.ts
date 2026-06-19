@@ -847,17 +847,37 @@ describe("angular generator — byId single-record reads", () => {
     expect(api).toContain("if (id) {");
   });
 
-  it("stubs an Action / operation page instead of emitting a dangling mutation ref", async () => {
-    const src = DETAIL_SOURCE.replace(
+  // An aggregate carrying a public operation, for the Action variants.
+  const opSource = (actionBody: string): string =>
+    DETAIL_SOURCE.replace(
       'data: o => Stack { Heading { "Order" }, Text { o.customerId } }',
-      "data: o => Stack { Action { o.cancel } }",
+      `data: o => Stack { ${actionBody} }`,
     ).replace(
       "aggregate Order with crudish {\n          customerId: string\n          total: int\n        }",
       "aggregate Order with crudish {\n          customerId: string\n          operation cancel() { }\n        }",
     );
-    const all = await generateSystemFiles(src);
+
+  it("renders a no-then Action as an inline statement-bound button + id-at-mutate hoist", async () => {
+    const all = await generateSystemFiles(opSource("Action { o.cancel }"));
     const page = all.get("web/src/app/pages/order-detail.component.ts")!;
-    // Deferred → stub; must NOT reference an un-hoisted `cancelOrder` mutation.
+    expect(page).not.toContain("stub — body needs api/forms support");
+    // Inline `(click)` statement reads the record id at click time — no arrow.
+    expect(page).toContain("(click)='cancelOrder.mutate(orderById.data()!.id, {})'");
+    expect(page).not.toContain("() =>");
+    // The mutation factory is hoisted with no hoist-time id.
+    expect(page).toContain("readonly cancelOrder = useCancelOrder();");
+    expect(page).toContain('import { useCancelOrder } from "../../api/order";');
+    // Factory shape: id is a `mutate` argument, not a hoist argument.
+    const api = all.get("web/src/api/order.ts")!;
+    expect(api).toContain("export function useCancelOrder() {");
+    expect(api).toContain("const mutate = (id: string, input: CancelOrderRequest)");
+  });
+
+  it("stubs a then-bearing Action (the .then continuation can't be inlined in a template)", async () => {
+    const all = await generateSystemFiles(
+      opSource("Action { o.cancel, then: navigate(OrderDetail) }"),
+    );
+    const page = all.get("web/src/app/pages/order-detail.component.ts")!;
     expect(page).toContain("stub — body needs api/forms support");
     expect(page).not.toContain("cancelOrder");
   });

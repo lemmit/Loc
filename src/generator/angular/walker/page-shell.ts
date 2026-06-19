@@ -2,6 +2,7 @@ import type { DerivedIR, ExprIR, PageIR, StateFieldIR } from "../../../ir/types/
 import { upperFirst } from "../../../util/naming.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { emitExpr, type WalkContext, type WalkResult } from "../../_walker/walker-core.js";
+import type { AngularActionSpec } from "../action.js";
 import type { AngularCreateFormSpec } from "../create-form.js";
 import { angularTarget } from "./angular-target.js";
 
@@ -270,6 +271,24 @@ export function renderAngularPage(input: AngularPageShellInput): string {
         "  }",
       ].join("\n"),
     );
+  }
+
+  // `Action(inst.op)` — the Angular renderer recorded one spec per operation on
+  // the `angularActions` side-channel.  Each hoists `readonly <var> =
+  // use<Op><Agg>()`; the inline `(click)="<var>.mutate(<id>, {})"` handler the
+  // button already carries reads the record id at click time.
+  const angularActions = (result.angularActions ?? []) as AngularActionSpec[];
+  if (angularActions.length > 0) {
+    const byPath = new Map<string, Set<string>>();
+    for (const a of angularActions) {
+      const names = byPath.get(a.importFrom) ?? new Set<string>();
+      names.add(a.hookName);
+      byPath.set(a.importFrom, names);
+    }
+    for (const [from, names] of [...byPath.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      imports.push(`import { ${[...names].sort().join(", ")} } from ${JSON.stringify(from)};`);
+    }
+    for (const a of angularActions) members.push(`  readonly ${a.localVar} = ${a.hookName}();`);
   }
 
   // Primitive imports collected by `renderPrimitive` (pack-declared) —

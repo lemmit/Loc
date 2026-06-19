@@ -147,6 +147,10 @@ export interface WalkResult {
    *  `FormGroup` + submit wiring.  Framework-neutral `unknown[]` here — the
    *  other frameworks never populate or read it. */
   angularForms?: unknown[];
+  /** OPTIONAL Angular side-channel: per-`Action(inst.op)` specs the Angular
+   *  target's `renderAction` seam records so its page-shell can hoist the
+   *  `use<Op><Agg>()` mutation.  Framework-neutral `unknown[]`; ignored elsewhere. */
+  angularActions?: unknown[];
   /** Every static `testid:` literal encountered while
    *  walking the body, plus the synthesised testid bases the walker
    *  generates on the user's behalf (e.g. `<form-namespace>-input-
@@ -360,6 +364,7 @@ export function walkBody(
     bcByWorkflow,
     formOfs: [],
     angularForms: [],
+    angularActions: [],
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
@@ -380,6 +385,7 @@ export function walkBody(
     usedApiHooks: ctx.usedApiHooks,
     formOfs: ctx.formOfs,
     angularForms: ctx.angularForms,
+    angularActions: ctx.angularActions,
     actionMutations: ctx.actionMutations,
     collectedTestids: ctx.collectedTestids,
     usesCodeBlock: ctx.usesCodeBlock,
@@ -489,6 +495,9 @@ export interface Sink {
    *  walker framework-neutral.  Optional so the other frameworks' dummy
    *  contexts (init-expr rendering) need not set it. */
   angularForms?: unknown[];
+  /** Angular `Action` specs — mutable sink the `renderAction` seam pushes
+   *  into (see the WalkResult field). */
+  angularActions?: unknown[];
   /** `Action(<instance>.<op>)` mutation wiring (see
    *  `ActionMutationState`). */
   actionMutations: ActionMutationState[];

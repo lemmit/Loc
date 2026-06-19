@@ -34,6 +34,7 @@ import type {
   WalkerTarget,
 } from "../../_walker/target.js";
 import type { WalkContext } from "../../_walker/walker-core.js";
+import { renderAngularAction } from "../action.js";
 import { renderAngularCreateForm } from "../create-form.js";
 
 /** Angular-flavoured `WalkerTarget`.  Stateless and pure — no walker
@@ -150,6 +151,12 @@ export const angularTarget: WalkerTarget = {
    *  react-hook-form path is skipped for Angular). */
   renderCreateForm(call: ExprIR, ctx: WalkContext, depth: number): string | null {
     return call.kind === "call" ? renderAngularCreateForm(call, ctx, depth) : null;
+  },
+
+  /** Fork `Action(inst.op)` to an inline statement-bound button + an
+   *  id-at-mutate hoist (Angular templates can't host the JSX arrow). */
+  renderAction(call: ExprIR, ctx: WalkContext, depth: number): string | null {
+    return call.kind === "call" ? renderAngularAction(call, ctx, depth) : null;
   },
 
   // --- Match expression seam ----------------------------------------------
