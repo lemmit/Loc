@@ -4,6 +4,8 @@ import type { ScaffoldColumn } from "../../src/macros/stdlib/scaffold/_body-buil
 import {
   filterFindsForAggregate,
   filterStateFields,
+  scaffoldInstanceDetails,
+  scaffoldInstanceList,
   scaffoldList,
   scaffoldNewForm,
   scaffoldOperations,
@@ -189,6 +191,61 @@ describe("scaffoldOperations — per-operation modals", () => {
     const { model } = await parseString(withOps("private operation recompute() { }"));
     const order = findNode(model, "Aggregate", "Order");
     expect(printExpr(scaffoldOperations(order))).toBe("Group()");
+  });
+});
+
+describe("scaffold instance builders — observable workflow pages", () => {
+  const observable = `
+    system S {
+      context C {
+        aggregate Order { subject: string }
+        enum FulfillmentStatus { Pending, Shipped }
+        workflow Fulfillment {
+          orderId: Order id
+          status: FulfillmentStatus
+          create(o: Order id) { let x = 1 }
+        }
+        repository Orders for Order { }
+      }
+    }`;
+
+  it("scaffoldInstanceList: correlation column links to detail, rest dispatch by type", async () => {
+    const { model, errors } = await parseString(observable);
+    expect(errors).toEqual([]);
+    const wf = findNode(model, "Workflow", "Fulfillment");
+    const src = printExpr(scaffoldInstanceList(wf));
+    expect(src).toContain(
+      'Column("Order Id", i => Anchor(i.orderId, to: "/workflows/fulfillment/instances/" + i.orderId))',
+    );
+    expect(src).toContain('Column("Status", i => EnumBadge(i.status))');
+    expect(src).toContain('rowTestid: r => "fulfillment-instances-row-" + r.orderId');
+    expect(src).toContain("QueryView(of: Fulfillment.instances.all");
+    expect(src).toContain('Heading("Fulfillment instances", level: 2)');
+    expect(src).toContain('testid: "fulfillment-instances-list"');
+    expect(
+      parseRawResult(inPage(src))
+        .parserErrors.map((e) => e.message)
+        .join("\n"),
+    ).toBe("");
+  });
+
+  it("scaffoldInstanceDetails: KeyValueRows over the instance shape, queried by id", async () => {
+    const { model } = await parseString(observable);
+    const wf = findNode(model, "Workflow", "Fulfillment");
+    const src = printExpr(scaffoldInstanceDetails(wf));
+    expect(src).toContain('KeyValueRow("Order Id", IdLink(data.orderId, of: Order))');
+    expect(src).toContain('KeyValueRow("Status", EnumBadge(data.status))');
+    expect(src).toContain("QueryView(of: Fulfillment.instances.byId(id), single: true");
+    expect(src).toContain(
+      'Anchor("Fulfillment instances", to: "/workflows/fulfillment/instances")',
+    );
+    expect(src).toContain('Heading("Fulfillment instance", level: 2)');
+    expect(src).toContain('color: "yellow"');
+    expect(
+      parseRawResult(inPage(src))
+        .parserErrors.map((e) => e.message)
+        .join("\n"),
+    ).toBe("");
   });
 });
 
