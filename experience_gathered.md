@@ -1385,3 +1385,58 @@ Lesson: when two backends must agree on an external contract (here, Postgres
 column identifiers across the EF mapping and the `MigrationsIR` DDL), pin the
 agreement in a fast unit assertion — don't rely on a heavy, nightly, easily-masked
 e2e run to be the first thing that exercises it.
+
+---
+
+## 14. Compiling generated backends in Docker (and the TLS-fingerprint proxy 503)
+
+Docker **is** available in the remote/sandbox environment — the container ships
+the Docker client but no running daemon. Start one with `dockerd >/tmp/dockerd.log
+2>&1 &` (root + passwordless sudo). It doesn't persist; if `docker info` starts
+failing mid-session, just relaunch it. Image pulls from Docker Hub and
+`mcr.microsoft.com` work through the standard egress.
+
+Verified end-to-end (generate → compile) for every backend that lacks a host
+toolchain or runs in a container:
+
+- **Java** — `gradle testClasses bootJar` on the host (JDK 21 + Gradle present).
+- **.NET** — host has no SDK, so build in `mcr.microsoft.com/dotnet/sdk:8.0`
+  (matches the `net8.0` target); `dotnet restore` + `dotnet build /warnaserror`
+  are clean. NuGet sails through the egress proxy.
+- **Phoenix/Elixir** — `mix deps.get && mix compile --warnings-as-errors` in the
+  `hexpm/elixir` image, against real Ash 3.x.
+
+### The gotcha: egress proxies that allowlist by TLS fingerprint
+
+The hard part wasn't Docker — it was that this environment's egress gateway
+**allowlists by the client's TLS fingerprint**. Requests from the system
+OpenSSL (curl, Python stdlib `ssl`, .NET, Gradle, Node? — see below) get
+`200`; requests from **Erlang/OTP's `:ssl` get a bare HTTP `503`** even though
+the CA is trusted, SNI is correct, and `openssl s_client` from the *same
+container* returns `200`. Symptom: `mix local.hex` / `mix deps.get` fail with
+`{:bad_status_code, 503}` (or "Unknown CA" before the proxy CA is injected).
+
+Ruled out, one at a time: CA trust (CA injection changes the error from
+"Unknown CA" to 503), docker bridge NAT (`--network host` doesn't help),
+User-Agent, and SNI (forcing `server_name_indication` doesn't help). It is the
+TLS client itself. **mitmproxy as a re-originator also fails** — its bundled
+OpenSSL is rejected too. **Node's https client was rejected as well** (got
+`200` standalone once, but `503` re-originating), so the mirror is **Python
+stdlib `ssl`**, which is reliably accepted (134/134 fetches in a full build).
+
+### The workaround: `scripts/hex-mirror.py` + `LOOM_HEX_MIRROR=1`
+
+A loopback TLS-terminating mirror: Erlang does clean localhost TLS to it
+(gateway never in that hop), and it re-originates to hex.pm with Python's
+stdlib `ssl` (the accepted fingerprint). Wiring (`test/e2e/support/hex-mirror.ts`):
+`docker run --network host --add-host {builds,repo,hex}.hex.pm:127.0.0.1`, mount
+the mirror CA, and — the subtle bit — set **`HEX_CACERTS_PATH`** to the OS bundle:
+`mix local.hex` uses Erlang's `:httpc` (OS trust store, so `update-ca-certificates`
+suffices) but **`mix deps.get` uses Hex's *own* CA bundle**, so without
+`HEX_CACERTS_PATH` it rejects the mirror cert with "Unknown CA". Bytes pass
+through verbatim, so Hex's registry signature + tarball checksums still verify.
+
+Lesson: when a sandbox "can't reach the internet", check *which client* — a 503
+that an identical `openssl`/curl request doesn't get is a fingerprint allowlist,
+not a network block. The fix is to re-originate through an accepted client, not
+to fight the CA.

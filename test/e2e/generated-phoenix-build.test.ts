@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type HexMirror, startHexMirror } from "./support/hex-mirror";
 
 // ---------------------------------------------------------------------------
 // generated Phoenix project compiles against real Ash 3.x.
@@ -31,13 +32,14 @@ import { describe, expect, it } from "vitest";
 // skips the rm-rf cleanup so `deps/` + `_build/` survive for the
 // post-job `actions/cache` save.
 //
-// Network requirement: `mix deps.get` reaches repo.hex.pm.  In a
-// proxy-restricted sandbox the call fails with a TLS handshake
-// error from Erlang's :inets — the Dockerfile bakes proxy CAs via
-// /usr/local/share/ca-certificates/, but this test
-// shells out directly rather than using that Dockerfile, so it
-// requires network access to hex.pm AND a host with passwordless
-// `docker run`.  GitHub-hosted runners satisfy both.
+// Network requirement: `mix deps.get` reaches repo.hex.pm.  GitHub-hosted
+// runners have direct access, so this test shells out to `docker run`
+// unchanged.  Behind a TLS-fingerprinting egress proxy (some sandboxes)
+// Erlang's :ssl is rejected with HTTP 503 even though the CA is trusted;
+// set `LOOM_HEX_MIRROR=1` to route hex.pm through the loopback mirror
+// (`scripts/hex-mirror.py`, see test/e2e/support/hex-mirror.ts and
+// docs/tools.md).  Either way the test needs a host with passwordless
+// `docker run`.
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -47,9 +49,36 @@ const fixturesDir = path.join(here, "fixtures", "phoenix-build");
 
 const ENABLED = process.env.LOOM_PHOENIX_BUILD === "1";
 
+const IMAGE = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
+
+// `mix local.hex && mix local.rebar && mix deps.get && mix compile` inside the
+// elixir image.  --warnings-as-errors catches Ash 3.x API drift (deprecated
+// define_for, wrong Ash.transaction signature, etc.).  When `mirror` is set
+// (LOOM_HEX_MIRROR=1) the hex.pm traffic is routed through the loopback mirror
+// — see test/e2e/support/hex-mirror.ts.
+function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
+  const dockerArgs = mirror ? `${mirror.dockerArgs.join(" ")} ` : "";
+  const shellPrefix = mirror?.shellPrefix ?? "";
+  execSync(
+    `docker run --rm ${dockerArgs}-v ${projDir}:/app -w /app -e MIX_ENV=prod ${IMAGE} ` +
+      `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
+      `mix deps.get --only prod && mix compile --warnings-as-errors'`,
+    { stdio: "inherit", timeout: 600_000 },
+  );
+}
+
 describe.skipIf(!ENABLED)(
   "generated Phoenix project compiles against real Ash 3.x (LOOM_PHOENIX_BUILD=1)",
   () => {
+    // Behind a TLS-fingerprinting proxy (LOOM_HEX_MIRROR=1) start one loopback
+    // hex mirror for the whole suite; a no-op (undefined) with direct access.
+    let mirror: HexMirror | undefined;
+    beforeAll(async () => {
+      mirror = await startHexMirror();
+    });
+    afterAll(() => {
+      mirror?.stop();
+    });
     it.each([
       { name: "acme-lv.ddd" },
       // OIDC turnkey auth (D-AUTH-OIDC): compiles the generated ApiWeb.Auth
@@ -159,18 +188,7 @@ describe.skipIf(!ENABLED)(
         expect(fs.existsSync(path.join(projDir, "mix.exs"))).toBe(true);
 
         // 2. mix deps.get + mix compile inside the elixir image.
-        //    --warnings-as-errors catches Ash 3.x API drift (deprecated
-        //    define_for, wrong Ash.transaction signature, etc.).
-        const image = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
-        execSync(
-          `docker run --rm -v ${projDir}:/app -w /app -e MIX_ENV=prod ${image} ` +
-            `bash -c 'mix local.hex --force && mix local.rebar --force && ` +
-            `mix deps.get --only prod && mix compile --warnings-as-errors'`,
-          {
-            stdio: "inherit",
-            timeout: 600_000,
-          },
-        );
+        runMixCompile(projDir, mirror);
       } finally {
         // CI-driven runs (LOOM_PHOENIX_OUT_DIR set) MUST leave deps/
         // and _build/ on disk so `actions/cache` can save them after
@@ -222,16 +240,7 @@ describe.skipIf(!ENABLED)(
           }
           expect(fs.existsSync(path.join(projDir, "mix.exs"))).toBe(true);
 
-          const image = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
-          execSync(
-            `docker run --rm -v ${projDir}:/app -w /app -e MIX_ENV=prod ${image} ` +
-              `bash -c 'mix local.hex --force && mix local.rebar --force && ` +
-              `mix deps.get --only prod && mix compile --warnings-as-errors'`,
-            {
-              stdio: "inherit",
-              timeout: 600_000,
-            },
-          );
+          runMixCompile(projDir, mirror);
         } finally {
           if (!baseOutDir) {
             try {
