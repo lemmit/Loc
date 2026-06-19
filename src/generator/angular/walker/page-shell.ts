@@ -48,7 +48,9 @@ export function pageSlug(page: PageIR): string {
 export function pageNeedsDeferredFeatures(result: WalkResult): boolean {
   if (result.formOfs.length > 0) return true;
   for (const h of result.usedApiHooks.values()) {
-    if (!h.hookName.startsWith("useAll")) return true;
+    // Collection (`useAll…`) and single-record (`use…ById`) reads are
+    // supported; anything else (action mutations) still defers.
+    if (!h.hookName.startsWith("useAll") && !h.hookName.endsWith("ById")) return true;
   }
   return false;
 }
@@ -130,6 +132,18 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     componentImports.add("RouterLink");
   }
 
+  // Route params (`/orders/:id`) the body or a byId read references — bound from
+  // the `ActivatedRoute` snapshot below.  Compute + register the imports here
+  // (before the import lines are built); the member fields emit further down.
+  const routeParams = [...(page.route ?? "").matchAll(/:(\w+)/g)].map((m) => m[1]);
+  const argRefs = new Set<string>();
+  for (const h of result.usedApiHooks.values()) for (const a of h.argsRendered) argRefs.add(a);
+  const boundParams = routeParams.filter((p) => result.usedParams.has(p) || argRefs.has(p));
+  if (boundParams.length > 0) {
+    coreSymbols.add("inject");
+    routerSymbols.add("ActivatedRoute");
+  }
+
   const imports: string[] = [
     `import { ${[...coreSymbols].sort().join(", ")} } from "@angular/core";`,
   ];
@@ -144,6 +158,19 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   if (usedHelpers.length > 0) {
     imports.push(`import { ${usedHelpers.join(", ")} } from "../../lib/format";`);
     for (const h of usedHelpers) members.push(`  protected readonly ${h} = ${h};`);
+  }
+
+  // Bind each route param synchronously as a class field so both the template
+  // (`{{ id }}`) and a `use…ById(this.id)` hoist resolve.  Declared BEFORE the
+  // api-read hoists, which reference them via `this.<param>` (class fields
+  // initialise top-to-bottom).
+  if (boundParams.length > 0) {
+    members.push("  private readonly route = inject(ActivatedRoute);");
+    for (const p of boundParams) {
+      members.push(
+        `  readonly ${p} = this.route.snapshot.paramMap.get(${JSON.stringify(p)}) ?? "";`,
+      );
+    }
   }
 
   // Per-aggregate api reads — import each `use*` read factory from
@@ -162,6 +189,8 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     for (const [from, names] of [...byPath.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       imports.push(`import { ${[...names].sort().join(", ")} } from ${JSON.stringify(from)};`);
     }
+    // Route-param args resolve against the bound class fields (`id` → `this.id`).
+    const bind = (arg: string): string => (boundParams.includes(arg) ? `this.${arg}` : arg);
     const hoisted = angularTarget.renderApiHoisting(
       [...result.usedApiHooks.values()].map((h) => ({
         apiHandle: "",
@@ -171,7 +200,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
         args: [],
         varName: h.varName,
         hookName: h.hookName,
-        argsRendered: h.argsRendered,
+        argsRendered: h.argsRendered.map(bind),
       })),
     );
     for (const line of hoisted) members.push(`  ${line}`);

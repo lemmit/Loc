@@ -139,9 +139,11 @@ export const angularTarget: WalkerTarget = {
 
   /** Angular's read handle exposes `data` as a SIGNAL, so the QueryView
    *  data-lambda binding calls it (`<handle>.data()`).  TSX/Vue read the
-   *  TanStack `.data` property directly (the omitted-default path). */
-  renderQueryDataAccess(handle: string): string {
-    return `${handle}.data()`;
+   *  TanStack `.data` property directly (the omitted-default path).  For a byId
+   *  read (`single`) `data()` is `T | null`; the template's `@if (…data())`
+   *  guard can't narrow a call result, so assert non-null inside it. */
+  renderQueryDataAccess(handle: string, single?: boolean): string {
+    return single ? `${handle}.data()!` : `${handle}.data()`;
   },
 
   /** Fork `CreateForm(of: …)` to idiomatic typed Reactive Forms (the shared

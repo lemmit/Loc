@@ -68,6 +68,7 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
   const tag = snake(plural(single));
   const allFn = `useAll${plural(single)}`;
   const allVar = `${lowerFirst(single)}All`;
+  const byIdFn = `use${single}ById`;
   const createFn = `useCreate${single}`;
 
   const fields = forApiRead(wireShapeFor(agg));
@@ -97,6 +98,10 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
     `    return this.http.get<${responseName}[]>(\`\${API_BASE_URL}/${tag}\`);`,
     "  }",
     "",
+    `  findById(id: string) {`,
+    `    return this.http.get<${responseName}>(\`\${API_BASE_URL}/${tag}/\${id}\`);`,
+    "  }",
+    "",
     `  create(input: ${createName}) {`,
     `    return this.http.post<{ id: string }>(\`\${API_BASE_URL}/${tag}\`, input);`,
     "  }",
@@ -121,6 +126,33 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
     "      isLoading.set(false);",
     "    },",
     "  });",
+    "  return { data, isLoading, isError };",
+    "}",
+    "",
+    "/** Signal-backed `findById` read — the single-record sibling of the",
+    " *  collection factory.  `data` is `null` until the row resolves; the shared",
+    " *  QueryView walker's detail-lambda reads it via `()` like the list case.",
+    " *  `id` is nullable (mirrors the TanStack `enabled: !!id` guard): an absent",
+    " *  route param skips the fetch and settles immediately. */",
+    `export function ${byIdFn}(id: string | undefined) {`,
+    `  const service = inject(${serviceName});`,
+    `  const data = signal<${responseName} | null>(null);`,
+    "  const isLoading = signal(true);",
+    "  const isError = signal(false);",
+    "  if (id) {",
+    "    service.findById(id).subscribe({",
+    "      next: (row) => {",
+    "        data.set(row);",
+    "        isLoading.set(false);",
+    "      },",
+    "      error: () => {",
+    "        isError.set(true);",
+    "        isLoading.set(false);",
+    "      },",
+    "    });",
+    "  } else {",
+    "    isLoading.set(false);",
+    "  }",
     "  return { data, isLoading, isError };",
     "}",
     "",

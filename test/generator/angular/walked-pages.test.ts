@@ -770,3 +770,80 @@ describe("angular generator — CreateForm typed Reactive Forms", () => {
     expect(page).not.toContain("body needs api/forms support");
   });
 });
+
+// ---------------------------------------------------------------------------
+// byId single-record reads — a detail page's `QueryView(of: …byId(id),
+// single: true)` un-stubs and renders the single-record guards.  The `data()`
+// signal is `T | null`, so the detail-lambda body non-null-asserts (`data()!`)
+// inside the truthy `@if` (Angular templates don't narrow a call result).  The
+// api module gains a `findById` + nullable-id `use<Agg>ById` factory.
+// (ng build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const DETAIL_SOURCE = `
+  system Smoke {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish {
+          customerId: string
+          total: int
+        }
+        repository Orders for Order { }
+      }
+    }
+    ui WebApp {
+      api Sales: SalesApi
+      page OrderDetail {
+        route: "/orders/:id"
+        body: QueryView {
+          of: Sales.Order.byId(id),
+          single: true,
+          data: o => Stack { Heading { "Order" }, Text { o.customerId } }
+        }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api {
+      platform: node
+      contexts: [Orders]
+      dataSources: [ordersState]
+      serves: SalesApi
+      port: 8080
+    }
+    deployable web {
+      platform: angular
+      targets: api
+      ui: WebApp { Sales: api }
+      port: 3004
+    }
+  }
+`;
+
+describe("angular generator — byId single-record reads", () => {
+  it("un-stubs the detail page with single-record guards + non-null data access", async () => {
+    const all = await generateSystemFiles(DETAIL_SOURCE);
+    const page = all.get("web/src/app/pages/order-detail.component.ts")!;
+    expect(page).not.toContain("body needs api/forms support");
+    expect(page).toContain('import { useOrderById } from "../../api/order";');
+    expect(page).toContain("readonly orderById = useOrderById(");
+    // Single-record (not collection `.length`) guards.
+    expect(page).toContain(
+      "@if (!orderById.isLoading() && !orderById.isError() && !orderById.data())",
+    );
+    expect(page).toContain("@if (orderById.data()) {");
+    // Body asserts non-null inside the truthy branch (template can't narrow a call).
+    expect(page).toContain("orderById.data()!.customerId");
+  });
+
+  it("emits a findById service method + nullable-id signal factory", async () => {
+    const all = await generateSystemFiles(DETAIL_SOURCE);
+    const api = all.get("web/src/api/order.ts")!;
+    expect(api).toContain("findById(id: string) {");
+    expect(api).toContain("this.http.get<OrderResponse>(`${API_BASE_URL}/orders/${id}`)");
+    expect(api).toContain("export function useOrderById(id: string | undefined) {");
+    expect(api).toContain("const data = signal<OrderResponse | null>(null);");
+    expect(api).toContain("if (id) {");
+  });
+});

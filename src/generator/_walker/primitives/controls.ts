@@ -323,7 +323,7 @@ export function emitQueryView(
     const childParamTypes = recordAgg
       ? new Map([...(ctx.paramTypes ?? []), [data.param, recordAgg]])
       : ctx.paramTypes;
-    const dataAccess = ctx.target.renderQueryDataAccess?.(queryExpr) ?? `${queryExpr}.data`;
+    const dataAccess = ctx.target.renderQueryDataAccess?.(queryExpr, single) ?? `${queryExpr}.data`;
     const childCtx: WalkContext = {
       ...ctx,
       lambdaParams: extendLambdaParams(ctx, data.param, dataAccess),
