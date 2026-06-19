@@ -1828,3 +1828,128 @@ custom page therefore means writing the body explicitly (the example
 remain — the macro still emits them as the body of the per-UI index pages, and
 a slimmed `expandInlineScaffoldPrimitives` expands those three from the system
 shape.
+
+---
+
+## D-TENANCY-SCOPE — the per-aggregate tenancy axis is two values
+
+**Status:** PINNED.
+
+**Problem.** Earlier drafts of `multi-tenancy-design-note.md` had a three-value
+scope axis — `tenantOwned` / `crossTenant` / `platform` — where `platform` meant
+"admin-only cross-tenant data" (audit trails, projections), distinct from open
+reference data.
+
+**Decision.** The per-aggregate tenancy axis has **two** values: tenant-owned
+(the `tenantOwned` capability) and `crossTenant` (unscoped). There is **no
+`platform` scope.** *Who may read* is an authorization concern, not a tenancy
+scope, so admin-only cross-tenant data is `crossTenant` + an authorization
+default-deny policy. Once depth moved to per-role authz access levels
+(D-TENANCY-HIERARCHY) and the registry to a capability (D-TENANCY-REGISTRY),
+`platform` had no scope meaning left. Safety note: `crossTenant` is fail-open at
+the tenancy layer; sensitive cross-tenant data relies on the authz default-deny
+gate.
+
+**Affects.** `multi-tenancy-design-note.md` R2 (canonical); `authorization.md`
+§0/§2 (no longer lists `platform`).
+
+---
+
+## D-TENANCY-REGISTRY — registry named in `tenancy by … of X` + a `tenantRegistry` capability
+
+**Status:** PINNED.
+
+**Problem.** The tenant registry (the `Organization`/`Tenant` aggregate) can't be
+plain tenant-scoped (it is created before its own tenant context exists, and is
+self-keyed with no `TenantId` column) nor `crossTenant` (that would leak every
+org). An early draft made it a `platform` aggregate mode.
+
+**Decision.** The registry is a **system-level fact** named in `tenancy by
+user.tenantId of Organization`. It carries an explicit, unfoldable **`implements
+"tenantRegistry"` capability** that **provides** an immutable self-referential
+`parent: Self id?` + a managed `dataKey` path + the path-stamp — fields come from
+the local capability, never injected by the distant `tenancy by` line
+(verify-don't-inject). Loom **verifies** cardinality (exactly one
+`tenantRegistry`) + the `of …` cross-link + that the claim field exists — **not**
+field-conformance (the capability provides the fields by construction).
+**Reparent is out of scope** (immutable `parent` ⇒ permanent paths; rare org
+moves are an offline migration).
+
+**Affects.** `multi-tenancy-design-note.md` R1/R5; `typed-capabilities.md` (the
+`tenantRegistry` worked case).
+
+---
+
+## D-TENANCY-DEFAULT — no silent default; an explicit-stance lint
+
+**Status:** PINNED (lint **severity** OPEN — recommended `error`).
+
+**Problem.** A fail-closed *silent* default ("unmarked ⇒ `tenantOwned`") would
+have Loom implicitly attach the `tenantOwned` capability, injecting
+`tenantId`/`dataKey` — the distant-injection magic the capability model forbids.
+
+**Decision.** **No silent default.** An unmarked aggregate under a `tenancy by`
+system is **unscoped**; a **lint** flags it and suggests the explicit marker
+(`with tenantOwned` or `crossTenant`). Fields only ever come from an explicit,
+unfoldable capability. The lint's **severity is the fail-open/fail-closed knob**:
+**error** (recommended — the common case is tenant data, so the unmarked fallback
+is the dangerous one) gives fail-closed without magic; **warning** is fail-open.
+Severity is the one OPEN sub-decision.
+
+**Affects.** `multi-tenancy-design-note.md` R3 (supersedes original decision #2's
+silent-default *mechanism*; the fail-closed *goal* survives via the lint).
+
+---
+
+## D-TENANCY-HIERARCHY — always hierarchy-ready; depth is a per-role authz access level
+
+**Status:** PINNED.
+
+**Problem.** Hierarchical (parent/child org) visibility could be a
+flat-vs-hierarchical *mode*, a per-aggregate `subtenantScoped` flavor, or a
+per-role access level. An entity-flavor can't express "Manager sees `Project`
+deep but `Invoice` local."
+
+**Decision.** **Always hierarchy-ready — no mode switch.** "Flat" is the
+degenerate case (every org a root, every read `local`). `tenantId` + a
+denormalised `dataKey` (the owning org's materialized path) are stamped on every
+`tenantOwned` aggregate **from the token** at create (immutable `parent` ⇒
+permanent paths ⇒ `orgPath` can ride the token), so enabling `deep` later is
+**migration-free**. **Depth is a per-role authorization access level**, not an
+aggregate marker — `authorization.md`'s directional `Self`/`Descendants`/`All`
+(Dynamics' `local`/`deep`/`global` is the same ladder, a mnemonic). `deep` is a
+**direct indexed prefix scan** on the row's `dataKey` (no join). Grounded in
+Dynamics (Business Unit + Basic/Local/Deep/Global) and Salesforce (Role
+Hierarchy). **Assumption to verify:** token-carried `orgPath` is a *derived
+session value*, not an IdP claim (D-AUTH-OIDC), so the pure-claim-copy stamp is
+contingent on session enrichment, else a per-request cached registry lookup.
+
+**Affects.** `multi-tenancy-design-note.md` R5; `authorization.md` §2 (`DataKey`
+= the hierarchical extension; directional predicates = the access levels).
+
+---
+
+## D-TYPED-CAPABILITIES — capabilities are first-class pure-mixin declarations
+
+**Status:** PINNED (proposal pending scheduling).
+
+**Problem.** Loom's capability surface (`implements "X"` / `filter for "X"` /
+`stamp for "X"`) is the one stringly-typed corner — no resolution, no contract,
+and a muddy capability-vs-macro line (capabilities are *implemented as* macros
+today).
+
+**Decision.** Promote capabilities to a first-class **`capability { fields +
+filter + stamp }`** declaration with **typed references** (`implements X` /
+`with X`). It is a **pure mixin** — everything in the body is *provided*; **no**
+`requires`/`provides`/`expects` keywords and **no** field-conformance (every
+capability provides what its own behavior uses; the rare "operate on a host
+field" case is *parameterization*, not a contract). Provision is local +
+unfoldable (not magic); provided members are non-overridable by default. Lowers
+to the existing per-aggregate `contextFilters`/`contextStamps` IR ⇒
+**byte-identical migration**. Subsumes the `audit`/`softDelete` field+filter+stamp
+macros; `crudish`/`scaffold*` stay macros (operations/structure). Open: emission
+deduplication when a capability is reused (`typed-capabilities.md` OQ#1).
+
+**Affects.** `typed-capabilities.md` (canonical); `../capabilities.md` (evolves
+its mechanism); `multi-tenancy-design-note.md` (`tenantOwned`/`tenantRegistry`
+are capabilities).
