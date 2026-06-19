@@ -163,6 +163,8 @@ export function printStructural(node: AstNode): string {
       return printDataSource(node as import("../generated/ast.js").Resource);
     case "Layout":
       return printLayout(node as Layout);
+    case "Capability":
+      return printCapability(node as import("../generated/ast.js").Capability);
     case "BoundedContext":
       return printBoundedContext(node as BoundedContext);
     case "EnumDecl":
@@ -571,6 +573,16 @@ function printBoundedContext(node: BoundedContext): string {
   return block(
     `context ${node.name}${printWithClause(node.withClause)}`,
     node.members.map((m) => printContextMember(m)),
+  );
+}
+
+/** `capability <name> { <field|filter|stamp>… }` (typed-capabilities.md) —
+ * a pure-mixin bundle.  Every body member (`Property`/`FilterDecl`/
+ * `StampDecl`) is itself printable, so it reuses `printStructural`. */
+function printCapability(node: import("../generated/ast.js").Capability): string {
+  return block(
+    `capability ${node.name}`,
+    node.members.map((m) => printStructural(m)),
   );
 }
 

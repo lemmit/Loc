@@ -74,6 +74,7 @@ export type DddKeywordNames =
     | "by"
     | "cache"
     | "canonical"
+    | "capability"
     | "carries"
     | "chakra"
     | "channel"
@@ -356,6 +357,14 @@ export function isBoolLiteral(item: unknown): item is BoolLiteral {
     return item === 'true' || item === 'false';
 }
 
+export type CapabilityMember = FilterDecl | Property | StampDecl;
+
+export const CapabilityMember = 'CapabilityMember';
+
+export function isCapabilityMember(item: unknown): item is CapabilityMember {
+    return reflection.isInstance(item, CapabilityMember);
+}
+
 export type ChannelDelivery = 'broadcast' | 'queue';
 
 export function isChannelDelivery(item: unknown): item is ChannelDelivery {
@@ -518,7 +527,7 @@ export function isMemberName(item: unknown): item is MemberName {
     return item === 'by' || item === 'handle' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'create' || item === 'destroy' || item === 'find' || item === 'where' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'action' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'title' || item === 'body' || item === 'state' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
-export type ModelMember = Api | AuthBlock | BoundedContext | ChannelSource | Component | Deployable | EnumDecl | Layout | PayloadDecl | Requirement | Resource | Solution | Storage | Subdomain | System | TestCase | TestE2E | ThemeBlock | Ui | UserBlock | ValueObject;
+export type ModelMember = Api | AuthBlock | BoundedContext | Capability | ChannelSource | Component | Deployable | EnumDecl | Layout | PayloadDecl | Requirement | Resource | Solution | Storage | Subdomain | System | TestCase | TestE2E | ThemeBlock | Ui | UserBlock | ValueObject;
 
 export const ModelMember = 'ModelMember';
 
@@ -624,7 +633,7 @@ export function isStorageType(item: unknown): item is StorageType {
     return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery' || item === 's3' || item === 'rabbitmq' || item === 'nats' || item === 'restApi';
 }
 
-export type SystemMember = Api | AuthBlock | BoundedContext | ChannelSource | Deployable | Layout | Resource | Storage | Subdomain | TestE2E | ThemeBlock | Ui | UserBlock;
+export type SystemMember = Api | AuthBlock | BoundedContext | Capability | ChannelSource | Deployable | Layout | Resource | Storage | Subdomain | TestE2E | ThemeBlock | Ui | UserBlock;
 
 export const SystemMember = 'SystemMember';
 
@@ -956,6 +965,19 @@ export function isCanonicalProp(item: unknown): item is CanonicalProp {
     return reflection.isInstance(item, CanonicalProp);
 }
 
+export interface Capability extends AstNode {
+    readonly $container: Model | System;
+    readonly $type: 'Capability';
+    members: Array<CapabilityMember>;
+    name: string;
+}
+
+export const Capability = 'Capability';
+
+export function isCapability(item: unknown): item is Capability {
+    return reflection.isInstance(item, Capability);
+}
+
 export interface Channel extends AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'Channel';
@@ -1282,7 +1304,7 @@ export function isExpectStmt(item: unknown): item is ExpectStmt {
 }
 
 export interface FilterDecl extends AstNode {
-    readonly $container: Aggregate | BoundedContext;
+    readonly $container: Aggregate | BoundedContext | Capability;
     readonly $type: 'FilterDecl';
     capability?: string;
     expr: Expression;
@@ -2095,7 +2117,7 @@ export function isPrimitiveType(item: unknown): item is PrimitiveType {
 }
 
 export interface Property extends AstNode {
-    readonly $container: Aggregate | EntityPart | EventDecl | PayloadDecl | ValueObject | View | Workflow;
+    readonly $container: Aggregate | Capability | EntityPart | EventDecl | PayloadDecl | ValueObject | View | Workflow;
     readonly $type: 'Property';
     access?: FieldAccess;
     check?: Expression;
@@ -2361,7 +2383,7 @@ export function isSortItem(item: unknown): item is SortItem {
 }
 
 export interface StampDecl extends AstNode {
-    readonly $container: Aggregate | BoundedContext;
+    readonly $container: Aggregate | BoundedContext | Capability;
     readonly $type: 'StampDecl';
     assignments: Array<AssignOrCallStmt>;
     capability?: string;
@@ -2862,6 +2884,8 @@ export type DddAstType = {
     CallArg: CallArg
     CallSuffix: CallSuffix
     CanonicalProp: CanonicalProp
+    Capability: Capability
+    CapabilityMember: CapabilityMember
     Channel: Channel
     ChannelSource: ChannelSource
     ClaimEntry: ClaimEntry
@@ -3028,7 +3052,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [ActionType, Aggregate, AggregateMember, Api, ApiStatus, Apply, Area, AreaMember, AssignOrCallStmt, AuthBlock, AuthConfigValue, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Channel, ChannelSource, ClaimEntry, ClaimsMap, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvAuthValue, EnvConnectionSource, EventDecl, ExpectStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, IfLetStmt, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralAuthValue, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OidcConfig, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RetrievalLiteral, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiChannelParam, UiComposeBinding, UiFunction, UiMember, UiNotification, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
+        return [ActionType, Aggregate, AggregateMember, Api, ApiStatus, Apply, Area, AreaMember, AssignOrCallStmt, AuthBlock, AuthConfigValue, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Capability, CapabilityMember, Channel, ChannelSource, ClaimEntry, ClaimsMap, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvAuthValue, EnvConnectionSource, EventDecl, ExpectStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, IfLetStmt, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralAuthValue, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OidcConfig, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RetrievalLiteral, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiChannelParam, UiComposeBinding, UiFunction, UiMember, UiNotification, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -3063,6 +3087,7 @@ export class DddAstReflection extends AbstractAstReflection {
                 return this.isSubtype(Statement, supertype) || this.isSubtype(TestStatement, supertype);
             }
             case AuthBlock:
+            case Capability:
             case ChannelSource:
             case Layout:
             case Resource:
@@ -3164,9 +3189,8 @@ export class DddAstReflection extends AbstractAstReflection {
                 return this.isSubtype(TestStatement, supertype);
             }
             case FilterDecl:
-            case ImplementsDecl:
             case StampDecl: {
-                return this.isSubtype(AggregateMember, supertype) || this.isSubtype(ContextMember, supertype);
+                return this.isSubtype(AggregateMember, supertype) || this.isSubtype(CapabilityMember, supertype) || this.isSubtype(ContextMember, supertype);
             }
             case ForStmt:
             case IfLetStmt:
@@ -3182,6 +3206,9 @@ export class DddAstReflection extends AbstractAstReflection {
             case OnDecl:
             case WorkflowCreateDecl: {
                 return this.isSubtype(WorkflowMember, supertype);
+            }
+            case ImplementsDecl: {
+                return this.isSubtype(AggregateMember, supertype) || this.isSubtype(ContextMember, supertype);
             }
             case LayoutMainSlot:
             case LayoutNamedSlot: {
@@ -3205,7 +3232,7 @@ export class DddAstReflection extends AbstractAstReflection {
                 return this.isSubtype(AggregateMember, supertype) || this.isSubtype(Targetable, supertype);
             }
             case Property: {
-                return this.isSubtype(AggregateMember, supertype) || this.isSubtype(EntityPartMember, supertype) || this.isSubtype(ValueObjectMember, supertype) || this.isSubtype(WorkflowMember, supertype);
+                return this.isSubtype(AggregateMember, supertype) || this.isSubtype(CapabilityMember, supertype) || this.isSubtype(EntityPartMember, supertype) || this.isSubtype(ValueObjectMember, supertype) || this.isSubtype(WorkflowMember, supertype);
             }
             case Repository:
             case View: {
@@ -3496,6 +3523,15 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: CanonicalProp,
                     properties: [
                         { name: 'value' }
+                    ]
+                };
+            }
+            case Capability: {
+                return {
+                    name: Capability,
+                    properties: [
+                        { name: 'members', defaultValue: [] },
+                        { name: 'name' }
                     ]
                 };
             }

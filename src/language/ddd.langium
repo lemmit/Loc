@@ -20,7 +20,10 @@ ModelMember:
     // also admissible at file top level and compose into the project's single
     // `system` — so deployment can live in its own file.  See
     // docs/proposals/implicit-system-composition.md.
-    | Deployable | Storage | Resource | ChannelSource | Ui | ThemeBlock | UserBlock | AuthBlock | Api | Layout | TestE2E;
+    | Deployable | Storage | Resource | ChannelSource | Ui | ThemeBlock | UserBlock | AuthBlock | Api | Layout | TestE2E
+    // Typed capabilities (typed-capabilities.md): a `capability` pure-mixin is
+    // top-level declarable (and a `SystemMember` inside `system { }`).
+    | Capability;
 
 // ---------------------------------------------------------------------------
 // System / Module / Deployable — the deployment shape.
@@ -39,7 +42,7 @@ System:
     '}';
 
 SystemMember:
-    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout | Capability;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -927,6 +930,37 @@ StampEvent returns string:
 // HasQueryFilter loop per capability in OnModelCreating).
 ImplementsDecl:
     'implements' name=STRING;
+
+// ---- typed capability declaration (typed-capabilities.md) -------
+//
+// A `capability` is a PURE MIXIN: a named bundle of fields + `filter` +
+// `stamp`, everything in its body PROVIDED to implementors.  No
+// ownership keywords (`requires`/`provides`) — declaring a member IS the
+// capability providing it; no operations / structure (those stay
+// macros).  A `capability` is the declared, in-language successor to the
+// field/filter/stamp macros (`audit`/`softDelete`): its body holds the
+// same AST member nodes a macro emits (`Property`/`FilterDecl`/
+// `StampDecl`).
+//
+// Aggregates opt in via the `with` / `implements` clause.  References are
+// resolved by the macro expander's document-wide inventory (like macro
+// names + macro-arg refs — see `WithClause` / `MacroArgValue` above and
+// the rationale at `MacroArgValue`), NOT a Langium cross-reference: macro
+// expansion runs before linking, so the expander splices a referenced
+// capability's members into the host aggregate's `members[]` at phase ②,
+// indistinguishable from user-written ones.  Everything downstream
+// (scope, lower, enrich, validate, codegen) is unchanged.
+//
+// Top-level declarable (a `SystemMember`); globally visible because the
+// expander resolves by name, not by Langium scope.  See
+// docs/plans/typed-capabilities-implementation.md.
+Capability:
+    'capability' name=ID '{'
+        (members+=CapabilityMember ','?)*
+    '}';
+
+CapabilityMember:
+    Property | FilterDecl | StampDecl;
 
 TestBlock:
     'test' name=STRING ('verifies' verifies=[TestCase:TraceId])? '{'
