@@ -656,14 +656,18 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // (document/embedded) aggregate.  node handles both shapes: a `document`
   // aggregate filters in-app over the rehydrated doc; an `embedded` aggregate's
   // root scalars are real columns, so the predicate AND-s into the SQL read like
-  // the relational path.  java handles `document` (its document-store filters
-  // every read in-app via `findAll().stream()`).  .NET handles all shapes (it's
-  // not in LIMITED_FAMILIES).  A PRINCIPAL filter on a non-relational shape stays
-  // gated everywhere for now (the actor + json intersection isn't wired) — hence
-  // the `!usesPrincipal` condition at the call site.
+  // the relational path.  java handles BOTH too: a `document` aggregate's store
+  // filters every read in-app via `findAll().stream()`; an `embedded`
+  // aggregate's root entity is a real JPA table whose root scalars are columns,
+  // so the static non-principal predicate rides Hibernate's `@SQLRestriction`
+  // exactly like the relational path (`emit/entity.ts`).  .NET handles all
+  // shapes (it's not in LIMITED_FAMILIES).  A PRINCIPAL filter on a
+  // non-relational shape stays gated everywhere for now (the actor + json
+  // intersection isn't wired) — hence the `!usesPrincipal` condition at the
+  // call site.
   const supportsNonRelationalFilter = (family: string, shp: string): boolean =>
     (family === "node" && (shp === "document" || shp === "embedded")) ||
-    (family === "java" && shp === "document");
+    (family === "java" && (shp === "document" || shp === "embedded"));
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
