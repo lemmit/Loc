@@ -25,6 +25,8 @@ import type {
   PageProp,
   PostfixChain,
   RouteProp,
+  StateBlock,
+  StateField,
   StringLit,
   TernaryExpr,
   UiMember,
@@ -45,9 +47,13 @@ import {
   mkPage,
   mkPageMenuMeta,
   mkPostfixChain,
+  mkPrimitiveType,
   mkRouteProp,
+  mkStateBlock,
+  mkStateField,
   mkStringLit,
   mkTernaryExpr,
+  mkTypeRef,
 } from "./_mk.js";
 import { _currentOrigin, _setContainer, _tag } from "./factories-internals.js";
 
@@ -234,18 +240,55 @@ export function pageMenuMeta(entries: Record<string, Expression>): PageMenuMeta 
 // Page itself
 // ---------------------------------------------------------------------------
 
+/** A `string`-typed state field initialised to `""` — the shape the scaffolded
+ * list filter inputs bind to.  (The scaffolders only need this one shape.) */
+function stringStateField(name: string): StateField {
+  const origin = _currentOrigin();
+  const base = _tag(mkPrimitiveType({ $type: "PrimitiveType", name: "string" }), origin);
+  const type = _tag(
+    mkTypeRef({
+      $type: "TypeRef",
+      base,
+      array: false,
+      optional: false,
+      alternatives: [],
+      ctors: [],
+    }),
+    origin,
+  );
+  _setContainer(base, type, "base");
+  const init = stringLit("");
+  const field = _tag(mkStateField({ $type: "StateField", name, type, init }), origin);
+  _setContainer(type, field, "type");
+  _setContainer(init, field, "init");
+  return field;
+}
+
+/** A `state { … }` block prop carrying the given string state fields. */
+function stateBlock(names: readonly string[]): StateBlock {
+  const origin = _currentOrigin();
+  const fields = names.map(stringStateField);
+  const block = _tag(mkStateBlock({ $type: "StateBlock", fields }), origin);
+  fields.forEach((f, i) => {
+    _setContainer(f, block, "fields", i);
+  });
+  return block;
+}
+
 /** A page declaration.  At minimum needs a name, route, and body;
- * `menu` is optional. */
+ * `menu` and `state` (string-field names) are optional. */
 export function page(opts: {
   name: string;
   route: string;
   body: Expression;
   menu?: Record<string, Expression>;
+  state?: readonly string[];
 }): Page & UiMember {
   const origin = _currentOrigin();
   const props: PageProp[] = [];
   props.push(routeProp(opts.route));
   props.push(bodyProp(opts.body));
+  if (opts.state && opts.state.length > 0) props.push(stateBlock(opts.state));
   if (opts.menu) props.push(pageMenuMeta(opts.menu));
   const p: Page = _tag(
     mkPage({

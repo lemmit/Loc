@@ -385,6 +385,17 @@ export function scaffoldInstanceDetails(wf: Workflow): Expression {
  *  with `scaffoldOperations` on the Detail page; `apiHandle` is the ui's api
  *  param when the aggregate is served over one. */
 export function scaffoldDetails(agg: Aggregate, opts: { apiHandle?: string } = {}): Expression {
+  return callExpr("Stack", scaffoldDetailsParts(agg, opts));
+}
+
+/** The Detail read-section's `Stack` children — `[Breadcrumbs, Heading,
+ *  QueryView]`.  Exposed separately so the Detail page can *flatten* them into
+ *  its outer `Stack` alongside the operation modals (matching the ⑤c expander,
+ *  which splices `scaffoldDetails` into the page Stack rather than nesting it). */
+export function scaffoldDetailsParts(
+  agg: Aggregate,
+  opts: { apiHandle?: string } = {},
+): Array<{ name?: string; value: Expression }> {
   const slug = snake(plural(agg.name));
   const humanPlural = humanize(plural(agg.name));
   const humanAgg = humanize(agg.name);
@@ -399,7 +410,7 @@ export function scaffoldDetails(agg: Aggregate, opts: { apiHandle?: string } = {
       ? card
       : callExpr("Stack", [{ value: card }, ...related.map((r) => ({ value: r }))]);
 
-  return callExpr("Stack", [
+  return [
     {
       value: callExpr("Breadcrumbs", [
         {
@@ -445,7 +456,7 @@ export function scaffoldDetails(agg: Aggregate, opts: { apiHandle?: string } = {
         { name: "data", value: lambda(cellVar, dataBody) },
       ]),
     },
-  ]);
+  ];
 }
 
 /** The Detail page's field card + related-entity cards.  Each scalar field is a
