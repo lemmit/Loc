@@ -14,10 +14,11 @@
 // gated on equivalent generated output.  Built so far, all faithful twins of
 // the matching ⑤c expanders: `scaffoldList` (per-type columns + `rowTestid` +
 // the find-filter bar), `scaffoldNewForm`, `scaffoldOperations`,
-// `scaffoldWorkflowForm`, `scaffoldViewList`.  The Detail builder
-// (`scaffoldDetails`/value-object + related cards) and the workflow-instance
-// list/detail builders, plus attaching the filter state as the page's
-// `state { }` block when wiring, are the remaining tail.
+// `scaffoldWorkflowForm`, `scaffoldViewList`, and the workflow-instance
+// list/detail (`scaffoldInstanceList`/`scaffoldInstanceDetails`).  The Detail
+// builder (`scaffoldDetails` — value-object sub-rows + related-entity cards)
+// and attaching the filter state as the page's `state { }` block when wiring
+// are the remaining tail.
 
 import type {
   Aggregate,
@@ -197,6 +198,185 @@ export function scaffoldViewList(view: View): Expression {
   ]);
 }
 
+/** `scaffoldInstanceList` — scaffolds an observable workflow's running-instances
+ *  list page body.  AST twin of `expandScaffoldInstanceList`: the correlation
+ *  column links to the instance detail (an `Anchor`, not an `IdLink`), the rest
+ *  dispatch by type; `rowTestid` keys on the correlation field. */
+export function scaffoldInstanceList(wf: Workflow): Expression {
+  const slug = snake(wf.name);
+  const humanWf = humanize(wf.name);
+  const lowerWf = humanWf.toLowerCase();
+  const corr = workflowCorrelation(wf);
+  const corrName = corr ? String(corr.name) : "";
+  const queryRoot = (): Expression => memberAccess(nameRefExpr(wf.name), "instances");
+
+  const cols: Array<{ name?: string; value: Expression }> = [];
+  for (const p of workflowInstanceProperties(wf)) {
+    const name = String(p.name);
+    if (corr && p.name === corr.name) {
+      cols.push({
+        value: callExpr("Column", [
+          { value: stringLit(humanize(name)) },
+          {
+            value: lambda(
+              "i",
+              callExpr("Anchor", [
+                { value: memberAccess(nameRefExpr("i"), name) },
+                {
+                  name: "to",
+                  value: binaryExpr(
+                    stringLit(`/workflows/${slug}/instances/`),
+                    "+",
+                    memberAccess(nameRefExpr("i"), name),
+                  ),
+                },
+              ]),
+            ),
+          },
+        ]),
+      });
+      continue;
+    }
+    const kind = columnKindForType(p.type);
+    if (!kind) continue; // skip value-objects / arrays
+    cols.push({
+      value: callExpr("Column", [
+        { value: stringLit(humanize(name)) },
+        { value: lambda("i", columnAccessor(name, kind, "i")) },
+      ]),
+    });
+  }
+
+  const table = callExpr("Table", [
+    ...cols,
+    { name: "rows", value: nameRefExpr("rows") },
+    { name: "striped", value: boolLit(true) },
+    { name: "highlight", value: boolLit(true) },
+    { name: "sticky", value: boolLit(true) },
+    {
+      name: "rowTestid",
+      value: lambda(
+        "r",
+        binaryExpr(
+          stringLit(`${slug}-instances-row-`),
+          "+",
+          memberAccess(nameRefExpr("r"), corrName),
+        ),
+      ),
+    },
+  ]);
+
+  return callExpr("Stack", [
+    {
+      value: callExpr("Breadcrumbs", [
+        {
+          value: callExpr("Anchor", [
+            { value: stringLit("Home") },
+            { name: "to", value: stringLit("/") },
+          ]),
+        },
+        { value: callExpr("Text", [{ value: stringLit("Workflows") }]) },
+        { value: callExpr("Text", [{ value: stringLit(`${humanWf} instances`) }]) },
+      ]),
+    },
+    {
+      value: callExpr("Heading", [
+        { value: stringLit(`${humanWf} instances`) },
+        { name: "level", value: intLit(2) },
+      ]),
+    },
+    {
+      value: callExpr("QueryView", [
+        { name: "of", value: memberAccess(queryRoot(), "all") },
+        { name: "loading", value: callExpr("Skeleton", [{ name: "count", value: intLit(5) }]) },
+        {
+          name: "error",
+          value: callExpr("Alert", [{ value: stringLit(`Couldn't load ${lowerWf} instances`) }]),
+        },
+        {
+          name: "empty",
+          value: callExpr("Empty", [{ value: stringLit(`No ${lowerWf} instances yet.`) }]),
+        },
+        { name: "data", value: lambda("rows", callExpr("Paper", [{ value: table }])) },
+      ]),
+    },
+    { name: "testid", value: stringLit(`${slug}-instances-list`) },
+  ]);
+}
+
+/** `scaffoldInstanceDetails` — scaffolds a workflow instance's detail page body:
+ *  a `QueryView` (by id) over a `Card` of `KeyValueRow`s, one per instance field
+ *  (arrays skipped, value-objects rendered as `Text`).  AST twin of
+ *  `expandScaffoldInstanceDetails`. */
+export function scaffoldInstanceDetails(wf: Workflow): Expression {
+  const slug = snake(wf.name);
+  const humanWf = humanize(wf.name);
+  const lowerWf = humanWf.toLowerCase();
+  const queryRoot = (): Expression => memberAccess(nameRefExpr(wf.name), "instances");
+
+  const rows: Array<{ name?: string; value: Expression }> = [];
+  for (const p of workflowInstanceProperties(wf)) {
+    const kind = kindForType(p.type, true); // arrays skip; value-objects → Text
+    if (!kind) continue;
+    const name = String(p.name);
+    rows.push({
+      value: callExpr("KeyValueRow", [
+        { value: stringLit(humanize(name)) },
+        { value: typedCell(() => memberAccess(nameRefExpr("data"), name), kind) },
+      ]),
+    });
+  }
+
+  return callExpr("Stack", [
+    {
+      value: callExpr("Breadcrumbs", [
+        {
+          value: callExpr("Anchor", [
+            { value: stringLit("Home") },
+            { name: "to", value: stringLit("/") },
+          ]),
+        },
+        { value: callExpr("Text", [{ value: stringLit("Workflows") }]) },
+        {
+          value: callExpr("Anchor", [
+            { value: stringLit(`${humanWf} instances`) },
+            { name: "to", value: stringLit(`/workflows/${slug}/instances`) },
+          ]),
+        },
+        { value: callExpr("Text", [{ value: stringLit("Detail") }]) },
+      ]),
+    },
+    {
+      value: callExpr("Heading", [
+        { value: stringLit(`${humanWf} instance`) },
+        { name: "level", value: intLit(2) },
+      ]),
+    },
+    {
+      value: callExpr("QueryView", [
+        {
+          name: "of",
+          value: memberAccess(queryRoot(), "byId", { call: true, args: [nameRefExpr("id")] }),
+        },
+        { name: "single", value: boolLit(true) },
+        { name: "loading", value: callExpr("Skeleton", [{ name: "count", value: intLit(3) }]) },
+        {
+          name: "error",
+          value: callExpr("Alert", [{ value: stringLit(`Couldn't load ${lowerWf} instance`) }]),
+        },
+        {
+          name: "empty",
+          value: callExpr("Alert", [
+            { value: stringLit(`No ${lowerWf} instance matches that id.`) },
+            { name: "color", value: stringLit("yellow") },
+          ]),
+        },
+        { name: "data", value: lambda("data", callExpr("Card", rows)) },
+      ]),
+    },
+  ]);
+}
+
 /** The property list a view's columns walk: its declared output record when
  *  present, else the source shape — a workflow source's instance wire shape or
  *  the source aggregate's fields. */
@@ -208,17 +388,24 @@ function viewColumnFields(view: View): Property[] {
   return [];
 }
 
-/** A workflow's persisted-instance properties in wire-shape order — the single
- *  id-shaped correlation field first (the `token`), then the remaining state
- *  fields in declaration order.  Twin of `wireFieldsForWorkflow`; an absent or
- *  ambiguous correlation ⇒ no instance shape (empty), matching the enrichment
- *  gate.  Shared by the view-list and (later) the instance builders. */
+/** A workflow's correlation field — the single id-shaped state property — or
+ *  `undefined` when absent/ambiguous (no persisted instance, matching the
+ *  enrichment gate). */
+function workflowCorrelation(wf: Workflow): Property | undefined {
+  const idProps = propertiesOf(wf.members).filter(
+    (p) => p.type.base.$type === "IdType" && !p.type.array,
+  );
+  return idProps.length === 1 ? idProps[0] : undefined;
+}
+
+/** A workflow's persisted-instance properties in wire-shape order — the
+ *  correlation field first (the `token`), then the remaining state fields in
+ *  declaration order.  Twin of `wireFieldsForWorkflow`; no correlation ⇒ no
+ *  instance shape (empty).  Shared by the view-list and instance builders. */
 function workflowInstanceProperties(wf: Workflow): Property[] {
-  const props = propertiesOf(wf.members);
-  const idProps = props.filter((p) => p.type.base.$type === "IdType" && !p.type.array);
-  if (idProps.length !== 1) return [];
-  const corr = idProps[0]!;
-  return [corr, ...props.filter((p) => p.name !== corr.name)];
+  const corr = workflowCorrelation(wf);
+  if (!corr) return [];
+  return [corr, ...propertiesOf(wf.members).filter((p) => p.name !== corr.name)];
 }
 
 /** The display dispatch a list/table column renders through — the
@@ -239,26 +426,33 @@ export interface ScaffoldColumn {
   kind: ColumnKind;
 }
 
-/** One table cell accessor `<rowVar>.<field>`, wrapped per type exactly as
- *  the ⑤c `columnAccessorFor` does: ids link, datetimes format, bools render
- *  a Yes/No ternary, enums badge, everything else is plain `Text`. */
-function columnAccessor(fieldName: string, kind: ColumnKind, rowVar: string): Expression {
-  const cell = (): Expression => memberAccess(nameRefExpr(rowVar), fieldName);
+/** A type-dispatched cell renderer rooted at an arbitrary receiver — the
+ *  macro-layer twin of `typedCellFor`: ids link, datetimes format, bools render
+ *  a Yes/No ternary, enums badge, everything else is plain `Text`.  `receiver`
+ *  is a thunk so each call builds fresh AST nodes. */
+function typedCell(receiver: () => Expression, kind: ColumnKind): Expression {
   switch (kind.tag) {
     case "id":
       return callExpr("IdLink", [
-        { value: cell() },
+        { value: receiver() },
         { name: "of", value: nameRefExpr(kind.targetName) },
       ]);
     case "datetime":
-      return callExpr("DateDisplay", [{ value: cell() }]);
+      return callExpr("DateDisplay", [{ value: receiver() }]);
     case "bool":
-      return callExpr("Text", [{ value: ternaryExpr(cell(), stringLit("Yes"), stringLit("No")) }]);
+      return callExpr("Text", [
+        { value: ternaryExpr(receiver(), stringLit("Yes"), stringLit("No")) },
+      ]);
     case "enum":
-      return callExpr("EnumBadge", [{ value: cell() }]);
+      return callExpr("EnumBadge", [{ value: receiver() }]);
     default: // "numeric" | "text"
-      return callExpr("Text", [{ value: cell() }]);
+      return callExpr("Text", [{ value: receiver() }]);
   }
+}
+
+/** One table cell accessor `<rowVar>.<field>`, dispatched by type. */
+function columnAccessor(fieldName: string, kind: ColumnKind, rowVar: string): Expression {
+  return typedCell(() => memberAccess(nameRefExpr(rowVar), fieldName), kind);
 }
 
 /** Resolve an aggregate's scalar list columns from its AST — one `ScaffoldColumn`
@@ -286,8 +480,13 @@ function propertiesOf(members: readonly { $type: string }[]): Property[] {
   return members.filter((m): m is Property => m.$type === "Property");
 }
 
-function columnKindForType(type: TypeRef): ColumnKind | null {
-  if (type.array) return null; // arrays have no scalar column cell
+/** Dispatch a field's display `kind` from its AST type.  Arrays never have a
+ *  scalar cell (→ null).  `voAsText` decides value-objects: list/table columns
+ *  skip them (`false`, → null, like the expander's `valueobject` column skip),
+ *  the detail rows render them as plain `Text` (`true`, like `typedCellFor`'s
+ *  fallback over a `data.<vo>` receiver). */
+function kindForType(type: TypeRef, voAsText: boolean): ColumnKind | null {
+  if (type.array) return null; // arrays have no scalar cell
   const base = type.base;
   if (base.$type === "IdType") {
     return { tag: "id", targetName: base.target.ref?.name ?? base.target.$refText };
@@ -308,11 +507,14 @@ function columnKindForType(type: TypeRef): ColumnKind | null {
     }
   }
   if (base.$type === "NamedType") {
-    // Enum → badge; a value-object (or any other named type) has no scalar
-    // column cell, mirroring the expander's `valueobject` skip.
-    return base.target.ref?.$type === "EnumDecl" ? { tag: "enum" } : null;
+    if (base.target.ref?.$type === "EnumDecl") return { tag: "enum" };
+    return voAsText ? { tag: "text" } : null; // value-object
   }
-  return null;
+  return voAsText ? { tag: "text" } : null;
+}
+
+function columnKindForType(type: TypeRef): ColumnKind | null {
+  return kindForType(type, false);
 }
 
 /** A repository `find` the list filter-bar turns into a text-input arm — its
