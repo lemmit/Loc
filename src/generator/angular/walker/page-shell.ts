@@ -1,6 +1,7 @@
 import type { ExprIR, PageIR, StateFieldIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
 import type { WalkResult } from "../../_walker/walker-core.js";
+import type { AngularCreateFormSpec } from "../create-form.js";
 import { angularTarget } from "./angular-target.js";
 
 // ---------------------------------------------------------------------------
@@ -174,6 +175,29 @@ export function renderAngularPage(input: AngularPageShellInput): string {
       })),
     );
     for (const line of hoisted) members.push(`  ${line}`);
+  }
+
+  // `CreateForm(of: …)` — the Angular renderer recorded one spec per form on
+  // the `angularForms` side-channel.  Each hoists the `useCreate<Agg>`
+  // mutation, builds the typed Reactive `FormGroup`, and declares the submit
+  // handler (`mutate` → navigate).  The form-shell imports (FormGroup /
+  // ReactiveFormsModule / Mat modules / the api types) ride `result.imports`.
+  const angularForms = (result.angularForms ?? []) as AngularCreateFormSpec[];
+  for (const form of angularForms) {
+    members.push(`  readonly ${form.mutationVar} = ${form.mutationFn}();`);
+    const controls = form.controls
+      .map((c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`)
+      .join(", ");
+    members.push(`  readonly ${form.formVar} = new FormGroup({ ${controls} });`);
+    members.push(
+      [
+        `  async ${form.submitMethod}(): Promise<void> {`,
+        `    if (this.${form.formVar}.invalid) return;`,
+        `    const out = await this.${form.mutationVar}.mutate(this.${form.formVar}.getRawValue());`,
+        `    this.router.navigateByUrl(\`/${form.redirectSlug}/\${out.id}\`);`,
+        "  }",
+      ].join("\n"),
+    );
   }
 
   // Primitive imports collected by `renderPrimitive` (pack-declared) —

@@ -141,6 +141,12 @@ export interface WalkResult {
    *  imports, mutation hook, `defaultValues`, and the `onSubmit`
    *  handler that wraps the form's `<form onSubmit={…}>`. */
   formOfs: FormOfState[];
+  /** OPTIONAL Angular side-channel: per-`CreateForm` specs the Angular
+   *  target's `renderCreateForm` seam records (typed `AngularCreateFormSpec`
+   *  in the angular generator) so its page-shell can build the typed Reactive
+   *  `FormGroup` + submit wiring.  Framework-neutral `unknown[]` here — the
+   *  other frameworks never populate or read it. */
+  angularForms?: unknown[];
   /** Every static `testid:` literal encountered while
    *  walking the body, plus the synthesised testid bases the walker
    *  generates on the user's behalf (e.g. `<form-namespace>-input-
@@ -348,6 +354,7 @@ export function walkBody(
     workflowsByName,
     bcByWorkflow,
     formOfs: [],
+    angularForms: [],
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
@@ -367,6 +374,7 @@ export function walkBody(
     usesChildren: ctx.usesChildren,
     usedApiHooks: ctx.usedApiHooks,
     formOfs: ctx.formOfs,
+    angularForms: ctx.angularForms,
     actionMutations: ctx.actionMutations,
     collectedTestids: ctx.collectedTestids,
     usesCodeBlock: ctx.usesCodeBlock,
@@ -465,6 +473,11 @@ export interface Sink {
    *  emit `useForm` + mutation hook + `handleSubmit` wiring at
    *  function top. */
   formOfs: FormOfState[];
+  /** Angular `CreateForm` specs (see the WalkResult field).  Mutable sink the
+   *  `renderCreateForm` seam pushes into; `unknown[]` to keep the shared
+   *  walker framework-neutral.  Optional so the other frameworks' dummy
+   *  contexts (init-expr rendering) need not set it. */
+  angularForms?: unknown[];
   /** `Action(<instance>.<op>)` mutation wiring (see
    *  `ActionMutationState`). */
   actionMutations: ActionMutationState[];

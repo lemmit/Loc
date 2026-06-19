@@ -33,6 +33,8 @@ import type {
   TargetHookUse,
   WalkerTarget,
 } from "../../_walker/target.js";
+import type { WalkContext } from "../../_walker/walker-core.js";
+import { renderAngularCreateForm } from "../create-form.js";
 
 /** Angular-flavoured `WalkerTarget`.  Stateless and pure — no walker
  *  context is captured; every method takes the data it needs.  Consumed
@@ -140,6 +142,12 @@ export const angularTarget: WalkerTarget = {
    *  TanStack `.data` property directly (the omitted-default path). */
   renderQueryDataAccess(handle: string): string {
     return `${handle}.data()`;
+  },
+
+  /** Fork `CreateForm(of: …)` to idiomatic typed Reactive Forms (the shared
+   *  react-hook-form path is skipped for Angular). */
+  renderCreateForm(call: ExprIR, ctx: WalkContext, depth: number): string | null {
+    return call.kind === "call" ? renderAngularCreateForm(call, ctx, depth) : null;
   },
 
   // --- Match expression seam ----------------------------------------------

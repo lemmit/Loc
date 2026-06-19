@@ -678,3 +678,95 @@ describe("angular generator — standalone state-bound inputs", () => {
     expect(page).toContain('readonly size = signal("M");');
   });
 });
+
+// ---------------------------------------------------------------------------
+// CreateForm(of: <Agg>) — idiomatic typed Reactive Forms (forms sub-slice).
+// The Angular `renderCreateForm` seam forks the shared react-hook-form path:
+// a `[formGroup]` / `(ngSubmit)` shell, per-field controls by type (text /
+// number / mat-select for enums / mat-checkbox for bool / datetime-local), and
+// a typed FormGroup + submit handler (`mutate(getRawValue())` → navigate) on
+// the component class.  (ng build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const FORM_SOURCE = `
+  system Smoke {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Orders {
+        enum OrderStatus { Draft, Confirmed, Shipped }
+        aggregate Order with crudish {
+          customerId: string
+          status: OrderStatus
+          priority: int
+          rush: bool
+        }
+        repository Orders for Order { }
+      }
+    }
+    ui WebApp {
+      api Sales: SalesApi
+      page OrderNew {
+        route: "/"
+        body: CreateForm { of: Order, testid: "orders-new" }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api {
+      platform: hono
+      contexts: [Orders]
+      dataSources: [ordersState]
+      serves: SalesApi
+      port: 8080
+    }
+    deployable web {
+      platform: angular
+      targets: api
+      ui: WebApp { Sales: api }
+      port: 3004
+    }
+  }
+`;
+
+async function formPage(): Promise<string> {
+  const all = await generateSystemFiles(FORM_SOURCE);
+  return all.get("web/src/app/pages/order-new.component.ts")!;
+}
+
+describe("angular generator — CreateForm typed Reactive Forms", () => {
+  it("renders a [formGroup]/(ngSubmit) shell with per-type field controls", async () => {
+    const page = await formPage();
+    expect(page).toContain(
+      '<form [formGroup]="orderForm" (ngSubmit)="onSubmitOrder()" data-testid="orders-new">',
+    );
+    expect(page).toContain('<input matInput formControlName="customerId"');
+    expect(page).toContain('<mat-select formControlName="status"');
+    expect(page).toContain('<mat-option value="Draft">Draft</mat-option>');
+    expect(page).toContain('<input matInput type="number" formControlName="priority"');
+    expect(page).toContain('<mat-checkbox formControlName="rush"');
+    expect(page).toContain('[disabled]="orderCreate.isPending()"');
+  });
+
+  it("builds the typed FormGroup + submit handler on the component class", async () => {
+    const page = await formPage();
+    expect(page).toContain("readonly orderCreate = useCreateOrder();");
+    expect(page).toContain('customerId: new FormControl("", { nonNullable: true })');
+    expect(page).toContain("priority: new FormControl(0, { nonNullable: true })");
+    expect(page).toContain("rush: new FormControl(false, { nonNullable: true })");
+    expect(page).toContain("async onSubmitOrder(): Promise<void> {");
+    expect(page).toContain(
+      "const out = await this.orderCreate.mutate(this.orderForm.getRawValue());",
+    );
+    expect(page).toContain("this.router.navigateByUrl(`/orders/${out.id}`);");
+  });
+
+  it("imports the Reactive Forms + api surface and is not stubbed", async () => {
+    const page = await formPage();
+    expect(page).toContain('import { CreateOrderRequest, useCreateOrder } from "../../api/order";');
+    expect(page).toContain(
+      'import { FormControl, FormGroup, ReactiveFormsModule } from "@angular/forms";',
+    );
+    expect(page).toContain("ReactiveFormsModule");
+    expect(page).not.toContain("body needs api/forms support");
+  });
+});

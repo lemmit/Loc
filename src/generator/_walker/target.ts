@@ -70,6 +70,7 @@
 
 import type { ExprIR, StateFieldIR, TypeIR } from "../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "./api-hook-detector.js";
+import type { WalkContext } from "./walker-core.js";
 
 /** Discriminator: where in the emitted module the walker is currently
  *  rendering.  Drives state-reference syntax — HEEx differentiates
@@ -430,4 +431,13 @@ export interface WalkerTarget {
    *  itself owns the `isLoading` / `isError` reads; this seam is only the
    *  data-lambda binding the walker injects. */
   renderQueryDataAccess?(handle: string): string;
+
+  /** OPTIONAL — whole-primitive override for `CreateForm(of: <Agg>)`.  The
+   *  shared `emitCreateForm` delegates here first; a non-null return is used
+   *  verbatim and the RHF/react-query `emitFormOfAggregate` path is skipped.
+   *  Angular forks here to emit idiomatic typed Reactive Forms (a
+   *  `[formGroup]`/`(ngSubmit)` shell) and records its `FormGroup` + submit
+   *  wiring on `ctx.angularForms` for the page-shell; the other frameworks
+   *  omit it and keep the shared react-hook-form pipeline. */
+  renderCreateForm?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
 }
