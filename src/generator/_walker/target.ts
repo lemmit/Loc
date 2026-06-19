@@ -451,4 +451,21 @@ export interface WalkerTarget {
    *  (e.g. a `then:` effect it can't express inline) falls back to the shared
    *  path, which records an `actionMutations` entry and stubs the page. */
   renderAction?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
+
+  /** OPTIONAL — whole-primitive override for `OperationForm(...)` and `Modal {
+   *  … }`.  The shared `emitOperationForm` / `emitModal` delegate here first; a
+   *  non-null return is used verbatim and the RHF/`field-input-*` path is
+   *  skipped.  Angular returns a deferred-feature comment (the inline op-dialog
+   *  form is a later batch) so an op-form page renders a placeholder instead of
+   *  crashing on a `field-input-*` template the inline-forms pack doesn't ship. */
+  renderOperationForm?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
+  renderModal?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
+
+  /** OPTIONAL — the navigate CALL for a `Button(to:)` shorthand, given the
+   *  already-rendered destination arg.  The JSX family omits it (default
+   *  `navigate(<to>)`, wrapped in the arrow handler); Angular returns
+   *  `router.navigateByUrl(<to>)`, which `renderEventHandler` then binds as a
+   *  statement.  Distinct from `renderNavigate` (raw-route, for `then:`/Anchor)
+   *  — this takes the pre-rendered arg the button already resolved. */
+  renderNavigateExpr?(toArg: string): string;
 }
