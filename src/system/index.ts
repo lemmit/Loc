@@ -609,6 +609,25 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   }
   lines.push(`  environment:`);
   for (const [k, v] of shape.env) lines.push(`    ${k}: ${JSON.stringify(v)}`);
+  // Same-origin proxy target for a vite-served frontend.  Its bundle fetches
+  // `/api` relative, and `vite preview` proxies that to the backend — but
+  // inside the compose network the backend is its SERVICE name (not the
+  // host's `localhost`), so point the preview proxy at `http://<svc>:<port>`.
+  // (Local `vite dev` falls back to the baked localhost target in vite.config.)
+  if (shape.previewProxiesApi && d.targetName) {
+    const target = sys.deployables.find((t) => t.name === d.targetName);
+    if (target) {
+      const targetSlug = serviceSlug(target.name);
+      const targetPort = platformFor(target.platform).composeService({
+        deployable: target,
+        sys,
+        slug: targetSlug,
+      }).internalPort;
+      lines.push(
+        `    VITE_API_PROXY_TARGET: ${JSON.stringify(`http://${targetSlug}:${targetPort}`)}`,
+      );
+    }
+  }
   if (oidc) {
     const kc = keycloakConfig(sys);
     lines.push(`    OIDC_ISSUER: ${JSON.stringify(kc.issuer)}`);

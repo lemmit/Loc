@@ -5,6 +5,6 @@ import vue from "@vitejs/plugin-vue";
 export default defineConfig({
 {{#if base}}  base: {{json base}},
 {{/if}}  plugins: [vue()],
-  server: { port: 3000, host: true{{#if apiProxyTarget}}, proxy: { "/api": {{json apiProxyTarget}} }{{/if}} },
-  preview: { port: 3000, host: true },
+  server: { port: 3000, host: true{{#if apiProxyTarget}}, proxy: { "/api": (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.VITE_API_PROXY_TARGET ?? {{json apiProxyTarget}} }{{/if}} },
+  preview: { port: 3000, host: true{{#if apiProxyTarget}}, proxy: { "/api": (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.VITE_API_PROXY_TARGET ?? {{json apiProxyTarget}} }{{/if}} },
 });

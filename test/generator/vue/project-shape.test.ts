@@ -123,6 +123,12 @@ describe("vue generator — project shape", () => {
     const all = await generateSystemFiles(SOURCE);
     const compose = all.get("docker-compose.yml")!;
     expect(compose).toContain("VITE_API_BASE_URL");
+    // Same-origin: the preview proxy is pointed at the backend SERVICE so the
+    // bundle's relative `/api` resolves under `vite preview` in compose.
+    expect(compose).toMatch(/VITE_API_PROXY_TARGET: "http:\/\/\w[\w-]*:\d+"/);
     expect(compose).toMatch(/3003:3000/);
+    // Both server and preview proxy `/api` in the generated vite config.
+    const vite = [...all.entries()].find(([k]) => k.endsWith("vite.config.ts"))![1];
+    expect(vite.match(/proxy: \{ "\/api":/g)?.length).toBe(2);
   });
 });
