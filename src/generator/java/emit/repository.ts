@@ -319,6 +319,15 @@ export function renderJavaRepositoryImpl(
   const finds = declaredFinds(repo).map((f) => unionFindAsOptionalTwin(f, agg.name));
   const retrievals = ctx.retrievals ?? [];
   const anyReified = retrievals.some((r) => ctx.isReified?.(r));
+  // A reified retrieval reads via JpaSpecificationExecutor.findAll(spec), which
+  // bypasses the scoped findAll/findById @Query overrides — so a PRINCIPAL
+  // (tenancy) filter must be AND-ed in as a `tenantScope(User)` Specification,
+  // which needs the request actor.  Inject CurrentUserAccessor only then.
+  const principalScoped = (agg.contextFilters ?? []).some(exprUsesCurrentUser);
+  const injectAccessor = anyReified && principalScoped;
+  const tenantScopeAnd = injectAccessor
+    ? `.and(${agg.name}Criteria.tenantScope(currentUserAccessor.user()))`
+    : "";
   const retrievalDelegates = retrievals.flatMap((r) => {
     const params = r.params
       .map((p) => {
@@ -329,18 +338,17 @@ export function renderJavaRepositoryImpl(
     const pagedParams = [params, "Integer offset, Integer limit"].filter(Boolean).join(", ");
     const bareArgs = r.params.map((p) => p.name).join(", ");
     if (ctx.isReified?.(r) && r.criterionRef) {
-      // NOTE (DEBT-01 / DEBT-24 intersection): a reified `criterion` retrieval
-      // reads via `JpaSpecificationExecutor.findAll(spec)`, which the scoped
-      // findAll/findById @Query overrides above don't cover — so a PRINCIPAL
-      // (tenancy) filter is NOT yet AND-ed into a reified retrieval. Narrow
-      // intersection (criterion reification is itself partial); the
-      // non-reified retrieval path below IS scoped via `jpqlWhere`.
+      // A reified `criterion` retrieval reads via
+      // JpaSpecificationExecutor.findAll(spec); the scoped findAll/findById
+      // @Query overrides don't apply, so a principal (tenancy) filter is AND-ed
+      // in via `<Agg>Criteria.tenantScope(currentUserAccessor.user())`
+      // (`tenantScopeAnd`).  The non-reified path below is scoped via `jpqlWhere`.
       imports.add("org.springframework.data.domain.Sort");
       const args = r.criterionRef.args.map((a) => {
         collectJavaExprImports(a, imports);
         return renderJavaExpr(a);
       });
-      const spec = `${agg.name}Criteria.${r.criterionRef.name}(${args.join(", ")})`;
+      const spec = `${agg.name}Criteria.${r.criterionRef.name}(${args.join(", ")})${tenantScopeAnd}`;
       return [
         `    @Override`,
         `    public List<${agg.name}> run${upperFirst(r.name)}(${params}) {`,
@@ -411,6 +419,7 @@ export function renderJavaRepositoryImpl(
     anyReified && ctx.criteriaPkg && ctx.criteriaPkg !== ctx.infraPkg
       ? `import ${ctx.criteriaPkg}.${agg.name}Criteria;`
       : null,
+    injectAccessor ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     retrievals.length > 0 && ctx.persistencePkg && ctx.persistencePkg !== ctx.infraPkg
       ? `import ${ctx.persistencePkg}.OffsetLimitPageRequest;`
       : null,
@@ -419,9 +428,13 @@ export function renderJavaRepositoryImpl(
     `@Repository`,
     `public class ${agg.name}RepositoryImpl implements ${agg.name}Repository {`,
     `    private final ${agg.name}JpaRepository jpa;`,
+    injectAccessor ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
     ``,
-    `    public ${agg.name}RepositoryImpl(${agg.name}JpaRepository jpa) {`,
+    injectAccessor
+      ? `    public ${agg.name}RepositoryImpl(${agg.name}JpaRepository jpa, CurrentUserAccessor currentUserAccessor) {`
+      : `    public ${agg.name}RepositoryImpl(${agg.name}JpaRepository jpa) {`,
     `        this.jpa = jpa;`,
+    injectAccessor ? `        this.currentUserAccessor = currentUserAccessor;` : null,
     `    }`,
     ``,
     `    @Override`,

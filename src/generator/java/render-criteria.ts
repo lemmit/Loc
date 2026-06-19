@@ -104,6 +104,9 @@ const FLIPPED: Record<string, string> = { "<": ">", "<=": ">=", ">": "<", ">=": 
 /** Candidate-rooted path segments of `this.a.b`, or null. */
 function pathSegments(e: ExprIR): string[] | null {
   if (e.kind === "paren") return pathSegments(e.inner);
+  // Bare `this` (the receiver of an explicit `this.field` access, as a capability
+  // filter spells it — criterion bodies use the implicit bare-field form).
+  if (e.kind === "this") return [];
   if (e.kind === "ref" && (e.refKind === "this-prop" || e.refKind === "this-vo-prop")) {
     return [e.name];
   }
@@ -151,8 +154,13 @@ function declaredType(segs: string[], ctx: CriteriaCtx): string {
 }
 
 /** VALUE position — params / literals / enum values via the normal
- *  Java leaf table. */
+ *  Java leaf table.  A principal (tenancy) `currentUser.<field>` access
+ *  renders null-safe against the `currentUser` the factory is handed (no
+ *  actor → null → the comparison matches no rows: fail-closed). */
 function value(e: ExprIR, ctx: CriteriaCtx): string {
+  if (e.kind === "member" && e.receiver.kind === "ref" && e.receiver.refKind === "current-user") {
+    return `(currentUser == null ? null : currentUser.${e.member}())`;
+  }
   collectJavaExprImports(e, ctx.imports);
   return renderJavaExpr(e, { thisName: "root" });
 }
