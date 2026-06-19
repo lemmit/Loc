@@ -58,6 +58,11 @@ const FIXTURES: Array<[string, string]> = [
   // findAll/findById overrides + custom find + view, with the auth
   // (CurrentUserAccessor/UserFilter) the SpEL resolves through.
   ["test/e2e/fixtures/java-build/tenancy-filter.ddd", "api1"],
+  // Tenancy filter AND-ed into a REIFIED criterion retrieval: the
+  // `tenantScope(User)` Specification factory + injected CurrentUserAccessor
+  // + `findAll(spec.and(tenantScope(...)))` (the JpaSpecificationExecutor path
+  // the @Query overrides don't cover).
+  ["test/e2e/fixtures/java-build/tenancy-reified.ddd", "api1"],
   // TPH (sharedTable) inheritance: JPA SINGLE_TABLE + @DiscriminatorColumn
   // on the abstract base, @DiscriminatorValue per concrete, shared <Base>Id.
   ["test/e2e/fixtures/java-build/tph.ddd", "tph_api"],

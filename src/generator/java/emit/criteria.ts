@@ -74,7 +74,34 @@ export function renderJavaCriteriaClasses(
         ``,
       ];
     });
-    while (factories[factories.length - 1] === "") factories.pop();
+    // Tenancy scope — a PRINCIPAL capability filter
+    // (`this.tenantId == currentUser.tenantId`) is AND-ed into the @Query reads
+    // (see emit/repository.ts), but a reified retrieval reads via
+    // JpaSpecificationExecutor.findAll(spec), which bypasses those.  Emit a
+    // `tenantScope(User)` Specification factory the repository impl ANDs into
+    // the reified findAll so it honours the same row scoping.  Takes the actor
+    // as a param (the request principal isn't reachable from a static factory);
+    // the predicate renders it null-safe (fail-closed).
+    const principalFilters = (agg.contextFilters ?? []).filter(exprUsesCurrentUser);
+    const tenantScope =
+      principalFilters.length > 0
+        ? (() => {
+            const preds = principalFilters.map((p) =>
+              renderCriteriaPredicate(p, { agg, voLookup, imports }),
+            );
+            const body = preds.length === 1 ? preds[0]! : `cb.and(${preds.join(", ")})`;
+            return [
+              `    /** Tenancy scope (principal capability filter) — AND-ed into reified`,
+              `     *  retrievals so they honour the same row scoping as the @Query reads. */`,
+              `    public static Specification<${agg.name}> tenantScope(User currentUser) {`,
+              `        return (root, query, cb) -> ${body};`,
+              `    }`,
+              ``,
+            ];
+          })()
+        : [];
+    const allFactories = [...factories, ...tenantScope];
+    while (allFactories[allFactories.length - 1] === "") allFactories.pop();
     const entityPkg = entityPkgOf(agg.name);
     out.push({
       name: `${agg.name}Criteria.java`,
@@ -86,6 +113,7 @@ export function renderJavaCriteriaClasses(
         `import org.springframework.data.jpa.domain.Specification;`,
         ``,
         entityPkg !== pkg ? `import ${entityPkg}.${agg.name};` : null,
+        tenantScope.length > 0 ? `import ${basePkg}.auth.User;` : null,
         `import ${basePkg}.domain.enums.*;`,
         `import ${basePkg}.domain.ids.*;`,
         `import ${basePkg}.domain.valueobjects.*;`,
@@ -96,7 +124,7 @@ export function renderJavaCriteriaClasses(
         `    private ${agg.name}Criteria() {`,
         `    }`,
         ``,
-        ...factories,
+        ...allFactories,
         `}`,
         ``,
       ),

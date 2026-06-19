@@ -1,0 +1,46 @@
+// DEBT-01 residual — a PRINCIPAL (tenancy) capability filter AND-ed into a
+// REIFIED `criterion` retrieval on java.  A retrieval whose `where:` is exactly
+// a criterion reference reads via `JpaSpecificationExecutor.findAll(spec)`,
+// which bypasses the scoped findAll/findById @Query overrides — so the tenancy
+// filter is AND-ed in as a `tenantScope(User)` Specification:
+// `jpa.findAll(AccountCriteria.highBalance(min).and(
+//   AccountCriteria.tenantScope(currentUserAccessor.user())), sort)`.
+// The factory renders the principal predicate null-safe (fail-closed).
+//
+// Compiles the reified-retrieval + Specification + injected CurrentUserAccessor
+// under `gradle testClasses bootJar` (the java-build gate).
+system JavaReifiedTenancy {
+  user { id: guid  tenantId: string }
+
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+        // Always-on row scoping by the requesting principal's tenant.
+        filter this.tenantId == currentUser.tenantId
+      }
+      repository Accounts for Account { }
+
+      criterion HighBalance(min: int) of Account = balance >= min
+
+      // `where:` is exactly a criterion reference → reified (JpaSpecificationExecutor).
+      retrieval RichAccounts(min: int) of Account {
+        where: HighBalance(min)
+        sort:  [balance desc]
+      }
+    }
+  }
+
+  api LedgerApi from Core
+  storage primary { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: primary }
+  deployable api1 {
+    platform: java
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    port: 8081
+    auth: required
+  }
+}
