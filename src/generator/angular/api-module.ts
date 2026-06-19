@@ -3,7 +3,7 @@ import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.j
 import type { EnrichedAggregateIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { peelCollection, peelNullable, wireTypeInfo } from "../../ir/types/wire-types.js";
 import { lines } from "../../util/code-builder.js";
-import { lowerFirst, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate Angular API module (`src/api/<agg>.ts`).
@@ -74,6 +74,47 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
   const fields = forApiRead(wireShapeFor(agg));
   const createFields = createInputFields(agg);
 
+  // Public domain operations → a `POST /<tag>/:id/<op>` mutation each
+  // (request type = op params, mirrors the React op-mutation shape).  The
+  // op-form / Modal renderers hoist `use<Op><Agg>(id)` and submit its params.
+  const ops = agg.operations.filter((o) => o.visibility === "public");
+  const opRequests = ops.flatMap((op) => [
+    `export interface ${upperFirst(op.name)}${single}Request {`,
+    ...op.params.map((p) => `  ${p.name}: ${wireTsType(p.type)};`),
+    "}",
+    "",
+  ]);
+  const opMethods = ops.flatMap((op) => [
+    "",
+    `  ${op.name}(id: string, input: ${upperFirst(op.name)}${single}Request) {`,
+    `    return this.http.post<void>(\`\${API_BASE_URL}/${tag}/\${id}/${op.name}\`, input);`,
+    "  }",
+  ]);
+  const opFactories = ops.flatMap((op) => {
+    const reqType = `${upperFirst(op.name)}${single}Request`;
+    return [
+      `/** Signal-backed \`${op.name}\` operation mutation — hoisted with the record`,
+      " *  id; `mutate` POSTs the op params and resolves when the command lands. */",
+      `export function use${upperFirst(op.name)}${single}(id: string) {`,
+      `  const service = inject(${serviceName});`,
+      "  const isPending = signal(false);",
+      "  const error = signal<unknown>(null);",
+      `  const mutate = (input: ${reqType}): Promise<void> => {`,
+      "    isPending.set(true);",
+      "    error.set(null);",
+      `    return firstValueFrom(service.${op.name}(id, input))`,
+      "      .catch((e) => {",
+      "        error.set(e);",
+      "        throw e;",
+      "      })",
+      "      .finally(() => isPending.set(false));",
+      "  };",
+      "  return { mutate, isPending, error };",
+      "}",
+      "",
+    ];
+  });
+
   return lines(
     "// Auto-generated.  Do not edit by hand.",
     'import { HttpClient } from "@angular/common/http";',
@@ -90,6 +131,7 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
     ...createFields.map((f) => `  ${f.name}: ${wireTsType(f.type)};`),
     "}",
     "",
+    ...opRequests,
     `@Injectable({ providedIn: "root" })`,
     `export class ${serviceName} {`,
     "  private readonly http = inject(HttpClient);",
@@ -105,6 +147,7 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
     `  create(input: ${createName}) {`,
     `    return this.http.post<{ id: string }>(\`\${API_BASE_URL}/${tag}\`, input);`,
     "  }",
+    ...opMethods,
     "}",
     "",
     "/** Signal-backed `findAll` read — hoisted as a component field; the",
@@ -176,6 +219,7 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
     "  return { mutate, isPending, error };",
     "}",
     "",
+    ...opFactories,
     // Reference the var names the page-shell will hoist so the naming stays
     // discoverable next to the factories.
     `// hoisted as: readonly ${allVar} = ${allFn}();`,

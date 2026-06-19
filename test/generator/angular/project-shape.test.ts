@@ -148,3 +148,49 @@ describe("angular generator — project shape", () => {
     expect(api).toContain("return { mutate, isPending, error };");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-operation mutations — every public domain operation gets a
+// `POST /<tag>/:id/<op>` service method + `use<Op><Agg>(id)` signal factory,
+// the data foundation the op-form / Modal renderers hoist.  (ng build-verified
+// separately.)
+// ---------------------------------------------------------------------------
+
+const OP_SOURCE = `
+  system Shop {
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish {
+          customerId: string
+          operation cancel() { }
+          operation note(reason: string) { }
+        }
+      }
+    }
+    ui Web { }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], port: 3000 }
+    deployable web { platform: angular, targets: api, ui: Web, port: 3004 }
+  }
+`;
+
+describe("angular generator — per-operation mutations", () => {
+  it("emits a request type + service POST + signal factory per public operation", async () => {
+    const all = await generateSystemFiles(OP_SOURCE);
+    const api = all.get("web/src/api/order.ts")!;
+    // No-param op → empty request interface.
+    expect(api).toContain("export interface CancelOrderRequest {");
+    // Param-bearing op → typed request.
+    expect(api).toContain("export interface NoteOrderRequest {");
+    expect(api).toContain("reason: string;");
+    // Service methods POST to /<tag>/:id/<op>.
+    expect(api).toContain("cancel(id: string, input: CancelOrderRequest) {");
+    expect(api).toContain("this.http.post<void>(`${API_BASE_URL}/orders/${id}/cancel`, input)");
+    expect(api).toContain("note(id: string, input: NoteOrderRequest) {");
+    // Hooked-with-id mutation factories.
+    expect(api).toContain("export function useCancelOrder(id: string) {");
+    expect(api).toContain("export function useNoteOrder(id: string) {");
+    expect(api).toContain("return firstValueFrom(service.cancel(id, input))");
+  });
+});
