@@ -213,3 +213,30 @@ body {
 .loom-code-block pre {
   margin: 0;
 }
+.loom-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.loom-table th,
+.loom-table td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+}
+.loom-table th {
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.6);
+}
+.loom-table-striped tbody tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.03);
+}
+.loom-table-highlight tbody tr:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+.loom-table-sticky thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}

@@ -500,3 +500,96 @@ describe("angular generator — QueryView collection read", () => {
     expect(page).toContain("<div>{{ o.customerId }}</div>");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Table inside a QueryView data branch (data path sub-slice C).  `Table` lowers
+// to a plain `@for`-driven HTML `<table class="loom-table">` (no mat-table /
+// MatTableDataSource / displayedColumns component state) — headers from the
+// Column labels, one `<td>` per column whose cell walks the accessor lambda
+// (IdLink / Text / EnumBadge / DateDisplay) against the loop `row`.  Style
+// flags map to `.loom-table-*` modifiers; `rowTestid` to a bound attribute.
+// (ng build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const TABLE_SOURCE = `
+  system Smoke {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Orders {
+        enum OrderStatus { Draft, Confirmed, Shipped }
+        aggregate Order with crudish {
+          customerId: string
+          status: OrderStatus
+          placedAt: datetime
+        }
+        repository Orders for Order { }
+      }
+    }
+    ui WebApp {
+      api Sales: SalesApi
+      page OrderList {
+        route: "/"
+        body: QueryView {
+          of: Sales.Order.all,
+          loading: Loader {},
+          empty: Empty { "No orders yet" },
+          data: rows => Table {
+            rows: rows,
+            striped: true,
+            highlight: true,
+            sticky: true,
+            rowTestid: r => "orders-row-" + r.id,
+            Column { "ID", o => IdLink { o.id, of: Order } },
+            Column { "Customer", o => Text { o.customerId } },
+            Column { "Status", o => EnumBadge { o.status } },
+            Column { "Placed", o => DateDisplay { o.placedAt } }
+          },
+          testid: "orders-query"
+        }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api {
+      platform: hono
+      contexts: [Orders]
+      dataSources: [ordersState]
+      serves: SalesApi
+      port: 8080
+    }
+    deployable web {
+      platform: angular
+      targets: api
+      ui: WebApp { Sales: api }
+      port: 3004
+    }
+  }
+`;
+
+async function tablePage(): Promise<string> {
+  const all = await generateSystemFiles(TABLE_SOURCE);
+  return all.get("web/src/app/pages/order-list.component.ts")!;
+}
+
+describe("angular generator — Table in a QueryView data branch", () => {
+  it("renders a plain @for table with column headers and the style modifiers", async () => {
+    const page = await tablePage();
+    expect(page).toContain(
+      '<table class="loom-table loom-table-striped loom-table-highlight loom-table-sticky">',
+    );
+    expect(page).toContain("<tr><th>ID</th><th>Customer</th><th>Status</th><th>Placed</th></tr>");
+    expect(page).toContain("@for (row of orderAll.data(); track row.id) {");
+    expect(page).toContain("[attr.data-testid]='(\"orders-row-\" + row.id)'");
+  });
+
+  it("walks each column accessor against the loop row", async () => {
+    const page = await tablePage();
+    // IdLink → routerLink + shortId; Text → interpolation; EnumBadge → badge;
+    // DateDisplay → formatDateTime — all reading the `row` loop variable.
+    expect(page).toContain("[routerLink]='\"/orders/\" + row.id'");
+    expect(page).toContain("{{ shortId(row.id) }}");
+    expect(page).toContain("<td><div>{{ row.customerId }}</div></td>");
+    expect(page).toContain('<span class="loom-badge">{{ row.status }}</span>');
+    expect(page).toContain("{{ formatDateTime(row.placedAt) }}");
+  });
+});
