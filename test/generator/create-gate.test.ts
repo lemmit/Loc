@@ -5,9 +5,9 @@
 // aggregate declares one — explicit `create(...)` or via `crudish`, which
 // lowering records as `canonicalCreate` (`hasCreate`).  An aggregate with
 // neither is not constructible over HTTP and emits no create; it is reached
-// only through its own operations.  Gated on Hono + .NET (Phoenix models
-// all-CRUD via Ash defaults; React's create UI compiles regardless — both
-// keep create always-on for now).
+// only through its own operations.  Gated on every backend (Hono + .NET here;
+// Phoenix/Ash and the frontend scaffold now join via DEBT-09 — see
+// create-gate-frontend.test.ts).
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../_helpers/index.js";

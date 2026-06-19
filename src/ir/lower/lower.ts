@@ -87,6 +87,7 @@ import {
   isWorkflow,
 } from "../../language/generated/ast.js";
 import { descriptorFor } from "../../platform/metadata.js";
+import { isConstructible } from "../enrich/wire-projection.js";
 import type {
   AggregateIR,
   ApiIR,
@@ -590,9 +591,28 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
   // per-aggregate page-object emitter also dispatches on
   // `page.origin` to produce the rich `e2e/pages/<agg>.ts`
   // helper classes.
+  dropNonConstructibleNewPages(built);
   applyPageOriginSideEffects(built);
   expandInlineScaffoldPrimitiveCalls(built);
   return built;
+}
+
+/** Drop the scaffolded `<Agg>New` page for a non-constructible aggregate
+ *  (no create surface — `!isConstructible`).  The backends emit no POST
+ *  route for such an aggregate (`hasCreate`), so a scaffolded create form
+ *  would submit to a route that doesn't exist; the matching list "New"
+ *  button is suppressed in `expandScaffoldList`.  Removing the page here
+ *  (before the origin / expand passes) also drops it from the router and
+ *  menu, which derive from `ui.pages` at emit time. */
+function dropNonConstructibleNewPages(sys: SystemIR): void {
+  for (const ui of sys.uis) {
+    const ctx = buildExpandContext(sys, ui);
+    ui.pages = ui.pages.filter((page) => {
+      if (page.origin?.kind !== "aggregate-new") return true;
+      const agg = ctx.aggregatesByName.get(page.origin.aggregateName);
+      return !agg || isConstructible(agg);
+    });
+  }
 }
 
 function lowerConfigEntry(entry: ConfigEntry): ConfigEntryIR {

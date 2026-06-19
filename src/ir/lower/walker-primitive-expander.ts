@@ -16,6 +16,7 @@
 // full expanded body uniformly.
 
 import { humanize, plural, snake } from "../../util/naming.js";
+import { isConstructible } from "../enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -471,14 +472,21 @@ function expandScaffoldList(agg: AggregateIR, ctx: WalkerExpandContext): ExprIR 
       ]),
       call("Toolbar", [
         call("Heading", [lit(humanPlural)], [["level", intLit(2)]]),
-        call(
-          "Button",
-          [lit(`New ${singular(humanLower)}`)],
-          [
-            ["to", lit(`/${slug}/new`)],
-            ["testid", lit(`${slug}-list-create`)],
-          ],
-        ),
+        // The "New <agg>" button is suppressed for a non-constructible
+        // aggregate — its `<Agg>New` page (and backend POST route) don't
+        // exist, so the link would dangle.  See `dropNonConstructibleNewPages`.
+        ...(isConstructible(agg)
+          ? [
+              call(
+                "Button",
+                [lit(`New ${singular(humanLower)}`)],
+                [
+                  ["to", lit(`/${slug}/new`)],
+                  ["testid", lit(`${slug}-list-create`)],
+                ],
+              ),
+            ]
+          : []),
       ]),
       ...(filterBar.length > 0 ? [call("Group", filterBar)] : []),
       listRegion,
