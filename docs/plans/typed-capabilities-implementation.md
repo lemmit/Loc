@@ -93,14 +93,27 @@ before any behavior wires up.
 - `crudish` / `scaffold*` **stay macros** (operations / structure). Each
   migration sha256-gated across all backends.
 
+## End state — the stringly forms are removed, not kept as sugar
+
+**Decision (owner):** the stringly-typed surface (`implements "X"` / `filter for
+"X"` / `stamp for "X"`) is a **temporary migration bridge, not a permanent
+deprecation path.** The endgame removes it entirely and ports every
+`examples/*.ddd`, `web/src/examples/*.ddd`, fixture, and test to the typed
+`capability` form. Each phase below keeps the string form working *only* so the
+migration can proceed incrementally; Phase 6 deletes it.
+
+This raises the stakes on Phase 3 (stdlib migration): the `audit`/`softDelete`
+macros currently *emit* `implements "string"` / `filter for "string"` nodes, so
+they must move to typed capabilities before the string grammar can be deleted.
+
 ### Phase 4 — typed `implements` + context-level application
 
-- `ImplementsDecl`: accept `name=[Capability:ID]`-style typed ref **with the
-  STRING form kept as back-compat sugar** (`'implements' (cap=… | name=STRING)`).
-  Resolution still via the expander inventory; STRING stays a deprecation path.
+- `ImplementsDecl`: accept a typed `[Capability]` reference, resolved via the
+  expander inventory. The STRING form keeps parsing **only as a transitional
+  bridge** (slated for removal in Phase 6) — a deprecation warning points at it.
 - Context-level application — `context Sales with auditable` applies the
   capability to every aggregate in the context (the `*ByDefault` replacement);
-  grammar + propagation in `lower-capabilities.ts`.
+  the expander splices clones into each child aggregate.
 
 ### Phase 5 — `Self` type, tooling, marker emission (feeds dedup)
 
@@ -110,6 +123,17 @@ before any behavior wires up.
   completion. Marker-interface emission (`I<Capability>`) — the seam
   [`capability-emission-dedup.md`](../proposals/capability-emission-dedup.md)
   consumes.
+
+### Phase 6 — remove the stringly forms (the cleanup the owner asked for)
+
+- Delete `'implements' STRING`, `filter for "X"`, `stamp for "X"` from the
+  grammar; delete the string-matching capability-grouping in
+  `lower-capabilities.ts`; remove `implementsCapabilities` string plumbing where
+  it only served the string surface.
+- Migrate **every** `examples/*.ddd`, `web/src/examples/*.ddd`, fixture, and test
+  to the typed `capability` + `with` / `implements <Cap>` form.
+- Prereqs: Phases 3 (stdlib no longer emits string nodes) + 4 (typed
+  `implements`) must land first.
 
 ## Deferred (proposal scope guardrails)
 
@@ -121,6 +145,7 @@ scope until a concrete case appears.
 
 - [x] Phase 1 — grammar + AST + parse test.
 - [x] Phase 2 — expander splice + existence checking + scope guard + equivalence tests.
-- [ ] Phase 3 — stdlib migration (softDelete, audit).
-- [ ] Phase 4 — typed `implements` + context-level `with`.
+- [ ] Phase 3 — stdlib migration (softDelete, audit) — needs built-in-capability delivery.
+- [ ] Phase 4 — typed `implements` + context-level `with` (← in progress).
 - [ ] Phase 5 — `Self`, tooling, marker emission.
+- [ ] Phase 6 — **remove** the stringly forms; migrate all examples/tests.
