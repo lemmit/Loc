@@ -147,7 +147,7 @@ describe("macro expander diagnostics", () => {
         }}
       `),
     );
-    expect(errors.join("\n")).toMatch(/Unknown macro 'nonexistent'/);
+    expect(errors.join("\n")).toMatch(/Unknown macro or capability 'nonexistent'/);
   });
 
   it("reports target-kind mismatch", async () => {

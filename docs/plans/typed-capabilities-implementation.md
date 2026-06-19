@@ -60,19 +60,31 @@ before any behavior wires up.
 - `'capability'` is a new hard keyword; verified unused as an identifier in any
   `.ddd` (all current occurrences are comments).
 
-### Phase 2 — expander resolves + splices (the behavior slice)
+### Phase 2 — expander resolves + splices (the behavior slice) ✅
 
-- Extend `src/macros/expander.ts`: build a per-document inventory of `Capability`
-  declarations; when a `WithClause` `MacroCall` (or a typed `implements`, phase
-  4) names a capability rather than a macro, splice the capability's
-  `Property`/`FilterDecl`/`StampDecl` members into the host aggregate's
-  `members[]` (origin-tagged for unfold). Unknown name that is neither macro nor
-  capability → the existing "unknown macro" diagnostic, now capability-aware.
-- Validator: an `implements`/`with` naming no declared capability is an **error**
-  (resolves the proposal's core "silent no-match" motivation); a capability with
-  no implementors is allowed (armed-but-inactive, matching today's string rule).
-- Gate: author one `.ddd` two ways (string form vs `capability` + `with`) →
-  identical IR; full byte-identical regen.
+- `src/macros/expander.ts`: `Capability` added to the per-document inventory;
+  when a `with <name>` clause names no macro but a declared capability, the
+  capability's `Property`/`FilterDecl`/`StampDecl` members are **deep-cloned**
+  (Langium `AstUtils.copyAstNode` + the language `Linker.buildReference`, so each
+  clone's cross-references re-link in the Linked phase) and spliced into the host
+  aggregate's `members[]` — one independent clone per implementor.
+- **Precedence (intentional, additive):** a macro wins on a name collision, so
+  the stdlib `audit`/`softDelete`/… macros still resolve to the macro until they
+  migrate in Phase 3. New (non-macro-named) capabilities resolve to the
+  capability. The unknown-name diagnostic is now "Unknown macro or capability".
+- **Existence-checking** (the proposal's core motivation) falls out of the
+  expander: a `with X` that is neither macro nor capability is an error.
+- **Scope guard:** a capability applied to a `context` errors (aggregate-scope
+  only in Phase 2; context-level `with` is Phase 4).
+- Tests: `test/ir/capabilities/typed-capability-equivalence.test.ts` proves
+  capability-via-`with` == hand-written filter/stamp/field IR, reuse across many
+  aggregates clones independently, the capability decl body itself raises no
+  validation error, and both error paths fire.
+- **Cross-file note:** Phase 2 assumes the `capability` decl and its `with` use
+  are reachable in the same workspace build (the inventory is workspace-aware);
+  the deferred cross-file re-check that macro *ref-args* get
+  (`collectUnresolvedMacroRefs`) is a Phase 4 refinement alongside context-level
+  application.
 
 ### Phase 3 — migrate the stdlib (one capability per PR, each byte-identical)
 
@@ -108,7 +120,7 @@ scope until a concrete case appears.
 ## Status
 
 - [x] Phase 1 — grammar + AST + parse test.
-- [ ] Phase 2 — expander splice + existence validator.
+- [x] Phase 2 — expander splice + existence checking + scope guard + equivalence tests.
 - [ ] Phase 3 — stdlib migration (softDelete, audit).
 - [ ] Phase 4 — typed `implements` + context-level `with`.
 - [ ] Phase 5 — `Self`, tooling, marker emission.
