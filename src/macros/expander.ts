@@ -668,22 +668,23 @@ export function resolveMacroArgs(
   return result.ok ? result.values : undefined;
 }
 
-/** Re-check every macro call's `ref` / `refList` arguments against the
- * *settled* workspace and report any that name a declaration which still
- * doesn't exist.  Unlike the expansion pass (which runs once at
- * IndexedContent, before sibling files may have loaded, and therefore stays
- * silent about unresolved refs), this runs from the validator on every
- * (re)validation with a workspace-aware inventory — so a cross-file
- * `with scaffold(subdomains: [...])` clears the moment its target file is
- * indexed, and a genuinely unknown ref keeps erroring.  Pair with the
- * `isAffected` override in `ddd-module.ts`, which re-validates macro-host
- * documents when the workspace document set changes. */
-export function collectUnresolvedMacroRefs(
-  model: Model,
-  shared: LangiumSharedServices | undefined,
-  record: DiagnosticRecorder,
-): void {
-  const inv = buildInventory(model, shared);
+// ---------------------------------------------------------------------------
+// Macro ref-argument re-resolution + dependency tracking
+// ---------------------------------------------------------------------------
+
+/** One `ref` / `refList` element of a macro call, with the declaration kind
+ * its param spec expects. */
+type MacroRefVisitor = (
+  kind: NamedDeclKind,
+  name: string,
+  arg: MacroArg,
+  macroName: string,
+) => void;
+
+/** Walk every macro host in `model` and visit each `ref` / `refList` argument
+ * element (name + expected declaration kind).  Shared by the validator's
+ * diagnostic re-check and the dependency capture below so the two never drift. */
+function forEachMacroRef(model: Model, visit: MacroRefVisitor): void {
   for (const node of AstUtils.streamAllContents(model)) {
     if (!isAggregate(node) && !isUi(node) && !isBoundedContext(node)) continue;
     const host = node as Aggregate | Ui | import("../language/generated/ast.js").BoundedContext;
@@ -694,24 +695,73 @@ export function collectUnresolvedMacroRefs(
         const ps = arg.name ? macro.params[arg.name] : undefined;
         if (!ps) continue;
         const v = arg.value;
-        const report = (kind: NamedDeclKind, refText: string): void =>
-          record({
-            severity: "error",
-            message: `Argument '${arg.name}' to macro '${macro.name}' references unknown ${kind} '${refText}'.`,
-            node: arg,
-            property: "value",
-          });
         if (ps.kind === "ref" && v.$type === "MacroArgRef") {
           const t = readArgRef(v);
-          if (t && !resolveRef(inv, ps.of, t)) report(ps.of, t);
+          if (t) visit(ps.of, t, arg, macro.name);
         } else if (ps.kind === "refList" && v.$type === "MacroArgRefList") {
           for (const t of readArgRefs(v)) {
-            if (t && !resolveRef(inv, ps.of, t)) report(ps.of, t);
+            if (t) visit(ps.of, t, arg, macro.name);
           }
         }
       }
     }
   }
+}
+
+/** What a document's macro ref-arguments currently depend on — the macro-side
+ * analogue of Langium's reference index.  Recorded by the validator on every
+ * (re)validation and read by the `isAffected` override in `ddd-module.ts`. */
+export interface MacroRefDeps {
+  /** At least one ref/refList element did not resolve against the workspace. */
+  unresolved: boolean;
+  /** `toString()` URIs of the documents that currently provide the resolved
+   * refs — so a change to (or removal of) one of them re-validates this host. */
+  providers: Set<string>;
+}
+
+const _macroDepsByDoc = new WeakMap<LangiumDocument, MacroRefDeps>();
+
+/** The macro ref-dependency record captured for `document` at its last
+ * validation, or `undefined` if it has not been validated. */
+export function getMacroRefDeps(document: LangiumDocument): MacroRefDeps | undefined {
+  return _macroDepsByDoc.get(document);
+}
+
+/** Re-check every macro call's `ref` / `refList` arguments against the
+ * *settled* workspace, reporting any that name a declaration which still
+ * doesn't exist, and record the document's ref-dependency footprint.
+ *
+ * The expansion pass runs once at IndexedContent — before sibling files may
+ * have loaded — and therefore stays silent about unresolved refs.  This runs
+ * from the validator on every (re)validation with a workspace-aware inventory,
+ * so a cross-file `with scaffold(subdomains: [...])` clears the moment its
+ * target file is indexed and a genuinely unknown ref keeps erroring.  The
+ * captured `MacroRefDeps` let `ddd-module.ts`'s `isAffected` re-validate a host
+ * precisely — when it is still unresolved, or when a file it resolved into
+ * changes/is removed — instead of on every workspace edit. */
+export function collectUnresolvedMacroRefs(
+  model: Model,
+  shared: LangiumSharedServices | undefined,
+  record: DiagnosticRecorder,
+): void {
+  const inv = buildInventory(model, shared);
+  const providers = new Set<string>();
+  let unresolved = false;
+  forEachMacroRef(model, (kind, name, arg, macroName) => {
+    const target = resolveRef(inv, kind, name);
+    if (target) {
+      providers.add(AstUtils.getDocument(target).uri.toString());
+      return;
+    }
+    unresolved = true;
+    record({
+      severity: "error",
+      message: `Argument '${arg.name}' to macro '${macroName}' references unknown ${kind} '${name}'.`,
+      node: arg,
+      property: "value",
+    });
+  });
+  _macroDepsByDoc.set(AstUtils.getDocument(model), { unresolved, providers });
 }
 
 function resolveRef(inv: Inventory, kind: NamedDeclKind, name: string): AstNode | undefined {
