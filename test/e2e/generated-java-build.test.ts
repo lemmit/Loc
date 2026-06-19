@@ -84,6 +84,10 @@ const FIXTURES: Array<[string, string]> = [
   // shape(document): whole aggregate in one jsonb column via the
   // field-visibility Jackson mapper, version-bumping upserts.
   ["test/e2e/fixtures/java-build/document.ddd", "doc_api"],
+  // DEBT-02: a capability `filter` on a document aggregate — applied in-app
+  // over the rehydrated aggregate (findById gate + findAll filter; custom finds
+  // inherit via findAll().stream()).
+  ["test/e2e/fixtures/java-build/document-filter.ddd", "api1"],
   // shape(embedded): containments fold into jsonb columns via the
   // Hibernate JSON FormatMapper; scalar columns stay queryable.
   ["test/e2e/fixtures/java-build/embedded.ddd", "emb_api"],

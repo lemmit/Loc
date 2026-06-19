@@ -1,0 +1,35 @@
+// DEBT-02 — a capability `filter` on a `shape(document)` aggregate (java).
+// The whole aggregate lives in one `data` jsonb column, so the filter is
+// applied in-app over the rehydrated aggregate on every read (the document
+// store already deserialises every row + filters finds via findAll().stream()).
+// Compiles the gated findById + filtered findAll under `gradle testClasses
+// bootJar` (the java-build gate).
+system DocFilter {
+  subdomain D {
+    context Cms {
+      aggregate Article shape(document) {
+        title: string
+        isDeleted: bool
+        // soft-delete capability — every read hides a deleted article.
+        filter !this.isDeleted
+        contains sections: Section[]
+        entity Section { heading: string  body: string }
+        operation softDelete() { isDeleted := true }
+      }
+      repository Articles for Article {
+        find byTitle(t: string): Article[] where this.title == t
+        find first(t: string): Article? where this.title == t
+      }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Cms, kind: state, use: primary }
+  deployable api1 {
+    platform: java
+    contexts: [Cms]
+    dataSources: [st]
+    serves: A
+    port: 8081
+  }
+}

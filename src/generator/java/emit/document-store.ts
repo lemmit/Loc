@@ -1,7 +1,8 @@
 import type { EnrichedAggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
-import { renderJavaExpr, renderJavaType } from "../render-expr.js";
+import { collectJavaExprImports, renderJavaExpr, renderJavaType } from "../render-expr.js";
 import type { JavaRepoCtx } from "./repository.js";
 import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
 
@@ -36,6 +37,27 @@ export function renderJavaDocumentRepositoryImpl(
   const bare = plural(snake(agg.name));
   const table = schema ? `${schema}.${bare}` : bare;
   const finds = declaredFinds(repo).map((f) => unionFindAsOptionalTwin(f, agg.name));
+
+  // A document aggregate's every field lives in the `data` jsonb column, so a
+  // (non-principal) capability `filter` is applied in-app over the rehydrated
+  // aggregate (the read already deserialises every row).  Gating findById +
+  // findAll covers the custom finds too — they all read through findAll().
+  const capBody = (varName: string): string | null => {
+    const preds = (agg.contextFilters ?? [])
+      .filter((p) => !exprUsesCurrentUser(p))
+      .map((p) => `(${renderJavaExpr(p, { thisName: varName, agg, accessorProps: true })})`);
+    return preds.length > 0 ? preds.join(" && ") : null;
+  };
+  const capRec = capBody("rec");
+  const capX = capBody("x");
+
+  // Expression imports the in-app find / capability predicates need — notably
+  // `java.util.Objects` for a string/ref `==` (renders to `Objects.equals`).
+  // (The pre-existing emit hardcoded a fixed import list and omitted this, so a
+  // document aggregate with a string-equality find failed to compile.)
+  const exprImports = new Set<string>();
+  for (const f of finds) if (f.filter) collectJavaExprImports(f.filter, exprImports);
+  for (const p of agg.contextFilters ?? []) collectJavaExprImports(p, exprImports);
 
   const findLines = finds.flatMap((f) => {
     const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`);
@@ -78,6 +100,7 @@ export function renderJavaDocumentRepositoryImpl(
     ``,
     `import java.util.ArrayList;`,
     `import java.util.List;`,
+    exprImports.has("java.util.Objects") ? `import java.util.Objects;` : null,
     `import java.util.Optional;`,
     ``,
     `import com.fasterxml.jackson.annotation.JsonAutoDetect;`,
@@ -132,7 +155,13 @@ export function renderJavaDocumentRepositoryImpl(
     `    @Override`,
     `    public Optional<${agg.name}> findById(${idClass} id) {`,
     `        var rows = jdbc.query("select data from ${table} where id = ?", (rs, i) -> rs.getString(1), id.value());`,
-    `        return rows.isEmpty() ? Optional.empty() : Optional.of(fromJson(rows.get(0)));`,
+    ...(capRec
+      ? [
+          `        if (rows.isEmpty()) return Optional.empty();`,
+          `        var rec = fromJson(rows.get(0));`,
+          `        return (${capRec}) ? Optional.of(rec) : Optional.empty();`,
+        ]
+      : [`        return rows.isEmpty() ? Optional.empty() : Optional.of(fromJson(rows.get(0)));`]),
     `    }`,
     ``,
     `    @Override`,
@@ -145,7 +174,14 @@ export function renderJavaDocumentRepositoryImpl(
     `    public List<${agg.name}> findAll() {`,
     `        var rows = jdbc.query("select data from ${table} order by id", (rs, i) -> rs.getString(1));`,
     `        var out = new ArrayList<${agg.name}>();`,
-    `        for (var data : rows) out.add(fromJson(data));`,
+    ...(capX
+      ? [
+          `        for (var data : rows) {`,
+          `            var x = fromJson(data);`,
+          `            if (${capX}) out.add(x);`,
+          `        }`,
+        ]
+      : [`        for (var data : rows) out.add(fromJson(data));`]),
     `        return out;`,
     `    }`,
     ``,
