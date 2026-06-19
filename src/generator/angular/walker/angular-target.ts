@@ -159,6 +159,25 @@ export const angularTarget: WalkerTarget = {
     return call.kind === "call" ? renderAngularAction(call, ctx, depth) : null;
   },
 
+  /** Defer the operation-dialog form — Angular renders forms inline (no
+   *  `field-input-*` / `primitive-modal` templates), and the dialog form is a
+   *  later batch.  Returning a comment here keeps the op-form path off the
+   *  shared RHF dispatch so the page renders a placeholder instead of crashing
+   *  on a missing template. */
+  renderOperationForm(_call: ExprIR): string | null {
+    return "<!-- OperationForm: the operation-dialog form is not yet supported on Angular -->";
+  },
+
+  renderModal(_call: ExprIR): string | null {
+    return "<!-- Modal: the operation-dialog form is not yet supported on Angular -->";
+  },
+
+  /** `Button(to:)` → `router.navigateByUrl(<to>)` (bound as a statement by
+   *  `renderEventHandler`); `router` is injected via `usesNavigate`. */
+  renderNavigateExpr(toArg: string): string {
+    return `router.navigateByUrl(${toArg})`;
+  },
+
   // --- Match expression seam ----------------------------------------------
 
   /** Chained ternaries — Angular interpolations + bindings evaluate JS

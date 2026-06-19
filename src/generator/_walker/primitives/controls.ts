@@ -85,7 +85,14 @@ export function emitButton(
     const to = stringOrRefArgValue(call, "to", ctx);
     if (to) {
       ctx.usesNavigate = true;
-      onClickHandler = `() => navigate(${to})`;
+      // Route through the navigate + event-handler seams so statement-binding
+      // targets (Angular `(click)`) get `router.navigateByUrl(<to>)` instead of
+      // a JSX arrow.  JSX family: both seams are omitted → `() => navigate(<to>)`
+      // (byte-identical to the prior hardcoded form).
+      const navExpr = ctx.target.renderNavigateExpr?.(to) ?? `navigate(${to})`;
+      onClickHandler = ctx.target.renderEventHandler
+        ? ctx.target.renderEventHandler(undefined, navExpr)
+        : `() => ${navExpr}`;
     }
   }
   // `disabled:` and `loading:` named args.  Both

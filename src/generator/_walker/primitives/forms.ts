@@ -66,6 +66,10 @@ export function emitOperationForm(
   ctx: WalkContext,
   _depth: number,
 ): string {
+  // A target may fork the whole primitive (Angular defers the op-dialog form,
+  // so it never reaches the RHF / `field-input-*` path below).
+  const override = ctx.target.renderOperationForm?.(call, ctx, _depth);
+  if (override != null) return override;
   const ofArg = namedArgValue(call, "of");
   const opArg = namedArgValue(call, "op");
   if (ofArg && opArg && ofArg.kind === "ref" && opArg.kind === "ref") {
@@ -619,6 +623,11 @@ export function emitModal(
   ctx: WalkContext,
   depth: number,
 ): string {
+  // A target may fork the whole primitive (Angular defers the op-dialog form;
+  // delegating here avoids walking the OperationForm child + the
+  // `primitive-modal` lookup the inline-forms pack doesn't ship).
+  const override = ctx.target.renderModal?.(call, ctx, depth);
+  if (override != null) return override;
   const positionals = positionalArgs(call);
   const formChild = positionals.find(
     (a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "OperationForm",

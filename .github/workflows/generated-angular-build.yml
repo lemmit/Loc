@@ -1,0 +1,93 @@
+name: Generated Angular build
+
+# For each {case × angular pack} cell, generate the Angular project,
+# `npm install`, and `ng build` it (the Angular CLI typechecks + bundles
+# in one step).  The Angular analogue of generated-vue-build.yml — catches
+# generator/pack drift invisible to the IR-level tests, institutionalising
+# the per-PR `ng build` verification from the Slice-4 batches.
+#
+# Matrix policy:
+#   - pull_request    → 1 cell: the showcase case (read + create-form + byId
+#                       + action surface) × the single angularMaterial pack.
+#   - push: main /    → full 3-cell sweep ({minimal, scaffold, showcase}).
+#     workflow_dispatch
+#
+# Cell names MUST match the case labels in
+# test/e2e/generated-angular-build.test.ts (`<case>:<pack>`).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'designs/angularMaterial/**'
+      - 'api/**'
+      - 'docker/**'
+      - 'stacks/ng1/**'
+      - 'test/e2e/generated-angular-build.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-angular-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'designs/angularMaterial/**'
+      - 'api/**'
+      - 'docker/**'
+      - 'stacks/ng1/**'
+      - 'test/e2e/generated-angular-build.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-angular-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        run: |
+          PACKS='["angularMaterial@v1"]'
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CASES='["showcase"]'
+          else
+            CASES='["minimal","scaffold","showcase"]'
+          fi
+          echo "matrix={\"case\":$CASES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
+
+  matrix:
+    needs: configure
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
+    timeout-minutes: 12
+    name: ${{ matrix.case }} × ${{ matrix.pack }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Run angular-build shard
+        env:
+          LOOM_ANGULAR_BUILD_CASE: ${{ matrix.case }}:${{ matrix.pack }}
+        run: npx vitest run test/e2e/generated-angular-build.test.ts
