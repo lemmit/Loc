@@ -882,3 +882,94 @@ describe("angular generator — byId single-record reads", () => {
     expect(page).not.toContain("cancelOrder");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Modal { OperationForm(…), trigger: … } — the operation-dialog form, rendered
+// as a signal-toggled inline Reactive Form.  The trigger captures the record id
+// into a signal (so the submit method reads it without this-prefixing a
+// template expr), the `@if (<op>Open())` block holds the typed FormGroup over
+// the op's params, and submit calls the id-at-mutate `use<Op><Agg>()` factory
+// then closes.  (ng build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const MODAL_SOURCE = `
+  system Smoke {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish {
+          customerId: string
+          operation addNote(reason: string) { }
+        }
+        repository Orders for Order { }
+      }
+    }
+    ui WebApp {
+      api Sales: SalesApi
+      page OrderDetail {
+        route: "/orders/:id"
+        body: QueryView {
+          of: Sales.Order.byId(id),
+          single: true,
+          data: o => Stack {
+            Heading { "Order" },
+            Modal {
+              OperationForm { of: Order, op: addNote, testid: "orders-op-addNote" },
+              title: "Add note",
+              trigger: Button { "Add note", emphasis: "primary", testid: "orders-op-addNote" }
+            }
+          }
+        }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api {
+      platform: node
+      contexts: [Orders]
+      dataSources: [ordersState]
+      serves: SalesApi
+      port: 8080
+    }
+    deployable web {
+      platform: angular
+      targets: api
+      ui: WebApp { Sales: api }
+      port: 3004
+    }
+  }
+`;
+
+describe("angular generator — Modal operation-dialog form", () => {
+  it("renders a trigger that captures the id + toggles an @if form block", async () => {
+    const all = await generateSystemFiles(MODAL_SOURCE);
+    const page = all.get("web/src/app/pages/order-detail.component.ts")!;
+    expect(page).not.toContain("not yet supported on Angular");
+    // Trigger captures the record id into a signal + opens (single-quoted
+    // binding so the bare `id` ref is clean).
+    expect(page).toContain("(click)='addNoteOrderId.set(id); addNoteOrderOpen.set(true)'");
+    expect(page).toContain("@if (addNoteOrderOpen()) {");
+    expect(page).toContain(
+      '<form [formGroup]="addNoteOrderForm" (ngSubmit)="submitAddNoteOrder()"',
+    );
+    expect(page).toContain('formControlName="reason"');
+    expect(page).toContain('[disabled]="addNoteOrder.isPending()"');
+  });
+
+  it("wires the toggle signals, op mutation, FormGroup + submit method on the class", async () => {
+    const all = await generateSystemFiles(MODAL_SOURCE);
+    const page = all.get("web/src/app/pages/order-detail.component.ts")!;
+    expect(page).toContain("readonly addNoteOrderOpen = signal(false);");
+    expect(page).toContain('readonly addNoteOrderId = signal("");');
+    expect(page).toContain("readonly addNoteOrder = useAddNoteOrder();");
+    expect(page).toContain(
+      'readonly addNoteOrderForm = new FormGroup({ reason: new FormControl("", { nonNullable: true }) });',
+    );
+    expect(page).toContain("async submitAddNoteOrder(): Promise<void> {");
+    expect(page).toContain(
+      "await this.addNoteOrder.mutate(this.addNoteOrderId(), this.addNoteOrderForm.getRawValue());",
+    );
+    expect(page).toContain("this.addNoteOrderOpen.set(false);");
+    expect(page).toContain('import { useAddNoteOrder } from "../../api/order";');
+  });
+});

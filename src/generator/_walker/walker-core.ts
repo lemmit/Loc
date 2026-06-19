@@ -151,6 +151,11 @@ export interface WalkResult {
    *  target's `renderAction` seam records so its page-shell can hoist the
    *  `use<Op><Agg>()` mutation.  Framework-neutral `unknown[]`; ignored elsewhere. */
   angularActions?: unknown[];
+  /** OPTIONAL Angular side-channel: per-`Modal` operation-dialog specs the
+   *  Angular target's `renderModal` seam records so its page-shell can build the
+   *  toggle signal, the op `FormGroup`, and the submit method.  `unknown[]`;
+   *  ignored by the other frameworks. */
+  angularModals?: unknown[];
   /** Every static `testid:` literal encountered while
    *  walking the body, plus the synthesised testid bases the walker
    *  generates on the user's behalf (e.g. `<form-namespace>-input-
@@ -365,6 +370,7 @@ export function walkBody(
     formOfs: [],
     angularForms: [],
     angularActions: [],
+    angularModals: [],
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
@@ -386,6 +392,7 @@ export function walkBody(
     formOfs: ctx.formOfs,
     angularForms: ctx.angularForms,
     angularActions: ctx.angularActions,
+    angularModals: ctx.angularModals,
     actionMutations: ctx.actionMutations,
     collectedTestids: ctx.collectedTestids,
     usesCodeBlock: ctx.usesCodeBlock,
@@ -498,6 +505,9 @@ export interface Sink {
   /** Angular `Action` specs — mutable sink the `renderAction` seam pushes
    *  into (see the WalkResult field). */
   angularActions?: unknown[];
+  /** Angular `Modal` operation-dialog specs — mutable sink the `renderModal`
+   *  seam pushes into (see the WalkResult field). */
+  angularModals?: unknown[];
   /** `Action(<instance>.<op>)` mutation wiring (see
    *  `ActionMutationState`). */
   actionMutations: ActionMutationState[];

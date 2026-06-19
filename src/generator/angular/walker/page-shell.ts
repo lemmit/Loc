@@ -4,6 +4,7 @@ import type { LoadedPack } from "../../_packs/loader.js";
 import { emitExpr, type WalkContext, type WalkResult } from "../../_walker/walker-core.js";
 import type { AngularActionSpec } from "../action.js";
 import type { AngularCreateFormSpec } from "../create-form.js";
+import type { AngularModalSpec } from "../modal.js";
 import { angularTarget } from "./angular-target.js";
 
 // ---------------------------------------------------------------------------
@@ -188,6 +189,11 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     routerSymbols.add("ActivatedRoute");
   }
 
+  // `Modal` operation-dialog forms use `signal()` for their open/id state —
+  // register the core import before the import lines are built (the spec block
+  // that consumes them runs further down).
+  if ((result.angularModals?.length ?? 0) > 0) coreSymbols.add("signal");
+
   const imports: string[] = [
     `import { ${[...coreSymbols].sort().join(", ")} } from "@angular/core";`,
   ];
@@ -289,6 +295,35 @@ export function renderAngularPage(input: AngularPageShellInput): string {
       imports.push(`import { ${[...names].sort().join(", ")} } from ${JSON.stringify(from)};`);
     }
     for (const a of angularActions) members.push(`  readonly ${a.localVar} = ${a.hookName}();`);
+  }
+
+  // `Modal { OperationForm(…) }` — the renderer recorded one spec per
+  // operation-dialog on `angularModals`.  Each gets a toggle `<op>Open` signal,
+  // an `<op>Id` signal the trigger captures the record id into, the
+  // `use<Op><Agg>()` mutation, the op `FormGroup`, and the submit method that
+  // mutates (id from the signal) then closes.  The `use…` import + the field /
+  // forms modules ride `result.imports`.
+  const angularModals = (result.angularModals ?? []) as AngularModalSpec[];
+  if (angularModals.length > 0) {
+    coreSymbols.add("signal");
+    for (const m of angularModals) {
+      members.push(`  readonly ${m.openSig} = signal(false);`);
+      members.push(`  readonly ${m.idSig} = signal("");`);
+      members.push(`  readonly ${m.mutationVar} = ${m.mutationFn}();`);
+      const controls = m.controls
+        .map((c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`)
+        .join(", ");
+      members.push(`  readonly ${m.formVar} = new FormGroup({ ${controls} });`);
+      members.push(
+        [
+          `  async ${m.submitMethod}(): Promise<void> {`,
+          `    if (this.${m.formVar}.invalid) return;`,
+          `    await this.${m.mutationVar}.mutate(this.${m.idSig}(), this.${m.formVar}.getRawValue());`,
+          `    this.${m.openSig}.set(false);`,
+          "  }",
+        ].join("\n"),
+      );
+    }
   }
 
   // Primitive imports collected by `renderPrimitive` (pack-declared) —
