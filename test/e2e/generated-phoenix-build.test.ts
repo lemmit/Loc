@@ -123,6 +123,11 @@ describe.skipIf(!ENABLED)(
         // itself — against real Ash 3.x.  No LiveView pages are emitted;
         // the React `assets/` half is covered by the react-build matrix.
         { name: "phoenix-embed-react.ddd" },
+        // DestroyForm on a LiveView detail page (parity finding #5): compiles
+        // the delete `<.button>`, the hoisted `destroy_widget` handle_event
+        // clause, and the `~p"/widgets"` post-delete navigation.  `with crudish`
+        // supplies the `destroy_widget!/1` code interface the form calls.
+        { name: "destroy-form.ddd" },
         // Carrier-bounded generics (payload-transport-layer.md, P3b): compiles
         // the Ash offset-pagination read actions + the controller page/pageSize
         // actions that map %Ash.Page.Offset{} to the cross-backend envelope.
