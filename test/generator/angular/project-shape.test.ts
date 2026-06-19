@@ -56,12 +56,30 @@ describe("angular generator — project shape", () => {
       "src/api/config.ts",
       "src/logger.ts",
       "Dockerfile",
+      "server.mjs",
       ".dockerignore",
       "certs/.gitkeep",
     ];
     for (const path of expected) {
       expect(files.has(path), `missing emitted file: ${path}`).toBe(true);
     }
+  });
+
+  it("serves the bundle via server.mjs with a same-origin /api proxy (not bare `serve`)", async () => {
+    const all = await generateSystemFiles(SOURCE);
+    const files = await angularFiles();
+    // The static host proxies the bundle's relative `/api` to the backend,
+    // target from VITE_API_PROXY_TARGET (dev fallback baked).
+    const server = files.get("server.mjs")!;
+    expect(server).toContain('process.env.VITE_API_PROXY_TARGET ?? "http://localhost:3000"');
+    expect(server).toMatch(/url\.startsWith\("\/api\/"\)/);
+    expect(server).toContain("proxyRequest");
+    // Dockerfile runs it (and `serve` is gone — it cannot proxy).
+    const dockerfile = files.get("Dockerfile")!;
+    expect(dockerfile).toContain('CMD ["node", "server.mjs"]');
+    expect(dockerfile).not.toMatch(/serve -s|"serve"/);
+    // Compose points the proxy at the backend SERVICE (not localhost).
+    expect(all.get("docker-compose.yml")!).toMatch(/VITE_API_PROXY_TARGET: "http:\/\/api:3000"/);
   });
 
   it("bootstraps a standalone app via bootstrapApplication + appConfig", async () => {

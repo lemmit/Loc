@@ -51,6 +51,10 @@ const angularPlatform: PlatformSurface = {
       dependsOnDb: false,
       healthPath: "/",
       internalPort: 3000,
+      // Served by the emitted `server.mjs` (a static host with a same-origin
+      // `/api` reverse proxy) reading VITE_API_PROXY_TARGET — so the bundle's
+      // relative `/api` reaches the backend service under compose.
+      injectsApiProxyTarget: true,
     };
   },
 };

@@ -3,8 +3,10 @@
 #
 # Angular diverges from the Vite frontends: `ng build` emits a static
 # bundle to `dist/browser` (the pack's angular.json pins `outputPath` so
-# this path is stable), served by a tiny static server with history-API
-# fallback so client-side deep links resolve to index.html.
+# this path is stable), served by the emitted `server.mjs` — a tiny static
+# host with history-API fallback (client-side deep links → index.html) AND a
+# same-origin `/api` reverse proxy, so the bundle's relative `/api` reaches the
+# backend SERVICE under compose / k8s instead of this server's own origin.
 
 FROM node:24-alpine AS build
 WORKDIR /app
@@ -23,6 +25,9 @@ FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV PORT=3000
 COPY --from=build /app/dist/browser ./browser
+COPY --from=build /app/server.mjs ./server.mjs
 EXPOSE 3000
-# `serve -s` rewrites unmatched routes to index.html (SPA fallback).
-CMD ["npx", "--yes", "serve", "-s", "browser", "-l", "3000"]
+# server.mjs: static + SPA fallback + same-origin `/api` proxy
+# (VITE_API_PROXY_TARGET → the backend service).  A bare static server (`serve`)
+# can't proxy, so the bundle's relative `/api` would never reach the backend.
+CMD ["node", "server.mjs"]

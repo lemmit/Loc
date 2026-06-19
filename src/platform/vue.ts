@@ -45,7 +45,7 @@ const vuePlatform: PlatformSurface = {
       dependsOnDb: false,
       healthPath: "/",
       internalPort: 3000,
-      previewProxiesApi: true,
+      injectsApiProxyTarget: true,
     };
   },
 };

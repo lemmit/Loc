@@ -614,7 +614,7 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   // inside the compose network the backend is its SERVICE name (not the
   // host's `localhost`), so point the preview proxy at `http://<svc>:<port>`.
   // (Local `vite dev` falls back to the baked localhost target in vite.config.)
-  if (shape.previewProxiesApi && d.targetName) {
+  if (shape.injectsApiProxyTarget && d.targetName) {
     const target = sys.deployables.find((t) => t.name === d.targetName);
     if (target) {
       const targetSlug = serviceSlug(target.name);
