@@ -656,12 +656,14 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // (document/embedded) aggregate.  node handles both shapes: a `document`
   // aggregate filters in-app over the rehydrated doc; an `embedded` aggregate's
   // root scalars are real columns, so the predicate AND-s into the SQL read like
-  // the relational path (DEBT-02).  .NET handles all shapes (it's not in
-  // LIMITED_FAMILIES).  A PRINCIPAL filter on a non-relational shape stays gated
-  // everywhere for now (the actor + json intersection isn't wired) — hence the
-  // `!usesPrincipal` condition at the call site.
+  // the relational path.  java handles `document` (its document-store filters
+  // every read in-app via `findAll().stream()`).  .NET handles all shapes (it's
+  // not in LIMITED_FAMILIES).  A PRINCIPAL filter on a non-relational shape stays
+  // gated everywhere for now (the actor + json intersection isn't wired) — hence
+  // the `!usesPrincipal` condition at the call site.
   const supportsNonRelationalFilter = (family: string, shp: string): boolean =>
-    family === "node" && (shp === "document" || shp === "embedded");
+    (family === "node" && (shp === "document" || shp === "embedded")) ||
+    (family === "java" && shp === "document");
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
