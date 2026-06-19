@@ -25,18 +25,32 @@ describe("angular pack format groundwork", () => {
     expect(packFormatForBuiltin("spartanNg@v1")).toBe("angular");
   });
 
-  it("angular required set mirrors TSX plus the op-dialog wrapper", () => {
+  it("angular required set is the display surface only — forms/modal render via the walker, not templates", () => {
     const angular = new Set(flattenRequired(REQUIRED_PRIMITIVES.angular));
     const tsx = new Set(flattenRequired(REQUIRED_PRIMITIVES.tsx));
+    // Every shared DISPLAY/layout/input primitive the TSX set requires is
+    // required for angular too — except the form/modal family, which Angular
+    // renders inline via the `renderCreateForm` walker seam (or stubs), so it
+    // ships no `form-of` / `field-input-*` / `form-*` / `modal` templates.
+    const angularRendersInline = (name: string): boolean =>
+      name === "primitive-form-of" ||
+      name === "primitive-modal" ||
+      name.startsWith("field-input-") ||
+      name.startsWith("form-") ||
+      name === "op-dialog" ||
+      name === "realtime-toast";
     for (const name of tsx) {
       // Angular builds with `ng build`, so it emits `angular-json`
       // instead of the Vite world's `vite-config`.
       if (name === "vite-config") continue;
+      if (angularRendersInline(name)) {
+        expect(angular.has(name), `angular should NOT require inline-rendered "${name}"`).toBe(
+          false,
+        );
+        continue;
+      }
       expect(angular.has(name), `angular set missing tsx-required "${name}"`).toBe(true);
     }
-    // Angular owns the operation-dialog wrapper (MatDialog / p-dialog /
-    // the spartan dialog), like the vue packs.
-    expect(angular.has("op-dialog")).toBe(true);
     // The `ng build` shell delta: angular-json in, vite-config out.
     expect(angular.has("angular-json")).toBe(true);
     expect(angular.has("vite-config")).toBe(false);
