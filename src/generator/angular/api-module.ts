@@ -1,5 +1,5 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
-import { forApiRead } from "../../ir/enrich/wire-projection.js";
+import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
 import type { EnrichedAggregateIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { peelCollection, peelNullable, wireTypeInfo } from "../../ir/types/wire-types.js";
 import { lines } from "../../util/code-builder.js";
@@ -64,20 +64,29 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
   const single = agg.name;
   const serviceName = `${single}Service`;
   const responseName = `${single}Response`;
+  const createName = `Create${single}Request`;
   const tag = snake(plural(single));
   const allFn = `useAll${plural(single)}`;
   const allVar = `${lowerFirst(single)}All`;
+  const createFn = `useCreate${single}`;
 
   const fields = forApiRead(wireShapeFor(agg));
+  const createFields = createInputFields(agg);
 
   return lines(
     "// Auto-generated.  Do not edit by hand.",
     'import { HttpClient } from "@angular/common/http";',
     'import { Injectable, inject, signal } from "@angular/core";',
+    'import { firstValueFrom } from "rxjs";',
     'import { API_BASE_URL } from "./config";',
     "",
     `export interface ${responseName} {`,
     ...fields.map((f) => `  ${f.name}: ${f.source === "id" ? "string" : wireTsType(f.type)};`),
+    "}",
+    "",
+    // Client-suppliable create payload (server-controlled fields dropped).
+    `export interface ${createName} {`,
+    ...createFields.map((f) => `  ${f.name}: ${wireTsType(f.type)};`),
     "}",
     "",
     `@Injectable({ providedIn: "root" })`,
@@ -86,6 +95,10 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
     "",
     `  findAll() {`,
     `    return this.http.get<${responseName}[]>(\`\${API_BASE_URL}/${tag}\`);`,
+    "  }",
+    "",
+    `  create(input: ${createName}) {`,
+    `    return this.http.post<{ id: string }>(\`\${API_BASE_URL}/${tag}\`, input);`,
     "  }",
     "}",
     "",
@@ -111,9 +124,30 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
     "  return { data, isLoading, isError };",
     "}",
     "",
-    // Reference the var name the page-shell will hoist (`<agg>All`) so the
-    // naming stays discoverable next to the factory it calls.
+    "/** Signal-backed create mutation — hoisted as a component field; `mutate`",
+    " *  POSTs the form payload and resolves with the new id.  `isPending` /",
+    " *  `error` are signals the form template reads via `()`. */",
+    `export function ${createFn}() {`,
+    `  const service = inject(${serviceName});`,
+    "  const isPending = signal(false);",
+    "  const error = signal<unknown>(null);",
+    `  const mutate = (input: ${createName}): Promise<{ id: string }> => {`,
+    "    isPending.set(true);",
+    "    error.set(null);",
+    "    return firstValueFrom(service.create(input))",
+    "      .catch((e) => {",
+    "        error.set(e);",
+    "        throw e;",
+    "      })",
+    "      .finally(() => isPending.set(false));",
+    "  };",
+    "  return { mutate, isPending, error };",
+    "}",
+    "",
+    // Reference the var names the page-shell will hoist so the naming stays
+    // discoverable next to the factories.
     `// hoisted as: readonly ${allVar} = ${allFn}();`,
+    `// hoisted as: readonly ${lowerFirst(single)}Create = ${createFn}();`,
     "",
   );
 }

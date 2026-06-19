@@ -131,4 +131,20 @@ describe("angular generator — project shape", () => {
     expect(api).toContain("const data = signal<CustomerResponse[]>([]);");
     expect(api).toContain("return { data, isLoading, isError };");
   });
+
+  it("emits the create request type + service POST + signal-backed mutation factory", async () => {
+    const api = (await angularFiles()).get("src/api/customer.ts")!;
+    // Client-suppliable create payload.
+    expect(api).toContain("export interface CreateCustomerRequest {");
+    expect(api).toContain("name: string;");
+    // Service POST + rxjs->promise mutation.
+    expect(api).toContain("create(input: CreateCustomerRequest) {");
+    expect(api).toContain("this.http.post<{ id: string }>(`${API_BASE_URL}/customers`, input)");
+    expect(api).toContain('import { firstValueFrom } from "rxjs";');
+    expect(api).toContain("export function useCreateCustomer() {");
+    expect(api).toContain(
+      "const mutate = (input: CreateCustomerRequest): Promise<{ id: string }> => {",
+    );
+    expect(api).toContain("return { mutate, isPending, error };");
+  });
 });
