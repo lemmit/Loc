@@ -52,11 +52,28 @@ function indentTemplate(markup: string): string {
     .join("\n");
 }
 
+/** The `src/lib/format.ts` helpers a primitive template may call inside an
+ *  Angular interpolation.  Angular evaluates template expressions against the
+ *  component instance, so any helper the walked markup references has to be
+ *  re-exposed as a component member — detected here by a `<helper>(` call in
+ *  the rendered template. */
+const FORMAT_HELPERS = [
+  "formatMoney",
+  "formatDateTime",
+  "formatNumber",
+  "formatBool",
+  "formatPlain",
+  "shortId",
+] as const;
+
 export function renderAngularPage(input: AngularPageShellInput): string {
   const { page, result } = input;
   const coreSymbols = new Set<string>(["Component"]);
   const routerSymbols = new Set<string>();
   const members: string[] = [];
+  // Directives the standalone component registers in `imports: []` — the
+  // pack-declared `*Module`s plus `RouterLink`.
+  const componentImports = new Set<string>();
 
   // State fields → signals (read `name()`, write `name.set()`).
   if (result.usesState) {
@@ -74,6 +91,13 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     members.push("  readonly router = inject(Router);");
   }
 
+  // `Anchor(to:)` / `IdLink` / `Breadcrumbs` emit `[routerLink]` bindings — the
+  // standalone component registers the `RouterLink` directive.
+  if (result.usesRouterLink) {
+    routerSymbols.add("RouterLink");
+    componentImports.add("RouterLink");
+  }
+
   const imports: string[] = [
     `import { ${[...coreSymbols].sort().join(", ")} } from "@angular/core";`,
   ];
@@ -81,10 +105,18 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     imports.push(`import { ${[...routerSymbols].sort().join(", ")} } from "@angular/router";`);
   }
 
+  // Format helpers the walked markup calls (Money/DateDisplay/IdLink) — import
+  // them from `src/lib/format.ts` and re-expose as members so the template
+  // interpolations resolve against the component.
+  const usedHelpers = FORMAT_HELPERS.filter((h) => result.tsx.includes(`${h}(`));
+  if (usedHelpers.length > 0) {
+    imports.push(`import { ${usedHelpers.join(", ")} } from "../../lib/format";`);
+    for (const h of usedHelpers) members.push(`  protected readonly ${h} = ${h};`);
+  }
+
   // Primitive imports collected by `renderPrimitive` (pack-declared) —
   // each becomes an import line, and Angular declarables (the `*Module`
   // symbols a standalone component must register) go into `imports: []`.
-  const componentImports = new Set<string>();
   for (const [from, names] of [...result.imports.entries()].sort(([a], [b]) =>
     a.localeCompare(b),
   )) {
