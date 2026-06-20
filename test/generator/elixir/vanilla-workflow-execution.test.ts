@@ -67,9 +67,12 @@ describe("vanilla — Slice 5c workflow execution", () => {
     const ctx = files.get([...files.keys()].find((k) => k.endsWith("lib/api/tracker.ex"))!)!;
     // The CRUD defdelegates remain:
     expect(ctx).toContain("defdelegate update_task(record, attrs)");
-    // The named-op function for `markDone` (no CRUD collision):
+    // The named-op function for `markDone` (no CRUD collision) renders the
+    // BODY (`done := true`) and persists the assigned column, rather than
+    // casting params.
     expect(ctx).toContain("def mark_done_task(%Api.Tracker.Task{} = record, params)");
-    expect(ctx).toContain("Api.Tracker.TaskChangeset.change_mark_done(params)");
+    expect(ctx).toContain("record = %{record | done: true}");
+    expect(ctx).toContain("Ecto.Changeset.put_change(:done, record.done)");
     expect(ctx).toContain("Api.Tracker.TaskRepository.persist_change()");
     // CRUDish's `update` operation must NOT also emit a named-op
     // function — it would collide with the `update_task/2` defdelegate

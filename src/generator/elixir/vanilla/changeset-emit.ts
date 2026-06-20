@@ -95,10 +95,13 @@ function renderChangeset(appModule: string, ctxModule: string, agg: AggregateIR)
     .map((c) => ectoValidator(snake(c.field), c.pattern));
   const validatorBlock = validatorLines.length > 0 ? `\n${validatorLines.join("\n")}` : "";
 
-  // Per-action changeset helpers — one per create + operation + destroy.
+  // Per-action changeset helpers — create + destroy.  Named OPERATIONS no
+  // longer get a `change_<op>` helper: their `<op>_<agg>` context fn renders the
+  // body and `put_change`s the assigned columns directly (context-emit).  The
+  // old operation helper `cast`d the op's *params*, which raises `unknown field`
+  // at runtime whenever a param isn't a column (e.g. `reprice(qty, price)`).
   const actionHelpers = [
     ...(agg.creates ?? []).map((op) => renderActionHelper(aggModule, op, "create")),
-    ...agg.operations.map((op) => renderActionHelper(aggModule, op, "operation")),
     ...(agg.destroys ?? []).map((op) => renderActionHelper(aggModule, op, "destroy")),
   ]
     .filter(Boolean)

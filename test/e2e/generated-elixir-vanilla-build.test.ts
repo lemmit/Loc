@@ -87,6 +87,11 @@ describe.skipIf(!ENABLED)(
         // guards, `assign` struct-update, `emit` PubSub broadcast, fall-through
         // success serialised to a wire map.
         { name: "vanilla-returns-body.ddd", deployable: "api" },
+        // State-based named-operation BODY emission — a non-returning
+        // `operation reprice(qty, price) { precondition …; total := … }` renders
+        // its guards + `field := value` struct-updates and persists the assigned
+        // columns via put_change (not a param cast).
+        { name: "vanilla-op-body.ddd", deployable: "api" },
         // ES applier folds over value-object / enum fields (P4.3): an inline VO
         // constructor renders to a plain map on vanilla — compile that path.
         { name: "vanilla-vo-fold.ddd", deployable: "api" },

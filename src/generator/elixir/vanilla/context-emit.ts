@@ -11,6 +11,8 @@
 
 import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { stmtUsesParam } from "../domain/predicates.js";
+import type { RenderCtx } from "../render-expr.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import {
   customFindsOfAgg,
@@ -19,7 +21,11 @@ import {
   renderEnsureHelper,
   renderEsContextBlock,
 } from "./eventsourced-emit.js";
-import { isReturningOperation, renderReturningOpFunction } from "./operation-returns-emit.js";
+import {
+  isReturningOperation,
+  renderReturningOpFunction,
+  renderReturningStmt,
+} from "./operation-returns-emit.js";
 import { customFindsOf } from "./repository-emit.js";
 
 /** Operation names whose `<op>_<agg>` collide with the CRUD
@@ -76,7 +82,7 @@ function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedC
       .map((op) =>
         isReturningOperation(op)
           ? renderReturningOpFunction(facadeMod, ctx, agg, op)
-          : renderNamedOpFunction(facadeMod, agg, aggPascal, aggSnake, op),
+          : renderNamedOpFunction(facadeMod, ctx, agg, aggPascal, aggSnake, op),
       );
     // Custom-find defdelegates — `<find>_<agg>(args...)` routes to the
     // repository fn emitted by `customFindsOf`.  Workflow `repo-let`
@@ -137,30 +143,67 @@ ${blocks.join("\n")}${retrievalBlock}${ensureBlock}end
 `;
 }
 
-// Slice 5c prerequisite — named operation functions per aggregate
-// operation.  Each `<op>_<agg>(record, params)` casts the params via
-// the aggregate's Changeset module (using the per-action
-// `change_<op>/2` helper from Slice 2) and runs `Repo.update`.  This
-// is the seam workflows call when their body invokes
-// `<aggregate>.<operation>(args)`.
+// Named operation functions per aggregate operation.  `<op>_<agg>(record,
+// params)` runs the operation BODY: bind the params it reads, render the
+// statements (guards raise, `field := value` struct-updates the threaded
+// `record`, `emit` broadcasts — the same vanilla renderer the returning-op
+// path uses), then persist the assigned fields and `Repo.update`.
+//
+// The body is rendered against an immutable `record` struct: each `field :=
+// value` re-binds `record = %{record | field: value}`, so after the body the
+// struct holds the computed values.  Persistence then `put_change`s exactly the
+// assigned fields onto a changeset (they're real schema columns), rather than
+// `cast`ing the op's *params* — params are inputs to the formula, not columns,
+// so casting them would raise `unknown field` at runtime.  This is the seam
+// workflows call when their body invokes `<aggregate>.<operation>(args)`.
 function renderNamedOpFunction(
   facadeMod: string,
+  ctx: BoundedContextIR,
   agg: AggregateIR,
   aggPascal: string,
   aggSnake: string,
   op: OperationIR,
 ): string {
+  void agg;
   const opSnake = snake(op.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
-  const csMod = `${aggModule}Changeset`;
   const repoMod = `${aggModule}Repository`;
-  void agg; // reserved for future per-op-param introspection
-  return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` — Slice 5c."
+  const rc: RenderCtx = { thisName: "record", contextModule: facadeMod, foundation: "vanilla" };
+
+  // Bind only the params the body references, so an unused param never trips
+  // `mix compile --warnings-as-errors`.  (`record` is always used — the persist
+  // pipeline reads it — so it needs no such guard.)
+  const usedParams = op.params.filter((p) => op.statements.some((s) => stmtUsesParam(s, p.name)));
+  const paramBinds = usedParams.map(
+    (p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})`,
+  );
+
+  // Render the body (guards / assigns / emit / let) — shared with the
+  // returning-op path; a non-returning body never carries a `return` arm.
+  const bodyLines = op.statements.map((s) => renderReturningStmt(s, ctx, rc));
+
+  // Persist the fields the body assigned (deduped, declaration order).  Each is
+  // a real schema column on the mutated `record`, so `put_change` is safe.
+  const assignedFields: string[] = [];
+  for (const s of op.statements) {
+    if (s.kind !== "assign") continue;
+    const f = snake(s.target.segments[0] ?? "");
+    if (f.length > 0 && !assignedFields.includes(f)) assignedFields.push(f);
+  }
+  const putChanges = assignedFields
+    .map((f) => `    |> Ecto.Changeset.put_change(:${f}, record.${f})`)
+    .join("\n");
+  const putBlock = putChanges ? `\n${putChanges}` : "";
+
+  const prelude = [...paramBinds, ...bodyLines].join("\n");
+  const preludeBlock = prelude ? `${prelude}\n` : "";
+
+  return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` — runs the body, persists the assigned fields."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
           {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t() | term()}
   def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params) when is_map(params) do
-    record
-    |> ${csMod}.change_${opSnake}(params)
+${preludeBlock}    record
+    |> Ecto.Changeset.change(%{})${putBlock}
     |> ${repoMod}.persist_change()
   end`;
 }

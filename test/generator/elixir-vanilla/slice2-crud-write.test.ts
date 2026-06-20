@@ -56,12 +56,16 @@ describe("vanilla — Slice 2 CRUD write path + Changeset", () => {
     expect(cs).not.toContain("Ash.Changeset");
   });
 
-  it("emits per-action change_<op> helpers for create/update/destroy from crudish", async () => {
+  it("emits per-action change_<op> helpers for create/destroy from crudish", async () => {
     const files = await generateSystemFiles(VANILLA_SOURCE);
     const cs = files.get([...files.keys()].find((k) => k.endsWith("/tracker/task_changeset.ex"))!)!;
     expect(cs).toContain("def change_create(attrs)");
-    expect(cs).toContain("def change_update(struct, attrs)");
     expect(cs).toContain("def change_destroy(struct)");
+    // Named OPERATIONS (crudish `update`, custom ops) no longer get a
+    // `change_<op>` helper — their `<op>_<agg>` context fn renders the body and
+    // put_changes the assigned columns; the dead helper cast op *params*, which
+    // raised `unknown field` at runtime when a param wasn't a column.
+    expect(cs).not.toContain("def change_update(");
   });
 
   it("Repository now exposes insert/update/delete returning typed results", async () => {

@@ -1,0 +1,43 @@
+// State-based named-operation BODY emission on the vanilla foundation.  A
+// non-returning `operation reprice(qty, price) { precondition …; total := … }`
+// now renders its body: the `<op>_<agg>` context fn binds the params it reads,
+// raises on a failed `precondition`, struct-updates the threaded `record` for
+// each `field := value`, then `put_change`s the assigned columns onto an Ecto
+// changeset and `Repo.update`s.  Compiled by build-generated-elixir-vanilla so
+// the rendered body + the put_change persist path actually pass
+// `mix compile --warnings-as-errors` against plain Ecto.
+system Inventory {
+  subdomain Ops {
+    context Stock {
+      aggregate Item ids guid {
+        sku: string
+        quantity: int
+        unitPrice: int
+        total: int
+
+        // Guard + multi-statement mutation reading params (qty/price) and a
+        // sibling field (quantity) — the canonical computed-operation shape.
+        operation reprice(qty: int, price: int) {
+          precondition qty > 0
+          total := qty * price - quantity
+        }
+
+        // No-param mutation — exercises the param-less + boolean-assign path.
+        operation restock() {
+          quantity := quantity + 1
+        }
+      }
+      repository Items for Item { }
+    }
+  }
+  api InventoryApi from Ops
+  storage pg { type: postgres }
+  resource itemState { for: Stock, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Stock]
+    dataSources: [itemState]
+    serves: InventoryApi
+    port: 4000
+  }
+}
