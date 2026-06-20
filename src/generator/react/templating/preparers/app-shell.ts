@@ -97,6 +97,14 @@ export function prepareAppShellVM(
   hasViewsIndex: boolean = true,
   /** Same, for the `WorkflowsIndex` page (origin `workflows-index`). */
   hasWorkflowsIndex: boolean = true,
+  /** Whether the deployable is `auth: ui` — the verified session user is
+   *  available client-side.  Surfaced verbatim on the VM as `authUi` so the
+   *  App-shell template can bind `currentUser = useSession().user` and wrap
+   *  menu links that carry a `requiresJs` gate.  The default hardcoded sidebar
+   *  entries (aggregates/workflows/views) are scaffold pages with no
+   *  `requires`, so they never carry `requiresJs` and stay ungated; only the
+   *  `sidebarOverride` (menu-derived) entries can be gated. */
+  authUi: boolean = false,
 ): AppShellVM {
   const imports: ImportVM[] = [];
   const routes: RouteVM[] = [];
@@ -296,6 +304,13 @@ export function prepareAppShellVM(
   }
   for (const imp of layoutImports ?? []) imports.push(imp);
 
+  const finalNavSections = sidebarOverride ?? navSections;
+  // The App-shell binds the session user only when at least one nav entry is
+  // actually gated — binding it under bare `authUi` (with no gated link) would
+  // leave `currentUser` + the `useSession` import unused, which the generated
+  // project's Biome config rejects as an error.
+  const navUsesSession = finalNavSections.some((s) => s.entries.some((e) => !!e.requiresJs));
+
   return {
     systemNameHuman: humanize(systemName),
     imports,
@@ -304,6 +319,8 @@ export function prepareAppShellVM(
     namedLayouts: namedLayoutsVM,
     hasNamedLayouts: namedLayoutsVM.length > 0,
     anyLayoutUsesNavigate: namedLayoutsVM.some((nl) => nl.usesNavigate),
-    navSections: sidebarOverride ?? navSections,
+    navSections: finalNavSections,
+    authUi,
+    navUsesSession,
   };
 }

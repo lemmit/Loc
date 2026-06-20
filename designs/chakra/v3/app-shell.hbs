@@ -6,7 +6,8 @@ import {
   Drawer, Portal, useDisclosure, List,
 } from "@chakra-ui/react";
 import React from "react";
-{{#each imports}}import {{specifier}} from "{{from}}";
+{{#if navUsesSession}}import { useSession } from "./auth/AuthGate";
+{{/if}}{{#each imports}}import {{specifier}} from "{{from}}";
 {{/each}}{{#if hasRealtimeHandlers}}import { RealtimeHandlers } from "./components/RealtimeHandlers";
 {{/if}}
 
@@ -90,7 +91,8 @@ function useIsActive() {
 function AppShellLayout() {
   const isActive = useIsActive();
   const navigate = useNavigate();
-  const { open, onOpen, onClose } = useDisclosure();
+{{#if navUsesSession}}  const currentUser = useSession().user as Record<string, any>;
+{{/if}}  const { open, onOpen, onClose } = useDisclosure();
   // Mobile UX: auto-close the temporary Drawer after a route change.
   const location = useLocation();
   React.useEffect(() => {
@@ -103,7 +105,26 @@ function AppShellLayout() {
       <Separator />
       <List.Root gap={0} pt={2} listStyleType="none">
 {{#each navSections}}        <Text fontSize="xs" fontWeight={600} color="gray.500" px={4} py={1} textTransform="uppercase">{{label}}</Text>
-{{#each entries}}        <List.Item>
+{{#each entries}}{{#if requiresJs}}        {({{{requiresJs}}}) ? (
+          <List.Item>
+            <Box
+              as="button"
+              w="full"
+              textAlign="left"
+              px={4}
+              py={2}
+              fontWeight={isActive({{{activeArgs}}}) ? 600 : 400}
+              bg={isActive({{{activeArgs}}}) ? "brand.50" : "transparent"}
+              color={isActive({{{activeArgs}}}) ? "brand.600" : "inherit"}
+              _hover=\{{ bg: "gray.100" }}
+              onClick={() => navigate("{{to}}")}
+              data-testid="{{testId}}"
+            >
+              {{label}}
+            </Box>
+          </List.Item>
+        ) : null}
+{{else}}        <List.Item>
           <Box
             as="button"
             w="full"
@@ -120,7 +141,7 @@ function AppShellLayout() {
             {{label}}
           </Box>
         </List.Item>
-{{/each}}{{/each}}      </List.Root>
+{{/if}}{{/each}}{{/each}}      </List.Root>
     </Box>
   );
 

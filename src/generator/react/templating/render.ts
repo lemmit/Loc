@@ -89,6 +89,12 @@ export function renderAppShell(
    *  missing index module.  Mirrors `hasScaffoldHome`. */
   hasViewsIndex: boolean = true,
   hasWorkflowsIndex: boolean = true,
+  /** Whether this react deployable is `auth: ui` (verified session claims
+   *  available client-side).  Gates the menu-link `requires` hiding in the
+   *  App-shell template — the `useSession`/`currentUser` binding + per-link
+   *  `{requiresJs}` wrap are emitted only when true, so non-auth output stays
+   *  byte-identical. */
+  authUi = false,
 ): string {
   return pack.render("app-shell", {
     hasRealtimeHandlers,
@@ -106,6 +112,7 @@ export function renderAppShell(
       observableWorkflows,
       hasViewsIndex,
       hasWorkflowsIndex,
+      authUi,
     ),
     // Router 7 (stack v3) renamed the package react-router-dom →
     // react-router; library mode keeps the v6 API so only the

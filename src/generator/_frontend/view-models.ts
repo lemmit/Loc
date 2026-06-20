@@ -127,6 +127,14 @@ export interface AppShellVM {
   anyLayoutUsesNavigate: boolean;
   /** One section per construct kind that has at least one entry. */
   navSections: NavSectionVM[];
+  /** Whether the deployable is `auth: ui`.  Drives the per-entry `requiresJs`
+   *  wrap (only gated entries carry one). */
+  authUi: boolean;
+  /** True when `auth: ui` AND at least one nav entry is gated (`requiresJs`).
+   *  Gates the `useSession` import + `currentUser` binding so they're emitted
+   *  only when actually consumed — an unused binding would be a Biome error in
+   *  the generated project.  False ⇒ byte-identical to non-auth output. */
+  navUsesSession: boolean;
 }
 
 /** A named-layout wrapper view-model.  Each slot's JSX is the

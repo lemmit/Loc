@@ -7,7 +7,8 @@ import {
   useDisclosure, List, ListItem,
 } from "@chakra-ui/react";
 import React from "react";
-{{#each imports}}import {{specifier}} from "{{from}}";
+{{#if navUsesSession}}import { useSession } from "./auth/AuthGate";
+{{/if}}{{#each imports}}import {{specifier}} from "{{from}}";
 {{/each}}{{#if hasRealtimeHandlers}}import { RealtimeHandlers } from "./components/RealtimeHandlers";
 {{/if}}
 
@@ -93,7 +94,8 @@ function useIsActive() {
 function AppShellLayout() {
   const isActive = useIsActive();
   const navigate = useNavigate();
-  const { isOpen, onOpen, onClose } = useDisclosure();
+{{#if navUsesSession}}  const currentUser = useSession().user as Record<string, any>;
+{{/if}}  const { isOpen, onOpen, onClose } = useDisclosure();
   // Mobile UX: auto-close the temporary Drawer after a route change.
   // Tapping a sidebar entry on a phone otherwise leaves the drawer
   // covering the destination page.  Desktop is unaffected — the
@@ -109,7 +111,26 @@ function AppShellLayout() {
       <Divider />
       <List spacing={0} pt={2}>
 {{#each navSections}}        <Text fontSize="xs" fontWeight={600} color="gray.500" px={4} py={1} textTransform="uppercase">{{label}}</Text>
-{{#each entries}}        <ListItem>
+{{#each entries}}{{#if requiresJs}}        {({{{requiresJs}}}) ? (
+          <ListItem>
+            <Box
+              as="button"
+              w="full"
+              textAlign="left"
+              px={4}
+              py={2}
+              fontWeight={isActive({{{activeArgs}}}) ? 600 : 400}
+              bg={isActive({{{activeArgs}}}) ? "brand.50" : "transparent"}
+              color={isActive({{{activeArgs}}}) ? "brand.600" : "inherit"}
+              _hover=\{{ bg: "gray.100" }}
+              onClick={() => navigate("{{to}}")}
+              data-testid="{{testId}}"
+            >
+              {{label}}
+            </Box>
+          </ListItem>
+        ) : null}
+{{else}}        <ListItem>
           <Box
             as="button"
             w="full"
@@ -126,7 +147,7 @@ function AppShellLayout() {
             {{label}}
           </Box>
         </ListItem>
-{{/each}}{{/each}}      </List>
+{{/if}}{{/each}}{{/each}}      </List>
     </Box>
   );
 
