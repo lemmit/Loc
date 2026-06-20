@@ -94,7 +94,9 @@ describe("operation returns — platform-aware emission gate (exception-less spi
     expect(await gateDiags("elixir")).toEqual([]);
   });
 
-  it("STILL gates a mutation-then-return operation on elixir/ash (vanilla-only today)", async () => {
+  it("does NOT gate a mutation-then-return (assign) operation on elixir/ash (DEBT-03)", async () => {
+    // `reserved := true` is an in-memory struct-update the generic action's run
+    // fn now performs (`%{record | reserved: true}`), so ash serves it.
     const sys = `
       system Shop {
         subdomain Sales {
@@ -115,9 +117,33 @@ describe("operation returns — platform-aware emission gate (exception-less spi
     const diags = validateLoomModel(enrichLoomModel(lowerModel(model)))
       .filter((d) => d.code === "loom.operation-return-unsupported")
       .map((d) => d.message);
+    expect(diags).toEqual([]);
+  });
+
+  it("STILL gates an `emit`-bodied returning operation on elixir/ash (vanilla-only)", async () => {
+    const sys = `
+      system Shop {
+        subdomain Sales {
+          context Shop {
+            error NotFound { resource: string }
+            event Accepted { code: string }
+            aggregate Order ids guid {
+              code: string
+              operation accept(): string or NotFound { emit Accepted { code: code }  return code }
+            }
+          }
+        }
+        storage pg { type: postgres }
+        resource shopState { for: Shop, kind: state, use: pg }
+        deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], port: 4000 }
+      }`;
+    const { model } = await parseString(sys, { validate: false });
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(model)))
+      .filter((d) => d.code === "loom.operation-return-unsupported")
+      .map((d) => d.message);
     expect(diags.length).toBe(1);
     expect(diags[0]).toContain("foundation: ash");
-    expect(diags[0]).toContain("return-dominant");
+    expect(diags[0]).toContain("foundation: vanilla");
   });
 
   it("does NOT gate the same mutation-then-return operation on elixir/vanilla", async () => {

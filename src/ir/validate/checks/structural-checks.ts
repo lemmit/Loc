@@ -17,7 +17,7 @@ import type {
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allContexts } from "../../types/loom-ir.js";
-import { isReturnDominantOp } from "../../util/operation-returns.js";
+import { isAshReturningOpEmittable } from "../../util/operation-returns.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 
@@ -518,12 +518,13 @@ export function validateOperationReturnsUnimplemented(
   const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java"]);
 
   // Elixir capability is per-op: vanilla handles every returning op; ash handles
-  // only return-dominant ones.  So elixir can serve an op iff every foundation
-  // it runs under can — `vanilla` always, `ash` only when the body is
-  // return-dominant.
+  // return-dominant ops PLUS in-memory mutation (`assign`) and `precondition`/
+  // `requires` guards (DEBT-03).  So elixir can serve an op iff every foundation
+  // it runs under can — `vanilla` always, `ash` when the body is Ash-emittable
+  // (`emit` / `add` / `remove` still defer to vanilla).
   const elixirCapableForOp = (op: OperationIR): boolean =>
     elixirFoundations.size > 0 &&
-    [...elixirFoundations].every((f) => f === "vanilla" || isReturnDominantOp(op));
+    [...elixirFoundations].every((f) => f === "vanilla" || isAshReturningOpEmittable(op));
 
   const isCapable = (p: string, op: OperationIR): boolean =>
     SUPPORTED_RETURN_BACKENDS.has(p) || (p === "elixir" && elixirCapableForOp(op));
@@ -537,11 +538,13 @@ export function validateOperationReturnsUnimplemented(
       // gets a targeted hint; otherwise the generic "backend doesn't emit it"
       // message.
       const ashDeferred =
-        unsupported.includes("elixir") && elixirFoundations.has("ash") && !isReturnDominantOp(op);
+        unsupported.includes("elixir") &&
+        elixirFoundations.has("ash") &&
+        !isAshReturningOpEmittable(op);
       const ashNote = ashDeferred
-        ? ` On foundation: ash only *return-dominant* bodies (statements limited to ` +
-          `\`return\`/\`let\`) are emitted today; this op mutates state or declares a guard, ` +
-          `so host it on foundation: vanilla.`
+        ? ` On foundation: ash a returning op's body may use \`return\`/\`let\`, in-memory ` +
+          `\`field := value\` mutation, and \`precondition\`/\`requires\` guards; this op uses ` +
+          `\`emit\`/\`add\`/\`remove\` (or a bare expression), so host it on foundation: vanilla.`
         : "";
       diags.push({
         severity: "error",

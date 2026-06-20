@@ -174,6 +174,12 @@ describe.skipIf(!ENABLED)(
         // ProblemDetails).  The decisive check that Ash 3.x accepts the generic
         // action + its `:id`-first code interface.
         { name: "operation-returns.ddd" },
+        // DEBT-03 — a MUTATING + GUARDED returning-op body on ash: the generic
+        // action's run fn struct-updates the loaded record in place
+        // (`%{record | quantity: …}`) and `precondition`/`requires` raise.  The
+        // decisive check that the in-place mutation + raise guards compile against
+        // real Ash 3.x.
+        { name: "operation-returns-body.ddd" },
         // Principal-referencing (tenancy) capability filter on Ash (DEBT-01):
         // `filter this.tenantId == currentUser.tenantId` → `base_filter
         // expr(tenant_id == ^actor(:tenant_id))`, with `actor: current_user`

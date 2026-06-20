@@ -19,32 +19,32 @@
 //     status (the same `problem_variant/5` responder the vanilla foundation
 //     emits), an absent record → the shared 404.
 //
-// **Slice scope (first slice):** *return-dominant* bodies only — every statement
-// is a `return` or a `let`.  A generic action has no changeset, so
-// mutation-then-return (`assign`/`add`/`remove`/`emit` before the return) and
-// `requires`/`precondition` guards stay gated on `foundation: ash`
-// (`validateOperationReturnsUnimplemented` keeps rejecting them).  This covers
-// the canonical `operation foo(): Agg or NotFound { return NotFound { … } }`
-// shape every current fixture uses; the mutation/guard forms are a follow-up
-// (they need the generic-action changeset bridge the doc describes).
+// **Slice scope:** `return`/`let`, plus *in-memory* mutation (`assign` →
+// `%{record | field: …}`, the same struct-update the vanilla foundation does —
+// no Ash changeset, no persistence beyond the response) and `precondition`/
+// `requires` guards (raise).  `emit` (PubSub), `add`/`remove` (association
+// metadata) stay gated on `foundation: ash` (`isAshReturningOpEmittable` keeps
+// the validator rejecting them → host on vanilla).  Covers the canonical
+// `operation foo(): Agg or NotFound { … }` return shape AND the guard/mutate
+// pattern (`precondition …; field := value`).
 // ---------------------------------------------------------------------------
 
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type { AggregateIR, BoundedContextIR, OperationIR } from "../../ir/types/loom-ir.js";
 import { aggregateUsesPrincipalContextFilter } from "../../ir/types/loom-ir.js";
-import { isReturnDominantOp } from "../../ir/util/operation-returns.js";
+import { isAshReturningOpEmittable } from "../../ir/util/operation-returns.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 // Foundation-neutral helpers shared with the vanilla emitter.
 import { errorVariantsOf } from "./vanilla/operation-returns-emit.js";
 
-/** A returning op the Ash slice can emit today: its body is *return-dominant*
- *  (every statement is a `return` or a `let`).  Bodies with mutations
- *  (`assign`/`add`/`remove`/`emit`) or guards (`precondition`/`requires`) need
- *  the generic-action changeset bridge and stay gated on Ash for now.  Shares
- *  `isReturnDominantOp` with the validator gate so the two never drift. */
+/** A returning op the Ash slice can emit today: `return`/`let`, in-memory
+ *  `assign` mutation, and `precondition`/`requires` guards.  `emit`/`add`/`remove`
+ *  bodies still need machinery the generic action's run fn doesn't carry and stay
+ *  gated on Ash.  Shares `isAshReturningOpEmittable` with the validator gate so
+ *  the two never drift. */
 export function isAshReturningOpSupported(op: OperationIR): boolean {
-  return isReturnDominantOp(op);
+  return isAshReturningOpEmittable(op);
 }
 
 /** Does this aggregate have any public returning op the Ash slice emits (→ the
@@ -101,11 +101,29 @@ export function renderAshReturningOpAction(
     (p) => `            ${snake(p.name)} = input.arguments.${snake(p.name)}`,
   );
 
-  // Body: the `let` binds, then the terminal tagged term.
+  // Body: `let` binds, in-memory mutations + guards, then the terminal tagged
+  // term.  A generic action has no changeset, so an `assign` struct-updates the
+  // loaded record in place (`%{record | field: …}`, same as the vanilla
+  // foundation — the fall-through success serialises the mutated struct), and
+  // `precondition`/`requires` raise.  (`emit`/`add`/`remove` stay gated — the
+  // validator keeps rejecting them on the ash foundation.)
   const bodyLines: string[] = [];
   for (const s of op.statements) {
     if (s.kind === "let") {
       bodyLines.push(`            ${snake(s.name)} = ${renderExpr(s.expr, renderCtx)}`);
+    } else if (s.kind === "assign") {
+      const field = snake(s.target.segments[0] ?? "");
+      bodyLines.push(
+        `            record = %{record | ${field}: ${renderExpr(s.value, renderCtx)}}`,
+      );
+    } else if (s.kind === "precondition") {
+      bodyLines.push(
+        `            if not (${renderExpr(s.expr, renderCtx)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`,
+      );
+    } else if (s.kind === "requires") {
+      bodyLines.push(
+        `            if not (${renderExpr(s.expr, renderCtx)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`,
+      );
     } else if (s.kind === "return") {
       bodyLines.push(`            ${renderReturnTerm(s, ctx, agg, renderCtx)}`);
     }
@@ -177,7 +195,19 @@ function renderReturnTerm(
 function statementReferencesName(s: OperationIR["statements"][number], name: string): boolean {
   // Serialise the relevant expr and look for the snake name as a word — cheap
   // but sufficient (params are bound to their snake name in the rendered body).
-  const expr = s.kind === "let" ? s.expr : s.kind === "return" ? s.value : undefined;
+  // Covers every statement kind the run fn renders so a param used only in a
+  // guard / assign still gets its `input.arguments.<p>` bind (else "undefined
+  // variable").
+  const expr =
+    s.kind === "let"
+      ? s.expr
+      : s.kind === "return"
+        ? s.value
+        : s.kind === "assign"
+          ? s.value
+          : s.kind === "precondition" || s.kind === "requires"
+            ? s.expr
+            : undefined;
   if (!expr) return false;
   return JSON.stringify(expr).includes(`"${name}"`);
 }

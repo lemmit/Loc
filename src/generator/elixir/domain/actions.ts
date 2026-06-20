@@ -39,8 +39,18 @@ import {
  *  matching Hono/.NET); coarse "must be authenticated" auth is enforced
  *  separately by the deployable's JWT plug.  Returns "" when the aggregate
  *  has no guarded operations (no authorizer is attached in that case). */
+/** A `requires`-guarded op that emits an Ash policy + SimpleCheck — i.e. a
+ *  guarded op handled by the normal update-action path.  A *returning* op
+ *  (emitted as a generic action) handles its `requires`/`precondition` inline in
+ *  the run fn (`isAshReturningOpSupported`), so it must NOT also emit a policy
+ *  check (the check's changeset/actor context doesn't carry the run fn's
+ *  `record`/param binds — DEBT-03). */
+export function isAshPolicyGuardedOperation(op: AggregateIR["operations"][number]): boolean {
+  return isGuardedOperation(op) && !isAshReturningOpSupported(op);
+}
+
 export function renderPolicies(agg: AggregateIR, resourceModule: string): string {
-  const guarded = agg.operations.filter(isGuardedOperation);
+  const guarded = agg.operations.filter(isAshPolicyGuardedOperation);
   if (guarded.length === 0) return "";
   // Base allow: un-guarded actions are authorized for any caller; the
   // guarded `policy action(:op)` blocks below AND a second check on top.
@@ -64,7 +74,7 @@ export function renderPolicyChecks(
   ctx: RenderCtx,
   resourceModule: string,
 ): string {
-  const guarded = agg.operations.filter(isGuardedOperation);
+  const guarded = agg.operations.filter(isAshPolicyGuardedOperation);
   if (guarded.length === 0) return "";
   const modules = guarded.map((op) => {
     const cond = operationGuards(op)

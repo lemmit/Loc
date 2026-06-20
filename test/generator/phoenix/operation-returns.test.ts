@@ -98,3 +98,68 @@ describe("phoenix generator — exception-less operation returns (DEBT-03)", () 
     expect((ctrl.match(/defp problem_variant\(/g) ?? []).length).toBe(1);
   });
 });
+
+// DEBT-03 (mutation/guard slice) — a returning op whose body mutates (`assign`)
+// and guards (`precondition`/`requires`).  The generic action's run fn
+// struct-updates the loaded record in place and the guards raise; crucially the
+// op must NOT also emit the normal Ash policy-check / validate (whose
+// changeset/actor context doesn't carry the run fn's binds).
+const MUT_SRC = `
+system Inventory {
+  subdomain Ops {
+    context Stock {
+      error NotFound { resource: string }
+      aggregate Item ids guid {
+        sku: string
+        quantity: int
+        operation adjust(delta: int): Item or NotFound {
+          precondition delta != 0
+          requires quantity + delta >= 0
+          quantity := quantity + delta
+        }
+      }
+      repository Items for Item { }
+    }
+  }
+  api InventoryApi from Ops
+  storage primary { type: postgres }
+  resource itemState { for: Stock, kind: state, use: primary }
+  deployable api {
+    platform: phoenix
+    contexts: [Stock]
+    dataSources: [itemState]
+    serves: InventoryApi
+    port: 4000
+  }
+}
+`;
+
+describe("phoenix generator — exception-less mutation/guard bodies (DEBT-03)", () => {
+  it("renders guards (raise) + in-place struct mutation in the generic action run fn", async () => {
+    const resource = bySuffix(await generateSystemFiles(MUT_SRC), "stock/item.ex");
+    expect(resource).toContain("action :adjust, :term do");
+    // The param the guards/assign use is bound from the action arguments.
+    expect(resource).toContain("delta = input.arguments.delta");
+    // Guards raise; the assign struct-updates the loaded record in place.
+    expect(resource).toContain(
+      'if not (delta != 0), do: raise(ArgumentError, "Precondition failed: delta != 0")',
+    );
+    expect(resource).toContain(
+      'if not (record.quantity + delta >= 0), do: raise(ArgumentError, "Forbidden: quantity + delta >= 0")',
+    );
+    expect(resource).toContain("record = %{record | quantity: record.quantity + delta}");
+    // Fall-through success serialises the MUTATED record.
+    expect(resource).toContain(
+      "{:ok, {:success, %{id: record.id, sku: record.sku, quantity: record.quantity}}}",
+    );
+  });
+
+  it("does NOT emit a policy check / authorizer for the returning op's `requires`", async () => {
+    const resource = bySuffix(await generateSystemFiles(MUT_SRC), "stock/item.ex");
+    // The generic action handles `requires` inline (raise) — no Ash policy block,
+    // no SimpleCheck module, no authorizer (which would reference unbound vars).
+    expect(resource).not.toContain("Ash.Policy.Authorizer");
+    expect(resource).not.toContain("Checks.Adjust");
+    expect(resource).not.toContain("policy action(:adjust)");
+  });
+});
