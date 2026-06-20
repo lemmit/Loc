@@ -328,7 +328,33 @@ end
 
 function renderViewAction(ctx: BoundedContextIR, view: ViewIR, appModule: string): string {
   const viewSnake = snake(view.name);
-  const viewModule = `${appModule}.${upperFirst(ctx.name)}.Views.${upperFirst(view.name)}`;
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+  const viewModule = `${contextModule}.Views.${upperFirst(view.name)}`;
+  // Read-side `requires` authorization gate (D-AUTH-OIDC / default-deny): a 403
+  // returned before the query when the currentUser-only predicate fails — the
+  // read-side analogue of an operation's `requires`.  The action already binds
+  // `current_user`; an ungated view keeps its original shape.
+  if (view.requires) {
+    const webModule = `${appModule}Web`;
+    const gate = renderExpr(view.requires, {
+      thisName: "record",
+      contextModule,
+      foundation: "vanilla",
+    });
+    return `  @doc "GET /api/views/${viewSnake}"
+  def ${viewSnake}(conn, _params) do
+    current_user = Map.get(conn.assigns, :current_user)
+
+    if not (${gate}) do
+      ${webModule}.ProblemDetails.problem_response(conn, 403, "Forbidden", ${JSON.stringify(
+        `Forbidden: view ${view.name}`,
+      )})
+    else
+      data = ${viewModule}.run(current_user) |> Enum.map(&serialize/1)
+      json(conn, %{data: data})
+    end
+  end`;
+  }
   return `  @doc "GET /api/views/${viewSnake}"
   def ${viewSnake}(conn, _params) do
     current_user = Map.get(conn.assigns, :current_user)

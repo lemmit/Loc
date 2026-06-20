@@ -542,6 +542,41 @@ function renderViewAction(
         |> Map.drop(${ashInternalKeys})`
     : "record";
 
+  // Read-side `requires` authorization gate (D-AUTH-OIDC / default-deny): a
+  // 403 returned before the query runs when the predicate (currentUser-only)
+  // fails — the read-side analogue of an operation's `requires`.  The action
+  // already binds `current_user`; an ungated view keeps its exact original
+  // shape (below).
+  if (view.requires) {
+    const webModule = `${appModule}Web`;
+    const gate = renderExpr(view.requires, {
+      thisName: "record",
+      contextModule,
+      foundation: "ash",
+    });
+    return `  @doc "GET /api/views/${viewSnake}"
+  def ${viewSnake}(conn, _params) do
+    current_user = Map.get(conn.assigns, :current_user)
+
+    if not (${gate}) do
+      ${webModule}.ProblemDetails.problem_response(conn, 403, "Forbidden", ${JSON.stringify(
+        `Forbidden: view ${view.name}`,
+      )})
+    else
+      records = ${viewModule}.run(current_user)
+
+      data =
+        Enum.map(records, fn record ->
+          ${projection}
+        end)
+
+      conn
+      |> put_status(:ok)
+      |> json(%{data: data})
+    end
+  end`;
+  }
+
   return `  @doc "GET /api/views/${viewSnake}"
   def ${viewSnake}(conn, _params) do
     # currentUser available to views via run/1 first arg.
