@@ -304,8 +304,8 @@ docker run --rm -p 8080:8080 \
     my-sales:latest
 ```
 
-Build stage uses `mcr.microsoft.com/dotnet/sdk:8.0`, runtime uses
-`mcr.microsoft.com/dotnet/aspnet:8.0`.  ASP.NET Core listens on port
+Build stage uses `mcr.microsoft.com/dotnet/sdk:10.0`, runtime uses
+`mcr.microsoft.com/dotnet/aspnet:10.0`.  ASP.NET Core listens on port
 8080 (`ASPNETCORE_URLS=http://+:8080`).
 
 ### Customising

@@ -101,7 +101,7 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
     const model = await modelFrom(trioed("softDelete", "softDeletable"));
     const files = generateDotnet(model);
     const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
-    expect(cfg).toMatch(/builder\.HasQueryFilter\(x => !x\.IsDeleted\)/);
+    expect(cfg).toMatch(/builder\.HasQueryFilter\("IsDeletedFilter", x => !x\.IsDeleted\)/);
   });
 
   it("does NOT install HasQueryFilter for non-softDeletable aggregates", async () => {
@@ -124,7 +124,29 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
     `);
     const files = generateDotnet(model);
     const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
-    expect(cfg).toMatch(/builder\.HasQueryFilter\(x => !x\.Archived\)/);
+    expect(cfg).toMatch(/builder\.HasQueryFilter\("ArchivedFilter", x => !x\.Archived\)/);
+  });
+
+  it("names each filter so multiple capability filters are all additive (EF Core 10)", async () => {
+    // Pre-EF-10 a second HasQueryFilter overwrote the first; named filters
+    // make both apply.  `softDelete` + a hand-written tenancy `filter` on the
+    // same aggregate ⇒ two distinct named HasQueryFilter calls.
+    const model = await modelFrom(`
+      context Sales with softDelete {
+        aggregate Order with softDeletable {
+          subject: string
+          tenantId: string
+          filter this.tenantId == "acme"
+        }
+        repository Orders for Order { }
+      }
+    `);
+    const files = generateDotnet(model);
+    const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
+    expect(cfg).toMatch(/builder\.HasQueryFilter\("IsDeletedFilter", x => !x\.IsDeleted\)/);
+    expect(cfg).toMatch(/builder\.HasQueryFilter\("TenantIdFilter", x => x\.TenantId == "acme"\)/);
+    // Two named filters, no accidental name collision.
+    expect((cfg.match(/HasQueryFilter\(/g) ?? []).length).toBe(2);
   });
 });
 
@@ -178,11 +200,11 @@ describe(".NET generator: context-level propagation reaches per-config emission"
     `);
     const files = generateDotnet(model);
     expect(files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!).toMatch(
-      /builder\.HasQueryFilter\(x => !x\.IsDeleted\)/,
+      /builder\.HasQueryFilter\("IsDeletedFilter", x => !x\.IsDeleted\)/,
     );
     expect(
       files.get("Infrastructure/Persistence/Configurations/CustomerConfiguration.cs")!,
-    ).toMatch(/builder\.HasQueryFilter\(x => !x\.IsDeleted\)/);
+    ).toMatch(/builder\.HasQueryFilter\("IsDeletedFilter", x => !x\.IsDeleted\)/);
     const ctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
     expect(ctx).not.toMatch(/foreach \(var entityType/);
   });

@@ -90,8 +90,8 @@ describe(".NET generator", () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
     const dockerfile = files.get("Dockerfile")!;
-    expect(dockerfile).toMatch(/FROM mcr\.microsoft\.com\/dotnet\/sdk:8\.0 AS build/);
-    expect(dockerfile).toMatch(/FROM mcr\.microsoft\.com\/dotnet\/aspnet:8\.0 AS runtime/);
+    expect(dockerfile).toMatch(/FROM mcr\.microsoft\.com\/dotnet\/sdk:10\.0 AS build/);
+    expect(dockerfile).toMatch(/FROM mcr\.microsoft\.com\/dotnet\/aspnet:10\.0 AS runtime/);
     expect(dockerfile).toMatch(/ENTRYPOINT \["dotnet", "Sales\.dll"\]/);
     const dockerignore = files.get(".dockerignore")!;
     expect(dockerignore).toMatch(/\*\*\/bin/);

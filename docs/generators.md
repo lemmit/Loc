@@ -225,7 +225,7 @@ for deployables marked `platform: dotnet`.
 
 ```
 <deployable>/
-├── <Namespace>.csproj               # net8.0, EF Core, Mediator source-gen, Swashbuckle, EF Tools
+├── <Namespace>.csproj               # net10.0, EF Core 10, Mediator source-gen, Swashbuckle, EF Tools
 ├── Program.cs                       # AddDbContext, AddMediator, AddCors, AddSwaggerGen, MapControllers,
 │                                    # camelCase JSON, EnsureCreated, /health
 ├── Dockerfile                       # multi-stage dotnet/sdk → dotnet/aspnet

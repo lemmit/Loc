@@ -1400,8 +1400,8 @@ Verified end-to-end (generate → compile) for every backend that lacks a host
 toolchain or runs in a container:
 
 - **Java** — `gradle testClasses bootJar` on the host (JDK 21 + Gradle present).
-- **.NET** — host has no SDK, so build in `mcr.microsoft.com/dotnet/sdk:8.0`
-  (matches the `net8.0` target); `dotnet restore` + `dotnet build /warnaserror`
+- **.NET** — host has no SDK, so build in `mcr.microsoft.com/dotnet/sdk:10.0`
+  (matches the `net10.0` target); `dotnet restore` + `dotnet build /warnaserror`
   are clean. NuGet sails through the egress proxy.
 - **Phoenix/Elixir** — `mix deps.get && mix compile --warnings-as-errors` in the
   `hexpm/elixir` image, against real Ash 3.x.

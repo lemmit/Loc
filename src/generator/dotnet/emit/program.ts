@@ -588,19 +588,19 @@ export function renderCsproj(
     ? `\n    <!-- OIDC token validation (generated OidcUserVerifier) -->\n    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.0.1" />\n    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.0.1" />`
     : "";
   // Persistence package set — Dapper + raw Npgsql for `persistence: dapper`,
-  // otherwise the EF Core + Npgsql.EntityFrameworkCore stack.
+  // otherwise the EF Core 10 + Npgsql.EntityFrameworkCore stack.
   const persistenceRefs = usingDapper
     ? DAPPER_PROJECT_DEPS.join("\n")
-    : `    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.10" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
+    : `    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.10">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.9">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.10" />`;
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />`;
   // Resource-client NuGet refs (Phase 4c) — AWSSDK.S3 / RabbitMQ.Client
   // etc., one row per package the deployable's consumed resources need.
   const resourceRefs = Object.entries(resourceNugetDeps)
@@ -624,12 +624,12 @@ export function renderCsproj(
   // dependency ships only for the EF Core path with at least one retrieval.
   const specRef =
     usesSpecifications && !usingDapper
-      ? `\n    <!-- Ardalis.Specification — reified retrieval/criterion query objects -->\n    <PackageReference Include="Ardalis.Specification" Version="8.0.0" />\n    <PackageReference Include="Ardalis.Specification.EntityFrameworkCore" Version="8.0.0" />`
+      ? `\n    <!-- Ardalis.Specification — reified retrieval/criterion query objects -->\n    <PackageReference Include="Ardalis.Specification" Version="9.3.1" />\n    <PackageReference Include="Ardalis.Specification.EntityFrameworkCore" Version="9.3.1" />`
       : "";
   return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>${ns}</RootNamespace>
@@ -674,7 +674,7 @@ export function renderTestCsproj(ns: string): string {
   return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
@@ -727,7 +727,7 @@ RUN npm ci --prefer-offline --no-audit --no-fund || npm install
 COPY ClientApp/ ./
 RUN npm run build
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS dotnet-build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build
 WORKDIR /src
 COPY certs/ /usr/local/share/ca-certificates/
 RUN update-ca-certificates 2>&1 | tail -1 || true
@@ -736,7 +736,7 @@ RUN dotnet restore ${ns}.csproj
 COPY . .
 RUN dotnet publish ${ns}.csproj -c Release -o /app/publish --no-restore /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 # wget for the compose healthcheck (see the other dockerfile branch).
 RUN apt-get update -y && apt-get install -y --no-install-recommends wget \\
@@ -753,7 +753,7 @@ ENTRYPOINT ["dotnet", "${ns}.dll"]
   return `# syntax=docker/dockerfile:1
 # Auto-generated.
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 # Optional proxy CAs — drop *.crt files into ./certs/ to make the
 # build trust them.  The directory always exists (with a .gitkeep),
@@ -765,7 +765,7 @@ RUN dotnet restore ${ns}.csproj
 COPY . .
 RUN dotnet publish ${ns}.csproj -c Release -o /app/publish --no-restore /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 # wget is here so the compose healthcheck (which shells out to wget) works
 # inside the aspnet image — without it the container reports unhealthy
