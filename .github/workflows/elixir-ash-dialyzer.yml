@@ -31,22 +31,22 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/generator/phoenix-live-view/**'
-      - 'src/platform/phoenix-live-view.ts'
+      - 'src/generator/elixir/**'
+      - 'src/platform/elixir.ts'
       - 'examples/**'
       - 'test/e2e/fixtures/phoenix-build/**'
       - 'test/e2e/generated-phoenix-dialyzer.test.ts'
       - 'package.json'
-      - '.github/workflows/phoenix-dialyzer.yml'
+      - '.github/workflows/elixir-ash-dialyzer.yml'
   pull_request:
     paths:
-      - 'src/generator/phoenix-live-view/**'
-      - 'src/platform/phoenix-live-view.ts'
+      - 'src/generator/elixir/**'
+      - 'src/platform/elixir.ts'
       - 'examples/**'
       - 'test/e2e/fixtures/phoenix-build/**'
       - 'test/e2e/generated-phoenix-dialyzer.test.ts'
       - 'package.json'
-      - '.github/workflows/phoenix-dialyzer.yml'
+      - '.github/workflows/elixir-ash-dialyzer.yml'
   workflow_dispatch:
 
 permissions:
