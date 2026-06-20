@@ -56,6 +56,7 @@ import type {
   ParamType,
 } from "./api/define.js";
 import { _withOrigin } from "./api/factories.js";
+import { builtinCapabilities } from "./prelude.js";
 import { allMacros, lookupMacro } from "./registry.js";
 
 // The deep-clone reference rebuilder `copyAstNode` expects — the
@@ -64,6 +65,16 @@ import { allMacros, lookupMacro } from "./registry.js";
 // parents), and each cloned cross-reference (e.g. a `createdBy: User`
 // type ref) is rebuilt here so the Linked phase resolves it normally.
 type BuildRef = Parameters<typeof AstUtils.copyAstNode>[1];
+
+// Capability members are cloned with PLAIN `{ $refText }` references (the shape
+// the macro factories' `makeRef` produces), NOT the Linker's `buildReference`.
+// A plain reference resolves leniently — lowering reads `$refText` directly and
+// the linker never surfaces a "could not resolve" diagnostic — matching the
+// field/filter/stamp macros these capabilities replace.  A linker-built
+// reference would instead report unresolved targets the macro silently tolerated
+// (e.g. an `auditable` `createdBy: User id` in a model with no `User` aggregate).
+const buildCapabilityRef: BuildRef = (_node, _property, _refNode, refText) =>
+  ({ $refText: refText }) as never;
 
 // Side-table mechanism removed: capabilities are now first-class
 // AST members (FilterDecl / StampDecl / ImplementsDecl) spliced into
@@ -191,18 +202,14 @@ function expandModel(model: Model, doc: LangiumDocument, shared?: LangiumSharedS
   // O(N) AST walk once, instead of once per ref-list arg.  Workspace-aware
   // so a macro ref-list can name a declaration in a sibling file.
   const inv = buildInventory(model, shared);
-  // The language Linker's `buildReference` — handed to `copyAstNode` when a
-  // capability's members are cloned into an implementing aggregate so each
-  // cloned cross-reference re-links in the Linked phase.  Only available on
-  // the live build path (shared present); the arg-resolution path never
-  // expands capabilities, so `undefined` there is fine.
-  const buildRef = shared
-    ? (
-        shared.ServiceRegistry.getServices(doc.uri) as {
-          references: { Linker: { buildReference: BuildRef } };
-        }
-      ).references.Linker.buildReference
-    : undefined;
+  // Merge the built-in capability prelude into the inventory — a user-declared
+  // capability of the same name already populated `inv` and wins (default, not
+  // override).  Cheap and side-effect-free, so unconditional.
+  for (const [name, cap] of builtinCapabilities()) {
+    if (!inv.Capability.has(name)) inv.Capability.set(name, cap);
+  }
+  void shared;
+  const buildRef = buildCapabilityRef;
   // streamAllContents walks the AST via `$container`-respecting
   // traversal — safe from cycle-via-parent-pointer recursion.
   for (const node of AstUtils.streamAllContents(model)) {

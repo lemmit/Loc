@@ -41,10 +41,11 @@ system Helpdesk {
       ticketsReassign
     }
 
-    // `with audit, softDelete` add the context-level stamping rules and
-    // the soft-delete query filter.  `with tenantScoped` (below, on the
-    // context) is the hand-written equivalent for multi-tenant scoping.
-    context Support with audit, softDelete {
+    // `with softDelete` adds the soft-delete query filter at context level.
+    // Audit is the built-in `auditable` capability applied per aggregate
+    // (below) — it co-locates the audit fields + stamping rules.  The
+    // hand-written `filter for "tenantScoped"` is the multi-tenant equivalent.
+    context Support with softDelete {
 
       enum TicketStatus { Open, Pending, Closed }
 
@@ -54,10 +55,10 @@ system Helpdesk {
       // tenant rule the macros don't ship.
       filter for "tenantScoped" this.tenantId == currentUser.tenantId
 
-      // `auditable` adds createdAt/updatedAt/createdBy/updatedBy + the
-      // "auditable" marker; `softDeletable` adds isDeleted/deletedAt +
-      // softDelete()/restore() + the "softDeletable" marker.  The
-      // context's `audit`/`softDelete` rules then attach to those markers.
+      // `auditable` (built-in capability) adds createdAt/updatedAt/
+      // createdBy/updatedBy + the create/update stamps in one declaration;
+      // `softDeletable` (macro) adds isDeleted/deletedAt + softDelete()/
+      // restore() + the "softDeletable" marker the context filter attaches to.
       aggregate Ticket with auditable, softDeletable {
         tenantId: string
         subject: string

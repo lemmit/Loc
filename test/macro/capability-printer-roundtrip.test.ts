@@ -117,23 +117,19 @@ describe("capability source surface roundtrips through structural printer", () =
     expect(printed).toMatch(/stamp for "auditable" onUpdate \{/);
   });
 
-  it("`context Foo with audit, softDelete { ... }` prints the with clause", async () => {
+  it("`context Foo with auditable, softDelete { ... }` prints the with clause", async () => {
     const { printed } = await roundtripContext(`
-      context Sales with audit, softDelete {
+      context Sales with auditable, softDelete {
         aggregate Order {
           subject: string
           isDeleted: bool
-          createdAt: datetime
-          createdBy: User id
-          updatedAt: datetime
-          updatedBy: User id
         }
         aggregate User { name: string }
         repository Orders for Order { }
         repository Users for User { }
       }
     `);
-    expect(printed).toMatch(/context Sales with audit, softDelete \{/);
+    expect(printed).toMatch(/context Sales with auditable, softDelete \{/);
   });
 
   it("re-parsed AST has the same structural shape as the original", async () => {

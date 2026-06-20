@@ -352,11 +352,13 @@ describe("macro-call composition: `*ByDefault` context macros", () => {
     expect(orderD.contextFilters?.length).toBe(orderE.contextFilters?.length);
   });
 
-  it("`with auditedByDefault` fans auditable state + audit stamps", async () => {
+  it("context-level `with auditable` fans the capability (fields + stamps) to every aggregate", async () => {
+    // Typed-capabilities Phase 3: the built-in `auditable` capability applied at
+    // context scope replaces the former `auditedByDefault` macro.
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }
-        subdomain M { context C with auditedByDefault {
+        subdomain M { context C with auditable {
           aggregate Order { subject: string }
           aggregate Customer { name: string }
         }}
@@ -364,8 +366,10 @@ describe("macro-call composition: `*ByDefault` context macros", () => {
     `);
     for (const name of ["Order", "Customer"]) {
       const agg = findAgg(ir, name);
-      expect(agg.implementsCapabilities).toContain("auditable");
       expect(agg.contextStamps?.length).toBe(2);
+      expect(agg.wireShape.map((f) => f.name)).toEqual(
+        expect.arrayContaining(["createdAt", "updatedAt", "createdBy", "updatedBy"]),
+      );
     }
   });
 });

@@ -17,10 +17,11 @@ subdomain People {
     departmentsManage
   }
 
-  // `with audit, softDelete` add the context-level stamping rules and the
-  // soft-delete query filter; `auditable`/`softDeletable` (per aggregate)
-  // add the columns + markers those rules attach to.
-  context People with audit, softDelete {
+  // `with softDelete` adds the soft-delete query filter at context level;
+  // `auditable` (built-in capability, per aggregate) co-locates the audit
+  // columns + stamps; `softDeletable` (macro) adds the soft-delete columns +
+  // ops + the marker the filter attaches to.
+  context People with softDelete {
 
     enum EmployeeStatus { Active, OnLeave, Terminated }
 

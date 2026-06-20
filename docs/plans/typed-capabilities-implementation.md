@@ -86,12 +86,32 @@ before any behavior wires up.
   (`collectUnresolvedMacroRefs`) is a Phase 4 refinement alongside context-level
   application.
 
-### Phase 3 — migrate the stdlib (one capability per PR, each byte-identical)
+### Phase 3 — built-in capability prelude + stdlib migration
 
-- `softDelete`/`softDeletable`/`softDeleteByDefault` → `capability softDeletable`.
-- `audit`/`auditable`/`auditedByDefault` → `capability auditable`.
-- `crudish` / `scaffold*` **stay macros** (operations / structure). Each
-  migration sha256-gated across all backends.
+**Delivery mechanism (the prelude):** macros are delivered by code; a capability
+is delivered by source.  `src/macros/prelude.ts` ships canonical built-in
+capabilities (built with the same AST factories the macros used, so their nodes
+— crucially the `User` cross-references — match the macro output: plain
+`{ $refText }` refs that resolve leniently, no "could not resolve" diagnostic).
+`expander.ts` merges them into the per-document capability inventory; a
+user-declared capability of the same name wins.
+
+- **`audit`/`auditable`/`auditedByDefault` → built-in `capability auditable`** ✅
+  Collapses the former state/behavior split into one co-located declaration
+  (fields + create/update stamps).  The three macros were removed; `with
+  auditable` (aggregate) and `with auditable` at context (the `auditedByDefault`
+  replacement) now resolve to the capability.  Examples (`auth-capabilities.ddd`,
+  `erp/hr.ddd`) migrated: the context `audit` clause is dropped (the per-aggregate
+  capability self-stamps).  Equivalent generated output (stamps move from
+  context-propagated to aggregate-co-located; same `contextStamps` IR;
+  `implementsCapabilities` no longer carries `"auditable"`, which no backend
+  consumes).
+- **`softDelete` family stays macros (deferred).** Blocked on a design gap: the
+  `softDeletable` macro adds the `softDelete()`/`restore()` **operations**, which
+  the proposal keeps in macros — so `softDeletable` can't collapse into a
+  pure-mixin capability without deciding where those operations live (see Open
+  Questions). `softDelete`/`softDeletable`/`softDeleteByDefault` remain untouched.
+- `crudish` / `scaffold*` **stay macros** (operations / structure).
 
 ## End state — the stringly forms are removed, not kept as sugar
 
@@ -147,6 +167,22 @@ they must move to typed capabilities before the string grammar can be deleted.
 - Prereqs: Phases 3 (stdlib no longer emits string nodes) + 4 (typed
   `implements`) must land first.
 
+## Open question — soft-delete operations (blocks the softDelete migration)
+
+The `softDeletable` macro adds `isDeleted`/`deletedAt` **and** the
+`softDelete()`/`restore()` **operations**.  A `capability` is a pure mixin
+(fields + filter + stamp) — operations stay macros (proposal guardrail).  So
+`softDeletable` can't collapse into one capability without deciding where the
+operations live.  Options, for the owner:
+1. **Capability + residual macro** — `capability softDeletable { isDeleted +
+   deletedAt + filter }` plus a small `softDeleteOps` macro for the two
+   operations (composed: `with softDeletable, softDeleteOps`).
+2. **Author the operations** — drop the generated ops; users hand-write
+   `softDelete()`/`restore()` when wanted (they're two-line bodies).
+3. **Extend capabilities to allow operations** — rejected by the proposal
+   guardrail unless a broader case appears.
+Recommendation: option 1 (keeps behavior; honours the mixin boundary).
+
 ## Deferred (proposal scope guardrails)
 
 Capability parameters (`searchable(on: name)`, OQ#2), capability-implements-
@@ -157,7 +193,7 @@ scope until a concrete case appears.
 
 - [x] Phase 1 — grammar + AST + parse test.
 - [x] Phase 2 — expander splice + existence checking + scope guard + equivalence tests.
-- [ ] Phase 3 — stdlib migration (softDelete, audit) — needs built-in-capability delivery.
+- [x] Phase 3 — built-in prelude + **audit** family migrated to `capability auditable`. softDelete deferred (operations design gap).
 - [x] Phase 4 — typed `implements` (synonym of `with`) + context-level `with`.
 - [ ] Phase 5 — `Self`, tooling, marker emission.
 - [ ] Phase 6 — **remove** the stringly forms; migrate all examples/tests.

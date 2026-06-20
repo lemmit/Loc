@@ -2,9 +2,6 @@
 // register every shipped macro into the global registry.
 
 import { registerMacro } from "../registry.js";
-import audit from "./audit/audit.macro.js";
-import auditable from "./audit/auditable.macro.js";
-import auditedByDefault from "./audit/auditedByDefault.macro.js";
 import crudish from "./crudish.macro.js";
 import scaffold from "./scaffold/scaffold.macro.js";
 import scaffoldAggregate from "./scaffold/scaffoldAggregate.macro.js";
@@ -32,10 +29,9 @@ let _loaded = false;
 export function loadStdlibMacros(): void {
   if (_loaded) return;
   _loaded = true;
-  // Audit trio
-  registerMacro(audit);
-  registerMacro(auditable);
-  registerMacro(auditedByDefault);
+  // Audit is now the built-in `capability auditable` (src/macros/prelude.ts) —
+  // the former audit/auditable/auditedByDefault macros were removed in the
+  // typed-capabilities Phase 3 migration.
   // Soft-delete trio
   registerMacro(softDelete);
   registerMacro(softDeletable);

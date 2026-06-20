@@ -56,14 +56,15 @@ describe("auditable stdlib macro", () => {
     );
   });
 
-  it("paired with `with audit` at context, contributes both create + update stamps", async () => {
-    // Post-split: `with auditable` adds state (fields + implements);
-    // `with audit` at context adds the stamping rules.  Together they
-    // produce the full audit capability.
+  it("`with auditable` (capability) adds both create + update stamps to the aggregate", async () => {
+    // Typed-capabilities Phase 3: the built-in `auditable` capability collapses
+    // the former `auditable` (fields) + `audit` (stamps) macro pair, so the
+    // stamps are spliced directly onto the aggregate (co-located), not the
+    // context.
     const { model } = await parseString(
       wrap(`
         subdomain Sales {
-          context Orders with audit {
+          context Orders {
             aggregate Order with auditable {
               subject: string
             }
@@ -71,19 +72,17 @@ describe("auditable stdlib macro", () => {
         }
       `),
     );
-    const ctx = findContext(model, "Orders");
-    // Two capability-scoped StampDecls live on the context.
-    const stamps = (ctx.members ?? []).filter((m) => m.$type === "StampDecl");
+    const agg = findAggregate(model, "Order");
+    const stamps = (agg.members ?? []).filter((m) => m.$type === "StampDecl");
     expect(stamps.length).toBe(2);
     expect(stamps.map((m) => (m as any).event).sort()).toEqual(["onCreate", "onUpdate"]);
-    expect(stamps.every((m) => (m as any).capability === "auditable")).toBe(true);
   });
 
-  it("composes with softDeletable — no field collisions, all four trio pieces present", async () => {
+  it("composes with softDeletable — auditable (capability) + softDeletable (macro)", async () => {
     const { model, errors } = await parseString(
       wrap(`
         subdomain Sales {
-          context Orders with audit, softDelete {
+          context Orders with softDelete {
             aggregate Order with auditable, softDeletable {
               subject: string
             }
@@ -107,13 +106,12 @@ describe("auditable stdlib macro", () => {
     );
     const opNames = (agg.members ?? []).filter(isOperation).map((o) => o.name);
     expect(opNames).toEqual(expect.arrayContaining(["softDelete", "restore"]));
-    // Capability behavior lives on the context, not the aggregate:
-    // - 2 StampDecls (from `with audit`) on the context
-    // - 1 FilterDecl (from `with softDelete`) on the context
+    // auditable stamps are co-located on the aggregate (capability); the
+    // softDelete macro's filter is the FilterDecl on the context.
+    const aggStamps = (agg.members ?? []).filter((m) => m.$type === "StampDecl");
+    expect(aggStamps.length).toBe(2);
     const ctx = findContext(model, "Orders");
-    const ctxStamps = (ctx.members ?? []).filter((m) => m.$type === "StampDecl");
     const ctxFilters = (ctx.members ?? []).filter((m) => m.$type === "FilterDecl");
-    expect(ctxStamps.length).toBe(2);
     expect(ctxFilters.length).toBe(1);
   });
 });
@@ -153,13 +151,13 @@ describe("macro expander diagnostics", () => {
   it("reports target-kind mismatch", async () => {
     const { errors } = await parseString(
       wrap(`
-        ui App with auditable {
+        ui App with softDeletable {
           page Home { route: "/" body: Text { "x" } }
         }
       `),
     );
     expect(errors.join("\n")).toMatch(
-      /Macro 'auditable' targets 'aggregate' but was invoked on a 'ui'/,
+      /Macro 'softDeletable' targets 'aggregate' but was invoked on a 'ui'/,
     );
   });
 

@@ -104,25 +104,10 @@ context Sales {
     expect(errors).toEqual([]);
   });
 
-  it("unfolds `with auditable` into the four audit fields + implements", async () => {
-    const source = `
-context Sales {
-  aggregate User { name: string }
-  aggregate Order with auditable {
-    subject: string
-  }
-  repository Orders for Order { }
-  repository Users for User { }
-}
-`;
-    const unfolded = await unfold(source, "auditable");
-    expect(unfolded).not.toMatch(/with auditable/);
-    expect(unfolded).toMatch(/createdAt: datetime/);
-    expect(unfolded).toMatch(/updatedAt: datetime/);
-    expect(unfolded).toMatch(/createdBy: User id/);
-    expect(unfolded).toMatch(/updatedBy: User id/);
-    expect(unfolded).toMatch(/implements "auditable"/);
-  });
+  // NOTE: `auditable` is now a built-in capability (not a macro), so the unfold
+  // code action — which expands macro calls — no longer targets it.  Unfolding a
+  // typed capability is a Phase 5 (LSP) concern; see
+  // docs/plans/typed-capabilities-implementation.md.
 
   it("unfolds context-level `with softDelete` into the capability filter", async () => {
     const source = `
@@ -140,29 +125,26 @@ context Sales with softDelete {
     expect(unfolded).toMatch(/filter for "softDeletable" !this\.isDeleted/);
   });
 
-  it("unfolding one of two macros keeps the other in the with clause", async () => {
+  it("unfolding one of two `with` entries keeps the other (macro + capability)", async () => {
+    // `softDelete` is a macro (unfoldable); `auditable` is a built-in capability
+    // (left intact by the macro unfold action).
     const source = `
-context Sales with audit, softDelete {
+context Sales with auditable, softDelete {
   aggregate User { name: string }
   aggregate Order {
     subject: string
     isDeleted: bool
-    createdAt: datetime
-    updatedAt: datetime
-    createdBy: User id
-    updatedBy: User id
     implements "softDeletable"
-    implements "auditable"
   }
   repository Orders for Order { }
   repository Users for User { }
 }
 `;
     const unfolded = await unfold(source, "softDelete");
-    // softDelete is gone, audit remains:
-    expect(unfolded).toMatch(/with audit\s*\{/);
-    expect(unfolded).not.toMatch(/with audit, softDelete/);
-    expect(unfolded).not.toMatch(/with softDelete, audit/);
+    // softDelete is gone, auditable remains:
+    expect(unfolded).toMatch(/with auditable\s*\{/);
+    expect(unfolded).not.toMatch(/with auditable, softDelete/);
+    expect(unfolded).not.toMatch(/with softDelete, auditable/);
     expect(unfolded).toMatch(/filter for "softDeletable" !this\.isDeleted/);
   });
 
