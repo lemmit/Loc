@@ -219,6 +219,7 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   // MenuBlockIR or per-page menuMeta, identical structure to the
   // React generator's sidebar.  Skipped in embedded-react mode (the
   // HEEx sidebar belongs to the LiveView shell, which the SPA replaces).
+  let hasSidebar = false;
   if (deployable.uiName && !embedReact) {
     const ui = sys.uis.find((u) => u.name === deployable.uiName);
     if (ui) {
@@ -231,6 +232,7 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
         `lib/${appName}_web/components/sidebar.ex`,
         renderSidebarComponent({ ui, appName, appModule, nameCtx }),
       );
+      hasSidebar = true;
     }
   }
 
@@ -300,6 +302,7 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
     out,
     migrations ?? [],
     styleAdapter,
+    hasSidebar,
   );
 
   return out;
