@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Answering style
+
+Be concise and lead with the answer. No preamble, no recap of what you're about to do, no summary of what you just did.
+
+- **Cut the obvious.** Don't narrate routine mechanics (opening a PR, kicking CI, running tests, committing) — just do them and report the result in a line.
+- **Language features always carry two examples:** the Loom (`.ddd`) source *and* the generated target-language output. Show, don't describe.
+- Prefer a short snippet or a one-line answer over a paragraph. Drop hedging and restated context.
+
 ## What this is
 
 **Loom** — a Langium-based DSL for Domain-Driven Design. A `.ddd` source describes a `system` of `module`s, `aggregate`s, `valueobject`s, `event`s, `repository`s, `api`s, `storage`s, `ui`s, and `deployable`s; the toolchain generates a runnable multi-project tree wired together as one `docker compose` stack. Five backends (TypeScript/Hono, .NET/ASP.NET+EF+Mediator, Phoenix LiveView/Ash, Python/FastAPI+SQLAlchemy, Java/Spring Boot+JPA) and three frontends (React/Vite+Mantine, Vue 3/Vite+Vuetify, Svelte/SvelteKit) are supported.
