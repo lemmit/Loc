@@ -140,7 +140,7 @@ describe("idempotent-consumer markers — Hono", () => {
     expect(wf).toContain("if (__eventId !== undefined && state.lastEventId === __eventId) {");
     expect(wf).toContain("if (__eventId !== undefined) state.lastEventId = __eventId;");
     expect(wf).toContain(
-      "await inner.dispatch({ ...(row.payload as Events.DomainEvent), __loomEventId: row.id } as Events.DomainEvent);",
+      "await inner.dispatch({ ...(row.payload as Events.DomainEvent), __loomEventId: row.id } as unknown as Events.DomainEvent);",
     );
   });
 

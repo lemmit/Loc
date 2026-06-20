@@ -89,15 +89,13 @@ Building 6 backends × 30 features = 180 hand-maintained fixtures the old way wo
 **Landed — Phase 1 compile tier (reference backend):**
 
 - `test/e2e/corpus-tsc-build.test.ts` (gated `LOOM_TS_BUILD`, sharded by `LOOM_CORPUS_TSC_CASE`, `npm run test:tsc-corpus`) — generates each corpus feature for `node`, `npm install`s, and runs strict `tsc --noEmit`, upgrading the corpus from a generation floor to a **compile guarantee** on Hono, from the same single source of truth.
-- **18 of 25 node features are compile-verified.** The tier immediately surfaced **7 real Hono generator bugs** no existing gate caught (the legacy TS gate never exercised these exact shapes) — each recorded as a documented compile-tier skip with its precise `tsc` error:
-  - `single-containment` / `embedded` — required single containment emits null-unsafe repo code (TS18047/TS2345)
-  - `outbox` — durable-channel workflow casts a union event to `DomainEvent` (TS2352)
-  - `union-find-absence` — union-find route spreads a non-object union type (TS2698)
-  - `state-gate` — `when`/can-query route omits the enum import (TS2304)
-  - `resources` — queue client missing `@types/amqplib` (TS7016)
-  - `workflow-view` — references saga state field out of scope (TS2304)
-
-  These are now tracked, reproducible bug reports (each skip is one `LOOM_CORPUS_TSC_CASE` away from a red repro); fixing the emitter and dropping the skip is the follow-up. This is the compile tier doing its job — converting silent breakage into a checklist.
+- **24 of 25 node features are compile-verified.** The tier immediately surfaced **7 real Hono generator bugs** no existing gate caught (the legacy TS gate never exercised these exact shapes). **Six were genuine emitter bugs — all fixed** (compile-verified, skip dropped):
+  - `single-containment` / `embedded` — required single containment emitted null-unsafe repo code (TS18047/TS2345). Fixed: the wire projection + embedded doc-serialize now non-null-assert required single containment (parity with .NET's `= default!` owned entity); optional containment null-guards.
+  - `outbox` — durable-channel workflow cast a union event to `DomainEvent` (TS2352). Fixed: cast through `unknown` (the `__loomEventId` envelope marker is out-of-band, not on the event union).
+  - `union-find-absence` — union-find route spread a non-object union type (TS2698). Fixed: spread `repo.toWire(result) as Record<string, unknown>`.
+  - `state-gate` — `when`/can-query route omitted the enum import (TS2304). Fixed at lowering: qualified enum access `EnumName.Value` in a `when`/invariant predicate now lowers to an `enum-value` ref, and the route file imports the enums its `when` gates reference.
+  - `resources` — queue client missing `@types/amqplib` (TS7016). Fixed: the rabbitmq ResourceAdapter declares the dep.
+- **The 7th is a FEATURE GAP, not an emitter bug** (still skip-listed, honestly labelled): `workflow-view` exercises **workflow own-state mutation** (`create(p) by p.order { attempts := 1 }`) — documented as "own-state mutation" (workflow.md) but not yet lowered: the assignment falls through to lower-workflow.ts's `__bad__` placeholder (TS2304). Wiring it is a **cross-backend slice**, not a one-line emitter fix — a new `assign` `WorkflowStmtIR` kind feeding all five workflow backends, **and** making the saga-state row writable (Java/.NET/Phoenix state classes are immutable today: package-private fields + getters, no setters / `private set`). Tracked as a Phase-5 feature item below, not a compile-tier skip to "just fix".
 
 **Landed — Phase 0 migration (legacy dup-set collapse):**
 
@@ -110,7 +108,7 @@ A `materializeCorpusFixture(feature, backend, dir)` helper lets the per-backend 
 
 (Sandbox note: `.NET`/Phoenix compile-verify is blocked here by package-registry egress — `NU1301` to nuget.org, `unknown_ca` to hex.pm; both compile in CI. The repointed .NET cells are CI-verified.)
 
-**Remaining:** extend the compile tier to the other backends' docker gates (Phase 1 cont.), fix the 7 surfaced Hono bugs, flip showcase-completeness to hard (Phase 2), the manifest-driven wire-parity sweep (Phase 3), and the behavioural runtime tier (Phases 4–5).
+**Remaining:** extend the compile tier to the other backends' docker gates (Phase 1 cont.), implement workflow own-state mutation across the five workflow backends (the lone remaining compile-tier skip — a feature, scoped as a Phase-5 item), flip showcase-completeness to hard (Phase 2), the manifest-driven wire-parity sweep (Phase 3), and the behavioural runtime tier (Phases 4–5).
 
 ---
 

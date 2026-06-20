@@ -104,11 +104,19 @@ export function buildEmbeddedRepositoryFile(
   }
   for (const c of agg.contains) {
     const toDoc = `${lowerFirst(c.partName)}ToDoc`;
-    rootEntries.push(
-      c.collection
-        ? `${c.name}: aggregate.${c.name}.map((e) => ${toDoc}(e))`
-        : `${c.name}: ${toDoc}(aggregate.${c.name})`,
-    );
+    if (c.collection) {
+      rootEntries.push(`${c.name}: aggregate.${c.name}.map((e) => ${toDoc}(e))`);
+    } else if (c.optional) {
+      // Optional single containment serialises to a nullable jsonb cell.
+      rootEntries.push(
+        `${c.name}: aggregate.${c.name} == null ? null : ${toDoc}(aggregate.${c.name})`,
+      );
+    } else {
+      // Required single containment — the domain getter is typed `Part | null`
+      // (defaulted on create); assert before serialising (parity with .NET's
+      // `= default!` owned entity).
+      rootEntries.push(`${c.name}: ${toDoc}(aggregate.${c.name}!)`);
+    }
   }
   const rootRow = `{ ${rootEntries.join(", ")} }`;
 

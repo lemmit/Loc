@@ -1167,7 +1167,7 @@ function emitFindRoute(
     // discriminated-union 200 schema both Hono's zod DTO and the React client
     // pin (P4b).
     out.push(
-      `    return c.json({ type: ${JSON.stringify(unionSpec.successTag)}, ...repo.toWire(result) } as z.infer<typeof ${unionSpec.name}>, 200);`,
+      `    return c.json({ type: ${JSON.stringify(unionSpec.successTag)}, ...(repo.toWire(result) as Record<string, unknown>) } as z.infer<typeof ${unionSpec.name}>, 200);`,
     );
   } else if (isList) {
     // Array responses skip wire_out — `Object.keys` over an array

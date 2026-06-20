@@ -842,7 +842,7 @@ function emitOutboxMachinery(durable: ReadonlySet<string>): string[] {
   // idempotent-consumer marker can no-op on redelivery (dispatch-delivery-
   // semantics.md §3).  Inline (ephemeral) dispatch carries no id.
   out.push(
-    `          await inner.dispatch({ ...(row.payload as Events.DomainEvent), __loomEventId: row.id } as Events.DomainEvent);`,
+    `          await inner.dispatch({ ...(row.payload as Events.DomainEvent), __loomEventId: row.id } as unknown as Events.DomainEvent);`,
   );
   out.push(
     `          await db.update(schema.loomOutbox).set({ dispatchedAt: new Date() }).where(eq(schema.loomOutbox.id, row.id));`,
