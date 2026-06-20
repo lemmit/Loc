@@ -84,9 +84,22 @@ Building 6 backends × 30 features = 180 hand-maintained fixtures the old way wo
 - **Coverage delivered:** 25 features each generation-verified across all 6 backends (one declared exception — `criterion-filter` on Java, a real renderer gap the gate now documents). Hono and .NET go from 9 / 6 fixtures to **25 features each at parity with every other backend** on the generation tier.
 - The 25: core-domain, state-gate, operation-returns, union-find-absence, paged, single-containment, value-collections, document, embedded, inheritance (TPH+TPC), event-sourcing, eventsourced-workflow, saga, auth-oidc, auth-simple, outbox, workflow-view, tenancy-filter, stamps, extern, seeding, views, resources, provenance, criterion-filter.
 
-**What this gate is and isn't:** it proves every feature is *reachable* (generates without crashing) on every declared backend — the high-frequency lowering/enrichment failure mode — per-PR, in seconds. It is *not yet* a compile guarantee; the per-backend compile/runtime tiers (docker, nightly) consume this same corpus on top of the generation floor. Those are the remaining phases below.
+**What the generation gate is and isn't:** it proves every feature is *reachable* (generates without crashing) on every declared backend — the high-frequency lowering/enrichment failure mode — per-PR, in seconds. The harness asserts clean parse+validation too, so an invalid fixture fails rather than emitting a partial model.
 
-**Remaining:** wire the corpus into the docker compile gates (Phase 1 compile tier), collapse the legacy near-duplicate fixtures onto the corpus (Phase 0 migration), flip showcase-completeness to hard (Phase 2), the manifest-driven wire-parity sweep (Phase 3), and the behavioural runtime tier (Phases 4–5).
+**Landed — Phase 1 compile tier (reference backend):**
+
+- `test/e2e/corpus-tsc-build.test.ts` (gated `LOOM_TS_BUILD`, sharded by `LOOM_CORPUS_TSC_CASE`, `npm run test:tsc-corpus`) — generates each corpus feature for `node`, `npm install`s, and runs strict `tsc --noEmit`, upgrading the corpus from a generation floor to a **compile guarantee** on Hono, from the same single source of truth.
+- **18 of 25 node features are compile-verified.** The tier immediately surfaced **7 real Hono generator bugs** no existing gate caught (the legacy TS gate never exercised these exact shapes) — each recorded as a documented compile-tier skip with its precise `tsc` error:
+  - `single-containment` / `embedded` — required single containment emits null-unsafe repo code (TS18047/TS2345)
+  - `outbox` — durable-channel workflow casts a union event to `DomainEvent` (TS2352)
+  - `union-find-absence` — union-find route spreads a non-object union type (TS2698)
+  - `state-gate` — `when`/can-query route omits the enum import (TS2304)
+  - `resources` — queue client missing `@types/amqplib` (TS7016)
+  - `workflow-view` — references saga state field out of scope (TS2304)
+
+  These are now tracked, reproducible bug reports (each skip is one `LOOM_CORPUS_TSC_CASE` away from a red repro); fixing the emitter and dropping the skip is the follow-up. This is the compile tier doing its job — converting silent breakage into a checklist.
+
+**Remaining:** extend the compile tier to the other backends' docker gates (Phase 1 cont.), fix the 7 surfaced Hono bugs, collapse the legacy near-duplicate fixtures onto the corpus (Phase 0 migration), flip showcase-completeness to hard (Phase 2), the manifest-driven wire-parity sweep (Phase 3), and the behavioural runtime tier (Phases 4–5).
 
 ---
 

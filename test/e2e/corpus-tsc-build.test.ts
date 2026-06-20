@@ -21,16 +21,33 @@ import { CORPUS } from "../fixtures/corpus/manifest.js";
 const ENABLED = process.env.LOOM_TS_BUILD === "1";
 const CASE = process.env.LOOM_CORPUS_TSC_CASE;
 
-// Features that GENERATE on node but don't yet `tsc`-compile, each a documented
-// Hono generator gap the compile tier surfaced (the generation gate still covers
-// them on all six backends).  Widen as the underlying emitter bugs are fixed.
+// Features that GENERATE on node but don't yet `tsc`-compile under strict mode —
+// real Hono generator gaps this compile tier surfaced (the generation gate still
+// covers all of them on all six backends; each line is a precise, reproducible
+// bug report).  Widen the gate by FIXING the emitter, then dropping the entry.
 const TS_COMPILE_SKIP: Record<string, string> = {
-  // A required single (non-collection) containment inside `shape(embedded)`
-  // emits null-unsafe repository code on Hono (`Memo | null` passed where `Memo`
-  // is expected; `root.note` possibly-null) — see db/repositories/*-repository.ts.
-  // The collection-containment embedded path (corpus/embedded sans `note`) and the
-  // relational single-containment path (corpus/single-containment) both compile.
-  embedded: "Hono embedded-shape required single-containment emits null-unsafe repo code",
+  // Required single (non-collection) containment emits null-unsafe repository code
+  // (`root.shipment` / `root.note` possibly-null; `Memo | null` passed where `Memo`
+  // is expected) — TS18047 / TS2345, db/repositories/*-repository.ts.  Hits both the
+  // relational (single-containment) and embedded (embedded) shapes.
+  "single-containment": "Hono required single-containment emits null-unsafe repo code (TS18047)",
+  embedded: "Hono embedded-shape required single-containment emits null-unsafe repo code (TS18047)",
+  // Durable-channel (outbox) workflow casts a union event to `DomainEvent` that
+  // strict tsc rejects (TS2352, http/workflows.ts).  The ephemeral saga path
+  // (corpus/saga) compiles; only `retention: log` diverges.
+  outbox: "Hono outbox workflow casts a union event to DomainEvent (TS2352)",
+  // Union-returning find route spreads a non-object union member (TS2698,
+  // http/*.routes.ts) when translating the `Order or NotFound` result.
+  "union-find-absence": "Hono union-find route spreads a non-object union type (TS2698)",
+  // `when` can-query companion route references the gate's enum without importing
+  // it (TS2304 'OrderStatus' not found, http/*.routes.ts).
+  "state-gate": "Hono when/can-query route omits the enum import (TS2304)",
+  // Resource clients import `amqplib` with no bundled type declarations — the
+  // generated package.json omits `@types/amqplib` (TS7016, resources/rabbitmq.ts).
+  resources: "Hono queue client missing @types/amqplib (TS7016)",
+  // Workflow-sourced view references the saga state field out of scope (TS2304
+  // 'attempts' not found, http/workflows.ts).
+  "workflow-view": "Hono workflow-view references saga state field out of scope (TS2304)",
 };
 
 // Every corpus feature the manifest declares to generate on `node`, minus the
