@@ -447,7 +447,7 @@ shape end-to-end.
 |---|---|
 | `subdomain`, `context`, aggregate fields | Drizzle schema, Hono routes, .NET commands (existing) |
 | `api X from <Ctx>` | Per-aggregate `api/<name>.ts` with React Query hooks (existing scaffold output) |
-| `storage X { type: postgres }` | Drizzle config + Phoenix/Hono/.NET Postgres migrations via the platform-neutral MigrationsIR (`src/ir/types/migrations-ir.ts` + `src/system/migrations-builder.ts`); per-backend emitters in `src/generator/{phoenix-live-view,typescript,dotnet}/emit/migrations*.ts` |
+| `storage X { type: postgres }` | Drizzle config + Phoenix/Hono/.NET Postgres migrations via the platform-neutral MigrationsIR (`src/ir/types/migrations-ir.ts` + `src/system/migrations-builder.ts`); per-backend emitters in `src/generator/<backend>/emit/migrations*.ts` (one per backend — `elixir`, `typescript`, `dotnet`, `python`, `java`) |
 | `storage X { type: <other> }` | Parses + validates; no generator output yet |
 | `resource X { for: C, kind: state, use: Y, schema: "...", tablePrefix: "..." }` | EF Core `ToTable("name", "schema")`, Drizzle `pgSchema("...").table(...)`, AshPostgres `schema "..." + table "prefix_..."`.  Schema defaults to `snake(contextName)` when omitted on a relational store. |
 | `resource X { ..., isolationLevel: <level> }` | Default isolation for transactional workflows in the bound context, overridden by per-workflow `transactional(<level>)`. |

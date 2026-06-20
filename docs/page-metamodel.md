@@ -337,7 +337,7 @@ Two boundaries to know:
   single-arg key-sort (`sortBy(o => o.key)`) has no native array method or
   runtime helper yet on any frontend, so pre-shape ordering in a backend
   `view`/`find` for now.
-- **All frontends.** React, Vue, and Svelte share the `emitExpr` engine;
+- **All frontends.** React, Vue, Svelte, and Angular share the `emitExpr` engine;
   Phoenix/HEEx runs a parallel engine that mirrors the same ops to Elixir
   idioms (`filter`/`map` → `Enum.filter/2` / `Enum.map/2`), so inline
   `filter`/`map` shaping works on every frontend.
@@ -360,7 +360,7 @@ Two boundaries to know:
 | `Money`, `DateDisplay`, `EnumBadge`, `IdLink` | Formatter primitives. |
 | `CodeBlock` | Syntax-highlighted code block (highlight.js at runtime). |
 | `Table`, `Column` | Tabular display (data lambda accessors). |
-| `For { each: T[], empty?: markup, item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. The optional `empty:` arm is rendered when the collection is empty — Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)` ternary, a Vue `v-if` sibling `<template>`, a HEEx `Enum.empty?/1` guard. |
+| `For { each: T[], empty?: markup, item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Angular to an `@for (… ; track …)` block, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. The optional `empty:` arm is rendered when the collection is empty — Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)` ternary, a Vue `v-if` sibling `<template>`, Angular's `@for`/`@empty` block, a HEEx `Enum.empty?/1` guard. |
 | `QueryView { of:, loading:, error:, empty:, data:, single?: }` | 4-arm query-state branching (collection or single-record). |
 
 The set is closed in v0. **Removed from earlier drafts:** `Wizard`, `Stage`,

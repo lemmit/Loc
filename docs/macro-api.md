@@ -14,8 +14,8 @@ API exposes.  For each macro's source-equivalent and intent, see
 
 | Source | Discovery |
 |---|---|
-| **Stdlib** | `src/stdlib/<name>/*.macro.ts`. Registered once at toolchain boot by `loadStdlibMacros()` in `src/stdlib/index.ts`. |
-| **Project-local** | The registry (`src/language/macro-registry.ts`) accepts user-supplied `MacroDefinition`s via `registerMacro(...)`.  A workspace-level auto-discovery seam under `.loom/macros/*.js` is documented in the registry's header comment but **not yet wired** to the CLI / LSP boot path — today the only way to add a macro is to drop it into `src/stdlib/` and rebuild the toolchain. |
+| **Stdlib** | `src/macros/stdlib/<name>/*.macro.ts`. Registered once at toolchain boot by `loadStdlibMacros()` in `src/macros/stdlib/index.ts`. |
+| **Project-local** | The registry (`src/macros/registry.ts`) accepts user-supplied `MacroDefinition`s via `registerMacro(...)`.  A workspace-level auto-discovery seam under `.loom/macros/*.js` is documented in the registry's header comment but **not yet wired** to the CLI / LSP boot path — today the only way to add a macro is to drop it into `src/macros/stdlib/` and rebuild the toolchain. |
 
 The shape of a macro module is the same in both cases.  Each macro
 file default-exports a single `defineMacro({ ... })` call.
@@ -23,7 +23,7 @@ file default-exports a single `defineMacro({ ... })` call.
 ## The entry point
 
 ```ts
-import { defineMacro } from "../../macro-api/index.js";
+import { defineMacro } from "../../api/index.js";
 
 export default defineMacro({
   name: "<macro-name>",
@@ -98,7 +98,7 @@ expand({ target, args, origin, invokeMacro }): MemberTypeOf[T][]
 | `target` | The host AST node (typed against `MacroTarget`). |
 | `args` | Parsed, type-checked, default-filled argument bag. |
 | `origin` | Opaque tag attached to every synthesised member by the factories so diagnostics on synthesised code can point back at the `with` call site. |
-| `invokeMacro(name, { target, args? })` | Programmatic invocation of another registered macro.  Used by composer macros (`scaffoldContext` calls `scaffoldAggregate`; `auditedByDefault` calls `audit` + `auditable`).  The returned nodes are tagged with the passed target, not the caller's host — splice-time descendant checks reject inside-out invocation (an aggregate macro can't call a context macro). |
+| `invokeMacro(name, { target, args? })` | Programmatic invocation of another registered macro.  Used by composer macros (`scaffoldContext` calls `scaffoldAggregate`; `softDeleteByDefault` calls `softDelete` per aggregate).  The returned nodes are tagged with the passed target, not the caller's host — splice-time descendant checks reject inside-out invocation (an aggregate macro can't call a context macro). |
 
 The returned array's element type is enforced at the TS level:
 `target: "aggregate"` requires `AggregateMember[]`, `"ui"` requires
@@ -107,7 +107,7 @@ The returned array's element type is enforced at the TS level:
 ## Factory functions
 
 AST construction must go through the factories so synthesised nodes
-carry `origin` metadata.  The full surface is `src/macro-api/`:
+carry `origin` metadata.  The full surface is `src/macros/api/`:
 
 ### `factories.ts` — domain-side AST nodes
 
@@ -174,16 +174,16 @@ Composer macros call leaf macros via `invokeMacro`.  The rule is
 **outside-in only**:
 
 - A `context` macro can call an `aggregate` macro against each
-  child aggregate (`softDeleteByDefault` calls `softDeletable`
+  child aggregate (`softDeleteByDefault` calls `softDelete`
   per aggregate).
 - A `ui` macro can call other `ui` macros (`scaffold` calls
-  `scaffoldModule`).
+  `scaffoldSubdomain`).
 - An `aggregate` macro **cannot** call a `context` macro — the
   expander's splice-time descendant check rejects it.
 
 The factories tag each returned node with the **invocation's** target,
 not the caller's.  So when `softDeleteByDefault` runs at context
-scope and calls `softDeletable` against a child aggregate, the
+scope and calls `softDelete` against a child aggregate, the
 returned `AggregateMember[]` is spliced into that aggregate, not the
 context.
 
@@ -197,7 +197,7 @@ import {
   defineMacro,
   field,
   primType,
-} from "../../macro-api/index.js";
+} from "../../api/index.js";
 
 export default defineMacro({
   name: "tagged",

@@ -2,7 +2,7 @@
 
 Per-platform reference for every file the generators emit and the
 features they implement.  This document maps each DSL construct to its
-output across all three platforms so you can answer questions like:
+output across the five backends and four frontends so you can answer questions like:
 
 - "What does `aggregate Order` produce on .NET?"
 - "Where does my `derived total: Money = …` end up in the React app?"
@@ -32,8 +32,9 @@ The alternates (`dapper`, `mikroorm`) share the domain layer below and only
 swap the repository/schema layer (minimal-v1 surface, validator-gated).
 
 > **Scope note.** This matrix tracks the three reference platforms
-> (TypeScript/Hono, .NET, React). The later backends — **Python/FastAPI**
-> and **Java/Spring Boot** — and the **Vue** frontend consume the same
+> (TypeScript/Hono, .NET, React). The other backends — **Python/FastAPI**,
+> **Java/Spring Boot**, and **Elixir/Phoenix** — and the other frontends —
+> **Vue**, **Svelte**, and **Angular** — consume the same
 > `LoomModel` / `wireShape` IR contract and emit the analogous constructs
 > in their own idiom; they are not yet broken out as columns here. See
 > [`platforms.md`](platforms.md) for the full registered set.
@@ -148,13 +149,14 @@ backend emits a host-language debug-string hook that delegates to
 the `inspect` value — `public override string ToString()` (.NET,
 auto-invoked by `$"{x}"` / `Console.WriteLine`), `toString()` +
 `[Symbol.for("nodejs.util.inspect.custom")]` (TS, auto-invoked by
-`String(x)` / `${x}` / `console.log`), and a public
+`String(x)` / `${x}` / `console.log`), a public
 `def inspect(record)` module function (Phoenix, **invoked
 explicitly** as `MyApp.Catalog.Customer.inspect(record)` — Ash 3.x
 auto-derives the `Inspect` protocol for every resource module, so
 the loom-emitted form lives at the module-function level to avoid a
 `redefining module Inspect.<...>` collision under `mix compile
---warnings-as-errors`).  Honours `sensitive(...)` field tags by
+--warnings-as-errors`), a `__repr__` (Python, auto-invoked by
+`repr(x)` / f-strings), and a `toString()` override (Java).  Honours `sensitive(...)` field tags by
 substituting `<redacted>` for the value while keeping the field
 name in the structural output.  VO-typed fields are inlined
 structurally one level deep — `price: Money` shows as

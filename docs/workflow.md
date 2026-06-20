@@ -154,8 +154,10 @@ supplied:
 
 - **.NET**: `await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct)` (etc.).
 - **Hono**: `await db.transaction(async (tx) => { ... }, { isolationLevel: "serializable" })` (etc.).
+- **Python**: `await session.connection(execution_options={"isolation_level": "SERIALIZABLE"})` (etc.).
+- **Java**: `@Transactional(isolation = Isolation.SERIALIZABLE)` (etc.).
 
-Bare `transactional` emits the no-arg form on both backends so the
+Bare `transactional` emits the no-arg form on every backend so the
 connection-default behaviour is preserved.
 
 ## Generated code
@@ -204,6 +206,20 @@ a `with`-chain over the context's Ash code interfaces (`create_<agg>`,
 `transactional`, and broadcasts workflow-level events via
 `Phoenix.PubSub`.  An **event-triggered-only** workflow emits no `run/2`
 or controller — see *Status* below.
+
+### Python (FastAPI + SQLAlchemy)
+
+The workflow handler constructs each repository from the request session,
+runs the body, saves in declaration order, and drains workflow-level
+events.  `transactional` wraps the body in the session transaction, with
+the `isolation_level` execution option set when a level is pinned.
+
+### Java (Spring Boot + JPA)
+
+The workflow handler injects each repository / service it needs, runs the
+body, saves in declaration order, and drains workflow-level events.  A
+`transactional` workflow is annotated `@Transactional` (with
+`isolation = Isolation.<Level>` when a level is pinned).
 
 ## When to reach for a workflow
 
@@ -254,8 +270,8 @@ elsewhere a bare event/payload name stays unresolved.  See the
 [language reference](language.md#type-references).
 
 > **Status.** The parameter surface above parses, resolves, and
-> type-checks today.  **In-process dispatch ships on the Hono, .NET, and
-> Phoenix backends** (channels.md): when a `channel` in the deployable
+> type-checks today.  **In-process dispatch ships on the Hono, .NET,
+> Phoenix, Python, and Java backends** (channels.md): when a `channel` in the deployable
 > `carries:` the event, an emitted event is delivered to every
 > `on(e: Event)` reactor and event-triggered `create(e: Event) by` starter
 > that subscribes to it, and a handler's own `emit` re-enters the dispatcher
@@ -288,6 +304,18 @@ elsewhere a bare event/payload name stays unresolved.  See the
 >   read/written through the app `Repo`: a `create` starter loads-or-allocates
 >   the row, an `on` reactor routes to it or drops + logs `event_unrouted`.
 >   An event-triggered-only workflow emits no `run/2` / HTTP command surface.
+> - **Python** emits an in-process dispatcher (`dispatch-builder.ts`) that
+>   routes each emitted event to its reactor / starter handlers; a handler's
+>   own `emit` re-enters the dispatcher.  Correlation is **persisted** through
+>   a saga-state row keyed by the correlation field: a `create` starter
+>   loads-or-allocates the row, an `on` reactor routes to it or drops + logs
+>   `event_unrouted`.
+> - **Java** emits an in-process dispatcher (`dispatch.ts`) that routes each
+>   emitted event to its reactor / starter handlers; a handler's own `emit`
+>   re-enters the dispatcher.  Correlation is **persisted** through a
+>   JPA-mapped saga-state row keyed by the correlation field: a `create`
+>   starter loads-or-allocates the row, an `on` reactor routes to it or drops
+>   + logs `event_unrouted`.
 >
 > Still deferred: external brokers (redis / kafka / nats via
 > `channelSource`).  See

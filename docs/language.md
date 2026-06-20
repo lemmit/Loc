@@ -144,14 +144,15 @@ preserved at [`plans/multi-file-source.md`](plans/multi-file-source.md).
 | Form | Purpose |
 | --- | --- |
 | `subdomain Name { … }` | Groups one or more bounded contexts under a name.  A subdomain is a logical unit; it doesn't directly produce code.  Was named `module` before the D-STORAGE-SPLIT rename. |
-| `deployable name { platform: dotnet\|hono\|phoenixLiveView, contexts: [A, B], dataSources: [X, Y], port: N, auth: required? }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  `contexts:` names which bounded contexts this deployable hosts; `dataSources:` lists the system-scope `resource` decls that route those contexts' persistence (every hosted aggregate must have a matching binding — see the `resource` row below; the clause keyword stays `dataSources:` for compatibility).  Optional `auth: required` enables JWT-decode middleware on this deployable; see [`auth.md`](auth.md). |
+| `deployable name { platform: dotnet\|node\|elixir\|python\|java\|phoenixLiveView, contexts: [A, B], dataSources: [X, Y], port: N, auth: required? }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  `contexts:` names which bounded contexts this deployable hosts; `dataSources:` lists the system-scope `resource` decls that route those contexts' persistence (every hosted aggregate must have a matching binding — see the `resource` row below; the clause keyword stays `dataSources:` for compatibility).  Optional `auth: required` enables JWT-decode middleware on this deployable; see [`auth.md`](auth.md). |
 | `deployable name { platform: react, targets: <other-deployable>, port: N }` | A frontend deployable: a Vite-built React + RQ + Zod + Mantine SPA whose API base URL is wired to `targets`'s port.  Hosted contexts are inherited from the target. |
 | `deployable name { platform: svelte, targets: <other-deployable>, port: N }` | The Svelte frontend deployable: a Svelte 5 / SvelteKit static SPA (adapter-static, ssr off) + svelte-query + Zod, rendered against a svelte design pack (`shadcnSvelte` default, or `flowbite`).  Same contract as `react` — `targets:` a backend, inherits its contexts. |
 | `deployable name { platform: vue, targets: <other-deployable>, port: N }` | A Vue 3 frontend deployable: a Vite-built vue-router + vue-query + Zod SPA (design packs `vuetify` / `shadcnVue`), same `targets:` contract as `react`. |
+| `deployable name { platform: angular, targets: <other-deployable>, port: N }` | An Angular SPA frontend deployable (angularMaterial design pack), same `targets:` contract as `react`. |
 | `context Name { … }` | Allowed directly inside a system; treated as if it were in an implicit `_default` subdomain. |
 | `test e2e "name" against <deployable> { … }` | End-to-end test that runs against the named deployable's HTTP API; lowers to a vitest file at the system output root. |
 | `user { id: string, role: string, … }` | System-wide JWT-claim shape decoded by the verifier hook.  At most one per system; required when any deployable opts in via `auth: required`.  The `currentUser` magic identifier in operation / workflow / view-bind expressions is typed against this shape.  See [`auth.md`](auth.md). |
-| `theme { primary: "#…", radius: "md", … }` | System-wide visual identity — design tokens consumed by every React (and Phoenix LiveView) deployable in this system.  At most one per system.  Colour properties (`primary`, `secondary`, `accent`, `success`, `warning`, `error`, `neutral`) accept CSS hex values (`#RGB` / `#RRGGBB` / `#RRGGBBAA`).  `radius` is one of `none / sm / md / lg / xl`.  `fontFamily` and `fontFamilyMono` are free-form strings.  `colorScheme` is `light / dark / auto`.  Unknown property names and invalid values are validator errors. |
+| `theme { primary: "#…", radius: "md", … }` | System-wide visual identity — design tokens consumed by every frontend (react, vue, svelte, angular) and Phoenix LiveView deployable in this system.  At most one per system.  Colour properties (`primary`, `secondary`, `accent`, `success`, `warning`, `error`, `neutral`) accept CSS hex values (`#RGB` / `#RRGGBB` / `#RRGGBBAA`).  `radius` is one of `none / sm / md / lg / xl`.  `fontFamily` and `fontFamilyMono` are free-form strings.  `colorScheme` is `light / dark / auto`.  Unknown property names and invalid values are validator errors. |
 | `api Name from <Subdomain>` | First-class API contract derived from a subdomain's domain (aggregates expose `all / byId / create / update / delete`, repositories expose their finds, workflows expose mutations, views expose queries).  Backend deployables `serves:` an api; UIs reference one via `api X: <ApiName>` parameters.  See [`architecture.md`](architecture.md). |
 | `storage Name { type: postgres\|redis\|kafka\|s3\|rabbitmq\|restApi\|… }` | Typed physical store / service reusable across deployables.  `type:` names the built-in **sourceType** that realizes it.  v0 fully supports `postgres`; object-store / queue / external-api types (`s3`, `rabbitmq`, `restApi`) activate dev-compose sidecars + client emission; the rest parse but don't activate generator output.  Optional `config { k: v }` map for vendor parameters (region, bucket, vhost, …).  See [`resources.md`](resources.md). |
 | `resource Name { for: <Ctx>, kind: <k>, use: <storage>, … }` | The configured binding (renamed from `dataSource`) from a bounded context's data of kind `state` / `eventLog` / `snapshot` / `cache` / `replica` / `objectStore` / `queue` / `api` to a physical `storage`.  Optional knobs: `schema`, `tablePrefix`, `keyPrefix`, `ttl`, `every`, `retain`, `isolationLevel`, `readonly`, `shape`, `config { … }`.  Every backend deployable hosting an aggregate must list a matching `resource` under its `dataSources:` field.  See [`resources.md`](resources.md) for the full model (sourceTypes, kinds, capabilities, interfaces) and workflow-level consumption. |
@@ -181,9 +182,16 @@ used in operation / workflow expression bodies.  The
 | --- | --- |
 | `dotnet` | ASP.NET Core + EF Core + Mediator (martinothamar) + Swashbuckle.  Default port 8080. |
 | `node`   | Hono + Drizzle ORM + Zod with `@hono/zod-openapi`.  Default port 3000. |
+| `elixir` / `phoenixLiveView` | Phoenix + Ash 3.x (or vanilla Ecto via `foundation: vanilla`).  `phoenixLiveView` additionally mounts a HEEx UI (fullstack). |
+| `python` | FastAPI + SQLAlchemy + Pydantic. |
+| `java`   | Spring Boot + JPA + Hibernate. |
 | `react`  | Vite + React Router + React Query + Zod + Mantine + Playwright page objects.  Default port 3001. |
+| `vue`    | Vite + vue-router + vue-query + Zod (design packs `vuetify` / `shadcnVue`). |
+| `svelte` | Svelte 5 / SvelteKit static SPA + svelte-query + Zod (`shadcnSvelte` / `flowbite`). |
+| `angular` | Angular SPA (angularMaterial pack). |
 
-Backend deployables (`dotnet`, `node`, `phoenixLiveView`) declare
+Backend deployables (`dotnet`, `node`, `elixir`, `python`, `java`,
+`phoenixLiveView`) declare
 `contexts: [...]` (which bounded contexts they host) and
 `dataSources: [...]` (the system-scope `resource` decls that route
 those contexts' persistence).  React deployables declare
@@ -203,7 +211,7 @@ order:
 | --- | --- |
 | `enum Name { A, B, C }` | Closed enumeration; values are referenced bare. |
 | `valueobject Name { … }` | Immutable record with optional invariants and derived members. |
-| `aggregate Name [ids guid\|int\|long\|string] [persistedAs(eventLog\|state)] [shape(relational\|embedded\|document)] { … }` | Aggregate root with implicit `Name id` field.  Header modifiers (D-DOCUMENT-AXIS): `persistedAs(…)` picks the primary truth kind (default `state`); `shape(…)` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ash embedded resources); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on `dotnet`/`node` (a `shape(…)` a backend can't emit is a validation error — see `supportedShapes`). |
+| `aggregate Name [ids guid\|int\|long\|string] [persistedAs(eventLog\|state)] [shape(relational\|embedded\|document)] { … }` | Aggregate root with implicit `Name id` field.  Header modifiers (D-DOCUMENT-AXIS): `persistedAs(…)` picks the primary truth kind (default `state`); `shape(…)` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ash embedded resources); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on `dotnet`, `node`, `python`, and `java` (elixir is relational/embedded only) (a `shape(…)` a backend can't emit is a validation error — see `supportedShapes`). |
 | `event Name { field: Type, … }` | Flat record raised via `emit`. |
 | `repository Name for Aggregate { find … }` | Repository declaration with optional find queries. |
 
@@ -280,8 +288,8 @@ can be queried polymorphically:
 | `inheritanceUsing(sharedTable \| ownTable)` | Header modifier (on the base, optionally per concrete) choosing the table-mapping strategy. Default `sharedTable` (TPH). `ownTable` (TPC) emits a standalone table per concrete. |
 
 `find all <Base>` returns the polymorphic union of all subtypes via a per-backend
-reader. TPC (`ownTable`) is emitted on every backend; TPH (`sharedTable`) on the
-node/Hono backend only — a TPH hierarchy with no node/Hono host is an error. See
+reader. TPC (`ownTable`) is emitted on every backend; TPH (`sharedTable`) is
+emitted on all five backends. See
 [`inheritance.md`](inheritance.md) for the per-backend emission, the validation
 rules, and the deferred patterns.
 
@@ -303,7 +311,7 @@ Inside an aggregate or an `entity` part:
 | `operation name(params) { … }` | Public mutating method (root only). |
 | `private operation name(params) { … }` | Mutating method, only callable from within the same aggregate root. |
 | `operation name(params) extern { precondition … }` | Public op whose business decision lives in user code; body must contain only `precondition` statements. See `extern.md`. |
-| `operation name(params) when <pred> { … }` | **canCommand state gate** (criterion.md, use site 2): `<pred>` is a pure bool predicate over the aggregate's own state (op params are out of scope — `loom.when-references-op-param`), evaluated against the loaded instance before the body. False → 409 "Disallowed" ProblemDetails; a side-effect-free `GET /{id}/can_<op>` companion returns `{ allowed }` for UI enablement. Named criteria / aggregate functions inline like any bool position. Hono + .NET; gated on elixir (`loom.when-unsupported`). Distinct from `requires` (auth, 403) and `precondition` (argument validation, 400). |
+| `operation name(params) when <pred> { … }` | **canCommand state gate** (criterion.md, use site 2): `<pred>` is a pure bool predicate over the aggregate's own state (op params are out of scope — `loom.when-references-op-param`), evaluated against the loaded instance before the body. False → 409 "Disallowed" ProblemDetails; a side-effect-free `GET /{id}/can_<op>` companion returns `{ allowed }` for UI enablement. Named criteria / aggregate functions inline like any bool position. Supported on all five backends (node, dotnet, python, elixir, java). Distinct from `requires` (auth, 403) and `precondition` (argument validation, 400). |
 | `apply(e: <Event>) { … }` | **Event-sourcing fold** (only on a `persistedAs(eventLog)` aggregate).  Folds one emitted event type into state — a pure transition: assignments / collection mutations / `let` only, no `emit`, no side-effecting calls, no guards.  One `apply` per event type.  See the event-sourcing note below. |
 | `view name = Aggregate where filter` | Shorthand: saved query, source's wire shape.  Exposed at `GET /views/<snake>`. |
 | `view name { fields ... from Aggregate where? bind ... }` | Full form: declared output shape with bind-expression projections.  See `views.md`. |
@@ -358,13 +366,12 @@ aggregate Account ids guid persistedAs(eventLog) {
 }
 ```
 
-Storage emission is currently the **Hono** backend only: an event-sourced
-aggregate persists to an append-only `<agg>_events` table, constructs and
-mutates through emitted events, and rehydrates by folding the stream on load.
-Hosting one on .NET / Phoenix is a validation error (not a silent state
-fallback). See `generators.md` for the per-backend matrix and
-`docs/proposals/workflow-and-applier.md` for the roadmap
-(creation-from-events, snapshots, and the other backends are upcoming).
+Storage emission ships on **node, .NET, Python, and Java**, plus Phoenix under
+`foundation: vanilla`: an event-sourced aggregate persists to an append-only
+`<agg>_events` table, constructs and mutates through emitted events, and
+rehydrates by folding the stream on load. Only an Ash-Phoenix host is a
+validation error (not a silent state fallback). See `generators.md` for the
+per-backend matrix and `docs/proposals/workflow-and-applier.md` for the roadmap.
 
 #### Provenanced fields
 
@@ -397,9 +404,9 @@ ddd snapshot path/to/system.ddd -o out
 
 The TypeScript/Hono backend additionally emits a `domain/provenance.ts`
 runtime SDK and a `recordTrace(...)` call after each write, so a value can be
-traced back to the snapshot that produced it at runtime. Provenance is a
-TypeScript/Hono feature; other backends parse the keyword but emit no trace
-code. See `examples/provenance.ddd` for a runnable backend example and the
+traced back to the snapshot that produced it at runtime. Provenance trace code
+is emitted on the TypeScript/Hono, .NET, and elixir-vanilla backends; the
+remaining backends parse the keyword but emit no trace code. See `examples/provenance.ddd` for a runnable backend example and the
 `Provenance System` playground example for the same domain as a Hono + React
 system.
 
@@ -627,6 +634,8 @@ for high-magnitude / high-precision values).
 | TS host type | `number` | `decimal.js` `Decimal` |
 | .NET host type | `System.Decimal` (lossy through JSON-number boundary) | `System.Decimal` (precise, string-on-wire) |
 | Phoenix/Ash host type | Elixir `Decimal` (lossy through Jason float) | Elixir `Decimal` (precise — Jason's default) |
+| Python host type | `float` (lossy through JSON-number boundary) | `Decimal` (precise, string-on-wire) |
+| Java host type | `double` (lossy through JSON-number boundary) | `BigDecimal` (precise, string-on-wire) |
 | OpenAPI | `{ type: number }` | `{ type: string, format: decimal }` (PayPal/Coinbase/ISO 20022 convention) |
 | Source-level literal | `10.50` | `money("10.50")` |
 | Arithmetic | participates in `int < long < decimal` widening | **closed**: see below |
@@ -791,9 +800,10 @@ test e2e "create then confirm an order via UI" against webApp {
 ```
 
 The test kind is implied by the target deployable's platform —
-`react` deployables get a Playwright spec routed through the auto-
-generated page objects (`<react-deployable>/e2e/pages/<aggregate>.ts`);
-backend deployables get the vitest+fetch path described above.
+any frontend deployable (react, vue, svelte, angular) gets a Playwright
+spec routed through the auto-generated page objects
+(`<frontend-deployable>/e2e/pages/<aggregate>.ts`); backend deployables get
+the vitest+fetch path described above.
 
 The DSL surface is identical to api e2e (`ui.<aggregate>.<verb>(...)`);
 only the lowering differs:
@@ -848,8 +858,8 @@ by the queryable-subset validator.
 `findById` and `getById` are auto-generated for every aggregate
 (no need to declare them in the repository).  An auto-included
 `find all(): T[]` is also added to every aggregate's repository, so
-both backends always expose `GET /<plural>` and the React frontend
-always has a list page to render.  Declaring your own `find all(...)`
+all five backends always expose `GET /<plural>` and every frontend
+(react, vue, svelte, angular) always has a list page to render.  Declaring your own `find all(...)`
 in the DSL overrides the implicit one.
 
 ---
@@ -871,9 +881,9 @@ The validator runs after parsing and reports errors for:
 - Unknown / out-of-scope `X id` targets.
 - `contains` referencing a part that belongs to a different aggregate.
 - Operations or `test` blocks declared outside an aggregate root.
-- A `platform: react` deployable without a `targets:` field, or
-  pointing `targets:` at another `react` deployable.
-- A non-react deployable using `targets:` (only valid on frontends).
+- A frontend deployable (`react`, `vue`, `svelte`, `angular`) without a
+  `targets:` field, or pointing `targets:` at another frontend deployable.
+- A non-frontend deployable using `targets:` (only valid on frontends).
 
 Warnings (non-fatal):
 

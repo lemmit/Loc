@@ -244,13 +244,15 @@ docker compose up                          # backends apply migrations at boot
 ```
 
 There is no separate `db:generate` / `dotnet ef migrations add` step
-— Loom owns the diff.  Both backends self-apply on boot:
+— Loom owns the diff.  Every DB backend self-applies on boot:
 
 | Backend | Files emitted | Applied by |
 |---|---|---|
 | Hono (Drizzle) | `<deployable>/db/migrations/<ts>_<name>.sql` + `db/migrations/meta/_journal.json` | `drizzle-orm/node-postgres/migrator`'s `migrate()` called from `index.ts` at startup; `npm run db:migrate` also wired for out-of-band runs. |
 | .NET (EF Core) | `<deployable>/Infrastructure/Persistence/Migrations/<Ts>_<Name>.cs` with `b.Sql(...)` raw-SQL `Up` / `Down` bodies | `db.Database.Migrate()` in `Program.cs` at startup (idempotent — EF's `__EFMigrationsHistory` table tracks what's been applied). |
 | Phoenix (Ash/Ecto) | `<deployable>/priv/repo/migrations/<ts>_<name>.exs` Ecto migrations | `mix ecto.migrate` from the entrypoint script; `mix ecto.setup` on first boot. |
+| Python (SQLAlchemy) | `<deployable>/migrations/<version>_<module>_<name>.sql` raw-SQL files | `run_migrations()` from the FastAPI lifespan applies pending files in order, tracking applied tags in a `__loom_migrations` table (the Drizzle-runtime-migrator pattern). |
+| Java (Spring/Flyway) | `<deployable>/src/main/resources/db/migration/V<version>.<n>__<Module>_<Name>.sql` Flyway scripts | Flyway runs them on Spring Boot startup (tracked in `flyway_schema_history`). |
 
 The `.loom/snapshots/<Subdomain>.snapshot.json` files are
 repo-checked-in baselines — committing them is what gives the next
@@ -276,9 +278,11 @@ body.  Loom doesn't try to translate between them.
 
 ## Docker
 
-Both backends ship with a multi-stage `Dockerfile` and a
+Every backend ships with a multi-stage `Dockerfile` and a
 `.dockerignore`.  Build and run with the standard commands; verified
-end-to-end against `docker build` and `docker run`.
+end-to-end against `docker build` and `docker run`.  The TypeScript and
+.NET images are walked through below as representatives; the Python,
+Java, and Phoenix images follow the same multi-stage shape.
 
 ### TypeScript
 
@@ -604,9 +608,11 @@ The opt-in `LOOM_E2E_CA_DIR` environment variable (used by
 ### Cross-platform OpenAPI parity check
 
 When the same subdomain is hosted on more than one deployable across
-different platforms (Hono, .NET, Phoenix), the e2e additionally diffs
-their OpenAPI specs three ways to catch generator drift. Each backend
-self-describes via its framework-native OpenAPI emitter:
+different platforms (Hono, .NET, Phoenix, Python — Java is booted and
+health-checked but excluded from the diff pairs), the e2e additionally
+diffs their OpenAPI specs across every backend pair to catch generator
+drift. Each backend self-describes via its framework-native OpenAPI
+emitter:
 
 Every backend serves the spec at the **aligned** path `/openapi.json` (root):
 
@@ -623,13 +629,16 @@ are gated by `LOOM_OPENAPI_UI` (default on; the k8s chart sets it `false` to
 keep an unauthenticated API explorer off production). The `/openapi.json` spec
 stays available regardless.
 
-The check fetches all three, runs `diffSpecs(ref, other) → ParityDiff`
-(pure helper in `test/_helpers/openapi-normalize.ts`) for every backend
-pair (`hono ↔ dotnet`, `hono ↔ phoenix`, `dotnet ↔ phoenix`), and
-reports any divergence across nine dimensions: ops sets, response
-cardinality, schemas sets, per-schema field/required-set drift,
-path-param types, request- and response-body schema refs, and
-operationIds.
+The check fetches each diffed backend's spec, runs
+`diffSpecs(ref, other) → ParityDiff` (pure helper in
+`test/_helpers/openapi-normalize.ts`) for every backend pair over the
+four diffed backends — six pairs (`hono ↔ dotnet`, `hono ↔ phoenix`,
+`dotnet ↔ phoenix`, `hono ↔ python`, `dotnet ↔ python`,
+`phoenix ↔ python`) — and reports any divergence across the dimensions:
+ops sets, response cardinality, schemas sets, per-schema
+field/required-set drift, per-property type/format, path-param types,
+query params, request- and response-body schema refs, operationIds,
+enum value-sets, and error responses.
 
 The CI workflow (`.github/workflows/conformance-parity.yml`) runs in
 **strict mode** (`LOOM_E2E_STRICT_PARITY=1`): each divergence is a hard

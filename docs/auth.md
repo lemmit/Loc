@@ -129,6 +129,9 @@ Slice 1B introduces `.contains(x)` as a collection op (joining
 | --- | --- |
 | TypeScript | `array.includes(value)` |
 | C# / .NET | `array.Contains(value)` (LINQ) |
+| Python | `value in array` |
+| Java | `array.contains(value)` |
+| Elixir | `value in array` |
 
 It's available on any array — not just `currentUser.permissions`
 — so the same vocabulary covers any membership check the domain
@@ -227,10 +230,10 @@ for the full surface.
 ### UI gate — `page { requires <expr> }`
 
 A `page` carries the same `requires <expr>` clause (page-metamodel §4).  On a
-**React** frontend with `auth: ui` (whose target backend is `auth: required`),
-the generated page evaluates the gate client-side against the verified session
-claims and renders a `<Forbidden/>` fallback instead of its body when it fails
-— the read-side mirror of the backend 403:
+**React / Vue / Svelte** frontend with `auth: ui` (whose target backend is
+`auth: required`), the generated page evaluates the gate client-side against
+the verified session claims and renders a `<Forbidden/>` fallback instead of
+its body when it fails — the read-side mirror of the backend 403:
 
 ```ddd
 page Secret {
@@ -250,10 +253,11 @@ if (!(currentUser.role === "agent")) {
 Like the view gate it is **`currentUser`-only** (it has no row to scope), so it
 and the backend stay decidable from the same claims.  The gate guard lands after
 every hook (keeping rules-of-hooks intact).  A page without `auth: ui`, or
-without a gate, is byte-identical to before.  Currently React-only; the other
-frontends (Vue / Svelte / Angular) and menu-link hiding are follow-ups, and the
-client guard is **defence-in-depth** — the authoritative check is always the
-backend 403.
+without a gate, is byte-identical to before.  The page `requires` gate ships on
+React, Vue, and Svelte; menu-link hiding ships on React + Svelte, and
+action-button gating on React / Vue / Svelte — only Angular still lacks an auth
+UI gate.  The client guard is **defence-in-depth** — the authoritative check is
+always the backend 403.
 
 `currentUser` is in scope wherever an expression evaluates **per
 request**:
@@ -271,6 +275,13 @@ request**:
 | `function` body | ❌ |
 
 The validator surfaces a friendly diagnostic for any disallowed use.
+
+> **All five backends emit auth files.** The two file layouts documented
+> below (.NET and Hono) are representative — Python, Java, and
+> Elixir/Phoenix emit the same surface (a strongly-typed `User`, a verifier
+> hook, and request middleware that stashes the resolved principal), plus
+> the OIDC authorization-code handshake when an `auth { oidc { … } }` block
+> is present.
 
 ## .NET (ASP.NET Core + Mediator)
 
@@ -371,7 +382,7 @@ overriding the default.
 
 ## Bypass list
 
-Both backends bypass auth on these paths so docker-compose health
+Every backend bypasses auth on these paths so docker-compose health
 checks, OpenAPI clients, and Swagger UI work without tokens:
 
 - `/health`
