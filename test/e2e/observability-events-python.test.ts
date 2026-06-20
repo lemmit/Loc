@@ -22,7 +22,7 @@ import { describe, expect, it } from "vitest";
 // machines).
 //
 // Opt-in via LOOM_OBS_E2E_PYTHON=1 — keeps `npm test` fast.  Requires
-// `uv` on PATH (it provisions Python 3.12 itself).
+// `uv` on PATH (it provisions Python 3.13 itself).
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
