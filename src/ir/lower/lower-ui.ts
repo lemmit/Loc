@@ -26,7 +26,6 @@ import type {
   PageIR,
   PageLayoutIR,
   PageMetadataIR,
-  PageOriginIR,
   StateFieldIR,
   UiApiParamIR,
   UiChannelParamIR,
@@ -270,12 +269,6 @@ function lowerPage(p: Page, user?: UserIR): PageIR {
   if (description !== undefined || ogImage !== undefined || canonical !== undefined) {
     metadata = { description, ogImage, canonical };
   }
-  // Infer the page's origin discriminator + `source` from its body
-  // shape.  Only the three singleton index-page sentinels (`Home` /
-  // `WorkflowsIndex` / `ViewsIndex`) are recognised here; scaffolded
-  // list / detail / form pages carry full body trees and get their
-  // origin re-sourced by name in `resourceScaffoldOrigins` (lower.ts).
-  const inferred = inferPageOrigin(body);
   return {
     name: p.name,
     params,
@@ -286,29 +279,28 @@ function lowerPage(p: Page, user?: UserIR): PageIR {
     derived,
     body,
     menuMeta,
-    source: inferred.kind === "custom" ? "explicit" : "scaffold",
-    origin: inferred,
+    // `source` flags the three scaffold singleton sentinels (`Home` /
+    // `WorkflowsIndex` / `ViewsIndex`), whose page NAMES collide with
+    // hand-written pages — only their sentinel BODY (visible here, before the
+    // ⑤c expander rewrites it) distinguishes them.  `classifyPage` gates its
+    // singleton branch on this so a user page literally named `Home` stays
+    // `custom`.  Every other page kind is name/area-derivable, so they keep the
+    // default `"explicit"`.
+    source: isSingletonSentinel(body) ? "scaffold" : "explicit",
     layout,
     metadata,
   };
 }
 
-/** Infer a page's `origin` from its body shape.  The scaffold macro
- *  emits the three singleton index pages with a sentinel-call body
- *  (`Home()` / `WorkflowsIndex()` / `ViewsIndex()`) whose name maps
- *  one-to-one to an origin kind.  Anything else is a user-written page
- *  → `{ kind: "custom" }`; scaffolded list / detail / form pages carry
- *  their full body tree directly and get their origin re-sourced by
- *  name in `resourceScaffoldOrigins` (`src/ir/lower/lower.ts`). */
-function inferPageOrigin(body: ExprIR | undefined): PageOriginIR {
-  if (!body || body.kind !== "call") return { kind: "custom" };
-  const callName = body.name;
-  // Singleton index pages — synthesised by the scaffold macro with
-  // sentinel-call bodies whose name matches the page's role.
-  if (callName === "Home") return { kind: "home" };
-  if (callName === "WorkflowsIndex") return { kind: "workflows-index" };
-  if (callName === "ViewsIndex") return { kind: "views-index" };
-  return { kind: "custom" };
+/** True when a page body is one of the three scaffold singleton sentinels
+ *  (`Home()` / `WorkflowsIndex()` / `ViewsIndex()`) the macro emits — the only
+ *  origin-free signal that tells the scaffold singleton apart from a
+ *  hand-written page that happens to share its reserved name. */
+function isSingletonSentinel(body: ExprIR | undefined): boolean {
+  return (
+    body?.kind === "call" &&
+    (body.name === "Home" || body.name === "WorkflowsIndex" || body.name === "ViewsIndex")
+  );
 }
 
 export function lowerComponent(c: Component): ComponentIR {

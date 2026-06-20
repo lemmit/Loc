@@ -1882,12 +1882,6 @@ export interface PageIR {
    *  per-aggregate / per-workflow / per-view builders for the bulk-
    *  scaffold case (byte-equivalence target). */
   source: "explicit" | "scaffold";
-  /** Only set for scaffold-synthesised pages.  Carries the structural
-   *  shape of the page so the page emitter can dispatch without
-   *  re-parsing the body expression.  Same source context the legacy
-   *  generator's per-aggregate / per-workflow / per-view loop
-   *  received. */
-  origin?: PageOriginIR;
   /** Explicit emit path override for walker-rendered
    *  pages.  When set, the page-emitter writes the rendered TSX to
    *  this path instead of the default `src/pages/<page-snake>.tsx`.
@@ -1933,19 +1927,6 @@ export interface PageMetadataIR {
  *  re-introspecting the body.  User-written explicit pages get
  *  `{ kind: "custom" }` — they emit at `src/pages/<page-snake>.tsx`
  *  and contribute no auto-nav entry. */
-export type PageOriginIR =
-  | { kind: "aggregate-list"; aggregateName: string; contextName: string }
-  | { kind: "aggregate-new"; aggregateName: string; contextName: string }
-  | { kind: "aggregate-detail"; aggregateName: string; contextName: string }
-  | { kind: "workflow-form"; workflowName: string; contextName: string }
-  | { kind: "workflow-instances-list"; workflowName: string; contextName: string }
-  | { kind: "workflow-instance-detail"; workflowName: string; contextName: string }
-  | { kind: "view-list"; viewName: string; contextName: string }
-  | { kind: "workflows-index" }
-  | { kind: "views-index" }
-  | { kind: "home" }
-  | { kind: "custom" };
-
 /** A user-defined component: typed function from params (and optional
  *  local state) to a body expression.  Components compose other
  *  components but never produce pages or routes. */

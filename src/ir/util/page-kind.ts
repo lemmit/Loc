@@ -1,0 +1,114 @@
+import { plural, snake, upperFirst } from "../../util/naming.js";
+import type { PageIR } from "../types/loom-ir.js";
+
+/** The classification of a page by what the scaffold synthesised it as — an
+ *  aggregate's list/new/detail, a workflow's form/instance pages, a view's
+ *  table, the singleton index pages, or a hand-written `custom` page.
+ *
+ *  This used to be *stamped* onto `PageIR.origin` at lower time (by
+ *  `inferPageOrigin` + `resourceScaffoldOrigins`).  Slice 3c removed that
+ *  denormalised field: a page's kind is now *derived on demand* from its
+ *  role-scoped `name` + `area` (the single source of truth set by the scaffold
+ *  macro / the `area` block) via `classifyPage`.  `contextName` is intentionally
+ *  empty — every consumer that needs the bounded context resolves it by
+ *  searching, so the name was never load-bearing. */
+export type PageKind =
+  | { kind: "aggregate-list"; aggregateName: string; contextName: string }
+  | { kind: "aggregate-new"; aggregateName: string; contextName: string }
+  | { kind: "aggregate-detail"; aggregateName: string; contextName: string }
+  | { kind: "workflow-form"; workflowName: string; contextName: string }
+  | { kind: "workflow-instances-list"; workflowName: string; contextName: string }
+  | { kind: "workflow-instance-detail"; workflowName: string; contextName: string }
+  | { kind: "view-list"; viewName: string; contextName: string }
+  | { kind: "workflows-index" }
+  | { kind: "views-index" }
+  | { kind: "home" }
+  | { kind: "custom" };
+
+/** The declaration names a page is classified against — the aggregates,
+ *  workflows, and views served by the page's ui.  Every consumer already has
+ *  these (the generators iterate them; lowering carries the expand context), so
+ *  threading this tiny shape is cheaper than re-stamping `origin`. */
+export interface PageNameCtx {
+  // Arrays, not bare `Iterable` — `classifyPage` runs once per page over the
+  // same ctx, so a single-use `Map.keys()` iterator would be exhausted after
+  // the first page and silently misclassify the rest.
+  aggregateNames: readonly string[];
+  workflowNames: readonly string[];
+  viewNames: readonly string[];
+}
+
+/** Derive a page's {@link PageKind} from its role-scoped `name` + `area`.
+ *  Reproduces exactly what `inferPageOrigin` + `classifyScaffoldPageByName`
+ *  stamped before slice 3c, so generated output is byte-identical. */
+export function classifyPage(
+  page: Pick<PageIR, "name" | "area" | "source">,
+  ctx: PageNameCtx,
+): PageKind {
+  const name = page.name;
+  const area = page.area ?? [];
+
+  // Singleton index pages.  Their NAMES (`Home` / `WorkflowsIndex` /
+  // `ViewsIndex`) collide with hand-written pages, so — unlike the
+  // aggregate/workflow/view kinds below, whose names are distinctive — they are
+  // gated on `source === "scaffold"` (set in `lowerPage` from the sentinel body,
+  // the only signal that survives lowering).  A user page literally named `Home`
+  // keeps `source: "explicit"` and falls through to `custom`.
+  if (page.source === "scaffold") {
+    if (name === "Home") return { kind: "home" };
+    if (name === "WorkflowsIndex") return { kind: "workflows-index" };
+    if (name === "ViewsIndex") return { kind: "views-index" };
+  }
+
+  // Aggregate pages are role-named (`List`/`New`/`Detail`) inside their
+  // per-aggregate `area <Plural>` block — the area's last segment identifies
+  // the aggregate, the role the page kind.  Gating on the area keeps a
+  // hand-written top-level `page List` on its `custom` kind.
+  const last = area[area.length - 1];
+  if (last !== undefined) {
+    for (const aggName of ctx.aggregateNames) {
+      if (last !== snake(plural(aggName))) continue;
+      if (name === "List")
+        return { kind: "aggregate-list", aggregateName: aggName, contextName: "" };
+      if (name === "New") return { kind: "aggregate-new", aggregateName: aggName, contextName: "" };
+      if (name === "Detail")
+        return { kind: "aggregate-detail", aggregateName: aggName, contextName: "" };
+    }
+  }
+
+  // Workflow / view pages keep their full declared names.
+  for (const wfName of ctx.workflowNames) {
+    const p = upperFirst(wfName);
+    if (name === `${p}Workflow`)
+      return { kind: "workflow-form", workflowName: wfName, contextName: "" };
+    if (name === `${p}InstancesList`)
+      return { kind: "workflow-instances-list", workflowName: wfName, contextName: "" };
+    if (name === `${p}InstanceDetail`)
+      return { kind: "workflow-instance-detail", workflowName: wfName, contextName: "" };
+  }
+  for (const viewName of ctx.viewNames) {
+    if (name === `${viewName}View`) return { kind: "view-list", viewName, contextName: "" };
+  }
+
+  return { kind: "custom" };
+}
+
+/** The proper, aggregate-qualified identifier a page emits as in generated
+ *  *target* code — the React/Vue/Angular component name, the Phoenix LiveView
+ *  module / file stem, the Playwright page-object class, the smoke-test title,
+ *  the router import.
+ *
+ *  Scaffold aggregate pages are named by *role* in the DSL (`page List` inside
+ *  `area Orders`) so the file lands at its area path (`pages/orders/list.tsx`)
+ *  and the unfolded source reads cleanly.  But the role name (`List`) is not
+ *  unique across aggregates and reads poorly as a component identifier, so the
+ *  emitted name stays the aggregate-qualified `OrderList` form — reconstructed
+ *  from the page's derived {@link PageKind}.  Matches the router imports
+ *  (`<OrderList />` from `./pages/orders/list`). */
+export function pageEmitName(page: PageIR, ctx: PageNameCtx): string {
+  const k = classifyPage(page, ctx);
+  if (k.kind === "aggregate-list") return `${upperFirst(k.aggregateName)}List`;
+  if (k.kind === "aggregate-new") return `${upperFirst(k.aggregateName)}New`;
+  if (k.kind === "aggregate-detail") return `${upperFirst(k.aggregateName)}Detail`;
+  return page.name;
+}

@@ -13,6 +13,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { contextUsesMoney, uiUsesMoney } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
+import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
@@ -165,6 +166,12 @@ export function generateVueForContexts(
   }
   const pageRoutes = new Map<string, string>();
   for (const page of pages) pageRoutes.set(page.name, page.route!);
+  // Name-context for `classifyPage` (slice 3c — replaces the stamped `origin`).
+  const pageCtx: PageNameCtx = {
+    aggregateNames: [...aggregatesIRByName.keys()],
+    workflowNames: [...workflowsByName.keys()],
+    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
+  };
 
   // Extern frontend functions (extern-function-hook-escape-hatch.md §3):
   // the SAME two machine-owned files as react — the wire-DTO-typed
@@ -349,7 +356,7 @@ export function generateVueForContexts(
     topLevelComponents: options.topLevelComponents ?? [],
   });
   for (const [path, content] of pageObjects) out.set(path, content);
-  out.set("e2e/smoke.spec.ts", smokeSpec(ui));
+  out.set("e2e/smoke.spec.ts", smokeSpec(ui, pageCtx));
   out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
   out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
@@ -428,7 +435,7 @@ export function generateVueForContexts(
   // `deriveSidebarFromUi` render a `requiresJs` gate on any entry whose
   // linked page declares a `requires` clause, so the app-shell can hide a
   // forbidden page's nav link at runtime.
-  const sidebarOverride = deriveSidebarFromUi(ui, authUi);
+  const sidebarOverride = deriveSidebarFromUi(ui, pageCtx, authUi);
   const navSections: Array<{
     label: string;
     entries: Array<{
@@ -457,7 +464,7 @@ export function generateVueForContexts(
           requiresJs: e.requiresJs,
         })),
       }))
-    : deriveNavSections(defaultPages);
+    : deriveNavSections(defaultPages, pageCtx);
   // Bind the session user in the app-shell only when a nav entry is actually
   // gated — an unused `currentUser` binding would be a vue-tsc error.
   const navUsesSession = navSections.some((s) =>
@@ -698,13 +705,16 @@ interface NavEntryVM {
   exact?: boolean;
 }
 
-function deriveNavSections(pages: PageIR[]): Array<{ label: string; entries: NavEntryVM[] }> {
+function deriveNavSections(
+  pages: PageIR[],
+  nameCtx: PageNameCtx,
+): Array<{ label: string; entries: NavEntryVM[] }> {
   const aggregates: NavEntryVM[] = [];
   const workflows: NavEntryVM[] = [];
   const views: NavEntryVM[] = [];
   for (const page of pages) {
-    const o = page.origin;
-    if (!o || !page.route) continue;
+    if (!page.route) continue;
+    const o = classifyPage(page, nameCtx);
     if (o.kind === "aggregate-list") {
       const label = humanize(plural(o.aggregateName));
       aggregates.push({ to: page.route, label, testId: `nav-${snake(plural(o.aggregateName))}` });

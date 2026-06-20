@@ -17,6 +17,7 @@
 // ---------------------------------------------------------------------------
 
 import type { UiIR } from "../../ir/types/loom-ir.js";
+import type { PageNameCtx } from "../../ir/util/page-kind.js";
 import type { NavSectionVM } from "../_frontend/menu-emitter.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 
@@ -24,15 +25,17 @@ export interface RenderSidebarComponentArgs {
   ui: UiIR;
   appName: string;
   appModule: string;
+  /** Served decl names for `classifyPage` (slice 3c — replaces stamped origin). */
+  nameCtx: PageNameCtx;
 }
 
 /** Emit the full Elixir source for `lib/<app>_web/components/sidebar.ex`.
  *  Returns the file content as a string; the caller writes it to the
  *  appropriate path. */
 export function renderSidebarComponent(args: RenderSidebarComponentArgs): string {
-  const { ui, appName, appModule } = args;
+  const { ui, appName, appModule, nameCtx } = args;
 
-  const navSections: NavSectionVM[] = deriveSidebarFromUi(ui) ?? buildDefaultSections(ui);
+  const navSections: NavSectionVM[] = deriveSidebarFromUi(ui, nameCtx) ?? buildDefaultSections(ui);
 
   const webModule = `${appModule}Web`;
   const lines: string[] = [];

@@ -9,6 +9,7 @@ import {
   uiUsesMoney,
 } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
+import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
 import { AUTH_GATE_SVELTE, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
@@ -91,6 +92,13 @@ export function generateSvelteForContexts(
   }
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const { agg } of aggregates) aggregatesByName.set(agg.name, agg);
+  // Name-context for `classifyPage` / `pageEmitName` (slice 3c — replaces the
+  // stamped page origin).  Derived once from the served contexts.
+  const pageCtx: PageNameCtx = {
+    aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
+    workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
+    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
+  };
 
   const design = deployable.design ?? "shadcnSvelte@v1";
   const pack = loadPack(resolvePackDir(design));
@@ -159,7 +167,7 @@ export function generateSvelteForContexts(
   // Playwright e2e harness — same testid-keyed page-object surface
   // the react projects ship; the ui-e2e spec renderer (system layer)
   // adds the per-system `<sys>.ui.spec.ts` next to these.
-  out.set("e2e/smoke.spec.ts", smokeSpec(ui));
+  out.set("e2e/smoke.spec.ts", smokeSpec(ui, pageCtx));
   out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
   out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
   out.set("e2e/package.json", E2E_PACKAGE_JSON_SVELTE);
@@ -208,28 +216,36 @@ export function generateSvelteForContexts(
   // `authUi` enables per-link gating: `deriveSidebarFromUi` renders a
   // `requiresJs` condition on any nav entry whose linked page declares a
   // `requires` gate, so the app-shell can hide a forbidden page's link.
-  const sidebarOverride = deriveSidebarFromUi(ui, authUi);
-  const scaffoldedAggregates = aggregates
-    .filter(({ agg }) =>
-      ui.pages.some(
-        (p) => p.origin?.kind === "aggregate-list" && p.origin.aggregateName === agg.name,
-      ),
-    )
-    .map((a) => a.agg);
   const workflows = allWorkflows(contexts);
   const views = allViews(contexts);
+  const kindOf = (p: (typeof ui.pages)[number]) => classifyPage(p, pageCtx);
+  const sidebarOverride = deriveSidebarFromUi(ui, pageCtx, authUi);
+  const scaffoldedAggregates = aggregates
+    .filter(({ agg }) =>
+      ui.pages.some((p) => {
+        const k = kindOf(p);
+        return k.kind === "aggregate-list" && k.aggregateName === agg.name;
+      }),
+    )
+    .map((a) => a.agg);
   const scaffoldedWorkflows = workflows
     .filter(({ wf }) =>
-      ui.pages.some((p) => p.origin?.kind === "workflow-form" && p.origin.workflowName === wf.name),
+      ui.pages.some((p) => {
+        const k = kindOf(p);
+        return k.kind === "workflow-form" && k.workflowName === wf.name;
+      }),
     )
     .map((w) => w.wf);
   const scaffoldedViewNames = views
     .filter(({ view }) =>
-      ui.pages.some((p) => p.origin?.kind === "view-list" && p.origin.viewName === view.name),
+      ui.pages.some((p) => {
+        const k = kindOf(p);
+        return k.kind === "view-list" && k.viewName === view.name;
+      }),
     )
     .map((v) => v.view.name);
-  const hasWorkflowsIndex = ui.pages.some((p) => p.origin?.kind === "workflows-index");
-  const hasViewsIndex = ui.pages.some((p) => p.origin?.kind === "views-index");
+  const hasWorkflowsIndex = ui.pages.some((p) => kindOf(p).kind === "workflows-index");
+  const hasViewsIndex = ui.pages.some((p) => kindOf(p).kind === "views-index");
   const navSections =
     sidebarOverride?.map((s) => ({
       label: s.label,

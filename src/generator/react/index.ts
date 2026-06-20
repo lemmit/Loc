@@ -11,6 +11,7 @@ import {
   uiUsesMoney,
 } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
+import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lowerFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
@@ -168,6 +169,13 @@ export function generateReactForContexts(
 
   const workflows = allWorkflows(contexts);
   const views = allViews(contexts);
+  // Name-context for `classifyPage` (slice 3c): a page's kind is derived from
+  // its role-scoped name + area against the served decls, not a stamped origin.
+  const pageCtx: PageNameCtx = {
+    aggregateNames: aggregates.map(({ agg }) => agg.name),
+    workflowNames: workflows.map(({ wf }) => wf.name),
+    viewNames: views.map(({ view }) => view.name),
+  };
 
   // Single codegen path: every `src/pages/...` file (scaffold-derived
   // OR explicit) routes through `emitPagesForUi` → walker.
@@ -205,7 +213,7 @@ export function generateReactForContexts(
     out.set("src/api/views.ts", buildViewsApiModule(contexts));
   }
 
-  out.set("e2e/smoke.spec.ts", smokeSpec(ui));
+  out.set("e2e/smoke.spec.ts", smokeSpec(ui, pageCtx));
   out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
   out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
@@ -274,7 +282,7 @@ export function generateReactForContexts(
   // Workflows / Views grouping below.  When the ui has no menu
   // block, `sidebarOverride` is `undefined` and the AppShell
   // preparer falls back to its default hardcoded shape.
-  const sidebarOverride = deriveSidebarFromUi(ui, authUi);
+  const sidebarOverride = deriveSidebarFromUi(ui, pageCtx, authUi);
 
   // Explicit pages with non-conventional names need
   // to register their import + route in App.tsx so React Router
@@ -284,7 +292,7 @@ export function generateReactForContexts(
   // `prepareAppShellVM`.  Pages with `layout: none` go to a
   // separate `outOfShell` channel that mounts as sibling routes
   // outside the AppShell chrome.
-  const extraRouteSplit = deriveExtraRoutesFromUi(ui, options.topLevelComponents ?? []);
+  const extraRouteSplit = deriveExtraRoutesFromUi(ui, options.topLevelComponents ?? [], pageCtx);
   const extraRoutes = extraRouteSplit.inShell;
   const outOfShellRoutes = extraRouteSplit.outOfShell;
   // Phase 8 step 2: walk each declared `layout <Name>` referenced by
@@ -309,38 +317,47 @@ export function generateReactForContexts(
   // otherwise produce dangling imports and duplicate identifiers
   // alongside the explicit-page extraRoutes.  Filter the lists down to
   // the targets that the ui actually scaffolded.
+  const kindOf = (p: (typeof ui.pages)[number]) => classifyPage(p, pageCtx);
   const scaffoldedAggregates = aggregates.filter(({ agg }) =>
-    ui.pages.some(
-      (p) => p.origin?.kind === "aggregate-list" && p.origin.aggregateName === agg.name,
-    ),
+    ui.pages.some((p) => {
+      const k = kindOf(p);
+      return k.kind === "aggregate-list" && k.aggregateName === agg.name;
+    }),
   );
   const scaffoldedWorkflows = workflows.filter(({ wf }) =>
-    ui.pages.some((p) => p.origin?.kind === "workflow-form" && p.origin.workflowName === wf.name),
+    ui.pages.some((p) => {
+      const k = kindOf(p);
+      return k.kind === "workflow-form" && k.workflowName === wf.name;
+    }),
   );
   const scaffoldedViews = views.filter(({ view }) =>
-    ui.pages.some((p) => p.origin?.kind === "view-list" && p.origin.viewName === view.name),
+    ui.pages.some((p) => {
+      const k = kindOf(p);
+      return k.kind === "view-list" && k.viewName === view.name;
+    }),
   );
   // Observable workflows (workflow-instance-visibility.md) — those whose
   // scaffold produced read-only instance pages.  A superset of the form set in
   // one direction (an event-triggered-only saga has instance pages but no
   // form), so it's derived independently.
   const observableWorkflows = workflows.filter(({ wf }) =>
-    ui.pages.some(
-      (p) => p.origin?.kind === "workflow-instances-list" && p.origin.workflowName === wf.name,
-    ),
+    ui.pages.some((p) => {
+      const k = kindOf(p);
+      return k.kind === "workflow-instances-list" && k.workflowName === wf.name;
+    }),
   );
 
   // Whether the scaffold expander synthesised a `Home` page (only
   // happens when the ui declared at least one scaffold).
-  const hasScaffoldHome = ui.pages.some((p) => p.origin?.kind === "home");
+  const hasScaffoldHome = ui.pages.some((p) => kindOf(p).kind === "home");
   // Same for the `ViewsIndex` / `WorkflowsIndex` singleton index pages:
   // they are only synthesised by the scaffold macro, so an explicit-page
   // ui with a view/workflow page but no scaffold has none.  The App shell
   // must then skip the `/views` (resp. `/workflows`) index import+route or
   // it dangles against a missing `./pages/views/index` module (TS2307) —
   // the per-view / per-workflow pages still mount.
-  const hasViewsIndex = ui.pages.some((p) => p.origin?.kind === "views-index");
-  const hasWorkflowsIndex = ui.pages.some((p) => p.origin?.kind === "workflows-index");
+  const hasViewsIndex = ui.pages.some((p) => kindOf(p).kind === "views-index");
+  const hasWorkflowsIndex = ui.pages.some((p) => kindOf(p).kind === "workflows-index");
 
   out.set(
     "src/App.tsx",

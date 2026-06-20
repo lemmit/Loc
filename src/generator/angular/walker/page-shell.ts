@@ -1,5 +1,5 @@
 import type { DerivedIR, ExprIR, PageIR, StateFieldIR } from "../../../ir/types/loom-ir.js";
-import { pageEmitName } from "../../../ir/util/page-emit-name.js";
+import { type PageNameCtx, pageEmitName } from "../../../ir/util/page-kind.js";
 import { upperFirst } from "../../../util/naming.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
@@ -35,18 +35,20 @@ export interface AngularPageShellInput {
    *  guard below — without it, a `requires` predicate stays purely a
    *  server-side 403. */
   authUi?: boolean;
+  /** Served decl names for the component's emitted identifier (slice 3c). */
+  nameCtx: PageNameCtx;
 }
 
 /** PascalCase component class name (`CustomerHome` → `CustomerHomeComponent`).
  *  Uses the aggregate-qualified emit name (`OrderList`), not the scaffold's
  *  role-scoped page name (`List`), which would collide across aggregates. */
-export function pageComponentName(page: PageIR): string {
-  return `${upperFirst(pageEmitName(page))}Component`;
+export function pageComponentName(page: PageIR, nameCtx: PageNameCtx): string {
+  return `${upperFirst(pageEmitName(page, nameCtx))}Component`;
 }
 
 /** kebab selector (`CustomerHome` → `app-customer-home`). */
-export function pageSelector(page: PageIR): string {
-  const kebab = pageEmitName(page)
+export function pageSelector(page: PageIR, nameCtx: PageNameCtx): string {
+  const kebab = pageEmitName(page, nameCtx)
     .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
     .replace(/[_\s]+/g, "-")
     .toLowerCase();
@@ -54,8 +56,8 @@ export function pageSelector(page: PageIR): string {
 }
 
 /** file slug (`CustomerHome` → `customer-home`). */
-export function pageSlug(page: PageIR): string {
-  return pageSelector(page).slice("app-".length);
+export function pageSlug(page: PageIR, nameCtx: PageNameCtx): string {
+  return pageSelector(page, nameCtx).slice("app-".length);
 }
 
 /** True when the walked body needs features not assembled yet — such a page
@@ -122,7 +124,7 @@ const FORMAT_HELPERS = [
 ] as const;
 
 export function renderAngularPage(input: AngularPageShellInput): string {
-  const { page, result } = input;
+  const { page, result, nameCtx } = input;
   const coreSymbols = new Set<string>(["Component"]);
   const routerSymbols = new Set<string>();
   const members: string[] = [];
@@ -413,13 +415,13 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     ...imports,
     "",
     "@Component({",
-    `  selector: ${JSON.stringify(pageSelector(page))},`,
+    `  selector: ${JSON.stringify(pageSelector(page, nameCtx))},`,
     `  imports: [${componentImportsList.join(", ")}],`,
     "  template: `",
     template,
     "  `,",
     "})",
-    `export class ${pageComponentName(page)} {${members.length > 0 ? "\n" + members.join("\n") + "\n" : ""}}`,
+    `export class ${pageComponentName(page, nameCtx)} {${members.length > 0 ? "\n" + members.join("\n") + "\n" : ""}}`,
     "",
   ].join("\n");
 }
@@ -481,17 +483,17 @@ function derivedCtx(
 }
 
 /** Stub component for a page whose body needs deferred features. */
-export function renderAngularPageStub(page: PageIR): string {
+export function renderAngularPageStub(page: PageIR, nameCtx: PageNameCtx): string {
   return [
     "// Auto-generated (stub — body needs api/forms support, a later Slice 4b batch).",
     'import { Component } from "@angular/core";',
     "",
     "@Component({",
-    `  selector: ${JSON.stringify(pageSelector(page))},`,
+    `  selector: ${JSON.stringify(pageSelector(page, nameCtx))},`,
     "  imports: [],",
-    `  template: \`<section data-testid=${JSON.stringify(`page-${pageSlug(page)}`)}><h2>${page.name}</h2></section>\`,`,
+    `  template: \`<section data-testid=${JSON.stringify(`page-${pageSlug(page, nameCtx)}`)}><h2>${page.name}</h2></section>\`,`,
     "})",
-    `export class ${pageComponentName(page)} {}`,
+    `export class ${pageComponentName(page, nameCtx)} {}`,
     "",
   ].join("\n");
 }

@@ -3,7 +3,7 @@
 // Svelte, and Vue frontends.  Extracted from src/generator/react/index.ts.
 
 import type { UiIR } from "../../ir/types/loom-ir.js";
-import { pageEmitName } from "../../ir/util/page-emit-name.js";
+import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 
 /** Auto-generated minimal Playwright smoke: every param-less page this
  *  ui declares navigates and loads.  Driven by route (not by importing
@@ -11,7 +11,7 @@ import { pageEmitName } from "../../ir/util/page-emit-name.js";
  *  pages map onto page-object files.  Richer per-page scenarios live
  *  in the page objects under e2e/pages/ and the generated
  *  `*.ui.spec.ts`. */
-export function smokeSpec(ui: UiIR): string {
+export function smokeSpec(ui: UiIR, nameCtx: PageNameCtx): string {
   // Auto-generated minimal Playwright smoke: every param-less page this
   // ui declares navigates and loads.  Driven by route (not by importing
   // the page objects) so it stays correct regardless of how the ui's
@@ -35,7 +35,7 @@ export function smokeSpec(ui: UiIR): string {
     cases.push(
       // Title uses the aggregate-qualified emit name (`OrderList`), not the
       // scaffold's role-scoped page name (`List`) — stable + unique.
-      `test(${JSON.stringify(`${pageEmitName(page)} loads`)}, async ({ page }) => {\n` +
+      `test(${JSON.stringify(`${pageEmitName(page, nameCtx)} loads`)}, async ({ page }) => {\n` +
         `  await page.goto(${JSON.stringify(route)});\n` +
         `  await expect(page).toHaveURL(new RegExp(${JSON.stringify(routeRe)}));\n` +
         `});`,

@@ -32,6 +32,9 @@ describe("page areas — containment grouping", () => {
       system Acme {
         subdomain S { context C { aggregate Order { name: string } } }
         ui App {
+          // A hand-written page literally named Home (body, not the scaffold
+          // Home() sentinel) must stay custom — classifyPage gates the singleton
+          // kinds on source: "scaffold", so this keeps a flat, unset emitPath.
           page Home { route: "/" body: Text { "hi" } }
           area Sales {
             area Orders {
