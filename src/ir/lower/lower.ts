@@ -140,6 +140,7 @@ import { lit } from "../types/loom-ir.js";
 import { lowerAuth } from "./lower-auth.js";
 import type { ContextLevelCapabilities } from "./lower-capabilities.js";
 import {
+  collectCapabilities,
   collectContextLevelCapabilities,
   collectFilters,
   collectStamps,
@@ -1256,6 +1257,7 @@ function lowerAggregate(
   // doesn't bind `this` to any aggregate), then re-bind here.
   const filters = collectFilters(agg, inner, contextLevelCaps);
   const stamps = collectStamps(agg, inner, contextLevelCaps);
+  const capabilities = collectCapabilities(agg);
   return {
     name: agg.name,
     idValueType,
@@ -1276,6 +1278,7 @@ function lowerAggregate(
       ? filters.map((f) => f.criterionRef)
       : undefined,
     contextStamps: stamps.length > 0 ? stamps : undefined,
+    capabilities: capabilities.length > 0 ? capabilities : undefined,
     persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,
     savingShape: (agg.shape as import("../types/loom-ir.js").SavingShape | undefined) ?? undefined,
     appliers: appliers.length > 0 ? appliers : undefined,

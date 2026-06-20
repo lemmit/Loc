@@ -47,6 +47,7 @@ import {
   type Model,
   type Ui,
 } from "../language/generated/ast.js";
+import { CAPABILITIES_TAG } from "../util/capability-tag.js";
 import { readArgBool, readArgInt, readArgRef, readArgRefs, readArgString } from "./api/_read.js";
 import type {
   MacroDefinition,
@@ -453,9 +454,16 @@ function expandCapability(
           isAggregate,
         );
   for (const agg of targets) {
-    const cloned = (cap.members ?? []).map((m) => AstUtils.copyAstNode(m, buildRef));
-    for (const m of cloned) resolveSelfTypes(m, agg.name, buildRef);
+    const cloned: unknown[] = (cap.members ?? []).map((m) => AstUtils.copyAstNode(m, buildRef));
+    for (const m of cloned) resolveSelfTypes(m as AstNode, agg.name, buildRef);
     spliceMembers(agg, "aggregate", cloned, at, doc);
+    // Record capability membership as a transient annotation on the aggregate
+    // node (read by lowering's `collectCapabilities`).  Deliberately NOT an
+    // `implements <Cap>` AST member — that would re-trigger the typed-implements
+    // scan in `expandHost` and double-apply the capability.
+    const slot = agg as { [CAPABILITIES_TAG]?: string[] };
+    if (!slot[CAPABILITIES_TAG]) slot[CAPABILITIES_TAG] = [];
+    slot[CAPABILITIES_TAG].push(cap.name);
   }
 }
 

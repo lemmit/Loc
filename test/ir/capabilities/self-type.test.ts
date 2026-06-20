@@ -93,3 +93,33 @@ describe("`Self id` anchored capability type (typed-capabilities.md)", () => {
     expect(errors.join("\n")).toMatch(/`Self id` is only valid inside a `capability`/);
   });
 });
+
+describe("capability membership (AggregateIR.capabilities)", () => {
+  it("records every applied capability (with + implements, deduped + sorted)", async () => {
+    const ir = await buildLoomModel(`
+      capability trashable { isDeleted: bool  filter !this.isDeleted }
+      system D { subdomain M { context C {
+        aggregate Order with auditable, trashable { subject: string }
+        aggregate Doc { subject: string  implements trashable }
+        aggregate Plain { subject: string }
+      }}}
+    `);
+    expect(findAgg(ir, "Order").capabilities).toEqual(["auditable", "trashable"]);
+    expect(findAgg(ir, "Doc").capabilities).toEqual(["trashable"]);
+    expect(findAgg(ir, "Plain").capabilities).toBeUndefined();
+  });
+
+  it("context-level `with <Cap>` records membership on every aggregate", async () => {
+    const ir = await buildLoomModel(`
+      capability trashable { isDeleted: bool  filter !this.isDeleted }
+      system D { subdomain M {
+        context C with trashable {
+          aggregate Order { subject: string }
+          aggregate Invoice { total: int }
+        }
+      }}
+    `);
+    expect(findAgg(ir, "Order").capabilities).toEqual(["trashable"]);
+    expect(findAgg(ir, "Invoice").capabilities).toEqual(["trashable"]);
+  });
+});

@@ -1,4 +1,5 @@
 import type { Aggregate, BoundedContext, Expression } from "../../language/generated/ast.js";
+import { CAPABILITIES_TAG } from "../../util/capability-tag.js";
 import type { ContextStampIR, ExprIR } from "../types/loom-ir.js";
 import { criterionRefOf, lowerExpr } from "./lower-expr.js";
 import type { Env } from "./lower-types.js";
@@ -77,6 +78,16 @@ export function collectStamps(
     .filter((m) => m.$type === "StampDecl")
     .map((m) => lowerStampDecl(m as unknown as StampDeclLike, env));
   return [...ctxCaps.unqualifiedStamps, ...own];
+}
+
+/** The typed capabilities an aggregate implements — read from the transient
+ * annotation the expander records for every `with <Cap>` / `implements <Cap>`
+ * application (aggregate- and context-scope).  Deduped + sorted for a
+ * deterministic order.  Capability application has already spliced the
+ * fields/filter/stamp; this is the surviving identity record. */
+export function collectCapabilities(agg: Aggregate): string[] {
+  const names = (agg as { [CAPABILITIES_TAG]?: string[] })[CAPABILITIES_TAG] ?? [];
+  return [...new Set(names)].sort();
 }
 
 /** Shape we rely on from a `StampDecl` AST node.  Local alias so the
