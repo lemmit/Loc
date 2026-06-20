@@ -1,7 +1,11 @@
 import type { EnrichedLoomModel } from "../types/loom-ir.js";
 import { allContexts } from "../types/loom-ir.js";
 import type { LoomDiagnostic } from "./checks/diagnostic.js";
-import { validateQueryableWheres, validateRetrievals } from "./checks/query-checks.js";
+import {
+  validateQueryableWheres,
+  validateRetrievals,
+  validateViewGates,
+} from "./checks/query-checks.js";
 import {
   validateCurrentUserScope,
   validateEventSourcedDiscipline,
@@ -137,6 +141,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // bundled in a system's modules or sits at the top level.
   for (const c of allContexts(loom)) {
     validateQueryableWheres(c, diags);
+    validateViewGates(c, diags);
     validateRetrievals(c, diags);
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);

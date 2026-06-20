@@ -2784,6 +2784,7 @@ export interface View extends AstNode {
     binds: Array<BindEntry>;
     fields: Array<Property>;
     filter: Expression;
+    gate?: Expression;
     name: string;
     source: Reference<ViewSource>;
 }
@@ -4756,6 +4757,7 @@ export class DddAstReflection extends AbstractAstReflection {
                         { name: 'binds', defaultValue: [] },
                         { name: 'fields', defaultValue: [] },
                         { name: 'filter' },
+                        { name: 'gate' },
                         { name: 'name' },
                         { name: 'source' }
                     ]

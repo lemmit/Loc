@@ -90,6 +90,64 @@ shorthand form is a strict subset of the full form's surface.
   the declared fields, exposed as a Zod schema on Hono and a C#
   record on .NET.
 
+## Authorization — the `requires` gate
+
+Both forms accept an optional `requires <expr>` clause **before**
+`where`:
+
+```ddd
+// Shorthand
+view OpenTickets = Ticket requires currentUser.role == "agent" where open == true
+
+// Full form
+view TicketSummary {
+  ticketId: Ticket id
+  subject: string
+
+  from Ticket requires currentUser.role == "agent" where open == true
+  bind ticketId = id, subject = subject
+}
+```
+
+`requires` is the read-side analogue of an operation's `requires`
+gate: a boolean predicate that must hold or the request is rejected
+with **403 Forbidden** before the query runs.
+
+**`requires` is not `where`.**  They sit next to each other but do
+different jobs:
+
+| Clause | When | Scope | On failure |
+|---|---|---|---|
+| `requires` | *before* the query — no row exists yet | **`currentUser` only** (+ constants) | whole request → **403** |
+| `where` | *is* the query — pushed to SQL | the **source row's** fields | row is filtered out |
+
+Because the gate runs before any row is fetched, it can only see the
+caller, never the data.  A `requires` expression that references the
+source row (`requires open == true`) is a **compile error**
+(`loom.view-gate-not-current-user`) steering you to use `where` for
+row scoping and `requires` for caller authorization.  Use `requires`
+to decide *who* may run the view; use `where` to decide *which rows*
+they get back.
+
+`requires true` is the explicit "intentionally public" escape — it
+documents an anonymous-readable view and satisfies default-deny.
+
+### Default-deny
+
+Under `auth { enforcement: denyByDefault }`, every view reachable on
+an `auth: required` deployable **must** declare a `requires` gate;
+an ungated view is a compile error (`loom.default-deny-ungated`).
+This closes the read-side hole that the command-side default-deny
+already covers — under denyByDefault a view is forbidden until you
+say otherwise (`requires true` to opt back into public access).
+Under the default `enforcement: opt`, the gate stays opt-in.
+
+> **Backend support.**  The 403 gate currently emits on the Hono
+> (TypeScript) backend.  The validation rules (`requires`-is-
+> currentUser-only, default-deny) are platform-neutral and run for
+> every backend; the other backends will grow the 403 emission in
+> follow-up work.
+
 ## Joined views (snowflake style)
 
 Slice 3 lets bind expressions **follow** `X id` references into

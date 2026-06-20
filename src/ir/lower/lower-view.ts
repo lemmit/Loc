@@ -28,6 +28,12 @@ export function lowerView(view: View, env: Env): ViewIR {
     sourceIR = { kind: "aggregate", name: source.name };
   }
   const filter = view.filter ? lowerExpr(view.filter, inner) : undefined;
+  // The `requires` gate is lowered in the BARE context env (not `inner`), so
+  // `currentUser` resolves but the source row's fields do not — a view-level
+  // gate decides endpoint access before any row exists, so it must be
+  // currentUser-only.  Referencing a source field is then a name-resolution
+  // error, exactly the restriction we want.
+  const requires = view.gate ? lowerExpr(view.gate, env) : undefined;
   // Full-form views declare an output record.  Each `fields+=Property`
   // gives us a typed field; each `binds+=BindEntry` gives us the
   // expression that produces its value at projection time.  The
@@ -64,6 +70,7 @@ export function lowerView(view: View, env: Env): ViewIR {
   return {
     name: view.name,
     source: sourceIR,
+    requires,
     filter,
     output,
   };

@@ -150,6 +150,20 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
           }
         }
       }
+      // Views: each is a GET endpoint.  A `view … requires <expr>` gate is the
+      // read-side analogue of an operation's `requires` (in-handler 403); an
+      // ungated view under denyByDefault serves to any caller.  `requires true`
+      // (a literal gate) is the explicit intentionally-public escape.
+      for (const view of c.views) {
+        if (!view.requires) {
+          diags.push({
+            severity: "error",
+            code: "loom.default-deny-ungated",
+            message: `denyByDefault: view '${view.name}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
+            source: `view/${view.name}`,
+          });
+        }
+      }
     }
   }
 }
