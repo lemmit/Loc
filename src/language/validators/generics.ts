@@ -23,7 +23,34 @@
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type { Model, TypeRef } from "../generated/ast.js";
-import { isFindDecl, isPayloadDecl, isProperty, isSlotType, isTypeRef } from "../generated/ast.js";
+import {
+  isCapability,
+  isFindDecl,
+  isPayloadDecl,
+  isProperty,
+  isSelfType,
+  isSlotType,
+  isTypeRef,
+} from "../generated/ast.js";
+
+/** `Self id` (the anchored capability type, typed-capabilities.md) is only
+ *  meaningful inside a `capability` body, where it resolves to the implementing
+ *  aggregate's own type at splice time.  Anywhere else there is no implementor
+ *  to resolve it to, so it is an error — the author should name a concrete
+ *  `<Aggregate> id`. */
+export function checkSelfType(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isSelfType(node)) continue;
+    if (!AstUtils.getContainerOfType(node, isCapability)) {
+      accept(
+        "error",
+        "`Self id` is only valid inside a `capability` body (it resolves to the " +
+          "implementing aggregate's type). Use a concrete `<Aggregate> id` here.",
+        { node, code: "loom.self-outside-capability" },
+      );
+    }
+  }
+}
 
 export function checkGenericCarriers(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {

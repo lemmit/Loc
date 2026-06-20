@@ -46,6 +46,7 @@ import {
   checkProjectSingletons,
   checkRetrievalLiteral,
   checkSeeds,
+  checkSelfType,
   checkSlotMemberAccess,
   checkSlotTypePosition,
   checkTheme,
@@ -147,6 +148,8 @@ export class DddValidator {
     // v1 admits only single-level (non-nested) instantiation, and a carrier
     // may appear only in a transport position (find return / payload field).
     checkGenericCarriers(model, accept);
+    // `Self id` (typed-capabilities.md) is only valid inside a `capability`.
+    checkSelfType(model, accept);
     // Discriminated unions (payload-transport-layer.md, P4): anonymous
     // `A or B` and named `payload Foo = A | B` variant sets must be distinct
     // (unambiguous wire discriminator) and carrier-typed (no `slot` variant).

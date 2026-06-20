@@ -983,6 +983,9 @@ function printTypeAtom(node: TypeRef | import("../generated/ast.js").TypeAtom): 
     case "ActionType":
       s = base.arg ? `action(${printTypeRef(base.arg)})` : "action";
       break;
+    case "SelfType":
+      s = "Self id";
+      break;
     case "IdType":
       s = `${base.target.$refText} id`;
       break;

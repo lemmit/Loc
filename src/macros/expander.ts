@@ -454,7 +454,25 @@ function expandCapability(
         );
   for (const agg of targets) {
     const cloned = (cap.members ?? []).map((m) => AstUtils.copyAstNode(m, buildRef));
+    for (const m of cloned) resolveSelfTypes(m, agg.name, buildRef);
     spliceMembers(agg, "aggregate", cloned, at, doc);
+  }
+}
+
+/** Rewrite every `Self id` base in a cloned capability member to `<hostName> id`
+ * (typed-capabilities.md, the anchored `Self` type).  `Self` resolves to the
+ * implementing aggregate's own type, so by splice time the member carries a
+ * concrete `IdType` — lowering and the backends never see a `SelfType`. */
+function resolveSelfTypes(root: AstNode, hostName: string, buildRef: BuildRef): void {
+  const selfs = [...AstUtils.streamAllContents(root)].filter((n) => n.$type === "SelfType");
+  for (const node of selfs) {
+    const container = node.$container as Record<string, unknown> | undefined;
+    if (!container || node.$containerProperty !== "base") continue;
+    const idNode: Record<string, unknown> = { $type: "IdType" };
+    idNode.target = buildRef(idNode as never, "target", undefined, hostName);
+    idNode.$container = container;
+    idNode.$containerProperty = "base";
+    container.base = idNode;
   }
 }
 

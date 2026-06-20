@@ -47,6 +47,7 @@ export type DddKeywordNames =
     | ">"
     | ">="
     | "?"
+    | "Self"
     | "["
     | "[]"
     | "]"
@@ -343,7 +344,7 @@ export function isAuthMode(item: unknown): item is AuthMode {
     return item === 'required' || item === 'ui';
 }
 
-export type BaseType = ActionType | IdType | NamedType | PrimitiveType | SlotType;
+export type BaseType = ActionType | IdType | NamedType | PrimitiveType | SelfType | SlotType;
 
 export const BaseType = 'BaseType';
 
@@ -2121,7 +2122,7 @@ export interface Property extends AstNode {
     access?: FieldAccess;
     check?: Expression;
     default?: Expression;
-    name: 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'handle' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'service' | 'snapshot' | 'sort' | 'state' | 'tablePrefix' | 'title' | 'token' | 'ttl' | 'use' | string;
+    name: 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'handle' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'service' | 'snapshot' | 'sort' | 'state' | 'tablePrefix' | 'title' | 'token' | 'ttl' | 'use' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;
@@ -2315,6 +2316,18 @@ export const SeedRow = 'SeedRow';
 
 export function isSeedRow(item: unknown): item is SeedRow {
     return reflection.isInstance(item, SeedRow);
+}
+
+export interface SelfType extends AstNode {
+    readonly $container: TypeAtom | TypeRef;
+    readonly $type: 'SelfType';
+    selfRef: boolean;
+}
+
+export const SelfType = 'SelfType';
+
+export function isSelfType(item: unknown): item is SelfType {
+    return reflection.isInstance(item, SelfType);
 }
 
 export interface SensitivityClause extends AstNode {
@@ -2997,6 +3010,7 @@ export type DddAstType = {
     SecretConnectionSource: SecretConnectionSource
     Seed: Seed
     SeedRow: SeedRow
+    SelfType: SelfType
     SensitivityClause: SensitivityClause
     ServiceConnectionSource: ServiceConnectionSource
     SlotType: SlotType
@@ -3050,7 +3064,7 @@ export type DddAstType = {
 export class DddAstReflection extends AbstractAstReflection {
 
     getAllTypes(): string[] {
-        return [ActionType, Aggregate, AggregateMember, Api, ApiStatus, Apply, Area, AreaMember, AssignOrCallStmt, AuthBlock, AuthConfigValue, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Capability, CapabilityMember, Channel, ChannelSource, ClaimEntry, ClaimsMap, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvAuthValue, EnvConnectionSource, EventDecl, ExpectStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, IfLetStmt, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralAuthValue, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OidcConfig, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RetrievalLiteral, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiChannelParam, UiComposeBinding, UiFunction, UiMember, UiNotification, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
+        return [ActionType, Aggregate, AggregateMember, Api, ApiStatus, Apply, Area, AreaMember, AssignOrCallStmt, AuthBlock, AuthConfigValue, BaseType, BinaryChain, BindEntry, BodyProp, BoolConfigValue, BoolLit, BoundedContext, BuilderCall, BuilderEntry, CallArg, CallSuffix, CanonicalProp, Capability, CapabilityMember, Channel, ChannelSource, ClaimEntry, ClaimsMap, Component, ComponentDecl, ConfigEntry, ConfigValue, ConnectionSource, Containment, ContextMember, Create, Criterion, DecLit, Deployable, DerivedProp, DescriptionProp, Destroy, EmitField, EmitStmt, EntityPart, EntityPartMember, EnumDecl, EnumValue, EnvAuthValue, EnvConnectionSource, EventDecl, ExpectStmt, Expression, FilterDecl, FindDecl, ForStmt, FunctionDecl, HandleDecl, IdRef, IdType, IfLetStmt, ImplementsDecl, ImportStmt, IntConfigValue, IntLit, Invariant, LValue, Lambda, Layout, LayoutMainSlot, LayoutNamedSlot, LayoutProp, LayoutSlot, LetStmt, ListLit, LiteralAuthValue, LiteralConnectionSource, LiteralExpr, LoadPath, LoadSegment, MacroArg, MacroArgBool, MacroArgInt, MacroArgRef, MacroArgRefList, MacroArgString, MacroArgValue, MacroCall, MatchArm, MatchExpr, MemberSuffix, MenuBlock, MenuLink, MenuLinkProp, MenuMetaEntry, MenuSection, Model, ModelMember, MoneyLit, NameRef, NamedDecl, NamedType, NowExpr, NullLit, ObjectFieldInit, ObjectLit, OgImageProp, OidcConfig, OnDecl, Operation, Page, PageMenuMeta, PageProp, Parameter, ParenExpr, PayloadDecl, PermissionDecl, PermissionsBlock, PostfixChain, PostfixSuffix, PreconditionStmt, PrimitiveConversion, PrimitiveType, Property, Repository, Requirement, RequirementProp, RequiresProp, RequiresStmt, Resource, Retrieval, RetrievalLiteral, ReturnStmt, RouteProp, SecretConnectionSource, Seed, SeedRow, SelfType, SensitivityClause, ServiceConnectionSource, SlotType, Solution, SortItem, StampDecl, StateBlock, StateField, Statement, Storage, StringConfigValue, StringLit, Subdomain, System, SystemMember, Targetable, TernaryExpr, TestBlock, TestCase, TestE2E, TestStatement, ThemeBlock, ThemeProp, ThisRef, TitleProp, TypeAtom, TypeRef, Ui, UiApiParam, UiBlockBinding, UiChannelParam, UiComposeBinding, UiFunction, UiMember, UiNotification, UiParamBinding, UiSugarBinding, UnaryExpr, UserBlock, UserField, ValueObject, ValueObjectMember, View, ViewSource, WithClause, Workflow, WorkflowCreateDecl, WorkflowMember];
     }
 
     protected override computeIsSubtype(subtype: string, supertype: string): boolean {
@@ -3059,6 +3073,7 @@ export class DddAstReflection extends AbstractAstReflection {
             case IdType:
             case NamedType:
             case PrimitiveType:
+            case SelfType:
             case SlotType: {
                 return this.isSubtype(BaseType, supertype);
             }
@@ -4449,6 +4464,14 @@ export class DddAstReflection extends AbstractAstReflection {
                     properties: [
                         { name: 'aggregate' },
                         { name: 'value' }
+                    ]
+                };
+            }
+            case SelfType: {
+                return {
+                    name: SelfType,
+                    properties: [
+                        { name: 'selfRef', defaultValue: false }
                     ]
                 };
             }

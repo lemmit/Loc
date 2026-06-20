@@ -155,10 +155,19 @@ they must move to typed capabilities before the string grammar can be deleted.
 
 ### Phase 5 — `Self` type, tooling, marker emission (feeds dedup)
 
-- `Self` type resolution for self-referential provided fields (`parent: Self id?`
-  → `Org id?` on `Org`) — grammar + scope/type-system (proposal OQ#3).
-- LSP: custom `DefinitionProvider` (go-to-capability), find-implementors,
-  completion. Marker-interface emission (`I<Capability>`) — the seam
+- **`Self` type** ✅ (proposal OQ#3) — `Self id` is a self-referential anchored
+  type valid only inside a `capability` body (Eiffel `like Current` / Swift–Rust
+  `Self`).  Grammar adds a `SelfType` base; the expander rewrites `Self id` →
+  `<Host> id` at splice time (per implementor), so lowering and the backends only
+  ever see a concrete `X id` — **zero backend work**.  `lowerField` now threads
+  the env so the rewritten FK recovers the host's `idKind` (not default guid).
+  A validator rejects `Self id` outside a capability; `parent` is now a soft
+  field-name keyword so the canonical `parent: Self id?` parses.  **Generics
+  stay deferred** — `Self` is an anchored type, not parametric polymorphism, and
+  the existing `paged`/`envelope` carriers are a closed, emission-gated set that
+  wouldn't shortcut user generics (see the discussion in the PR thread).
+- **Remaining:** LSP (go-to-capability / find-implementors / completion) and
+  marker-interface emission (`I<Capability>`) — the seam
   [`capability-emission-dedup.md`](../proposals/capability-emission-dedup.md)
   consumes.
 

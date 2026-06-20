@@ -1330,7 +1330,12 @@ Property:
         // already in `LooseName`; this mirrors them for the `Property.name`
         // dispatch (which can't reuse `LooseName` wholesale because that set
         // includes member-starter keywords like `contains`).
-        | 'state' | 'title' | 'body')
+        | 'state' | 'title' | 'body'
+        // `parent` is hard only in the Requirement hierarchy clause
+        // (`requirement R parent R0`); soft in property position so the
+        // canonical self-referential field `parent: Self id?` (and any
+        // domain field named `parent`) parses.
+        | 'parent')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1562,7 +1567,7 @@ GenericCtor returns string:
     'paged' | 'envelope' | 'option';
 
 BaseType:
-    PrimitiveType | SlotType | ActionType | IdType | NamedType;
+    PrimitiveType | SlotType | ActionType | SelfType | IdType | NamedType;
 
 PrimitiveType:
     name=('int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid' | 'json');
@@ -1587,6 +1592,15 @@ SlotType:
 // hoisted in the caller's scope, exactly as `onSubmit` is.
 ActionType:
     name='action' ('(' arg=TypeRef ')')?;
+
+// `Self id` — a self-referential entity reference, valid only inside a
+// `capability` body (typed-capabilities.md; the anchored-type / Eiffel
+// `like Current` construct).  `Self` resolves to the implementing aggregate's
+// own type: the expander rewrites `Self id` → `<Host> id` when it splices the
+// capability into an aggregate, so lowering and the backends only ever see a
+// concrete `X id`.  A `Self id` outside a capability is a validation error.
+SelfType:
+    selfRef?='Self' 'id';
 
 IdType:
     target=[NamedDecl:ID] 'id';
