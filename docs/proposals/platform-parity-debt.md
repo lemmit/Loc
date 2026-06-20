@@ -14,13 +14,22 @@ Legend: ✓ implemented · ✗ gated (fail-fast validator error) · ⚠ partial 
 
 ## The matrix at a glance
 
+> **[2026-06-20 audit]** Two cells flipped since the last revision: **principal
+> `filter`** now ships on node + phoenix (✗→✓; DEBT-01, #1386 — relational shapes;
+> principal-on-non-relational stays gated) and **provenanced fields** now ship on
+> dotnet (✗→✓) and phoenix-vanilla (#1400 / DEBT-06; ash stays gated). Also note
+> this matrix predates the **java / python** backends and the **vue / svelte /
+> angular** frontends — those columns are not yet represented here; consult the
+> per-feature validator gates (`system-checks.ts`, `src/util/platform-axes.ts`)
+> for those five targets until the matrix is widened.
+
 | Feature | node | dotnet | phoenix | react | Owning proposal |
 |---|:---:|:---:|:---:|:---:|---|
 | Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ vanilla / ✗ ash | N/A | [workflow-and-applier](./workflow-and-applier.md) |
 | TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | N/A | [aggregate-inheritance](./aggregate-inheritance.md) |
 | `shape(document)` persistence | ✓ | ✓ | ✗ | N/A | [document-and-json-hierarchies](./document-and-json-hierarchies.md) |
-| Principal `filter` (`currentUser`/tenancy) | ✗ | ✓ | ✗ | N/A | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
-| Provenanced fields (runtime trace) | ✓ | ✗ gated | ✗ gated | N/A | [provenance](./provenance.md) |
+| Principal `filter` (`currentUser`/tenancy) | ✓ | ✓ | ✓ | N/A | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
+| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ vanilla / ✗ ash | N/A | [provenance](./provenance.md) |
 | Generic carriers (`paged<T>`) | ✓ | ✓ | ✓ | ✓ (#898) | [payload-transport-layer](./payload-transport-layer.md) |
 | Ordered `X id[]` collections | ✓ | ✓ | ✗ | display | [load-specifications](./load-specifications.md) |
 | Per-op `audited` flag | ✓ | ✗ gated | ✗ gated | N/A | [audit-and-logging](./audit-and-logging.md) |
@@ -48,17 +57,17 @@ backend today** — designed boundaries with no implementation:
 
 Ordered by blast radius — how many real models the gap blocks today:
 
-1. **Phoenix backend depth** — `shape(document)`, ordered `X id[]`, principal
-   filters. Phoenix is the backend furthest from parity; it is the common factor
-   in most ✗ rows above. (TPH now closed — shared-table multi-resource +
+1. **Phoenix backend depth** — `shape(document)`, ordered `X id[]`. Phoenix is the
+   backend furthest from parity. (TPH now closed — shared-table multi-resource +
    `base_filter`, see [phoenix-tph-emission](./phoenix-tph-emission.md). Event
    sourcing now closed on the **vanilla** foundation — #1205, D-VANILLA-ES-HOME;
-   only `foundation: ash` still rejects `persistedAs(eventLog)`.)
-2. ✅ **DONE (Tier 0) — silent no-ops made honest.** Provenanced fields and the
-   per-operation `audited` flag used to compile and do nothing on dotnet/phoenix;
-   they now fail fast (`loom.provenanced-backend-unsupported`,
-   `loom.audited-backend-unsupported`). Implementing them for real (rather than
-   gating) is the remaining work here, alongside `with audit` stamping parity.
+   only `foundation: ash` still rejects `persistedAs(eventLog)`. **Principal
+   `filter`s now ship on phoenix** too — DEBT-01, #1386 — so that's off this list.)
+2. ✅ **Provenance now IMPLEMENTED** (2026-06-20 audit) — node + dotnet +
+   elixir-vanilla emit the real lineage runtime (#1400 / DEBT-06; ash stays gated),
+   no longer "gated no-op, remaining work". The residue here is the per-operation
+   **`audited`** runtime (still `loom.audited-backend-unsupported` on dotnet/phoenix)
+   and `with audit` stamping parity.
 3. **React generative gaps** — generic carriers, list-page filters, non-
    constructible create surface; each is a localised walker/emitter addition.
 4. **Alternate adapters** — promote `dapper`/`mikroorm` past minimal-v1, or

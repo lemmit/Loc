@@ -34,7 +34,7 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 | 03 | 🟡 OPEN (**narrowed**) | Ash union returns ship for return/let, **in-memory `assign` mutation, and `precondition`/`requires` guards**; only **`emit`/`add`/`remove`** bodies still gate to vanilla |
 | 04 | ⚠️ RE-SCOPED | elixir audit-ops = real greenfield; lifecycle = vaporware (→16) |
 | 05 | ✅ DONE | `For` shipped; List/Detail removed |
-| 06 | 🔴 OPEN | `PROVENANCE_BACKENDS = {node, dotnet}` — **elixir** excluded |
+| 06 | ✅ DONE (vanilla) | Provenance runtime shipped on `foundation: vanilla` (#1400); gate now foundation-aware (`system-checks.ts:~1443`) — `elixir+vanilla` capable, only `ash` excluded. (Updated 2026-06-20; the earlier 🔴 contradicted this doc's own DEBT-06 detail block.) |
 | 07 | 🔴 OPEN | elixir saving shapes `["relational","embedded"]` — no `document` |
 | 08 | ✅/⚠️ | paged done; envelope deferred (no live use) |
 | 09–11 | ✅ DONE | this session |
