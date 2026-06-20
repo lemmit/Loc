@@ -1,0 +1,41 @@
+// Provenanced stored fields (provenance.md): each write to a `provenanced`
+// field becomes an immutable per-write-site rule snapshot.  Backend-only;
+// non-Hono backends parse the keyword but emit no trace code.
+system OrderingSystem {
+  subdomain Ordering {
+    context Ordering {
+      aggregate Order ids guid with crudish {
+        reference: string
+        quantity: int
+        unitPrice: int
+        discount: int
+        total: int provenanced
+        operation reprice(qty: int, price: int) {
+          precondition qty > 0
+          precondition price >= 0
+          quantity := qty
+          unitPrice := price
+          total := qty * price - discount
+        }
+        operation applyDiscount(amount: int) {
+          precondition amount >= 0
+          discount := amount
+          total := quantity * unitPrice - amount
+        }
+      }
+      repository Orders for Order {
+        find byReference(reference: string): Order? where this.reference == reference
+      }
+    }
+  }
+  api OrderingApi from Ordering
+  storage primary { type: postgres }
+  resource orderingState { for: Ordering, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Ordering]
+    dataSources: [orderingState]
+    serves: OrderingApi
+    port: 4000
+  }
+}

@@ -1,0 +1,35 @@
+// Core domain surface: enum, value object, event, aggregate with containment,
+// a derived field, an invariant, an operation, and a custom find.
+system CoreShop {
+  subdomain Sales {
+    context Orders {
+      enum Status { Draft, Placed, Cancelled }
+      valueobject Money { amount: decimal  currency: string }
+      event OrderPlaced { code: string }
+      aggregate Order ids guid {
+        code: string
+        status: Status
+        total: Money
+        contains lines: Line[]
+        entity Line { sku: string  qty: int }
+        derived isDraft: bool = status == Status.Draft
+        invariant qtyPositive = true
+        operation place() { status := Status.Placed }
+        operation addLine(sku: string, qty: int) { lines += Line { sku: sku, qty: qty } }
+      }
+      repository Orders for Order {
+        find byStatus(s: Status): Order[] where this.status == s
+      }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

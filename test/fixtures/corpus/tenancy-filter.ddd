@@ -1,0 +1,29 @@
+// Principal-referencing (tenancy) capability filter: `filter this.tenantId ==
+// currentUser.tenantId` AND-ed into every read; `auth: required` emits the
+// principal accessor the filter resolves through.
+system Tenancy {
+  user { id: guid  tenantId: string }
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+        filter this.tenantId == currentUser.tenantId
+      }
+      repository Accounts for Account {
+        find byMinBalance(min: int): Account[] where this.balance >= min
+      }
+    }
+  }
+  api LedgerApi from Core
+  storage primary { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    port: 4000
+    auth: required
+  }
+}

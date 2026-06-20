@@ -1,0 +1,52 @@
+// In-process event dispatch / saga (channels.md) with persisted correlation.
+system FulfillmentSaga {
+  subdomain Fulfillment {
+    context Fulfillment {
+      aggregate Order {
+        customerId: string
+        status: string
+        operation place() {
+          precondition status == "Draft"
+          status := "Placed"
+          emit OrderPlaced { order: id, at: now() }
+        }
+      }
+      repository Orders for Order { }
+      aggregate Shipment {
+        orderRef: Order id
+        status: string
+        operation markTracked() { status := "Tracked" }
+      }
+      repository Shipments for Shipment { }
+      event OrderPlaced { order: Order id, at: datetime }
+      event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+      channel Lifecycle {
+        carries: OrderPlaced, ShipmentRequested
+        delivery: broadcast
+        retention: ephemeral
+      }
+      workflow OrderFulfillment {
+        orderId: Order id
+        attempts: int
+        create(p: OrderPlaced) by p.order {
+          let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+          emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+        }
+        on(s: ShipmentRequested) by s.order {
+          let ship = Shipments.getById(s.shipment)
+          ship.markTracked()
+        }
+      }
+    }
+  }
+  api FulfillmentApi from Fulfillment
+  storage pg { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: pg }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Fulfillment]
+    dataSources: [fulfillmentState]
+    serves: FulfillmentApi
+    port: 4000
+  }
+}

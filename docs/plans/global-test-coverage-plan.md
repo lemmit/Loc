@@ -75,7 +75,22 @@ Building 6 backends × 30 features = 180 hand-maintained fixtures the old way wo
 
 ---
 
-## Phase 0 — Capability manifest + corpus scaffold (foundation)
+## Implementation status (2026-06-20)
+
+**Landed — Phase 0 + the Phase 1 enforcement gate:**
+
+- `test/fixtures/corpus/` — the shared corpus: `backends.ts` (6 backend keys + `platform:` clauses), `harness.ts` (`generateCorpusCase(feature, backend)` — swaps `__PLATFORM__`, generates in-memory), `manifest.ts` (the declared feature × backend matrix), and **21 platform-agnostic feature `.ddd`s**.
+- `test/conformance/corpus-coverage.test.ts` — the no-docker coverage gate, **in the fast `npm test` suite**. 129 tests: every declared (feature, backend) cell generates cleanly through lower → enrich → validate → compose, plus completeness checks (no orphan fixture, no dangling manifest row, no missing reference doc).
+- **Coverage delivered:** 21 features each generation-verified across all 6 backends (one declared exception — `criterion-filter` on Java, a real renderer gap the gate now documents). Hono and .NET go from 9 / 6 fixtures to **21 features each at parity with every other backend** on the generation tier.
+- The 21: core-domain, state-gate, operation-returns, union-find-absence, paged, single-containment, value-collections, document, embedded, inheritance (TPH+TPC), event-sourcing, eventsourced-workflow, saga, tenancy-filter, stamps, extern, seeding, views, resources, provenance, criterion-filter.
+
+**What this gate is and isn't:** it proves every feature is *reachable* (generates without crashing) on every declared backend — the high-frequency lowering/enrichment failure mode — per-PR, in seconds. It is *not yet* a compile guarantee; the per-backend compile/runtime tiers (docker, nightly) consume this same corpus on top of the generation floor. Those are the remaining phases below.
+
+**Remaining:** wire the corpus into the docker compile gates (Phase 1 compile tier), collapse the legacy near-duplicate fixtures onto the corpus (Phase 0 migration), flip showcase-completeness to hard (Phase 2), the manifest-driven wire-parity sweep (Phase 3), and the behavioural runtime tier (Phases 4–5).
+
+---
+
+## Phase 0 — Capability manifest + corpus scaffold (foundation) ✅ shipped
 
 The keystone. Without it, every later phase is N-way copy-paste.
 

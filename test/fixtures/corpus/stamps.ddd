@@ -1,0 +1,26 @@
+// Lifecycle stamps (capabilities.md): audit timestamps via stamp blocks.
+system Stamped {
+  subdomain D {
+    context Shop {
+      stamp onCreate { createdAt := now() }
+      stamp onUpdate { updatedAt := now() }
+      aggregate Order with crudish {
+        code: string
+        createdAt: datetime
+        updatedAt: datetime
+        implements "auditable"
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    port: 4000
+  }
+}

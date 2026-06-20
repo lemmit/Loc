@@ -1,0 +1,34 @@
+// Extern operations (extern.md): body carries only preconditions; the
+// user-supplied handler owns the mutation.
+system ExternSys {
+  subdomain Sales {
+    context Sales {
+      enum OrderStatus { Draft, Confirmed, Cancelled }
+      event OrderConfirmed { order: Order id, at: datetime }
+      aggregate Order {
+        customerId: string
+        status: OrderStatus
+        riskScore: int
+        invariant riskNonNegative = true
+        function isMutable(): bool = status == OrderStatus.Draft
+        operation confirm() extern {
+          precondition isMutable()
+          precondition riskScore < 80
+        }
+        operation flag(score: int) extern { precondition score >= 0 }
+        operation cancel() { precondition isMutable()  status := OrderStatus.Cancelled }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api SalesApi from Sales
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 4000
+  }
+}

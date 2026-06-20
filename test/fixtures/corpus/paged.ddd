@@ -1,0 +1,22 @@
+// Pagination: `find ... paged` returns the Paged<T> envelope.
+system PagedShop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order ids guid { code: string  region: string }
+      repository Orders for Order {
+        find recent(): Order paged
+        find inRegion(region: string): Order paged where this.region == region
+      }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

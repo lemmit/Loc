@@ -1,0 +1,33 @@
+// shape(embedded): queryable root row, containments fold into jsonb columns.
+system EmbSys {
+  subdomain Shop {
+    context Shop {
+      aggregate Tag { label: string }
+      repository Tags for Tag {}
+      aggregate Order shape(embedded) {
+        customer: string
+        total: money
+        tags: Tag id[]
+        contains lines: LineItem[]
+        contains note: Memo
+        entity LineItem { sku: string  qty: int }
+        entity Memo { text: string }
+        operation addLine(sku: string, qty: int) { lines += LineItem { sku: sku, qty: qty } }
+        operation retotal(amount: money) { total := amount }
+      }
+      repository Orders for Order {
+        find byCustomer(name: string): Order[] where this.customer == name
+      }
+    }
+  }
+  api ShopApi from Shop
+  storage primary { type: postgres }
+  resource shopState { for: Shop, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Shop]
+    dataSources: [shopState]
+    serves: ShopApi
+    port: 4000
+  }
+}
