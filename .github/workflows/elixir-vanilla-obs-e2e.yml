@@ -80,8 +80,8 @@ jobs:
       # dep set resolves identically.
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: '27.0'
-          elixir-version: '1.17.2'
+          otp-version: '27.3'
+          elixir-version: '1.18.4'
 
       - name: Install Loom toolchain
         run: npm ci
