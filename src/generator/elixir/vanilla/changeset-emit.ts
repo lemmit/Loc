@@ -13,12 +13,18 @@
 // doesn't consume it yet.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  OperationIR,
+  SystemIR,
+} from "../../../ir/types/loom-ir.js";
 import {
   type SingleFieldPattern,
   singleFieldConstraints,
 } from "../../../ir/validate/invariant-classify.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 
 interface AggField {
@@ -33,6 +39,7 @@ export function emitVanillaChangesets(
   appModule: string,
   ctx: BoundedContextIR,
   out: Map<string, string>,
+  sys?: SystemIR,
 ): void {
   const ctxModule = upperFirst(ctx.name);
   for (const agg of ctx.aggregates) {
@@ -43,7 +50,9 @@ export function emitVanillaChangesets(
     const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());
     out.set(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}_changeset.ex`,
-      renderChangeset(appModule, ctxModule, agg),
+      isVanillaDocAgg(agg, ctx, sys)
+        ? renderDocChangeset(appModule, ctxModule, agg)
+        : renderChangeset(appModule, ctxModule, agg),
     );
   }
 }

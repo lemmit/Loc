@@ -26,6 +26,7 @@ import type {
   EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
+  SavingShape,
   SubdomainIR,
   SystemIR,
   TypeIR,
@@ -36,6 +37,7 @@ import { exprUsesCurrentUser } from "../../types/loom-ir.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
+  isDocumentShaped,
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
@@ -446,8 +448,17 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 
   for (const dep of sys.deployables) {
     if (!platformOwnsBackend(dep.platform)) continue;
-    const supported = platformSavingShapes(dep.platform);
-    if (!supported) continue;
+    const base = platformSavingShapes(dep.platform);
+    if (!base) continue;
+    // Foundation-shaped on elixir: the `vanilla` foundation emits the opaque
+    // `(id, data, version)` document table + a schemaless-changeset validated
+    // fold, so it supports `document` on top of the platform's relational /
+    // embedded set.  The `ash` foundation has no idiomatic document fit and
+    // stays gated (PLATFORM_SAVING_SHAPES omits it).
+    const supported =
+      dep.platform === "elixir" && dep.foundation === "vanilla"
+        ? ([...base, "document"] as readonly SavingShape[])
+        : base;
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
@@ -463,6 +474,55 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
             `'${ctxName}.${agg.name}' with shape(${shape}), but that backend can only ` +
             `emit: ${supported.join(", ")}.  Use a supported shape, or host this ` +
             `aggregate on a deployable whose platform emits shape(${shape}).`,
+          source: `${sys.name}/${dep.name}`,
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Vanilla `shape(document)` v1 scope (DEBT-07).  The vanilla document path
+// emits the CRUD surface (list / get / create / update / delete) over the
+// `(id, data, version)` jsonb row.  Custom finds (which would need an
+// in-memory rehydrate-and-filter path) and user-defined named operations
+// (which struct-update flattened columns the document schema doesn't have)
+// are NOT yet emitted — and the context module would otherwise emit a
+// defdelegate / named-op fn that references a non-existent repository
+// function.  Reject the combination with a clear error rather than
+// misgenerate, exactly like the saving-shape capability gate above.
+// ---------------------------------------------------------------------------
+const VANILLA_DOC_CRUD_OPS = new Set(["create", "update", "delete", "destroy", "list", "get"]);
+export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+
+  for (const dep of sys.deployables) {
+    if (dep.platform !== "elixir" || dep.foundation !== "vanilla") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        if (!isDocumentShaped(enriched, resolveDataSourceConfig(enriched, ctx, sys))) continue;
+        const customFinds = (ctx.repositories ?? [])
+          .find((r) => r.aggregateName === agg.name)
+          ?.finds.filter((f) => f.name !== "all");
+        const customOps = agg.operations.filter((op) => !VANILLA_DOC_CRUD_OPS.has(op.name));
+        if ((customFinds?.length ?? 0) === 0 && customOps.length === 0) continue;
+        const bits: string[] = [];
+        if (customOps.length > 0)
+          bits.push(`named operation(s) ${customOps.map((o) => o.name).join(", ")}`);
+        if (customFinds && customFinds.length > 0)
+          bits.push(`custom find(s) ${customFinds.map((f) => f.name).join(", ")}`);
+        diags.push({
+          severity: "error",
+          code: "loom.vanilla-document-unsupported",
+          message:
+            `aggregate '${ctxName}.${agg.name}' is shape(document) on foundation: vanilla, which ` +
+            `emits the CRUD surface only in v1, but declares ${bits.join(" and ")}. ` +
+            `Drop them, host this aggregate on a backend with full document support ` +
+            `(node / dotnet / python / java), or use shape(relational) / shape(embedded).`,
           source: `${sys.name}/${dep.name}`,
         });
       }
