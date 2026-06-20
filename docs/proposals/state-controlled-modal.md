@@ -5,6 +5,8 @@
 > `Modal { open: editing }` emitted a stub comment because the only Modal shape
 > implemented was the *operation-form* modal.
 
+> **[2026-06-20 status audit]** Top-of-file 'building (React slice)' header is stale — the doc's own §Scope update says all EIGHT frontend packs ship the controlled modal (react/vue/svelte tests `modal-state-controlled.test.ts`). Treat as SHIPPED.
+
 ## Two Modal shapes
 
 Loom's `Modal` primitive serves two distinct intents:

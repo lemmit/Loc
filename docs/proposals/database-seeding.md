@@ -33,6 +33,8 @@
 >   **D-SEED-IDEMPOTENCY** (v1 = ship-once applied-marker; per-row
 >   upsert-by-natural-key deferred until reference data needs it).
 
+> **[2026-06-20 status audit]** The `seed` emitter now spans FIVE backends — Python (`python/emit/seed.ts`) and Java (`java/emit/seed.ts`) added beyond the original Hono/.NET/Phoenix three.
+
 ## TL;DR
 
 Loom already derives schema **migrations** as a platform-neutral

@@ -1,6 +1,9 @@
 # RFC: Resource Model & Source Types
 
 **Status:** Draft / Proposed.
+
+> **[2026-06-20 status audit]** PARTIAL (no longer Draft/Proposed) — `Resource`/`sourceType`/`kind` in grammar (`ddd.langium`), `src/ir/resource-verbs.ts` + per-backend `adapters/resource-clients.ts` ship objectStore/queue/api clients across backends, with tests. Some sourceTypes/interfaces remain.
+
 **Scope:** Define Loom's data-layer model as a clean separation of *logical need*,
 *configured binding*, and *built-in technology descriptor*, with explicit
 semantic `kind`, refining `capability`, and context-selected `interface`. The

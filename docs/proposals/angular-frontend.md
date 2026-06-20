@@ -22,6 +22,8 @@
 > which decouples the served UI framework from the host platform — the
 > precondition that makes "any host serves Angular" expressible.
 
+> **[2026-06-20 status audit]** SHIPPED — full generator tree `src/generator/angular/` + `src/platform/angular.ts` (registry) + `angularMaterial` design pack + tests; consumes the shared `walkBody`. The angular-frontend-plan.md is largely executed. Parity tail: page-`requires`/nav-link auth gating hasn't reached Angular yet.
+
 ## TL;DR
 
 Add an **Angular** frontend — standalone components, the **signals**

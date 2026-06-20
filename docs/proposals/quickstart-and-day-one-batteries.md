@@ -1,5 +1,7 @@
 # Proposal: Quick-Start On-Ramp and Day-One Batteries
 
+> **[2026-06-20 status audit]** Partially shipped (no longer 'no code yet') — `ddd new` with `--platform`/`--template blank|crud`/`--design` (`src/cli/new-templates.ts`) and turnkey OIDC `auth { oidc { … } }` (`ddd.langium`) are live. NOT shipped: `ddd dev`/`ddd deploy`, `saas` template, the §5 day-one constructs (`job`/`email`/object storage).
+
 **Status:** PROPOSED. No code yet; surface, lowering semantics, and
 build order specified below.
 **Scope:** Collapse the zero-to-running path into a single opinionated

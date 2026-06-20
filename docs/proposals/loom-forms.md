@@ -1,5 +1,7 @@
 # Loom forms — declarative form generation from aggregate actions
 
+> **[2026-06-20 status audit]** Same as frontend-acl: the `errors[]` extension shipped (`validation-error-extension.md`), so the field-routing 'dormant until backends grow errors[]' note no longer holds.
+
 > Status: **PARTIAL** — the named-leaf trio is live in the walker registry
 > (code-verified 2026-06-10): `CreateForm { of: }` and
 > `OperationForm { of:, op: | <inst>.<op> }` shipped post-#512 (delegating

@@ -9,6 +9,8 @@
 > machinery. Write paths (starting/advancing a workflow) are unchanged —
 > they already exist as the POST trigger routes and `WorkflowForm` pages.
 
+> **[2026-06-20 status audit]** SHIPPED (no longer 'proposed/not implemented') — `instanceWireShape` enrichment + instance tests on hono/dotnet/java/python/phoenix/vanilla + React/scaffold (#1035).
+
 ## Problem
 
 A stateful workflow is, at runtime, *almost exactly an aggregate*:

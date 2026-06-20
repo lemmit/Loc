@@ -1,5 +1,7 @@
 # Frontend ACL — volatile state ↔ sealed payload, with bidirectional error hydration
 
+> **[2026-06-20 status audit]** Dormancy note is stale — the RFC 7807 §3.2 `errors[]`/`pointer` extension SHIPPED on all five backends (`validation-error-extension.md`; e.g. `src/platform/hono/v4/emit.ts:~162`), so the per-field `applied` path is now live, not dormant.
+
 > Status: **PARTIAL** — Phases 1+2 shipped on `main` as [#769](https://github.com/lemmit/Loc/pull/769) (commit `25dba02`). Three deferred work items tracked in the plan:
 > - **Schema restructure** (flat-key inputs + `.transform()` + `.readonly()` so `<Action>FormState` actually diverges from `<Action>Payload`) — gated on a real form needing flat ≠ nested, OR `loom-forms.md` Phase F1.
 > - **Per-action `FieldMap` instances** with `satisfies StrictFieldMap<Payload, FormState>` — meaningless until the schema restructure (the constraint is trivial when both types are structurally identical; today the catch block uses `{} as const` identity).

@@ -1,5 +1,7 @@
 # Realization-axes rollout — phase plan
 
+> **[2026-06-20 status audit]** 'Done' is understated — the Phase 1 validator ships R1+R3+R4+R6 (`deployable.ts`); Phase 2's `phoenixLiveView→phoenix` is superseded by D-ELIXIR-PLATFORM (`→elixir`); transport/runtime are now adapter-backed (`platform/elixir.ts`, `platform/dotnet.ts`).
+
 > Status: **planning**. Sequences the work that turns the pinned
 > realization-axes design (**D-REALIZATION-AXES**, **D-NODE-PLATFORM**,
 > **D-PHOENIX-SURFACE**) into shipped behaviour. Each phase is independently

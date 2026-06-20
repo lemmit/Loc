@@ -1,5 +1,7 @@
 # Retrieval — the named query bundle (`criterion` + sort + page + loads)
 
+> **[2026-06-20 status audit]** Retrieval emission ships on all FIVE backends now (add Java `java/emit/repository.ts:~138` + Python `python/repository-builder.ts:~336`), not 'four'. Explicit `loads:` plan still gated (`loom.retrieval-loads-unsupported`, `query-checks.ts:~204`).
+
 > Status: **PARTIAL.** Surface + IR + lowering + validation shipped (#794);
 > emission shipped on **all four backends** — .NET `Run<Name>Async` + workflow
 > `foreach` (#810), Hono `run<Name>` (#952), Phoenix/Ash read action (#955).

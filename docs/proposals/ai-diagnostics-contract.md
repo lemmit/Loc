@@ -1,5 +1,7 @@
 # AI diagnostics contract — `ddd validate --json` and friends
 
+> **[2026-06-20 status audit]** Stale impl path — there is no `src/cli/json-report.ts`; the JSON report lives in `src/api/report.ts` (+ `src/diagnostics/contract.ts`), driven by `runParseJson` in `src/cli/main.ts`.
+
 > **Status:** PARTIAL — slice 1 shipped. `ddd parse --json` emits the
 > `ValidateReport` envelope (§2): located/coded/phase-attributed `diagnostics[]`
 > from phases ①③④⑦, deterministic ordering (§3.4), the always-valid envelope on
