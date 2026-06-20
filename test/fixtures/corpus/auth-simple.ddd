@@ -1,0 +1,29 @@
+// Simple (dev-stub) auth (auth.md): a `user` shape + `requires`-guarded
+// operation without an external OIDC provider.
+system SimpleAuth {
+  user { id: guid  role: string }
+  subdomain Support {
+    context Tickets {
+      aggregate Ticket with crudish {
+        subject: string
+        open: bool
+        operation close() {
+          requires currentUser.role == "agent"
+          open := false
+        }
+      }
+      repository Tickets for Ticket { }
+    }
+  }
+  storage primary { type: postgres }
+  resource ticketState { for: Tickets, kind: state, use: primary }
+  api SupportApi from Support
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Tickets]
+    serves: SupportApi
+    dataSources: [ticketState]
+    port: 4000
+    auth: required
+  }
+}
