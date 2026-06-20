@@ -135,6 +135,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | DEBT-29 | Joined view sources + per-view parameters not emitted | all backends | 2 | M | `views.md` |
 | DEBT-30 | Misc IR-consumed-nowhere: seed create-shape validation, side-effecting-call metadata, block-body lambdas in e2e, method-call hooks binding | varies | 1 | S–M | — |
 | DEBT-31 | ~~Inline collection-op lambdas on Phoenix/HEEx~~ **DONE** — `filter`/`map` now route to `Enum.filter/2`/`Enum.map/2` (was: lambda hoisted to a `handle_event`, invalid `recv.filter(…)` chain). `sortBy` dropped from scope — it's a non-native JS method with no runtime helper, so it's unsupported on the JS frontends too (no parity target) | elixir | 2 | M | — |
+| DEBT-32 | **Vanilla (Ecto) nested entity parts** — `contains <part>: <Part>[]` is silently dropped on `foundation: vanilla` (schema emits no `embeds_many`/`has_many`; a containment-mutating op's changeset casts the part's fields onto the root → runtime `Ecto.cast` error). **Now GATED** (`loom.vanilla-containment-unsupported`) so it fails loudly instead — the *implementation* (embeds_many + child-schema + embed-mutating op emit, the deferred "richer `embeds_one` path") is the remaining work. Ash foundation handles parts correctly. | elixir/vanilla | 3 | M | — |
 
 ---
 
