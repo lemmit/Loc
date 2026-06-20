@@ -1,14 +1,18 @@
-// Lifecycle stamps (capabilities.md): audit timestamps via stamp blocks.
+// Lifecycle stamps (capabilities.md): audit timestamps via a typed `auditable`
+// capability — fields + onCreate/onUpdate `stamp` blocks the aggregate
+// `implements`.  (Typed-capabilities Phase 6 removed the stringly `implements
+// "auditable"` group; a capability now co-locates the stamps it contributes.)
 system Stamped {
+  capability auditable {
+    createdAt: datetime, updatedAt: datetime
+    stamp onCreate { createdAt := now() }
+    stamp onUpdate { updatedAt := now() }
+  }
   subdomain D {
     context Shop {
-      stamp onCreate { createdAt := now() }
-      stamp onUpdate { updatedAt := now() }
       aggregate Order with crudish {
         code: string
-        createdAt: datetime
-        updatedAt: datetime
-        implements "auditable"
+        implements auditable
       }
       repository Orders for Order { }
     }
