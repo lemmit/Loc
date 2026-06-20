@@ -1,9 +1,13 @@
 <!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
   import { page } from "$app/state";
-
+{{#if navUsesSession}}  import { useSession } from "$lib/auth/AuthGate.svelte";
+{{/if}}
   let { children } = $props();
   let opened = $state(false);
+{{#if navUsesSession}}  // Verified session claims — gate forbidden pages' nav links (auth: ui).
+  const currentUser = useSession().user as Record<string, any>;
+{{/if}}
 
   function isActive(path: string): boolean {
     return page.url.pathname === path || page.url.pathname.startsWith(path + "/");
@@ -29,12 +33,19 @@
     <nav class={"w-56 shrink-0 border-r bg-background p-3 " + (opened ? "block" : "hidden sm:block")}>
       <div class="flex flex-col gap-1">
 {{#each navSections}}        <p class="px-3 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">{{label}}</p>
-{{#each entries}}        <a
+{{#each entries}}{{#if requiresJs}}        {#if ({{{requiresJs}}})}
+        <a
           href="{{to}}"
           data-testid="{{testId}}"
           class={"rounded-md px-3 py-2 text-sm font-medium transition-colors " + (isActive("{{to}}") ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground")}
         >{{label}}</a>
-{{/each}}{{/each}}      </div>
+        {/if}
+{{else}}        <a
+          href="{{to}}"
+          data-testid="{{testId}}"
+          class={"rounded-md px-3 py-2 text-sm font-medium transition-colors " + (isActive("{{to}}") ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground")}
+        >{{label}}</a>
+{{/if}}{{/each}}{{/each}}      </div>
     </nav>
     <main class="flex-1 p-6">
       {@render children()}

@@ -205,7 +205,10 @@ export function generateSvelteForContexts(
   // App shell — the chrome group's layout, driven by the same nav
   // derivation rules as the react AppShell (explicit ui.menu wins;
   // default grouping otherwise).
-  const sidebarOverride = deriveSidebarFromUi(ui);
+  // `authUi` enables per-link gating: `deriveSidebarFromUi` renders a
+  // `requiresJs` condition on any nav entry whose linked page declares a
+  // `requires` gate, so the app-shell can hide a forbidden page's link.
+  const sidebarOverride = deriveSidebarFromUi(ui, authUi);
   const scaffoldedAggregates = aggregates
     .filter(({ agg }) =>
       ui.pages.some(
@@ -230,7 +233,14 @@ export function generateSvelteForContexts(
   const navSections =
     sidebarOverride?.map((s) => ({
       label: s.label,
-      entries: s.entries.map((e) => ({ to: e.to, label: e.label, testId: e.testId })),
+      entries: s.entries.map((e) => ({
+        to: e.to,
+        label: e.label,
+        testId: e.testId,
+        // Per-link gate condition (auth: ui) — the app-shell `{#if}`-hides a
+        // forbidden page's link.  Absent ⇒ link always shown.
+        requiresJs: e.requiresJs,
+      })),
     })) ??
     defaultNavSections(
       scaffoldedAggregates,
@@ -239,12 +249,18 @@ export function generateSvelteForContexts(
       hasWorkflowsIndex,
       hasViewsIndex,
     );
+  // Bind the session user in the app-shell only when a nav entry is actually
+  // gated — an unused binding would be a svelte-check error.
+  const navUsesSession = navSections.some(
+    (s) => "entries" in s && s.entries.some((e) => "requiresJs" in e && !!e.requiresJs),
+  );
   out.set(
     "src/routes/(app)/+layout.svelte",
     pack.render("app-shell", {
       systemNameHuman: humanize(sys.name),
       navSections,
       hasNav: navSections.length > 0,
+      navUsesSession,
     }),
   );
   out.set("src/routes/+layout.svelte", pack.render("root-layout", { hasRealtimeHandlers, authUi }));
