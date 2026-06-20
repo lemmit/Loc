@@ -415,9 +415,9 @@ scaffold views:      ActiveOrders, … → page ActiveOrdersView  (+ shared View
 
 ### What each scaffolded page contains
 
-Scaffold is sugar: it lowers (via `src/ir/lower/walker-primitive-expander.ts`,
-the final sub-pass of `lowerModel`) to a walker-stdlib body identical
-to one the user could hand-write. The contract per page:
+Scaffold is sugar: the `with scaffold(...)` macro emits each page with a
+walker-stdlib body (built by `src/macros/stdlib/scaffold/_body-builders.ts`)
+identical to one the user could hand-write. The contract per page:
 
 | Page | Body |
 |---|---|

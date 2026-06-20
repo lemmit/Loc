@@ -1823,11 +1823,17 @@ trees (`src/macros/stdlib/scaffold/_body-builders.ts`). The sentinels are no
 longer `admissibleInSource` — a hand-written `body: scaffoldList { of: X }`
 now fails validation with "Unknown builder type". Embedding a list/detail in a
 custom page therefore means writing the body explicitly (the example
-`web/src/examples/extern-showcase.ddd` shows the inlined list tree). The three
-**singleton index-page sentinels** (`Home` / `WorkflowsIndex` / `ViewsIndex`)
-remain — the macro still emits them as the body of the per-UI index pages, and
-a slimmed `expandInlineScaffoldPrimitives` expands those three from the system
-shape.
+`web/src/examples/extern-showcase.ddd` shows the inlined list tree).
+
+**Update (2026-06-20).** The three **singleton index-page sentinels** (`Home` /
+`WorkflowsIndex` / `ViewsIndex`) — the last holdouts — are gone too. They are
+now ordinary scaffold macros (`scaffoldHome` / `scaffoldWorkflowsIndex` /
+`scaffoldViewsIndex` in `_body-builders.ts`) emitting full bodies from the
+gathered inventory; the `expandInlineScaffoldPrimitives` expander, the ⑤c pass,
+the `Home`/`WorkflowsIndex`/`ViewsIndex` registry primitives, and the page
+`origin`/`source` fields are all removed. `walker-primitive-expander.ts` is now
+just `buildExpandContext`. A page's kind is derived on demand from its
+role-scoped name + area via `classifyPage` (`src/ir/util/page-kind.ts`).
 
 ---
 
