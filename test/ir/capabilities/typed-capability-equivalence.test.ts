@@ -108,8 +108,8 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     expect(errors).toEqual([]);
   });
 
-  it("a capability applied to a context is an error (aggregate-scope only in Phase 2)", async () => {
-    const { errors } = await parseString(`
+  it("context-level `with` applies the capability to every aggregate (the *ByDefault replacement)", async () => {
+    const ir = await buildLoomModel(`
       capability trashable {
         isDeleted: bool
         filter !this.isDeleted
@@ -117,10 +117,62 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
       system Demo { subdomain M {
         context C with trashable {
           aggregate Order { subject: string }
+          aggregate Invoice { total: int }
         }
       }}
     `);
-    expect(errors.join("\n")).toMatch(/Capability 'trashable' can only be applied to an aggregate/);
+    for (const name of ["Order", "Invoice"]) {
+      const agg = findAgg(ir, name);
+      expect(agg.contextFilters?.length).toBe(1);
+      expect(agg.wireShape.some((f) => f.name === "isDeleted")).toBe(true);
+    }
+  });
+
+  it("context-level `with` == applying the capability to each aggregate individually", async () => {
+    const viaContext = await buildLoomModel(`
+      capability tracked {
+        createdAt: datetime
+        stamp onCreate { createdAt := now() }
+      }
+      system Demo { subdomain M {
+        context C with tracked {
+          aggregate Order { subject: string }
+        }
+      }}
+    `);
+    const viaAggregate = await buildLoomModel(`
+      capability tracked {
+        createdAt: datetime
+        stamp onCreate { createdAt := now() }
+      }
+      system Demo { subdomain M {
+        context C {
+          aggregate Order with tracked { subject: string }
+        }
+      }}
+    `);
+    const a = findAgg(viaContext, "Order");
+    const b = findAgg(viaAggregate, "Order");
+    expect(JSON.stringify(a.contextStamps)).toEqual(JSON.stringify(b.contextStamps));
+    expect(a.wireShape.map((f) => f.name)).toEqual(b.wireShape.map((f) => f.name));
+  });
+
+  it("an aggregate's own member wins over a context-applied capability member (override-by-name)", async () => {
+    const ir = await buildLoomModel(`
+      capability trashable {
+        isDeleted: bool
+        filter !this.isDeleted
+      }
+      system Demo { subdomain M {
+        context C with trashable {
+          aggregate Order { subject: string  isDeleted: bool }
+        }
+      }}
+    `);
+    const agg = findAgg(ir, "Order");
+    // The aggregate's explicit isDeleted suppresses the capability's clone — so
+    // exactly one isDeleted field, no duplicate column.
+    expect(agg.wireShape.filter((f) => f.name === "isDeleted").length).toBe(1);
   });
 
   it("an unknown `with` name that is neither macro nor capability errors", async () => {

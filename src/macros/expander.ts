@@ -373,20 +373,24 @@ function expandOneCall(
   spliceMembers(host, hostKind, flat, call, doc);
 }
 
-/** Expand a typed-capability reference (`aggregate Order with auditable`):
- * deep-clone each of the capability's members (`Property` / `FilterDecl` /
- * `StampDecl`) into the host aggregate's `members[]`, indistinguishable from
- * hand-written ones.  Cloning (not aliasing) is required because the same
- * capability is implemented by many aggregates — one AST node can't live under
- * N parents — and each clone's cross-references are rebuilt via the Linker's
- * `buildReference` so they re-link in the Linked phase.  Lowering then reads
- * the spliced members structurally (`collectFilters`/`collectStamps` +
- * standard field lowering), so a capability and the equivalent hand-written
+/** Expand a typed-capability reference (`aggregate Order with auditable`, or
+ * context-level `context Sales with auditable`): deep-clone each of the
+ * capability's members (`Property` / `FilterDecl` / `StampDecl`) into the
+ * implementing aggregate(s)' `members[]`, indistinguishable from hand-written
+ * ones.  Cloning (not aliasing) is required because the same capability is
+ * implemented by many aggregates — one AST node can't live under N parents —
+ * and each clone's cross-references are rebuilt via the Linker's
+ * `buildReference` so they re-link in the Linked phase.  Lowering then reads the
+ * spliced members structurally (`collectFilters`/`collectStamps` + standard
+ * field lowering), so a capability and the equivalent hand-written
  * filter/stamp/field produce byte-identical IR.
  *
- * Phase 2: capabilities apply at aggregate scope via `with` only; context-level
- * application (`context Sales with auditable`, the `*ByDefault` replacement) is
- * Phase 4.  A capability is a pure mixin, so it never targets a `ui`. */
+ * Scope (typed-capabilities.md):
+ *   - aggregate `with` — splice into that aggregate.
+ *   - context `with` — splice an independent clone into EVERY aggregate in the
+ *     context (the `*ByDefault` replacement).  An aggregate that already
+ *     declares a same-named member wins (override-by-name in `spliceMembers`).
+ * A capability is a pure mixin, so it never targets a `ui`. */
 function expandCapability(
   cap: Capability,
   host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext,
@@ -395,12 +399,12 @@ function expandCapability(
   doc: LangiumDocument,
   buildRef: BuildRef | undefined,
 ): void {
-  if (hostKind !== "aggregate") {
+  if (hostKind === "ui") {
     recordDiagnostic(doc, {
       severity: "error",
       message:
-        `Capability '${cap.name}' can only be applied to an aggregate (got '${hostKind}').  ` +
-        "Context-level capability application is not yet supported.",
+        `Capability '${cap.name}' can only be applied to an aggregate or context (got 'ui').  ` +
+        "A capability is a pure mixin over domain state, not a UI concern.",
       node: call,
       property: "name",
     });
@@ -409,8 +413,18 @@ function expandCapability(
   // Only reachable off the live build path, where `shared` (hence buildRef) is
   // always present; guard defensively so the arg-resolution path is a no-op.
   if (!buildRef) return;
-  const cloned = (cap.members ?? []).map((m) => AstUtils.copyAstNode(m, buildRef));
-  spliceMembers(host, hostKind, cloned, call, doc);
+  // One fresh clone-set per destination aggregate — a context `with` fans out
+  // to every child aggregate; an aggregate `with` is the single-target case.
+  const targets =
+    hostKind === "aggregate"
+      ? [host as Aggregate]
+      : ((host as import("../language/generated/ast.js").BoundedContext).members ?? []).filter(
+          isAggregate,
+        );
+  for (const agg of targets) {
+    const cloned = (cap.members ?? []).map((m) => AstUtils.copyAstNode(m, buildRef));
+    spliceMembers(agg, "aggregate", cloned, call, doc);
+  }
 }
 
 /** Hidden property used by `invokeMacro` to redirect a returned
