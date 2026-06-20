@@ -272,7 +272,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
       [
         `  async ${form.submitMethod}(): Promise<void> {`,
         `    if (this.${form.formVar}.invalid) return;`,
-        `    const out = await this.${form.mutationVar}.mutate(this.${form.formVar}.getRawValue());`,
+        `    const out = await this.${form.mutationVar}.mutateAsync(this.${form.formVar}.getRawValue());`,
         `    this.router.navigateByUrl(\`/${form.redirectSlug}/\${out.id}\`);`,
         "  }",
       ].join("\n"),
@@ -301,7 +301,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
         `  async ${a.method.name}(): Promise<void> {`,
         `    const id = ${a.method.idAccess};`,
         "    if (!id) return;",
-        `    await this.${a.localVar}.mutate(id, {});`,
+        `    await this.${a.localVar}.mutateAsync({ id, input: {} });`,
       ];
       if (a.method.thenJs) body.push(`    ${a.method.thenJs};`);
       body.push("  }");
@@ -330,7 +330,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
         [
           `  async ${m.submitMethod}(): Promise<void> {`,
           `    if (this.${m.formVar}.invalid) return;`,
-          `    await this.${m.mutationVar}.mutate(this.${m.idSig}(), this.${m.formVar}.getRawValue());`,
+          `    await this.${m.mutationVar}.mutateAsync({ id: this.${m.idSig}(), input: this.${m.formVar}.getRawValue() });`,
           `    this.${m.openSig}.set(false);`,
           "  }",
         ].join("\n"),

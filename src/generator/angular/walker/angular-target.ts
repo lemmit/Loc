@@ -139,13 +139,14 @@ export const angularTarget: WalkerTarget = {
     return lines;
   },
 
-  /** Angular's read handle exposes `data` as a SIGNAL, so the QueryView
-   *  data-lambda binding calls it (`<handle>.data()`).  TSX/Vue read the
-   *  TanStack `.data` property directly (the omitted-default path).  For a byId
-   *  read (`single`) `data()` is `T | null`; the template's `@if (…data())`
-   *  guard can't narrow a call result, so assert non-null inside it. */
+  /** Angular's read handle is a TanStack `injectQuery` result whose `data` is a
+   *  SIGNAL, so the QueryView binding calls it (`<handle>.data()`).  `data()` is
+   *  `T | undefined` (no `initialData`); for a collection read, default to `[]`
+   *  so an `@for` / `Table of:` always gets an iterable, and for a `single` read
+   *  assert non-null inside the template's `@if (…data())` guard (a call result
+   *  can't be narrowed). */
   renderQueryDataAccess(handle: string, single?: boolean): string {
-    return single ? `${handle}.data()!` : `${handle}.data()`;
+    return single ? `${handle}.data()!` : `(${handle}.data() ?? [])`;
   },
 
   /** Fork `CreateForm(of: …)` to idiomatic typed Reactive Forms (the shared

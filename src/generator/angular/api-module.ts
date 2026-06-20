@@ -8,13 +8,16 @@ import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 // ---------------------------------------------------------------------------
 // Per-aggregate Angular API module (`src/api/<agg>.ts`).
 //
-// IDIOMATIC ANGULAR, not the React/Vue TanStack module: a `@Injectable`
-// service wraps `HttpClient`, and a `use<Op><Agg>()` factory returns a
-// signal-backed read handle (`{ data, isLoading, isError }`) the page-shell
-// hoists as a class field.  The factory mirrors the TanStack result shape so
-// the SHARED QueryView walker's `<handle>.isLoading` / `.data` accesses line
-// up — only the read syntax diverges (Angular signals are called: `()`),
-// which the angular QueryView template + the `renderQueryDataAccess` seam own.
+// TanStack Angular Query (the senior-Angular-idiomatic server-state layer): a
+// `@Injectable` service wraps `HttpClient` for the raw requests, and each
+// `use<Op><Agg>()` factory returns a TanStack `injectQuery` / `injectMutation`
+// result the page-shell hoists as a class field (the field initializer is the
+// injection context both require).  Reads share the query cache (dedup +
+// caching), keyed by the collection / record tag; mutations invalidate exactly
+// the keys the generator knows they touch.  The result shape (`data` /
+// `isLoading` / `isError` / `mutate*`) is what the SHARED QueryView walker
+// reads — only the signal-call syntax diverges (`()`), owned by the angular
+// QueryView template + the `renderQueryDataAccess` seam.
 //
 // Response types are plain TS interfaces derived from the aggregate's
 // `wireShape` (the same ordered field list every backend's DTO emitter
@@ -66,6 +69,7 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
   const responseName = `${single}Response`;
   const createName = `Create${single}Request`;
   const tag = snake(plural(single));
+  const oneTag = snake(single);
   const allFn = `useAll${plural(single)}`;
   const allVar = `${lowerFirst(single)}All`;
   const byIdFn = `use${single}ById`;
@@ -93,25 +97,22 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
   const opFactories = ops.flatMap((op) => {
     const reqType = `${upperFirst(op.name)}${single}Request`;
     return [
-      `/** Signal-backed \`${op.name}\` operation mutation.  \`mutate\` takes the`,
-      " *  record id AT CALL TIME (not hoist time) so an async QueryView record —",
-      " *  resolved after the component's field initialisers run — still targets the",
-      " *  right row; it POSTs the op params and resolves when the command lands. */",
+      `/** \`${op.name}\` operation mutation (TanStack \`injectMutation\`).  Call`,
+      " *  `mutateAsync({ id, input })` — the variables carry the record id, so an",
+      " *  async QueryView record (resolved after field initialisers run) still",
+      " *  targets the right row.  On success it invalidates exactly the affected",
+      " *  record + the collection, so the cached reads refetch. */",
       `export function use${upperFirst(op.name)}${single}() {`,
       `  const service = inject(${serviceName});`,
-      "  const isPending = signal(false);",
-      "  const error = signal<unknown>(null);",
-      `  const mutate = (id: string, input: ${reqType}): Promise<void> => {`,
-      "    isPending.set(true);",
-      "    error.set(null);",
-      `    return firstValueFrom(service.${op.name}(id, input))`,
-      "      .catch((e) => {",
-      "        error.set(e);",
-      "        throw e;",
-      "      })",
-      "      .finally(() => isPending.set(false));",
-      "  };",
-      "  return { mutate, isPending, error };",
+      "  const queryClient = inject(QueryClient);",
+      "  return injectMutation(() => ({",
+      `    mutationFn: (vars: { id: string; input: ${reqType} }) =>`,
+      `      firstValueFrom(service.${op.name}(vars.id, vars.input)),`,
+      "    onSuccess: (_data, vars) =>",
+      `      queryClient`,
+      `        .invalidateQueries({ queryKey: ["${oneTag}", vars.id] })`,
+      `        .then(() => queryClient.invalidateQueries({ queryKey: ["${tag}"] })),`,
+      "  }));",
       "}",
       "",
     ];
@@ -120,7 +121,8 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
   return lines(
     "// Auto-generated.  Do not edit by hand.",
     'import { HttpClient } from "@angular/common/http";',
-    'import { Injectable, inject, signal } from "@angular/core";',
+    'import { Injectable, inject } from "@angular/core";',
+    'import { QueryClient, injectMutation, injectQuery } from "@tanstack/angular-query-experimental";',
     'import { firstValueFrom } from "rxjs";',
     'import { API_BASE_URL } from "./config";',
     "",
@@ -152,73 +154,43 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
     ...opMethods,
     "}",
     "",
-    "/** Signal-backed `findAll` read — hoisted as a component field; the",
-    " *  injection context is the field initializer.  Mirrors the TanStack",
-    " *  result shape (`data` / `isLoading` / `isError`) the shared QueryView",
-    " *  walker consumes, with signals read via `()` in the angular template. */",
+    "/** `findAll` query (TanStack `injectQuery`) — hoisted as a component field;",
+    " *  the injection context is the field initializer.  The shared query cache,",
+    " *  keyed by the collection tag, dedupes concurrent reads and is invalidated",
+    " *  by the matching mutations.  `data` (a `T[] | undefined` signal — defaulted",
+    " *  to `[]` at the read site) / `isLoading` / `isError` are read via `()`. */",
     `export function ${allFn}() {`,
     `  const service = inject(${serviceName});`,
-    `  const data = signal<${responseName}[]>([]);`,
-    "  const isLoading = signal(true);",
-    "  const isError = signal(false);",
-    "  service.findAll().subscribe({",
-    "    next: (rows) => {",
-    "      data.set(rows);",
-    "      isLoading.set(false);",
-    "    },",
-    "    error: () => {",
-    "      isError.set(true);",
-    "      isLoading.set(false);",
-    "    },",
-    "  });",
-    "  return { data, isLoading, isError };",
+    `  return injectQuery(() => ({`,
+    `    queryKey: ["${tag}"] as const,`,
+    `    queryFn: () => firstValueFrom(service.findAll()),`,
+    `  }));`,
     "}",
     "",
-    "/** Signal-backed `findById` read — the single-record sibling of the",
-    " *  collection factory.  `data` is `null` until the row resolves; the shared",
-    " *  QueryView walker's detail-lambda reads it via `()` like the list case.",
-    " *  `id` is nullable (mirrors the TanStack `enabled: !!id` guard): an absent",
-    " *  route param skips the fetch and settles immediately. */",
+    "/** `findById` query — the single-record sibling.  `enabled: !!id` keeps the",
+    " *  query idle (no request) when the route param is absent; the record is",
+    " *  cached under `[tag, id]`, so an op-mutation can later invalidate exactly",
+    " *  this row.  `data` is `T | undefined` until it resolves. */",
     `export function ${byIdFn}(id: string | undefined) {`,
     `  const service = inject(${serviceName});`,
-    `  const data = signal<${responseName} | null>(null);`,
-    "  const isLoading = signal(true);",
-    "  const isError = signal(false);",
-    "  if (id) {",
-    "    service.findById(id).subscribe({",
-    "      next: (row) => {",
-    "        data.set(row);",
-    "        isLoading.set(false);",
-    "      },",
-    "      error: () => {",
-    "        isError.set(true);",
-    "        isLoading.set(false);",
-    "      },",
-    "    });",
-    "  } else {",
-    "    isLoading.set(false);",
-    "  }",
-    "  return { data, isLoading, isError };",
+    `  return injectQuery(() => ({`,
+    `    queryKey: ["${oneTag}", id] as const,`,
+    `    queryFn: () => firstValueFrom(service.findById(id as string)),`,
+    `    enabled: !!id,`,
+    `  }));`,
     "}",
     "",
-    "/** Signal-backed create mutation — hoisted as a component field; `mutate`",
-    " *  POSTs the form payload and resolves with the new id.  `isPending` /",
-    " *  `error` are signals the form template reads via `()`. */",
+    "/** Create mutation (TanStack `injectMutation`) — hoisted as a component",
+    " *  field; `mutateAsync(input)` POSTs the form payload and resolves with the",
+    " *  new id.  On success it invalidates the collection query so the list",
+    " *  refetches.  `isPending` is a signal the form template reads via `()`. */",
     `export function ${createFn}() {`,
     `  const service = inject(${serviceName});`,
-    "  const isPending = signal(false);",
-    "  const error = signal<unknown>(null);",
-    `  const mutate = (input: ${createName}): Promise<{ id: string }> => {`,
-    "    isPending.set(true);",
-    "    error.set(null);",
-    "    return firstValueFrom(service.create(input))",
-    "      .catch((e) => {",
-    "        error.set(e);",
-    "        throw e;",
-    "      })",
-    "      .finally(() => isPending.set(false));",
-    "  };",
-    "  return { mutate, isPending, error };",
+    "  const queryClient = inject(QueryClient);",
+    "  return injectMutation(() => ({",
+    `    mutationFn: (input: ${createName}) => firstValueFrom(service.create(input)),`,
+    `    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["${tag}"] }),`,
+    "  }));",
     "}",
     "",
     ...opFactories,

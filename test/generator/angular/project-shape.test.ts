@@ -89,6 +89,8 @@ describe("angular generator — project shape", () => {
     expect(cfg).toContain("provideRouter(routes)");
     expect(cfg).toContain("provideHttpClient(withFetch())");
     expect(cfg).toContain("provideAnimationsAsync()");
+    // TanStack QueryClient backs the server-state cache.
+    expect(cfg).toContain("provideTanStackQuery(new QueryClient())");
   });
 
   it("app shell is a standalone app-root component with the system name baked in", async () => {
@@ -121,8 +123,8 @@ describe("angular generator — project shape", () => {
     expect(pkg.dependencies["@angular/router"]).toBeTruthy();
     expect(pkg.dependencies["@angular/material"]).toBeTruthy();
     expect(pkg.scripts.build).toBe("ng build");
-    // DI-native data layer — no external query lib.
-    expect(pkg.dependencies["@tanstack/angular-query-experimental"]).toBeUndefined();
+    // TanStack Angular Query backs the server-state layer (caching + invalidation).
+    expect(pkg.dependencies["@tanstack/angular-query-experimental"]).toBeTruthy();
   });
 
   it("index.html is the Angular host (<app-root>), not a Vite manual-mount page", async () => {
@@ -133,24 +135,27 @@ describe("angular generator — project shape", () => {
   });
 
   // --- Per-aggregate API module (data path sub-slice A) ------------------
-  it("emits an idiomatic @Injectable service + signal-backed read factory per aggregate", async () => {
+  it("emits an @Injectable HttpClient service + an injectQuery read factory per aggregate", async () => {
     const api = (await angularFiles()).get("src/api/customer.ts")!;
     // Response interface derived from the aggregate's wire shape.
     expect(api).toContain("export interface CustomerResponse {");
     expect(api).toContain("id: string;");
     expect(api).toContain("name: string;");
-    // DI-native HttpClient service — not a fetch wrapper, no TanStack.
+    // HttpClient service handles the raw request; the query layer wraps it.
     expect(api).toContain('import { HttpClient } from "@angular/common/http";');
     expect(api).toContain('@Injectable({ providedIn: "root" })');
     expect(api).toContain("export class CustomerService {");
     expect(api).toContain("this.http.get<CustomerResponse[]>(`${API_BASE_URL}/customers`)");
-    // Signal-backed read factory mirrors the TanStack result shape.
+    // TanStack injectQuery read factory — shared cache keyed by the collection tag.
+    expect(api).toContain(
+      'import { QueryClient, injectMutation, injectQuery } from "@tanstack/angular-query-experimental";',
+    );
     expect(api).toContain("export function useAllCustomers() {");
-    expect(api).toContain("const data = signal<CustomerResponse[]>([]);");
-    expect(api).toContain("return { data, isLoading, isError };");
+    expect(api).toContain('queryKey: ["customers"] as const,');
+    expect(api).toContain("queryFn: () => firstValueFrom(service.findAll()),");
   });
 
-  it("emits the create request type + service POST + signal-backed mutation factory", async () => {
+  it("emits the create request type + service POST + an injectMutation factory that invalidates", async () => {
     const api = (await angularFiles()).get("src/api/customer.ts")!;
     // Client-suppliable create payload.
     expect(api).toContain("export interface CreateCustomerRequest {");
@@ -159,11 +164,18 @@ describe("angular generator — project shape", () => {
     expect(api).toContain("create(input: CreateCustomerRequest) {");
     expect(api).toContain("this.http.post<{ id: string }>(`${API_BASE_URL}/customers`, input)");
     expect(api).toContain('import { firstValueFrom } from "rxjs";');
-    expect(api).toContain("export function useCreateCustomer() {");
+    // TanStack injectMutation — on success invalidates the collection query.
     expect(api).toContain(
-      "const mutate = (input: CreateCustomerRequest): Promise<{ id: string }> => {",
+      'import { QueryClient, injectMutation, injectQuery } from "@tanstack/angular-query-experimental";',
     );
-    expect(api).toContain("return { mutate, isPending, error };");
+    expect(api).toContain("export function useCreateCustomer() {");
+    expect(api).toContain("return injectMutation(() => ({");
+    expect(api).toContain(
+      "mutationFn: (input: CreateCustomerRequest) => firstValueFrom(service.create(input)),",
+    );
+    expect(api).toContain(
+      'onSuccess: () => queryClient.invalidateQueries({ queryKey: ["customers"] }),',
+    );
   });
 });
 
@@ -208,11 +220,14 @@ describe("angular generator — per-operation mutations", () => {
     expect(api).toContain("this.http.post<void>(");
     expect(api).toContain("/cancel`, input)");
     expect(api).toContain("note(id: string, input: NoteOrderRequest) {");
-    // Mutation factories take the id AT CALL TIME (`mutate(id, input)`), so an
-    // async record id resolves at click time rather than in the field init.
+    // injectMutation factories carry the id in their variables (`{ id, input }`),
+    // so an async record id resolves at call time; onSuccess invalidates the
+    // affected record + collection queries.
     expect(api).toContain("export function useCancelOrder() {");
     expect(api).toContain("export function useNoteOrder() {");
-    expect(api).toContain("const mutate = (id: string, input: CancelOrderRequest)");
-    expect(api).toContain("return firstValueFrom(service.cancel(id, input))");
+    expect(api).toContain("mutationFn: (vars: { id: string; input: CancelOrderRequest }) =>");
+    expect(api).toContain("firstValueFrom(service.cancel(vars.id, vars.input)),");
+    expect(api).toContain('.invalidateQueries({ queryKey: ["order", vars.id] })');
+    expect(api).toContain('.then(() => queryClient.invalidateQueries({ queryKey: ["orders"] })),');
   });
 });
