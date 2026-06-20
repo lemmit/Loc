@@ -1421,37 +1421,55 @@ export function validateEventSourcedWorkflowStorage(
   }
 }
 
-// the Hono (`node`) and .NET (`dotnet`) backends — the lineage SDK + co-located
-// `<field>_provenance` column + the `provenance_records` flush.  On a backend
-// that doesn't (phoenix today) a `provenanced` field silently behaves like a
-// plain field, dropping the audit trail it promises — an error, not a silent
-// no-op.  Mirrors the event-sourcing storage gate (a parsed-but-unemitted
-// feature is a footgun, so it fails fast).
+// the Hono (`node`) and .NET (`dotnet`) backends, plus elixir on the **vanilla**
+// foundation — the lineage SDK + co-located `<field>_provenance` column + the
+// `provenance_records` flush.  On a backend that doesn't (the Ash foundation, or
+// react) a `provenanced` field silently behaves like a plain field, dropping the
+// audit trail it promises — an error, not a silent no-op.  Mirrors the
+// event-sourcing storage gate (foundation-shaped on elixir; a parsed-but-
+// unemitted feature is a footgun, so it fails fast).
 const PROVENANCE_BACKENDS = new Set(["node", "dotnet"]);
 export function validateProvenancedStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
+  elixirFoundations: Set<string> = new Set(),
 ): void {
-  const unsupported = [...backendPlatforms].filter((p) => !PROVENANCE_BACKENDS.has(p));
+  // elixir hosts the provenance runtime only on the vanilla foundation
+  // (D-VANILLA-ES-HOME-shaped) — the Ash foundation has no co-located-column /
+  // process-buffer fit, exactly like event-sourced storage.  An `elixir` host
+  // counts as provenance-capable iff every elixir deployable hosting it uses
+  // `vanilla`.
+  const elixirProvCapable =
+    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
+  const isProvCapable = (p: string): boolean =>
+    PROVENANCE_BACKENDS.has(p) || (p === "elixir" && elixirProvCapable);
+  const unsupported = [...backendPlatforms].filter((p) => !isProvCapable(p));
   const anyBackend = backendPlatforms.size > 0;
   for (const agg of ctx.aggregates) {
     const provFields = agg.fields.filter((f) => f.provenanced);
     if (provFields.length === 0) continue;
     if (anyBackend && unsupported.length === 0) continue;
+    const includesPhoenix = unsupported.includes("elixir");
     const hostNote =
       unsupported.length > 0
         ? `it is hosted by ${unsupported.join(", ")}, where the provenance runtime is not emitted`
-        : "no provenance-capable (node / dotnet) backend deployable hosts this context";
+        : "no provenance-capable (node / dotnet / elixir-vanilla) backend deployable hosts this context";
     const names = provFields.map((f) => f.name).join(", ");
     diags.push({
       severity: "error",
       code: "loom.provenanced-backend-unsupported",
       message:
         `aggregate '${agg.name}' has provenanced field(s) ${names}, but the provenance runtime ` +
-        `(trace capture + history) is emitted for the Hono (node) and .NET (dotnet) backends only — ${hostNote}. ` +
-        `Host the context on a node or dotnet deployable, or drop the 'provenanced' modifier to use a plain ` +
-        `field (all backends). Tracked in provenance.md / type-system-feature-migration.md (DBT-1).`,
+        `(trace capture + history) is emitted for the Hono (node), .NET (dotnet) and elixir-vanilla ` +
+        `backends only — ${hostNote}. ` +
+        (includesPhoenix
+          ? `On Phoenix this is a foundation constraint: the Ash foundation has no provenance fit, ` +
+            `so switch the deployable to foundation: vanilla. Otherwise host `
+          : `Host `) +
+        `the context on a node / dotnet / elixir-vanilla deployable, or drop the 'provenanced' ` +
+        `modifier to use a plain field (all backends). Tracked in provenance.md / ` +
+        `type-system-feature-migration.md (DBT-1).`,
       source: `${ctx.name}/${agg.name}`,
     });
   }

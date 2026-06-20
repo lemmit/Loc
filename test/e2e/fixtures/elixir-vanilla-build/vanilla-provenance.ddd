@@ -1,0 +1,47 @@
+// Provenance runtime on the vanilla foundation (DEBT-06).  A `provenanced`
+// field gets a co-located `<field>_provenance` jsonb backing column, every
+// named-operation write to it captures a lineage (rule snapshot + leaf inputs
+// + computed value) into a per-process buffer, and the persist drains that
+// buffer into the `provenance_records` history table inside the save
+// transaction.  Compiled by build-generated-elixir-vanilla so the rendered
+// capture + flush + the Provenance SDK actually pass
+// `mix compile --warnings-as-errors` against plain Ecto.
+system Ordering {
+  subdomain Sales {
+    context Orders {
+      aggregate Order ids guid {
+        quantity: int
+        unitPrice: int
+        discount: int
+
+        // The canonical "why is this value what it is?" field — two operations
+        // write it, so two distinct rule snapshots are captured.
+        total: int provenanced
+
+        // Reads params (qty/price) + a sibling field (discount).
+        operation reprice(qty: int, price: int) {
+          precondition qty > 0
+          total := qty * price - discount
+        }
+
+        // Self-referential write — exercises pre-write leaf snapshotting.
+        operation applyDiscount(amount: int) {
+          precondition amount >= 0
+          discount := amount
+          total := total - amount
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api OrdersApi from Sales
+  storage pg { type: postgres }
+  resource orderState { for: Orders, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Orders]
+    dataSources: [orderState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

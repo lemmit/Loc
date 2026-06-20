@@ -21,6 +21,7 @@ import type {
 import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { isEventSourced } from "./eventsourced-emit.js";
+import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 
 export function emitVanillaSchemas(
   appModule: string,
@@ -63,10 +64,15 @@ function renderSchema(
 ): string {
   const moduleName = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const tableName = snake(plural(agg.name));
-  const fieldLines = agg.fields
-    .map((f) => renderFieldLine(f, enumsByName))
-    .filter(Boolean)
-    .join("\n");
+  const declaredLines = agg.fields.map((f) => renderFieldLine(f, enumsByName)).filter(Boolean);
+  // Co-located provenance backing columns — one `<field>_provenance` jsonb
+  // (the pass-through `Provenance.Json` Ecto type) per provenanced field,
+  // holding the current lineage persisted on the row.  Never cast from client
+  // attrs (server-managed); the named-op persist `put_change`s it directly.
+  const provLines = provenancedFieldsOf(agg).map(
+    (f) => `    field :${provColumn(f.name)}, ${appModule}.Provenance.Json`,
+  );
+  const fieldLines = [...declaredLines, ...provLines].join("\n");
   const prefixLine = schemaPrefix ? `  @schema_prefix ${JSON.stringify(schemaPrefix)}\n` : "";
 
   return `# Auto-generated.
