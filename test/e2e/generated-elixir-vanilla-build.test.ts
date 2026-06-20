@@ -92,6 +92,11 @@ describe.skipIf(!ENABLED)(
         // its guards + `field := value` struct-updates and persists the assigned
         // columns via put_change (not a param cast).
         { name: "vanilla-op-body.ddd", deployable: "api" },
+        // Provenance runtime (DEBT-06) — a `provenanced` field's co-located
+        // `<field>_provenance` jsonb column, inline lineage capture at each
+        // named-op write site, and the transactional `provenance_records` flush
+        // (the `<App>.Provenance` SDK + the Json Ecto type + the migration).
+        { name: "vanilla-provenance.ddd", deployable: "api" },
         // ES applier folds over value-object / enum fields (P4.3): an inline VO
         // constructor renders to a plain map on vanilla — compile that path.
         { name: "vanilla-vo-fold.ddd", deployable: "api" },

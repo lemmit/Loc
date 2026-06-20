@@ -906,6 +906,18 @@ of footgun worth documenting.
   module function) when the macro-controlled struct owns the
   protocol slot sidesteps the entire collision class.
 
+- **Don't name a *generated* temp var with a leading underscore if the
+  body reads it.**  Porting the TS/.NET provenance capture (DEBT-06,
+  vanilla foundation) I emitted `__lin_N` / `__prov_inputs_N` temps —
+  fine in JS/C#, but in Elixir a leading `_` means "intentionally
+  unused", so `--warnings-as-errors` rejects *"the underscored variable
+  `__lin_1` is used after being set"*.  Unit string-assertions and
+  `tsc` never see it — only the docker `mix compile` gate does.  Fix:
+  prefix generated locals that ARE read with a real name (`loom_lineage_N`,
+  not `__lineage_N`); reserve the underscore for genuinely-discarded
+  bindings (`_ = expr`).  General rule for Elixir codegen: the
+  underscore is a *use* assertion, not just a naming convention.
+
 - **Plug router syntax (`:id`) vs OpenAPI path-template syntax
   (`{id}`) are different.**  The OpenApiSpex emitter happily renders
   `"/<plural>/:id"` as a path key — valid Elixir, invalid OpenAPI 3.

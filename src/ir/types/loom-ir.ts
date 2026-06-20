@@ -164,8 +164,9 @@ export interface FieldIR {
   /** True iff the source declared this property with the `provenanced`
    * modifier.  Every assignment statement (`:=`/`+=`/`-=`) targeting such
    * a field becomes a per-site rule snapshot; see `ProvSite`.  The provenance
-   * runtime is emitted on the Hono (`node`) backend only — hosting a
-   * provenanced context on another backend is rejected at validate time
+   * runtime is emitted on the Hono (`node`), .NET (`dotnet`) and elixir-
+   * `vanilla` backends — hosting a provenanced context on another surface (the
+   * Ash foundation, react) is rejected at validate time
    * (`loom.provenanced-backend-unsupported`, `validateProvenancedStorage`)
    * rather than silently dropping the trail. */
   provenanced?: boolean;
