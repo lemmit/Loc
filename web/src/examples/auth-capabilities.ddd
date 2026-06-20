@@ -32,6 +32,13 @@ system Helpdesk {
     tenantId: string
   }
 
+  // `tenantScoped` — a user-declared capability: the multi-tenant read filter,
+  // applied per aggregate via `with tenantScoped` (the typed replacement for the
+  // old `filter for "tenantScoped"` + `implements "tenantScoped"` string group).
+  capability tenantScoped {
+    filter this.tenantId == currentUser.tenantId
+  }
+
   subdomain Support {
 
     // Typed permission catalogue.  `permissions.ticketsClose` lowers to
@@ -43,27 +50,21 @@ system Helpdesk {
 
     // Audit + soft-delete are built-in capabilities applied per aggregate
     // (below): `auditable` co-locates the audit fields + stamps, `softDeletable`
-    // the isDeleted/deletedAt state + read filter.  The hand-written
-    // `filter for "tenantScoped"` is the multi-tenant equivalent.
+    // the isDeleted/deletedAt state + read filter; `tenantScoped` (declared
+    // above) is the user-defined multi-tenant filter.
     context Support {
 
       enum TicketStatus { Open, Pending, Closed }
-
-      // Hand-written capability group: every aggregate that
-      // `implements "tenantScoped"` gets this read filter.  A tenant rule
-      // ships no built-in, so it's written out longhand.
-      filter for "tenantScoped" this.tenantId == currentUser.tenantId
 
       // `auditable` (capability) adds createdAt/updatedAt/createdBy/updatedBy +
       // the create/update stamps; `softDeletable` (capability) adds
       // isDeleted/deletedAt + the read filter; `softDelete` (macro) adds the
       // softDelete()/restore() operations.
-      aggregate Ticket with auditable, softDeletable, softDelete {
+      aggregate Ticket with auditable, softDeletable, softDelete, tenantScoped {
         tenantId: string
         subject: string
         status: TicketStatus
         assignee: string
-        implements "tenantScoped"
 
         invariant subject.length > 0
 
