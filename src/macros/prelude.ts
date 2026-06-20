@@ -33,7 +33,7 @@ import {
   primType,
   thisRef,
 } from "./api/index.js";
-import { callExpr } from "./api/ui-factories.js";
+import { nowExpr } from "./api/ui-factories.js";
 
 /** Assemble a `Capability` AST node from already-built members, wiring the
  * member `$container` triples (the factories wire each member's own subtree). */
@@ -59,11 +59,11 @@ function buildAuditable(): Capability {
     field("updatedBy", idRef("User"), { access: "managed" }),
     ...contextStamp({
       onCreate: [
-        { field: "createdAt", value: callExpr("now", []) },
+        { field: "createdAt", value: nowExpr() },
         { field: "createdBy", value: nameRef("currentUser") },
       ],
       onUpdate: [
-        { field: "updatedAt", value: callExpr("now", []) },
+        { field: "updatedAt", value: nowExpr() },
         { field: "updatedBy", value: nameRef("currentUser") },
       ],
     }),

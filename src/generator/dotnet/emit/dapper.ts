@@ -814,7 +814,7 @@ export function renderDapperSchema(aggs: readonly EnrichedAggregateIR[], ns: str
  *  EF Core package set). */
 export const DAPPER_PROJECT_DEPS: readonly string[] = [
   `    <PackageReference Include="Dapper" Version="2.1.35" />`,
-  `    <PackageReference Include="Npgsql" Version="8.0.5" />`,
+  `    <PackageReference Include="Npgsql" Version="10.0.3" />`,
 ];
 
 /** Program.cs persistence wiring for Dapper — registers the NpgsqlDataSource

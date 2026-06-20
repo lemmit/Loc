@@ -91,6 +91,7 @@ export {
   lambda,
   matchExpr,
   nameRefExpr,
+  nowExpr,
   page,
   pageMenuMeta,
   routeProp,

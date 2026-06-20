@@ -315,13 +315,28 @@ export function renderConfiguration(
     : [...indexedColumnsFor(agg, ctx)].map(
         (col) => `        builder.HasIndex(x => x.${pascalCol(col, agg)});`,
       );
-  // Context filters: one `builder.HasQueryFilter(...)` per propagated predicate.
+  // Context filters: one NAMED `builder.HasQueryFilter("<Name>", ...)` per
+  // propagated predicate (EF Core 10 named query filters — efcore10.md).
+  // Pre-EF-10 only ONE filter per entity was allowed; a second
+  // `HasQueryFilter(...)` silently OVERWROTE the first, so an aggregate
+  // carrying two capability filters (e.g. `softDelete` + a tenancy `filter`)
+  // would lose one at runtime.  Naming each filter makes them additive again —
+  // every predicate applies — and lets a query selectively bypass a single one
+  // via `IgnoreQueryFilters(["<Name>"])` instead of dropping them all.
+  const seenFilterNames = new Set<string>();
   const filterLines = tph
     ? []
-    : (agg.contextFilters ?? []).map(
-        (predicate) =>
-          `        builder.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
-      );
+    : (agg.contextFilters ?? []).map((predicate, i) => {
+        let name = queryFilterName(predicate, agg.contextFilterRefs?.[i], i);
+        // Disambiguate the (rare) case where two filters derive the same name.
+        if (seenFilterNames.has(name)) {
+          let n = 2;
+          while (seenFilterNames.has(`${name}${n}`)) n++;
+          name = `${name}${n}`;
+        }
+        seenFilterNames.add(name);
+        return `        builder.HasQueryFilter(${JSON.stringify(name)}, x => ${renderCsExpr(predicate, { thisName: "x" })});`;
+      });
   // Co-located provenance (provenance.md): each `provenanced` field's
   // `<Field>Provenance` lineage maps to a `<field>_provenance` jsonb column via
   // a System.Text.Json value-converter (ProvJson.Options → the same Web-default
@@ -403,6 +418,27 @@ function indexedColumnsFor(agg: AggregateIR, ctx: BoundedContextIR): Set<string>
     }
   }
   return out;
+}
+
+/** Stable, human-readable name for an EF Core 10 named query filter.
+ *  Prefers the criterion's own name when the filter reifies a named
+ *  `criterion` (`activeOnly` → `ActiveOnlyFilter`); otherwise derives it
+ *  from the single column the predicate touches (`!this.isDeleted` →
+ *  `IsDeletedFilter`), falling back to a positional `Filter<n>` when the
+ *  predicate spans zero or several columns. */
+function queryFilterName(
+  predicate: ExprIR,
+  ref: { name: string } | undefined,
+  index: number,
+): string {
+  if (ref) return `${upperFirst(ref.name)}Filter`;
+  const cols = new Set<string>();
+  collectColumnRefs(predicate, cols);
+  if (cols.size === 1) {
+    const [col] = [...cols];
+    return `${upperFirst(col!)}Filter`;
+  }
+  return `Filter${index + 1}`;
 }
 
 function collectColumnRefs(e: ExprIR, out: Set<string>): void {

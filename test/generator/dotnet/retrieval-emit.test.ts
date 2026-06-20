@@ -64,10 +64,10 @@ describe(".NET generator — retrieval", () => {
     );
     const csproj = [...out.entries()].find(([k]) => k.endsWith(".csproj"))![1];
     expect(csproj).toMatch(
-      /<PackageReference Include="Ardalis\.Specification" Version="8\.0\.0" \/>/,
+      /<PackageReference Include="Ardalis\.Specification" Version="9\.3\.1" \/>/,
     );
     expect(csproj).toMatch(
-      /<PackageReference Include="Ardalis\.Specification\.EntityFrameworkCore" Version="8\.0\.0" \/>/,
+      /<PackageReference Include="Ardalis\.Specification\.EntityFrameworkCore" Version="9\.3\.1" \/>/,
     );
   });
 

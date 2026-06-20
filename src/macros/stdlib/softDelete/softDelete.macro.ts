@@ -1,5 +1,5 @@
 import { assignStmt, defineMacro, nullLit, operation } from "../../api/index.js";
-import { boolLit, callExpr } from "../../api/ui-factories.js";
+import { boolLit, nowExpr } from "../../api/ui-factories.js";
 
 /** Soft-delete operations (typed-capabilities.md, Phase 3).
  *
@@ -29,7 +29,7 @@ export default defineMacro({
       operation(
         "softDelete",
         [],
-        [assignStmt("isDeleted", boolLit(true)), assignStmt("deletedAt", callExpr("now", []))],
+        [assignStmt("isDeleted", boolLit(true)), assignStmt("deletedAt", nowExpr())],
       ),
       operation(
         "restore",

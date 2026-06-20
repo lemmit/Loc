@@ -96,7 +96,7 @@ It does **not** persist — if `docker info` starts failing mid-session, just re
 **Every backend target compiles locally without waiting on CI** (verified end-to-end here — generate → compile):
 
 - **Java** — `gradle testClasses bootJar` on the *host* (JDK 21 + Gradle present; no container needed).
-- **.NET** — host has no SDK, so build in the `mcr.microsoft.com/dotnet/sdk:8.0` container (matches the `net8.0` target): `dotnet restore` + `dotnet build /warnaserror` are clean.
+- **.NET** — host has no SDK, so build in the `mcr.microsoft.com/dotnet/sdk:10.0` container (matches the `net10.0` target): `dotnet restore` + `dotnet build /warnaserror` are clean.
 - **Phoenix/Elixir** — `mix deps.get && mix compile --warnings-as-errors` in the `hexpm/elixir` image, against real Ash 3.x.
 - **Python** — `uv sync` + ruff + mypy + pytest on the host.
 

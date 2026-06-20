@@ -80,12 +80,20 @@ too** (DEBT-01 / DEBT-02) — only their *intersection*, a principal
 predicate on a non-relational aggregate, stays gated.  See *Deferred
 cases* below.
 
-- **.NET / EF Core** — every aggregate that has any propagated
-  `contextFilters` gets one `b.HasQueryFilter(x => …)` per filter
-  inside its `EntityConfiguration.Configure(...)` method.  Emission
-  is per-entity-type (EF Core's `HasQueryFilter` is per-entity by
-  design); the filter applies to *every* query of that aggregate
-  (capability application was resolved earlier, at expansion +
+- **.NET / EF Core 10** — every aggregate that has any propagated
+  `contextFilters` gets one **named** `b.HasQueryFilter("<Name>", x => …)`
+  per filter inside its `EntityConfiguration.Configure(...)` method
+  (EF Core 10 *named query filters*).  Names are derived from the
+  reified `criterion` name (`activeOnly` → `"ActiveOnlyFilter"`) or, for
+  anonymous predicates, from the single column they touch
+  (`!this.isDeleted` → `"IsDeletedFilter"`), falling back to a positional
+  `"Filter<n>"`.  Naming matters: pre-EF-10 a second `HasQueryFilter`
+  call **silently overwrote** the first, so an aggregate carrying two
+  capability filters (e.g. `softDelete` + a tenancy `filter`) lost one at
+  runtime — named filters make all of them additive again, and let a
+  query selectively bypass just one via `IgnoreQueryFilters(["<Name>"])`.
+  Emission is per-entity-type; the filter applies to *every* query of that
+  aggregate (capability application was resolved earlier, at expansion +
   lowering).  EF Core resolves the DI-scoped
   principal and queries jsonb transparently, so .NET is the one
   backend with no deferred cases.  See

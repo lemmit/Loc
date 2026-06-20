@@ -20,6 +20,7 @@ import type {
   MatchExpr,
   MenuMetaEntry,
   NameRef,
+  NowExpr,
   Page,
   PageMenuMeta,
   PageProp,
@@ -44,6 +45,7 @@ import {
   mkMatchExpr,
   mkMenuMetaEntry,
   mkNameRef,
+  mkNowExpr,
   mkPage,
   mkPageMenuMeta,
   mkPostfixChain,
@@ -67,6 +69,16 @@ import { _currentOrigin, _setContainer, _tag } from "./factories-internals.js";
 export function stringLit(value: string): StringLit {
   const origin = _currentOrigin();
   return _tag(mkStringLit({ $type: "StringLit", value }), origin);
+}
+
+/** The current-timestamp builtin (`now()`).  The grammar parses `now()`
+ * as a dedicated `NowExpr` node, NOT a function call — lowering's
+ * `isNowExpr` guard recognises it and emits each backend's clock call
+ * (.NET `DateTime.UtcNow`, etc.).  Building it as `callExpr("now", [])`
+ * would lower to a generic call and render as a bogus `Now()`. */
+export function nowExpr(): NowExpr {
+  const origin = _currentOrigin();
+  return _tag(mkNowExpr({ $type: "NowExpr" }), origin);
 }
 
 /** A boolean literal expression.  The grammar surfaces these as
