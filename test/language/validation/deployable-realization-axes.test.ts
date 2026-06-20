@@ -260,9 +260,26 @@ describe("realization axes — R6 foundation ↔ persistence/application compati
     const { errors } = await parse(sys("elixir { foundation: vanilla, application: ash }"));
     expect(
       errors.some((e) =>
-        /application: ash.*incompatible with 'foundation: vanilla'.*'vanilla'/.test(e),
+        // Compatible style for the vanilla foundation is the real pipeline shape
+        // `serviceLayer` (= adapter `layered`), not a style named after the
+        // foundation.
+        /application: ash.*incompatible with 'foundation: vanilla'.*'serviceLayer'/.test(e),
       ),
     ).toBe(true);
+  });
+
+  it("accepts `foundation: vanilla` + `application: serviceLayer` (plain Phoenix's real pipeline)", async () => {
+    // The plain-Phoenix style is the real `layered`/`serviceLayer` shape — it
+    // is the explicit spelling of the vanilla foundation's defaulted style.
+    const { errors } = await parse(
+      sys("elixir { foundation: vanilla, application: serviceLayer }"),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects `application: vanilla` — `vanilla` is a foundation, never a style", async () => {
+    const { errors } = await parse(sys("elixir { foundation: vanilla, application: vanilla }"));
+    expect(errors.some((e) => /application: vanilla/.test(e))).toBe(true);
   });
 
   it("no R6 error for a foundation without an explicit data layer", async () => {

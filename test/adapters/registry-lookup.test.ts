@@ -148,14 +148,15 @@ describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 me
 
   it("phoenix is 100% real", () => {
     // realization-axes-alignment.md: both foundations' data layers + styles
-    // are first-class — ashPostgres/ecto on persistence, ash/vanilla on style
-    // (sorted).  Layout stays byFeature-only (byLayer is unidiomatic for
-    // Phoenix — deferred).
+    // are first-class — ashPostgres/ecto on persistence, ash/layered on style
+    // (sorted).  `layered` is plain Phoenix's real pipeline shape (DSL
+    // `serviceLayer`); `vanilla` is a foundation, not a style.  Layout stays
+    // byFeature-only (byLayer is unidiomatic for Phoenix — deferred).
     expect(availableAdapterNames("phoenixLiveView", "persistence")).toEqual([
       "ashPostgres",
       "ecto",
     ]);
-    expect(availableAdapterNames("phoenixLiveView", "style")).toEqual(["ash", "vanilla"]);
+    expect(availableAdapterNames("phoenixLiveView", "style")).toEqual(["ash", "layered"]);
     expect(availableAdapterNames("phoenixLiveView", "layout")).toEqual(["byFeature"]);
   });
 
