@@ -181,6 +181,9 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
         pageRoutes,
         externFunctionNames,
         c.derived,
+        // `auth: ui` enables currentUser-only operation-`requires` gating on
+        // `Action(...)` buttons in this component.
+        ctx.authUi,
       ),
     );
   }
@@ -218,6 +221,9 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
         // `page { requires <expr> }` UI gate — only when a verified session is
         // available to evaluate it against.
         ctx.authUi ? page.requires : undefined,
+        // `auth: ui` also enables currentUser-only operation-`requires` gating
+        // on `Action(...)` buttons inside the body.
+        ctx.authUi,
       ),
     );
   }
