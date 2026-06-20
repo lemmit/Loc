@@ -47,6 +47,19 @@ describe("built-in capability prelude (typed-capabilities.md Phase 3)", () => {
     expect(errors).toEqual([]);
   });
 
+  it("`with softDeletable` resolves the built-in (state + filter)", async () => {
+    const ir = await buildLoomModel(`
+      system D { subdomain M { context C {
+        aggregate Order with softDeletable { subject: string }
+      }}}
+    `);
+    const agg = findAgg(ir, "Order");
+    expect(agg.wireShape.map((f) => f.name)).toEqual(
+      expect.arrayContaining(["isDeleted", "deletedAt"]),
+    );
+    expect(agg.contextFilters?.length).toBe(1);
+  });
+
   it("a user-declared `capability auditable` overrides the built-in", async () => {
     const ir = await buildLoomModel(`
       capability auditable { archived: bool }

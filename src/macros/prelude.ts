@@ -22,7 +22,17 @@
 // pair into one co-located declaration.
 
 import type { Capability, CapabilityMember } from "../language/generated/ast.js";
-import { contextStamp, field, idRef, nameRef, primType } from "./api/index.js";
+import {
+  contextFilter,
+  contextStamp,
+  field,
+  idRef,
+  memberAccess,
+  nameRef,
+  not,
+  primType,
+  thisRef,
+} from "./api/index.js";
 import { callExpr } from "./api/ui-factories.js";
 
 /** Assemble a `Capability` AST node from already-built members, wiring the
@@ -60,6 +70,18 @@ function buildAuditable(): Capability {
   ] as CapabilityMember[]);
 }
 
+/** `capability softDeletable { isDeleted (internal) + deletedAt? (managed) +
+ * filter !this.isDeleted }` — state + query filter, co-located.  The
+ * `softDelete()`/`restore()` OPERATIONS stay in the `softDelete` macro (a
+ * capability is a pure mixin); compose them: `with softDeletable, softDelete`. */
+function buildSoftDeletable(): Capability {
+  return capability("softDeletable", [
+    field("isDeleted", primType("bool"), { access: "internal" }),
+    field("deletedAt", primType("datetime", { optional: true }), { access: "managed" }),
+    contextFilter(not(memberAccess(thisRef(), "isDeleted"))),
+  ] as CapabilityMember[]);
+}
+
 let _cache: Map<string, Capability> | undefined;
 
 /** The built-in capabilities, built once and cached for the process.  The
@@ -68,7 +90,10 @@ let _cache: Map<string, Capability> | undefined;
  * documents/builds is safe. */
 export function builtinCapabilities(): Map<string, Capability> {
   if (!_cache) {
-    _cache = new Map([["auditable", buildAuditable()]]);
+    _cache = new Map([
+      ["auditable", buildAuditable()],
+      ["softDeletable", buildSoftDeletable()],
+    ]);
   }
   return _cache;
 }

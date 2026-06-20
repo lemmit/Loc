@@ -17,11 +17,11 @@ subdomain People {
     departmentsManage
   }
 
-  // `with softDelete` adds the soft-delete query filter at context level;
-  // `auditable` (built-in capability, per aggregate) co-locates the audit
-  // columns + stamps; `softDeletable` (macro) adds the soft-delete columns +
-  // ops + the marker the filter attaches to.
-  context People with softDelete {
+  // Audit + soft-delete are built-in capabilities applied per aggregate:
+  // `auditable` co-locates the audit columns + stamps; `softDeletable` the
+  // soft-delete columns + read filter; the `softDelete` macro adds the
+  // softDelete()/restore() operations.
+  context People {
 
     enum EmployeeStatus { Active, OnLeave, Terminated }
 
@@ -31,7 +31,7 @@ subdomain People {
     // macros don't ship.
     filter for "tenantScoped" this.tenantId == currentUser.tenantId
 
-    aggregate Department with auditable, softDeletable {
+    aggregate Department with auditable, softDeletable, softDelete {
       tenantId: string
       code: string
       name: string
@@ -40,7 +40,7 @@ subdomain People {
       derived display: string = name
     }
 
-    aggregate Employee with auditable, softDeletable {
+    aggregate Employee with auditable, softDeletable, softDelete {
       tenantId: string
       name: PersonName
       email: string sensitive(pii)

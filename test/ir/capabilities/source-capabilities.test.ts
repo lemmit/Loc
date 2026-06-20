@@ -84,36 +84,34 @@ describe("source-level capabilities (hand-written, no macro)", () => {
     expect(agg.implementsCapabilities).toEqual(["auditable", "softDeletable"]);
   });
 
-  it("hand-written equivalent of trio (softDelete + softDeletable) produces matching IR", async () => {
-    // Trio shape: context-level capability filter + aggregate-level
-    // state + opt-in via `implements`.  Writing the equivalent by
-    // hand should yield identical IR for the capability surface.
+  it("the `softDeletable` capability == hand-written state + filter", async () => {
+    // The built-in capability co-locates state + filter on the aggregate;
+    // hand-writing the same fields + `filter` yields matching IR.
     const handIR = await buildLoomModel(`
       system Demo {
         subdomain M { context C {
-          filter for "softDeletable" !this.isDeleted
-          aggregate Hand {
+          aggregate Order {
             subject: string
-            isDeleted: bool
-            deletedAt: datetime?
-            implements "softDeletable"
+            isDeleted: bool internal
+            deletedAt: datetime? managed
+            filter !this.isDeleted
           }
         }}
       }
     `);
-    const macroIR = await buildLoomModel(`
+    const capIR = await buildLoomModel(`
       system Demo {
-        subdomain M { context C with softDelete {
-          aggregate Macro with softDeletable {
+        subdomain M { context C {
+          aggregate Order with softDeletable {
             subject: string
           }
         }}
       }
     `);
-    const hand = findAgg(handIR, "Hand");
-    const macro = findAgg(macroIR, "Macro");
-    expect(hand.contextFilters?.length).toBe(macro.contextFilters?.length);
-    expect(hand.implementsCapabilities).toEqual(macro.implementsCapabilities);
+    const hand = findAgg(handIR, "Order");
+    const cap = findAgg(capIR, "Order");
+    expect(JSON.stringify(hand.contextFilters)).toEqual(JSON.stringify(cap.contextFilters));
+    expect(hand.wireShape.map((f) => f.name)).toEqual(cap.wireShape.map((f) => f.name));
   });
 });
 
@@ -313,7 +311,7 @@ describe('capability-scoped context stamps: `stamp for "<name>"`', () => {
 });
 
 describe("macro-call composition: `*ByDefault` context macros", () => {
-  it("`with softDeleteByDefault` on a context fans softDeletable across every aggregate", async () => {
+  it("`with softDeleteByDefault` fans state + filter + ops across every aggregate", async () => {
     const ir = await buildLoomModel(`
       system Demo {
         subdomain M { context C with softDeleteByDefault {
@@ -322,16 +320,19 @@ describe("macro-call composition: `*ByDefault` context macros", () => {
         }}
       }
     `);
-    // Both aggregates received: implements + filter propagated.
-    const order = findAgg(ir, "Order");
-    const customer = findAgg(ir, "Customer");
-    expect(order.implementsCapabilities).toContain("softDeletable");
-    expect(customer.implementsCapabilities).toContain("softDeletable");
-    expect(order.contextFilters?.length).toBe(1);
-    expect(customer.contextFilters?.length).toBe(1);
+    for (const name of ["Order", "Customer"]) {
+      const agg = findAgg(ir, name);
+      expect(agg.contextFilters?.length).toBe(1);
+      expect(agg.wireShape.map((f) => f.name)).toEqual(
+        expect.arrayContaining(["isDeleted", "deletedAt"]),
+      );
+      expect((agg.operations ?? []).map((o) => o.name)).toEqual(
+        expect.arrayContaining(["softDelete", "restore"]),
+      );
+    }
   });
 
-  it("`softDeleteByDefault` matches explicit composition of softDelete + softDeletable", async () => {
+  it("`softDeleteByDefault` matches explicit `with softDeletable, softDelete` per aggregate", async () => {
     const byDefault = await buildLoomModel(`
       system Demo {
         subdomain M { context C with softDeleteByDefault {
@@ -341,15 +342,18 @@ describe("macro-call composition: `*ByDefault` context macros", () => {
     `);
     const explicit = await buildLoomModel(`
       system Demo {
-        subdomain M { context C with softDelete {
-          aggregate Order with softDeletable { subject: string }
+        subdomain M { context C {
+          aggregate Order with softDeletable, softDelete { subject: string }
         }}
       }
     `);
     const orderD = findAgg(byDefault, "Order");
     const orderE = findAgg(explicit, "Order");
-    expect(orderD.implementsCapabilities).toEqual(orderE.implementsCapabilities);
-    expect(orderD.contextFilters?.length).toBe(orderE.contextFilters?.length);
+    expect(JSON.stringify(orderD.contextFilters)).toEqual(JSON.stringify(orderE.contextFilters));
+    expect(orderD.wireShape.map((f) => f.name)).toEqual(orderE.wireShape.map((f) => f.name));
+    expect((orderD.operations ?? []).map((o) => o.name)).toEqual(
+      (orderE.operations ?? []).map((o) => o.name),
+    );
   });
 
   it("context-level `with auditable` fans the capability (fields + stamps) to every aggregate", async () => {

@@ -62,6 +62,7 @@ export {
   field,
   idRef,
   implementsCapability,
+  implementsCapabilityRef,
   memberAccess,
   namedType,
   nameRef,

@@ -664,6 +664,18 @@ export function implementsCapability(name: string): ImplementsDeclAst & Aggregat
   return node as ImplementsDeclAst & AggregateMember;
 }
 
+/** Construct a TYPED `implements <Cap>` member (typed-capabilities.md) — a
+ * capability application the expander resolves against the capability inventory
+ * and splices in.  Unlike `implementsCapability` (the legacy string-group form),
+ * this carries the bare capability name in `cap`, so it triggers the mixin
+ * application rather than registering a string group.  Emitted on a context host
+ * it applies the capability to every aggregate in the context. */
+export function implementsCapabilityRef(cap: string): ImplementsDeclAst & AggregateMember {
+  const origin = currentOrigin();
+  const node: ImplementsDeclAst = tag(mkImplementsDecl({ $type: "ImplementsDecl", cap }), origin);
+  return node as ImplementsDeclAst & AggregateMember;
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------

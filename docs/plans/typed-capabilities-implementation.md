@@ -106,11 +106,17 @@ user-declared capability of the same name wins.
   context-propagated to aggregate-co-located; same `contextStamps` IR;
   `implementsCapabilities` no longer carries `"auditable"`, which no backend
   consumes).
-- **`softDelete` family stays macros (deferred).** Blocked on a design gap: the
-  `softDeletable` macro adds the `softDelete()`/`restore()` **operations**, which
-  the proposal keeps in macros — so `softDeletable` can't collapse into a
-  pure-mixin capability without deciding where those operations live (see Open
-  Questions). `softDelete`/`softDeletable`/`softDeleteByDefault` remain untouched.
+- **`softDelete` family → built-in `capability softDeletable` + `softDelete` ops
+  macro** ✅  The capability supplies `isDeleted` (internal) + `deletedAt`
+  (managed) + `filter !this.isDeleted`; the `softDelete` macro (repurposed from
+  the old *context filter* macro to an *aggregate ops* macro) supplies
+  `softDelete()`/`restore()`.  `softDeleteByDefault` (kept) emits a context-level
+  typed `implements softDeletable` (fans the capability to every aggregate) +
+  per-aggregate `softDelete`.  Usage: `aggregate Order with softDeletable,
+  softDelete`.  The old `softDeletable` (state) + `softDelete` (context filter)
+  macros were removed; the e2e build fixtures were already hand-written (legacy
+  `filter for`/`implements` string forms), so the slow backend legs are
+  unaffected.
 - `crudish` / `scaffold*` **stay macros** (operations / structure).
 
 ## End state — the stringly forms are removed, not kept as sugar
@@ -199,7 +205,7 @@ scope until a concrete case appears.
 
 - [x] Phase 1 — grammar + AST + parse test.
 - [x] Phase 2 — expander splice + existence checking + scope guard + equivalence tests.
-- [x] Phase 3 — built-in prelude + **audit** family migrated to `capability auditable`. softDelete deferred (operations design gap).
+- [x] Phase 3 — built-in prelude; **audit** → `capability auditable`; **softDelete** → `capability softDeletable` + `softDelete` ops macro.
 - [x] Phase 4 — typed `implements` (synonym of `with`) + context-level `with`.
 - [ ] Phase 5 — `Self`, tooling, marker emission.
 - [ ] Phase 6 — **remove** the stringly forms; migrate all examples/tests.

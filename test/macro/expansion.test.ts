@@ -78,12 +78,12 @@ describe("auditable stdlib macro", () => {
     expect(stamps.map((m) => (m as any).event).sort()).toEqual(["onCreate", "onUpdate"]);
   });
 
-  it("composes with softDeletable — auditable (capability) + softDeletable (macro)", async () => {
+  it("composes auditable + softDeletable (capabilities) with softDelete (ops macro)", async () => {
     const { model, errors } = await parseString(
       wrap(`
         subdomain Sales {
-          context Orders with softDelete {
-            aggregate Order with auditable, softDeletable {
+          context Orders {
+            aggregate Order with auditable, softDeletable, softDelete {
               subject: string
             }
           }
@@ -104,15 +104,14 @@ describe("auditable stdlib macro", () => {
         "deletedAt",
       ]),
     );
+    // softDelete (macro) → operations; capabilities co-locate fields/stamps/filter
+    // ON the aggregate.
     const opNames = (agg.members ?? []).filter(isOperation).map((o) => o.name);
     expect(opNames).toEqual(expect.arrayContaining(["softDelete", "restore"]));
-    // auditable stamps are co-located on the aggregate (capability); the
-    // softDelete macro's filter is the FilterDecl on the context.
     const aggStamps = (agg.members ?? []).filter((m) => m.$type === "StampDecl");
     expect(aggStamps.length).toBe(2);
-    const ctx = findContext(model, "Orders");
-    const ctxFilters = (ctx.members ?? []).filter((m) => m.$type === "FilterDecl");
-    expect(ctxFilters.length).toBe(1);
+    const aggFilters = (agg.members ?? []).filter((m) => m.$type === "FilterDecl");
+    expect(aggFilters.length).toBe(1);
   });
 });
 
@@ -151,13 +150,13 @@ describe("macro expander diagnostics", () => {
   it("reports target-kind mismatch", async () => {
     const { errors } = await parseString(
       wrap(`
-        ui App with softDeletable {
+        ui App with softDelete {
           page Home { route: "/" body: Text { "x" } }
         }
       `),
     );
     expect(errors.join("\n")).toMatch(
-      /Macro 'softDeletable' targets 'aggregate' but was invoked on a 'ui'/,
+      /Macro 'softDelete' targets 'aggregate' but was invoked on a 'ui'/,
     );
   });
 

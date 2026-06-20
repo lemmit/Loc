@@ -48,10 +48,10 @@ describe("macro capabilities propagate to AggregateIR", () => {
     expect(updateFields).toEqual(["updatedAt", "updatedBy"]);
   });
 
-  it("softDelete + softDeletable trio populates contextFilters with one predicate", async () => {
+  it("the `softDeletable` capability populates contextFilters with one predicate", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        subdomain M { context C with softDelete {
+        subdomain M { context C {
           aggregate Doc with softDeletable {
             subject: string
           }
@@ -77,7 +77,7 @@ describe("macro capabilities propagate to AggregateIR", () => {
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }
-        subdomain M { context C with softDelete {
+        subdomain M { context C {
           aggregate Order with auditable, softDeletable {
             subject: string
           }
