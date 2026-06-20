@@ -1,5 +1,6 @@
 import type { ExprIR } from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, upperFirst } from "../../util/naming.js";
+import { tryRenderGate } from "../_frontend/gate-expr.js";
 import { emitActionThen } from "../_walker/primitives/controls.js";
 import { renderPrimitive } from "../_walker/render-primitive.js";
 import { namedArgValue, positionalArgs } from "../_walker/shared/args.js";
@@ -61,7 +62,7 @@ function prefixThis(expr: string, names: ReadonlySet<string>): string {
 export function renderAngularAction(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
-  _depth: number,
+  depth: number,
 ): string | null {
   if (call.kind !== "call") return null;
 
@@ -123,7 +124,7 @@ export function renderAngularAction(
   const specs = ctx.angularActions as AngularActionSpec[];
   if (!specs.some((s) => s.localVar === localVar)) specs.push(spec);
 
-  return renderPrimitive(ctx, "primitive-button", {
+  const button = renderPrimitive(ctx, "primitive-button", {
     label: humanize(op.name),
     onClick: `${methodName}()`,
     hasOnClick: true,
@@ -134,4 +135,30 @@ export function renderAngularAction(
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });
+
+  // Action-button gating (D-AUTH-OIDC, the action-level mirror of the page
+  // `requires` guard — the Angular copy of the shared `emitAction` gate, which
+  // this `renderAction` fork bypasses).  On an `auth: ui` frontend, `@if`-hide
+  // the button at runtime when EVERY `requires` predicate on the operation is
+  // currentUser-only (the verified session claims decide it client-side); the
+  // page-shell injects the `SessionService` + `currentUser` accessor the gate
+  // reads off `usesCurrentUser`.  If the op has no `requires`, or any predicate
+  // touches `this.<field>`/params (not client-evaluable — `tryRenderGate`
+  // returns null), the button stays ungated; the backend 403 still enforces.
+  if (ctx.authUi) {
+    const gates = op.statements.filter((s) => s.kind === "requires").map((s) => s.expr);
+    if (gates.length > 0) {
+      const parts = gates.map((g) => tryRenderGate(g, "currentUser"));
+      if (parts.every((p) => p !== null)) {
+        ctx.usesCurrentUser = true;
+        return ctx.target.renderConditionalChild(
+          parts.map((p) => `(${p})`).join(" && "),
+          button,
+          "null",
+          depth,
+        );
+      }
+    }
+  }
+  return button;
 }

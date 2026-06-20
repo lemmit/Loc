@@ -136,7 +136,12 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // built (the gate's `inject(SessionService)` member needs it).  Stays
   // undefined — byte-identical to the ungated page — without `auth: ui`.
   const requires = input.authUi ? page.requires : undefined;
-  if (requires) coreSymbols.add("inject");
+  // The verified-session `currentUser` accessor is needed for the page guard
+  // (`requires`) AND for a currentUser-gated `Action` button inside the body
+  // (the walker sets `result.usesCurrentUser` when it `@if`-hides one) — even
+  // when the page itself carries no `requires`.  Inject once for either.
+  const needsSession = input.authUi && (!!requires || result.usesCurrentUser);
+  if (needsSession) coreSymbols.add("inject");
 
   // `derived name: T = expr` → `readonly <name> = computed(() => <expr>)`
   // class fields, in declaration order (a later derived may reference an
@@ -374,20 +379,25 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   }
   const componentImportsList = [...componentImports].sort();
 
-  // Page-level `requires` UI gate (D-AUTH-OIDC): on an `auth: ui` frontend a
-  // currentUser-only predicate gates the page body client-side — `inject` the
-  // `SessionService`, expose the verified claims as a `currentUser` accessor
-  // the template can read (bare member refs), and wrap the body in an
-  // `@if (<gate>) { … } @else { … }` rendering a Forbidden fallback when the
-  // gate fails (the client mirror of the backend 403).  Empty (byte-identical
-  // to the ungated page) when the frontend has no `auth: ui` or no `requires`.
+  // Verified-session binding (D-AUTH-OIDC): on an `auth: ui` frontend, `inject`
+  // the `SessionService` and expose the verified claims as a `currentUser`
+  // accessor the template reads as bare member refs.  Needed by the page-level
+  // `requires` guard AND by a currentUser-gated `Action` button in the body
+  // (`result.usesCurrentUser`) — one member only, even when both are present.
+  // Empty (byte-identical to the ungated page) without `auth: ui` or any gate.
   let template = indentTemplate(result.tsx);
-  if (requires) {
+  if (needsSession) {
     imports.push('import { SessionService } from "../auth/session.service";');
     members.push("  readonly session = inject(SessionService);");
     members.push(
       "  get currentUser(): Record<string, unknown> { return this.session.user() ?? {}; }",
     );
+  }
+  // Page-level `requires` UI gate: wrap the body in an `@if (<gate>) { … }
+  // @else { … }` rendering a Forbidden fallback when the gate fails (the client
+  // mirror of the backend 403).  The action-button gate, by contrast, is
+  // already woven into `result.tsx` by the walker, so it needs no wrap here.
+  if (requires) {
     const gateExpr = renderGateExpr(requires, "currentUser");
     template = [
       `      @if (${gateExpr}) {`,

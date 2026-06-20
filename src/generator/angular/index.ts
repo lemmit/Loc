@@ -139,6 +139,7 @@ export function generateAngularForContexts(
         pageRoutes,
         new Set(),
         new Set(page.derived.map((d) => d.name)),
+        authUi,
       );
       content = pageNeedsDeferredFeatures(result)
         ? renderAngularPageStub(page)
