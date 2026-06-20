@@ -212,4 +212,33 @@ describe("menu emitter", () => {
     `);
     expect(deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom))).toBeUndefined();
   });
+
+  it("disambiguates role-named pages via qualified `Area.Page` links", async () => {
+    const loom = await buildLoom(`
+      system S {
+        subdomain M {
+          context C {
+            aggregate Order { x: int }
+            aggregate Item { x: int }
+            repository Orders for Order { }
+            repository Items for Item { }
+          }
+        }
+        ui WebApp with scaffold(aggregates: [Order, Item]) {
+          menu {
+            section "Main" {
+              link Items.List,
+              link Orders.List
+            }
+          }
+        }
+      }
+    `);
+    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom))!;
+    const entries = sidebar[0]!.entries;
+    // Both links are named `List` (role-scoped); the qualifier must route each
+    // to its OWN aggregate page, in link order — not both to the first `List`.
+    expect(entries.map((e) => e.to)).toEqual(["/items", "/orders"]);
+    expect(entries.map((e) => e.testId)).toEqual(["nav-items", "nav-orders"]);
+  });
 });

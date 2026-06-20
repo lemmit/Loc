@@ -22,9 +22,17 @@ Generated output is **byte-identical**: the role name is the DSL/file identity
 only — every emitted *target-code* identifier (React/Vue/Angular component,
 Phoenix module/file, Playwright page-object, smoke title, router import) stays
 the aggregate-qualified `OrderList` form via `pageEmitName`
-(`src/ir/util/page-emit-name.ts`). Deferred (3c): qualified `Area.Page`
-menu-link references — a `link <Page>` still resolves a role name within the
-nearest matching scope.
+(`src/ir/util/page-kind.ts`).
+
+**Update — qualified `Area.Page` menu links (2026-06-20).** A `menu { link … }`
+can now disambiguate role-named scaffold pages by area: `link Orders.List`
+resolves to the `List` page inside `area Orders`, distinct from `Items.List`.
+The grammar accepts a dotted `QualifiedPageName`; `DddScopeProvider.getScope`
+resolves a page-link by both its bare name (unique top-level pages — `link Home`)
+and its area-qualified dotted path (built at link time, since the scaffold
+synthesises the area+page nodes after global indexing); lowering carries the
+resolved page's `route` so the menu emitter keys on it (not the shared role
+name). A bare `link List` still resolves nearest-match for back-compat.
 
 **Update — `origin` removed (slice 3c) — 2026-06-20.** `PageIR.origin` and its
 two inference passes (`inferPageOrigin` + `resourceScaffoldOrigins` /

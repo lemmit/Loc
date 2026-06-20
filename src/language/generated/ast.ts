@@ -583,6 +583,12 @@ export function isQualifiedName(item: unknown): item is QualifiedName {
     return typeof item === 'string';
 }
 
+export type QualifiedPageName = string;
+
+export function isQualifiedPageName(item: unknown): item is QualifiedPageName {
+    return typeof item === 'string';
+}
+
 export type RequirementPropKey = 'title' | 'type' | string;
 
 export function isRequirementPropKey(item: unknown): item is RequirementPropKey {

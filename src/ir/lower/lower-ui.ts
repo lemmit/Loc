@@ -351,9 +351,15 @@ function lowerMenuBlock(m: MenuBlock): MenuBlockIR {
         // not silent shim misses.
         const pageRef = l.page?.ref;
         if (pageRef) {
+          // Capture the resolved page's route as the menu emitter's match key —
+          // role-named scaffold pages (`List`/`New`/`Detail`) share `name`
+          // across aggregates, so `Orders.List` and `Items.List` are told apart
+          // by route, not name.
+          const routeProp = pageRef.props.find((pp) => pp.$type === "RouteProp");
           return {
             kind: "page",
             pageName: pageRef.name,
+            route: routeProp?.$type === "RouteProp" ? routeProp.value : undefined,
             props: (l.props ?? []).map((p) => ({
               name: p.name,
               value: lowerExpr(p.value, env),

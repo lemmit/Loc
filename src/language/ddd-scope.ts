@@ -14,6 +14,7 @@ import {
   type Aggregate,
   type EntityPart,
   isAggregate,
+  isArea,
   isBoundedContext,
   isChannel,
   isComponent,
@@ -21,6 +22,7 @@ import {
   isEntityPart,
   isEnumDecl,
   isModel,
+  isPage,
   isPayloadDecl,
   isSystem,
   isTargetable,
@@ -89,6 +91,35 @@ export class DddScopeProvider extends DefaultScopeProvider {
       if (!ch) return EMPTY_SCOPE;
       const events = ch.carries.map((c) => c.ref).filter((e) => e !== undefined);
       return this.createScopeForNodes(events);
+    }
+    // `menu { link Orders.List }` — a page link resolves within the enclosing
+    // ui, by BOTH the page's bare name (`Home`, a unique top-level page) AND its
+    // area-qualified dotted name (`Orders.List`, `Sales.Orders.List`).  The
+    // qualifier is needed because the scaffold names every aggregate's pages by
+    // ROLE (`List`/`New`/`Detail`), so the bare name collides across
+    // aggregates.  Built here (not in `computeExports`) because the scaffold
+    // macro synthesises the area+page nodes AFTER global indexing — they only
+    // exist on the tree at link time.
+    if (context.container.$type === "MenuLink" && context.property === "page") {
+      const ui = AstUtils.getContainerOfType(context.container, isUi);
+      if (!ui) return super.getScope(context);
+      const descs: AstNodeDescription[] = [];
+      const collect = (members: readonly AstNode[], areaPath: readonly string[]): void => {
+        for (const m of members) {
+          if (isPage(m)) {
+            // Bare name first so it wins on a duplicate (preserves the legacy
+            // nearest-match behaviour for an unqualified `link List`).
+            descs.push(this.descriptions.createDescription(m, m.name));
+            if (areaPath.length > 0) {
+              descs.push(this.descriptions.createDescription(m, `${areaPath.join(".")}.${m.name}`));
+            }
+          } else if (isArea(m)) {
+            collect(m.members, [...areaPath, m.name]);
+          }
+        }
+      };
+      collect(ui.members, []);
+      return this.createScope(descs);
     }
     return super.getScope(context);
   }

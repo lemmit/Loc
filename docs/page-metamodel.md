@@ -487,8 +487,8 @@ Pages carry `menu { … }` metadata; sidebar is derived. Optional `ui`-level
 
 ```ddd
 menu {
-  section "Sales"   { link OrderList, link OrderConsole, link OrderNew }
-  section "Lookup"  { link CustomerList, link ProductList }
+  section "Sales"   { link Orders.List, link OrderConsole, link Orders.New }
+  section "Lookup"  { link Customers.List, link Products.List }
   section "Reports" { link ActiveOrdersView, link OrderSummaryView }
   section "External" {
     link "Docs" -> "https://docs.acme.com"
@@ -496,11 +496,18 @@ menu {
 }
 ```
 
+A scaffold names an aggregate's pages by **role** (`List` / `New` / `Detail`)
+inside its per-aggregate `area` (`area Orders`), so a bare `link List` is
+ambiguous across aggregates.  Disambiguate with the **area-qualified** form
+`link Orders.List` / `link Orders.New`.  Pages with a unique name — custom pages
+(`OrderConsole`), views (`ActiveOrdersView`), and the singleton dashboards
+(`Home`) — link by bare name.
+
 `scaffold` doesn't *return* anything — it contributes pages-with-menu-metadata
 to a shared registry. The `menu` block is the explicit composition operator
 over that registry.
 
-Per-link auth: a `link OrderList` inherits the underlying page's `requires`
+Per-link auth: a `link Orders.List` inherits the underlying page's `requires`
 clause.  The React page guard (above) already renders `<Forbidden/>` on a gated
 page; conditionally **hiding** the matching menu link (so it never shows for a
 caller who can't reach it) is the next slice — today the link still renders and
