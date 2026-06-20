@@ -1,13 +1,16 @@
 # Named actions (and stores) — first-class page transitions
 
-> Status: **PROPOSED (design note).** Nothing here is implemented. This note
-> argues for giving page/component event handlers *names* — turning today's
-> anonymous handler lambdas into declared, typed, pure-by-construction
-> `action`s — and for an optional `store` declaration that bundles shared
-> state with the actions that transition it. It catalogues the design space,
-> recommends one shape, sketches the pipeline work against the real code, and
-> closes with why this is the prerequisite that turns a hypothetical
-> Fable/Feliz/Elmish target from "synthesis" into "projection."
+> Status: **PROPOSED (design note) — core decisions ratified.** Nothing is
+> implemented. This note argues for giving page/component event handlers
+> *names* — turning today's anonymous handler lambdas into declared, typed,
+> pure-by-construction `action`s — and for an optional `store` declaration that
+> bundles shared state with the actions that transition it. It catalogues the
+> design space, recommends one shape, sketches the pipeline work against the
+> real code, and closes with why this is the prerequisite that turns a
+> hypothetical Fable/Feliz/Elmish target from "synthesis" into "projection."
+> The decisions in §8 are settled (keyword, purity boundary, composition,
+> store deferral, async outcomes); the only remaining open item is `store`
+> persistence, explicitly out of v1 scope.
 
 ## TL;DR
 
@@ -127,6 +130,53 @@ sites checked against it on the other. The cost relative to an anonymous
 lambda (which infers the param type from the site for free) is one
 annotation; the benefit is a stable, reusable, projectable identity.
 
+### 2.3 Effectful calls and outcomes — success/failure continuations
+
+A pure action that *only* writes state is `(state) -> state'`. The moment it
+invokes an async effect with a result — an API write that can succeed or fail —
+it is `(state) -> (state', Cmd)` and MVU needs **both** outcome arms. Loom
+splits this by direction:
+
+- **Reads (server state / queries) — derived, no new surface.**
+  `QueryView { of: api.Order.byId(id), loading: …, error: …, data: … }`
+  already carries the endpoint, the wire shape, *and* the three branches — i.e.
+  `Idle | Loading | Loaded of T | Failed of E`. The generator **derives** the
+  remote-data union + load `Cmd` + outcome `Msg` from `QueryView`; no DSL
+  change.
+
+- **Writes (commands with an outcome) — reuse `then:`, add a failure arm.**
+  The language already has a *success continuation*: the
+  `Action { confirm, then: navigate(...) }` primitive's `then:`. We extend that
+  one idea — an effectful call carries an optional `then` (success) and an
+  optional `onError` (failure); the pair **is** a `Result<T, E>` outcome `Msg`
+  with its two `update` arms. A call with neither keeps today's terse
+  implicit-success behaviour (failure bubbles to the generic error surface), so
+  the common case stays short.
+
+```ddd
+action submit() {
+  call placeOrder(draft)
+    then      => navigate(OrderConsole, { customerId: draft.customerId })
+    onError e => toast(e.message)
+}
+```
+
+projects to:
+
+```fsharp
+| Submit ->
+    model,
+    Cmd.OfAsync.either Api.placeOrder model.Draft
+        (fun _ -> Submitted (Ok ())) (fun e -> Submitted (Error e.Message))
+| Submitted (Ok ())   -> model, Navigation.navigate (Route.OrderConsole model.Draft.CustomerId)
+| Submitted (Error m) -> model, Cmd.ofMsg (Toast m)
+```
+
+This closes the one MVU axis named actions do not (async effect outcomes) with
+a single *precedented* syntactic addition rather than a new concept, and it
+degrades gracefully — the `onError` arm is optional. See §8 for the decision
+record.
+
 ## 3. The sharing boundary: `store` (optional extension)
 
 `action` does **not** require a `store`. State used by one page/component and
@@ -174,7 +224,7 @@ parent via a message).
 
 ## 4. Naming the construct
 
-`action` is the recommended keyword: it is the word every web developer knows
+`action` is the keyword (decided — §8.1): it is the word every web developer knows
 (Redux / Zustand / Pinia all say "action"), and inside an action *declaration*
 position it is lexically and positionally distinct from the existing
 `Action {…}` render primitive (PascalCase builder-call in body position). The
@@ -260,17 +310,38 @@ Independently of whether F# is ever emitted, named actions are worth doing for
 converts the Elmish target from a synthesis problem into a projection — see
 the gap analysis tracked alongside this note.
 
-## 8. Open questions
+## 8. Decisions (ratified)
 
-- **Action composition**: may a page action call another page action (not just
-  a store action)? Cleanest answer: yes, as a same-surface tail call; the
-  validator must reject cycles.
-- **Derived vs action**: `derived` (read-only computed, `page-metamodel.md`)
-  and `action` (transition) should stay distinct — no effects in `derived`, no
-  pure-read aliasing in `action`.
-- **Async outcomes**: a declared effect with a result (an API call that yields
-  data) needs an outcome arm. On Elmish that is a second `Msg` case
-  (`Submitted of Result<…>`); on React it is the awaited mutation. Whether the
-  DSL names the outcome explicitly or the generator derives it is a follow-up.
-- **`store` lifetime/persistence**: in-memory only, or
-  session/local-storage-backed? Out of scope for the first slice.
+These were settled and are no longer open. They define v1.
+
+1. **Keyword — `action`.** The universal word (Redux/Zustand/Pinia/Vuex);
+   distinct from the `Action {}` render primitive by case + position (lowercase
+   declaration keyword vs PascalCase builder-call in body position). `intent`
+   remains the fallback only if the overlap is later judged too costly.
+2. **Action body purity — the admissible set is fixed.** An action body may
+   contain *only*: state writes (`:=` / `+=` / `-=`) on owned state; declared
+   effects (`call` / `navigate` / `emit`); and `let` / `for` / `if let` control
+   flow. **No** DOM access, `fetch`, or escape to host APIs. This is what makes
+   an action a pure `(state, payload) -> (state', Cmd)`; the validator enforces
+   it (§2.1).
+3. **Action composition is acyclic.** A page action may *call* another action
+   on the same surface or a store action (§3.1); the call graph must be acyclic
+   — the validator rejects cycles, keeping `update` well-founded.
+4. **`derived` and `action` stay distinct.** No effects in `derived`
+   (read-only computed, `page-metamodel.md`); no pure-read aliasing in
+   `action`.
+5. **`store` is deferred — v1 ships store-less page/component actions only.**
+   Cross-page sharing and lifetime/persistence are orthogonal to the MVU
+   projection (which needs *named actions*, not *shared state*). `store` lands
+   second (§3).
+6. **Async outcomes (§2.3).** Reads are **derived** from `QueryView` (no new
+   surface). Writes reuse the existing `then:` success continuation and add an
+   optional `onError` failure arm; the `(then, onError)` pair projects to a
+   `Result<T, E>` outcome `Msg` + two `update` arms. Continuation-less calls
+   keep implicit-success behaviour.
+
+## 9. Remaining open item
+
+- **`store` lifetime/persistence** — in-memory only, or
+  session/local-storage-backed? Out of scope for v1; revisit when `store`
+  lands.

@@ -61,6 +61,30 @@ independent cells (`StateFieldIR[]`, `loom-ir.ts:1964-1971`) — the React
 pure body → one `update` arm, `state {}` → `Model`. This note assumes that
 proposal as a dependency for flavor (2).
 
+### 2.1 Distance-to-MVU scorecard (per axis)
+
+What is accurate is **faithful one-way projection** Loom → MVU, not strict
+(bidirectional) isomorphism. Measured per MVU part:
+
+| MVU part | Loom today | Distance | Closed by |
+|---|---|---|---|
+| **Model** (one record) | `StateFieldIR[]`, flat typed cells | ≈0 (cosmetic regroup) | emit one record, no DSL change |
+| **view** (`Model → Html`) | `body:` already pure over render primitives | ≈0 | handlers reference a named action |
+| **init** (Model + Cmd) | `state { x = init }` + mount-time data binds | small | map mount binds to init `Cmd` |
+| **Msg** (named, exhaustive union) | anonymous lambdas, no names | **large** | **named actions** |
+| **update** (`(Msg,Model)→(Model,Cmd)`) | inline imperative `:=`+call blocks | medium | named actions + purity rule |
+| **Cmd** — sync (`navigate`/`call`/`emit`) | declared statement forms | medium | purity rule reifies them |
+| **Cmd** — async outcomes (server state) | hooks + boolean/nullable flags | **was the residual gap** | **decided** — see below |
+
+Five of six axes are at or near zero today; **named actions** closes Msg /
+update / sync-Cmd in one feature. The sixth — async effect outcomes — was the
+only genuinely unresolved design question, and is now **decided** in
+[named-actions §2.3 / §8.6](named-actions-and-stores.md): reads derive the
+remote-data union from `QueryView`; writes reuse `then:` + an optional
+`onError` arm, projecting to a `Result<T, E>` outcome `Msg`. With that, every
+MVU axis has a settled projection — the only open item left is `store`
+persistence, deferred out of v1.
+
 ## 3. Work streams and distance
 
 ### 3a. Feliz-with-hooks (React-in-F#)
