@@ -105,7 +105,7 @@ node bin/cli.js generate ts     <file.ddd> -o <out>    # single Hono project (le
 node bin/cli.js generate dotnet <file.ddd> -o <out>    # single .NET project (legacy)
 node bin/cli.js generate system <file.ddd> -o <out>    # full multi-deployable tree + docker-compose.yml
 node bin/cli.js snapshot        <file.ddd> -o <out>    # capture immutable .loom/snapshots/<ts>-<guid>.loomsnap.json (provenance rule snapshot — like `ef migrations add`, run deliberately)
-node bin/cli.js verify          <file.ddd> -o <out>    # run the generated test suites + join results onto the traceability graph → .loom/verification.{json,md}
+node bin/cli.js verify          <file.ddd> --results <results.json> [--out <dir>]  # join an existing test-results JSON onto the requirements graph → .loom/verification.{json,md} (gates the exit code; does NOT run the suites itself)
 ```
 
 Flags: `-o/--out`, `-w/--watch` (legacy generate only), `--dry-run` (print `write`/`skip` plan, touch nothing).
@@ -177,7 +177,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 
 ### Scaffolding
 
-`scaffold modules: M` / `scaffold aggregates: …` is compile-time sugar. The AST-walker expansion lives in `src/ir/lower/walker-primitive-expander.ts` (~1.0k LOC); the per-shape macro bodies live under `src/macros/stdlib/scaffold/` (`scaffold.macro.ts` plus its siblings `scaffoldAggregate.macro.ts`, `scaffoldContext.macro.ts`, `scaffoldModule.macro.ts`, `scaffoldView.macro.ts`, `scaffoldWorkflow.macro.ts`). Sibling stdlib capabilities (`audit/`, `softDelete/`, `crudish.macro.ts`) sit alongside under `src/macros/stdlib/`. Synthesised pages carry a `scaffoldOrigin` tag, then lower to explicit walker-stdlib bodies.
+`scaffold modules: M` / `scaffold aggregates: …` is compile-time sugar. The AST-walker expansion lives in `src/ir/lower/walker-primitive-expander.ts` (~1.0k LOC); the per-shape macro bodies live under `src/macros/stdlib/scaffold/` (`scaffold.macro.ts` plus its siblings `scaffoldAggregate.macro.ts`, `scaffoldContext.macro.ts`, `scaffoldSubdomain.macro.ts`, `scaffoldView.macro.ts`, `scaffoldWorkflow.macro.ts`). Sibling stdlib capabilities (`audit/`, `softDelete/`, `crudish.macro.ts`) sit alongside under `src/macros/stdlib/`. Synthesised pages carry a `scaffoldOrigin` tag, then lower to explicit walker-stdlib bodies.
 
 ## Repository layout (non-obvious bits)
 
