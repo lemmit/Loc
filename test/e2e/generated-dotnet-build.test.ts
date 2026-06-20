@@ -174,6 +174,46 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // Lifecycle stamps (audit) on .NET: the EF Core AuditableInterceptor stamps
+    // `createdAt := now()` (→ DateTime.UtcNow) and `createdBy := currentUser`
+    // (→ the request principal's id from the ambient RequestContext) before
+    // SaveChanges; stamped fields are widened to `internal set` so the
+    // same-assembly interceptor can write them.  This is the .NET analogue of
+    // the java-build `stamps-principal.ddd` cell — principal stamping had never
+    // been compiled on .NET before.
+    it("system `stamp onCreate/onUpdate` (dotnet) — AuditableInterceptor builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-stamps-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/stamps-principal.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        expect(
+          fs.existsSync(
+            path.join(proj, "Infrastructure", "Persistence", "AuditableInterceptor.cs"),
+          ),
+        ).toBe(true);
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // The "tech showcase" system (`examples/showcase.ddd`) exercises the whole
     // language surface across multiple contexts, but it's multi-context — the
     // single-context `generate dotnet` cases above can't reach it, and no other

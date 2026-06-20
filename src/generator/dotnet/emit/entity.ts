@@ -112,6 +112,16 @@ export function renderEntity(
   const esCreate = isAgg(entity) ? entity.creates?.[0] : undefined;
   const hasExtern = operations.some((o) => o.extern);
   const setterVisibility = hasExtern ? "internal" : "private";
+  // Lifecycle-stamp targets (audit / softDelete `stamp onCreate`/`onUpdate`):
+  // the AuditableInterceptor lives in the Infrastructure namespace of the SAME
+  // assembly, so it can only write these fields if their setter is at least
+  // `internal` (a `private set` is unreachable → CS0272).  Widen exactly the
+  // stamped fields to `internal set`; non-stamped fields keep `private set`.
+  const stampedFieldNames = new Set<string>(
+    isAgg(entity)
+      ? (entity.contextStamps ?? []).flatMap((r) => r.assignments.map((a) => a.field))
+      : [],
+  );
   // Non-implicit namespaces this entity's rendered expressions reach
   // into (`System.Text.RegularExpressions` when an invariant uses
   // `email.matches(...)`), collected over the same derived / function /
@@ -167,7 +177,8 @@ export function renderEntity(
     // `private` to `internal` keeps the field unwritable from
     // user/application code but lets the same-assembly hydration
     // succeed without reflection.
-    const fieldSetter = isRefCollection(f.type) ? "internal" : setterVisibility;
+    const fieldSetter =
+      isRefCollection(f.type) || stampedFieldNames.has(f.name) ? "internal" : setterVisibility;
     propLines.push(
       `    public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; ${fieldSetter} set; }${def}`,
     );

@@ -1,0 +1,27 @@
+// Lifecycle stamps on .NET (audit-style) — the EF Core AuditableInterceptor.
+// Timestamp stamps (`createdAt := now()` → DateTime.UtcNow) and a PRINCIPAL
+// stamp (`createdBy := currentUser` → the request principal's id, read from the
+// ambient RequestContext) both flow through the interceptor.  Stamped fields are
+// widened to `internal set` so the same-assembly interceptor can write them.
+// This cell compiles the generated interceptor under `dotnet build /warnaserror`
+// — the .NET analogue of the java-build `stamps-principal.ddd` cell.
+system PS {
+  user { id: guid  name: string }
+  subdomain D {
+    context Shop {
+      stamp onCreate { createdAt := now()  createdBy := currentUser }
+      stamp onUpdate { updatedAt := now() }
+      aggregate Order with crudish {
+        code: string
+        createdAt: datetime
+        updatedAt: datetime
+        createdBy: guid
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable api { platform: dotnet, contexts: [Shop], dataSources: [st], serves: A, port: 8081, auth: required }
+}

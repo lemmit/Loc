@@ -242,6 +242,39 @@ capability identity. Status quo (per-aggregate copies) is correct until then.
    (interceptors are per-`DbContext`). That is correct (per-store), but confirm
    the marker interface type is shared, not per-context-duplicated.
 
+## 9b. Implementation status (2026-06)
+
+What shipped, and what stays deferred after an end-to-end investigation of the
+`.NET` stamp path:
+
+- **`.NET` lifecycle stamping now compiles and is CI-covered.** The
+  `AuditableInterceptor` previously emitted uncompilable code (a bare
+  `currentUser` identifier; `private set` stamped fields the interceptor could
+  not write) and **no build matrix exercised it**. Fixed to mirror the Java
+  reference: a `currentUser` stamp value resolves to the principal id read from
+  the ambient `RequestContext.Current` (the .NET analogue of Java's
+  `currentUser.id()`); stamped fields widen to `internal set` (same-assembly
+  interceptor); a `loom.dotnet-stamp-unsupported` validator gates principal
+  stamps without auth (mirrors `loom.java-stamp-unsupported`); covered by
+  `test/e2e/fixtures/dotnet-build/stamps-principal.ddd` under
+  `dotnet build /warnaserror`. This is the working *raw-id* stamp pattern
+  (`createdBy: guid` + `:= currentUser`), the same one Java's
+  `stamps-principal.ddd` compiles.
+
+- **The `auditable` capability's `createdBy/updatedBy: User id` fields stay
+  broken on every backend — deferred.** The prelude (and the pre-capability
+  `audit` macro it preserves) types these as `User id`, a strongly-typed id of
+  the `user {}` **principal**, which is not a domain aggregate — so no `UserId`
+  class is emitted and the reference dangles. No backend build matrix compiles
+  `with auditable`. Fixing it means giving a capability field "the principal id
+  type" without the capability knowing the system's user-id type — a real
+  capability-typing problem, out of scope here.
+
+- **Marker-interface dedup (`I<Capability>`) stays deferred.** The interceptor
+  switch is already one arm per aggregate; the dedup is cosmetic, and a
+  *verifiable* capability-marker dedup needs the `auditable` dangle fixed first
+  (it is the only stamping capability). Revisit once `auditable` compiles.
+
 ## 10. Cross-references
 
 - [`typed-capabilities.md`](./typed-capabilities.md) — OQ#1 this resolves; the
