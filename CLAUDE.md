@@ -18,6 +18,14 @@ Once a plan exists (or the user has approved an approach), **execute it end to e
 - **Don't idle on CI.** If the next slice is independent, start it while CI runs. If it builds on an unmerged branch, **stack the PR** on the previous one rather than waiting for green. Report status in a line and keep moving.
 - **Surface, don't stall.** When you do hit a real blocker, say what's blocked and what you'd do by default, then take that default unless it's irreversible — don't wait for "continue with recommended".
 
+## Sync with `main` constantly — it moves under you
+
+This repo has **fast-moving `main`** (parallel agents land PRs continuously). A stale base is the single biggest source of wasted effort here, so:
+
+- **Re-sync before every new unit of work AND after every merge.** `git fetch origin main && git reset --hard origin/main` (or rebase the feature branch onto it). The SessionStart hook warns when you're behind — believe it. Don't start the next slice on yesterday's base.
+- **Verify the task isn't already done — *on fresh `main`* — before building.** Check `git log --oneline -20`, grep the actual validator gates / emitters, and `list_pull_requests` for in-flight work. This session, two things were **already shipped** when I started building them (a principal-filter slice; the elixir embedded-filter slice → a duplicate PR that had to be closed), and one "blocker" was **stale** (vanilla op-bodies looked unimplemented because I was reading pre-merge code — a `git fetch` later showed `#1395` had just fixed it). When in doubt, the code on fresh `main` wins over your memory of it.
+- **A stale base lies twice:** you rebuild already-merged work, *and* you reason from behaviour that no longer exists. Both are expensive. One `git fetch` up front is cheaper than either.
+
 ## What this is
 
 **Loom** — a Langium-based DSL for Domain-Driven Design. A `.ddd` source describes a `system` of `module`s, `aggregate`s, `valueobject`s, `event`s, `repository`s, `api`s, `storage`s, `ui`s, and `deployable`s; the toolchain generates a runnable multi-project tree wired together as one `docker compose` stack. Five backends (TypeScript/Hono, .NET/ASP.NET+EF+Mediator, Phoenix LiveView/Ash, Python/FastAPI+SQLAlchemy, Java/Spring Boot+JPA) and three frontends (React/Vite+Mantine, Vue 3/Vite+Vuetify, Svelte/SvelteKit) are supported.
