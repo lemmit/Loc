@@ -52,7 +52,7 @@ import type {
   SystemIR,
 } from "../../../src/ir/types/loom-ir.js";
 
-const phoenixPlatform: Platform = "phoenixLiveView";
+const elixirPlatform: Platform = "elixir";
 
 // Minimal stub aggregate / context / system that triggers the per-aggregate
 // controller emission without dragging in every other emit path.
@@ -104,7 +104,7 @@ function stubModel(): {
   } as unknown as EnrichedBoundedContextIR;
   const deployable: DeployableIR = {
     name: "phoenixApi",
-    platform: phoenixPlatform,
+    platform: elixirPlatform,
     port: 4000,
     serves: ["SalesApi"],
     moduleNames: ["Sales"],
@@ -231,7 +231,7 @@ describe("Phoenix validation-error extension — workflows controller wiring", (
     } as unknown as SystemIR;
     const deployable: DeployableIR = {
       name: "phoenixApi",
-      platform: phoenixPlatform,
+      platform: elixirPlatform,
       port: 4000,
       serves: [
         {

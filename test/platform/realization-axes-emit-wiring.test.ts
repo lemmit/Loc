@@ -23,7 +23,7 @@ import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { EnrichedBoundedContextIR } from "../../src/ir/types/loom-ir.js";
 import dotnetPlatform from "../../src/platform/dotnet.js";
-import phoenixPlatform from "../../src/platform/elixir.js";
+import elixirPlatform from "../../src/platform/elixir.js";
 import honoPlatform from "../../src/platform/hono/v4/index.js";
 import type { PlatformSurface } from "../../src/platform/surface.js";
 import { parseValid } from "../_helpers/parse.js";
@@ -119,7 +119,7 @@ describe.each([
 describe("style threading — phoenix", () => {
   it("dispatches config DI through the THREADED style adapter", async () => {
     const { contexts, deployable, sys } = await emitInputs("elixir");
-    const files = (phoenixPlatform as PlatformSurface).emitProject({
+    const files = (elixirPlatform as PlatformSurface).emitProject({
       contexts,
       deployable,
       sys,
@@ -132,7 +132,7 @@ describe("style threading — phoenix", () => {
 
   it("falls back to ashStyleAdapter when no adapter is threaded", async () => {
     const { contexts, deployable, sys } = await emitInputs("elixir");
-    const files = (phoenixPlatform as PlatformSurface).emitProject({
+    const files = (elixirPlatform as PlatformSurface).emitProject({
       contexts,
       deployable,
       sys,
@@ -153,6 +153,6 @@ describe("default selection keys match the sibling defaults", () => {
     expect(defs?.layout).toBe("byLayer");
   });
   it("phoenix application default key is `ash`", () => {
-    expect(phoenixPlatform.adapterDefaults?.().style).toBe("ash");
+    expect(elixirPlatform.adapterDefaults?.().style).toBe("ash");
   });
 });
