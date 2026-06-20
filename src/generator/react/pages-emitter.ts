@@ -256,6 +256,9 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
         pageRoutes,
         externFunctionNames,
         c.derived,
+        // `auth: ui` enables currentUser-only operation `requires` gating on
+        // `Action(...)` buttons in this component.
+        ctx.authUi,
       ),
     );
   }
@@ -305,6 +308,9 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
           // `page { requires <expr> }` UI gate — only meaningful when the
           // frontend has a verified session to evaluate it against.
           ctx.authUi ? page.requires : undefined,
+          // `auth: ui` also enables currentUser-only operation `requires`
+          // gating on `Action(...)` buttons inside the body.
+          ctx.authUi,
         ),
       );
     }

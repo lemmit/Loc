@@ -136,6 +136,12 @@ export function renderCustomLayoutPage(
    *  when the currentUser-only predicate fails — the client mirror of the
    *  backend 403.  Undefined → no gate (byte-identical to the ungated page). */
   requires: ExprIR | undefined = undefined,
+  /** True when the hosting frontend deployable has `auth: ui`.  Threaded into
+   *  the walk so `Action(<instance>.<op>)` buttons gate on currentUser-only
+   *  operation `requires` predicates (the action-level mirror of the page
+   *  `requires` guard).  When any such button is gated, the shell binds
+   *  `currentUser` even if the page itself has no `requires`. */
+  authUi: boolean = false,
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -146,6 +152,7 @@ export function renderCustomLayoutPage(
     usedParams,
     usesNavigate,
     usesState,
+    usesCurrentUser,
     usesRouterLink,
     usedUserComponents,
     usedApiHooks,
@@ -168,6 +175,7 @@ export function renderCustomLayoutPage(
     pageRoutes,
     externFunctions,
     derivedNames,
+    authUi,
   );
   // Page-derived bindings → hoisted `useMemo` computeds, in declaration
   // order (a derived may reference state, params, and EARLIER derived).
@@ -188,7 +196,9 @@ export function renderCustomLayoutPage(
       usesNavigate,
       stateNames,
       derivedNames: seenDerived,
+      authUi: false,
       usesState: false,
+      usesCurrentUser: false,
       usesRouterLink: false,
       userComponents: new Map(),
       usedUserComponents: new Set(),
@@ -235,7 +245,9 @@ export function renderCustomLayoutPage(
       usesNavigate,
       stateNames,
       derivedNames,
+      authUi: false,
       usesState,
+      usesCurrentUser: false,
       usesRouterLink: false,
       userComponents: new Map(),
       usedUserComponents: new Set(),
@@ -386,7 +398,7 @@ export function renderCustomLayoutPage(
   // fails.  The guard lands AFTER every hook (useSession is itself a hook, so it
   // stays unconditional) and right before the body `return`, keeping the
   // rules-of-hooks contract intact while short-circuiting the render.
-  const gate = renderPageGate(requires, srcImportPrefix);
+  const gate = renderPageGate(requires, usesCurrentUser, srcImportPrefix);
   return `// Auto-generated.  Do not edit by hand.
 ${gate.import}${reactImport}${decimalImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}
 export default function ${pageName}() {
@@ -397,34 +409,47 @@ ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${f
 `;
 }
 
-/** Render the page's `requires` UI gate: the `useSession` import + the
- *  currentUser-bound guard block placed just before the body `return`.  Both
- *  empty when the page is ungated. */
+/** Render the page's currentUser binding + optional `requires` guard.
+ *
+ *  The verified-session-user binding (`const currentUser = useSession().user`)
+ *  + its `useSession` import are emitted when the page has a `requires` gate
+ *  OR the body contains a currentUser-gated action button (`usesCurrentUser`)
+ *  — either path needs `currentUser` in scope.  The bind happens exactly once
+ *  (no double-import / double-const when both are present).
+ *
+ *  The `if (!(gate)) return <Forbidden/>` short-circuit is emitted ONLY when
+ *  the page itself declares `requires` — a page whose only currentUser
+ *  consumer is a gated button binds the user but renders its body normally
+ *  (the button hides itself).  All empty when neither applies (byte-identical
+ *  to the ungated page). */
 function renderPageGate(
   requires: ExprIR | undefined,
+  usesCurrentUser: boolean,
   srcImportPrefix: string,
 ): { import: string; guard: string } {
-  if (!requires) return { import: "", guard: "" };
+  if (!requires && !usesCurrentUser) return { import: "", guard: "" };
   // Dynamic JWT claims → the session user is loosely typed; the cast keeps
   // chained claim access (`currentUser.org.tier`) and membership (`.includes`)
   // clean under the generated project's `strict` tsconfig.  `any` (not
   // `unknown`) because an `unknown` claim can't be indexed/called past one hop.
-  const condition = renderGateExpr(requires, "currentUser");
-  const guard = [
-    `  const currentUser = useSession().user as Record<string, any>;`,
-    `  if (!(${condition})) {`,
-    `    return (`,
-    `      <div style={{ padding: 24 }}>`,
-    `        <h2>Forbidden</h2>`,
-    `        <p>You do not have access to this page.</p>`,
-    `      </div>`,
-    `    );`,
-    `  }`,
-    ``,
-  ].join("\n");
+  const binding = `  const currentUser = useSession().user as Record<string, any>;`;
+  // The Forbidden short-circuit only fires for a page-level `requires`.
+  const forbidden = requires
+    ? [
+        `  if (!(${renderGateExpr(requires, "currentUser")})) {`,
+        `    return (`,
+        `      <div style={{ padding: 24 }}>`,
+        `        <h2>Forbidden</h2>`,
+        `        <p>You do not have access to this page.</p>`,
+        `      </div>`,
+        `    );`,
+        `  }`,
+      ].join("\n")
+    : "";
+  const guard = forbidden ? `${binding}\n${forbidden}\n` : `${binding}\n`;
   return {
     import: `import { useSession } from "${srcImportPrefix}auth/AuthGate";\n`,
-    guard: `${guard}`,
+    guard,
   };
 }
 
@@ -621,6 +646,12 @@ export function renderUserComponentFile(
   /** Component-level `derived` bindings — read-only computed values
    *  hoisted as `useMemo` before the body (same as pages). */
   derived: DerivedIR[] = [],
+  /** True when the hosting frontend deployable has `auth: ui`.  A component
+   *  is the canonical host for `Action(<instance>.<op>)` buttons, so the same
+   *  currentUser-only operation-`requires` gating applies here — when a button
+   *  is gated, the component binds `currentUser` + imports `useSession`.
+   *  Components never carry a page-level `requires`, so no Forbidden guard. */
+  authUi: boolean = false,
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -630,6 +661,7 @@ export function renderUserComponentFile(
     imports,
     usedParams,
     usesState,
+    usesCurrentUser,
     usesRouterLink,
     usesNavigate,
     usedUserComponents,
@@ -653,6 +685,7 @@ export function renderUserComponentFile(
     pageRoutes,
     externFunctions,
     derivedNames,
+    authUi,
   );
   // Component-derived bindings → hoisted `useMemo` computeds (same as the
   // page shell). Body refs resolve to the bare const via `derivedNames`.
@@ -670,7 +703,9 @@ export function renderUserComponentFile(
       usesNavigate,
       stateNames,
       derivedNames: seenDerived,
+      authUi: false,
       usesState: false,
+      usesCurrentUser: false,
       usesRouterLink: false,
       userComponents: new Map(),
       usedUserComponents: new Set(),
@@ -814,15 +849,21 @@ export function renderUserComponentFile(
   const stateLines = compUsesState
     ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("")
     : "";
+  // currentUser binding for any gated `Action(...)` button in the body
+  // (the action-level mirror of the page `requires` guard).  A component
+  // never has a page-level `requires`, so this is binding-only — no
+  // Forbidden short-circuit.  Components sit one hop from `src/`, so the
+  // `useSession` shim resolves via `../`.
+  const gate = renderPageGate(undefined, usesCurrentUser, "../");
   // Suppress used-prop warnings — params declared but unused at
   // walker-emit time (e.g. typed pass-through to a child component
   // not yet wired) shouldn't trigger TS lint noise.  We reference
   // them with a `void` block when none made it into `tsx`.
   void usedParams;
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}
+${gate.import}${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}
 export default function ${name}(${propDestructure}) {
-${navigateLine}${actionWiring.decls}${form.decls}${stateLines}${derivedLines}  return (
+${navigateLine}${actionWiring.decls}${form.decls}${stateLines}${derivedLines}${gate.guard}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
@@ -981,7 +1022,9 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     usesNavigate: false,
     stateNames: new Set(),
     derivedNames: new Set(),
+    authUi: false,
     usesState: false,
+    usesCurrentUser: false,
     usesRouterLink: false,
     userComponents: new Map(),
     usedUserComponents: new Set(),

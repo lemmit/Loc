@@ -74,6 +74,22 @@ export function renderGateExpr(e: ExprIR, userVar: string): string {
   }
 }
 
+/**
+ * Best-effort variant of `renderGateExpr`: returns the rendered gate
+ * string, or `null` when the expression touches anything outside the
+ * currentUser-only subset (i.e. `renderGateExpr` throws).  Action-button
+ * gating uses this to decide whether an operation's `requires` predicate is
+ * client-evaluable — a gate referencing `this.<field>` / params is left
+ * ungated (the backend 403 still enforces it).
+ */
+export function tryRenderGate(e: ExprIR, userVar: string): string | null {
+  try {
+    return renderGateExpr(e, userVar);
+  } catch {
+    return null;
+  }
+}
+
 function renderLiteral(lit: string, value: string): string {
   switch (lit) {
     case "string":
