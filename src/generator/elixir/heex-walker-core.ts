@@ -961,15 +961,20 @@ function styleIrToHeex(expr: Extract<ExprIR, { kind: "call" }>): string | undefi
  *  expressions) — these should NOT be wrapped in `<%= %>`.  Consults
  *  the typed registry (anything with a `heex` renderer registered
  *  produces HEEx markup) so new primitives don't need a second list
- *  edit. */
-function isHEExCall(name: string): boolean {
-  return WALKER_PRIMITIVES[name]?.heex !== undefined;
+ *  edit, AND the ui's user `component`s — a `component` invocation
+ *  renders to a HEEx function-component tag
+ *  (`<…UiComponents.order_panel … />`), which is markup, so wrapping it
+ *  in `<%= %>` (e.g. inside a QueryView `data:` `cond` arm) produces
+ *  invalid HEEx. */
+function isHEExCall(name: string, ctx: WalkContext): boolean {
+  if (WALKER_PRIMITIVES[name]?.heex !== undefined) return true;
+  return ctx.ui.components.some((c) => c.name === name);
 }
 
 export function renderChild(child: ExprIR, ctx: WalkContext): string {
   // If the child is itself a primitive call that returns HEEx markup,
   // render it directly without `<%= %>` wrapping.
-  if (child.kind === "call" && isHEExCall(child.name)) {
+  if (child.kind === "call" && isHEExCall(child.name, ctx)) {
     return renderExpr(child, ctx);
   }
   if (child.kind === "literal" && child.lit === "string") {
@@ -981,7 +986,7 @@ export function renderChild(child: ExprIR, ctx: WalkContext): string {
 export function renderInTemplate(arg: ExprIR, ctx: WalkContext): string {
   if (arg.kind === "literal" && arg.lit === "string") return arg.value;
   // HEEx-generating calls should not be wrapped in <%= %>.
-  if (arg.kind === "call" && isHEExCall(arg.name)) {
+  if (arg.kind === "call" && isHEExCall(arg.name, ctx)) {
     return renderExpr(arg, ctx);
   }
   return `<%= ${renderExpr(arg, { ...ctx, position: "template" })} %>`;

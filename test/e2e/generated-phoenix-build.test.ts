@@ -122,6 +122,12 @@ describe.skipIf(!ENABLED)(
         // unwrapped.  The gated `<%= if %>` + `@current_user` markup only fails
         // at compile time, so this fixture is the real bar for it.
         { name: "auth-op-gate.ddd" },
+        // A user `component` invoked inside a QueryView `data:` lambda — the
+        // component renders to a HEEx function-component tag inside the
+        // QueryView's `<%= cond do %>` arm.  That tag is markup and must stay
+        // un-`<%= %>`-wrapped; the regression emitted `<%= <…order_panel/> %>`,
+        // invalid HEEx that only surfaces at `mix compile`.
+        { name: "component-in-queryview.ddd" },
         // Value-object array (`Money[]`) — Ash stores it inline as an
         // `{:array, Money}` embedded attribute → `{:array, :map}` column (no
         // child table); compiles the embedded-array path.
