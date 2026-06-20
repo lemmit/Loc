@@ -604,9 +604,9 @@ function printStampDecl(node: import("../generated/ast.js").StampDecl): string {
   );
 }
 
-/** `implements "<name>"` */
+/** `implements <Cap>` (typed) or `implements "<name>"` (legacy string group) */
 function printImplementsDecl(node: import("../generated/ast.js").ImplementsDecl): string {
-  return `implements ${quote(node.name)}`;
+  return node.cap ? `implements ${node.cap}` : `implements ${quote(node.name ?? "")}`;
 }
 
 /** `seed [dataset] [raw] { <Agg> { … } … }` (database-seeding.md) */

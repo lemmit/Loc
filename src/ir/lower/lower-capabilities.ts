@@ -81,7 +81,11 @@ export function collectContextLevelCapabilities(
         unqualifiedStamps.push(lowered);
       }
     } else if (m.$type === "ImplementsDecl") {
-      implementsCaps.push((m as { name: string }).name);
+      // Only the legacy `implements "string"` group-opt-in contributes a group
+      // name; typed `implements <Cap>` (name undefined, cap set) is a pure
+      // capability application already spliced by the expander.
+      const n = (m as { name?: string }).name;
+      if (typeof n === "string") implementsCaps.push(n);
     }
   }
   return {
@@ -128,7 +132,10 @@ export function collectStamps(
 export function collectImplements(agg: Aggregate, propagated: readonly string[]): string[] {
   const own = (agg.members ?? [])
     .filter((m) => m.$type === "ImplementsDecl")
-    .map((m) => (m as { name: string }).name);
+    .map((m) => (m as { name?: string }).name)
+    // Skip typed `implements <Cap>` (name undefined) — it is a pure capability
+    // application (spliced by the expander), not a string group opt-in.
+    .filter((n): n is string => typeof n === "string");
   // Dedupe + sort so generators get a deterministic order regardless
   // of declaration source (context vs aggregate vs macro emission).
   return [...new Set([...propagated, ...own])].sort();

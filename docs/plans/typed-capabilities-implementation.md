@@ -106,14 +106,26 @@ This raises the stakes on Phase 3 (stdlib migration): the `audit`/`softDelete`
 macros currently *emit* `implements "string"` / `filter for "string"` nodes, so
 they must move to typed capabilities before the string grammar can be deleted.
 
-### Phase 4 — typed `implements` + context-level application
+### Phase 4 — typed `implements` + context-level application ✅
 
-- `ImplementsDecl`: accept a typed `[Capability]` reference, resolved via the
-  expander inventory. The STRING form keeps parsing **only as a transitional
-  bridge** (slated for removal in Phase 6) — a deprecation warning points at it.
-- Context-level application — `context Sales with auditable` applies the
-  capability to every aggregate in the context (the `*ByDefault` replacement);
-  the expander splices clones into each child aggregate.
+- **4a — context-level `with`** (`0c24089`): `context C with <Cap>` splices an
+  independent clone of the capability into every aggregate in the context (the
+  `*ByDefault` replacement); override-by-name lets an aggregate's explicit member
+  win; a capability on a `ui` errors.
+- **4b — typed `implements`**: `ImplementsDecl` now accepts `implements <Cap>`
+  (bare id, resolved via the expander inventory) as a **synonym of `with <Cap>`**
+  — a pure capability application (splice), at aggregate or context scope. The
+  legacy `implements "string"` group-opt-in form keeps parsing as a transitional
+  bridge (removal in Phase 6). `collectImplements` / `collectContextLevelCapabilities`
+  skip name-less (typed) `ImplementsDecl`s so they never pollute the string
+  `implementsCapabilities` group. Printer updated for both forms.
+- **Decision:** `implements <Cap>` is a **body member** (consistent with the
+  legacy `implements "X"` position), not an aggregate-*header* clause. The
+  proposal's header sugar (`aggregate Org implements tenantRegistry { … }`) is a
+  separate, optional ergonomic addition — `with` already covers the header case —
+  deferred unless desired. No deprecation *warning* on the string form yet (it
+  would fire across every existing example/test); warnings land with the Phase 6
+  migration so the suite stays clean meanwhile.
 
 ### Phase 5 — `Self` type, tooling, marker emission (feeds dedup)
 
@@ -146,6 +158,6 @@ scope until a concrete case appears.
 - [x] Phase 1 — grammar + AST + parse test.
 - [x] Phase 2 — expander splice + existence checking + scope guard + equivalence tests.
 - [ ] Phase 3 — stdlib migration (softDelete, audit) — needs built-in-capability delivery.
-- [ ] Phase 4 — typed `implements` + context-level `with` (← in progress).
+- [x] Phase 4 — typed `implements` (synonym of `with`) + context-level `with`.
 - [ ] Phase 5 — `Self`, tooling, marker emission.
 - [ ] Phase 6 — **remove** the stringly forms; migrate all examples/tests.

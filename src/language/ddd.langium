@@ -923,13 +923,21 @@ StampDecl:
 StampEvent returns string:
     'onCreate' | 'onUpdate';
 
-// `implements "name"` opts the host into a capability group with the
-// given name.  Backends translate the name by convention (.NET adds
-// an `I` prefix → `IAuditable`; TS may emit a type alias; etc.) and
-// emit one shared infrastructure block per name (e.g. one
-// HasQueryFilter loop per capability in OnModelCreating).
+// `implements <Cap>` is the typed capability-application form
+// (typed-capabilities.md) — a synonym of `with <Cap>`: the expander splices
+// the referenced capability's fields + filter + stamp into the host aggregate
+// (or, at context scope, every aggregate in the context).  Resolved by the
+// expander's document-wide capability inventory, like `with` (see `Capability`
+// below), not a Langium cross-reference.
+//
+// `implements "name"` (STRING) is the LEGACY group-opt-in form: it opts the
+// host into a string-named capability group so context-scoped `filter for
+// "name"` / `stamp for "name"` declarations match it.  This stringly surface
+// is a transitional bridge slated for removal once the stdlib migrates and
+// every example/test moves to the typed form (see
+// docs/plans/typed-capabilities-implementation.md, Phase 6).
 ImplementsDecl:
-    'implements' name=STRING;
+    'implements' (cap=ID | name=STRING);
 
 // ---- typed capability declaration (typed-capabilities.md) -------
 //

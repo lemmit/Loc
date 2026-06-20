@@ -183,4 +183,75 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     `);
     expect(errors.join("\n")).toMatch(/Unknown macro or capability 'nope'/);
   });
+
+  // --- Phase 4b: typed `implements <Cap>` (synonym of `with <Cap>`) ----------
+
+  it("typed `implements <Cap>` == `with <Cap>`", async () => {
+    const viaImplements = await buildLoomModel(`
+      capability trashable {
+        isDeleted: bool
+        filter !this.isDeleted
+      }
+      system Demo { subdomain M { context C {
+        aggregate Order { implements trashable  subject: string }
+      }}}
+    `);
+    const viaWith = await buildLoomModel(`
+      capability trashable {
+        isDeleted: bool
+        filter !this.isDeleted
+      }
+      system Demo { subdomain M { context C {
+        aggregate Order with trashable { subject: string }
+      }}}
+    `);
+    const a = findAgg(viaImplements, "Order");
+    const b = findAgg(viaWith, "Order");
+    expect(JSON.stringify(a.contextFilters)).toEqual(JSON.stringify(b.contextFilters));
+    expect(a.wireShape.map((f) => f.name)).toEqual(b.wireShape.map((f) => f.name));
+  });
+
+  it("typed `implements <Cap>` at context scope applies to every aggregate", async () => {
+    const ir = await buildLoomModel(`
+      capability trashable {
+        isDeleted: bool
+        filter !this.isDeleted
+      }
+      system Demo { subdomain M {
+        context C {
+          implements trashable
+          aggregate Order { subject: string }
+          aggregate Invoice { total: int }
+        }
+      }}
+    `);
+    for (const name of ["Order", "Invoice"]) {
+      const agg = findAgg(ir, name);
+      expect(agg.contextFilters?.length).toBe(1);
+      expect(agg.wireShape.some((f) => f.name === "isDeleted")).toBe(true);
+    }
+  });
+
+  it("typed `implements` naming no capability errors", async () => {
+    const { errors } = await parseString(`
+      system Demo { subdomain M { context C {
+        aggregate Order { implements nope  subject: string }
+      }}}
+    `);
+    expect(errors.join("\n")).toMatch(/Unknown capability 'nope' in 'implements'/);
+  });
+
+  it('legacy `implements "string"` still parses (transitional bridge)', async () => {
+    const { errors } = await parseString(`
+      system Demo { subdomain M { context C {
+        filter for "softDeletable" !this.isDeleted
+        aggregate Order {
+          subject: string
+          isDeleted: bool
+          implements "softDeletable"
+        }
+      }}}
+    `);
+    expect(errors).toEqual([]);
+  });
 });

@@ -1415,7 +1415,8 @@ export function isIfLetStmt(item: unknown): item is IfLetStmt {
 export interface ImplementsDecl extends AstNode {
     readonly $container: Aggregate | BoundedContext;
     readonly $type: 'ImplementsDecl';
-    name: string;
+    cap?: string;
+    name?: string;
 }
 
 export const ImplementsDecl = 'ImplementsDecl';
@@ -3842,6 +3843,7 @@ export class DddAstReflection extends AbstractAstReflection {
                 return {
                     name: ImplementsDecl,
                     properties: [
+                        { name: 'cap' },
                         { name: 'name' }
                     ]
                 };

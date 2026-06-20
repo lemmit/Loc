@@ -36,6 +36,7 @@ import {
   isAggregate,
   isBoundedContext,
   isCapability,
+  isImplementsDecl,
   isSubdomain,
   isSystem,
   isUi,
@@ -220,9 +221,31 @@ function expandHost(
   buildRef: BuildRef | undefined,
 ): void {
   const wc = host.withClause;
-  if (!wc) return;
-  for (const call of wc.calls ?? []) {
-    expandOneCall(call, host, kind, doc, inv, buildRef);
+  if (wc) {
+    for (const call of wc.calls ?? []) {
+      expandOneCall(call, host, kind, doc, inv, buildRef);
+    }
+  }
+  // Typed `implements <Cap>` — a capability application, synonym of `with <Cap>`
+  // (typed-capabilities.md).  The legacy `implements "string"` group-opt-in form
+  // (`ImplementsDecl.name`) is handled in lowering, not here.  Snapshot the
+  // member list because aggregate-scope expansion splices into it.
+  if (kind !== "ui") {
+    const members = [...((host as { members?: AstNode[] }).members ?? [])];
+    for (const m of members) {
+      if (!isImplementsDecl(m) || !m.cap) continue;
+      const capDecl = inv.Capability.get(m.cap);
+      if (capDecl) {
+        expandCapability(capDecl, host, kind, m, doc, buildRef);
+      } else {
+        recordDiagnostic(doc, {
+          severity: "error",
+          message: `Unknown capability '${m.cap}' in 'implements'.`,
+          node: m,
+          property: "cap",
+        });
+      }
+    }
   }
 }
 
@@ -395,7 +418,9 @@ function expandCapability(
   cap: Capability,
   host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext,
   hostKind: "aggregate" | "ui" | "context",
-  call: MacroCall,
+  // The AST node the application was written at (a `with` MacroCall or an
+  // `implements` ImplementsDecl) — used only as the diagnostic anchor.
+  at: AstNode,
   doc: LangiumDocument,
   buildRef: BuildRef | undefined,
 ): void {
@@ -405,8 +430,7 @@ function expandCapability(
       message:
         `Capability '${cap.name}' can only be applied to an aggregate or context (got 'ui').  ` +
         "A capability is a pure mixin over domain state, not a UI concern.",
-      node: call,
-      property: "name",
+      node: at,
     });
     return;
   }
@@ -423,7 +447,7 @@ function expandCapability(
         );
   for (const agg of targets) {
     const cloned = (cap.members ?? []).map((m) => AstUtils.copyAstNode(m, buildRef));
-    spliceMembers(agg, "aggregate", cloned, call, doc);
+    spliceMembers(agg, "aggregate", cloned, at, doc);
   }
 }
 
@@ -461,7 +485,8 @@ function spliceMembers(
   host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext,
   hostKind: "aggregate" | "ui" | "context",
   members: unknown[],
-  call: MacroCall,
+  // Diagnostic anchor: a `with` MacroCall or an `implements` ImplementsDecl.
+  call: AstNode,
   doc: LangiumDocument,
 ): void {
   if (members.length === 0) return;
