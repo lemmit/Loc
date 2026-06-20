@@ -33,6 +33,19 @@ describe("elixir realization-axes alignment", () => {
     expect(ecto.supports("postgres", "state", "state")).toBe(true);
   });
 
+  it("ecto hosts eventLog too — it's the vanilla foundation's ES adapter (DEBT-20)", () => {
+    const ecto = resolvePersistence("elixir", "ecto", "eventLog");
+    expect(ecto.name).toBe("ecto");
+    expect(ecto.supportedStrategies).toContain("eventLog");
+    // The vanilla foundation emits the full event-sourced store; ecto is its
+    // persistence adapter, so it must advertise `eventLog` on postgres.
+    expect(ecto.supports("postgres", "eventLog", "eventLog")).toBe(true);
+    // ashPostgres (Ash) stays state-only — Ash has no ES path.
+    expect(
+      resolvePersistence("elixir", "ashPostgres").supports("postgres", "eventLog", "eventLog"),
+    ).toBe(false);
+  });
+
   it("resolves the vanilla style adapter; its DI block is empty (no ash_domains)", () => {
     const vanilla = resolveStyle("elixir", "vanilla");
     expect(vanilla.name).toBe("vanilla");

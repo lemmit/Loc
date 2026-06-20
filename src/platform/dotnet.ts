@@ -181,7 +181,12 @@ const dotnetPlatform: PlatformSurface = {
   },
   adapterDefaults(): PlatformAdapterDefaults {
     return {
-      persistence: { state: "efcore", eventLog: "marten" },
+      // eventLog → `efcore`: EF Core hosts the real event-sourced store (it
+      // declares `["state","eventLog"]` and emits the append/fold repository).
+      // `marten` is a reserved STUB, so it must not be the default (DEBT-20 —
+      // mirror node's `eventLog: "drizzle"`: the default must resolve to an
+      // adapter that actually emits ES, not the idiomatic-but-unimplemented one).
+      persistence: { state: "efcore", eventLog: "efcore" },
       style: "cqrs",
       layout: "byLayer",
       transport: "controllers",

@@ -139,7 +139,11 @@ const javaPlatform: PlatformSurface = {
   },
   adapterDefaults(): PlatformAdapterDefaults {
     return {
-      persistence: { state: "jpa", eventLog: "axon" },
+      // eventLog → `jpa`: JPA hosts the real event-sourced store (it declares
+      // `["state","eventLog"]` and emits the fold/append repository).  `axon` is
+      // a reserved STUB, so it must not be the default (DEBT-20 — the default
+      // eventLog must resolve to an adapter that actually emits ES).
+      persistence: { state: "jpa", eventLog: "jpa" },
       style: "layered",
       // Package-by-feature is the idiomatic Spring arrangement
       // (java-backend.md adapter menu).

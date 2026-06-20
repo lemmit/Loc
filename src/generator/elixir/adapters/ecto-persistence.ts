@@ -46,9 +46,18 @@ function contextOf(ctx: EmitCtx, aggName: string): EnrichedBoundedContextIR | un
 
 export const ectoPersistenceAdapter: PersistenceAdapter = {
   name: "ecto",
-  supportedStrategies: ["state"],
+  // ecto is the `foundation: vanilla` persistence adapter, and the vanilla
+  // foundation is the one that emits a full event-sourced store (struct + fold
+  // + `<agg>_event_log` Ecto schema + load-fold-append repository — see
+  // `vanilla/eventsourced-emit.ts`).  So ecto really hosts BOTH strategies; the
+  // ES gate is foundation-shaped (vanilla ok / ash rejected), not adapter-shaped.
+  // (ashPostgres / Ash stays `["state"]` — Ash has no ES path.)
+  supportedStrategies: ["state", "eventLog"],
 
   supports(storageType, kind, persistenceStrategy) {
+    if (persistenceStrategy === "eventLog") {
+      return storageType === "postgres" && kind === "eventLog";
+    }
     return (
       persistenceStrategy === "state" &&
       storageType === "postgres" &&

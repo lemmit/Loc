@@ -46,7 +46,7 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 | 17 | 🟡 OPEN (partial) | MikroORM real adapter, v1-minimal (retrievals/assoc/inheritance stubbed) |
 | 18 | 🟡 OPEN (partial, **narrowed**) | Dapper **retrievals now ship**; only out-of-subset predicates stub (`NotImplementedException`) |
 | 19 | ✅ DONE | TPH on all 5 DB backends |
-| 20 | 🟡 OPEN (partial) | java JPA + node do ES; **elixir-vanilla emit exists but its ecto/ashPostgres adapters declare `["state"]`**, and **java's default `eventLog: "axon"` points at a STUB** — latent misalignment worth a fix |
+| 20 | ✅ DONE (default/decl alignment) | every backend's eventLog **default now resolves to a REAL adapter** (java `axon`→`jpa`, dotnet `marten`→`efcore`, elixir `ashPostgres`→`ecto`, matching node's `drizzle`); **ecto now declares `["state","eventLog"]`** (it drives the vanilla ES emit). ES strategy itself ships on node/dotnet/java/elixir-vanilla; the marten/axon **event-store stubs** remain (DEBT-23) |
 | 21 | 🟡 OPEN (partial) | one real app-`style:` per backend (dotnet=cqrs, node/java=layered); rest reserved stubs |
 | 22 | 🟡 OPEN (partial) | one real `transport:` per backend (node=hono, dotnet=controllers); express/fastify/minimalApi stubbed |
 | 23 | 🔴 OPEN | marten/axon/jooq all `AdapterNotImplementedError` stubs |
@@ -121,7 +121,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | DEBT-17 | MikroORM v1 → full surface (retrieval, assoc, inheritance, filters, …) | node | 3 | L | `retrieval-implementation.md` |
 | DEBT-18 | Dapper v1 → full surface (find/retrieval predicate + same set) | dotnet | 2 | L | — |
 | DEBT-19 | ~~TPH inheritance (`inheritanceUsing(sharedTable)`)~~ **DONE (stale entry)** — the validator's `TPH_CAPABLE` set is `{node, dotnet, elixir, python, java}` (all DB backends), so a TPH hierarchy is accepted on every backend; emission ships (Hono shared table + `kind`, .NET EF `HasDiscriminator`, Ash shared-table + `base_filter`). Verified 2026-06-19 | ~~dotnet, elixir, python, java~~ | 3 | L | `tph-unionall-and-contains.md` |
-| DEBT-20 | Event-sourced storage (`persistedAs(eventLog)`) | elixir, java (`axon`) | 3 | L | `elixir-eventsourcing-vanilla-plan.md` |
+| DEBT-20 | ~~Event-sourced storage (`persistedAs(eventLog)`) adapter alignment~~ **DONE** — ES ships on node/dotnet/java/elixir-vanilla; this closed the *adapter* misalignment: every `eventLog` **default** now resolves to a real adapter (not the `axon`/`marten` stubs / state-only `ashPostgres`), and `ecto` declares the `eventLog` strategy it emits | ~~elixir, java~~ | 3 | L | `elixir-eventsourcing-vanilla-plan.md` |
 | **P3 — reserved adapter un-stubbing (greenfield axes, by demand) + half-landed** |
 | DEBT-21 | Application styles: `cqrs` (node/java), `layered`/`flat` (dotnet), `flat` (node) | node, dotnet, java | 2 | L | `realization-axes-rollout.md` |
 | DEBT-22 | Transports: `express`/`fastify` (node), `minimalApi` (dotnet) | node, dotnet | 2 | L | `realization-axes-rollout.md` |
@@ -200,7 +200,7 @@ Concise scope per item; full gate locations in the table above.
 - **DEBT-16 Audited lifecycle (dotnet, java)** — `audited create`/`destroy` instrumentation.
 - **DEBT-17 / DEBT-18 MikroORM & Dapper v1 → full surface** — both reject the same set (retrieval bundles, seed, event-sourced, non-relational, inheritance, `Id[]` associations, nested parts, audit stamping, capability filters, provenanced, managed access) and throw on complex find predicates (`emit/mikroorm.ts:437`, `emit/dapper.ts:405`). Close incrementally toward the default-adapter surface.
 - **DEBT-19 TPH inheritance — DONE (stale):** `inheritanceUsing(sharedTable)` emission already ships on every DB backend — `validateInheritanceStorage`'s `TPH_CAPABLE = {node, dotnet, elixir, python, java}` accepts a TPH hierarchy on any of them (Hono Drizzle shared table + `kind` discriminator; .NET EF Core `HasDiscriminator`; Phoenix/Ash shared-table multi-resource + `base_filter` on `kind`). The "beyond node" framing was stale.
-- **DEBT-20 Event-sourcing (elixir, java)** — `persistedAs(eventLog)`; elixir has an in-flight vanilla plan, java needs `axon` (DEBT-23).
+- **DEBT-20 ES adapter alignment — DONE:** the latent misalignment is fixed — every backend's `eventLog` **default** resolves to a real adapter that actually emits the store (java `axon`→`jpa`, dotnet `marten`→`efcore`, elixir `ashPostgres`→`ecto`; node already used `drizzle`), and elixir's `ecto` adapter now declares `["state","eventLog"]` to match the vanilla event-sourced emit it drives. A `registry-lookup` invariant pins "default eventLog adapter is real & advertises eventLog" so a default can't regress to a stub. The idiomatic event-store stubs (`marten`/`axon`/`jooq`) remain reserved under DEBT-23.
 
 ---
 
