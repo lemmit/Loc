@@ -46,6 +46,7 @@ import {
   validateResourceConfig,
   validateSavingShapeSupport,
   validateSystem,
+  validateVanillaContainmentSupport,
 } from "./checks/system-checks.js";
 import { validateAggregateTestBodies } from "./checks/test-checks.js";
 import {
@@ -111,6 +112,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateJavaStampSupport(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);
+    validateVanillaContainmentSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
