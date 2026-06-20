@@ -67,6 +67,13 @@ describe.skipIf(!ENABLED)(
       // Compiles the threaded repository/context/controller/retrieval/view + the
       // auth plug spliced into the router.
       { name: "vanilla-tenancy.ddd", deployable: "api" },
+      // DEBT-02: a non-principal capability `filter` on a `shape(embedded)`
+      // aggregate.  The embedded root is a real Ecto schema/table whose root
+      // scalars (`code`, `archived`) are columns (only `contains` parts ride a
+      // jsonb `{:array, :map}` column), so the soft-delete predicate AND-s into
+      // every `from(record in <Agg>, where: ...)` read exactly like the relational
+      // path (`vanillaCapabilityFilter` is shape-agnostic).
+      { name: "vanilla-embedded-filter.ddd", deployable: "api" },
     ])("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

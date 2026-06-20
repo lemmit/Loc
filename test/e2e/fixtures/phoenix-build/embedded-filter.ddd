@@ -1,0 +1,39 @@
+// DEBT-02 — a capability `filter` on a `shape(embedded)` aggregate (elixir/Ash).
+// An embedded aggregate's root is a real Ash resource backed by a Postgres
+// table: its root scalars (`code`, `isDeleted`) are real columns, only the
+// `contains` parts ride embedded (jsonb) attributes.  So a non-principal
+// capability `filter` lands on every read via the resource `base_filter` —
+// exactly the relational path (`renderBaseFilter` is shape-agnostic), no in-app
+// filtering needed.  Compiles against real Ash 3.x under
+// `mix compile --warnings-as-errors` (the elixir-ash-build gate).
+system EmbFilterAsh {
+  subdomain D {
+    context Shop {
+      aggregate Order shape(embedded) {
+        code: string
+        isDeleted: bool
+        // soft-delete capability — every read hides a deleted order.
+        filter !this.isDeleted
+        contains items: Item[]
+        entity Item { sku: string  qty: int }
+        operation addItem(sku: string, qty: int) {
+          items += Item { sku: sku, qty: qty }
+        }
+        operation softDelete() { isDeleted := true }
+      }
+      repository Orders for Order {
+        find byCode(code: string): Order[] where this.code == code
+      }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: phoenix { foundation: ash }
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    port: 4000
+  }
+}

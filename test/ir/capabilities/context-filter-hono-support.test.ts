@@ -131,7 +131,26 @@ system Shop {
     ).toEqual([]);
   });
 
-  it("still gates a non-relational capability filter on elixir (DEBT-02 follow-up)", async () => {
+  it("accepts a non-principal capability filter on an elixir EMBEDDED aggregate (DEBT-02 — base_filter / where on the root column)", async () => {
+    // The embedded root is a real Ash resource / Ecto schema; root scalars are
+    // columns, so the predicate rides the shape-agnostic base_filter (Ash) /
+    // `from(... where: ...)` (vanilla) exactly like the relational path.
+    expect(
+      await honoFilterErrors(
+        sys("elixir", { shape: "embedded", filter: "filter !this.isDeleted" }),
+      ),
+    ).toEqual([]);
+    expect(
+      await honoFilterErrors(
+        sys("elixir { foundation: vanilla }", {
+          shape: "embedded",
+          filter: "filter !this.isDeleted",
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still gates a DOCUMENT-shape capability filter on elixir (no document saving shape there)", async () => {
     const errs = await honoFilterErrors(
       sys("elixir", { shape: "document", filter: "filter !this.isDeleted" }),
     );

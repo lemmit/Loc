@@ -195,6 +195,14 @@ describe.skipIf(!ENABLED)(
         // controller call passing the actor).  Both read the tenancy aggregate
         // under its `^actor(:field)` base_filter; the gate compiles both.
         { name: "tenancy-ops.ddd" },
+        // DEBT-02: a non-principal capability `filter` on a `shape(embedded)`
+        // aggregate.  The embedded root is a real Ash resource/table whose root
+        // scalars (`code`, `is_deleted`) are columns (only `contains` parts ride
+        // embedded jsonb attributes), so the soft-delete predicate lands on every
+        // read via the shape-agnostic `base_filter expr(not is_deleted)` — exactly
+        // the relational path.  The decisive check that Ash 3.x compiles a
+        // `base_filter` on an embedded-shaped resource under --warnings-as-errors.
+        { name: "embedded-filter.ddd" },
       ]),
     )("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
