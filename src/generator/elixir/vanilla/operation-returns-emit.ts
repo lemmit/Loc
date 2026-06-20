@@ -135,7 +135,7 @@ ${body}
  *  `add`/`remove` collection mutations are still a v1 gap (they need the
  *  association metadata the Ash changeset path carries) — emitted as a TODO so
  *  the module still compiles. */
-function renderReturningStmt(s: StmtIR, ctx: BoundedContextIR, rc: RenderCtx): string {
+export function renderReturningStmt(s: StmtIR, ctx: BoundedContextIR, rc: RenderCtx): string {
   switch (s.kind) {
     case "return": {
       const value = renderExpr(s.value, rc);
