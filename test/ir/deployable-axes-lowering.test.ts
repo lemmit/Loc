@@ -117,13 +117,14 @@ describe("realization axes — lowering defaults", () => {
   });
 
   // realization-axes-alignment.md — `foundation: vanilla` on elixir selects
-  // the plain-Phoenix axis defaults (Ecto + vanilla style), NOT the platform's
-  // ash-oriented defaults.  The foundation owns no axis, but the omitted-knob
-  // default follows the foundation (`foundationAdapterOverride`).
-  it("explicit `foundation: vanilla` on elixir defaults to ecto + vanilla style", async () => {
+  // the plain-Phoenix axis defaults (Ecto + the `layered` style), NOT the
+  // platform's ash-oriented defaults.  The foundation owns no axis, but the
+  // omitted-knob default follows the foundation (`foundationAdapterOverride`).
+  // `vanilla` is the FOUNDATION; the style is the real pipeline shape `layered`.
+  it("explicit `foundation: vanilla` on elixir defaults to ecto + layered style", async () => {
     const d = await lowerDeployable("elixir { foundation: vanilla }");
     expect(d.foundation).toBe("vanilla");
-    expect(d.application).toBe("vanilla");
+    expect(d.application).toBe("layered");
     expect(d.persistence).toBe("ecto");
     // Greenfield axes are unaffected by foundation today.
     expect(d.transport).toBe("phoenix");

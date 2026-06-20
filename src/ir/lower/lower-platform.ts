@@ -66,14 +66,15 @@ export function greenfieldAxisDefaults(platform: Platform): {
  *  foundation still implies its own data layer + application style even though
  *  `vanilla` *owns* no axis (FOUNDATION_OWNED_AXES), so the omitted-knob
  *  default must follow the foundation, not the platform.  `elixir` +
- *  `vanilla` ⇒ plain Ecto + plain-Phoenix style.  Everything else uses the
- *  platform `adapterDefaults` unchanged (returns `{}`). */
+ *  `vanilla` ⇒ plain Ecto + the `layered` style (DSL `serviceLayer`: plain
+ *  Phoenix's controller → context → repository pipeline).  Everything else
+ *  uses the platform `adapterDefaults` unchanged (returns `{}`). */
 export function foundationAdapterOverride(
   platform: Platform,
   foundation: string | undefined,
 ): { style?: string; persistence?: string } {
   if (platform === "elixir" && foundation === "vanilla") {
-    return { style: "vanilla", persistence: "ecto" };
+    return { style: "layered", persistence: "ecto" };
   }
   return {};
 }
