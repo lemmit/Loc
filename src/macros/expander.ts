@@ -418,70 +418,51 @@ function spliceMembers(
   void hostKind; // reserved for future per-kind validation
 }
 
-/** Append `members` into `target.members[]`, wiring `$container`
- * triples and honouring override-by-name (an explicit member with
- * the same name as one of the synthesised members wins; the
- * synthesised member is silently dropped). */
+/** Merge synthesised `members` into `target.members[]`, scope-locally.
+ *
+ * Override-by-name and de-duplication are *scoped*: an existing member (an
+ * explicit declaration, or one already merged) suppresses a synthesised member
+ * of the same name only within the *same* container.  Two same-named `area`
+ * blocks merge — their children combine recursively — so role-named pages
+ * (`page List` repeated across per-aggregate `area Orders` / `area Products`
+ * blocks) no longer collapse onto the first area's copy.  Wires the `$container`
+ * triple on every appended node. */
 function spliceIntoTarget(target: object, members: unknown[]): void {
-  const targetList = (target as { members: unknown[] }).members;
-  if (!Array.isArray(targetList)) return;
+  if (!Array.isArray((target as { members?: unknown[] }).members)) return;
+  mergeScopedMembers(target, members);
+}
 
-  // Collect existing member names, descending into `area` blocks so an
-  // explicit page (top-level OR inside an area) suppresses a synthesised page
-  // of the same name even when the synthesised one is nested in an area.
-  const existingNames = new Set<string>();
-  const collectNames = (list: unknown[]): void => {
-    for (const m of list) {
-      const n = (m as { name?: unknown }).name;
-      if (typeof n === "string") existingNames.add(n);
-      if ((m as { $type?: unknown }).$type === "Area") {
-        collectNames(((m as { members?: unknown[] }).members ?? []) as unknown[]);
-      }
-    }
-  };
-  collectNames(targetList);
-
-  // Drop the members of a synthesised `area` whose name is already declared
-  // (override-by-name reaches into areas), re-wiring kept members' containers.
-  // Returns true if the area still has ≥1 member after filtering.
-  const pruneArea = (areaNode: { members?: unknown[] }): boolean => {
-    const kept: unknown[] = [];
-    for (const inner of areaNode.members ?? []) {
-      const innerName = (inner as { name?: unknown }).name;
-      if ((inner as { $type?: unknown }).$type === "Area") {
-        if (pruneArea(inner as { members?: unknown[] })) kept.push(inner);
-      } else if (typeof innerName === "string" && existingNames.has(innerName)) {
-        // overridden by an explicit declaration — drop it
-      } else {
-        kept.push(inner);
-      }
-    }
-    areaNode.members = kept;
-    kept.forEach((inner, i) => {
-      (inner as Record<string, unknown>).$container = areaNode;
-      (inner as Record<string, unknown>).$containerProperty = "members";
-      (inner as Record<string, unknown>).$containerIndex = i;
-    });
-    return kept.length > 0;
-  };
-
-  for (const m of members) {
-    const name = (m as { name?: unknown }).name;
-    const isArea = (m as { $type?: unknown }).$type === "Area";
-    if (isArea) {
-      // Dedup: an area with the same name is already present (e.g. the same
-      // aggregate listed twice in one scaffold call) — drop the duplicate.
-      if (typeof name === "string" && existingNames.has(name)) continue;
-      if (!pruneArea(m as { members?: unknown[] })) continue; // whole area overridden
-    } else if (typeof name === "string" && existingNames.has(name)) {
-      continue;
-    }
-    (m as Record<string, unknown>).$container = target;
+/** Append `incoming` into `container.members`, honouring scope-local
+ *  override-by-name and merging same-named child `area` blocks recursively. */
+function mergeScopedMembers(container: object, incoming: unknown[]): void {
+  const list = (container as { members: unknown[] }).members;
+  const append = (m: unknown): void => {
+    (m as Record<string, unknown>).$container = container;
     (m as Record<string, unknown>).$containerProperty = "members";
-    (m as Record<string, unknown>).$containerIndex = targetList.length;
-    targetList.push(m);
-    if (typeof name === "string") existingNames.add(name);
-    if (isArea) collectNames(((m as { members?: unknown[] }).members ?? []) as unknown[]);
+    (m as Record<string, unknown>).$containerIndex = list.length;
+    list.push(m);
+  };
+  const nameOf = (m: unknown): unknown => (m as { name?: unknown }).name;
+  const isAreaNode = (m: unknown): boolean => (m as { $type?: unknown }).$type === "Area";
+
+  for (const m of incoming) {
+    const name = nameOf(m);
+    if (isAreaNode(m)) {
+      // Merge into a same-named `area` already at this scope (the same
+      // aggregate scaffolded twice, or an explicit area the user opened);
+      // otherwise the whole synthesised area is new — append it intact.
+      const existing = list.find((x) => isAreaNode(x) && nameOf(x) === name);
+      if (existing) {
+        mergeScopedMembers(existing as object, (m as { members?: unknown[] }).members ?? []);
+        continue;
+      }
+      append(m);
+    } else if (typeof name === "string" && list.some((x) => nameOf(x) === name)) {
+      // suppressed by an existing same-named member at this scope (an explicit
+      // override-by-name, or a prior synthesised member) — drop it.
+    } else {
+      append(m);
+    }
   }
 }
 

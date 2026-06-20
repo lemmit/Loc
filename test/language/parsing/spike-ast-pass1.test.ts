@@ -11,8 +11,8 @@
 //      `ui.members` after parse + validate).
 //   2. The IndexManager + scope provider see the synthesised
 //      pages (by name, by $type === "Page").
-//   3. Override-by-name: an explicit `page OrderList { … }`
-//      suppresses the synthesised one of the same name.
+//   3. Override-by-name (scope-local): an explicit `page List` inside the
+//      scaffold's `area Orders` suppresses the synthesised one of the same name.
 //   4. Spike-grade — we don't yet construct a real `Body` /
 //      cross-references inside synthesised pages; just `name`
 //      and `$type`.  That's enough for indexing + resolution.
@@ -77,12 +77,12 @@ describe("spike — AST-to-AST scaffold expansion", () => {
       }
     `);
     const ui = uiOf(model, "WebApp");
-    // Three synthesised pages: OrderList / OrderNew / OrderDetail (nested in
-    // the per-aggregate `area Orders`).
+    // Three synthesised pages, named by role (`List` / `New` / `Detail`) and
+    // nested in the per-aggregate `area Orders`.
     const pageNames = allPageNames(ui);
-    expect(pageNames).toContain("OrderList");
-    expect(pageNames).toContain("OrderNew");
-    expect(pageNames).toContain("OrderDetail");
+    expect(pageNames).toContain("List");
+    expect(pageNames).toContain("New");
+    expect(pageNames).toContain("Detail");
   });
 
   it("synthesises pages for `scaffold modules: <Name>` recursively", async () => {
@@ -107,15 +107,9 @@ describe("spike — AST-to-AST scaffold expansion", () => {
     // The full architectural fix synthesises `Home` for any ui
     // that scaffolds at least one aggregate / workflow / view —
     // matches the legacy generator's behaviour.
-    expect(pageNames).toEqual([
-      "CustomerDetail",
-      "CustomerList",
-      "CustomerNew",
-      "Home",
-      "OrderDetail",
-      "OrderList",
-      "OrderNew",
-    ]);
+    // Aggregate pages are role-named (`List`/`New`/`Detail`) and scoped to
+    // their per-aggregate area, so the names repeat across Order + Customer.
+    expect(pageNames).toEqual(["Detail", "Detail", "Home", "List", "List", "New", "New"]);
   });
 
   it("synthesises pages for workflows + views", async () => {
@@ -143,7 +137,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
     expect(pageNames).toContain("ActiveOrdersView");
   });
 
-  it("override-by-name: explicit page suppresses the scaffolded one", async () => {
+  it("override-by-name is scope-local: an explicit area page suppresses the scaffolded one", async () => {
     const { model } = await parseFresh(`
       system S {
         subdomain M {
@@ -153,23 +147,34 @@ describe("spike — AST-to-AST scaffold expansion", () => {
           }
         }
         ui WebApp with scaffold(aggregates: [Order]) {
-          page OrderList {
-            route: "/custom"
-            body: f()
+          area Orders {
+            page List {
+              route: "/custom"
+              body: f()
+            }
           }
         }
       }
     `);
     const ui = uiOf(model, "WebApp");
-    // Exactly ONE page named OrderList — the explicit one (with the
-    // custom route).  Synthesised OrderList is suppressed.
-    const orderLists = (ui.members ?? []).filter(
-      (m): m is Page => m.$type === "Page" && m.name === "OrderList",
+    // The scaffold's synthesised `area Orders` merges into the explicit one;
+    // exactly ONE page named `List` survives in that area — the explicit one
+    // (with the custom route).  The synthesised List is suppressed.
+    const lists = allPageNames(ui).filter((n) => n === "List");
+    expect(lists).toHaveLength(1);
+    const ordersArea = (ui.members ?? []).find(
+      (m): m is Extract<typeof m, { $type: "Area" }> => m.$type === "Area" && m.name === "Orders",
     );
-    expect(orderLists).toHaveLength(1);
-    // The explicit page has props (route + body); synthesised pages
-    // in this spike have empty props.
-    expect(orderLists[0]!.props.length).toBeGreaterThan(0);
+    const explicitList = (ordersArea?.members ?? []).find(
+      (m): m is Page => m.$type === "Page" && m.name === "List",
+    );
+    // The explicit page has props (route + body); synthesised pages in this
+    // spike still carry their scaffolded body.
+    expect(explicitList!.props.length).toBeGreaterThan(0);
+    const route = explicitList!.props.find((p) => p.$type === "RouteProp") as
+      | { value: string }
+      | undefined;
+    expect(route?.value).toBe("/custom");
   });
 
   it("synthesised pages show up in IndexManager scope (export-side check)", async () => {

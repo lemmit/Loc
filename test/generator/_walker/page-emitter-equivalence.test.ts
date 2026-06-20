@@ -129,8 +129,8 @@ describe("byte-equivalence — page emitter vs legacy direct walk", () => {
     expect(pageNames).toContain("Home");
     expect(pageNames).toContain("WorkflowsIndex");
     expect(pageNames).toContain("ViewsIndex");
-    expect(pageNames).toContain("OrderList");
-    expect(pageNames).toContain("CustomerList");
-    expect(pageNames).toContain("ProductList");
+    // Aggregate pages are role-named (`List`), scoped to their per-aggregate
+    // area — Catalog/Sales/CustomerMgmt each contribute one `List`.
+    expect(pageNames.filter((n) => n === "List").length).toBeGreaterThanOrEqual(3);
   });
 });

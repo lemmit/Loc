@@ -9,6 +9,22 @@ the macro still emits as bare sentinel bodies. A hand-written `scaffold*` body
 primitive is no longer admissible (fails validation). See
 [D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes) for the dated
 supersede note. The prose below is the original proposal, kept for context.
+
+**Update — area-authoritative `emitPath` (slice 3a) — 2026-06-20.** The scaffold
+now names an aggregate's pages by **role** (`page List` / `New` / `Detail`)
+inside their per-aggregate `area` (decision 4), and `area` is **authoritative
+for `emitPath`** — `applyPageOriginSideEffects` no longer overrides the
+area-derived path (`src/pages/orders/list.tsx`), the prerequisite for dropping
+`origin` later (3c). Page-name uniqueness + override-by-name are now **per
+scope** (the ui top level and each `area`), and the macro splice merges
+same-named areas recursively, so role names don't collapse across aggregates.
+Generated output is **byte-identical**: the role name is the DSL/file identity
+only — every emitted *target-code* identifier (React/Vue/Angular component,
+Phoenix module/file, Playwright page-object, smoke title, router import) stays
+the aggregate-qualified `OrderList` form via `pageEmitName`
+(`src/ir/util/page-emit-name.ts`). Deferred (3c): qualified `Area.Page`
+menu-link references — a `link <Page>` still resolves a role name within the
+nearest matching scope.
 · **Created:** 2026-06-18
 
 > One-line thesis: the scaffold **page-body expansion**
