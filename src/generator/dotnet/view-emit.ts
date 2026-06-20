@@ -7,7 +7,7 @@ import type {
   ViewIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
-import { viewUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, viewUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { dtoParam, projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
@@ -131,6 +131,7 @@ function renderHandler(
     const bind = view.output?.binds.find((b) => b.name === f.name);
     if (bind) collectCsExprUsings(bind.expr, usings);
   }
+  if (view.requires) collectCsExprUsings(view.requires, usings);
   // Auxiliaries — sourceField → mapVarName (`customerId` →
   // `customerById`) — drives DI of foreign repos + bulk loads at
   // handler entry, and rewrites `X id` follow refs in the
@@ -140,6 +141,13 @@ function renderHandler(
   // the handler injects ICurrentUserAccessor and threads
   // `_currentUser.User` into the repository call.
   const usesUser = viewUsesCurrentUser(view);
+  // A `requires` authorization gate (D-AUTH-OIDC / default-deny) runs in the
+  // handler before the query — the read-side analogue of an operation's
+  // `requires`.  The gate is currentUser-only; when it references currentUser
+  // (i.e. anything but the `requires true` escape) the handler needs the
+  // accessor and a local `currentUser` for the rendered predicate to bind to.
+  const gateUsesUser = !!view.requires && exprUsesCurrentUser(view.requires);
+  const needsUser = usesUser || gateUsesUser;
   // Path → mapVar+aggName lookup, populated as we walk the
   // dependency-ordered auxiliaries.  Single-hop entries seed it;
   // multi-hop entries reference earlier prefix entries.
@@ -149,7 +157,7 @@ function renderHandler(
   const fields: string[] = [`    private readonly I${agg.name}Repository _repo;`];
   const ctorParams: string[] = [`I${agg.name}Repository repo`];
   const ctorAssigns: string[] = [`_repo = repo`];
-  if (usesUser) {
+  if (needsUser) {
     fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
     ctorParams.push(`ICurrentUserAccessor currentUser`);
     ctorAssigns.push(`_currentUser = currentUser`);
@@ -184,6 +192,20 @@ function renderHandler(
   const projection = view.output
     ? projectFullForm(view, ctx, pathToMap)
     : projectEntityExpr("d", agg, ctx);
+  // Authorization gate lines, emitted before the query runs.  A
+  // currentUser-referencing gate first binds a local `currentUser` (the
+  // rendered `current-user` ref); `requires true` skips it.  Mirrors
+  // render-stmt's operation `requires` → ForbiddenException (→ 403 via
+  // DomainExceptionFilter).
+  const gateLines: string[] = [];
+  if (view.requires) {
+    if (gateUsesUser) gateLines.push(`        var currentUser = _currentUser.User;`);
+    gateLines.push(
+      `        if (!(${renderCsExpr(view.requires)})) throw new ForbiddenException(${JSON.stringify(
+        `Forbidden: view ${view.name}`,
+      )});`,
+    );
+  }
   // Imports.  Shorthand needs the aggregate's Responses namespace;
   // full form needs only the local Views namespace (its row record
   // is sibling).  Auxiliaries pull in each foreign aggregate's
@@ -194,7 +216,9 @@ function renderHandler(
   const auxUsings = [
     ...new Set(auxiliaries.map((a) => `using ${ns}.Domain.${plural(a.aggName)};`)),
   ].join("\n");
-  const authUsing = usesUser ? `using ${ns}.Auth;\n` : "";
+  const authUsing = needsUser ? `using ${ns}.Auth;\n` : "";
+  // `requires` gates throw ForbiddenException, which lives in Domain.Common.
+  const commonUsing = view.requires ? `using ${ns}.Domain.Common;\n` : "";
   const extraUsings = [...usings]
     .sort()
     .map((n) => `using ${n};`)
@@ -208,7 +232,7 @@ using ${ns}.Domain.${plural(agg.name)};
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
 using ${ns}.Domain.Enums;
-${auxUsings ? auxUsings + "\n" : ""}${authUsing}${usingResponse}
+${auxUsings ? auxUsings + "\n" : ""}${authUsing}${commonUsing}${usingResponse}
 namespace ${ns}.Application.Views;
 
 public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<${responseRecord}>>
@@ -218,7 +242,7 @@ ${ctor}
 
     public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} query, CancellationToken cancellationToken)
     {
-        var domain = await _repo.${upperFirst(view.name)}(${repoCallArgs});
+${gateLines.length > 0 ? gateLines.join("\n") + "\n" : ""}        var domain = await _repo.${upperFirst(view.name)}(${repoCallArgs});
 ${auxLines.join("\n")}${auxLines.length > 0 ? "\n" : ""}        return domain.Select(d => ${projection}).ToList();
     }
 }
@@ -271,6 +295,7 @@ function renderWorkflowViewHandler(
   const usings = new Set<string>();
   const where = view.filter ? renderCsExpr(view.filter, { thisName: "r" }) : undefined;
   if (view.filter) collectCsExprUsings(view.filter, usings);
+  if (view.requires) collectCsExprUsings(view.requires, usings);
   const proj = (wf.instanceWireShape ?? [])
     .map((f) => projectToResponse(`r.${upperFirst(f.name)}`, f.type, ctx))
     .join(", ");
@@ -278,6 +303,23 @@ function renderWorkflowViewHandler(
     .sort()
     .map((n) => `using ${n};`)
     .join("\n");
+  // Authorization gate — same shape as the aggregate handler.  The accessor
+  // is injected only when a gate references currentUser.
+  const gateUsesUser = !!view.requires && exprUsesCurrentUser(view.requires);
+  const gateLines: string[] = [];
+  if (view.requires) {
+    if (gateUsesUser) gateLines.push(`        var currentUser = _currentUser.User;`);
+    gateLines.push(
+      `        if (!(${renderCsExpr(view.requires)})) throw new ForbiddenException(${JSON.stringify(
+        `Forbidden: view ${view.name}`,
+      )});`,
+    );
+  }
+  const ctorFields = gateUsesUser
+    ? `    private readonly AppDbContext _db;\n    private readonly ICurrentUserAccessor _currentUser;\n    public ${handlerName}(AppDbContext db, ICurrentUserAccessor currentUser)\n    {\n        _db = db;\n        _currentUser = currentUser;\n    }`
+    : `    private readonly AppDbContext _db;\n    public ${handlerName}(AppDbContext db) => _db = db;`;
+  const authUsing = gateUsesUser ? `using ${ns}.Auth;\n` : "";
+  const commonUsing = view.requires ? `using ${ns}.Domain.Common;\n` : "";
   return `// Auto-generated.
 using System.Collections.Generic;
 using System.Linq;
@@ -289,18 +331,17 @@ using ${ns}.Application.Workflows;
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
 using ${ns}.Domain.Enums;
-using ${ns}.Infrastructure.Persistence;
+${authUsing}${commonUsing}using ${ns}.Infrastructure.Persistence;
 
 namespace ${ns}.Application.Views;
 
 public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<${responseRecord}>>
 {
-    private readonly AppDbContext _db;
-    public ${handlerName}(AppDbContext db) => _db = db;
+${ctorFields}
 
     public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} query, CancellationToken cancellationToken)
     {
-        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);
+${gateLines.length > 0 ? gateLines.join("\n") + "\n" : ""}        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);
         return rows.Select(r => new ${responseRecord}(${proj})).ToList();
     }
 }
