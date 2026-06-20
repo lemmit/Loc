@@ -857,36 +857,45 @@ describe("angular generator — byId single-record reads", () => {
       "aggregate Order with crudish {\n          customerId: string\n          operation cancel() { }\n        }",
     );
 
-  it("renders a no-then Action as an inline statement-bound button + id-at-mutate hoist", async () => {
+  it("renders a no-then Action as a dumb-template method call + id-guarded mutate", async () => {
     const all = await generateSystemFiles(opSource("Action { o.cancel }"));
     const page = all.get("web/src/app/pages/order-detail.component.ts")!;
     expect(page).not.toContain("stub — body needs api/forms support");
-    // Inline `(click)` statement reads the record id at click time — no arrow.
-    expect(page).toContain("(click)='cancelOrder.mutate(orderById.data()!.id, {})'");
+    // Dumb template — one event, one method call (no arrow, no in-markup id).
+    expect(page).toContain("(click)='onCancelOrder()'");
+    expect(page).toContain("[disabled]='cancelOrder.isPending()'");
     expect(page).not.toContain("() =>");
-    // The mutation factory is hoisted with no hoist-time id.
+    // The method reads the id inside, with a `?.id` guard + early return.
     expect(page).toContain("readonly cancelOrder = useCancelOrder();");
+    expect(page).toContain("async onCancelOrder(): Promise<void> {");
+    expect(page).toContain("const id = this.orderById.data()?.id;");
+    expect(page).toContain("if (!id) return;");
+    expect(page).toContain("await this.cancelOrder.mutate(id, {});");
     expect(page).toContain('import { useCancelOrder } from "../../api/order";');
+    // No capture-signal workaround.
+    expect(page).not.toContain("cancelOrderId");
     // Factory shape: id is a `mutate` argument, not a hoist argument.
     const api = all.get("web/src/api/order.ts")!;
     expect(api).toContain("export function useCancelOrder() {");
     expect(api).toContain("const mutate = (id: string, input: CancelOrderRequest)");
   });
 
-  it("renders a then-bearing Action via an id-capture signal + an async method", async () => {
+  it("renders a then-bearing Action via the same method, with the effect appended", async () => {
     const all = await generateSystemFiles(
       opSource("Action { o.cancel, then: navigate(OrderDetail) }"),
     );
     const page = all.get("web/src/app/pages/order-detail.component.ts")!;
     expect(page).not.toContain("stub — body needs api/forms support");
-    // The click captures the record id into a signal, then calls the method —
-    // the `.then` effect can't inline, so it lives in a component method.
-    expect(page).toContain("(click)='cancelOrderId.set(orderById.data()!.id); onCancelOrder()'");
-    expect(page).toContain('readonly cancelOrderId = signal("");');
+    // Same dumb-template shape — the `then:` effect just runs after the mutate.
+    expect(page).toContain("(click)='onCancelOrder()'");
     expect(page).toContain("async onCancelOrder(): Promise<void> {");
-    expect(page).toContain("await this.cancelOrder.mutate(this.cancelOrderId(), {});");
+    expect(page).toContain("const id = this.orderById.data()?.id;");
+    expect(page).toContain("if (!id) return;");
+    expect(page).toContain("await this.cancelOrder.mutate(id, {});");
     // The `then:` effect runs after the mutation resolves, `this.`-prefixed.
     expect(page).toContain("this.router.navigateByUrl(");
+    // No capture-signal workaround.
+    expect(page).not.toContain("cancelOrderId");
   });
 });
 
