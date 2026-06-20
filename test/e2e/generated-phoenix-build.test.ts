@@ -105,6 +105,14 @@ describe.skipIf(!ENABLED)(
         // controller, and the {:jose, ...} + :inets/:ssl mix.exs additions under
         // `mix compile --warnings-as-errors`.
         { name: "auth-oidc.ddd" },
+        // Sidebar menu-link hiding under auth: an auth-required LiveView app
+        // whose sidebar links to a page with a currentUser-only `requires`
+        // gate.  The emitted sidebar wraps that link in a HEEx
+        // `<%= if (@current_user.role == "agent") do %> … <% end %>` against the
+        // layout-forwarded `@current_user`; the ungated page's link stays
+        // unwrapped.  The gated `<%= if %>` + `@current_user` markup only fails
+        // at compile time, so this fixture is the real bar for it.
+        { name: "auth-menu-gate.ddd" },
         // Value-object array (`Money[]`) — Ash stores it inline as an
         // `{:array, Money}` embedded attribute → `{:array, :map}` column (no
         // child table); compiles the embedded-array path.

@@ -16,10 +16,12 @@
 //   sections are separated by an <h3> heading.
 // ---------------------------------------------------------------------------
 
-import type { UiIR } from "../../ir/types/loom-ir.js";
+import type { PageIR, UiIR } from "../../ir/types/loom-ir.js";
 import type { PageNameCtx } from "../../ir/util/page-kind.js";
+import { tryRenderGate } from "../_frontend/gate-expr.js";
 import type { NavSectionVM } from "../_frontend/menu-emitter.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { renderRequiresGuardInTemplate } from "./heex-walker-core.js";
 
 export interface RenderSidebarComponentArgs {
   ui: UiIR;
@@ -27,15 +29,29 @@ export interface RenderSidebarComponentArgs {
   appModule: string;
   /** Served decl names for `classifyPage` (slice 3c — replaces stamped origin). */
   nameCtx: PageNameCtx;
+  /** True when this deployable runs `auth: required` — so `LiveAuth.on_mount`
+   *  assigns `@current_user` into the LiveView scope and the app layout passes
+   *  it through to the sidebar.  Gates a nav link whose linked page has a
+   *  currentUser-only `requires` clause (server-side, via a HEEx
+   *  `<%= if (<gate>) do %>`).  False ⇒ no `@current_user` exists, so NO
+   *  gating is emitted and the sidebar stays byte-identical. */
+  authEnabled?: boolean;
 }
 
 /** Emit the full Elixir source for `lib/<app>_web/components/sidebar.ex`.
  *  Returns the file content as a string; the caller writes it to the
  *  appropriate path. */
 export function renderSidebarComponent(args: RenderSidebarComponentArgs): string {
-  const { ui, appName, appModule, nameCtx } = args;
+  const { ui, appName, appModule, nameCtx, authEnabled = false } = args;
 
   const navSections: NavSectionVM[] = deriveSidebarFromUi(ui, nameCtx) ?? buildDefaultSections(ui);
+
+  // Per-entry currentUser-only gate, keyed by route.  Only populated when the
+  // deployable has auth (so `@current_user` exists in the layout/sidebar
+  // scope) and the linked page declares a currentUser-only `requires`.  A
+  // non-currentUser predicate (one that touches `this`/params) is left
+  // ungated — the sidebar has no record context to evaluate it against.
+  const gateByRoute = authEnabled ? buildGatesByRoute(ui, appModule) : new Map<string, string>();
 
   const webModule = `${appModule}Web`;
   const lines: string[] = [];
@@ -49,6 +65,12 @@ export function renderSidebarComponent(args: RenderSidebarComponentArgs): string
   lines.push(``);
   lines.push(`  @doc "Renders the sidebar navigation."`);
   lines.push(`  attr :current_path, :string, default: "/"`);
+  if (authEnabled) {
+    // The signed-in user assigned by `LiveAuth.on_mount` — read by a
+    // gated link's `<%= if (@current_user.…) do %>` wrapper.  `default: nil`
+    // keeps a dead render (before on_mount) from crashing on a missing assign.
+    lines.push(`  attr :current_user, :map, default: nil`);
+  }
   lines.push(``);
   lines.push(`  def sidebar(assigns) do`);
   lines.push(`    ~H"""`);
@@ -66,14 +88,14 @@ export function renderSidebarComponent(args: RenderSidebarComponentArgs): string
       lines.push(`          </h3>`);
       lines.push(`          <ul class="space-y-0.5">`);
       for (const entry of section.entries) {
-        lines.push(...renderNavEntry(entry, 12));
+        lines.push(...renderNavEntry(entry, 12, gateByRoute));
       }
       lines.push(`          </ul>`);
       lines.push(`        </li>`);
     } else {
       // Single section or no label — render entries directly under <ul>.
       for (const entry of section.entries) {
-        lines.push(...renderNavEntry(entry, 8));
+        lines.push(...renderNavEntry(entry, 8, gateByRoute));
       }
     }
   }
@@ -92,16 +114,24 @@ export function renderSidebarComponent(args: RenderSidebarComponentArgs): string
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** Render a single nav link <li> at the given indent level. */
-function renderNavEntry(entry: NavSectionVM["entries"][number], indentSpaces: number): string[] {
+/** Render a single nav link <li> at the given indent level.  When the
+ *  entry's route appears in `gateByRoute`, the `<li>` is wrapped in a HEEx
+ *  `<%= if (<gate>) do %> … <% end %>` so the link is hidden server-side
+ *  when the currentUser-only gate fails. */
+function renderNavEntry(
+  entry: NavSectionVM["entries"][number],
+  indentSpaces: number,
+  gateByRoute: ReadonlyMap<string, string>,
+): string[] {
   const pad = " ".repeat(indentSpaces);
   const label = escapeHeex(entry.label);
   const testId = escapeHeex(entry.testId);
 
+  let body: string[];
   // External links — sentinel `__external:<url>` written by menu-emitter.
   if (entry.to.startsWith("__external:")) {
     const url = escapeHeex(entry.to.slice("__external:".length));
-    return [
+    body = [
       `${pad}<li>`,
       `${pad}  <a href="${url}" target="_blank" rel="noopener noreferrer"`,
       `${pad}     class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-100"`,
@@ -111,19 +141,48 @@ function renderNavEntry(entry: NavSectionVM["entries"][number], indentSpaces: nu
       `${pad}  </a>`,
       `${pad}</li>`,
     ];
+  } else {
+    // Internal links — Phoenix Router ~p sigil.
+    const route = escapeHeex(entry.to);
+    body = [
+      `${pad}<li>`,
+      `${pad}  <.link navigate={~p"${route}"}`,
+      `${pad}         class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-100"`,
+      `${pad}         data-testid="${testId}">`,
+      `${pad}    ${label}`,
+      `${pad}  </.link>`,
+      `${pad}</li>`,
+    ];
   }
 
-  // Internal links — Phoenix Router ~p sigil.
-  const route = escapeHeex(entry.to);
-  return [
-    `${pad}<li>`,
-    `${pad}  <.link navigate={~p"${route}"}`,
-    `${pad}         class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-100"`,
-    `${pad}         data-testid="${testId}">`,
-    `${pad}    ${label}`,
-    `${pad}  </.link>`,
-    `${pad}</li>`,
-  ];
+  // Per-link gate — hide the link server-side when its page's
+  // currentUser-only `requires` fails.  External links are never gated
+  // (they map to no page); only internal routes appear in `gateByRoute`.
+  const gate = gateByRoute.get(entry.to);
+  if (gate) {
+    return [`${pad}<%= if (${gate}) do %>`, ...body, `${pad}<% end %>`];
+  }
+  return body;
+}
+
+/** Build the route → rendered-gate map for the sidebar.  For every page
+ *  with a `requires` clause that is currentUser-only (evaluable against the
+ *  signed-in user alone — no record/param context), render the gate in HEEx
+ *  template scope (`@current_user.…`).  Pages whose predicate touches
+ *  `this`/params are skipped (the sidebar can't evaluate them), leaving
+ *  their link ungated — the backend/page guard still enforces access. */
+function buildGatesByRoute(ui: UiIR, appModule: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const page of ui.pages) {
+    if (!page.requires || !page.route || page.route.includes(":")) continue;
+    // Reuse the JS gate-expr's currentUser-only classifier: a non-null
+    // result means the predicate touches only `currentUser` + constants —
+    // exactly the subset the sidebar can render against `@current_user`.
+    if (tryRenderGate(page.requires, "currentUser") === null) continue;
+    const gate = renderRequiresGuardInTemplate(page as PageIR, ui, appModule);
+    if (gate) out.set(page.route, gate);
+  }
+  return out;
 }
 
 /** Escape special HEEx characters in plain text content. */

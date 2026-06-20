@@ -230,7 +230,7 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
       };
       out.set(
         `lib/${appName}_web/components/sidebar.ex`,
-        renderSidebarComponent({ ui, appName, appModule, nameCtx }),
+        renderSidebarComponent({ ui, appName, appModule, nameCtx, authEnabled }),
       );
       hasSidebar = true;
     }
