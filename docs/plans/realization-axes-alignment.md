@@ -51,7 +51,7 @@ Key rulings this plan leans on:
 | Axis | dotnet | node (hono) | elixir | Spec gap |
 |---|---|---|---|---|
 | **persistence** | `efcore` R, `dapper` R, `marten` S | `drizzle` R, `mikroorm` R | `ashPostgres` R · **`ecto` ⊘** | elixir `ecto` missing / hardwired |
-| **application** | `cqrs` R, `layered` S | `layered` R, `cqrs` S | `ash` R · **`vanilla` ⊘** | elixir vanilla style hardwired; value names drift (`layered` vs spec `flat`/`serviceLayer`) |
+| **application** | `cqrs` R, `layered` S | `layered` R, `cqrs` S | `ash` R · `layered` R | ✅ resolved (#1421): the plain-Phoenix style is now the real `layered` adapter (DSL `serviceLayer`), on-axis and spec-aligned — `vanilla` is foundation-only |
 | **directoryLayout** | `byLayer` R, `byFeature` R | `byLayer` R, `byFeature` R | `byFeature` R | elixir `byLayer` absent (idiom — see §4) |
 | **transport** | `minimalApi` **1** | `hono` **1** | `phoenix` **1** | **all** greenfield size-1; spec wants `minimalApi`·`controllers` etc. |
 | **foundation** | `vanilla` 1 (`abp` future) | `vanilla` 1 (`nestjs` future) | `ash`*(def)* · `vanilla` | elixir vanilla realized via a **bypass branch**, not the axis |
@@ -161,10 +161,11 @@ visible alignment; later phases are parity/idiom polish.
 - Add `src/generator/elixir/adapters/ecto-persistence.ts` — a `PersistenceAdapter`
   named **`ecto`**, sibling of `ashPostgresPersistenceAdapter`; `supports`
   `state` now (`eventLog` later, D-VANILLA-ES-HOME); DB from `storageType`.
-- Add a **`vanilla` `StyleAdapter`** (plain contexts/changesets/controllers) as
-  sibling of `ashStyleAdapter`.
+- Add a plain-Phoenix `StyleAdapter` (plain contexts/changesets/controllers) as
+  sibling of `ashStyleAdapter`. *(Originally landed as `vanilla`; renamed to the
+  real pipeline name `layered` / DSL `serviceLayer` in #1421 — see §2.)*
 - Register both in `src/platform/elixir.ts`: `persistence: { ashPostgres, ecto }`,
-  `styles: { ash, vanilla }`.
+  `styles: { ash, layered }`.
 - Encode the foundation→axis coupling once (already supported by
   `FOUNDATION_OWNED_AXES` + greenfield narrowing): `ash ⇒ {ashPostgres, ash}`,
   `vanilla ⇒ {ecto, vanilla}`, each foundation supplying its default + narrowing
