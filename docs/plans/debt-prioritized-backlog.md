@@ -30,7 +30,7 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 | ID | Verified | Note |
 |---|---|---|
 | 01 | ✅ DONE | tenancy filter on all 5 backends |
-| 02 | 🟡 OPEN (partial) | node (both shapes) + java (both shapes) ship; only **elixir** non-relational `filter` + principal-on-non-relational gated |
+| 02 | 🟡 OPEN (partial) | node + java + elixir non-relational `filter` ship (java/node both shapes; elixir `embedded` — its only non-rel shape); only **principal-on-non-relational** gated everywhere |
 | 03 | 🟡 OPEN (**narrowed**) | Ash union returns ship for return/let, **in-memory `assign` mutation, and `precondition`/`requires` guards**; only **`emit`/`add`/`remove`** bodies still gate to vanilla |
 | 04 | ⚠️ RE-SCOPED | elixir audit-ops = real greenfield; lifecycle = vaporware (→16) |
 | 05 | ✅ DONE | `For` shipped; List/Detail removed |
@@ -101,7 +101,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 |---|---|---|:--:|:--:|---|
 | **P0 — parity completion, common, tractable** |
 | DEBT-01 | ~~Principal-referencing capability `filter` (`currentUser` / tenancy)~~ **DONE** — all five backends (node, .NET, elixir Ash + vanilla, java) wire it, incl. java reified-criterion retrievals | ~~node, elixir, java~~ | 5 | L | `proposals/criterion-everywhere.md` · **fully landed on every backend** |
-| DEBT-02 | Non-relational (`shape(document/embedded)`) capability `filter` — **node (both shapes) + java (both shapes) landed** (document → in-app over the rehydrated aggregate; embedded → root scalars are real columns, so SQL `where` / `@SQLRestriction`). Follow-ups: elixir; principal-on-non-relational | ~~node, java~~ · elixir, principal-non-rel | 4 | M | — |
+| DEBT-02 | Non-relational (`shape(document/embedded)`) capability `filter` — **node (both shapes) + java (both shapes) + elixir (`embedded`) landed** (document → in-app over the rehydrated aggregate; embedded → root scalars are real columns, so SQL `where` / `@SQLRestriction` / Ash `base_filter`). elixir has no `document` shape (DEBT-07). Only follow-up: principal-on-non-relational (actor + json intersection, all backends) | ~~node, java, elixir~~ · principal-non-rel | 4 | M | — |
 | DEBT-03 | Operation `or`-union return (exception-less ProblemDetails) | elixir/ash | 4 | M | `exception-less.md` · **return-dominant + mutation(`assign`)/guard(`precondition`/`requires`) landed**; only `emit`/`add`/`remove` bodies gate to vanilla |
 | DEBT-04 | Audit runtime parity — **RE-SCOPED** (see detail): `audited` ops → **elixir greenfield Ash audit** (real); `audited` lifecycle → **vaporware** (no grammar slot → DEBT-16); `with audit` stamping → vanilla-foundation | elixir | 4 | L | `type-system-feature-migration.md` (DBT) |
 | DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) — **DONE: `For` implemented (all 4 frontends + HEEx; now with an optional `empty:` arm); `List`/`Detail`/`MasterDetail` were inert duplicates of `scaffoldList`/`scaffoldDetails` and were REMOVED** ([D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes)) | react (→ vue/svelte) | — | — | resolved |

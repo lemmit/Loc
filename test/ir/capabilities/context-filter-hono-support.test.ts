@@ -131,12 +131,20 @@ system Shop {
     ).toEqual([]);
   });
 
-  it("still gates a non-relational capability filter on elixir (DEBT-02 follow-up)", async () => {
+  it("accepts a non-principal capability filter on an elixir EMBEDDED aggregate (DEBT-02 — Ash base_filter)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("elixir", { shape: "embedded", filter: "filter !this.isDeleted" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still gates a PRINCIPAL filter on an elixir embedded aggregate (principal + non-relational not wired)", async () => {
     const errs = await honoFilterErrors(
-      sys("elixir", { shape: "document", filter: "filter !this.isDeleted" }),
+      sys("elixir", { shape: "embedded", filter: "filter this.tenantId == currentUser.tenantId" }),
     );
     expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("shape(document)");
+    expect(errs[0]).toContain("shape(embedded)");
   });
 
   it("accepts a non-principal capability filter on a java EMBEDDED aggregate (DEBT-02 — @SQLRestriction)", async () => {

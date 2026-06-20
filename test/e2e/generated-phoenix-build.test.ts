@@ -162,6 +162,13 @@ describe.skipIf(!ENABLED)(
         // Ash 3.x accepts a calculation reference — including an argument-bearing
         // one — inside `base_filter`, alongside a plain inline filter.
         { name: "criterion-filter.ddd" },
+        // DEBT-02 — a non-principal capability filter on a `shape(embedded)`
+        // aggregate: the embedded Ash resource's root attributes are real
+        // columns, so the predicate rides the same `base_filter expr(not
+        // is_deleted)` the relational path emits, on a resource that also
+        // carries an `{:array, Line}` embedded attribute.  The decisive check
+        // that Ash 3.x compiles base_filter + embedded-array side by side.
+        { name: "embedded-filter.ddd" },
         // `when` canCommand state gate (criterion.md, use site 2): the operation
         // loads the record, evaluates the predicate (enum → Ash atom), 409s
         // Disallowed before mutating, and auto-exposes the side-effect-free

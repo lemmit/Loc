@@ -67,6 +67,43 @@ describe("Phoenix capability filter — base_filter", () => {
     expect(doc).not.toContain("base_filter");
   });
 
+  // DEBT-02 — an embedded Ash resource's root attributes (`is_deleted`) are
+  // real columns, so a non-principal capability filter rides the same
+  // `base_filter` the relational path emits; only the `contains` parts ride an
+  // embedded resource.  The validator now allows elixir + embedded.
+  it("emits a base_filter for a non-principal filter on an embedded aggregate", async () => {
+    const src = `
+system Sys {
+  subdomain Sales {
+    context Docs {
+      aggregate Doc shape(embedded) {
+        subject: string
+        isDeleted: bool
+        filter !this.isDeleted
+        contains lines: Line[]
+        entity Line { text: string }
+      }
+      repository Docs for Doc {}
+    }
+  }
+  storage primary { type: postgres }
+  resource docsState { for: Docs, kind: state, use: primary }
+  ui WebApp {}
+  deployable api {
+    platform: phoenix
+    contexts: [Docs]
+    dataSources: [docsState]
+    ui: WebApp
+    port: 4000
+  }
+}
+`;
+    const doc = find(await generate(src), (k) => k.endsWith("/docs/doc.ex"), "doc.ex");
+    expect(doc.split("\n").find((l) => l.includes("base_filter"))).toBe(
+      "    base_filter expr(not is_deleted)",
+    );
+  });
+
   // Multiple capability filters conjoin with Ash's INFIX `and` operator, each
   // predicate parenthesised.  `and` is a reserved word in Elixir, so the
   // function form `and(a, b)` is a parser SyntaxError — never valid in `expr()`.
