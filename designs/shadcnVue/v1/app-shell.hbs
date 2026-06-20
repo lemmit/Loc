@@ -4,10 +4,13 @@ import { onErrorCaptured, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { Menu } from "lucide-vue-next";
 import { Alert, AlertDescription, AlertTitle, Button } from "@/components/ui";
-{{#if hasRealtimeHandlers}}import RealtimeHandlers from "@/components/RealtimeHandlers.vue";
+{{#if navUsesSession}}import { useSession } from "@/auth/useSession";
+{{/if}}{{#if hasRealtimeHandlers}}import RealtimeHandlers from "@/components/RealtimeHandlers.vue";
 {{/if}}{{#if hasToastHost}}import { toastQueue } from "@/lib/toast";
 {{/if}}
-
+{{#if navUsesSession}}// Verified session claims — gate forbidden pages' nav links (auth: ui).
+const currentUser = (useSession().user.value ?? {}) as Record<string, any>;
+{{/if}}
 // Mobile sidebar toggle — hidden below the `sm` breakpoint until the
 // burger opens it; auto-closes after a route change so tapping a nav
 // link doesn't leave the menu covering the destination page.
@@ -53,8 +56,10 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
       <nav data-testid="nav-sidebar" :class="['w-60 shrink-0 border-r bg-background p-4 sm:block', opened ? 'block' : 'hidden']">
         <div class="flex flex-col gap-1">
 {{#each navSections}}          <p class="mt-2 mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{{label}}</p>
-{{#each entries}}          <router-link to="{{to}}" data-testid="{{testId}}" :class="['rounded-md px-3 py-2 text-sm font-medium transition-colors', isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}}) ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground']">{{label}}</router-link>
-{{/each}}{{/each}}        </div>
+{{#each entries}}{{#if external}}          <a :href="'{{href}}'" target="_blank" rel="noreferrer" data-testid="{{testId}}" class="rounded-md px-3 py-2 text-sm font-medium transition-colors text-muted-foreground hover:bg-accent hover:text-accent-foreground">{{label}}</a>
+{{else}}{{#if requiresJs}}          <template v-if='({{{requiresJs}}})'><router-link to="{{to}}" data-testid="{{testId}}" :class="['rounded-md px-3 py-2 text-sm font-medium transition-colors', isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}}) ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground']">{{label}}</router-link></template>
+{{else}}          <router-link to="{{to}}" data-testid="{{testId}}" :class="['rounded-md px-3 py-2 text-sm font-medium transition-colors', isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}}) ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground']">{{label}}</router-link>
+{{/if}}{{/if}}{{/each}}{{/each}}        </div>
       </nav>
       <main class="flex-1 p-4 lg:p-6">
         <div v-if="appError" data-testid="app-error" class="flex flex-col gap-4">

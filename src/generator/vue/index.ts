@@ -21,6 +21,7 @@ import {
   buildExternFunctionShim,
   buildExternFunctionSignature,
 } from "../_frontend/extern-functions.js";
+import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
@@ -421,9 +422,51 @@ export function generateVueForContexts(
   // chrome moves to `src/layouts/DefaultLayout.vue` and App.vue is a thin
   // `<router-view />` host that mounts the channel handlers once for
   // every layout.
+  // Sidebar: an explicit `ui.menu { … }` wins (via the shared
+  // `deriveSidebarFromUi` mirror — same driver as React/Svelte); the
+  // scaffold-origin grouping is the default otherwise.  `authUi` lets
+  // `deriveSidebarFromUi` render a `requiresJs` gate on any entry whose
+  // linked page declares a `requires` clause, so the app-shell can hide a
+  // forbidden page's nav link at runtime.
+  const sidebarOverride = deriveSidebarFromUi(ui, authUi);
+  const navSections: Array<{
+    label: string;
+    entries: Array<{
+      to: string;
+      label: string;
+      testId: string;
+      exact?: boolean;
+      external?: boolean;
+      href?: string;
+      requiresJs?: string;
+    }>;
+  }> = sidebarOverride
+    ? sidebarOverride.map((s) => ({
+        label: s.label,
+        entries: s.entries.map((e) => ({
+          to: e.to,
+          label: e.label,
+          testId: e.testId,
+          // The Vue templates append `, { exact: true }` to `isActive(...)`
+          // off this flag; the shared emitter carries it inside `activeArgs`.
+          exact: e.activeArgs.includes("exact: true"),
+          external: e.external,
+          href: e.href,
+          // Per-link gate condition (auth: ui) — the app-shell `v-if`-hides a
+          // forbidden page's link.  Absent ⇒ link always shown.
+          requiresJs: e.requiresJs,
+        })),
+      }))
+    : deriveNavSections(defaultPages);
+  // Bind the session user in the app-shell only when a nav entry is actually
+  // gated — an unused `currentUser` binding would be a vue-tsc error.
+  const navUsesSession = navSections.some((s) =>
+    s.entries.some((e) => "requiresJs" in e && !!e.requiresJs),
+  );
   const chromeVM = {
     systemNameHuman: humanize(sys.name),
-    navSections: deriveNavSections(defaultPages),
+    navSections,
+    navUsesSession,
     hasRealtimeHandlers,
     hasToastHost,
   };

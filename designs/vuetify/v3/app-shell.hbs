@@ -2,10 +2,13 @@
 <script setup lang="ts">
 import { onErrorCaptured, ref } from "vue";
 import { useRoute } from "vue-router";
-{{#if hasRealtimeHandlers}}import RealtimeHandlers from "./components/RealtimeHandlers.vue";
+{{#if navUsesSession}}import { useSession } from "./auth/useSession";
+{{/if}}{{#if hasRealtimeHandlers}}import RealtimeHandlers from "./components/RealtimeHandlers.vue";
 {{/if}}{{#if hasToastHost}}import { toastQueue } from "./lib/toast";
 {{/if}}
-const drawer = ref(true);
+{{#if navUsesSession}}// Verified session claims — gate forbidden pages' nav links (auth: ui).
+const currentUser = (useSession().user.value ?? {}) as Record<string, any>;
+{{/if}}const drawer = ref(true);
 // App-level error capture — a render-time crash in any page lands
 // here instead of blanking the whole shell.  Reset navigates home,
 // matching "the dashboard keeps working when one page is broken".
@@ -37,8 +40,10 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
     <v-navigation-drawer v-model="drawer" width="240">
       <v-list density="compact" nav data-testid="nav-sidebar">
 {{#each navSections}}        <v-list-subheader>{{label}}</v-list-subheader>
-{{#each entries}}        <v-list-item to="{{to}}" title="{{label}}" :active="isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}})" data-testid="{{testId}}" />
-{{/each}}{{/each}}      </v-list>
+{{#each entries}}{{#if external}}        <v-list-item :href="'{{href}}'" target="_blank" rel="noreferrer" title="{{label}}" data-testid="{{testId}}" />
+{{else}}{{#if requiresJs}}        <template v-if='({{{requiresJs}}})'><v-list-item to="{{to}}" title="{{label}}" :active="isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}})" data-testid="{{testId}}" /></template>
+{{else}}        <v-list-item to="{{to}}" title="{{label}}" :active="isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}})" data-testid="{{testId}}" />
+{{/if}}{{/if}}{{/each}}{{/each}}      </v-list>
     </v-navigation-drawer>
     <v-main>
       <v-container fluid>
