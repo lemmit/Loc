@@ -77,7 +77,7 @@ export function devClaimsHeader(cfg: AuthStubConfig): string | null {
  *  preview engine bundles only the React SPA shape — SvelteKit's
  *  `$app/*` client and Vue's SFC pipeline aren't reproduced in-browser
  *  yet), so they're surfaced here exactly like the backend platforms. */
-export type UnsupportedPlatform = "dotnet" | "phoenixLiveView" | "svelte" | "vue";
+export type UnsupportedPlatform = "dotnet" | "elixir" | "svelte" | "vue";
 export interface UnsupportedDeployable {
   slug: string;
   platform: UnsupportedPlatform;
@@ -363,7 +363,7 @@ export function unsupportedPlatformLabel(p: UnsupportedPlatform): string {
   switch (p) {
     case "dotnet":
       return ".NET";
-    case "phoenixLiveView":
+    case "elixir":
       return "Phoenix LiveView";
     case "svelte":
       return "SvelteKit";

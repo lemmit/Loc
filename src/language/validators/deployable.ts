@@ -271,9 +271,9 @@ export function checkDeployable(
  *  arbitrary STRING (for `family@version` pins).  Mirrors
  *  `checkDeployableDesignPack`'s version error:
  *
- *    - backend bareword (`hono`) / frontend keyword
+ *    - backend bareword (`node`) / frontend keyword
  *      (`react`/`static`) → always fine.
- *    - backend pin (`"hono@v4"`) → the version must be a
+ *    - backend pin (`"node@v4"`) → the version must be a
  *      registered surface, else error listing the available pins.
  *    - anything else (`"frobnicator"`, a typo'd quoted platform)
  *      → unknown-platform error (the grammar enum used to reject
@@ -288,7 +288,7 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
     if (!FRONTEND_KEYWORDS.has(raw)) {
       accept(
         "error",
-        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'svelte', 'vue', 'static', 'phoenix', 'python' (backends also accept a pinned form, e.g. 'node@v4').`,
+        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'svelte', 'vue', 'static', 'elixir', 'python' (backends also accept a pinned form, e.g. 'node@v4').`,
         { node: d, property: "platform" },
       );
     }
@@ -308,7 +308,7 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
 }
 
 /** Resolve a `platform:` value to its canonical family (`phoenix` →
- *  `phoenixLiveView`, `hono@v4` → `hono`), falling back to the raw value
+ *  `elixir`, `node@v4` → `node`), falling back to the raw value
  *  for frontends (`react`/`static`).  Mirrors how lowering canonicalises. */
 function resolveAxisFamily(platform: string): Platform {
   return (parseBuiltinPlatformRef(platform)?.family ?? platform) as Platform;
