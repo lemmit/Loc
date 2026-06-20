@@ -192,6 +192,11 @@ export function generateVueForContexts(
   for (const c of options.topLevelComponents ?? []) userComponents.set(c.name, c.params);
   for (const c of ui.components) userComponents.set(c.name, c.params);
 
+  // Frontend auth guard (D-AUTH-OIDC, `auth: ui`): gates `page { requires … }`
+  // and currentUser-only operation-`requires` action-button rendering.
+  // Computed here (before component + page emission, both of which consume it).
+  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
+
   const emittedComponents = new Map<string, ComponentIR>();
   for (const c of options.topLevelComponents ?? []) emittedComponents.set(c.name, c);
   for (const c of ui.components) emittedComponents.set(c.name, c);
@@ -234,15 +239,13 @@ export function generateVueForContexts(
       externFunctionNames,
       externComponentNames,
       c.derived,
+      // `auth: ui` enables currentUser-only operation-`requires` gating on
+      // `Action(...)` buttons in this component.
+      authUi,
     );
     if (component.usesFormToast) hasFormToast = true;
     out.set(`src/components/${c.name}.vue`, component.source);
   }
-
-  // Frontend auth guard (D-AUTH-OIDC, `auth: ui`): this vue deployable opts in
-  // AND its target backend enforces auth, so `useSession()` + the verified
-  // claims are available — gates `page { requires … }` rendering below.
-  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
 
   for (const page of pages) {
     if (!page.body) {
@@ -268,6 +271,7 @@ export function generateVueForContexts(
       pageRoutes,
       externFunctionNames,
       derivedNames,
+      authUi,
     );
     if (
       result.formOfs.some(
