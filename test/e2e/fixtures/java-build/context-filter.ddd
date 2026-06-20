@@ -1,11 +1,10 @@
 system CF {
   subdomain D {
     context Docs {
-      filter for "softDeletable" !this.isDeleted
       aggregate Doc {
         title: string
         isDeleted: bool
-        implements "softDeletable"
+        filter !this.isDeleted
         operation softDelete() { isDeleted := true }
       }
       repository Docs for Doc { }

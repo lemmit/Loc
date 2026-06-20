@@ -188,16 +188,19 @@ host field" is parameterization, not a contract.
 
 ## Open questions
 
-1. **Emission deduplication when a capability is reused** *(next design step,
-   flagged in session).* When a capability is implemented by many aggregates, its
-   fields / `filter` / `stamp` risk being **duplicated** N times in generated
-   code. Options: a shared base mapping, the marker-interface `OnModelCreating`
-   loop (above), a shared **stamp interceptor** keyed on the interface (EF
-   `SaveChangesInterceptor` / JPA `@EntityListener`), or per-aggregate copies
-   (status quo). Trade DRY-emission against EF's per-entity combination and
-   cross-backend uniformity — **and** the semantic subtlety that an interceptor
-   stamps at *SaveChanges*, not in the operation body, so a value read before
-   save would differ. **To be designed next.**
+1. **Emission deduplication when a capability is reused** — **RESOLVED** in
+   [`capability-emission-dedup.md`](./capability-emission-dedup.md). Verdict:
+   dedup is a **per-backend codegen choice over an unchanged per-aggregate IR**,
+   enabled by one additive provenance seam (`capabilityOrigin` on propagated
+   filters/stamps). **Filters stay per-entity** (EF's one-filter-per-entity
+   forces per-entity AND-combination; predicates are trivial — nothing to
+   hoist); the marker interface is emitted for *type identity*, not to install
+   filters. **Stamps dedup** via a marker-interface-keyed write-time hook (.NET
+   `is I<Cap>` interceptor branch / JPA `@EntityListener`), gated on pinning
+   **write-time stamp semantics** (a stamp is materialized at persist, not
+   readable in the operation body — already true on .NET, a behavior change for
+   Java). Behavior-preserving but **not** byte-identical (runtime-gated, unlike
+   the rest of this proposal); sequenced *after* typed capabilities land.
 2. **Capability parameters** — `searchable(on: name)` / `tenantOwned(by: …)`. The
    only sanctioned way for a capability to touch a *host* field. Defer until a
    real case appears.

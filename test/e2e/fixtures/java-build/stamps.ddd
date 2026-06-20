@@ -7,7 +7,6 @@ system ST {
         code: string
         createdAt: datetime
         updatedAt: datetime
-        implements "auditable"
       }
       repository Orders for Order { }
     }

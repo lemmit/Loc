@@ -20,7 +20,7 @@ export {
   checkDeployableServes,
   checkDeployableUiCompose,
 } from "./deployable.js";
-export { checkGenericCarriers } from "./generics.js";
+export { checkGenericCarriers, checkSelfType } from "./generics.js";
 export { checkInheritance } from "./inheritance.js";
 export { checkMacroExpansion } from "./macros.js";
 export {

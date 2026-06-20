@@ -1,62 +1,40 @@
-import { defineMacro } from "../../api/index.js";
+import { defineMacro, implementsCapabilityRef } from "../../api/index.js";
 
-/** Apply soft-delete to every aggregate in a context.
+/** Apply soft-delete to every aggregate in a context (typed-capabilities.md).
  *
- * Composes the other two trio members via `invokeMacro`:
- *   - Calls `softDelete` against the context itself, emitting the
- *     capability filter (`filter for "softDeletable" !this.isDeleted`).
- *   - For each child aggregate, calls `softDeletable` against it,
- *     emitting the fields, operations, and `implements "softDeletable"`.
- *
- * Source-equivalent:
+ * Emits a typed `implements softDeletable` on the CONTEXT host — the expander
+ * applies that capability (isDeleted/deletedAt + filter) to every aggregate in
+ * the context — and invokes the `softDelete` ops macro against each child to add
+ * the `softDelete()`/`restore()` operations.
  *
  *   context Sales with softDeleteByDefault {
  *     aggregate Order   { subject: string }
  *     aggregate Customer { name: string }
  *   }
  *
- *   ↓
+ *   ↓ every aggregate gains isDeleted/deletedAt + `filter !this.isDeleted`
+ *     (capability) and softDelete()/restore() (ops macro).
  *
- *   context Sales {
- *     filter for "softDeletable" !this.isDeleted
- *
- *     aggregate Order {
- *       subject: string
- *       isDeleted: bool
- *       deletedAt: datetime?
- *       operation softDelete() { ... }
- *       operation restore()    { ... }
- *       implements "softDeletable"
- *     }
- *     aggregate Customer {
- *       name: string
- *       isDeleted: bool
- *       // ... etc
- *       implements "softDeletable"
- *     }
- *   }
- *
- * Macro-calling-macro composition is the same outside-in mechanism
- * `scaffold` already uses to fan page-generation across the
- * aggregates it's given. */
+ * The context-scoped typed `implements` is spliced during this macro's
+ * expansion; the context's own typed-`implements` pass (which runs after the
+ * `with` clause in `expandHost`) then fans the capability to the children. */
 export default defineMacro({
   name: "softDeleteByDefault",
   target: "context",
   apiVersion: 1,
   description:
-    "Applies soft-delete state and capability to every aggregate in the " +
-    "context.  Composes the `softDelete` (context-level filter) and " +
-    "`softDeletable` (aggregate-level state) macros via invokeMacro.",
+    "Applies the softDeletable capability (state + filter) and the softDelete " +
+    "operations to every aggregate in the context.",
   expand({ target, invokeMacro }) {
     const aggregates = ((target as { members?: unknown[] }).members ?? []).filter(
       (m): m is { $type: "Aggregate" } =>
         !!m && typeof m === "object" && (m as { $type?: string }).$type === "Aggregate",
     );
     return [
-      // Capability filter on the context itself.
-      ...invokeMacro("softDelete", { target }),
-      // Per-aggregate state on each child.
-      ...aggregates.flatMap((agg) => invokeMacro("softDeletable", { target: agg })),
+      // Capability application on the context host → fans state + filter to all.
+      implementsCapabilityRef("softDeletable"),
+      // Operations on each child aggregate.
+      ...aggregates.flatMap((agg) => invokeMacro("softDelete", { target: agg })),
     ] as never[];
   },
 });

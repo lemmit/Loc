@@ -20,7 +20,10 @@ ModelMember:
     // also admissible at file top level and compose into the project's single
     // `system` — so deployment can live in its own file.  See
     // docs/proposals/implicit-system-composition.md.
-    | Deployable | Storage | Resource | ChannelSource | Ui | ThemeBlock | UserBlock | AuthBlock | Api | Layout | TestE2E;
+    | Deployable | Storage | Resource | ChannelSource | Ui | ThemeBlock | UserBlock | AuthBlock | Api | Layout | TestE2E
+    // Typed capabilities (typed-capabilities.md): a `capability` pure-mixin is
+    // top-level declarable (and a `SystemMember` inside `system { }`).
+    | Capability;
 
 // ---------------------------------------------------------------------------
 // System / Module / Deployable — the deployment shape.
@@ -39,7 +42,7 @@ System:
     '}';
 
 SystemMember:
-    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout | Capability;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -886,47 +889,76 @@ AggregateMember:
 
 // ---- capability source surface ----------------------------------
 //
-// Capabilities (`filter`, `stamp`, `implements`) are first-class
-// aggregate/context members.  They produce the same IR shape macros
-// did (`AggregateIR.contextFilters` / `.contextStamps` /
-// `.implementsCapabilities`); the macro factories are sugar that
-// emit these node types into the host's members[] array.  Anything
-// a macro can contribute, a user can hand-write.
+// `filter` / `stamp` are first-class aggregate/context members lowering to
+// `AggregateIR.contextFilters` / `.contextStamps`; `implements <Cap>` is the
+// typed capability application.  A `capability` declaration's body is built
+// from these same node types, and the expander splices them into a host's
+// members[] — anything a capability contributes, a user can hand-write.
 //
-// At ContextMember position these propagate to every aggregate
+// At ContextMember position `filter` / `stamp` propagate to every aggregate
 // inside the context at lowering time (see `lowerContext`).
 
 // `filter <expr>` declares a query-filter predicate.  At aggregate
 // scope it applies to that aggregate only.  At context scope it
 // applies to every aggregate inside (propagated at lowering time).
-//
-// `filter for "<name>" <expr>` is a capability-scoped variant: it
-// only applies to aggregates whose `implements "<name>"` matches.
-// Aggregates without the matching opt-in ignore the declaration.
-// Useful for "context Sales { filter for 'softDeletable' !this.isDeleted }"
-// where some aggregates participate and some don't.
+// (The legacy capability-scoped `filter for "<name>"` variant was
+// removed in typed-capabilities Phase 6 — a capability co-locates its
+// own filter, so the string-group qualifier is unnecessary.)
 FilterDecl:
-    'filter' ('for' capability=STRING)? expr=Expression;
+    'filter' expr=Expression;
 
 // `stamp <event> { ... }` declares lifecycle-stamping assignments.
-// Same scoping rules as FilterDecl: at aggregate scope applies to
-// that aggregate; at context scope propagates to every aggregate;
-// `for "<name>"` qualifier restricts propagation to opt-ins.
+// At aggregate scope applies to that aggregate; at context scope
+// propagates to every aggregate.  (The legacy `stamp for "<name>"`
+// qualifier was removed in typed-capabilities Phase 6.)
 StampDecl:
-    'stamp' ('for' capability=STRING)? event=StampEvent '{'
+    'stamp' event=StampEvent '{'
         assignments+=AssignOrCallStmt*
     '}';
 
 StampEvent returns string:
     'onCreate' | 'onUpdate';
 
-// `implements "name"` opts the host into a capability group with the
-// given name.  Backends translate the name by convention (.NET adds
-// an `I` prefix → `IAuditable`; TS may emit a type alias; etc.) and
-// emit one shared infrastructure block per name (e.g. one
-// HasQueryFilter loop per capability in OnModelCreating).
+// `implements <Cap>` is the typed capability-application form
+// (typed-capabilities.md) — a synonym of `with <Cap>`: the expander splices
+// the referenced capability's fields + filter + stamp into the host aggregate
+// (or, at context scope, every aggregate in the context).  Resolved by the
+// expander's document-wide capability inventory, like `with` (see `Capability`
+// below), not a Langium cross-reference.  (The legacy `implements "name"`
+// string-group form was removed in typed-capabilities Phase 6.)
 ImplementsDecl:
-    'implements' name=STRING;
+    'implements' cap=ID;
+
+// ---- typed capability declaration (typed-capabilities.md) -------
+//
+// A `capability` is a PURE MIXIN: a named bundle of fields + `filter` +
+// `stamp`, everything in its body PROVIDED to implementors.  No
+// ownership keywords (`requires`/`provides`) — declaring a member IS the
+// capability providing it; no operations / structure (those stay
+// macros).  A `capability` is the declared, in-language successor to the
+// field/filter/stamp macros (`audit`/`softDelete`): its body holds the
+// same AST member nodes a macro emits (`Property`/`FilterDecl`/
+// `StampDecl`).
+//
+// Aggregates opt in via the `with` / `implements` clause.  References are
+// resolved by the macro expander's document-wide inventory (like macro
+// names + macro-arg refs — see `WithClause` / `MacroArgValue` above and
+// the rationale at `MacroArgValue`), NOT a Langium cross-reference: macro
+// expansion runs before linking, so the expander splices a referenced
+// capability's members into the host aggregate's `members[]` at phase ②,
+// indistinguishable from user-written ones.  Everything downstream
+// (scope, lower, enrich, validate, codegen) is unchanged.
+//
+// Top-level declarable (a `SystemMember`); globally visible because the
+// expander resolves by name, not by Langium scope.  See
+// docs/plans/typed-capabilities-implementation.md.
+Capability:
+    'capability' name=ID '{'
+        (members+=CapabilityMember ','?)*
+    '}';
+
+CapabilityMember:
+    Property | FilterDecl | StampDecl;
 
 TestBlock:
     'test' name=STRING ('verifies' verifies=[TestCase:TraceId])? '{'
@@ -1298,7 +1330,12 @@ Property:
         // already in `LooseName`; this mirrors them for the `Property.name`
         // dispatch (which can't reuse `LooseName` wholesale because that set
         // includes member-starter keywords like `contains`).
-        | 'state' | 'title' | 'body')
+        | 'state' | 'title' | 'body'
+        // `parent` is hard only in the Requirement hierarchy clause
+        // (`requirement R parent R0`); soft in property position so the
+        // canonical self-referential field `parent: Self id?` (and any
+        // domain field named `parent`) parses.
+        | 'parent')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1530,7 +1567,7 @@ GenericCtor returns string:
     'paged' | 'envelope' | 'option';
 
 BaseType:
-    PrimitiveType | SlotType | ActionType | IdType | NamedType;
+    PrimitiveType | SlotType | ActionType | SelfType | IdType | NamedType;
 
 PrimitiveType:
     name=('int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid' | 'json');
@@ -1555,6 +1592,15 @@ SlotType:
 // hoisted in the caller's scope, exactly as `onSubmit` is.
 ActionType:
     name='action' ('(' arg=TypeRef ')')?;
+
+// `Self id` — a self-referential entity reference, valid only inside a
+// `capability` body (typed-capabilities.md; the anchored-type / Eiffel
+// `like Current` construct).  `Self` resolves to the implementing aggregate's
+// own type: the expander rewrites `Self id` → `<Host> id` when it splices the
+// capability into an aggregate, so lowering and the backends only ever see a
+// concrete `X id`.  A `Self id` outside a capability is a validation error.
+SelfType:
+    selfRef?='Self' 'id';
 
 IdType:
     target=[NamedDecl:ID] 'id';

@@ -2,9 +2,6 @@
 // register every shipped macro into the global registry.
 
 import { registerMacro } from "../registry.js";
-import audit from "./audit/audit.macro.js";
-import auditable from "./audit/auditable.macro.js";
-import auditedByDefault from "./audit/auditedByDefault.macro.js";
 import crudish from "./crudish.macro.js";
 import scaffold from "./scaffold/scaffold.macro.js";
 import scaffoldAggregate from "./scaffold/scaffoldAggregate.macro.js";
@@ -12,7 +9,6 @@ import scaffoldContext from "./scaffold/scaffoldContext.macro.js";
 import scaffoldSubdomain from "./scaffold/scaffoldSubdomain.macro.js";
 import scaffoldView from "./scaffold/scaffoldView.macro.js";
 import scaffoldWorkflow from "./scaffold/scaffoldWorkflow.macro.js";
-import softDeletable from "./softDelete/softDeletable.macro.js";
 import softDelete from "./softDelete/softDelete.macro.js";
 import softDeleteByDefault from "./softDelete/softDeleteByDefault.macro.js";
 
@@ -32,13 +28,14 @@ let _loaded = false;
 export function loadStdlibMacros(): void {
   if (_loaded) return;
   _loaded = true;
-  // Audit trio
-  registerMacro(audit);
-  registerMacro(auditable);
-  registerMacro(auditedByDefault);
-  // Soft-delete trio
+  // Audit is now the built-in `capability auditable` (src/macros/prelude.ts) —
+  // the former audit/auditable/auditedByDefault macros were removed in the
+  // typed-capabilities Phase 3 migration.
+  // Soft-delete: state + filter is the built-in `capability softDeletable`
+  // (src/macros/prelude.ts); `softDelete` (ops) + `softDeleteByDefault` stay
+  // macros.  The former `softDeletable` (state) + `softDelete` (context filter)
+  // macros were removed in the typed-capabilities Phase 3 migration.
   registerMacro(softDelete);
-  registerMacro(softDeletable);
   registerMacro(softDeleteByDefault);
   // Other capabilities
   registerMacro(crudish);

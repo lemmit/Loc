@@ -67,20 +67,18 @@ describe("capability source surface roundtrips through structural printer", () =
     expect(printed).toMatch(/filter !this\.isDeleted/);
   });
 
-  it('`filter for "softDeletable" !this.isDeleted` at context level', async () => {
+  it("`filter !this.isDeleted` at context level prints", async () => {
     const { printed } = await roundtripContext(`
       context Sales {
-        filter for "softDeletable" !this.isDeleted
+        filter !this.isDeleted
         aggregate Order {
           subject: string
           isDeleted: bool
-          implements "softDeletable"
         }
         repository Orders for Order { }
       }
     `);
-    expect(printed).toMatch(/filter for "softDeletable" !this\.isDeleted/);
-    expect(printed).toMatch(/implements "softDeletable"/);
+    expect(printed).toMatch(/filter !this\.isDeleted/);
   });
 
   it("`stamp onCreate { ... }` block prints with its assignments", async () => {
@@ -100,55 +98,31 @@ describe("capability source surface roundtrips through structural printer", () =
     expect(printed).toMatch(/createdAt := now\(\)/);
   });
 
-  it('`stamp for "auditable" onUpdate { ... }` at context level', async () => {
+  it("`context Foo with auditable, softDeleteByDefault { ... }` prints the with clause", async () => {
     const { printed } = await roundtripContext(`
-      context Sales {
-        stamp for "auditable" onUpdate {
-          updatedAt := now()
-        }
+      context Sales with auditable, softDeleteByDefault {
         aggregate Order {
           subject: string
-          updatedAt: datetime
-          implements "auditable"
-        }
-        repository Orders for Order { }
-      }
-    `);
-    expect(printed).toMatch(/stamp for "auditable" onUpdate \{/);
-  });
-
-  it("`context Foo with audit, softDelete { ... }` prints the with clause", async () => {
-    const { printed } = await roundtripContext(`
-      context Sales with audit, softDelete {
-        aggregate Order {
-          subject: string
-          isDeleted: bool
-          createdAt: datetime
-          createdBy: User id
-          updatedAt: datetime
-          updatedBy: User id
         }
         aggregate User { name: string }
         repository Orders for Order { }
         repository Users for User { }
       }
     `);
-    expect(printed).toMatch(/context Sales with audit, softDelete \{/);
+    expect(printed).toMatch(/context Sales with auditable, softDeleteByDefault \{/);
   });
 
   it("re-parsed AST has the same structural shape as the original", async () => {
     const { before, after } = await roundtripContext(`
       context Sales {
-        filter for "softDeletable" !this.isDeleted
-        stamp for "auditable" onCreate {
+        filter !this.isDeleted
+        stamp onCreate {
           createdAt := now()
         }
         aggregate Order {
           subject: string
           isDeleted: bool
           createdAt: datetime
-          implements "softDeletable"
-          implements "auditable"
         }
         repository Orders for Order { }
       }
