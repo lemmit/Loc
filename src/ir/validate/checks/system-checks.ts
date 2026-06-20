@@ -674,14 +674,19 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // filters every read in-app via `findAll().stream()`; an `embedded`
   // aggregate's root entity is a real JPA table whose root scalars are columns,
   // so the static non-principal predicate rides Hibernate's `@SQLRestriction`
-  // exactly like the relational path (`emit/entity.ts`).  .NET handles all
-  // shapes (it's not in LIMITED_FAMILIES).  A PRINCIPAL filter on a
-  // non-relational shape stays gated everywhere for now (the actor + json
-  // intersection isn't wired) — hence the `!usesPrincipal` condition at the
-  // call site.
+  // exactly like the relational path (`emit/entity.ts`).  elixir handles
+  // `embedded` (its only non-relational shape — `document` is unsupported there,
+  // gated by `validateSavingShapeSupport`): an embedded Ash resource's root
+  // attributes are real columns, so the predicate rides the same `base_filter`
+  // the relational path emits (`domain-emit.ts` renders it per-aggregate
+  // regardless of shape).  .NET handles all shapes (it's not in
+  // LIMITED_FAMILIES).  A PRINCIPAL filter on a non-relational shape stays gated
+  // everywhere for now (the actor + json intersection isn't wired) — hence the
+  // `!usesPrincipal` condition at the call site.
   const supportsNonRelationalFilter = (family: string, shp: string): boolean =>
     (family === "node" && (shp === "document" || shp === "embedded")) ||
-    (family === "java" && (shp === "document" || shp === "embedded"));
+    (family === "java" && (shp === "document" || shp === "embedded")) ||
+    (family === "elixir" && shp === "embedded");
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
