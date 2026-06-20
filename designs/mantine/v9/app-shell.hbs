@@ -3,7 +3,8 @@ import { Routes, Route, Link as RouterLink, useLocation, {{#if anyLayoutUsesNavi
 import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button, Stack{{#if hasNamedLayouts}}, Text, Box, Card, Container, Grid, Image, Badge{{/if}} } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import React from "react";
-{{#each imports}}import {{specifier}} from "{{from}}";
+{{#if navUsesSession}}import { useSession } from "./auth/AuthGate";
+{{/if}}{{#each imports}}import {{specifier}} from "{{from}}";
 {{/each}}{{#if hasRealtimeHandlers}}import { RealtimeHandlers } from "./components/RealtimeHandlers";
 {{/if}}
 
@@ -81,7 +82,8 @@ function useIsActive() {
 // padding.
 function AppShellLayout() {
   const isActive = useIsActive();
-  const [opened, { toggle, close }] = useDisclosure();
+{{#if navUsesSession}}  const currentUser = useSession().user as Record<string, any>;
+{{/if}}  const [opened, { toggle, close }] = useDisclosure();
   // Mobile UX: auto-close the navbar drawer after a route change.
   // Tapping a NavLink on a phone otherwise leaves the menu covering
   // the destination page, which is contrary to how every other
@@ -120,7 +122,7 @@ function AppShellLayout() {
       <AppShell.Navbar p="md">
         <Stack gap={4} data-testid="nav-sidebar">
 {{#each navSections}}          <Divider my="xs" label="{{label}}" labelPosition="left" />
-{{#each entries}}{{#if external}}          <Anchor href="{{href}}" target="_blank" rel="noreferrer" data-testid="{{testId}}">{{label}}</Anchor>{{else}}          <NavLink component={RouterLink} to="{{to}}" label="{{label}}" active={isActive({{{activeArgs}}})} data-testid="{{testId}}" />{{/if}}
+{{#each entries}}{{#if external}}          <Anchor href="{{href}}" target="_blank" rel="noreferrer" data-testid="{{testId}}">{{label}}</Anchor>{{else}}{{#if requiresJs}}          {({{{requiresJs}}}) ? <NavLink component={RouterLink} to="{{to}}" label="{{label}}" active={isActive({{{activeArgs}}})} data-testid="{{testId}}" /> : null}{{else}}          <NavLink component={RouterLink} to="{{to}}" label="{{label}}" active={isActive({{{activeArgs}}})} data-testid="{{testId}}" />{{/if}}{{/if}}
 {{/each}}{{/each}}        </Stack>
       </AppShell.Navbar>
       <AppShell.Main>

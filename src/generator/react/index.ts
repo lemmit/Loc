@@ -274,7 +274,7 @@ export function generateReactForContexts(
   // Workflows / Views grouping below.  When the ui has no menu
   // block, `sidebarOverride` is `undefined` and the AppShell
   // preparer falls back to its default hardcoded shape.
-  const sidebarOverride = deriveSidebarFromUi(ui);
+  const sidebarOverride = deriveSidebarFromUi(ui, authUi);
 
   // Explicit pages with non-conventional names need
   // to register their import + route in App.tsx so React Router
@@ -360,6 +360,7 @@ export function generateReactForContexts(
       hasRealtimeHandlers,
       hasViewsIndex,
       hasWorkflowsIndex,
+      authUi,
     ),
   );
   // Home is synthesised by the scaffold expander whenever the

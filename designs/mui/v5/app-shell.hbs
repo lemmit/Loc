@@ -8,7 +8,8 @@ import {
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
 import React from "react";
-{{#each imports}}import {{specifier}} from "{{from}}";
+{{#if navUsesSession}}import { useSession } from "./auth/AuthGate";
+{{/if}}{{#each imports}}import {{specifier}} from "{{from}}";
 {{/each}}{{#if hasRealtimeHandlers}}import { RealtimeHandlers } from "./components/RealtimeHandlers";
 {{/if}}
 
@@ -76,7 +77,8 @@ function useIsActive() {
 function AppShellLayout() {
   const isActive = useIsActive();
   const navigate = useNavigate();
-  const [mobileOpen, setMobileOpen] = React.useState(false);
+{{#if navUsesSession}}  const currentUser = useSession().user as Record<string, any>;
+{{/if}}  const [mobileOpen, setMobileOpen] = React.useState(false);
   // Mobile UX: auto-close the temporary Drawer after a route change.
   // Tapping a sidebar entry on a phone otherwise leaves the drawer
   // covering the destination page.  Desktop is unaffected — the
@@ -92,12 +94,19 @@ function AppShellLayout() {
       <Divider />
       <List dense>
 {{#each navSections}}        <ListSubheader sx=\{{ lineHeight: "32px", fontWeight: 600, color: "text.secondary" }}>{{label}}</ListSubheader>
-{{#each entries}}        <ListItem disablePadding>
+{{#each entries}}{{#if requiresJs}}        {({{{requiresJs}}}) ? (
+          <ListItem disablePadding>
+            <ListItemButton selected={isActive({{{activeArgs}}})} onClick={() => navigate("{{to}}")} data-testid="{{testId}}">
+              <ListItemText primary="{{label}}" />
+            </ListItemButton>
+          </ListItem>
+        ) : null}
+{{else}}        <ListItem disablePadding>
           <ListItemButton selected={isActive({{{activeArgs}}})} onClick={() => navigate("{{to}}")} data-testid="{{testId}}">
             <ListItemText primary="{{label}}" />
           </ListItemButton>
         </ListItem>
-{{/each}}{{/each}}      </List>
+{{/if}}{{/each}}{{/each}}      </List>
     </Box>
   );
 

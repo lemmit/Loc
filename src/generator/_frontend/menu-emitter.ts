@@ -28,6 +28,7 @@
 
 import type { PageIR, UiIR } from "../../ir/types/loom-ir.js";
 import { plural, snake } from "../../util/naming.js";
+import { renderGateExpr } from "./gate-expr.js";
 
 /** A single sidebar nav entry — framework-neutral data the React and
  *  Svelte app shells both render (React: NavLink; Svelte: <a>).
@@ -53,6 +54,15 @@ export interface NavEntryVM {
    *  exact form is used for index pages whose slug prefix would
    *  otherwise match every per-item child route. */
   activeArgs: string;
+  /** Rendered currentUser-only gate condition (e.g.
+   *  `currentUser.role === "agent"`) when the linked page declares a
+   *  `requires` clause AND the deployable is `auth: ui`.  The App-shell
+   *  templates wrap this entry's nav link in `({requiresJs}) ? <link> :
+   *  null` so a forbidden page's sidebar link hides at runtime — the
+   *  nav-side mirror of the page guard's `<Forbidden/>`.  Absent ⇒ the
+   *  link is never gated (rendered unconditionally, byte-identical to
+   *  before). */
+  requiresJs?: string;
 }
 
 /** A grouped sidebar section.  Sections with zero entries are
@@ -65,13 +75,13 @@ export interface NavSectionVM {
 /** Build sidebar `navSections` from a ui's explicit `menu { … }`
  *  block.  Returns `undefined` when the ui has no menu block — the
  *  caller falls back to the default hardcoded grouping. */
-export function deriveSidebarFromUi(ui: UiIR): NavSectionVM[] | undefined {
+export function deriveSidebarFromUi(ui: UiIR, authUi = false): NavSectionVM[] | undefined {
   if (ui.menu) {
     return ui.menu.sections.map(
       (section): NavSectionVM => ({
         label: section.label,
         entries: section.links
-          .map((link) => navEntryForLink(link, ui))
+          .map((link) => navEntryForLink(link, ui, authUi))
           .filter((e): e is NavEntryVM => e !== undefined),
       }),
     );
@@ -120,6 +130,10 @@ export function deriveSidebarFromUi(ui: UiIR): NavSectionVM[] | undefined {
           label,
           testId: tIdAndActive.testId,
           activeArgs: tIdAndActive.activeArgs,
+          // Hide the nav link when the page's `requires` gate fails (auth: ui).
+          ...(authUi && p.requires
+            ? { requiresJs: renderGateExpr(p.requires, "currentUser") }
+            : {}),
         };
       }),
     });
@@ -130,6 +144,7 @@ export function deriveSidebarFromUi(ui: UiIR): NavSectionVM[] | undefined {
 function navEntryForLink(
   link: import("../../ir/types/loom-ir.js").MenuLinkIR,
   ui: UiIR,
+  authUi: boolean,
 ): NavEntryVM | undefined {
   if (link.kind === "external") {
     // External links don't go through React Router; render as a plain
@@ -160,6 +175,14 @@ function navEntryForLink(
     label,
     testId: tIdAndActive.testId,
     activeArgs: tIdAndActive.activeArgs,
+    // Per-link auth: when the deployable is `auth: ui` and the linked
+    // page carries a `requires` gate, render the runtime condition so the
+    // App-shell hides this link when the gate fails — the nav mirror of
+    // the page guard's `<Forbidden/>`.  External links are returned above
+    // and never gated.
+    ...(authUi && page.requires
+      ? { requiresJs: renderGateExpr(page.requires, "currentUser") }
+      : {}),
   };
 }
 
