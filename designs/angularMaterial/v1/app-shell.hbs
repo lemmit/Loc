@@ -7,7 +7,8 @@ import { MatListModule } from "@angular/material/list";
 import { MatSidenavModule } from "@angular/material/sidenav";
 import { MatToolbarModule } from "@angular/material/toolbar";
 import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from "@angular/router";
-
+{{#if authUi}}import { AuthGateComponent } from "./auth/auth-gate.component";
+{{/if}}
 @Component({
   selector: "app-root",
   imports: [
@@ -18,7 +19,8 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
     MatSidenavModule,
     MatListModule,
     MatIconModule,
-  ],
+{{#if authUi}}    AuthGateComponent,
+{{/if}}  ],
   template: `
     <mat-toolbar color="primary">
       <a routerLink="/" class="loom-brand">{{systemNameHuman}}</a>
@@ -31,8 +33,11 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
 {{/each}}{{/each}}        </mat-nav-list>
       </mat-sidenav>
       <mat-sidenav-content class="loom-content">
-        <router-outlet />
-      </mat-sidenav-content>
+{{#if authUi}}        <app-auth-gate>
+          <router-outlet />
+        </app-auth-gate>
+{{else}}        <router-outlet />
+{{/if}}      </mat-sidenav-content>
     </mat-sidenav-container>
   `,
   styles: [

@@ -64,11 +64,11 @@ import { validateE2ETest } from "./test-checks.js";
 // just a string/uuid and doesn't depend on a display label.
 // ---------------------------------------------------------------------------
 
-// `auth: ui` (the frontend OIDC guard) is emitted by the React, Vue, and
-// Svelte generators.  A deployable whose resolved UI framework is none of
+// `auth: ui` (the frontend OIDC guard) is emitted by the React, Vue, Svelte,
+// and Angular generators.  A deployable whose resolved UI framework is none of
 // those (phoenixLiveView) would silently emit no guard — reject it loudly
 // so the limitation is visible rather than a no-op.
-const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte"]);
+const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular"]);
 
 export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
@@ -77,7 +77,7 @@ export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]):
       diags.push({
         severity: "error",
         code: "loom.auth-ui-unsupported-framework",
-        message: `Deployable '${d.name}': 'auth: ui' is currently only supported on react, vue, and svelte frontends; framework '${d.uiFramework ?? "unknown"}' isn't supported yet.`,
+        message: `Deployable '${d.name}': 'auth: ui' is currently only supported on react, vue, svelte, and angular frontends; framework '${d.uiFramework ?? "unknown"}' isn't supported yet.`,
         source: d.name,
       });
     }
