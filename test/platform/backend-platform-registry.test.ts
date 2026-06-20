@@ -21,7 +21,7 @@ describe("parseBuiltinPlatformRef", () => {
       version: "v4",
       qualified: "node@v4",
     });
-    expect(parseBuiltinPlatformRef("dotnet")?.qualified).toBe("dotnet@v8");
+    expect(parseBuiltinPlatformRef("dotnet")?.qualified).toBe("dotnet@v10");
     expect(parseBuiltinPlatformRef("elixir")?.qualified).toBe("elixir@v1");
     // Back-compat: legacy `phoenix` and `phoenixLiveView` alias to
     // canonical `elixir` (D-ELIXIR-PLATFORM).
@@ -56,7 +56,7 @@ describe("platformFor — byte-identity guarantee", () => {
     // The crux: `platform: node` must yield the exact instance
     // its default pin resolves to, so emitted output is unchanged.
     expect(platformFor("node")).toBe(platformFor("node@v4" as never));
-    expect(platformFor("dotnet")).toBe(platformFor("dotnet@v8" as never));
+    expect(platformFor("dotnet")).toBe(platformFor("dotnet@v10" as never));
     expect(platformFor("elixir")).toBe(platformFor("elixir@v1" as never));
     // Back-compat: the legacy `phoenix` and `phoenixLiveView` spellings
     // resolve identically (D-ELIXIR-PLATFORM).

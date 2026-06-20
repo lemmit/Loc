@@ -124,7 +124,7 @@ export function expectedFrameworkFor(
   hasUi: boolean,
 ): string | undefined {
   // Normalise a `family@version` pin to its family first so a pinned
-  // backend (`"phoenixLiveView@v1"`, `"dotnet@v8"`) maps to the same
+  // backend (`"phoenixLiveView@v1"`, `"dotnet@v10"`) maps to the same
   // framework as its bareword.
   const fam = platformFamily(platform);
   if (fam === "react" || fam === "static") return "react";
