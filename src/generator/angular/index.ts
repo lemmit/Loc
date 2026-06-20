@@ -141,7 +141,7 @@ export function generateAngularForContexts(
       );
       content = pageNeedsDeferredFeatures(result)
         ? renderAngularPageStub(page)
-        : renderAngularPage({ page, result, derived: page.derived, pack });
+        : renderAngularPage({ page, result, derived: page.derived, pack, authUi });
     }
     out.set(`src/app/pages/${slug}.component.ts`, content);
     routeDescs.push({ route: page.route!, component: pageComponentName(page), slug });
