@@ -166,8 +166,13 @@ function navEntryForLink(
       activeArgs: `""`,
     };
   }
-  // `link Page { label: "...", order: N }` — page reference.
-  const page = ui.pages.find((p) => p.name === link.pageName);
+  // `link Page { label: "...", order: N }` — page reference.  Match on the
+  // resolved route first (unique) so a qualified `link Orders.List` targets the
+  // exact page; role-named pages (`List`) share `pageName` across aggregates.
+  // Fall back to name for unqualified links to unique pages.
+  const page =
+    (link.route !== undefined && ui.pages.find((p) => p.route === link.route)) ||
+    ui.pages.find((p) => p.name === link.pageName);
   if (!page) return undefined;
   // Allow per-link `label:` override; otherwise fall back to the
   // page's menuMeta `label` and finally to the page name.

@@ -678,7 +678,7 @@ MenuSection:
 // IDE affordances (autocomplete, go-to-def, find-refs, rename)
 // follow.
 MenuLink:
-      'link' page=[Page:LooseName] ('{' (props+=MenuLinkProp (','? props+=MenuLinkProp)* ','?)? '}')?
+      'link' page=[Page:QualifiedPageName] ('{' (props+=MenuLinkProp (','? props+=MenuLinkProp)* ','?)? '}')?
     | 'link' externalLabel=STRING '->' externalUrl=STRING;
 
 // Same approach as MenuMetaEntry — `LooseName` + validator-side
@@ -1529,6 +1529,14 @@ LooseName returns string:
     // so user code can still name a field / arg `action`; hard only in the
     // `ActionType` type position.
     | 'action';
+
+// A dotted page reference for `menu { link <Area>.<Page> }` — lets a menu link
+// disambiguate role-named scaffold pages (`List` / `New` / `Detail`) by their
+// area, e.g. `link Orders.List`.  A single segment (`link Home`) still parses
+// and resolves by bare name.  The area-qualified name is exported by
+// `DddScopeComputation` (see ddd-scope.ts).
+QualifiedPageName returns string:
+    LooseName ('.' LooseName)*;
 
 // ---------------------------------------------------------------------------
 // Type references

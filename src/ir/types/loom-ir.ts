@@ -1984,6 +1984,12 @@ export type MenuLinkIR =
   | {
       kind: "page";
       pageName: string;
+      /** The linked page's route, captured from the resolved cross-reference.
+       *  Role-named scaffold pages share a `pageName` (`List`) across
+       *  aggregates, so the menu emitter keys on this unique route to find the
+       *  exact target page (e.g. `link Orders.List` → `/orders`).  Undefined
+       *  only when the reference didn't resolve. */
+      route?: string;
       /** Override props (`label`, `order`).  Validator checks the
        *  allowed key names. */
       props: { name: string; value: ExprIR }[];
