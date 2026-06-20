@@ -21,12 +21,18 @@ export function corpusSourceFor(featureId: string, backend: Backend): string {
   return src.replaceAll("__PLATFORM__", PLATFORM_CLAUSE[backend]);
 }
 
-/** Generate a corpus feature for one backend, in-memory (no docker). */
+/** Generate a corpus feature for one backend, in-memory (no docker).
+ *  Asserts the source parses + validates cleanly first — a fixture with a
+ *  grammar or validation error must fail the gate, not silently emit a partial
+ *  model from a broken AST. */
 export async function generateCorpusCase(
   featureId: string,
   backend: Backend,
 ): Promise<Map<string, string>> {
   const source = corpusSourceFor(featureId, backend);
-  const { model } = await parseString(source);
+  const { model, errors } = await parseString(source);
+  if (errors.length > 0) {
+    throw new Error(`parse/validation errors:\n${errors.join("\n")}`);
+  }
   return generateSystems(model).files;
 }

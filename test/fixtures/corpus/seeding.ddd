@@ -7,7 +7,7 @@ system Seeding {
         name: string
         size: int
         tier: Tier
-        invariant nonNegative = true
+        invariant size >= 0
         derived display: string = name
       }
       aggregate Gadget with crudish {

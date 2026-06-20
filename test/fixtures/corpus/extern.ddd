@@ -9,7 +9,7 @@ system ExternSys {
         customerId: string
         status: OrderStatus
         riskScore: int
-        invariant riskNonNegative = true
+        invariant riskScore >= 0
         function isMutable(): bool = status == OrderStatus.Draft
         operation confirm() extern {
           precondition isMutable()

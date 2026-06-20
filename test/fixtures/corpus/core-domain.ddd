@@ -13,7 +13,7 @@ system CoreShop {
         contains lines: Line[]
         entity Line { sku: string  qty: int }
         derived isDraft: bool = status == Status.Draft
-        invariant qtyPositive = true
+        invariant total.amount >= 0
         operation place() { status := Status.Placed }
         operation addLine(sku: string, qty: int) { lines += Line { sku: sku, qty: qty } }
       }
