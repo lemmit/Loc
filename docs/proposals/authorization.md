@@ -6,6 +6,7 @@
 > **Scope:** all domain-logic backends (.NET/EF Core, TypeScript/Hono,
 > Phoenix/Ash); React consumes the resulting wire shape only.
 > **⚠ Needs reconciliation with [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md).** See [§0](#0-reconciliation-needed-with-multi-tenancy-design-note) below.
+> **Companion:** [`offerability-can-query.md`](./offerability-can-query.md) — projecting the param-free slice of these gates into the pre-flight `can_<op>` query (the write-side analogue of this doc's field-capabilities projection).
 
 ---
 
