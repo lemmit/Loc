@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { CORPUS_DEPLOYABLE, materializeCorpusFixture } from "../fixtures/corpus/harness.js";
 
 // ---------------------------------------------------------------------------
 // Generator regression test: emit each example via `ddd generate dotnet`,
@@ -148,11 +149,13 @@ describe.skipIf(!ENABLED)(
     it("system `auth { oidc }` (dotnet) — generated OIDC verifier builds under /warnaserror", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-oidc-"));
       try {
-        execSync(
-          `node ${cli} generate system test/e2e/fixtures/dotnet-build/auth-oidc.ddd -o ${outDir}`,
-          { stdio: "inherit", cwd: repoRoot },
-        );
-        const proj = path.join(outDir, "api");
+        // Generated from the shared corpus fixture (one canonical auth-oidc across all backends).
+        const src = materializeCorpusFixture("auth-oidc", "dotnet", outDir);
+        execSync(`node ${cli} generate system ${src} -o ${outDir}`, {
+          stdio: "inherit",
+          cwd: repoRoot,
+        });
+        const proj = path.join(outDir, CORPUS_DEPLOYABLE);
         expect(fs.existsSync(path.join(proj, "Auth", "OidcUserVerifier.cs"))).toBe(true);
         execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
         execSync(`dotnet build --no-restore --nologo /warnaserror`, {

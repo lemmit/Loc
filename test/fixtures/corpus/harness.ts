@@ -21,6 +21,19 @@ export function corpusSourceFor(featureId: string, backend: Backend): string {
   return src.replaceAll("__PLATFORM__", PLATFORM_CLAUSE[backend]);
 }
 
+/** The deployable name every corpus fixture uses → its emitted project dir. */
+export const CORPUS_DEPLOYABLE = "d";
+
+/** Materialise a corpus feature specialised for one backend to a temp `.ddd`
+ *  on disk, returning its path.  Lets the per-backend build gates generate the
+ *  shared canonical fixture (one source of truth) instead of a per-backend
+ *  duplicate `.ddd`.  The emitted project lands under `<out>/${CORPUS_DEPLOYABLE}`. */
+export function materializeCorpusFixture(featureId: string, backend: Backend, destDir: string): string {
+  const dest = path.join(destDir, `${featureId}.${backend}.ddd`);
+  fs.writeFileSync(dest, corpusSourceFor(featureId, backend));
+  return dest;
+}
+
 /** Generate a corpus feature for one backend, in-memory (no docker).
  *  Asserts the source parses + validates cleanly first — a fixture with a
  *  grammar or validation error must fail the gate, not silently emit a partial

@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { CORPUS_DEPLOYABLE, materializeCorpusFixture } from "../fixtures/corpus/harness.js";
 
 // ---------------------------------------------------------------------------
 // Generator regression test: emit each example, install deps, run
@@ -164,12 +165,13 @@ describe.skipIf(!ENABLED)(
     it("system OIDC auth (verifier + /auth/* handshake) — generated project type-checks + bundles", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-oidc-"));
       try {
-        execSync(
-          `node ${cli} generate system test/e2e/fixtures/ts-build/auth-oidc.ddd -o ${outDir}`,
-          { stdio: "inherit", cwd: repoRoot },
-        );
-        // The hono deployable is named `api` → its project lands under `api/`.
-        const proj = path.join(outDir, "api");
+        // Generated from the shared corpus fixture (one canonical auth-oidc across all backends).
+        const src = materializeCorpusFixture("auth-oidc", "node", outDir);
+        execSync(`node ${cli} generate system ${src} -o ${outDir}`, {
+          stdio: "inherit",
+          cwd: repoRoot,
+        });
+        const proj = path.join(outDir, CORPUS_DEPLOYABLE);
         // Sanity: the OIDC files were actually emitted into this project.
         expect(fs.existsSync(path.join(proj, "auth", "oidc.ts"))).toBe(true);
         expect(fs.existsSync(path.join(proj, "auth", "handshake.ts"))).toBe(true);

@@ -51,7 +51,9 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   ["test/e2e/fixtures/python-build/auth.ddd", "api"],
   // `auth { oidc }` — the PyJWT + JWKS verifier (app/auth/oidc.py), the
   // /auth/login|callback|logout handshake + /auth/me probe, and the
-  // pyjwt[crypto] dep, under ruff + mypy --strict.
+  // pyjwt[crypto] dep, under ruff + mypy --strict.  (Shared with the python
+  // runtime OIDC e2e — auth-oidc-python-e2e.test.ts — so kept single-sourced
+  // here rather than migrated to the corpus.)
   ["test/e2e/fixtures/python-build/auth-oidc.ddd", "api"],
   // `seed { ... }` — domain-create + raw datasets, __loom_seed marker.
   ["test/e2e/fixtures/python-build/seeds.ddd", "api"],
