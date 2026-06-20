@@ -56,7 +56,7 @@ swap the repository/schema layer (minimal-v1 surface, validator-gated).
 | `operation` | Public method (or private if marked) that enforces preconditions, mutates state, queues events, and re-asserts invariants | Same shape; visibility honoured | Mantine button on the detail page; opens a modal whose form binds to `<Op>Request`; submit calls `use<Op><Agg>()` |
 | `precondition` | `if (!cond) throw new DomainError(<source>)` | `if (!cond) throw new DomainException(<source>)` | (server-side; HTTP 400 surfaces as a Mantine error notification) |
 | `emit` | `_events.push({ type: "X", … })` | `_events.Add(new X(...))` | (server-side) |
-| `repository` find | Method on `<Agg>Repository`; `where` clauses lower to Drizzle predicates (`lowerToDrizzle`) over the queryable subset, paramless finds fall back to convention-matching | Method on `I<Agg>Repository`; LINQ `.Where(x => …)` for both convention and `where` forms | `use<FindName><Agg>(query)` React Query hook + a list-page filter mode (deferred; v1 emits the hook only) |
+| `repository` find | Method on `<Agg>Repository`; `where` clauses lower to Drizzle predicates (`lowerToDrizzle`) over the queryable subset, paramless finds fall back to convention-matching | Method on `I<Agg>Repository`; LINQ `.Where(x => …)` for both convention and `where` forms | `use<FindName><Agg>(query)` React Query hook + a list-page filter bar (one input per `where` param) that drives the hook, falling back to `useAll<Agg>()` when unfiltered |
 | `criterion` (inline use-site) | Predicate body re-lowered + substituted at each `where` / invariant / precondition (same Drizzle predicate as a hand-written filter) | Same — inlined into the LINQ `.Where(...)` / guard | (server-side; not surfaced) |
 | `criterion` reified by a `retrieval` or `find` `where` | Module-level predicate fn `<name>Criterion = (args) => <Drizzle predicate>`, called by `run<Name>` and the matching `find` (one fn, deduped across both) | `Criterion<T>` (`IsSatisfiedBy` + `ToExpression()`) fed into the retrieval's Ardalis `Specification<T>` bundle and a `find`'s `.Where(crit.ToExpression())` (EF); a parameterised SQL fragment on Dapper. (Phoenix/Ash backend: a `:boolean` Ash **calculation** the read action filters by — `filter expr(<calc>(arg: ^arg(:p)))`; one calc shared by retrieval + find.) | (n/a — wire shape unchanged) |
 | `retrieval` (named query bundle) | `run<Name>(args, page?)` on `<Agg>Repository` — `where` + `.orderBy(...)` + `.limit/.offset` paging | `Run<Name>Async(args, page?, ct)` — `.WithSpecification(spec).ApplyPaging(page).ToListAsync(ct)` (EF) / parameterised SQL (Dapper). (Phoenix/Ash: a read action + `Ash.Query` page.) | (n/a — backend-only) |
@@ -773,7 +773,7 @@ Aggregate IR maps onto Ash:
 | `on(e: Event)` reactor / event-triggered `create(e: Event) by …` (channel-carried) | one `<Ctx>.Workflows.<Wf>.On<Event>` / `.Start<Event>` module with `handle(event)`, routed by a per-context `<Ctx>.Dispatcher` that pattern-matches each event struct. Correlation persists through a `<Wf>State` `Ecto.Schema` keyed by the correlation field (`create` loads-or-allocates, `on` routes-or-drops + logs `event_unrouted`). An event-triggered-only workflow emits no `run/2` / HTTP route / UI form page. See [`workflow.md`](workflow.md) §Triggers and [`channels.md`](proposals/channels.md). |
 | `abstract aggregate Party` + `extends` (TPC) | base emits no resource; each concrete is a standalone `Ash.Resource`; the context Ash.Domain gains `list_parties!/0` (the union of the concrete `list_<concrete>!` reads). |
 | `abstract aggregate Party` + `inheritanceUsing(sharedTable)` (TPH) | Ash has no native STI, so the concretes share one table via multiple resources: each concrete `Ash.Resource` declares `table "<base_plural>"`, a `:kind` string attribute defaulted to its own name, and `base_filter expr(kind == "<Concrete>")` (inside the `resource do` block) so it reads/writes only its rows. The base owns no resource; the Ash.Domain gains the same polymorphic `list_parties!/0` union reader. See [`phoenix-tph-emission.md`](./proposals/phoenix-tph-emission.md). |
-| `persistedAs(eventLog)` + `apply(...)` (event sourcing) | **deferred — IR-validate error** (`validateEventSourcedStorage`; `EVENT_SOURCING_BACKENDS` excludes Phoenix). Deferred for effort + no-local-Elixir validation, not framework fit: the ecosystem offers [AshCommanded](https://hexdocs.pm/ash_commanded) (full CQRS/ES — closest to Loom's emit/apply model) and [AshEvents](https://hexdocs.pm/ash_events) (first-class events, but *hybrid* — keeps a state table, so a partial fit for Loom's *pure* eventLog). Landscape + re-weighted design options in [workflow-and-applier.md](proposals/workflow-and-applier.md). |
+| `persistedAs(eventLog)` + `apply(...)` (event sourcing) | **Supported on `foundation: vanilla`** (Ecto/Phoenix — `src/generator/elixir/vanilla/eventsourced-emit.ts`): an append-only `<agg>_events` stream + `apply` fold + rehydrator, the elixir sibling of the node/.NET/python/java event stores. **Gated on `foundation: ash`** (today's default Phoenix foundation) — `validateEventSourcedStorage` accepts `elixir` iff every hosting deployable is `vanilla`; Ash has no pure-ES fit (AshCommanded is full CQRS/ES, AshEvents keeps a state table — both partial). Switch the deployable to `foundation: vanilla`, or see [workflow-and-applier.md](proposals/workflow-and-applier.md). |
 
 ### Per-page detail
 
@@ -785,7 +785,7 @@ PageIR maps onto LiveView:
 | `state { step: int = 0 }` | `socket.assigns.step`; initialised in `mount/3` via `assign(socket, :step, 0)` |
 | `state.step := 1` (in lambda) | `assign(socket, :step, 1)` inside generated `handle_event/3` |
 | `match { p => v; else => fallback }` | `cond do p -> v; true -> fallback end` (or `<%= cond do … end %>` in HEEx) |
-| `requires <pred>` (page) | guard in `handle_params/3` (v0 stub: bind only; full guard is a follow-up) |
+| `requires <pred>` (page) | full `handle_params/3` guard — when the predicate fails it `put_flash(:error, "forbidden")` + `push_navigate`s to `/` (the read-side UI analogue of an operation's `requires`; `liveview-emit.ts`) |
 | `navigate(<P>, {…})` | `push_navigate(socket, to: ~p"/route?…")` |
 | Scaffolded body | `pack.render("page-list" \| "page-new" \| "page-detail", vm)` → HEEx inline in `render/1` |
 | Pack-emitted Playwright page object | `e2e/pages/<x>.ts` — same testid-keyed shape as React; HEEx HTML is selector-compatible |
@@ -1026,8 +1026,14 @@ A `test e2e "name" against <deployable> { … }` block lowers via
 
 Out of scope for v1 (intentional):
 
-- **Authentication / authorization**: no opinion.  Add via
-  `.loomignore` on `Program.cs` (.NET) or `http/index.ts` (Hono).
+- **Production identity provider**: `auth: required` + a `user {}`
+  block emit a *first-class* auth surface on every backend — a typed
+  principal, a request boundary (401), `requires` 403 gates on
+  operations / views / pages, `currentUser`/tenancy capability filters,
+  and an OIDC turnkey verifier — but the default verifier is an
+  accept-all **dev stub**.  Wiring a real IdP (or replacing the stub)
+  is the deployment's job; see [`auth.md`](auth.md).  (Fine-grained RBAC
+  beyond predicate `requires` is not modelled.)
 - **Pagination on `findAll`**: returns every row.  Adding pagination
   is a future syntax extension (`find all(skip: int, take: int)`).
 - **Multi-target frontends**: a `react` deployable has exactly one
