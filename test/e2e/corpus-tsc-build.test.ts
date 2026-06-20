@@ -42,9 +42,6 @@ const TS_COMPILE_SKIP: Record<string, string> = {
   // `when` can-query companion route references the gate's enum without importing
   // it (TS2304 'OrderStatus' not found, http/*.routes.ts).
   "state-gate": "Hono when/can-query route omits the enum import (TS2304)",
-  // Resource clients import `amqplib` with no bundled type declarations — the
-  // generated package.json omits `@types/amqplib` (TS7016, resources/rabbitmq.ts).
-  resources: "Hono queue client missing @types/amqplib (TS7016)",
   // Workflow-sourced view references the saga state field out of scope (TS2304
   // 'attempts' not found, http/workflows.ts).
   "workflow-view": "Hono workflow-view references saga state field out of scope (TS2304)",
