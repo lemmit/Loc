@@ -57,6 +57,11 @@ export function emitLiveViewPages(args: {
   const out = new Map<string, string>();
   const routes: LiveRoute[] = [];
 
+  // True when this deployable runs `auth: required` — `LiveAuth.on_mount`
+  // then assigns `@current_user`, which a gated `Action` button reads in its
+  // `<%= if (@current_user.…) do %>` wrapper.  Off ⇒ no gating (byte-identical).
+  const authEnabled = deployable.auth?.required === true;
+
   // Locate the UI block this deployable mounts.  Backends without a
   // `ui:` binding skip — they only emit the API surface.
   if (!deployable.uiName) return { files: out, routes };
@@ -114,6 +119,7 @@ export function emitLiveViewPages(args: {
       aggregatesByName,
       enumsByName,
       valueObjectsByName,
+      authEnabled,
     );
     componentInfo.set(c.name, {
       actionBindings: w.actionBindings,
@@ -147,6 +153,7 @@ export function emitLiveViewPages(args: {
       valueObjectsByName,
       contextModuleByAggName,
       componentInfo,
+      authEnabled,
     });
     out.set(filePath, source);
     routes.push({ route: page.route, liveModule });
@@ -172,7 +179,14 @@ export function emitLiveViewPages(args: {
   if (ui.components.length > 0) {
     out.set(
       `lib/${appName}_web/components/ui_components.ex`,
-      renderUiComponents({ ui, appModule, aggregatesByName, enumsByName, valueObjectsByName }),
+      renderUiComponents({
+        ui,
+        appModule,
+        aggregatesByName,
+        enumsByName,
+        valueObjectsByName,
+        authEnabled,
+      }),
     );
   }
 
@@ -199,6 +213,9 @@ interface RenderArgs {
    *  LiveView can hoist the `handle_event` clauses for `Action`s inside
    *  the (stateless) components it renders. */
   componentInfo: ReadonlyMap<string, ComponentActionInfo>;
+  /** True when the deployable runs `auth: required` — drives currentUser
+   *  action-button gating in the page body (off ⇒ byte-identical). */
+  authEnabled: boolean;
 }
 
 interface ComponentActionInfo {
@@ -275,6 +292,7 @@ function renderLiveView(a: RenderArgs): string {
     valueObjectsByName,
     contextModuleByAggName,
     componentInfo,
+    authEnabled,
   } = a;
   const webModule = `${appModule}Web`;
 
@@ -293,6 +311,7 @@ function renderLiveView(a: RenderArgs): string {
     aggregatesByName,
     enumsByName,
     valueObjectsByName,
+    authEnabled,
   );
   const heex = walked.heex;
   const handlers: HandleEventClause[] = walked.handlers;
@@ -637,8 +656,11 @@ function renderUiComponents(args: {
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
   enumsByName: ReadonlyMap<string, EnumIR>;
   valueObjectsByName: ReadonlyMap<string, ValueObjectIR>;
+  /** True when the host deployable runs `auth: required` — drives
+   *  currentUser action-button gating inside component bodies. */
+  authEnabled: boolean;
 }): string {
-  const { ui, appModule, aggregatesByName, enumsByName, valueObjectsByName } = args;
+  const { ui, appModule, aggregatesByName, enumsByName, valueObjectsByName, authEnabled } = args;
   const webModule = `${appModule}Web`;
   const defs = ui.components.map((c) => {
     const synthPage = {
@@ -657,6 +679,7 @@ function renderUiComponents(args: {
       aggregatesByName,
       enumsByName,
       valueObjectsByName,
+      authEnabled,
     );
     const attrLines = c.params
       .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)
