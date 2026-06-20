@@ -34,7 +34,7 @@ system Sys {
   resource ordersState { for: Orders, kind: state, use: primary }
   ui WebApp {}
   deployable webApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState]
     ui: WebApp
@@ -54,7 +54,7 @@ async function buildCtx(): Promise<EmitCtx> {
 
 describe("ashPostgres PersistenceAdapter (real)", () => {
   it("is registered as the phoenixLiveView ashPostgres persistence adapter", () => {
-    const resolved = resolvePersistence("phoenixLiveView", "ashPostgres");
+    const resolved = resolvePersistence("elixir", "ashPostgres");
     expect(resolved).toBe(ashPostgresPersistenceAdapter);
     expect(resolved.name).toBe("ashPostgres");
   });

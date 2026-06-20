@@ -21,7 +21,7 @@ describe("adapter registry — lookup", () => {
   it("backends carry adapter menus; frontends don't", () => {
     expect(hasAdapters("dotnet")).toBe(true);
     expect(hasAdapters("node")).toBe(true);
-    expect(hasAdapters("phoenixLiveView")).toBe(true);
+    expect(hasAdapters("elixir")).toBe(true);
     expect(hasAdapters("react")).toBe(false);
     expect(hasAdapters("static")).toBe(false);
   });
@@ -60,8 +60,8 @@ describe("adapter registry — lookup", () => {
     expect(d.layout).toBe("byLayer");
   });
 
-  it("exposes the phoenixLiveView defaults", () => {
-    const d = defaultsFor("phoenixLiveView")!;
+  it("exposes the elixir defaults", () => {
+    const d = defaultsFor("elixir")!;
     expect(d.persistence.state).toBe("ashPostgres");
     expect(d.style).toBe("ash");
     expect(d.layout).toBe("byFeature");
@@ -108,7 +108,7 @@ describe("adapter registry — lookup", () => {
   });
 
   it("every registered persistence adapter is a valid PersistenceAdapter shape", () => {
-    for (const platform of ["dotnet", "node", "phoenixLiveView"] as const) {
+    for (const platform of ["dotnet", "node", "elixir"] as const) {
       const menu = adaptersFor(platform)!;
       for (const [name, adapter] of Object.entries(menu.persistence)) {
         expect(adapter.name).toBe(name);
@@ -119,7 +119,7 @@ describe("adapter registry — lookup", () => {
   });
 
   it("every registered style adapter declares strategies + layouts", () => {
-    for (const platform of ["dotnet", "node", "phoenixLiveView"] as const) {
+    for (const platform of ["dotnet", "node", "elixir"] as const) {
       const menu = adaptersFor(platform)!;
       for (const [name, adapter] of Object.entries(menu.styles)) {
         expect(adapter.name).toBe(name);
@@ -152,12 +152,9 @@ describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 me
     // (sorted).  `layered` is plain Phoenix's real pipeline shape (DSL
     // `serviceLayer`); `vanilla` is a foundation, not a style.  Layout stays
     // byFeature-only (byLayer is unidiomatic for Phoenix — deferred).
-    expect(availableAdapterNames("phoenixLiveView", "persistence")).toEqual([
-      "ashPostgres",
-      "ecto",
-    ]);
-    expect(availableAdapterNames("phoenixLiveView", "style")).toEqual(["ash", "layered"]);
-    expect(availableAdapterNames("phoenixLiveView", "layout")).toEqual(["byFeature"]);
+    expect(availableAdapterNames("elixir", "persistence")).toEqual(["ashPostgres", "ecto"]);
+    expect(availableAdapterNames("elixir", "style")).toEqual(["ash", "layered"]);
+    expect(availableAdapterNames("elixir", "layout")).toEqual(["byFeature"]);
   });
 
   it("frontends expose no adapter names", () => {
@@ -178,7 +175,7 @@ describe("transport — adapter-backed axis (realization-axes-alignment.md slice
   it("each backend exposes its real transport (alternatives are stubs)", () => {
     expect(availableAdapterNames("dotnet", "transport")).toEqual(["controllers"]);
     expect(availableAdapterNames("node", "transport")).toEqual(["hono"]);
-    expect(availableAdapterNames("phoenixLiveView", "transport")).toEqual(["phoenix"]);
+    expect(availableAdapterNames("elixir", "transport")).toEqual(["phoenix"]);
     // Reserved stubs — present in allAdapterNames, excluded from the real menu:
     // controllers (dotnet); express + fastify (node).
     expect(allAdapterNames("dotnet", "transport")).toEqual(["controllers", "minimalApi"]);
@@ -188,7 +185,7 @@ describe("transport — adapter-backed axis (realization-axes-alignment.md slice
   it("exposes the transport default per backend", () => {
     expect(defaultsFor("dotnet")!.transport).toBe("controllers");
     expect(defaultsFor("node")!.transport).toBe("hono");
-    expect(defaultsFor("phoenixLiveView")!.transport).toBe("phoenix");
+    expect(defaultsFor("elixir")!.transport).toBe("phoenix");
   });
 
   it("resolves a bareword default + an explicit transport; throws on unknown", () => {
@@ -209,19 +206,19 @@ describe("runtime — adapter-backed axis (realization-axes-alignment.md slice 5
   it("each backend exposes `transactional`; actor runtimes are reserved stubs", () => {
     expect(availableAdapterNames("dotnet", "runtime")).toEqual(["transactional"]);
     expect(availableAdapterNames("node", "runtime")).toEqual(["transactional"]);
-    expect(availableAdapterNames("phoenixLiveView", "runtime")).toEqual(["transactional"]);
+    expect(availableAdapterNames("elixir", "runtime")).toEqual(["transactional"]);
     // Actor runtimes are registered stubs — present in allAdapterNames,
     // excluded from the real menu: orleans (dotnet), genserver (elixir),
     // worker (node — worker_threads).
     expect(allAdapterNames("dotnet", "runtime")).toEqual(["orleans", "transactional"]);
-    expect(allAdapterNames("phoenixLiveView", "runtime")).toEqual(["genserver", "transactional"]);
+    expect(allAdapterNames("elixir", "runtime")).toEqual(["genserver", "transactional"]);
     expect(allAdapterNames("node", "runtime")).toEqual(["transactional", "worker"]);
   });
 
   it("exposes the runtime default per backend (transactional)", () => {
     expect(defaultsFor("dotnet")!.runtime).toBe("transactional");
     expect(defaultsFor("node")!.runtime).toBe("transactional");
-    expect(defaultsFor("phoenixLiveView")!.runtime).toBe("transactional");
+    expect(defaultsFor("elixir")!.runtime).toBe("transactional");
   });
 
   it("resolves the default + an explicit runtime; reserved stubs resolve cleanly", () => {

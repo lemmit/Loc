@@ -24,7 +24,7 @@ system Acme {
   storage primary { type: postgres }
   resource salesState { for: Tickets, kind: state, use: primary }
   deployable api {
-    platform: phoenix { foundation: ${foundation} }
+    platform: elixir { foundation: ${foundation} }
     contexts: [Tickets]
     dataSources: [salesState]
     serves: SalesApi

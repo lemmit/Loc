@@ -76,8 +76,9 @@ const platforms: Record<Platform, PlatformSurface> = {
   static: reactPlatform,
   // Fullstack Elixir / Ash + Phoenix LiveView platform.  Owns its own
   // database, mounts a `ui:`, and (when populated) `serves:` an
-  // Ash-derived API.  Legacy `platform: phoenix` / `phoenixLiveView`
-  // desugar to `elixir` at the lowering boundary (D-ELIXIR-PLATFORM).
+  // Ash-derived API.  `elixir` is the only spelling — the legacy
+  // `platform: phoenix` / `phoenixLiveView` aliases were retired
+  // (D-ELIXIR-PLATFORM), mirroring the retired `hono` → `node` alias.
   elixir: elixirPlatform,
   // FastAPI + SQLAlchemy 2 backend.  The `fastapi` framework spelling
   // desugars to `python` at the lowering boundary (mirrors `hono` →

@@ -4,7 +4,7 @@
 // emit dispatch only; the endpoint/router/Dockerfile serve-wiring that
 // makes the bundle reachable from `priv/static` is phase 6b.
 //
-// Output-neutral guarantee: no shipped example pairs `platform: phoenix`
+// Output-neutral guarantee: no shipped example pairs `platform: elixir`
 // with a `framework: react` ui, so this branch never fires on real
 // sources — these tests construct the embedded case explicitly.
 
@@ -24,7 +24,7 @@ system Sys {
   resource ordersState { for: Orders, kind: state, use: primary }
   ui WebApp { framework: react }
   deployable app {
-    platform: phoenix
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState]
     hosts: WebApp
@@ -45,7 +45,7 @@ system Sys {
   resource ordersState { for: Orders, kind: state, use: primary }
   ui WebApp { framework: liveview  page Home { route: "/" } }
   deployable app {
-    platform: phoenix
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState]
     hosts: WebApp

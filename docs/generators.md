@@ -701,9 +701,9 @@ stay byte-identical (`pipeline-layering` + the full suite gate this).
 | Deferred | `WorkflowForm` stubs cleanly to a placeholder page — `validateRequired` is on, so unsupported constructs never crash codegen. |
 | CI | `generated-angular-build.yml` — per `{case × pack}` (`minimal` / `scaffold` / `showcase` × `angularMaterial`): `npm install` + `ng build` (the Angular CLI typechecks + bundles in one step; `npm run test:angular-build` locally). |
 
-## Phoenix LiveView fullstack (`platform: phoenixLiveView`)
+## Phoenix LiveView fullstack (`platform: elixir`)
 
-`generate system` for deployables marked `platform: phoenixLiveView`.
+`generate system` for deployables marked `platform: elixir`.
 Single project that both serves an Ash-derived API (when `serves:` is
 populated) AND mounts a `ui:` rendered as Phoenix LiveView modules.
 Owns its own Postgres database (`needsDb: true`).

@@ -62,7 +62,7 @@ function source(opts: { oidc: boolean }): string {
   resource ticketState { for: Tickets, kind: state, use: primary }
   api SupportApi from Support
   deployable api {
-    platform: phoenix { foundation: ash }
+    platform: elixir { foundation: ash }
     contexts: [Tickets]
     serves: SupportApi
     dataSources: [ticketState]

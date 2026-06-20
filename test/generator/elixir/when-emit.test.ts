@@ -30,7 +30,7 @@ system Sys {
   resource ordersState { for: Orders, kind: state, use: primary }
   ui WebApp {}
   deployable api {
-    platform: phoenix
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState]
     serves: OrdersApi

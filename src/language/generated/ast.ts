@@ -211,7 +211,6 @@ export type DddKeywordNames =
     | "permissions"
     | "persistedAs"
     | "persistence"
-    | "phoenix"
     | "phoenixLiveView"
     | "platform"
     | "port"
@@ -564,10 +563,10 @@ export function isPayloadKind(item: unknown): item is PayloadKind {
     return item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error';
 }
 
-export type Platform = 'angular' | 'dotnet' | 'elixir' | 'fastapi' | 'java' | 'node' | 'phoenix' | 'phoenixLiveView' | 'python' | 'react' | 'static' | 'svelte' | 'vue' | string;
+export type Platform = 'angular' | 'dotnet' | 'elixir' | 'fastapi' | 'java' | 'node' | 'python' | 'react' | 'static' | 'svelte' | 'vue' | string;
 
 export function isPlatform(item: unknown): item is Platform {
-    return item === 'dotnet' || item === 'node' || item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'static' || item === 'phoenixLiveView' || item === 'phoenix' || item === 'elixir' || item === 'python' || item === 'fastapi' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'dotnet' || item === 'node' || item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'static' || item === 'elixir' || item === 'python' || item === 'fastapi' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export type PostfixSuffix = CallSuffix | MemberSuffix;

@@ -47,7 +47,7 @@ system TenancyBank {
 
   api LedgerApi from Core
   deployable phoenixApp {
-    platform: phoenix { foundation: ash }
+    platform: elixir { foundation: ash }
     contexts: [Ledger]
     serves: LedgerApi
     dataSources: [ledgerState]

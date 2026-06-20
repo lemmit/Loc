@@ -34,7 +34,7 @@ system Sys {
   resource billingState { for: Billing, kind: state, use: primary }
   ui WebApp {}
   deployable webApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Orders, Billing]
     dataSources: [ordersState, billingState]
     ui: WebApp
@@ -54,7 +54,7 @@ async function buildCtx(): Promise<EmitCtx> {
 
 describe("ash StyleAdapter — phoenixLiveView (real)", () => {
   it("is registered as the phoenixLiveView ash style adapter", () => {
-    const resolved = resolveStyle("phoenixLiveView", "ash");
+    const resolved = resolveStyle("elixir", "ash");
     expect(resolved).toBe(ashStyleAdapter);
     expect(resolved.name).toBe("ash");
   });

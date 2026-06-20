@@ -32,7 +32,7 @@ system Sys {
   storage primary { type: postgres }
   resource st { for: Shop, kind: state, use: primary }
   ui W {}
-  deployable api { platform: phoenixLiveView  contexts: [Shop]  dataSources: [st]  ui: W  port: 4000 }
+  deployable api { platform: elixir  contexts: [Shop]  dataSources: [st]  ui: W  port: 4000 }
 }
 `;
 }

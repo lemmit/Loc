@@ -27,7 +27,7 @@ system Demo {
   }
   api AccountsApi from Accounts
   deployable phoenixApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Accounts]
     serves: AccountsApi
     port: 4000

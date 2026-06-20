@@ -55,7 +55,7 @@ const SOURCE = `system MiniAtomic {
   api SalesApi from Sales
 
   deployable phoenixApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Sales]
     serves: SalesApi
     port: 4000

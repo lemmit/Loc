@@ -64,7 +64,7 @@ const BACKENDS = [
   "dotnet",
   "java",
   "python",
-  "phoenix",
+  "elixir",
   "elixir { foundation: vanilla }",
 ] as const;
 
@@ -82,7 +82,7 @@ function filesMentioning(files: Map<string, string>, criterion: string): number 
 
 describe("Repo.findAll(<Criterion>) — cross-backend emission parity", () => {
   for (const platform of BACKENDS) {
-    const ui = platform === "phoenix";
+    const ui = platform === "elixir";
     it(`${platform}: both findAll retrievals are emitted and invoked`, async () => {
       const files = await generateSystemFiles(system(platform, ui));
       // Each criterion's synthetic retrieval must appear in ≥2 files: its

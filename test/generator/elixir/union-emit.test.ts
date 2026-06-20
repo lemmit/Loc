@@ -24,7 +24,7 @@ system UnionShop {
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
   deployable phoenixApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState]
     serves: OrdersApi
@@ -83,7 +83,7 @@ system UnionShop {
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
   deployable phoenixApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState]
     serves: OrdersApi

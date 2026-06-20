@@ -30,7 +30,7 @@ system EmbFilter {
   resource docsState { for: Docs, kind: state, use: primary }
   ui WebApp {}
   deployable phoenixApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Docs]
     dataSources: [docsState]
     ui: WebApp

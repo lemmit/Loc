@@ -1,6 +1,6 @@
 // Phoenix embeds a SvelteKit SPA (item 4b — phoenix paths.base hosting).
 //
-// A `platform: phoenix` deployable hosting a `framework: svelte` ui
+// A `platform: elixir` deployable hosting a `framework: svelte` ui
 // embeds the SvelteKit project under `assets/` and serves the built
 // bundle from `/app` (Plug.Static + SpaController), exactly like the
 // react/vue embeds — but the SvelteKit build sets `kit.paths.base =
@@ -23,7 +23,7 @@ system Sys {
   resource ordersState { for: Orders, kind: state, use: primary }
   ui WebApp { framework: svelte }
   deployable app {
-    platform: phoenix
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState]
     hosts: WebApp

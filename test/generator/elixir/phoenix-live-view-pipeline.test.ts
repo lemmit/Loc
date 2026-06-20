@@ -59,7 +59,7 @@ const FIXTURE_SOURCE = `system MiniLiveView {
   }
 
   deployable phoenixApp {
-    platform: phoenix,
+    platform: elixir,
     contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,
@@ -380,7 +380,7 @@ describe("phoenixLiveView pipeline", () => {
     contexts: [Sales]
   }
   deployable phoenixApp {
-    platform: phoenix,
+    platform: elixir,
     contexts: [Sales],
     targets: peer,
     serves: SalesApi,
@@ -493,7 +493,7 @@ describe("emitApiControllers (api-emit unit)", () => {
 
   const stubDeployable: DeployableIR = {
     name: "phoenixApp",
-    platform: "phoenixLiveView",
+    platform: "elixir",
     contextNames: ["Customers"],
     dataSourceNames: [],
     port: 4000,
@@ -994,7 +994,7 @@ import { emitAuth } from "../../../src/generator/elixir/auth-emit.js";
 describe("JWT auth emission (auth-emit unit)", () => {
   const baseDeployable: DeployableIR = {
     name: "phoenixApp",
-    platform: "phoenixLiveView",
+    platform: "elixir",
     contextNames: ["Customers"],
     dataSourceNames: [],
     port: 4000,
@@ -1195,7 +1195,7 @@ describe("router wiring (orchestrator integration)", () => {
     permissions: string[]
   }
   deployable phoenixApp {
-    platform: phoenix,
+    platform: elixir,
     contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,
@@ -1407,7 +1407,7 @@ describe.skip("integration (parent wires emitters)", () => {
 //
 // Uses the full `examples/acme.ddd` (has workflows + views + parts +
 // value objects), retargeted by adding a third deployable that picks
-// `platform: phoenix`.
+// `platform: elixir`.
 // ---------------------------------------------------------------------------
 
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
@@ -1458,7 +1458,7 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
   api SalesApi from Sales
   ui SalesAdmin with scaffold(subdomains: [Sales]) {}
   deployable phoenixApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
@@ -2073,7 +2073,7 @@ const ACME_UI_E2E_SOURCE = `system AcmeUI {
   api SalesApi from Sales
   ui SalesAdmin with scaffold(subdomains: [Sales]) {}
   deployable phoenixApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
@@ -2166,7 +2166,7 @@ const FORM_FIXTURE = `system AcmeForm {
   api SalesApi from Sales
   ui SalesAdmin with scaffold(subdomains: [Sales]) {}
   deployable phoenixApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
@@ -2257,7 +2257,7 @@ describe("Per-aggregate controller emission (api-emit unit)", () => {
 
   const stubDeployable: DeployableIR = {
     name: "phoenixApp",
-    platform: "phoenixLiveView",
+    platform: "elixir",
     contextNames: ["Customers"],
     dataSourceNames: [],
     port: 4000,
@@ -2510,7 +2510,7 @@ describe("Per-operation + per-find route emission (api-emit unit)", () => {
 
   const stubDeployable: DeployableIR = {
     name: "phoenixApp",
-    platform: "phoenixLiveView",
+    platform: "elixir",
     contextNames: ["Customers"],
     dataSourceNames: [],
     port: 4000,
@@ -2700,7 +2700,7 @@ describe("OpenAPI spec — per-op + per-find paths", () => {
     };
     const deployable: DeployableIR = {
       name: "phoenixApp",
-      platform: "phoenixLiveView",
+      platform: "elixir",
       contextNames: ["Customers"],
       dataSourceNames: [],
       port: 4000,
@@ -3016,7 +3016,7 @@ describe("Ash 3.x compile-correctness regressions", () => {
             repository People for Person {}
           }
         }
-        deployable api { platform: phoenix, contexts: [People], port: 4000 }
+        deployable api { platform: elixir, contexts: [People], port: 4000 }
       }
     `;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-inspect-redact-"));
@@ -3143,7 +3143,7 @@ describe("renderTelemetry --trace (telemetry-emit unit)", () => {
     };
     const deployable: DeployableIR = {
       name: "phoenix_app",
-      platform: "phoenixLiveView",
+      platform: "elixir",
       contextNames: ["Customers"],
       dataSourceNames: [],
       port: 4000,
@@ -3215,7 +3215,7 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
   }
   api RosterApi from Roster
   ui RosterAdmin with scaffold(subdomains: [Roster]) { }
-  deployable phoenixApp { platform: phoenix  contexts: [Roster]  serves: RosterApi  ui: RosterAdmin  port: 4000 }
+  deployable phoenixApp { platform: elixir  contexts: [Roster]  serves: RosterApi  ui: RosterAdmin  port: 4000 }
 }
 `;
 
@@ -3357,7 +3357,7 @@ describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
         api SalesApi from Sales
         ui SalesUi with scaffold(subdomains: [Sales]) { }
         deployable phoenixApp {
-          platform: phoenix
+          platform: elixir
           contexts: [Sales]
           serves: SalesApi
           ui: SalesUi
@@ -3411,7 +3411,7 @@ describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
         api SalesApi from Sales
         ui SalesUi with scaffold(subdomains: [Sales]) { }
         deployable phoenixApp {
-          platform: phoenix
+          platform: elixir
           contexts: [Sales]
           serves: SalesApi
           ui: SalesUi
@@ -3474,7 +3474,7 @@ const WIRE_SOURCE = `system MiniWire {
   }
 
   deployable phoenixApp {
-    platform: phoenix,
+    platform: elixir,
     contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,

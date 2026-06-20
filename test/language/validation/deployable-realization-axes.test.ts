@@ -164,8 +164,8 @@ describe("realization axes — R3 style ↔ directoryLayout compatibility", () =
 });
 
 describe("realization axes — R4 foundation owns layers", () => {
-  it("rejects `foundation: ash` + `application:` on phoenix (Ash supplies it)", async () => {
-    const { errors } = await parse(sys("phoenix { foundation: ash, application: serviceLayer }"));
+  it("rejects `foundation: ash` + `application:` on elixir (Ash supplies it)", async () => {
+    const { errors } = await parse(sys("elixir { foundation: ash, application: serviceLayer }"));
     expect(
       errors.some((e) =>
         /foundation: ash.*owns the application layer.*remove 'application:'/i.test(e),
@@ -173,8 +173,8 @@ describe("realization axes — R4 foundation owns layers", () => {
     ).toBe(true);
   });
 
-  it("rejects `foundation: ash` + `transport:` on phoenix", async () => {
-    const { errors } = await parse(sys("phoenix { foundation: ash, transport: phoenixRouter }"));
+  it("rejects `foundation: ash` + `transport:` on elixir", async () => {
+    const { errors } = await parse(sys("elixir { foundation: ash, transport: phoenixRouter }"));
     expect(errors.some((e) => /foundation: ash.*owns the transport layer/i.test(e))).toBe(true);
   });
 
@@ -188,8 +188,8 @@ describe("realization axes — R4 foundation owns layers", () => {
 // Slice 0 of docs/plans/vanilla-foundation-tdd-plan.md — the previous
 // R5 emitter-not-implemented rejection is lifted now that the
 // `vanilla/` orchestrator subtree exists.  `foundation: vanilla` on
-// `platform: elixir` (and its legacy `phoenix` alias) must now parse,
-// lower, and validate without error.
+// `platform: elixir` must now parse, lower, and validate without error.
+// (The legacy `phoenix` / `phoenixLiveView` platform aliases were retired.)
 // ---------------------------------------------------------------------------
 describe("realization axes — foundation: vanilla on elixir is accepted (Slice 0)", () => {
   it("accepts `foundation: vanilla` on elixir without R5 (gate lifted)", async () => {
@@ -197,9 +197,9 @@ describe("realization axes — foundation: vanilla on elixir is accepted (Slice 
     expect(errors).toEqual([]);
   });
 
-  it("accepts the legacy `phoenix` alias too", async () => {
-    const { errors } = await parse(sys("phoenix { foundation: vanilla }"));
-    expect(errors).toEqual([]);
+  it("rejects the retired `phoenix` platform alias (D-ELIXIR-PLATFORM)", async () => {
+    const { errors } = await parse(sys('"phoenix"'));
+    expect(errors.some((e) => /Unknown platform 'phoenix'/.test(e))).toBe(true);
   });
 
   it("does NOT fire on elixir with `foundation: ash` (current emit path)", async () => {

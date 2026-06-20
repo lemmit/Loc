@@ -1,6 +1,6 @@
 // D-PHOENIX-SURFACE phase 6c — a Phoenix backend that EMBEDS a React SPA.
 //
-// The keystone case the whole proposal unlocks: `platform: phoenix`
+// The keystone case the whole proposal unlocks: `platform: elixir`
 // (an Ash/JSON-API backend) `hosts:` a `ui { framework: react }`.  The
 // orchestrator emits the Ash domain + `/api` controllers + OpenAPI (the
 // LiveView pages are NOT emitted), plus the React project under
@@ -46,7 +46,7 @@ system PhoenixEmbedReact {
   resource catalogState { for: Catalog, kind: state, use: primary }
 
   deployable phoenixApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Catalog]
     dataSources: [catalogState]
     serves: CatalogApi

@@ -449,7 +449,7 @@ system Sys {
   });
 
   it("emits a Phoenix polymorphic reader: list_parties! on the domain module", async () => {
-    const { files } = generateSystems(await parseValid(TPC_TWO_CONCRETE("phoenixLiveView", 4000)));
+    const { files } = generateSystems(await parseValid(TPC_TWO_CONCRETE("elixir", 4000)));
     const paths = [...files.keys()];
     // Concrete subtypes emit Ash resources; the abstract base emits none.
     expect(paths.some((p) => p.endsWith("parties/customer.ex"))).toBe(true);
@@ -499,7 +499,7 @@ system Sys {
     // Phoenix ships TPH via Ash shared-table multi-resource + base_filter on
     // `kind` (aggregate-inheritance.md I2).  All three DB backends now support
     // TPH, so the gate has no triggering host left.
-    const ON_PHOENIX = TPH.replace("platform: node", "platform: phoenix").replace(
+    const ON_PHOENIX = TPH.replace("platform: node", "platform: elixir").replace(
       "port: 3000",
       "port: 5000",
     );

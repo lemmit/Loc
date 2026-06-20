@@ -304,13 +304,15 @@ Framework returns string:
 // backend (Hono web framework); the framework name surfaces as the
 // `transport:` value, not as a platform alias.
 // `elixir` is the D-ELIXIR-PLATFORM canonical name for the
-// language-ecosystem platform; legacy `phoenix` and `phoenixLiveView`
-// desugar to `elixir` (the latter through a `phoenix → elixir` chain).
+// language-ecosystem platform.  The legacy `phoenix` / `phoenixLiveView`
+// platform aliases were RETIRED (mirroring the retired `hono` → `node`
+// alias): `elixir` is now the only spelling and `platform: phoenix` /
+// `platform: phoenixLiveView` fail validation as unknown platforms.
 // `python` is the canonical language-ecosystem name for the
 // FastAPI + SQLAlchemy backend; `fastapi` is its framework-spelled
 // alias and desugars to `python`.
 Platform returns string:
-    'dotnet' | 'node' | 'react' | 'svelte' | 'vue' | 'angular' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'python' | 'fastapi' | 'java' | STRING;
+    'dotnet' | 'node' | 'react' | 'svelte' | 'vue' | 'angular' | 'static' | 'elixir' | 'python' | 'fastapi' | 'java' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,

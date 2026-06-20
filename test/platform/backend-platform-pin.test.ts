@@ -50,6 +50,13 @@ describe("platform pin grammar + validation", () => {
     expect(pinned.errors.some((e) => /Unknown platform 'hono@v4'/.test(e))).toBe(true);
   });
 
+  it("rejects the retired `phoenix` / `phoenixLiveView` aliases (D-ELIXIR-PLATFORM)", async () => {
+    const { errors } = await parse(sys(`"phoenix"`));
+    expect(errors.some((e) => /Unknown platform 'phoenix'/.test(e))).toBe(true);
+    const lv = await parse(sys(`"phoenixLiveView"`));
+    expect(lv.errors.some((e) => /Unknown platform 'phoenixLiveView'/.test(e))).toBe(true);
+  });
+
   it("rejects an unregistered version with an available-list error", async () => {
     const { errors } = await parse(sys(`"node@v9"`));
     expect(errors.some((e) => /no version 'v9' of backend 'node'/.test(e))).toBe(true);

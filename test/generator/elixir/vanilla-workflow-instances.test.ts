@@ -132,7 +132,7 @@ describe("vanilla foundation — workflow-instance read endpoints", () => {
           }
         }
         storage primary { type: postgres }
-        deployable api { platform: phoenix { foundation: vanilla }  contexts: [F]  port: 4000 }
+        deployable api { platform: elixir { foundation: vanilla }  contexts: [F]  port: 4000 }
       }
     `;
     const { model } = await parseString(SRC, { validate: false });

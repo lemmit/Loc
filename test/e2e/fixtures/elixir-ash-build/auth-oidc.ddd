@@ -34,7 +34,7 @@ system Helpdesk {
 
   api SupportApi from Support
   deployable phoenixApp {
-    platform: phoenix { foundation: ash }
+    platform: elixir { foundation: ash }
     contexts: [Tickets]
     serves: SupportApi
     dataSources: [ticketState]

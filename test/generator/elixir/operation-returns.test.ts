@@ -29,7 +29,7 @@ system Orders {
   storage primary { type: postgres }
   resource ordersState { for: Reservations, kind: state, use: primary }
   deployable api {
-    platform: phoenix
+    platform: elixir
     contexts: [Reservations]
     dataSources: [ordersState]
     serves: OrdersApi
@@ -125,7 +125,7 @@ system Inventory {
   storage primary { type: postgres }
   resource itemState { for: Stock, kind: state, use: primary }
   deployable api {
-    platform: phoenix
+    platform: elixir
     contexts: [Stock]
     dataSources: [itemState]
     serves: InventoryApi

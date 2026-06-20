@@ -50,7 +50,7 @@ describe("audited-operation capability validation", () => {
   });
 
   it("rejects an audited operation on a Phoenix deployable (no audit emission)", async () => {
-    const errs = await auditErrors(sys("phoenixLiveView"));
+    const errs = await auditErrors(sys("elixir"));
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("audit-record emission");
   });

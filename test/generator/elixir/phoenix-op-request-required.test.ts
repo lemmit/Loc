@@ -28,7 +28,7 @@ system Demo {
   }
   api ProjectsApi from Projects
   deployable phoenixApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Projects]
     serves: ProjectsApi
     port: 4000

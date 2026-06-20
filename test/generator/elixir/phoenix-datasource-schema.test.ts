@@ -35,7 +35,7 @@ system Sys {
   ${dataSourceClause}
   ui WebApp {}
   deployable api {
-    platform: phoenix
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState]
     ui: WebApp

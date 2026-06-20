@@ -28,7 +28,7 @@ system Demo {
     }
   }
   deployable phoenixApp {
-    platform: phoenix, contexts: [C], serves: DemoApi,
+    platform: elixir, contexts: [C], serves: DemoApi,
     ui: DemoUi, port: 4000
   }
 }

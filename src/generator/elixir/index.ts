@@ -106,7 +106,7 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   // React project is generated under `assets/` instead (phase 6a wires
   // the emit; the endpoint/router/Dockerfile serve-wiring is phase 6b).
   // Dormant until an example uses it: no current source pairs
-  // `platform: phoenix` with a `framework: react` ui, so output is
+  // `platform: elixir` with a `framework: react` ui, so output is
   // unchanged.  The Ash domain + `/api` controllers + OpenAPI are
   // emitted in either mode.
   const embedVue = deployable.uiFramework === "vue";

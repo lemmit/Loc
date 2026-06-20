@@ -28,7 +28,7 @@ function p(
 
 describe("byFeature LayoutAdapter — phoenixLiveView (real)", () => {
   it("is registered as the phoenixLiveView byFeature layout adapter", () => {
-    const resolved = resolveLayout("phoenixLiveView", "byFeature");
+    const resolved = resolveLayout("elixir", "byFeature");
     expect(resolved).toBe(byFeatureLayoutAdapter);
     expect(resolved.name).toBe("byFeature");
   });

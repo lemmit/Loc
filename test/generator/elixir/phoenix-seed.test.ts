@@ -27,7 +27,7 @@ const FIXTURE = `system AcmeSeed {
   }
   api ShopApi from Shop
   deployable web {
-    platform: phoenix
+    platform: elixir
     contexts: [Catalog]
     serves: ShopApi
     port: 4000
@@ -109,7 +109,7 @@ describe("phoenix seeding — raw explicit-id path", () => {
     ui U with scaffold(subdomains: [Sales]) { }
     storage p { type: postgres }
     resource st { for: Sales, kind: state, use: p }
-    deployable web { platform: phoenixLiveView contexts: [Sales] dataSources: [st] serves: A ui: U port: 4000 }
+    deployable web { platform: elixir contexts: [Sales] dataSources: [st] serves: A ui: U port: 4000 }
   }`;
 
   it("emits Ecto.Adapters.SQL INSERTs with explicit id + FK", async () => {
