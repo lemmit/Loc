@@ -59,6 +59,10 @@ export interface SveltePageEmitContext {
   contextsByName: Map<string, BoundedContextIR>;
   pack: LoadedPack;
   topLevelComponents: readonly ComponentIR[];
+  /** True when the frontend opts into `auth: ui` — a page's `requires` gate
+   *  then renders a client-side `{#if}`-guarded `<Forbidden/>` against the
+   *  verified session claims.  Optional: absent ⇒ ungated. */
+  authUi?: boolean;
 }
 
 /** Translate a page-metamodel route to a SvelteKit route directory
@@ -211,6 +215,9 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
         pageRoutes,
         externFunctionNames,
         page.derived,
+        // `page { requires <expr> }` UI gate — only when a verified session is
+        // available to evaluate it against.
+        ctx.authUi ? page.requires : undefined,
       ),
     );
   }
