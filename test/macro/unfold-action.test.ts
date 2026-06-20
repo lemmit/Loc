@@ -69,10 +69,10 @@ async function unfold(source: string, macroNameInSource: string): Promise<string
 }
 
 describe("unfold code action", () => {
-  // NOTE: `softDeletable`/`auditable` are now built-in capabilities (not macros),
-  // so the unfold code action — which expands macro calls — no longer targets
-  // them; unfolding a typed capability is a Phase 5 (LSP) concern.  `softDelete`
-  // (the operations) is still a macro and unfolds.  Clause order is
+  // NOTE: `softDeletable`/`auditable` are now built-in capabilities (not macros).
+  // Unfold is a MACRO refactor (it expands a `with X(...)` macro call to its
+  // source), so it does not target capabilities at all.  `softDelete` (the
+  // operations) is still a macro and unfolds.  Clause order is
   // `softDelete, softDeletable` so the marker search lands on the standalone
   // `softDelete` and not the `softDelete` inside `softDeletable`.
 
