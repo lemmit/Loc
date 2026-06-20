@@ -141,7 +141,7 @@ export function renderActions(
   // `update` action.
   const opActions = ops.map((op) =>
     isAshReturningOpSupported(op)
-      ? renderAshReturningOpAction(ctx, agg, op)
+      ? renderAshReturningOpAction(ctx, agg, op, ctxModule)
       : renderOperationAction(op, renderCtx, ctxModule),
   );
 

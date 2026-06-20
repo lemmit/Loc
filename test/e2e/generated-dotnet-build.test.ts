@@ -21,7 +21,7 @@ import { CORPUS_DEPLOYABLE, materializeCorpusFixture } from "../fixtures/corpus/
 // `.github/workflows/dotnet-build.yml` runs the same check on every
 // PR that touches the .NET generator.
 //
-// Requires the .NET SDK on PATH (8.0 — matches the generated
+// Requires the .NET SDK on PATH (10.0 — matches the generated
 // `<TargetFramework>` in `templates/program.tpl.ts`).
 // ---------------------------------------------------------------------------
 
@@ -86,9 +86,9 @@ describe.skipIf(!ENABLED)(
           stdio: "inherit",
           timeout: 180_000,
         });
-        // A `.dll` lands in `bin/Debug/net8.0/` on a successful build —
+        // A `.dll` lands in `bin/Debug/net10.0/` on a successful build —
         // assert one exists so a silent no-op build can't pass.
-        const binDir = path.join(outDir, "bin", "Debug", "net8.0");
+        const binDir = path.join(outDir, "bin", "Debug", "net10.0");
         const builtDlls = fs.existsSync(binDir)
           ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
           : [];
@@ -127,7 +127,7 @@ describe.skipIf(!ENABLED)(
           stdio: "inherit",
           timeout: 180_000,
         });
-        const binDir = path.join(proj, "bin", "Debug", "net8.0");
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
         const builtDlls = fs.existsSync(binDir)
           ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
           : [];
@@ -163,7 +163,7 @@ describe.skipIf(!ENABLED)(
           stdio: "inherit",
           timeout: 180_000,
         });
-        const binDir = path.join(proj, "bin", "Debug", "net8.0");
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
         const builtDlls = fs.existsSync(binDir)
           ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
           : [];
@@ -198,7 +198,7 @@ describe.skipIf(!ENABLED)(
           stdio: "inherit",
           timeout: 180_000,
         });
-        const binDir = path.join(proj, "bin", "Debug", "net8.0");
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
         const builtDlls = fs.existsSync(binDir)
           ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
           : [];
@@ -256,7 +256,7 @@ describe.skipIf(!ENABLED)(
           stdio: "inherit",
           timeout: 180_000,
         });
-        const binDir = path.join(proj, "bin", "Debug", "net8.0");
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
         const builtDlls = fs.existsSync(binDir)
           ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
           : [];
@@ -307,7 +307,7 @@ describe.skipIf(!ENABLED)(
           stdio: "inherit",
           timeout: 180_000,
         });
-        const binDir = path.join(proj, "bin", "Debug", "net8.0");
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
         const builtDlls = fs.existsSync(binDir)
           ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
           : [];

@@ -48,6 +48,7 @@ import type {
   MenuMetaEntry,
   NamedType,
   NameRef,
+  NowExpr,
   NullLit,
   Operation,
   Page,
@@ -201,6 +202,10 @@ export function mkStringLit(shape: AstLiteral<StringLit>): StringLit {
 
 export function mkBoolLit(shape: AstLiteral<BoolLit>): BoolLit {
   return mkAst<BoolLit>(shape);
+}
+
+export function mkNowExpr(shape: AstLiteral<NowExpr>): NowExpr {
+  return mkAst<NowExpr>(shape);
 }
 
 export function mkIntLit(shape: AstLiteral<IntLit>): IntLit {

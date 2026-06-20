@@ -25,10 +25,13 @@ export function isReturnDominantOp(op: OperationIR): boolean {
  *  the return-dominant slice to *in-memory* mutation-then-return: the run fn
  *  loads the record and a `field := value` (`assign`) struct-updates it in
  *  place (`%{record | field: …}`, same as the vanilla foundation — no Ash
- *  changeset / no persistence beyond the response), and `precondition` /
- *  `requires` guards raise.  Still deferred (→ host on `foundation: vanilla`):
- *  `emit` (PubSub), `add`/`remove` (association metadata), and bare expression
- *  statements — those need machinery the generic action's run fn doesn't carry. */
+ *  changeset / no persistence beyond the response), `precondition` / `requires`
+ *  guards raise, and `emit` broadcasts a domain event over `Phoenix.PubSub`
+ *  (the same broadcast the regular Ash op body / workflow renders — no
+ *  persistence, so it fits the generic action's run fn).  Still deferred (→ host
+ *  on `foundation: vanilla`): `add`/`remove` (they mutate a join table via
+ *  `manage_relationship`, which needs a changeset the generic action doesn't
+ *  carry) and bare expression statements. */
 export function isAshReturningOpEmittable(op: OperationIR): boolean {
   if (!op.returnType) return false;
   return op.statements.every(
@@ -37,6 +40,7 @@ export function isAshReturningOpEmittable(op: OperationIR): boolean {
       s.kind === "let" ||
       s.kind === "assign" ||
       s.kind === "precondition" ||
-      s.kind === "requires",
+      s.kind === "requires" ||
+      s.kind === "emit",
   );
 }

@@ -149,11 +149,11 @@ The same vendor-neutral source emits idiomatic native code per backend — the
 payoff of the model. Per consumed resource, a client module is emitted and the
 verb call sites dispatch to it:
 
-| kind | hono | .NET | Phoenix |
-|---|---|---|---|
-| objectStore | `@aws-sdk/client-s3` (+ presigner) | `AWSSDK.S3` | `ExAws.S3` |
-| queue | `amqplib` | `RabbitMQ.Client` v7 | `AMQP` |
-| api | `fetch` | `HttpClient` | `Req` |
+| kind | hono | .NET | Phoenix | Python | Java |
+|---|---|---|---|---|---|
+| objectStore | `@aws-sdk/client-s3` (+ presigner) | `AWSSDK.S3` | `ExAws.S3` | `boto3` (+ presigner) | `software.amazon.awssdk:s3` (+ `S3Presigner`) |
+| queue | `amqplib` | `RabbitMQ.Client` v7 | `AMQP` | `aio_pika` | `com.rabbitmq:amqp-client` |
+| api | `fetch` | `HttpClient` | `Req` | `httpx` | `java.net.http HttpClient` |
 
 Dev `docker-compose` gains a sidecar per object-store / queue storage (MinIO for
 `s3`, `rabbitmq`); deployables with no such resources are byte-identical.

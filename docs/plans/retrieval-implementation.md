@@ -1,5 +1,7 @@
 # Retrieval — implementation plan (PR-sliced)
 
+> **[2026-06-20 status audit]** Header contradicts the body's MERGED PR list — retrieval (`where` + multi-column `sort` + offset pagination + whole-load) is IMPLEMENTED across backends; explicit `loads:` is gated (`loom.retrieval-loads-unsupported`). Only Phase 5 reified criteria + Phase 6 autoload remain.
+
 > Status: **plan, not yet implemented.** Captures the grounded
 > file-by-file plan for the `retrieval` keyword
 > ([`../proposals/retrieval.md`](../proposals/retrieval.md)). Companion:

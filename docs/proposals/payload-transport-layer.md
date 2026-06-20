@@ -1,5 +1,7 @@
 # Payload — a structural transport layer
 
+> **[2026-06-20 status audit]** Two sub-claims advanced: `or`-unions now emit on FIVE backends (`structural-checks.ts:~414`); the union-find producer path is no longer 'stubbed on .NET and Hono' (`dotnet/find-emit.ts:~35`, `typescript/repository-find-builder.ts:~398`).
+
 > Status: **PARTIAL — most of P1–P4 shipped** (code-verified 2026-06-10):
 > **P1** — the `payload` umbrella with all six kinds
 > (`payload | event | command | query | response | error`) parses,

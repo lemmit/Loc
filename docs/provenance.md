@@ -8,11 +8,15 @@ backend records a runtime trace on every write so a value can later
 be explained: "this 128.40 came from `reprice(qty=8, price=16)` via
 rule `<snapshotId>`".
 
-Provenance has a runtime on the **Hono (`node`)** and **.NET (`dotnet`)**
-backends — both emit the co-located lineage column, per-write trace
-capture, and the transactional `provenance_records` flush.  The
-remaining backends (`phoenixLiveView`, `react`) parse the keyword but
-emit no trace code; only the snapshot capture runs across all backends.
+Provenance has a runtime on the **Hono (`node`)**, **.NET (`dotnet`)** and
+**elixir on the `vanilla` foundation** backends — each emits the co-located
+lineage column, per-write trace capture, and the transactional
+`provenance_records` flush.  The remaining surfaces (elixir on the **`ash`**
+foundation, `react`) parse the keyword but emit no trace code; only the
+snapshot capture runs across all backends.  On Phoenix this is a *foundation*
+constraint — `foundation: vanilla` un-gates the runtime, `foundation: ash`
+stays gated (the validator rejects a provenanced field hosted on Ash, exactly
+like event-sourced storage).
 
 ## Surface
 
@@ -152,9 +156,50 @@ frame explicitly, while a direct operation route runs in the root frame
 fresh root frame, so the row still records the write but with a
 correlation orphaned from the original request.
 
+## Generated runtime (elixir — `foundation: vanilla`)
+
+The vanilla foundation (plain Phoenix + Ecto, no Ash) emits the same shape
+in Elixir's immutable idiom:
+
+- `lib/<app>/provenance.ex` — the `<App>.Provenance` SDK: a per-process trace
+  buffer (`record/1` push, `drain/0` clear) and the transactional history
+  flush (`flush/1`).  The BEAM has no AsyncLocal, so the buffer rides the
+  **process dictionary** (cleared on drain) — the same per-process discipline
+  `RequestContext` uses for `Logger.metadata`.  Alongside it: `<App>.Provenance
+  .Json` (a pass-through Ecto type so a scalar `computed_value` and the
+  `inputs` list share one jsonb shape) and `<App>.Provenance.Record` (the
+  append-only history schema).
+- A co-located `field :<field>_provenance, <App>.Provenance.Json` on the
+  aggregate's Ecto schema (jsonb column).
+- **Inline capture** at every provenanced write site inside a named operation:
+  snapshot the leaf inputs *before* the struct rebind, build the lineage map,
+  route it to the co-located column AND `<App>.Provenance.record(...)`.
+- The named-operation persist runs the save + `<App>.Provenance.flush(Repo)`
+  in **one `Repo.transaction`**, so the `provenance_records` rows commit
+  atomically with the aggregate update.  Each row is stamped with the ambient
+  `RequestContext` ids (correlation / scope / actor / parent).
+- The co-located columns + the `provenance_records` table ship as one extra
+  migration (`…_create_provenance.exs`, a high timestamp so it sorts after
+  every module's initial migration), schema-prefixed to match each aggregate's
+  table.
+
+Capture covers **named operations** (the persisting path); returning-op bodies
+on vanilla don't persist, so a provenanced write there is a no-op (the
+canonical reprice/applyDiscount shape is a named operation).
+
+```elixir
+# lib/<app>/<ctx>.ex — total := qty * price - discount, captured:
+loom_prov_inputs_1 = [%{path: "qty", value: qty}, %{path: "price", value: price}, %{path: "discount", value: record.discount}]
+record = %{record | total: qty * price - record.discount}
+loom_lineage_1 = %{snapshot_id: "13d60464", target: %{type: "Order", field: "total"}, inputs: loom_prov_inputs_1, computed_value: record.total}
+record = %{record | total_provenance: loom_lineage_1}
+_ = MyApp.Provenance.record(loom_lineage_1)
+# …then save + MyApp.Provenance.flush(MyApp.Repo) inside Repo.transaction.
+```
+
 ## Other backends
 
-`phoenixLiveView` and `react` parse `provenanced` and treat it as a
+elixir on `foundation: ash` and `react` parse `provenanced` and treat it as a
 no-op at runtime.  The snapshot capture still produces a file for the
 system as a whole; backends that don't implement the runtime half
 ignore it.

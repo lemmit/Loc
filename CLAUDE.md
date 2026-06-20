@@ -18,9 +18,17 @@ Once a plan exists (or the user has approved an approach), **execute it end to e
 - **Don't idle on CI.** If the next slice is independent, start it while CI runs. If it builds on an unmerged branch, **stack the PR** on the previous one rather than waiting for green. Report status in a line and keep moving.
 - **Surface, don't stall.** When you do hit a real blocker, say what's blocked and what you'd do by default, then take that default unless it's irreversible — don't wait for "continue with recommended".
 
+## Sync with `main` constantly — it moves under you
+
+This repo has **fast-moving `main`** (parallel agents land PRs continuously). A stale base is the single biggest source of wasted effort here, so:
+
+- **Re-sync before every new unit of work AND after every merge.** `git fetch origin main && git reset --hard origin/main` (or rebase the feature branch onto it). The SessionStart hook warns when you're behind — believe it. Don't start the next slice on yesterday's base.
+- **Verify the task isn't already done — *on fresh `main`* — before building.** Check `git log --oneline -20`, grep the actual validator gates / emitters, and `list_pull_requests` for in-flight work. This session, two things were **already shipped** when I started building them (a principal-filter slice; the elixir embedded-filter slice → a duplicate PR that had to be closed), and one "blocker" was **stale** (vanilla op-bodies looked unimplemented because I was reading pre-merge code — a `git fetch` later showed `#1395` had just fixed it). When in doubt, the code on fresh `main` wins over your memory of it.
+- **A stale base lies twice:** you rebuild already-merged work, *and* you reason from behaviour that no longer exists. Both are expensive. One `git fetch` up front is cheaper than either.
+
 ## What this is
 
-**Loom** — a Langium-based DSL for Domain-Driven Design. A `.ddd` source describes a `system` of `module`s, `aggregate`s, `valueobject`s, `event`s, `repository`s, `api`s, `storage`s, `ui`s, and `deployable`s; the toolchain generates a runnable multi-project tree wired together as one `docker compose` stack. Five backends (TypeScript/Hono, .NET/ASP.NET+EF+Mediator, Phoenix LiveView/Ash, Python/FastAPI+SQLAlchemy, Java/Spring Boot+JPA) and three frontends (React/Vite+Mantine, Vue 3/Vite+Vuetify, Svelte/SvelteKit) are supported.
+**Loom** — a Langium-based DSL for Domain-Driven Design. A `.ddd` source describes a `system` of `module`s, `aggregate`s, `valueobject`s, `event`s, `repository`s, `api`s, `storage`s, `ui`s, and `deployable`s; the toolchain generates a runnable multi-project tree wired together as one `docker compose` stack. Five backends (TypeScript/Hono, .NET/ASP.NET+EF+Mediator, Phoenix LiveView/Ash, Python/FastAPI+SQLAlchemy, Java/Spring Boot+JPA) and four frontends (React/Vite+Mantine, Vue 3/Vite+Vuetify, Svelte/SvelteKit, Angular+Angular Material) are supported.
 
 The package name in `package.json` is `loc-ddd-dsl`; the CLI binary is `ddd`; the working name everywhere in docs and code is "Loom".
 
@@ -88,7 +96,7 @@ It does **not** persist — if `docker info` starts failing mid-session, just re
 **Every backend target compiles locally without waiting on CI** (verified end-to-end here — generate → compile):
 
 - **Java** — `gradle testClasses bootJar` on the *host* (JDK 21 + Gradle present; no container needed).
-- **.NET** — host has no SDK, so build in the `mcr.microsoft.com/dotnet/sdk:8.0` container (matches the `net8.0` target): `dotnet restore` + `dotnet build /warnaserror` are clean.
+- **.NET** — host has no SDK, so build in the `mcr.microsoft.com/dotnet/sdk:10.0` container (matches the `net10.0` target): `dotnet restore` + `dotnet build /warnaserror` are clean.
 - **Phoenix/Elixir** — `mix deps.get && mix compile --warnings-as-errors` in the `hexpm/elixir` image, against real Ash 3.x.
 - **Python** — `uv sync` + ruff + mypy + pytest on the host.
 
@@ -105,7 +113,7 @@ node bin/cli.js generate ts     <file.ddd> -o <out>    # single Hono project (le
 node bin/cli.js generate dotnet <file.ddd> -o <out>    # single .NET project (legacy)
 node bin/cli.js generate system <file.ddd> -o <out>    # full multi-deployable tree + docker-compose.yml
 node bin/cli.js snapshot        <file.ddd> -o <out>    # capture immutable .loom/snapshots/<ts>-<guid>.loomsnap.json (provenance rule snapshot — like `ef migrations add`, run deliberately)
-node bin/cli.js verify          <file.ddd> -o <out>    # run the generated test suites + join results onto the traceability graph → .loom/verification.{json,md}
+node bin/cli.js verify          <file.ddd> --results <results.json> [--out <dir>]  # join an existing test-results JSON onto the requirements graph → .loom/verification.{json,md} (gates the exit code; does NOT run the suites itself)
 ```
 
 Flags: `-o/--out`, `-w/--watch` (legacy generate only), `--dry-run` (print `write`/`skip` plan, touch nothing).
@@ -177,7 +185,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 
 ### Scaffolding
 
-`scaffold modules: M` / `scaffold aggregates: …` is compile-time sugar. The AST-walker expansion lives in `src/ir/lower/walker-primitive-expander.ts` (~1.0k LOC); the per-shape macro bodies live under `src/macros/stdlib/scaffold/` (`scaffold.macro.ts` plus its siblings `scaffoldAggregate.macro.ts`, `scaffoldContext.macro.ts`, `scaffoldModule.macro.ts`, `scaffoldView.macro.ts`, `scaffoldWorkflow.macro.ts`). Sibling stdlib capabilities (`audit/`, `softDelete/`, `crudish.macro.ts`) sit alongside under `src/macros/stdlib/`. Synthesised pages carry a `scaffoldOrigin` tag, then lower to explicit walker-stdlib bodies.
+`scaffold modules: M` / `scaffold aggregates: …` is compile-time sugar. The AST-walker expansion lives in `src/ir/lower/walker-primitive-expander.ts` (~1.0k LOC); the per-shape macro bodies live under `src/macros/stdlib/scaffold/` (`scaffold.macro.ts` plus its siblings `scaffoldAggregate.macro.ts`, `scaffoldContext.macro.ts`, `scaffoldSubdomain.macro.ts`, `scaffoldView.macro.ts`, `scaffoldWorkflow.macro.ts`). Sibling stdlib capabilities (`audit/`, `softDelete/`, `crudish.macro.ts`) sit alongside under `src/macros/stdlib/`. Synthesised pages carry a `scaffoldOrigin` tag, then lower to explicit walker-stdlib bodies.
 
 ## Repository layout (non-obvious bits)
 

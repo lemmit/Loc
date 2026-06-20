@@ -15,6 +15,8 @@
 > projections over running sagas the way they already do over aggregates,
 > reusing the `view` pipeline on top of that read model.
 
+> **[2026-06-20 status audit]** Also ships on Python (`python/views-builder.ts`), Java, and elixir-vanilla now — not just Hono/.NET/React. Only the Phoenix-Ash OpenAPI surface still defers (`openapi-emit.ts`).
+
 ## Problem
 
 The instance surface that shipped answers *"show me every running

@@ -3,6 +3,8 @@
 > Status: proposal. Not in `ddd.langium`. Builds on the
 > [execution-context backbone](./execution-context.md).
 
+> **[2026-06-20 status audit]** `audited` is a real operation modifier now (grammar `ddd.langium:~1383`, IR `loom-ir.ts:~324`, validator `validateAuditedOperationSupport`, emit on Hono + .NET `dotnet/emit/audit.ts`). Only `logged` remains a proposal.
+
 ## Problem
 
 Teams need an explicit, compiler-supported way to say *"this matters for

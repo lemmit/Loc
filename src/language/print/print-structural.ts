@@ -163,6 +163,8 @@ export function printStructural(node: AstNode): string {
       return printDataSource(node as import("../generated/ast.js").Resource);
     case "Layout":
       return printLayout(node as Layout);
+    case "Capability":
+      return printCapability(node as import("../generated/ast.js").Capability);
     case "BoundedContext":
       return printBoundedContext(node as BoundedContext);
     case "EnumDecl":
@@ -574,27 +576,32 @@ function printBoundedContext(node: BoundedContext): string {
   );
 }
 
-/** `filter [for "<name>"] <expr>` — capability-scoped variant when
- * `for` is set, otherwise applies to every aggregate at scope. */
-function printFilterDecl(node: import("../generated/ast.js").FilterDecl): string {
-  const cap = (node as { capability?: string }).capability;
-  const forClause = cap ? ` for ${quote(cap)}` : "";
-  return `filter${forClause} ${printExpr(node.expr)}`;
+/** `capability <name> { <field|filter|stamp>… }` (typed-capabilities.md) —
+ * a pure-mixin bundle.  Every body member (`Property`/`FilterDecl`/
+ * `StampDecl`) is itself printable, so it reuses `printStructural`. */
+function printCapability(node: import("../generated/ast.js").Capability): string {
+  return block(
+    `capability ${node.name}`,
+    node.members.map((m) => printStructural(m)),
+  );
 }
 
-/** `stamp [for "<name>"] <event> { ... }` */
+/** `filter <expr>` — applies to its aggregate, or every aggregate at context scope. */
+function printFilterDecl(node: import("../generated/ast.js").FilterDecl): string {
+  return `filter ${printExpr(node.expr)}`;
+}
+
+/** `stamp <event> { ... }` */
 function printStampDecl(node: import("../generated/ast.js").StampDecl): string {
-  const cap = (node as { capability?: string }).capability;
-  const forClause = cap ? ` for ${quote(cap)}` : "";
   return block(
-    `stamp${forClause} ${node.event}`,
+    `stamp ${node.event}`,
     (node.assignments ?? []).map((a) => printStmt(a as never)),
   );
 }
 
-/** `implements "<name>"` */
+/** `implements <Cap>` (typed capability application) */
 function printImplementsDecl(node: import("../generated/ast.js").ImplementsDecl): string {
-  return `implements ${quote(node.name)}`;
+  return `implements ${node.cap}`;
 }
 
 /** `seed [dataset] [raw] { <Agg> { … } … }` (database-seeding.md) */
@@ -975,6 +982,9 @@ function printTypeAtom(node: TypeRef | import("../generated/ast.js").TypeAtom): 
       break;
     case "ActionType":
       s = base.arg ? `action(${printTypeRef(base.arg)})` : "action";
+      break;
+    case "SelfType":
+      s = "Self id";
       break;
     case "IdType":
       s = `${base.target.$refText} id`;

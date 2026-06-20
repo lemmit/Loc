@@ -32,8 +32,11 @@ import { AstUtils, DocumentState } from "langium";
 import type { LangiumSharedServices } from "langium/lsp";
 import {
   type Aggregate,
+  type Capability,
   isAggregate,
   isBoundedContext,
+  isCapability,
+  isImplementsDecl,
   isSubdomain,
   isSystem,
   isUi,
@@ -44,6 +47,7 @@ import {
   type Model,
   type Ui,
 } from "../language/generated/ast.js";
+import { CAPABILITIES_TAG } from "../util/capability-tag.js";
 import { readArgBool, readArgInt, readArgRef, readArgRefs, readArgString } from "./api/_read.js";
 import type {
   MacroDefinition,
@@ -53,7 +57,25 @@ import type {
   ParamType,
 } from "./api/define.js";
 import { _withOrigin } from "./api/factories.js";
+import { builtinCapabilities } from "./prelude.js";
 import { allMacros, lookupMacro } from "./registry.js";
+
+// The deep-clone reference rebuilder `copyAstNode` expects — the
+// language Linker's `buildReference`.  A capability's members are cloned
+// once per implementing aggregate (the same AST node can't live under N
+// parents), and each cloned cross-reference (e.g. a `createdBy: User`
+// type ref) is rebuilt here so the Linked phase resolves it normally.
+type BuildRef = Parameters<typeof AstUtils.copyAstNode>[1];
+
+// Capability members are cloned with PLAIN `{ $refText }` references (the shape
+// the macro factories' `makeRef` produces), NOT the Linker's `buildReference`.
+// A plain reference resolves leniently — lowering reads `$refText` directly and
+// the linker never surfaces a "could not resolve" diagnostic — matching the
+// field/filter/stamp macros these capabilities replace.  A linker-built
+// reference would instead report unresolved targets the macro silently tolerated
+// (e.g. an `auditable` `createdBy: User id` in a model with no `User` aggregate).
+const buildCapabilityRef: BuildRef = (_node, _property, _refNode, refText) =>
+  ({ $refText: refText }) as never;
 
 // Side-table mechanism removed: capabilities are now first-class
 // AST members (FilterDecl / StampDecl / ImplementsDecl) spliced into
@@ -127,6 +149,9 @@ interface Inventory {
   View: Map<string, AstNode>;
   ValueObject: Map<string, AstNode>;
   EnumDecl: Map<string, AstNode>;
+  /** Typed capability declarations (typed-capabilities.md) keyed by name.
+   * A `with <cap>` clause resolves against this when no macro matches. */
+  Capability: Map<string, Capability>;
 }
 
 function buildInventory(model: Model, shared?: LangiumSharedServices): Inventory {
@@ -138,6 +163,7 @@ function buildInventory(model: Model, shared?: LangiumSharedServices): Inventory
     View: new Map(),
     ValueObject: new Map(),
     EnumDecl: new Map(),
+    Capability: new Map(),
   };
   const scan = (root: Model): void => {
     for (const node of AstUtils.streamAllContents(root)) {
@@ -150,6 +176,7 @@ function buildInventory(model: Model, shared?: LangiumSharedServices): Inventory
       else if (isView(node)) inv.View.set(named.name, node);
       else if (node.$type === "ValueObject") inv.ValueObject.set(named.name, node);
       else if (node.$type === "EnumDecl") inv.EnumDecl.set(named.name, node);
+      else if (isCapability(node)) inv.Capability.set(named.name, node);
     }
   };
   // Sibling documents first, then the local model — so a local
@@ -176,12 +203,20 @@ function expandModel(model: Model, doc: LangiumDocument, shared?: LangiumSharedS
   // O(N) AST walk once, instead of once per ref-list arg.  Workspace-aware
   // so a macro ref-list can name a declaration in a sibling file.
   const inv = buildInventory(model, shared);
+  // Merge the built-in capability prelude into the inventory — a user-declared
+  // capability of the same name already populated `inv` and wins (default, not
+  // override).  Cheap and side-effect-free, so unconditional.
+  for (const [name, cap] of builtinCapabilities()) {
+    if (!inv.Capability.has(name)) inv.Capability.set(name, cap);
+  }
+  void shared;
+  const buildRef = buildCapabilityRef;
   // streamAllContents walks the AST via `$container`-respecting
   // traversal — safe from cycle-via-parent-pointer recursion.
   for (const node of AstUtils.streamAllContents(model)) {
-    if (isAggregate(node)) expandHost(node, "aggregate", doc, inv);
-    else if (isUi(node)) expandHost(node, "ui", doc, inv);
-    else if (isBoundedContext(node)) expandHost(node, "context", doc, inv);
+    if (isAggregate(node)) expandHost(node, "aggregate", doc, inv, buildRef);
+    else if (isUi(node)) expandHost(node, "ui", doc, inv, buildRef);
+    else if (isBoundedContext(node)) expandHost(node, "context", doc, inv, buildRef);
   }
   void isSystem; // imported for symmetry with future system-level macros
 }
@@ -191,11 +226,34 @@ function expandHost(
   kind: "aggregate" | "ui" | "context",
   doc: LangiumDocument,
   inv: Inventory,
+  buildRef: BuildRef | undefined,
 ): void {
   const wc = host.withClause;
-  if (!wc) return;
-  for (const call of wc.calls ?? []) {
-    expandOneCall(call, host, kind, doc, inv);
+  if (wc) {
+    for (const call of wc.calls ?? []) {
+      expandOneCall(call, host, kind, doc, inv, buildRef);
+    }
+  }
+  // Typed `implements <Cap>` — a capability application, synonym of `with <Cap>`
+  // (typed-capabilities.md).  The legacy `implements "string"` group-opt-in form
+  // (`ImplementsDecl.name`) is handled in lowering, not here.  Snapshot the
+  // member list because aggregate-scope expansion splices into it.
+  if (kind !== "ui") {
+    const members = [...((host as { members?: AstNode[] }).members ?? [])];
+    for (const m of members) {
+      if (!isImplementsDecl(m) || !m.cap) continue;
+      const capDecl = inv.Capability.get(m.cap);
+      if (capDecl) {
+        expandCapability(capDecl, host, kind, m, doc, buildRef);
+      } else {
+        recordDiagnostic(doc, {
+          severity: "error",
+          message: `Unknown capability '${m.cap}' in 'implements'.`,
+          node: m,
+          property: "cap",
+        });
+      }
+    }
   }
 }
 
@@ -205,14 +263,24 @@ function expandOneCall(
   hostKind: "aggregate" | "ui" | "context",
   doc: LangiumDocument,
   inv: Inventory,
+  buildRef: BuildRef | undefined,
 ): void {
   const name = call.name;
   if (!name) return;
   const macro = lookupMacro(name);
   if (!macro) {
+    // No macro by this name — try a typed capability (typed-capabilities.md).
+    // Macro wins on a name collision (a stdlib macro shadows a same-named
+    // capability) until the stdlib migrates in Phase 3; that keeps this
+    // purely additive.
+    const cap = inv.Capability.get(name);
+    if (cap) {
+      expandCapability(cap, host, hostKind, call, doc, buildRef);
+      return;
+    }
     recordDiagnostic(doc, {
       severity: "error",
-      message: `Unknown macro '${name}'.  Available: ${listMacroNames()}.`,
+      message: `Unknown macro or capability '${name}'.  Available macros: ${listMacroNames()}.`,
       node: call,
       property: "name",
     });
@@ -336,6 +404,86 @@ function expandOneCall(
   spliceMembers(host, hostKind, flat, call, doc);
 }
 
+/** Expand a typed-capability reference (`aggregate Order with auditable`, or
+ * context-level `context Sales with auditable`): deep-clone each of the
+ * capability's members (`Property` / `FilterDecl` / `StampDecl`) into the
+ * implementing aggregate(s)' `members[]`, indistinguishable from hand-written
+ * ones.  Cloning (not aliasing) is required because the same capability is
+ * implemented by many aggregates — one AST node can't live under N parents —
+ * and each clone's cross-references are rebuilt via the Linker's
+ * `buildReference` so they re-link in the Linked phase.  Lowering then reads the
+ * spliced members structurally (`collectFilters`/`collectStamps` + standard
+ * field lowering), so a capability and the equivalent hand-written
+ * filter/stamp/field produce byte-identical IR.
+ *
+ * Scope (typed-capabilities.md):
+ *   - aggregate `with` — splice into that aggregate.
+ *   - context `with` — splice an independent clone into EVERY aggregate in the
+ *     context (the `*ByDefault` replacement).  An aggregate that already
+ *     declares a same-named member wins (override-by-name in `spliceMembers`).
+ * A capability is a pure mixin, so it never targets a `ui`. */
+function expandCapability(
+  cap: Capability,
+  host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext,
+  hostKind: "aggregate" | "ui" | "context",
+  // The AST node the application was written at (a `with` MacroCall or an
+  // `implements` ImplementsDecl) — used only as the diagnostic anchor.
+  at: AstNode,
+  doc: LangiumDocument,
+  buildRef: BuildRef | undefined,
+): void {
+  if (hostKind === "ui") {
+    recordDiagnostic(doc, {
+      severity: "error",
+      message:
+        `Capability '${cap.name}' can only be applied to an aggregate or context (got 'ui').  ` +
+        "A capability is a pure mixin over domain state, not a UI concern.",
+      node: at,
+    });
+    return;
+  }
+  // Only reachable off the live build path, where `shared` (hence buildRef) is
+  // always present; guard defensively so the arg-resolution path is a no-op.
+  if (!buildRef) return;
+  // One fresh clone-set per destination aggregate — a context `with` fans out
+  // to every child aggregate; an aggregate `with` is the single-target case.
+  const targets =
+    hostKind === "aggregate"
+      ? [host as Aggregate]
+      : ((host as import("../language/generated/ast.js").BoundedContext).members ?? []).filter(
+          isAggregate,
+        );
+  for (const agg of targets) {
+    const cloned: unknown[] = (cap.members ?? []).map((m) => AstUtils.copyAstNode(m, buildRef));
+    for (const m of cloned) resolveSelfTypes(m as AstNode, agg.name, buildRef);
+    spliceMembers(agg, "aggregate", cloned, at, doc);
+    // Record capability membership as a transient annotation on the aggregate
+    // node (read by lowering's `collectCapabilities`).  Deliberately NOT an
+    // `implements <Cap>` AST member — that would re-trigger the typed-implements
+    // scan in `expandHost` and double-apply the capability.
+    const slot = agg as { [CAPABILITIES_TAG]?: string[] };
+    if (!slot[CAPABILITIES_TAG]) slot[CAPABILITIES_TAG] = [];
+    slot[CAPABILITIES_TAG].push(cap.name);
+  }
+}
+
+/** Rewrite every `Self id` base in a cloned capability member to `<hostName> id`
+ * (typed-capabilities.md, the anchored `Self` type).  `Self` resolves to the
+ * implementing aggregate's own type, so by splice time the member carries a
+ * concrete `IdType` — lowering and the backends never see a `SelfType`. */
+function resolveSelfTypes(root: AstNode, hostName: string, buildRef: BuildRef): void {
+  const selfs = [...AstUtils.streamAllContents(root)].filter((n) => n.$type === "SelfType");
+  for (const node of selfs) {
+    const container = node.$container as Record<string, unknown> | undefined;
+    if (!container || node.$containerProperty !== "base") continue;
+    const idNode: Record<string, unknown> = { $type: "IdType" };
+    idNode.target = buildRef(idNode as never, "target", undefined, hostName);
+    idNode.$container = container;
+    idNode.$containerProperty = "base";
+    container.base = idNode;
+  }
+}
+
 /** Hidden property used by `invokeMacro` to redirect a returned
  * node's splice destination from "the calling macro's host" to "the
  * node that the called macro was applied to."  Read by
@@ -370,7 +518,8 @@ function spliceMembers(
   host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext,
   hostKind: "aggregate" | "ui" | "context",
   members: unknown[],
-  call: MacroCall,
+  // Diagnostic anchor: a `with` MacroCall or an `implements` ImplementsDecl.
+  call: AstNode,
   doc: LangiumDocument,
 ): void {
   if (members.length === 0) return;

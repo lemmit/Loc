@@ -1,5 +1,7 @@
 # .NET TPH emission — design note
 
+> **[2026-06-20 status audit]** Inline `TPH_CAPABLE = {node, dotnet, elixir}` quote is stale — actual set is five (`{…, python, java}`, `system-checks.ts:~1230`). .NET TPH itself ships (accurate).
+
 > Status: **SHIPPED**. [`aggregate-inheritance.md`](./aggregate-inheritance.md)
 > **I2** — TPH (`sharedTable`) storage on the **.NET / EF Core** backend.
 > Phoenix/Ash TPH has since shipped too (see

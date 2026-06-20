@@ -827,7 +827,11 @@ describe("angular generator — byId single-record reads", () => {
     const page = all.get("web/src/app/pages/order-detail.component.ts")!;
     expect(page).not.toContain("body needs api/forms support");
     expect(page).toContain('import { useOrderById } from "../../api/order";');
-    expect(page).toContain("readonly orderById = useOrderById(");
+    // The magic route `id` binds from the ActivatedRoute snapshot, and the byId
+    // read receives it (it used to be `useOrderById(undefined)` — never fetched).
+    expect(page).not.toContain("unsupported expr: id");
+    expect(page).toContain('readonly id = this.route.snapshot.paramMap.get("id") ?? "";');
+    expect(page).toContain("readonly orderById = useOrderById(this.id);");
     // Single-record (not collection `.length`) guards.
     expect(page).toContain(
       "@if (!orderById.isLoading() && !orderById.isError() && !orderById.data())",

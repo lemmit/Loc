@@ -3,7 +3,7 @@
 Every generated backend emits **one shared, machine-parseable log shape**
 so a dashboard, alert, or `jq` query written once works across every
 deployable platform — Hono (Node.js), .NET (ASP.NET Core), Phoenix
-(Elixir).
+(Elixir), Java (Spring Boot), Python (FastAPI).
 
 The wire-shape pattern, applied to logs. One catalog defines the events;
 per-backend renderers consume it; the framework's standard logger on each
@@ -46,9 +46,11 @@ without dialect differences.
 
 `src/generator/_obs/log-events.ts` is the single source of truth. Every
 event pins its `event` name, level, and field set. Per-backend renderers
-(`src/generator/_obs/render-{hono,dotnet,phoenix}.ts`) consume it; a
-typo at any generator call site is a typecheck error, not a runtime
-missing-event surprise.
+(`src/generator/_obs/render-{hono,dotnet,phoenix}.ts`, plus the Java and
+Python renderers under their backend dirs —
+`src/generator/java/emit/observability.ts` and
+`src/generator/python/emit/obs.ts`) consume it; a typo at any generator
+call site is a typecheck error, not a runtime missing-event surprise.
 
 Stability promise: **additive only**. New events / new optional fields
 won't break consumers. Renaming or removing requires a downstream
@@ -125,6 +127,8 @@ This list is an excerpt of what the catalog ships; the file
 | **Hono** | [pino](https://github.com/pinojs/pino) | Native — pino emits JSON by default | `req.log` child logger; envelope auto-bound |
 | **.NET** | `ILogger<T>` | `AddJsonConsole` — structured fields land under `State.<Pascal>` | `IHttpContextAccessor` + `BeginScope`; `Activity.Current.TraceId` carries `request_id` |
 | **Phoenix** | Elixir `Logger` | Custom `<App>.LogFormatter` — see [`lib/<app>/log_formatter.ex`](https://github.com/lemmit/Loc/blob/main/src/generator/phoenix-live-view/index.ts) | `:telemetry` handlers attach `[:phoenix, :endpoint, :start/:stop]` and translate to catalog identity; the `<App>.RequestContext` Plug stamps `correlation_id`/`scope_id` (and `actor_id` post-auth) into `Logger.metadata`, which the LogFormatter dumps onto every line — see [`request-context.md`](architecture/request-context.md) |
+| **Java** | slf4j + Logback | JSON layout; structured fields land on each line | `MDC` carries `request_id`/`scope_id`/`actor_id`, read at log time |
+| **Python** | stdlib `logging` | JSON formatter | a `contextvar` carries the per-frame ids, read by the formatter at log time |
 
 The renderers in `src/generator/_obs/` keep the per-backend differences
 local. A call site like `renderHonoLogCall("requestEnd", […])` emits the
@@ -149,11 +153,11 @@ RID=01J6...
 docker compose logs api | jq "select(.request_id == \"$RID\")"
 ```
 
-The same queries work against the .NET and Phoenix deployables.
+The same queries work against the .NET, Phoenix, Java, and Python deployables.
 
 ## Verification
 
-Three runtime end-to-end suites boot the generated server against a real
+Five runtime end-to-end suites boot the generated server against a real
 postgres, hit `/health`, and assert the JSON stream carries the full
 lifecycle + request bracket with the catalog envelope. Opt-in via env
 vars (kept out of `npm test` because they're slow):
@@ -162,6 +166,8 @@ vars (kept out of `npm test` because they're slow):
 LOOM_OBS_E2E=1            npx vitest run test/e2e/observability-events.test.ts
 LOOM_OBS_E2E_DOTNET=1     npx vitest run test/e2e/observability-events-dotnet.test.ts
 LOOM_OBS_E2E_PHOENIX=1    npx vitest run test/e2e/observability-events-phoenix.test.ts
+LOOM_OBS_E2E_JAVA=1       npx vitest run test/e2e/observability-events-java.test.ts
+LOOM_OBS_E2E_PYTHON=1     npx vitest run test/e2e/observability-events-python.test.ts
 ```
 
 Each suite:
@@ -173,7 +179,7 @@ Each suite:
 6. `SIGTERM`s the process group; waits for exit.
 7. Parses the JSON stream and asserts the catalog envelope + lifecycle order.
 
-`.github/workflows/{hono,dotnet,phoenix}-obs-e2e.yml` run their
+`.github/workflows/{hono,dotnet,phoenix,java,python}-obs-e2e.yml` run their
 respective suites on every PR that touches the matching generator,
 the shared catalog, or the renderer. Each opts in via the
 backend-specific env var (`LOOM_OBS_E2E*`) and skips locally when
@@ -184,6 +190,8 @@ Prerequisites:
   generated pg pool is lazy).
 - **.NET**: docker (for the postgres sidecar) + `dotnet` SDK 8+.
 - **Phoenix**: docker + `mix` + Erlang/OTP.
+- **Java**: docker (for the postgres sidecar) + JDK 21 + Gradle.
+- **Python**: docker (for the postgres sidecar) + `uv`.
 
 When the env var is set but a prereq is missing, the suite **fails
 loudly with an actionable message** rather than skipping silently —
@@ -220,6 +228,11 @@ renderPhoenixLogCall("myEvent", [
   { name: "bar", valueExpr: "bar" },
 ])
 ```
+
+The Java (`src/generator/java/emit/observability.ts`) and Python
+(`src/generator/python/emit/obs.ts`) backends consume the same catalog
+through their own log-call seams; emit the new event there too for full
+five-backend coverage.
 
 The renderer enforces field-set correctness against the catalog at
 generate time. A `LOOM_OBS_E2E_*=1` run then verifies the line actually

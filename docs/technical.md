@@ -82,14 +82,16 @@ them was costing readers an accurate mental model.
                                          directly. Backends that execute
                                          domain logic also walk ExprIR /
                                          StmtIR via render-expr.ts /
-                                         render-stmt.ts. React skips
-                                         those — frontend doesn't run
-                                         domain logic.
+                                         render-stmt.ts. The five
+                                         domain-logic backends (TS, .NET,
+                                         Phoenix, Python, Java) walk those;
+                                         all frontends skip them —
+                                         frontends don't run domain logic.
                                        ─ INVOKED BY phase ⑨; not a
                                          standalone driver.
          │
          ▼   ⑨ System composition +         src/system/index.ts +
-        migration derivation                src/ir/migrations-builder.ts
+        migration derivation                src/system/migrations-builder.ts
    Map<path, content> for the system   ─ the orchestrator runs
                                          `buildMigrations(sys, snapshots)`
                                          (IR diff → MigrationsIR[]), then
@@ -431,7 +433,7 @@ expanded. No downstream phase ever sees the un-expanded sentinel.
 
 ## Loom IR shape
 
-Defined in `src/ir/loom-ir.ts`.  The whole IR is a tree of immutable
+Defined in `src/ir/types/loom-ir.ts`.  The whole IR is a tree of immutable
 records; no graphs, no cycles.
 
 **Top-level**:
@@ -651,7 +653,7 @@ Each platform has the same module shape (in `src/generator/<platform>/`):
 | `index.ts` | Orchestrator — `generate<Platform>ForContexts(contexts, ...) → Map<path, content>`. |
 | `emit/*.ts` (TS/.NET) or `*-emit.ts` (Phoenix) | Procedural emitters (`render<Thing>(...)`) for regular-shaped fragments — id classes, value-object classes, events, common errors, etc.  Plain TypeScript functions building strings via `lines(...)` from `src/util/code-builder.ts`. |
 | `*-builder.ts` | Procedural builders for content with too much per-aggregate variation to keep small (Hono routes, Hono repositories, React pages, React page-objects). |
-| `render-expr.ts` / `render-stmt.ts` | `ExprIR → string` / `StmtIR → string` renderers (only on platforms that execute domain logic — TS, .NET, and Phoenix LiveView, not React).  `render-expr.ts` is a leaf-only `ExprTarget` table; the recursive dispatch lives in the shared `_expr/` subdir (below).  `render-stmt.ts` stays per-backend. |
+| `render-expr.ts` / `render-stmt.ts` | `ExprIR → string` / `StmtIR → string` renderers (only on platforms that execute domain logic — TS, .NET, Phoenix LiveView, Python, and Java, not the frontends).  `render-expr.ts` is a leaf-only `ExprTarget` table; the recursive dispatch lives in the shared `_expr/` subdir (below).  `render-stmt.ts` stays per-backend. |
 
 ### Shared generator subdirs
 
@@ -661,8 +663,8 @@ multiple platforms:
 | Subdir | Consumed by | What it owns |
 |---|---|---|
 | `_packs/` | every UI-mounting backend (react, fullstack dotnet, phoenixLiveView) | Design-pack discovery + loader.  `loader-fs.ts` / `loader-vfs.ts` are the FS / browser-VFS backends.  (The pack-identity metadata — `BUILTIN_PACK_FORMATS` / `BUILTIN_PACK_LATEST` + the `parseBuiltinDesignRef` parser — lives in [`src/util/builtin-formats.ts`](../src/util/builtin-formats.ts): language validators and IR lowering consume it too, so it sits at the foundational `util/` layer.)  See [`design-packs.md`](design-packs.md). |
-| `_expr/` | every domain-logic backend (TS, .NET, phoenixLiveView) | `target.ts` defines the `ExprTarget` interface (the eight leaf-divergence axes — operators, naming, money arithmetic, collection ops, `refColl.contains` membership, regex, `ref` role, `callKind` call syntax) and `renderExprWith(e, target, ctx)`, which owns the 17-arm `ExprIR.kind` dispatch + all recursion.  Each backend's `render-expr.ts` supplies only the leaf table (`TS_TARGET` / `CS_TARGET` / `ELIXIR_TARGET`).  Expression-side analogue of `WalkerTarget`; a 5th domain-logic backend writes one target, not a 4th dispatcher (PR #843). |
-| `_walker/` | react + phoenixLiveView | `target.ts` defines the `WalkerTarget` interface that captures the framework-shaped seams (state read/write, navigation, API call lowering, `match` rendering).  Both targets are implemented and consumed: `react/walker/tsx-target.ts` is imported by `body-walker.ts` and delegated to at ~15 call sites (state-read/write, API call shape); `phoenix-live-view/heex-target.ts` is imported by `heex-walker.ts` and delegated to at 20+ call sites. |
+| `_expr/` | every domain-logic backend (TS, .NET, Phoenix, Python, Java) | `target.ts` defines the `ExprTarget` interface (the eight leaf-divergence axes — operators, naming, money arithmetic, collection ops, `refColl.contains` membership, regex, `ref` role, `callKind` call syntax) and `renderExprWith(e, target, ctx)`, which owns the 17-arm `ExprIR.kind` dispatch + all recursion.  Each backend's `render-expr.ts` supplies only the leaf table (`TS_TARGET` / `CS_TARGET` / `ELIXIR_TARGET` / `PY_TARGET` / `JAVA_TARGET`).  Expression-side analogue of `WalkerTarget`; already five backends — a 6th domain-logic backend writes one target, not a 6th dispatcher. |
+| `_walker/` | the JSX/markup frontends (react, vue, svelte, angular) + a parallel HEEx engine (phoenixLiveView) | `target.ts` defines the `WalkerTarget` interface that captures the framework-shaped seams (state read/write, navigation, API call lowering, `match` rendering).  The four JSX/markup targets are implemented and consumed: `react/walker/tsx-target.ts`, `vue/walker/vue-target.ts`, `svelte/walker/svelte-target.ts`, and `angular/walker/angular-target.ts` all drive the shared `walker-core.ts`; Phoenix/HEEx runs a parallel engine via `elixir/heex-target.ts` (its output topology diverges). |
 | `_obs/` | hono, dotnet, phoenixLiveView | Observability catalog + per-backend renderers.  `log-events.ts` defines the envelope schema; `render-<platform>.ts` emits the per-backend instrumentation.  See [`observability.md`](observability.md). |
 
 ### All-procedural emission
@@ -768,6 +770,14 @@ Page bodies route through `body-walker.ts`, which dispatches every
 walker-stdlib primitive into the active design pack's templates.
 (A legacy `pages-builder.ts` archetype renderer that this section
 previously mentioned no longer exists in tree.)
+
+The other three frontends mirror this layout, each driving the shared
+`_walker/walker-core.ts` through its own `WalkerTarget`:
+`src/generator/vue/` (Vue 3 / vue-query, packs `vuetify` / `shadcnVue`),
+`src/generator/svelte/` (SvelteKit static SPA, packs `shadcnSvelte` /
+`flowbite`), and `src/generator/angular/` (standalone Angular SPA, pack
+`angularMaterial`).  Like React, none of them emit `render-expr.ts` /
+`render-stmt.ts` — they consume the wire shape only.
 
 ### Scaffold expansion (compile-time sugar, not a codegen path)
 
@@ -1136,7 +1146,7 @@ Rough recipe:
    `lower.ts` orchestrator, or `lower-expr.ts` (expression /
    statement / type).
 4. **Renderers** — extend `render-expr.ts` / `render-stmt.ts` for
-   each backend that emits domain logic (TS, .NET).
+   each backend that emits domain logic (TS, .NET, Phoenix, Python, Java).
 5. **Emitters / builders** — add or extend the relevant `emit/*.ts`
    (TS/.NET) or `*-emit.ts` (Phoenix) files, or `*-builder.ts` modules.
 6. **Orchestrator** — wire up new file emission in
@@ -1150,7 +1160,11 @@ Rough recipe:
 
 ### Adding a new backend
 
-Three precedents in tree:
+Many precedents in tree — five backends (`generator/typescript/`,
+`generator/dotnet/`, `generator/elixir/`, `generator/java/`,
+`generator/python/`) and four frontends (`generator/react/`,
+`generator/vue/`, `generator/svelte/`, `generator/angular/`).  A few
+worth reading first:
 
 - `generator/typescript/` — Hono.  Procedural emitters for fixed
   shapes (`emit/*.ts`); larger procedural builders (`*-builder.ts`)
@@ -1208,9 +1222,9 @@ layout mirrors the pipeline:
 | `test/ir/enrichments.test.ts`, `test/ir/wire-shape.test.ts`, `test/ir/wire-spec.test.ts` | ⑥ enrichment |
 | `test/ir/multifile-validate.test.ts`, `test/ir/invariant-classify.test.ts` | ⑦ IR validation |
 | `test/system/architecture-*.test.ts`, `test/system/deployable-composition.test.ts`, `test/system/traceability.test.ts` | ⑨ system orchestration |
-| `test/generator/*` (per backend, 63 files) | ⑧ per-platform output |
+| `test/generator/*` (per backend, ~358 files) | ⑧ per-platform output |
 | `test/cli/*.test.ts` | ⑩ output writing (`.loomignore`, `--dry-run`) |
-| `test/generator/walker-*.test.ts` (33 files) | ⑧ React body-walker primitives |
+| `test/generator/walker-*.test.ts` (46 files) | ⑧ React body-walker primitives |
 | `LOOM_TS_BUILD=1 npm run test:tsc` | ⑧ regression — generated TS compiles under strict tsc |
 | `LOOM_E2E=1 npm run test:e2e` | full pipeline + content-shape OpenAPI parity + Playwright UI suite |
 

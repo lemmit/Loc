@@ -29,7 +29,7 @@ import { type PlatformDescriptor, STATIC_BUNDLE_FRAMEWORKS } from "./surface.js"
 // ---------------------------------------------------------------------------
 export const BUILTIN_PLATFORM_LATEST = {
   node: "v4",
-  dotnet: "v8",
+  dotnet: "v10",
   elixir: "v1",
   python: "v1",
   java: "v1",

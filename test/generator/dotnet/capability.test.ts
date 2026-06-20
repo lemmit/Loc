@@ -101,7 +101,26 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
     const model = await modelFrom(trioed("softDelete", "softDeletable"));
     const files = generateDotnet(model);
     const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
-    expect(cfg).toMatch(/builder\.HasQueryFilter\(x => !x\.IsDeleted\)/);
+    expect(cfg).toMatch(/builder\.HasQueryFilter\("IsDeletedFilter", x => !x\.IsDeleted\)/);
+  });
+
+  it("softDelete operation stamps DeletedAt with DateTime.UtcNow (not a bogus Now() call)", async () => {
+    // Regression: the softDelete macro built `now()` as a generic call,
+    // emitting `DeletedAt = Now();` — uncompilable C#.  The `softDelete` ops
+    // macro is aggregate-level (pairs with the built-in `softDeletable`
+    // capability for the state + filter).
+    const model = await modelFrom(`
+      context Sales {
+        aggregate Order with softDeletable, softDelete {
+          subject: string
+        }
+        repository Orders for Order { }
+      }
+    `);
+    const files = generateDotnet(model);
+    const order = files.get("Domain/Orders/Order.cs")!;
+    expect(order).toMatch(/DeletedAt = DateTime\.UtcNow;/);
+    expect(order).not.toMatch(/DeletedAt = Now\(\)/);
   });
 
   it("does NOT install HasQueryFilter for non-softDeletable aggregates", async () => {
@@ -124,7 +143,29 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
     `);
     const files = generateDotnet(model);
     const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
-    expect(cfg).toMatch(/builder\.HasQueryFilter\(x => !x\.Archived\)/);
+    expect(cfg).toMatch(/builder\.HasQueryFilter\("ArchivedFilter", x => !x\.Archived\)/);
+  });
+
+  it("names each filter so multiple capability filters are all additive (EF Core 10)", async () => {
+    // Pre-EF-10 a second HasQueryFilter overwrote the first; named filters
+    // make both apply.  The `softDeletable` capability filter + a hand-written
+    // tenancy `filter` on the same aggregate ⇒ two distinct named calls.
+    const model = await modelFrom(`
+      context Sales {
+        aggregate Order with softDeletable {
+          subject: string
+          tenantId: string
+          filter this.tenantId == "acme"
+        }
+        repository Orders for Order { }
+      }
+    `);
+    const files = generateDotnet(model);
+    const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
+    expect(cfg).toMatch(/builder\.HasQueryFilter\("IsDeletedFilter", x => !x\.IsDeleted\)/);
+    expect(cfg).toMatch(/builder\.HasQueryFilter\("TenantIdFilter", x => x\.TenantId == "acme"\)/);
+    // Two named filters, no accidental name collision.
+    expect((cfg.match(/HasQueryFilter\(/g) ?? []).length).toBe(2);
   });
 });
 
@@ -143,6 +184,18 @@ describe(".NET generator: registry-driven SaveChangesInterceptor", () => {
     const src = files.get("Infrastructure/Persistence/AuditableInterceptor.cs")!;
     expect(src).toMatch(/e\.CreatedAt =/);
     expect(src).toMatch(/e\.UpdatedAt =/);
+  });
+
+  it("audit stamps render the now() builtin as DateTime.UtcNow (not a bogus Now() call)", async () => {
+    // Regression: the audit macro built `now()` as a generic call, which
+    // lowered to `Now()` — uncompilable C#.  It must build a NowExpr so the
+    // .NET renderer emits the clock builtin.
+    const model = await modelFrom(trioed("audit", "auditable"));
+    const files = generateDotnet(model);
+    const src = files.get("Infrastructure/Persistence/AuditableInterceptor.cs")!;
+    expect(src).toMatch(/e\.CreatedAt = DateTime\.UtcNow;/);
+    expect(src).toMatch(/e\.UpdatedAt = DateTime\.UtcNow;/);
+    expect(src).not.toMatch(/= Now\(\)/);
   });
 
   it("Program.cs registers the interceptor when stamping is used", async () => {
@@ -178,11 +231,11 @@ describe(".NET generator: context-level propagation reaches per-config emission"
     `);
     const files = generateDotnet(model);
     expect(files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!).toMatch(
-      /builder\.HasQueryFilter\(x => !x\.IsDeleted\)/,
+      /builder\.HasQueryFilter\("IsDeletedFilter", x => !x\.IsDeleted\)/,
     );
     expect(
       files.get("Infrastructure/Persistence/Configurations/CustomerConfiguration.cs")!,
-    ).toMatch(/builder\.HasQueryFilter\(x => !x\.IsDeleted\)/);
+    ).toMatch(/builder\.HasQueryFilter\("IsDeletedFilter", x => !x\.IsDeleted\)/);
     const ctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
     expect(ctx).not.toMatch(/foreach \(var entityType/);
   });

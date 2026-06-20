@@ -164,8 +164,9 @@ export interface FieldIR {
   /** True iff the source declared this property with the `provenanced`
    * modifier.  Every assignment statement (`:=`/`+=`/`-=`) targeting such
    * a field becomes a per-site rule snapshot; see `ProvSite`.  The provenance
-   * runtime is emitted on the Hono (`node`) backend only — hosting a
-   * provenanced context on another backend is rejected at validate time
+   * runtime is emitted on the Hono (`node`), .NET (`dotnet`) and elixir-
+   * `vanilla` backends — hosting a provenanced context on another surface (the
+   * Ash foundation, react) is rejected at validate time
    * (`loom.provenanced-backend-unsupported`, `validateProvenancedStorage`)
    * rather than silently dropping the trail. */
   provenanced?: boolean;
@@ -468,14 +469,15 @@ export interface AggregateIR {
    * Composes additively — N stamping declarations yield N rule sets
    * concatenated per event. */
   contextStamps?: ContextStampIR[];
-  /** Capability names this aggregate opts into via
-   * `implements "<name>"`.  Backends translate by convention to a
-   * marker interface / type alias / behaviour, and group runtime
-   * infrastructure by capability name (.NET: one `OnModelCreating`
-   * filter loop per capability, scoped by `Entries<I<Cap>>()`).
-   * Sorted + deduped at lowering time.  Undefined when the
-   * aggregate names no capabilities. */
-  implementsCapabilities?: readonly string[];
+  /** Typed capabilities this aggregate implements (via `with <Cap>` /
+   * `implements <Cap>`, at aggregate or context scope).  Sorted + deduped at
+   * lowering time; undefined when the aggregate implements none.  Capability
+   * application has already spliced the fields/filter/stamp by this point — this
+   * is the surviving identity record, consumed by capability-aware emission
+   * (marker interfaces `I<Cap>` and the stamp-interceptor dedup —
+   * docs/proposals/capability-emission-dedup.md) and by tooling
+   * (find-implementors). */
+  capabilities?: readonly string[];
   /** Pointer to the `derived display: string` field, if the
    * aggregate declared one.  Populated by `enrichLoomModel`.
    * When set, `string(aggregate)` and implicit `string + aggregate`

@@ -2,6 +2,9 @@
 
 **Status:** Draft / Proposed. Phase 4 of the resource model
 ([`resource-model-and-source-types.md`](./resource-model-and-source-types.md)).
+
+> **[2026-06-20 status audit]** Shipped well past '4a put/get only' — `callKind: "resource-op"` + `resourceOp` IR field render the full verb set (put/get/list/signedUrl/delete, enqueue/publish, api get/post) on hono/dotnet/java/python/phoenix/vanilla; 4b tests present. Reclassify Draft→PARTIAL.
+
 **Scope:** Define how domain logic *uses* a `resource` — the call surface that
 turns the object-store / queue / external-API resources (and their generated
 clients) into something a workflow can actually invoke. This is the consumer of

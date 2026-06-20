@@ -333,7 +333,11 @@ function embeddedTableForAggregate(agg: AggregateIR, ownerModule: string): Table
     }
   }
   for (const c of agg.contains) {
-    columns.push({ name: snake(c.name), type: { kind: "json" }, nullable: false });
+    // Nullable: an empty `embeds_many` on the vanilla (Ecto) foundation inserts
+    // NULL (an empty embed is "no change", so it isn't written), which Ecto then
+    // loads back as `[]`.  Ash always writes the attribute default `[]`, so it is
+    // unaffected behaviourally — the column just also tolerates NULL.
+    columns.push({ name: snake(c.name), type: { kind: "json" }, nullable: true });
   }
   return { name: tableName, ownerModule, columns, primaryKey: ["id"], foreignKeys, indexes };
 }

@@ -2,6 +2,8 @@
 
 > Status: design agreed in conversation, not yet implemented. Coordinates with [`workflow-and-applier.md`](./workflow-and-applier.md) (merged), [`lifecycle-operations.md`](./lifecycle-operations.md) (proposed), and supersedes the per-aggregate-storage stance of [`storage-and-platform-config.md`](./storage-and-platform-config.md) + [`storage-and-platform-config-plan.md`](./storage-and-platform-config-plan.md) + [`storage-and-platform-config-micro-plan.md`](./storage-and-platform-config-micro-plan.md) (those proposals' grammar work mostly survives — the granularity choice is what changes).
 
+> **[2026-06-20 status audit]** SHIPPED — `subdomain`/`context` model + per-context binding + the `storage`/`dataSource` split (D-STORAGE-SPLIT/D-GRANULARITY) are all in the grammar (`ddd.langium`) and validated; deployable `contexts:`/`dataSources:` live. No longer 'not yet implemented'.
+
 > **Pinned decisions** (see [`docs/decisions.md`](../decisions.md)):
 >
 > - **D-GRANULARITY** — bindings are per-context, not per-aggregate

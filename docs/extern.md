@@ -20,6 +20,19 @@ aggregate Order {
 }
 ```
 
+> **Backend coverage.** `extern` *operations* ship on four of the five
+> backends — Hono, .NET, **Python**, and **Java**.  Elixir/Phoenix has no
+> extern escape hatch (the surface no-ops there).  The two handler-registry
+> layouts walked through below (.NET and Hono) are representative; Python
+> and Java emit the same shape (a typed per-op handler interface / registry,
+> a register/verify gate, and a fail-fast-at-startup check for a missing
+> implementation).
+>
+> Two **frontend** extern hatches exist alongside the operation one:
+> `function … extern from "…"` (a typed frontend-function hook — React, Vue,
+> Svelte) and `component … extern from "…"` (hand-written page component —
+> React, Vue, Svelte).
+
 An `extern` operation's body contains **only** `precondition` statements
 — no assignment, no `emit`, no collection mutation.  The framework owns
 the surrounding plumbing:

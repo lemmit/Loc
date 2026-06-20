@@ -13,12 +13,18 @@
 // doesn't consume it yet.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  OperationIR,
+  SystemIR,
+} from "../../../ir/types/loom-ir.js";
 import {
   type SingleFieldPattern,
   singleFieldConstraints,
 } from "../../../ir/validate/invariant-classify.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 
 interface AggField {
@@ -33,6 +39,7 @@ export function emitVanillaChangesets(
   appModule: string,
   ctx: BoundedContextIR,
   out: Map<string, string>,
+  sys?: SystemIR,
 ): void {
   const ctxModule = upperFirst(ctx.name);
   for (const agg of ctx.aggregates) {
@@ -43,7 +50,9 @@ export function emitVanillaChangesets(
     const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());
     out.set(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}_changeset.ex`,
-      renderChangeset(appModule, ctxModule, agg),
+      isVanillaDocAgg(agg, ctx, sys)
+        ? renderDocChangeset(appModule, ctxModule, agg)
+        : renderChangeset(appModule, ctxModule, agg),
     );
   }
 }
@@ -95,6 +104,13 @@ function renderChangeset(appModule: string, ctxModule: string, agg: AggregateIR)
     .map((c) => ectoValidator(snake(c.field), c.pattern));
   const validatorBlock = validatorLines.length > 0 ? `\n${validatorLines.join("\n")}` : "";
 
+  // Containments (`embeds_many`/`embeds_one`) round-trip via `cast_embed` — and
+  // crucially it forces the embed into the INSERT (an untouched `embeds_many`
+  // writes NULL, violating the `null: false` jsonb column the shared migration
+  // emits).  Each delegates to the part module's `changeset/2`.
+  const castEmbedLines = agg.contains.map((c) => `    |> cast_embed(:${snake(c.name)})`).join("\n");
+  const castEmbedBlock = castEmbedLines.length > 0 ? `\n${castEmbedLines}` : "";
+
   // Per-action changeset helpers — create + destroy.  Named OPERATIONS no
   // longer get a `change_<op>` helper: their `<op>_<agg>` context fn renders the
   // body and `put_change`s the assigned columns directly (context-emit).  The
@@ -120,7 +136,7 @@ defmodule ${changesetMod} do
   def base_changeset(struct \\\\ %${aggPascal}{}, attrs) do
     struct
     |> cast(attrs, @all_fields)
-    |> validate_required(@required_fields)${validatorBlock}
+    |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}
   end
 
 ${actionHelpers}

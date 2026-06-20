@@ -1,11 +1,11 @@
-// Vanilla (plain Ecto) containment gate.  The vanilla foundation does not yet
-// persist nested entity parts — `contains <part>: <Part>[]` lowers fine but the
-// schema emitter emits no `embeds_many` / `has_many`, and a containment-mutating
-// operation's changeset casts the part's fields onto the root struct (runtime
-// `Ecto.cast` error).  The check turns that silent-breakage into a hard error,
-// pointing at the Ash foundation (which models parts as embedded resources /
-// relationships).  The Ash foundation — the default for `platform: elixir` — is
-// unaffected.
+// Vanilla (plain Ecto) containment gate.  A `shape(embedded)` aggregate now
+// persists nested entity parts (DEBT-32): each part becomes an Ecto
+// `embedded_schema` module the root `embeds_many`s (inline jsonb column), and a
+// containment-mutating op (`items += Item{…}`) appends + `put_embed`s.  A
+// RELATIONAL-shaped aggregate's containments would need child tables + has_many
+// (the shape's migration emits a child table, not an inline column) — that
+// relational nested-entity emit is NOT wired, so it stays gated.  The Ash
+// foundation (default for `platform: elixir`) handles both and is unaffected.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -22,7 +22,8 @@ async function containmentErrors(source: string): Promise<string[]> {
 
 /** A Shop context whose Order aggregate optionally contains an entity part,
  *  hosted on the given platform string (e.g. `elixir { foundation: vanilla }`). */
-function sys(platform: string, opts: { contains: boolean }): string {
+function sys(platform: string, opts: { contains: boolean; shape?: string }): string {
+  const shapeMod = opts.shape ? ` shape(${opts.shape})` : "";
   const body = opts.contains
     ? `
         contains items: Item[]
@@ -33,7 +34,7 @@ function sys(platform: string, opts: { contains: boolean }): string {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Order ids guid {
+      aggregate Order ids guid${shapeMod} {
         code: string${body}
       }
     }
@@ -47,11 +48,20 @@ system Shop {
 }
 
 describe("vanilla containment support gate", () => {
-  it("rejects an entity containment on a vanilla deployable (silent-drop footgun)", async () => {
+  it("accepts an entity containment on a shape(embedded) vanilla aggregate (DEBT-32 — embeds_many)", async () => {
+    expect(
+      await containmentErrors(
+        sys("elixir { foundation: vanilla }", { contains: true, shape: "embedded" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still rejects an entity containment on a RELATIONAL vanilla aggregate (no child-table emit)", async () => {
     const errs = await containmentErrors(sys("elixir { foundation: vanilla }", { contains: true }));
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("Order");
     expect(errs[0]).toContain("Item");
+    expect(errs[0]).toContain("shape(embedded)");
     expect(errs[0]).toContain("foundation: ash");
   });
 
@@ -62,12 +72,15 @@ describe("vanilla containment support gate", () => {
   });
 
   it("accepts an entity containment on the Ash foundation (embedded resources / relationships)", async () => {
-    // Default `platform: elixir` is the Ash foundation, which DOES persist parts.
+    // Default `platform: elixir` is the Ash foundation, which persists parts on
+    // both shapes.
     expect(await containmentErrors(sys("elixir", { contains: true }))).toEqual([]);
+    expect(await containmentErrors(sys("elixir", { contains: true, shape: "embedded" }))).toEqual(
+      [],
+    );
   });
 
   it("does not fire for non-elixir backends (this gate is vanilla-only)", async () => {
-    // node handles nested parts; this specific gate must stay silent for it.
     expect(await containmentErrors(sys("node", { contains: true }))).toEqual([]);
   });
 });

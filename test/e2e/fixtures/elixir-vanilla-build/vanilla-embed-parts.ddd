@@ -1,0 +1,35 @@
+// DEBT-32 — nested entity parts on a `shape(embedded)` vanilla aggregate.
+// `contains lines: Line[]` persists as an Ecto `embeds_many` over a part
+// `embedded_schema` module (`Line`), stored inline in the parent's jsonb column
+// (the same `:map` column the shared migration emits for the embedded shape —
+// the vanilla analogue of Ash's embedded resource).  The `addLine` operation's
+// body (`lines += Line { … }`) appends the struct to the threaded record and
+// `put_embed`s the list.  Compiles against plain Ecto under
+// `mix compile --warnings-as-errors`.
+system VanillaEmbedParts {
+  subdomain Core {
+    context Shop {
+      aggregate Order shape(embedded) {
+        code: string
+        contains lines: Line[]
+        entity Line { sku: string  qty: int }
+        operation addLine(sku: string, qty: int) {
+          lines += Line { sku: sku, qty: qty }
+        }
+      }
+      repository Orders for Order {
+        find byCode(c: string): Order[] where this.code == c
+      }
+    }
+  }
+  api CatalogApi from Core
+  storage pg { type: postgres }
+  resource orderState { for: Shop, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Shop]
+    dataSources: [orderState]
+    serves: CatalogApi
+    port: 4000
+  }
+}

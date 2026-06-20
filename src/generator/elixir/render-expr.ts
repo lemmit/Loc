@@ -80,6 +80,14 @@ export interface RenderCtx {
    *  local (`id = Ecto.UUID.generate()`) and no `this` struct exists yet.
    *  Unset everywhere else → `id` stays `<thisName>.id`. */
   idLocal?: string;
+  /** When set, a provenanced `field := value` write in this body renders
+   *  with inline lineage capture (the co-located backing column + the
+   *  per-process trace buffer push).  Set only on the vanilla named-operation
+   *  persist path — the one body that drains the buffer in its save
+   *  transaction (`context-emit.ts:renderNamedOpFunction`).  Off everywhere
+   *  else, so a provenanced write outside that path stays a plain struct
+   *  update (no orphaned, undrained trace). */
+  captureProvenance?: boolean;
   /** Per-name rewrite for `param` references.  Used by the in-process
    *  dispatch handlers (dispatch-emit.ts), where a reactor / event-create
    *  body's single bound event param (`s` in `on(s: ShipmentRequested)`)
@@ -391,6 +399,9 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
 
 function renderNew(fields: { name: string; value: string }[], e: NewExpr, ctx: RenderCtx): string {
   const body = fields.map((f) => `${snake(f.name)}: ${f.value}`).join(", ");
+  // The part is a struct on both foundations: an embedded Ash resource on Ash,
+  // an Ecto `embedded_schema` on vanilla (`%Ctx.Part{}`) — see schema-emit's
+  // `embeds_many`.
   return `%${ctx.contextModule}.${upperFirst(e.partName)}{${body}}`;
 }
 

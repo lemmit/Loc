@@ -76,7 +76,7 @@ describe("angular pack format groundwork", () => {
     );
     const pack = loadPack(dir, { validateRequired: false });
     const rendered = pack.render("package-json", {});
-    expect(rendered).toContain('"@angular/core": "^20.0.0"');
+    expect(rendered).toContain('"@angular/core": "^22.0.0"');
     expect(rendered).toContain('"@angular/router"');
     expect(rendered).toContain('"@angular/forms"');
     expect(rendered).toContain('"rxjs"');

@@ -335,3 +335,148 @@ export const AUTH_GATE_SVELTE = `<!-- Auto-generated.  Do not edit by hand. -->
   </button>
 {/if}
 `;
+
+// ---------------------------------------------------------------------------
+// Angular sibling (`auth: ui` on a `platform: angular` deployable).  Unlike
+// the JSX/markup frameworks, the framework-neutral `session.ts` is NOT reused:
+// its relative imports (`../api/client`, `../api/config`) resolve from
+// `src/auth/` on React, but the Angular auth files live one level deeper at
+// `src/app/auth/`, and — more importantly — the idiomatic Angular shape is a
+// root `@Injectable` SessionService that owns the probe (so a future page
+// guard can `inject()` it and read `user()`).  The service uses the
+// fetch-backed `HttpClient` already provided in `app.config.ts`, sending the
+// session cookie via `withCredentials`.  `signIn` / `signOut` redirect to the
+// backend's `/auth/login` / `/auth/logout` (→ IdP), reusing the shared
+// `API_BASE_URL` from `src/api/config.ts`.  The guard component
+// (`AuthGateComponent`) is pack-agnostic — plain elements + inline styles, no
+// Material imports — so the one file works under every Angular design pack.
+// ---------------------------------------------------------------------------
+
+/** `src/app/auth/session.service.ts` — the root session service: probe +
+ *  sign-in/out redirects + the exposed `user` signal a page guard reads. */
+export const AUTH_SESSION_SERVICE_ANGULAR = `// Auto-generated.
+import { HttpClient, HttpErrorResponse } from "@angular/common/http";
+import { Injectable, inject, signal } from "@angular/core";
+import { firstValueFrom } from "rxjs";
+import { API_BASE_URL } from "../../api/config";
+
+export type SessionUser = Record<string, unknown>;
+
+/** The session state machine: probing on init, then anon / authed. */
+export type SessionState =
+  | { kind: "loading" }
+  | { kind: "anon" }
+  | { kind: "authed"; user: SessionUser };
+
+/** Root session service.  Owns the /auth/me probe and exposes the verified
+ *  user as a signal so a future page guard can \`inject(SessionService)\` and
+ *  read \`user()\` without re-probing. */
+@Injectable({ providedIn: "root" })
+export class SessionService {
+  private readonly http = inject(HttpClient);
+
+  private readonly state = signal<SessionState>({ kind: "loading" });
+
+  /** The current probe state — read by the AuthGate. */
+  readonly snapshot = this.state.asReadonly();
+
+  /** The verified user claims, or null until the probe authenticates.
+   *  Exposed for a future page guard. */
+  readonly user = signal<SessionUser | null>(null);
+
+  /** Probe the current session.  Resolves to the verified claims, or null
+   *  when unauthenticated (HTTP 401).  Drives \`snapshot\` + \`user\`. */
+  async probe(): Promise<SessionUser | null> {
+    try {
+      const me = await firstValueFrom(
+        this.http.get<unknown>(\`\${API_BASE_URL}/auth/me\`, { withCredentials: true }),
+      );
+      const u = me !== null && typeof me === "object" ? (me as SessionUser) : null;
+      this.user.set(u);
+      this.state.set(u ? { kind: "authed", user: u } : { kind: "anon" });
+      return u;
+    } catch (err) {
+      if (err instanceof HttpErrorResponse && err.status === 401) {
+        this.user.set(null);
+        this.state.set({ kind: "anon" });
+        return null;
+      }
+      this.user.set(null);
+      this.state.set({ kind: "anon" });
+      throw err;
+    }
+  }
+
+  /** Redirect to the backend's login, which 302s to the IdP's hosted login
+   *  page.  No login form is shipped — the IdP owns credentials. */
+  signIn(): void {
+    window.location.href = \`\${API_BASE_URL}/auth/login\`;
+  }
+
+  /** Redirect to the backend's logout, clearing the local session. */
+  signOut(): void {
+    window.location.href = \`\${API_BASE_URL}/auth/logout\`;
+  }
+}
+`;
+
+/** \`src/app/auth/auth-gate.component.ts\` — the route guard.  Probes the
+ *  session on init, shows a spinner while loading, a full-screen Sign in
+ *  screen when unauthenticated, and projects the app (\`<ng-content>\`) +
+ *  a fixed Sign out button once authenticated.  Pack-agnostic. */
+export const AUTH_GATE_ANGULAR = `// Auto-generated.
+import { Component, type OnInit, inject } from "@angular/core";
+import { SessionService } from "./session.service";
+
+/** Gates the app on a verified session.  Probes /auth/me on init via the
+ *  root SessionService: shows a spinner while loading, a Sign in screen
+ *  (redirecting to the IdP) when unauthenticated, and projects the app once
+ *  authenticated. */
+@Component({
+  selector: "app-auth-gate",
+  imports: [],
+  template: \`
+    @switch (session.snapshot().kind) {
+      @case ("loading") {
+        <div style="display:flex;align-items:center;justify-content:center;min-height:100vh">
+          Loading…
+        </div>
+      }
+      @case ("anon") {
+        <div style="display:flex;align-items:center;justify-content:center;min-height:100vh">
+          <div style="text-align:center">
+            <h1 style="margin-bottom:16px">Sign in</h1>
+            <button
+              type="button"
+              style="padding:8px 20px;font-size:16px;cursor:pointer"
+              (click)="session.signIn()"
+            >
+              Sign in
+            </button>
+          </div>
+        </div>
+      }
+      @default {
+        <ng-content />
+        <button
+          type="button"
+          style="position:fixed;bottom:12px;right:12px;z-index:1000;padding:6px 12px;cursor:pointer"
+          (click)="session.signOut()"
+        >
+          Sign out
+        </button>
+      }
+    }
+  \`,
+})
+export class AuthGateComponent implements OnInit {
+  readonly session = inject(SessionService);
+
+  ngOnInit(): void {
+    void this.session.probe().catch(() => {
+      // Network/probe failure falls back to the Sign in screen
+      // (SessionService already set state to anon).
+    });
+  }
+}
+`;

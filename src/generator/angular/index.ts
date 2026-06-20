@@ -11,6 +11,8 @@ import type {
 import { contextUsesMoney } from "../../ir/types/loom-ir.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
+import { AUTH_GATE_ANGULAR, AUTH_SESSION_SERVICE_ANGULAR } from "../_frontend/auth-ui.js";
+import { renderGateExpr } from "../_frontend/gate-expr.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { walkBody } from "../_walker/walker-core.js";
@@ -140,21 +142,31 @@ export function generateAngularForContexts(
       );
       content = pageNeedsDeferredFeatures(result)
         ? renderAngularPageStub(page)
-        : renderAngularPage({ page, result, derived: page.derived, pack });
+        : renderAngularPage({ page, result, derived: page.derived, pack, authUi });
     }
     out.set(`src/app/pages/${slug}.component.ts`, content);
     routeDescs.push({ route: page.route!, component: pageComponentName(page), slug });
   }
 
   // Nav sidebar — one entry per routed page (routerLink keeps the
-  // leading-slash absolute path; the route table strips it).
+  // leading-slash absolute path; the route table strips it).  On an `auth: ui`
+  // frontend a page carrying a currentUser-only `requires` gate gets a
+  // `requiresJs` condition the app-shell `@if`-hides — the nav-side mirror of
+  // the page body guard.  The gate validator guarantees a page `requires` is
+  // currentUser-only, so `renderGateExpr` can't throw here (same assumption the
+  // page guard in page-shell.ts relies on).
   const navEntries = pages.map((p) => ({
     to: p.route!,
     label: humanize(p.name),
     testId: `nav-${pageSlug(p)}`,
+    requiresJs: authUi && p.requires ? renderGateExpr(p.requires, "currentUser") : undefined,
   }));
   const navSections =
     navEntries.length > 0 ? [{ label: humanize(sys.name), entries: navEntries }] : [];
+
+  // Bind the session user in the app shell only when a nav entry is actually
+  // gated — an unused injected member would be an `ng build` strict error.
+  const navUsesSession = navSections.some((s) => s.entries.some((e) => !!e.requiresJs));
 
   // The app shell (Material toolbar + sidenav).
   out.set(
@@ -163,9 +175,22 @@ export function generateAngularForContexts(
       systemNameHuman: humanize(sys.name),
       navSections,
       hasNav: navEntries.length > 0,
+      authUi,
+      navUsesSession,
     }),
   );
   out.set("src/app/app.config.ts", pack.render("app-config", {}));
+
+  // --- Frontend auth (`auth: ui`) ------------------------------------
+  // The session service owns the /auth/me probe + sign-in/out redirects (and
+  // exposes the verified `user` signal a future page guard reads); the
+  // pack-agnostic AuthGate component wraps <router-outlet /> in the app shell.
+  // Gated entirely behind `authUi` — a non-auth app emits neither file and an
+  // unchanged app shell.
+  if (authUi) {
+    out.set("src/app/auth/session.service.ts", AUTH_SESSION_SERVICE_ANGULAR);
+    out.set("src/app/auth/auth-gate.component.ts", AUTH_GATE_ANGULAR);
+  }
 
   // Routes: one per page; a synthetic Home only when no page owns the
   // index route; a wildcard NotFound always.

@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 //
 // Slow (~3-5 min cold; ~30s warm with NuGet cache) and requires:
 //   - docker (for the postgres sidecar)
-//   - dotnet SDK 8.0+ on PATH
+//   - dotnet SDK 10.0+ on PATH
 //
 // Stays opt-in via LOOM_OBS_E2E_DOTNET=1 — keeps `npm test` fast.  The
 // inner availability checks (docker daemon + dotnet binary) skip the
@@ -133,7 +133,7 @@ describe.skipIf(!ENABLED)(
         throw new Error(
           "LOOM_OBS_E2E_DOTNET=1 set but `dotnet` is not on PATH. " +
             "The suite needs the .NET SDK 8+. " +
-            "Add `actions/setup-dotnet@v4` with `dotnet-version: '8.0.x'` to the workflow.",
+            "Add `actions/setup-dotnet@v4` with `dotnet-version: '10.0.x'` to the workflow.",
         );
       }
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-obs-dn-"));

@@ -112,8 +112,18 @@ export function renderVuePage(input: VuePageShellInput): string {
     }
   }
 
+  // The magic route `id` (`byId(id)`) binds from `route.params.id` too, when
+  // the body referenced it and the route declares an `:id` segment.  (Unlike
+  // declared params, the `:id` segment isn't in `routeParams`, so check the
+  // route string.)
+  const routeHasId = /:id\b/.test(page.route ?? "");
+  const routeIdParam = result.usesRouteId && routeHasId ? ["id"] : [];
   const usedParams = [
-    ...new Set([...[...result.usedParams].filter((p) => routeParams.includes(p)), ...idExprParams]),
+    ...new Set([
+      ...[...result.usedParams].filter((p) => routeParams.includes(p)),
+      ...idExprParams,
+      ...routeIdParam,
+    ]),
   ];
   const needsRoute = usedParams.length > 0;
 
@@ -307,11 +317,14 @@ export function renderVuePage(input: VuePageShellInput): string {
       apiImports.set(from, names);
     }
   }
-  // `Action(<inst>.<op>)` mutation hoists — same reactive() wrapper.
+  // `Action(<inst>.<op>)` mutation hoists — same reactive() wrapper.  The
+  // hook targets a specific instance, so it takes the instance id
+  // (`use<Op><Agg>(<idExpr>)` — matches React/Svelte); `scriptArgs` applies
+  // the page's state `.value` rewrite to the idExpr, as for find hooks above.
   for (const m of result.actionMutations) {
     if (seenVars.has(m.localVar)) continue;
     seenVars.add(m.localVar);
-    hookLines.push(`const ${m.localVar} = reactive(${m.hookName}());`);
+    hookLines.push(`const ${m.localVar} = reactive(${m.hookName}(${scriptArgs([m.idExpr])}));`);
     vueImports.add("reactive");
     const from = `../api/${m.aggCamel}`;
     const names = apiImports.get(from) ?? new Set<string>();
@@ -745,7 +758,11 @@ export function renderVueComponentFile(
   for (const m of result.actionMutations) {
     if (seenVars.has(m.localVar)) continue;
     seenVars.add(m.localVar);
-    hookLines.push(`const ${m.localVar} = reactive(${m.hookName}());`);
+    // The mutation hook targets a specific instance, so it takes the
+    // instance id (`use<Op><Agg>(<idExpr>)` — matches React/Svelte).  The
+    // raw `idExpr` (`order.id`) is rewritten to `props.order.id` by the
+    // `rewriteScript` map below, since the instance is a component prop.
+    hookLines.push(`const ${m.localVar} = reactive(${m.hookName}(${m.idExpr}));`);
     vueImports.add("reactive");
     const from = `../api/${m.aggCamel}`;
     const names = apiImports.get(from) ?? new Set<string>();
@@ -995,6 +1012,7 @@ function buildDerivedLines(
       usesState: false,
       usesCurrentUser: false,
       usesRouterLink: false,
+      usesRouteId: false,
       userComponents: new Map(),
       usedUserComponents: new Set(),
       usesChildren: false,

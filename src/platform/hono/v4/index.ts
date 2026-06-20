@@ -38,7 +38,7 @@ import { BACKEND_PINS } from "./pins.js";
  *  `family: "node"` names the JS runtime platform; `loomVersion: "v4"`
  *  mirrors the **Hono major** this package emits (the `hono: ^4.x` pin in
  *  `./pins.ts`), *not* a Node.js version — the same convention as
- *  `dotnet@v8` ↔ .NET 8.  A Hono-5 fork ships as a sibling `v5/` package
+ *  `dotnet@v10` ↔ .NET 10.  A Hono-5 fork ships as a sibling `v5/` package
  *  (`node@v5`). */
 export const loomManifest: LoomBackendManifest = {
   kind: "backend",

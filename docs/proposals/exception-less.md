@@ -1,5 +1,7 @@
 # Exception-less flow — `or` unions, `option`, `?` propagation, `error` payloads
 
+> **[2026-06-20 status audit]** `or`-union operation returns now ship on node/dotnet/python/java/elixir-vanilla (`structural-checks.ts:~551`), not 'node/dotnet; gated on elixir'. (`?` propagation operator already removed — see failure-taxonomy.)
+
 > Status: proposal — **partially landed, and partially walked back**.
 > Shipped already: `error` payloads (a `PayloadKind`), the anonymous
 > `or`-union return surface on operations (emitting on node/dotnet;

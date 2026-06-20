@@ -21,7 +21,7 @@ import { describe, it } from "vitest";
 // fast.  CI's `.github/workflows/dotnet-build.yml` runs the same
 // check as a second step after `dotnet build`.
 //
-// Requires the .NET SDK on PATH (8.0).
+// Requires the .NET SDK on PATH (10.0).
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));

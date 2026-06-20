@@ -8,6 +8,13 @@
 //  to runtime here; the audit/softDelete macros + a hand-written tenant
 //  filter show the whole authorization surface.
 // ════════════════════════════════════════════════════════════════════
+// `tenantScoped` — a user-declared capability: the multi-tenant read filter,
+// applied per aggregate via `with tenantScoped` (the typed replacement for the
+// old `filter for "tenantScoped"` + `implements "tenantScoped"` string group).
+capability tenantScoped {
+  filter this.tenantId == currentUser.tenantId
+}
+
 subdomain People {
 
   // Typed permission catalogue.  `permissions.employeesManage` lowers to
@@ -17,29 +24,23 @@ subdomain People {
     departmentsManage
   }
 
-  // `with audit, softDelete` add the context-level stamping rules and the
-  // soft-delete query filter; `auditable`/`softDeletable` (per aggregate)
-  // add the columns + markers those rules attach to.
-  context People with audit, softDelete {
+  // Audit + soft-delete are built-in capabilities applied per aggregate:
+  // `auditable` co-locates the audit columns + stamps; `softDeletable` the
+  // soft-delete columns + read filter; the `softDelete` macro adds the
+  // softDelete()/restore() operations.
+  context People {
 
     enum EmployeeStatus { Active, OnLeave, Terminated }
 
-    // Hand-written capability group: every aggregate that
-    // `implements "tenantScoped"` gets this read filter — exactly what
-    // the audit/softDelete macros expand into, but for a tenant rule the
-    // macros don't ship.
-    filter for "tenantScoped" this.tenantId == currentUser.tenantId
-
-    aggregate Department with auditable, softDeletable {
+    aggregate Department with auditable, softDeletable, softDelete, tenantScoped {
       tenantId: string
       code: string
       name: string
-      implements "tenantScoped"
       invariant code.length > 0
       derived display: string = name
     }
 
-    aggregate Employee with auditable, softDeletable {
+    aggregate Employee with auditable, softDeletable, softDelete, tenantScoped {
       tenantId: string
       name: PersonName
       email: string sensitive(pii)
@@ -47,7 +48,6 @@ subdomain People {
       departmentRef: Department id
       status: EmployeeStatus = Active
       salary: money sensitive(pii)
-      implements "tenantScoped"
 
       invariant tenantId.length > 0
       derived display: string = name.display

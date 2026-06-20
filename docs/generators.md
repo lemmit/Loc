@@ -2,7 +2,7 @@
 
 Per-platform reference for every file the generators emit and the
 features they implement.  This document maps each DSL construct to its
-output across all three platforms so you can answer questions like:
+output across the five backends and four frontends so you can answer questions like:
 
 - "What does `aggregate Order` produce on .NET?"
 - "Where does my `derived total: Money = …` end up in the React app?"
@@ -32,8 +32,9 @@ The alternates (`dapper`, `mikroorm`) share the domain layer below and only
 swap the repository/schema layer (minimal-v1 surface, validator-gated).
 
 > **Scope note.** This matrix tracks the three reference platforms
-> (TypeScript/Hono, .NET, React). The later backends — **Python/FastAPI**
-> and **Java/Spring Boot** — and the **Vue** frontend consume the same
+> (TypeScript/Hono, .NET, React). The other backends — **Python/FastAPI**,
+> **Java/Spring Boot**, and **Elixir/Phoenix** — and the other frontends —
+> **Vue**, **Svelte**, and **Angular** — consume the same
 > `LoomModel` / `wireShape` IR contract and emit the analogous constructs
 > in their own idiom; they are not yet broken out as columns here. See
 > [`platforms.md`](platforms.md) for the full registered set.
@@ -51,7 +52,7 @@ swap the repository/schema layer (minimal-v1 surface, validator-gated).
 | `X id[]` (reference collection) | Auto-derived many-to-many **join table** (composite PK enforces set semantics); save diff-syncs join rows, `.contains(param)` lowers to an `inArray` subquery against the join table. The join table also carries an `ordinal` column written on every `+=`, but the wire contract is unordered — see "What the generators don't do" below. | EF Core join entity + `DbSet<JoinEntity>` (composite PK + `Ordinal`); `GetByIdAsync` loads via the join entity, `SaveAsync` diff-syncs, `.contains(param)` lowers to `_db.<JoinDbSet>.Any(...)`. (Phoenix/Ash backend: `many_to_many ... through <JoinResource>` + a `calculate :<field>, {:array, :uuid}, expr(<rel>.id)`; `.contains` lowers to `exists(<rel>, id == ^arg(:<param>))`.) | `X id[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
 | `derived` | Getter that calls into the expression | Computed property that calls into the expression | Read-only field on detail; included in the response Zod schema |
 | `invariant` | Private `_assertInvariants()` called at the end of every mutator | Private `AssertInvariants()` called at the end of every mutator | (enforced server-side; surfaces as 400 in the UI) |
-| `provenanced` property | `domain/provenance.ts` SDK + `recordTrace(...)` after each write; `ddd snapshot` captures rule snapshots to `.loom/snapshots/*.loomsnap.json` | `Domain/Common/ProvLineage.cs` SDK + inline lineage capture after each write; co-located `<field>_provenance` jsonb column; `provenance_records` flushed in the EF save transaction; current lineage exposed on `<Agg>Response` | (n/a — wire shape unaffected) |
+| `provenanced` property | `domain/provenance.ts` SDK + `recordTrace(...)` after each write; `ddd snapshot` captures rule snapshots to `.loom/snapshots/*.loomsnap.json` | `Domain/Common/ProvLineage.cs` SDK + inline lineage capture after each write; co-located `<field>_provenance` jsonb column; `provenance_records` flushed in the EF save transaction; current lineage exposed on `<Agg>Response`. **Elixir `foundation: vanilla`** emits the same shape — the `<App>.Provenance` SDK (process-dictionary trace buffer + `flush/1`), a co-located `<field>_provenance` jsonb column, inline capture at each named-op write site, and a `provenance_records` flush inside the save `Repo.transaction` (`foundation: ash` stays gated). | (n/a — wire shape unaffected) |
 | `function` | Private method on the aggregate / part class | Private expression-bodied member | (server-only) |
 | `operation` | Public method (or private if marked) that enforces preconditions, mutates state, queues events, and re-asserts invariants | Same shape; visibility honoured | Mantine button on the detail page; opens a modal whose form binds to `<Op>Request`; submit calls `use<Op><Agg>()` |
 | `precondition` | `if (!cond) throw new DomainError(<source>)` | `if (!cond) throw new DomainException(<source>)` | (server-side; HTTP 400 surfaces as a Mantine error notification) |
@@ -148,13 +149,14 @@ backend emits a host-language debug-string hook that delegates to
 the `inspect` value — `public override string ToString()` (.NET,
 auto-invoked by `$"{x}"` / `Console.WriteLine`), `toString()` +
 `[Symbol.for("nodejs.util.inspect.custom")]` (TS, auto-invoked by
-`String(x)` / `${x}` / `console.log`), and a public
+`String(x)` / `${x}` / `console.log`), a public
 `def inspect(record)` module function (Phoenix, **invoked
 explicitly** as `MyApp.Catalog.Customer.inspect(record)` — Ash 3.x
 auto-derives the `Inspect` protocol for every resource module, so
 the loom-emitted form lives at the module-function level to avoid a
 `redefining module Inspect.<...>` collision under `mix compile
---warnings-as-errors`).  Honours `sensitive(...)` field tags by
+--warnings-as-errors`), a `__repr__` (Python, auto-invoked by
+`repr(x)` / f-strings), and a `toString()` override (Java).  Honours `sensitive(...)` field tags by
 substituting `<redacted>` for the value while keeping the field
 name in the structural output.  VO-typed fields are inlined
 structurally one level deep — `price: Money` shows as
@@ -225,7 +227,7 @@ for deployables marked `platform: dotnet`.
 
 ```
 <deployable>/
-├── <Namespace>.csproj               # net8.0, EF Core, Mediator source-gen, Swashbuckle, EF Tools
+├── <Namespace>.csproj               # net10.0, EF Core 10, Mediator source-gen, Swashbuckle, EF Tools
 ├── Program.cs                       # AddDbContext, AddMediator, AddCors, AddSwaggerGen, MapControllers,
 │                                    # camelCase JSON, EnsureCreated, /health
 ├── Dockerfile                       # multi-stage dotnet/sdk → dotnet/aspnet
@@ -672,7 +674,7 @@ web_app/
 ## Angular frontend (`platform: angular`)
 
 The fourth frontend generator (`src/generator/angular/`).  Emits a **standalone
-Angular 20 SPA** per angular deployable — `bootstrapApplication` + `appConfig`
+Angular 22 SPA** per angular deployable — `bootstrapApplication` + `appConfig`
 (no NgModules), built with the `@angular/build:application` builder and served
 the same `vite preview`-style way as the other SPAs in docker.  Pages flow
 through the **same shared markup walker** the React / Vue / Svelte generators use
@@ -776,6 +778,7 @@ Aggregate IR maps onto Ash:
 | `abstract aggregate Party` + `extends` (TPC) | base emits no resource; each concrete is a standalone `Ash.Resource`; the context Ash.Domain gains `list_parties!/0` (the union of the concrete `list_<concrete>!` reads). |
 | `abstract aggregate Party` + `inheritanceUsing(sharedTable)` (TPH) | Ash has no native STI, so the concretes share one table via multiple resources: each concrete `Ash.Resource` declares `table "<base_plural>"`, a `:kind` string attribute defaulted to its own name, and `base_filter expr(kind == "<Concrete>")` (inside the `resource do` block) so it reads/writes only its rows. The base owns no resource; the Ash.Domain gains the same polymorphic `list_parties!/0` union reader. See [`phoenix-tph-emission.md`](./proposals/phoenix-tph-emission.md). |
 | `persistedAs(eventLog)` + `apply(...)` (event sourcing) | **Supported on `foundation: vanilla`** (Ecto/Phoenix — `src/generator/elixir/vanilla/eventsourced-emit.ts`): an append-only `<agg>_events` stream + `apply` fold + rehydrator, the elixir sibling of the node/.NET/python/java event stores. **Gated on `foundation: ash`** (today's default Phoenix foundation) — `validateEventSourcedStorage` accepts `elixir` iff every hosting deployable is `vanilla`; Ash has no pure-ES fit (AshCommanded is full CQRS/ES, AshEvents keeps a state table — both partial). Switch the deployable to `foundation: vanilla`, or see [workflow-and-applier.md](proposals/workflow-and-applier.md). |
+| `shape(document)` persistence | **Supported on `foundation: vanilla` (CRUD — DEBT-07)** — `src/generator/elixir/vanilla/document-emit.ts`: the whole aggregate persists as one jsonb blob in an `(id, data, version)` table, validated through a **schemaless** Ecto changeset (`cast({%{}, @types}, attrs, …)` + the same `validate_required` / invariant validators the relational `base_changeset` runs); reads merge `data` back over the id. **Gated on `foundation: ash`** (no idiomatic Ash document fit). Custom finds + named ops on a document aggregate are a gated v1 follow-up (`loom.vanilla-document-unsupported`). `shape(embedded)` is supported on both foundations: Ash embedded resources on `ash`; on `vanilla` (DEBT-32, `src/generator/elixir/vanilla/schema-emit.ts`), each entity part is an Ecto `embedded_schema` module the root `embeds_many`s (value objects fold to `:map`), stored inline in the parent's jsonb column — a containment-mutating op (`lines += Line{…}`) appends the struct + `put_embed`s; `contains` on a *relational*-shape vanilla aggregate stays gated (`loom.vanilla-containment-unsupported`). |
 
 ### Per-page detail
 

@@ -167,6 +167,35 @@ describe("svelte generator — project shape", () => {
     expect(detail).toContain('data-testid="orders-op-confirm-submit"');
   });
 
+  it("magic route id: a hand-written byId(id) page derives id from page.params", async () => {
+    // The bare `id` magic identifier (NOT a declared param) used to render
+    // `/* unsupported expr: id */ undefined`, so the byId read never fetched.
+    const out = await generateSystemFiles(`
+      system S {
+        api SalesApi from Sales
+        subdomain Sales {
+          context Orders {
+            aggregate Item { name: string }
+            repository Items for Item { find byId(id: string): Item? }
+          }
+        }
+        ui WebApp {
+          api Sales: SalesApi
+          page ItemDetail {
+            route: "/items/:id"
+            body: QueryView { of: Sales.Item.byId(id), single: true, data: o => Text { o.name } }
+          }
+        }
+        deployable api { platform: node, contexts: [Orders], port: 3000 }
+        deployable web { platform: svelte, targets: api, ui: WebApp, port: 3002 }
+      }
+    `);
+    const detail = out.get("web/src/routes/(app)/items/[id]/+page.svelte") ?? "";
+    expect(detail).not.toContain("unsupported expr: id");
+    expect(detail).toContain('const id = $derived(page.params.id ?? "");');
+    expect(detail).toContain("const itemById = useItemById(() => id);");
+  });
+
   it("emits the runes form/toast/format lib and no react artifacts", async () => {
     const out = await files();
     expect(out.get("web/src/lib/forms.svelte.ts")).toContain("export function createForm");

@@ -40,9 +40,12 @@ export function applicationAdapterToDsl(v: string): string {
 export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingShape[]>> = {
   dotnet: ["relational", "embedded", "document"],
   node: ["relational", "embedded", "document"],
-  // Phoenix/Ash emits relational + embedded (Ash embedded resources);
-  // `document` (a single opaque `:map` — non-idiomatic for Ash) is a
-  // future allowed-but-warned addition.
+  // Phoenix platform-level set = relational + embedded (Ash embedded
+  // resources).  `document` is foundation-shaped: the **vanilla** foundation
+  // emits it (the `(id, data, version)` jsonb table + a schemaless-changeset
+  // validated fold — DEBT-07), un-gated in `validateSavingShapeSupport`'s
+  // elixir/vanilla branch; the **ash** foundation has no idiomatic document
+  // fit and stays on this base set.
   elixir: ["relational", "embedded"],
   // Python emits all three: relational (table-per-entity + join tables),
   // document (shape(document): one jsonb (id, data, version) blob), and

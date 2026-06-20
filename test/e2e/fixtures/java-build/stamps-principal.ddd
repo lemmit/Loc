@@ -6,7 +6,6 @@ system PS {
       aggregate Order with crudish {
         code: string
         createdBy: guid
-        implements "auditable"
       }
       repository Orders for Order { }
     }

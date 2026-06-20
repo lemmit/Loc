@@ -17,6 +17,7 @@ import type {
   BoundedContextIR,
   FindIR,
   RepositoryIR,
+  SystemIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
@@ -26,12 +27,14 @@ import {
   combineWhere,
   vanillaCapabilityFilter,
 } from "./capability-filter.js";
+import { isVanillaDocAgg, renderDocRepository } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 
 export function emitVanillaRepositories(
   appModule: string,
   ctx: BoundedContextIR,
   out: Map<string, string>,
+  sys?: SystemIR,
 ): void {
   const ctxModule = upperFirst(ctx.name);
   for (const agg of ctx.aggregates) {
@@ -44,7 +47,9 @@ export function emitVanillaRepositories(
     const repo = (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name);
     out.set(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}_repository.ex`,
-      renderRepository(appModule, ctxModule, agg, repo),
+      isVanillaDocAgg(agg, ctx, sys)
+        ? renderDocRepository(appModule, ctxModule, agg)
+        : renderRepository(appModule, ctxModule, agg, repo),
     );
   }
 }

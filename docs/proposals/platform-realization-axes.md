@@ -10,6 +10,8 @@
 > domain-framework axis gets its own keyword, `foundation:`, rather than being
 > folded into `persistence:`.
 
+> **[2026-06-20 status audit]** Beyond 'pinned' — the six-axis `platform { … }` block has SHIPPED across grammar (`ddd.langium:~180`), IR (`loom-ir.ts:~2226`), validator R1/R3/R4/R6 (`deployable.ts:~317`), and generators (`elixir/index.ts`, `java/adapters/by-layer-layout.ts`). Only R2/R7 + the node-actor `runtime:` menu remain; the IR comment 'no generator consumes them yet' is also stale.
+
 ## 0. The question this answers
 
 `platform: dotnet` today bundles EF Core + MediatR-CQRS + minimal API + xUnit

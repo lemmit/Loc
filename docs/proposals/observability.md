@@ -7,6 +7,8 @@
 > append-only, transactional, queryable rows; the logging here is the
 > ordinary structured-log channel for everything else.
 
+> **[2026-06-20 status audit]** SHIPPED (no longer 'proposal') — platform-neutral catalog `src/generator/_obs/log-events.ts` consumed by hono/dotnet/phoenix/java/python with per-backend obs-e2e gates (`package.json` `test:obs*`).
+
 ## Problem
 
 A running app must explain itself. The generated Hono backend already

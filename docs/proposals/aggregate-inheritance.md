@@ -1,5 +1,7 @@
 # Aggregate inheritance and storage strategies
 
+> **[2026-06-20 status audit]** Backend count understated — TPC/TPH now on FIVE DB backends: `TPH_CAPABLE = {node, dotnet, elixir, python, java}` (`system-checks.ts:~1230`); Python `python/emit/schema.ts`, Java `java/emit/entity.ts` emit TPH.
+
 > Status: **I1–I3 shipped** — surface, both storage strategies, and the
 > polymorphic read path.  This proposal is now reference-documented in
 > [`../inheritance.md`](../inheritance.md); the design discussion below is

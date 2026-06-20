@@ -17,7 +17,7 @@ versioning works.
 | `platform:` keyword | Surface file | Default port | Needs DB | Mounts UI |
 |---|---|---|---|---|
 | `node` (default `node@v4`; Hono web framework) | `src/platform/hono/v4/index.ts` | 3000 | ✓ | ✗ |
-| `dotnet` (default `dotnet@v8`) | `src/platform/dotnet.ts` | 8080 | ✓ | ✓ (when `ui:` is declared) |
+| `dotnet` (default `dotnet@v10`) | `src/platform/dotnet.ts` | 8080 | ✓ | ✓ (when `ui:` is declared) |
 | `elixir` (default `elixir@v1`; legacy aliases `phoenix` / `phoenixLiveView` desugar to it) | `src/platform/elixir.ts` | 4000 | ✓ | ✓ (fullstack) |
 | `python` (default `python@v1`; framework alias `fastapi`) | `src/platform/python.ts` | 8000 | ✓ | ✓ (when `ui:` is declared — dotnet-style dual mode) |
 | `java` (default `java@v1`) | `src/platform/java.ts` | 8081 | ✓ | ✓ (`ui:` embedded-SPA mount; `hosts:` gated) |
@@ -61,7 +61,7 @@ Resolution happens in two parts (see `parseBuiltinPlatformRef` in
    > **major version of its defining framework/runtime**, *not* the
    > platform's own name. So `node@v4` tracks **Hono 4** (the `hono:
    > ^4.x` pin in `src/platform/hono/v4/pins.ts`; `v5` is reserved for
-   > the next Hono major), exactly as `dotnet@v8` tracks **.NET 8** and
+   > the next Hono major), exactly as `dotnet@v10` tracks **.NET 10** and
    > `mantine@v9` tracks Mantine 9. `node@v4` is therefore *not* "Node.js
    > 4" — the `node` platform names the JS runtime, while the `4` versions
    > the Hono web framework it emits. (Sources never spell this out: every

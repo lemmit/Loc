@@ -8,6 +8,8 @@
 > is hardcoded to React. No new top-level declaration, no `family@version`
 > machinery — a grammar-level reshape of the UI/host seam.
 
+> **[2026-06-20 status audit]** Core SHIPPED (no longer 'nothing implemented') — `framework:` on `ui` (`ddd.langium:~280`) and the `hosts:` host↔ui relation (`ddd.langium:~221`) are live and load-bearing: Vue/Svelte embed into non-React hosts via this seam (`svelte-embed-{dotnet,java}.test.ts`). PARTIAL — multi-framework-per-host edge remains.
+
 ## TL;DR
 
 Today a UI's framework is inferred from whatever backend happens to mount it

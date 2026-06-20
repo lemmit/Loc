@@ -41,8 +41,9 @@ carrier argument, a union variant, and (auto-synthesized) the per-aggregate
 Every aggregate, part, and value object carries a canonical, ordered
 `wireShape` (id → declared properties → containments → derived), synthesized
 once in enrichment. Every backend's DTO emitter walks the *same* list, so the
-JSON an aggregate takes on the network is identical across Hono, .NET, React,
-and Phoenix by construction — not by coincidence. This is the shape a union
+JSON an aggregate takes on the network is identical across Hono, .NET, Phoenix,
+Python, Java (and the React/Vue/Svelte/Angular frontends) by construction — not
+by coincidence. This is the shape a union
 variant or a carrier argument projects through when it names an aggregate.
 
 ---
@@ -83,6 +84,8 @@ type (EF, `Ash.Page.Offset`, …) — each maps to this one DTO.
 | Hono / React | `z.object({ items: …, page, pageSize, total, totalPages })` |
 | .NET | `Paged<T>` record (`Domain.Common`); repo `CountAsync` + `Skip`/`Take` |
 | Phoenix / Ash | offset-pagination read action; controller maps `%Ash.Page.Offset{}` to the envelope |
+| Python / FastAPI | `PagedResult[T]` |
+| Java / Spring | `Paged<T>` over Spring Data paging |
 
 ---
 
@@ -131,7 +134,7 @@ data:
 - the **`none`** unit is bare: `{ "type": "none" }`.
 
 The variant **tag** is the variant type's name (`Order`, `Cancel`, `none`, …).
-All four backends derive this shape from one resolver, so the wire is identical
+All five backends derive this shape from one resolver, so the wire is identical
 by construction:
 
 | Backend | union emission |
@@ -139,6 +142,8 @@ by construction:
 | Hono / React | `z.discriminatedUnion("type", [ z.object({ type: z.literal("Order"), … }), … ])` |
 | .NET | `[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]` base + one `[JsonDerivedType(typeof(V), "Tag")]` record per variant |
 | Phoenix / Ash | controller `tag_<union>/1` — one struct-pattern clause per variant → `%{type: "Tag", …}` |
+| Java / Spring | `@JsonTypeInfo` / `@JsonSubTypes` sealed interface, one record per variant |
+| Python / FastAPI | `buildPyBaseUnionFile` — a tagged base + one model per variant |
 
 ### Precedence
 
@@ -167,7 +172,7 @@ unaffected.
 | `loom.union-position` | An inline `or` union outside a find return / payload field. |
 | `loom.generic-arg-not-carrier` | A non-carrier or nested carrier argument to `paged` / `envelope`. |
 | `loom.generic-position` | A generic carrier outside a transport position. |
-| `loom.generic-carrier-unsupported` / `loom.union-unsupported` | A carrier / union served by a backend that doesn't emit it yet — a platform-aware gate. All four backends now emit both, so these are dormant safety nets for a future backend. |
+| `loom.generic-carrier-unsupported` / `loom.union-unsupported` | A carrier / union served by a backend that doesn't emit it yet — a platform-aware gate. All five backends now emit both, so these are dormant safety nets for a future backend. |
 
 ---
 

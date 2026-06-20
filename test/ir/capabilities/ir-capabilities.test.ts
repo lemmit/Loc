@@ -23,13 +23,13 @@ function findAgg(
 
 describe("macro capabilities propagate to AggregateIR", () => {
   it("audit + auditable trio populates contextStamps with onCreate + onUpdate rules", async () => {
-    // Post-trio-split: capability behavior (stamps) lives at context;
-    // aggregate-level state opts in via `implements "auditable"`.
-    // Both pieces compose to populate the propagated IR.
+    // Typed-capabilities Phase 3: the built-in `auditable` capability
+    // co-locates fields + stamps, so a single `with auditable` populates the
+    // aggregate's contextStamps directly.
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }
-        subdomain M { context C with audit {
+        subdomain M { context C {
           aggregate Order with auditable {
             subject: string
           }
@@ -48,10 +48,10 @@ describe("macro capabilities propagate to AggregateIR", () => {
     expect(updateFields).toEqual(["updatedAt", "updatedBy"]);
   });
 
-  it("softDelete + softDeletable trio populates contextFilters with one predicate", async () => {
+  it("the `softDeletable` capability populates contextFilters with one predicate", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        subdomain M { context C with softDelete {
+        subdomain M { context C {
           aggregate Doc with softDeletable {
             subject: string
           }
@@ -77,7 +77,7 @@ describe("macro capabilities propagate to AggregateIR", () => {
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }
-        subdomain M { context C with audit, softDelete {
+        subdomain M { context C {
           aggregate Order with auditable, softDeletable {
             subject: string
           }
@@ -89,10 +89,12 @@ describe("macro capabilities propagate to AggregateIR", () => {
     expect(agg.contextFilters?.length).toBe(1);
   });
 
-  it("auditable without `audit` at context contributes ONLY state, no stamps", async () => {
-    // Demonstrates that macros are level-correct: `auditable` alone
-    // adds fields + implements but no behavior.  Behavior is the
-    // capability's responsibility (context-level `audit` macro).
+  it("the `auditable` capability co-locates fields AND stamps in one `with`", async () => {
+    // Typed-capabilities Phase 3: unlike the old state/behavior macro split,
+    // the built-in `auditable` capability bundles both — `with auditable` alone
+    // contributes the four audit fields and the create/update stamps.  As a
+    // typed application (not a string group), it does NOT register
+    // `implementsCapabilities`.
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }
@@ -104,8 +106,10 @@ describe("macro capabilities propagate to AggregateIR", () => {
       }
     `);
     const agg = findAgg(ir, "Order");
-    expect(agg.contextStamps).toBeUndefined();
-    expect(agg.implementsCapabilities).toContain("auditable");
+    expect(agg.contextStamps?.length).toBe(2);
+    expect(agg.wireShape.map((f) => f.name)).toEqual(
+      expect.arrayContaining(["createdAt", "updatedAt", "createdBy", "updatedBy"]),
+    );
   });
 
   it("aggregates without macros have undefined capabilities", async () => {

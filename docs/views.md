@@ -86,9 +86,10 @@ shorthand form is a strict subset of the full form's surface.
 - **Bind type-check** — each bind expression's inferred type must
   be assignable to its declared field type.  (Slice 2 ships the
   shape-checking; tighter assignability arrives with slice 3.)
-- **Result type** is `<View>Row[]` — a fresh record record matching
-  the declared fields, exposed as a Zod schema on Hono and a C#
-  record on .NET.
+- **Result type** is `<View>Row[]` — a fresh record matching
+  the declared fields, emitted on all five backends (a Zod schema on
+  Hono, a C# record on .NET, a `<View>Row` dataclass on Python, a
+  `<View>Row` record on Java, and the Phoenix equivalent).
 
 ## Authorization — the `requires` gate
 
@@ -142,11 +143,9 @@ already covers — under denyByDefault a view is forbidden until you
 say otherwise (`requires true` to opt back into public access).
 Under the default `enforcement: opt`, the gate stays opt-in.
 
-> **Backend support.**  The 403 gate currently emits on the Hono
-> (TypeScript) backend.  The validation rules (`requires`-is-
-> currentUser-only, default-deny) are platform-neutral and run for
-> every backend; the other backends will grow the 403 emission in
-> follow-up work.
+> **Backend support.**  The 403 gate now emits on all five backends.
+> The validation rules (`requires`-is-currentUser-only, default-deny)
+> are platform-neutral and run for every backend.
 
 ## Joined views (snowflake style)
 
@@ -178,10 +177,15 @@ How it lowers:
   `(sourceField, targetAgg)` pair is collected into the view's
   `auxiliaries`.
 - Each aggregate's repository gains a canonical `findManyByIds`
-  method (TS) / `FindManyByIdsAsync` (.NET) that bulk-loads roots
+  method (TS) / `FindManyByIdsAsync` (.NET) — with the equivalent
+  bulk-load on Python and Phoenix — that bulk-loads roots
   matching a list of ids.  This avoids N+1: the view route fires
   one extra query per auxiliary aggregate, regardless of how many
-  rows came back from the source.
+  rows came back from the source.  **Java** does not yet implement
+  cross-aggregate follows: a view whose binds follow an `X id`
+  reference into another aggregate is an explicit emit-time error
+  on the Java backend ("cross-aggregate follows — not yet
+  implemented on the java backend").
 - The route / handler runs the source view query, then for each
   auxiliary calls `findManyByIds` with the deduped list of source-
   field values, building a `Map<id, Aggregate>` (TS) /
@@ -237,6 +241,10 @@ optional-Id follows, no explicit join keys), see [Remaining
 limits](#remaining-limits) above.
 
 ## What it generates
+
+> The Hono and .NET subsections below are illustrative; Python, Java,
+> and Phoenix also emit view code (repository query method + a
+> `<View>Row` shape + a route/handler) following the same pattern.
 
 ### Hono (TypeScript + Drizzle)
 

@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
+import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { stmtUsesParam } from "../domain/predicates.js";
 import type { RenderCtx } from "../render-expr.js";
@@ -26,6 +27,7 @@ import {
   renderReturningOpFunction,
   renderReturningStmt,
 } from "./operation-returns-emit.js";
+import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { customFindsOf } from "./repository-emit.js";
 
 /** Operation names whose `<op>_<agg>` collide with the CRUD
@@ -164,11 +166,21 @@ function renderNamedOpFunction(
   aggSnake: string,
   op: OperationIR,
 ): string {
-  void agg;
+  const containNames = new Set(agg.contains.map((c) => snake(c.name)));
   const opSnake = snake(op.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
   const repoMod = `${aggModule}Repository`;
-  const rc: RenderCtx = { thisName: "record", contextModule: facadeMod, foundation: "vanilla" };
+  // A provenanced write-site captures lineage inline (co-located column + the
+  // per-process trace buffer), and the persist drains that buffer into the
+  // history table inside a transaction.  `captureProvenance` gates the body
+  // rendering; `hasProv` gates the transactional persist tail.
+  const hasProv = opHasProvSite(op);
+  const rc: RenderCtx = {
+    thisName: "record",
+    contextModule: facadeMod,
+    foundation: "vanilla",
+    captureProvenance: hasProv,
+  };
 
   // Bind only the params the body references, so an unused param never trips
   // `mix compile --warnings-as-errors`.  (`record` is always used — the persist
@@ -179,31 +191,70 @@ function renderNamedOpFunction(
   );
 
   // Render the body (guards / assigns / emit / let) — shared with the
-  // returning-op path; a non-returning body never carries a `return` arm.
-  const bodyLines = op.statements.map((s) => renderReturningStmt(s, ctx, rc));
+  // returning-op path; a non-returning body never carries a `return` arm.  The
+  // statement index disambiguates per-write provenance temp vars.
+  const bodyLines = op.statements.map((s, i) => renderReturningStmt(s, ctx, rc, i));
 
   // Persist the fields the body assigned (deduped, declaration order).  Each is
   // a real schema column on the mutated `record`, so `put_change` is safe.
   const assignedFields: string[] = [];
   for (const s of op.statements) {
-    if (s.kind !== "assign") continue;
+    // `assign` (`field := v`), collection `add`/`remove` (`items += Item{…}`),
+    // and scalar compound `add`/`remove` (`total += n`) all re-bind a real
+    // schema column on `record` — persist each via `put_change`.
+    if (s.kind !== "assign" && s.kind !== "add" && s.kind !== "remove") continue;
     const f = snake(s.target.segments[0] ?? "");
     if (f.length > 0 && !assignedFields.includes(f)) assignedFields.push(f);
   }
-  const putChanges = assignedFields
-    .map((f) => `    |> Ecto.Changeset.put_change(:${f}, record.${f})`)
-    .join("\n");
-  const putBlock = putChanges ? `\n${putChanges}` : "";
+  // Co-located provenance columns ride the same changeset: a `<field>_provenance`
+  // jsonb backing column for each provenanced field the body actually assigned.
+  const provNames = new Set(provenancedFieldsOf(agg).map((f) => snake(f.name)));
+  const provColumns = assignedFields.filter((f) => provNames.has(f)).map((f) => provColumn(f));
+  // Put bodies — re-indented per persist path (4-space for the plain pipe,
+  // 6-space inside the `changeset =` assignment).  A containment
+  // (`embeds_many`/`embeds_one`) round-trips via `put_embed`; scalar columns
+  // (incl. the provenance backing columns) via `put_change`.
+  const putBodies = [
+    ...assignedFields.map((f) =>
+      containNames.has(f)
+        ? `Ecto.Changeset.put_embed(:${f}, record.${f})`
+        : `Ecto.Changeset.put_change(:${f}, record.${f})`,
+    ),
+    ...provColumns.map((c) => `Ecto.Changeset.put_change(:${c}, record.${c})`),
+  ];
+  const putBlock = putBodies.map((b) => `\n    |> ${b}`).join("");
+  const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");
 
   const prelude = [...paramBinds, ...bodyLines].join("\n");
   const preludeBlock = prelude ? `${prelude}\n` : "";
+
+  // Persist tail.  Without provenance: the plain changeset pipe.  With it: build
+  // the changeset, then run the save + history flush in ONE transaction so the
+  // `provenance_records` rows commit atomically with the aggregate update.
+  const appModule = facadeMod.split(".")[0]!;
+  const persist = hasProv
+    ? `    changeset =
+      record
+      |> Ecto.Changeset.change(%{})${putBlock6}
+
+    ${appModule}.Repo.transaction(fn ->
+      case ${repoMod}.persist_change(changeset) do
+        {:ok, saved} ->
+          ${appModule}.Provenance.flush(${appModule}.Repo)
+          saved
+
+        {:error, reason} ->
+          ${appModule}.Repo.rollback(reason)
+      end
+    end)`
+    : `    record
+    |> Ecto.Changeset.change(%{})${putBlock}
+    |> ${repoMod}.persist_change()`;
 
   return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` — runs the body, persists the assigned fields."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
           {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t() | term()}
   def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params) when is_map(params) do
-${preludeBlock}    record
-    |> Ecto.Changeset.change(%{})${putBlock}
-    |> ${repoMod}.persist_change()
+${preludeBlock}${persist}
   end`;
 }

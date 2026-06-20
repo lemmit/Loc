@@ -1,6 +1,7 @@
 import type { DerivedIR, ExprIR, PageIR, StateFieldIR } from "../../../ir/types/loom-ir.js";
 import { pageEmitName } from "../../../ir/util/page-emit-name.js";
 import { upperFirst } from "../../../util/naming.js";
+import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { emitExpr, type WalkContext, type WalkResult } from "../../_walker/walker-core.js";
 import type { AngularActionSpec } from "../action.js";
@@ -29,6 +30,11 @@ export interface AngularPageShellInput {
   /** Active design pack — required to build the `WalkContext` the derived
    *  expressions emit through. */
   pack?: LoadedPack;
+  /** True when the hosting frontend deployable has `auth: ui` (a verified
+   *  session is available client-side).  Enables the page-level `requires`
+   *  guard below — without it, a `requires` predicate stays purely a
+   *  server-side 403. */
+  authUi?: boolean;
 }
 
 /** PascalCase component class name (`CustomerHome` → `CustomerHomeComponent`).
@@ -124,6 +130,14 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // pack-declared `*Module`s plus `RouterLink`.
   const componentImports = new Set<string>();
 
+  // Page-level `requires` UI gate (D-AUTH-OIDC): a currentUser-only predicate
+  // gates the page body client-side on an `auth: ui` frontend.  Resolved up
+  // front so the `inject` core symbol is registered BEFORE the import lines are
+  // built (the gate's `inject(SessionService)` member needs it).  Stays
+  // undefined — byte-identical to the ungated page — without `auth: ui`.
+  const requires = input.authUi ? page.requires : undefined;
+  if (requires) coreSymbols.add("inject");
+
   // `derived name: T = expr` → `readonly <name> = computed(() => <expr>)`
   // class fields, in declaration order (a later derived may reference an
   // earlier one — resolved as a `<name>()` signal call via `derivedNames`).
@@ -186,7 +200,12 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   const routeParams = [...(page.route ?? "").matchAll(/:(\w+)/g)].map((m) => m[1]);
   const argRefs = new Set<string>();
   for (const h of result.usedApiHooks.values()) for (const a of h.argsRendered) argRefs.add(a);
-  const boundParams = routeParams.filter((p) => result.usedParams.has(p) || argRefs.has(p));
+  // The magic route `id` (`usesRouteId` — `byId(id)` / a bare `id` read) binds
+  // even when it isn't a declared param or a hook arg, so a `/…/:id` page that
+  // references it resolves `id` against the snapshot.
+  const boundParams = routeParams.filter(
+    (p) => result.usedParams.has(p) || argRefs.has(p) || (result.usesRouteId && p === "id"),
+  );
   if (boundParams.length > 0) {
     coreSymbols.add("inject");
     routerSymbols.add("ActivatedRoute");
@@ -355,6 +374,30 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   }
   const componentImportsList = [...componentImports].sort();
 
+  // Page-level `requires` UI gate (D-AUTH-OIDC): on an `auth: ui` frontend a
+  // currentUser-only predicate gates the page body client-side — `inject` the
+  // `SessionService`, expose the verified claims as a `currentUser` accessor
+  // the template can read (bare member refs), and wrap the body in an
+  // `@if (<gate>) { … } @else { … }` rendering a Forbidden fallback when the
+  // gate fails (the client mirror of the backend 403).  Empty (byte-identical
+  // to the ungated page) when the frontend has no `auth: ui` or no `requires`.
+  let template = indentTemplate(result.tsx);
+  if (requires) {
+    imports.push('import { SessionService } from "../auth/session.service";');
+    members.push("  readonly session = inject(SessionService);");
+    members.push(
+      "  get currentUser(): Record<string, unknown> { return this.session.user() ?? {}; }",
+    );
+    const gateExpr = renderGateExpr(requires, "currentUser");
+    template = [
+      `      @if (${gateExpr}) {`,
+      indentTemplate(result.tsx),
+      "      } @else {",
+      `        <section style="padding:24px"><h2>Forbidden</h2><p>You don't have access to this page.</p></section>`,
+      "      }",
+    ].join("\n");
+  }
+
   return [
     "// Auto-generated.",
     ...imports,
@@ -363,7 +406,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     `  selector: ${JSON.stringify(pageSelector(page))},`,
     `  imports: [${componentImportsList.join(", ")}],`,
     "  template: `",
-    indentTemplate(result.tsx),
+    template,
     "  `,",
     "})",
     `export class ${pageComponentName(page)} {${members.length > 0 ? "\n" + members.join("\n") + "\n" : ""}}`,
@@ -408,6 +451,7 @@ function derivedCtx(
     usesState: false,
     usesCurrentUser: false,
     usesRouterLink: false,
+    usesRouteId: false,
     userComponents: new Map(),
     usedUserComponents: new Set(),
     usesChildren: false,

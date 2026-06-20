@@ -92,6 +92,20 @@ describe.skipIf(!ENABLED)(
         // its guards + `field := value` struct-updates and persists the assigned
         // columns via put_change (not a param cast).
         { name: "vanilla-op-body.ddd", deployable: "api" },
+        // Provenance runtime (DEBT-06) — a `provenanced` field's co-located
+        // `<field>_provenance` jsonb column, inline lineage capture at each
+        // named-op write site, and the transactional `provenance_records` flush
+        // (the `<App>.Provenance` SDK + the Json Ecto type + the migration).
+        { name: "vanilla-provenance.ddd", deployable: "api" },
+        // DEBT-32 — nested entity parts on a shape(embedded) vanilla aggregate:
+        // `contains lines: Line[]` → `embeds_many` over a part `embedded_schema`
+        // module; `lines += Line{…}` appends + `put_embed`s.  Compiles the
+        // embedded-schema part + put_embed persist.
+        { name: "vanilla-embed-parts.ddd", deployable: "api" },
+        // shape(document) (DEBT-07) — the `(id, data, version)` jsonb table, a
+        // schemaless-changeset validated fold, and the document CRUD repository
+        // (the relational `Map.from_struct` serialize swapped for a data-merge).
+        { name: "vanilla-document.ddd", deployable: "api" },
         // ES applier folds over value-object / enum fields (P4.3): an inline VO
         // constructor renders to a plain map on vanilla — compile that path.
         { name: "vanilla-vo-fold.ddd", deployable: "api" },

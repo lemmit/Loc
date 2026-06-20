@@ -255,6 +255,12 @@ export const vueTarget: WalkerTarget = {
     return `router.push({ path: ${JSON.stringify(routeTemplate)}, state: { ${state} } })`;
   },
 
+  /** The magic route `id` reads the local `id` the shell binds from
+   *  `route.params.id` (gated on `usesRouteId`). */
+  renderRouteId(): string {
+    return "id";
+  },
+
   // --- Type-default seam --------------------------------------------------
 
   defaultInitFor(type: TypeIR): string {

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Auto-generated.
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 # Optional proxy CAs — drop *.crt files into ./certs/ to make the
 # build trust them.  The directory always exists (with a .gitkeep),
@@ -13,7 +13,7 @@ RUN dotnet restore Api.csproj
 COPY . .
 RUN dotnet publish Api.csproj -c Release -o /app/publish --no-restore /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 # wget is here so the compose healthcheck (which shells out to wget) works
 # inside the aspnet image — without it the container reports unhealthy

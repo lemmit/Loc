@@ -210,6 +210,12 @@ export const svelteTarget: WalkerTarget = {
     return renderJsNavigate(routeTemplate, args, stateExpr);
   },
 
+  /** The magic route `id` reads the local `id` the shell derives from
+   *  `$derived(page.params.id ?? "")` (gated on `usesRouteId`). */
+  renderRouteId(): string {
+    return "id";
+  },
+
   // --- Type-default seam --------------------------------------------------
 
   defaultInitFor(type: TypeIR): string {

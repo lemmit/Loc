@@ -140,9 +140,9 @@ import { lit } from "../types/loom-ir.js";
 import { lowerAuth } from "./lower-auth.js";
 import type { ContextLevelCapabilities } from "./lower-capabilities.js";
 import {
+  collectCapabilities,
   collectContextLevelCapabilities,
   collectFilters,
-  collectImplements,
   collectStamps,
   EMPTY_CONTEXT_CAPABILITIES,
 } from "./lower-capabilities.js";
@@ -1262,12 +1262,9 @@ function lowerAggregate(
   // concatenated with anything propagated from the enclosing context.
   // Context-level capabilities lower in the context's env (which
   // doesn't bind `this` to any aggregate), then re-bind here.
-  // ImplementsCaps is computed FIRST because qualified
-  // (`filter for "X"`) context-level decls only propagate to
-  // aggregates whose implements set includes the qualifier name.
-  const implementsCaps = collectImplements(agg, contextLevelCaps.implementsCaps);
-  const filters = collectFilters(agg, inner, contextLevelCaps, implementsCaps);
-  const stamps = collectStamps(agg, inner, contextLevelCaps, implementsCaps);
+  const filters = collectFilters(agg, inner, contextLevelCaps);
+  const stamps = collectStamps(agg, inner, contextLevelCaps);
+  const capabilities = collectCapabilities(agg);
   return {
     name: agg.name,
     idValueType,
@@ -1288,7 +1285,7 @@ function lowerAggregate(
       ? filters.map((f) => f.criterionRef)
       : undefined,
     contextStamps: stamps.length > 0 ? stamps : undefined,
-    implementsCapabilities: implementsCaps.length > 0 ? implementsCaps : undefined,
+    capabilities: capabilities.length > 0 ? capabilities : undefined,
     persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,
     savingShape: (agg.shape as import("../types/loom-ir.js").SavingShape | undefined) ?? undefined,
     appliers: appliers.length > 0 ? appliers : undefined,

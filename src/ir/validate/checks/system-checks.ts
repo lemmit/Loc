@@ -26,6 +26,7 @@ import type {
   EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
+  SavingShape,
   SubdomainIR,
   SystemIR,
   TypeIR,
@@ -36,6 +37,7 @@ import { exprUsesCurrentUser } from "../../types/loom-ir.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
+  isDocumentShaped,
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
@@ -62,11 +64,11 @@ import { validateE2ETest } from "./test-checks.js";
 // just a string/uuid and doesn't depend on a display label.
 // ---------------------------------------------------------------------------
 
-// `auth: ui` (the frontend OIDC guard) is emitted by the React, Vue, and
-// Svelte generators.  A deployable whose resolved UI framework is none of
+// `auth: ui` (the frontend OIDC guard) is emitted by the React, Vue, Svelte,
+// and Angular generators.  A deployable whose resolved UI framework is none of
 // those (phoenixLiveView) would silently emit no guard — reject it loudly
 // so the limitation is visible rather than a no-op.
-const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte"]);
+const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular"]);
 
 export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
@@ -75,7 +77,7 @@ export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]):
       diags.push({
         severity: "error",
         code: "loom.auth-ui-unsupported-framework",
-        message: `Deployable '${d.name}': 'auth: ui' is currently only supported on react, vue, and svelte frontends; framework '${d.uiFramework ?? "unknown"}' isn't supported yet.`,
+        message: `Deployable '${d.name}': 'auth: ui' is currently only supported on react, vue, svelte, and angular frontends; framework '${d.uiFramework ?? "unknown"}' isn't supported yet.`,
         source: d.name,
       });
     }
@@ -446,8 +448,17 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 
   for (const dep of sys.deployables) {
     if (!platformOwnsBackend(dep.platform)) continue;
-    const supported = platformSavingShapes(dep.platform);
-    if (!supported) continue;
+    const base = platformSavingShapes(dep.platform);
+    if (!base) continue;
+    // Foundation-shaped on elixir: the `vanilla` foundation emits the opaque
+    // `(id, data, version)` document table + a schemaless-changeset validated
+    // fold, so it supports `document` on top of the platform's relational /
+    // embedded set.  The `ash` foundation has no idiomatic document fit and
+    // stays gated (PLATFORM_SAVING_SHAPES omits it).
+    const supported =
+      dep.platform === "elixir" && dep.foundation === "vanilla"
+        ? ([...base, "document"] as readonly SavingShape[])
+        : base;
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
@@ -463,6 +474,55 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
             `'${ctxName}.${agg.name}' with shape(${shape}), but that backend can only ` +
             `emit: ${supported.join(", ")}.  Use a supported shape, or host this ` +
             `aggregate on a deployable whose platform emits shape(${shape}).`,
+          source: `${sys.name}/${dep.name}`,
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Vanilla `shape(document)` v1 scope (DEBT-07).  The vanilla document path
+// emits the CRUD surface (list / get / create / update / delete) over the
+// `(id, data, version)` jsonb row.  Custom finds (which would need an
+// in-memory rehydrate-and-filter path) and user-defined named operations
+// (which struct-update flattened columns the document schema doesn't have)
+// are NOT yet emitted — and the context module would otherwise emit a
+// defdelegate / named-op fn that references a non-existent repository
+// function.  Reject the combination with a clear error rather than
+// misgenerate, exactly like the saving-shape capability gate above.
+// ---------------------------------------------------------------------------
+const VANILLA_DOC_CRUD_OPS = new Set(["create", "update", "delete", "destroy", "list", "get"]);
+export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+
+  for (const dep of sys.deployables) {
+    if (dep.platform !== "elixir" || dep.foundation !== "vanilla") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        if (!isDocumentShaped(enriched, resolveDataSourceConfig(enriched, ctx, sys))) continue;
+        const customFinds = (ctx.repositories ?? [])
+          .find((r) => r.aggregateName === agg.name)
+          ?.finds.filter((f) => f.name !== "all");
+        const customOps = agg.operations.filter((op) => !VANILLA_DOC_CRUD_OPS.has(op.name));
+        if ((customFinds?.length ?? 0) === 0 && customOps.length === 0) continue;
+        const bits: string[] = [];
+        if (customOps.length > 0)
+          bits.push(`named operation(s) ${customOps.map((o) => o.name).join(", ")}`);
+        if (customFinds && customFinds.length > 0)
+          bits.push(`custom find(s) ${customFinds.map((f) => f.name).join(", ")}`);
+        diags.push({
+          severity: "error",
+          code: "loom.vanilla-document-unsupported",
+          message:
+            `aggregate '${ctxName}.${agg.name}' is shape(document) on foundation: vanilla, which ` +
+            `emits the CRUD surface only in v1, but declares ${bits.join(" and ")}. ` +
+            `Drop them, host this aggregate on a backend with full document support ` +
+            `(node / dotnet / python / java), or use shape(relational) / shape(embedded).`,
           source: `${sys.name}/${dep.name}`,
         });
       }
@@ -642,23 +702,21 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
 }
 
 // ---------------------------------------------------------------------------
-// Vanilla (plain Ecto) foundation: nested entity parts are not persisted.
+// Vanilla (plain Ecto) foundation: nested entity parts on a RELATIONAL-shaped
+// aggregate are not persisted.
 //
-// `contains <part>: <Part>[]` (and the `entity <Part> {}` declarations it
-// references) lower fine, but the vanilla schema emitter emits NO field /
-// `embeds_many` / `has_many` for them — the "richer embeds_one-backed path"
-// is explicitly deferred (`vanilla/schema-emit.ts`).  Worse, the per-operation
-// changeset for a containment-mutating op (`contains items: Item[]`,
-// `operation addItem(sku, qty) { items += Item{...} }`) casts the op's params
-// (`[:sku, :qty]`) onto the ROOT struct, which has no such fields — `Ecto.cast`
-// raises at runtime.  So today a vanilla aggregate with nested parts compiles
-// but silently loses the containment and crashes the operation.
-//
-// Reject loudly until the embed / relationship emit lands — pointing at the Ash
-// foundation (which models parts as embedded resources / relationships) or a
-// value-object remodel.  Mirrors `validateJavaContainmentSupport` /
-// `validateDapperSupport`'s nested-parts gates.  (The Ash foundation — the
-// default for `platform: elixir` — is unaffected.)
+// On a `shape(embedded)` aggregate, `contains <part>: <Part>[]` now persists:
+// the part becomes an Ecto `embedded_schema` module the root `embeds_many`s
+// (one jsonb column — the same column the shared migration emits for the
+// embedded shape), and a containment-mutating op (`items += Item{…}`) appends
+// the struct + `put_embed`s it (DEBT-32).  But a RELATIONAL-shaped aggregate's
+// containments would need child tables + `has_many` + `cast_assoc` (the shape's
+// migration emits a child table, not an inline column) — that relational
+// nested-entity emit is NOT wired, so the inline `embeds_many` would mismatch
+// the child-table migration.  Reject relational containments loudly: point at
+// `shape(embedded)` (now supported), the Ash foundation, or a value-object
+// remodel.  Mirrors `validateJavaContainmentSupport` / `validateDapperSupport`.
+// (The Ash foundation — the default for `platform: elixir` — is unaffected.)
 // ---------------------------------------------------------------------------
 export function validateVanillaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
@@ -670,20 +728,24 @@ export function validateVanillaContainmentSupport(sys: SystemIR, diags: LoomDiag
       if (!ctx) continue;
       for (const agg of ctx.aggregates) {
         // A containment usage OR an entity-part declaration both signal nested
-        // parts the vanilla emitter drops.  (Value objects are plain fields, not
-        // `contains`, so they're unaffected.)
+        // parts.  (Value objects are plain fields, not `contains`, so they're
+        // unaffected.)
         if ((agg.contains ?? []).length === 0 && (agg.parts ?? []).length === 0) continue;
+        // `shape(embedded)` containments are now wired (inline `embeds_many`).
+        const enriched = agg as EnrichedAggregateIR;
+        const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
+        if (shape === "embedded") continue;
         const part = agg.contains[0]?.partName ?? agg.parts[0]?.name ?? "Part";
         diags.push({
           severity: "error",
           message:
             `Deployable '${dep.name}' (platform ${dep.platform}, foundation: vanilla) hosts ` +
-            `aggregate '${ctxName}.${agg.name}' which contains nested entity parts (e.g. '${part}') — ` +
-            `the vanilla (plain Ecto) foundation does not yet persist nested parts (no ` +
-            `'embeds_many' / 'has_many' is emitted, and a containment-mutating operation would ` +
-            `cast the part's fields onto the root). Host this context on 'foundation: ash' (which ` +
-            `maps parts to embedded resources / relationships), model the part as a value object, ` +
-            `or use another backend.`,
+            `aggregate '${ctxName}.${agg.name}' which contains nested entity parts (e.g. '${part}') ` +
+            `on a relational shape — the vanilla (plain Ecto) foundation only persists nested parts ` +
+            `on a 'shape(embedded)' aggregate (inline 'embeds_many'); the relational child-table ` +
+            `emit is not wired. Add 'shape(embedded)' to the aggregate, host this context on ` +
+            `'foundation: ash' (which maps parts to relationships), model the part as a value ` +
+            `object, or use another backend.`,
           source: `${sys.name}/${dep.name}`,
           code: "loom.vanilla-containment-unsupported",
         });
@@ -1421,37 +1483,55 @@ export function validateEventSourcedWorkflowStorage(
   }
 }
 
-// the Hono (`node`) and .NET (`dotnet`) backends — the lineage SDK + co-located
-// `<field>_provenance` column + the `provenance_records` flush.  On a backend
-// that doesn't (phoenix today) a `provenanced` field silently behaves like a
-// plain field, dropping the audit trail it promises — an error, not a silent
-// no-op.  Mirrors the event-sourcing storage gate (a parsed-but-unemitted
-// feature is a footgun, so it fails fast).
+// the Hono (`node`) and .NET (`dotnet`) backends, plus elixir on the **vanilla**
+// foundation — the lineage SDK + co-located `<field>_provenance` column + the
+// `provenance_records` flush.  On a backend that doesn't (the Ash foundation, or
+// react) a `provenanced` field silently behaves like a plain field, dropping the
+// audit trail it promises — an error, not a silent no-op.  Mirrors the
+// event-sourcing storage gate (foundation-shaped on elixir; a parsed-but-
+// unemitted feature is a footgun, so it fails fast).
 const PROVENANCE_BACKENDS = new Set(["node", "dotnet"]);
 export function validateProvenancedStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
+  elixirFoundations: Set<string> = new Set(),
 ): void {
-  const unsupported = [...backendPlatforms].filter((p) => !PROVENANCE_BACKENDS.has(p));
+  // elixir hosts the provenance runtime only on the vanilla foundation
+  // (D-VANILLA-ES-HOME-shaped) — the Ash foundation has no co-located-column /
+  // process-buffer fit, exactly like event-sourced storage.  An `elixir` host
+  // counts as provenance-capable iff every elixir deployable hosting it uses
+  // `vanilla`.
+  const elixirProvCapable =
+    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
+  const isProvCapable = (p: string): boolean =>
+    PROVENANCE_BACKENDS.has(p) || (p === "elixir" && elixirProvCapable);
+  const unsupported = [...backendPlatforms].filter((p) => !isProvCapable(p));
   const anyBackend = backendPlatforms.size > 0;
   for (const agg of ctx.aggregates) {
     const provFields = agg.fields.filter((f) => f.provenanced);
     if (provFields.length === 0) continue;
     if (anyBackend && unsupported.length === 0) continue;
+    const includesPhoenix = unsupported.includes("elixir");
     const hostNote =
       unsupported.length > 0
         ? `it is hosted by ${unsupported.join(", ")}, where the provenance runtime is not emitted`
-        : "no provenance-capable (node / dotnet) backend deployable hosts this context";
+        : "no provenance-capable (node / dotnet / elixir-vanilla) backend deployable hosts this context";
     const names = provFields.map((f) => f.name).join(", ");
     diags.push({
       severity: "error",
       code: "loom.provenanced-backend-unsupported",
       message:
         `aggregate '${agg.name}' has provenanced field(s) ${names}, but the provenance runtime ` +
-        `(trace capture + history) is emitted for the Hono (node) and .NET (dotnet) backends only — ${hostNote}. ` +
-        `Host the context on a node or dotnet deployable, or drop the 'provenanced' modifier to use a plain ` +
-        `field (all backends). Tracked in provenance.md / type-system-feature-migration.md (DBT-1).`,
+        `(trace capture + history) is emitted for the Hono (node), .NET (dotnet) and elixir-vanilla ` +
+        `backends only — ${hostNote}. ` +
+        (includesPhoenix
+          ? `On Phoenix this is a foundation constraint: the Ash foundation has no provenance fit, ` +
+            `so switch the deployable to foundation: vanilla. Otherwise host `
+          : `Host `) +
+        `the context on a node / dotnet / elixir-vanilla deployable, or drop the 'provenanced' ` +
+        `modifier to use a plain field (all backends). Tracked in provenance.md / ` +
+        `type-system-feature-migration.md (DBT-1).`,
       source: `${ctx.name}/${agg.name}`,
     });
   }

@@ -46,6 +46,8 @@
 > existing `storage` / `dataSource` split (D-STORAGE-SPLIT) and the
 > `DomainEventDispatcher` seam (`docs/workflow.md`).
 
+> **[2026-06-20 status audit]** Realtime v1 frontend now spans React, Vue (`vue/realtime-handlers-builder.ts`), AND Svelte (`svelte/realtime-handlers-builder.ts`) — Hono remains the only backend serving `/realtime/events`.
+
 This proposal has two halves, designed together and sharing one key model:
 **Part I — Channels** (async messaging, queues, realtime delivery) and
 **Part II — Reads, freshness & caching** (invalidation, the cache tiers). Part I
