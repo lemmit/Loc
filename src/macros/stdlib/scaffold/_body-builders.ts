@@ -199,6 +199,175 @@ export function scaffoldViewList(view: View): Expression {
   ]);
 }
 
+/** `scaffoldHome` — the welcome page body: one summary `Card` per non-empty
+ *  section (aggregates / workflows / views).  AST twin of `expandScaffoldHome`.
+ *  Counts come from the scaffold macro's gathered inventory. */
+export function scaffoldHome(counts: {
+  aggregates: number;
+  workflows: number;
+  views: number;
+}): Expression {
+  const cards: Array<{ value: Expression }> = [];
+  if (counts.aggregates > 0) {
+    cards.push({
+      value: callExpr("Card", [
+        {
+          value: callExpr("Heading", [
+            { value: stringLit(pluralizeCount(counts.aggregates, "aggregate", "aggregates")) },
+            { name: "level", value: intLit(4) },
+          ]),
+        },
+        {
+          value: callExpr("Text", [
+            { value: stringLit("Manage records of each kind from the sidebar.") },
+          ]),
+        },
+      ]),
+    });
+  }
+  if (counts.workflows > 0) {
+    cards.push({
+      value: callExpr("Card", [
+        {
+          value: callExpr("Heading", [
+            { value: stringLit(pluralizeCount(counts.workflows, "workflow", "workflows")) },
+            { name: "level", value: intLit(4) },
+          ]),
+        },
+        {
+          value: callExpr("Anchor", [
+            { value: stringLit("Open workflows →") },
+            { name: "to", value: stringLit("/workflows") },
+          ]),
+        },
+      ]),
+    });
+  }
+  if (counts.views > 0) {
+    cards.push({
+      value: callExpr("Card", [
+        {
+          value: callExpr("Heading", [
+            { value: stringLit(pluralizeCount(counts.views, "view", "views")) },
+            { name: "level", value: intLit(4) },
+          ]),
+        },
+        {
+          value: callExpr("Anchor", [
+            { value: stringLit("Open views →") },
+            { name: "to", value: stringLit("/views") },
+          ]),
+        },
+      ]),
+    });
+  }
+  return callExpr("Stack", [
+    {
+      value: callExpr("Heading", [
+        { value: stringLit("Welcome") },
+        { name: "level", value: intLit(2) },
+      ]),
+    },
+    {
+      value: callExpr("Text", [
+        {
+          value: stringLit("Pick a section from the sidebar to start, or jump straight in below."),
+        },
+      ]),
+    },
+    { value: callExpr("Stack", cards) },
+    { name: "testid", value: stringLit("home") },
+  ]);
+}
+
+/** `scaffoldWorkflowsIndex` — the workflows index page body: Breadcrumbs +
+ *  Heading + one `Card` per workflow.  AST twin of
+ *  `expandScaffoldWorkflowsIndex`. */
+export function scaffoldWorkflowsIndex(workflows: readonly Workflow[]): Expression {
+  const cards = workflows.map((wf) => {
+    const slug = snake(wf.name);
+    return {
+      value: callExpr("Card", [
+        {
+          value: callExpr("Heading", [
+            { value: stringLit(humanize(wf.name)) },
+            { name: "level", value: intLit(4) },
+          ]),
+        },
+        {
+          value: callExpr("Anchor", [
+            { value: stringLit("Run →") },
+            { name: "to", value: stringLit(`/workflows/${slug}`) },
+            { name: "testid", value: stringLit(`workflow-${slug}-run`) },
+          ]),
+        },
+        { name: "testid", value: stringLit(`workflow-card-${slug}`) },
+      ]),
+    };
+  });
+  return callExpr("Stack", [
+    { value: breadcrumbs("Workflows", "workflows") },
+    {
+      value: callExpr("Heading", [
+        { value: stringLit("Workflows") },
+        { name: "level", value: intLit(2) },
+      ]),
+    },
+    {
+      value: callExpr("Text", [
+        { value: stringLit("System-level orchestrations.  Pick one to run.") },
+      ]),
+    },
+    { value: callExpr("Stack", cards) },
+    { name: "testid", value: stringLit("workflows-index") },
+  ]);
+}
+
+/** `scaffoldViewsIndex` — the views index page body: Breadcrumbs + Heading +
+ *  one `Card` per view.  AST twin of `expandScaffoldViewsIndex`. */
+export function scaffoldViewsIndex(views: readonly View[]): Expression {
+  const cards = views.map((view) => {
+    const slug = snake(view.name);
+    return {
+      value: callExpr("Card", [
+        {
+          value: callExpr("Heading", [
+            { value: stringLit(humanize(view.name)) },
+            { name: "level", value: intLit(4) },
+          ]),
+        },
+        {
+          value: callExpr("Anchor", [
+            { value: stringLit("Open →") },
+            { name: "to", value: stringLit(`/views/${slug}`) },
+            { name: "testid", value: stringLit(`view-${slug}-open`) },
+          ]),
+        },
+        { name: "testid", value: stringLit(`view-card-${slug}`) },
+      ]),
+    };
+  });
+  return callExpr("Stack", [
+    { value: breadcrumbs("Views", "views") },
+    {
+      value: callExpr("Heading", [
+        { value: stringLit("Views") },
+        { name: "level", value: intLit(2) },
+      ]),
+    },
+    {
+      value: callExpr("Text", [{ value: stringLit("Saved queries.  Open one to inspect rows.") }]),
+    },
+    { value: callExpr("Stack", cards) },
+    { name: "testid", value: stringLit("views-index") },
+  ]);
+}
+
+/** `${n} ${singular|plural}` — twin of the ⑤c expander's `pluralize`. */
+function pluralizeCount(n: number, singular: string, plural: string): string {
+  return `${n} ${n === 1 ? singular : plural}`;
+}
+
 /** `scaffoldInstanceList` — scaffolds an observable workflow's running-instances
  *  list page body.  AST twin of `expandScaffoldInstanceList`: the correlation
  *  column links to the instance detail (an `Anchor`, not an `IdLink`), the rest

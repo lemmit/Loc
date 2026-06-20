@@ -1282,7 +1282,7 @@ describe.skip("integration (parent wires emitters)", () => {
     const { renderSidebarComponent } = await import("../../src/generator/elixir/sidebar-emit.js");
     const ui = {
       name: "SalesAdmin",
-      pages: [{ name: "Home", route: "/", params: [], state: [], source: "scaffold" as const }],
+      pages: [{ name: "Home", route: "/", params: [], state: [] }],
       components: [],
       scaffolds: [],
       apiParams: [],
@@ -1331,7 +1331,6 @@ describe.skip("integration (parent wires emitters)", () => {
       route: "/",
       params: [],
       state: [],
-      source: "scaffold" as const,
       archetype: { kind: "home" as const },
     };
     const ts = buildPlaywrightPageObject({

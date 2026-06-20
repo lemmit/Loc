@@ -1,5 +1,5 @@
 import type { Aggregate, BoundedContext, Subdomain, View, Workflow } from "../../api/index.js";
-import { defineMacro, viewsIn, workflowsIn } from "../../api/index.js";
+import { aggregatesIn, defineMacro, viewsIn, workflowsIn } from "../../api/index.js";
 import {
   homePage,
   viewsIndexPage,
@@ -60,12 +60,30 @@ export default defineMacro({
       out.push(...invokeMacro("scaffoldView", { target, args: { of: v } }));
     }
 
-    // Shared singleton pages — conditional on what's scaffolded so
-    // we don't pollute the menu with empty WorkflowsIndex /
-    // ViewsIndex links.  Computed from args (not from `out.length`,
-    // which is 0 in unfold mode because invokeMacro returns []).
+    // Shared singleton dashboard pages.  These are ordinary scaffold pages now:
+    // each macro builds its full body inline from the gathered inventory (no
+    // deferred sentinel).  The inventory is everything this `scaffold` covers —
+    // its direct ref-list args plus the aggregates/workflows/views inside any
+    // scaffolded contexts/subdomains.
     const subdomains = args.subdomains as readonly Subdomain[];
     const contexts = args.contexts as readonly BoundedContext[];
+    const allAggregates = [
+      ...(args.aggregates as readonly Aggregate[]),
+      ...contexts.flatMap((c) => aggregatesIn(c)),
+      ...subdomains.flatMap((m) => aggregatesIn(m)),
+    ];
+    const allWorkflows = [
+      ...(args.workflows as readonly Workflow[]),
+      ...contexts.flatMap((c) => workflowsIn(c)),
+      ...subdomains.flatMap((m) => workflowsIn(m)),
+    ];
+    const allViews = [
+      ...(args.views as readonly View[]),
+      ...contexts.flatMap((c) => viewsIn(c)),
+      ...subdomains.flatMap((m) => viewsIn(m)),
+    ];
+    // Gate Home on the args (not the expanded inventory) so a `scaffold` over an
+    // empty context still gets a landing page, matching prior behaviour.
     const hasAnyWork =
       subdomains.length +
         contexts.length +
@@ -73,23 +91,25 @@ export default defineMacro({
         (args.workflows as readonly Workflow[]).length +
         (args.views as readonly View[]).length >
       0;
-    if (hasAnyWork) out.push(homePage());
-    // Only workflows with a command surface get a form page, so the
-    // WorkflowsIndex singleton (and its menu link) is emitted only when at
-    // least one such workflow exists — a context of purely event-triggered
-    // sagas would otherwise produce an empty index linking nowhere.
-    const hasCommandWorkflow = (wfs: readonly Workflow[]) =>
-      wfs.some((w) => !workflowIsEventTriggeredOnly(w));
-    const hasWorkflowsAnywhere =
-      hasCommandWorkflow(args.workflows as readonly Workflow[]) ||
-      contexts.some((c) => hasCommandWorkflow(workflowsIn(c))) ||
-      subdomains.some((m) => hasCommandWorkflow(workflowsIn(m)));
-    if (hasWorkflowsAnywhere) out.push(workflowsIndexPage());
-    const hasViewsAnywhere =
-      (args.views as readonly View[]).length > 0 ||
-      contexts.some((c) => viewsIn(c).length > 0) ||
-      subdomains.some((m) => viewsIn(m).length > 0);
-    if (hasViewsAnywhere) out.push(viewsIndexPage());
+    if (hasAnyWork) {
+      out.push(
+        homePage({
+          aggregates: allAggregates.length,
+          // The Home "N workflows" card counts only command-surfaced workflows
+          // (an event-triggered-only saga has no `/workflows/<wf>` route).
+          workflows: allWorkflows.filter((w) => !workflowIsEventTriggeredOnly(w)).length,
+          views: allViews.length,
+        }),
+      );
+    }
+    // The WorkflowsIndex singleton (and its menu link) is emitted only when at
+    // least one command-surfaced workflow exists — a context of purely
+    // event-triggered sagas would otherwise produce an empty index linking
+    // nowhere.  Its cards list every workflow, matching the prior expander.
+    if (allWorkflows.some((w) => !workflowIsEventTriggeredOnly(w))) {
+      out.push(workflowsIndexPage(allWorkflows));
+    }
+    if (allViews.length > 0) out.push(viewsIndexPage(allViews));
 
     return out as never[];
   },

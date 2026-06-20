@@ -5,17 +5,14 @@
 // can consume it without violating the one-directional layering rule
 // (`language/` knows nothing about `generator/`).
 //
-// Three sets:
+// Two sets:
 //   WALKER_LAYOUT_PRIMITIVES — top-level layout / formatter primitives
 //     (`Stack`, `Heading`, `Money` as a UI formatter, …) + the named-leaf
 //     form variants (`CreateForm`, `OperationForm`, `WorkflowForm`).
 //   WALKER_SUB_PRIMITIVES    — sub-elements that only appear nested inside
 //     a parent (`Tab` inside `Tabs`, `Column` inside `Table`).
-//   WALKER_SCAFFOLD_PRIMITIVES — the singleton index-page sentinels
-//     (`Home`/`WorkflowsIndex`/`ViewsIndex`) recognised by
-//     `inferPageOrigin`.
 //
-// These three sets are DERIVED — the single source of truth is the
+// These sets are DERIVED — the single source of truth is the
 // typed dispatch table at src/generator/_walker/registry.ts, which
 // holds the renderer functions for each target (React/TSX and
 // Phoenix/HEEx).  The layering rule forbids `language/` from
@@ -91,22 +88,8 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
 
 export const WALKER_SUB_PRIMITIVES: ReadonlySet<string> = new Set(["Tab", "Column"]);
 
-/** Singleton index-page sentinel names recognised by `inferPageOrigin`.
- *  Admissible as BuilderCall types so the scaffold-emitted index-page
- *  bodies (`body: Home`, `body: WorkflowsIndex`, `body: ViewsIndex`)
- *  validate. */
-export const WALKER_SCAFFOLD_PRIMITIVES: ReadonlySet<string> = new Set([
-  "Home",
-  "WorkflowsIndex",
-  "ViewsIndex",
-]);
-
 /** True when `name` is admissible as a v2 BuilderCall type without
  *  resolving to a user-declared type (VO, EntityPart, Component). */
 export function isWalkerPrimitive(name: string): boolean {
-  return (
-    WALKER_LAYOUT_PRIMITIVES.has(name) ||
-    WALKER_SUB_PRIMITIVES.has(name) ||
-    WALKER_SCAFFOLD_PRIMITIVES.has(name)
-  );
+  return WALKER_LAYOUT_PRIMITIVES.has(name) || WALKER_SUB_PRIMITIVES.has(name);
 }

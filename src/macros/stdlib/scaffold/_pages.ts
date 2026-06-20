@@ -11,13 +11,16 @@ import {
   filterFindsForAggregate,
   filterStateFields,
   scaffoldDetailsParts,
+  scaffoldHome,
   scaffoldInstanceDetails,
   scaffoldInstanceList,
   scaffoldList,
   scaffoldNewForm,
   scaffoldOperations,
   scaffoldViewList,
+  scaffoldViewsIndex,
   scaffoldWorkflowForm,
+  scaffoldWorkflowsIndex,
   scalarColumnsForAggregate,
 } from "./_body-builders.js";
 
@@ -175,20 +178,20 @@ export function pageForView(v: View): Page {
   });
 }
 
-export function homePage(): Page {
+export function homePage(counts: { aggregates: number; workflows: number; views: number }): Page {
   return page({
     name: "Home",
     route: "/",
-    body: callExpr("Home", []),
+    body: scaffoldHome(counts),
     menu: { hidden: boolLit(true) },
   });
 }
 
-export function workflowsIndexPage(): Page {
+export function workflowsIndexPage(workflows: readonly Workflow[]): Page {
   return page({
     name: "WorkflowsIndex",
     route: "/workflows",
-    body: callExpr("WorkflowsIndex", []),
+    body: scaffoldWorkflowsIndex(workflows),
     menu: {
       section: stringLit("Workflows"),
       label: stringLit("Index"),
@@ -196,11 +199,11 @@ export function workflowsIndexPage(): Page {
   });
 }
 
-export function viewsIndexPage(): Page {
+export function viewsIndexPage(views: readonly View[]): Page {
   return page({
     name: "ViewsIndex",
     route: "/views",
-    body: callExpr("ViewsIndex", []),
+    body: scaffoldViewsIndex(views),
     menu: {
       section: stringLit("Views"),
       label: stringLit("Index"),
