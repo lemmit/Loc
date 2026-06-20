@@ -11,6 +11,7 @@ import type {
 import { contextUsesMoney } from "../../ir/types/loom-ir.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
+import { AUTH_GATE_ANGULAR, AUTH_SESSION_SERVICE_ANGULAR } from "../_frontend/auth-ui.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { walkBody } from "../_walker/walker-core.js";
@@ -163,9 +164,21 @@ export function generateAngularForContexts(
       systemNameHuman: humanize(sys.name),
       navSections,
       hasNav: navEntries.length > 0,
+      authUi,
     }),
   );
   out.set("src/app/app.config.ts", pack.render("app-config", {}));
+
+  // --- Frontend auth (`auth: ui`) ------------------------------------
+  // The session service owns the /auth/me probe + sign-in/out redirects (and
+  // exposes the verified `user` signal a future page guard reads); the
+  // pack-agnostic AuthGate component wraps <router-outlet /> in the app shell.
+  // Gated entirely behind `authUi` — a non-auth app emits neither file and an
+  // unchanged app shell.
+  if (authUi) {
+    out.set("src/app/auth/session.service.ts", AUTH_SESSION_SERVICE_ANGULAR);
+    out.set("src/app/auth/auth-gate.component.ts", AUTH_GATE_ANGULAR);
+  }
 
   // Routes: one per page; a synthetic Home only when no page owns the
   // index route; a wildcard NotFound always.
