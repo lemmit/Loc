@@ -47,11 +47,46 @@ describe("saving-shape capability validation", () => {
     expect(await shapeErrors(sys("node", "embedded"))).toEqual([]);
   });
 
-  it("rejects shape(document) on a phoenix deployable (no Ash document emitter)", async () => {
+  it("rejects shape(document) on a phoenix deployable (defaults to ash — no document emitter)", async () => {
     const errs = await shapeErrors(sys("phoenixLiveView", "document"));
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("shape(document)");
     expect(errs[0]).toContain("Cart");
+  });
+
+  it("accepts shape(document) on an elixir foundation: vanilla deployable (DEBT-07)", async () => {
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Cart ids guid shape(document) with crudish { total: int }
+      repository Carts for Cart { }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    expect(await shapeErrors(src)).toEqual([]);
+  });
+
+  it("rejects shape(document) on an elixir foundation: ash deployable (no document fit)", async () => {
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Cart ids guid shape(document) { total: int }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: ash }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    const errs = await shapeErrors(src);
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("shape(document)");
   });
 
   it("accepts shape(embedded) on a phoenix deployable (Ash embedded resources)", async () => {
@@ -81,5 +116,76 @@ system Shop {
     const errs = await shapeErrors(src);
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("shape(document)");
+  });
+});
+
+describe("vanilla shape(document) v1 CRUD-only scope (DEBT-07)", () => {
+  async function docScopeErrors(source: string): Promise<string[]> {
+    const { model } = await parseString(source, { validate: false });
+    return validateLoomModel(enrichLoomModel(lowerModel(model)))
+      .filter((d) => d.severity === "error" && d.code === "loom.vanilla-document-unsupported")
+      .map((d) => d.message);
+  }
+
+  it("rejects a custom find on a vanilla document aggregate", async () => {
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Cart ids guid shape(document) with crudish {
+        reference: string
+      }
+      repository Carts for Cart {
+        find byReference(reference: string): Cart? where this.reference == reference
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    const errs = await docScopeErrors(src);
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("custom find(s) byReference");
+  });
+
+  it("rejects a user-defined named operation on a vanilla document aggregate", async () => {
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Cart ids guid shape(document) with crudish {
+        total: int
+        operation bump() { total := total + 1 }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    const errs = await docScopeErrors(src);
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("named operation(s) bump");
+  });
+
+  it("accepts a CRUD-only vanilla document aggregate", async () => {
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Cart ids guid shape(document) with crudish { reference: string }
+      repository Carts for Cart { }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    expect(await docScopeErrors(src)).toEqual([]);
   });
 });

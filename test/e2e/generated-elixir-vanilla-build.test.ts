@@ -102,6 +102,10 @@ describe.skipIf(!ENABLED)(
         // module; `lines += Line{…}` appends + `put_embed`s.  Compiles the
         // embedded-schema part + put_embed persist.
         { name: "vanilla-embed-parts.ddd", deployable: "api" },
+        // shape(document) (DEBT-07) — the `(id, data, version)` jsonb table, a
+        // schemaless-changeset validated fold, and the document CRUD repository
+        // (the relational `Map.from_struct` serialize swapped for a data-merge).
+        { name: "vanilla-document.ddd", deployable: "api" },
         // ES applier folds over value-object / enum fields (P4.3): an inline VO
         // constructor renders to a plain map on vanilla — compile that path.
         { name: "vanilla-vo-fold.ddd", deployable: "api" },

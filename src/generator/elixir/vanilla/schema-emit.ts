@@ -22,6 +22,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { isVanillaDocAgg, renderDocSchema } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 
@@ -52,7 +53,9 @@ export function emitVanillaSchemas(
       : undefined;
     out.set(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}.ex`,
-      renderSchema(appModule, ctxModule, agg, enumsByName, schemaPrefix),
+      isVanillaDocAgg(agg, ctx, sys)
+        ? renderDocSchema(appModule, ctxModule, agg, schemaPrefix)
+        : renderSchema(appModule, ctxModule, agg, enumsByName, schemaPrefix),
     );
     // Each entity part (`entity Line { … }`) becomes an Ecto `embedded_schema`
     // module the aggregate `embeds_many`/`embeds_one`s — the vanilla analogue of

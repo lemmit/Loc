@@ -14,11 +14,17 @@
 // extension shape byte-identical to the Ash tower) lands in Slice 4.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  OperationIR,
+  SystemIR,
+} from "../../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
+import { isVanillaDocAgg, renderDocSerialize } from "./document-emit.js";
 import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
 import { aggregateHasUnionFind, findRoutes, renderFindActions } from "./find-controller.js";
 import {
@@ -48,6 +54,7 @@ export function emitVanillaApiControllers(
   appModule: string,
   ctx: BoundedContextIR,
   out: Map<string, string>,
+  sys?: SystemIR,
 ): VanillaApiEmitResult {
   const ctxModule = upperFirst(ctx.name);
   const routes: ApiRoute[] = [];
@@ -63,7 +70,15 @@ export function emitVanillaApiControllers(
       `lib/${appName}_web/controllers/${aggSnake}_controller.ex`,
       es
         ? renderEsController(appModule, ctxModule, agg, ctx)
-        : renderController(appModule, ctxModule, agg, aggSnake, memberOps, ctx),
+        : renderController(
+            appModule,
+            ctxModule,
+            agg,
+            aggSnake,
+            memberOps,
+            ctx,
+            isVanillaDocAgg(agg, ctx, sys),
+          ),
     );
 
     // Read path.  Custom-find routes (`GET /<plural>/<find>`) MUST precede the
@@ -135,6 +150,7 @@ function renderController(
   aggSnake: string,
   memberOps: readonly OperationIR[],
   ctx: BoundedContextIR,
+  isDoc = false,
 ): string {
   const aggPascal = upperFirst(agg.name);
   const facadeMod = `${appModule}.${ctxModule}`;
@@ -251,11 +267,15 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
 ${findActions}
 ${opActions}
 ${problemVariant}
-  defp serialize(record) do
+${
+  isDoc
+    ? renderDocSerialize()
+    : `  defp serialize(record) do
     record
     |> Map.from_struct()
     |> Map.drop([:__meta__, :__struct__])
-  end
+  end`
+}
 end
 `;
 }

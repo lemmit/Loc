@@ -77,8 +77,8 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   const allViews: VanillaViewRef[] = [];
   for (const ctx of contexts) {
     emitVanillaSchemas(appModule, ctx, out, sys);
-    emitVanillaChangesets(appModule, ctx, out);
-    emitVanillaRepositories(appModule, ctx, out);
+    emitVanillaChangesets(appModule, ctx, out, sys);
+    emitVanillaRepositories(appModule, ctx, out, sys);
     // Event-sourced aggregates (persistedAs(eventLog)) — struct + event-log
     // Ecto schema + fold + event-store repository (D-VANILLA-ES-HOME).  The
     // state emitters above skip them; the context module + controllers branch.
@@ -89,7 +89,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // structs against these (PubSub broadcast), and a future channel-on-
     // vanilla slice reuses the same module path.
     emitVanillaEventModules(appModule, ctx, out);
-    const { routes } = emitVanillaApiControllers(appName, appModule, ctx, out);
+    const { routes } = emitVanillaApiControllers(appName, appModule, ctx, out, sys);
     apiRoutes.push(...routes);
     // Views — per-context Ecto query modules; controller + routes collected
     // project-wide (one `ViewsController` for all views, matching the ash path).
