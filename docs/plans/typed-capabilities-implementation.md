@@ -167,21 +167,27 @@ they must move to typed capabilities before the string grammar can be deleted.
 - Prereqs: Phases 3 (stdlib no longer emits string nodes) + 4 (typed
   `implements`) must land first.
 
-## Open question — soft-delete operations (blocks the softDelete migration)
+## Soft-delete migration — capability + `softDelete` ops macro (decided)
 
-The `softDeletable` macro adds `isDeleted`/`deletedAt` **and** the
+The `softDeletable` macro adds `isDeleted`/`deletedAt` + filter **and** the
 `softDelete()`/`restore()` **operations**.  A `capability` is a pure mixin
-(fields + filter + stamp) — operations stay macros (proposal guardrail).  So
-`softDeletable` can't collapse into one capability without deciding where the
-operations live.  Options, for the owner:
-1. **Capability + residual macro** — `capability softDeletable { isDeleted +
-   deletedAt + filter }` plus a small `softDeleteOps` macro for the two
-   operations (composed: `with softDeletable, softDeleteOps`).
-2. **Author the operations** — drop the generated ops; users hand-write
-   `softDelete()`/`restore()` when wanted (they're two-line bodies).
-3. **Extend capabilities to allow operations** — rejected by the proposal
-   guardrail unless a broader case appears.
-Recommendation: option 1 (keeps behavior; honours the mixin boundary).
+(fields + filter + stamp) — operations stay macros (proposal guardrail).  Split:
+
+- **`capability softDeletable { isDeleted + deletedAt + filter !this.isDeleted }`**
+  — built-in (state + filter, co-located).  Replaces the old `softDeletable`
+  (aggregate fields) + `softDelete` (context filter) macro pair.
+- **`softDelete` macro (aggregate)** — just the `softDelete()`/`restore()`
+  operations.  (Owner's call: `with softDelete` reads better than an
+  `*Ops`-suffixed name; `softDeletable` is now the capability.)
+- Usage: `aggregate Order with softDeletable, softDelete`.
+- `softDeleteByDefault` (context) → fans the capability (state + filter) + the
+  `softDelete` ops macro to every aggregate.
+
+Migration note: `softDelete` flips from a *context* macro (old: filter) to an
+*aggregate* macro (new: ops), so every `context … with softDelete` clause is
+dropped (the per-aggregate capability co-locates the filter) and every
+`aggregate … with softDeletable` gains `, softDelete` where the ops are wanted.
+IR-equivalent; ~18 source/fixture/test files affected.
 
 ## Deferred (proposal scope guardrails)
 
