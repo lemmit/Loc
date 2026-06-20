@@ -11,27 +11,31 @@ import { emitExpr, styleAttr, testidAttr, type WalkContext } from "../_walker/wa
 // the `renderAction` walker seam.
 //
 // Angular template event bindings bind a STATEMENT, not a function value, and
-// forbid arrow functions.  Two shapes:
+// forbid arrow functions.  Rather than stage state in the markup, every Action
+// renders a "dumb template" — one event, one method call:
 //
-//   - No `then:` — the click handler is the inline call
-//     `<localVar>.mutate(<idExpr>, {})` (id passed AT CLICK TIME so an async
-//     QueryView record id resolves correctly).  The page-shell hoists only
-//     `readonly <localVar> = use<Op><Agg>()`.
-//   - `then:` — the after-resolve effect needs a `.then(...)` continuation the
-//     template can't host, so the click captures the id into an `<op>Id` signal
-//     and calls a component METHOD; the page-shell emits
-//     `async on<Op><Agg>() { await this.<localVar>.mutate(this.<op>Id(), {});
-//     <then> }`.  Same id-capture trick the operation-dialog Modal uses.
+//   <button (click)='on<Op><Agg>()' [disabled]='<localVar>.isPending()'>…
+//
+// and the page-shell emits a component method that reads the record id INSIDE
+// the method (a `?.id` access with an early-return guard), awaits the mutation,
+// then runs the optional `then:` effect:
+//
+//   async on<Op><Agg>(): Promise<void> {
+//     const id = this.<receiver>?.id;
+//     if (!id) return;
+//     await this.<localVar>.mutate(id, {});
+//     <then>;
+//   }
 // ---------------------------------------------------------------------------
 
-/** What the page-shell needs to wire one Action's mutation. */
+/** What the page-shell needs to wire one Action's mutation + method. */
 export interface AngularActionSpec {
   localVar: string;
   hookName: string;
   importFrom: string;
-  /** Present when the Action carries a `then:` effect — the shell emits an
-   *  id-capture signal + an `async` method instead of just the hoist. */
-  method?: { name: string; idSig: string; thenJs: string };
+  /** The component method the `(click)` calls — reads the id, guards, mutates,
+   *  then runs the optional `then:` effect. */
+  method: { name: string; idAccess: string; thenJs?: string };
 }
 
 /** Prefix bare class-field identifiers with `this.` for a method-body context,
@@ -87,43 +91,44 @@ export function renderAngularAction(
   const localVar = `${lowerFirst(op.name)}${agg.name}`;
   const hookName = `use${upperFirst(op.name)}${agg.name}`;
   const importFrom = `../../api/${lowerFirst(agg.name)}`;
-  // Receiver id is evaluated in TEMPLATE scope (bare `<handle>.data()!` for a
-  // QueryView record, `<param>` for a component prop) — what the inline `(click)`
-  // statement / the id-capture `set(...)` needs.
-  const idExpr = `${emitExpr(opRef.receiver, ctx)}.id`;
+  const methodName = `on${upperFirst(op.name)}${agg.name}`;
 
+  // The record id is read INSIDE the method, not pre-staged in the markup.  Its
+  // receiver renders in TEMPLATE scope (`<handle>.data()!` for a QueryView
+  // record, `<param>` for a component prop); for the method body, strip the
+  // non-null `!` (the method guards with `?.id`) and `this.`-prefix the
+  // class-field reads.
+  const fieldNames = new Set<string>([
+    "router",
+    ...[...ctx.usedApiHooks.values()].map((h) => h.varName),
+    ...ctx.stateNames,
+    ...ctx.paramNames,
+  ]);
+  const receiverTemplate = emitExpr(opRef.receiver, ctx).replace(/!+$/, "");
+  const idAccess = `${prefixThis(receiverTemplate, fieldNames)}?.id`;
+
+  // The `then:` effect (e.g. `navigate(...)`) renders in template scope, then
+  // gets `this.`-prefixed for the method body.  `emitActionThen` sets
+  // `usesNavigate`, so the shell injects `Router`.
   const thenArg = namedArgValue(call, "then");
-  const spec: AngularActionSpec = { localVar, hookName, importFrom };
-  let onClick: string;
-  if (thenArg) {
-    // The `then:` effect (e.g. `navigate(...)`) renders in template scope; the
-    // method body needs class-field reads `this.`-prefixed.  `emitActionThen`
-    // sets `usesNavigate`, so the shell injects `Router`.
-    const thenTemplate = emitActionThen(thenArg, ctx);
-    const fieldNames = new Set<string>([
-      "router",
-      ...[...ctx.usedApiHooks.values()].map((h) => h.varName),
-      ...ctx.stateNames,
-      ...ctx.paramNames,
-    ]);
-    const methodName = `on${upperFirst(op.name)}${agg.name}`;
-    const idSig = `${localVar}Id`;
-    spec.method = { name: methodName, idSig, thenJs: prefixThis(thenTemplate, fieldNames) };
-    onClick = `${idSig}.set(${idExpr}); ${methodName}()`;
-  } else {
-    onClick = `${localVar}.mutate(${idExpr}, {})`;
-  }
+  const thenJs = thenArg ? prefixThis(emitActionThen(thenArg, ctx), fieldNames) : undefined;
 
+  const spec: AngularActionSpec = {
+    localVar,
+    hookName,
+    importFrom,
+    method: { name: methodName, idAccess, thenJs },
+  };
   ctx.angularActions ??= [];
   const specs = ctx.angularActions as AngularActionSpec[];
   if (!specs.some((s) => s.localVar === localVar)) specs.push(spec);
 
   return renderPrimitive(ctx, "primitive-button", {
     label: humanize(op.name),
-    onClick,
+    onClick: `${methodName}()`,
     hasOnClick: true,
-    disabled: undefined,
-    hasDisabled: false,
+    disabled: `${localVar}.isPending()`,
+    hasDisabled: true,
     loading: undefined,
     hasLoading: false,
     testidAttr: testidAttr(call, ctx),
