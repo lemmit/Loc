@@ -193,6 +193,10 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // register the core import before the import lines are built (the spec block
   // that consumes them runs further down).
   if ((result.angularModals?.length ?? 0) > 0) coreSymbols.add("signal");
+  // A `then:`-bearing Action hoists an id-capture signal too.
+  if (((result.angularActions ?? []) as AngularActionSpec[]).some((a) => a.method !== undefined)) {
+    coreSymbols.add("signal");
+  }
 
   const imports: string[] = [
     `import { ${[...coreSymbols].sort().join(", ")} } from "@angular/core";`,
@@ -294,7 +298,22 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     for (const [from, names] of [...byPath.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       imports.push(`import { ${[...names].sort().join(", ")} } from ${JSON.stringify(from)};`);
     }
-    for (const a of angularActions) members.push(`  readonly ${a.localVar} = ${a.hookName}();`);
+    for (const a of angularActions) {
+      members.push(`  readonly ${a.localVar} = ${a.hookName}();`);
+      // A `then:`-bearing Action carries an id-capture signal + an async method
+      // (the trigger calls `<method>()`); a no-`then` Action mutates inline.
+      if (a.method) {
+        members.push(`  readonly ${a.method.idSig} = signal("");`);
+        members.push(
+          [
+            `  async ${a.method.name}(): Promise<void> {`,
+            `    await this.${a.localVar}.mutate(this.${a.method.idSig}(), {});`,
+            `    ${a.method.thenJs};`,
+            "  }",
+          ].join("\n"),
+        );
+      }
+    }
   }
 
   // `Modal { OperationForm(…) }` — the renderer recorded one spec per
