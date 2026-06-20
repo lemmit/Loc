@@ -1,0 +1,87 @@
+name: Behavioral e2e (headless, no docker)
+
+# Boots the GENERATED Hono backend on PGlite (Postgres-in-WASM,
+# in-process — no docker, no Postgres sidecar) and runs the suites Loom
+# EMITS from the DSL:
+#   - api : the generated `e2e/<Sys>.e2e.test.ts` (`test e2e … against
+#           <node backend>`), dispatched into `app.fetch`.
+#   - unit: the generated pure-domain `*.test.ts` (`test "…"` blocks)
+#           — non-gating for now (see test/behavioral/README.md).
+#
+# This promotes the behavioral domain layer — which otherwise runs ONLY
+# nightly in the docker `conformance-full` leg (LOOM_E2E=1) — to a fast,
+# per-PR, docker-free gate for the Hono/TS backend.  Per-PR coverage is
+# otherwise purely structural (typecheck / build / string-match generator
+# tests), which proves code is emitted, not that it behaves.  Reuses the
+# playground's own runners (web/src/testing, web/src/runtime/ddl).
+#
+# Cross-backend (.NET/Java/Phoenix/Python) + UI-pack behavioral coverage
+# stays in the docker/nightly legs; this tier is additive.
+#
+# Triggers: PRs/pushes touching the toolchain, the corpus examples, the
+# emitters the boot path bundles, or the harness itself.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'bin/**'
+      - 'web/src/testing/**'
+      - 'web/src/runtime/ddl.ts'
+      - 'web/src/examples/sales-system.ddd'
+      - 'web/src/examples/storefront-system.ddd'
+      - 'test/behavioral/**'
+      - 'package.json'
+      - '.github/workflows/behavioral-e2e.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'bin/**'
+      - 'web/src/testing/**'
+      - 'web/src/runtime/ddl.ts'
+      - 'web/src/examples/sales-system.ddd'
+      - 'web/src/examples/storefront-system.ddd'
+      - 'test/behavioral/**'
+      - 'package.json'
+      - '.github/workflows/behavioral-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  behavioral:
+    runs-on: ubuntu-latest
+    # Boot+dispatch is ~sub-second per case; the time is npm ci (root +
+    # harness) + the toolchain build.  Cap leaves headroom for cold cache.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Build the Loom toolchain so `bin/cli.js generate system` works
+      # (`prepare` lifecycle runs langium:generate).
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      # Pinned generated-project runtime deps (zod 3, drizzle, hono,
+      # @hono/zod-openapi, pglite, esbuild) — isolated from the repo's.
+      - name: Install behavioral harness deps
+        working-directory: test/behavioral
+        run: npm ci || npm install --no-audit --no-fund
+
+      - name: Run behavioral tier (api gates; unit reports)
+        working-directory: test/behavioral
+        run: node run.mjs

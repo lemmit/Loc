@@ -1,0 +1,7 @@
+{
+  "comment": "Curated allowlist for the headless behavioral tier. Each entry is generated, its single `platform: node` (Hono) deployable booted on PGlite, and its emitted suites run. CONSTRAINT: exactly one node backend per system, so dispatch (host-agnostic, path-matched) is unambiguous — multi-backend systems (showcase, examples/acme) stay in the docker `conformance-full` leg. `api` runs the emitted `e2e/<Sys>.e2e.test.ts`; `unit` runs the emitted pure-domain `*.test.ts`.",
+  "cases": [
+    { "name": "sales-system", "ddd": "web/src/examples/sales-system.ddd", "api": true, "unit": true },
+    { "name": "storefront-system", "ddd": "web/src/examples/storefront-system.ddd", "api": true, "unit": true }
+  ]
+}
