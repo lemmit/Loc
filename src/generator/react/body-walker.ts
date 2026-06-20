@@ -42,6 +42,9 @@ export function walkBodyToTsx(
   /** Page/component `derived` binding names — body refs resolve to the
    *  hoisted `useMemo` const. */
   derivedNames: ReadonlySet<string> = new Set(),
+  /** True when the hosting frontend deployable has `auth: ui` — enables
+   *  currentUser-only operation `requires` gating on `Action(...)` buttons. */
+  authUi = false,
 ): WalkResult {
   return walkBody(
     body,
@@ -59,5 +62,6 @@ export function walkBodyToTsx(
     pageRoutes,
     externFunctions,
     derivedNames,
+    authUi,
   );
 }

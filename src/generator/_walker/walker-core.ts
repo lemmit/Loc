@@ -112,6 +112,12 @@ export interface WalkResult {
    *  `useState` import + per-field `const [x, setX] = useState(...)`
    *  declarations when set. */
   usesState: boolean;
+  /** True when any walked node emitted a currentUser-gated
+   *  action button (an `Action(<instance>.<op>)` whose operation's
+   *  `requires` predicate is wholly client-evaluable).  The React page
+   *  shell binds `const currentUser = useSession().user` + imports
+   *  `useSession` when set, so the body's button gates resolve it. */
+  usesCurrentUser: boolean;
   /** True when any walked node emitted JSX that
    *  references React Router's `Link` component (e.g.
    *  `Anchor("…", to: …)` → `<Anchor component={RouterLink}>`).
@@ -340,6 +346,12 @@ export function walkBody(
    *  computed (read like state); the shell hoists each as
    *  `useMemo`/`computed`/`$derived`. */
   derivedNames: ReadonlySet<string> = new Set(),
+  /** True when the hosting frontend deployable has `auth: ui` — the
+   *  verified session user is available client-side, so currentUser-only
+   *  operation `requires` gates can hide their action buttons.  False (the
+   *  default, and Svelte's omitted arg) → no button is gated and output
+   *  stays byte-identical. */
+  authUi = false,
 ): WalkResult {
   const apiParamNames = new Map<string, string>();
   for (const p of apiParams) apiParamNames.set(p.name, p.apiName);
@@ -350,11 +362,13 @@ export function walkBody(
     paramNames,
     paramTypes,
     pageRoutes,
+    authUi,
     usedParams: new Set(),
     usesNavigate: false,
     stateNames,
     derivedNames,
     usesState: false,
+    usesCurrentUser: false,
     usesRouterLink: false,
     userComponents,
     usedUserComponents: new Set(),
@@ -385,6 +399,7 @@ export function walkBody(
     usedParams: ctx.usedParams,
     usesNavigate: ctx.usesNavigate,
     usesState: ctx.usesState,
+    usesCurrentUser: ctx.usesCurrentUser,
     usesRouterLink: ctx.usesRouterLink,
     usedUserComponents: ctx.usedUserComponents,
     usesChildren: ctx.usesChildren,
@@ -447,6 +462,11 @@ export interface WalkEnv {
   /** Page name → route path, so an `Action`'s `then: navigate(<Page>,
    *  …)` effect targets the page's real declared route. */
   pageRoutes?: ReadonlyMap<string, string>;
+  /** True when the hosting frontend deployable has `auth: ui`.  Lets
+   *  `Action(<instance>.<op>)` hide its button at runtime when the
+   *  operation's `requires` predicate is currentUser-only (the action-level
+   *  mirror of the page `requires` guard).  False → no button is gated. */
+  authUi: boolean;
   apiParamNames: ReadonlyMap<string, string>;
   /** Lambda params bound in the current sub-walk
    *  (source-side name → emitted JS name).  `Column("ID", o => o.id)`
@@ -486,6 +506,10 @@ export interface Sink {
   usedParams: Set<string>;
   usesNavigate: boolean;
   usesState: boolean;
+  /** True when a currentUser-gated action button emitted from this body
+   *  (an `Action(<instance>.<op>)` whose op `requires` is client-evaluable).
+   *  The React page shell binds `currentUser` + imports `useSession`. */
+  usesCurrentUser: boolean;
   usesRouterLink: boolean;
   usedUserComponents: Set<string>;
   usesChildren: boolean;
@@ -833,6 +857,7 @@ export function propagateChildFlags(parent: WalkContext, child: WalkContext): vo
   if (child.usesNavigate) parent.usesNavigate = true;
   if (child.usesRouterLink) parent.usesRouterLink = true;
   if (child.usesState) parent.usesState = true;
+  if (child.usesCurrentUser) parent.usesCurrentUser = true;
   if (child.usesChildren) parent.usesChildren = true;
   if (child.usesCodeBlock) parent.usesCodeBlock = true;
   if (child.usesFragment) parent.usesFragment = true;

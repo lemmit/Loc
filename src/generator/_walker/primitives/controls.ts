@@ -5,6 +5,7 @@
 
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { tryRenderGate } from "../../_frontend/gate-expr.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
@@ -151,7 +152,6 @@ export function emitAction(
   // statement-bound button + an id-at-mutate hoist instead of a JSX arrow).
   const override = ctx.target.renderAction?.(call, ctx, depth);
   if (override != null) return override;
-  void depth;
   const opRef = positionalArgs(call)[0];
   if (!opRef || opRef.kind !== "member" || opRef.receiver.kind !== "ref") {
     return ctx.target.renderComment(
@@ -197,7 +197,7 @@ export function emitAction(
   const onClick = thenJs
     ? `() => void ${mutateCall}.then(() => { ${thenJs}; })`
     : `() => void ${mutateCall}`;
-  return renderPrimitive(ctx, "primitive-button", {
+  const button = renderPrimitive(ctx, "primitive-button", {
     label: humanize(op.name),
     onClick,
     hasOnClick: true,
@@ -208,6 +208,29 @@ export function emitAction(
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });
+  // Action-button gating (D-AUTH-OIDC, the action-level mirror of the page
+  // `requires` guard).  On an `auth: ui` frontend, hide the button at runtime
+  // when EVERY `requires` predicate on the operation is currentUser-only (the
+  // verified session claims can decide it client-side).  If the op has no
+  // `requires`, or ANY predicate touches `this.<field>` / params (not
+  // client-evaluable — `tryRenderGate` returns null), the button stays
+  // ungated; the backend 403 still enforces the gate (defence-in-depth).
+  if (ctx.authUi) {
+    const gates = op.statements.filter((s) => s.kind === "requires").map((s) => s.expr);
+    if (gates.length > 0) {
+      const parts = gates.map((g) => tryRenderGate(g, "currentUser"));
+      if (parts.every((p) => p !== null)) {
+        ctx.usesCurrentUser = true;
+        return ctx.target.renderConditionalChild(
+          parts.map((p) => `(${p})`).join(" && "),
+          button,
+          "null",
+          depth,
+        );
+      }
+    }
+  }
+  return button;
 }
 
 /** Render an `Action`'s `then:` effect — the JS run after the
