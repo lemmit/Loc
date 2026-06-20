@@ -41,24 +41,18 @@ export interface PageNameCtx {
 /** Derive a page's {@link PageKind} from its role-scoped `name` + `area`.
  *  Reproduces exactly what `inferPageOrigin` + `classifyScaffoldPageByName`
  *  stamped before slice 3c, so generated output is byte-identical. */
-export function classifyPage(
-  page: Pick<PageIR, "name" | "area" | "source">,
-  ctx: PageNameCtx,
-): PageKind {
+export function classifyPage(page: Pick<PageIR, "name" | "area">, ctx: PageNameCtx): PageKind {
   const name = page.name;
   const area = page.area ?? [];
 
-  // Singleton index pages.  Their NAMES (`Home` / `WorkflowsIndex` /
-  // `ViewsIndex`) collide with hand-written pages, so — unlike the
-  // aggregate/workflow/view kinds below, whose names are distinctive — they are
-  // gated on `source === "scaffold"` (set in `lowerPage` from the sentinel body,
-  // the only signal that survives lowering).  A user page literally named `Home`
-  // keeps `source: "explicit"` and falls through to `custom`.
-  if (page.source === "scaffold") {
-    if (name === "Home") return { kind: "home" };
-    if (name === "WorkflowsIndex") return { kind: "workflows-index" };
-    if (name === "ViewsIndex") return { kind: "views-index" };
-  }
+  // Singleton dashboard pages, identified by their reserved names.  The scaffold
+  // mints exactly these names (`Home` / `WorkflowsIndex` / `ViewsIndex`); a
+  // hand-written page sharing one is treated as that dashboard too, consistent
+  // with the scaffold's override-by-name contract (write `page Home { … }` to
+  // replace the generated landing page).
+  if (name === "Home") return { kind: "home" };
+  if (name === "WorkflowsIndex") return { kind: "workflows-index" };
+  if (name === "ViewsIndex") return { kind: "views-index" };
 
   // Aggregate pages are role-named (`List`/`New`/`Detail`) inside their
   // per-aggregate `area <Plural>` block — the area's last segment identifies

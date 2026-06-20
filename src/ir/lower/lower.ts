@@ -179,11 +179,7 @@ import {
 import { lowerComponent, lowerLayout, lowerUi } from "./lower-ui.js";
 import { lowerView } from "./lower-view.js";
 import { lowerWorkflow } from "./lower-workflow.js";
-import {
-  buildExpandContext,
-  expandInlineScaffoldPrimitives,
-  type WalkerExpandContext,
-} from "./walker-primitive-expander.js";
+import { buildExpandContext, type WalkerExpandContext } from "./walker-primitive-expander.js";
 
 // ---------------------------------------------------------------------------
 // Lowering — structure layer.
@@ -584,18 +580,16 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
     layouts,
   };
   // Scaffold post-passes.  A page's kind (`<Agg>` list/new/detail, `<Wf>`
-  // form/instances, `<View>`, the singleton indexes, or `custom`) is derived on
-  // demand from its role-scoped name + area via `classifyPage` — no stamped
+  // form/instances, `<View>`, the singleton dashboards, or `custom`) is derived
+  // on demand from its role-scoped name + area via `classifyPage` — no stamped
   // `origin` (slice 3c).  These passes drop the create surface for
   // non-constructible aggregates and apply per-page side effects (emit path,
-  // auto-`id` param for detail pages).  `expandInlineScaffoldPrimitiveCalls`
-  // rewrites the three singleton index-page sentinels
-  // (`Home`/`WorkflowsIndex`/`ViewsIndex`) the macro emits as bare sentinel
-  // calls; every other page is a no-op.
+  // auto-`id` param for detail pages).  Every scaffold page — dashboards
+  // included — already carries its full body from the macro, so there is no
+  // inline sentinel left to expand.
   dropNonConstructibleNewPages(built);
   stripNonConstructibleListCreate(built);
   applyPageSideEffects(built);
-  expandInlineScaffoldPrimitiveCalls(built);
   return built;
 }
 
@@ -697,28 +691,9 @@ function lowerConnectionSource(node: ConnectionSource): ConnectionSourceIR {
   }
 }
 
-/** Rewrite the singleton index-page sentinels — `Home()` /
- *  `WorkflowsIndex()` / `ViewsIndex()` — into their expanded ExprIR
- *  trees (the scaffold macro emits them as bare sentinel-call bodies,
- *  derived here from the system shape).  Runs against EVERY page's
- *  body; pages whose body never uses a sentinel are no-ops — the
- *  rewriter walks each tree once and returns the same reference when
- *  nothing changed. */
-function expandInlineScaffoldPrimitiveCalls(sys: SystemIR): void {
-  for (const ui of sys.uis) {
-    const ctx = buildExpandContext(sys, ui);
-    for (const page of ui.pages) {
-      if (!page.body) continue;
-      page.body = expandInlineScaffoldPrimitives(page.body, ctx);
-    }
-  }
-}
-
-/** Per-page side effects driven by `page.origin`: compute the
+/** Per-page side effects driven by the page's derived kind: compute the
  *  conventional emit path and synthesise the `id` route param on
- *  aggregate-detail pages.  Body content is left alone — the singleton
- *  index-page sentinels are expanded in a separate pass by
- *  `expandInlineScaffoldPrimitiveCalls`. */
+ *  aggregate-/instance-detail pages. */
 function applyPageSideEffects(sys: SystemIR): void {
   for (const ui of sys.uis) {
     const ctx = buildExpandContext(sys, ui);

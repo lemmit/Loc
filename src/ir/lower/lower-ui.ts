@@ -279,28 +279,9 @@ function lowerPage(p: Page, user?: UserIR): PageIR {
     derived,
     body,
     menuMeta,
-    // `source` flags the three scaffold singleton sentinels (`Home` /
-    // `WorkflowsIndex` / `ViewsIndex`), whose page NAMES collide with
-    // hand-written pages — only their sentinel BODY (visible here, before the
-    // ⑤c expander rewrites it) distinguishes them.  `classifyPage` gates its
-    // singleton branch on this so a user page literally named `Home` stays
-    // `custom`.  Every other page kind is name/area-derivable, so they keep the
-    // default `"explicit"`.
-    source: isSingletonSentinel(body) ? "scaffold" : "explicit",
     layout,
     metadata,
   };
-}
-
-/** True when a page body is one of the three scaffold singleton sentinels
- *  (`Home()` / `WorkflowsIndex()` / `ViewsIndex()`) the macro emits — the only
- *  origin-free signal that tells the scaffold singleton apart from a
- *  hand-written page that happens to share its reserved name. */
-function isSingletonSentinel(body: ExprIR | undefined): boolean {
-  return (
-    body?.kind === "call" &&
-    (body.name === "Home" || body.name === "WorkflowsIndex" || body.name === "ViewsIndex")
-  );
 }
 
 export function lowerComponent(c: Component): ComponentIR {

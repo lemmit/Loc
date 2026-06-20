@@ -1876,12 +1876,6 @@ export interface PageIR {
   /** Per-page menu metadata.  Read by the menu emitter when
    *  no explicit ui-level menu block is declared. */
   menuMeta?: MenuMetaIR;
-  /** Provenance discriminator: `"explicit"` for pages
-   *  written in source; `"scaffold"` for pages synthesised by the
-   *  expander.  The page emitter uses this to fast-path the legacy
-   *  per-aggregate / per-workflow / per-view builders for the bulk-
-   *  scaffold case (byte-equivalence target). */
-  source: "explicit" | "scaffold";
   /** Explicit emit path override for walker-rendered
    *  pages.  When set, the page-emitter writes the rendered TSX to
    *  this path instead of the default `src/pages/<page-snake>.tsx`.

@@ -6,8 +6,8 @@
 // One entry per closed-primitive-library name (`Stack`, `Heading`,
 // `Button`, …).  The entry carries:
 //
-//   - `group`              : layout / sub / scaffold — drives the
-//                            language-side admissibility sets in
+//   - `group`              : layout / sub — drives the language-side
+//                            admissibility sets in
 //                            src/language/walker-stdlib.ts.
 //   - `admissibleInSource` : whether the validator accepts the name
 //                            as a v2 `BuilderCall` type without it
@@ -176,14 +176,11 @@ export type TsxRenderer = (
  *  rendered HEEx fragment.  Reads/writes pass through `ctx`. */
 export type HeexRenderer = (call: ExprIR & { kind: "call" }, ctx: HeexWalkContext) => string;
 
-/** Grouping — drives the three language-side admissibility sets:
- *    layout   → top-level layout / display / formatter primitives.
- *    sub      → sub-elements only valid nested inside a parent
- *               (`Tab` inside `Tabs`, `Column` inside `Table`).
- *    scaffold → the singleton index-page sentinels (`Home`,
- *               `WorkflowsIndex`, `ViewsIndex`) recognised by
- *               `inferPageOrigin`. */
-export type PrimitiveGroup = "layout" | "sub" | "scaffold";
+/** Grouping — drives the language-side admissibility sets:
+ *    layout → top-level layout / display / formatter primitives.
+ *    sub    → sub-elements only valid nested inside a parent
+ *             (`Tab` inside `Tabs`, `Column` inside `Table`). */
+export type PrimitiveGroup = "layout" | "sub";
 
 export interface PrimitiveDef {
   group: PrimitiveGroup;
@@ -398,14 +395,6 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   // wired through Table so it stays out of the top-level dispatch.
   Tab: { group: "sub", admissibleInSource: true },
   Column: { group: "sub", admissibleInSource: true, heex: renderTableColumnHeex },
-  // --- Singleton index-page sentinels (recognised by inferPageOrigin) ----
-  // The scaffold macro still emits these as the body of the per-UI
-  // Home / Workflows / Views index pages; they classify the page origin.
-  // (The `scaffold*(of:)` body primitives were removed — scaffolded list /
-  // detail / form pages now carry their full body tree directly.)
-  Home: { group: "scaffold", admissibleInSource: true },
-  WorkflowsIndex: { group: "scaffold", admissibleInSource: true },
-  ViewsIndex: { group: "scaffold", admissibleInSource: true },
 };
 
 /** True when `name` is a registered walker primitive (any group).
