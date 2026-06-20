@@ -3,7 +3,12 @@
 // `retrieval` validation.
 // -------------------------------------------------------------------------
 
-import type { BoundedContextIR, EnrichedAggregateIR } from "../../types/loom-ir.js";
+import type {
+  BoundedContextIR,
+  EnrichedAggregateIR,
+  ExprIR,
+  RefKind,
+} from "../../types/loom-ir.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import {
   aggregateHasMember,
@@ -204,4 +209,95 @@ export function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[
       });
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// View `requires` gate (D-AUTH-OIDC / default-deny).  A view's optional
+// `requires <expr>` is an authorization gate evaluated against `currentUser`
+// *before* the query runs — failure → 403.  Because no row exists at gate
+// time, the gate may reference only `currentUser` (+ constants), never the
+// source row.  Reject row-state references (this-prop / this-vo-prop /
+// this-derived) with a message steering the author to `where` for row scoping.
+// ---------------------------------------------------------------------------
+
+// Allowlist (not denylist): the gate is lowered in the bare context env, so a
+// source-field reference doesn't resolve to `this-prop` — it lowers to an
+// `unknown` ref.  An allowlist catches that (and any future refKind): only
+// `current-user`, `enum-value`, and internally-bound refs (`lambda` params,
+// pure `helper-fn`s) are legal in a gate.
+const GATE_ALLOWED_REFS: ReadonlySet<RefKind> = new Set<RefKind>([
+  "current-user",
+  "enum-value",
+  "lambda",
+  "helper-fn",
+]);
+
+export function validateViewGates(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  for (const view of ctx.views) {
+    if (!view.requires) continue;
+    const offending = firstNonCurrentUserRef(view.requires);
+    if (offending !== null) {
+      diags.push({
+        severity: "error",
+        code: "loom.view-gate-not-current-user",
+        message:
+          `view '${view.name}': a \`requires\` gate runs before the query (no row exists yet), ` +
+          `so it may only reference \`currentUser\` (and constants) — \`${offending}\` is not ` +
+          "available here. Use `where` to scope which rows return; use `requires` to allow / " +
+          "deny the caller.",
+        source: `view/${view.name}`,
+      });
+    }
+  }
+}
+
+/** The name of the first reference in an expression tree that isn't legal in a
+ *  view gate (anything but currentUser / enum / lambda / helper), or null when
+ *  the expression touches only currentUser / constants / operators. */
+function firstNonCurrentUserRef(e: ExprIR): string | null {
+  if (e.kind === "ref") return GATE_ALLOWED_REFS.has(e.refKind) ? null : e.name;
+  switch (e.kind) {
+    case "member":
+      return firstNonCurrentUserRef(e.receiver);
+    case "method-call":
+      return firstNonCurrentUserRef(e.receiver) ?? firstFromArgs(e.args);
+    case "call":
+      return firstFromArgs(e.args);
+    case "binary":
+      return firstNonCurrentUserRef(e.left) ?? firstNonCurrentUserRef(e.right);
+    case "ternary":
+      return (
+        firstNonCurrentUserRef(e.cond) ??
+        firstNonCurrentUserRef(e.then) ??
+        firstNonCurrentUserRef(e.otherwise)
+      );
+    case "unary":
+      return firstNonCurrentUserRef(e.operand);
+    case "paren":
+      return firstNonCurrentUserRef(e.inner);
+    case "convert":
+      return firstNonCurrentUserRef(e.value);
+    case "list":
+      return firstFromArgs(e.elements);
+    case "match":
+      return (
+        firstFromArgs(e.arms.flatMap((a) => [a.cond, a.value])) ??
+        (e.otherwise ? firstNonCurrentUserRef(e.otherwise) : null)
+      );
+    case "lambda":
+      return e.body ? firstNonCurrentUserRef(e.body) : null;
+    case "new":
+    case "object":
+      return firstFromArgs(e.fields.map((f) => f.value));
+    default:
+      return null;
+  }
+}
+
+function firstFromArgs(args: ExprIR[]): string | null {
+  for (const a of args) {
+    const r = firstNonCurrentUserRef(a);
+    if (r !== null) return r;
+  }
+  return null;
 }

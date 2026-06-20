@@ -1117,10 +1117,11 @@ type ViewSource = Aggregate | Workflow;
 View:
     'view' name=ID
     (
-        '=' source=[ViewSource:ID] 'where' filter=Expression
+        '=' source=[ViewSource:ID] ('requires' gate=Expression)? 'where' filter=Expression
       | '{'
             fields+=Property*
             'from' source=[ViewSource:ID]
+            ('requires' gate=Expression)?
             ('where' filter=Expression)?
             'bind' binds+=BindEntry (',' binds+=BindEntry)* ','?
         '}'

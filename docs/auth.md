@@ -33,11 +33,12 @@ What's intentionally **not** here yet:
   **operations, creates, and destroys**, plus **workflows** (every
   command-triggered `create … {}` starter and named `handle …(){}`
   continuation; event-triggered creates and `on(...)` reactors are not
-  client-reachable and so excluded).  Still uncovered: **reads** —
-  repository `find`s and `view`s.  These have no `requires` surface in the
-  grammar at all (only a `where` filter), so flagging them would leave no
-  escape hatch; gating reads needs a `requires`-on-query language addition
-  first (separate follow-up).
+  client-reachable and so excluded), and **`view`s** (which now carry an
+  optional `requires` gate — see [View gates](#view-requires-gates) below).
+  Still uncovered: **repository `find`s** — these have no `requires`
+  surface in the grammar (only a `where` filter), so flagging them would
+  leave no escape hatch; gating bare finds needs the same `requires`-on-
+  query addition (separate follow-up).
 - Workflow bodies calling currentUser-bound finds — the validator
   currently rejects this with a pointer at `getById` or moving the
   call out to the route layer.
@@ -197,6 +198,30 @@ Default-deny is opt-in via `auth { enforcement: denyByDefault }`
 default) a deployable on `auth: required` still serves any
 operation that doesn't declare a `requires` gate — Slice 2's
 original behaviour.
+
+### View `requires` gates
+
+A `view` accepts an optional `requires <expr>` clause **before**
+its `where` filter — the read-side analogue of an operation gate:
+
+```ddd
+view OpenTickets = Ticket requires currentUser.role == "agent" where open == true
+```
+
+The gate emits an in-handler **403** at the top of the view's
+route, evaluated against the request's `currentUser` before the
+query runs.  Because it runs *before* any row is fetched, a view
+gate is **`currentUser`-only** (plus constants): referencing the
+source row (`requires open == true`) is a compile error
+(`loom.view-gate-not-current-user`).  This keeps the gate decidable
+without the data — use `where` to scope *which rows* come back, and
+`requires` to decide *who* may run the view.  `requires true` is the
+intentionally-public escape that also satisfies default-deny.
+
+The 403 emission currently targets the Hono backend; the validation
+(currentUser-only, default-deny) is platform-neutral.  See
+[Views → Authorization](views.md#authorization--the-requires-gate)
+for the full surface.
 
 `currentUser` is in scope wherever an expression evaluates **per
 request**:

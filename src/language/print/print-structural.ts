@@ -805,16 +805,20 @@ function printOnDecl(node: OnDecl): string {
 }
 
 function printView(node: View): string {
+  // Optional `requires <expr>` authorization gate (D-AUTH-OIDC / default-deny),
+  // printed between the source and the `where` filter in both forms.
+  const gate = node.gate ? ` requires ${printExpr(node.gate)}` : "";
   // Full form is the only one that carries `bind` entries (grammar requires
   // ≥1), so a populated `binds` discriminates it from the shorthand.
   if (node.binds.length > 0) {
     const items: string[] = node.fields.map(printProperty);
     items.push(`from ${node.source.$refText}`);
+    if (node.gate) items.push(`requires ${printExpr(node.gate)}`);
     if (node.filter) items.push(`where ${printExpr(node.filter)}`);
     items.push(`bind ${node.binds.map(printBindEntry).join(", ")}`);
     return block(`view ${node.name}`, items);
   }
-  return `view ${node.name} = ${node.source.$refText} where ${printExpr(node.filter!)}`;
+  return `view ${node.name} = ${node.source.$refText}${gate} where ${printExpr(node.filter!)}`;
 }
 
 function printBindEntry(node: BindEntry): string {

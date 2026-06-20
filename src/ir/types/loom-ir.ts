@@ -853,6 +853,15 @@ export interface ViewIR {
   /** Source aggregate or workflow.  Must live in the same context as the
    *  view declaration. */
   source: ViewSourceIR;
+  /** Authorization gate (D-AUTH-OIDC / default-deny).  An optional
+   *  `requires <expr>` clause — a boolean evaluated against `currentUser`
+   *  *before* the query runs; failure → 403.  Distinct from `filter`: the
+   *  filter scopes which rows come back (queryable, pushed to SQL), the gate
+   *  decides whether the caller may hit the endpoint at all.  Lowered in the
+   *  bare context scope (currentUser only, no source row), so it can reference
+   *  `currentUser` + constants but not aggregate fields.  `requires true` is
+   *  the explicit intentionally-public escape. */
+  requires?: ExprIR;
   /** Queryable predicate.  Required by the shorthand grammar;
    *  optional in the full form.  Subject to the same restrictions
    *  as repository find filters. */

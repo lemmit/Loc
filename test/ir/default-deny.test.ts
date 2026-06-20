@@ -81,9 +81,10 @@ describe("default-deny enforcement", () => {
 
   // --- Creates + workflows (the command surface beyond operations/destroys) ---
 
-  /** A system with an aggregate `create`, a command-triggered `workflow`, plus
-   *  a read `find` and `view` — each command body gated by `gate`. */
-  function commandSys(gate: string): string {
+  /** A system with an aggregate `create`, a command-triggered `workflow`, a
+   *  read `find`, and a `view` — commands gated by `gate`, the view by
+   *  `viewGate` (the `requires …` clause, or "" for ungated). */
+  function commandSys(gate: string, viewGate: string): string {
     return `
 system Helpdesk {
   user { id: string role: string }
@@ -101,7 +102,7 @@ system Helpdesk {
       workflow openTicket {
         create(s: string) { ${gate}let t = Ticket.register(s) }
       }
-      view ActiveTickets = Ticket where open == true
+      view ActiveTickets = Ticket ${viewGate}where open == true
     }
   }
   storage primary { type: postgres }
@@ -112,25 +113,33 @@ system Helpdesk {
 `;
   }
 
+  const OP_GATE = 'requires currentUser.role == "agent"\n        ';
+  const VIEW_GATE = 'requires currentUser.role == "agent" ';
+
   it("rejects an ungated public create under denyByDefault", async () => {
-    const errs = await denyErrors(commandSys(""));
+    const errs = await denyErrors(commandSys("", ""));
     expect(errs.some((m) => m.includes("Ticket.register"))).toBe(true);
   });
 
   it("rejects an ungated command-triggered workflow under denyByDefault", async () => {
-    const errs = await denyErrors(commandSys(""));
+    const errs = await denyErrors(commandSys("", ""));
     expect(errs.some((m) => m.includes("workflow 'openTicket'"))).toBe(true);
   });
 
-  it("accepts gated creates + workflows (requires on every command body)", async () => {
-    const errs = await denyErrors(commandSys('requires currentUser.role == "agent"\n        '));
+  it("rejects an ungated view under denyByDefault", async () => {
+    const errs = await denyErrors(commandSys("", ""));
+    expect(errs.some((m) => m.includes("view 'ActiveTickets'"))).toBe(true);
+  });
+
+  it("accepts gated creates + workflows + views (requires on every command + view)", async () => {
+    // Everything gated; the ungated `find` remains — and must NOT be flagged
+    // (finds stay out of default-deny scope: no `requires` surface yet).
+    const errs = await denyErrors(commandSys(OP_GATE, VIEW_GATE));
     expect(errs).toEqual([]);
   });
 
-  it("does not flag reads (finds / views have no requires surface — deferred)", async () => {
-    // Gate the commands so only reads remain ungated; no diagnostic should
-    // mention the find or view (reads are out of default-deny scope).
-    const errs = await denyErrors(commandSys("requires true\n        "));
+  it("accepts `requires true` on a view as the intentionally-public escape", async () => {
+    const errs = await denyErrors(commandSys(OP_GATE, "requires true "));
     expect(errs).toEqual([]);
   });
 });

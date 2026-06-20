@@ -224,11 +224,14 @@ function emitViewRoute(
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
-  if (usesUser) {
+  // The auth `requires` gate (and any currentUser-scoped filter) needs the
+  // request principal in scope.  Read it for either.
+  if (usesUser || view.requires) {
     out.push(
       `    const currentUser = (httpCtx as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
   }
+  for (const line of viewGateLines(view)) out.push(line);
   out.push(`    const repo = new ${view.source.name}Repository(db, events);`);
   const repoCallArgs = usesUser ? "currentUser" : "";
   out.push(`    const rows = await repo.${lowerFirst(view.name)}(${repoCallArgs});`);
@@ -310,6 +313,12 @@ function emitWorkflowViewRoute(
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
+  if (view.requires) {
+    out.push(
+      `    const currentUser = (httpCtx as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+    );
+  }
+  for (const line of viewGateLines(view)) out.push(line);
   out.push(`    const rows = await db.select().from(${table})${where ? `.where(${where})` : ""};`);
   out.push(`    return httpCtx.json(rows as unknown as z.infer<typeof ${T}Response>, 200);`);
   out.push(`  },`);
@@ -452,4 +461,15 @@ function zodForRow(t: TypeIR, enumValues: Map<string, string[]>): string {
         `zodForRow: discriminated unions are not emittable yet (P4); IR-validate should have rejected '${t.kind}'.`,
       );
   }
+}
+
+/** Auth-gate lines for a view route: a 403 when the `requires` predicate
+ *  (evaluated against the in-scope `currentUser`) fails.  Empty for an ungated
+ *  view.  ForbiddenError is mapped to a 403 ProblemDetails by the file's
+ *  onError filter — the read-side analogue of an operation `requires` gate.
+ *  (The OpenAPI response set is intentionally left unchanged for now so the
+ *  cross-backend view contract doesn't drift ahead of the other backends.) */
+function viewGateLines(view: ViewIR): string[] {
+  if (!view.requires) return [];
+  return [`    if (!(${renderTsExpr(view.requires)})) throw new ForbiddenError("Forbidden");`];
 }
