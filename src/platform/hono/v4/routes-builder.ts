@@ -61,6 +61,7 @@ import {
 } from "../../../ir/util/openapi-ids.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
+import { walkExpr } from "../../../ir/validate/checks/shared.js";
 import type {
   ClassifyContext,
   SingleFieldPattern,
@@ -143,6 +144,20 @@ export function buildRoutesFile(
   lines.push(
     `import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
   );
+  // `when` gates (and their auto-exposed can-query companions) render enum
+  // values like `OrderStatus.Shipped` in the route file; import those enums
+  // from value-objects so the predicate type-checks (else TS2304).
+  const whenEnums = new Set<string>();
+  for (const op of agg.operations) {
+    walkExpr(op.when, (e) => {
+      if (e.kind === "ref" && e.refKind === "enum-value" && e.enumName) {
+        whenEnums.add(e.enumName);
+      }
+    });
+  }
+  if (whenEnums.size > 0) {
+    lines.push(`import { ${[...whenEnums].sort().join(", ")} } from "../domain/value-objects";`);
+  }
   // Extern handler registry — the per-aggregate file is always emitted
   // when the aggregate has at least one extern op, never imported when
   // it has none.  Type-only import keeps the route file fine when

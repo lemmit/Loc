@@ -12,9 +12,9 @@
 
 import { describe, expect, it } from "vitest";
 import { validateLoomModel } from "../../../src/ir/validate/validate.js";
-import { corpusSourceFor } from "../../fixtures/corpus/harness.js";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 import { buildLoomModel } from "../../_helpers/ir.js";
+import { corpusSourceFor } from "../../fixtures/corpus/harness.js";
 
 // The canonical TPH fixture now lives in the shared corpus (deployable `d`).
 const SRC = corpusSourceFor("tph", "java");

@@ -39,9 +39,6 @@ const TS_COMPILE_SKIP: Record<string, string> = {
   // Union-returning find route spreads a non-object union member (TS2698,
   // http/*.routes.ts) when translating the `Order or NotFound` result.
   "union-find-absence": "Hono union-find route spreads a non-object union type (TS2698)",
-  // `when` can-query companion route references the gate's enum without importing
-  // it (TS2304 'OrderStatus' not found, http/*.routes.ts).
-  "state-gate": "Hono when/can-query route omits the enum import (TS2304)",
   // Workflow-sourced view references the saga state field out of scope (TS2304
   // 'attempts' not found, http/workflows.ts).
   "workflow-view": "Hono workflow-view references saga state field out of scope (TS2304)",
