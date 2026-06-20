@@ -57,8 +57,10 @@ context Sales {
 ### Backend emission
 
 Every backend that runs a query layer reifies non-principal,
-relational filters; only the deferred cases (principal-referencing
-predicates and non-relational shapes) are gated off — see *Deferred
+relational filters.  Principal-referencing predicates (tenancy) and
+non-relational shapes have **since landed on the query-layer backends
+too** (DEBT-01 / DEBT-02) — only their *intersection*, a principal
+predicate on a non-relational aggregate, stays gated.  See *Deferred
 cases* below.
 
 - **.NET / EF Core** — every aggregate that has any propagated
@@ -74,12 +76,28 @@ cases* below.
   `src/generator/dotnet/emit/efcore.ts`.
 - **Hono / Drizzle** — Drizzle has no global query filter, so the
   repository builder AND-s each predicate into every root-table read
-  site (`src/generator/typescript/repository-find-predicate.ts`).
+  site (`src/generator/typescript/repository-find-predicate.ts`).  A
+  **principal** predicate renders against the ambient
+  `requireCurrentUser()` accessor (the analog of EF Core's
+  DI-resolved principal); a **non-relational** aggregate filters in-app
+  over the rehydrated `document`, or AND-s into the SQL read for an
+  `embedded` root (whose scalars are real columns).
 - **Java / Hibernate** — a static `@SQLRestriction("…")` on the
-  entity (`src/generator/java/emit/entity.ts`).
+  entity for the non-principal predicate (`src/generator/java/emit/entity.ts`);
+  a **principal** predicate instead AND-s a SpEL-principal JPQL clause
+  (`:#{@currentUserAccessor.user()?.tenantId()}`) into the scoped
+  `findAll`/`findById` overrides + finds/retrievals/views.  A
+  **non-relational** aggregate filters in-app via `findAll().stream()`
+  for `document`, or rides the same `@SQLRestriction` for an `embedded`
+  root.
 - **Phoenix / Ash** — an Ash `base_filter expr(…)` inside the
   resource's `resource do … end` block — the platform analog of
-  `HasQueryFilter` (`src/generator/elixir/domain-emit.ts`).
+  `HasQueryFilter` (`src/generator/elixir/domain-emit.ts`).  A
+  **principal** predicate renders as `base_filter expr(… == ^actor(:field))`
+  with `actor: current_user` threaded onto every read (both the Ash and
+  vanilla-Ecto foundations).  An **`embedded`** root rides the same
+  `base_filter` (its root attributes are real columns; `document` is not
+  an elixir shape).
 
 A filter that is *exactly* one named `criterion` (`filter NotDeleted`)
 **reifies** rather than inlining: the IR carries the reference in
@@ -93,16 +111,19 @@ criterion as a first-class, reusable predicate.
 
 ### Deferred cases
 
-Two filter shapes are wired only on **.NET**; the IR validator
-(`validateContextFilterSupport`, code `loom.context-filter-unsupported`)
-rejects them on `node` / `elixir` / `java`:
+One filter shape remains gated by the IR validator
+(`validateContextFilterSupport`, code `loom.context-filter-unsupported`):
 
-- **Principal-referencing** predicates (tenancy — `filter for
-  "tenantScoped" this.tenantId == currentUser.tenantId`): binding the
-  request principal into the always-on read path is deferred.
-- **Non-relational shapes** (`shape(document)` / `shape(embedded)`):
-  the field lives inside a jsonb column, so the predicate needs
-  JSON-path lowering first.
+- **A principal-referencing predicate on a non-relational aggregate**
+  (a tenancy `filter … == currentUser.tenantId` on a `shape(document)`
+  / `shape(embedded)` aggregate).  Each half ships on its own — a
+  principal predicate on a *relational* aggregate (DEBT-01), and a
+  *non-principal* predicate on a non-relational one (DEBT-02) — but
+  their intersection (binding the request actor *and* reaching into a
+  jsonb column on the always-on read path) isn't wired on the
+  query-layer backends yet.  **.NET** handles it (EF Core's
+  `HasQueryFilter` resolves the DI-scoped principal and queries jsonb
+  transparently — the one backend with no deferred cases).
 
 Host such an aggregate on a `.NET` deployable, or hand-write the
 predicate inside individual `repository find` bodies, in the meantime.
