@@ -30,6 +30,30 @@ import {
 // These emit proper Phoenix/HEEx structures — no <!-- TODO --> comments.
 // ---------------------------------------------------------------------------
 
+/** Render an attribute *value* as either a quoted literal or a HEEx `{…}`
+ *  expression, depending on whether the arg is a compile-time literal.
+ *
+ *  A *dynamic* value (anything but a `literal`) is an Elixir expression and
+ *  MUST ride a `{…}` expression attribute — emitting it inside quotes (e.g.
+ *  `id="<%= … %>"` or `data-testid="x <> y"`) produces a HEEx tokenizer
+ *  ParseError ("expected attribute name").  This is the single seam that
+ *  every primitive funnels dynamic attribute values through, so the bug class
+ *  can't reappear one renderer at a time. */
+export function attrValue(arg: ExprIR, ctx: WalkContext): string {
+  return arg.kind === "literal"
+    ? `"${arg.value}"`
+    : `{${renderExpr(arg, { ...ctx, position: "template" })}}`;
+}
+
+/** The trailing ` data-testid=…` attribute for a primitive call, or `""` when
+ *  no `testid:` is given.  A literal renders as `data-testid="x"`; a dynamic
+ *  `testid:` renders as `data-testid={<expr>}` (see {@link attrValue}). */
+export function testIdAttr(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  const idx = (expr.argNames ?? []).indexOf("testid");
+  const arg = idx >= 0 ? expr.args[idx] : undefined;
+  return arg ? ` data-testid=${attrValue(arg, ctx)}` : "";
+}
+
 /** `Breadcrumbs(items...)` → `<nav aria-label="breadcrumb">` with
  *  a list of spans/links.  Positional children are each an Anchor
  *  (link) or Text (current page) from the scaffold expander. */
@@ -59,7 +83,6 @@ export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
   let label = "";
   let toLiteral: string | undefined;
   let toExpr = "";
-  let testid = "";
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -72,13 +95,10 @@ export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
       } else {
         toExpr = renderExpr(arg, { ...ctx, position: "template" });
       }
-    } else if (name === "testid") {
-      testid =
-        arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
     }
   }
   label = positional[0] ? renderInTemplate(positional[0], ctx) : "";
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   if (toLiteral !== undefined) {
     if (toLiteral.startsWith("/")) {
       return `<.link navigate={~p"${toLiteral}"}${testidAttr}>${label}</.link>`;
@@ -246,7 +266,6 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   if (positional0 && positional0.kind === "member") return "";
   let ofTarget = "";
   let runsTarget = "";
-  let testid = "";
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
@@ -256,13 +275,10 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
     } else if (name === "runs") {
       runsTarget =
         arg.kind === "ref" ? snake(arg.name) : renderExpr(arg, { ...ctx, position: "template" });
-    } else if (name === "testid") {
-      testid =
-        arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
     }
   }
   const submitEvent = ofTarget ? `save_${ofTarget}` : runsTarget ? `run_${runsTarget}` : "submit";
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   // Register a form binding so the LiveView emitter can assign @form
   // in mount/3.  We track the PascalCase name; emitter handles
   // module-name resolution against contexts + workflows.
@@ -507,7 +523,6 @@ export function renderFor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCont
  *  `<.table id="..." rows={@rows}>` with `<:col :let={row}>` slots. */
 export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let rowsExpr = "@items";
-  let testid = "";
   const cols: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -517,19 +532,20 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
       cols.push(arg);
     } else if (name === "rows") {
       rowsExpr = renderExpr(arg, { ...ctx, position: "template" });
-    } else if (name === "testid") {
-      testid =
-        arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
     }
-    // striped / highlight / sticky / rowTestid / keyExpr — ignored in HEEx
-    // (these are Mantine-specific props; CoreComponents.table doesn't use them)
+    // testid handled via the shared helpers below; striped / highlight /
+    // sticky / rowTestid / keyExpr — ignored in HEEx (Mantine-specific props;
+    // CoreComponents.table doesn't use them)
   }
-  const tableId = testid || "data-table";
-  // When `testid:` is supplied, also emit it as `data-testid` so
-  // Playwright/lvtest selectors work the same way they do on TSX
-  // tables.  The `id=` attribute stays for the `<.table>` LiveView
-  // hook contract (required by Phoenix.Component).
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  // `<.table>` requires an `id` (Phoenix.Component hook contract); reuse
+  // `testid:` for it, defaulting to "data-table".  When `testid:` is supplied
+  // it ALSO emits as `data-testid` so Playwright/lvtest selectors match TSX.
+  // A dynamic `testid:` rides `id={…}` / `data-testid={…}` expression
+  // attributes — never quoted literals (see attrValue).
+  const testidIdx = (expr.argNames ?? []).indexOf("testid");
+  const testidArg = testidIdx >= 0 ? expr.args[testidIdx] : undefined;
+  const idAttr = testidArg ? attrValue(testidArg, ctx) : `"data-table"`;
+  const testidAttr = testIdAttr(expr, ctx);
   const colSlots = cols
     .map((c) =>
       c.kind === "call"
@@ -538,7 +554,7 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
     )
     .join("\n");
   return [
-    `<.table id="${tableId}"${testidAttr} rows={${rowsExpr}}>`,
+    `<.table id=${idAttr}${testidAttr} rows={${rowsExpr}}>`,
     colSlots.length > 0 ? indent(colSlots, 2) : `  <:col :let={_row} label="Data"></:col>`,
     `</.table>`,
   ].join("\n");
@@ -908,21 +924,15 @@ export function renderDivider(expr: Extract<ExprIR, { kind: "call" }>, _ctx: Wal
 /** `Image(src, alt)` → `<img src=… alt=… />`.  Literal attrs render as
  *  quoted strings; refs render as `{@assign}` HEEx expressions. */
 export function renderImage(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  const attrVal = (arg: ExprIR): string =>
-    arg.kind === "literal"
-      ? `"${arg.value}"`
-      : `{${renderExpr(arg, { ...ctx, position: "template" })}}`;
   let srcAttr = "";
   let altAttr = "";
-  let testid = "";
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
-    if (name === "src") srcAttr = ` src=${attrVal(arg)}`;
-    else if (name === "alt") altAttr = ` alt=${attrVal(arg)}`;
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
+    if (name === "src") srcAttr = ` src=${attrValue(arg, ctx)}`;
+    else if (name === "alt") altAttr = ` alt=${attrValue(arg, ctx)}`;
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   return `<img${srcAttr}${altAttr}${testidAttr} />`;
 }
 
@@ -945,25 +955,19 @@ export function renderStat(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
  *  placeholder when no `src:` (the HEEx analogue of the packs' user-icon
  *  fallback). */
 export function renderAvatar(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  const attrVal = (arg: ExprIR): string =>
-    arg.kind === "literal"
-      ? `"${arg.value}"`
-      : `{${renderExpr(arg, { ...ctx, position: "template" })}}`;
   let srcArg: ExprIR | undefined;
   let altArg: ExprIR | undefined;
-  let testid = "";
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "src") srcArg = arg;
     else if (name === "alt") altArg = arg;
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const cls = "inline-block h-8 w-8 rounded-full";
   if (srcArg) {
-    const altAttr = altArg ? ` alt=${attrVal(altArg)}` : ` alt=""`;
-    return `<img class="${cls} object-cover" src=${attrVal(srcArg)}${altAttr}${testidAttr} />`;
+    const altAttr = altArg ? ` alt=${attrValue(altArg, ctx)}` : ` alt=""`;
+    return `<img class="${cls} object-cover" src=${attrValue(srcArg, ctx)}${altAttr}${testidAttr} />`;
   }
   return `<span class="${cls} bg-gray-200"${testidAttr}></span>`;
 }
