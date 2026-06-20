@@ -2,15 +2,26 @@
 
 > Status: **PROPOSED (design note) — core decisions ratified.** Nothing is
 > implemented. This note argues for giving page/component event handlers
-> *names* — turning today's anonymous handler lambdas into declared, typed,
-> pure-by-construction `action`s — and for an optional `store` declaration that
-> bundles shared state with the actions that transition it. It catalogues the
-> design space, recommends one shape, sketches the pipeline work against the
-> real code, and closes with why this is the prerequisite that turns a
-> hypothetical Fable/Feliz/Elmish target from "synthesis" into "projection."
-> The decisions in §8 are settled (keyword, purity boundary, composition,
-> store deferral, async outcomes); the only remaining open item is `store`
-> persistence, explicitly out of v1 scope.
+> *names* — turning today's anonymous handler lambdas into declared, typed
+> `action`s whose purity is an **enforced invariant** (not the authoring
+> mental model) — and for an optional `store` declaration that bundles shared
+> state with the actions that transition it. It catalogues the design space,
+> recommends one shape, sketches the pipeline work against the real code, and
+> closes with why this is the prerequisite that turns a hypothetical
+> Fable/Feliz/Elmish target from "synthesis" into "projection." The decisions
+> in §8 are settled (keyword, purity boundary, effect-vocabulary scoping,
+> composition, store deferral, async outcomes); the only remaining open item
+> is `store` persistence, explicitly out of v1 scope.
+>
+> **Framing note (this revision):** "an action is a pure function" is
+> idiomatic to *nobody* — Redux calls the data an action and the *reducer*
+> pure; Zustand/Pinia call the action an *impure* mutating method; Elm has no
+> "action" and names the pure function `update`. So purity is presented here
+> as a **validator-enforced restriction**, not the pitch. Authors write an
+> action like a Pinia method (named, imperative-looking `:=`); the compiler
+> *proves* it pure by reifying the declared effects. Lead users with "a named
+> state transition," reserve the `(state, payload) -> (state', Cmd)` reading
+> for the backend author.
 
 ## TL;DR
 
@@ -96,6 +107,14 @@ An action body restricted to *exactly these* is, semantically, a pure
 function `(state, payload) -> (state', Cmd)` — Elm's `update` signature. The
 imperative `:=` surface is sugar over an immutable transform; the effects are
 *reified* (they become `Cmd`s), not arbitrary imperative reach.
+
+> **Purity is the output, not the input.** The author does not "write a pure
+> function" — they write a named, imperative-looking transition (the Pinia
+> mental model). The compiler *harvests* purity because the effects are
+> declared rather than freely invoked. So this is an **enforced invariant**:
+> the validator rejects anything outside the admissible set; the author never
+> has to hold "pure" in their head, they just bump into the restriction if
+> they reach for a DOM poke / raw `fetch` / host escape.
 
 > **This restriction is the design.** It is what makes one `action`
 > projectable to a Zustand action, a Pinia action, an Elmish `Msg` + `update`
@@ -214,13 +233,68 @@ preferred component-scoped MVU pattern) and the store case maps to a
 global/context program is the tell that both are first-class, not one a
 shortcut for the other.
 
-### 3.1 Encapsulation boundary
+### 3.1 Encapsulation boundary — state is scoped per surface
 
 The one rule that keeps every projection clean: a page action mutates *page*
 state directly and may **call** a store action (`Cart.clear()`), but never
 writes store state in-line. Store state changes only through store actions
 (Pinia/Zustand encapsulation; in Elmish, a child program dispatching to its
 parent via a message).
+
+The cross-surface call is what keeps the *single* purity rule sound across
+both surfaces: each action `:=`-writes **only its own** state; touching
+another surface is a reified **call** (a `Cmd`), never an inline write. So
+`discard() { confirming := false; Cart.clear() }` stays pure — `Cart.clear()`
+dispatches across the program boundary, it does not reach into Cart's model.
+Allowing `Cart.lines := []` from a page would make the page's `update` mutate
+foreign state — breaking Pinia/Zustand encapsulation *and* the Elmish
+child-program boundary at once. Composition is one-way by lifetime: a page
+action may call a store action (shared outlives page); a store action may call
+another store action (acyclic, §8.4) but **never** a page action.
+
+### 3.2 Effect vocabulary is scoped per surface — `navigate`/`toast` are view-only
+
+The §3.1 boundary scopes *state* per surface. The same logic scopes *effects*:
+an action sees only the declared effects its surface can host. `navigate` and
+`toast` are **view-scoped** — they need a router/location (SPA) or a socket
+(LiveView `push_navigate`) that only a page/component has. A `store` is
+view-less shared state with no route and, on LiveView, no socket to navigate
+on. So they are **illegal in store actions**, and the calling page owns the
+navigation:
+
+```ddd
+store Cart {
+  state { lines: OrderLine[] = [] }
+  action clear() { lines := [] }            // data only — no navigate/toast
+}
+
+page CartPage {
+  use Cart
+  action confirm() {
+    call placeOrder(Cart.lines)
+      then      => { Cart.clear(); navigate(OrderConsole, { id: ... }) }  // page owns the redirect
+      onError e => toast(e.message)
+  }
+}
+```
+
+```fsharp
+// the page program owns the nav Cmd; the Cart program only ever mutates Lines
+| Confirmed (Ok ())  -> model, Cmd.batch [ Cmd.ofMsg (CartMsg Clear); Navigation.navigate (Route.OrderConsole ...) ]
+| Confirmed (Error m)-> model, Cmd.ofMsg (Toast m)
+```
+
+| In an action body | page / component | store |
+|---|---|---|
+| `:=` own state · `call` · `emit` · call a store action | ✓ | ✓ |
+| `navigate` / `toast` | ✓ | ✗ — view-scoped |
+
+This is not a purity exception (`navigate` reifies to a `Cmd` cleanly) — it is
+the effect-side of the ownership boundary. The honest ergonomic cost is
+`Auth.logout()` "wanting" to redirect: the answer is either the page that
+triggers logout owns the `navigate`, or — better for auth — the redirect is a
+declarative reaction to "no session" (route guard / `on_mount`), which is
+auth's job, not `store`'s.
 
 ## 4. Naming the construct
 
@@ -231,11 +305,22 @@ position it is lexically and positionally distinct from the existing
 residual conceptual overlap is the cost; familiarity is the benefit, and the
 case/position convention carries the disambiguation.
 
-Rejected alternatives: `intent` (collision-free but unfamiliar — a viable
-fallback if the `Action {}` overlap is judged too costly); `transition`
-(honest about the FSM-ish semantics but verbose and over-promising);
-`msg` / `update` / `reducer` (leak one specific target — Elmish/Redux — into a
-DSL that is deliberately target-neutral).
+Two cautions, regardless of which word wins. First, the word is familiar but
+its *meaning* is not shared: Redux's action is data, Zustand/Pinia's is an
+impure method, Elm has no action and names the pure function `update` — so the
+keyword buys recognition, not a precise semantic the user already holds. The
+unifying truth to teach is "a named state transition," and (per §2.1) purity
+is enforced, never advertised. Second, the real practical cost is the
+`Action {}` collision, not the semantics; if it bites in real `.ddd` files,
+`intent` is the clean fallback.
+
+Rejected alternatives: `intent` (collision-free but less familiar — the
+designated fallback if the `Action {}` overlap is judged too costly; it also
+honestly carries the dispatch-identity-that-gets-reduced meaning, à la Android
+MVI, without falsely promising purity); `transition` (honest about the FSM-ish
+semantics but verbose and over-promising); `msg` / `update` / `reducer` (leak
+one specific target — Elmish/Redux — into a DSL that is deliberately
+target-neutral).
 
 ## 5. Pipeline work (sketch, against the real code)
 
@@ -258,7 +343,15 @@ DSL that is deliberately target-neutral).
    bodies contain only state-writes + declared effects (§2.1); (b) every
    `onSubmit:`/`rowAction:` action reference conforms to the
    primitive-supplied payload type (§2.2); (c) store state is written only by
-   store actions (§3.1).
+   store actions (§3.1); (d) a store action contains no view-scoped effect —
+   reject a `navigate`/`toast` `callKind` whose enclosing surface is a `store`
+   (§3.2). These are **validator** checks, not scope visibility: scope answers
+   *"is this name visible?"* (a store action simply can't *see* page state —
+   resolution failure, free), but (c)/(d) are *contextual* — the store field
+   is in scope for reads, and `navigate` is a built-in call-kind with no
+   declaration to omit, so neither can be expressed as a scope rule. Run them
+   at the IR level (phase ⑦) where the `callKind` and l-value are resolved,
+   rather than string-matching a bare `navigate` at the AST.
 5. **Generators**: the existing `WalkerTarget` seam already lowers handler
    bodies per framework (`renderStateWrite`, `renderEventHandler`,
    `renderApiCall`, `renderNavigate`). A named action changes *where the body
@@ -316,25 +409,37 @@ These were settled and are no longer open. They define v1.
 
 1. **Keyword — `action`.** The universal word (Redux/Zustand/Pinia/Vuex);
    distinct from the `Action {}` render primitive by case + position (lowercase
-   declaration keyword vs PascalCase builder-call in body position). `intent`
-   remains the fallback only if the overlap is later judged too costly.
-2. **Action body purity — the admissible set is fixed.** An action body may
-   contain *only*: state writes (`:=` / `+=` / `-=`) on owned state; declared
-   effects (`call` / `navigate` / `emit`); and `let` / `for` / `if let` control
-   flow. **No** DOM access, `fetch`, or escape to host APIs. This is what makes
-   an action a pure `(state, payload) -> (state', Cmd)`; the validator enforces
-   it (§2.1).
-3. **Action composition is acyclic.** A page action may *call* another action
+   declaration keyword vs PascalCase builder-call in body position). The word
+   buys recognition, not a shared semantic (it means data in Redux, an impure
+   method in Zustand/Pinia, nothing in Elm) — so it is taught as "a named state
+   transition," never "a pure function." `intent` remains the fallback only if
+   the `Action {}` overlap is later judged too costly.
+2. **Action body purity — enforced, not advertised; the admissible set is
+   fixed.** An action body may contain *only*: state writes (`:=` / `+=` / `-=`)
+   on owned state; declared effects (`call` / `navigate` / `emit`); and `let` /
+   `for` / `if let` control flow. **No** DOM access, `fetch`, or escape to host
+   APIs. This makes an action semantically pure `(state, payload) -> (state',
+   Cmd)` — but purity is the *output* (the compiler harvests it by reifying
+   declared effects), not the authoring model (Pinia-style named transition).
+   The validator enforces the admissible set (§2.1).
+3. **Effect vocabulary is scoped per surface (§3.2).** Each action sees only
+   the effects its surface can host. `navigate` and `toast` are view-scoped
+   (need a router/socket a `store` lacks) and are **illegal in store actions**;
+   the calling page owns navigation. State is likewise scoped — an action
+   `:=`-writes only its own surface; cross-surface is a reified *call*, never
+   an inline write (§3.1). Composition is one-way by lifetime: page → store,
+   store → store (acyclic), never store → page.
+4. **Action composition is acyclic.** A page action may *call* another action
    on the same surface or a store action (§3.1); the call graph must be acyclic
    — the validator rejects cycles, keeping `update` well-founded.
-4. **`derived` and `action` stay distinct.** No effects in `derived`
+5. **`derived` and `action` stay distinct.** No effects in `derived`
    (read-only computed, `page-metamodel.md`); no pure-read aliasing in
    `action`.
-5. **`store` is deferred — v1 ships store-less page/component actions only.**
+6. **`store` is deferred — v1 ships store-less page/component actions only.**
    Cross-page sharing and lifetime/persistence are orthogonal to the MVU
    projection (which needs *named actions*, not *shared state*). `store` lands
    second (§3).
-6. **Async outcomes (§2.3).** Reads are **derived** from `QueryView` (no new
+7. **Async outcomes (§2.3).** Reads are **derived** from `QueryView` (no new
    surface). Writes reuse the existing `then:` success continuation and add an
    optional `onError` failure arm; the `(then, onError)` pair projects to a
    `Result<T, E>` outcome `Msg` + two `update` arms. Continuation-less calls

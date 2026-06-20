@@ -79,7 +79,7 @@ What is accurate is **faithful one-way projection** Loom → MVU, not strict
 Five of six axes are at or near zero today; **named actions** closes Msg /
 update / sync-Cmd in one feature. The sixth — async effect outcomes — was the
 only genuinely unresolved design question, and is now **decided** in
-[named-actions §2.3 / §8.6](named-actions-and-stores.md): reads derive the
+[named-actions §2.3 / §8.7](named-actions-and-stores.md): reads derive the
 remote-data union from `QueryView`; writes reuse `then:` + an optional
 `onError` arm, projecting to a `Result<T, E>` outcome `Msg`. With that, every
 MVU axis has a settled projection — the only open item left is `store`
