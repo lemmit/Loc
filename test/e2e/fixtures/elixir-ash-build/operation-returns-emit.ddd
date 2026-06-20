@@ -1,0 +1,44 @@
+// Operation `or`-union returns on `foundation: ash` whose body EMITS a domain
+// event (exception-less.md A3, DEBT-03 — the `emit` slice beyond mutate/guard).
+// A returning op lowers to an Ash generic action; `emit` renders the same
+// `Phoenix.PubSub.broadcast(%Ctx.Events.Name{…})` the regular Ash op body /
+// workflow emits (no persistence, so it fits the in-memory run fn — the
+// per-context Dispatcher consumes it identically).  `add`/`remove` stay gated
+// on ash (they need a `manage_relationship` changeset the generic action can't
+// carry).  Compiled by `build-generated-elixir-ash` so the broadcast inside the
+// generic action passes `mix compile --warnings-as-errors` against real Ash 3.x.
+system Inventory {
+  subdomain Ops {
+    context Stock {
+      error NotFound { resource: string }
+      event Adjusted { sku: string, delta: int }
+
+      aggregate Item ids guid {
+        sku: string
+        quantity: int
+
+        // Guard + in-memory mutation + a domain-event broadcast, then the
+        // aggregate-success fall-through (serialises the mutated struct).
+        operation adjust(delta: int): Item or NotFound {
+          precondition delta != 0
+          quantity := quantity + delta
+          emit Adjusted { sku: sku, delta: delta }
+        }
+      }
+
+      repository Items for Item { }
+    }
+  }
+
+  api InventoryApi from Ops
+  storage pg { type: postgres }
+  resource itemState { for: Stock, kind: state, use: pg }
+
+  deployable phoenixApp {
+    platform: elixir
+    contexts: [Stock]
+    dataSources: [itemState]
+    serves: InventoryApi
+    port: 4000
+  }
+}

@@ -48,10 +48,10 @@ describe("realization axes — lowering defaults", () => {
   });
 
   it("bare elixir → ash foundation + ashPostgres/byFeature (after canonicalization)", async () => {
-    // D-ELIXIR-PLATFORM: `platform: elixir` is the canonical name; legacy
-    // `phoenix` aliases to it (`phoenix` is now a back-compat keyword).
-    // D-PHOENIX-TRANSPORT: `transport: phoenix` is canonical;
-    // `phoenixRouter` aliases to it.
+    // D-ELIXIR-PLATFORM: `platform: elixir` is the canonical (and only)
+    // name — the legacy `phoenix` / `phoenixLiveView` platform aliases
+    // were retired.  D-PHOENIX-TRANSPORT: `transport: phoenix` is
+    // canonical; `phoenixRouter` aliases to it.
     const d = await lowerDeployable("elixir");
     expect(d.foundation).toBe("ash");
     expect(d.application).toBe("ash");
@@ -59,18 +59,6 @@ describe("realization axes — lowering defaults", () => {
     expect(d.directoryLayout).toBe("byFeature");
     expect(d.transport).toBe("phoenix");
     expect(d.runtime).toBe("transactional");
-  });
-
-  it("legacy bare phoenix aliases to elixir on the lowering boundary", async () => {
-    const d = await lowerDeployable("phoenix");
-    expect(d.platform).toBe("elixir");
-    expect(d.foundation).toBe("ash");
-    expect(d.transport).toBe("phoenix");
-  });
-
-  it("legacy bare phoenixLiveView aliases to elixir on the lowering boundary", async () => {
-    const d = await lowerDeployable("phoenixLiveView");
-    expect(d.platform).toBe("elixir");
   });
 
   it("defaults are sourced from the adapter menu, not hardcoded literals", async () => {

@@ -14,7 +14,7 @@ import { spliceNode } from "../edit-engine";
 export const STORAGE_TYPES = [
   "postgres", "mysql", "sqlite", "inMemory", "redis", "elastic", "meilisearch", "kafka", "clickhouse", "bigquery",
 ];
-export const PLATFORMS = ["hono", "dotnet", "react", "static", "phoenixLiveView"];
+export const PLATFORMS = ["node", "dotnet", "react", "static", "elixir"];
 
 function findByName(ast: Model, type: string, name: string): AstNode | null {
   for (const n of AstUtils.streamAst(ast)) {

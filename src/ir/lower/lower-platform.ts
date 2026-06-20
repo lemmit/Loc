@@ -96,19 +96,15 @@ export function qualifyPlatform(raw: string | undefined): {
 }
 
 /** Canonicalise a legacy *platform* alias to its canonical family
- *  (`phoenixLiveView` → `phoenix` → `elixir`, `fastapi` → `python`);
- *  everything else passes through.  Boundary-only: the alias never reaches
- *  the IR or any generator.  (The Hono *web framework* surfaces as the
- *  `transport:` value on `platform: node`; the LiveView *framework* keeps `phoenixLiveView`
- *  — see `canonicalFramework`.  D-ELIXIR-PLATFORM renamed the language-
- *  ecosystem platform `phoenix` → `elixir`; D-PHOENIX-TRANSPORT renamed
- *  the Phoenix web framework `phoenixRouter` → `phoenix` (see
- *  `canonicalTransport`).) */
+ *  (`fastapi` → `python`); everything else passes through.  Boundary-only:
+ *  the alias never reaches the IR or any generator.  (The Hono *web
+ *  framework* surfaces as the `transport:` value on `platform: node`; the
+ *  LiveView *framework* keeps `phoenixLiveView` — see `canonicalFramework`.
+ *  The legacy `phoenix` / `phoenixLiveView` platform aliases were RETIRED:
+ *  `elixir` is the only spelling now, mirroring the retired `hono` →
+ *  `node` alias.  D-PHOENIX-TRANSPORT renamed the Phoenix web framework
+ *  `phoenixRouter` → `phoenix` (see `canonicalTransport`).) */
 export function canonicalPlatform(value: string): string {
-  // Chain: phoenixLiveView → phoenix → elixir.  Order matters so the
-  // legacy `phoenixLiveView` lands at the canonical `elixir` in one pass.
-  if (value === "phoenixLiveView") return "elixir";
-  if (value === "phoenix") return "elixir";
   // The FastAPI *web framework* spelling desugars to the canonical
   // `python` language-ecosystem platform.
   if (value === "fastapi") return "python";

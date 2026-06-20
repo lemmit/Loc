@@ -1,0 +1,66 @@
+// DestroyForm Phoenix-build fixture (parity finding #5).
+//
+// A fullstack `platform: elixir` LiveView app whose detail page hosts a
+// `DestroyForm(of: Widget)`.  Compiled by the generated-elixir-ash CI gate
+// (test/e2e/generated-elixir-ash-build.test.ts globs this directory), so the
+// delete `<.button>` + the hoisted `destroy_widget` handle_event clause +
+// the `~p"/widgets"` post-delete navigation are validated by `mix compile`.
+//
+// `with crudish` gives Widget the canonical `destroy` action (and the
+// `destroy_widget!/1` code interface DestroyForm calls); the explicit
+// `Widgets` list page at `/widgets` makes the verified route resolve.
+
+system DestroyDemo {
+  subdomain Catalog {
+    context Inventory {
+      aggregate Widget with crudish {
+        name: string
+      }
+    }
+  }
+
+  api InventoryApi from Catalog
+  storage primary { type: postgres }
+  resource invState { for: Inventory, kind: state, use: primary }
+
+  ui Admin {
+    page Widgets {
+      route: "/widgets"
+      body: Stack { Heading { "Widgets" } }
+    }
+    page WidgetDetail(id: Widget id) {
+      route: "/widgets/:id"
+      state {
+        draft: string = ""
+        count: int = 0
+        pw: string = ""
+        notes: string = ""
+        region: string = "EU"
+        active: bool = false
+      }
+      body: Stack {
+        Heading { "Widget" },
+        Field("Name", bind: draft),
+        NumberField("Count", bind: count),
+        PasswordField("Secret", bind: pw),
+        MultilineField("Notes", bind: notes),
+        SelectField("Region", bind: region, options: ["EU", "US"]),
+        Toggle("Active", bind: active),
+        Tabs {
+          Tab("Overview", Text { "the overview" }),
+          Tab("Settings", Stack { Text { "the settings" } })
+        },
+        DestroyForm(of: Widget)
+      }
+    }
+  }
+
+  deployable phoenixApp {
+    platform: elixir
+    contexts: [Inventory]
+    dataSources: [invState]
+    serves: InventoryApi
+    ui: Admin
+    port: 4000
+  }
+}

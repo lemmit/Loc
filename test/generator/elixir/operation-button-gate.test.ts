@@ -54,7 +54,7 @@ ${authBits}  subdomain Sales {
   storage primary { type: postgres }
   resource salesState { for: Sales, kind: state, use: primary }
   deployable phoenixApp {
-    platform: phoenix { foundation: ash }
+    platform: elixir { foundation: ash }
     contexts: [Sales]
     dataSources: [salesState]
     serves: SalesApi

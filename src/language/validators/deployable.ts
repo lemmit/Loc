@@ -58,7 +58,7 @@ export function checkDeployable(
 ): void {
   // Page-metamodel UI binding rules (3, 4, 4b).
   // Rule 3:  only platforms that mount a UI admit `ui:` — `react`,
-  //          `static`, and `phoenixLiveView` (fullstack Ash + Phoenix).
+  //          `static`, and `elixir` (fullstack Ash + Phoenix).
   // Rule 4:  every `static` deployable must declare `ui:` (otherwise
   //          it has nothing to serve).
   // Rule 4b: every `react` deployable must declare `ui:`.  The
@@ -78,7 +78,7 @@ export function checkDeployable(
   if (hasUiBinding && !platformMountsUi(d.platform)) {
     accept(
       "error",
-      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'svelte', 'vue', 'static', 'phoenix', 'dotnet', 'java'); got '${d.platform}'.`,
+      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'svelte', 'vue', 'static', 'elixir', 'dotnet', 'java'); got '${d.platform}'.`,
       {
         node: d,
         property: d.uiSugar
@@ -271,9 +271,9 @@ export function checkDeployable(
  *  arbitrary STRING (for `family@version` pins).  Mirrors
  *  `checkDeployableDesignPack`'s version error:
  *
- *    - backend bareword (`hono`) / frontend keyword
+ *    - backend bareword (`node`) / frontend keyword
  *      (`react`/`static`) → always fine.
- *    - backend pin (`"hono@v4"`) → the version must be a
+ *    - backend pin (`"node@v4"`) → the version must be a
  *      registered surface, else error listing the available pins.
  *    - anything else (`"frobnicator"`, a typo'd quoted platform)
  *      → unknown-platform error (the grammar enum used to reject
@@ -288,7 +288,7 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
     if (!FRONTEND_KEYWORDS.has(raw)) {
       accept(
         "error",
-        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'svelte', 'vue', 'static', 'phoenix', 'python' (backends also accept a pinned form, e.g. 'node@v4').`,
+        `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'node', 'java', 'react', 'svelte', 'vue', 'static', 'elixir', 'python' (backends also accept a pinned form, e.g. 'node@v4').`,
         { node: d, property: "platform" },
       );
     }
@@ -307,8 +307,8 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
   }
 }
 
-/** Resolve a `platform:` value to its canonical family (`phoenix` →
- *  `phoenixLiveView`, `hono@v4` → `hono`), falling back to the raw value
+/** Resolve a `platform:` value to its canonical family (`node@v4` →
+ *  `node`, `fastapi` → `python`), falling back to the raw value
  *  for frontends (`react`/`static`).  Mirrors how lowering canonicalises. */
 function resolveAxisFamily(platform: string): Platform {
   return (parseBuiltinPlatformRef(platform)?.family ?? platform) as Platform;
@@ -555,8 +555,8 @@ export function checkDeployableDataSources(d: Deployable, accept: ValidationAcce
 }
 
 /** `serves:` validations.
- *    - Only valid on platforms that own a backend (dotnet, hono,
- *      phoenixLiveView).  Frontend-only platforms (react, static)
+ *    - Only valid on platforms that own a backend (dotnet, node,
+ *      java, elixir).  Frontend-only platforms (react, static)
  *      have no api surface to serve.
  *    - Each api ref must resolve.
  *    - No duplicate api names within one deployable's serves list. */
@@ -565,7 +565,7 @@ export function checkDeployableServes(d: Deployable, accept: ValidationAcceptor)
   if (!platformOwnsBackend(d.platform)) {
     accept(
       "error",
-      `'serves:' is only valid on a backend deployable (dotnet, hono, java, phoenixLiveView).  Got platform '${d.platform}'.`,
+      `'serves:' is only valid on a backend deployable (dotnet, node, java, elixir).  Got platform '${d.platform}'.`,
       { node: d, property: "serves" },
     );
     return;
@@ -598,7 +598,7 @@ export function checkDeployableServes(d: Deployable, accept: ValidationAcceptor)
  *  `api Sales: SalesApi` in the ui block) to a backend deployable
  *  that supplies its contract.  The rule applies to any deployable
  *  that mounts a UI (`platformMountsUi`) — split frontends (react /
- *  static) AND fullstack backends (phoenixLiveView, fullstack dotnet);
+ *  static) AND fullstack backends (elixir, fullstack dotnet);
  *  in the fullstack case the deployable can be both source and
  *  target of its own bindings (it serves the api it consumes).
  *    - Each binding's `name` must match a UiApiParam in the ui.

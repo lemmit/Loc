@@ -756,11 +756,11 @@ lowering time, lowered to typed router calls / notifications.
 
 ---
 
-## 16. LiveView lowering (`platform: phoenixLiveView`)
+## 16. LiveView lowering (`platform: elixir`)
 
-A deployable that picks `platform: phoenixLiveView` consumes the same
+A deployable that picks `platform: elixir` consumes the same
 `ui { … }` source the React platform consumes — the metamodel is
-framework-neutral by design.  The generator (`src/generator/phoenix-live-view/`)
+framework-neutral by design.  The generator (`src/generator/elixir/`)
 lowers the IR onto Phoenix LiveView semantics.  Per-construct mapping:
 
 | Metamodel construct | LiveView lowering |

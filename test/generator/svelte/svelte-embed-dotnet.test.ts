@@ -71,5 +71,5 @@ describe("dotnet hosts a svelte ui (fullstack embed)", () => {
   });
 
   // Phoenix-hosted svelte is now supported (paths.base = "/app") and
-  // covered by test/generator/phoenix/phoenix-embeds-svelte.test.ts.
+  // covered by test/generator/elixir/phoenix-embeds-svelte.test.ts.
 });

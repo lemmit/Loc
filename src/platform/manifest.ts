@@ -2,7 +2,7 @@
 // Backend package manifest (see docs/packaging-split.md).
 //
 // The small, declarative descriptor a backend package ships so the
-// core can resolve `platform: node` / `platform: "hono@v4"`
+// core can resolve `platform: node` / `platform: "node@v4"`
 // *automagically* without statically importing every backend.
 //
 // Today this is paired with an in-tree discovery seam (backends are
@@ -12,7 +12,7 @@
 // consuming project's dependency closure instead of the in-tree set.
 //
 // `family` + `loomVersion` are exactly the two halves
-// `parseBuiltinPlatformRef` splits a `hono@v4` ref into.  Keep this
+// `parseBuiltinPlatformRef` splits a `node@v4` ref into.  Keep this
 // shape minimal — it is a public contract; additive fields are a
 // minor change, shape changes are a breaking ABI bump every backend
 // package must republish for (mirrors the `PlatformSurface`

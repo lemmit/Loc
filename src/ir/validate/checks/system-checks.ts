@@ -1383,11 +1383,11 @@ export function validateEventSourcedStorage(
   // don't (e.g. an Ash-foundation Phoenix deployable hosting the context).
   const unsupported = [...backendPlatforms].filter((p) => !isEsCapable(p));
   const anyBackend = backendPlatforms.size > 0;
-  const includesPhoenix = unsupported.includes("elixir");
+  const includesElixir = unsupported.includes("elixir");
   for (const agg of ctx.aggregates) {
     if (agg.persistedAs !== "eventLog") continue;
     if (anyBackend && unsupported.length === 0) continue;
-    const message = includesPhoenix
+    const message = includesElixir
       ? // Phoenix-specific: name the Ash-foundation constraint, point at the
         // planned vanilla foundation (D-VANILLA-ES-HOME) and the cross-backend
         // escape (host the context on node / dotnet).
@@ -1458,7 +1458,7 @@ export function validateEventSourcedWorkflowStorage(
   const unsupported = [...backendPlatforms].filter((p) => !isEsCapable(p));
   if (unsupported.length === 0) return;
   const hosts = unsupported.sort().join(", ");
-  const includesPhoenix = unsupported.includes("elixir");
+  const includesElixir = unsupported.includes("elixir");
   for (const wf of ctx.workflows) {
     if (!wf.eventSourced) continue;
     diags.push({
@@ -1469,7 +1469,7 @@ export function validateEventSourcedWorkflowStorage(
         `(a per-correlation event stream folded through its apply(...) blocks) is ` +
         `implemented on the Hono (node), .NET (dotnet), Python (FastAPI), Java (Spring) ` +
         `and elixir-vanilla backends — this context is also hosted by ${hosts}. ` +
-        (includesPhoenix
+        (includesElixir
           ? `On Phoenix this is a foundation constraint: the Ash foundation has no pure-ES ` +
             `fit, so switch the deployable to foundation: vanilla (D-VANILLA-ES-HOME). Otherwise host `
           : `Host `) +
@@ -1512,7 +1512,7 @@ export function validateProvenancedStorage(
     const provFields = agg.fields.filter((f) => f.provenanced);
     if (provFields.length === 0) continue;
     if (anyBackend && unsupported.length === 0) continue;
-    const includesPhoenix = unsupported.includes("elixir");
+    const includesElixir = unsupported.includes("elixir");
     const hostNote =
       unsupported.length > 0
         ? `it is hosted by ${unsupported.join(", ")}, where the provenance runtime is not emitted`
@@ -1525,7 +1525,7 @@ export function validateProvenancedStorage(
         `aggregate '${agg.name}' has provenanced field(s) ${names}, but the provenance runtime ` +
         `(trace capture + history) is emitted for the Hono (node), .NET (dotnet) and elixir-vanilla ` +
         `backends only — ${hostNote}. ` +
-        (includesPhoenix
+        (includesElixir
           ? `On Phoenix this is a foundation constraint: the Ash foundation has no provenance fit, ` +
             `so switch the deployable to foundation: vanilla. Otherwise host `
           : `Host `) +

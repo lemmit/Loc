@@ -56,7 +56,7 @@ describe("heex dynamic attribute seam", () => {
     // link to the instance detail by the (non-id) correlation field — a
     // string-concat route, the exact shape that broke pre-#1367.
     const src = readFileSync(
-      join(repoRoot, "test", "e2e", "fixtures", "phoenix-build", "dispatch.ddd"),
+      join(repoRoot, "test", "e2e", "fixtures", "elixir-ash-build", "dispatch.ddd"),
       "utf8",
     );
     const files = await generateSystemFiles(src);

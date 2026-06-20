@@ -21,7 +21,7 @@ describe("unsupported-platform labels", () => {
   it("labels every UnsupportedPlatform with a human name", () => {
     const labels: Record<UnsupportedPlatform, string> = {
       dotnet: ".NET",
-      phoenixLiveView: "Phoenix LiveView",
+      elixir: "Phoenix LiveView",
       svelte: "SvelteKit",
       vue: "Vue",
     };

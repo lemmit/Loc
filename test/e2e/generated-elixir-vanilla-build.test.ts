@@ -8,7 +8,7 @@ import { type HexMirror, startHexMirror } from "./support/hex-mirror";
 
 // ---------------------------------------------------------------------------
 // Slice 6 of docs/plans/vanilla-foundation-tdd-plan.md — CI gate for
-// the vanilla emit subtree.  Parallel to test/e2e/generated-phoenix-
+// the vanilla emit subtree.  Parallel to test/e2e/generated-elixir-ash-
 // build.test.ts but exercises `foundation: vanilla` deployables and
 // expects no Ash deps in the generated mix.exs.
 //
@@ -49,7 +49,7 @@ function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
 // dep compile fits the per-cell timeout and reseeds its own cache.
 // `LOOM_PHOENIX_VANILLA_BUILD_CASE=<fixture>.ddd` selects that single fixture;
 // unset (local `npm run test:phoenix-vanilla`) builds them all.  Mirrors the Ash
-// gate's LOOM_PHOENIX_BUILD_CASE (generated-phoenix-build.test.ts).
+// gate's LOOM_PHOENIX_BUILD_CASE (generated-elixir-ash-build.test.ts).
 function pickCases<T extends { name: string }>(all: T[]): T[] {
   const only = process.env.LOOM_PHOENIX_VANILLA_BUILD_CASE;
   if (!only) return all;

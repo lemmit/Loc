@@ -111,7 +111,7 @@ function analyzeDeployables(files: VirtualFile[]): DeployableAnalysis {
     const dotnet = f.path.match(/^([^/]+)\/Program\.cs$/);
     if (dotnet) platformBySlug.set(dotnet[1], "dotnet");
     const phoenix = f.path.match(/^([^/]+)\/mix\.exs$/);
-    if (phoenix) platformBySlug.set(phoenix[1], "phoenixLiveView");
+    if (phoenix) platformBySlug.set(phoenix[1], "elixir");
     // Frontend SPAs the preview engine doesn't bundle in-browser yet:
     // SvelteKit (`svelte.config.js`; its `$app/*` client + file routing
     // aren't reproduced) and Vue (`src/main.ts` — the `.ts` entry, vs

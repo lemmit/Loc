@@ -39,14 +39,13 @@ export type BackendFamily = keyof typeof BUILTIN_PLATFORM_LATEST;
 
 /** Legacy platform name → canonical family.  Each canonical name
  *  decouples the *platform* (runtime / language-ecosystem) from the
- *  *framework* it was once conflated with: `phoenixLiveView` / `phoenix`
- *  → `elixir`; `fastapi` → `python`.  (See the D-ELIXIR-PLATFORM /
- *  D-NODE-PLATFORM decisions.)  The former `hono` → `node` alias was
- *  retired (D-NODE-PLATFORM): `node` is the only spelling, and the Hono
- *  framework name surfaces only as the `transport:` value. */
+ *  *framework* it was once conflated with: `fastapi` → `python`.
+ *  (See the D-NODE-PLATFORM / D-ELIXIR-PLATFORM decisions.)  The former
+ *  `hono` → `node` and `phoenix` / `phoenixLiveView` → `elixir` aliases
+ *  were retired: `node` and `elixir` are the only spellings, and the
+ *  Hono / Phoenix framework names surface only as `transport:` /
+ *  `framework:` values. */
 const LEGACY_PLATFORM_ALIASES: Record<string, string> = {
-  phoenixLiveView: "elixir",
-  phoenix: "elixir",
   fastapi: "python",
 };
 
@@ -74,15 +73,16 @@ export interface ParsedBuiltinPlatformRef {
  *  `family@version` → that pin; frontend / unknown → `null`.  Pure;
  *  the shared resolution authority for validator + lowering. */
 export function parseBuiltinPlatformRef(s: string): ParsedBuiltinPlatformRef | null {
-  // Canonicalise legacy spellings (`phoenix`/`phoenixLiveView` → `elixir`,
-  // `hono` → `node`, `fastapi` → `python`) here so validator + lowering +
-  // surface resolution accept every spelling identically.
+  // Canonicalise legacy spellings (`fastapi` → `python`) here so
+  // validator + lowering + surface resolution accept every spelling
+  // identically.  (The `hono` → `node` and `phoenix` / `phoenixLiveView`
+  // → `elixir` platform aliases were retired.)
   const canonical = aliasPlatform(s);
   const at = canonical.indexOf("@");
   const family = (at === -1 ? canonical : canonical.slice(0, at)) as BackendFamily;
   if (!(family in BUILTIN_PLATFORM_LATEST)) return null;
   // Slice the version off `canonical`, not `s` — the alias may change the
-  // family's length (`phoenixLiveView@v1` → `elixir@v1`).
+  // family's length (`fastapi@v1` → `python@v1`).
   const version = at === -1 ? BUILTIN_PLATFORM_LATEST[family] : canonical.slice(at + 1);
   return { family, version, qualified: `${family}@${version}` };
 }
@@ -245,7 +245,7 @@ const PLATFORM_DESCRIPTORS: Record<Platform, PlatformDescriptor> = {
  *
  *  Canonicalises legacy spellings and version pins exactly as registry's
  *  `resolvePlatformRef` does, so callers can pass a raw source value
- *  (`"node@v4"`, `"phoenix"`, `"fastapi"`) or a canonical `Platform` and get
+ *  (`"node@v4"`, `"fastapi"`) or a canonical `Platform` and get
  *  the same descriptor — `platformFor(x).<field>` and `descriptorFor(x).<field>`
  *  agree for every input. */
 export function descriptorFor(name: Platform): PlatformDescriptor {

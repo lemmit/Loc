@@ -562,7 +562,7 @@ describe("page metamodel — IR shape", () => {
         system Acme {
           subdomain M { context C { } }
           ui Admin { framework: phoenixLiveView }
-          deployable app { platform: phoenix, contexts: [C], hosts: Admin, port: 4000 }
+          deployable app { platform: elixir, contexts: [C], hosts: Admin, port: 4000 }
         }
       `);
       const d = deployableByName(loom, "app");
@@ -577,42 +577,22 @@ describe("page metamodel — IR shape", () => {
           subdomain M { context C { } }
           ui Web { framework: react }
           ui Admin { framework: phoenixLiveView }
-          deployable app { platform: phoenix, contexts: [C], hosts: [Web, Admin], port: 4000 }
+          deployable app { platform: elixir, contexts: [C], hosts: [Web, Admin], port: 4000 }
         }
       `);
       expect(deployableByName(loom, "app").hostedUiNames).toEqual(["Web", "Admin"]);
     });
   });
 
-  // D-PHOENIX-SURFACE phase 5 — `phoenix`/`liveview` aliases canonicalise.
-  describe("phoenix/liveview aliases (D-PHOENIX-SURFACE)", () => {
+  // D-PHOENIX-SURFACE phase 5 — the `liveview` framework alias canonicalises.
+  // (The `phoenix` / `phoenixLiveView` *platform* aliases were retired —
+  // `platform: elixir` is the only spelling.)
+  describe("liveview framework alias (D-PHOENIX-SURFACE)", () => {
     function deployableByName(loom: LoomModel, name: string) {
       const d = firstSystem(loom).deployables.find((x) => x.name === name);
       if (!d) throw new Error(`deployable '${name}' not found`);
       return d;
     }
-
-    it("platform: phoenix is the canonical family literal", async () => {
-      const loom = await buildLoom(`
-        system Acme {
-          subdomain M { context C { } }
-          ui Admin { framework: liveview }
-          deployable app { platform: phoenix, contexts: [C], hosts: Admin, port: 4000 }
-        }
-      `);
-      expect(deployableByName(loom, "app").platform).toBe("elixir");
-    });
-
-    it("legacy platform: phoenix desugars to the canonical phoenix", async () => {
-      const loom = await buildLoom(`
-        system Acme {
-          subdomain M { context C { } }
-          ui Admin { framework: liveview }
-          deployable app { platform: phoenix, contexts: [C], hosts: Admin, port: 4000 }
-        }
-      `);
-      expect(deployableByName(loom, "app").platform).toBe("elixir");
-    });
 
     it("framework: liveview canonicalises to phoenixLiveView on the ui", async () => {
       const loom = await buildLoom(`
@@ -628,7 +608,7 @@ describe("page metamodel — IR shape", () => {
         system Acme {
           subdomain M { context C { } }
           ui Admin { framework: liveview }
-          deployable app { platform: phoenix, contexts: [C], hosts: Admin, port: 4000 }
+          deployable app { platform: elixir, contexts: [C], hosts: Admin, port: 4000 }
         }
       `);
       expect(deployableByName(loom, "app").uiFramework).toBe("phoenixLiveView");
@@ -640,7 +620,7 @@ describe("page metamodel — IR shape", () => {
           subdomain M { context C { } }
           ui Web { framework: react }
           ui Admin { framework: liveview }
-          deployable app { platform: phoenix, contexts: [C], hosts: [Web, Admin], port: 4000 }
+          deployable app { platform: elixir, contexts: [C], hosts: [Web, Admin], port: 4000 }
         }
       `);
       expect(deployableByName(loom, "app").hostedUiNames).toEqual(["Web", "Admin"]);

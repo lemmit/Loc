@@ -29,7 +29,7 @@ describe("hostableFrameworks — the host-capability rule", () => {
   });
 
   it("Phoenix hosts LiveView + every static bundle (all served under /app)", () => {
-    const phoenix = platformFor("phoenixLiveView").hostableFrameworks;
+    const phoenix = platformFor("elixir").hostableFrameworks;
     // Hosts its own runtime-coupled LiveView…
     expect(phoenix.has("phoenixLiveView")).toBe(true);
     // …and every static bundle, all served from /app: react / static /

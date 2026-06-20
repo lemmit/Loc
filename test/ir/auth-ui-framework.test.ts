@@ -55,7 +55,7 @@ describe("auth: ui framework gate", () => {
   });
 
   it("rejects auth: ui on an unsupported (phoenixLiveView) frontend", async () => {
-    const errs = await authUiErrors(sys("phoenixLiveView"));
+    const errs = await authUiErrors(sys("elixir"));
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("only supported on react, vue, svelte, and angular");
   });

@@ -23,7 +23,7 @@ import { describe, expect, it } from "vitest";
 // Opt-in — heavy (npm installs + a Playwright browser download).  Run
 // with `LOOM_SVELTE_E2E=1 npx vitest run test/e2e/generated-svelte-e2e.test.ts`
 // (or via the generated-svelte-e2e.yml CI workflow).  Mirrors the react
-// runtime-e2e pattern (embed-react-phoenix.test.ts).
+// runtime-e2e pattern (embed-react-elixir.test.ts).
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));

@@ -290,15 +290,15 @@ backend deployable that supplies its contract.
 Sugar form `ui: WebApp` (no compose-block) is only admissible
 when the UI declares no api parameters.
 
-### Fullstack deployables (`platform: phoenixLiveView`)
+### Fullstack deployables (`platform: elixir`)
 
-A `phoenixLiveView` deployable collapses backend + frontend into one
+An `elixir` deployable collapses backend + frontend into one
 project.  It both `serves:` an Ash-derived API AND mounts a `ui:`,
 without a peer `targets:` link.
 
 ```ddd
 deployable phoenixApp {
-  platform: phoenixLiveView
+  platform: elixir
   contexts: [Orders]
   dataSources: [ordersState]
   serves:   SalesApi
@@ -311,7 +311,7 @@ Validator obligations specific to fullstack platforms:
 
 - `targets:` is rejected — the deployable IS the backend.
 - `framework:` (when explicit) must equal `phoenixLiveView`; pairing
-  `platform: phoenixLiveView` with `framework: react` is rejected.
+  `platform: elixir` with `framework: react` is rejected.
 - `ui:` may be sugar (`ui: SalesAdmin`) or compose-block, same
   semantics as for frontend deployables.
 - `design:` defaults to `ashPhoenix` (the built-in HEEx pack);

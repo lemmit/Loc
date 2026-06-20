@@ -48,7 +48,7 @@ describe("saving-shape capability validation", () => {
   });
 
   it("rejects shape(document) on a phoenix deployable (defaults to ash — no document emitter)", async () => {
-    const errs = await shapeErrors(sys("phoenixLiveView", "document"));
+    const errs = await shapeErrors(sys("elixir", "document"));
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("shape(document)");
     expect(errs[0]).toContain("Cart");
@@ -90,12 +90,12 @@ system Shop {
   });
 
   it("accepts shape(embedded) on a phoenix deployable (Ash embedded resources)", async () => {
-    expect(await shapeErrors(sys("phoenixLiveView", "embedded"))).toEqual([]);
+    expect(await shapeErrors(sys("elixir", "embedded"))).toEqual([]);
   });
 
   it("accepts the default (relational) shape on every backend, incl. Phoenix", async () => {
-    expect(await shapeErrors(sys("phoenixLiveView", ""))).toEqual([]);
-    expect(await shapeErrors(sys("phoenixLiveView", "relational"))).toEqual([]);
+    expect(await shapeErrors(sys("elixir", ""))).toEqual([]);
+    expect(await shapeErrors(sys("elixir", "relational"))).toEqual([]);
   });
 
   it("honours a per-projection `resource { shape: … }` override against the backend", async () => {
@@ -110,7 +110,7 @@ system Shop {
   }
   storage pg { type: postgres }
   resource shopState { for: Shop, kind: state, use: pg, shape: document }
-  deployable api { platform: phoenix, contexts: [Shop], dataSources: [shopState], port: 4000 }
+  deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], port: 4000 }
 }
 `;
     const errs = await shapeErrors(src);

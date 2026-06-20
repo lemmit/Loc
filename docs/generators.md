@@ -15,7 +15,7 @@ workflow see [`tools.md`](tools.md).
 To see one identical domain lowered onto every backend, pick the
 **Storefront** trio from the playground dropdown — `storefront-system`
 (Hono + React), `storefront-dotnet` (.NET + embedded SPA), and
-`storefront-phoenix` (Elixir/Ash + LiveView). All three share the same
+`storefront-elixir` (Elixir/Ash + LiveView). All three share the same
 aggregate tree (`Order` → `OrderLine` + `Money`), `Wallet` aggregate,
 and transactional `checkout` saga, so diffing their output is the
 fastest way to read this matrix concretely.
@@ -701,9 +701,9 @@ stay byte-identical (`pipeline-layering` + the full suite gate this).
 | Deferred | `WorkflowForm` stubs cleanly to a placeholder page — `validateRequired` is on, so unsupported constructs never crash codegen. |
 | CI | `generated-angular-build.yml` — per `{case × pack}` (`minimal` / `scaffold` / `showcase` × `angularMaterial`): `npm install` + `ng build` (the Angular CLI typechecks + bundles in one step; `npm run test:angular-build` locally). |
 
-## Phoenix LiveView fullstack (`platform: phoenixLiveView`)
+## Phoenix LiveView fullstack (`platform: elixir`)
 
-`generate system` for deployables marked `platform: phoenixLiveView`.
+`generate system` for deployables marked `platform: elixir`.
 Single project that both serves an Ash-derived API (when `serves:` is
 populated) AND mounts a `ui:` rendered as Phoenix LiveView modules.
 Owns its own Postgres database (`needsDb: true`).
