@@ -279,13 +279,12 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
   }
 
   for (const page of ui.pages) {
-    // Every page (scaffold OR explicit) routes through the walker.
-    // Scaffold pages carry their full body tree directly (the macro emits the
-    // `_body-builders.ts` scaffolders); any hand-written `scaffold*(of:)`
-    // primitive was rewritten by `expandInlineScaffoldPrimitiveCalls` during
-    // lowering — so by the time we're here the body is always walker-eligible.
-    // `page.origin` distinguishes scaffold-origin (per-aggregate page-object
-    // emitter handles those) from `custom` (walker-side per-page page-object).
+    // Every page (scaffold OR explicit) routes through the walker.  Scaffold
+    // pages carry their full body tree directly from the macro's
+    // `_body-builders.ts` scaffolders, so by the time we're here the body is
+    // always walker-eligible.  `classifyPage` distinguishes scaffold pages (the
+    // per-aggregate page-object emitter above handles those) from `custom` ones
+    // (which get the walker-side per-page page-object).
     if (isWalkableLayoutBody(page.body, userComponents)) {
       // `page.emitPath` overrides the default
       // `src/pages/<page-snake>.tsx` location.  Set by the
