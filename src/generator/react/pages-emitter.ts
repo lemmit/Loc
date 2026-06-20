@@ -32,6 +32,7 @@ import type {
   SystemIR,
   UiIR,
 } from "../../ir/types/loom-ir.js";
+import { pageEmitName } from "../../ir/util/page-emit-name.js";
 import { lowerFirst, snake } from "../../util/naming.js";
 import { buildViewPageObject } from "../_frontend/views-module.js";
 import { buildWorkflowPageObject } from "../_frontend/workflows-module.js";
@@ -289,7 +290,10 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
       out.set(
         emitPath,
         renderCustomLayoutPage(
-          page.name,
+          // Component function name stays the aggregate-qualified `OrderList`
+          // form even though the scaffold names the page by role (`List`) — see
+          // `pageEmitName`.  Matches the origin-bound router import.
+          pageEmitName(page),
           page.body!,
           ctx.pack,
           page.params,

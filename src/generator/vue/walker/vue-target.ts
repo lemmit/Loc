@@ -255,6 +255,12 @@ export const vueTarget: WalkerTarget = {
     return `router.push({ path: ${JSON.stringify(routeTemplate)}, state: { ${state} } })`;
   },
 
+  /** The magic route `id` reads the local `id` the shell binds from
+   *  `route.params.id` (gated on `usesRouteId`). */
+  renderRouteId(): string {
+    return "id";
+  },
+
   // --- Type-default seam --------------------------------------------------
 
   defaultInitFor(type: TypeIR): string {
@@ -293,12 +299,15 @@ export const vueTarget: WalkerTarget = {
    *  template expressions cannot evaluate to markup (no JSX-style
    *  markup-valued ternary), so conditional children render as
    *  structural directives — the same divergence Svelte has with
-   *  `{#if}` blocks. */
+   *  `{#if}` blocks.  The `v-if` is SINGLE-quoted (like `renderStyleAttr`
+   *  below) because the rendered condition can carry double-quoted JS
+   *  string literals (`currentUser.role === "manager"`); a double-quoted
+   *  attribute would terminate at the first inner `"`. */
   renderConditionalChild(cond: string, thenS: string, elseS: string, depth: number): string {
     const pad = "  ".repeat(depth);
     const inner = "  ".repeat(depth + 1);
     return [
-      `<template v-if="${cond}">`,
+      `<template v-if='${cond}'>`,
       `${inner}${thenS}`,
       `${pad}</template>`,
       `${pad}<template v-else>`,

@@ -105,9 +105,18 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
   });
 
   it("softDelete operation stamps DeletedAt with DateTime.UtcNow (not a bogus Now() call)", async () => {
-    // Regression: the softDeletable macro built `now()` as a generic call,
-    // emitting `DeletedAt = Now();` — uncompilable C#.
-    const model = await modelFrom(trioed("softDelete", "softDeletable"));
+    // Regression: the softDelete macro built `now()` as a generic call,
+    // emitting `DeletedAt = Now();` — uncompilable C#.  The `softDelete` ops
+    // macro is aggregate-level (pairs with the built-in `softDeletable`
+    // capability for the state + filter).
+    const model = await modelFrom(`
+      context Sales {
+        aggregate Order with softDeletable, softDelete {
+          subject: string
+        }
+        repository Orders for Order { }
+      }
+    `);
     const files = generateDotnet(model);
     const order = files.get("Domain/Orders/Order.cs")!;
     expect(order).toMatch(/DeletedAt = DateTime\.UtcNow;/);
@@ -139,10 +148,10 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
 
   it("names each filter so multiple capability filters are all additive (EF Core 10)", async () => {
     // Pre-EF-10 a second HasQueryFilter overwrote the first; named filters
-    // make both apply.  `softDelete` + a hand-written tenancy `filter` on the
-    // same aggregate ⇒ two distinct named HasQueryFilter calls.
+    // make both apply.  The `softDeletable` capability filter + a hand-written
+    // tenancy `filter` on the same aggregate ⇒ two distinct named calls.
     const model = await modelFrom(`
-      context Sales with softDelete {
+      context Sales {
         aggregate Order with softDeletable {
           subject: string
           tenantId: string

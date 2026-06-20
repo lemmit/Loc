@@ -154,6 +154,7 @@ export function renderCustomLayoutPage(
     usesState,
     usesCurrentUser,
     usesRouterLink,
+    usesRouteId,
     usedUserComponents,
     usedApiHooks,
     formOfs,
@@ -200,6 +201,7 @@ export function renderCustomLayoutPage(
       usesState: false,
       usesCurrentUser: false,
       usesRouterLink: false,
+      usesRouteId: false,
       userComponents: new Map(),
       usedUserComponents: new Set(),
       usesChildren: false,
@@ -249,6 +251,7 @@ export function renderCustomLayoutPage(
       usesState,
       usesCurrentUser: false,
       usesRouterLink: false,
+      usesRouteId: false,
       userComponents: new Map(),
       usedUserComponents: new Set(),
       usesChildren: false,
@@ -350,8 +353,12 @@ export function renderCustomLayoutPage(
   );
   const actionWiring = renderActionMutations(actionMutations, srcImportPrefix);
   const hasParams = params.length > 0;
+  // The magic route `id` (`byId(id)`) binds from `useParams` too, even when
+  // the page declares no params — synthesize an `id: string` route param.
+  const routeIdParam = usesRouteId && !paramNames.has("id");
+  const needsUseParams = hasParams || usesRouteId;
   const routerSpecifiers: string[] = [];
-  if (hasParams) routerSpecifiers.push("useParams");
+  if (needsUseParams) routerSpecifiers.push("useParams");
   if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
   if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport =
@@ -381,14 +388,16 @@ export function renderCustomLayoutPage(
     effectiveUsesState && state.some((f) => typeUsesMoney(f.type))
       ? `import Decimal from "decimal.js";\n`
       : "";
-  const paramsType = hasParams
-    ? `<{ ${params.map((p) => `${p.name}: ${typeRefAsTsString(p)}`).join("; ")} }>`
-    : "";
-  const used = [...usedParams].sort();
+  const typeEntries = params.map((p) => `${p.name}: ${typeRefAsTsString(p)}`);
+  if (routeIdParam) typeEntries.push("id: string");
+  const paramsType = needsUseParams ? `<{ ${typeEntries.join("; ")} }>` : "";
+  const usedSet = new Set([...usedParams]);
+  if (usesRouteId) usedSet.add("id");
+  const used = [...usedSet].sort();
   const paramsLine =
     used.length > 0
       ? `  const { ${used.join(", ")} } = useParams${paramsType}();\n`
-      : hasParams
+      : needsUseParams
         ? `  useParams${paramsType}();\n`
         : "";
   const navigateLine =
@@ -707,6 +716,7 @@ export function renderUserComponentFile(
       usesState: false,
       usesCurrentUser: false,
       usesRouterLink: false,
+      usesRouteId: false,
       userComponents: new Map(),
       usedUserComponents: new Set(),
       usesChildren: false,
@@ -1026,6 +1036,7 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     usesState: false,
     usesCurrentUser: false,
     usesRouterLink: false,
+    usesRouteId: false,
     userComponents: new Map(),
     usedUserComponents: new Set(),
     usesChildren: false,

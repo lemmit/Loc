@@ -1,4 +1,5 @@
 import type { DerivedIR, ExprIR, PageIR, StateFieldIR } from "../../../ir/types/loom-ir.js";
+import { pageEmitName } from "../../../ir/util/page-emit-name.js";
 import { upperFirst } from "../../../util/naming.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { emitExpr, type WalkContext, type WalkResult } from "../../_walker/walker-core.js";
@@ -30,14 +31,16 @@ export interface AngularPageShellInput {
   pack?: LoadedPack;
 }
 
-/** PascalCase component class name (`CustomerHome` → `CustomerHomeComponent`). */
+/** PascalCase component class name (`CustomerHome` → `CustomerHomeComponent`).
+ *  Uses the aggregate-qualified emit name (`OrderList`), not the scaffold's
+ *  role-scoped page name (`List`), which would collide across aggregates. */
 export function pageComponentName(page: PageIR): string {
-  return `${upperFirst(page.name)}Component`;
+  return `${upperFirst(pageEmitName(page))}Component`;
 }
 
 /** kebab selector (`CustomerHome` → `app-customer-home`). */
 export function pageSelector(page: PageIR): string {
-  const kebab = page.name
+  const kebab = pageEmitName(page)
     .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
     .replace(/[_\s]+/g, "-")
     .toLowerCase();
@@ -183,7 +186,12 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   const routeParams = [...(page.route ?? "").matchAll(/:(\w+)/g)].map((m) => m[1]);
   const argRefs = new Set<string>();
   for (const h of result.usedApiHooks.values()) for (const a of h.argsRendered) argRefs.add(a);
-  const boundParams = routeParams.filter((p) => result.usedParams.has(p) || argRefs.has(p));
+  // The magic route `id` (`usesRouteId` — `byId(id)` / a bare `id` read) binds
+  // even when it isn't a declared param or a hook arg, so a `/…/:id` page that
+  // references it resolves `id` against the snapshot.
+  const boundParams = routeParams.filter(
+    (p) => result.usedParams.has(p) || argRefs.has(p) || (result.usesRouteId && p === "id"),
+  );
   if (boundParams.length > 0) {
     coreSymbols.add("inject");
     routerSymbols.add("ActivatedRoute");
@@ -405,6 +413,7 @@ function derivedCtx(
     usesState: false,
     usesCurrentUser: false,
     usesRouterLink: false,
+    usesRouteId: false,
     userComponents: new Map(),
     usedUserComponents: new Set(),
     usesChildren: false,

@@ -96,7 +96,10 @@ export function lowerEntityPart(part: EntityPart, agg: Aggregate, outer: Env): E
 
 export function lowerField(p: Property, env?: Env): FieldIR {
   const sensitivity = fieldSensitivity(p);
-  const baseType = lowerType(p.type);
+  // Pass `env` so an unresolved id ref (a capability `Self id` rewritten to
+  // `<Host> id`, whose plain ref the Linker skips) recovers the target's
+  // idKind by name — otherwise it would default to `guid`.
+  const baseType = lowerType(p.type, env);
   const declared = p.access as FieldIR["access"];
   // Default value — lowered in the declaring scope so enum values / money
   // literals resolve in the field's type context.  Only the constructible

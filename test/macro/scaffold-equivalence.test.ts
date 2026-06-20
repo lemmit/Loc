@@ -6,7 +6,7 @@
 // surfaces immediately.
 
 import { describe, expect, it } from "vitest";
-import type { Model, Page, Ui } from "../../src/language/generated/ast.js";
+import type { Model, Ui } from "../../src/language/generated/ast.js";
 import { isPage } from "../../src/language/generated/ast.js";
 import { parseString } from "../_helpers/parse.js";
 
@@ -91,22 +91,16 @@ describe("scaffold macro: aggregate selector", () => {
   it("emits List/New/Detail per aggregate, plus Home and the indexes that apply", async () => {
     const { model, errors } = await parseString(wrapWith("aggregates: [Order, Customer]"));
     expect(errors).toEqual([]);
-    expect(pageNames(model)).toEqual([
-      "CustomerDetail",
-      "CustomerList",
-      "CustomerNew",
-      "Home",
-      "OrderDetail",
-      "OrderList",
-      "OrderNew",
-    ]);
+    // Pages are role-named (`List`/`New`/`Detail`), scoped to their
+    // per-aggregate area — so the names repeat across Order's + Customer's areas.
+    expect(pageNames(model)).toEqual(["Detail", "Detail", "Home", "List", "List", "New", "New"]);
   });
 
   it("List pages get pluralised snake-case routes", async () => {
     const { model } = await parseString(wrapWith("aggregates: [Order]"));
-    expect(pageRoute(model, "OrderList")).toBe("/orders");
-    expect(pageRoute(model, "OrderNew")).toBe("/orders/new");
-    expect(pageRoute(model, "OrderDetail")).toBe("/orders/:id");
+    expect(pageRoute(model, "List")).toBe("/orders");
+    expect(pageRoute(model, "New")).toBe("/orders/new");
+    expect(pageRoute(model, "Detail")).toBe("/orders/:id");
   });
 
   it("bodies are emitted as full unfoldable trees (the flip)", async () => {
@@ -114,9 +108,9 @@ describe("scaffold macro: aggregate selector", () => {
     // The scaffold macro now emits the FULL page-body tree directly (the
     // unfoldable scaffolders) instead of a `scaffold<X>(of:|runs:)` sentinel
     // the IR phase later expanded — every page body is a top-level `Stack`.
-    expect(pageBodyCallee(model, "OrderList")).toBe("Stack");
-    expect(pageBodyCallee(model, "OrderNew")).toBe("Stack");
-    expect(pageBodyCallee(model, "OrderDetail")).toBe("Stack");
+    expect(pageBodyCallee(model, "List")).toBe("Stack");
+    expect(pageBodyCallee(model, "New")).toBe("Stack");
+    expect(pageBodyCallee(model, "Detail")).toBe("Stack");
   });
 });
 
@@ -145,12 +139,10 @@ describe("scaffold macro: workflow / view / module selectors", () => {
     const names = pageNames(model);
     expect(names).toEqual(
       expect.arrayContaining([
-        "OrderList",
-        "OrderNew",
-        "OrderDetail",
-        "CustomerList",
-        "CustomerNew",
-        "CustomerDetail",
+        // role-named aggregate pages (shared across Order's + Customer's areas)
+        "List",
+        "New",
+        "Detail",
         "PlaceOrderWorkflow",
         "ActiveOrdersView",
         "Home",
@@ -167,7 +159,7 @@ describe("scaffold macro: composition rules", () => {
     expect(errors.join("\n")).toMatch(/unknown Aggregate 'Bogus'/);
   });
 
-  it("override-by-name: explicit page wins over scaffold-emitted page", async () => {
+  it("override-by-name is scope-local: an explicit area page wins over the scaffolded one", async () => {
     const { model } = await parseString(`
       system Demo {
         subdomain Sales {
@@ -177,29 +169,27 @@ describe("scaffold macro: composition rules", () => {
           }
         }
         ui App with scaffold(aggregates: [Order]) {
-          page OrderList { route: "/custom"  body: Stack { Heading { "Orders" } } }
+          area Orders {
+            page List { route: "/custom"  body: Stack { Heading { "Orders" } } }
+          }
         }
       }
     `);
     const ui = findUi(model);
-    // The explicit top-level OrderList wins; the synthesised one is pruned
-    // from the scaffold's `area Orders` (override-by-name reaches into areas).
-    const topLevelOrderList = (ui.members ?? [])
-      .filter(isPage)
-      .filter((p: Page) => p.name === "OrderList");
-    expect(topLevelOrderList.length).toBe(1);
-    const route = (topLevelOrderList[0]!.props ?? []).find((p) => p.$type === "RouteProp") as any;
-    expect(route?.value).toBe("/custom");
-    // exactly one OrderList across the whole ui (the explicit one)
-    expect(allPages(ui).filter((p: any) => p.name === "OrderList").length).toBe(1);
+    // The scaffold's synthesised `area Orders` merges into the explicit one;
+    // the explicit `page List` (custom route) suppresses the synthesised List
+    // in that same scope, while New + Detail are still contributed.
     const ordersArea = (ui.members ?? []).find(
       (m: any) => m.$type === "Area" && m.name === "Orders",
     );
-    const areaPageNames = (ordersArea?.members ?? [])
-      .filter(isPage)
-      .map((p: any) => p.name)
-      .sort();
-    expect(areaPageNames).toEqual(["OrderDetail", "OrderNew"]); // OrderList pruned
+    const areaPages = (ordersArea?.members ?? []).filter(isPage);
+    const listPages = areaPages.filter((p: any) => p.name === "List");
+    expect(listPages.length).toBe(1);
+    const route = (listPages[0]!.props ?? []).find((p: any) => p.$type === "RouteProp") as any;
+    expect(route?.value).toBe("/custom");
+    expect(areaPages.map((p: any) => p.name).sort()).toEqual(["Detail", "List", "New"]);
+    // exactly one List across the whole ui (the explicit one)
+    expect(allPages(ui).filter((p: any) => p.name === "List").length).toBe(1);
   });
 
   it("groups an aggregate's List/New/Detail under a per-aggregate `area`", async () => {
@@ -223,6 +213,6 @@ describe("scaffold macro: composition rules", () => {
       .filter(isPage)
       .map((p: any) => p.name)
       .sort();
-    expect(names).toEqual(["OrderDetail", "OrderList", "OrderNew"]);
+    expect(names).toEqual(["Detail", "List", "New"]);
   });
 });

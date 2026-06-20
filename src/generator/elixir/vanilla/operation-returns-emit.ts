@@ -16,12 +16,15 @@ import { variantTag } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  ExprIR,
   OperationIR,
+  ProvSite,
   StmtIR,
 } from "../../../ir/types/loom-ir.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { provColumn } from "./provenance-emit.js";
 
 /** The wire field list a returning op's success branch serialises `record`
  *  into — the same ordered `wireShape` the find/CRUD controllers expose, so the
@@ -135,7 +138,15 @@ ${body}
  *  `add`/`remove` collection mutations are still a v1 gap (they need the
  *  association metadata the Ash changeset path carries) — emitted as a TODO so
  *  the module still compiles. */
-export function renderReturningStmt(s: StmtIR, ctx: BoundedContextIR, rc: RenderCtx): string {
+export function renderReturningStmt(
+  s: StmtIR,
+  ctx: BoundedContextIR,
+  rc: RenderCtx,
+  /** Statement position in the body — disambiguates the per-capture temp
+   *  vars (`__lin_<i>` / `__prov_inputs_<i>`) when an op has multiple
+   *  provenanced writes.  Unused unless `rc.captureProvenance` is set. */
+  index = 0,
+): string {
   switch (s.kind) {
     case "return": {
       const value = renderExpr(s.value, rc);
@@ -159,7 +170,17 @@ export function renderReturningStmt(s: StmtIR, ctx: BoundedContextIR, rc: Render
       // `field := value` → struct-update the threaded `record`, so the
       // fall-through success branch serialises the mutated aggregate.
       const field = snake(s.target.segments[0] ?? "");
-      return `    record = %{record | ${field}: ${renderExpr(s.value, rc)}}`;
+      const write = `    record = %{record | ${field}: ${renderExpr(s.value, rc)}}`;
+      // A provenanced write (named-op persist path only) wraps the struct
+      // update with lineage capture: snapshot the leaf inputs BEFORE the
+      // mutation (so a self-referential `x := x + n` records the pre-write
+      // value), do the write, build the lineage, route it to the co-located
+      // backing column AND the per-process trace buffer (drained in the save
+      // transaction).
+      if (rc.captureProvenance && s.prov) {
+        return renderProvenancedAssign(field, s.prov, s.value, rc, index);
+      }
+      return write;
     }
     case "emit": {
       // Broadcast a domain event — same form the vanilla workflow body emits.
@@ -173,6 +194,88 @@ export function renderReturningStmt(s: StmtIR, ctx: BoundedContextIR, rc: Render
     default:
       return `    # TODO(exception-less): unsupported returning-op statement '${s.kind}'`;
   }
+}
+
+/** Render a provenanced `field := value` write with inline lineage capture.
+ *  Mirrors the Hono `withTrace` / .NET `withProvCapture` shape, in Elixir's
+ *  immutable struct-rebind idiom. */
+function renderProvenancedAssign(
+  field: string,
+  prov: ProvSite,
+  value: ExprIR,
+  rc: RenderCtx,
+  index: number,
+): string {
+  const appModule = rc.contextModule.split(".")[0]!;
+  // No leading underscore — these are READ after being set, and Elixir's
+  // `--warnings-as-errors` flags a used `_`-prefixed var.  The `loom_` prefix
+  // avoids collision with any snake-cased param/let local.
+  const inputsVar = `loom_prov_inputs_${index}`;
+  const linVar = `loom_lineage_${index}`;
+  const inputs = collectVanillaLeaves(value, rc)
+    .map((l) => `%{path: ${JSON.stringify(l.path)}, value: ${l.value}}`)
+    .join(", ");
+  const targetLit = `%{type: ${JSON.stringify(prov.target.type)}, field: ${JSON.stringify(prov.target.field)}}`;
+  return [
+    `    ${inputsVar} = [${inputs}]`,
+    `    record = %{record | ${field}: ${renderExpr(value, rc)}}`,
+    `    ${linVar} = %{snapshot_id: ${JSON.stringify(prov.snapshotId)}, target: ${targetLit}, inputs: ${inputsVar}, computed_value: record.${field}}`,
+    `    record = %{record | ${provColumn(field)}: ${linVar}}`,
+    `    _ = ${appModule}.Provenance.record(${linVar})`,
+  ].join("\n");
+}
+
+/** Bounded walk over a provenanced write's RHS collecting leaf inputs — the
+ *  `this`-props, params and let-bindings (and member chains rooted at them)
+ *  that fed the value, each rendered to its current Elixir value.  Lambdas are
+ *  skipped (their bodies reference lambda-local params, not stored leaves).
+ *  Elixir sibling of the TS/.NET `collectLeaves`. */
+function collectVanillaLeaves(
+  e: ExprIR,
+  rc: RenderCtx,
+  out: Array<{ path: string; value: string }> = [],
+): Array<{ path: string; value: string }> {
+  switch (e.kind) {
+    case "ref":
+      if (e.refKind === "this-prop" || e.refKind === "param" || e.refKind === "let") {
+        out.push({ path: e.name, value: renderExpr(e, rc) });
+      }
+      break;
+    case "member":
+      out.push({ path: leafPath(e), value: renderExpr(e, rc) });
+      break;
+    case "method-call":
+      collectVanillaLeaves(e.receiver, rc, out);
+      for (const a of e.args) collectVanillaLeaves(a, rc, out);
+      break;
+    case "call":
+      for (const a of e.args) collectVanillaLeaves(a, rc, out);
+      break;
+    case "paren":
+      collectVanillaLeaves(e.inner, rc, out);
+      break;
+    case "unary":
+      collectVanillaLeaves(e.operand, rc, out);
+      break;
+    case "binary":
+      collectVanillaLeaves(e.left, rc, out);
+      collectVanillaLeaves(e.right, rc, out);
+      break;
+    case "ternary":
+      collectVanillaLeaves(e.cond, rc, out);
+      collectVanillaLeaves(e.then, rc, out);
+      collectVanillaLeaves(e.otherwise, rc, out);
+      break;
+  }
+  return out;
+}
+
+/** Dotted source-side path for a member-access chain (e.g. `line.price`). */
+function leafPath(e: ExprIR): string {
+  if (e.kind === "ref") return e.name;
+  if (e.kind === "this") return "this";
+  if (e.kind === "member") return `${leafPath(e.receiver)}.${e.member}`;
+  return "<expr>";
 }
 
 // ---------------------------------------------------------------------------

@@ -84,6 +84,35 @@ describe("vue walker — scaffold pages", () => {
     expect(detail).toContain('data-testid="customers-op-update-submit"');
   });
 
+  it("magic route id: a hand-written byId(id) page binds id from route.params", async () => {
+    // The bare `id` magic identifier (NOT a declared param) used to render
+    // `/* unsupported expr: id */ undefined`, so the byId read never fetched.
+    const all = await generateSystemFiles(`
+      system S {
+        api SalesApi from Sales
+        subdomain Sales {
+          context Orders {
+            aggregate Order { customerId: string }
+            repository Orders for Order { find byId(id: string): Order? }
+          }
+        }
+        ui WebApp {
+          api Sales: SalesApi
+          page OrderDetail {
+            route: "/orders/:id"
+            body: QueryView { of: Sales.Order.byId(id), single: true, data: o => Text { o.customerId } }
+          }
+        }
+        deployable api { platform: node, contexts: [Orders], port: 3000 }
+        deployable web { platform: vue, targets: api, ui: WebApp, port: 3003 }
+      }
+    `);
+    const detail = all.get("web/src/pages/order_detail.vue")!;
+    expect(detail).not.toContain("unsupported expr: id");
+    expect(detail).toContain("const id = route.params.id as string;");
+    expect(detail).toContain("const orderById = reactive(useOrderById(id));");
+  });
+
   it("new page: create form wired through useLoomForm + reactive mutation handle", async () => {
     const files = await vueFiles();
     const newPage = files.get("src/pages/customers/new.vue")!;

@@ -128,6 +128,38 @@ describe("api binding + walker hook injection", () => {
     expect(content).toMatch(/const \{ slug \} = useParams<\{ slug: string \}>\(\);/);
   });
 
+  it("magic route id: byId(id) binds `id` from useParams even with no declared param", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        subdomain Sales {
+          context Orders {
+            aggregate Customer { name: string }
+            repository Customers for Customer { find byId(id: string): Customer? }
+          }
+        }
+        api SalesApi from Sales
+        ui WebApp {
+          api Sales: SalesApi
+          page Detail {
+            route: "/customers/:id"
+            body: Stack {
+              Heading { "Customer" },
+              Text { Sales.Customer.byId(id).isLoading }
+            }
+          }
+        }
+        deployable api { platform: node, contexts: [Orders], port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+      }
+    `);
+    const content = files.get("web/src/pages/detail.tsx")!;
+    // The magic `id` used to render `/* unsupported expr: id */ undefined`,
+    // leaving the detail page unable to fetch.  It now binds from useParams.
+    expect(content).not.toContain("unsupported expr: id");
+    expect(content).toMatch(/const \{ id \} = useParams<\{ id: string \}>\(\);/);
+    expect(content).toMatch(/const customerById = useCustomerById\(id\);/);
+  });
+
   it("multiple references to same op de-dupe to one hook decl", async () => {
     const files = await buildAndGenerate(`
       system S {

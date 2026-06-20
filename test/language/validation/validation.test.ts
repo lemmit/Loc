@@ -553,7 +553,7 @@ describe("validation", () => {
         }
       `);
       expect(errors).toEqual([]);
-      // Sanity check: one OrderList page (deduped), not two.
+      // Sanity check: one List page (deduped), not two.
       const { isPage, isSystem, isUi } = await import("../../../src/language/generated/ast.js");
       const sys = (model.members ?? []).find(isSystem);
       const ui = (sys?.members ?? []).find(isUi);
@@ -562,9 +562,7 @@ describe("validation", () => {
         (members ?? []).flatMap((m: any) =>
           isPage(m) ? [m] : m?.$type === "Area" ? collectPages(m.members) : [],
         );
-      const orderListPages = collectPages(ui?.members ?? []).filter(
-        (p: any) => p.name === "OrderList",
-      );
+      const orderListPages = collectPages(ui?.members ?? []).filter((p: any) => p.name === "List");
       expect(orderListPages.length).toBe(1);
     });
 

@@ -112,8 +112,18 @@ export function renderVuePage(input: VuePageShellInput): string {
     }
   }
 
+  // The magic route `id` (`byId(id)`) binds from `route.params.id` too, when
+  // the body referenced it and the route declares an `:id` segment.  (Unlike
+  // declared params, the `:id` segment isn't in `routeParams`, so check the
+  // route string.)
+  const routeHasId = /:id\b/.test(page.route ?? "");
+  const routeIdParam = result.usesRouteId && routeHasId ? ["id"] : [];
   const usedParams = [
-    ...new Set([...[...result.usedParams].filter((p) => routeParams.includes(p)), ...idExprParams]),
+    ...new Set([
+      ...[...result.usedParams].filter((p) => routeParams.includes(p)),
+      ...idExprParams,
+      ...routeIdParam,
+    ]),
   ];
   const needsRoute = usedParams.length > 0;
 
@@ -344,10 +354,12 @@ export function renderVuePage(input: VuePageShellInput): string {
   );
   // Page-level `requires` UI gate (D-AUTH-OIDC): bind the verified session
   // user so the `<template>` can `v-if`-guard a `<Forbidden/>` fallback — the
-  // client mirror of the backend 403.  Only when `auth: ui` AND the page
-  // declares a gate; otherwise byte-identical.
+  // client mirror of the backend 403.  The currentUser binding is also needed
+  // when the body has a currentUser-gated `Action(...)` button
+  // (`usesCurrentUser`); the `v-if` Forbidden wrap is page-`requires`-only.
   const gated = !!input.authUi && !!page.requires;
-  if (gated) {
+  const needsUser = gated || result.usesCurrentUser;
+  if (needsUser) {
     script.push(`import { useSession } from "${relPrefix(input)}auth/useSession";`);
   }
   if (usesLoomForm) {
@@ -412,11 +424,13 @@ export function renderVuePage(input: VuePageShellInput): string {
     // onto vue-router locally.
     script.push("const navigate = (to: string) => { void router.push(to); };");
   }
-  if (gated) {
+  if (needsUser) {
     // Dynamic OIDC/JWT claims → loose type so chained claim access stays
     // vue-tsc-clean; `?? {}` is a safe default (AuthGate guarantees a session
     // before the page mounts, so this branch is for typing only).
     script.push(`const currentUser = (useSession().user.value ?? {}) as Record<string, any>;`);
+  }
+  if (gated) {
     script.push(`const loomPageAllowed = ${renderGateExpr(page.requires!, "currentUser")};`);
   }
   script.push(...stateLines);
@@ -641,6 +655,10 @@ export function renderVueComponentFile(
   externFunctions: ReadonlySet<string> = new Set(),
   externComponents: ReadonlySet<string> = new Set(),
   derived: readonly DerivedIR[] = [],
+  /** True when the hosting deployable has `auth: ui` — enables currentUser-only
+   *  operation-`requires` gating on `Action(...)` buttons (a component is the
+   *  canonical Action host).  Binding-only: components carry no page gate. */
+  authUi = false,
 ): { source: string; usesFormToast: boolean } {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -668,6 +686,7 @@ export function renderVueComponentFile(
     pageRoutes,
     externFunctions,
     derivedNames,
+    authUi,
   );
   // Operation forms (Action dialogs).  Same op-dialog host + per-op
   // LoomForm the page shell emits — the only twist is the instance
@@ -884,6 +903,12 @@ export function renderVueComponentFile(
   script.push(
     `import { EMPTY, formatBool, formatDateTime, formatMoney, formatNumber, formatPlain, isEmpty, shortId } from "../lib/format";`,
   );
+  // currentUser binding for a gated `Action(...)` button in the body (the
+  // action-level mirror of the page gate; binding-only — a component has no
+  // page `requires`).
+  if (result.usesCurrentUser) {
+    script.push(`import { useSession } from "../auth/useSession";`);
+  }
   if (usesLoomForm) {
     script.push(`import { useLoomForm } from "../lib/form";`);
   }
@@ -923,6 +948,9 @@ export function renderVueComponentFile(
   if (needsNavigate) {
     script.push("const router = useRouter();");
     script.push("const navigate = (to: string) => { void router.push(to); };");
+  }
+  if (result.usesCurrentUser) {
+    script.push(`const currentUser = (useSession().user.value ?? {}) as Record<string, any>;`);
   }
   script.push(...stateLines);
   script.push(...rewrittenHooks);
@@ -977,6 +1005,7 @@ function buildDerivedLines(
       usesState: false,
       usesCurrentUser: false,
       usesRouterLink: false,
+      usesRouteId: false,
       userComponents: new Map(),
       usedUserComponents: new Set(),
       usesChildren: false,

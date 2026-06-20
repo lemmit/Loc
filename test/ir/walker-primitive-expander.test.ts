@@ -184,14 +184,14 @@ const SCAFFOLD_VIEW_DDD = `
 describe("scaffolded aggregate pages — full body trees, singleton Home expanded", () => {
   it("List page body is a Stack tree (no `scaffold*` call remains)", async () => {
     const loom = await buildLoomModel(SCAFFOLD_AGGREGATE_DDD);
-    const list = findPage(uiPages(loom, "App"), "OrderList");
+    const list = findPage(uiPages(loom, "App"), "List");
     expect(topCallee(list.body)).toBe("Stack");
     expect(containsScaffoldCall(list.body)).toBe(false);
   });
 
   it("List body places Breadcrumbs at top and Heading inside a Toolbar", async () => {
     const loom = await buildLoomModel(SCAFFOLD_AGGREGATE_DDD);
-    const list = findPage(uiPages(loom, "App"), "OrderList");
+    const list = findPage(uiPages(loom, "App"), "List");
     const body = list.body as Extract<ExprIR, { kind: "call" }>;
     expect(body.name).toBe("Stack");
     const calleeNames = body.args.map(topCallee);
@@ -205,7 +205,7 @@ describe("scaffolded aggregate pages — full body trees, singleton Home expande
 
   it("List body lands on a QueryView whose `data:` arg is a lambda", async () => {
     const loom = await buildLoomModel(SCAFFOLD_AGGREGATE_DDD);
-    const list = findPage(uiPages(loom, "App"), "OrderList");
+    const list = findPage(uiPages(loom, "App"), "List");
     const stack = list.body as Extract<ExprIR, { kind: "call" }>;
     const queryView = stack.args.find(
       (a): a is Extract<ExprIR, { kind: "call" }> => topCallee(a) === "QueryView",
@@ -218,7 +218,7 @@ describe("scaffolded aggregate pages — full body trees, singleton Home expande
 
   it("Detail page body is a Stack with Breadcrumbs + Heading + QueryView", async () => {
     const loom = await buildLoomModel(SCAFFOLD_AGGREGATE_DDD);
-    const detail = findPage(uiPages(loom, "App"), "OrderDetail");
+    const detail = findPage(uiPages(loom, "App"), "Detail");
     expect(topCallee(detail.body)).toBe("Stack");
     expect(containsScaffoldCall(detail.body)).toBe(false);
     const stack = detail.body as Extract<ExprIR, { kind: "call" }>;
@@ -230,7 +230,7 @@ describe("scaffolded aggregate pages — full body trees, singleton Home expande
 
   it("New page body is a Stack with a CreateForm", async () => {
     const loom = await buildLoomModel(SCAFFOLD_AGGREGATE_DDD);
-    const newPage = findPage(uiPages(loom, "App"), "OrderNew");
+    const newPage = findPage(uiPages(loom, "App"), "New");
     expect(topCallee(newPage.body)).toBe("Stack");
     expect(containsScaffoldCall(newPage.body)).toBe(false);
     const stack = newPage.body as Extract<ExprIR, { kind: "call" }>;

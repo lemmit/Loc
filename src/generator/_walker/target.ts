@@ -434,6 +434,14 @@ export interface WalkerTarget {
    *  guard — Angular's template typechecker won't narrow a `data()` call. */
   renderQueryDataAccess?(handle: string, single?: boolean): string;
 
+  /** OPTIONAL — the in-scope accessor for the magic route `id` identifier
+   *  (`{ kind: "id" }`, e.g. `Order.byId(id)` on a `/orders/:id` page).  The
+   *  shared `emitExpr` sets `ctx.usesRouteId` and returns this; the page-shell
+   *  binds a matching local `id` from the route param (`useParams` /
+   *  `route.params` / `$page.params` / the Angular `ActivatedRoute` snapshot).
+   *  A target that omits it leaves the old `unsupported expr` placeholder. */
+  renderRouteId?(): string;
+
   /** OPTIONAL — whole-primitive override for `CreateForm(of: <Agg>)`.  The
    *  shared `emitCreateForm` delegates here first; a non-null return is used
    *  verbatim and the RHF/react-query `emitFormOfAggregate` path is skipped.

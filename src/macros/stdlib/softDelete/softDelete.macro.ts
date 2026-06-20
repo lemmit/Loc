@@ -1,46 +1,41 @@
-import { contextFilter, defineMacro, memberAccess, not, thisRef } from "../../api/index.js";
+import { assignStmt, defineMacro, nullLit, operation } from "../../api/index.js";
+import { boolLit, nowExpr } from "../../api/ui-factories.js";
 
-/** Context-level companion to `softDeletable`.
+/** Soft-delete operations (typed-capabilities.md, Phase 3).
  *
- * Declares the capability filter (`filter for "softDeletable"
- * !this.isDeleted`) once at the context level.  Aggregates that opt
- * in via `with softDeletable` (or by writing
- * `implements "softDeletable"` themselves) receive the filter via
- * the lowerer's capability-scoped propagation.
+ * Adds the `softDelete()` / `restore()` mutations to an aggregate.  A capability
+ * is a pure mixin (fields + filter + stamp), so the operations live here, in a
+ * macro, while the STATE + query FILTER come from the built-in `softDeletable`
+ * capability.  Compose them:
  *
- * Source-equivalent of:
+ *   aggregate Order with softDeletable, softDelete { subject: string }
  *
- *   context Sales with softDelete {
- *     aggregate Order with softDeletable { subject: string }
- *     aggregate Public { name: string }    // not filtered
- *   }
+ *   ↓  softDeletable (capability) → isDeleted, deletedAt, filter !this.isDeleted
+ *      softDelete    (macro)      → operation softDelete() / restore()
  *
- *   ↓
- *
- *   context Sales {
- *     filter for "softDeletable" !this.isDeleted
- *     aggregate Order { ... implements "softDeletable" ... }
- *     aggregate Public { name: string }
- *   }
- *
- * Reading note: this macro contains the capability *behavior*; the
- * sibling `softDeletable` macro contains the per-aggregate *state*
- * (fields, operations).  They compose: applying both yields a fully
- * functional soft-delete capability.  `softDeleteByDefault` combines
- * them in one go for every aggregate in the context. */
+ * (Pre-Phase-3 this name was the *context* macro that declared the
+ * `filter for "softDeletable"` predicate; the capability now co-locates that
+ * filter, so `softDelete` is repurposed as the aggregate-level ops macro.) */
 export default defineMacro({
   name: "softDelete",
-  target: "context",
+  target: "aggregate",
   apiVersion: 1,
   description:
-    "Context-level capability filter for the `softDeletable` group.  " +
-    "Hides rows whose `isDeleted` field is true from default reads, " +
-    'but only for aggregates that opt in via `implements "softDeletable"`.',
+    "Adds softDelete()/restore() operations to an aggregate.  Pair with the " +
+    "built-in `softDeletable` capability, which supplies the isDeleted/deletedAt " +
+    "state and the read filter.",
   expand() {
     return [
-      contextFilter(not(memberAccess(thisRef(), "isDeleted")), {
-        capability: "softDeletable",
-      }),
+      operation(
+        "softDelete",
+        [],
+        [assignStmt("isDeleted", boolLit(true)), assignStmt("deletedAt", nowExpr())],
+      ),
+      operation(
+        "restore",
+        [],
+        [assignStmt("isDeleted", boolLit(false)), assignStmt("deletedAt", nullLit())],
+      ),
     ];
   },
 });

@@ -206,6 +206,9 @@ export function renderSveltePage(
    *  `<Forbidden/>` fallback when the currentUser-only predicate fails — the
    *  client mirror of the backend 403.  Undefined ⇒ ungated (byte-identical). */
   requires: ExprIR | undefined = undefined,
+  /** True when the hosting deployable has `auth: ui` — enables currentUser-only
+   *  operation-`requires` gating on `Action(...)` buttons in the body. */
+  authUi = false,
 ): string {
   void pageName;
   const paramNames = new Set(params.map((p) => p.name));
@@ -217,6 +220,8 @@ export function renderSveltePage(
     usedParams,
     usesNavigate,
     usesState,
+    usesCurrentUser,
+    usesRouteId,
     usedUserComponents,
     usedApiHooks,
     formOfs,
@@ -238,6 +243,7 @@ export function renderSveltePage(
     pageRoutes,
     externFunctions,
     derivedNames,
+    authUi,
   );
   // Page `derived` bindings → hoisted `$derived` consts (runes auto-track).
   // A derived reading a state field forces the `$state` declaration even
@@ -302,10 +308,14 @@ export function renderSveltePage(
     usesNavigate || form.usesNavigate
       ? `  import { goto as navigate } from "$app/navigation";\n`
       : "";
-  const pageStateImport = usedParams.size > 0 ? `  import { page } from "$app/state";\n` : "";
+  // Route params to bind: the declared/used ones plus the magic route `id`
+  // (`byId(id)`) when the body referenced it.
+  const routeParamNames = new Set(usedParams);
+  if (usesRouteId) routeParamNames.add("id");
+  const pageStateImport = routeParamNames.size > 0 ? `  import { page } from "$app/state";\n` : "";
   // Used route params derive from the reactive `page.params` — bare
   // refs in the walked body (`{id}`) resolve against these locals.
-  const paramLines = [...usedParams]
+  const paramLines = [...routeParamNames]
     .sort()
     .map((n) => `  const ${n} = $derived(page.params.${n} ?? "");\n`)
     .join("");
@@ -325,7 +335,7 @@ export function renderSveltePage(
   // and wrap the body markup in an `{#if}` that renders `<Forbidden/>` when the
   // currentUser-only predicate fails (Svelte has no early-return in markup, so
   // the guard is a template conditional, not a control-flow return).
-  const gate = renderSveltePageGate(requires);
+  const gate = renderSveltePageGate(requires, usesCurrentUser);
   const markup = gate.guardOpen
     ? `${gate.guardOpen}\n${indentJsx(tsx, "  ")}\n${gate.guardClose}`
     : indentJsx(tsx, "");
@@ -340,23 +350,32 @@ ${templateScope}`;
 /** Render the page's `requires` UI gate fragments: the `useSession` import, the
  *  `<script>` user binding, and the `{#if}` markup wrapper.  All empty when the
  *  page is ungated. */
-function renderSveltePageGate(requires: ExprIR | undefined): {
+function renderSveltePageGate(
+  requires: ExprIR | undefined,
+  usesCurrentUser: boolean,
+): {
   import: string;
   binding: string;
   guardOpen: string;
   guardClose: string;
 } {
-  if (!requires) return { import: "", binding: "", guardOpen: "", guardClose: "" };
-  const condition = renderGateExpr(requires, "currentUser");
+  // The session-user binding + `useSession` import are needed when the page
+  // has a `requires` gate OR the body has a currentUser-gated action button
+  // (`usesCurrentUser`).  The `{#if}` Forbidden wrap is page-`requires`-only.
+  if (!requires && !usesCurrentUser) {
+    return { import: "", binding: "", guardOpen: "", guardClose: "" };
+  }
   return {
     import: `  import { useSession } from "$lib/auth/AuthGate.svelte";\n`,
     // Dynamic OIDC/JWT claims → loose type so chained access / membership stays
     // svelte-check-clean under the generated project's strict config.
     binding: `  const currentUser = useSession().user as Record<string, any>;\n`,
-    guardOpen: `{#if !(${condition})}
+    guardOpen: requires
+      ? `{#if !(${renderGateExpr(requires, "currentUser")})}
   <div style="padding:24px"><h2>Forbidden</h2><p>You do not have access to this page.</p></div>
-{:else}`,
-    guardClose: `{/if}`,
+{:else}`
+      : "",
+    guardClose: requires ? `{/if}` : "",
   };
 }
 
@@ -377,6 +396,10 @@ export function renderSvelteComponentFile(
   externFunctions: ReadonlySet<string> = new Set(),
   /** Component-level `derived` bindings — hoisted as `$derived` consts. */
   derived: DerivedIR[] = [],
+  /** True when the hosting deployable has `auth: ui` — enables currentUser-only
+   *  operation-`requires` gating on `Action(...)` buttons (a component is the
+   *  canonical Action host).  Binding-only: components carry no page gate. */
+  authUi = false,
 ): string {
   void name;
   const paramNames = new Set(params.map((p) => p.name));
@@ -387,6 +410,7 @@ export function renderSvelteComponentFile(
     imports,
     usesState,
     usesNavigate,
+    usesCurrentUser,
     usedUserComponents,
     usesChildren,
     usedApiHooks,
@@ -409,7 +433,12 @@ export function renderSvelteComponentFile(
     pageRoutes,
     externFunctions,
     derivedNames,
+    authUi,
   );
+  // currentUser binding for any gated `Action(...)` button in the body (the
+  // action-level mirror of the page gate; binding-only — components have no
+  // page `requires`).
+  const gate = renderSveltePageGate(undefined, usesCurrentUser);
   // Component `derived` bindings → hoisted `$derived` consts.  A derived
   // reading a state field forces the `$state` declaration.
   const derivedResult = buildDerivedLines(derived, pack, paramNames, stateNames);
@@ -501,7 +530,7 @@ export function renderSvelteComponentFile(
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${snippetImport}${navigateImport}${decimalImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}</script>
+${gate.import}${snippetImport}${navigateImport}${decimalImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${gate.binding}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}</script>
 
 ${indentJsx(markup, "")}
 ${templateScope}`;
@@ -630,6 +659,7 @@ function dummyCtx(
     usesState: false,
     usesCurrentUser: false,
     usesRouterLink: false,
+    usesRouteId: false,
     userComponents: new Map(),
     usedUserComponents: new Set(),
     usesChildren: false,

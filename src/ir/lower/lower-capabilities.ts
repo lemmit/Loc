@@ -1,4 +1,5 @@
 import type { Aggregate, BoundedContext, Expression } from "../../language/generated/ast.js";
+import { CAPABILITIES_TAG } from "../../util/capability-tag.js";
 import type { ContextStampIR, ExprIR } from "../types/loom-ir.js";
 import { criterionRefOf, lowerExpr } from "./lower-expr.js";
 import type { Env } from "./lower-types.js";
@@ -24,114 +25,69 @@ function filterEntry(expr: Expression, env: Env): FilterEntry {
 // ---------------------------------------------------------------------------
 
 export interface ContextLevelCapabilities {
-  /** Unqualified filters — propagate to every aggregate in the
-   * context, regardless of `implements`. */
+  /** Context-level filters — propagate to every aggregate in the context. */
   unqualifiedFilters: FilterEntry[];
-  /** Capability-qualified filters — propagate only to aggregates
-   * whose `implementsCapabilities` includes the matching name. */
-  qualifiedFilters: Array<{ capability: string; entry: FilterEntry }>;
-  /** Unqualified stamps — propagate to every aggregate. */
+  /** Context-level stamps — propagate to every aggregate in the context. */
   unqualifiedStamps: ContextStampIR[];
-  /** Capability-qualified stamps — propagate only to opt-ins. */
-  qualifiedStamps: Array<{ capability: string; stamp: ContextStampIR }>;
-  /** `implements` declarations at context level propagate to every
-   * aggregate's `implementsCapabilities` (today; "for" qualifier on
-   * implements is intentionally not supported — implements IS the
-   * opt-in mechanism, qualifying it would be redundant). */
-  implementsCaps: string[];
 }
 
 export const EMPTY_CONTEXT_CAPABILITIES: ContextLevelCapabilities = Object.freeze({
   unqualifiedFilters: [],
-  qualifiedFilters: [],
   unqualifiedStamps: [],
-  qualifiedStamps: [],
-  implementsCaps: [],
 }) as ContextLevelCapabilities;
 
-/** Scan a BoundedContext's members for FilterDecl/StampDecl/
- * ImplementsDecl nodes, lower them in the context's env, and
- * partition by qualifier.  Unqualified context-level decls apply to
- * every aggregate inside; qualified (`for "<name>"`) decls apply
- * only to aggregates whose `implements` matches. */
+/** Scan a BoundedContext's members for FilterDecl/StampDecl nodes and lower
+ * them in the context's env.  Context-level filters/stamps apply to every
+ * aggregate inside (typed-capabilities Phase 6 removed the capability-scoped
+ * `for "<name>"` qualifier — a capability co-locates its own filter/stamp).
+ * Context-level `implements <Cap>` is applied by the expander (it splices the
+ * capability into each aggregate), so there is nothing to lower here. */
 export function collectContextLevelCapabilities(
   ctx: BoundedContext,
   env: Env,
 ): ContextLevelCapabilities {
   const unqualifiedFilters: FilterEntry[] = [];
-  const qualifiedFilters: Array<{ capability: string; entry: FilterEntry }> = [];
   const unqualifiedStamps: ContextStampIR[] = [];
-  const qualifiedStamps: Array<{ capability: string; stamp: ContextStampIR }> = [];
-  const implementsCaps: string[] = [];
   for (const m of ctx.members ?? []) {
     if (m.$type === "FilterDecl") {
-      const f = m as { expr: Expression; capability?: string };
-      const entry = filterEntry(f.expr, env);
-      if (f.capability) {
-        qualifiedFilters.push({ capability: f.capability, entry });
-      } else {
-        unqualifiedFilters.push(entry);
-      }
+      unqualifiedFilters.push(filterEntry((m as { expr: Expression }).expr, env));
     } else if (m.$type === "StampDecl") {
-      const s = m as unknown as StampDeclLike & { capability?: string };
-      const lowered = lowerStampDecl(s, env);
-      if (s.capability) {
-        qualifiedStamps.push({ capability: s.capability, stamp: lowered });
-      } else {
-        unqualifiedStamps.push(lowered);
-      }
-    } else if (m.$type === "ImplementsDecl") {
-      implementsCaps.push((m as { name: string }).name);
+      unqualifiedStamps.push(lowerStampDecl(m as unknown as StampDeclLike, env));
     }
   }
-  return {
-    unqualifiedFilters,
-    qualifiedFilters,
-    unqualifiedStamps,
-    qualifiedStamps,
-    implementsCaps,
-  };
+  return { unqualifiedFilters, unqualifiedStamps };
 }
 
 export function collectFilters(
   agg: Aggregate,
   env: Env,
   ctxCaps: ContextLevelCapabilities,
-  aggImplementsCaps: readonly string[],
 ): FilterEntry[] {
   const own = (agg.members ?? [])
     .filter((m) => m.$type === "FilterDecl")
     .map((m) => filterEntry((m as { expr: Expression }).expr, env));
-  // Qualified context filters propagate only to aggregates whose
-  // implements set includes the qualifier name.
-  const matchingQualified = ctxCaps.qualifiedFilters
-    .filter((q) => aggImplementsCaps.includes(q.capability))
-    .map((q) => q.entry);
-  return [...ctxCaps.unqualifiedFilters, ...matchingQualified, ...own];
+  return [...ctxCaps.unqualifiedFilters, ...own];
 }
 
 export function collectStamps(
   agg: Aggregate,
   env: Env,
   ctxCaps: ContextLevelCapabilities,
-  aggImplementsCaps: readonly string[],
 ): ContextStampIR[] {
   const own = (agg.members ?? [])
     .filter((m) => m.$type === "StampDecl")
     .map((m) => lowerStampDecl(m as unknown as StampDeclLike, env));
-  const matchingQualified = ctxCaps.qualifiedStamps
-    .filter((q) => aggImplementsCaps.includes(q.capability))
-    .map((q) => q.stamp);
-  return [...ctxCaps.unqualifiedStamps, ...matchingQualified, ...own];
+  return [...ctxCaps.unqualifiedStamps, ...own];
 }
 
-export function collectImplements(agg: Aggregate, propagated: readonly string[]): string[] {
-  const own = (agg.members ?? [])
-    .filter((m) => m.$type === "ImplementsDecl")
-    .map((m) => (m as { name: string }).name);
-  // Dedupe + sort so generators get a deterministic order regardless
-  // of declaration source (context vs aggregate vs macro emission).
-  return [...new Set([...propagated, ...own])].sort();
+/** The typed capabilities an aggregate implements — read from the transient
+ * annotation the expander records for every `with <Cap>` / `implements <Cap>`
+ * application (aggregate- and context-scope).  Deduped + sorted for a
+ * deterministic order.  Capability application has already spliced the
+ * fields/filter/stamp; this is the surviving identity record. */
+export function collectCapabilities(agg: Aggregate): string[] {
+  const names = (agg as { [CAPABILITIES_TAG]?: string[] })[CAPABILITIES_TAG] ?? [];
+  return [...new Set(names)].sort();
 }
 
 /** Shape we rely on from a `StampDecl` AST node.  Local alias so the

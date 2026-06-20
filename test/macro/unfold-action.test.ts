@@ -69,101 +69,44 @@ async function unfold(source: string, macroNameInSource: string): Promise<string
 }
 
 describe("unfold code action", () => {
-  it("offers an `Unfold macro 'softDeletable'` refactor on the macro call", async () => {
+  // NOTE: `softDeletable`/`auditable` are now built-in capabilities (not macros).
+  // Unfold is a MACRO refactor (it expands a `with X(...)` macro call to its
+  // source), so it does not target capabilities at all.  `softDelete` (the
+  // operations) is still a macro and unfolds.  Clause order is
+  // `softDelete, softDeletable` so the marker search lands on the standalone
+  // `softDelete` and not the `softDelete` inside `softDeletable`.
+
+  it("offers an `Unfold macro 'softDelete'` refactor that materializes the operations", async () => {
     const source = `
 context Sales {
-  aggregate Order with softDeletable {
+  aggregate Order with softDelete, softDeletable {
     subject: string
   }
   repository Orders for Order { }
 }
 `;
-    const unfolded = await unfold(source, "softDeletable");
-    // Macro call gone:
-    expect(unfolded).not.toMatch(/with softDeletable/);
-    // Fields + ops + implements present in the aggregate body:
-    expect(unfolded).toMatch(/isDeleted: bool/);
-    expect(unfolded).toMatch(/deletedAt: datetime\?/);
+    const unfolded = await unfold(source, "softDelete");
+    // The softDelete macro call is gone; the capability remains:
+    expect(unfolded).toMatch(/with softDeletable/);
+    expect(unfolded).not.toMatch(/softDelete,/);
+    // Operations materialized into the aggregate body:
     expect(unfolded).toMatch(/operation softDelete/);
     expect(unfolded).toMatch(/operation restore/);
-    expect(unfolded).toMatch(/implements "softDeletable"/);
   });
 
   it("re-parses to a working program after unfold", async () => {
     const source = `
 context Sales {
-  aggregate Order with softDeletable {
+  aggregate Order with softDelete, softDeletable {
     subject: string
   }
   repository Orders for Order { }
 }
 `;
-    const unfolded = await unfold(source, "softDeletable");
+    const unfolded = await unfold(source, "softDelete");
     const reparseResult = await validate(unfolded);
     const errors = reparseResult.diagnostics.filter((d) => d.severity === 1);
     expect(errors).toEqual([]);
-  });
-
-  it("unfolds `with auditable` into the four audit fields + implements", async () => {
-    const source = `
-context Sales {
-  aggregate User { name: string }
-  aggregate Order with auditable {
-    subject: string
-  }
-  repository Orders for Order { }
-  repository Users for User { }
-}
-`;
-    const unfolded = await unfold(source, "auditable");
-    expect(unfolded).not.toMatch(/with auditable/);
-    expect(unfolded).toMatch(/createdAt: datetime/);
-    expect(unfolded).toMatch(/updatedAt: datetime/);
-    expect(unfolded).toMatch(/createdBy: User id/);
-    expect(unfolded).toMatch(/updatedBy: User id/);
-    expect(unfolded).toMatch(/implements "auditable"/);
-  });
-
-  it("unfolds context-level `with softDelete` into the capability filter", async () => {
-    const source = `
-context Sales with softDelete {
-  aggregate Order {
-    subject: string
-    isDeleted: bool
-    implements "softDeletable"
-  }
-  repository Orders for Order { }
-}
-`;
-    const unfolded = await unfold(source, "softDelete");
-    expect(unfolded).not.toMatch(/with softDelete/);
-    expect(unfolded).toMatch(/filter for "softDeletable" !this\.isDeleted/);
-  });
-
-  it("unfolding one of two macros keeps the other in the with clause", async () => {
-    const source = `
-context Sales with audit, softDelete {
-  aggregate User { name: string }
-  aggregate Order {
-    subject: string
-    isDeleted: bool
-    createdAt: datetime
-    updatedAt: datetime
-    createdBy: User id
-    updatedBy: User id
-    implements "softDeletable"
-    implements "auditable"
-  }
-  repository Orders for Order { }
-  repository Users for User { }
-}
-`;
-    const unfolded = await unfold(source, "softDelete");
-    // softDelete is gone, audit remains:
-    expect(unfolded).toMatch(/with audit\s*\{/);
-    expect(unfolded).not.toMatch(/with audit, softDelete/);
-    expect(unfolded).not.toMatch(/with softDelete, audit/);
-    expect(unfolded).toMatch(/filter for "softDeletable" !this\.isDeleted/);
   });
 
   it("threads ref-list args through unfold (scaffold with modules: [Sales])", async () => {
@@ -226,22 +169,19 @@ system Demo {
     expect(result).toMatch(/with scaffoldAggregate\(of: Order\)/);
     result = await unfold(result, "scaffoldAggregate");
     // Final level: the three pages land as source.
-    expect(result).toMatch(/page OrderList/);
-    expect(result).toMatch(/page OrderNew/);
-    expect(result).toMatch(/page OrderDetail/);
+    expect(result).toMatch(/page List/);
+    expect(result).toMatch(/page New/);
+    expect(result).toMatch(/page Detail/);
     // And the source re-parses cleanly:
     const reparse = await validate(result);
     expect(reparse.diagnostics.filter((d) => d.severity === 1)).toEqual([]);
   });
 
-  it("unfolds `with softDeleteByDefault` one level into child `with` clauses", async () => {
-    // Composer macros like `*ByDefault` use `invokeMacro` to fan
-    // child macros across descendants.  Unfold is one-level: the
-    // composer is replaced by the child macro calls themselves
-    // (`with softDelete` on the context, `with softDeletable` on
-    // each aggregate) rather than the children's fully-expanded
-    // contributions.  The user can drill further by unfolding the
-    // children too.
+  it("unfolds `with softDeleteByDefault` one level into capability + child ops macros", async () => {
+    // The composer emits a typed `implements softDeletable` on the context (which
+    // fans the capability — state + filter — to every aggregate) and a child
+    // `with softDelete` ops macro on each aggregate.  Unfold is one-level: those
+    // calls appear rather than their fully-expanded contributions.
     const source = `
 context Sales with softDeleteByDefault {
   aggregate Order {
@@ -255,28 +195,24 @@ context Sales with softDeleteByDefault {
 }
 `;
     const unfolded = await unfold(source, "softDeleteByDefault");
-    // The composer call is gone:
     expect(unfolded).not.toMatch(/with softDeleteByDefault/);
-    // Replaced by `with softDelete` on the context:
-    expect(unfolded).toMatch(/context Sales with softDelete \{/);
-    // And `with softDeletable` on each aggregate:
-    expect(unfolded).toMatch(/aggregate Order with softDeletable \{/);
-    expect(unfolded).toMatch(/aggregate Customer with softDeletable \{/);
+    // Typed capability application on the context:
+    expect(unfolded).toMatch(/implements softDeletable/);
+    // Child ops macro on each aggregate:
+    expect(unfolded).toMatch(/aggregate Order with softDelete \{/);
+    expect(unfolded).toMatch(/aggregate Customer with softDelete \{/);
     // NOT flattened — child contributions stay opaque at this level:
-    expect(unfolded).not.toMatch(/filter for "softDeletable"/);
-    expect(unfolded).not.toMatch(/implements "softDeletable"/);
+    expect(unfolded).not.toMatch(/operation softDelete/);
     expect(unfolded).not.toMatch(/isDeleted: bool/);
-    // Re-parses cleanly (running the macros gives the same end IR):
+    // Re-parses cleanly (running the capability + macros gives the same IR):
     const reparse = await validate(unfolded);
     expect(reparse.diagnostics.filter((d) => d.severity === 1)).toEqual([]);
   });
 
   it("unfold one level can be applied recursively to reach raw source", async () => {
-    // The composer test above proves shallow unfold.  This proves
-    // that the user can keep unfolding to drill all the way down:
-    // first softDeleteByDefault → `with softDelete` + `with
-    // softDeletable`, then unfold `softDelete` → the context filter
-    // lands at context level (and one `with softDeletable` remains).
+    // softDeleteByDefault → `implements softDeletable` (context) + `with
+    // softDelete` (each aggregate); then unfold the aggregate's `softDelete` →
+    // the operations materialize as source.
     const source = `
 context Sales with softDeleteByDefault {
   aggregate Order {
@@ -285,13 +221,13 @@ context Sales with softDeleteByDefault {
 }
 `;
     let result = await unfold(source, "softDeleteByDefault");
-    expect(result).toMatch(/with softDelete/);
+    expect(result).toMatch(/aggregate Order with softDelete/);
     result = await unfold(result, "softDelete");
-    // After the second unfold, the filter materializes at the context:
-    expect(result).toMatch(/filter for "softDeletable" !this\.isDeleted/);
-    // And the aggregate still carries `with softDeletable` — the
-    // user can keep going if they want the field/op breakdown.
-    expect(result).toMatch(/aggregate Order with softDeletable/);
+    // After the second unfold, the operations materialize on the aggregate:
+    expect(result).toMatch(/operation softDelete/);
+    expect(result).toMatch(/operation restore/);
+    // The capability application stays at the context:
+    expect(result).toMatch(/implements softDeletable/);
   });
 
   it("does not offer unfold when cursor isn't on a macro call", async () => {

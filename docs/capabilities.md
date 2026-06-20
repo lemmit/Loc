@@ -1,24 +1,43 @@
-# Capabilities — `filter`, `stamp`, `implements`
+# Capabilities — `capability`, `filter`, `stamp`, `implements`
 
-The three capability declarations let you express *cross-aggregate
-behaviours* — soft-delete, audit, tenant-scoping — once at the
-context level and have them apply to every aggregate that opts in.
-They are the hand-written equivalent of what the audit / softDelete
-macros produce; the source surface is identical because the macros
-just emit these nodes.
+A **`capability`** is a first-class, pure-mixin declaration — a named
+bundle of **fields + `filter` + `stamp`** that an aggregate opts into
+with `with <Cap>` / `implements <Cap>`.  It is the typed successor to the
+stringly-typed surface (`implements "X"` / `filter for "X"` /
+`stamp for "X"`), which was **removed** — see
+[`proposals/typed-capabilities.md`](proposals/typed-capabilities.md) and
+[`plans/typed-capabilities-implementation.md`](plans/typed-capabilities-implementation.md).
+
+```ddd
+capability softDeletable {
+  isDeleted: bool internal
+  deletedAt: datetime? managed
+  filter !this.isDeleted            // behaviour the capability provides
+}
+
+aggregate Order with softDeletable { subject: string }   // gains the field + filter
+```
+
+`softDeletable` and `auditable` ship **built in** (the toolchain prelude,
+`src/macros/prelude.ts`) — available by name with nothing declared. The
+`softDelete()`/`restore()` operations stay in the `softDelete` macro
+(operations aren't part of a pure-mixin capability): `with softDeletable,
+softDelete`.
 
 ## Surface
 
-Capability members live at three positions in the AST:
+`filter` / `stamp` are also usable directly (the building blocks a
+capability body is made of); `implements <Cap>` / `with <Cap>` apply a
+capability:
 
 | Where | What you write | Effect |
 |---|---|---|
-| Inside an `aggregate` | `filter <expr>`, `stamp <event> { … }`, `implements "<name>"` | Applies to that aggregate only. |
-| Inside a `context` (without `for`) | `filter <expr>`, `stamp <event> { … }`, `implements "<name>"` | Propagates to **every** aggregate in the context at lowering time. |
-| Inside a `context` (with `for "<name>"`) | `filter for "<name>" <expr>`, `stamp for "<name>" <event> { … }` | Propagates only to aggregates whose `implements "<name>"` matches. |
+| Inside a `capability` | `<field>`, `filter <expr>`, `stamp <event> { … }` | Provided to every implementor. |
+| Inside an `aggregate` | `filter <expr>`, `stamp <event> { … }`, `with <Cap>`, `implements <Cap>` | Applies to that aggregate. |
+| Inside a `context` | `filter <expr>`, `stamp <event> { … }`, `with <Cap>`, `implements <Cap>` | `filter`/`stamp` propagate to **every** aggregate in the context; `with`/`implements <Cap>` apply the capability to every aggregate. |
 
-The grammar rules are `FilterDecl`, `StampDecl`, and `ImplementsDecl`
-in `src/language/ddd.langium`.
+The grammar rules are `Capability`, `FilterDecl`, `StampDecl`, and
+`ImplementsDecl` in `src/language/ddd.langium`.
 
 ## `filter <expr>`
 
@@ -35,22 +54,19 @@ aggregate Order {
 }
 ```
 
-At context scope with `for "<capability>"`, the filter is *capability-
-scoped*: it only applies to aggregates that opted into the capability
-group.  This is the canonical soft-delete pattern:
+To apply a filter to *some* aggregates in a context but not others,
+bundle it in a `capability` and opt in per aggregate — the typed
+replacement for the old `filter for "<name>"` string-group form:
 
 ```ddd
+capability softDeletable {
+  isDeleted: bool
+  filter !this.isDeleted
+}
+
 context Sales {
-  filter for "softDeletable" !this.isDeleted
-
-  aggregate Order {
-    isDeleted: bool
-    implements "softDeletable"    // opts in — receives the filter
-  }
-
-  aggregate Public {
-    name: string                  // does NOT implement "softDeletable" — no filter
-  }
+  aggregate Order  with softDeletable { subject: string }  // gains the filter
+  aggregate Public { name: string }                        // no filter
 }
 ```
 
@@ -75,10 +91,9 @@ cases* below.
   capability filters (e.g. `softDelete` + a tenancy `filter`) lost one at
   runtime — named filters make all of them additive again, and let a
   query selectively bypass just one via `IgnoreQueryFilters(["<Name>"])`.
-  Emission is per-entity-type; the filter applies to *every* query of that aggregate
-  regardless of whether the aggregate names a capability via
-  `implements` — the capability-grouping step happened earlier, in
-  the lowerer's propagation pass.  EF Core resolves the DI-scoped
+  Emission is per-entity-type; the filter applies to *every* query of that
+  aggregate (capability application was resolved earlier, at expansion +
+  lowering).  EF Core resolves the DI-scoped
   principal and queries jsonb transparently, so .NET is the one
   backend with no deferred cases.  See
   `src/generator/dotnet/emit/efcore.ts`.
@@ -161,10 +176,9 @@ aggregate Order {
 }
 ```
 
-`stamp for "auditable" onCreate { … }` at context scope propagates
-only to aggregates that `implements "auditable"`.  See the
-[`audit`](scaffold-macros.md#audit--auditable--auditedbydefault)
-macro for the macro-generated equivalent.
+To apply stamps to some aggregates and not others, bundle them in a
+`capability` (the built-in `auditable` is exactly this) and opt in per
+aggregate with `with auditable`.
 
 ### Backend emission
 
@@ -185,71 +199,53 @@ macro for the macro-generated equivalent.
   Hand-writing the stamps inside operation bodies (or using the
   `audit` macro under .NET-only deployment) is the workaround.
 
-## `implements "<name>"`
+## `implements <Cap>` / `with <Cap>`
 
-Opts the host aggregate into a capability group.  The name is a free
-string; the only contract is that **the same name used in
-`filter for "<name>"` / `stamp for "<name>"` declarations selects
-this aggregate**.
+Apply a capability to the host: the expander deep-clones the
+capability's members (fields + `filter` + `stamp`) into the aggregate
+(or, at context scope, into every aggregate in the context).  `with` and
+`implements` are synonyms for this; `with` additionally drives macros.
 
 ```ddd
-aggregate Order {
-  subject: string
-  implements "softDeletable"
-  implements "auditable"
-}
+aggregate Order with softDeletable, auditable { subject: string }
+// or, equivalently for capabilities:
+aggregate Order { subject: string  implements softDeletable  implements auditable }
 ```
 
-The IR records `implements` names on the aggregate (the
-`implementsCapabilities` field) and uses them at lowering time to
-decide which context-scope `filter for "<name>"` / `stamp for
-"<name>"` declarations propagate onto this aggregate.  After
-propagation the `implements` list is informational — none of the
-current backends compile it to marker interfaces, type aliases, or
-runtime tags.  It survives in the IR for tooling (validators, diff
-tools) and for future capability-aware backend logic.
+A `with`/`implements` naming neither a macro nor a declared capability
+is an **error** — the existence check the old free-string form lacked.
+References resolve against the expander's document-wide capability
+inventory (built-ins + user `capability` declarations), not a Langium
+cross-reference.
 
 ## Propagation rules
 
-At lowering time (`lowerContext` in `src/ir/lower/lower.ts`, with the
-filter/stamp/implements collection in `src/ir/lower/lower-capabilities.ts`)
-the compiler expands context-level capability members onto every aggregate in
-that context, subject to the `for` filter:
+At expansion time the typed `with`/`implements <Cap>` is spliced into
+the host (`src/macros/expander.ts`); at lowering time
+(`src/ir/lower/lower-capabilities.ts`) context-level `filter`/`stamp`
+members propagate to every aggregate in the context:
 
 | Declaration | Applies to |
 |---|---|
 | `filter <expr>` at context scope | every aggregate in the context |
-| `filter for "X" <expr>` at context scope | every aggregate in the context that `implements "X"` |
 | `stamp <event> { … }` at context scope | every aggregate in the context |
-| `stamp for "X" <event> { … }` at context scope | every aggregate in the context that `implements "X"` |
-| `implements "X"` at context scope | every aggregate in the context (rare; the macros use it) |
-
-A capability-scoped declaration with no matching `implements` is
-silently a no-op — that's the design.  Soft-delete on a context with
-mixed aggregates (`Order` opts in; `PublicCatalog` doesn't) is the
-canonical case.
+| `with <Cap>` / `implements <Cap>` at context scope | the capability is applied to every aggregate in the context |
+| `with <Cap>` / `implements <Cap>` at aggregate scope | the capability is applied to that aggregate |
 
 ## Relationship to macros
 
-The capability nodes are not a separate machinery — they are the
-**target shape** the audit / softDelete macros expand into.  See
-[`scaffold-macros.md`](scaffold-macros.md) for the macros and the
-exact source-equivalents.  Hand-writing `filter for …` /
-`stamp for …` / `implements` covers every case the macros do plus
-arbitrary user-defined capability groups the macros don't know
-about.
+A `capability` subsumes the field/filter/stamp macros: `auditable` and
+`softDeletable` are built-in capabilities, not macros.  Macros remain for
+**operations and structure** — `softDelete` (operations), `crudish`,
+`scaffold*`.  See [`scaffold-macros.md`](scaffold-macros.md).
 
 ## Validation rules
 
-- An `implements "<name>"` whose name doesn't match any
-  `filter for "<name>"` / `stamp for "<name>"` is allowed (it's a
-  marker the user can extend later).
-- A `filter for "<name>"` / `stamp for "<name>"` with no aggregate
-  implementing the name is allowed (capability is "armed" but
-  inactive).
-- Field references inside `filter` / `stamp` bodies type-check
-  against the propagation target, not the declaring scope — so a
-  context-scope `stamp for "auditable" onCreate { createdBy :=
-  currentUser }` requires every `implements "auditable"` aggregate
-  to declare a `createdBy: User id` field.  A missing field is an
-  IR-validation error.
+- A `with`/`implements` naming no macro and no declared capability is an
+  error.
+- A capability with no implementors is allowed (declared but unused).
+- Field references inside a capability's `filter` / `stamp` body
+  type-check against each implementing aggregate, so a capability whose
+  `stamp onCreate { createdBy := currentUser }` assigns `createdBy`
+  requires every implementor to have a `createdBy: User id` field — a
+  missing field is an IR-validation error.

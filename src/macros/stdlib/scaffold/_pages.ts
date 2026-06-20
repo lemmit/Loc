@@ -35,8 +35,11 @@ function firstApiHandle(ui: Ui): string | undefined {
 /** Group an aggregate's List/New/Detail pages under a per-aggregate `area`
  *  named after its plural (`area Orders { … }` → `src/pages/orders/…`).  The
  *  scaffold returns this instead of loose pages so the generated page tree
- *  groups by aggregate.  In slice 2 `origin` still drives `emitPath` (output
- *  byte-identical); slice 3 makes the area authoritative.  See
+ *  groups by aggregate.  The pages are named by *role* (`List`/`New`/`Detail`),
+ *  scoped to the area, and the `area` is authoritative for `emitPath`
+ *  (`src/pages/orders/list.tsx`) — origin no longer drives it (slice 3a).  The
+ *  emitted component / module identifiers stay the aggregate-qualified
+ *  `OrderList` form via `pageEmitName` (output byte-identical).  See
  *  docs/proposals/unfoldable-page-scaffolding.md. */
 export function areaForAggregate(agg: Aggregate, ui: Ui): Area {
   return area(plural(agg.name), pagesForAggregate(agg, ui));
@@ -50,7 +53,7 @@ export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
   const filters = filterFindsForAggregate(agg);
   return [
     page({
-      name: `${aggName}List`,
+      name: "List",
       route: `/${pluralSnake}`,
       // The full Breadcrumbs/Toolbar/QueryView/Table tree, emitted directly as
       // unfoldable source (no IR-phase sentinel expansion).  The find-filter
@@ -63,13 +66,13 @@ export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
       },
     }),
     page({
-      name: `${aggName}New`,
+      name: "New",
       route: `/${pluralSnake}/new`,
       body: scaffoldNewForm(aggName),
       menu: { hidden: boolLit(true) },
     }),
     page({
-      name: `${aggName}Detail`,
+      name: "Detail",
       route: `/${pluralSnake}/:id`,
       // `Stack { Breadcrumbs, Heading, QueryView, <operations> }` — the read
       // view's parts flattened directly into the page Stack (matching the ⑤c

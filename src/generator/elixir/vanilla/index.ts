@@ -32,6 +32,7 @@ import { emitVanillaContextModule } from "./context-emit.js";
 import { emitVanillaEventModules } from "./events-emit.js";
 import { emitVanillaEventSourcedFiles } from "./eventsourced-emit.js";
 import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
+import { emitVanillaProvenance } from "./provenance-emit.js";
 import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaRetrievals } from "./retrieval-emit.js";
 import { emitVanillaSchemas } from "./schema-emit.js";
@@ -127,6 +128,12 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     emitDispatch(appName, ctx, appModule, out, sys, "vanilla");
   }
   apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
+
+  // Provenance runtime — the `<App>.Provenance` SDK (trace buffer + history
+  // flush + the `Json` Ecto type + `Record` schema) plus the migration that
+  // adds the co-located `<field>_provenance` columns + the `provenance_records`
+  // table.  No-op unless a provenanced field exists (DEBT-06).
+  emitVanillaProvenance(appName, appModule, contexts, out, sys);
 
   // Auth modules — the foundation-agnostic Auth plug (Bearer-JWT → `conn.assigns
   // .current_user`), LiveAuth on_mount, and /auth controller.  Emitted when the

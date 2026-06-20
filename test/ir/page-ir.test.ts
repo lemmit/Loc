@@ -88,9 +88,9 @@ describe("page metamodel — IR shape", () => {
     `);
     const ui = uiByName(loom, "WebApp");
     const pageNames = ui.pages.map((p) => p.name).sort();
-    expect(pageNames).toContain("OrderList");
-    expect(pageNames).toContain("OrderNew");
-    expect(pageNames).toContain("OrderDetail");
+    expect(pageNames).toContain("List");
+    expect(pageNames).toContain("New");
+    expect(pageNames).toContain("Detail");
   });
 
   it("lowers a `page` with route/title/requires/state/body/menu meta", async () => {

@@ -3,6 +3,7 @@
 // Svelte, and Vue frontends.  Extracted from src/generator/react/index.ts.
 
 import type { UiIR } from "../../ir/types/loom-ir.js";
+import { pageEmitName } from "../../ir/util/page-emit-name.js";
 
 /** Auto-generated minimal Playwright smoke: every param-less page this
  *  ui declares navigates and loads.  Driven by route (not by importing
@@ -32,7 +33,9 @@ export function smokeSpec(ui: UiIR): string {
     if (!route || route.includes(":")) continue;
     const routeRe = `${route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`;
     cases.push(
-      `test(${JSON.stringify(`${page.name} loads`)}, async ({ page }) => {\n` +
+      // Title uses the aggregate-qualified emit name (`OrderList`), not the
+      // scaffold's role-scoped page name (`List`) — stable + unique.
+      `test(${JSON.stringify(`${pageEmitName(page)} loads`)}, async ({ page }) => {\n` +
         `  await page.goto(${JSON.stringify(route)});\n` +
         `  await expect(page).toHaveURL(new RegExp(${JSON.stringify(routeRe)}));\n` +
         `});`,

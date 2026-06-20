@@ -32,6 +32,13 @@ system Helpdesk {
     tenantId: string
   }
 
+  // `tenantScoped` — a user-declared capability: the multi-tenant read filter,
+  // applied per aggregate via `with tenantScoped` (the typed replacement for the
+  // old `filter for "tenantScoped"` + `implements "tenantScoped"` string group).
+  capability tenantScoped {
+    filter this.tenantId == currentUser.tenantId
+  }
+
   subdomain Support {
 
     // Typed permission catalogue.  `permissions.ticketsClose` lowers to
@@ -41,29 +48,23 @@ system Helpdesk {
       ticketsReassign
     }
 
-    // `with audit, softDelete` add the context-level stamping rules and
-    // the soft-delete query filter.  `with tenantScoped` (below, on the
-    // context) is the hand-written equivalent for multi-tenant scoping.
-    context Support with audit, softDelete {
+    // Audit + soft-delete are built-in capabilities applied per aggregate
+    // (below): `auditable` co-locates the audit fields + stamps, `softDeletable`
+    // the isDeleted/deletedAt state + read filter; `tenantScoped` (declared
+    // above) is the user-defined multi-tenant filter.
+    context Support {
 
       enum TicketStatus { Open, Pending, Closed }
 
-      // Hand-written capability group: every aggregate that
-      // `implements "tenantScoped"` gets this read filter.  This is
-      // exactly what the audit/softDelete macros expand into, but for a
-      // tenant rule the macros don't ship.
-      filter for "tenantScoped" this.tenantId == currentUser.tenantId
-
-      // `auditable` adds createdAt/updatedAt/createdBy/updatedBy + the
-      // "auditable" marker; `softDeletable` adds isDeleted/deletedAt +
-      // softDelete()/restore() + the "softDeletable" marker.  The
-      // context's `audit`/`softDelete` rules then attach to those markers.
-      aggregate Ticket with auditable, softDeletable {
+      // `auditable` (capability) adds createdAt/updatedAt/createdBy/updatedBy +
+      // the create/update stamps; `softDeletable` (capability) adds
+      // isDeleted/deletedAt + the read filter; `softDelete` (macro) adds the
+      // softDelete()/restore() operations.
+      aggregate Ticket with auditable, softDeletable, softDelete, tenantScoped {
         tenantId: string
         subject: string
         status: TicketStatus
         assignee: string
-        implements "tenantScoped"
 
         invariant subject.length > 0
 

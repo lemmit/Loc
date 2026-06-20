@@ -149,6 +149,15 @@ export const angularTarget: WalkerTarget = {
     return single ? `${handle}.data()!` : `(${handle}.data() ?? [])`;
   },
 
+  /** The magic route `id` reads the bound class field `id` (the page-shell
+   *  binds `readonly id = this.route.snapshot.paramMap.get("id") ?? ""` when
+   *  `usesRouteId`).  In a hook-arg position the shell rewrites it to
+   *  `this.id` via the route-param binding; in template scope `id` reads the
+   *  field directly. */
+  renderRouteId(): string {
+    return "id";
+  },
+
   /** Fork `CreateForm(of: …)` to idiomatic typed Reactive Forms (the shared
    *  react-hook-form path is skipped for Angular). */
   renderCreateForm(call: ExprIR, ctx: WalkContext, depth: number): string | null {

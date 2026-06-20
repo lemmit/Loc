@@ -140,9 +140,9 @@ import { lit } from "../types/loom-ir.js";
 import { lowerAuth } from "./lower-auth.js";
 import type { ContextLevelCapabilities } from "./lower-capabilities.js";
 import {
+  collectCapabilities,
   collectContextLevelCapabilities,
   collectFilters,
-  collectImplements,
   collectStamps,
   EMPTY_CONTEXT_CAPABILITIES,
 } from "./lower-capabilities.js";
@@ -631,17 +631,17 @@ function classifyScaffoldPageByName(
   ctx: WalkerExpandContext,
   up: (s: string) => string,
 ): PageOriginIR | undefined {
-  // Aggregate pages live in the per-aggregate `area <Plural>` block — gate on
-  // the area so a hand-written top-level page that merely shares a scaffold's
-  // name (e.g. an explicit `CustomerNew`) keeps its `custom` origin.
+  // Aggregate pages are named by role (`List`/`New`/`Detail`) and live in the
+  // per-aggregate `area <Plural>` block — the area's last segment identifies
+  // the aggregate, the role name the page kind.  Gating on the area keeps a
+  // hand-written top-level `page List` (sharing a role name by coincidence)
+  // on its `custom` origin.
   const inArea = (aggName: string): boolean => area[area.length - 1] === pluralSnake(aggName);
   for (const aggName of ctx.aggregatesByName.keys()) {
     if (!inArea(aggName)) continue;
-    if (name === `${aggName}List`)
-      return { kind: "aggregate-list", aggregateName: aggName, contextName: "" };
-    if (name === `${aggName}New`)
-      return { kind: "aggregate-new", aggregateName: aggName, contextName: "" };
-    if (name === `${aggName}Detail`)
+    if (name === "List") return { kind: "aggregate-list", aggregateName: aggName, contextName: "" };
+    if (name === "New") return { kind: "aggregate-new", aggregateName: aggName, contextName: "" };
+    if (name === "Detail")
       return { kind: "aggregate-detail", aggregateName: aggName, contextName: "" };
   }
   for (const wfName of ctx.workflowsByName.keys()) {
@@ -769,7 +769,14 @@ function applyPageOriginSideEffects(sys: SystemIR): void {
     const ctx = buildExpandContext(sys, ui);
     for (const page of ui.pages) {
       if (!page.origin || page.origin.kind === "custom") continue;
-      page.emitPath = conventionalEmitPath(page.origin, ctx);
+      // `area` is authoritative for file placement (slice 3a): a page declared
+      // inside an `area { … }` block already had its `emitPath` set from the
+      // area containment path in `lowerUi` (`src/pages/orders/list.tsx`).  Only
+      // fall back to the origin-conventional path for area-less scaffold pages
+      // (the Home / Workflows / Views index singletons, workflow + view pages).
+      if (!page.area || page.area.length === 0) {
+        page.emitPath = conventionalEmitPath(page.origin, ctx);
+      }
       // Detail page bodies reference `id` as a route param
       // (`api.Order.byId(id)`).  Scaffold emits the detail page with
       // route `/<plural>/:id` but no declarative `params` block, so
@@ -1255,12 +1262,9 @@ function lowerAggregate(
   // concatenated with anything propagated from the enclosing context.
   // Context-level capabilities lower in the context's env (which
   // doesn't bind `this` to any aggregate), then re-bind here.
-  // ImplementsCaps is computed FIRST because qualified
-  // (`filter for "X"`) context-level decls only propagate to
-  // aggregates whose implements set includes the qualifier name.
-  const implementsCaps = collectImplements(agg, contextLevelCaps.implementsCaps);
-  const filters = collectFilters(agg, inner, contextLevelCaps, implementsCaps);
-  const stamps = collectStamps(agg, inner, contextLevelCaps, implementsCaps);
+  const filters = collectFilters(agg, inner, contextLevelCaps);
+  const stamps = collectStamps(agg, inner, contextLevelCaps);
+  const capabilities = collectCapabilities(agg);
   return {
     name: agg.name,
     idValueType,
@@ -1281,7 +1285,7 @@ function lowerAggregate(
       ? filters.map((f) => f.criterionRef)
       : undefined,
     contextStamps: stamps.length > 0 ? stamps : undefined,
-    implementsCapabilities: implementsCaps.length > 0 ? implementsCaps : undefined,
+    capabilities: capabilities.length > 0 ? capabilities : undefined,
     persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,
     savingShape: (agg.shape as import("../types/loom-ir.js").SavingShape | undefined) ?? undefined,
     appliers: appliers.length > 0 ? appliers : undefined,

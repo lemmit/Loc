@@ -517,7 +517,9 @@ describe("WalkerTarget — vueTarget (vue-frontend-plan.md)", () => {
 
   it("renderConditionalChild is a structural `<template v-if>` block pair", () => {
     const out = vueTarget.renderConditionalChild("ok", "<A />", "<B />", 1);
-    expect(out).toContain('<template v-if="ok">');
+    // Single-quoted `v-if` (like renderStyleAttr) so a condition carrying
+    // double-quoted JS string literals (`role === "manager"`) stays valid.
+    expect(out).toContain("<template v-if='ok'>");
     expect(out).toContain("<template v-else>");
     expect(out).toContain("<A />");
     expect(out).toContain("<B />");
