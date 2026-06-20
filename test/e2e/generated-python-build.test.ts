@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { CORPUS_DEPLOYABLE, materializeCorpusFixture } from "../fixtures/corpus/harness.js";
 
 // ---------------------------------------------------------------------------
 // Generator regression gate: emit each fixture via `ddd generate system`,
@@ -42,7 +43,8 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   ["test/e2e/fixtures/python-build/saga.ddd", "api"],
   // Event-sourced workflow: append-only `<wf>_events` stream + fold-on-load
   // + emit→append-own-event dispatch (the saga analogue of eventLog.ddd).
-  ["test/e2e/fixtures/python-build/eventsourced-workflow.ddd", "api"],
+  // Generated from the shared corpus fixture.
+  ["corpus:eventsourced-workflow", CORPUS_DEPLOYABLE],
   // Durable channel (`retention: log`): transactional outbox + relay +
   // last_event_id idempotent-consumer dedup.
   ["test/e2e/fixtures/python-build/outbox.ddd", "api"],
@@ -86,13 +88,15 @@ describe.skipIf(!ENABLED)(
       (fixture, project, flags = "") => {
         const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-python-"));
         try {
-          execSync(
-            `node ${cli} generate system ${fixture} -o ${outDir}${flags ? ` ${flags}` : ""}`,
-            {
-              stdio: "inherit",
-              cwd: repoRoot,
-            },
-          );
+          // `corpus:<feature>` resolves to the shared corpus fixture, materialised
+          // for python; a plain path is used as-is.
+          const src = fixture.startsWith("corpus:")
+            ? materializeCorpusFixture(fixture.slice("corpus:".length), "python", outDir)
+            : fixture;
+          execSync(`node ${cli} generate system ${src} -o ${outDir}${flags ? ` ${flags}` : ""}`, {
+            stdio: "inherit",
+            cwd: repoRoot,
+          });
           const proj = path.join(outDir, project);
           expect(fs.existsSync(path.join(proj, "pyproject.toml"))).toBe(true);
           const run = (cmd: string) =>

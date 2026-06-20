@@ -301,11 +301,13 @@ describe.skipIf(!ENABLED)(
     it("system event-sourced workflow (stream + fold + apply dispatch) — generated project type-checks", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-eswf-"));
       try {
-        execSync(
-          `node ${cli} generate system test/e2e/fixtures/ts-build/eventsourced-workflow.ddd -o ${outDir}`,
-          { stdio: "inherit", cwd: repoRoot },
-        );
-        const proj = path.join(outDir, "api");
+        // Generated from the shared corpus fixture.
+        const src = materializeCorpusFixture("eventsourced-workflow", "node", outDir);
+        execSync(`node ${cli} generate system ${src} -o ${outDir}`, {
+          stdio: "inherit",
+          cwd: repoRoot,
+        });
+        const proj = path.join(outDir, CORPUS_DEPLOYABLE);
         // Sanity: the workflow event stream + the fold made it out (not a state table).
         const schema = fs.readFileSync(path.join(proj, "db", "schema.ts"), "utf8");
         expect(schema).toContain("order_fulfillment_events");

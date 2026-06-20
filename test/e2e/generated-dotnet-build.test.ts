@@ -406,11 +406,13 @@ describe.skipIf(!ENABLED)(
     it("system event-sourced workflow (stream + fold + apply dispatch) — dotnet project builds under /warnaserror", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-eswf-"));
       try {
-        execSync(
-          `node ${cli} generate system test/e2e/fixtures/dotnet-build/eventsourced-workflow.ddd -o ${outDir}`,
-          { stdio: "inherit", cwd: repoRoot },
-        );
-        const proj = path.join(outDir, "api");
+        // Generated from the shared corpus fixture.
+        const src = materializeCorpusFixture("eventsourced-workflow", "dotnet", outDir);
+        execSync(`node ${cli} generate system ${src} -o ${outDir}`, {
+          stdio: "inherit",
+          cwd: repoRoot,
+        });
+        const proj = path.join(outDir, CORPUS_DEPLOYABLE);
         // Sanity: the fold class + the event-record entity made it out (and no
         // mutable saga-state POCO for the event-sourced workflow).
         expect(
