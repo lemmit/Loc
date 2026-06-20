@@ -1,12 +1,13 @@
 {
   "id": "ng1",
-  "description": "Angular stack — Angular 20 standalone components + signals, typed Reactive Forms, DI-native HttpClient + toSignal data (no external query lib), Zod 4 family.",
+  "description": "Angular stack — Angular 20 standalone components + signals, typed Reactive Forms, TanStack Angular Query server-state (injectQuery/injectMutation — caching + dedup + invalidation), Zod 4 family.",
   "deps": {
     "@angular/core": "20 (^20.0.0 — standalone-by-default, stable signals + @if/@for/@switch control flow)",
-    "@angular/common": "20 (provides HttpClient; httpResource is a later opt-in)",
+    "@angular/common": "20 (provides HttpClient; the query layer wraps it via firstValueFrom)",
     "@angular/forms": "20 (typed Reactive Forms — FormGroup<{…}> / Validators)",
     "@angular/router": "20 (provideRouter + lazy loadComponent route table)",
-    "rxjs": "7 (Angular peer dep; bridged to signals via toSignal)",
+    "@tanstack/angular-query-experimental": "5 (^5.101.0 — signal-native injectQuery/injectMutation; server-state cache + invalidation. Version-pinned: the Angular adapter ships under the -experimental name)",
+    "rxjs": "7 (Angular peer dep; HttpClient observables bridged to promises via firstValueFrom)",
     "zone.js": "0.15 (default change-detection runtime; zoneless is a later opt-in)",
     "zod": "4 (^4.0.0 — same family as stack v3/vue1 so wire schemas match the react/vue packs)",
     "typescript": "5.8 (Angular 20 pairs with TS 5.8+)"

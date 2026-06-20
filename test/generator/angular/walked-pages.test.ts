@@ -489,14 +489,14 @@ describe("angular generator — QueryView collection read", () => {
     expect(page).toContain("@if (orderAll.isLoading()) {");
     expect(page).toContain("@if (orderAll.isError()) {");
     expect(page).toContain(
-      "@if (!orderAll.isLoading() && !orderAll.isError() && orderAll.data().length === 0) {",
+      "@if (!orderAll.isLoading() && !orderAll.isError() && (orderAll.data() ?? []).length === 0) {",
     );
-    expect(page).toContain("@if (orderAll.data().length > 0) {");
+    expect(page).toContain("@if ((orderAll.data() ?? []).length > 0) {");
   });
 
   it("binds the data lambda to the called data signal and iterates rows", async () => {
     const page = await queryPage();
-    expect(page).toContain("@for (o of orderAll.data(); track $index) {");
+    expect(page).toContain("@for (o of (orderAll.data() ?? []); track $index) {");
     expect(page).toContain("<div>{{ o.customerId }}</div>");
   });
 });
@@ -578,7 +578,7 @@ describe("angular generator — Table in a QueryView data branch", () => {
       '<table class="loom-table loom-table-striped loom-table-highlight loom-table-sticky">',
     );
     expect(page).toContain("<tr><th>ID</th><th>Customer</th><th>Status</th><th>Placed</th></tr>");
-    expect(page).toContain("@for (row of orderAll.data(); track row.id) {");
+    expect(page).toContain("@for (row of (orderAll.data() ?? []); track row.id) {");
     expect(page).toContain("[attr.data-testid]='(\"orders-row-\" + row.id)'");
   });
 
@@ -755,7 +755,7 @@ describe("angular generator — CreateForm typed Reactive Forms", () => {
     expect(page).toContain("rush: new FormControl(false, { nonNullable: true })");
     expect(page).toContain("async onSubmitOrder(): Promise<void> {");
     expect(page).toContain(
-      "const out = await this.orderCreate.mutate(this.orderForm.getRawValue());",
+      "const out = await this.orderCreate.mutateAsync(this.orderForm.getRawValue());",
     );
     expect(page).toContain("this.router.navigateByUrl(`/orders/${out.id}`);");
   });
@@ -837,14 +837,19 @@ describe("angular generator — byId single-record reads", () => {
     expect(page).toContain("orderById.data()!.customerId");
   });
 
-  it("emits a findById service method + nullable-id signal factory", async () => {
+  it("emits a findById service method + an injectQuery byId factory (cached, id-guarded)", async () => {
     const all = await generateSystemFiles(DETAIL_SOURCE);
     const api = all.get("web/src/api/order.ts")!;
     expect(api).toContain("findById(id: string) {");
     expect(api).toContain("this.http.get<OrderResponse>(`${API_BASE_URL}/orders/${id}`)");
     expect(api).toContain("export function useOrderById(id: string | undefined) {");
-    expect(api).toContain("const data = signal<OrderResponse | null>(null);");
-    expect(api).toContain("if (id) {");
+    // TanStack injectQuery: keyed by [record, id], idle until the id resolves.
+    expect(api).toContain(
+      'import { QueryClient, injectMutation, injectQuery } from "@tanstack/angular-query-experimental";',
+    );
+    expect(api).toContain('queryKey: ["order", id] as const,');
+    expect(api).toContain("queryFn: () => firstValueFrom(service.findById(id as string)),");
+    expect(api).toContain("enabled: !!id,");
   });
 
   // An aggregate carrying a public operation, for the Action variants.
@@ -870,14 +875,15 @@ describe("angular generator — byId single-record reads", () => {
     expect(page).toContain("async onCancelOrder(): Promise<void> {");
     expect(page).toContain("const id = this.orderById.data()?.id;");
     expect(page).toContain("if (!id) return;");
-    expect(page).toContain("await this.cancelOrder.mutate(id, {});");
+    expect(page).toContain("await this.cancelOrder.mutateAsync({ id, input: {} });");
     expect(page).toContain('import { useCancelOrder } from "../../api/order";');
     // No capture-signal workaround.
     expect(page).not.toContain("cancelOrderId");
-    // Factory shape: id is a `mutate` argument, not a hoist argument.
+    // Factory shape: an injectMutation carrying the id in its variables.
     const api = all.get("web/src/api/order.ts")!;
     expect(api).toContain("export function useCancelOrder() {");
-    expect(api).toContain("const mutate = (id: string, input: CancelOrderRequest)");
+    expect(api).toContain("return injectMutation(() => ({");
+    expect(api).toContain("mutationFn: (vars: { id: string; input: CancelOrderRequest }) =>");
   });
 
   it("renders a then-bearing Action via the same method, with the effect appended", async () => {
@@ -891,7 +897,7 @@ describe("angular generator — byId single-record reads", () => {
     expect(page).toContain("async onCancelOrder(): Promise<void> {");
     expect(page).toContain("const id = this.orderById.data()?.id;");
     expect(page).toContain("if (!id) return;");
-    expect(page).toContain("await this.cancelOrder.mutate(id, {});");
+    expect(page).toContain("await this.cancelOrder.mutateAsync({ id, input: {} });");
     // The `then:` effect runs after the mutation resolves, `this.`-prefixed.
     expect(page).toContain("this.router.navigateByUrl(");
     // No capture-signal workaround.
@@ -983,7 +989,7 @@ describe("angular generator — Modal operation-dialog form", () => {
     );
     expect(page).toContain("async submitAddNoteOrder(): Promise<void> {");
     expect(page).toContain(
-      "await this.addNoteOrder.mutate(this.addNoteOrderId(), this.addNoteOrderForm.getRawValue());",
+      "await this.addNoteOrder.mutateAsync({ id: this.addNoteOrderId(), input: this.addNoteOrderForm.getRawValue() });",
     );
     expect(page).toContain("this.addNoteOrderOpen.set(false);");
     expect(page).toContain('import { useAddNoteOrder } from "../../api/order";');

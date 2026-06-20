@@ -81,8 +81,8 @@ describe("angular pack format groundwork", () => {
     expect(rendered).toContain('"@angular/forms"');
     expect(rendered).toContain('"rxjs"');
     expect(rendered).toContain('"@angular/cli"');
-    // No external query lib — DI-native HttpClient + toSignal.
-    expect(rendered).not.toContain("@tanstack/angular-query");
+    // TanStack Angular Query backs the server-state layer (caching + invalidation).
+    expect(rendered).toContain("@tanstack/angular-query-experimental");
     // The angular format reads `angular/` + `api/` shared dirs: its own
     // `ng build` dockerfile and the framework-neutral api fetch client
     // must both resolve.  `docker/` (the vite two-stage) is NOT included.

@@ -679,21 +679,23 @@ through the **same shared markup walker** the React / Vue / Svelte generators us
 (`src/generator/_walker/walker-core.ts`) with `angularTarget` + the
 `angularMaterial` design pack.  See `docs/plans/angular-frontend-plan.md`.
 
-The defining difference from the TanStack-based frontends is that **Angular is
-idiomatic, not a TanStack port**: the data layer is DI-native and the reactive
-primitive is the **signal**, not a query cache.  Several walker seams fork the
-shared (React-shaped) emission rather than reuse it — each is opt-in (only
-`angularTarget` implements it), so the other three frontends stay byte-identical
-(`pipeline-layering` + the full suite gate this).
+Angular renders **idiomatic Angular**, not a transliterated React app: standalone
+`@Component`s, signals/`computed` for view state, typed Reactive Forms, and —
+for server state — **TanStack Angular Query** (`injectQuery` / `injectMutation`),
+the senior-Angular-idiomatic caching layer, so reads share a query cache (dedup +
+caching) and mutations invalidate exactly the keys the generator knows they touch.
+Several walker seams fork the shared (React-shaped) emission rather than reuse it —
+each is opt-in (only `angularTarget` implements it), so the other three frontends
+stay byte-identical (`pipeline-layering` + the full suite gate this).
 
 | Concern | Emission |
 |---|---|
 | Pages | Each `page` becomes a standalone `@Component` under `src/app/pages/<slug>.component.ts` with an inline `template`.  The route table (`src/app/app.routes.ts`) maps `/orders/:id` → the component via `provideRouter`; a wildcard `**` mounts `NotFound`.  The app shell (`app.component.ts`) derives the sidebar from the page set. |
 | State / derived | `state { x: T = init }` → `readonly x = signal(init)` (read `x()`, write `x.set(…)`); the `:=` walker write lowers to `.set(…)`.  `derived n = expr` → `readonly n = computed(() => …)` (signal reads `this.`-prefixed in the class-field initialiser). |
 | Events | Angular `(click)` binds a **statement**, not a function value (and forbids arrow functions) — the `renderEventHandler` seam inlines the lambda body (`(click)='count.set(count() + 1)'`). `Button(to:)` routes through `renderNavigateExpr` → `router.navigateByUrl(<to>)`. |
-| Data | DI-native, **no TanStack**: per aggregate `src/api/<agg>.ts` ships an `@Injectable` `HttpClient` service + signal-backed factories (`useAll<Agg>s`, `use<Agg>ById`, `useCreate<Agg>`, `use<Op><Agg>`) that mirror the `data` / `isLoading` / `isError` / `mutate` surface the shared `QueryView` walker reads — signals are *called* (`handle.data()`), owned by the `renderQueryDataAccess` seam.  byId reads bind the route param from the `ActivatedRoute` snapshot. |
-| Forms | Idiomatic **typed Reactive Forms** (the `renderCreateForm` seam), not react-hook-form: a `[formGroup]` / `(ngSubmit)` shell over a `FormGroup` of `nonNullable` `FormControl`s (per-field Material inputs from `src/generator/angular/form-fields.ts`), submit → `mutate(getRawValue())` → navigate.  So the pack ships **no** `field-input-*` / `form-of` templates — the Angular required-primitive surface is display/layout/input only. |
-| Operations | `Action(inst.op)` → an inline statement-bound button (`renderAction` seam) hoisting an **id-at-mutate** `use<Op><Agg>()` factory (the id is read at click time, so an async QueryView record resolves correctly).  A `then:` effect can't inline (`.then(…)` needs an arrow Angular templates forbid), so the click captures the id into an `<op>Id` signal and calls an `async on<Op><Agg>()` method that mutates then runs the effect (`this.`-prefixed).  `Modal { OperationForm(…) }` → a **signal-toggled** inline Reactive Form (`renderModal` seam): the trigger captures the record id into an `<op>Id` signal and flips `<op>Open`; an `@if (<op>Open())` block holds the op `FormGroup`; submit reads the id signal, mutates, then closes. |
+| Data | **TanStack Angular Query**: per aggregate `src/api/<agg>.ts` ships an `@Injectable` `HttpClient` service (the raw requests) + factories the page-shell hoists as component fields — `useAll<Agg>s` / `use<Agg>ById` return `injectQuery` results (cached, keyed `["<tag>"]` / `["<one>", id]`; byId is `enabled: !!id` so it stays idle until the route param resolves), and `useCreate<Agg>` / `use<Op><Agg>` return `injectMutation` results whose `onSuccess` calls `queryClient.invalidateQueries` on exactly the affected keys.  Signals are *called* (`handle.data()` / `handle.isPending()`); the `renderQueryDataAccess` seam defaults a collection read to `[]` (`(handle.data() ?? [])`).  The `QueryClient` is provided once in `app.config.ts` (`provideTanStackQuery`).  byId reads bind the route param from the `ActivatedRoute` snapshot. |
+| Forms | Idiomatic **typed Reactive Forms** (the `renderCreateForm` seam), not react-hook-form: a `[formGroup]` / `(ngSubmit)` shell over a `FormGroup` of `nonNullable` `FormControl`s (per-field Material inputs from `src/generator/angular/form-fields.ts`), submit → `mutateAsync(getRawValue())` → navigate (the create mutation invalidates the list, so it refetches).  So the pack ships **no** `field-input-*` / `form-of` templates — the Angular required-primitive surface is display/layout/input only. |
+| Operations | `Action(inst.op)` → a "dumb template" button (`renderAction` seam): `(click)="on<Op><Agg>()"` + `[disabled]="<localVar>.isPending()"`, with an `async on<Op><Agg>()` method that reads the record id inside (a `?.id` guard + early return), `await`s `<localVar>.mutateAsync({ id, input })`, then runs the optional `then:` effect (`this.`-prefixed).  `Modal { OperationForm(…) }` → a **signal-toggled** inline Reactive Form (`renderModal` seam): the trigger captures the record id into an `<op>Id` signal and flips `<op>Open`; an `@if (<op>Open())` block holds the op `FormGroup`; submit reads the id signal, `mutateAsync({ id, input })`s, then closes. |
 | Deferred | `WorkflowForm` stubs cleanly to a placeholder page — `validateRequired` is on, so unsupported constructs never crash codegen. |
 | CI | `generated-angular-build.yml` — per `{case × pack}` (`minimal` / `scaffold` / `showcase` × `angularMaterial`): `npm install` + `ng build` (the Angular CLI typechecks + bundles in one step; `npm run test:angular-build` locally). |
 
