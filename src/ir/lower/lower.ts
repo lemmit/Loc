@@ -503,7 +503,9 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
   // components, scaffolds, and the optional menu block are each turned
   // into their literal IR shape.  Scaffold expansion and body type
   // inference happen in subsequent passes.
-  const uis = members.filter((m): m is Ui => m.$type === "Ui").map((u) => lowerUi(u));
+  // Thread the system user shape so a page's `requires` gate (and any other
+  // page-scope `currentUser` reference) resolves to a `current-user` ref.
+  const uis = members.filter((m): m is Ui => m.$type === "Ui").map((u) => lowerUi(u, user));
   // Api declarations — system-level peers to module / ui / deployable.
   const apis = members
     .filter((m): m is Api => m.$type === "Api")

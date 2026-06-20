@@ -134,7 +134,7 @@ the full Breadcrumbs · Toolbar · QueryView · Table tree.
 |---|---|
 | `route:` | Path-with-`:params`. Path params bind to typed parameters. |
 | `title:` | String expression, may interpolate page data. |
-| `requires` | Auth predicate — same syntax as on operations. |
+| `requires` | Auth predicate — same syntax as on operations. On a React frontend with `auth: ui`, the page renders a client-side `<Forbidden/>` guard (evaluated against `useSession().user`) — the mirror of the backend's 403. Gates are `currentUser`-only (see [auth.md](auth.md#view-requires-gates)). |
 | `state { … }` | Reactive local fields (see §6). At most one, multiples merge. |
 | `body:` | Single expression. May be a `match`, a ternary, a component invocation, anything. |
 | `menu { … }` | Per-page menu metadata (`section`, `label`, `order`, `hidden`). |
@@ -500,8 +500,11 @@ menu {
 to a shared registry. The `menu` block is the explicit composition operator
 over that registry.
 
-Per-link auth comes free: a `link OrderList` inherits the underlying page's
-`requires` clause, so menu links hide automatically.
+Per-link auth: a `link OrderList` inherits the underlying page's `requires`
+clause.  The React page guard (above) already renders `<Forbidden/>` on a gated
+page; conditionally **hiding** the matching menu link (so it never shows for a
+caller who can't reach it) is the next slice — today the link still renders and
+the destination page guards itself.
 
 ---
 

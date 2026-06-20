@@ -18,6 +18,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
 import type {
@@ -129,6 +130,12 @@ export function renderCustomLayoutPage(
   /** Page-level `derived name: T = expr` bindings — read-only computed
    *  values hoisted as `useMemo` before the body. */
   derived: DerivedIR[] = [],
+  /** Page-level `requires <expr>` UI authorization gate (D-AUTH-OIDC).  When
+   *  set (the frontend has `auth: ui`), the component binds the verified
+   *  session user and renders a `<Forbidden/>` fallback instead of the body
+   *  when the currentUser-only predicate fails — the client mirror of the
+   *  backend 403.  Undefined → no gate (byte-identical to the ungated page). */
+  requires: ExprIR | undefined = undefined,
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -374,14 +381,51 @@ export function renderCustomLayoutPage(
         : "";
   const navigateLine =
     usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
+  // Page-level `requires` UI gate (D-AUTH-OIDC): bind the verified session user
+  // and render a `<Forbidden/>` fallback when the currentUser-only predicate
+  // fails.  The guard lands AFTER every hook (useSession is itself a hook, so it
+  // stays unconditional) and right before the body `return`, keeping the
+  // rules-of-hooks contract intact while short-circuiting the render.
+  const gate = renderPageGate(requires, srcImportPrefix);
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${decimalImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}
+${gate.import}${reactImport}${decimalImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}
 export default function ${pageName}() {
-${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${titleEffect}  return (
+${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${titleEffect}${gate.guard}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
 `;
+}
+
+/** Render the page's `requires` UI gate: the `useSession` import + the
+ *  currentUser-bound guard block placed just before the body `return`.  Both
+ *  empty when the page is ungated. */
+function renderPageGate(
+  requires: ExprIR | undefined,
+  srcImportPrefix: string,
+): { import: string; guard: string } {
+  if (!requires) return { import: "", guard: "" };
+  // Dynamic JWT claims → the session user is loosely typed; the cast keeps
+  // chained claim access (`currentUser.org.tier`) and membership (`.includes`)
+  // clean under the generated project's `strict` tsconfig.  `any` (not
+  // `unknown`) because an `unknown` claim can't be indexed/called past one hop.
+  const condition = renderGateExpr(requires, "currentUser");
+  const guard = [
+    `  const currentUser = useSession().user as Record<string, any>;`,
+    `  if (!(${condition})) {`,
+    `    return (`,
+    `      <div style={{ padding: 24 }}>`,
+    `        <h2>Forbidden</h2>`,
+    `        <p>You do not have access to this page.</p>`,
+    `      </div>`,
+    `    );`,
+    `  }`,
+    ``,
+  ].join("\n");
+  return {
+    import: `import { useSession } from "${srcImportPrefix}auth/AuthGate";\n`,
+    guard: `${guard}`,
+  };
 }
 
 /** Assemble the RHF + create-mutation wiring around a
