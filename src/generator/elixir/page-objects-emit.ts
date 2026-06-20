@@ -26,6 +26,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR, BoundedContextIR, PageIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { pageEmitName } from "../../ir/util/page-emit-name.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { fillBlock } from "../_frontend/page-objects-builder.js";
 
@@ -109,7 +110,7 @@ function buildAggregateListPageObject(
 ): string {
   const slug = snake(plural(agg.name));
   const aggPascal = upperFirst(agg.name);
-  const className = `${upperFirst(page.name)}Page`;
+  const className = `${upperFirst(pageEmitName(page))}Page`;
   const route = page.route ?? `/${slug}`;
 
   const lines: string[] = [];
@@ -248,7 +249,7 @@ function buildAggregateNewPageObject(
 ): string {
   const slug = snake(plural(agg.name));
   const aggPascal = upperFirst(agg.name);
-  const className = `${upperFirst(page.name)}Page`;
+  const className = `${upperFirst(pageEmitName(page))}Page`;
   const route = page.route ?? `/${slug}/new`;
   const required = agg.fields.filter((f) => !f.optional);
 
@@ -311,7 +312,7 @@ function buildAggregateDetailPageObject(
   ctx: BoundedContextIR,
 ): string {
   const slug = snake(plural(agg.name));
-  const className = `${upperFirst(page.name)}Page`;
+  const className = `${upperFirst(pageEmitName(page))}Page`;
   const ops = agg.operations.filter((o) => o.visibility === "public");
 
   const lines: string[] = [];
@@ -385,7 +386,7 @@ function buildWorkflowFormPageObject(
   ctx: BoundedContextIR,
 ): string {
   const slug = snake(wf.name);
-  const className = `${upperFirst(page.name)}Page`;
+  const className = `${upperFirst(pageEmitName(page))}Page`;
   const route = page.route ?? `/workflows/${slug}`;
 
   const lines: string[] = [];
@@ -429,7 +430,7 @@ function buildViewListPageObject(
   view: import("../../ir/types/loom-ir.js").ViewIR,
 ): string {
   const slug = snake(view.name);
-  const className = `${upperFirst(page.name)}Page`;
+  const className = `${upperFirst(pageEmitName(page))}Page`;
   const route = page.route ?? `/views/${slug}`;
 
   const lines: string[] = [];
@@ -464,7 +465,7 @@ function buildViewListPageObject(
 // ---------------------------------------------------------------------------
 
 function buildWorkflowsIndexPageObject(page: PageIR): string {
-  const className = `${upperFirst(page.name)}Page`;
+  const className = `${upperFirst(pageEmitName(page))}Page`;
   const route = page.route ?? "/workflows";
 
   const lines: string[] = [];
@@ -499,7 +500,7 @@ function buildWorkflowsIndexPageObject(page: PageIR): string {
 // ---------------------------------------------------------------------------
 
 function buildViewsIndexPageObject(page: PageIR): string {
-  const className = `${upperFirst(page.name)}Page`;
+  const className = `${upperFirst(pageEmitName(page))}Page`;
   const route = page.route ?? "/views";
 
   const lines: string[] = [];
@@ -534,7 +535,7 @@ function buildViewsIndexPageObject(page: PageIR): string {
 // ---------------------------------------------------------------------------
 
 function buildHomePageObject(page: PageIR): string {
-  const className = `${upperFirst(page.name)}Page`;
+  const className = `${upperFirst(pageEmitName(page))}Page`;
   const route = page.route ?? "/";
 
   const lines: string[] = [];
@@ -574,7 +575,7 @@ function buildHomePageObject(page: PageIR): string {
 
 function buildGenericPageObject(page: PageIR): string {
   const hasParams = page.params.length > 0;
-  const className = `${upperFirst(page.name)}Page`;
+  const className = `${upperFirst(pageEmitName(page))}Page`;
   const route = page.route ?? "/";
 
   const lines: string[] = [];
@@ -621,7 +622,7 @@ function buildGenericPageObject(page: PageIR): string {
 // ---------------------------------------------------------------------------
 
 function buildFallback(page: PageIR): string {
-  const className = `${upperFirst(page.name)}Page`;
+  const className = `${upperFirst(pageEmitName(page))}Page`;
   const route = page.route ?? "/";
 
   const lines: string[] = [];

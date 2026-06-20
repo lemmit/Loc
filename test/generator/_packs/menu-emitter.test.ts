@@ -53,8 +53,8 @@ describe("menu emitter", () => {
         ui WebApp with scaffold(aggregates: [Order]) {
           menu {
             section "Sales" {
-              link OrderList,
-              link OrderDetail
+              link List,
+              link Detail
             }
             section "External" {
               link "Docs" -> "https://example.com"
@@ -86,7 +86,7 @@ describe("menu emitter", () => {
         ui WebApp with scaffold(aggregates: [Order]) {
           menu {
             section "Sales" {
-              link OrderList { label: "All Orders" }
+              link List { label: "All Orders" }
             }
           }
         }
@@ -132,7 +132,7 @@ describe("menu emitter", () => {
         ui WebApp with scaffold(subdomains: [Sales]) {
           menu {
             section "Mixed" {
-              link OrderList,
+              link List,
               link PlaceOrderWorkflow,
               link ActiveOrdersView,
               link WorkflowsIndex,
