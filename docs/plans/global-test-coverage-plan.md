@@ -99,7 +99,16 @@ Building 6 backends × 30 features = 180 hand-maintained fixtures the old way wo
 
   These are now tracked, reproducible bug reports (each skip is one `LOOM_CORPUS_TSC_CASE` away from a red repro); fixing the emitter and dropping the skip is the follow-up. This is the compile tier doing its job — converting silent breakage into a checklist.
 
-**Remaining:** extend the compile tier to the other backends' docker gates (Phase 1 cont.), fix the 7 surfaced Hono bugs, collapse the legacy near-duplicate fixtures onto the corpus (Phase 0 migration), flip showcase-completeness to hard (Phase 2), the manifest-driven wire-parity sweep (Phase 3), and the behavioural runtime tier (Phases 4–5).
+**Landed — Phase 0 migration (legacy dup-set collapse):**
+
+A `materializeCorpusFixture(feature, backend, dir)` helper lets the per-backend build gates generate a shared corpus feature (via a `corpus:<feature>` sentinel) instead of a per-backend duplicate `.ddd`. Two dup-sets collapsed onto the corpus, each cell compile-verified on-host (node/java/python) where the sandbox allows:
+
+- **`auth-oidc`** (5 → 3): node/java/dotnet build gates repointed, their three legacy copies deleted. Python keeps its copy (shared with the runtime OIDC e2e, `auth-oidc-python-e2e.test.ts` — single-sourced rather than split); Phoenix's name-based cached gate deferred.
+- **`eventsourced-workflow`** (4 → 1): node/java/python/dotnet all repointed, all four legacy copies deleted (none were e2e-shared).
+
+`tph` is **deliberately not collapsed**: the corpus `inheritance` feature is a TPH+TPC superset (not 1:1 with TPH-only `tph`), `java-build/tph.ddd` is also consumed by a unit test, and Phoenix uses it via its invasive gate — a scope decision, not a mechanical repoint. (Sandbox note: `.NET`/Phoenix compile-verify is blocked here by package-registry egress — `NU1301` to nuget.org, `unknown_ca` to hex.pm; both compile in CI. The repointed .NET cells are CI-verified.)
+
+**Remaining:** extend the compile tier to the other backends' docker gates (Phase 1 cont.), fix the 7 surfaced Hono bugs, flip showcase-completeness to hard (Phase 2), the manifest-driven wire-parity sweep (Phase 3), and the behavioural runtime tier (Phases 4–5).
 
 ---
 
