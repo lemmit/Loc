@@ -19,14 +19,16 @@
 //     status (the same `problem_variant/5` responder the vanilla foundation
 //     emits), an absent record → the shared 404.
 //
-// **Slice scope:** `return`/`let`, plus *in-memory* mutation (`assign` →
+// **Slice scope:** `return`/`let`, *in-memory* mutation (`assign` →
 // `%{record | field: …}`, the same struct-update the vanilla foundation does —
-// no Ash changeset, no persistence beyond the response) and `precondition`/
-// `requires` guards (raise).  `emit` (PubSub), `add`/`remove` (association
-// metadata) stay gated on `foundation: ash` (`isAshReturningOpEmittable` keeps
-// the validator rejecting them → host on vanilla).  Covers the canonical
-// `operation foo(): Agg or NotFound { … }` return shape AND the guard/mutate
-// pattern (`precondition …; field := value`).
+// no Ash changeset, no persistence beyond the response), `precondition`/
+// `requires` guards (raise), and `emit` (a `Phoenix.PubSub.broadcast` of a
+// domain event — no persistence, so it fits the run fn; same form the regular
+// Ash op body renders).  Still gated on `foundation: ash` → host on vanilla:
+// `add`/`remove`, which mutate a join table via `manage_relationship` and so
+// need a changeset the generic action's run fn doesn't carry
+// (`isAshReturningOpEmittable`).  Covers `operation foo(): Agg or NotFound { … }`
+// with the guard/mutate/emit body patterns.
 // ---------------------------------------------------------------------------
 
 import { variantTag } from "../../ir/stdlib/unions.js";
@@ -75,11 +77,14 @@ export function renderAshReturningOpAction(
   ctx: BoundedContextIR,
   agg: AggregateIR,
   op: OperationIR,
+  ctxModule: string,
 ): string {
   const opSnake = snake(op.name);
   const renderCtx: RenderCtx = {
     thisName: "record",
-    contextModule: "", // not needed — return-dominant bodies only touch record/params
+    // The bounded-context module (e.g. `MyApp.Sales`) — an `emit` body builds
+    // `%<ctxModule>.Events.<Name>{…}` and broadcasts on `<ctxModule>.PubSub`.
+    contextModule: ctxModule,
     foundation: "ash",
   };
 
@@ -123,6 +128,17 @@ export function renderAshReturningOpAction(
     } else if (s.kind === "requires") {
       bodyLines.push(
         `            if not (${renderExpr(s.expr, renderCtx)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`,
+      );
+    } else if (s.kind === "emit") {
+      // Broadcast a domain event — the same `Phoenix.PubSub.broadcast` the
+      // regular Ash op body (`render-stmt.ts`) and workflow emit render.  No
+      // persistence, so it fits the in-memory generic-action run fn; the
+      // per-context Dispatcher consumes it exactly as for a non-returning op.
+      const fields = s.fields
+        .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
+        .join(", ");
+      bodyLines.push(
+        `            Phoenix.PubSub.broadcast(${ctxModule}.PubSub, "events", %${ctxModule}.Events.${upperFirst(s.eventName)}{${fields}})`,
       );
     } else if (s.kind === "return") {
       bodyLines.push(`            ${renderReturnTerm(s, ctx, agg, renderCtx)}`);
@@ -198,6 +214,11 @@ function statementReferencesName(s: OperationIR["statements"][number], name: str
   // Covers every statement kind the run fn renders so a param used only in a
   // guard / assign still gets its `input.arguments.<p>` bind (else "undefined
   // variable").
+  // An `emit` references params/this-props through its field value exprs —
+  // serialise them all so a param used only in an emit keeps its bind.
+  if (s.kind === "emit") {
+    return s.fields.some((f) => JSON.stringify(f.value).includes(`"${name}"`));
+  }
   const expr =
     s.kind === "let"
       ? s.expr

@@ -187,6 +187,11 @@ describe.skipIf(!ENABLED)(
         // decisive check that the in-place mutation + raise guards compile against
         // real Ash 3.x.
         { name: "operation-returns-body.ddd" },
+        // DEBT-03 — an EMITTING returning-op body on ash: the generic action's
+        // run fn renders `Phoenix.PubSub.broadcast(%Ctx.Events.Name{…})` (the
+        // same form the regular Ash op body emits) before the success term.
+        // Checks the broadcast compiles inside the generic action against Ash 3.x.
+        { name: "operation-returns-emit.ddd" },
         // Principal-referencing (tenancy) capability filter on Ash (DEBT-01):
         // `filter this.tenantId == currentUser.tenantId` → `base_filter
         // expr(tenant_id == ^actor(:tenant_id))`, with `actor: current_user`

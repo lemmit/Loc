@@ -3,9 +3,9 @@
 // generic action has no changeset, so an `assign` struct-updates the loaded
 // record in place (`%{record | quantity: …}`, same as the vanilla foundation —
 // the success fall-through serialises the mutated struct) and
-// `precondition`/`requires` raise.  `emit`/`add`/`remove` stay gated on ash, so
-// this body deliberately omits them (its vanilla sibling vanilla-returns-body
-// exercises `emit`).  Compiled by `build-generated-phoenix` so the generic
+// `precondition`/`requires` raise.  `emit` now ships too (sibling fixture
+// operation-returns-emit); only `add`/`remove` stay gated on ash, so this body
+// omits those.  Compiled by `build-generated-phoenix` so the generic
 // action's in-place mutation + raise guards pass `mix compile
 // --warnings-as-errors` against real Ash 3.x.
 system Inventory {

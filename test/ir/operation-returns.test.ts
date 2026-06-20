@@ -120,7 +120,7 @@ describe("operation returns — platform-aware emission gate (exception-less spi
     expect(diags).toEqual([]);
   });
 
-  it("STILL gates an `emit`-bodied returning operation on elixir/ash (vanilla-only)", async () => {
+  it("does NOT gate an `emit`-bodied returning operation on elixir/ash (DEBT-03 — broadcast in the generic action)", async () => {
     const sys = `
       system Shop {
         subdomain Sales {
@@ -130,6 +130,33 @@ describe("operation returns — platform-aware emission gate (exception-less spi
             aggregate Order ids guid {
               code: string
               operation accept(): string or NotFound { emit Accepted { code: code }  return code }
+            }
+          }
+        }
+        storage pg { type: postgres }
+        resource shopState { for: Shop, kind: state, use: pg }
+        deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], port: 4000 }
+      }`;
+    const { model } = await parseString(sys, { validate: false });
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(model))).filter(
+      (d) => d.code === "loom.operation-return-unsupported",
+    );
+    expect(diags).toEqual([]);
+  });
+
+  it("STILL gates an `add`/`remove`-bodied returning operation on elixir/ash (vanilla-only)", async () => {
+    // `add`/`remove` mutate a join table via `manage_relationship`, which needs
+    // a changeset the generic action's in-memory run fn can't carry — gated.
+    const sys = `
+      system Shop {
+        subdomain Sales {
+          context Shop {
+            error NotFound { resource: string }
+            aggregate Tag ids guid { label: string }
+            aggregate Order ids guid {
+              code: string
+              tags: Tag id[]
+              operation tag(t: Tag id): Order or NotFound { tags += t }
             }
           }
         }
