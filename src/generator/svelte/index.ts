@@ -122,6 +122,10 @@ export function generateSvelteForContexts(
   // Pages + components through the shared walker.
   const contextsByName = new Map<string, BoundedContextIR>();
   for (const ctx of contexts) contextsByName.set(ctx.name, ctx);
+  // Frontend auth guard (D-AUTH-OIDC, `auth: ui`): this svelte deployable opts
+  // in AND its target backend enforces auth, so `useSession()` + the verified
+  // claims are available — gates `page { requires … }` rendering below.
+  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
   const emitCtx = {
     sys,
     deployable,
@@ -129,6 +133,7 @@ export function generateSvelteForContexts(
     contextsByName,
     pack,
     topLevelComponents: options.topLevelComponents ?? [],
+    authUi,
   };
   for (const [path, content] of emitSveltePagesForUi(ui, emitCtx)) out.set(path, content);
   for (const [path, content] of emitSveltePageObjectsForUi(ui, emitCtx)) out.set(path, content);
@@ -160,12 +165,8 @@ export function generateSvelteForContexts(
   out.set("e2e/package.json", E2E_PACKAGE_JSON_SVELTE);
   out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
-  // Frontend auth guard (D-AUTH-OIDC, `auth: ui`): mirrors the react
-  // wiring — when this svelte deployable opts in AND its target backend
-  // enforces auth, emit the session client + the route guard (the root
-  // layout wraps the app in <AuthGate> below).  Probes GET /auth/me,
-  // which both the OIDC verifier and the playground dev stub answer.
-  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
+  // `authUi` computed above (before page emission, which consumes it for the
+  // `page { requires … }` gate).  Drives the session client + route guard emits.
 
   // Shared lib surface.
   const hasDelete = aggregates.some((a) => !!a.agg.canonicalDestroy);

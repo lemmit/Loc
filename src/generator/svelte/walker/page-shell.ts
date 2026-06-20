@@ -33,6 +33,7 @@ import type {
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { idTargetHookVar } from "../../_frontend/form-helpers.js";
+import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { indentJsx } from "../../_walker/shared/args.js";
 import type {
@@ -199,6 +200,12 @@ export function renderSveltePage(
   /** Page-level `derived name: T = expr` bindings — hoisted as `$derived`
    *  consts before the body. */
   derived: DerivedIR[] = [],
+  /** Page-level `requires <expr>` UI authorization gate (D-AUTH-OIDC).  When
+   *  set (the frontend has `auth: ui`), the `<script>` binds the verified
+   *  session user and the body is wrapped in an `{#if}` that renders a
+   *  `<Forbidden/>` fallback when the currentUser-only predicate fails — the
+   *  client mirror of the backend 403.  Undefined ⇒ ungated (byte-identical). */
+  requires: ExprIR | undefined = undefined,
 ): string {
   void pageName;
   const paramNames = new Set(params.map((p) => p.name));
@@ -314,12 +321,43 @@ export function renderSveltePage(
       : "";
 
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
+  // Page-level `requires` UI gate: bind the verified session user in `<script>`
+  // and wrap the body markup in an `{#if}` that renders `<Forbidden/>` when the
+  // currentUser-only predicate fails (Svelte has no early-return in markup, so
+  // the guard is a template conditional, not a control-flow return).
+  const gate = renderSveltePageGate(requires);
+  const markup = gate.guardOpen
+    ? `${gate.guardOpen}\n${indentJsx(tsx, "  ")}\n${gate.guardClose}`
+    : indentJsx(tsx, "");
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${navigateImport}${pageStateImport}${decimalImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${titleEffect}</script>
+${gate.import}${navigateImport}${pageStateImport}${decimalImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${gate.binding}${titleEffect}</script>
 
-${indentJsx(tsx, "")}
+${markup}
 ${templateScope}`;
+}
+
+/** Render the page's `requires` UI gate fragments: the `useSession` import, the
+ *  `<script>` user binding, and the `{#if}` markup wrapper.  All empty when the
+ *  page is ungated. */
+function renderSveltePageGate(requires: ExprIR | undefined): {
+  import: string;
+  binding: string;
+  guardOpen: string;
+  guardClose: string;
+} {
+  if (!requires) return { import: "", binding: "", guardOpen: "", guardClose: "" };
+  const condition = renderGateExpr(requires, "currentUser");
+  return {
+    import: `  import { useSession } from "$lib/auth/AuthGate.svelte";\n`,
+    // Dynamic OIDC/JWT claims → loose type so chained access / membership stays
+    // svelte-check-clean under the generated project's strict config.
+    binding: `  const currentUser = useSession().user as Record<string, any>;\n`,
+    guardOpen: `{#if !(${condition})}
+  <div style="padding:24px"><h2>Forbidden</h2><p>You do not have access to this page.</p></div>
+{:else}`,
+    guardClose: `{/if}`,
+  };
 }
 
 /** Render one ComponentIR as `src/lib/components/<Name>.svelte`:
