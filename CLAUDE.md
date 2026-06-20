@@ -10,6 +10,14 @@ Be concise and lead with the answer. No preamble, no recap of what you're about 
 - **Language features always carry two examples:** the Loom (`.ddd`) source *and* the generated target-language output. Show, don't describe.
 - Prefer a short snippet or a one-line answer over a paragraph. Drop hedging and restated context.
 
+## Keep going without being asked
+
+Once a plan exists (or the user has approved an approach), **execute it end to end** — don't stop after each slice to ask "continue?". Finishing step 1 well *is* the go-ahead for step 2; treat the next planned item as the default action, not a decision point.
+
+- **Work slice by slice to the end of the plan.** Only pause for a genuinely user-owned decision — an ambiguous requirement, a destructive/irreversible action, or a fork the plan didn't settle. "Should I proceed with the next step?" is not such a decision; just proceed.
+- **Don't idle on CI.** If the next slice is independent, start it while CI runs. If it builds on an unmerged branch, **stack the PR** on the previous one rather than waiting for green. Report status in a line and keep moving.
+- **Surface, don't stall.** When you do hit a real blocker, say what's blocked and what you'd do by default, then take that default unless it's irreversible — don't wait for "continue with recommended".
+
 ## What this is
 
 **Loom** — a Langium-based DSL for Domain-Driven Design. A `.ddd` source describes a `system` of `module`s, `aggregate`s, `valueobject`s, `event`s, `repository`s, `api`s, `storage`s, `ui`s, and `deployable`s; the toolchain generates a runnable multi-project tree wired together as one `docker compose` stack. Five backends (TypeScript/Hono, .NET/ASP.NET+EF+Mediator, Phoenix LiveView/Ash, Python/FastAPI+SQLAlchemy, Java/Spring Boot+JPA) and three frontends (React/Vite+Mantine, Vue 3/Vite+Vuetify, Svelte/SvelteKit) are supported.
