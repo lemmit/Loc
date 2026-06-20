@@ -25,6 +25,23 @@ the aggregate-qualified `OrderList` form via `pageEmitName`
 (`src/ir/util/page-emit-name.ts`). Deferred (3c): qualified `Area.Page`
 menu-link references — a `link <Page>` still resolves a role name within the
 nearest matching scope.
+
+**Update — `origin` removed (slice 3c) — 2026-06-20.** `PageIR.origin` and its
+two inference passes (`inferPageOrigin` + `resourceScaffoldOrigins` /
+`classifyScaffoldPageByName`) are **gone**. A page's kind — aggregate
+list/new/detail, workflow form/instances, view, the singleton indexes, or
+`custom` — is now **derived on demand** from its role-scoped `name` + `area`
+against the served decls, via `classifyPage(page, ctx)` in
+`src/ir/util/page-kind.ts` (the new home of `pageEmitName` too). The single
+source of truth is the page itself; nothing is stamped. Every consumer
+(lowering side-effects, the React app-shell scaffolded-set + presence flags,
+the shared menu emitter, all frontends' page-object dispatch, the Phoenix
+LiveView module/file naming) threads a tiny `PageNameCtx` (served aggregate /
+workflow / view name arrays) instead of reading a cached field. Generated
+output is **byte-identical** (full fast suite + baseline fixtures unchanged).
+Gotcha worth recording: `PageNameCtx` holds **arrays, not bare `Iterable`** — a
+`Map.keys()` iterator is single-use and `classifyPage` runs once per page, so an
+iterator ctx silently misclassifies every page after the first.
 · **Created:** 2026-06-18
 
 > One-line thesis: the scaffold **page-body expansion**

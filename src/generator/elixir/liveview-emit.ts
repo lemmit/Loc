@@ -29,7 +29,7 @@ import type {
   UiIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
-import { pageEmitName } from "../../ir/util/page-emit-name.js";
+import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import {
   type ActionBinding,
@@ -121,12 +121,19 @@ export function emitLiveViewPages(args: {
     });
   }
 
+  // Name-context for `pageEmitName` (slice 3c — derives the emitted name from
+  // the page's role-scoped name + area against the served decls).
+  const nameCtx: PageNameCtx = {
+    aggregateNames: [...aggregatesByName.keys()],
+    workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
+    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
+  };
   for (const page of ui.pages) {
     if (!page.route) continue; // can't emit a router entry without one
     // Phoenix derives the module + file stem from the page's emit name
     // (`OrderList` → `OrderListLive` / `order_list_live.ex`), not the scaffold's
     // role-scoped page name (`List`) — which would collide across aggregates.
-    const emitName = pageEmitName(page);
+    const emitName = pageEmitName(page, nameCtx);
     const liveModule = `${appModule}Web.${upperFirst(emitName)}Live`;
     const filePath = `lib/${appName}_web/live/${snake(emitName)}_live.ex`;
     const source = renderLiveView({

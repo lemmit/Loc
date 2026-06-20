@@ -26,7 +26,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR, BoundedContextIR, PageIR, TypeIR } from "../../ir/types/loom-ir.js";
-import { pageEmitName } from "../../ir/util/page-emit-name.js";
+import { classifyPage, type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { fillBlock } from "../_frontend/page-objects-builder.js";
 
@@ -41,61 +41,75 @@ export interface BuildPlaywrightPageObjectArgs {
  *  page.  Caller writes the result to `e2e/pages/<page-snake>.ts`. */
 export function buildPlaywrightPageObject(args: BuildPlaywrightPageObjectArgs): string {
   const { page, aggregatesByName, contextByAggName } = args;
-  const origin = page.origin;
+  // The page's kind + emitted name are derived from its role-scoped name + area
+  // (slice 3c — no stamped `origin`).
+  const workflowNames: string[] = [];
+  const viewNames: string[] = [];
+  for (const bc of contextByAggName.values()) {
+    for (const wf of bc.workflows) workflowNames.push(wf.name);
+    for (const v of bc.views) viewNames.push(v.name);
+  }
+  const nameCtx: PageNameCtx = {
+    aggregateNames: [...aggregatesByName.keys()],
+    workflowNames,
+    viewNames,
+  };
+  const origin = classifyPage(page, nameCtx);
+  const emitName = pageEmitName(page, nameCtx);
 
-  if (!origin || origin.kind === "custom") {
+  if (origin.kind === "custom") {
     // Explicit (walker-emitted, user-written) page — generic
     // param/route pattern.
-    return buildGenericPageObject(page);
+    return buildGenericPageObject(page, emitName);
   }
 
   switch (origin.kind) {
     case "aggregate-list": {
       const agg = aggregatesByName.get(origin.aggregateName);
       const ctx = contextByAggName.get(origin.aggregateName);
-      if (!agg || !ctx) return buildFallback(page);
-      return buildAggregateListPageObject(page, agg, ctx);
+      if (!agg || !ctx) return buildFallback(page, emitName);
+      return buildAggregateListPageObject(page, agg, ctx, emitName);
     }
     case "aggregate-new": {
       const agg = aggregatesByName.get(origin.aggregateName);
       const ctx = contextByAggName.get(origin.aggregateName);
-      if (!agg || !ctx) return buildFallback(page);
-      return buildAggregateNewPageObject(page, agg, ctx);
+      if (!agg || !ctx) return buildFallback(page, emitName);
+      return buildAggregateNewPageObject(page, agg, ctx, emitName);
     }
     case "aggregate-detail": {
       const agg = aggregatesByName.get(origin.aggregateName);
       const ctx = contextByAggName.get(origin.aggregateName);
-      if (!agg || !ctx) return buildFallback(page);
-      return buildAggregateDetailPageObject(page, agg, ctx);
+      if (!agg || !ctx) return buildFallback(page, emitName);
+      return buildAggregateDetailPageObject(page, agg, ctx, emitName);
     }
     case "workflow-form": {
       const ctx = [...contextByAggName.values()].find((c) =>
         c.workflows.some((w) => w.name === origin.workflowName),
       );
       const wf = ctx?.workflows.find((w) => w.name === origin.workflowName);
-      if (!wf || !ctx) return buildFallback(page);
-      return buildWorkflowFormPageObject(page, wf, ctx);
+      if (!wf || !ctx) return buildFallback(page, emitName);
+      return buildWorkflowFormPageObject(page, wf, ctx, emitName);
     }
     case "view-list": {
       const ctx = [...contextByAggName.values()].find((c) =>
         c.views.some((v) => v.name === origin.viewName),
       );
       const view = ctx?.views.find((v) => v.name === origin.viewName);
-      if (!view || !ctx) return buildFallback(page);
-      return buildViewListPageObject(page, view);
+      if (!view || !ctx) return buildFallback(page, emitName);
+      return buildViewListPageObject(page, view, emitName);
     }
     case "workflows-index":
-      return buildWorkflowsIndexPageObject(page);
+      return buildWorkflowsIndexPageObject(page, emitName);
     case "views-index":
-      return buildViewsIndexPageObject(page);
+      return buildViewsIndexPageObject(page, emitName);
     case "home":
-      return buildHomePageObject(page);
+      return buildHomePageObject(page, emitName);
     // Workflow-instance read pages (workflow-instance-visibility.md) use the
     // generic param/route page object for v1 — a bespoke instance page object
     // is a later refinement.
     case "workflow-instances-list":
     case "workflow-instance-detail":
-      return buildGenericPageObject(page);
+      return buildGenericPageObject(page, emitName);
   }
 }
 
@@ -107,10 +121,11 @@ function buildAggregateListPageObject(
   page: PageIR,
   agg: AggregateIR,
   _ctx: BoundedContextIR,
+  emitName: string,
 ): string {
   const slug = snake(plural(agg.name));
   const aggPascal = upperFirst(agg.name);
-  const className = `${upperFirst(pageEmitName(page))}Page`;
+  const className = `${upperFirst(emitName)}Page`;
   const route = page.route ?? `/${slug}`;
 
   const lines: string[] = [];
@@ -246,10 +261,11 @@ function buildAggregateNewPageObject(
   page: PageIR,
   agg: AggregateIR,
   ctx: BoundedContextIR,
+  emitName: string,
 ): string {
   const slug = snake(plural(agg.name));
   const aggPascal = upperFirst(agg.name);
-  const className = `${upperFirst(pageEmitName(page))}Page`;
+  const className = `${upperFirst(emitName)}Page`;
   const route = page.route ?? `/${slug}/new`;
   const required = agg.fields.filter((f) => !f.optional);
 
@@ -310,9 +326,10 @@ function buildAggregateDetailPageObject(
   page: PageIR,
   agg: AggregateIR,
   ctx: BoundedContextIR,
+  emitName: string,
 ): string {
   const slug = snake(plural(agg.name));
-  const className = `${upperFirst(pageEmitName(page))}Page`;
+  const className = `${upperFirst(emitName)}Page`;
   const ops = agg.operations.filter((o) => o.visibility === "public");
 
   const lines: string[] = [];
@@ -384,9 +401,10 @@ function buildWorkflowFormPageObject(
   page: PageIR,
   wf: import("../../ir/types/loom-ir.js").WorkflowIR,
   ctx: BoundedContextIR,
+  emitName: string,
 ): string {
   const slug = snake(wf.name);
-  const className = `${upperFirst(pageEmitName(page))}Page`;
+  const className = `${upperFirst(emitName)}Page`;
   const route = page.route ?? `/workflows/${slug}`;
 
   const lines: string[] = [];
@@ -428,9 +446,10 @@ function buildWorkflowFormPageObject(
 function buildViewListPageObject(
   page: PageIR,
   view: import("../../ir/types/loom-ir.js").ViewIR,
+  emitName: string,
 ): string {
   const slug = snake(view.name);
-  const className = `${upperFirst(pageEmitName(page))}Page`;
+  const className = `${upperFirst(emitName)}Page`;
   const route = page.route ?? `/views/${slug}`;
 
   const lines: string[] = [];
@@ -464,8 +483,8 @@ function buildViewListPageObject(
 // Workflows-index page object
 // ---------------------------------------------------------------------------
 
-function buildWorkflowsIndexPageObject(page: PageIR): string {
-  const className = `${upperFirst(pageEmitName(page))}Page`;
+function buildWorkflowsIndexPageObject(page: PageIR, emitName: string): string {
+  const className = `${upperFirst(emitName)}Page`;
   const route = page.route ?? "/workflows";
 
   const lines: string[] = [];
@@ -499,8 +518,8 @@ function buildWorkflowsIndexPageObject(page: PageIR): string {
 // Views-index page object
 // ---------------------------------------------------------------------------
 
-function buildViewsIndexPageObject(page: PageIR): string {
-  const className = `${upperFirst(pageEmitName(page))}Page`;
+function buildViewsIndexPageObject(page: PageIR, emitName: string): string {
+  const className = `${upperFirst(emitName)}Page`;
   const route = page.route ?? "/views";
 
   const lines: string[] = [];
@@ -534,8 +553,8 @@ function buildViewsIndexPageObject(page: PageIR): string {
 // Home page object
 // ---------------------------------------------------------------------------
 
-function buildHomePageObject(page: PageIR): string {
-  const className = `${upperFirst(pageEmitName(page))}Page`;
+function buildHomePageObject(page: PageIR, emitName: string): string {
+  const className = `${upperFirst(emitName)}Page`;
   const route = page.route ?? "/";
 
   const lines: string[] = [];
@@ -573,9 +592,9 @@ function buildHomePageObject(page: PageIR): string {
 // Generic (walker-emitted / explicit) page — mirrors walker-page-objects.ts
 // ---------------------------------------------------------------------------
 
-function buildGenericPageObject(page: PageIR): string {
+function buildGenericPageObject(page: PageIR, emitName: string): string {
   const hasParams = page.params.length > 0;
-  const className = `${upperFirst(pageEmitName(page))}Page`;
+  const className = `${upperFirst(emitName)}Page`;
   const route = page.route ?? "/";
 
   const lines: string[] = [];
@@ -621,8 +640,8 @@ function buildGenericPageObject(page: PageIR): string {
 // Fallback — page whose IR lookup failed
 // ---------------------------------------------------------------------------
 
-function buildFallback(page: PageIR): string {
-  const className = `${upperFirst(pageEmitName(page))}Page`;
+function buildFallback(page: PageIR, emitName: string): string {
+  const className = `${upperFirst(emitName)}Page`;
   const route = page.route ?? "/";
 
   const lines: string[] = [];

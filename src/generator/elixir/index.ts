@@ -6,6 +6,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import type { PageNameCtx } from "../../ir/util/page-kind.js";
 import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { StyleAdapter } from "../_adapters/index.js";
 import { generateReactForContexts } from "../react/index.js";
@@ -221,9 +222,14 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   if (deployable.uiName && !embedReact) {
     const ui = sys.uis.find((u) => u.name === deployable.uiName);
     if (ui) {
+      const nameCtx: PageNameCtx = {
+        aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
+        workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
+        viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
+      };
       out.set(
         `lib/${appName}_web/components/sidebar.ex`,
-        renderSidebarComponent({ ui, appName, appModule }),
+        renderSidebarComponent({ ui, appName, appModule, nameCtx }),
       );
     }
   }

@@ -32,7 +32,7 @@ import type {
   SystemIR,
   UiIR,
 } from "../../ir/types/loom-ir.js";
-import { pageEmitName } from "../../ir/util/page-emit-name.js";
+import { classifyPage, type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { lowerFirst, snake } from "../../util/naming.js";
 import { buildViewPageObject } from "../_frontend/views-module.js";
 import { buildWorkflowPageObject } from "../_frontend/workflows-module.js";
@@ -108,6 +108,18 @@ function computeSrcImportPrefix(emitPath: string): string {
  *  walker can resolve enum / value-object types declared alongside
  *  the aggregate.  Built from `ctx.contextsByName` once per emit
  *  so the walker doesn't repeatedly scan all contexts. */
+/** The served aggregate / workflow / view names `classifyPage` matches a
+ *  page's role-scoped name against (slice 3c — replaces stamped `origin`). */
+function pageNameCtx(ctx: PageEmitContext): PageNameCtx {
+  const workflowNames: string[] = [];
+  const viewNames: string[] = [];
+  for (const bc of ctx.contextsByName.values()) {
+    for (const wf of bc.workflows) workflowNames.push(wf.name);
+    for (const v of bc.views) viewNames.push(v.name);
+  }
+  return { aggregateNames: [...ctx.aggregatesByName.keys()], workflowNames, viewNames };
+}
+
 function buildBcByAggregate(ctx: PageEmitContext): Map<string, BoundedContextIR> {
   const out = new Map<string, BoundedContextIR>();
   for (const bc of ctx.contextsByName.values()) {
@@ -154,6 +166,7 @@ function buildBcByWorkflow(ctx: PageEmitContext): Map<string, BoundedContextIR> 
 export function deriveExtraRoutesFromUi(
   ui: UiIR,
   topLevelComponents: readonly ComponentIR[] = [],
+  nameCtx: PageNameCtx = { aggregateNames: [], workflowNames: [], viewNames: [] },
 ): {
   inShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[];
   outOfShell: import("./templating/preparers/app-shell.js").ExtraPageRoute[];
@@ -174,7 +187,7 @@ export function deriveExtraRoutesFromUi(
   for (const c of ui.components) userComponents.set(c.name, c.params);
   for (const page of ui.pages) {
     if (!page.route) continue;
-    if (page.origin && page.origin.kind !== "custom") continue;
+    if (classifyPage(page, nameCtx).kind !== "custom") continue;
     if (isWalkableLayoutBody(page.body, userComponents)) {
       const route: import("./templating/preparers/app-shell.js").ExtraPageRoute = {
         componentName: page.name,
@@ -197,6 +210,7 @@ export function deriveExtraRoutesFromUi(
 
 export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, string> {
   const out = new Map<string, string>();
+  const pageCtx = pageNameCtx(ctx);
 
   // Build the per-ui name→params map the walker uses to resolve
   // cross-component invocations.  Top-level components seed the map
@@ -293,7 +307,7 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
           // Component function name stays the aggregate-qualified `OrderList`
           // form even though the scaffold names the page by role (`List`) — see
           // `pageEmitName`.  Matches the origin-bound router import.
-          pageEmitName(page),
+          pageEmitName(page, pageCtx),
           page.body!,
           ctx.pack,
           page.params,
@@ -438,17 +452,17 @@ function stmtUsesCodeBlock(stmt: import("../../ir/types/loom-ir.js").StmtIR): bo
 
 export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string, string> {
   const out = new Map<string, string>();
+  const pageCtx = pageNameCtx(ctx);
   const seenAggregates = new Set<string>();
   const seenWorkflows = new Set<string>();
   const seenViews = new Set<string>();
 
   for (const page of ui.pages) {
-    // Only scaffold-origin pages dispatch to the
-    // per-aggregate / per-workflow / per-view page-object
-    // builders.  Custom-origin (user-written) pages get the
+    // Only scaffold pages dispatch to the per-aggregate / per-workflow /
+    // per-view page-object builders.  Custom (user-written) pages get the
     // walker-side per-page page-object emitted separately.
-    const origin = page.origin;
-    if (!origin || origin.kind === "custom") continue;
+    const origin = classifyPage(page, pageCtx);
+    if (origin.kind === "custom") continue;
     switch (origin.kind) {
       case "aggregate-list":
       case "aggregate-new":
@@ -536,9 +550,9 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
   const userComponents = buildUserComponentsMap(ui, ctx.topLevelComponents);
   const bcByAggregate = buildBcByAggregate(ctx);
   for (const page of ui.pages) {
-    // Skip scaffold-origin pages; per-aggregate page-objects above
-    // covered them (with their richer fill/submit/expectRow surface).
-    if (page.origin && page.origin.kind !== "custom") continue;
+    // Skip scaffold pages; per-aggregate page-objects above covered them
+    // (with their richer fill/submit/expectRow surface).
+    if (classifyPage(page, pageCtx).kind !== "custom") continue;
     if (!isWalkableLayoutBody(page.body, userComponents)) continue;
     if (!page.body) continue;
     const paramNames = new Set(page.params.map((p) => p.name));

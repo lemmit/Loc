@@ -32,6 +32,7 @@ import type {
   UiIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
 import {
   buildExternFunctionShim,
@@ -283,18 +284,30 @@ export function defaultNavSections(
  *  pages get a per-page class from their collected testids).  Only
  *  the api-module import root differs (`src/lib/api` in SvelteKit
  *  projects). */
+/** Served decl names for `classifyPage` (slice 3c — replaces stamped `origin`). */
+function sveltePageNameCtx(ctx: SveltePageEmitContext): PageNameCtx {
+  const workflowNames: string[] = [];
+  const viewNames: string[] = [];
+  for (const bc of ctx.contextsByName.values()) {
+    for (const wf of bc.workflows) workflowNames.push(wf.name);
+    for (const v of bc.views) viewNames.push(v.name);
+  }
+  return { aggregateNames: [...ctx.aggregatesByName.keys()], workflowNames, viewNames };
+}
+
 export function emitSveltePageObjectsForUi(
   ui: UiIR,
   ctx: SveltePageEmitContext,
 ): Map<string, string> {
   const out = new Map<string, string>();
+  const pageCtx = sveltePageNameCtx(ctx);
   const seenAggregates = new Set<string>();
   const seenWorkflows = new Set<string>();
   const seenViews = new Set<string>();
 
   for (const page of ui.pages) {
-    const origin = page.origin;
-    if (!origin || origin.kind === "custom") continue;
+    const origin = classifyPage(page, pageCtx);
+    if (origin.kind === "custom") continue;
     switch (origin.kind) {
       case "aggregate-list":
       case "aggregate-new":
@@ -372,7 +385,7 @@ export function emitSveltePageObjectsForUi(
   for (const c of ui.components) userComponents.set(c.name, c.params);
   const bcByAggregate = buildBcByAggregate(ctx);
   for (const page of ui.pages) {
-    if (page.origin && page.origin.kind !== "custom") continue;
+    if (classifyPage(page, pageCtx).kind !== "custom") continue;
     if (!isWalkableLayoutBody(page.body, userComponents)) continue;
     if (!page.body) continue;
     const paramNames = new Set(page.params.map((p) => p.name));

@@ -27,6 +27,7 @@
 // `prepareAppShellVM`.
 
 import type { PageIR, UiIR } from "../../ir/types/loom-ir.js";
+import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { plural, snake } from "../../util/naming.js";
 import { renderGateExpr } from "./gate-expr.js";
 
@@ -75,13 +76,17 @@ export interface NavSectionVM {
 /** Build sidebar `navSections` from a ui's explicit `menu { … }`
  *  block.  Returns `undefined` when the ui has no menu block — the
  *  caller falls back to the default hardcoded grouping. */
-export function deriveSidebarFromUi(ui: UiIR, authUi = false): NavSectionVM[] | undefined {
+export function deriveSidebarFromUi(
+  ui: UiIR,
+  nameCtx: PageNameCtx,
+  authUi = false,
+): NavSectionVM[] | undefined {
   if (ui.menu) {
     return ui.menu.sections.map(
       (section): NavSectionVM => ({
         label: section.label,
         entries: section.links
-          .map((link) => navEntryForLink(link, ui, authUi))
+          .map((link) => navEntryForLink(link, ui, nameCtx, authUi))
           .filter((e): e is NavEntryVM => e !== undefined),
       }),
     );
@@ -91,13 +96,14 @@ export function deriveSidebarFromUi(ui: UiIR, authUi = false): NavSectionVM[] | 
   // pages (and any other source-declared pages) with `menu {
   // section: "X" }` metadata group by section into a sidebar.
   //
-  // Restricted to `source === "explicit"` so scaffold-synthesised
+  // Restricted to `custom` (hand-written) pages so scaffold-synthesised
   // pages (which carry default menuMeta from the scaffold expander)
   // don't pre-empt the default hardcoded grouping in app-shell.ts.
   // Explicit pages opt into this driver by declaring a `menu { … }`
   // block.
   const eligible = ui.pages.filter(
-    (p) => p.source === "explicit" && p.menuMeta && !readMenuMetaBool(p, "hidden"),
+    (p) =>
+      classifyPage(p, nameCtx).kind === "custom" && p.menuMeta && !readMenuMetaBool(p, "hidden"),
   );
   if (eligible.length === 0) return undefined;
   // Group pages by section name (default "" if no section declared).
@@ -124,7 +130,7 @@ export function deriveSidebarFromUi(ui: UiIR, authUi = false): NavSectionVM[] | 
       label: sectionLabel,
       entries: pages.map((p): NavEntryVM => {
         const label = readMenuMetaString(p, "label") ?? p.name;
-        const tIdAndActive = testIdAndActive(p);
+        const tIdAndActive = testIdAndActive(p, nameCtx);
         return {
           to: p.route ?? "",
           label,
@@ -144,6 +150,7 @@ export function deriveSidebarFromUi(ui: UiIR, authUi = false): NavSectionVM[] | 
 function navEntryForLink(
   link: import("../../ir/types/loom-ir.js").MenuLinkIR,
   ui: UiIR,
+  nameCtx: PageNameCtx,
   authUi: boolean,
 ): NavEntryVM | undefined {
   if (link.kind === "external") {
@@ -167,9 +174,9 @@ function navEntryForLink(
   const overrideLabel = stringPropOf(link.props, "label");
   const metaLabel = readMenuMetaString(page, "label");
   const label = overrideLabel ?? metaLabel ?? page.name;
-  // Identify well-known page kinds via `archetype` so testid
+  // Identify well-known page kinds via `classifyPage` so testid
   // and active-route semantics match main's hardcoded conventions.
-  const tIdAndActive = testIdAndActive(page);
+  const tIdAndActive = testIdAndActive(page, nameCtx);
   return {
     to: page.route ?? "",
     label,
@@ -186,14 +193,18 @@ function navEntryForLink(
   };
 }
 
-function testIdAndActive(page: PageIR): {
+function testIdAndActive(
+  page: PageIR,
+  nameCtx: PageNameCtx,
+): {
   testId: string;
   activeArgs: string;
 } {
   const route = page.route ?? "";
-  switch (page.origin?.kind) {
+  const kind = classifyPage(page, nameCtx);
+  switch (kind.kind) {
     case "aggregate-list": {
-      const slug = snake(plural(page.origin.aggregateName));
+      const slug = snake(plural(kind.aggregateName));
       return {
         testId: `nav-${slug}`,
         activeArgs: JSON.stringify(`/${slug}`),
@@ -201,21 +212,21 @@ function testIdAndActive(page: PageIR): {
     }
     case "aggregate-new":
     case "aggregate-detail": {
-      const slug = snake(plural(page.origin.aggregateName));
+      const slug = snake(plural(kind.aggregateName));
       return {
-        testId: `nav-${slug}-${page.origin.kind === "aggregate-new" ? "new" : "detail"}`,
+        testId: `nav-${slug}-${kind.kind === "aggregate-new" ? "new" : "detail"}`,
         activeArgs: JSON.stringify(route),
       };
     }
     case "workflow-form": {
-      const slug = snake(page.origin.workflowName);
+      const slug = snake(kind.workflowName);
       return {
         testId: `nav-workflow-${slug}`,
         activeArgs: JSON.stringify(`/workflows/${slug}`),
       };
     }
     case "view-list": {
-      const slug = snake(page.origin.viewName);
+      const slug = snake(kind.viewName);
       return {
         testId: `nav-view-${slug}`,
         activeArgs: JSON.stringify(`/views/${slug}`),
