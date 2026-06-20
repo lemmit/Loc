@@ -1447,9 +1447,9 @@ describe("cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
     expect(files.has("phoenix_app/lib/phoenix_app_web/controllers/openapi_controller.ex")).toBe(
       true,
     );
-    // The router must wire GET /api/openapi.json so clients can fetch it.
+    // The router must wire GET /openapi.json (root, aligned across backends).
     const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
-    expect(router).toMatch(/get\s+"\/openapi\.json",\s*OpenapiController/);
+    expect(router).toMatch(/get\s+"\/openapi\.json",\s*[\w.]*OpenapiController/);
   });
 
   it("Every aggregate from wire-spec.json appears as <Name>Response in the Phoenix spec", async () => {

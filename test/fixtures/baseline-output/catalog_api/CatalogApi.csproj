@@ -44,7 +44,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Mediator.Abstractions" Version="2.1.7" />
-    <!-- OpenAPI spec emitted at /swagger/v1/swagger.json -->
+    <!-- OpenAPI spec emitted at /openapi.json -->
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
     <!-- FluentValidation — wire-boundary validators (Mediator pipeline) -->
     <PackageReference Include="FluentValidation" Version="11.10.0" />

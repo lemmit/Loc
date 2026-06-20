@@ -212,7 +212,7 @@ ${tokenBlock}
   # Bypass list — the openapi spec endpoint must serve without a token
   # so the cross-platform parity check works.  /health and /ready are
   # routed outside the :api pipeline but listed here as belt-and-suspenders.
-  defp bypass_path?("/api/openapi.json"), do: true
+  defp bypass_path?("/openapi.json"), do: true
   defp bypass_path?("/health"), do: true
   defp bypass_path?("/ready"), do: true
 ${handshakeBypass}  defp bypass_path?(_), do: false

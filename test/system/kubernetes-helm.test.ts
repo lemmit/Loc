@@ -167,6 +167,14 @@ describe("kubernetes / helm — secret widening + probe alignment", () => {
     expect(dep).toContain("secretKeyRef");
   });
 
+  it("disables the interactive OpenAPI UI on backends by default (LOOM_OPENAPI_UI=false)", async () => {
+    const files = await filesFor(JAVA_SRC, true);
+    // Prod-hardening: the k8s ConfigMap turns off the Swagger UI / FastAPI docs;
+    // the /openapi.json spec stays available.  Compose leaves it on (dev loop).
+    expect(files.get("k8s/api-config.yaml")!).toContain("LOOM_OPENAPI_UI");
+    expect(files.get("helm/templates/api-config.yaml")!).toContain("LOOM_OPENAPI_UI");
+  });
+
   it("aligns probes to /health (liveness) + /ready (readiness) regardless of compose healthPath", async () => {
     const files = await filesFor(JAVA_SRC, true);
     const dep = files.get("k8s/api-deployment.yaml")!;

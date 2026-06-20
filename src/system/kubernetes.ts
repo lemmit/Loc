@@ -160,6 +160,13 @@ export function buildWorkloads(sys: SystemIR): WorkloadModel[] {
         configEnv.push({ name: k, value: v });
       }
     }
+    // k8s prod-hardening: disable the interactive OpenAPI UI by default on
+    // backends (Java's Swagger UI / Python's /docs+/redoc).  The machine
+    // /openapi.json spec stays available; compose leaves it ON for the inner
+    // loop.  Override per deployable via the chart's `env:` overlay.
+    if (!platform.isFrontend) {
+      configEnv.push({ name: "LOOM_OPENAPI_UI", value: "false" });
+    }
     return {
       deployableName: d.name,
       name,

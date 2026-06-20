@@ -103,12 +103,14 @@ builder.Services.AddCors(opts =>
 });
 
 // OpenAPI spec generation — Swashbuckle reflects over controllers and
-// emits the spec at /swagger/v1/swagger.json.  The cross-platform
-// contract check diffs this against the Hono-emitted /openapi.json.
+// emits the spec at /openapi.json (aligned across every backend so the
+// cross-platform contract check diffs a single well-known path).
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new() { Title = "CatalogApi", Version = "v1" });
+    // Document name "openapi" + the UseSwagger RouteTemplate below place the
+    // spec at /openapi.json (not Swashbuckle's default /swagger/v1/swagger.json).
+    c.SwaggerDoc("openapi", new() { Title = "CatalogApi", Version = "v1" });
     // RFC 7807: rewrite declared 4xx/5xx responses to
     // application/problem+json carrying ProblemDetails (matches Hono/Phoenix).
     c.OperationFilter<ProblemDetailsResponsesFilter>();
@@ -220,7 +222,8 @@ app.UseMiddleware<CatalogApi.Middleware.RequestLoggingMiddleware>();
 // catalog line are both useful; dashboards filter on the catalog).
 app.UseHttpLogging();
 app.UseCors();
-app.UseSwagger();
+// Serve the spec at /openapi.json (documentName "openapi" → "{documentName}.json").
+app.UseSwagger(c => c.RouteTemplate = "{documentName}.json");
 app.MapControllers();
 
 

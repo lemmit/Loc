@@ -335,7 +335,7 @@ into HTTP 400 and missing-aggregate into 404.
 - `AddScoped<I<Agg>Repository, <Agg>Repository>` per aggregate
 - `AddControllers().AddJsonOptions(...)` — camelCase property naming
 - `AddCors` (permissive default; pin to tighten in prod)
-- `AddSwaggerGen` (`/swagger/v1/swagger.json`)
+- `AddSwaggerGen` — spec at `/openapi.json` (aligned across backends)
 - `app.MapGet("/health", ...)` + `UseCors() / UseSwagger() / MapControllers()`
 - `db.Database.EnsureCreated()` on first scope (per-deployable DB,
   no race — see [`tools.md`](tools.md#per-deployable-databases))
