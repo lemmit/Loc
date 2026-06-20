@@ -583,20 +583,13 @@ type StampDeclAst = import("../../language/generated/ast.js").StampDecl;
 type ImplementsDeclAst = import("../../language/generated/ast.js").ImplementsDecl;
 
 /** Construct a `filter <expr>` aggregate / context member.
- * Equivalent to writing `filter <expr>` directly in source.  Pass
- * `{ capability: "<name>" }` to emit the capability-scoped variant
- * (`filter for "<name>" <expr>`) — only applies to aggregates whose
- * `implements "<name>"` matches. */
-export function contextFilter(
-  predicate: Expression,
-  opts: { capability?: string } = {},
-): FilterDeclAst & AggregateMember {
+ * Equivalent to writing `filter <expr>` directly in source. */
+export function contextFilter(predicate: Expression): FilterDeclAst & AggregateMember {
   const origin = currentOrigin();
   const node: FilterDeclAst = tag(
     mkFilterDecl({
       $type: "FilterDecl",
       expr: predicate,
-      ...(opts.capability !== undefined ? { capability: opts.capability } : {}),
     }),
     origin,
   );
@@ -613,20 +606,17 @@ export interface ContextStampAssignment {
 
 /** Construct one or two `stamp <event> { ... }` aggregate / context
  * members from the spec.  Each event with at least one assignment
- * yields a StampDecl AST node; the expander splices each separately.
- * Pass `{ capability: "<name>" }` to emit the capability-scoped
- * variant (`stamp for "<name>" <event>` — applies only to opt-ins). */
+ * yields a StampDecl AST node; the expander splices each separately. */
 export function contextStamp(spec: {
   onCreate?: ContextStampAssignment[];
   onUpdate?: ContextStampAssignment[];
-  capability?: string;
 }): Array<StampDeclAst & AggregateMember> {
   const out: Array<StampDeclAst & AggregateMember> = [];
   if (spec.onCreate?.length) {
-    out.push(buildStamp("onCreate", spec.onCreate, spec.capability));
+    out.push(buildStamp("onCreate", spec.onCreate));
   }
   if (spec.onUpdate?.length) {
-    out.push(buildStamp("onUpdate", spec.onUpdate, spec.capability));
+    out.push(buildStamp("onUpdate", spec.onUpdate));
   }
   return out;
 }
@@ -634,7 +624,6 @@ export function contextStamp(spec: {
 function buildStamp(
   event: "onCreate" | "onUpdate",
   assignments: ContextStampAssignment[],
-  capability?: string,
 ): StampDeclAst & AggregateMember {
   const origin = currentOrigin();
   const stmts = assignments.map((a) => assignStmt(a.field, a.value));
@@ -643,7 +632,6 @@ function buildStamp(
       $type: "StampDecl",
       event,
       assignments: stmts,
-      ...(capability !== undefined ? { capability } : {}),
     }),
     origin,
   );
@@ -651,17 +639,6 @@ function buildStamp(
     setContainer(s, node, "assignments", i);
   });
   return node as StampDeclAst & AggregateMember;
-}
-
-/** Construct an `implements "<name>"` aggregate / context member —
- * opts the host into a capability group with the given name.
- * Generators translate the name by convention (.NET adds an
- * `I` prefix → `IAuditable`) and emit one shared infrastructure
- * block per name (e.g. one HasQueryFilter loop in OnModelCreating). */
-export function implementsCapability(name: string): ImplementsDeclAst & AggregateMember {
-  const origin = currentOrigin();
-  const node: ImplementsDeclAst = tag(mkImplementsDecl({ $type: "ImplementsDecl", name }), origin);
-  return node as ImplementsDeclAst & AggregateMember;
 }
 
 /** Construct a TYPED `implements <Cap>` member (typed-capabilities.md) — a

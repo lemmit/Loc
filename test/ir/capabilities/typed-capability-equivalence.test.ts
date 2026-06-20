@@ -240,18 +240,4 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     `);
     expect(errors.join("\n")).toMatch(/Unknown capability 'nope' in 'implements'/);
   });
-
-  it('legacy `implements "string"` still parses (transitional bridge)', async () => {
-    const { errors } = await parseString(`
-      system Demo { subdomain M { context C {
-        filter for "softDeletable" !this.isDeleted
-        aggregate Order {
-          subject: string
-          isDeleted: bool
-          implements "softDeletable"
-        }
-      }}}
-    `);
-    expect(errors).toEqual([]);
-  });
 });

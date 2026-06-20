@@ -1306,7 +1306,6 @@ export function isExpectStmt(item: unknown): item is ExpectStmt {
 export interface FilterDecl extends AstNode {
     readonly $container: Aggregate | BoundedContext | Capability;
     readonly $type: 'FilterDecl';
-    capability?: string;
     expr: Expression;
 }
 
@@ -1415,8 +1414,7 @@ export function isIfLetStmt(item: unknown): item is IfLetStmt {
 export interface ImplementsDecl extends AstNode {
     readonly $container: Aggregate | BoundedContext;
     readonly $type: 'ImplementsDecl';
-    cap?: string;
-    name?: string;
+    cap: string;
 }
 
 export const ImplementsDecl = 'ImplementsDecl';
@@ -2387,7 +2385,6 @@ export interface StampDecl extends AstNode {
     readonly $container: Aggregate | BoundedContext | Capability;
     readonly $type: 'StampDecl';
     assignments: Array<AssignOrCallStmt>;
-    capability?: string;
     event: StampEvent;
 }
 
@@ -3773,7 +3770,6 @@ export class DddAstReflection extends AbstractAstReflection {
                 return {
                     name: FilterDecl,
                     properties: [
-                        { name: 'capability' },
                         { name: 'expr' }
                     ]
                 };
@@ -3843,8 +3839,7 @@ export class DddAstReflection extends AbstractAstReflection {
                 return {
                     name: ImplementsDecl,
                     properties: [
-                        { name: 'cap' },
-                        { name: 'name' }
+                        { name: 'cap' }
                     ]
                 };
             }
@@ -4506,7 +4501,6 @@ export class DddAstReflection extends AbstractAstReflection {
                     name: StampDecl,
                     properties: [
                         { name: 'assignments', defaultValue: [] },
-                        { name: 'capability' },
                         { name: 'event' }
                     ]
                 };

@@ -67,23 +67,6 @@ describe("source-level capabilities (hand-written, no macro)", () => {
     expect(rule.assignments[0]!.field).toBe("createdAt");
   });
 
-  it('`implements "X"` populates implementsCapabilities', async () => {
-    const ir = await buildLoomModel(`
-      system Demo {
-        subdomain M { context C {
-          aggregate Doc {
-            subject: string
-            implements "softDeletable"
-            implements "auditable"
-          }
-        }}
-      }
-    `);
-    const agg = findAgg(ir, "Doc");
-    // Sorted + deduped.
-    expect(agg.implementsCapabilities).toEqual(["auditable", "softDeletable"]);
-  });
-
   it("the `softDeletable` capability == hand-written state + filter", async () => {
     // The built-in capability co-locates state + filter on the aggregate;
     // hand-writing the same fields + `filter` yields matching IR.
@@ -140,24 +123,6 @@ describe("context-level propagation", () => {
     expect(customer.contextFilters?.length).toBe(1);
   });
 
-  it("`implements` at context level propagates the capability name", async () => {
-    const ir = await buildLoomModel(`
-      system Demo {
-        subdomain M {
-          context C {
-            implements "softDeletable"
-            aggregate Order {
-              subject: string
-              isDeleted: bool
-            }
-          }
-        }
-      }
-    `);
-    const order = findAgg(ir, "Order");
-    expect(order.implementsCapabilities).toEqual(["softDeletable"]);
-  });
-
   it("context-level + aggregate-level capabilities concatenate", async () => {
     const ir = await buildLoomModel(`
       system Demo {
@@ -178,52 +143,10 @@ describe("context-level propagation", () => {
     // Two filters: one propagated from context, one declared locally.
     expect(order.contextFilters?.length).toBe(2);
   });
-
-  it("context-level `implements` dedupes when aggregate also declares the same", async () => {
-    const ir = await buildLoomModel(`
-      system Demo {
-        subdomain M {
-          context C {
-            implements "auditable"
-            aggregate Order {
-              subject: string
-              implements "auditable"
-            }
-          }
-        }
-      }
-    `);
-    const order = findAgg(ir, "Order");
-    expect(order.implementsCapabilities).toEqual(["auditable"]);
-  });
 });
 
-describe('capability-scoped context filters: `filter for "<name>"`', () => {
-  it("propagates only to aggregates with matching `implements`", async () => {
-    const ir = await buildLoomModel(`
-      system Demo {
-        subdomain M {
-          context C {
-            filter for "softDeletable" !this.isDeleted
-            aggregate Order {
-              subject: string
-              isDeleted: bool
-              implements "softDeletable"
-            }
-            aggregate Public {
-              name: string
-            }
-          }
-        }
-      }
-    `);
-    const order = findAgg(ir, "Order");
-    const pub = findAgg(ir, "Public");
-    expect(order.contextFilters?.length).toBe(1);
-    expect(pub.contextFilters).toBeUndefined();
-  });
-
-  it("unqualified context filter still propagates to every aggregate", async () => {
+describe("context-level filter propagation", () => {
+  it("an unqualified context filter propagates to every aggregate", async () => {
     const ir = await buildLoomModel(`
       system Demo {
         subdomain M {
@@ -243,70 +166,6 @@ describe('capability-scoped context filters: `filter for "<name>"`', () => {
     `);
     expect(findAgg(ir, "Order").contextFilters?.length).toBe(1);
     expect(findAgg(ir, "Customer").contextFilters?.length).toBe(1);
-  });
-
-  it("multiple capability-scoped filters route to the right aggregates", async () => {
-    const ir = await buildLoomModel(`
-      system Demo {
-        subdomain M {
-          context C {
-            filter for "softDeletable" !this.isDeleted
-            filter for "drafted" !this.isDraft
-            aggregate Soft {
-              subject: string
-              isDeleted: bool
-              implements "softDeletable"
-            }
-            aggregate Draft {
-              subject: string
-              isDraft: bool
-              implements "drafted"
-            }
-            aggregate Both {
-              subject: string
-              isDeleted: bool
-              isDraft: bool
-              implements "softDeletable"
-              implements "drafted"
-            }
-            aggregate Neither {
-              subject: string
-            }
-          }
-        }
-      }
-    `);
-    expect(findAgg(ir, "Soft").contextFilters?.length).toBe(1);
-    expect(findAgg(ir, "Draft").contextFilters?.length).toBe(1);
-    expect(findAgg(ir, "Both").contextFilters?.length).toBe(2);
-    expect(findAgg(ir, "Neither").contextFilters).toBeUndefined();
-  });
-});
-
-describe('capability-scoped context stamps: `stamp for "<name>"`', () => {
-  it('`stamp for "auditable" onCreate { ... }` propagates only to opt-ins', async () => {
-    const ir = await buildLoomModel(`
-      system Demo {
-        user { id: string  role: string }
-        subdomain M {
-          context C {
-            stamp for "auditable" onCreate {
-              createdAt := now()
-            }
-            aggregate Order {
-              subject: string
-              createdAt: datetime
-              implements "auditable"
-            }
-            aggregate Plain {
-              subject: string
-            }
-          }
-        }
-      }
-    `);
-    expect(findAgg(ir, "Order").contextStamps?.length).toBe(1);
-    expect(findAgg(ir, "Plain").contextStamps).toBeUndefined();
   });
 });
 

@@ -162,16 +162,19 @@ they must move to typed capabilities before the string grammar can be deleted.
   [`capability-emission-dedup.md`](../proposals/capability-emission-dedup.md)
   consumes.
 
-### Phase 6 — remove the stringly forms (the cleanup the owner asked for)
+### Phase 6 — remove the stringly forms (the cleanup the owner asked for) ✅
 
-- Delete `'implements' STRING`, `filter for "X"`, `stamp for "X"` from the
-  grammar; delete the string-matching capability-grouping in
-  `lower-capabilities.ts`; remove `implementsCapabilities` string plumbing where
-  it only served the string surface.
-- Migrate **every** `examples/*.ddd`, `web/src/examples/*.ddd`, fixture, and test
-  to the typed `capability` + `with` / `implements <Cap>` form.
-- Prereqs: Phases 3 (stdlib no longer emits string nodes) + 4 (typed
-  `implements`) must land first.
+- **6a** — migrated every real (non-test) usage to the typed form: `tenantScoped`
+  → a user-declared `capability tenantScoped { filter … }` + `with tenantScoped`
+  (auth-capabilities.ddd, erp/hr.ddd); e2e java-build fixtures moved to
+  aggregate-level `filter` / dropped functionless `implements "auditable"`.
+- **6b** — removed the grammar forms: `FilterDecl`/`StampDecl` lost the
+  `for "<name>"` qualifier, `ImplementsDecl` is now `'implements' cap=ID` only.
+  Lowering dropped the qualified-filter/stamp matching and `collectImplements`;
+  the vestigial `AggregateIR.implementsCapabilities` field (no backend reader)
+  and the `implementsCapability` (string) / `capability:`-option factories were
+  removed; printer simplified. Deleted the tests that existed only to exercise
+  the string mechanism.
 
 ## Soft-delete migration — capability + `softDelete` ops macro (decided)
 
@@ -208,4 +211,5 @@ scope until a concrete case appears.
 - [x] Phase 3 — built-in prelude; **audit** → `capability auditable`; **softDelete** → `capability softDeletable` + `softDelete` ops macro.
 - [x] Phase 4 — typed `implements` (synonym of `with`) + context-level `with`.
 - [ ] Phase 5 — `Self`, tooling, marker emission.
-- [ ] Phase 6 — **remove** the stringly forms; migrate all examples/tests.
+- [x] Phase 6 — **removed** the stringly forms; migrated all examples/fixtures/tests to typed.
+- [ ] Phase 5 — `Self` type, tooling, marker emission (only remaining work).

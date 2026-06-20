@@ -7899,28 +7899,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "value": "filter"
           },
           {
-            "$type": "Group",
-            "elements": [
-              {
-                "$type": "Keyword",
-                "value": "for"
-              },
-              {
-                "$type": "Assignment",
-                "feature": "capability",
-                "operator": "=",
-                "terminal": {
-                  "$type": "RuleCall",
-                  "rule": {
-                    "$ref": "#/rules@204"
-                  },
-                  "arguments": []
-                }
-              }
-            ],
-            "cardinality": "?"
-          },
-          {
             "$type": "Assignment",
             "feature": "expr",
             "operator": "=",
@@ -7950,28 +7928,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "stamp"
-          },
-          {
-            "$type": "Group",
-            "elements": [
-              {
-                "$type": "Keyword",
-                "value": "for"
-              },
-              {
-                "$type": "Assignment",
-                "feature": "capability",
-                "operator": "=",
-                "terminal": {
-                  "$type": "RuleCall",
-                  "rule": {
-                    "$ref": "#/rules@204"
-                  },
-                  "arguments": []
-                }
-              }
-            ],
-            "cardinality": "?"
           },
           {
             "$type": "Assignment",
@@ -8050,33 +8006,16 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "value": "implements"
           },
           {
-            "$type": "Alternatives",
-            "elements": [
-              {
-                "$type": "Assignment",
-                "feature": "cap",
-                "operator": "=",
-                "terminal": {
-                  "$type": "RuleCall",
-                  "rule": {
-                    "$ref": "#/rules@208"
-                  },
-                  "arguments": []
-                }
+            "$type": "Assignment",
+            "feature": "cap",
+            "operator": "=",
+            "terminal": {
+              "$type": "RuleCall",
+              "rule": {
+                "$ref": "#/rules@208"
               },
-              {
-                "$type": "Assignment",
-                "feature": "name",
-                "operator": "=",
-                "terminal": {
-                  "$type": "RuleCall",
-                  "rule": {
-                    "$ref": "#/rules@204"
-                  },
-                  "arguments": []
-                }
-              }
-            ]
+              "arguments": []
+            }
           }
         ]
       },

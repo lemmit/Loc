@@ -889,34 +889,30 @@ AggregateMember:
 
 // ---- capability source surface ----------------------------------
 //
-// Capabilities (`filter`, `stamp`, `implements`) are first-class
-// aggregate/context members.  They produce the same IR shape macros
-// did (`AggregateIR.contextFilters` / `.contextStamps` /
-// `.implementsCapabilities`); the macro factories are sugar that
-// emit these node types into the host's members[] array.  Anything
-// a macro can contribute, a user can hand-write.
+// `filter` / `stamp` are first-class aggregate/context members lowering to
+// `AggregateIR.contextFilters` / `.contextStamps`; `implements <Cap>` is the
+// typed capability application.  A `capability` declaration's body is built
+// from these same node types, and the expander splices them into a host's
+// members[] — anything a capability contributes, a user can hand-write.
 //
-// At ContextMember position these propagate to every aggregate
+// At ContextMember position `filter` / `stamp` propagate to every aggregate
 // inside the context at lowering time (see `lowerContext`).
 
 // `filter <expr>` declares a query-filter predicate.  At aggregate
 // scope it applies to that aggregate only.  At context scope it
 // applies to every aggregate inside (propagated at lowering time).
-//
-// `filter for "<name>" <expr>` is a capability-scoped variant: it
-// only applies to aggregates whose `implements "<name>"` matches.
-// Aggregates without the matching opt-in ignore the declaration.
-// Useful for "context Sales { filter for 'softDeletable' !this.isDeleted }"
-// where some aggregates participate and some don't.
+// (The legacy capability-scoped `filter for "<name>"` variant was
+// removed in typed-capabilities Phase 6 — a capability co-locates its
+// own filter, so the string-group qualifier is unnecessary.)
 FilterDecl:
-    'filter' ('for' capability=STRING)? expr=Expression;
+    'filter' expr=Expression;
 
 // `stamp <event> { ... }` declares lifecycle-stamping assignments.
-// Same scoping rules as FilterDecl: at aggregate scope applies to
-// that aggregate; at context scope propagates to every aggregate;
-// `for "<name>"` qualifier restricts propagation to opt-ins.
+// At aggregate scope applies to that aggregate; at context scope
+// propagates to every aggregate.  (The legacy `stamp for "<name>"`
+// qualifier was removed in typed-capabilities Phase 6.)
 StampDecl:
-    'stamp' ('for' capability=STRING)? event=StampEvent '{'
+    'stamp' event=StampEvent '{'
         assignments+=AssignOrCallStmt*
     '}';
 
@@ -928,16 +924,10 @@ StampEvent returns string:
 // the referenced capability's fields + filter + stamp into the host aggregate
 // (or, at context scope, every aggregate in the context).  Resolved by the
 // expander's document-wide capability inventory, like `with` (see `Capability`
-// below), not a Langium cross-reference.
-//
-// `implements "name"` (STRING) is the LEGACY group-opt-in form: it opts the
-// host into a string-named capability group so context-scoped `filter for
-// "name"` / `stamp for "name"` declarations match it.  This stringly surface
-// is a transitional bridge slated for removal once the stdlib migrates and
-// every example/test moves to the typed form (see
-// docs/plans/typed-capabilities-implementation.md, Phase 6).
+// below), not a Langium cross-reference.  (The legacy `implements "name"`
+// string-group form was removed in typed-capabilities Phase 6.)
 ImplementsDecl:
-    'implements' (cap=ID | name=STRING);
+    'implements' cap=ID;
 
 // ---- typed capability declaration (typed-capabilities.md) -------
 //

@@ -586,27 +586,22 @@ function printCapability(node: import("../generated/ast.js").Capability): string
   );
 }
 
-/** `filter [for "<name>"] <expr>` — capability-scoped variant when
- * `for` is set, otherwise applies to every aggregate at scope. */
+/** `filter <expr>` — applies to its aggregate, or every aggregate at context scope. */
 function printFilterDecl(node: import("../generated/ast.js").FilterDecl): string {
-  const cap = (node as { capability?: string }).capability;
-  const forClause = cap ? ` for ${quote(cap)}` : "";
-  return `filter${forClause} ${printExpr(node.expr)}`;
+  return `filter ${printExpr(node.expr)}`;
 }
 
-/** `stamp [for "<name>"] <event> { ... }` */
+/** `stamp <event> { ... }` */
 function printStampDecl(node: import("../generated/ast.js").StampDecl): string {
-  const cap = (node as { capability?: string }).capability;
-  const forClause = cap ? ` for ${quote(cap)}` : "";
   return block(
-    `stamp${forClause} ${node.event}`,
+    `stamp ${node.event}`,
     (node.assignments ?? []).map((a) => printStmt(a as never)),
   );
 }
 
-/** `implements <Cap>` (typed) or `implements "<name>"` (legacy string group) */
+/** `implements <Cap>` (typed capability application) */
 function printImplementsDecl(node: import("../generated/ast.js").ImplementsDecl): string {
-  return node.cap ? `implements ${node.cap}` : `implements ${quote(node.name ?? "")}`;
+  return `implements ${node.cap}`;
 }
 
 /** `seed [dataset] [raw] { <Agg> { … } … }` (database-seeding.md) */

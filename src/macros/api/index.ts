@@ -61,7 +61,6 @@ export {
   destroy,
   field,
   idRef,
-  implementsCapability,
   implementsCapabilityRef,
   memberAccess,
   namedType,

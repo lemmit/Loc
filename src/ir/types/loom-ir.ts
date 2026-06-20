@@ -468,14 +468,6 @@ export interface AggregateIR {
    * Composes additively — N stamping declarations yield N rule sets
    * concatenated per event. */
   contextStamps?: ContextStampIR[];
-  /** Capability names this aggregate opts into via
-   * `implements "<name>"`.  Backends translate by convention to a
-   * marker interface / type alias / behaviour, and group runtime
-   * infrastructure by capability name (.NET: one `OnModelCreating`
-   * filter loop per capability, scoped by `Entries<I<Cap>>()`).
-   * Sorted + deduped at lowering time.  Undefined when the
-   * aggregate names no capabilities. */
-  implementsCapabilities?: readonly string[];
   /** Pointer to the `derived display: string` field, if the
    * aggregate declared one.  Populated by `enrichLoomModel`.
    * When set, `string(aggregate)` and implicit `string + aggregate`
