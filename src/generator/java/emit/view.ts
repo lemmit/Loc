@@ -1,4 +1,5 @@
 import type { EnrichedBoundedContextIR, ViewIR, WorkflowIR } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
@@ -75,6 +76,34 @@ export function renderJavaViews(
   // Source workflows whose saga-state repository the service must inject.
   const stateWfs: WorkflowIR[] = [];
 
+  // Authorization gate (D-AUTH-OIDC / default-deny).  A `view … requires <expr>`
+  // gate runs in the views service method before the read — the read-side
+  // analogue of an operation's `requires`.  A failure throws ForbiddenException
+  // (→ 403 via the controller advice, the same path operations use).  The gate
+  // is currentUser-only; when it references currentUser the service injects the
+  // CurrentUserAccessor and binds a local `currentUser` for the predicate.
+  // `requires true` needs neither (and an unused field would be dead code).
+  const anyGate = [...views, ...wfViews].some((v) => v.requires);
+  const anyGateUsesUser = [...views, ...wfViews].some(
+    (v) => v.requires && exprUsesCurrentUser(v.requires),
+  );
+  const gateLinesFor = (view: ViewIR): string[] => {
+    if (!view.requires) return [];
+    collectJavaExprImports(view.requires, imports);
+    const gl: string[] = [];
+    if (exprUsesCurrentUser(view.requires)) {
+      gl.push(`        var currentUser = currentUserAccessor.user();`);
+    }
+    gl.push(
+      `        if (!(${renderJavaExpr(view.requires, { thisName: "this" })})) throw new ForbiddenException(${JSON.stringify(
+        `Forbidden: view ${view.name}`,
+      )});`,
+    );
+    return gl;
+  };
+  if (anyGate) explicitImports.add(`${vctx.basePkg}.domain.common.ForbiddenException`);
+  if (anyGateUsesUser) explicitImports.add(`${vctx.basePkg}.auth.CurrentUserAccessor`);
+
   for (const view of views) {
     const aggName = (view.source as { name: string }).name;
     repoAggs.add(aggName);
@@ -115,6 +144,7 @@ export function renderJavaViews(
       });
       methods.push(
         `    public List<${rowName}> ${findName}() {`,
+        ...gateLinesFor(view),
         `        return ${repoField(aggName)}.${findName}().stream()`,
         `            .map(a -> new ${rowName}(${args.join(", ")}))`,
         `            .toList();`,
@@ -133,6 +163,7 @@ export function renderJavaViews(
       explicitImports.add(`${vctx.applicationPkgOf(aggName)}.${aggName}Response`);
       methods.push(
         `    public List<${aggName}Response> ${findName}() {`,
+        ...gateLinesFor(view),
         `        return ${repoField(aggName)}.${findName}().stream().map(${aggName}Response::from).toList();`,
         `    }`,
         ``,
@@ -189,6 +220,7 @@ export function renderJavaViews(
       : "";
     methods.push(
       `    public List<${rowName}> ${findName}() {`,
+      ...gateLinesFor(view),
       `        return ${repo}.findAll().stream()`,
       ...(filterLine ? [filterLine.trimEnd()] : []),
       `            .map(x -> new ${rowName}(${proj}))`,
@@ -248,13 +280,16 @@ export function renderJavaViews(
       `public class ${serviceName} {`,
       ...repoFields.map((a) => `    private final ${a}Repository ${repoField(a)};`),
       ...stateFields,
+      anyGateUsesUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
       ``,
       `    public ${serviceName}(${[
         ...repoFields.map((a) => `${a}Repository ${repoField(a)}`),
         ...stateCtorParams,
+        ...(anyGateUsesUser ? ["CurrentUserAccessor currentUserAccessor"] : []),
       ].join(", ")}) {`,
       ...repoFields.map((a) => `        this.${repoField(a)} = ${repoField(a)};`),
       ...stateCtorAssigns,
+      anyGateUsesUser ? `        this.currentUserAccessor = currentUserAccessor;` : null,
       `    }`,
       ``,
       ...methods,
