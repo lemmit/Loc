@@ -5,7 +5,7 @@
 // the success fall-through serialises the mutated struct) and
 // `precondition`/`requires` raise.  `emit` now ships too (sibling fixture
 // operation-returns-emit); only `add`/`remove` stay gated on ash, so this body
-// omits those.  Compiled by `build-generated-phoenix` so the generic
+// omits those.  Compiled by `build-generated-elixir-ash` so the generic
 // action's in-place mutation + raise guards pass `mix compile
 // --warnings-as-errors` against real Ash 3.x.
 system Inventory {

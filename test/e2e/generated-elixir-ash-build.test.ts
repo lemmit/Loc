@@ -22,7 +22,7 @@ import { type HexMirror, startHexMirror } from "./support/hex-mirror";
 // PR that touches the Phoenix generator (one fixture per matrix cell,
 // selected via LOOM_PHOENIX_BUILD_CASE — see pickCases below).
 //
-// Fixtures live under `test/e2e/fixtures/phoenix-build/` — the
+// Fixtures live under `test/e2e/fixtures/elixir-ash-build/` — the
 // workflow reads them too (single source of truth, so the workflow
 // stays in sync without manual heredoc edits per language change).
 //
@@ -46,7 +46,7 @@ import { type HexMirror, startHexMirror } from "./support/hex-mirror";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
 const cli = path.join(repoRoot, "bin", "cli.js");
-const fixturesDir = path.join(here, "fixtures", "phoenix-build");
+const fixturesDir = path.join(here, "fixtures", "elixir-ash-build");
 
 const ENABLED = process.env.LOOM_PHOENIX_BUILD === "1";
 
@@ -60,7 +60,7 @@ function pickCases<T extends { name: string }>(all: T[]): T[] {
   const selected = all.filter((c) => c.name === only);
   if (selected.length === 0) {
     throw new Error(
-      `LOOM_PHOENIX_BUILD_CASE=${only} matched no phoenix-build fixture ` +
+      `LOOM_PHOENIX_BUILD_CASE=${only} matched no elixir-ash-build fixture ` +
         `(have: ${all.map((c) => c.name).join(", ")})`,
     );
   }
@@ -145,7 +145,7 @@ describe.skipIf(!ENABLED)(
         // the router `/app` SpaController fallback, and the SpaController
         // itself — against real Ash 3.x.  No LiveView pages are emitted;
         // the React `assets/` half is covered by the react-build matrix.
-        { name: "phoenix-embed-react.ddd" },
+        { name: "elixir-embed-react.ddd" },
         // DestroyForm on a LiveView detail page (parity finding #5): compiles
         // the delete `<.button>`, the hoisted `destroy_widget` handle_event
         // clause, and the `~p"/widgets"` post-delete navigation.  `with crudish`
@@ -283,7 +283,7 @@ describe.skipIf(!ENABLED)(
     //
     // Gated behind LOOM_PHOENIX_SHOWCASE (in addition to the block-level
     // LOOM_PHOENIX_BUILD) so it runs in its OWN parallel CI job
-    // (`build-generated-phoenix-showcase`) rather than stacking onto the
+    // (`build-generated-elixir-ash-showcase`) rather than stacking onto the
     // fixtures job's sequential docker legs — generating the full
     // multi-deployable system + compiling this large Ash app is markedly
     // heavier than any single fixture.  Local `npm run test:phoenix` runs

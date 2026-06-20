@@ -1,7 +1,7 @@
 // Channels-on-vanilla — exercises the in-process Dispatcher + per-context
 // handler modules + correlation-keyed saga Ecto schema under the
 // `mix compile --warnings-as-errors` gate.  Vanilla mirror of
-// `test/e2e/fixtures/phoenix-build/dispatch.ddd` (the Ash channels gate).
+// `test/e2e/fixtures/elixir-ash-build/dispatch.ddd` (the Ash channels gate).
 //
 // Shape: OrderPlaced STARTS the OrderFulfillment saga (allocates the
 // correlation row) and emits ShipmentRequested; that event routes back

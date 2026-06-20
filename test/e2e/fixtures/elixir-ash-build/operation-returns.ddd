@@ -3,7 +3,7 @@
 // lowers to an Ash 3.x *generic action* (`action :foo, :term do … run fn …`)
 // whose run fn loads the record and hands back a tagged term; the controller
 // translates it to HTTP (success → 200, error variant → RFC-7807
-// ProblemDetails).  Compiled by `build-generated-phoenix` so the generic
+// ProblemDetails).  Compiled by `build-generated-elixir-ash` so the generic
 // action, its `:id`-first code interface, and the `problem_variant/5`
 // translation actually pass `mix compile --warnings-as-errors` against real
 // Ash 3.x.

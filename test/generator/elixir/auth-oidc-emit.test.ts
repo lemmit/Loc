@@ -15,7 +15,7 @@ import { generateSystems } from "../../../src/system/index.js";
 // :ssl into mix.exs.  Without an oidc block (auth: required only) the plug
 // stays the permissive dev stub — same out-of-the-box behaviour as the Hono /
 // .NET dev-stub verifiers.  Compilation of the emitted Elixir is covered by
-// the elixir-ash-build gate (the auth-oidc.ddd phoenix-build fixture); this
+// the elixir-ash-build gate (the auth-oidc.ddd elixir-ash-build fixture); this
 // suite pins the generator-level wiring.
 // ---------------------------------------------------------------------------
 

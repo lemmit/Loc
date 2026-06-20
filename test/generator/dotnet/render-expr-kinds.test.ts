@@ -2,7 +2,7 @@
 // ExprIR kind plus the C#-specific leaf divergences worth locking against
 // regressions.  Completes the cross-backend arm-level coverage triangle:
 // `test/generator/typescript/render-expr-kinds.test.ts` and
-// `test/generator/phoenix/phoenix-render-expr.test.ts` already pin TS and
+// `test/generator/elixir/phoenix-render-expr.test.ts` already pin TS and
 // Elixir; this is the missing C# leg.
 //
 // All three backends now dispatch through the shared `ExprTarget`

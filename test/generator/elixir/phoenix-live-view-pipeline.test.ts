@@ -2921,7 +2921,7 @@ describe("Jason.Encoder defimpl emission (domain-emit unit)", () => {
 
 // ---------------------------------------------------------------------------
 // Ash 3.x compile-correctness regressions — three drift bugs the
-// phoenix-build CI job (mix compile --warnings-as-errors) would
+// elixir-ash-build CI job (mix compile --warnings-as-errors) would
 // surface.  Pre-empted here so unit tests catch them before CI:
 //   1. Domain `define :update_X, action: :update` references an
 //      :update action that the resource didn't declare (`defaults
@@ -2977,7 +2977,7 @@ describe("Ash 3.x compile-correctness regressions", () => {
     //      `mix compile --warnings-as-errors` as:
     //        warning: redefining module Inspect.<Module>
     //      (PR #546's regression — surfaced after #541 unblocked the
-    //      phoenix-build workflow.)
+    //      elixir-ash-build workflow.)
     //
     // The module-fn channel sidesteps both: native-Elixir body (so
     // `<>` / `to_string/1` work), separate namespace from the

@@ -5,7 +5,7 @@
 // `tag_<union>/1` (one struct-pattern clause per variant), byte-compatible
 // with the TS `z.discriminatedUnion("type", …)` and the .NET JsonPolymorphic
 // records.  The generated project compiles under
-// `mix compile --warnings-as-errors` (test/e2e/fixtures/phoenix-build/union.ddd).
+// `mix compile --warnings-as-errors` (test/e2e/fixtures/elixir-ash-build/union.ddd).
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";

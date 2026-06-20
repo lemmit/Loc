@@ -1,7 +1,7 @@
 // Paged finds on the Phoenix/Ash backend — exercises P3b generic-carrier
 // emission (Ash offset pagination read action + controller page/pageSize +
 // %Ash.Page.Offset{} → wire envelope) under `mix compile
-// --warnings-as-errors` in the generated-phoenix CI matrix.
+// --warnings-as-errors` in the generated-elixir-ash CI matrix.
 system PagedShop {
   subdomain Sales {
     context Orders {

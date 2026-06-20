@@ -11,7 +11,7 @@ import { parseString } from "../../_helpers/index.js";
 // `buildWireSpec(sys)` is Loom's canonical IR-derived wire contract — every
 // backend must surface every aggregate / part / value-object name from it.
 // The Phoenix side is asserted in
-// `test/generator/phoenix/elixir-pipeline.test.ts:1198`; this
+// `test/generator/elixir/elixir-pipeline.test.ts:1198`; this
 // block asserts the same for the .NET CQRS DTO records.
 //
 // Fast (no docker, no boot) — complements the OpenAPI-parity e2e test in

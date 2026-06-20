@@ -1,8 +1,8 @@
 // DestroyForm Phoenix-build fixture (parity finding #5).
 //
 // A fullstack `platform: phoenix` LiveView app whose detail page hosts a
-// `DestroyForm(of: Widget)`.  Compiled by the generated-phoenix CI gate
-// (test/e2e/generated-phoenix-build.test.ts globs this directory), so the
+// `DestroyForm(of: Widget)`.  Compiled by the generated-elixir-ash CI gate
+// (test/e2e/generated-elixir-ash-build.test.ts globs this directory), so the
 // delete `<.button>` + the hoisted `destroy_widget` handle_event clause +
 // the `~p"/widgets"` post-delete navigation are validated by `mix compile`.
 //

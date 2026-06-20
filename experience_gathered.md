@@ -865,7 +865,7 @@ of footgun worth documenting.
 - **Layered failures stay hidden behind earlier blockers.**
   PR #524 hard-broke the `Property` grammar's `display` modifier but
   missed migrating `examples/showcase.ddd` (added 12 min earlier in
-  #401) and an inline fixture in `phoenix-build.yml`.  Both files
+  #401) and an inline fixture in `elixir-ash-build.yml`.  Both files
   parsed-error at `node bin/cli.js generate`, so every downstream
   failure was invisible.  Fix in #529 + #541.  Lesson: a hard grammar
   break needs a corpus sweep, not just an "in-tree fixtures
@@ -1243,7 +1243,7 @@ errors across the whole tree) without needing deps. It does **not** catch
 `--warnings-as-errors` traps (unused alias/var, undefined refs) or Ash
 semantics — so write the emitters defensively (fully-qualified module refs so
 no unused `alias`; underscore statically-unused vars; `require Logger` only
-where a `Logger` macro is used) and treat the **`build-generated-phoenix` CI
+where a `Logger` macro is used) and treat the **`build-generated-elixir-ash` CI
 job as the authoritative gate**. On #1020 the local syntax pass + careful
 emission got it green on the first CI compile.
 

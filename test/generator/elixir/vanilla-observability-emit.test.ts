@@ -8,7 +8,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 // JSON-per-line envelope as the Ash, Hono, .NET, Java, and Python backends.
 // This test pins the emission shape; the boot-and-hit gate that asserts the
 // events actually land on stdout under `mix phx.server` lives in
-// `test/e2e/observability-events-phoenix-vanilla.test.ts` (LOOM_OBS_E2E_PHOENIX_VANILLA=1).
+// `test/e2e/observability-events-elixir-vanilla.test.ts` (LOOM_OBS_E2E_PHOENIX_VANILLA=1).
 // ---------------------------------------------------------------------------
 
 const SOURCE = `

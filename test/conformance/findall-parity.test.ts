@@ -7,7 +7,7 @@
 // That structural equivalence is the whole correctness argument — and the
 // strict build gates already compile the equivalent author-declared shape
 // (`dotnet-build/dapper.ddd`'s `retrieval … { where: NameIs(n) }`,
-// `java-build/retrieval.ddd`, `phoenix-build/roster.ddd`,
+// `java-build/retrieval.ddd`, `elixir-ash-build/roster.ddd`,
 // `python-build/domain.ddd`).  What no gate pinned was that the *desugar*
 // keeps producing that shape on every backend; if `synthesizeFindAllRetrievals`
 // or a backend's retrieval emitter drifts, this fast (no-docker) test catches

@@ -31,7 +31,7 @@ async function generate(file: string): Promise<Map<string, string>> {
   return generateSystems(doc.parseResult.value as Model).files;
 }
 
-const DISPATCH = "test/e2e/fixtures/phoenix-build/dispatch.ddd";
+const DISPATCH = "test/e2e/fixtures/elixir-ash-build/dispatch.ddd";
 
 describe("Phoenix workflow instance read endpoints", () => {
   it("emits the saga-state schema for the correlation-bearing workflow", async () => {

@@ -23,7 +23,7 @@ on:
       - 'src/generator/elixir/telemetry-emit.ts'
       - 'src/generator/_obs/**'
       - 'src/platform/elixir.ts'
-      - 'test/e2e/observability-events-phoenix-vanilla.test.ts'
+      - 'test/e2e/observability-events-elixir-vanilla.test.ts'
       - 'package.json'
       - '.github/workflows/elixir-vanilla-obs-e2e.yml'
   workflow_dispatch:
@@ -107,7 +107,7 @@ jobs:
           # `docker run postgres` step when the URL is supplied.
           LOOM_OBS_PG_URL: 'postgres://postgres:postgres@127.0.0.1:5432'
           LOOM_OBS_PG_DB: 'api'
-        run: npx vitest run test/e2e/observability-events-phoenix-vanilla.test.ts --reporter=verbose
+        run: npx vitest run test/e2e/observability-events-elixir-vanilla.test.ts --reporter=verbose
 
       - name: Surface failure context
         if: failure()

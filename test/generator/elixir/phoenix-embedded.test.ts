@@ -3,7 +3,7 @@
 // jsonb column on the root via `attribute :lines, {:array, Line}` —
 // instead of child tables + `has_many`.  Mirrors EF owned-`.ToJson()`
 // (.NET) and the Drizzle jsonb column (TS).  The `mix compile` gate
-// lives in test/e2e/generated-phoenix-build.test.ts.
+// lives in test/e2e/generated-elixir-ash-build.test.ts.
 
 import { describe, expect, it } from "vitest";
 import { generateSystems } from "../../../src/system/index.js";

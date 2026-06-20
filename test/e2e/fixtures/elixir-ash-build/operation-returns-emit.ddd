@@ -5,7 +5,7 @@
 // workflow emits (no persistence, so it fits the in-memory run fn — the
 // per-context Dispatcher consumes it identically).  `add`/`remove` stay gated
 // on ash (they need a `manage_relationship` changeset the generic action can't
-// carry).  Compiled by `build-generated-phoenix` so the broadcast inside the
+// carry).  Compiled by `build-generated-elixir-ash` so the broadcast inside the
 // generic action passes `mix compile --warnings-as-errors` against real Ash 3.x.
 system Inventory {
   subdomain Ops {

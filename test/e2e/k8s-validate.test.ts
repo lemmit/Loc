@@ -49,7 +49,7 @@ const TOOLS = ENABLED && hasTool("helm", ["version"]) && hasTool("kubeconform", 
 // secret, and a Java SPRING_DATASOURCE_PASSWORD secret.
 const FIXTURES: string[] = [
   "web/src/examples/inheritance-system.ddd", // hono backend + react frontend (ingress, DB secret)
-  "web/src/examples/storefront-phoenix.ddd", // phoenix (SECRET_KEY_BASE → Secret)
+  "web/src/examples/storefront-elixir.ddd", // phoenix (SECRET_KEY_BASE → Secret)
   "examples/acme.ddd", // multi-deployable showcase
 ];
 

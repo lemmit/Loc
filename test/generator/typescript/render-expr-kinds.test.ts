@@ -3,7 +3,7 @@
 // regressions.  Mirrors the dispatch table in
 // `src/generator/typescript/render-expr.ts:28-88`.
 //
-// Pattern follows `test/generator/phoenix/phoenix-render-expr.test.ts`.
+// Pattern follows `test/generator/elixir/phoenix-render-expr.test.ts`.
 // These tests run in <50ms total; the TS emitter is pure string emission
 // with no IO or class instantiation.
 

@@ -18,7 +18,7 @@ import { generateSystems } from "../../../src/system/index.js";
 // (load-or-allocate for `create`, route-or-drop+log for `on`).  An
 // event-triggered-only workflow has no `run/2` / HTTP command surface.  The
 // `mix compile --warnings-as-errors` gate lives in
-// test/e2e/generated-phoenix-build.test.ts (dispatch.ddd fixture).
+// test/e2e/generated-elixir-ash-build.test.ts (dispatch.ddd fixture).
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -38,7 +38,7 @@ async function generate(file: string): Promise<Map<string, string>> {
   return generateSystems(doc.parseResult.value as Model).files;
 }
 
-const DISPATCH = "test/e2e/fixtures/phoenix-build/dispatch.ddd";
+const DISPATCH = "test/e2e/fixtures/elixir-ash-build/dispatch.ddd";
 const base = "phoenix_app/lib/phoenix_app/fulfillment";
 
 describe("Phoenix in-process event dispatch emission", () => {
@@ -159,7 +159,7 @@ describe("Phoenix in-process event dispatch emission", () => {
   });
 
   it("emits no dispatch wiring for a channel-less project (byte-identical / no-op)", async () => {
-    const files = await generate("test/e2e/fixtures/phoenix-build/roster.ddd");
+    const files = await generate("test/e2e/fixtures/elixir-ash-build/roster.ddd");
     const keys = [...files.keys()];
     // No dispatcher, no reactor handlers, no saga schema.
     expect(keys.some((k) => k.endsWith("/dispatcher.ex"))).toBe(false);

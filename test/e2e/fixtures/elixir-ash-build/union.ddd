@@ -1,7 +1,7 @@
 // Discriminated-union finds on the Phoenix/Ash backend — exercises P4d union
 // emission (the controller `tag_<union>/1` serializer with one struct-pattern
 // clause per variant → the cross-backend `%{type: tag, …}` wire) under
-// `mix compile --warnings-as-errors` in the generated-phoenix CI matrix.
+// `mix compile --warnings-as-errors` in the generated-elixir-ash CI matrix.
 //
 // The find returns an anonymous `Order or Cancel` union; the read action is a
 // single-get on the repo's aggregate, and the controller tags the result.

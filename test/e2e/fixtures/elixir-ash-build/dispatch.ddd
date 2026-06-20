@@ -3,7 +3,7 @@
 // shared Hono / .NET dispatch fixture): OrderPlaced STARTS the
 // OrderFulfillment saga instance (a `create` allocating the correlation
 // row) which emits ShipmentRequested; that event routes back to the SAME
-// instance via an `on(...) by s.order` continuation.  The phoenix-build
+// instance via an `on(...) by s.order` continuation.  The elixir-ash-build
 // gate compiles the emitted dispatcher + reactor handlers + saga Ecto
 // schema under `mix compile --warnings-as-errors`.
 system FulfillmentSys {

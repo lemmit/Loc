@@ -1,5 +1,5 @@
 // Union-find with an `error` variant on the Phoenix/Ash backend — the find
-// re-shape (exception-less.md A4).  Compiled by generated-phoenix-build under
+// re-shape (exception-less.md A4).  Compiled by generated-elixir-ash-build under
 // `mix compile --warnings-as-errors` so the union-find controller action —
 // `%Ctx.NotFound{}` → 404 ProblemDetails, success → the tagged `%{type:
 // "Order", …}` 200 body — passes alongside the `tag_<union>/1` serializer that

@@ -1,7 +1,7 @@
 name: Elixir / Ash Dialyzer verification
 
 # Runs `mix dialyzer` against a generated Phoenix project to catch
-# structural-typing bugs that the compile gate (`phoenix-build.yml`)
+# structural-typing bugs that the compile gate (`elixir-ash-build.yml`)
 # can't see: `@spec` / implementation mismatches, dead pattern arms,
 # `Ash.Error.t()` shape drift in error tuples, etc.
 #
@@ -17,13 +17,13 @@ name: Elixir / Ash Dialyzer verification
 #   - Dialyxir dev-only dep added to the generated mix.exs (this PR).
 #
 # The actual generate + dialyze loop lives in
-# `test/e2e/generated-phoenix-dialyzer.test.ts` (entrypoint:
+# `test/e2e/generated-elixir-ash-dialyzer.test.ts` (entrypoint:
 # `npm run test:dialyzer-phoenix`); this workflow pre-generates,
 # restores the PLT cache, then hands off.  PLT generation is the
 # slow part (cold ~5-15 min); warm runs with the cache restored
 # complete in ~30-60s.
 #
-# Triggers — narrower than phoenix-build.yml: only the workflow file
+# Triggers — narrower than elixir-ash-build.yml: only the workflow file
 # + the test + the generator pieces that produce the typed surface
 # Dialyzer reads.  Won't fire on a touch to an unrelated emitter.
 
@@ -34,8 +34,8 @@ on:
       - 'src/generator/elixir/**'
       - 'src/platform/elixir.ts'
       - 'examples/**'
-      - 'test/e2e/fixtures/phoenix-build/**'
-      - 'test/e2e/generated-phoenix-dialyzer.test.ts'
+      - 'test/e2e/fixtures/elixir-ash-build/**'
+      - 'test/e2e/generated-elixir-ash-dialyzer.test.ts'
       - 'package.json'
       - '.github/workflows/elixir-ash-dialyzer.yml'
   pull_request:
@@ -43,8 +43,8 @@ on:
       - 'src/generator/elixir/**'
       - 'src/platform/elixir.ts'
       - 'examples/**'
-      - 'test/e2e/fixtures/phoenix-build/**'
-      - 'test/e2e/generated-phoenix-dialyzer.test.ts'
+      - 'test/e2e/fixtures/elixir-ash-build/**'
+      - 'test/e2e/generated-elixir-ash-dialyzer.test.ts'
       - 'package.json'
       - '.github/workflows/elixir-ash-dialyzer.yml'
   workflow_dispatch:
@@ -57,7 +57,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  dialyze-generated-phoenix:
+  dialyze-generated-elixir-ash:
     runs-on: ubuntu-latest
     # Cold PLT build is 5-15 min depending on dep set; warm cached
     # runs are ~30-60s.  30min cap leaves headroom for the first
@@ -81,7 +81,7 @@ jobs:
       - name: Pre-generate acme-lv fixture (for cache key)
         run: |
           mkdir -p /tmp/ci/phoenix-dialyzer/acme-lv/out
-          node bin/cli.js generate system test/e2e/fixtures/phoenix-build/acme-lv.ddd \
+          node bin/cli.js generate system test/e2e/fixtures/elixir-ash-build/acme-lv.ddd \
             -o /tmp/ci/phoenix-dialyzer/acme-lv/out
 
       - name: Compute Dialyzer dep + PLT signature

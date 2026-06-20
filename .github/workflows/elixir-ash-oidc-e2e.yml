@@ -1,4 +1,4 @@
-name: Phoenix OIDC auth (full-compose runtime e2e)
+name: Elixir / Ash OIDC auth (full-compose runtime e2e)
 
 # Runtime-verifies the Phoenix OIDC turnkey-auth chain (D-AUTH-OIDC) through
 # the GENERATED docker-compose stack.  Boots the emitted `docker-compose.yml`
@@ -26,10 +26,10 @@ on:
     paths:
       - 'src/generator/elixir/**'
       - 'src/system/index.ts'
-      - 'test/e2e/auth-oidc-phoenix-compose-e2e.test.ts'
-      - 'test/e2e/fixtures/phoenix-build/auth-oidc.ddd'
+      - 'test/e2e/auth-oidc-elixir-compose-e2e.test.ts'
+      - 'test/e2e/fixtures/elixir-ash-build/auth-oidc.ddd'
       - 'package.json'
-      - '.github/workflows/phoenix-oidc-e2e.yml'
+      - '.github/workflows/elixir-ash-oidc-e2e.yml'
   workflow_dispatch:
 
 permissions:
@@ -40,7 +40,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  phoenix-oidc-e2e:
+  elixir-ash-oidc-e2e:
     runs-on: ubuntu-latest
     # The Phoenix release image build (cold mix deps.get + compiling Ash
     # ~6-10min) + Keycloak boot dominate.  25min cap.

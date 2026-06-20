@@ -83,7 +83,7 @@ defmodule ${appModule}.MixProject do
       # optional deps for the \`mix ash_postgres.gen.resources\` task
       # and aren't pulled by \`mix deps.get --only prod\`, which surfaces
       # as "module X is not available" warnings.  Under the
-      # phoenix-build workflow's \`mix compile --warnings-as-errors\`,
+      # elixir-ash-build workflow's \`mix compile --warnings-as-errors\`,
       # any warning fails the build.  Declaring them here with
       # \`runtime: false\` resolves the compile-time references without
       # pulling them into the application start sequence.

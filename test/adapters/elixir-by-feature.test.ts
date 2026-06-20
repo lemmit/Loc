@@ -1,7 +1,7 @@
 // byFeature — real LayoutAdapter for phoenixLiveView (F7c).  Pins
 // every category to the exact path the existing Phoenix orchestrator
 // writes today.  Verified against
-// `generate system web/src/examples/storefront-phoenix.ddd`.
+// `generate system web/src/examples/storefront-elixir.ddd`.
 
 import { describe, expect, it } from "vitest";
 import type { EmitCtx } from "../../src/generator/_adapters/index.js";

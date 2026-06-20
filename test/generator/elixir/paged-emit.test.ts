@@ -5,7 +5,7 @@
 // `page: [limit:, offset:, count: true]`, and maps the `%Ash.Page.Offset{}`
 // to the cross-backend `{ items, page, pageSize, total, totalPages }` envelope.
 // The generated project compiles against real Ash 3.x under
-// `mix compile --warnings-as-errors` (test/e2e/fixtures/phoenix-build/paged.ddd);
+// `mix compile --warnings-as-errors` (test/e2e/fixtures/elixir-ash-build/paged.ddd);
 // these unit tests pin the emitted Elixir shape.
 
 import { describe, expect, it } from "vitest";

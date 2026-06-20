@@ -3,7 +3,7 @@
 // the array below.
 import storefrontSystemSource from "./storefront-system.ddd?raw";
 import storefrontDotnetSource from "./storefront-dotnet.ddd?raw";
-import storefrontPhoenixSource from "./storefront-phoenix.ddd?raw";
+import storefrontElixirSource from "./storefront-elixir.ddd?raw";
 import salesSystemSource from "./sales-system.ddd?raw";
 import bankingSystemSource from "./banking-system.ddd?raw";
 import inventorySystemSource from "./inventory-system.ddd?raw";
@@ -310,9 +310,9 @@ export const examples: LoomExample[] = [
       "The Storefront domain on a single .NET deployable (EF Core + Mediator) serving /api/* and a React SPA (shadcn pack) from wwwroot/. Files-only in the playground (.NET doesn't boot in-browser).",
   },
   {
-    id: "storefront-phoenix",
+    id: "storefront-elixir",
     label: "Storefront · fullstack Phoenix LiveView",
-    source: storefrontPhoenixSource,
+    source: storefrontElixirSource,
     blurb:
       "The Storefront domain on Elixir/Ash — aggregates lower to Ash.Resource, the `checkout` saga to a Reactor, views to Ash.Query. Files-only in the playground (BEAM, not Node).",
   },

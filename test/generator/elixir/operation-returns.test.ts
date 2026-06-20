@@ -6,7 +6,7 @@
 // success → 200 + body, an `error`-payload variant → its RFC-7807
 // ProblemDetails status.  The generated project compiles under
 // `mix compile --warnings-as-errors`
-// (test/e2e/fixtures/phoenix-build/operation-returns.ddd).
+// (test/e2e/fixtures/elixir-ash-build/operation-returns.ddd).
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";

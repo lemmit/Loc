@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Observability events on the vanilla Phoenix backend — vanilla mirror of
-// `observability-events-phoenix.test.ts` (Ash).  Generates a vanilla
+// `observability-events-elixir-ash.test.ts` (Ash).  Generates a vanilla
 // Phoenix project, brings up a throwaway postgres container, `mix
 // deps.get && mix phx.server`, hits /health, SIGTERMs, then asserts the
 // JSON-per-line stream from the rendered <App>.LogFormatter carries the

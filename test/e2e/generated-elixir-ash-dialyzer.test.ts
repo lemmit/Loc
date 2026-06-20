@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 // ---------------------------------------------------------------------------
 // Generated Phoenix project passes `mix dialyzer` against the
 // pre-shipped `.dialyzer_ignore.exs` filter.  Mirrors
-// `generated-phoenix-build.test.ts` (the compile gate) — emit a
+// `generated-elixir-ash-build.test.ts` (the compile gate) — emit a
 // fixture via `ddd generate system`, then run dialyzer inside the
 // same hexpm/elixir docker image.
 //
@@ -38,7 +38,7 @@ import { describe, expect, it } from "vitest";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
 const cli = path.join(repoRoot, "bin", "cli.js");
-const fixturesDir = path.join(here, "fixtures", "phoenix-build");
+const fixturesDir = path.join(here, "fixtures", "elixir-ash-build");
 
 const ENABLED = process.env.LOOM_PHOENIX_DIALYZER === "1";
 
@@ -48,7 +48,7 @@ describe.skipIf(!ENABLED)(
     // Single fixture first — Dialyzer is slow (cold PLT is 5-15 min);
     // matrix expansion lands after the first run is confirmed green.
     // acme-lv.ddd is the canonical LiveView fixture and the same
-    // entrypoint generated-phoenix-build.test.ts exercises.
+    // entrypoint generated-elixir-ash-build.test.ts exercises.
     it("acme-lv.ddd → mix dialyzer is clean against the shipped ignore filter", () => {
       const fixturePath = path.join(fixturesDir, "acme-lv.ddd");
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;

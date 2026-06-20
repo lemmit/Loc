@@ -162,7 +162,7 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
   it("operation-modal form (renderModal path) honours VO nesting", async () => {
     // The walker's renderModal builds its input list from operation
     // params via the same renderFieldInputForField; ctx.valueObjectsByName
-    // threads through.  storefront-phoenix's `topUp(amount: Money)`
+    // threads through.  storefront-elixir's `topUp(amount: Money)`
     // already exercises this path — the test here pins the shape
     // explicitly against a minimal fixture.
     const files = await generateSystemFiles(`
