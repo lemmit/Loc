@@ -1,17 +1,20 @@
-import type { AstNodeDescription, MaybePromise } from "langium";
+import type { AstNodeDescription, LangiumDocuments, MaybePromise } from "langium";
 import { AstUtils } from "langium";
 import {
   type CompletionAcceptor,
   type CompletionContext,
   DefaultCompletionProvider,
+  type LangiumServices,
   type NextFeature,
 } from "langium/lsp";
 import { CompletionItemKind } from "vscode-languageserver";
+import { builtinCapabilities } from "../../macros/prelude.js";
 import { isCollectionOp } from "../../util/collection-ops.js";
 import {
   type EnumDecl,
   isAggregate,
   isBoundedContext,
+  isCapability,
   isContainment,
   isDerivedProp,
   isEntityPart,
@@ -25,6 +28,7 @@ import {
   isPostfixChain,
   isProperty,
   isValueObject,
+  type Model,
 } from "../generated/ast.js";
 import {
   type DddType,
@@ -50,6 +54,14 @@ import {
 //      gets a `detail` string ("aggregate", "valueobject", "enum",
 //      "event", …) so the popup is informative at a glance.
 //
+//   3. Capability-name completion: in `with <Cap>` / `implements <Cap>`
+//      position the name is a plain ID token resolved by the macro
+//      expander's inventory (built-ins + declared `capability`s), not a
+//      Langium cross-reference, so the default offers nothing.  We fill
+//      both built-ins and workspace-declared capabilities there — the
+//      completion counterpart to the go-to-def / find-implementors
+//      bridges in ddd-definition.ts / ddd-references.ts.
+//
 // Everything else (keyword completion, scope-driven candidates) is
 // handled by the default and the existing `DddScopeProvider`
 // (which already restricts containment-part lookup to the same
@@ -57,6 +69,13 @@ import {
 // ---------------------------------------------------------------------------
 
 export class DddCompletionProvider extends DefaultCompletionProvider {
+  private readonly documents: LangiumDocuments;
+
+  constructor(services: LangiumServices) {
+    super(services);
+    this.documents = services.shared.workspace.LangiumDocuments;
+  }
+
   protected override completionFor(
     context: CompletionContext,
     next: NextFeature,
@@ -71,7 +90,55 @@ export class DddCompletionProvider extends DefaultCompletionProvider {
       // there's no overlap (MemberName is `ID | 'id'`), so this is a
       // no-op safety net.
     }
+    // Capability-name arm: `with <Cap>` (MacroCall.name) and
+    // `implements <Cap>` (ImplementsDecl.cap) are plain ID slots.
+    if (this.isCapabilityNameSlot(context, next)) {
+      this.completeCapabilityNames(context, acceptor);
+    }
     return super.completionFor(context, next, acceptor);
+  }
+
+  /** The `name` slot of a `MacroCall` (`with <Cap>`) or the `cap` slot of an
+   *  `ImplementsDecl` (`implements <Cap>`) — both plain ID tokens the macro
+   *  expander resolves by name, invisible to the cross-reference index.  The two
+   *  slots surface differently: at `with ` Langium reports `next.type` =
+   *  `MacroCall`; at the empty `implements ` slot `next.type` is undefined and
+   *  only `next.property` survives, so we pair `cap` with the cursor node's
+   *  `$type`. */
+  private isCapabilityNameSlot(context: CompletionContext, next: NextFeature): boolean {
+    return (
+      (next.type === "MacroCall" && next.property === "name") ||
+      (next.property === "cap" && context.node?.$type === "ImplementsDecl")
+    );
+  }
+
+  /** Offer every capability name in scope: the built-in prelude
+   *  (`auditable` / `softDeletable`) plus every `capability` declared across
+   *  the workspace.  `with` also accepts real macros — those still come from
+   *  the default keyword/scope passes, so this arm is purely additive. */
+  private completeCapabilityNames(context: CompletionContext, acceptor: CompletionAcceptor): void {
+    const seen = new Set<string>();
+    for (const name of builtinCapabilities().keys()) {
+      seen.add(name);
+      acceptor(context, {
+        label: name,
+        kind: CompletionItemKind.Interface,
+        detail: "capability (built-in)",
+      });
+    }
+    for (const doc of this.documents.all) {
+      const root = doc.parseResult?.value as Model | undefined;
+      if (!root) continue;
+      for (const node of AstUtils.streamAllContents(root)) {
+        if (!isCapability(node) || seen.has(node.name)) continue;
+        seen.add(node.name);
+        acceptor(context, {
+          label: node.name,
+          kind: CompletionItemKind.Interface,
+          detail: "capability",
+        });
+      }
+    }
   }
 
   protected override createReferenceCompletionItem(nodeDescription: AstNodeDescription) {
