@@ -13,7 +13,9 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  ContainmentIR,
   EnrichedAggregateIR,
+  EntityPartIR,
   EnumIR,
   SystemIR,
   TypeIR,
@@ -52,8 +54,84 @@ export function emitVanillaSchemas(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}.ex`,
       renderSchema(appModule, ctxModule, agg, enumsByName, schemaPrefix),
     );
+    // Each entity part (`entity Line { … }`) becomes an Ecto `embedded_schema`
+    // module the aggregate `embeds_many`/`embeds_one`s — the vanilla analogue of
+    // the Ash embedded resource.  Stored inline as the parent's jsonb column.
+    for (const part of agg.parts) {
+      out.set(
+        `lib/${appSnake}/${ctxSnake}/${snake(part.name)}.ex`,
+        renderPartSchema(appModule, ctxModule, part, enumsByName),
+      );
+    }
   }
 }
+
+/** Embed line for one containment — `embeds_many :lines, App.Ctx.Line` for a
+ *  collection, `embeds_one` otherwise. */
+function embedLine(appModule: string, ctxModule: string, c: ContainmentIR): string {
+  const partMod = `${appModule}.${ctxModule}.${upperFirst(c.partName)}`;
+  return c.collection
+    ? `    embeds_many :${snake(c.name)}, ${partMod}`
+    : `    embeds_one :${snake(c.name)}, ${partMod}`;
+}
+
+/** An entity part as an Ecto `embedded_schema` — scalar fields + nested embeds,
+ *  a Jason encoder over the wire atoms, and a `cast/3` changeset (used by the
+ *  parent's `cast_embed` when present). */
+function renderPartSchema(
+  appModule: string,
+  ctxModule: string,
+  part: EntityPartIR,
+  enumsByName: Map<string, EnumIR>,
+): string {
+  const moduleName = `${appModule}.${ctxModule}.${upperFirst(part.name)}`;
+  const fieldLines = part.fields
+    .map((f) => renderFieldLine(f, enumsByName))
+    .filter(Boolean)
+    .join("\n");
+  const containLines = (part.contains ?? [])
+    .map((c) => embedLine(appModule, ctxModule, c))
+    .join("\n");
+  const schemaBody = [fieldLines, containLines].filter(Boolean).join("\n");
+  // Cast list: scalar columns only (nested embeds round-trip via `cast_embed`).
+  const castCols = part.fields
+    .filter((f) => !SYSTEM_FIELDS.has(f.name) && mapTypeToEcto(f.type, enumsByName))
+    .map((f) => `:${snake(f.name)}`);
+  const castEmbeds = (part.contains ?? [])
+    .map((c) => `    |> cast_embed(:${snake(c.name)})`)
+    .join("\n");
+  // Wire shape: id, scalar fields, then containment names (mirrors the Ash
+  // embedded resource's `@derive Jason.Encoder` atom list).
+  const wireAtoms = [
+    ":id",
+    ...part.fields
+      .filter((f) => mapTypeToEcto(f.type, enumsByName))
+      .map((f) => `:${snake(f.name)}`),
+    ...(part.contains ?? []).map((c) => `:${snake(c.name)}`),
+  ].join(", ");
+  const castBlock = castEmbeds ? `\n${castEmbeds}` : "";
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc false
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @derive {Jason.Encoder, only: [${wireAtoms}]}
+  embedded_schema do
+${schemaBody}
+  end
+
+  @doc false
+  def changeset(struct, attrs) do
+    struct
+    |> cast(attrs, [${castCols.join(", ")}])${castBlock}
+  end
+end
+`;
+}
+
+const SYSTEM_FIELDS = new Set(["id", "createdAt", "updatedAt"]);
 
 function renderSchema(
   appModule: string,
@@ -73,6 +151,12 @@ function renderSchema(
     (f) => `    field :${provColumn(f.name)}, ${appModule}.Provenance.Json`,
   );
   const fieldLines = [...declaredLines, ...provLines].join("\n");
+  // Entity containments (`contains items: Item[]`) → `embeds_many`/`embeds_one`
+  // over the part's `embedded_schema` module (emitted above), stored inline in
+  // one jsonb column — the vanilla analogue of the Ash embedded resource.
+  // Operation bodies append the part struct + `put_embed` (`context-emit.ts`).
+  const containLines = agg.contains.map((c) => embedLine(appModule, ctxModule, c)).join("\n");
+  const schemaBody = [fieldLines, containLines].filter(Boolean).join("\n");
   const prefixLine = schemaPrefix ? `  @schema_prefix ${JSON.stringify(schemaPrefix)}\n` : "";
 
   return `# Auto-generated.
@@ -84,7 +168,7 @@ defmodule ${moduleName} do
   @foreign_key_type :binary_id
 ${prefixLine}
   schema "${tableName}" do
-${fieldLines}
+${schemaBody}
     timestamps(type: :utc_datetime)
   end
 end

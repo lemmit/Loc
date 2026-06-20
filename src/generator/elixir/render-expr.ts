@@ -399,6 +399,9 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
 
 function renderNew(fields: { name: string; value: string }[], e: NewExpr, ctx: RenderCtx): string {
   const body = fields.map((f) => `${snake(f.name)}: ${f.value}`).join(", ");
+  // The part is a struct on both foundations: an embedded Ash resource on Ash,
+  // an Ecto `embedded_schema` on vanilla (`%Ctx.Part{}`) — see schema-emit's
+  // `embeds_many`.
   return `%${ctx.contextModule}.${upperFirst(e.partName)}{${body}}`;
 }
 
