@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 // as flat snake_case keys — the same shape the Hono pino stream
 // produces).
 //
-// Postgres comes from docker (postgres:16-alpine) by default; set
+// Postgres comes from docker (postgres:18-alpine) by default; set
 // LOOM_OBS_PG_URL=postgresql+asyncpg://user:pass@host:port/db to use a
 // running instance instead (the local-dev path on docker-less
 // machines).
@@ -119,7 +119,7 @@ describe.skipIf(!ENABLED)(
           execSync(
             `docker run -d --rm --name ${pgContainer} ` +
               `-e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=app ` +
-              `-p ${pgPort}:5432 postgres:16-alpine`,
+              `-p ${pgPort}:5432 postgres:18-alpine`,
             { stdio: "pipe", timeout: 60_000 },
           );
           startedContainer = true;

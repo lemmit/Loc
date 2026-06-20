@@ -102,7 +102,7 @@ describe.skipIf(!ENABLED)("Phoenix embeds React — runtime e2e (LOOM_EMBED_E2E_
         execSync(
           `docker run -d --rm --name ${pgContainer} ` +
             `-e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=${externalPgDb} ` +
-            `-p ${pgPort}:5432 postgres:16-alpine`,
+            `-p ${pgPort}:5432 postgres:18-alpine`,
           { stdio: "pipe", timeout: 60_000 },
         );
         const pgDeadline = Date.now() + 60_000;

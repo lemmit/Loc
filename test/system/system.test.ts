@@ -67,7 +67,7 @@ describe("system / module / deployable", () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);
     const compose = files.get("docker-compose.yml")!;
-    expect(compose).toMatch(/image: postgres:16-alpine/);
+    expect(compose).toMatch(/image: postgres:18-alpine/);
     expect(compose).toMatch(/api:\s*\n\s*build: \.\/api/);
     expect(compose).toMatch(/catalog_web:\s*\n\s*build: \.\/catalog_web/);
     expect(compose).toMatch(/8080:8080/);

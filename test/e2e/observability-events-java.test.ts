@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 //   request_end {status,durationMs} → server_shutdown → server_drained
 //
 // Catalog lines are flat JSON objects (see emit/observability.ts).
-// Postgres comes from docker (postgres:16-alpine) by default; set
+// Postgres comes from docker (postgres:18-alpine) by default; set
 // LOOM_OBS_PG_URL=jdbc:postgresql://host:port/db to use a running
 // instance instead (the local-dev path on docker-less machines).
 // ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ describe.skipIf(!ENABLED)(
         if (!pgUrl) {
           const pgPort = await freePort();
           pgContainer = execSync(
-            `docker run -d --rm -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=obs_api -p ${pgPort}:5432 postgres:16-alpine`,
+            `docker run -d --rm -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=obs_api -p ${pgPort}:5432 postgres:18-alpine`,
             { encoding: "utf8" },
           ).trim();
           pgUrl = `jdbc:postgresql://127.0.0.1:${pgPort}/obs_api`;
