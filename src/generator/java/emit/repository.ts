@@ -160,6 +160,7 @@ export function renderJavaRepositoryInterface(
     ``,
     anyPaged ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
+    `import ${ctx.basePkg}.domain.enums.*;`,
     ``,
     `@org.jmolecules.ddd.annotation.Repository`,
     `public interface ${agg.name}Repository {`,
@@ -290,6 +291,7 @@ export function renderJavaSpringDataRepository(
     ``,
     ctx.entityPkg !== ctx.infraPkg ? `import ${ctx.entityPkg}.${agg.name};` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
+    `import ${ctx.basePkg}.domain.enums.*;`,
     ``,
     `public interface ${agg.name}JpaRepository extends JpaRepository<${agg.name}, ${idClass}>${anyReified ? `, JpaSpecificationExecutor<${agg.name}>` : ""} {`,
     ...allMethodLines,
@@ -424,6 +426,7 @@ export function renderJavaRepositoryImpl(
       ? `import ${ctx.persistencePkg}.OffsetLimitPageRequest;`
       : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
+    `import ${ctx.basePkg}.domain.enums.*;`,
     ``,
     `@Repository`,
     `public class ${agg.name}RepositoryImpl implements ${agg.name}Repository {`,

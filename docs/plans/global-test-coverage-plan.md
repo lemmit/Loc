@@ -97,6 +97,22 @@ Building 6 backends × 30 features = 180 hand-maintained fixtures the old way wo
   - `resources` — queue client missing `@types/amqplib` (TS7016). Fixed: the rabbitmq ResourceAdapter declares the dep.
 - **The 7th is a FEATURE GAP, not an emitter bug** (still skip-listed, honestly labelled): `workflow-view` exercises **workflow own-state mutation** (`create(p) by p.order { attempts := 1 }`) — documented as "own-state mutation" (workflow.md) but not yet lowered: the assignment falls through to lower-workflow.ts's `__bad__` placeholder (TS2304). Wiring it is a **cross-backend slice**, not a one-line emitter fix — a new `assign` `WorkflowStmtIR` kind feeding all five workflow backends, **and** making the saga-state row writable (Java/.NET/Phoenix state classes are immutable today: package-private fields + getters, no setters / `private set`). Tracked as a Phase-5 feature item below, not a compile-tier skip to "just fix".
 
+**Landed — Phase 1 compile tier extended to Java + Python:**
+
+The Hono compile tier now has two siblings, so the corpus is a **compile guarantee on three backends** from the one source of truth:
+
+- `test/e2e/corpus-java-build.test.ts` (`LOOM_JAVA_BUILD`, sharded by `LOOM_CORPUS_JAVA_CASE`, `npm run test:java-corpus`) — generates each corpus feature for `java`, runs `gradle testClasses bootJar`. **20 of 24 features compile.**
+- `test/e2e/corpus-python-build.test.ts` (`LOOM_PYTHON_BUILD`, sharded by `LOOM_CORPUS_PYTHON_CASE`, `npm run test:python-corpus`) — generates each corpus feature for `python`, runs `uv sync` + `ruff check` + `mypy --strict` (+ `pytest`). **21 of 25 features pass.**
+
+The Java tier immediately surfaced (and this slice **fixes**) a real Java bug: **enum-typed find/operation parameters weren't importing `domain.enums.*`** in the repository interface / JPA repo / repository impl / controller (javac "cannot find symbol" on the enum type). Fixed by adding the (always-safe, `_Namespace.java`-backed) enums wildcard import alongside `domain.ids.*`, matching what entity/dto/events already emit unconditionally — unblocking every enum-using feature.
+
+The remaining failures are skip-listed with precise reasons (the compile-tier model: surface → skip-list → fix as follow-up), split into **platform limitations** (the CLI refuses at generate-time, by design) and **real bugs**:
+
+- **Java** — *limitations:* `provenance` (runtime node/dotnet-only, DBT-1), `embedded` (jsonb id-array column unmapped on java). *Bugs:* `inheritance` (base `inspect` references subclass-owned fields → cannot find symbol), `event-sourcing` (repo impl references an undefined symbol).
+- **Python** — *limitation:* `provenance` (node/dotnet-only). *Bugs:* `value-collections` (repo `_create` omits value-object-array args → mypy missing-arg), `stamps` (unused `datetime.UTC` import → ruff F401), `resources` (unused workflow resource-let local → ruff F841).
+
+(`workflow-view` stays skip-listed on both as the documented cross-backend own-state-mutation feature gap.)
+
 **Landed — Phase 0 migration (legacy dup-set collapse):**
 
 A `materializeCorpusFixture(feature, backend, dir)` helper lets the per-backend build gates generate a shared corpus feature (via a `corpus:<feature>` sentinel) instead of a per-backend duplicate `.ddd`. Two dup-sets collapsed onto the corpus, each cell compile-verified on-host (node/java/python) where the sandbox allows:

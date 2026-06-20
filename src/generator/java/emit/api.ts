@@ -285,6 +285,7 @@ export function renderJavaController(
     ...[...unionImports].sort().map((i) => `import ${i};`),
     declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
+    `import ${ctx.basePkg}.domain.enums.*;`,
     ``,
     `@RestController`,
     `@RequestMapping("${ctx.routePrefix ?? ""}/${route}")`,
