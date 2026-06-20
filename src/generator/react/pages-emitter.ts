@@ -73,6 +73,12 @@ export interface PageEmitContext {
    *  ui-scope component with the same name overrides the top-level
    *  one (the ui-scope iteration runs second and wins). */
   topLevelComponents: readonly ComponentIR[];
+  /** True when this frontend opts into `auth: ui` against an `auth: required`
+   *  backend — `useSession()` + the verified claims are then available, so a
+   *  page's `requires` gate renders a client-side `<Forbidden/>` guard.
+   *  Optional: only the React host wires the page gate today (Vue/Svelte reuse
+   *  this context but don't yet consume it), so absent means "ungated". */
+  authUi?: boolean;
 }
 
 /** Compute the relative-path prefix from a page's emit
@@ -296,6 +302,9 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
           pageRoutes,
           externFunctionNames,
           page.derived,
+          // `page { requires <expr> }` UI gate — only meaningful when the
+          // frontend has a verified session to evaluate it against.
+          ctx.authUi ? page.requires : undefined,
         ),
       );
     }

@@ -33,6 +33,7 @@ import type {
   UiFunctionIR,
   UiIR,
   UiNotificationIR,
+  UserIR,
 } from "../types/loom-ir.js";
 import { lowerExpr } from "./lower-expr.js";
 import { lowerDerived } from "./lower-members.js";
@@ -87,7 +88,7 @@ export function lowerLayout(layout: Layout): LayoutIR {
   return { name: layout.name, header, sidebar, footer };
 }
 
-export function lowerUi(ui: Ui): UiIR {
+export function lowerUi(ui: Ui, user?: UserIR): UiIR {
   const pages: PageIR[] = [];
   const components: ComponentIR[] = [];
   const apiParams: UiApiParamIR[] = [];
@@ -104,7 +105,7 @@ export function lowerUi(ui: Ui): UiIR {
     const path = [...parent, snake(area.name)];
     for (const member of area.members) {
       if (member.$type === "Page") {
-        const p = lowerPage(member);
+        const p = lowerPage(member, user);
         p.area = path;
         p.emitPath = `src/pages/${path.join("/")}/${snake(p.name)}.tsx`;
         pages.push(p);
@@ -114,7 +115,7 @@ export function lowerUi(ui: Ui): UiIR {
     }
   };
   for (const m of ui.members) {
-    if (m.$type === "Page") pages.push(lowerPage(m));
+    if (m.$type === "Page") pages.push(lowerPage(m, user));
     else if (m.$type === "Area") collectArea(m, []);
     else if (m.$type === "Component") components.push(lowerComponent(m));
     else if (m.$type === "UiApiParam") {
@@ -174,7 +175,7 @@ export function lowerUi(ui: Ui): UiIR {
   };
 }
 
-function lowerPage(p: Page): PageIR {
+function lowerPage(p: Page, user?: UserIR): PageIR {
   const params = (p.params ?? []).map((param) => ({
     name: param.name,
     type: lowerType(param.type),
@@ -200,7 +201,9 @@ function lowerPage(p: Page): PageIR {
   // emit time; this addition makes the IR's type info accurate enough
   // that contextual lowering tricks (literal promotion, implicit
   // string-concat convert injection) don't mis-fire on page bodies.
-  let env: Env = { locals: new Map(), user: undefined };
+  // `user` is threaded so a page `requires` gate (and any page-scope
+  // `currentUser` ref) resolves to a `current-user` ref rather than `unknown`.
+  let env: Env = { locals: new Map(), user };
   for (const param of p.params ?? []) {
     env = withLocal(env, param.name, "param", lowerType(param.type));
   }

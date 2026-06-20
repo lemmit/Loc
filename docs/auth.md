@@ -218,10 +218,42 @@ without the data — use `where` to scope *which rows* come back, and
 `requires` to decide *who* may run the view.  `requires true` is the
 intentionally-public escape that also satisfies default-deny.
 
-The 403 emission currently targets the Hono backend; the validation
-(currentUser-only, default-deny) is platform-neutral.  See
+The 403 emission lands on **every backend** (Hono, .NET, Java, Python,
+Phoenix Ash + vanilla); the validation (currentUser-only, default-deny) is
+platform-neutral.  See
 [Views → Authorization](views.md#authorization--the-requires-gate)
 for the full surface.
+
+### UI gate — `page { requires <expr> }`
+
+A `page` carries the same `requires <expr>` clause (page-metamodel §4).  On a
+**React** frontend with `auth: ui` (whose target backend is `auth: required`),
+the generated page evaluates the gate client-side against the verified session
+claims and renders a `<Forbidden/>` fallback instead of its body when it fails
+— the read-side mirror of the backend 403:
+
+```ddd
+page Secret {
+  route: "/secret"
+  requires currentUser.role == "agent"
+  body: Heading { "Top secret" }
+}
+```
+
+```tsx
+const currentUser = useSession().user as Record<string, any>;
+if (!(currentUser.role === "agent")) {
+  return ( <div style={{ padding: 24 }}><h2>Forbidden</h2>…</div> );
+}
+```
+
+Like the view gate it is **`currentUser`-only** (it has no row to scope), so it
+and the backend stay decidable from the same claims.  The gate guard lands after
+every hook (keeping rules-of-hooks intact).  A page without `auth: ui`, or
+without a gate, is byte-identical to before.  Currently React-only; the other
+frontends (Vue / Svelte / Angular) and menu-link hiding are follow-ups, and the
+client guard is **defence-in-depth** — the authoritative check is always the
+backend 403.
 
 `currentUser` is in scope wherever an expression evaluates **per
 request**:

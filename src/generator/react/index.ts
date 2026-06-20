@@ -173,6 +173,10 @@ export function generateReactForContexts(
   // OR explicit) routes through `emitPagesForUi` → walker.
   const contextsByName = new Map<string, BoundedContextIR>();
   for (const ctx of contexts) contextsByName.set(ctx.name, ctx);
+  // Frontend auth guard (D-AUTH-OIDC, `auth: ui`): this react deployable opts in
+  // AND its target backend enforces auth (so `useSession()` / the verified claims
+  // are available client-side).  Gates `page { requires … }` rendering below.
+  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
   const emitCtx = {
     sys,
     deployable,
@@ -180,6 +184,7 @@ export function generateReactForContexts(
     contextsByName,
     pack,
     topLevelComponents: options.topLevelComponents ?? [],
+    authUi,
   };
   const pages = emitPagesForUi(ui, emitCtx);
   for (const [path, content] of pages) out.set(path, content);
@@ -210,12 +215,8 @@ export function generateReactForContexts(
   // destroy (declared or via `crudish`) — keeps the shared client
   // byte-identical for projects without any hard-delete.
   const hasDelete = aggregates.some((a) => !!a.agg.canonicalDestroy);
-  // Frontend auth guard (D-AUTH-OIDC, `auth: ui`): when this react
-  // deployable opts in AND its target backend enforces auth, emit the
-  // session-aware client + the route guard.  Works for both the OIDC
-  // verifier and the in-browser playground dev stub (both answer
-  // GET /auth/me).
-  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
+  // `authUi` computed above (before page emission, which consumes it for the
+  // `page { requires … }` gate).  Drives the session client + route guard emits.
   out.set(
     "src/api/client.ts",
     renderShellFile("api-client", { hasDelete, hasAuthUi: authUi }, pack),
