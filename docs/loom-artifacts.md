@@ -75,7 +75,7 @@ traceability coverage, or migration baselines.
 | `traceability.json` | `src/system/traceability.ts` → `renderTraceabilityJson` | Machine-readable form of the same graph (for CI gating, custom reports). |
 | `coverage.md` | `src/system/traceability.ts` → `renderCoverageReport` | Per-solution and per-requirement coverage roll-up. |
 | `gaps.md` | `src/system/traceability.ts` → `renderGapsReport` | Inverse of coverage — requirements with no solution, solutions with no test case, test cases with no test. |
-| `verification.json` | `ddd verify` (`src/cli/main.ts`) | Join of the requirements graph with a JSON of test results — every requirement gets a `VERIFIED / NOT-VERIFIED / NO-TESTS` verdict. |
+| `verification.json` | `ddd verify` (`src/cli/main.ts`) | Join of the requirements graph with a JSON of test results — every requirement gets a `VERIFIED / FAILING / UNVERIFIED / UNTESTED` verdict. |
 | `verification.md` | `ddd verify` | Human-readable companion to `verification.json`. |
 
 See [`traceability.md`](traceability.md) for the surface that

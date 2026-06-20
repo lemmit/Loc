@@ -57,7 +57,7 @@ DTO for `Customer` carries the same `name` / `email` / `creditLimit` shape.
 | Tables | one per concrete (`customers`, `suppliers`); no base table | one shared table named for the base (`parties`) |
 | Columns | base + own columns duplicated on each concrete table | base columns + every concrete's columns, per-concrete columns forced nullable |
 | Discriminator | none (the table identifies the type) | a non-null `kind` column; each repo filters/stamps it |
-| Backends | **all four** (node/Hono, .NET, Phoenix, React wire) | **node/Hono only (v1)** |
+| Backends | **all five** (node/Hono, .NET, Phoenix, Python, Java) | **all five** (node/Hono, .NET, Phoenix, Python, Java) |
 | `<Base> id` references | rejected (`loom.polymorphic-id-ref-unsupported` — ambiguous FK across N tables) | allowed (unambiguous single-table FK) |
 
 The default is `sharedTable`, so a hierarchy with no `inheritanceUsing(…)` is TPH.
@@ -75,22 +75,24 @@ column union:
 | `node` (Hono / Drizzle) | a read-only `<Base>Repository` whose `findAll()` concatenates each concrete repo's `all()`; a `<Base>` discriminated-union response type |
 | `dotnet` (.NET / EF Core) | `public abstract class <Base>` carrying the shared fields; concretes declare `: <Base>` and inherit them; EF excludes the base via `modelBuilder.Ignore<<Base>>()` so each concrete maps standalone; a read-only `I<Base>Repository` / `<Base>Repository` whose `FindAllAsync()` returns `IReadOnlyList<<Base>>` |
 | `phoenix` (Ash) | the context Ash.Domain gains `list_<bases>!/0` (+ a non-bang `{:ok, …}` variant) = the union of the concrete `list_<concrete>!` reads; the base emits no Ash.Resource |
+| `python` (FastAPI / SQLAlchemy) | a read-only `<Base>` repository whose `find_all` concatenates each concrete repo's reads; a `<Base>` union response type |
+| `java` (Spring Boot / JPA) | a read-only `<Base>Repository` whose `findAll()` concatenates each concrete repo's reads; a `<Base>` union response type |
 
 Under TPC, identity stays **per-concrete** (each concrete keeps its own
 strongly-typed `<Concrete>Id`); there is no shared `<Base>Id`, and a polymorphic
 `<Base> id` reference is rejected — so the readers expose `findAll` only, with no
-polymorphic `findById` target. Under TPH (node/Hono) the shared table does carry a
+polymorphic `findById` target. Under TPH the shared table does carry a
 single identity, so `<Base> id` refs and a `findById` on the base reader are
 available there.
 
 ## Backend gating
 
-TPC emission is wired on every backend. TPH emission is implemented for the
-node/Hono backend only — a TPH hierarchy whose context is **not** hosted by a
-node/Hono backend deployable is an **IR-validate error** (not a warning): there
-is no implemented emission target. The error names the offending platform(s) and
-suggests either hosting the context on a node/Hono deployable or switching to
-`inheritanceUsing(ownTable)` (which works everywhere).
+TPC emission is wired on every backend. TPH emission ships on all five backends
+(node/Hono, .NET, Phoenix, Python, Java) — the gate fires only when **no DB
+backend** hosts the context, which is an **IR-validate error** (not a warning):
+there is no implemented emission target. The error names the offending
+platform(s) and suggests either hosting the context on a DB backend deployable
+or switching to `inheritanceUsing(ownTable)` (which works everywhere).
 
 > Platform-literal note (D-PHOENIX-SURFACE / D-NODE-PLATFORM): the canonical
 > backend literals are `node` (the JS runtime, ex-`hono`), `dotnet`, and
@@ -107,7 +109,7 @@ suggests either hosting the context on a node/Hono deployable or switching to
 | `loom.abstract-repository` | a `repository` targets an abstract base |
 | `loom.polymorphic-id-ref-unsupported` | a `<Base> id` reference to an `ownTable` (TPC) base |
 | `loom.es-tph-forced-own-table` | event-sourced / document opt-out forces `ownTable` on a TPH member |
-| (storage gate) | a `sharedTable` (TPH) hierarchy whose context has no node/Hono, .NET, or Phoenix host |
+| (storage gate) | a `sharedTable` (TPH) hierarchy whose context has no node/Hono, .NET, Phoenix, Python, or Java host |
 
 ## Deferred (gated, not emitted)
 
@@ -115,11 +117,12 @@ suggests either hosting the context on a node/Hono deployable or switching to
   override of a TPH base, and the `UNION ALL` `find all <Base>` it would require,
   are rejected (`loom.tph-own-override-unsupported`,
   `loom.polymorphic-id-ref-mixed-strategy`).
-- **`contains` on a TPH concrete (proposal Pattern 4)** — rejected
-  (`loom.tph-contains-unsupported`); the join table is never emitted for a TPH
-  concrete. TPC concretes are unaffected — each is a standalone table and its
-  parts join normally.
+- **`contains` on a TPH concrete (proposal Pattern 4)** — now **supported**: the
+  part emits its own table FK'd to the shared base table (TPT-via-`contains`,
+  since a TPH concrete's id is the shared-table row id); `loom.tph-contains-unsupported`
+  is no longer emitted. TPC concretes are unaffected — each is a standalone table
+  and its parts join normally.
 - **TPH on React** — N/A; the frontend consumes the concrete wire shapes, it
   does not own storage. TPH ships on node/Hono (`kind` column), .NET (EF Core
-  `HasDiscriminator`), and Phoenix (Ash shared-table multi-resource +
-  `base_filter`); see backend gating above.
+  `HasDiscriminator`), Phoenix (Ash shared-table multi-resource +
+  `base_filter`), Python, and Java; see backend gating above.

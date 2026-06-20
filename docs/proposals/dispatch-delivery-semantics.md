@@ -33,6 +33,8 @@
 > the **default (no-`channelSource`) in-process path** — the layer every
 > external transport will sit on top of.
 
+> **[2026-06-20 status audit]** The transactional outbox tier + idempotent-consumer markers now ALSO ship on Python (`python/dispatch-builder.ts`, `__loom_outbox` + `last_event_id`), beyond Hono/.NET. Phoenix/Oban relay + LISTEN/NOTIFY remain the outstanding items.
+
 ## What ships today (verified against code)
 
 When a `channel carries:` an event with a subscriber, an emitted domain

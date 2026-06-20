@@ -1,4 +1,4 @@
-# Macros — `scaffold`, `crudish`, `audit`, `softDelete`
+# Macros — `scaffold`, `crudish`, `softDelete`
 
 Macros are compile-time `with <name>(...)` clauses that splice
 declarations into the host AST before lowering.  They expand to
@@ -7,22 +7,23 @@ documents its **source-equivalent**.
 
 The stdlib ships three families:
 
-- **Scaffolding** — `scaffold`, `scaffoldModule`, `scaffoldContext`,
+- **Scaffolding** — `scaffold`, `scaffoldSubdomain`, `scaffoldContext`,
   `scaffoldAggregate`, `scaffoldWorkflow`, `scaffoldView`.
   Synthesise UI pages from a domain.
 - **CRUDish** — `crudish`.  Adds a generated `update(...)` operation
   to an aggregate.
-- **Cross-cutting capabilities** — `audit` / `auditable` /
-  `auditedByDefault`, `softDelete` / `softDeletable` /
-  `softDeleteByDefault`.  Add audit and soft-delete behaviour via
-  the [capability surface](capabilities.md).
+- **Cross-cutting capabilities** — `softDelete` /
+  `softDeleteByDefault`.  Add soft-delete behaviour via
+  the [capability surface](capabilities.md).  (Audit is no longer a
+  macro — it ships as the builtin `capability auditable`; see below.)
 
 Macros are applied with `with <macro>(<args>)` on the host
 declaration:
 
 ```ddd
-aggregate Order with crudish, auditable {
+aggregate Order with crudish {
   subject: string
+  implements "auditable"               // builtin capability, not a macro
 }
 
 context Sales with softDeleteByDefault {
@@ -37,7 +38,7 @@ ui WebApp {
 The full grammar of `with` is in [`language.md`](language.md).
 The expansion happens in AST phase ② (see
 [`technical.md`](technical.md)); the macros' implementations live
-under `src/stdlib/`.
+under `src/macros/stdlib/`.
 
 ## `scaffold` family
 
@@ -67,7 +68,7 @@ leaves.  Users can drill into a single aggregate's scaffold without
 flattening the whole UI.
 
 The leaves all delegate page-shape decisions to `pagesForAggregate`
-/ `pageForWorkflow` / `pageForView` in `src/stdlib/scaffold/_pages.ts`
+/ `pageForWorkflow` / `pageForView` in `src/macros/stdlib/scaffold/_pages.ts`
 — so all six macros agree on what a "list page" looks like.
 
 ## `crudish`
@@ -106,35 +107,18 @@ fields participate.
 `create` and `delete` are **deferred** until input-type synthesis
 lands.  Today, `crudish` only emits `update`.
 
-## `audit` / `auditable` / `auditedByDefault`
+## Audit — now the builtin `capability auditable`
 
-Capability group: `"auditable"`.  Adds the four canonical audit
-fields and the stamping rules.
+> **Removed as macros.** `audit` / `auditable` / `auditedByDefault`
+> no longer exist as macros.  Audit ships as the **builtin
+> `capability auditable`** declared in `src/macros/prelude.ts` — apply
+> it directly via the capability surface (`implements "auditable"` +
+> the prelude's `filter` / `stamp` rules) rather than a `with`
+> clause.  See [`capabilities.md`](capabilities.md).
 
-| Macro | Target | What it emits |
-|---|---|---|
-| `auditable` | aggregate | Adds `createdAt`, `updatedAt`, `createdBy: User id`, `updatedBy: User id` properties + `implements "auditable"`.  Carries **no stamping rules**. |
-| `audit` | context | Adds `stamp for "auditable" onCreate { … }` and `stamp for "auditable" onUpdate { … }` to the context.  Carries **no fields**. |
-| `auditedByDefault` | context | Composes `audit` on the context AND `auditable` on every child aggregate. |
-
-Why split fields and stamps?  Because the stamping rules are a
-*context-level* concern — they assign the same fields the same way
-for every audited aggregate — while the field declarations are
-*per-aggregate* (the macro that declares them can be applied
-selectively).  See [`capabilities.md`](capabilities.md) for the
-underlying surface.
-
-### Source-equivalents
-
-```ddd
-context Sales with audit {
-  aggregate Order with auditable {
-    subject: string
-  }
-}
-```
-
-↓
+The capability adds the four canonical audit fields (`createdAt`,
+`updatedAt`, `createdBy: User id`, `updatedBy: User id`) and the
+context-level stamping rules:
 
 ```ddd
 context Sales {
@@ -158,34 +142,34 @@ context Sales {
 }
 ```
 
-`auditedByDefault` is the shortest form for "apply this to every
-aggregate":
+Why keep fields and stamps separate?  The stamping rules are a
+*context-level* concern — they assign the same fields the same way
+for every audited aggregate — while the field declarations and the
+`implements "auditable"` opt-in are *per-aggregate*.  See
+[`capabilities.md`](capabilities.md) for the underlying surface.
 
-```ddd
-context Sales with auditedByDefault { aggregate Order { … }; aggregate Invoice { … } }
-```
+## `softDelete` / `softDeleteByDefault`
 
-…is equivalent to the long form above for both aggregates.
+Capability group: `"softDeletable"`.  The **state + filter** ship as
+the builtin `capability softDeletable` (`isDeleted` + `deletedAt?` +
+`filter !this.isDeleted`, co-located in `src/macros/prelude.ts`); the
+`softDelete` **macro** adds only the two **operations**.  A capability
+is a pure mixin, so compose them: `with softDeletable, softDelete`.
 
-## `softDelete` / `softDeletable` / `softDeleteByDefault`
-
-Capability group: `"softDeletable"`.  Adds the soft-delete columns,
-mutations, and filter.
-
-| Macro | Target | What it emits |
+| Macro / capability | Target | What it adds |
 |---|---|---|
-| `softDeletable` | aggregate | Adds `isDeleted: bool`, `deletedAt: datetime?`, the `softDelete()` and `restore()` mutations, and `implements "softDeletable"`.  Carries **no filter**. |
-| `softDelete` | context | Adds `filter for "softDeletable" !this.isDeleted` to the context.  Carries **no fields**. |
-| `softDeleteByDefault` | context | Composes `softDelete` on the context AND `softDeletable` on every child aggregate. |
+| `softDeletable` (builtin **capability**) | aggregate | `isDeleted: bool`, `deletedAt: datetime?`, and the `!this.isDeleted` read filter. **No operations.** |
+| `softDelete` (**macro**) | aggregate | The `softDelete()` and `restore()` mutations. **No state/filter** — pair it with the capability. |
+| `softDeleteByDefault` (**macro**) | context | Invokes `softDelete` on every child aggregate. |
 
-The split mirrors `audit` / `auditable` — the filter is a
-*context-level* concern, the fields and mutations are *per-aggregate*.
+The filter is a *context-level* concern carried by the builtin
+capability; the operations are *per-aggregate* (added by `softDelete`).
 
 ### Source-equivalent
 
 ```ddd
-context Sales with softDelete {
-  aggregate Order with softDeletable { subject: string }
+context Sales {
+  aggregate Order with softDeletable, softDelete { subject: string }
   aggregate Public { name: string }            // not soft-deletable
 }
 ```
@@ -194,7 +178,7 @@ context Sales with softDelete {
 
 ```ddd
 context Sales {
-  filter for "softDeletable" !this.isDeleted
+  // filter for "softDeletable" !this.isDeleted  — carried by the builtin capability
 
   aggregate Order {
     subject: string
@@ -223,7 +207,7 @@ unfiltered.
 
 ## Authoring a macro
 
-Macros are TS modules under `src/stdlib/<name>/` that default-export
+Macros are TS modules under `src/macros/stdlib/<name>/` that default-export
 a `defineMacro({...})` call.  Each macro declares:
 
 ```ts
@@ -239,7 +223,7 @@ defineMacro({
 });
 ```
 
-The `macro-api` (`src/macro-api/`) exposes typed AST factory helpers
+The `macro-api` (`src/macros/api/`) exposes typed AST factory helpers
 (`operation`, `param`, `primType`, `boolLit`, `callExpr`, …) and
 inspection utilities (`writableUpdateFields`, `viewsIn`,
 `workflowsIn`, `aggregatesIn`).  Anything you can write by hand in
@@ -248,7 +232,8 @@ inspection utilities (`writableUpdateFields`, `viewsIn`,
 ## Cross-references
 
 - [`capabilities.md`](capabilities.md) — the `filter` / `stamp` /
-  `implements` surface the audit and softDelete macros target.
+  `implements` surface the builtin `auditable` capability and the
+  `softDelete` macro target.
 - [`page-metamodel.md`](page-metamodel.md) — the page DSL the
   scaffold macros emit.
 - [`language.md`](language.md) — the `with <macro>(...)` clause and

@@ -1,5 +1,7 @@
 # Reified criteria — specifications as constructed objects
 
+> **[2026-06-20 status audit]** Backend count understated — find/retrieval criteria now reify on FIVE domain backends incl. Java (`src/generator/java/emit/repository.ts:~50`); Python emits retrievals but is not yet reified.
+
 > Status: **PARTIAL — retrieval *and* find criteria reified on all four
 > backends.** The Specification reframe landed first on the .NET/EF backend
 > in four slices: Slice 1a — emit `Criterion<T>` + `IsSatisfiedBy` (the

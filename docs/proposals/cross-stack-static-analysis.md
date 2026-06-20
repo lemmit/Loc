@@ -1,5 +1,7 @@
 # Cross-stack lint, static analysis, and type-metadata emission
 
+> **[2026-06-20 status audit]** C# nullable-reference annotations + the .NET analyzer gate have SHIPPED (`dotnet/emit/program.ts` `Nullable`/`AnalysisLevel`, gated by `dotnet build /warnaserror`). Only repo-content/markdown lint remains in 'Remaining'.
+
 > Status: **PARTIAL.** The Phoenix arm has largely landed: the generator now
 > emits Elixir `@spec`s on event/VO modules + polymorphic readers (#902), on
 > `view` module `def run/1` (#906), on `workflow` `def run/2` (#911), plus a

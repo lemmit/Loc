@@ -1,5 +1,7 @@
 # Implementation plan — aggregate inheritance, payload transport, exception-less flow
 
+> **[2026-06-20 status audit]** The 2026-06-03 refresh is itself stale: `errors[]`, reified criteria, TPH, and `or`-unions are now on FIVE backends, not 'three'/'four' (`system-checks.ts:~1230`, `structural-checks.ts:~414`).
+
 > Status: implementation plan. Operationalises three sibling
 > proposals into one delivery stream:
 >

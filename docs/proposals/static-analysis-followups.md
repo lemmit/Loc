@@ -1,5 +1,7 @@
 # Cross-stack static analysis — remaining slices
 
+> **[2026-06-20 status audit]** Slice 4 (workflow `returnType` enrichment) SHIPPED (`enrichments.ts`, consumed at `elixir/workflow-emit.ts`). Only three slices remain (format-CI, Credo, service-layer).
+
 > Status: **proposal**.  Follow-up to
 > `docs/proposals/cross-stack-static-analysis.md`, which framed and
 > shipped the bulk of the Phoenix Tier 3 / Tier 4 surface (PRs #902,

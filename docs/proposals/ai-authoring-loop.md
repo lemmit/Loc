@@ -1,5 +1,7 @@
 # AI authoring loop — agent, validate/repair, model patches
 
+> **[2026-06-20 status audit]** Header lags body — fixHint patches (`src/language/fix-hints.ts`), the agent driver `runAgent` (`src/tools/agent-loop.ts`), and the MCP server (`src/mcp/main.ts`, `packages/ddd-mcp/`) have SHIPPED. Remaining = the wedge demo + the playground chat UI.
+
 > **Status:** PARTIAL. Shipped: the diagnostics half of the loop
 > (`ddd parse --json`, build-plan items 1–2; see
 > [`ai-diagnostics-contract.md`](./ai-diagnostics-contract.md)) and the

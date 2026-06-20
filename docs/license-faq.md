@@ -13,9 +13,10 @@ file, the LICENSE file is authoritative.
 ## 1. What is licensed under FSL-1.1-Apache-2.0?
 
 Everything in this repository: the `ddd` CLI, the Langium grammar,
-the IR, the per-platform generators (TypeScript / .NET / React), the
-VS Code extension, and the documentation.  This is the **generator
-itself**.
+the IR, the per-platform generators (the five backends — TypeScript /
+.NET / Phoenix / Python / Java — and the frontends — React / Vue /
+Svelte / Angular), the VS Code extension, and the documentation.  This
+is the **generator itself**.
 
 You may use the generator for any **Permitted Purpose** — internal
 use, building products and services for your own customers,

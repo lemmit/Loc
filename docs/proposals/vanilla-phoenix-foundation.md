@@ -30,6 +30,8 @@
 > §4, and unblocks one half of
 > [`workflow-and-applier.md`](./workflow-and-applier.md)'s deferred-ES gap.
 
+> **[2026-06-20 status audit]** The "Remaining" list is stale — workflow body lowering (precondition/requires/repo-let/emit/repo-run, `vanilla/workflow-execution-emit.ts`), event sourcing under vanilla (D-VANILLA-ES-HOME, `eventsourced-emit.ts`), and the provenance runtime (#1400, `vanilla/provenance-emit.ts`) have all LANDED. ~20 emit modules now. Still PARTIAL; `shape(document)` + first-class adapter rewire remain.
+
 ## TL;DR
 
 Add a second Phoenix foundation — `foundation: vanilla` — that emits

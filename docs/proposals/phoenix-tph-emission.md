@@ -1,5 +1,7 @@
 # Phoenix / Ash TPH emission — design note
 
+> **[2026-06-20 status audit]** 'all three DB backends' understated — the `loom.tph-backend-unsupported` gate admits five (`system-checks.ts:~1230`). Phoenix TPH itself ships (accurate).
+
 > Status: **SHIPPED.** The last TPH ✗ in the parity matrix — TPH (`sharedTable`)
 > on **Phoenix / Ash** — closed via the shared-table multi-resource +
 > `base_filter` design below; `loom.tph-backend-unsupported` now admits all

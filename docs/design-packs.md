@@ -3,12 +3,15 @@
 > Status: contract documented; Mantine and shadcn are the reference
 > implementations.
 
-A **design-system pack** is the unit of pluggable UI in Loom's React
-generator.  When a user writes `design: <name>` in a `.ddd` source's
+A **design-system pack** is the unit of pluggable UI in Loom's frontend
+generators — pluggable across React, Vue, Svelte, Angular, and Phoenix
+HEEx.  When a user writes `design: <name>` in a `.ddd` source's
 `deployable webApp { ... }` block, the React generator loads that
 pack and renders every UI surface (pages, forms, tables, cells) through
-it.  Built-in packs are `mantine` and `shadcn`; custom packs are any
-directory the user points the slot at.
+it.  Built-in packs are `mantine`, `shadcn`, `mui`, `chakra` (React),
+`vuetify`, `shadcnVue` (Vue), `shadcnSvelte`, `flowbite` (Svelte),
+`angularMaterial` (Angular), and `ashPhoenix` (HEEx); custom packs are
+any directory the user points the slot at.
 
 This document is the contract.  If you're writing a third design pack
 — for Material UI, Chakra, your in-house system, whatever — this is
@@ -191,7 +194,10 @@ upgrade pain — the project ships a small set of **stacks** under
 |---|---|---|---|---|---|---|
 | `v1` | 18 | `react-router-dom@^6` | 3 | 5.7 | 5 | (none currently — older pack versions historically rode it) |
 | `v2` | 19.2 | `react-router-dom@^6` | 3 | 5.7 | 5 | (intermediate) |
-| `v3` | 19.2 | `react-router@^7` | 4 | 5.7 | 5 | every pack version currently shipped |
+| `v3` | 19.2 | `react-router@^7` | 4 | 5.7 | 5 | every React pack version currently shipped |
+| `sv1` | (Svelte 5 / SvelteKit) | SvelteKit routing | 4 | 5.7 | 5 | the svelte packs (`shadcnSvelte`, `flowbite`) |
+| `vue1` | (Vue 3) | vue-router | 4 | 5.7 | 5 | the vue packs (`vuetify`, `shadcnVue`) |
+| `ng1` | (Angular 20) | `@angular/router` | 4 | (Angular CLI) | (Angular build) | the angular pack (`angularMaterial`) |
 
 Each stack ships:
 
@@ -504,7 +510,8 @@ missing CSS imports, asset resolution, Tailwind config errors.
 ### The `LOOM_REACT_BUILD=1` gate
 
 The repo ships `test/generated-react-build.test.ts` which does the
-above for the four example systems × two built-in packs.  Add your
+above for the example systems × the built-in React packs (`mantine`,
+`shadcn`, `mui`, `chakra`).  Add your
 custom pack to its cases for ongoing coverage:
 
 ```sh
@@ -575,9 +582,11 @@ design: ashPhoenix               // forced for phoenixLiveView platform
 ```
 
 The shipped families: `mantine` (v7, v9), `shadcn` (v3, v4),
-`mui` (v5, v7), `chakra` (v2, v3), `ashPhoenix` (v3), and the vue
+`mui` (v5, v7), `chakra` (v2, v3), `ashPhoenix` (v3), the vue
 packs `vuetify` (v3 — tracks Vuetify 3) and `shadcnVue` (v1 — the
-shadcn-vue flavour: reka-ui + Tailwind 4, source-copy distribution).
+shadcn-vue flavour: reka-ui + Tailwind 4, source-copy distribution),
+the svelte packs `shadcnSvelte` and `flowbite`, and the angular pack
+`angularMaterial`.
 The current bareword defaults live in `BUILTIN_PACK_LATEST` in
 `src/util/builtin-formats.ts`.
 
@@ -813,7 +822,7 @@ In a separate PR after the new version has soaked:
    node scripts/capture-baseline-fixture.mjs
    ```
 
-3. Update `test/loader-vfs.test.ts`'s bareword expectation:
+3. Update `test/playground/loader-vfs.test.ts`'s bareword expectation:
 
    ```ts
    expect(resolvePackDir("<family>")).toBe("/designs/<family>/<vNew>");
@@ -838,9 +847,9 @@ In a separate PR after the new version has soaked:
 - [`plans/per-pack-migration.md`](./plans/per-pack-migration.md) — per-library historical migration notes (mantine→v9, mui→v7, chakra→v3, shadcn→v4)
 - `src/generator/_packs/loader.ts` — pure compile core
 - `src/generator/_packs/loader-fs.ts` — Node FS adapter
-- `src/generator/_packs/loader-vfs.ts` — playground VFS adapter
+- `web/src/build/loader-vfs.ts` — playground VFS adapter
 - `src/util/builtin-formats.ts` — built-in pack format map + bareword defaults
-- `stacks/<id>/` — stack definitions (`v1`, `v2`, `v3`)
+- `stacks/<id>/` — stack definitions (`v1`, `v2`, `v3`, `sv1`, `vue1`, `ng1`)
 - `designs/<family>/<version>/` — reference implementations
 - `test/generated-react-build.test.ts` — the static-validation gate
 - `test/pack-manifest.test.ts` — manifest-shape contract tests

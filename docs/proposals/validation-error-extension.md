@@ -1,5 +1,7 @@
 # Validation error extension — RFC 7807 §3.2 `errors[]` on the wire
 
+> **[2026-06-20 status audit]** Understated — `errors[]`/`pointer` also emits on Java (`java/emit/api.ts:~339`) and Python (`python/index.ts:~820`); five backends total.
+
 > Status: SHIPPED. All four phases delivered:
 >   Phase A — Hono runtime (#782)
 >   Phase B — .NET runtime (#829)

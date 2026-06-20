@@ -1,5 +1,7 @@
 # Plan — Type-system feature migration & cross-backend debt clearance
 
+> **[2026-06-20 status audit]** Substantially shipped (no longer just 'in-flight design note') — payload/command/query/response/error + named unions + option/or carriers + criterion + abstract/extends are in grammar/IR/validators/docs; `<Agg>Wire` enrichment + the `ExprTarget` unification landed. Remaining: strict-parity phase + the DBT register (esp. Phoenix provenance — note: provenance has since shipped on elixir-vanilla #1400).
+
 > Status: in-flight design note. Scopes how the type-system family of
 > proposals (`docs/proposals/type-system-overview.md` and its five
 > siblings) folds into the existing toolchain — **which existing

@@ -1,5 +1,7 @@
 # Typed capabilities — from `implements "string"` to a first-class `capability`
 
+> **[2026-06-20 status audit]** SHIPPED (#1388) — first-class `capability` mixin live (grammar `ddd.langium:~955`, expander `src/macros/expander.ts:~237`, Phase 6 string-form removal in `lower-capabilities.ts`). Only OQ#1 emission-dedup remains (`capability-emission-dedup.md`).
+
 > **Status:** PROPOSED (no implementation yet). Grammar/IR/lowering specified;
 > byte-identical-output migration path. Emerged from the multi-tenancy design
 > session (see [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md)

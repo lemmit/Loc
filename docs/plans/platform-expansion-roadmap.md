@@ -1,5 +1,7 @@
 # Platform-expansion roadmap
 
+> **[2026-06-20 status audit]** Snapshot stale — Vue/Svelte AND Angular have shipped (4 frontends now: `src/platform/{vue,svelte,angular}.ts` + registry). The intro 'one frontend (React)' and Phase B Vue='Sketch' are out of date; Angular landed outside the A–I phase plan.
+
 Multi-phase plan to grow Loom's compilation targets beyond the current three
 backends (Hono / .NET / Phoenix LiveView) and one frontend (React) without
 abandoning the architectural invariants that keep the toolchain tractable.

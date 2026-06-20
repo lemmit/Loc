@@ -1,5 +1,7 @@
 # Failure taxonomy — error handling, reconsidered
 
+> **[2026-06-20 status audit]** The `?` surface-only slice is ALREADY REMOVED (no `PropagateExpr`/`propagate` in `src/`), not 'slated for removal'.
+
 > Status: proposal (design note). **Revisits**:
 > [`exception-less.md`](./exception-less.md). That proposal shipped in
 > slices A1–A3 (`or`-unions, the `error` payload keyword, root-level

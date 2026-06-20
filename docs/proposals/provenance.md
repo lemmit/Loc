@@ -8,6 +8,8 @@
 > derived-value variant, the `.provenance`/`.explain()` accessors, the
 > Explain service, and non-TS backends are **deferred** (see *Deferred*).
 
+> **[2026-06-20 status audit]** Backend spread understated — provenance runtime now ships on TS/Hono, .NET (`dotnet/emit/provenance.ts`), AND elixir-vanilla (`elixir/vanilla/provenance-emit.ts`, #1400/DEBT-06). Only Python/Java + the Explain service / `.provenance` accessors remain deferred.
+
 ## Problem
 
 A business value — the canonical example is `order.total` — should be

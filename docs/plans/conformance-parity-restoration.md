@@ -1,5 +1,7 @@
 # Plan — Restoring cross-backend OpenAPI parity
 
+> **[2026-06-20 status audit]** SHIPPED — expanded to a 5-way STRICT parity gate (`conformance-parity.yml` with `LOOM_E2E_STRICT_PARITY=1`; `test/e2e/e2e.test.ts` asserts all pairs agree). Phase-0/C1 helpers in tree.
+
 > Status: in-flight design note. Captures the review of the failing
 > `conformance-parity` gate and the staged plan to make Hono / .NET /
 > Phoenix agree on one contract again.

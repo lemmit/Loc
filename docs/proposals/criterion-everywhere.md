@@ -1,5 +1,7 @@
 # Criterion everywhere — the selectability model
 
+> **[2026-06-20 status audit]** Stale internal cite: `firstNonQueryableNode` is re-exported from `validate.ts` but implemented under `src/ir/validate/checks/query-checks.ts` (orchestrator refactor). Shipped/supersession claims still accurate.
+
 > **Mechanism superseded by
 > [`reified-criteria.md`](./reified-criteria.md).** This doc's *inline*
 > approach (substitute the criterion body at each use-site; bind

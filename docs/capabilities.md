@@ -72,8 +72,9 @@ context Sales {
 
 ### Backend emission
 
-Every backend that runs a query layer reifies non-principal,
-relational filters.  Principal-referencing predicates (tenancy) and
+The wired-filter backends — .NET, Hono, Java, and Phoenix — reify
+non-principal, relational filters.  (Python does not yet consume
+capability `filter`s.)  Principal-referencing predicates (tenancy) and
 non-relational shapes have **since landed on the query-layer backends
 too** (DEBT-01 / DEBT-02) — only their *intersection*, a principal
 predicate on a non-relational aggregate, stays gated.  See *Deferred
@@ -185,11 +186,15 @@ aggregate with `with auditable`.
   `src/generator/dotnet/emit/auditable-interceptor.tpl.ts`.  Note
   that this means stamps fire at *save time*, after the operation
   body has already run.
-- **Hono** and **Phoenix** — context stamps are **not yet wired
-  through to runtime**.  The IR carries `contextStamps` on every
-  aggregate but the Drizzle and Ecto codegens don't consume them.
+- **Java / JPA** — context stamps are emitted as entity
+  `_stampOnCreate` / `_stampOnUpdate` hooks (one arm per stamping
+  rule) with the service calling them on create / update; support
+  is gated by `validateJavaStampSupport`.
+- **Hono**, **Phoenix**, and **Python** — context stamps are **not
+  yet wired through to runtime**.  The IR carries `contextStamps` on
+  every aggregate but those codegens don't consume them.
   Hand-writing the stamps inside operation bodies (or using the
-  `audit` macro under .NET-only deployment) is the workaround.
+  `audit` macro under .NET-/Java-only deployment) is the workaround.
 
 ## `implements <Cap>` / `with <Cap>`
 

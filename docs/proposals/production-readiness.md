@@ -1,5 +1,7 @@
 # Production readiness — feature roadmap
 
+> **[2026-06-20 status audit]** Several items shipped (no longer 'no code yet') — §3.8 Kubernetes/Helm (`src/system/kubernetes.ts`, `src/system/helm.ts`, `--k8s`) and §3.9 health/ready probes + observability. Still open: ops/admin UI, §3.7 i18n, §3.10 backend-to-backend calls.
+
 > **Status:** REFERENCE / roadmap proposal — no code yet.
 > **Role:** Names the gap between "Loom generates a runnable stack" and
 > "Loom generates a system you can run in production," frames each

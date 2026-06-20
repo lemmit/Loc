@@ -1,9 +1,12 @@
 # Loom — Cross-Generator Conformance
 
 The conformance harness is the cross-backend gate that catches generator
-drift between Hono / .NET / Phoenix. One DSL source describes one
-contract; all three backends emit OpenAPI specs whose **wire surface is
-structurally identical** — same operations, operationIds, component
+drift across backends. Five backends boot (Hono / .NET / Phoenix /
+Python / Java); the parity diff compares four of them (Hono / .NET /
+Phoenix / Python) — Java is booted and health-checked but excluded from
+the diff pairs. One DSL source describes one contract; the backends emit
+OpenAPI specs whose **wire surface is structurally identical** — same
+operations, operationIds, component
 schema names, field names, required sets, enum value-sets, response
 cardinality, and path-param types.
 
@@ -46,18 +49,20 @@ The diff is one pure function plus a small e2e wrapper. Every dimension
 has unit-test coverage in the fast suite; the e2e wrapper only owns
 the docker-compose fetch.
 
-### Three-way pair diff
+### All-pairs diff
 
-The harness compares **every pair** of backends (`hono ↔ dotnet`,
-`hono ↔ phoenix`, `dotnet ↔ phoenix`) rather than only checking each
-against a single reference. The third pair catches symmetric drift —
-two non-Hono backends shipping a contract change in lockstep, leaving
-Hono behind. Without it, the two reference-diffs would each report
-"X drifts from Hono" without making the joint relationship explicit.
+The harness compares **every pair** of the four diffed backends
+(`hono ↔ dotnet`, `hono ↔ phoenix`, `dotnet ↔ phoenix`, `hono ↔ python`,
+`dotnet ↔ python`, `phoenix ↔ python` — six pairs) rather than only
+checking each against a single reference. The non-Hono pairs catch
+symmetric drift — two non-Hono backends shipping a contract change in
+lockstep, leaving Hono behind. Without them, the reference-diffs would
+each report "X drifts from Hono" without making the joint relationship
+explicit.
 
 ---
 
-## The nine dimensions
+## The dimensions
 
 | Dimension | Helper | What it catches |
 |---|---|---|
@@ -66,10 +71,15 @@ Hono behind. Without it, the two reference-diffs would each report
 | Schemas set | `schemaNames(spec)` | Component schemas declared on one side but not the other (new / removed DTOs) |
 | Per-schema fields | `fieldSet(spec, name)` | Property-name drift on a shared schema (e.g. `created_at` vs `createdAt`) |
 | Per-schema required | `requiredSet(spec, name)` | A field flipping `required → optional` on one side |
+| Per-property type | `propertyTypeDiffs` | Same-name field with a different JSON type on each side (e.g. `string` vs `integer`) |
+| Per-property format | `propertyFormatDiffs` | Same field/type, different `format:` (e.g. `date-time` vs none) |
 | Path-param types | `pathParamSignatures(spec)` | Same URL shape, different `{id}` schema (e.g. `string` vs `string:uuid`) |
+| Query params | `queryParamDiffs` | Query-parameter set / type drift on a shared op |
 | Request-body refs | `requestBodySchemas(spec)` | An op pointing its body at a different component schema (e.g. `CreateProductRequest` vs `UpdateProductRequest`) |
 | Response-body refs | `responseBodySchemas(spec)` | Same cardinality, different element schema (e.g. `array<ProjectResponse>` vs `array<ProjectListItem>`) |
 | OperationIds | `operationIds(spec)` | Same op declares a different `operationId` per backend — breaks codegen consumers (NSwag, openapi-generator) |
+| Enum value-sets | `enumValueDiffs` | A shared enum schema with a different value-set per backend |
+| Error responses | `errorResponseDiffs` | Per-op 4xx/5xx error-response drift |
 
 Each dimension follows the same shape in `ParityDiff`:
 
@@ -140,7 +150,8 @@ with the tracking issue and removed once the generator work lands:
 
 ### Strict gating
 
-All three pairs (`hono↔dotnet`, `hono↔phoenix`, `dotnet↔phoenix`) hard-fail
+All six pairs over the four diffed backends (`hono↔dotnet`, `hono↔phoenix`,
+`dotnet↔phoenix`, `hono↔python`, `dotnet↔python`, `phoenix↔python`) hard-fail
 under `LOOM_E2E_STRICT_PARITY=1` (the `conformance-parity.yml` job). #707
 brought .NET byte-identical with Hono; #716 brought Phoenix in line (named
 enum schemas, `{id}` create response, bare-array views, request-bool
@@ -252,7 +263,7 @@ Checklist:
 7. **Update the all-clean `diffSpecs` test** to assert the new field
    is `[]` when specs agree.
 
-8. **Update this doc's "Nine dimensions" table** with the new entry.
+8. **Update this doc's dimensions table** with the new entry.
 
 Run `npx vitest run test/_helpers/openapi-normalize.test.ts` to verify
 the unit tests pass before opening a PR; the e2e job will exercise the
