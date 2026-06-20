@@ -134,7 +134,7 @@ export async function discoverBackendsFs(rootDir: string): Promise<DiscoveredBac
 
 /** Walk fs and install a composed source: every fs-discovered
  *  backend, plus every in-tree backend the fs walk didn't pick up
- *  (so dotnet@v8 / phoenixLiveView@v1 — not yet packaged — still
+ *  (so dotnet@v10 / phoenixLiveView@v1 — not yet packaged — still
  *  resolve).  Idempotent at the registry level; safe to call once
  *  at CLI startup. */
 export async function installFsBackendSource(rootDir: string): Promise<void> {
