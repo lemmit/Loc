@@ -29,9 +29,28 @@ describe("adapter registry — lookup", () => {
   it("exposes the .NET defaults", () => {
     const d = defaultsFor("dotnet")!;
     expect(d.persistence.state).toBe("efcore");
-    expect(d.persistence.eventLog).toBe("marten");
+    // DEBT-20: eventLog default must be a REAL adapter, not the `marten` stub.
+    expect(d.persistence.eventLog).toBe("efcore");
     expect(d.style).toBe("cqrs");
     expect(d.layout).toBe("byLayer");
+  });
+
+  // DEBT-20: a backend's *default* eventLog adapter must be REAL (it has to
+  // actually emit an event-sourced store when an event-sourced aggregate omits
+  // an explicit `persistence:`).  Guards against a default pointing back at a
+  // reserved stub (java→axon / dotnet→marten) or a state-only adapter
+  // (elixir→ashPostgres).
+  it.each([
+    "node",
+    "dotnet",
+    "java",
+    "elixir",
+  ] as const)("%s default eventLog adapter is real and advertises eventLog", (platform) => {
+    const name = defaultsFor(platform)!.persistence.eventLog;
+    // `availableAdapterNames` lists REAL adapters only (stubs excluded).
+    expect(availableAdapterNames(platform, "persistence")).toContain(name);
+    const adapter = resolvePersistence(platform, name, "eventLog");
+    expect(adapter.supportedStrategies).toContain("eventLog");
   });
 
   it("exposes the node defaults", () => {
@@ -52,7 +71,10 @@ describe("adapter registry — lookup", () => {
     expect(resolvePersistence("dotnet", null, "state").name).toBe("efcore");
     expect(resolvePersistence("dotnet", undefined, "state").name).toBe("efcore");
     expect(resolvePersistence("dotnet", "", "state").name).toBe("efcore");
-    expect(resolvePersistence("dotnet", null, "eventLog").name).toBe("marten");
+    // DEBT-20: the eventLog default resolves to the real efcore adapter, not the
+    // marten stub (an event-sourced aggregate with no explicit `persistence:`
+    // must land on an adapter that actually emits the store).
+    expect(resolvePersistence("dotnet", null, "eventLog").name).toBe("efcore");
     expect(resolveStyle("dotnet", null).name).toBe("cqrs");
     expect(resolveLayout("dotnet", null).name).toBe("byLayer");
   });

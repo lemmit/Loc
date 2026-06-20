@@ -89,7 +89,7 @@ describe("java platform — adapter menu", () => {
 
   it("defaults: jpa / layered / byFeature / restController / transactional", () => {
     expect(defaultsFor("java")).toEqual({
-      persistence: { state: "jpa", eventLog: "axon" },
+      persistence: { state: "jpa", eventLog: "jpa" },
       style: "layered",
       layout: "byFeature",
       transport: "restController",

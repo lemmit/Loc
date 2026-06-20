@@ -126,7 +126,11 @@ const elixirPlatform: PlatformSurface = {
   },
   adapterDefaults(): PlatformAdapterDefaults {
     return {
-      persistence: { state: "ashPostgres", eventLog: "ashPostgres" },
+      // eventLog → `ecto`: event-sourcing is emitted on the vanilla foundation
+      // (its `ecto` persistence adapter), not Ash.  ashPostgres is state-only,
+      // so it must not be the eventLog default (DEBT-20 — keep the default on the
+      // adapter that actually hosts the strategy).
+      persistence: { state: "ashPostgres", eventLog: "ecto" },
       style: "ash",
       layout: "byFeature",
       transport: "phoenix",
