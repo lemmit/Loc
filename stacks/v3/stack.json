@@ -8,7 +8,7 @@
     "react-hook-form": "7 + @hookform/resolvers@^5 (resolvers 5 is the zod-4-compatible major)",
     "zod": "4 (^4.0.0)",
     "typescript": "5.7 (TS 6 follow-up — unchanged from v2)",
-    "vite": "5 (Vite 8 follow-up — unchanged from v2)"
+    "vite": "8 (^8.0.0 — Rolldown bundler; @vitejs/plugin-react 6; unchanged from v2)"
   },
   "bundler": {
     "rdcShim": false,

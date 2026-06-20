@@ -5,7 +5,7 @@ pin** vs **current latest stable upstream** for every generated stack
 and the playground itself. Refresh this doc when bumping anything in
 Phase 1.X / Phase 2.
 
-Snapshot date: **2026-05** (verify against npm/nuget/hex before
+Snapshot date: **2026-06** (verify against npm/nuget/hex before
 acting; these numbers age).
 
 > **Phase 0.5 note:** the cross-cutting deps below are no longer
@@ -31,9 +31,9 @@ acting; these numbers age).
 | `zod` | ^3.23.0 | ^3.23.0 | **4.x** |
 | `dayjs` | ^1.11.0 | ^1.11.0 | 1.11 |
 | `@types/react` / `-dom` (dev) | ^18.3.0 | **^19.2.0** | 19.2 |
-| `@vitejs/plugin-react` (dev) | ^4.3.0 | ^4.3.0 | latest 4.x |
+| `@vitejs/plugin-react` (dev) | **^6.0.0** | **^6.0.0** | 6.x (Vite-8 / Rolldown era) |
 | `typescript` (dev) | ^5.7.0 | ^5.7.0 | **6.x** |
-| `vite` (dev) | ^5.4.0 | ^5.4.0 | **8.x** |
+| `vite` (dev) | **^8.0.0** | **^8.0.0** | 8.x |
 
 Per-pack legacy table (kept for the per-dep latest-stable column):
 
@@ -48,7 +48,7 @@ Per-pack legacy table (kept for the per-dep latest-stable column):
 | `@hookform/resolvers` | ^3.9.0 | ^3.9.0 | ^3.9.0 | ^3.9.0 | ^3.9.0 | **5.x** |
 | `zod` | ^3.23.0 | ^3.23.0 | ^3.23.0 | ^3.23.0 | ^3.23.0 | **4.x** |
 | `dayjs` | ^1.11.0 | ^1.11.0 | ^1.11.0 | ^1.11.0 | ^1.11.0 | 1.11 |
-| `vite` (dev) | ^5.4.0 | ^5.4.0 | ^5.4.0 | ^5.4.0 | ^5.4.0 | **8.x** |
+| `vite` (dev) | ^8.0.0 | ^8.0.0 | ^8.0.0 | ^8.0.0 | ^8.0.0 | 8.x |
 | `typescript` (dev) | ^5.7.0 | ^5.7.0 | ^5.7.0 | ^5.7.0 | ^5.7.0 | **6.x** |
 
 ### Pack-specific deps
