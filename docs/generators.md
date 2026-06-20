@@ -672,7 +672,7 @@ web_app/
 ## Angular frontend (`platform: angular`)
 
 The fourth frontend generator (`src/generator/angular/`).  Emits a **standalone
-Angular 20 SPA** per angular deployable — `bootstrapApplication` + `appConfig`
+Angular 22 SPA** per angular deployable — `bootstrapApplication` + `appConfig`
 (no NgModules), built with the `@angular/build:application` builder and served
 the same `vite preview`-style way as the other SPAs in docker.  Pages flow
 through the **same shared markup walker** the React / Vue / Svelte generators use
