@@ -827,7 +827,7 @@ Per deployable it emits:
 | Inheritance | TPC via `@MappedSuperclass`; TPH (`sharedTable`) via JPA `SINGLE_TABLE` — the base owns the shared table + `@DiscriminatorColumn("kind")`, concretes carry `@DiscriminatorValue` and share the base `<Base>Id` |
 | Single containments | hidden owning `_parent` `@OneToOne` on the part (JPA has no unidirectional one-to-one with the FK on the part table) + inverse `mappedBy` with cascade/orphanRemoval on the root |
 | Seeding | `seed` blocks → `<Ctx>SeedRunner` `ApplicationRunner`: domain rows through `create(...)` + the port save, raw rows as schema-qualified INSERTs, ship-once `__loom_seed` marker (`default` always, others via `LOOM_SEED`) |
-| Capability filters | non-principal relational `filter` predicates → Hibernate `@SQLRestriction` (static SQL on every SELECT) |
+| Capability filters | non-principal predicates → Hibernate `@SQLRestriction` (static SQL on every SELECT) on relational + `shape(embedded)` roots, in-app `findAll().stream()` for `shape(document)`; **principal** (tenancy) predicates → SpEL-principal JPQL clause AND-ed into the scoped `findAll`/`findById` overrides + finds/retrievals/views |
 | Fullstack (`ui:`) | controllers move under `/api`, `SpaWebConfig` serves the SPA bundle (`UI_DIR`, index.html fallback), React project under `ClientApp/`, node stage in the Dockerfile; the auth filter guards `/api/*` only |
 | Extern ops | per-op handler interface + throwing dev-stub `@Component`; service runs `check<Op>` → handler → invariants → save |
 | Tests | `test "…"` → JUnit 5 classes under `src/test/java` |
@@ -840,17 +840,24 @@ comparisons, `Objects.equals` reference equality, `Instant` ordering via
 collection ops with type-directed `sum` reduction.
 
 **Not yet implemented — every gap fails fast at validate time** (never a
-silent downgrade): discriminated unions in find / payload positions
-(java is absent from `SUPPORTED_UNION_BACKENDS`), `persistedAs(eventLog)`,
-`shape(document|embedded)` (`PLATFORM_SAVING_SHAPES.java` is
-relational-only), part-declared (nested) single containments
-(`loom.java-single-containment-unsupported`), `hosts:` UI hosting
-(`loom.java-fullstack-unsupported` — the `ui:` embedded-SPA mount is
-implemented), resource-op clients, principal-referencing / non-relational
-capability filters (`loom.context-filter-unsupported`), and
-provenance/audited (gated — no runtime emitted; the node and .NET
-backends do implement these).  See
+silent downgrade): the reserved `axon` event-store adapter and `jooq`
+persistence adapter (both `stubAdapter` — the default JPA persistence
+*does* emit `persistedAs(eventLog)`), part-declared (nested) single
+containments (`loom.java-single-containment-unsupported`), `hosts:` UI
+hosting (`loom.java-fullstack-unsupported` — the `ui:` embedded-SPA
+mount is implemented), resource-op clients, a **principal-referencing
+capability filter on a non-relational aggregate**
+(`loom.context-filter-unsupported` — each half ships alone; only the
+actor + jsonb intersection is deferred), and provenance/audited (gated —
+no runtime emitted; the node and .NET backends do implement these).  See
 `docs/plans/java-backend-implementation.md` for the execution record.
+
+Discriminated unions (find / payload positions), `shape(document)` /
+`shape(embedded)` persistence, event-sourced (`persistedAs(eventLog)`)
+JPA streams, and non-principal capability filters on those non-relational
+shapes are all **implemented** (java is in `SUPPORTED_UNION_BACKENDS`
+and `EVENT_SOURCING_BACKENDS`; `PLATFORM_SAVING_SHAPES.java` carries all
+three shapes).
 
 ---
 
@@ -897,10 +904,11 @@ Resource verb clients (`objectStore` → boto3, `queue` → aio-pika,
 workflow / saga `<resource>.<verb>(...)` calls import + await them.
 
 **Not yet implemented** (fails fast / follow-ups): durable-channel
-outbox tier, `--trace` domain instrumentation, `shape(document|embedded)`
-(`PLATFORM_SAVING_SHAPES.python` is relational-only), `when` can-queries
-(python absent from `SUPPORTED_WHEN_BACKENDS`), and provenance/audited
-(gated like .NET).
+outbox tier, `--trace` domain instrumentation, and provenance/audited
+(gated — no runtime emitted; the node and .NET backends do implement
+these).  `shape(document)` / `shape(embedded)` persistence (all three
+shapes are in `PLATFORM_SAVING_SHAPES.python`) and `when` can-queries
+(python is in `SUPPORTED_WHEN_BACKENDS`) are **implemented**.
 
 ---
 
