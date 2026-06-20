@@ -239,6 +239,11 @@ export function generateVueForContexts(
     out.set(`src/components/${c.name}.vue`, component.source);
   }
 
+  // Frontend auth guard (D-AUTH-OIDC, `auth: ui`): this vue deployable opts in
+  // AND its target backend enforces auth, so `useSession()` + the verified
+  // claims are available — gates `page { requires … }` rendering below.
+  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
+
   for (const page of pages) {
     if (!page.body) {
       out.set(pagePath(page), renderPageStub(page));
@@ -279,6 +284,7 @@ export function generateVueForContexts(
         result,
         pack,
         externComponents: externComponentNames,
+        authUi,
       }),
     );
   }
@@ -361,12 +367,9 @@ export function generateVueForContexts(
 
   // Shared shell files (api/ + vue/ + docker/ shared-source layers).
   const hasDelete = aggregates.some((a) => !!a.agg.canonicalDestroy);
-  // Frontend auth guard (D-AUTH-OIDC, `auth: ui`): when this vue
-  // deployable opts in AND its target backend enforces auth, emit the
-  // session-aware client + the provide/inject route guard.  Mirrors the
-  // React wiring — the `session.ts` probe is shared verbatim; the guard
-  // SFC + `useSession` composable are the Vue-shaped half.
-  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
+  // `authUi` computed above (before page emission, which consumes it for the
+  // `page { requires … }` gate).  Drives the session client + provide/inject
+  // route guard emits below (the Vue-shaped half of the React auth wiring).
   out.set("src/api/client.ts", renderShell(pack, "api-client", { hasDelete, hasAuthUi: authUi }));
   out.set("src/api/config.ts", renderShell(pack, "api-config", { apiBaseUrl }));
   if (authUi) {

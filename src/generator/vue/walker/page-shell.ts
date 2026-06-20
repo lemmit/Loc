@@ -10,6 +10,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
 import {
   emitExpr,
@@ -65,6 +66,10 @@ export interface VuePageShellInput {
    *  extension (they resolve to a `<Name>.ts` re-export shim forwarding
    *  the hand-written module), unlike walked components (`<Name>.vue`). */
   externComponents?: ReadonlySet<string>;
+  /** True when the frontend opts into `auth: ui` — a page's `requires` gate
+   *  then renders a `v-if` `<Forbidden/>` guard against the verified session
+   *  claims (`useSession().user`).  Absent ⇒ ungated. */
+  authUi?: boolean;
 }
 
 export function renderVuePage(input: VuePageShellInput): string {
@@ -337,6 +342,14 @@ export function renderVuePage(input: VuePageShellInput): string {
   script.push(
     `import { EMPTY, formatBool, formatDateTime, formatMoney, formatNumber, formatPlain, isEmpty, shortId } from "${relPrefix(input)}lib/format";`,
   );
+  // Page-level `requires` UI gate (D-AUTH-OIDC): bind the verified session
+  // user so the `<template>` can `v-if`-guard a `<Forbidden/>` fallback — the
+  // client mirror of the backend 403.  Only when `auth: ui` AND the page
+  // declares a gate; otherwise byte-identical.
+  const gated = !!input.authUi && !!page.requires;
+  if (gated) {
+    script.push(`import { useSession } from "${relPrefix(input)}auth/useSession";`);
+  }
   if (usesLoomForm) {
     script.push(`import { useLoomForm } from "${relPrefix(input)}lib/form";`);
   }
@@ -399,6 +412,13 @@ export function renderVuePage(input: VuePageShellInput): string {
     // onto vue-router locally.
     script.push("const navigate = (to: string) => { void router.push(to); };");
   }
+  if (gated) {
+    // Dynamic OIDC/JWT claims → loose type so chained claim access stays
+    // vue-tsc-clean; `?? {}` is a safe default (AuthGate guarantees a session
+    // before the page mounts, so this branch is for typing only).
+    script.push(`const currentUser = (useSession().user.value ?? {}) as Record<string, any>;`);
+    script.push(`const loomPageAllowed = ${renderGateExpr(page.requires!, "currentUser")};`);
+  }
   script.push(...stateLines);
   script.push(...hookLines);
   script.push(...opFormLines);
@@ -408,13 +428,25 @@ export function renderVuePage(input: VuePageShellInput): string {
 
   const title = humanize(page.name);
   const dialogs = dialogBlocks.length > 0 ? `\n${dialogBlocks.join("\n")}` : "";
+  // Page-`requires` guard: a forbidden caller sees `<Forbidden/>` instead of
+  // the body (Vue 3 allows multiple template roots, so the guard `div` + the
+  // `v-else` body sit side by side).  Ungated pages keep the bare body.
+  const templateBody = gated
+    ? `  <div v-if="!loomPageAllowed" style="padding: 24px;">
+    <h2>Forbidden</h2>
+    <p>You do not have access to this page.</p>
+  </div>
+  <template v-else>
+${indent(result.tsx, "    ")}${dialogs}
+  </template>`
+    : `${indent(result.tsx, "  ")}${dialogs}`;
   return `<!-- Auto-generated.  Do not edit by hand.  (${title}) -->
 <script setup lang="ts">
 ${script.join("\n")}
 </script>
 
 <template>
-${indent(result.tsx, "  ")}${dialogs}
+${templateBody}
 </template>
 `;
 }
