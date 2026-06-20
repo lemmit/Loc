@@ -104,6 +104,16 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
     expect(cfg).toMatch(/builder\.HasQueryFilter\("IsDeletedFilter", x => !x\.IsDeleted\)/);
   });
 
+  it("softDelete operation stamps DeletedAt with DateTime.UtcNow (not a bogus Now() call)", async () => {
+    // Regression: the softDeletable macro built `now()` as a generic call,
+    // emitting `DeletedAt = Now();` — uncompilable C#.
+    const model = await modelFrom(trioed("softDelete", "softDeletable"));
+    const files = generateDotnet(model);
+    const order = files.get("Domain/Orders/Order.cs")!;
+    expect(order).toMatch(/DeletedAt = DateTime\.UtcNow;/);
+    expect(order).not.toMatch(/DeletedAt = Now\(\)/);
+  });
+
   it("does NOT install HasQueryFilter for non-softDeletable aggregates", async () => {
     const model = await modelFrom(aggregateOnly(""));
     const files = generateDotnet(model);
@@ -165,6 +175,18 @@ describe(".NET generator: registry-driven SaveChangesInterceptor", () => {
     const src = files.get("Infrastructure/Persistence/AuditableInterceptor.cs")!;
     expect(src).toMatch(/e\.CreatedAt =/);
     expect(src).toMatch(/e\.UpdatedAt =/);
+  });
+
+  it("audit stamps render the now() builtin as DateTime.UtcNow (not a bogus Now() call)", async () => {
+    // Regression: the audit macro built `now()` as a generic call, which
+    // lowered to `Now()` — uncompilable C#.  It must build a NowExpr so the
+    // .NET renderer emits the clock builtin.
+    const model = await modelFrom(trioed("audit", "auditable"));
+    const files = generateDotnet(model);
+    const src = files.get("Infrastructure/Persistence/AuditableInterceptor.cs")!;
+    expect(src).toMatch(/e\.CreatedAt = DateTime\.UtcNow;/);
+    expect(src).toMatch(/e\.UpdatedAt = DateTime\.UtcNow;/);
+    expect(src).not.toMatch(/= Now\(\)/);
   });
 
   it("Program.cs registers the interceptor when stamping is used", async () => {

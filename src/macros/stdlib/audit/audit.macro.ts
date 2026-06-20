@@ -1,5 +1,5 @@
 import { contextStamp, defineMacro, nameRef } from "../../api/index.js";
-import { callExpr } from "../../api/ui-factories.js";
+import { nowExpr } from "../../api/ui-factories.js";
 
 /** Context-level companion to `auditable`.
  *
@@ -49,11 +49,11 @@ export default defineMacro({
     return contextStamp({
       capability: "auditable",
       onCreate: [
-        { field: "createdAt", value: callExpr("now", []) },
+        { field: "createdAt", value: nowExpr() },
         { field: "createdBy", value: nameRef("currentUser") },
       ],
       onUpdate: [
-        { field: "updatedAt", value: callExpr("now", []) },
+        { field: "updatedAt", value: nowExpr() },
         { field: "updatedBy", value: nameRef("currentUser") },
       ],
     });
