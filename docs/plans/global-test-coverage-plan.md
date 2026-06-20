@@ -106,7 +106,9 @@ A `materializeCorpusFixture(feature, backend, dir)` helper lets the per-backend 
 - **`auth-oidc`** (5 → 3): node/java/dotnet build gates repointed, their three legacy copies deleted. Python keeps its copy (shared with the runtime OIDC e2e, `auth-oidc-python-e2e.test.ts` — single-sourced rather than split); Phoenix's name-based cached gate deferred.
 - **`eventsourced-workflow`** (4 → 1): node/java/python/dotnet all repointed, all four legacy copies deleted (none were e2e-shared).
 
-`tph` is **deliberately not collapsed**: the corpus `inheritance` feature is a TPH+TPC superset (not 1:1 with TPH-only `tph`), `java-build/tph.ddd` is also consumed by a unit test, and Phoenix uses it via its invasive gate — a scope decision, not a mechanical repoint. (Sandbox note: `.NET`/Phoenix compile-verify is blocked here by package-registry egress — `NU1301` to nuget.org, `unknown_ca` to hex.pm; both compile in CI. The repointed .NET cells are CI-verified.)
+- **`tph`** — a *new* corpus feature (the Vehicle/Car/Truck TPH-only canonical fixture, kept distinct from `inheritance`'s TPH+TPC showcase). Java's two consumers — the `generated-java-build` gate **and** the `generator-java-tph` unit test — now share it; `java-build/tph.ddd` deleted. Verified on host (gradle bootJar + the unit test's 4 structural assertions). The `dotnet`/`phoenix` `tph` fixtures are **genuinely different content** (dotnet is `Party`-based, asserts `PartyConfiguration.cs`; Phoenix's gate hardcodes the `phoenix_app` project dir) — not duplicates, correctly left in place.
+
+(Sandbox note: `.NET`/Phoenix compile-verify is blocked here by package-registry egress — `NU1301` to nuget.org, `unknown_ca` to hex.pm; both compile in CI. The repointed .NET cells are CI-verified.)
 
 **Remaining:** extend the compile tier to the other backends' docker gates (Phase 1 cont.), fix the 7 surfaced Hono bugs, flip showcase-completeness to hard (Phase 2), the manifest-driven wire-parity sweep (Phase 3), and the behavioural runtime tier (Phases 4–5).
 

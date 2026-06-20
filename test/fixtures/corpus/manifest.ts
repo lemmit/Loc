@@ -41,6 +41,7 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "document", title: "`shape(document)` — whole aggregate in one jsonb column", doc: "language", backends: ALL },
   { id: "embedded", title: "`shape(embedded)` — containments fold into jsonb columns", doc: "language", backends: ALL },
   { id: "inheritance", title: "aggregate inheritance — TPH (sharedTable) + TPC (ownTable)", doc: "inheritance", backends: ALL },
+  { id: "tph", title: "TPH-only (sharedTable) hierarchy — Vehicle/Car/Truck canonical fixture", doc: "inheritance", backends: ALL },
   { id: "event-sourcing", title: "`persistedAs(eventLog)` — append-only stream + appliers", doc: "workflow", backends: ALL },
   { id: "eventsourced-workflow", title: "event-sourced saga folding its own emitted events", doc: "workflow", backends: ALL },
   { id: "saga", title: "in-process dispatch / saga with persisted correlation", doc: "workflow", backends: ALL },

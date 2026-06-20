@@ -66,7 +66,7 @@ const FIXTURES: Array<[string, string]> = [
   ["test/e2e/fixtures/java-build/tenancy-reified.ddd", "api1"],
   // TPH (sharedTable) inheritance: JPA SINGLE_TABLE + @DiscriminatorColumn
   // on the abstract base, @DiscriminatorValue per concrete, shared <Base>Id.
-  ["test/e2e/fixtures/java-build/tph.ddd", "tph_api"],
+  ["corpus:tph", CORPUS_DEPLOYABLE],
   // Embedded-SPA fullstack mount: /api route prefix, SpaWebConfig
   // (resource handler + index.html fallback), ClientApp/ React project.
   ["test/e2e/fixtures/java-build/fullstack.ddd", "fs_app"],

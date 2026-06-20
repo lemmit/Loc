@@ -10,15 +10,16 @@
 // routes auto-filter on the discriminator; one shared table).
 // ---------------------------------------------------------------------------
 
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { validateLoomModel } from "../../../src/ir/validate/validate.js";
+import { corpusSourceFor } from "../../fixtures/corpus/harness.js";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 import { buildLoomModel } from "../../_helpers/ir.js";
 
-const SRC = readFileSync("test/e2e/fixtures/java-build/tph.ddd", "utf8");
+// The canonical TPH fixture now lives in the shared corpus (deployable `d`).
+const SRC = corpusSourceFor("tph", "java");
 
-const ROOT = "tph_api/src/main/java/com/loom/tphapi";
+const ROOT = "d/src/main/java/com/loom/d";
 
 async function files(): Promise<Map<string, string>> {
   return generateSystemFiles(SRC);
