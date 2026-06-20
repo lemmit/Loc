@@ -96,7 +96,7 @@ export function langiumDiagnosticToJson(d: Diagnostic, doc: LangiumDocument): Js
     code: codeOf(d),
     severity: severityOf(d),
     phase: phaseOf(d),
-    message: d.message,
+    message: typeof d.message === "string" ? d.message : d.message.value,
     ...(node ? { node } : {}),
     range: {
       start: { line: d.range.start.line, character: d.range.start.character },

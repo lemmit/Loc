@@ -223,7 +223,7 @@ interface Resolved {
 async function resolve(source: string, patches: ModelPatch[]): Promise<Resolved> {
   const services = createDddServices(EmptyFileSystem);
   const factory = services.shared.workspace.LangiumDocumentFactory;
-  const doc = factory.fromString<Model>(source, URI.parse("memory://patch.ddd"));
+  const doc = factory.fromString<Model>(source, URI.parse("memory:///patch.ddd"));
   await services.shared.workspace.DocumentBuilder.build([doc]);
 
   const { map, ambiguous } = indexTargets(doc.parseResult.value);

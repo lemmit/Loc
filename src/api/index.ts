@@ -71,7 +71,7 @@ interface ParsedSource {
 async function parseSource(source: string): Promise<ParsedSource> {
   const services = createDddServices(EmptyFileSystem);
   const factory = services.shared.workspace.LangiumDocumentFactory;
-  const doc = factory.fromString<Model>(source, URI.parse("memory://source.ddd"));
+  const doc = factory.fromString<Model>(source, URI.parse("memory:///source.ddd"));
   await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
   return {
     doc,

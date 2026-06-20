@@ -36,7 +36,7 @@ export interface Parsed {
 export async function parse(source: string): Promise<Parsed> {
   const services = createDddServices(EmptyFileSystem).Ddd;
   const factory = services.shared.workspace.LangiumDocumentFactory;
-  const doc = factory.fromString<Model>(source, URI.parse("memory://source.ddd"));
+  const doc = factory.fromString<Model>(source, URI.parse("memory:///source.ddd"));
   services.shared.workspace.LangiumDocuments.addDocument(doc);
   await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
   return { services, doc, model: doc.parseResult.value as Model | undefined };
