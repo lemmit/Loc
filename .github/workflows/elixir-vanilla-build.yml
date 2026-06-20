@@ -9,13 +9,21 @@ name: Elixir / Vanilla build verification
 #
 # The generate + compile loop lives in
 # `test/e2e/generated-elixir-vanilla-build.test.ts` (entrypoint:
-# `npm run test:phoenix-vanilla`); this workflow is a thin wrapper
-# that pre-generates each fixture into a stable path, computes the
-# deps-cache signature, restores the cache, then hands off to the
-# test.  The runner honours `LOOM_PHOENIX_OUT_DIR` and skips
-# regeneration when mix.exs already exists at the expected path.
+# `npm run test:phoenix-vanilla`).  A `configure` job enumerates the
+# fixtures dynamically, then a matrix runs ONE fixture per cell
+# (selected via `LOOM_PHOENIX_VANILLA_BUILD_CASE`): each cell
+# pre-generates to compute its own deps-cache signature, restores its
+# per-fixture cache, then hands off to the test (which honours
+# `LOOM_PHOENIX_OUT_DIR` and skips regeneration when mix.exs already
+# exists).  Sharding keeps a cold cache self-healing — see the job
+# comment below.
 #
-# Sibling of `elixir-ash-build.yml` (the Ash-foundation gate).
+# Sibling of `elixir-ash-build.yml` (the Ash-foundation gate), and
+# sharded the same way (#1367): the old single job compiled all ~14
+# fixtures sequentially behind one shared cache, so a fully-cold run
+# (after the 7-day cache eviction) couldn't finish in the timeout, got
+# cancelled, and never reseeded the cache — staying red until a
+# maintainer intervened.
 #
 # Triggers:
 #   - PRs that touch the vanilla generator subtree, the fixtures, or
@@ -55,9 +63,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-generated-elixir-vanilla:
+  # Enumerate the fixtures dynamically so adding/removing a `.ddd` under
+  # test/e2e/fixtures/elixir-vanilla-build/ needs no workflow edit.  Output is
+  # JSON consumed by the matrix below via `fromJSON`.  ~5s of runner time.
+  configure:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: set
+        run: |
+          fixtures=$(ls test/e2e/fixtures/elixir-vanilla-build/*.ddd \
+            | xargs -n1 basename | sed 's/\.ddd$//' | jq -R . | jq -cs .)
+          echo "matrix={\"fixture\":$fixtures}" >> "$GITHUB_OUTPUT"
+
+  # One job PER fixture (mirrors elixir-ash-build.yml's sharding, #1367).  A
+  # fully cold cell is ONE fixture (~2-3min) — it always completes within the
+  # timeout and reseeds its own per-fixture cache, so a cold cache self-heals.
+  build-generated-elixir-vanilla:
+    needs: configure
+    runs-on: ubuntu-latest
+    strategy:
+      # Surface every broken fixture rather than aborting on the first.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
     timeout-minutes: 15
+    name: ${{ matrix.fixture }}
     steps:
       - uses: actions/checkout@v6
 
@@ -71,44 +103,47 @@ jobs:
       - name: Install Loom toolchain
         run: npm ci
 
-      # Pre-generate each fixture once into a stable path so we can
-      # hash the emitted mix.exs for the cache key.  Vanilla fixtures
-      # emit to `<deployable>/` (e.g. `api/`), not `phoenix_app/` as
-      # the Ash matrix does.
-      - name: Pre-generate fixtures (for cache key)
+      # Pre-generate THIS fixture into a stable path so we can hash the
+      # emitted mix.exs for the cache key.  Vanilla fixtures emit to
+      # `<deployable>/` (e.g. `api/`), not `phoenix_app/` as the Ash
+      # matrix does — so the cache globs `*/out/*/`.
+      - name: Pre-generate fixture (for cache key)
         run: |
-          for fixture in test/e2e/fixtures/elixir-vanilla-build/*.ddd; do
-            stem=$(basename "$fixture" .ddd)
-            mkdir -p "/tmp/ci/vanilla/$stem/out"
-            node bin/cli.js generate system "$fixture" -o "/tmp/ci/vanilla/$stem/out"
-          done
+          mkdir -p "/tmp/ci/vanilla/${{ matrix.fixture }}/out"
+          node bin/cli.js generate system \
+            "test/e2e/fixtures/elixir-vanilla-build/${{ matrix.fixture }}.ddd" \
+            -o "/tmp/ci/vanilla/${{ matrix.fixture }}/out"
 
       - name: Compute vanilla dep signature
         id: vanilla-depsig
         run: |
-          hash=$(find /tmp/ci/vanilla -name mix.exs -print0 | xargs -0 cat | sha256sum | cut -d' ' -f1)
+          hash=$(find "/tmp/ci/vanilla/${{ matrix.fixture }}" -name mix.exs -print0 \
+            | xargs -0 cat | sha256sum | cut -d' ' -f1)
           echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
       - name: Cache vanilla deps + _build
         uses: actions/cache@v5
         with:
           path: |
-            /tmp/ci/vanilla/*/out/*/deps
-            /tmp/ci/vanilla/*/out/*/_build
-          key: vanilla-mix-${{ steps.vanilla-depsig.outputs.hash }}
+            /tmp/ci/vanilla/${{ matrix.fixture }}/out/*/deps
+            /tmp/ci/vanilla/${{ matrix.fixture }}/out/*/_build
+          key: vanilla-mix-${{ matrix.fixture }}-${{ steps.vanilla-depsig.outputs.hash }}
+          # On cache miss (mix.exs changed), fall back to this fixture's most
+          # recent stale cache so mix only re-fetches/-compiles deltas.
           restore-keys: |
-            vanilla-mix-
+            vanilla-mix-${{ matrix.fixture }}-
 
-      - name: Run test:phoenix-vanilla (mix compile against every fixture)
+      - name: Run test:phoenix-vanilla (this fixture)
         env:
           LOOM_PHOENIX_VANILLA_BUILD: "1"
           LOOM_PHOENIX_OUT_DIR: /tmp/ci/vanilla
+          LOOM_PHOENIX_VANILLA_BUILD_CASE: ${{ matrix.fixture }}.ddd
         run: npx vitest run test/e2e/generated-elixir-vanilla-build.test.ts
 
       - name: Surface failure context
         if: failure()
         run: |
-          echo '## Elixir / Vanilla mix compile failed' >> $GITHUB_STEP_SUMMARY
+          echo "## Elixir / Vanilla mix compile failed: ${{ matrix.fixture }}.ddd" >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
           echo 'See the "Run test:phoenix-vanilla" step above for the captured `mix deps.get` + `mix compile --warnings-as-errors` diagnostics.' >> $GITHUB_STEP_SUMMARY
-          echo 'Each fixture under `test/e2e/fixtures/elixir-vanilla-build/` runs as its own `it.each` iteration in `test/e2e/generated-elixir-vanilla-build.test.ts`.' >> $GITHUB_STEP_SUMMARY
+          echo 'This cell builds `test/e2e/fixtures/elixir-vanilla-build/${{ matrix.fixture }}.ddd` via its `it.each` iteration in `test/e2e/generated-elixir-vanilla-build.test.ts`.' >> $GITHUB_STEP_SUMMARY

@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type HexMirror, startHexMirror } from "./support/hex-mirror";
 
 // ---------------------------------------------------------------------------
 // Slice 6 of docs/plans/vanilla-foundation-tdd-plan.md — CI gate for
@@ -27,47 +28,96 @@ const repoRoot = path.resolve(here, "..", "..");
 const cli = path.join(repoRoot, "bin", "cli.js");
 const fixturesDir = path.join(here, "fixtures", "elixir-vanilla-build");
 const ENABLED = process.env.LOOM_PHOENIX_VANILLA_BUILD === "1";
+const IMAGE = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
+
+// `mix deps.get && mix compile --warnings-as-errors` inside the elixir image.
+// When `mirror` is set (LOOM_HEX_MIRROR=1) hex.pm traffic is routed through the
+// loopback mirror — mirrors the Ash gate, so this gate also runs behind a
+// TLS-fingerprinting egress proxy.  See test/e2e/support/hex-mirror.ts.
+function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
+  const dockerArgs = mirror ? `${mirror.dockerArgs.join(" ")} ` : "";
+  const shellPrefix = mirror?.shellPrefix ?? "";
+  execSync(
+    `docker run --rm ${dockerArgs}-v ${projDir}:/app -w /app -e MIX_ENV=prod ${IMAGE} ` +
+      `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
+      `mix deps.get --only prod && mix compile --warnings-as-errors'`,
+    { stdio: "inherit", timeout: 600_000 },
+  );
+}
+
+// CI shards one fixture per matrix cell (see elixir-vanilla-build.yml) so a cold
+// dep compile fits the per-cell timeout and reseeds its own cache.
+// `LOOM_PHOENIX_VANILLA_BUILD_CASE=<fixture>.ddd` selects that single fixture;
+// unset (local `npm run test:phoenix-vanilla`) builds them all.  Mirrors the Ash
+// gate's LOOM_PHOENIX_BUILD_CASE (generated-phoenix-build.test.ts).
+function pickCases<T extends { name: string }>(all: T[]): T[] {
+  const only = process.env.LOOM_PHOENIX_VANILLA_BUILD_CASE;
+  if (!only) return all;
+  const selected = all.filter((c) => c.name === only);
+  if (selected.length === 0) {
+    throw new Error(
+      `LOOM_PHOENIX_VANILLA_BUILD_CASE=${only} matched no elixir-vanilla-build fixture ` +
+        `(have: ${all.map((c) => c.name).join(", ")})`,
+    );
+  }
+  return selected;
+}
 
 describe.skipIf(!ENABLED)(
   "generated vanilla Phoenix project compiles against plain Ecto (LOOM_PHOENIX_VANILLA_BUILD=1)",
   () => {
-    it.each([
-      { name: "vanilla-min.ddd", deployable: "api" },
-      { name: "vanilla-channels.ddd", deployable: "api" },
-      // Event sourcing (T2.b) + operation `or`-union returns (T2.c) — compile the
-      // from-scratch ES + producer-translation Elixir, not just the structure tests.
-      { name: "vanilla-eventlog.ddd", deployable: "api" },
-      { name: "vanilla-returns.ddd", deployable: "api" },
-      // Returning-op body statements (T2.c tail) — precondition/requires raise
-      // guards, `assign` struct-update, `emit` PubSub broadcast, fall-through
-      // success serialised to a wire map.
-      { name: "vanilla-returns-body.ddd", deployable: "api" },
-      // ES applier folds over value-object / enum fields (P4.3): an inline VO
-      // constructor renders to a plain map on vanilla — compile that path.
-      { name: "vanilla-vo-fold.ddd", deployable: "api" },
-      // Per-field changeset validators (T2.i) — validate_number/length/format.
-      { name: "vanilla-invariants.ddd", deployable: "api" },
-      // Event-sourced append → Dispatcher fan-out (an ES event a workflow saga
-      // consumes) — compile the `<Ctx>.Dispatcher.dispatch/1` call in append.
-      { name: "vanilla-es-dispatch.ddd", deployable: "api" },
-      // Event-sourced WORKFLOW (A2-S5b): `<Wf>State` fold struct + `<wf>_events`
-      // schema + fold + stream IO + fold-on-load / append-own-events handlers.
-      { name: "vanilla-eventsourced-workflow.ddd", deployable: "api" },
-      // Custom-find HTTP surface — list / single / param-less GET actions.
-      { name: "vanilla-finds.ddd", deployable: "api" },
-      // Union-returning find — tagged success + problem_variant absence.
-      { name: "vanilla-union-find.ddd", deployable: "api" },
-      // Capability `filter` AND-ed into every Ecto read (list/find_by_id/find/
-      // retrieval/view) — plain Ecto has no Ash base_filter, so the conjoined
-      // `from(... where: ...)` reads must compile (and not silently drop the filter).
-      { name: "vanilla-capability-filter.ddd", deployable: "api" },
-      // Principal (tenancy) `filter this.tenantId == currentUser.tenantId` — the
-      // request actor is threaded from `conn.assigns.current_user` (Auth plug)
-      // into every read and pinned (`^(current_user && current_user.tenant_id)`).
-      // Compiles the threaded repository/context/controller/retrieval/view + the
-      // auth plug spliced into the router.
-      { name: "vanilla-tenancy.ddd", deployable: "api" },
-    ])("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
+    // Behind a TLS-fingerprinting proxy (LOOM_HEX_MIRROR=1) start one loopback
+    // hex mirror for the whole suite; a no-op (undefined) with direct access.
+    let mirror: HexMirror | undefined;
+    beforeAll(async () => {
+      mirror = await startHexMirror();
+    });
+    afterAll(() => {
+      mirror?.stop();
+    });
+    it.each(
+      pickCases([
+        { name: "vanilla-min.ddd", deployable: "api" },
+        { name: "vanilla-channels.ddd", deployable: "api" },
+        // Event sourcing (T2.b) + operation `or`-union returns (T2.c) — compile the
+        // from-scratch ES + producer-translation Elixir, not just the structure tests.
+        { name: "vanilla-eventlog.ddd", deployable: "api" },
+        { name: "vanilla-returns.ddd", deployable: "api" },
+        // Returning-op body statements (T2.c tail) — precondition/requires raise
+        // guards, `assign` struct-update, `emit` PubSub broadcast, fall-through
+        // success serialised to a wire map.
+        { name: "vanilla-returns-body.ddd", deployable: "api" },
+        // ES applier folds over value-object / enum fields (P4.3): an inline VO
+        // constructor renders to a plain map on vanilla — compile that path.
+        { name: "vanilla-vo-fold.ddd", deployable: "api" },
+        // Per-field changeset validators (T2.i) — validate_number/length/format.
+        { name: "vanilla-invariants.ddd", deployable: "api" },
+        // Event-sourced append → Dispatcher fan-out (an ES event a workflow saga
+        // consumes) — compile the `<Ctx>.Dispatcher.dispatch/1` call in append.
+        { name: "vanilla-es-dispatch.ddd", deployable: "api" },
+        // Event-sourced WORKFLOW (A2-S5b): `<Wf>State` fold struct + `<wf>_events`
+        // schema + fold + stream IO + fold-on-load / append-own-events handlers.
+        { name: "vanilla-eventsourced-workflow.ddd", deployable: "api" },
+        // Custom-find HTTP surface — list / single / param-less GET actions.
+        { name: "vanilla-finds.ddd", deployable: "api" },
+        // Union-returning find — tagged success + problem_variant absence.
+        { name: "vanilla-union-find.ddd", deployable: "api" },
+        // Capability `filter` AND-ed into every Ecto read (list/find_by_id/find/
+        // retrieval/view) — plain Ecto has no Ash base_filter, so the conjoined
+        // `from(... where: ...)` reads must compile (and not silently drop the filter).
+        { name: "vanilla-capability-filter.ddd", deployable: "api" },
+        // Principal (tenancy) `filter this.tenantId == currentUser.tenantId` — the
+        // request actor is threaded from `conn.assigns.current_user` (Auth plug)
+        // into every read and pinned (`^(current_user && current_user.tenant_id)`).
+        // Compiles the threaded repository/context/controller/retrieval/view + the
+        // auth plug spliced into the router.
+        { name: "vanilla-tenancy.ddd", deployable: "api" },
+        // Plain (non-event-sourced) workflow saga: the `<Wf>` GenServer-free
+        // Ecto-state instance + correlation row + create/continuation handlers
+        // compiled on the vanilla foundation.
+        { name: "vanilla-workflows.ddd", deployable: "api" },
+      ]),
+    )("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
       const outDir = baseOutDir
@@ -94,17 +144,10 @@ describe.skipIf(!ENABLED)(
         expect(mix).not.toContain(":ash_postgres,");
         expect(mix).not.toContain(":ash_phoenix,");
 
-        // mix deps.get + compile inside the elixir image.  Mirrors the Ash
-        // test's 600s exec timeout — cold-cache mix deps.get + compile of
-        // a plain Phoenix+Ecto skeleton fits comfortably under this budget,
-        // but the headroom protects against transient hex registry slowness.
-        const image = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
-        execSync(
-          `docker run --rm -v ${projDir}:/app -w /app -e MIX_ENV=prod ${image} ` +
-            `bash -c 'mix local.hex --force && mix local.rebar --force && ` +
-            `mix deps.get --only prod && mix compile --warnings-as-errors'`,
-          { stdio: "inherit", cwd: repoRoot, timeout: 600_000 },
-        );
+        // mix deps.get + compile inside the elixir image (cold-cache fits the
+        // 600s exec budget; the headroom absorbs transient hex slowness).
+        // Routed through the loopback hex mirror when LOOM_HEX_MIRROR=1.
+        runMixCompile(projDir, mirror);
       } finally {
         if (!baseOutDir) {
           try {

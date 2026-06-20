@@ -20,16 +20,16 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/generator/phoenix-live-view/**'
+      - 'src/generator/elixir/**'
       - 'src/generator/_obs/**'
       - 'src/generator/react/**'
-      - 'src/platform/phoenix-live-view.ts'
+      - 'src/platform/elixir.ts'
       - 'designs/ashPhoenix/**'
       - 'test/e2e/observability-events-phoenix.test.ts'
       - 'test/e2e/embed-react-phoenix.test.ts'
       - 'test/e2e/fixtures/phoenix-build/phoenix-embed-react.ddd'
       - 'package.json'
-      - '.github/workflows/phoenix-obs-e2e.yml'
+      - '.github/workflows/elixir-ash-obs-e2e.yml'
   workflow_dispatch:
 
 permissions:
@@ -101,7 +101,7 @@ jobs:
           # run, so we can't cache deps/ + _build/ at a stable path;
           # caching the global hex + mix dirs is the next best thing
           # and still saves the http fetch.
-          key: hex-mix-${{ hashFiles('src/generator/phoenix-live-view/index.ts') }}
+          key: hex-mix-${{ hashFiles('src/generator/elixir/index.ts') }}
           restore-keys: |
             hex-mix-
 
