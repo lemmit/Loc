@@ -113,6 +113,15 @@ describe.skipIf(!ENABLED)(
         // unwrapped.  The gated `<%= if %>` + `@current_user` markup only fails
         // at compile time, so this fixture is the real bar for it.
         { name: "auth-menu-gate.ddd" },
+        // Operation action-button gating under auth: an auth-required LiveView
+        // app whose component hosts an `Action(<instance>.<op>)` button on an
+        // operation with a currentUser-only `requires`.  The emitted component
+        // wraps the `<.button>` in a HEEx
+        // `<%= if ((@current_user.role == "manager")) do %> … <% end %>` against
+        // the on_mount-assigned `@current_user`; the ungated op's button stays
+        // unwrapped.  The gated `<%= if %>` + `@current_user` markup only fails
+        // at compile time, so this fixture is the real bar for it.
+        { name: "auth-op-gate.ddd" },
         // Value-object array (`Money[]`) — Ash stores it inline as an
         // `{:array, Money}` embedded attribute → `{:array, :map}` column (no
         // child table); compiles the embedded-array path.
