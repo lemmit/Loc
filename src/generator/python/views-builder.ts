@@ -6,6 +6,7 @@ import type {
   WireField,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
@@ -111,11 +112,16 @@ export function buildPyViewsFile(
   for (const p of wfLowered.values()) for (const op of p?.ops ?? []) saOps.add(op);
   // Saga-state row classes the workflow views read.
   const wfRows = [...new Set(wfViews.map((v) => `${wfByName.get(v.source.name)!.name}Row`))].sort();
+  // Authorization gates: any `view … requires <expr>` pulls in ForbiddenError;
+  // a currentUser-referencing gate additionally threads `Request` + the `User`
+  // principal type.  `requires true` needs only ForbiddenError.
+  const anyGate = [...views, ...wfViews].some((v) => v.requires);
+  const anyGateUsesUser = [...views, ...wfViews].some((v) => viewGateNeedsUser(v));
 
   return lines(
     `"""Read-model view routes.  Auto-generated."""`,
     "",
-    "from fastapi import APIRouter, Depends",
+    `from fastapi import APIRouter, Depends${anyGateUsesUser ? ", Request" : ""}`,
     models.length > 0 || wfModels.length > 0 ? "from pydantic import BaseModel, RootModel" : null,
     saOps.size > 0 ? `from sqlalchemy import ${[...saOps].sort().join(", ")}` : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
@@ -132,6 +138,8 @@ export function buildPyViewsFile(
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
+    anyGate ? "from app.domain.errors import ForbiddenError" : null,
+    anyGateUsesUser ? "from app.auth.user import User" : null,
     ...responseAggs.map((n) => {
       const names = [
         refersTo(`${n}ListResponse`) ? `${n}ListResponse` : null,
@@ -156,7 +164,8 @@ function viewRoute(view: ViewIR, ctx: EnrichedBoundedContextIR, dispatcherExpr: 
   if (!view.output) {
     return lines(
       `@router.get("/${fn}", response_model=${src}ListResponse, operation_id="${opId}")`,
-      `async def ${fn}_view(session: SessionDep) -> list[dict[str, object]]:`,
+      `async def ${fn}_view(${viewSig(view)}) -> list[dict[str, object]]:`,
+      ...viewGateLines(view),
       repoInit,
       `    return [repo.to_wire(r) for r in await repo.${fn}()]`,
     );
@@ -165,7 +174,8 @@ function viewRoute(view: ViewIR, ctx: EnrichedBoundedContextIR, dispatcherExpr: 
   // first), then project binds per row.
   const out: string[] = [
     `@router.get("/${fn}", response_model=${view.name}Response, operation_id="${opId}")`,
-    `async def ${fn}_view(session: SessionDep) -> list[dict[str, object]]:`,
+    `async def ${fn}_view(${viewSig(view)}) -> list[dict[str, object]]:`,
+    ...viewGateLines(view),
     repoInit,
     `    rows = await repo.${fn}()`,
   ];
@@ -235,7 +245,8 @@ function workflowViewRoute(view: ViewIR, wf: WorkflowIR, pred: PyPredicate | nul
   const where = pred ? `.where(${pred.expr})` : "";
   return lines(
     `@router.get("/${fn}", response_model=${view.name}Response, operation_id="${camelId(opView(view.name))}")`,
-    `async def ${fn}_view(session: SessionDep) -> list[dict[str, object]]:`,
+    `async def ${fn}_view(${viewSig(view)}) -> list[dict[str, object]]:`,
+    ...viewGateLines(view),
     `    rows = (await session.execute(select(${row})${where})).scalars().all()`,
     `    return [{${proj}} for row in rows]`,
   );
@@ -288,6 +299,34 @@ function renderIdReceiver(
     }
   }
   return renderPyExpr(expr, { thisName: "r" });
+}
+
+// --- authorization gate (D-AUTH-OIDC / default-deny) ----------------------
+
+/** True when a view's `requires` gate references currentUser — the route then
+ *  threads the request principal in (`request: Request`). */
+function viewGateNeedsUser(view: ViewIR): boolean {
+  return !!view.requires && exprUsesCurrentUser(view.requires);
+}
+
+/** The view route's parameter list.  `request: Request` is threaded in only
+ *  when a currentUser-referencing gate needs the principal; `requires true`
+ *  (and ungated views) keep the bare `session` signature. */
+function viewSig(view: ViewIR): string {
+  return viewGateNeedsUser(view) ? "request: Request, session: SessionDep" : "session: SessionDep";
+}
+
+/** Authorization-gate body lines: a 403 raised before the query when the
+ *  `requires` predicate fails — the read-side analogue of an operation's
+ *  `requires`.  Mirrors render-stmt's `requires` (ForbiddenError → 403 via the
+ *  app exception handler). */
+function viewGateLines(view: ViewIR): string[] {
+  if (!view.requires) return [];
+  const out: string[] = [];
+  if (viewGateNeedsUser(view)) out.push(`    current_user: User = request.state.current_user`);
+  out.push(`    if not (${renderPyExpr(view.requires)}):`);
+  out.push(`        raise ForbiddenError(${JSON.stringify(`Forbidden: view ${view.name}`)})`);
+  return out;
 }
 
 function idFollowPath(e: ExprIR): string[] | undefined {
