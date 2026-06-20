@@ -18,8 +18,9 @@ import { type HexMirror, startHexMirror } from "./support/hex-mirror";
 //
 // Slow (~3-5 min cold; ~30s warm with deps cache) — opt-in via
 // LOOM_PHOENIX_BUILD=1 so the default `npm test` stays fast.  CI's
-// `.github/workflows/phoenix-build.yml` runs the same check on every
-// PR that touches the Phoenix generator.
+// `.github/workflows/elixir-ash-build.yml` runs the same check on every
+// PR that touches the Phoenix generator (one fixture per matrix cell,
+// selected via LOOM_PHOENIX_BUILD_CASE — see pickCases below).
 //
 // Fixtures live under `test/e2e/fixtures/phoenix-build/` — the
 // workflow reads them too (single source of truth, so the workflow
@@ -48,6 +49,23 @@ const cli = path.join(repoRoot, "bin", "cli.js");
 const fixturesDir = path.join(here, "fixtures", "phoenix-build");
 
 const ENABLED = process.env.LOOM_PHOENIX_BUILD === "1";
+
+// CI shards one fixture per matrix cell (see .github/workflows/elixir-ash-build.yml)
+// so a cold dep compile fits the per-cell timeout and reseeds its own cache.
+// `LOOM_PHOENIX_BUILD_CASE=<fixture>.ddd` selects that single fixture; unset
+// (local `npm run test:phoenix`) builds them all.  Mirrors LOOM_REACT_BUILD_CASE.
+function pickCases<T extends { name: string }>(all: T[]): T[] {
+  const only = process.env.LOOM_PHOENIX_BUILD_CASE;
+  if (!only) return all;
+  const selected = all.filter((c) => c.name === only);
+  if (selected.length === 0) {
+    throw new Error(
+      `LOOM_PHOENIX_BUILD_CASE=${only} matched no phoenix-build fixture ` +
+        `(have: ${all.map((c) => c.name).join(", ")})`,
+    );
+  }
+  return selected;
+}
 
 const IMAGE = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
 
@@ -79,93 +97,100 @@ describe.skipIf(!ENABLED)(
     afterAll(() => {
       mirror?.stop();
     });
-    it.each([
-      { name: "acme-lv.ddd" },
-      // OIDC turnkey auth (D-AUTH-OIDC): compiles the generated ApiWeb.Auth
-      // OIDC verifier (JOSE + JWKS discovery via :httpc), the /auth/me probe
-      // controller, and the {:jose, ...} + :inets/:ssl mix.exs additions under
-      // `mix compile --warnings-as-errors`.
-      { name: "auth-oidc.ddd" },
-      // Value-object array (`Money[]`) — Ash stores it inline as an
-      // `{:array, Money}` embedded attribute → `{:array, :map}` column (no
-      // child table); compiles the embedded-array path.
-      { name: "value-collections.ddd" },
-      // Reference-collection (`Id<T>[]`) fixture — exercises the m2m join
-      // entity + many_to_many relationship + `manage_relationship` mutations
-      // + `exists(...)` filter that Phoenix join-table emission produces.
-      { name: "roster.ddd" },
-      // First-boot seeding (database-seeding.md): compiles priv/repo/seeds.exs
-      // (the Ash create-action seed path) + the ecto.setup alias change.
-      { name: "seeding.ddd" },
-      // D-PHOENIX-SURFACE: a phoenix backend that EMBEDS a React SPA
-      // (hosts: a `ui { framework: react }`).  Compiles the
-      // embedded-react Elixir side — the endpoint `/app` Plug.Static,
-      // the router `/app` SpaController fallback, and the SpaController
-      // itself — against real Ash 3.x.  No LiveView pages are emitted;
-      // the React `assets/` half is covered by the react-build matrix.
-      { name: "phoenix-embed-react.ddd" },
-      // Carrier-bounded generics (payload-transport-layer.md, P3b): compiles
-      // the Ash offset-pagination read actions + the controller page/pageSize
-      // actions that map %Ash.Page.Offset{} to the cross-backend envelope.
-      { name: "paged.ddd" },
-      // Discriminated unions (payload-transport-layer.md, P4d): compiles the
-      // controller `tag_<union>/1` serializer (struct-pattern clauses → the
-      // `%{type: tag, …}` wire) for an `Order or Cancel` find.
-      { name: "union.ddd" },
-      // Union-find with an `error` variant (exception-less.md A4): the
-      // controller action maps `%Ctx.NotFound{}` to a 404 ProblemDetails (the
-      // cross-backend absent-variant wire) and tags only the success variant
-      // at 200, while `tag_<union>/1` still declares every variant.  Compiles
-      // the runtime-dead error clause + the new `case` arm clean.
-      { name: "union-absence.ddd" },
-      // TPH (sharedTable) inheritance (aggregate-inheritance.md I2): the two
-      // concrete Ash resources (Customer, Vendor) share one `parties` table,
-      // each `base_filter`'d on a `kind` discriminator, plus the polymorphic
-      // `list_parties` base reader.  The decisive check that Ash 3.x compiles
-      // multiple resources mapping to one table (Ash has no native STI).
-      { name: "tph.ddd" },
-      // In-process event dispatch (channels.md): compiles the emitted
-      // per-context Dispatcher, the reactor / event-create handler modules
-      // (`StartOrderPlaced` / `OnShipmentRequested`), and the persisted
-      // saga-state `Ecto.Schema` (load-or-allocate / route-or-drop+log)
-      // against real Ash 3.x — the decisive check that the event-triggered
-      // saga path compiles under `--warnings-as-errors`.
-      { name: "dispatch.ddd" },
-      // Reified criterion-ref capability filters (reified-criteria.md): a
-      // `filter <Criterion>` reifies to an Ash boolean calculation that
-      // `base_filter` references (`expr(active)` / `expr(in_region(region:
-      // "EU"))`) instead of inlining the predicate.  The decisive check that
-      // Ash 3.x accepts a calculation reference — including an argument-bearing
-      // one — inside `base_filter`, alongside a plain inline filter.
-      { name: "criterion-filter.ddd" },
-      // `when` canCommand state gate (criterion.md, use site 2): the operation
-      // loads the record, evaluates the predicate (enum → Ash atom), 409s
-      // Disallowed before mutating, and auto-exposes the side-effect-free
-      // `GET /orders/:id/can_cancel` companion + its OpenAPI path/CanResponse.
-      { name: "when.ddd" },
-      // Operation `or`-union returns on foundation: ash (exception-less.md A3,
-      // DEBT-03): a return-dominant `operation foo(): Agg or NotFound` lowers to
-      // an Ash generic action whose run fn loads the record and returns a tagged
-      // term; the controller translates it (success → 200, error variant →
-      // ProblemDetails).  The decisive check that Ash 3.x accepts the generic
-      // action + its `:id`-first code interface.
-      { name: "operation-returns.ddd" },
-      // Principal-referencing (tenancy) capability filter on Ash (DEBT-01):
-      // `filter this.tenantId == currentUser.tenantId` → `base_filter
-      // expr(tenant_id == ^actor(:tenant_id))`, with `actor: current_user`
-      // threaded onto every read (CRUD list/get/update/destroy + the context
-      // view's `Ash.read!`).  The decisive check that Ash 3.x accepts an
-      // `^actor(:field)` reference inside base_filter and that the actor-threaded
-      // reads compile under --warnings-as-errors.
-      { name: "tenancy-filter.ddd" },
-      // DEBT-01 follow-up: actor threading through the two read paths the first
-      // Ash slice deferred — a context retrieval invoked from a workflow
-      // (`run_<ret>_<agg>!(..., actor: current_user)`) and an `or`-union
-      // returning op (`Ash.get(__MODULE__, id, actor: context.actor)` + the
-      // controller call passing the actor).  Both read the tenancy aggregate
-      // under its `^actor(:field)` base_filter; the gate compiles both.
-      { name: "tenancy-ops.ddd" },
-    ])("$name → mix compile --warnings-as-errors", ({ name }) => {
+    it.each(
+      pickCases([
+        { name: "acme-lv.ddd" },
+        // OIDC turnkey auth (D-AUTH-OIDC): compiles the generated ApiWeb.Auth
+        // OIDC verifier (JOSE + JWKS discovery via :httpc), the /auth/me probe
+        // controller, and the {:jose, ...} + :inets/:ssl mix.exs additions under
+        // `mix compile --warnings-as-errors`.
+        { name: "auth-oidc.ddd" },
+        // Value-object array (`Money[]`) — Ash stores it inline as an
+        // `{:array, Money}` embedded attribute → `{:array, :map}` column (no
+        // child table); compiles the embedded-array path.
+        { name: "value-collections.ddd" },
+        // Reference-collection (`Id<T>[]`) fixture — exercises the m2m join
+        // entity + many_to_many relationship + `manage_relationship` mutations
+        // + `exists(...)` filter that Phoenix join-table emission produces.
+        { name: "roster.ddd" },
+        // First-boot seeding (database-seeding.md): compiles priv/repo/seeds.exs
+        // (the Ash create-action seed path) + the ecto.setup alias change.
+        { name: "seeding.ddd" },
+        // D-PHOENIX-SURFACE: a phoenix backend that EMBEDS a React SPA
+        // (hosts: a `ui { framework: react }`).  Compiles the
+        // embedded-react Elixir side — the endpoint `/app` Plug.Static,
+        // the router `/app` SpaController fallback, and the SpaController
+        // itself — against real Ash 3.x.  No LiveView pages are emitted;
+        // the React `assets/` half is covered by the react-build matrix.
+        { name: "phoenix-embed-react.ddd" },
+        // DestroyForm on a LiveView detail page (parity finding #5): compiles
+        // the delete `<.button>`, the hoisted `destroy_widget` handle_event
+        // clause, and the `~p"/widgets"` post-delete navigation.  `with crudish`
+        // supplies the `destroy_widget!/1` code interface the form calls.
+        { name: "destroy-form.ddd" },
+        // Carrier-bounded generics (payload-transport-layer.md, P3b): compiles
+        // the Ash offset-pagination read actions + the controller page/pageSize
+        // actions that map %Ash.Page.Offset{} to the cross-backend envelope.
+        { name: "paged.ddd" },
+        // Discriminated unions (payload-transport-layer.md, P4d): compiles the
+        // controller `tag_<union>/1` serializer (struct-pattern clauses → the
+        // `%{type: tag, …}` wire) for an `Order or Cancel` find.
+        { name: "union.ddd" },
+        // Union-find with an `error` variant (exception-less.md A4): the
+        // controller action maps `%Ctx.NotFound{}` to a 404 ProblemDetails (the
+        // cross-backend absent-variant wire) and tags only the success variant
+        // at 200, while `tag_<union>/1` still declares every variant.  Compiles
+        // the runtime-dead error clause + the new `case` arm clean.
+        { name: "union-absence.ddd" },
+        // TPH (sharedTable) inheritance (aggregate-inheritance.md I2): the two
+        // concrete Ash resources (Customer, Vendor) share one `parties` table,
+        // each `base_filter`'d on a `kind` discriminator, plus the polymorphic
+        // `list_parties` base reader.  The decisive check that Ash 3.x compiles
+        // multiple resources mapping to one table (Ash has no native STI).
+        { name: "tph.ddd" },
+        // In-process event dispatch (channels.md): compiles the emitted
+        // per-context Dispatcher, the reactor / event-create handler modules
+        // (`StartOrderPlaced` / `OnShipmentRequested`), and the persisted
+        // saga-state `Ecto.Schema` (load-or-allocate / route-or-drop+log)
+        // against real Ash 3.x — the decisive check that the event-triggered
+        // saga path compiles under `--warnings-as-errors`.
+        { name: "dispatch.ddd" },
+        // Reified criterion-ref capability filters (reified-criteria.md): a
+        // `filter <Criterion>` reifies to an Ash boolean calculation that
+        // `base_filter` references (`expr(active)` / `expr(in_region(region:
+        // "EU"))`) instead of inlining the predicate.  The decisive check that
+        // Ash 3.x accepts a calculation reference — including an argument-bearing
+        // one — inside `base_filter`, alongside a plain inline filter.
+        { name: "criterion-filter.ddd" },
+        // `when` canCommand state gate (criterion.md, use site 2): the operation
+        // loads the record, evaluates the predicate (enum → Ash atom), 409s
+        // Disallowed before mutating, and auto-exposes the side-effect-free
+        // `GET /orders/:id/can_cancel` companion + its OpenAPI path/CanResponse.
+        { name: "when.ddd" },
+        // Operation `or`-union returns on foundation: ash (exception-less.md A3,
+        // DEBT-03): a return-dominant `operation foo(): Agg or NotFound` lowers to
+        // an Ash generic action whose run fn loads the record and returns a tagged
+        // term; the controller translates it (success → 200, error variant →
+        // ProblemDetails).  The decisive check that Ash 3.x accepts the generic
+        // action + its `:id`-first code interface.
+        { name: "operation-returns.ddd" },
+        // Principal-referencing (tenancy) capability filter on Ash (DEBT-01):
+        // `filter this.tenantId == currentUser.tenantId` → `base_filter
+        // expr(tenant_id == ^actor(:tenant_id))`, with `actor: current_user`
+        // threaded onto every read (CRUD list/get/update/destroy + the context
+        // view's `Ash.read!`).  The decisive check that Ash 3.x accepts an
+        // `^actor(:field)` reference inside base_filter and that the actor-threaded
+        // reads compile under --warnings-as-errors.
+        { name: "tenancy-filter.ddd" },
+        // DEBT-01 follow-up: actor threading through the two read paths the first
+        // Ash slice deferred — a context retrieval invoked from a workflow
+        // (`run_<ret>_<agg>!(..., actor: current_user)`) and an `or`-union
+        // returning op (`Ash.get(__MODULE__, id, actor: context.actor)` + the
+        // controller call passing the actor).  Both read the tenancy aggregate
+        // under its `^actor(:field)` base_filter; the gate compiles both.
+        { name: "tenancy-ops.ddd" },
+      ]),
+    )("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
       const outDir = baseOutDir

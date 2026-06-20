@@ -49,11 +49,16 @@ export function renderBreadcrumbs(
 }
 
 /** `Anchor("label", to: "/path")` → `<.link navigate={~p"/path"}>label</.link>`
- *  Falls back to `<a href="...">` when not an internal route literal.
+ *  A literal internal route uses the verified-route `~p` sigil; a literal
+ *  external URL falls back to `<a href="...">`.  A *dynamic* `to:` (e.g.
+ *  `"/x/" <> id`) is an Elixir expression, so it must ride a HEEx EXPRESSION
+ *  attribute — `<.link navigate={<expr>}>` — never a quoted literal attribute
+ *  (which would emit `href="…" <> id"`, a HEEx tokenizer ParseError).
  *  `testid:` becomes `data-testid`. */
 export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let label = "";
-  let to = "";
+  let toLiteral: string | undefined;
+  let toExpr = "";
   let testid = "";
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
@@ -62,7 +67,11 @@ export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
     if (!name) {
       positional.push(arg);
     } else if (name === "to") {
-      to = arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
+      if (arg.kind === "literal") {
+        toLiteral = arg.value;
+      } else {
+        toExpr = renderExpr(arg, { ...ctx, position: "template" });
+      }
     } else if (name === "testid") {
       testid =
         arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
@@ -70,10 +79,14 @@ export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
   }
   label = positional[0] ? renderInTemplate(positional[0], ctx) : "";
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
-  if (to.startsWith("/")) {
-    return `<.link navigate={~p"${to}"}${testidAttr}>${label}</.link>`;
+  if (toLiteral !== undefined) {
+    if (toLiteral.startsWith("/")) {
+      return `<.link navigate={~p"${toLiteral}"}${testidAttr}>${label}</.link>`;
+    }
+    return `<a href="${toLiteral}"${testidAttr}>${label}</a>`;
   }
-  return `<a href="${to}"${testidAttr}>${label}</a>`;
+  // Dynamic route expression — emit it as a HEEx expression attribute.
+  return `<.link navigate={${toExpr}}${testidAttr}>${label}</.link>`;
 }
 
 /** `Modal(trigger: Button(...), title: "…", OperationForm(of: Agg, op: x))`
