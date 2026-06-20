@@ -18,7 +18,7 @@ import { lines } from "../../../util/code-builder.js";
 
 /** Spring Boot release the generated projects build against.  Bumping it
  *  is a single-constant change validated by `LOOM_JAVA_BUILD=1`. */
-export const SPRING_BOOT_VERSION = "3.5.14";
+export const SPRING_BOOT_VERSION = "4.1.0";
 
 /** Spring's Gradle dependency-management plugin (BOM import). */
 export const DEPENDENCY_MANAGEMENT_VERSION = "1.1.7";
@@ -33,14 +33,14 @@ export const JMOLECULES_VERSION = "1.10.0";
 
 /** springdoc serves the OpenAPI document (`/openapi.json`) the
  *  cross-backend conformance harness diffs. */
-export const SPRINGDOC_VERSION = "2.8.17";
+export const SPRINGDOC_VERSION = "3.0.3";
 
 /** Nimbus JOSE+JWT — the JWKS/JWT library the generated OIDC verifier uses
  *  (D-AUTH-OIDC).  Pinned explicitly: unlike Flyway / Spring Security, the
  *  Spring Boot BOM does NOT manage `nimbus-jose-jwt` on its own (only when
  *  spring-security-oauth2-jose is on the classpath, which the generated
  *  backend doesn't pull), so a version-less coordinate fails to resolve. */
-export const NIMBUS_JOSE_JWT_VERSION = "9.48";
+export const NIMBUS_JOSE_JWT_VERSION = "10.3";
 
 export function renderGradleBuild(
   options: { flyway?: boolean; oidc?: boolean; extraDeps?: Record<string, string> } = {},
@@ -261,11 +261,11 @@ export function renderJsonFormatMapperConfig(basePkg: string): string {
     ``,
     `import com.fasterxml.jackson.annotation.JsonAutoDetect;`,
     `import com.fasterxml.jackson.annotation.PropertyAccessor;`,
-    `import com.fasterxml.jackson.databind.MapperFeature;`,
-    `import com.fasterxml.jackson.databind.json.JsonMapper;`,
+    `import tools.jackson.databind.MapperFeature;`,
+    `import tools.jackson.databind.json.JsonMapper;`,
     `import org.hibernate.cfg.AvailableSettings;`,
-    `import org.hibernate.type.format.jackson.JacksonJsonFormatMapper;`,
-    `import org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer;`,
+    `import org.hibernate.type.format.jackson.Jackson3JsonFormatMapper;`,
+    `import org.springframework.boot.hibernate.autoconfigure.HibernatePropertiesCustomizer;`,
     `import org.springframework.context.annotation.Bean;`,
     `import org.springframework.context.annotation.Configuration;`,
     ``,
@@ -276,12 +276,13 @@ export function renderJsonFormatMapperConfig(basePkg: string): string {
     `        var mapper = JsonMapper.builder()`,
     `            .findAndAddModules()`,
     `            .configure(MapperFeature.PROPAGATE_TRANSIENT_MARKER, true)`,
-    `            .visibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY)`,
-    `            .visibility(PropertyAccessor.GETTER, JsonAutoDetect.Visibility.NONE)`,
-    `            .visibility(PropertyAccessor.IS_GETTER, JsonAutoDetect.Visibility.NONE)`,
-    `            .visibility(PropertyAccessor.CREATOR, JsonAutoDetect.Visibility.ANY)`,
+    `            .changeDefaultVisibility(vc -> vc`,
+    `                .withVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY)`,
+    `                .withVisibility(PropertyAccessor.GETTER, JsonAutoDetect.Visibility.NONE)`,
+    `                .withVisibility(PropertyAccessor.IS_GETTER, JsonAutoDetect.Visibility.NONE)`,
+    `                .withVisibility(PropertyAccessor.CREATOR, JsonAutoDetect.Visibility.ANY))`,
     `            .build();`,
-    `        return props -> props.put(AvailableSettings.JSON_FORMAT_MAPPER, new JacksonJsonFormatMapper(mapper));`,
+    `        return props -> props.put(AvailableSettings.JSON_FORMAT_MAPPER, new Jackson3JsonFormatMapper(mapper));`,
     `    }`,
     `}`,
     ``,
