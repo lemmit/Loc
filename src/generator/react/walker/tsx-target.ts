@@ -255,6 +255,12 @@ export const tsxTarget: WalkerTarget = {
     return renderJsNavigate(routeTemplate, args, stateExpr);
   },
 
+  /** The magic route `id` reads the local `id` the shell destructures from
+   *  `useParams<{ id: string }>()` (gated on `usesRouteId`). */
+  renderRouteId(): string {
+    return "id";
+  },
+
   // --- Type-default seam --------------------------------------------------
 
   defaultInitFor(type: TypeIR): string {

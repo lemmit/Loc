@@ -126,6 +126,13 @@ export interface WalkResult {
    *  design packs whose own primitive is named `Link` (MUI,
    *  chakra) without an identifier collision. */
   usesRouterLink: boolean;
+  /** True when any walked node referenced the magic route `id`
+   *  identifier (`{ kind: "id" }` — e.g. `Sales.Order.byId(id)` on a
+   *  `/orders/:id` detail page).  The page-shell binds a local `id`
+   *  from the route's `:id` param (each frontend its own way:
+   *  `useParams` / `route.params` / `$page.params` / the Angular
+   *  `ActivatedRoute` snapshot) so the reference resolves. */
+  usesRouteId: boolean;
   /** Names of user-defined components the walker
    *  invoked while emitting (e.g. `WelcomeBox("Alice")` →
    *  `<WelcomeBox name="Alice" />`).  The shell emits per-name
@@ -370,6 +377,7 @@ export function walkBody(
     usesState: false,
     usesCurrentUser: false,
     usesRouterLink: false,
+    usesRouteId: false,
     userComponents,
     usedUserComponents: new Set(),
     usesChildren: false,
@@ -401,6 +409,7 @@ export function walkBody(
     usesState: ctx.usesState,
     usesCurrentUser: ctx.usesCurrentUser,
     usesRouterLink: ctx.usesRouterLink,
+    usesRouteId: ctx.usesRouteId,
     usedUserComponents: ctx.usedUserComponents,
     usesChildren: ctx.usesChildren,
     usedApiHooks: ctx.usedApiHooks,
@@ -511,6 +520,7 @@ export interface Sink {
    *  The React page shell binds `currentUser` + imports `useSession`. */
   usesCurrentUser: boolean;
   usesRouterLink: boolean;
+  usesRouteId: boolean;
   usedUserComponents: Set<string>;
   usesChildren: boolean;
   usedApiHooks: Map<string, ApiHookUse>;
@@ -856,6 +866,7 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
 export function propagateChildFlags(parent: WalkContext, child: WalkContext): void {
   if (child.usesNavigate) parent.usesNavigate = true;
   if (child.usesRouterLink) parent.usesRouterLink = true;
+  if (child.usesRouteId) parent.usesRouteId = true;
   if (child.usesState) parent.usesState = true;
   if (child.usesCurrentUser) parent.usesCurrentUser = true;
   if (child.usesChildren) parent.usesChildren = true;
@@ -1139,6 +1150,13 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         return `/* TODO: method-call ${receiverDesc}.${expr.member}(${argsRendered}) — needs hooks {} binding */ undefined`;
       }
       return `${recv}.${expr.member}(${argsRendered})`;
+    }
+    case "id": {
+      // The magic route `id` (`{ kind: "id" }`) — e.g. `Order.byId(id)` on a
+      // `/orders/:id` detail page.  Each frontend binds a local `id` from the
+      // route param in its page-shell; the seam returns the in-scope accessor.
+      ctx.usesRouteId = true;
+      return ctx.target.renderRouteId?.() ?? `/* unsupported expr: ${expr.kind} */ undefined`;
     }
     default:
       return `/* unsupported expr: ${expr.kind} */ undefined`;

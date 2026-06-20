@@ -24,9 +24,6 @@ import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 // consumes).  Primitive + id fields map precisely; value-object / enum /
 // nested-entity fields fall back to `unknown` for now (the read path only
 // needs the collection shape — precise nested typing is a later slice).
-//
-// Batch scope (Slice 4b — data path sub-slice A): the `findAll` collection
-// read only.  `byId` / mutations / find-params land in following sub-slices.
 // ---------------------------------------------------------------------------
 
 /** Map a wire `TypeIR` to a TS type string for a response interface field. */

@@ -221,6 +221,7 @@ export function renderSveltePage(
     usesNavigate,
     usesState,
     usesCurrentUser,
+    usesRouteId,
     usedUserComponents,
     usedApiHooks,
     formOfs,
@@ -307,10 +308,14 @@ export function renderSveltePage(
     usesNavigate || form.usesNavigate
       ? `  import { goto as navigate } from "$app/navigation";\n`
       : "";
-  const pageStateImport = usedParams.size > 0 ? `  import { page } from "$app/state";\n` : "";
+  // Route params to bind: the declared/used ones plus the magic route `id`
+  // (`byId(id)`) when the body referenced it.
+  const routeParamNames = new Set(usedParams);
+  if (usesRouteId) routeParamNames.add("id");
+  const pageStateImport = routeParamNames.size > 0 ? `  import { page } from "$app/state";\n` : "";
   // Used route params derive from the reactive `page.params` — bare
   // refs in the walked body (`{id}`) resolve against these locals.
-  const paramLines = [...usedParams]
+  const paramLines = [...routeParamNames]
     .sort()
     .map((n) => `  const ${n} = $derived(page.params.${n} ?? "");\n`)
     .join("");
@@ -654,6 +659,7 @@ function dummyCtx(
     usesState: false,
     usesCurrentUser: false,
     usesRouterLink: false,
+    usesRouteId: false,
     userComponents: new Map(),
     usedUserComponents: new Set(),
     usesChildren: false,
