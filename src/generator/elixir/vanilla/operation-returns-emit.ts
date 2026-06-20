@@ -182,6 +182,25 @@ export function renderReturningStmt(
       }
       return write;
     }
+    case "add": {
+      // `items += Item{...}` (collection) appends to the threaded record's
+      // containment list (stored `{:array, :map}` jsonb); a scalar `total += n`
+      // (collection:false) is arithmetic on the column.  Both re-bind `record`
+      // so the persist step (context-emit) `put_change`s the mutated field.
+      const field = snake(s.target.segments[0] ?? "");
+      const value = renderExpr(s.value, rc);
+      return s.collection
+        ? `    record = %{record | ${field}: (record.${field} || []) ++ [${value}]}`
+        : `    record = %{record | ${field}: record.${field} + ${value}}`;
+    }
+    case "remove": {
+      // `items -= x` drops the first matching element; scalar `n -= x` subtracts.
+      const field = snake(s.target.segments[0] ?? "");
+      const value = renderExpr(s.value, rc);
+      return s.collection
+        ? `    record = %{record | ${field}: List.delete(record.${field} || [], ${value})}`
+        : `    record = %{record | ${field}: record.${field} - ${value}}`;
+    }
     case "emit": {
       // Broadcast a domain event — same form the vanilla workflow body emits.
       const fields = s.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, rc)}`).join(", ");

@@ -642,23 +642,21 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
 }
 
 // ---------------------------------------------------------------------------
-// Vanilla (plain Ecto) foundation: nested entity parts are not persisted.
+// Vanilla (plain Ecto) foundation: nested entity parts on a RELATIONAL-shaped
+// aggregate are not persisted.
 //
-// `contains <part>: <Part>[]` (and the `entity <Part> {}` declarations it
-// references) lower fine, but the vanilla schema emitter emits NO field /
-// `embeds_many` / `has_many` for them — the "richer embeds_one-backed path"
-// is explicitly deferred (`vanilla/schema-emit.ts`).  Worse, the per-operation
-// changeset for a containment-mutating op (`contains items: Item[]`,
-// `operation addItem(sku, qty) { items += Item{...} }`) casts the op's params
-// (`[:sku, :qty]`) onto the ROOT struct, which has no such fields — `Ecto.cast`
-// raises at runtime.  So today a vanilla aggregate with nested parts compiles
-// but silently loses the containment and crashes the operation.
-//
-// Reject loudly until the embed / relationship emit lands — pointing at the Ash
-// foundation (which models parts as embedded resources / relationships) or a
-// value-object remodel.  Mirrors `validateJavaContainmentSupport` /
-// `validateDapperSupport`'s nested-parts gates.  (The Ash foundation — the
-// default for `platform: elixir` — is unaffected.)
+// On a `shape(embedded)` aggregate, `contains <part>: <Part>[]` now persists:
+// the part becomes an Ecto `embedded_schema` module the root `embeds_many`s
+// (one jsonb column — the same column the shared migration emits for the
+// embedded shape), and a containment-mutating op (`items += Item{…}`) appends
+// the struct + `put_embed`s it (DEBT-32).  But a RELATIONAL-shaped aggregate's
+// containments would need child tables + `has_many` + `cast_assoc` (the shape's
+// migration emits a child table, not an inline column) — that relational
+// nested-entity emit is NOT wired, so the inline `embeds_many` would mismatch
+// the child-table migration.  Reject relational containments loudly: point at
+// `shape(embedded)` (now supported), the Ash foundation, or a value-object
+// remodel.  Mirrors `validateJavaContainmentSupport` / `validateDapperSupport`.
+// (The Ash foundation — the default for `platform: elixir` — is unaffected.)
 // ---------------------------------------------------------------------------
 export function validateVanillaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
@@ -670,20 +668,24 @@ export function validateVanillaContainmentSupport(sys: SystemIR, diags: LoomDiag
       if (!ctx) continue;
       for (const agg of ctx.aggregates) {
         // A containment usage OR an entity-part declaration both signal nested
-        // parts the vanilla emitter drops.  (Value objects are plain fields, not
-        // `contains`, so they're unaffected.)
+        // parts.  (Value objects are plain fields, not `contains`, so they're
+        // unaffected.)
         if ((agg.contains ?? []).length === 0 && (agg.parts ?? []).length === 0) continue;
+        // `shape(embedded)` containments are now wired (inline `embeds_many`).
+        const enriched = agg as EnrichedAggregateIR;
+        const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
+        if (shape === "embedded") continue;
         const part = agg.contains[0]?.partName ?? agg.parts[0]?.name ?? "Part";
         diags.push({
           severity: "error",
           message:
             `Deployable '${dep.name}' (platform ${dep.platform}, foundation: vanilla) hosts ` +
-            `aggregate '${ctxName}.${agg.name}' which contains nested entity parts (e.g. '${part}') — ` +
-            `the vanilla (plain Ecto) foundation does not yet persist nested parts (no ` +
-            `'embeds_many' / 'has_many' is emitted, and a containment-mutating operation would ` +
-            `cast the part's fields onto the root). Host this context on 'foundation: ash' (which ` +
-            `maps parts to embedded resources / relationships), model the part as a value object, ` +
-            `or use another backend.`,
+            `aggregate '${ctxName}.${agg.name}' which contains nested entity parts (e.g. '${part}') ` +
+            `on a relational shape — the vanilla (plain Ecto) foundation only persists nested parts ` +
+            `on a 'shape(embedded)' aggregate (inline 'embeds_many'); the relational child-table ` +
+            `emit is not wired. Add 'shape(embedded)' to the aggregate, host this context on ` +
+            `'foundation: ash' (which maps parts to relationships), model the part as a value ` +
+            `object, or use another backend.`,
           source: `${sys.name}/${dep.name}`,
           code: "loom.vanilla-containment-unsupported",
         });

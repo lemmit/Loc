@@ -95,6 +95,13 @@ function renderChangeset(appModule: string, ctxModule: string, agg: AggregateIR)
     .map((c) => ectoValidator(snake(c.field), c.pattern));
   const validatorBlock = validatorLines.length > 0 ? `\n${validatorLines.join("\n")}` : "";
 
+  // Containments (`embeds_many`/`embeds_one`) round-trip via `cast_embed` — and
+  // crucially it forces the embed into the INSERT (an untouched `embeds_many`
+  // writes NULL, violating the `null: false` jsonb column the shared migration
+  // emits).  Each delegates to the part module's `changeset/2`.
+  const castEmbedLines = agg.contains.map((c) => `    |> cast_embed(:${snake(c.name)})`).join("\n");
+  const castEmbedBlock = castEmbedLines.length > 0 ? `\n${castEmbedLines}` : "";
+
   // Per-action changeset helpers — create + destroy.  Named OPERATIONS no
   // longer get a `change_<op>` helper: their `<op>_<agg>` context fn renders the
   // body and `put_change`s the assigned columns directly (context-emit).  The
@@ -120,7 +127,7 @@ defmodule ${changesetMod} do
   def base_changeset(struct \\\\ %${aggPascal}{}, attrs) do
     struct
     |> cast(attrs, @all_fields)
-    |> validate_required(@required_fields)${validatorBlock}
+    |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}
   end
 
 ${actionHelpers}

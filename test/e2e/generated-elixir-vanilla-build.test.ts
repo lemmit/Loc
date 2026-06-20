@@ -97,6 +97,11 @@ describe.skipIf(!ENABLED)(
         // named-op write site, and the transactional `provenance_records` flush
         // (the `<App>.Provenance` SDK + the Json Ecto type + the migration).
         { name: "vanilla-provenance.ddd", deployable: "api" },
+        // DEBT-32 — nested entity parts on a shape(embedded) vanilla aggregate:
+        // `contains lines: Line[]` → `embeds_many` over a part `embedded_schema`
+        // module; `lines += Line{…}` appends + `put_embed`s.  Compiles the
+        // embedded-schema part + put_embed persist.
+        { name: "vanilla-embed-parts.ddd", deployable: "api" },
         // ES applier folds over value-object / enum fields (P4.3): an inline VO
         // constructor renders to a plain map on vanilla — compile that path.
         { name: "vanilla-vo-fold.ddd", deployable: "api" },
