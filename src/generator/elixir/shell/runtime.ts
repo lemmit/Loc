@@ -337,6 +337,42 @@ end
 `;
 }
 
+/** lib/<app>_web/nav.ex — a Phoenix.LiveView `on_mount` hook that assigns
+ *  `@current_path` on every LiveView in the `live_session`.  The app layout's
+ *  `<.sidebar current_path={@current_path} />` reads it to mark the active
+ *  link.  `attach_hook(:handle_params, …)` re-derives the path on every live
+ *  navigation (not just first mount).  `assign_new` keeps the assign present
+ *  before the first `handle_params` (e.g. the dead render), so the layout
+ *  never references an unassigned `@current_path` — warnings-clean.
+ *
+ *  Foundation-agnostic in shape, but only emitted on the Ash/LiveView path:
+ *  the vanilla foundation is a JSON API with no `live_session`. */
+export function renderLiveNav(appModule: string): string {
+  const webModule = `${appModule}Web`;
+  return `# Auto-generated.
+defmodule ${webModule}.Nav do
+  @moduledoc """
+  Phoenix.LiveView \`on_mount\` hook that publishes the current request path
+  as \`@current_path\` for every LiveView in the \`live_session\`.  The app
+  layout's sidebar reads it to highlight the active navigation link.
+  """
+
+  import Phoenix.Component, only: [assign: 3, assign_new: 3]
+
+  def on_mount(:default, _params, _session, socket) do
+    socket =
+      socket
+      |> assign_new(:current_path, fn -> "/" end)
+      |> Phoenix.LiveView.attach_hook(:save_current_path, :handle_params, fn _params, uri, socket ->
+        {:cont, assign(socket, :current_path, URI.parse(uri).path || "/")}
+      end)
+
+    {:cont, socket}
+  end
+end
+`;
+}
+
 export function renderRouter(
   appName: string,
   appModule: string,
@@ -360,20 +396,20 @@ export function renderRouter(
     })
     .join("\n");
 
-  // When auth is enabled, wrap live routes in a live_session with on_mount.
-  let liveScopeBody: string;
-  if (authEnabled) {
-    const inner = liveLines || `      # No pages declared in this deployable's ui: block.`;
-    liveScopeBody = `
-    live_session :default, on_mount: [${webModule}.LiveAuth] do
+  // Live routes ALWAYS run inside a `live_session` so the `${webModule}.Nav`
+  // on_mount hook assigns `@current_path` on every LiveView (the app layout's
+  // sidebar reads it to mark the active link).  When auth is enabled LiveAuth
+  // runs first, then Nav; without auth just Nav.  This is why a non-auth
+  // LiveView app still gets a `live_session :default` block — the sidebar
+  // needs `@current_path` on every page regardless of whether auth is wired.
+  const onMountHooks = authEnabled
+    ? `[${webModule}.LiveAuth, ${webModule}.Nav]`
+    : `[${webModule}.Nav]`;
+  const inner = liveLines || `      # No pages declared in this deployable's ui: block.`;
+  const liveScopeBody = `
+    live_session :default, on_mount: ${onMountHooks} do
 ${inner}
     end`;
-  } else {
-    const flatLines = liveLines
-      ? liveLines.replace(/^ {6}/gm, "    ")
-      : `    # No pages declared in this deployable's ui: block.`;
-    liveScopeBody = `\n${flatLines}`;
-  }
 
   // API routes — emitApiControllers returns:
   //   - paths prefixed with `!root:` → outside `/api` scope (health / ready)

@@ -1239,11 +1239,14 @@ describe("router wiring (orchestrator integration)", () => {
     expect(router).toMatch(/pipeline :api do[\s\S]*plug PhoenixAppWeb\.Auth/);
   });
 
-  it("router.ex wraps LiveView routes in live_session with LiveAuth on_mount", async () => {
+  it("router.ex wraps LiveView routes in live_session with LiveAuth + Nav on_mount", async () => {
     const model = await buildAuthFixture();
     const { files } = generateSystems(model);
     const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
-    expect(router).toMatch(/live_session :default, on_mount: \[PhoenixAppWeb\.LiveAuth\]/);
+    // Auth wired → LiveAuth runs first (gate), then Nav (assigns @current_path).
+    expect(router).toMatch(
+      /live_session :default, on_mount: \[PhoenixAppWeb\.LiveAuth, PhoenixAppWeb\.Nav\]/,
+    );
   });
 
   it("does NOT emit auth files or wire the plug when auth is absent", async () => {
@@ -1253,7 +1256,52 @@ describe("router wiring (orchestrator integration)", () => {
     expect(files.has("phoenix_app/lib/phoenix_app_web/live_auth.ex")).toBe(false);
     const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
     expect(router).not.toMatch(/plug PhoenixAppWeb\.Auth/);
-    expect(router).not.toMatch(/live_session :default/);
+    // Even without auth, live routes run in a live_session so the Nav on_mount
+    // hook can assign @current_path for the sidebar — but LiveAuth is absent.
+    expect(router).toMatch(/live_session :default, on_mount: \[PhoenixAppWeb\.Nav\]/);
+    expect(router).not.toMatch(/LiveAuth/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sidebar wiring — the derived `Components.Sidebar` is now LIVE in the app
+// layout, sourced by the `Nav` on_mount hook's `@current_path` assign.
+// ---------------------------------------------------------------------------
+
+describe("sidebar wiring (app layout + Nav on_mount)", () => {
+  it("app.html.heex invokes the Sidebar component (qualified) instead of the hardcoded Home nav", async () => {
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const layout = files.get("phoenix_app/lib/phoenix_app_web/components/layouts/app.html.heex")!;
+    // Fully-qualified call — the Sidebar module `use`s `:html`, so importing it
+    // into the shared html bundle would self-import (CompileError).
+    expect(layout).toMatch(
+      /<PhoenixAppWeb\.Components\.Sidebar\.sidebar current_path=\{@current_path\} \/>/,
+    );
+    expect(layout).toMatch(/<%= @inner_content %>/);
+    // The dead hardcoded single-link nav is gone.
+    expect(layout).not.toMatch(/<a href="\/">Home<\/a>/);
+  });
+
+  it("emits a Nav on_mount hook that assigns @current_path from handle_params", async () => {
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const nav = files.get("phoenix_app/lib/phoenix_app_web/nav.ex");
+    expect(nav, "nav.ex is emitted").toBeDefined();
+    expect(nav!).toMatch(/defmodule PhoenixAppWeb\.Nav do/);
+    expect(nav!).toMatch(/def on_mount\(:default, _params, _session, socket\)/);
+    // assign_new keeps @current_path present before the first handle_params
+    // (warnings-clean default), then attach_hook re-derives it on navigation.
+    expect(nav!).toMatch(/assign_new\(:current_path, fn -> "\/" end\)/);
+    expect(nav!).toMatch(/attach_hook\(:save_current_path, :handle_params/);
+    expect(nav!).toMatch(/URI\.parse\(uri\)\.path/);
+  });
+
+  it("router wraps live routes in a live_session whose on_mount includes Nav (non-auth app)", async () => {
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
+    expect(router).toMatch(/live_session :default, on_mount: \[PhoenixAppWeb\.Nav\]/);
   });
 });
 

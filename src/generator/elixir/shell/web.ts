@@ -584,8 +584,25 @@ export function renderRootLayout(appName: string): string {
 `;
 }
 
-export function renderAppLayout(): string {
-  return `<header class="px-4 sm:px-6 lg:px-8">
+/** The `app.html.heex` layout.  When the deployable emits a derived sidebar
+ *  (a LiveView app with a `ui:` block), the chrome is a flex row: the
+ *  `<.sidebar>` component on the left as the real navigation, the page body
+ *  (`@inner_content`) on the right.  `@current_path` is published on every
+ *  LiveView by the `<App>Web.Nav` on_mount hook (see renderLiveNav).
+ *
+ *  In the embedded-SPA case (`hasSidebar === false`) there is no Sidebar
+ *  module and the SPA owns the UI, so the layout falls back to the minimal
+ *  hardcoded `Home` header — referencing no sidebar component or routes.
+ *
+ *  The sidebar is invoked by its FULLY-QUALIFIED module path rather than the
+ *  short `<.sidebar>` form.  An `import <App>Web.Components.Sidebar` would have
+ *  to live in the shared `html_helpers` bundle, but the Sidebar module itself
+ *  does `use <App>Web, :html` (→ that same bundle) → it would import itself
+ *  while being defined (a `CompileError`).  The qualified call needs no import,
+ *  so it's both self-import-safe and unused-import-warning-clean. */
+export function renderAppLayout(appModule: string, hasSidebar = false): string {
+  if (!hasSidebar) {
+    return `<header class="px-4 sm:px-6 lg:px-8">
   <div class="flex items-center justify-between border-b border-zinc-100 py-3 text-sm">
     <div class="flex items-center gap-4">
       <nav class="flex items-center gap-4 font-semibold leading-6 text-zinc-900">
@@ -600,6 +617,20 @@ export function renderAppLayout(): string {
     <%= @inner_content %>
   </div>
 </main>
+`;
+  }
+
+  return `<div class="flex min-h-screen">
+  <aside class="w-64 flex-shrink-0 border-r border-zinc-100 bg-zinc-50">
+    <${appModule}Web.Components.Sidebar.sidebar current_path={@current_path} />
+  </aside>
+  <main class="flex-1 px-4 py-8 sm:px-6 lg:px-8">
+    <div class="mx-auto max-w-4xl">
+      <.flash_group flash={@flash} />
+      <%= @inner_content %>
+    </div>
+  </main>
+</div>
 `;
 }
 
