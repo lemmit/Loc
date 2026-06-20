@@ -608,11 +608,20 @@ different platforms (Hono, .NET, Phoenix), the e2e additionally diffs
 their OpenAPI specs three ways to catch generator drift. Each backend
 self-describes via its framework-native OpenAPI emitter:
 
-| Platform | Library              | Endpoint                        |
-| -------- | -------------------- | ------------------------------- |
-| .NET     | Swashbuckle.AspNetCore | `/swagger/v1/swagger.json`    |
-| Hono     | `@hono/zod-openapi`    | `/openapi.json`               |
-| Phoenix  | OpenApiSpex           | `/api/openapi.json`           |
+Every backend serves the spec at the **aligned** path `/openapi.json` (root):
+
+| Platform | Library              | Endpoint        |
+| -------- | -------------------- | --------------- |
+| .NET     | Swashbuckle.AspNetCore | `/openapi.json` |
+| Hono     | `@hono/zod-openapi`    | `/openapi.json` |
+| Phoenix  | OpenApiSpex           | `/openapi.json` |
+| Python   | FastAPI               | `/openapi.json` |
+| Java     | springdoc            | `/openapi.json` |
+
+Interactive UIs (FastAPI's `/docs` + `/redoc`, springdoc's `/swagger-ui.html`)
+are gated by `LOOM_OPENAPI_UI` (default on; the k8s chart sets it `false` to
+keep an unauthenticated API explorer off production). The `/openapi.json` spec
+stays available regardless.
 
 The check fetches all three, runs `diffSpecs(ref, other) → ParityDiff`
 (pure helper in `test/_helpers/openapi-normalize.ts`) for every backend

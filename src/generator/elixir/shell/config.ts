@@ -34,7 +34,7 @@ config :${appName}, ecto_repos: [${appModule}.Repo]
 config :${appName}, ${appModule}Web.Endpoint,
   url: [host: "localhost"],
   # Wire the generated ErrorJSON / ErrorHTML modules so an exception in a
-  # controller (e.g. a 500 on /api/openapi.json) renders through them
+  # controller (e.g. a 500 on /openapi.json) renders through them
   # instead of crashing again on a missing default ErrorView.
   render_errors: [
     formats: [json: ${appModule}Web.ErrorJSON, html: ${appModule}Web.ErrorHTML],

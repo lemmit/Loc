@@ -192,7 +192,7 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
 
   // --- OpenAPI spec ----------------------------------------------
   // Emits <Api>Spec module, per-aggregate/workflow/view schema modules,
-  // OpenapiController, and a GET /api/openapi.json route entry.
+  // OpenapiController, and a GET /openapi.json route entry.
   const { files: openApiFiles, routes: openApiRoutes } = emitOpenApiSpec({
     contexts,
     deployable,

@@ -216,7 +216,7 @@ export function renderHttpIndex(
       realtimeMount,
       viewMount,
       "  // OpenAPI 3.1 spec assembled from every sub-router's createRoute()",
-      "  // calls.  Diffed against the .NET-emitted /swagger/v1/swagger.json by",
+      "  // calls.  Diffed against the .NET-emitted /openapi.json by",
       "  // the cross-platform contract check.",
       '  app.doc("/openapi.json", {',
       '    openapi: "3.1.0",',

@@ -97,14 +97,17 @@ describe(".NET generator", () => {
     expect(dockerignore).toMatch(/\*\*\/bin/);
   });
 
-  it("wires Swashbuckle so /swagger/v1/swagger.json is exposed", async () => {
+  it("wires Swashbuckle so the spec is exposed at the aligned /openapi.json", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
     const csproj = files.get("Sales.csproj")!;
     expect(csproj).toMatch(/<PackageReference Include="Swashbuckle\.AspNetCore"/);
     const program = files.get("Program.cs")!;
     expect(program).toMatch(/AddSwaggerGen/);
-    expect(program).toMatch(/UseSwagger/);
+    // Doc named "openapi" + RouteTemplate "{documentName}.json" → /openapi.json
+    // (aligned with every other backend), not the default /swagger/v1/swagger.json.
+    expect(program).toMatch(/SwaggerDoc\("openapi"/);
+    expect(program).toMatch(/UseSwagger\(c => c\.RouteTemplate = "\{documentName\}\.json"\)/);
   });
 
   it("enables CORS + camelCase JSON in Program.cs", async () => {
@@ -1599,7 +1602,7 @@ describe(".NET generator", () => {
       const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
       const program = files.get("Program.cs")!;
       expect(program).toMatch(/app\.UseMiddleware<UserMiddleware>\(\);/);
-      const sw = program.indexOf("UseSwagger()");
+      const sw = program.indexOf("UseSwagger(");
       const mw = program.indexOf("UseMiddleware<UserMiddleware>");
       const mc = program.indexOf("MapControllers()");
       expect(sw).toBeGreaterThan(0);

@@ -263,9 +263,10 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     let specs: Record<string, OpenApiSpec>;
     try {
       specs = {
+        // Every backend now serves the spec at the aligned root path /openapi.json.
         node: await fetchSpec("http://localhost:3000/openapi.json"),
-        dotnet: await fetchSpec("http://localhost:8080/swagger/v1/swagger.json"),
-        phoenix: await fetchSpec("http://localhost:4000/api/openapi.json"),
+        dotnet: await fetchSpec("http://localhost:8080/openapi.json"),
+        phoenix: await fetchSpec("http://localhost:4000/openapi.json"),
         python: await fetchSpec("http://localhost:8000/openapi.json"),
         java: await fetchSpec("http://localhost:8081/openapi.json"),
       };
