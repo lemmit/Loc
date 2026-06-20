@@ -48,14 +48,17 @@ const JAVA_COMPILE_SKIP: Record<string, string> = {
   // (Hibernate's structured-JSON path bypasses the Jackson FormatMapper for
   // @Embeddable ids).  Documented; use shape(document)/relational or host on
   // node/dotnet.
-  embedded: "PLATFORM LIMITATION: jsonb id-array column unmapped on java (shape(embedded) + ref collection)",
+  embedded:
+    "PLATFORM LIMITATION: jsonb id-array column unmapped on java (shape(embedded) + ref collection)",
   // Real Java generator bug: the abstract base entity's `inspect` getter
   // references `this.id` / declared fields that the concrete subclass owns,
   // so javac can't resolve them on the base (TPC/TPH, Asset.java).
-  inheritance: "Java inheritance base `inspect` references subclass-owned fields (cannot find symbol)",
+  inheritance:
+    "Java inheritance base `inspect` references subclass-owned fields (cannot find symbol)",
   // Real Java generator bug: the event-sourced repository impl references an
   // undefined symbol in the fold/append path (AccountRepositoryImpl.java).
-  "event-sourcing": "Java event-sourced repository impl references an undefined symbol (cannot find symbol)",
+  "event-sourcing":
+    "Java event-sourced repository impl references an undefined symbol (cannot find symbol)",
 };
 
 // Every corpus feature the manifest declares to generate on `java`, minus the

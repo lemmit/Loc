@@ -46,7 +46,8 @@ const PYTHON_COMPILE_SKIP: Record<string, string> = {
   // Real Python generator bug: the repository hydration `_create(...)` call omits
   // the value-object-array fields (`line_items` / `surcharges`), so mypy --strict
   // rejects the missing named args (invoice_repository.py).
-  "value-collections": "Python repo `_create` omits value-object-array args (mypy missing named arg)",
+  "value-collections":
+    "Python repo `_create` omits value-object-array args (mypy missing named arg)",
   // Real Python generator bug: the stamps entity imports `datetime.UTC` without
   // using it for this stamp shape (ruff F401, domain/order.py).
   stamps: "Python stamps entity imports unused `datetime.UTC` (ruff F401)",
