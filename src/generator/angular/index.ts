@@ -128,7 +128,7 @@ export function generateAngularForContexts(
     const slug = pageSlug(page, pageCtx);
     let content: string;
     if (!page.body) {
-      content = renderAngularPageStub(page, pageCtx);
+      content = renderAngularPageStub(page, pageCtx, authUi);
     } else {
       const result = walkBody(
         page.body,
@@ -149,7 +149,7 @@ export function generateAngularForContexts(
         authUi,
       );
       content = pageNeedsDeferredFeatures(result)
-        ? renderAngularPageStub(page, pageCtx)
+        ? renderAngularPageStub(page, pageCtx, authUi)
         : renderAngularPage({
             page,
             result,

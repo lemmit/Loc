@@ -483,7 +483,44 @@ function derivedCtx(
 }
 
 /** Stub component for a page whose body needs deferred features. */
-export function renderAngularPageStub(page: PageIR, nameCtx: PageNameCtx): string {
+export function renderAngularPageStub(page: PageIR, nameCtx: PageNameCtx, authUi = false): string {
+  const testid = JSON.stringify(`page-${pageSlug(page, nameCtx)}`);
+  const section = `<section data-testid=${testid}><h2>${page.name}</h2></section>`;
+  const className = pageComponentName(page, nameCtx);
+
+  // Page-level `requires` UI gate (D-AUTH-OIDC) — applies to the stub too, so a
+  // gated page whose body needs deferred features still renders a `<Forbidden>`
+  // fallback instead of leaking its (stub) chrome to an unauthorized user.  The
+  // gate validator guarantees a page `requires` is currentUser-only, so
+  // `renderGateExpr` can't throw.  Without `auth: ui` / no `requires` the stub
+  // stays byte-identical (no injection, no wrap).
+  const requires = authUi ? page.requires : undefined;
+  if (requires) {
+    const gate = renderGateExpr(requires, "currentUser");
+    return [
+      "// Auto-generated (stub — body needs api/forms support, a later Slice 4b batch).",
+      'import { Component, inject } from "@angular/core";',
+      'import { SessionService } from "../auth/session.service";',
+      "",
+      "@Component({",
+      `  selector: ${JSON.stringify(pageSelector(page, nameCtx))},`,
+      "  imports: [],",
+      "  template: `",
+      `    @if (${gate}) {`,
+      `      ${section}`,
+      "    } @else {",
+      `      <section style="padding:24px"><h2>Forbidden</h2><p>You don't have access to this page.</p></section>`,
+      "    }",
+      "  `,",
+      "})",
+      `export class ${className} {`,
+      "  readonly session = inject(SessionService);",
+      "  get currentUser(): Record<string, unknown> { return this.session.user() ?? {}; }",
+      "}",
+      "",
+    ].join("\n");
+  }
+
   return [
     "// Auto-generated (stub — body needs api/forms support, a later Slice 4b batch).",
     'import { Component } from "@angular/core";',
@@ -491,9 +528,9 @@ export function renderAngularPageStub(page: PageIR, nameCtx: PageNameCtx): strin
     "@Component({",
     `  selector: ${JSON.stringify(pageSelector(page, nameCtx))},`,
     "  imports: [],",
-    `  template: \`<section data-testid=${JSON.stringify(`page-${pageSlug(page, nameCtx)}`)}><h2>${page.name}</h2></section>\`,`,
+    `  template: \`${section}\`,`,
     "})",
-    `export class ${pageComponentName(page, nameCtx)} {}`,
+    `export class ${className} {}`,
     "",
   ].join("\n");
 }
