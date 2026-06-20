@@ -90,21 +90,27 @@ which is the wrong tool for *client-owned* UI state.
 So `store` fills a real hole. **But the draft's framing has to change on two
 axes to fit Loom:**
 
-1. **Not Zustand.** Loom emits five frontends from one neutral metamodel
-   (React, Vue, Svelte, Angular, Phoenix LiveView). Zustand is React-only.
-   `store` must lower through the existing `WalkerTarget` seam
-   (`src/generator/_walker/target.ts`) to each framework's native idiom:
+1. **The DSL stays framework-neutral; each frontend lowers to its own idiom.**
+   The constraint Loom actually imposes is on the *keyword* — `store` must say
+   nothing about any library — not on the per-frontend lowering. Loom emits five
+   frontends from one neutral metamodel (React, Vue, Svelte, Angular, Phoenix
+   LiveView), and each already carries its own framework-only deps (React ships
+   `@tanstack/react-query` + `react-hook-form`). So `store` lowers through the
+   existing `WalkerTarget` seam (`src/generator/_walker/target.ts`) to each
+   framework's idiomatic store — Zustand is a legitimate React choice, in-grain
+   with the React stack's existing react-only deps:
 
    | Frontend | `store` lowering |
    |---|---|
-   | React | module-level store via `useSyncExternalStore` (tiny hand-rolled, ~20 LOC) — **no new dep** |
+   | React | a Zustand `create()` store (~1 KB, React-only) — in-grain with the existing React-only deps; selector memoization and a `persist` middleware come for free |
    | Vue | a `reactive()` singleton module (Pinia optional, not required) |
    | Svelte | a `.svelte.ts` module exporting `$state` runes |
    | Angular | an `@Injectable({providedIn:'root'})` signal service |
    | Phoenix LiveView | **no client store** — shared state is `socket.assigns`, seeded from a session/PubSub; a `store` either degrades to per-LiveView assigns or is rejected for LiveView (validator) |
 
    This mirrors how `state {}` already lowers per-framework — `store` is the
-   *cross-page* sibling of the page-local `state {}` block, not a new runtime.
+   *cross-page* sibling of the page-local `state {}` block. The keyword imposes
+   no runtime; each `WalkerTarget` picks the idiomatic one.
 
 2. **`ui`-scoped, not free-floating top-level.** Everything client lives under
    `ui { ... }` (`UiMember` — `ddd.langium`, near the `Page`/`Component`/`Area`
@@ -241,24 +247,29 @@ parallel to the existing `renderStateRead`/`renderStateWrite`:
   a use site (page body). For most frontends these are identical to the existing
   state seams pointed at the store module instead of a local hook.
 
-Illustrative React output (no new dependency — `useSyncExternalStore` is in
-React itself):
+Illustrative React output (Zustand — the React stack already carries react-only
+deps, so this is in-grain; `persist` middleware is the path to §4's
+`persist: local`):
 
 ```typescript
 // src/stores/filters.ts
-let state = { query: "", sortBy: "name", sortDesc: false };
-const subs = new Set<() => void>();
-const emit = () => subs.forEach((f) => f());
+import { create } from "zustand";
 
-export const filters = {
-  get: () => state,
-  set: (patch: Partial<typeof state>) => { state = { ...state, ...patch }; emit(); },
-  subscribe: (f: () => void) => { subs.add(f); return () => subs.delete(f); },
-};
-
-export function useFilters() {
-  return React.useSyncExternalStore(filters.subscribe, filters.get, filters.get);
+interface Filters {
+  query: string;
+  sortBy: string;
+  sortDesc: boolean;
+  set: (patch: Partial<Omit<Filters, "set">>) => void;
 }
+
+export const useFilters = create<Filters>((set) => ({
+  query: "",
+  sortBy: "name",
+  sortDesc: false,
+  set: (patch) => set(patch),
+}));
+// use site: const query = useFilters((s) => s.query);   // memoized selector
+//            useFilters.getState().set({ query: v })     // filters.query := v
 ```
 
 Svelte output is a `filters.svelte.ts` exporting a `$state` rune; Vue a
@@ -273,7 +284,7 @@ stays the source of truth for anything fetched; `store` is strictly
 | Draft ask | Disposition in Loom |
 |---|---|
 | `state` = pure data shape | **Rejected** — use `valueobject` / `payload`; `state` already means page-local reactive fields |
-| `store` = shared reactive container | **Adopted** — new `ui`-scoped `UiMember`, framework-neutral, no Zustand |
+| `store` = shared reactive container | **Adopted** — new `ui`-scoped `UiMember`; the keyword is framework-neutral, React lowers to Zustand, other frontends to their native reactivity |
 | `machine` = client state chart | **Deferred** — backend `workflow` + `QueryView` + `state`/`match` cover it; revisit as a `flow` sugar, never XState |
 | Dependency inference from usage | **Already true** — pages already detect `apiParam.X` calls and hoist hooks |
 | Colon = ownership marker | **Reframed** — dotted `store.field` vs bare `state` field, resolved by the existing scope provider |
@@ -293,10 +304,55 @@ stays the source of truth for anything fetched; `store` is strictly
 - **LiveView stores.** v0 rejects `store` on `framework: liveview` rather than
   guessing a `socket.assigns`/PubSub topology. Revisit when a concrete
   cross-LiveView-state example forces it.
-- **`flow` / `machine`.** Tracked, not designed. Precondition for designing it:
-  a real client lifecycle that `state` + `match` + `navigate` + `QueryView` +
-  backend `workflow` genuinely cannot express. Until then, the cost of an
-  XState-class runtime (and its framework-neutrality problem) isn't justified.
+- **`flow` / `machine`.** Tracked, not designed — see §4.1.
+
+### 4.1 The deferred `flow` (the draft's `machine`, re-scoped)
+
+`machine` is deferred rather than rejected because there *is* one capability the
+existing quartet can't express: **compile-time transition legality on
+purely-client state.** A `state { step: int = 0 }` wizard works, but nothing
+stops `step := 5`. The only honest justification for a new keyword is *enforced
+legal transitions* — named states where the compiler rejects an `event` that
+isn't admissible in the current state. That, and only that, is the gate.
+
+Everything else the draft's `machine` wanted is already covered, which is why
+the residual need is narrow:
+
+- **Async lifecycle** (idle/loading/success/error) is **TanStack Query** — surfaced
+  through `QueryView { of:, loading:, error:, empty:, data: }`. The draft's
+  flagship `UserListMachine` *is* this; re-expressing it as a client chart is
+  redundant.
+- **Durable, multi-aggregate, transactional lifecycle** is the backend
+  **`workflow`** (`docs/workflow.md`).
+- **In-memory wizards/branching** are `state` + `match` + block-body lambdas +
+  `navigate` (`docs/page-metamodel.md` §12) — a deliberate §14 choice.
+
+If a real illegal-state-prevention example survives all three, the construct is
+a **`flow`**, and it is a *reducer sugar*, never XState:
+
+- **Desugars to a framework-neutral reducer**, not an interpreter — states become
+  a discriminated-union/enum field, events become `dispatch(e)`, transitions
+  become a `match`-shaped reducer the `WalkerTarget` already renders. A reducer
+  has a clean image on every frontend; an XState interpreter is React-flavored
+  and has none on Vue/Svelte/Angular — and LiveView's whole model is *server*-owned
+  state, so a client chart is antithetical there. This is the same
+  framework-neutrality reason `store` doesn't mandate Zustand at the DSL level.
+- **`flow` orchestrates; TanStack Query executes async.** The draft's `_` wildcard
+  is an internal transition (action, no state change); its `*_SUCCESS`/`*_ERROR`
+  convention is a transition into a `loading` state whose action invokes an
+  existing api-param `mutate`/`query` — not an XState actor.
+- **Scope mirrors what exists** — a page-scoped `flow` for a local wizard, a
+  `ui`-scoped `flow` (built on `store`) for an app lifecycle such as auth; same
+  split as `state` (page) vs `store` (ui).
+- **Line vs `workflow`** — `flow` is ephemeral, single-session, client-only, no
+  persistence; its terminal action may `call` a `workflow`
+  (`call placeOrder(draft)`). `workflow` is the durable server side.
+
+Decision: **do not build `flow` speculatively.** It carries real new grammar,
+new IR, and new validation (the legality check) for a capability that `state` +
+`match` mostly already deliver. Build it only against a concrete `.ddd` example
+that needs enforced client-side transition legality — and even then, as a
+reducer sugar over `store` + `match` + api-params.
 
 ---
 
@@ -308,9 +364,12 @@ keywords fight the codebase: `state` is taken (and data shapes are
 `valueobject`/`payload`), and `machine` re-opens the deliberately-closed
 "client state chart" non-goal while pinning the output to React-only XState.
 The single keyword worth adding is **`store`** — the page-local `state {}` block
-lifted to `ui` scope, lowered to each frontend's native idiom through the
-existing `WalkerTarget` seam, with **no new third-party runtime on any
-frontend**. That delivers the draft's actual missing capability (shared
-cross-page client state) at the cost of one grammar production and one IR node,
-without violating Loom's server-first, framework-neutral, domain-logic-free
-frontend invariants.
+lifted to `ui` scope, lowered to each frontend's idiomatic store through the
+existing `WalkerTarget` seam (Zustand on React, native reactivity elsewhere;
+the keyword itself names no library). That delivers the draft's actual missing
+capability (shared cross-page client state) at the cost of one grammar
+production and one IR node, without violating Loom's server-first,
+framework-neutral, domain-logic-free frontend invariants. The draft's `machine`
+stays deferred behind a single concrete precondition (§4.1) — enforced
+client-side transition legality — and, if ever built, as a framework-neutral
+reducer sugar, not XState.
