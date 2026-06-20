@@ -112,8 +112,18 @@ export function renderVuePage(input: VuePageShellInput): string {
     }
   }
 
+  // The magic route `id` (`byId(id)`) binds from `route.params.id` too, when
+  // the body referenced it and the route declares an `:id` segment.  (Unlike
+  // declared params, the `:id` segment isn't in `routeParams`, so check the
+  // route string.)
+  const routeHasId = /:id\b/.test(page.route ?? "");
+  const routeIdParam = result.usesRouteId && routeHasId ? ["id"] : [];
   const usedParams = [
-    ...new Set([...[...result.usedParams].filter((p) => routeParams.includes(p)), ...idExprParams]),
+    ...new Set([
+      ...[...result.usedParams].filter((p) => routeParams.includes(p)),
+      ...idExprParams,
+      ...routeIdParam,
+    ]),
   ];
   const needsRoute = usedParams.length > 0;
 
@@ -995,6 +1005,7 @@ function buildDerivedLines(
       usesState: false,
       usesCurrentUser: false,
       usesRouterLink: false,
+      usesRouteId: false,
       userComponents: new Map(),
       usedUserComponents: new Set(),
       usesChildren: false,
