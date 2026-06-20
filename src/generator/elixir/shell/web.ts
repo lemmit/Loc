@@ -600,7 +600,11 @@ export function renderRootLayout(appName: string): string {
  *  does `use <App>Web, :html` (→ that same bundle) → it would import itself
  *  while being defined (a `CompileError`).  The qualified call needs no import,
  *  so it's both self-import-safe and unused-import-warning-clean. */
-export function renderAppLayout(appModule: string, hasSidebar = false): string {
+export function renderAppLayout(
+  appModule: string,
+  hasSidebar = false,
+  authEnabled = false,
+): string {
   if (!hasSidebar) {
     return `<header class="px-4 sm:px-6 lg:px-8">
   <div class="flex items-center justify-between border-b border-zinc-100 py-3 text-sm">
@@ -620,9 +624,14 @@ export function renderAppLayout(appModule: string, hasSidebar = false): string {
 `;
   }
 
+  // When auth is on, `LiveAuth.on_mount` assigns `@current_user` on every
+  // LiveView in the session, so the layout forwards it to the sidebar (whose
+  // `current_user` attr a gated link's `<%= if (@current_user.…) do %>`
+  // reads).  No-auth apps emit no such assign — keep the call byte-identical.
+  const currentUserAttr = authEnabled ? " current_user={@current_user}" : "";
   return `<div class="flex min-h-screen">
   <aside class="w-64 flex-shrink-0 border-r border-zinc-100 bg-zinc-50">
-    <${appModule}Web.Components.Sidebar.sidebar current_path={@current_path} />
+    <${appModule}Web.Components.Sidebar.sidebar current_path={@current_path}${currentUserAttr} />
   </aside>
   <main class="flex-1 px-4 py-8 sm:px-6 lg:px-8">
     <div class="mx-auto max-w-4xl">

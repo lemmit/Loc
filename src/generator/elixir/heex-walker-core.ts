@@ -1035,6 +1035,29 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
  *  null when the page has no guard.  Caller wraps in
  *  `if not (<pred>), do: push_navigate(socket, to: "/")`. */
 export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): string | null {
+  return renderRequiresGuardAt(page, ui, appModule, "handler");
+}
+
+/** Render a page's `requires <pred>` in HEEx *template* scope — the
+ *  current-user claim resolves to `@current_user` rather than the
+ *  handler-scope `socket.assigns.current_user`.  Used by the sidebar
+ *  emitter to gate a nav link inside a `<%= if (<gate>) do %>` against the
+ *  layout-assigned `@current_user`.  Returns null when the page has no
+ *  `requires` clause. */
+export function renderRequiresGuardInTemplate(
+  page: PageIR,
+  ui: UiIR,
+  appModule: string,
+): string | null {
+  return renderRequiresGuardAt(page, ui, appModule, "template");
+}
+
+function renderRequiresGuardAt(
+  page: PageIR,
+  ui: UiIR,
+  appModule: string,
+  position: RenderPosition,
+): string | null {
   if (!page.requires) return null;
   const ctx: WalkContext = {
     appModule,
@@ -1053,7 +1076,7 @@ export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): 
     usedComponents: new Set(),
     slotUsed: { value: false },
     tabSeq: { value: 0 },
-    position: "handler",
+    position,
   };
   return renderExpr(page.requires, ctx);
 }

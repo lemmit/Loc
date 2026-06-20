@@ -206,7 +206,7 @@ export function emitShellFiles(
   // lib/<app>_web/components/layouts/app.html.heex
   out.set(
     `lib/${appName}_web/components/layouts/app.html.heex`,
-    renderAppLayout(appModule, hasSidebar),
+    renderAppLayout(appModule, hasSidebar, authEnabled),
   );
 
   // Error views — the endpoint config wires these as the render_errors
