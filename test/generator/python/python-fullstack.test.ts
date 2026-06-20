@@ -57,7 +57,7 @@ describe("fullstack python — embedded SPA alongside the API", () => {
   it("the Dockerfile is multi-stage: ClientApp build → wwwroot copy", async () => {
     const files = await build(FIXTURE);
     const docker = files.get("app/Dockerfile")!;
-    expect(docker).toContain("FROM node:20-alpine AS spa-build");
+    expect(docker).toContain("FROM node:24-alpine AS spa-build");
     expect(docker).toContain("COPY ClientApp/ ./");
     expect(docker).toContain("COPY --from=spa-build /spa/dist ./wwwroot");
     expect(docker).toContain('CMD ["uvicorn", "app.main:app"');

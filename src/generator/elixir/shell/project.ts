@@ -133,7 +133,7 @@ export function renderDockerfile(appName: string, embedReact = false, spaOutDir 
   // (at `/app`) serves it.  Mirrors the .NET multi-stage embed
   // (spa-build → app build → runtime).
   const spaBuildStage = embedReact
-    ? `FROM node:20-alpine AS spa-build
+    ? `FROM node:24-alpine AS spa-build
 WORKDIR /spa
 COPY assets/package.json assets/package-lock.json* ./
 RUN npm ci --prefer-offline --no-audit --no-fund || npm install
