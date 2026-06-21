@@ -660,6 +660,6 @@ export function implementsCapabilityRef(cap: string): ImplementsDeclAst & Aggreg
 /** Build a Langium-style unresolved cross-reference.  Langium's
  * Linker phase resolves these against scope; until then, `ref` is
  * undefined and `$refText` carries the textual name. */
-function makeRef<T>(name: string): { $refText: string; ref?: T } {
-  return { $refText: name };
+function makeRef<T>(name: string): { $refText: string; ref: T | undefined } {
+  return { $refText: name, ref: undefined };
 }

@@ -74,7 +74,7 @@ export class DddReferencesProvider extends DefaultReferencesProvider {
     // Cursor on a `capability <Name>` declaration name (not a cross-reference,
     // so `findDeclaration` won't return it).
     if (isCapability(leaf.astNode) && leaf.text === leaf.astNode.name) return leaf.astNode;
-    const declared = this.references.findDeclaration(leaf);
+    const declared = this.references.findDeclarations(leaf)[0];
     if (declared && declared.$type !== "MemberSuffix") return declared;
     return memberDeclAt(leaf);
   }

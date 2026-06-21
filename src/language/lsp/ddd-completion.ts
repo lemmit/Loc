@@ -1,4 +1,4 @@
-import type { AstNodeDescription, LangiumDocuments, MaybePromise } from "langium";
+import type { AstNodeDescription, LangiumDocuments, MaybePromise, ReferenceInfo } from "langium";
 import { AstUtils } from "langium";
 import {
   type CompletionAcceptor,
@@ -141,8 +141,12 @@ export class DddCompletionProvider extends DefaultCompletionProvider {
     }
   }
 
-  protected override createReferenceCompletionItem(nodeDescription: AstNodeDescription) {
-    const item = super.createReferenceCompletionItem(nodeDescription);
+  protected override createReferenceCompletionItem(
+    nodeDescription: AstNodeDescription,
+    refInfo: ReferenceInfo,
+    context: CompletionContext,
+  ) {
+    const item = super.createReferenceCompletionItem(nodeDescription, refInfo, context);
     const detail = detailFor(nodeDescription);
     if (detail) {
       return { ...item, detail };

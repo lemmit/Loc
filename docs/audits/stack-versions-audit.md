@@ -127,14 +127,14 @@ Per-pack legacy table (kept for the per-dep latest-stable column):
 | package | pinned | latest | notes |
 | --- | --- | --- | --- |
 | `chalk` | ~5.3 | latest | safe |
-| `chevrotain` | ~11.0.3 | latest 11.x | safe (Langium dep, ride along) |
+| `chevrotain` | ~12.0.0 | 12.x | bumped with Langium 4 (its dep) |
 | `commander` | ~12.1 | latest | safe |
 | `handlebars` | ^4.7 | 4.x | template engine; unchanged |
 | `ignore` | ^7.0 | latest | safe |
-| `langium` | ~3.3 | 4.x | major bump (separate effort — Langium 4 changes the services API) |
-| `vscode-languageserver` | ~9.0 | latest 9.x | safe |
-| `typescript` (dev) | ~5.7 | 6.x | major bump |
-| `vitest` (dev) | ~2.1 | 3.x | major bump |
+| `langium` | **~4.3** | 4.3 | bumped 3.3 → 4.3 — `computeExports`→`collectExportedSymbols`, `findDeclaration`→`findDeclarations`, hover returns raw string, `Reference.ref` now required, `copyAstNode` ref-builder gained `origReference` |
+| `vscode-languageserver` | ~10.0 | 10.x | bumped with Langium 4 (subpaths `/node`, `/browser`) |
+| `typescript` (dev) | **~5.9** | 6.x | bumped 5.7 → 5.9 (Langium 4 needs ≥5.8). **TS 6 is a separate follow-up** — it breaks `@types/node` global resolution across the Node-only islands (49 errors) independently of Langium |
+| `vitest` (dev) | ~4.1 | 4.x | already on 4.x |
 
 ## Notable loose ranges to fix opportunistically
 

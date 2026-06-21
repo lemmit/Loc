@@ -314,21 +314,26 @@ describe("RenameProvider — shadowing, prepareRename, multi-file", () => {
   });
 
   it("renames an aggregate across files (the X id usage in another file)", async () => {
-    const shared = services.shared;
+    // Fresh services: this test exercises cross-file index resolution, so it
+    // must not see `Order` aggregates other tests parsed into the shared
+    // workspace (Langium 4's global scope would otherwise resolve `Order id`
+    // to a stale duplicate, finding zero references).
+    const isolated = createDddServices(NodeFileSystem).Ddd;
+    const shared = isolated.shared;
     const factory = shared.workspace.LangiumDocumentFactory;
     const a = factory.fromString(
       `context A {\n  aggregate Order {\n    total: int\n  }\n}`,
-      URI.parse("memory://rename-a.ddd"),
+      URI.parse("memory:///rename-a.ddd"),
     );
     const b = factory.fromString(
       `context B {\n  aggregate Cart {\n    order: Order id\n  }\n}`,
-      URI.parse("memory://rename-b.ddd"),
+      URI.parse("memory:///rename-b.ddd"),
     );
     shared.workspace.LangiumDocuments.addDocument(a);
     shared.workspace.LangiumDocuments.addDocument(b);
     await shared.workspace.DocumentBuilder.build([a, b], { validation: true });
 
-    const edit = await services.lsp.RenameProvider!.rename(a, {
+    const edit = await isolated.lsp.RenameProvider!.rename(a, {
       textDocument: { uri: a.textDocument.uri },
       position: a.textDocument.positionAt(a.textDocument.getText().indexOf("Order")),
       newName: "Purchase",
