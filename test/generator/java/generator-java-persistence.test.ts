@@ -175,7 +175,9 @@ describe("java generator — Flyway migrations (S4)", () => {
     expect(sql).toContain("CREATE TABLE orders.orders (");
     expect(sql).toContain("CREATE TABLE orders.order_tag_ids (");
     const build = files_.get("shop_api/build.gradle.kts")!;
-    expect(build).toContain('implementation("org.flywaydb:flyway-core")');
+    expect(build).toContain(
+      'implementation("org.springframework.boot:spring-boot-starter-flyway")',
+    );
     expect(build).toContain('implementation("org.flywaydb:flyway-database-postgresql")');
   });
 });
