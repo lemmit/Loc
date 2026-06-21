@@ -10,9 +10,12 @@
 > closes with why this is the prerequisite that turns a hypothetical
 > Fable/Feliz/Elmish target from "synthesis" into "projection." The decisions
 > in §8 are settled (keyword, purity boundary, effect-vocabulary scoping,
-> composition, store deferral, async-outcome *shape*); the remaining open items
-> are the `await`/`spawn` marker *spelling* (§2.3), whether **actions themselves
-> are `async`/awaitable** (§2.4), and `store` persistence — all out of v1 scope.
+> composition, store deferral); the **async-effect surface** (`await`/`spawn`,
+> `onError`, `async` actions) is split into its own note,
+> [`async-actions-and-effects.md`](async-actions-and-effects.md) ("Proposal B"),
+> because it changes call semantics and wants its own migration ramp. The
+> remaining open item *here* is `store` persistence. The full phased plan across
+> both notes is in [Rollout](#rollout--the-whole-initiative).
 >
 > **Framing note (this revision):** "an action is a pure function" is
 > idiomatic to *nobody* — Redux calls the data an action and the *reducer*
@@ -30,12 +33,11 @@
 > is already a statement (`AssignOrCallStmt`, `ddd.langium:1704`; the `call?=`
 > there is a *has-parens* flag, not a keyword); (2) the only `then` that ships
 > is the **success-only named arg on the `Action {}` render primitive**
-> (`then:`, read via `namedArgValue`, `controls.ts:194`) — the statement-level
-> `then`/`onError` continuation in §2.3 is 🔶, and its spelling (arrow vs the
-> colon precedent) is open; §2.3 now **drops `then` entirely** — async outcomes
-use explicit `await`/`spawn` markers + `onError`, and the `Action {}` `then:`
-retires when that primitive becomes the Phase-4 macro over named actions; (3)
-there is **no nullary `() =>` lambda** — the
+> (`then:`, read via `namedArgValue`, `controls.ts:194`); the async-effect
+> surface (Proposal B) **drops `then` entirely** in favour of explicit
+> `await`/`spawn` markers + `onError`, and the `Action {}` `then:` retires when
+> that primitive becomes the macro over named actions; (3) there is **no nullary
+> `() =>` lambda** — the
 > rule requires exactly one param (`Lambda: param=ID '=>' …`,
 > `ddd.langium:1896`), so a nullary handler is reached only by *referencing* a
 > named action. `toast(…)` ships only inside live-event `on …(e) { toast(…) }`
@@ -174,183 +176,32 @@ sites checked against it on the other. The cost relative to an anonymous
 lambda (which infers the param type from the site for free) is one
 annotation; the benefit is a stable, reusable, projectable identity.
 
-### 2.3 Effectful calls and outcomes — `await`, `spawn`, and failure
+### 2.3 Effectful calls and outcomes — split into a separate proposal
 
-A pure action that *only* writes state is `(state) -> state'`. The moment it
-calls a **remote** effect — a server command/query that can succeed or fail —
-it becomes `(state) -> (state', Cmd)` and MVU needs the outcome arms. Loom
-splits this by direction:
+How an action invokes a **remote** effect (a server command/query that can
+succeed or fail) — the explicit `await` / `spawn` markers, success-by-sequencing
+(no `then`), `onError` failure arms, and `async` action composition — is its own
+note: [`async-actions-and-effects.md`](async-actions-and-effects.md)
+("Proposal B"). It was split out because it **changes call semantics** (a remote
+call must be marked) and so wants its own lint→required migration ramp, whereas
+*this* note's named sync actions are a non-breaking addition.
+
+**In this note's scope (sync named actions), the two outcome directions are:**
 
 - **Reads (server state / queries) — derived, no new surface.**
-  `QueryView { of: api.Order.byId(id), loading: …, error: …, data: … }`
-  already carries the endpoint, the wire shape, *and* the three branches — i.e.
-  `Idle | Loading | Loaded of T | Failed of E`. The generator **derives** the
-  remote-data union + load `Cmd` + outcome `Msg` from `QueryView`; no DSL
-  change.
+  `QueryView { of: api.Order.byId(id), loading: …, error: …, data: … }` already
+  carries the endpoint, the wire shape, *and* the three branches
+  (`Idle | Loading | Loaded of T | Failed of E`). The generator **derives** the
+  remote-data union + load `Cmd` + outcome `Msg`; no DSL change.
 
-- **Writes (commands with an outcome) — explicit marker + failure arms.** 🔶
-  Settled across the design discussion, on three principles. There is **no
-  `then`** — it is dropped entirely (the success-only `then:` on the `Action {}`
-  render primitive retires when that primitive becomes the Phase-4 macro over
-  named actions, leaving one statement model with no `then` anywhere).
-
-**(1) Success is implicit sequencing.** The success continuation is *the next
-statement* — exactly how a backend operation body already sequences, and how
-`await` works in every mainstream language. No `then` arm; multi-step flows stay
-flat and stack for free:
-
-```ddd
-action submit() {                                   // 🔶
-  let order = await placeOrder(draft)               // remote write — await + bind result
-  await sendReceipt(order.id)                        // runs only on success of the previous
-  navigate(OrderConsole, { id: order.id })           // sync; no marker
-}
-```
-
-**(2) Every remote call carries an explicit, compiler-checked marker.** A bare
-remote call is rejected — invisible suspension points are the maintenance hazard
-`await`/`async` exist to prevent, so the author must choose one of two intentful
-forms. Because async-ness is *decidable* from resolution, the marker is
-**enforced both ways** (no floating-promise footgun — the classic "forgot
-`await`" bug becomes a compile error):
-
-| Form | Suspends? | Continuation | Failure |
-|---|---|---|---|
-| `await op()` | yes | runs **after** it resolves (MVU arm split) | `onError` aborts/recovers inline |
-| `spawn op()` | no | runs **immediately** (batched `Cmd`, no split) | **detached** `onError`, or dropped |
-| bare `op()` (remote) | — | — | **error** — must choose `await` or `spawn` |
-
-`spawn` is first-class fire-and-forget (analytics, telemetry, optimistic-UI
-background saves). Its `onError` is *detached* — it never aborts or blocks the
-continuation (which already ran); omit it and the failure is dropped (or routed
-to a default telemetry sink). `let x = spawn …` is an error (nothing to bind).
-Both `await` and `spawn` reify to `Cmd`s, so the action stays pure either way.
-
-**(3) Failure is per-call `onError`, falling back to a block `onError`.** A
-postfix handler attaches the *failure* arm to a single call (success is still
-the next statement, so this does **not** reintroduce `then`'s nesting); a
-block-level `onError` is the catch-all. Precedence: **per-call → block →
-propagate** (to a generic UI error boundary):
-
-```ddd
-action submit() {                                          // 🔶
-  let order = await placeOrder(draft)  onError e => abort show(e)  // recover or bail
-  await sendReceipt(order.id)          onError e => log(e)         // best-effort, continue
-  await audit(order.id)                                            // falls to block onError
-  navigate(OrderConsole, { id: order.id })                        // sync, no error surface
-} onError e => toast(e.message)                                  // catch-all
-```
-
-After a handler runs: a `let`-bound call must recover a value of the bound type
-or `abort`; an unbound call continues by default; `abort` stops the rest of the
-body. The sequential block projects to one MVU arm per `await`, with `onError`
-selecting the `Failed` arm:
-
-```fsharp
-| Submit          -> model, Cmd.OfAsync.either Api.placeOrder draft (Ok>>Placed) (Error>>PlaceFailed)
-| Placed (Ok ord) -> { model with Order=ord }, Cmd.OfAsync.either (Api.sendReceipt ord.Id) () (Ok>>Receipted) (Error>>ReceiptFailed)
-| PlaceFailed e   -> model, Cmd.ofMsg (Show e)          // abort — no continuation enqueued
-| ReceiptFailed e -> model, Cmd.ofMsg (Log e)           // best-effort — continuation still runs
-| Receipted _     -> model, Cmd.OfAsync.either (Api.audit ord.Id) () (Ok>>Done) (Error>>Failed)
-```
-
-`spawn` is the optimistic-update shape — no arm split, detached rollback:
-
-```ddd
-action like(post) {                                         // 🔶
-  post.liked := true                                         // optimistic UI update now
-  spawn likePost(post.id) onError e => post.liked := false   // background; rollback on failure
-}
-```
-
-```fsharp
-| Like post    -> { model with Liked = true }, Cmd.OfAsync.attempt Api.likePost post.Id (Error>>LikeFailed)
-| LikeFailed _ -> { model with Liked = false }, Cmd.none    // detached rollback arm
-```
-
-**Backend symmetry.** The `placeOrder` *operation* these calls hit is unchanged
-and `await`-free — a straight-line body (I/O at the transaction boundary, not in
-the body) ending in the exception-less `Result` union (`return Placed(...)` /
-`return Failed(...)`, `dotnet/render-stmt.ts:113-135`, `exception-less.md`). The
-frontend's `await … onError` *consumes* exactly that union — backend produces the
-`Failed` variant, frontend binds it. Two ends of one `Result<T,E>` contract: one
-neutral statement IR, two lowerings (straight-line transaction vs MVU arms).
-
-**Validator rules.**
-- `loom.missing-effect-marker` — a remote call that is neither `await` nor
-  `spawn` → error.
-- `loom.spurious-effect-marker` — `await`/`spawn` on a local call / value-object
-  ctor / pure `function` → error.
-- `loom.bind-on-spawn` — `let x = spawn …` → error.
-
-This closes the async-outcome MVU axis with an explicit, enforced surface that
-matches what every language does, and `spawn` makes fire-and-forget first-class.
-See §8.7 for the decision record and §2.4 for whether actions are themselves
-awaitable.
-
-### 2.4 Async actions — propagation, awaiting actions, the action interface 🔶
-
-If an action *contains* an `await`, it has a suspension point and an eventual
-completion — it is **async**. Three questions follow (raised in review): is
-async-ness visible, can one action `await` another, and what interface does an
-action expose? The coherent answer reuses the §2.3 discipline uniformly — a
-*call with an outcome* is treated the same whether the callee is a remote op or
-an async action.
-
-**Async-ness is inferred, but declared.** An action is async iff it
-(transitively) awaits a remote op — *decidable*, so (as with the call-site
-marker) the compiler needs no `async` keyword to know. But by the same
-"explicit at the boundary" principle that gave us `await`, the **declaration**
-carries `async` so a caller knows the contract from the signature alone, and the
-compiler **checks** it against the body (missing/spurious `async`, mirroring
-missing/spurious `await`):
-
-```ddd
-action       next()      { step := step + 1 }                           // sync
-async action checkout()  { await placeOrder(draft); navigate(Receipt) }  // body awaits ⇒ async
-```
-
-**Awaiting an action is the same discipline as awaiting an op.** An async action
-is itself `await`/`spawn`-able; a sync one is bare-called (the §3.1 composition
-already allows action→action / page→store calls — this just extends the §2.3
-marker rule to cover async callees):
-
-```ddd
-async action confirm() {                                     // 🔶
-  await checkout()           // awaiting another ASYNC action — sequences after it completes
-  Cart.clear()               // sync store action — bare call (unchanged from §3.1)
-}
-```
-
-`loom.missing-effect-marker` / `loom.spurious-effect-marker` now range over
-**both** remote ops and async actions: `await next()` (sync) and bare
-`checkout()` (async) are both errors. Async-ness propagates transitively up the
-(acyclic, §8.4) call graph, so the inference is well-founded.
-
-**The action interface — and what it deliberately omits.** §2.2 framed an
-action's interface as *state surface + payload param*. Async-ness adds one
-facet; notably it does **not** add a return value:
-
-| Interface facet | Owner | Checked at call site |
-|---|---|---|
-| payload param (§2.2) | call-site primitive | supplied value assignable to param |
-| `async` | the body (inferred → declared → checked) | marker (`await`/`spawn`) matches |
-| **return value** | — none — | actions are *transitions*, not functions |
-
-An action returns **nothing bindable** — it is a `(state, payload) -> (state',
-Cmd)` transition, not a function. `await checkout()` *sequences* but yields no
-value; `let x = await checkout()` is an error (`loom.bind-on-action`). To get a
-value back, `await` the **remote op** directly (ops return their result —
-`let order = await placeOrder(draft)`) or read shared `store` state. Keeping
-actions value-less is what preserves the MVU projection: an action is a `Msg`,
-and a `Msg` carries a *payload in*, not a *value out*; a value-returning action
-would be a general async function and break the `update`-arm shape.
-
-So actions are awaitable when async, async-ness is inferred-but-declared-and-
-checked, and the interface they conform to is `[async] (payload?: T)` with no
-return — one uniform marker discipline across ops and actions. **Open (§9):**
-whether `async` is a required declaration keyword or fully inferred, and whether
-v1 includes async action→action awaiting or defers it with `store`.
+- **Writes (commands with an outcome) — Proposal B.** Until Proposal B's markers
+  land, a remote call inside an action behaves exactly as a handler call does
+  today (implicit, unmarked). Proposal B then makes the async boundary explicit
+  and enforced. The one-line summary of what it settles: success is implicit
+  statement sequencing (no `then`); every remote call carries `await`
+  (sequential) or `spawn` (fire-and-forget); failure is a per-call `onError`
+  falling back to a block `onError`; actions have no return value; and `async`
+  is a required, checked declaration keyword.
 
 ## 3. The sharing boundary: `store` (optional extension)
 
@@ -424,12 +275,12 @@ store Cart {
   action clear() { lines := [] }            // data only — no navigate/toast
 }
 
-page CartPage {                              // 🔶 store/use/action + await/onError; bare call ✅
+page CartPage {                              // 🔶 store/use/action ✅; await/onError → Proposal B
   use Cart
   async action confirm() {
-    await placeOrder(Cart.lines) onError e => showError(e.message)
-    Cart.clear()                                       // sync store action
-    navigate(OrderConsole, { id: ... })                // page owns the redirect
+    await placeOrder(Cart.lines) onError e => showError(e.message)   // await/onError: async-actions-and-effects.md
+    Cart.clear()                                       // sync store action — call (this note)
+    navigate(OrderConsole, { id: ... })                // page owns the redirect (view-scoped effect)
   }
 }
 ```
@@ -597,26 +448,41 @@ These were settled and are no longer open. They define v1.
    Cross-page sharing and lifetime/persistence are orthogonal to the MVU
    projection (which needs *named actions*, not *shared state*). `store` lands
    second (§3).
-7. **Async outcomes (§2.3) — explicit markers, no `then`.** Reads are **derived**
-   from `QueryView` (no new surface). For writes, **`then` is dropped entirely**:
-   success is implicit statement sequencing (the next statement), every remote
-   call carries a compiler-checked **`await`** (sequential) or **`spawn`**
-   (fire-and-forget) marker — a bare remote call is an error — and failure is a
-   per-call `onError` falling back to a block `onError` (precedence: per-call →
-   block → propagate). Each `await` projects to one MVU arm; `onError` selects
-   the `Failed` arm of the backend's exception-less `Result` union. The
-   `Action {}` `then:` retires when that primitive becomes the Phase-4 macro. The
-   marker *spelling*, and whether actions are themselves `async`/awaitable (§2.4),
-   are the open items.
+7. **Reads are derived; writes are Proposal B.** Query/read outcomes are
+   **derived** from `QueryView` (no new surface). The async-*write* surface
+   (`await`/`spawn`, `onError`, `async` actions) is settled in
+   [Proposal B](async-actions-and-effects.md) — the only decision recorded here
+   is that it is a **separate, post-Stage-1** body of work, because it changes
+   call semantics and carries its own lint→required migration ramp.
 
 ## 9. Remaining open items
 
-- **Effect-marker spelling (§2.3).** `await` / `spawn` — confirm the keywords
-  (vs `go`/`detach`/`void` for fire-and-forget) and the postfix `onError`
-  attachment (call-level vs a wrapping form).
-- **Async actions (§2.4).** Whether `async` is a required declaration keyword or
-  fully inferred; whether v1 includes awaiting *async actions* (action→action)
-  or defers it alongside `store`.
 - **`store` lifetime/persistence** — in-memory only, or
   session/local-storage-backed? Out of scope for v1; revisit when `store`
   lands.
+- The async-effect open items (marker spelling, async-action awaiting in v1,
+  default failure sink) live in [Proposal B §8](async-actions-and-effects.md).
+
+## Rollout — the whole initiative
+
+Five stages spanning both notes. Each is independently shippable and leaves the
+system in a **coherent, improved** state — never a half-built bridge.
+
+| Stage | What lands | Note | Breaking? | The system after |
+|---|---|---|---|---|
+| **1. Named sync actions** | `action name(p){…}` in page/component: grammar, `ActionIR`, lower, validator (purity + payload conformance), generators replace the `event_N` gensym with the action name. Remote calls behave **exactly as today** (unmarked). | A (§2, §5) | **No** — pure addition | Handlers are named & testable; gensym gone. |
+| **2. Explicit effect markers** | `await` / `spawn` / `onError` on remote calls. Ships **lint-first** (bare remote call = warning + codemod), then flips to **required (error)**. | B (Stages 1–2) | Yes, via ramp | Every async boundary is visible & enforced; failures handled. |
+| **3. Retire `Action {}` `then:`** | Rewrite the `Action {}` render primitive as a macro over a named action with an `await`-sequenced body; remove the `then:` named arg. | B (cleanup) | Macro keeps surface | **One** continuation model — no `then` anywhere. |
+| **4. Async action composition** | `async` keyword (lint → required), transitive inference, action→action awaiting. | B (Stage 3) | Yes, via ramp | Async flows compose across actions. |
+| **5. `store`** | Shared/persistent state + store actions (async store actions already work from Stages 2/4). | A (§3) | No | Cross-page sharing; Zustand/Pinia emission. |
+
+**Ordering rationale.** Stage 1 is the non-breaking foundation everything builds
+on. Stage 2 makes async *explicit*; Stage 3 immediately follows so the legacy
+`then:` dies before more async surface accretes (avoids two continuation models
+coexisting). Stage 4 extends the markers to action composition. Stage 5 (`store`)
+depends only on Stage 1 and is otherwise independent — it can be pulled earlier
+if sharing is prioritised, but defaults last per §8.6.
+
+**Enabled, separate initiative:** the Fable/Feliz/Elmish target (§7). Stages 1–4
+turn its `Msg`/`update` emission from synthesis into projection; it is tracked in
+the gap analysis alongside these notes, not scheduled here.
