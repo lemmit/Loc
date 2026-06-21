@@ -323,20 +323,13 @@ export function renderConfiguration(
   // would lose one at runtime.  Naming each filter makes them additive again —
   // every predicate applies — and lets a query selectively bypass a single one
   // via `IgnoreQueryFilters(["<Name>"])` instead of dropping them all.
-  const seenFilterNames = new Set<string>();
+  const filterNames = queryFilterNames(agg);
   const filterLines = tph
     ? []
-    : (agg.contextFilters ?? []).map((predicate, i) => {
-        let name = queryFilterName(predicate, agg.contextFilterRefs?.[i], i);
-        // Disambiguate the (rare) case where two filters derive the same name.
-        if (seenFilterNames.has(name)) {
-          let n = 2;
-          while (seenFilterNames.has(`${name}${n}`)) n++;
-          name = `${name}${n}`;
-        }
-        seenFilterNames.add(name);
-        return `        builder.HasQueryFilter(${JSON.stringify(name)}, x => ${renderCsExpr(predicate, { thisName: "x" })});`;
-      });
+    : (agg.contextFilters ?? []).map(
+        (predicate, i) =>
+          `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x" })});`,
+      );
   // Co-located provenance (provenance.md): each `provenanced` field's
   // `<Field>Provenance` lineage maps to a `<field>_provenance` jsonb column via
   // a System.Text.Json value-converter (ProvJson.Options → the same Web-default
@@ -418,6 +411,48 @@ function indexedColumnsFor(agg: AggregateIR, ctx: BoundedContextIR): Set<string>
     }
   }
   return out;
+}
+
+/** The FINAL, disambiguated EF named-query-filter names for an aggregate,
+ *  index-aligned with `agg.contextFilters`.  This is the single source of truth
+ *  for filter identity: the `OnModelCreating` config emits
+ *  `HasQueryFilter("<name>", …)` from it, and the read emitters resolve an
+ *  `ignoring <Cap>` clause to the same names via `agg.contextFilterOrigins`
+ *  (named-filter-bypass.md §11).  Disambiguation (the rare two-filters-one-name
+ *  case) MUST stay in lockstep between the config and the reads, so it lives
+ *  here once. */
+export function queryFilterNames(agg: AggregateIR): string[] {
+  const seen = new Set<string>();
+  return (agg.contextFilters ?? []).map((predicate, i) => {
+    let name = queryFilterName(predicate, agg.contextFilterRefs?.[i], i);
+    if (seen.has(name)) {
+      let n = 2;
+      while (seen.has(`${name}${n}`)) n++;
+      name = `${name}${n}`;
+    }
+    seen.add(name);
+    return name;
+  });
+}
+
+/** The EF named-filter names an `ignoring` clause bypasses on this aggregate
+ *  (named-filter-bypass.md §11).  `bypassAll` → every filter; otherwise the
+ *  names whose contributing capability (`agg.contextFilterOrigins[i]`) is in
+ *  `bypassCaps`.  Returns [] when nothing matches (a `*` on a filterless
+ *  aggregate, or only stamps-only caps named — both already validated). */
+export function bypassedFilterNames(
+  agg: AggregateIR,
+  bypass: { bypassAll?: boolean; bypassCaps?: string[] },
+): string[] {
+  const names = queryFilterNames(agg);
+  if (bypass.bypassAll) return names;
+  const caps = new Set(bypass.bypassCaps ?? []);
+  if (caps.size === 0) return [];
+  const origins = agg.contextFilterOrigins ?? [];
+  return names.filter((_, i) => {
+    const origin = origins[i];
+    return origin != null && caps.has(origin);
+  });
 }
 
 /** Stable, human-readable name for an EF Core 10 named query filter.

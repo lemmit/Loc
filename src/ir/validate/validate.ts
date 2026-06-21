@@ -37,6 +37,7 @@ import {
   validateElixirStampSupport,
   validateEventSourcedStorage,
   validateEventSourcedWorkflowStorage,
+  validateFilterBypassSupport,
   validateFindPredicateAdapterSupport,
   validateInheritanceStorage,
   validateJavaContainmentSupport,
@@ -116,6 +117,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateSavingShapeSupport(sys, diags);
     validateVanillaDocumentScope(sys, diags);
     validateContextFilterSupport(sys, diags);
+    validateFilterBypassSupport(sys, diags);
     validateJavaContainmentSupport(sys, diags);
     validateJavaFullstackSupport(sys, diags);
     validateJavaStampSupport(sys, diags);

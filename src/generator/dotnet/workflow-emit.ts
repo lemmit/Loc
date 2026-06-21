@@ -33,6 +33,7 @@ import {
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
+import { bypassedFilterNames } from "./emit/efcore.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
 import { esCorrIdClass, esEventDbSet, esEventRecordClass } from "./workflow-eventsourced-emit.js";
 import {
@@ -1076,7 +1077,21 @@ function csWorkflowStmtTarget(
         const lim = st.page.limit ? renderArg(st.page.limit) : "null";
         args.push(`(${off}, ${lim})`);
       }
-      const callArgs = [...args, "cancellationToken"].join(", ");
+      // Inline `ignoring` clause (named-filter-bypass.md §11) → named retrieval-
+      // method args.  `ignoring *` → `ignoreAllFilters: true`; `ignoring <Cap>`
+      // → `ignoreFilters: ["Name1", …]` (the EF filter names the bypassed
+      // capabilities contributed on the target aggregate).
+      const bypassArgs: string[] = [];
+      if (st.bypassAll) {
+        bypassArgs.push("ignoreAllFilters: true");
+      } else if ((st.bypassCaps?.length ?? 0) > 0) {
+        const target = ctx.aggregates.find((a) => a.name === st.aggName);
+        const names = target ? bypassedFilterNames(target, { bypassCaps: st.bypassCaps }) : [];
+        if (names.length > 0) {
+          bypassArgs.push(`ignoreFilters: [${names.map((n) => JSON.stringify(n)).join(", ")}]`);
+        }
+      }
+      const callArgs = [...args, "cancellationToken", ...bypassArgs].join(", ");
       return [
         `${indent}var ${st.name} = await ${fieldName}.Run${upperFirst(st.retrievalName)}Async(${callArgs});`,
       ];
