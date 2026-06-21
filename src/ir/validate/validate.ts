@@ -46,6 +46,7 @@ import {
   validateReactIdReferences,
   validateResourceConfig,
   validateSavingShapeSupport,
+  validateStampSupport,
   validateSystem,
   validateVanillaContainmentSupport,
   validateVanillaDocumentScope,
@@ -114,6 +115,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateJavaFullstackSupport(sys, diags);
     validateJavaStampSupport(sys, diags);
     validateDotnetStampSupport(sys, diags);
+    validateStampSupport(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);
     validateVanillaContainmentSupport(sys, diags);

@@ -696,6 +696,53 @@ export function validateDotnetStampSupport(sys: SystemIR, diags: LoomDiagnostic[
   }
 }
 
+// Lifecycle stamps on the node / python / elixir backends.  Unlike java and
+// .NET — which emit `_stampOn*` entity methods / an EF Core interceptor — these
+// three backends do NOT consume `contextStamps` at all yet: the audit COLUMNS
+// are emitted (the `auditable` fields), but nothing ever populates them, so a
+// `stamp` (or `with audit`/`auditable`) would silently leave `createdAt` /
+// `createdBy` null.  Fail fast — never a silent drop — mirroring
+// `validateJavaStampSupport` / `validateDotnetStampSupport`: any lifecycle stamp
+// on one of these deployables is an error until the backend wires stamping.
+// Stable per-family diagnostic codes (a literal each, so the
+// diagnostic-codes-completeness source scan can see them — it requires a
+// double-quoted `code: "loom.…"` in every `diags.push`).
+const STAMP_UNSUPPORTED_CODE: Readonly<Record<string, string>> = {
+  node: "loom.node-stamp-unsupported",
+  python: "loom.python-stamp-unsupported",
+  elixir: "loom.elixir-stamp-unsupported",
+};
+
+export function validateStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    const fam = platformFamily(dep.platform);
+    if (!fam || !(fam in STAMP_UNSUPPORTED_CODE)) continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        if ((enriched.contextStamps ?? []).length === 0) continue;
+        const base = {
+          severity: "error" as const,
+          message:
+            `Deployable '${dep.name}' (platform ${fam}) hosts aggregate '${ctxName}.${agg.name}' ` +
+            `with a lifecycle stamp (e.g. from \`with audit\`/\`auditable\`, or \`stamp onCreate { … }\`), ` +
+            `but the ${fam} backend does not yet apply lifecycle stamps — the audit columns would be ` +
+            `emitted but never populated. Host this context on a java or dotnet deployable, or remove ` +
+            `the stamp (the \`auditable\` audit-columns capability and the \`audit\` stamp macro).`,
+          source: `${sys.name}/${dep.name}`,
+        };
+        if (fam === "node") diags.push({ ...base, code: "loom.node-stamp-unsupported" });
+        else if (fam === "python") diags.push({ ...base, code: "loom.python-stamp-unsupported" });
+        else if (fam === "elixir") diags.push({ ...base, code: "loom.elixir-stamp-unsupported" });
+      }
+    }
+  }
+}
+
 export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);

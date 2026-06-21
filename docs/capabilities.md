@@ -198,11 +198,14 @@ aggregate with `with auditable`.
   `_stampOnCreate` / `_stampOnUpdate` hooks (one arm per stamping
   rule) with the service calling them on create / update; support
   is gated by `validateJavaStampSupport`.
-- **Hono**, **Phoenix**, and **Python** — context stamps are **not
-  yet wired through to runtime**.  The IR carries `contextStamps` on
-  every aggregate but those codegens don't consume them.
-  Hand-writing the stamps inside operation bodies (or using the
-  `audit` macro under .NET-/Java-only deployment) is the workaround.
+- **Hono** (`node`), **Phoenix** (`elixir`), and **Python** — context
+  stamps are **not yet wired through to runtime**.  The IR carries
+  `contextStamps` on every aggregate but those codegens don't consume
+  them, so rather than silently emitting unpopulated audit columns this
+  is now a **fail-fast error** (`loom.{node,python,elixir}-stamp-unsupported`,
+  gated by `validateStampSupport`).  Host the stamping context on a
+  java / dotnet deployable, hand-write the assignments inside operation
+  bodies, or drop `with auditable` / the `audit` macro for those backends.
 
 ## `implements <Cap>` / `with <Cap>`
 
