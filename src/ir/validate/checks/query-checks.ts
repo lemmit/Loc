@@ -125,6 +125,76 @@ export function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagno
 }
 
 // ---------------------------------------------------------------------------
+// Raw-seed column value gate (Bucket V / P4).  A `seed raw { … }` row is a
+// direct Postgres INSERT (sql-pg.ts `renderSeedRowInsert` / `seedSqlLiteral`):
+// each column value must be a scalar / enum / id literal — or `now()`.  Any
+// other resolved expression (a member access, an arithmetic, a function call,
+// a reference to another column) throws at generate time
+// ("raw seed: unsupported column value of kind …").  We reject those at
+// validation so the throw is unreachable from valid input.
+//
+// The allowed shapes mirror `seedSqlLiteral` exactly:
+//   - any `literal` (string / int / long / decimal / money / bool / null /
+//     now);
+//   - an `enum-value` ref (`Status.Draft` → its stored text).
+// Value-object / nested-record columns on a raw row are already rejected by
+// the AST seed validator (`loom.seed-raw-unsupported-column`); this catches
+// the remaining non-literal expressions that AST validator lets through.
+// ---------------------------------------------------------------------------
+
+/** True when a resolved seed column value is a Postgres literal the raw-seed
+ *  INSERT renderer accepts (scalar / enum / id literal or `now()`). */
+function isRawSeedLiteral(e: ExprIR): boolean {
+  if (e.kind === "literal") return true;
+  if (e.kind === "ref" && e.refKind === "enum-value") return true;
+  return false;
+}
+
+export function validateRawSeedColumns(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  for (const seed of ctx.seeds ?? []) {
+    if (seed.path !== "raw") continue;
+    for (const row of seed.rows) {
+      for (const f of row.fields) {
+        if (!isRawSeedLiteral(f.value)) {
+          diags.push({
+            severity: "error",
+            code: "loom.seed-raw-non-literal-column",
+            message:
+              `seed raw '${row.aggregate}.${f.name}': a raw-seed column must be a scalar / enum / id ` +
+              `literal (or 'now()'); the value '${describeSeedValue(f.value)}' is computed at ` +
+              `generate time, which the direct-INSERT seed path can't render. ` +
+              `Use a literal value, or the domain seed path ('seed { … }' without 'raw').`,
+            source: `${ctx.name}/seed ${seed.dataset}`,
+          });
+        }
+      }
+    }
+  }
+}
+
+/** A short label for a rejected (non-literal) raw-seed column value. */
+function describeSeedValue(e: ExprIR): string {
+  switch (e.kind) {
+    case "ref":
+      return `${e.name} (${e.refKind})`;
+    case "member":
+      return `member access '.${e.member}'`;
+    case "method-call":
+      return `call '.${e.member}(…)'`;
+    case "call":
+      return `call to '${e.name}'`;
+    case "binary":
+      return `'${e.op}' expression`;
+    case "new":
+      return `'new ${e.partName}'`;
+    case "object":
+      return "object literal";
+    default:
+      return e.kind;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Retrieval validation (retrieval.md).  A `retrieval`'s `where` is a
 // selection position — same queryable-subset contract as a `find …
 // where` (reuses the oracle above).  Its `sort` and `loads` slots carry

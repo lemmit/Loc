@@ -26,6 +26,7 @@ import type {
   EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
+  ExprIR,
   SavingShape,
   SubdomainIR,
   SystemIR,
@@ -34,6 +35,10 @@ import type {
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../types/loom-ir.js";
+import {
+  firstUnlowerableForAdapter,
+  isFindPredicateAdapter,
+} from "../../util/find-predicate-capability.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -1269,6 +1274,78 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
           if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
           else if (f.access && MANAGED_ACCESS.has(f.access))
             reject(`field '${agg.name}.${f.name}'`, `has server-managed access '${f.access}'`);
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-persistence-adapter find-predicate capability gate (Bucket V / P0).
+//
+// Every relational adapter lowers a `find` / `filter` / retrieval / view
+// predicate to SQL, but each lowers a DIFFERENT subset of the queryable
+// expression sublanguage.  A predicate that passes the general queryable
+// check (`firstNonQueryableNode`) can still fall outside the SELECTED
+// adapter's narrower subset, and the generator then throws at codegen
+// (MikroORM `whereToMikroFilter`, Dapper `whereToSql`) or emits a runtime-
+// broken TODO stub (Drizzle's null fallback).  This gate fails fast instead,
+// keyed off the deployable's explicit `persistence:` selector.
+//
+// EF Core / Drizzle lower the full queryable subset, so only an explicit
+// `persistence: dapper` / `persistence: mikroorm` narrows anything — the
+// gate is silent for the (full-subset) defaults, matching the Dapper /
+// MikroORM capability gates above.  The per-adapter narrowing lives in the
+// platform-neutral descriptor `src/ir/util/find-predicate-capability.ts`
+// (ir/validate may not import generator/, so the subset table lives here).
+// ---------------------------------------------------------------------------
+export function validateFindPredicateAdapterSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+
+  for (const dep of sys.deployables) {
+    const adapter = dep.persistence;
+    if (!adapter || !isFindPredicateAdapter(adapter)) continue;
+    const report = (subject: string, label: string): void => {
+      diags.push({
+        severity: "error",
+        message:
+          `Deployable '${dep.name}' selects 'persistence: ${adapter}', but ${subject} uses ` +
+          `a predicate the ${adapter} adapter cannot lower to SQL: ${label}. ` +
+          `The ${adapter} find-predicate subset is narrower than EF Core's — ` +
+          `use 'persistence: efcore'/'drizzle', or restructure the predicate.`,
+        source: `${sys.name}/${dep.name}`,
+        code: "loom.find-predicate-unsupported",
+      });
+    };
+    const check = (predicate: ExprIR | undefined, subject: string): void => {
+      if (!predicate) return;
+      const label = firstUnlowerableForAdapter(predicate, adapter);
+      if (label) report(subject, label);
+    };
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const repo of ctx.repositories) {
+        for (const find of repo.finds) {
+          check(find.filter, `repository '${repo.name}' find '${find.name}'`);
+        }
+      }
+      for (const r of ctx.retrievals) {
+        check(r.where, `retrieval '${r.name}'`);
+      }
+      for (const v of ctx.views) {
+        check(v.filter, `view '${v.name}'`);
+      }
+      // Capability `filter` predicates also lower into every SELECT.  The
+      // Dapper / MikroORM capability gates already handle principal-
+      // referencing ones (and MikroORM rejects ALL capability filters), so
+      // only the non-principal predicates can reach a relational SELECT here.
+      for (const agg of ctx.aggregates) {
+        const filters = (agg as EnrichedAggregateIR).contextFilters ?? [];
+        for (const predicate of filters) {
+          if (exprUsesCurrentUser(predicate)) continue;
+          check(predicate, `a 'filter' capability predicate on aggregate '${agg.name}'`);
         }
       }
     }
