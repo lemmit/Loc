@@ -191,6 +191,30 @@ Ordered by the dependency spine, not by size.
     planned on the reified `Specification<T>` model and the
     `ExprTarget`/`WalkerTarget` seams — the first backend consuming
     `CriterionIR` directly.
+11. **Frontend actions, state & async (the MVU family)** — coordinated
+    notes [`named-actions-and-stores.md`](./named-actions-and-stores.md) (A) +
+    [`async-actions-and-effects.md`](./async-actions-and-effects.md) (B) +
+    [`error-handling-and-failure-sink.md`](./error-handling-and-failure-sink.md)
+    (C), with the `store` container owned by
+    [`frontend-state-management.md`](./frontend-state-management.md) and the
+    payoff target [`fable-elmish-frontend.md`](./fable-elmish-frontend.md).
+    Names page/component handlers as typed `action`s (ends `event_N` gensym,
+    gives a test surface, makes the Elmish `Msg`/`update` a **projection, not
+    synthesis**). **5 stages, each independently shippable** (authoritative table
+    in A → "Rollout — the whole initiative"):
+    **(1)** named *sync* actions — **non-breaking** (no call-semantics change),
+    the foundation; **(2)** `await` + `match` — explicit async marker over the
+    existing `Result`/`match` (lint→required ramp); **(3)** retire the
+    `Action {}` `then:` arg via a macro over a named action; **(4)** async action
+    composition (`async` keyword, required+checked); **(5)** `store` (defers
+    container/lifetime to frontend-state-management). Deferred/additive within:
+    `onError` sugar, `attempt { }` railway (→ F# `asyncResult` CE), `spawn`.
+    **Dependencies:** none hard for Stage 1; **strengthens `loom-forms` (#5)** —
+    `onSubmit:`/`rowAction:` bind to *named* actions instead of anonymous lambdas
+    — so co-design or sequence Stage 1 with it; **C defers its backend half** to
+    exception-less/failure-taxonomy (the T3.4 error family) and adds only the
+    frontend error boundary + two-tier unification. A **Track-C frontend** item;
+    Stage 1 has no governance-spine dependency and can start anytime.
 
 ## Coordinated single-PR moments (surviving set)
 
@@ -228,7 +252,10 @@ Three loosely-coupled tracks (one agent each):
 - **Track B (elixir parity):** T2.a → T2.b → T2.c → T2.d → T2.e/T2.h.
 - **Track C (governance & product):** T2.i →
   execution-context → multi-tenancy → authorization; loom-forms +
-  frontend remainders interleave.
+  frontend remainders interleave. The **MVU family (T4 #11) Stage 1**
+  (named *sync* actions) is non-breaking and governance-independent — it can
+  interleave here anytime, ideally co-designed with loom-forms (`onSubmit:`→
+  named action).
 
 ## Verification
 
