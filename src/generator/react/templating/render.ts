@@ -1,8 +1,7 @@
 // ---------------------------------------------------------------------------
 // Render orchestrator for the template-pack rendering layer.
 //
-// Page emission routes through `body-walker.ts` driven by the
-// walker-primitive expander (`src/ir/lower/walker-primitive-expander.ts`);
+// Page emission routes through `body-walker.ts` (the shared markup walker);
 // the previous archetype-based renderers were removed.  This module
 // owns the project-shell and theme/app-shell renderers that sit
 // alongside the body walker:

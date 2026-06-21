@@ -57,7 +57,7 @@ export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string
 }
 
 /** The view's rendered column order — must match the table built by
- *  `expandScaffoldViewList` (rows() indexes `<td>`s by position): the view's
+ *  `scaffoldViewList` (rows() indexes `<td>`s by position): the view's
  *  projected fields, dropping value-object and array fields (which the table
  *  doesn't render as plain cells).  No synthetic `id` column. */
 function collectColumnNames(view: ViewIR, ctx: BoundedContextIR): string[] {

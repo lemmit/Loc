@@ -7,12 +7,11 @@
 //     `requires` guard), handle_event/3 (per onSubmit/Action lambda),
 //     and render(assigns) — HEEx body emitted by the heex-walker.
 //
-// All pages (scaffold and custom) route through the HEEx walker.
-// Scaffold pages emit canonical body primitives that
-// `expandInlineScaffoldPrimitives` (src/ir/lower/walker-primitive-expander.ts) rewrites
-// during lowering, so `page.body` is always
-// a walker-stdlib `ExprIR` tree.  The walker (heex-walker.ts::walkBodyToHeex)
-// emits HEEx directly — no pack templates for full pages.
+// All pages (scaffold and custom) route through the HEEx walker.  Scaffold
+// pages carry their full walker-stdlib body directly from the macro, so
+// `page.body` is always a walker-stdlib `ExprIR` tree.  The walker
+// (heex-walker.ts::walkBodyToHeex) emits HEEx directly — no pack templates for
+// full pages.
 //
 // Also returns a list of `live "<route>", <Module>` entries the
 // orchestrator splices into router.ex.
@@ -109,7 +108,6 @@ export function emitLiveViewPages(args: {
       state: c.state,
       derived: c.derived,
       body: c.body,
-      source: "explicit",
     } as PageIR;
     const w = walkBodyToHeex(
       c.body,
@@ -297,10 +295,8 @@ function renderLiveView(a: RenderArgs): string {
   const webModule = `${appModule}Web`;
 
   // All pages — scaffold and custom — route through the HEEx walker.
-  // Scaffold pages emit canonical body primitives that
-  // expandInlineScaffoldPrimitives (src/ir/lower/walker-primitive-expander.ts) rewrites
-  // during lowering, so page.body is always
-  // populated with a walker-stdlib ExprIR tree.  The walker produces
+  // Scaffold pages carry their full walker-stdlib body from the macro, so
+  // page.body is always a walker-stdlib ExprIR tree.  The walker produces
   // handle_event clauses and alias lines from helper imports the body
   // actually references.
   const walked = walkBodyToHeex(
@@ -669,7 +665,6 @@ function renderUiComponents(args: {
       state: c.state,
       derived: c.derived,
       body: c.body,
-      source: "explicit",
     } as PageIR;
     const walked = walkBodyToHeex(
       c.body,
