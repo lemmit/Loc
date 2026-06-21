@@ -35,6 +35,7 @@ import {
   isValueObject,
   isWorkflow,
 } from "../../language/generated/ast.js";
+import { PRINCIPAL_TYPE_NAME } from "../../util/principal.js";
 import { canonicalUnion, OPTION_NONE } from "../stdlib/unions.js";
 import type {
   DataSourceKind,
@@ -264,6 +265,18 @@ function lowerBase(t: TypeRef | TypeAtom, env?: Env): TypeIR {
   }
   if (isIdType(base)) {
     const target = base.target?.ref;
+    // `User id` — the authentication PRINCIPAL's id, not a domain aggregate.
+    // The `auditable` capability's `createdBy/updatedBy: User id` (and any
+    // hand-written `User id`) names the principal, which has no `aggregate User`
+    // declaration and thus no `UserId` strong-id class.  Lower it to the
+    // principal's declared id scalar (`user { id: <type> }`) as a plain
+    // primitive so the field, the `currentUser` stamp, and the wire all agree —
+    // otherwise a phantom `UserId` wrapper dangles on every backend.  Only the
+    // unresolved ref reaches here; a real aggregate named `User` resolves above.
+    if (!target && env?.user && base.target?.$refText === PRINCIPAL_TYPE_NAME) {
+      const principalId = env.user.fields.find((f) => f.name === "id")?.type;
+      if (principalId) return principalId;
+    }
     let valueType: IdValueType = "guid";
     if (target && isAggregate(target)) {
       valueType = (target.idKind ?? "guid") as IdValueType;
