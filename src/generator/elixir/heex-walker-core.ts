@@ -216,6 +216,12 @@ export interface WalkContext {
   tabSeq: { value: number };
   /** Current rendering position — see RenderPosition. */
   position: RenderPosition;
+  /** Module-qualified bounded-context name keyed by entity-part name
+   *  (PascalCase) — e.g. `Line` → `PhoenixApp.Sales`.  Lets a page-body
+   *  `new Part { … }` struct literal qualify like the domain emitter does
+   *  (`%PhoenixApp.Sales.Line{…}`).  Empty when the orchestrator hasn't
+   *  threaded it; the `new` arm then falls back to `appModule`. */
+  partContextModule: ReadonlyMap<string, string>;
   /** Optional variable remappings — maps a source ref name to the LiveView
    *  assign name it should resolve to.  Used by QueryView to map lambda
    *  parameter names (e.g. "rows") to their assign names (e.g. "items"). */
@@ -260,6 +266,10 @@ export function walkBodyToHeex(
    *  action-button gating against `@current_user`.  Defaults to false
    *  (no auth ⇒ no gating ⇒ byte-identical output). */
   authEnabled = false,
+  /** Entity-part name → module-qualified context, so a page-body
+   *  `new Part { … }` qualifies like the domain emitter.  Empty default
+   *  ⇒ the `new` arm falls back to `appModule`. */
+  partContextModule: ReadonlyMap<string, string> = new Map(),
 ): WalkResult {
   const stateNames = new Set<string>(page.state.map((f) => snake(f.name)));
   const stateFields = new Map<string, StateFieldIR>(page.state.map((f) => [snake(f.name), f]));
@@ -293,6 +303,7 @@ export function walkBodyToHeex(
     position: "template",
     instanceTypes,
     authEnabled,
+    partContextModule,
   };
 
   const heex = body ? renderExpr(body, ctx) : `<!-- empty body -->`;
@@ -340,9 +351,7 @@ export function renderExpr(expr: ExprIR, ctx: WalkContext): string {
     case "object":
       return renderObjectLiteral(expr, ctx);
     case "new":
-      // `new Part { … }` only appears in operation bodies; pages
-      // shouldn't reach here.  Emit a comment marker.
-      return `<%-- TODO: new ${expr.partName} unsupported in page body --%>`;
+      return renderNew(expr, ctx);
     case "paren":
       return `(${renderExpr(expr.inner, ctx)})`;
     case "unary":
@@ -693,6 +702,19 @@ function renderMatch(expr: Extract<ExprIR, { kind: "match" }>, ctx: WalkContext)
 function renderObjectLiteral(expr: Extract<ExprIR, { kind: "object" }>, ctx: WalkContext): string {
   const fields = expr.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`).join(", ");
   return `%{${fields}}`;
+}
+
+/** `new Part { … }` in a page body → an Elixir struct literal, mirroring
+ *  the domain emitter (`render-expr.ts::renderNew`): a part is a struct on
+ *  both foundations (an embedded Ash resource / an Ecto `embedded_schema`),
+ *  addressed as `%<Ctx>.<Part>{field: value, …}`.  The context module is
+ *  resolved from the part's owning aggregate via `ctx.partContextModule`;
+ *  when the orchestrator hasn't threaded that map (or the part is unknown)
+ *  it falls back to `ctx.appModule` so the output is still valid Elixir. */
+function renderNew(expr: Extract<ExprIR, { kind: "new" }>, ctx: WalkContext): string {
+  const fields = expr.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`).join(", ");
+  const ctxModule = ctx.partContextModule.get(expr.partName) ?? ctx.appModule;
+  return `%${ctxModule}.${upperFirst(expr.partName)}{${fields}}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1076,8 +1098,69 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
       }
       return `|> tap(fn _ -> ${e} end)`;
     }
-    default:
-      return `# TODO ${stmt.kind}`;
+    case "add":
+    case "remove": {
+      // `count += 1` / `count -= 1` lower to `add` / `remove` (the same
+      // IR kinds collection mutations use).  In a LiveView page handler
+      // the only meaningful target is a page-`state` field: emit a
+      // pipe-assign whose value reads the field's current handler-scope
+      // value (`socket.assigns.<f>`) and either does compound arithmetic
+      // (scalar) or list append/remove (collection).  Mirrors the React
+      // walker's `emitStmt` add/remove arm, re-shaped to the socket pipe.
+      const fieldName = stmt.target.segments[0];
+      if (!fieldName) return `# bad ${stmt.kind}`;
+      const stateRef = {
+        field: { name: fieldName, type: { kind: "primitive" as const, name: "string" as const } },
+        name: fieldName,
+      };
+      const rhs = renderExpr(stmt.value, { ...ctx, position: "handler" });
+      // Nested target (`order.total += v`) reads the dotted handler path;
+      // a single-segment field reads via the state seam.
+      const read =
+        stmt.target.segments.length === 1
+          ? heexTarget.renderStateRead(stateRef, "handler")
+          : `socket.assigns.${stmt.target.segments.map((s) => snake(s)).join(".")}`;
+      const value = stmt.collection
+        ? stmt.kind === "add"
+          ? `${read} ++ [${rhs}]`
+          : `Enum.reject(${read}, &(&1 == ${rhs}))`
+        : `${read} ${stmt.kind === "add" ? "+" : "-"} ${rhs}`;
+      return heexTarget.renderStateWrite(stateRef, value);
+    }
+    case "precondition":
+    case "requires": {
+      // Guard statement in a handler body → keep the socket when the
+      // predicate holds, otherwise flash and halt the rest of the chain.
+      // `requires` is an authorization gate (forbidden); `precondition`
+      // is a domain check.  Both surface as a server-side flash since a
+      // page handler can't raise the way a domain action does.
+      const pred = renderExpr(stmt.expr, { ...ctx, position: "handler" });
+      const msg = stmt.kind === "requires" ? "Forbidden" : "Precondition failed";
+      return `|> then(fn socket -> if ${pred}, do: socket, else: put_flash(socket, :error, ${JSON.stringify(`${msg}: ${stmt.source}`)}) end)`;
+    }
+    case "emit": {
+      // Broadcast a domain event over Phoenix.PubSub.  No changeset in a
+      // page handler, so the struct is built inline and piped via `tap`
+      // (the socket flows through unchanged).  Module prefix uses the
+      // app module — page handlers don't carry a per-context module.
+      const fields = stmt.fields
+        .map((f) => `${snake(f.name)}: ${renderExpr(f.value, { ...ctx, position: "handler" })}`)
+        .join(", ");
+      const moduleName = upperFirst(stmt.eventName);
+      return `|> tap(fn _ -> Phoenix.PubSub.broadcast(${ctx.appModule}.PubSub, "events", %${ctx.appModule}.Events.${moduleName}{${fields}}) end)`;
+    }
+    case "call": {
+      // Bare function / private-operation call statement.  Evaluated for
+      // its effect; the socket flows through unchanged via `tap`.
+      const args = stmt.args.map((a) => renderExpr(a, { ...ctx, position: "handler" })).join(", ");
+      return `|> tap(fn _ -> ${snake(stmt.name)}(${args}) end)`;
+    }
+    case "return": {
+      // Elixir has no `return`; a page handler has no value sink, so the
+      // expression is evaluated for effect and the socket flows through.
+      const e = renderExpr(stmt.value, { ...ctx, position: "handler" });
+      return `|> tap(fn _ -> ${e} end)`;
+    }
   }
 }
 
@@ -1131,6 +1214,7 @@ function renderRequiresGuardAt(
     slotUsed: { value: false },
     tabSeq: { value: 0 },
     position,
+    partContextModule: new Map(),
   };
   return renderExpr(page.requires, ctx);
 }
