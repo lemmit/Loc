@@ -47,6 +47,7 @@ These cover a single language feature each.  Each one is self-contained.
 | Doc | When to read |
 | --- | --- |
 | [`technical.md`](technical.md) | The canonical pipeline reference — the ten phases from `.ddd` to disk.  Read this before extending the language or adding a backend. |
+| [`testing.md`](testing.md) | The test-tier placement guide — given a change, which tier proves it and where a new test belongs (fast vitest vs behavioral api/unit/ui vs per-backend build vs conformance vs playground e2e). |
 | [`macro-api.md`](macro-api.md) | You're authoring a macro (stdlib or project-local).  Covers `defineMacro`, parameter types, the factory surface, composability rules. |
 | [`loom-artifacts.md`](loom-artifacts.md) | The `.loom/` output directory — wire-spec, mermaid + C4 diagrams, traceability files, verification, snapshots.  What each artefact is and which CLI command produces it. |
 
