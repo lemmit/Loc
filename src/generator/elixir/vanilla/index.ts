@@ -26,6 +26,7 @@ import { emitMigrations } from "../migrations-emit.js";
 import { renderRelEnv, renderRelease, renderRelServer } from "../shell/config.js";
 import { renderDockerfile, renderDockerignore } from "../shell/project.js";
 import { toModulePrefix, toSnakeApp } from "../shell-emit.js";
+import { emitAggregateTests, emitTestHelper } from "../tests-emit.js";
 import { emitVanillaApiControllers } from "./api-emit.js";
 import { emitVanillaChangesets } from "./changeset-emit.js";
 import { emitVanillaContextModule } from "./context-emit.js";
@@ -79,6 +80,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // (`current_user.<idKey>`), defaulting to `id` when no `user {}` block — same
   // derivation the Ash path threads into `renderStampChanges`.
   const principalIdKey = actorIdKey(sys.user);
+  let hasDomainTests = false;
   for (const ctx of contexts) {
     emitVanillaSchemas(appModule, ctx, out, sys);
     emitVanillaChangesets(appModule, ctx, out, sys);
@@ -130,7 +132,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // their handlers to fold-on-load + append-own-events.
     emitVanillaEsWorkflowFiles(appName, appModule, ctx, out);
     emitDispatch(appName, ctx, appModule, out, sys, "vanilla");
+    // Domain `test "..."` blocks → ExUnit (pure-subset; see tests-emit.ts).
+    if (emitAggregateTests(ctx, appModule, "vanilla", out)) hasDomainTests = true;
   }
+  if (hasDomainTests) emitTestHelper(out);
   apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
 
   // Provenance runtime — the `<App>.Provenance` SDK (trace buffer + history

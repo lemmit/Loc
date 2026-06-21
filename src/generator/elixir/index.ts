@@ -21,6 +21,7 @@ import { emitMigrations } from "./migrations-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
 import { emitShellFiles, renderSpaController, toModulePrefix, toSnakeApp } from "./shell-emit.js";
 import { renderSidebarComponent } from "./sidebar-emit.js";
+import { emitAggregateTests, emitTestHelper } from "./tests-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
 import { renderTypesModule } from "./types-module-emit.js";
 import { generateVanillaElixirProject } from "./vanilla/index.js";
@@ -139,9 +140,13 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   // principal id read from the threaded actor (`context.actor.<key>`); the key
   // is the system `user { id: … }` field name (`actorIdKey`, default `id`).
   const principalIdKey = actorIdKey(sys.user);
+  let hasDomainTests = false;
   for (const ctx of contexts) {
     emitContext(appName, ctx, appModule, out, { resolveDataSource, principalIdKey });
+    // Domain `test "..."` blocks → ExUnit (pure-subset; see tests-emit.ts).
+    if (emitAggregateTests(ctx, appModule, "ash", out)) hasDomainTests = true;
   }
+  if (hasDomainTests) emitTestHelper(out);
 
   // --- Workflow + view files -----------------------------------------------
   for (const ctx of contexts) {
