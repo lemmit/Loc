@@ -8,7 +8,7 @@ import {
   controlInit,
   fieldInput,
   formButton,
-  isMaterialPack,
+  formStyle,
 } from "./form-fields.js";
 
 // ---------------------------------------------------------------------------
@@ -105,21 +105,30 @@ export function renderAngularModal(
       : humanize(op.name);
   const emphasis =
     trigger?.kind === "call" ? (stringNamed(trigger, "emphasis") ?? "primary") : "primary";
-  const material = isMaterialPack(ctx);
-  const triggerBtn = material
-    ? emphasis === "primary"
-      ? "mat-raised-button"
-      : "mat-stroked-button"
-    : emphasis === "primary"
-      ? 'class="loom-button loom-button-primary"'
-      : 'class="loom-button loom-button-secondary"';
-  const cancelBtn = material
-    ? 'mat-button type="button"'
-    : 'class="loom-button loom-button-ghost" type="button"';
+  const style = formStyle(ctx);
+  const triggerBtn =
+    style === "material"
+      ? emphasis === "primary"
+        ? "mat-raised-button"
+        : "mat-stroked-button"
+      : style === "primeng"
+        ? emphasis === "primary"
+          ? 'pButton type="button"'
+          : 'pButton type="button" [outlined]="true"'
+        : emphasis === "primary"
+          ? 'class="loom-button loom-button-primary"'
+          : 'class="loom-button loom-button-secondary"';
+  const cancelBtn =
+    style === "material"
+      ? 'mat-button type="button"'
+      : style === "primeng"
+        ? 'pButton type="button" [text]="true"'
+        : 'class="loom-button loom-button-ghost" type="button"';
 
   const bc = ctx.bcByAggregate?.get(aggName);
   addNg(ctx, "@angular/forms", "FormControl", "FormGroup", "ReactiveFormsModule");
-  if (material) addNg(ctx, "@angular/material/button", "MatButtonModule");
+  if (style === "material") addNg(ctx, "@angular/material/button", "MatButtonModule");
+  else if (style === "primeng") addNg(ctx, "primeng/button", "ButtonModule");
   addNg(ctx, importFrom, mutationFn);
 
   const fields = bc ? op.params : [];

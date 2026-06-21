@@ -17,16 +17,30 @@ export interface AngularFormControlSpec {
   init: string;
 }
 
-/** True when the active pack renders the inline Reactive Forms with Angular
- *  Material components (`mat-form-field` / `matInput` / `mat-raised-button`).
- *  `angularMaterial` and `primeng` both ship `@angular/material` as a dep and
- *  keep the Material form markup; `spartanNg` ships NO Material dep, so its
- *  forms render with plain styled elements + the pack's `.loom-*` classes —
- *  the form seams must NOT register `Mat*Module` there (those symbols don't
- *  resolve and the standalone-component `imports: []` array fails `ng build`). */
-export function isMaterialPack(ctx: WalkContext): boolean {
+/** The inline Reactive-Form rendering flavour the active Angular pack uses.
+ *  - `material` (`angularMaterial`) — `mat-form-field` / `matInput` / `Mat*Module`.
+ *  - `primeng` — idiomatic PrimeNG inputs (`pInputText` / `p-inputnumber` /
+ *    `p-select` / `p-checkbox` / `p-password` / `pButton`) + `primeng/*` modules.
+ *  - `plain` (`spartanNg`) — plain styled elements + the pack's `.loom-*`
+ *    classes; no component-library modules to register.
+ *  The `material` branch must stay byte-identical (it's frozen by the
+ *  generator tests); PrimeNG and `spartanNg` never register `Mat*Module`
+ *  (those symbols don't resolve and the standalone `imports: []` would fail
+ *  `ng build`). */
+export type AngularFormStyle = "material" | "primeng" | "plain";
+
+export function formStyle(ctx: WalkContext): AngularFormStyle {
   const name = ctx.pack.manifest.name;
-  return name === "angularMaterial" || name === "primeng";
+  if (name === "primeng") return "primeng";
+  if (name === "angularMaterial") return "material";
+  return "plain";
+}
+
+/** True only for the Angular Material pack — the seams that fork Material-vs.
+ *  other markup branch on this; PrimeNG and `spartanNg` both answer `false`
+ *  and branch on {@link formStyle} for their own markup. */
+export function isMaterialPack(ctx: WalkContext): boolean {
+  return formStyle(ctx) === "material";
 }
 
 /** Render one form submit/cancel/action button, Material- or plain-styled per
@@ -42,7 +56,8 @@ export function formButton(
   },
 ): string {
   const { type, emphasis, label, attrs = "" } = opts;
-  if (isMaterialPack(ctx)) {
+  const style = formStyle(ctx);
+  if (style === "material") {
     addNg(ctx, "@angular/material/button", "MatButtonModule");
     const matAttr =
       emphasis === "secondary"
@@ -53,6 +68,16 @@ export function formButton(
             ? "mat-button"
             : "mat-raised-button";
     return `<button ${matAttr} type="${type}"${attrs}>${label}</button>`;
+  }
+  if (style === "primeng") {
+    addNg(ctx, "primeng/button", "ButtonModule");
+    const pAttr =
+      emphasis === "secondary"
+        ? ' [outlined]="true"'
+        : emphasis === "warn"
+          ? ' severity="danger"'
+          : "";
+    return `<button pButton type="${type}"${pAttr}${attrs}>${label}</button>`;
   }
   const cls =
     emphasis === "secondary"
@@ -98,10 +123,10 @@ export function fieldInput(
   const label = humanize(name);
   const testid = ` data-testid="${ns}-input-${name}"`;
   const cn = JSON.stringify(name);
-  const material = isMaterialPack(ctx);
+  const style = formStyle(ctx);
   if (t.kind === "enum") {
     const en = bc.enums.find((e) => e.name === t.name);
-    if (material) {
+    if (style === "material") {
       addNg(ctx, "@angular/material/form-field", "MatFormFieldModule");
       addNg(ctx, "@angular/material/select", "MatSelectModule");
       const opts = (en?.values ?? [])
@@ -109,27 +134,49 @@ export function fieldInput(
         .join("");
       return `<mat-form-field class="loom-field"><mat-label>${label}</mat-label><mat-select formControlName=${cn}${testid}>${opts}</mat-select></mat-form-field>`;
     }
+    if (style === "primeng") {
+      addNg(ctx, "primeng/select", "SelectModule");
+      const opts = JSON.stringify((en?.values ?? []).map((v) => ({ label: v, value: v })));
+      return `<label class="loom-field"><span class="loom-label">${label}</span><p-select [options]='${opts}' optionLabel="label" optionValue="value" styleClass="loom-input" formControlName=${cn}${testid}></p-select></label>`;
+    }
     const opts = (en?.values ?? [])
       .map((v) => `<option value=${JSON.stringify(v)}>${v}</option>`)
       .join("");
     return `<label class="loom-field"><span class="loom-label">${label}</span><select class="loom-input" formControlName=${cn}${testid}>${opts}</select></label>`;
   }
   if (t.kind === "primitive" && t.name === "bool") {
-    if (material) {
+    if (style === "material") {
       addNg(ctx, "@angular/material/checkbox", "MatCheckboxModule");
       return `<mat-checkbox formControlName=${cn}${testid}>${label}</mat-checkbox>`;
     }
+    if (style === "primeng") {
+      addNg(ctx, "primeng/checkbox", "CheckboxModule");
+      return `<label class="loom-toggle"><p-checkbox [binary]="true" formControlName=${cn}${testid}></p-checkbox><span>${label}</span></label>`;
+    }
     return `<label class="loom-toggle"><input type="checkbox" formControlName=${cn}${testid} />${label}</label>`;
+  }
+  const isNumeric =
+    t.kind === "primitive" &&
+    (t.name === "int" || t.name === "long" || t.name === "decimal" || t.name === "money");
+  if (style === "primeng") {
+    if (isNumeric) {
+      addNg(ctx, "primeng/inputnumber", "InputNumberModule");
+      return `<label class="loom-field"><span class="loom-label">${label}</span><p-inputnumber styleClass="loom-input" formControlName=${cn}${testid}></p-inputnumber></label>`;
+    }
+    addNg(ctx, "primeng/inputtext", "InputTextModule");
+    const inputType =
+      t.kind === "primitive" && t.name === "datetime" ? ' type="datetime-local"' : "";
+    return `<label class="loom-field"><span class="loom-label">${label}</span><input pInputText class="loom-input"${inputType} formControlName=${cn}${testid} /></label>`;
   }
   let inputType = "";
   if (t.kind === "primitive") {
-    if (t.name === "int" || t.name === "long" || t.name === "decimal" || t.name === "money") {
+    if (isNumeric) {
       inputType = ' type="number"';
     } else if (t.name === "datetime") {
       inputType = ' type="datetime-local"';
     }
   }
-  if (material) {
+  if (style === "material") {
     addNg(ctx, "@angular/material/form-field", "MatFormFieldModule");
     addNg(ctx, "@angular/material/input", "MatInputModule");
     return `<mat-form-field class="loom-field"><mat-label>${label}</mat-label><input matInput${inputType} formControlName=${cn}${testid}></mat-form-field>`;
