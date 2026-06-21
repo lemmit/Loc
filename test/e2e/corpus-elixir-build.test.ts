@@ -60,6 +60,31 @@ const ELIXIR_COMPILE_SKIP: Record<string, string> = {
   // in a saga body is documented ("own-state mutation", workflow.md) but not yet
   // lowered on any backend — the same cross-backend gap every other tier tracks.
   "workflow-view": "FEATURE GAP: workflow own-state mutation (`field := …`) not yet lowered",
+  // PLATFORM LIMITATION (Ash foundation, generate-time error): `shape(document)`.
+  // Ash emits only relational/embedded shapes; the generator points to
+  // foundation: vanilla (or a node/dotnet deployable) for whole-aggregate jsonb.
+  document:
+    "PLATFORM LIMITATION: Ash foundation emits no shape(document) (use foundation: vanilla)",
+  // PLATFORM LIMITATION (Ash foundation, generate-time error): `persistedAs(eventLog)`.
+  // Ash has no pure-ES data-layer fit (AshEvents is hybrid); the generator points
+  // to foundation: vanilla / node / dotnet.  See proposals/vanilla-phoenix-foundation.md.
+  "event-sourcing":
+    "PLATFORM LIMITATION: Ash foundation has no pure-ES data layer (use foundation: vanilla)",
+  // PLATFORM LIMITATION (Ash foundation, generate-time error): an `eventSourced`
+  // workflow needs a per-correlation event stream — implemented on node/dotnet/
+  // java/python/elixir-vanilla, not the Ash foundation.
+  "eventsourced-workflow":
+    "PLATFORM LIMITATION: event-sourced workflow not on Ash foundation (use foundation: vanilla)",
+  // PLATFORM LIMITATION (Ash foundation, generate-time error): the `provenanced`
+  // field runtime (trace capture + history) is emitted for node/dotnet/java/
+  // python/elixir-vanilla, not the Ash foundation.
+  provenance:
+    "PLATFORM LIMITATION: provenance runtime not on Ash foundation (use foundation: vanilla)",
+  // EMITTER GAP: a workflow `let prev = <resource>.get(...)` whose bind is never
+  // read emits an unused `prev =` in the `with`-chain (compile warning →
+  // --warnings-as-errors).  Same class the Python tier already fixed (drop the
+  // dead bind, keep the side-effecting RHS as a bare `with` clause); pending on Ash.
+  resources: "EMITTER GAP: unused workflow `let` bind (`prev =`) trips --warnings-as-errors on Ash",
 };
 
 // Every corpus feature the manifest declares to generate on `phoenix`, minus the
