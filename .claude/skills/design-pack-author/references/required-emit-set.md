@@ -163,7 +163,7 @@ body walker dispatches on your format has a real template. Cross-check
    surface — if a new primitive landed in the registry but not yet in the
    required set, it can still crash your pack.
 
-The mirror gate `test/language/walker-stdlib-completeness.test.ts` pins
+The mirror gate `test/language/type-system/walker-stdlib-completeness.test.ts` pins
 `src/language/walker-stdlib.ts` to the registry — that's the *language-side*
 admissibility, not the pack-side template. Your job is the pack-side: a template
 for every dispatched primitive.
