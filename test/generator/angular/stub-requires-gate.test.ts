@@ -46,7 +46,7 @@ describe("angular parameterised-find requires gate", () => {
     // It is a REAL body now (the parameterised find is wired), not the stub.
     expect(page).not.toContain("stub — body needs api/forms support");
     expect(page).toContain('import { useOpenTicket } from "../../api/ticket";');
-    expect(page).toContain('readonly ticketOpen = useOpenTicket({ status: "open" });');
+    expect(page).toContain('readonly ticketOpen = useOpenTicket(() => ({ status: "open" }));');
     // …gated by the currentUser-only `requires` predicate.
     expect(page).toContain('import { SessionService } from "../auth/session.service";');
     expect(page).toContain("readonly session = inject(SessionService);");
@@ -57,7 +57,7 @@ describe("angular parameterised-find requires gate", () => {
   it("renders the ungated body (no session, no Forbidden) without auth: ui", async () => {
     const page = await gatedPage(false);
     expect(page).not.toContain("stub — body needs api/forms support");
-    expect(page).toContain('readonly ticketOpen = useOpenTicket({ status: "open" });');
+    expect(page).toContain('readonly ticketOpen = useOpenTicket(() => ({ status: "open" }));');
     // No client-side gate without an `auth: ui` frontend.
     expect(page).not.toContain("SessionService");
     expect(page).not.toContain("Forbidden");

@@ -1059,21 +1059,28 @@ async function findFiles(): Promise<Map<string, string>> {
 }
 
 describe("angular generator — parameterised find + view reads", () => {
-  it("un-stubs the find page and hoists the query-object find factory", async () => {
+  it("un-stubs the find page and hoists the find factory with a REACTIVE getter", async () => {
     const page = (await findFiles()).get("src/app/pages/by-status.component.ts")!;
     expect(page).not.toContain("body needs api/forms support");
     expect(page).toContain('import { useByStatusOrder } from "../../api/order";');
-    // The shared walker renders find args as a `{ <param>: <value> }` object;
-    // the state signal read resolves against `this` in the hoist initializer.
-    expect(page).toContain("readonly orderByStatus = useByStatusOrder({ status: this.status() });");
+    // The shared walker renders find args as a `{ <param>: <value> }` object; the
+    // state signal read resolves against `this`.  The whole object is wrapped in
+    // a getter (`() => (...)`) so the `injectQuery` options re-read it and the
+    // query LIVE-REFETCHES when the bound `status` signal changes — a bare
+    // `{ status: this.status() }` snapshot would freeze the query at construction.
+    expect(page).toContain(
+      "readonly orderByStatus = useByStatusOrder(() => ({ status: this.status() }));",
+    );
   });
 
-  it("emits the find query interface + service method + injectQuery factory", async () => {
+  it("emits the find query interface + service method + reactive-getter factory", async () => {
     const api = (await findFiles()).get("src/api/order.ts")!;
     expect(api).toContain("export interface ByStatusOrderQuery {");
     expect(api).toContain("byStatus(query: ByStatusOrderQuery) {");
-    expect(api).toContain("export function useByStatusOrder(query: ByStatusOrderQuery) {");
-    expect(api).toContain(`queryKey: ["orders", "find", "by_status", query] as const,`);
+    // The factory takes a getter and re-reads it inside the reactive options.
+    expect(api).toContain("export function useByStatusOrder(query: () => ByStatusOrderQuery) {");
+    expect(api).toContain(`queryKey: ["orders", "find", "by_status", query()] as const,`);
+    expect(api).toContain("queryFn: () => firstValueFrom(service.byStatus(query())),");
   });
 
   it("un-stubs the view page and emits the Angular-native views module", async () => {
@@ -1152,5 +1159,174 @@ describe("angular generator — WorkflowForm typed Reactive Form", () => {
     // A non-observable workflow has no instance reads, so only injectMutation
     // is imported (an unused injectQuery would be an ng build error).
     expect(wf).toContain('import { injectMutation } from "@tanstack/angular-query-experimental";');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Standalone OperationForm(...) — the operation-command form NOT hosted in a
+// Modal, forked to an always-visible typed Reactive Form.  Two source shapes:
+// the flat `OperationForm(of:, op:)` (targets the route id) and the instance
+// `OperationForm(<inst>.<op>)` inside a Detail data lambda (the spoken `Form`
+// shape).  Submit calls `use<Op><Agg>()` with the id + the op-param form.
+// (ng build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const OPFORM_SOURCE = (body: string) => `
+  system Smoke {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish {
+          customerId: string
+          operation addNote(reason: string) { }
+        }
+        repository Orders for Order { }
+      }
+    }
+    ui WebApp {
+      api Sales: SalesApi
+      page OrderEdit {
+        route: "/orders/:id/edit"
+        body: ${body}
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api {
+      platform: node
+      contexts: [Orders]
+      dataSources: [ordersState]
+      serves: SalesApi
+      port: 8080
+    }
+    deployable web {
+      platform: angular
+      targets: api
+      ui: WebApp { Sales: api }
+      port: 3004
+    }
+  }
+`;
+
+describe("angular generator — standalone OperationForm (flat of:/op:)", () => {
+  it("renders an always-visible [formGroup]/(ngSubmit) form over the op params", async () => {
+    const all = await generateSystemFiles(
+      OPFORM_SOURCE(`OperationForm { of: Order, op: addNote, testid: "orders-op-addNote" }`),
+    );
+    const page = all.get("web/src/app/pages/order-edit.component.ts")!;
+    expect(page).not.toContain("not yet supported on Angular");
+    expect(page).not.toContain("body needs api/forms support");
+    expect(page).toContain(
+      '<form [formGroup]="addNoteOrderForm" (ngSubmit)="submitAddNoteOrder()" data-testid="orders-op-addNote">',
+    );
+    expect(page).toContain('formControlName="reason"');
+  });
+
+  it("wires the op mutation, FormGroup + an id-from-route submit method", async () => {
+    const all = await generateSystemFiles(
+      OPFORM_SOURCE(`OperationForm { of: Order, op: addNote }`),
+    );
+    const page = all.get("web/src/app/pages/order-edit.component.ts")!;
+    // The route id binds from the ActivatedRoute snapshot; the mutate targets it.
+    expect(page).toContain('readonly id = this.route.snapshot.paramMap.get("id") ?? "";');
+    expect(page).toContain("readonly addNoteOrder = useAddNoteOrder();");
+    expect(page).toContain(
+      'readonly addNoteOrderForm = new FormGroup({ reason: new FormControl("", { nonNullable: true }) });',
+    );
+    expect(page).toContain("async submitAddNoteOrder(): Promise<void> {");
+    expect(page).toContain(
+      "await this.addNoteOrder.mutateAsync({ id: this.id, input: this.addNoteOrderForm.getRawValue() });",
+    );
+    expect(page).toContain('import { useAddNoteOrder } from "../../api/order";');
+    // Single import (not duplicated by the side-channel + addNg).
+    expect(page.match(/import \{ useAddNoteOrder \}/g)?.length).toBe(1);
+  });
+
+  it("renders the instance shape (Form-style <inst>.<op>) inside a Detail lambda", async () => {
+    const all = await generateSystemFiles(
+      OPFORM_SOURCE(
+        `QueryView { of: Sales.Order.byId(id), single: true, data: o => Stack { OperationForm { o.addNote } } }`,
+      ),
+    );
+    const page = all.get("web/src/app/pages/order-edit.component.ts")!;
+    expect(page).not.toContain("not yet supported on Angular");
+    expect(page).toContain(
+      '<form [formGroup]="addNoteOrderForm" (ngSubmit)="submitAddNoteOrder()"',
+    );
+    // The lambda binding isn't class-field-scoped, so the mutate targets route id.
+    expect(page).toContain(
+      "await this.addNoteOrder.mutateAsync({ id: this.id, input: this.addNoteOrderForm.getRawValue() });",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DestroyForm(of: <Agg>) — the canonical-destroy confirmation form, forked to a
+// confirm-delete button wired to `useDelete<Agg>`.  The button's (click) calls a
+// dumb-template method: window.confirm → mutateAsync(id) → navigate the list
+// route (default `then:`).  The api module gains a `delete` service method + an
+// `injectMutation` factory, gated on the aggregate's canonical destroy.
+// (ng build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const DESTROY_SOURCE = `
+  system Smoke {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish { customerId: string }
+        repository Orders for Order { }
+      }
+    }
+    ui WebApp {
+      api Sales: SalesApi
+      page OrderDelete {
+        route: "/orders/:id/delete"
+        body: DestroyForm { of: Order }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api {
+      platform: node
+      contexts: [Orders]
+      dataSources: [ordersState]
+      serves: SalesApi
+      port: 8080
+    }
+    deployable web {
+      platform: angular
+      targets: api
+      ui: WebApp { Sales: api }
+      port: 3004
+    }
+  }
+`;
+
+describe("angular generator — DestroyForm confirm-delete", () => {
+  it("renders a confirm-delete button + a dumb-template method (no stub)", async () => {
+    const all = await generateSystemFiles(DESTROY_SOURCE);
+    const page = all.get("web/src/app/pages/order-delete.component.ts")!;
+    expect(page).not.toContain("body needs api/forms support");
+    expect(page).toContain(
+      '<button mat-raised-button color="warn" (click)="onDeleteOrder()" [disabled]="deleteOrder.isPending()" data-testid="orders-destroy">Delete Order</button>',
+    );
+    expect(page).toContain("readonly deleteOrder = useDeleteOrder();");
+    expect(page).toContain("async onDeleteOrder(): Promise<void> {");
+    expect(page).toContain('if (!window.confirm("Delete this order?")) return;');
+    expect(page).toContain("await this.deleteOrder.mutateAsync(this.id);");
+    // Default then: navigates to the aggregate list route.
+    expect(page).toContain('this.router.navigateByUrl("/orders");');
+    expect(page).toContain('import { useDeleteOrder } from "../../api/order";');
+    expect(page.match(/import \{ useDeleteOrder \}/g)?.length).toBe(1);
+  });
+
+  it("emits the delete service method + injectMutation factory (gated on canonical destroy)", async () => {
+    const all = await generateSystemFiles(DESTROY_SOURCE);
+    const api = all.get("web/src/api/order.ts")!;
+    expect(api).toContain("delete(id: string) {");
+    expect(api).toContain("return this.http.delete<void>(`${API_BASE_URL}/orders/${id}`);");
+    expect(api).toContain("export function useDeleteOrder() {");
+    expect(api).toContain("mutationFn: (id: string) => firstValueFrom(service.delete(id)),");
   });
 });

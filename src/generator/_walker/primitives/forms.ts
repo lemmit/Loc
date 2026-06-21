@@ -97,6 +97,11 @@ export function emitDestroyForm(
   ctx: WalkContext,
   depth: number,
 ): string {
+  // A target may fork the whole primitive (Angular emits a confirm-delete button
+  // wired to its `useDelete<Agg>` mutation + `router.navigateByUrl` redirect,
+  // instead of the shared `actionMutations` + `window.confirm` path).
+  const override = ctx.target.renderDestroyForm?.(call, ctx, depth);
+  if (override != null) return override;
   void depth;
   const ofArg = namedArgValue(call, "of");
   if (!ofArg || ofArg.kind !== "ref") {

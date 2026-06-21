@@ -477,6 +477,15 @@ export interface WalkerTarget {
    *  wiring on `ctx.angularForms` for the page-shell. */
   renderWorkflowForm?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
 
+  /** OPTIONAL — whole-primitive override for `DestroyForm(of: <Agg>)`.  The
+   *  shared `emitDestroyForm` delegates here first; a non-null return is used
+   *  verbatim and the shared path (which records an `actionMutations` sink +
+   *  emits a `window.confirm` `primitive-button`) is skipped.  Angular forks
+   *  here to emit a confirm-delete button wired to its `useDelete<Agg>` mutation
+   *  and records the delete-mutation hoist on `ctx.angularDestroyForms` for the
+   *  page-shell. */
+  renderDestroyForm?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
+
   /** OPTIONAL — the navigate CALL for a `Button(to:)` shorthand, given the
    *  already-rendered destination arg.  The JSX family omits it (default
    *  `navigate(<to>)`, wrapped in the arrow handler); Angular returns

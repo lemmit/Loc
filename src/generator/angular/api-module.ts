@@ -78,6 +78,11 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR, repo?: Repositor
   const allVar = `${lowerFirst(single)}All`;
   const byIdFn = `use${single}ById`;
   const createFn = `useCreate${single}`;
+  const deleteFn = `useDelete${single}`;
+  // The canonical destroy (declared `destroy { }` or via `crudish`) drives the
+  // `DELETE /<tag>/{id}` route + `useDelete<Agg>` factory the `DestroyForm`
+  // renderer hoists.  Plain aggregates' modules stay delete-free.
+  const hasDelete = !!agg.canonicalDestroy;
 
   const fields = forApiRead(wireShapeFor(agg));
   const createFields = createInputFields(agg);
@@ -162,14 +167,16 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR, repo?: Repositor
     const fn = `use${upperFirst(f.name)}${single}`;
     return [
       `/** \`${f.name}\` parameterised find (TanStack \`injectQuery\`) — hoisted as a`,
-      " *  component field; the field initializer is the injection context.  Keyed",
-      " *  on the query object so a bound filter re-fetches when it changes; the",
-      " *  query stays the shared cache's `[tag, find, name, query]` entry. */",
-      `export function ${fn}(query: ${findQueryType(f)}) {`,
+      " *  component field; the field initializer is the injection context.  Takes",
+      " *  a REACTIVE getter (not a snapshot): the `injectQuery(() => …)` options",
+      " *  callback re-reads `query()` so a page-state-bound filter live-refetches",
+      " *  (the query key + fetch track the getter).  Keyed on the resolved query as",
+      " *  the shared cache's `[tag, find, name, query]` entry. */",
+      `export function ${fn}(query: () => ${findQueryType(f)}) {`,
       `  const service = inject(${serviceName});`,
       "  return injectQuery(() => ({",
-      `    queryKey: ["${tag}", "find", "${snake(f.name)}", query] as const,`,
-      `    queryFn: () => firstValueFrom(service.${f.name}(query)),`,
+      `    queryKey: ["${tag}", "find", "${snake(f.name)}", query()] as const,`,
+      `    queryFn: () => firstValueFrom(service.${f.name}(query())),`,
       "  }));",
       "}",
       "",
@@ -210,6 +217,14 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR, repo?: Repositor
     `  create(input: ${createName}) {`,
     `    return this.http.post<{ id: string }>(\`\${API_BASE_URL}/${tag}\`, input);`,
     "  }",
+    ...(hasDelete
+      ? [
+          "",
+          `  delete(id: string) {`,
+          `    return this.http.delete<void>(\`\${API_BASE_URL}/${tag}/\${id}\`);`,
+          "  }",
+        ]
+      : []),
     ...opMethods,
     ...findMethods,
     "}",
@@ -253,6 +268,22 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR, repo?: Repositor
     "  }));",
     "}",
     "",
+    // Delete mutation (canonical destroy) — `mutateAsync(id)` DELETEs the record
+    // and invalidates the collection so the list refetches.  `isPending` is a
+    // signal the confirm-delete button reads via `()`.
+    ...(hasDelete
+      ? [
+          `export function ${deleteFn}() {`,
+          `  const service = inject(${serviceName});`,
+          "  const queryClient = inject(QueryClient);",
+          "  return injectMutation(() => ({",
+          `    mutationFn: (id: string) => firstValueFrom(service.delete(id)),`,
+          `    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["${tag}"] }),`,
+          "  }));",
+          "}",
+          "",
+        ]
+      : []),
     ...opFactories,
     ...findFactories,
     // Reference the var names the page-shell will hoist so the naming stays
