@@ -178,3 +178,78 @@ biggest cost centers (recurring parity audits; runtime regressions on `main`) an
 cheapest to build and immediately removes a papercut. The `references/` tables
 (target matrix, docker recipes, upgrade footprint) are shared assets worth writing
 once even before the skills wrap them.
+
+---
+
+# Round 2 — a deeper PR sweep (#1388–#1449)
+
+A second pass over the prior ~50 PRs surfaced one more skill worth building and
+sharpened the case for the first four.
+
+## 5. `status-refresh` — re-verify docs/proposals/comments against fresh `main`  ⭐ new
+
+**Trigger.** "The docs are stale", "refresh the trackers", "audit the proposals
+against `main`", after any rename/removal/refactor ("scrub the stale references to
+X"), "is this doc still true?", picking up `global-implementation-plan.md` or the
+proposals `README.md` status table.
+
+**Why.** Documentation drift is a *standing, sizable* tax here — not a one-off. The
+evidence is unusually direct:
+- **#1407** — a single PR did ~150 code-verified doc-checks and corrected ~65 docs.
+  Its diagnosis names the recurring shape exactly: a **"3-backend-era freeze"** —
+  features written up as "three/four backends" that now ship on five, plus a fourth
+  frontend (Angular) the docs never picked up.
+- **#1441 / #1438 / #1431** — three separate *follow-up* PRs to scrub stale
+  `source`/`origin`/`⑤c` references after one removal (#1408). The removal was clean
+  in code on the first PR; the docs/comments took three more passes to catch up.
+- **#1443** — had to write *guardrails* (`experience_gathered.md` §15) so the
+  stamped-field/sentinel debt class "doesn't re-accrete".
+- **The proposals `README.md` says of itself**: "This README is hand-maintained and
+  was previously stale." CLAUDE.md's whole "Sync with `main` constantly — it moves
+  under you / a stale base lies twice" section is the same lesson at the code level.
+- **Live proof:** while building skill #1, the `parity-auditor` agent found *five*
+  doc/code disagreements in passing — including that the backend-parity audit's
+  flagship Finding F1 (Python capability-filter "silent gap") is already fixed in
+  code (`system-checks.ts:1004` gates Python), and that
+  `platform-parity-debt.md`'s matrix still has only node/dotnet/phoenix/react
+  columns. The docs rot faster than they're read.
+
+This is distinct from `parity-auditor` (which audits *emitter feature support* and
+may refresh one parity doc) — `status-refresh` audits *documentation truthfulness*
+broadly (proposals, reference docs, CLAUDE.md, code comments, trackers) against the
+code. `parity-auditor` can hand off to it; they share the "fresh `main` wins over
+prose" discipline.
+
+**What it does.**
+1. Take a scope: a doc set (`docs/`, `docs/proposals/`, `CLAUDE.md`) or a *concept*
+   just renamed/removed (then grep the concept name across `src/`/`test/`/`docs/`,
+   per the #1443 guardrail).
+2. For each claim, find the authoritative code (the validator gate, the emitter, the
+   registry) and classify: true / stale / wrong. Backend-count and frontend-count
+   claims are the highest-yield (the "N-backend-era freeze").
+3. Fix the docs (docs-only — never edit code to match a doc), and refresh the status
+   tables in `README.md` + `global-implementation-plan.md` together (they're meant
+   to agree).
+
+**Shape.** `SKILL.md` + `references/drift-hotspots.md` (the claims that rot fastest:
+backend/frontend counts, "shipped/partial/proposed" status tags, the per-feature
+target lists; the authoritative code location to check each against) +
+`references/concept-removal-checklist.md` (the grep-the-concept-name sweep for after
+a rename/removal, distilled from #1441/#1438/#1443).
+
+## What Round 2 reinforced (no new skill — evidence for the first four)
+
+- **Per-backend codegen that compiles in isolation but is never *exercised*** →
+  `generated-stack-verifier` + `parity-auditor`. #1419: the .NET `AuditableInterceptor`
+  "emitted uncompilable code that **no build matrix ever exercised**" — stamped
+  fields were `private set`, unwritable from the interceptor — "unlike Java, which
+  has a tested cell". #1445: generate-time string-asserts + compile-time `tsc`/`vue-tsc`
+  both passed, but the **runtime** smoke caught a ship-blocking React/Vue op-button
+  crash. Compile-green ≠ correct, repeatedly.
+- **Feature fan-outs across N targets, each with its own breakage** →
+  `parity-auditor`'s disjoint-bucket workflow is the right shape. Two large waves in
+  this window: lifecycle stamping (#1444 hono, #1446/#1449 python "re-land", #1447
+  elixir, #1419 dotnet, #1442 validate gate) and the auth UI-gate
+  (#1397/#1401/#1404/#1409/#1411/#1418/#1420/#1429/#1432/#1433/#1445 — every
+  frontend + Phoenix). The same feature, ported one target at a time, is the dominant
+  delivery unit here.
