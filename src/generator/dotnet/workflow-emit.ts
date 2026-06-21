@@ -35,7 +35,7 @@ import {
 } from "./dto-mapping.js";
 import { bypassedFilterNames } from "./emit/efcore.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
-import { esEventDbSet, esEventRecordClass } from "./workflow-eventsourced-emit.js";
+import { esCorrIdClass, esEventDbSet, esEventRecordClass } from "./workflow-eventsourced-emit.js";
 import {
   workflowAllocateInitializer,
   workflowStateClass,
