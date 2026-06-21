@@ -19,7 +19,6 @@ import {
 import type { Deployable } from "../generated/ast.js";
 import {
   builtinPackNamesForFormat,
-  canonicalFramework,
   defaultFoundationFor,
   expectedFrameworkFor,
   expectedPackFormatFor,
@@ -134,7 +133,7 @@ export function checkDeployable(
   if (framework && d.uiBlock) {
     const expected = expectedFrameworkFor(d.platform, hasUiBinding);
     const hostable = hostableFrameworksFor(d.platform);
-    const canonical = canonicalFramework(framework);
+    const canonical = framework;
     if (canonical && hostable.size > 0 && !hostable.has(canonical)) {
       accept(
         "error",
@@ -168,7 +167,7 @@ export function checkDeployable(
   if (hasUiBinding && platformMountsUi(d.platform)) {
     const hostable = hostableFrameworksFor(d.platform);
     for (const ui of mountedUis) {
-      const uiFramework = canonicalFramework(ui?.framework);
+      const uiFramework = ui?.framework;
       if (!uiFramework || hostable.has(uiFramework)) continue;
       const menu = [...hostable].sort().join(", ") || "none";
       accept(
@@ -204,7 +203,7 @@ export function checkDeployable(
   // it; e.g. a phoenix host embedding `framework: react` needs a tsx
   // pack, not ashPhoenix), then the legacy block-binding framework.
   // Mirrors the lowering precedence in `lower.ts`.
-  const uiDeclaredFramework = canonicalFramework(mountedUis.find((u) => u?.framework)?.framework);
+  const uiDeclaredFramework = mountedUis.find((u) => u?.framework)?.framework;
   checkDeployableDesignPack(d, hasUiBinding, uiDeclaredFramework ?? framework, accept);
 
   // Existing rules — react/static both behave like frontends.
@@ -308,8 +307,9 @@ export function checkDeployablePlatform(d: Deployable, accept: ValidationAccepto
 }
 
 /** Resolve a `platform:` value to its canonical family (`node@v4` →
- *  `node`, `fastapi` → `python`), falling back to the raw value
- *  for frontends (`react`/`static`).  Mirrors how lowering canonicalises. */
+ *  `node`), falling back to the raw value for frontends
+ *  (`react`/`static`).  Mirrors how lowering qualifies the platform.
+ *  (No alias desugaring — every platform alias was retired.) */
 function resolveAxisFamily(platform: string): Platform {
   return (parseBuiltinPlatformRef(platform)?.family ?? platform) as Platform;
 }

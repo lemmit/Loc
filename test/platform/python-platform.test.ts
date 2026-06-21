@@ -9,10 +9,10 @@ import { parseBuiltinPlatformRef, platformFor } from "../../src/platform/registr
 // ---------------------------------------------------------------------------
 // The `python` platform (FastAPI + SQLAlchemy 2 backend) — wiring slice.
 //
-// `python` is the canonical language-ecosystem platform name; the
-// `fastapi` framework spelling desugars to it at the lowering/registry
-// boundary (mirrors `hono` → `node`).  See
-// docs/plans/python-backend-plan.md (S1).
+// `python` is the canonical language-ecosystem platform name.  The
+// `fastapi` framework-spelled platform alias was RETIRED (mirroring the
+// retired `hono` → `node` and `phoenix` → `elixir` aliases): `python` is
+// the only spelling.  See docs/plans/python-backend-plan.md (S1).
 // ---------------------------------------------------------------------------
 
 async function parse(source: string) {
@@ -41,14 +41,16 @@ describe("python platform — registry resolution", () => {
     });
   });
 
-  it("the `fastapi` alias resolves to the python family", () => {
-    expect(parseBuiltinPlatformRef("fastapi")?.qualified).toBe("python@v1");
-    expect(parseBuiltinPlatformRef("fastapi@v1")?.qualified).toBe("python@v1");
+  it("rejects the retired `fastapi` platform alias (now an unknown name)", () => {
+    // The `fastapi` → `python` alias was retired, mirroring the retired
+    // `hono` → `node` and `phoenix` → `elixir` aliases: `python` is the
+    // only spelling.
+    expect(parseBuiltinPlatformRef("fastapi")).toBeNull();
+    expect(parseBuiltinPlatformRef("fastapi@v1")).toBeNull();
   });
 
   it("every spelling resolves to the SAME surface instance", () => {
     expect(platformFor("python")).toBe(platformFor("python@v1" as never));
-    expect(platformFor("fastapi" as never)).toBe(platformFor("python"));
   });
 
   it("throws a clear error for an unregistered python version", () => {
@@ -89,9 +91,9 @@ describe("python platform — grammar + validation", () => {
     expect(errors).toEqual([]);
   });
 
-  it("accepts the `platform: fastapi` alias", async () => {
-    const { errors } = await parse(sys("fastapi"));
-    expect(errors).toEqual([]);
+  it("rejects the retired `platform: fastapi` alias as an unknown platform", async () => {
+    const { errors } = await parse(sys(`"fastapi"`));
+    expect(errors.some((e) => /Unknown platform 'fastapi'/.test(e))).toBe(true);
   });
 
   it('accepts a registered pin `platform: "python@v1"`', async () => {
@@ -129,12 +131,6 @@ describe("python platform — lowering normalisation", () => {
 
   it("bareword: platform=python, platformRef=python@v1", async () => {
     const d = await lowerDeployable("python");
-    expect(d.platform).toBe("python");
-    expect(d.platformRef).toBe("python@v1");
-  });
-
-  it("the fastapi alias desugars to the canonical python family", async () => {
-    const d = await lowerDeployable("fastapi");
     expect(d.platform).toBe("python");
     expect(d.platformRef).toBe("python@v1");
   });

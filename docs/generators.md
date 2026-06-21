@@ -872,8 +872,9 @@ FastAPI / SQLAlchemy 2 (typed declarative, async) / asyncpg / Postgres,
 managed by **uv** (Python 3.12) and held to `ruff check` + `mypy
 --strict` + `pytest` by the `LOOM_PYTHON_BUILD` gate.  Emission lives in
 `src/generator/python/`; the surface is `src/platform/python.ts`
-(`python@v1`; `platform: fastapi` desugars to `python` the way `phoenix` →
-`elixir`).  Async end-to-end: `async def` handlers over a per-request
+(`python@v1`; `python` is the only spelling — the `fastapi` platform alias
+was retired the way `phoenix`/`hono` were).  Async end-to-end: `async def`
+handlers over a per-request
 `AsyncSession` — repositories `flush()`, the session dependency commits
 once after the handler returns, so multi-save workflows are atomic by
 construction.

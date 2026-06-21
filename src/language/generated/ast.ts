@@ -132,7 +132,6 @@ export type DddKeywordNames =
     | "extends"
     | "extern"
     | "false"
-    | "fastapi"
     | "favicon"
     | "filter"
     | "find"
@@ -174,7 +173,6 @@ export type DddKeywordNames =
     | "let"
     | "link"
     | "literal"
-    | "liveview"
     | "loads"
     | "log"
     | "long"
@@ -449,10 +447,10 @@ export function isFieldAccess(item: unknown): item is FieldAccess {
     return item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret';
 }
 
-export type Framework = 'angular' | 'liveview' | 'phoenixLiveView' | 'react' | 'svelte' | 'vue';
+export type Framework = 'angular' | 'phoenixLiveView' | 'react' | 'svelte' | 'vue';
 
 export function isFramework(item: unknown): item is Framework {
-    return item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'phoenixLiveView' || item === 'liveview';
+    return item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'phoenixLiveView';
 }
 
 export type GenericCtor = 'envelope' | 'option' | 'paged';
@@ -563,10 +561,10 @@ export function isPayloadKind(item: unknown): item is PayloadKind {
     return item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error';
 }
 
-export type Platform = 'angular' | 'dotnet' | 'elixir' | 'fastapi' | 'java' | 'node' | 'python' | 'react' | 'static' | 'svelte' | 'vue' | string;
+export type Platform = 'angular' | 'dotnet' | 'elixir' | 'java' | 'node' | 'python' | 'react' | 'static' | 'svelte' | 'vue' | string;
 
 export function isPlatform(item: unknown): item is Platform {
-    return item === 'dotnet' || item === 'node' || item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'static' || item === 'elixir' || item === 'python' || item === 'fastapi' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'dotnet' || item === 'node' || item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'static' || item === 'elixir' || item === 'python' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export type PostfixSuffix = CallSuffix | MemberSuffix;

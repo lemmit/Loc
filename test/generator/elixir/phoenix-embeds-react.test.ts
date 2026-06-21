@@ -43,7 +43,7 @@ system Sys {
   }
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
-  ui WebApp { framework: liveview  page Home { route: "/" } }
+  ui WebApp { framework: phoenixLiveView  page Home { route: "/" } }
   deployable app {
     platform: elixir
     contexts: [Orders]

@@ -2112,8 +2112,8 @@ export interface NeedIR {
 // declares `ui:`).
 //
 // `python` is the FastAPI + SQLAlchemy 2 backend (backend-only, like
-// `node`/`dotnet`); the legacy-style `fastapi` spelling desugars to it
-// at the lowering boundary (mirrors `hono` → `node`).
+// `node`/`dotnet`).  (The `fastapi` platform alias was retired — `python`
+// is the only spelling, mirroring the retired `hono`/`phoenix` aliases.)
 //
 // `svelte` is the second frontend-only platform: a Svelte 5 /
 // SvelteKit static SPA rendered against a svelte-format design pack

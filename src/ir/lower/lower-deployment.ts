@@ -4,7 +4,6 @@ import { defaultsFor } from "../../platform/resolve-adapters.js";
 import { applicationDslToAdapter } from "../../util/platform-axes.js";
 import type { DeployableIR, Platform, UiParamBindingIR } from "../types/loom-ir.js";
 import {
-  canonicalFramework,
   foundationAdapterOverride,
   greenfieldAxisDefaults,
   qualifyDesign,
@@ -69,9 +68,9 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   // ashPhoenix).
   const boundUi = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
   const uiFramework =
-    canonicalFramework(d.uiBlock?.framework) ??
-    canonicalFramework(boundUi?.framework) ??
-    canonicalFramework(firstHostedUi?.framework) ??
+    d.uiBlock?.framework ??
+    boundUi?.framework ??
+    firstHostedUi?.framework ??
     (uiName
       ? platform === "elixir"
         ? "phoenixLiveView"

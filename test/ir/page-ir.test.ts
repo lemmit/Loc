@@ -584,20 +584,21 @@ describe("page metamodel — IR shape", () => {
     });
   });
 
-  // D-PHOENIX-SURFACE phase 5 — the `liveview` framework alias canonicalises.
-  // (The `phoenix` / `phoenixLiveView` *platform* aliases were retired —
-  // `platform: elixir` is the only spelling.)
-  describe("liveview framework alias (D-PHOENIX-SURFACE)", () => {
+  // D-PHOENIX-SURFACE — `framework: phoenixLiveView` on a fullstack elixir
+  // host.  (Both the `liveview` framework alias and the `phoenix` /
+  // `phoenixLiveView` platform aliases were retired — `framework:
+  // phoenixLiveView` + `platform: elixir` are the only spellings.)
+  describe("phoenixLiveView framework on elixir (D-PHOENIX-SURFACE)", () => {
     function deployableByName(loom: LoomModel, name: string) {
       const d = firstSystem(loom).deployables.find((x) => x.name === name);
       if (!d) throw new Error(`deployable '${name}' not found`);
       return d;
     }
 
-    it("framework: liveview canonicalises to phoenixLiveView on the ui", async () => {
+    it("framework: phoenixLiveView lowers as-is on the ui", async () => {
       const loom = await buildLoom(`
         system Acme {
-          ui Admin { framework: liveview }
+          ui Admin { framework: phoenixLiveView }
         }
       `);
       expect(uiByName(loom, "Admin").framework).toBe("phoenixLiveView");
@@ -607,7 +608,7 @@ describe("page metamodel — IR shape", () => {
       const loom = await buildLoom(`
         system Acme {
           subdomain M { context C { } }
-          ui Admin { framework: liveview }
+          ui Admin { framework: phoenixLiveView }
           deployable app { platform: elixir, contexts: [C], hosts: Admin, port: 4000 }
         }
       `);
@@ -619,7 +620,7 @@ describe("page metamodel — IR shape", () => {
         system Acme {
           subdomain M { context C { } }
           ui Web { framework: react }
-          ui Admin { framework: liveview }
+          ui Admin { framework: phoenixLiveView }
           deployable app { platform: elixir, contexts: [C], hosts: [Web, Admin], port: 4000 }
         }
       `);

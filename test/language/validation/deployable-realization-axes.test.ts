@@ -174,7 +174,7 @@ describe("realization axes — R4 foundation owns layers", () => {
   });
 
   it("rejects `foundation: ash` + `transport:` on elixir", async () => {
-    const { errors } = await parse(sys("elixir { foundation: ash, transport: phoenixRouter }"));
+    const { errors } = await parse(sys("elixir { foundation: ash, transport: phoenix }"));
     expect(errors.some((e) => /foundation: ash.*owns the transport layer/i.test(e))).toBe(true);
   });
 

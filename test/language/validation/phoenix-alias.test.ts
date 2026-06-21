@@ -2,27 +2,29 @@ import { describe, expect, it } from "vitest";
 import { parseString } from "../../_helpers/parse.js";
 
 // ---------------------------------------------------------------------------
-// The `liveview` framework alias (D-PHOENIX-SURFACE phase 5) — still live.
+// Retired phoenix-family aliases.  `platform: elixir` + `framework:
+// phoenixLiveView` are the only spellings:
 //
-// `liveview` is the framework spelling; it canonicalises to the stable
-// `phoenixLiveView` framework at the lowering/registry boundary, so it
-// validates, lowers, and generates identically to `framework: phoenixLiveView`.
+//   - the `phoenix` / `phoenixLiveView` *platform* aliases were RETIRED
+//     (D-ELIXIR-PLATFORM, mirroring the retired `hono` → `node` alias):
+//     `platform: "phoenix"` fails validation as an unknown platform.
+//   - the `liveview` *framework* alias was RETIRED too: `phoenixLiveView`
+//     is the only framework spelling (the bare `liveview` keyword is gone
+//     from the grammar).
 //
-// The `phoenix` / `phoenixLiveView` *platform* aliases were RETIRED
-// (D-ELIXIR-PLATFORM, mirroring the retired `hono` → `node` alias):
-// `platform: elixir` is the only spelling, and `platform: "phoenix"` now
-// fails validation as an unknown platform.
+// These tests pin that the canonical spellings still host correctly and
+// that the retired platform alias is rejected.
 // ---------------------------------------------------------------------------
 
 const UNHOSTABLE = /cannot host ui .* framework/;
 const UNKNOWN_PLATFORM = /Unknown platform/;
 
-describe("validator: liveview framework alias + retired phoenix platform alias", () => {
+describe("validator: retired phoenix-family platform + framework aliases", () => {
   it("rejects the retired `platform: phoenix` alias as an unknown platform", async () => {
     const { errors } = await parseString(`
       system S {
         subdomain M { context C { aggregate A { x: int } } }
-        ui Admin { framework: liveview }
+        ui Admin { framework: phoenixLiveView }
         deployable app { platform: "phoenix", contexts: [C], hosts: Admin, port: 4000 }
       }
     `);
@@ -32,11 +34,11 @@ describe("validator: liveview framework alias + retired phoenix platform alias",
     ).toBe(true);
   });
 
-  it("an elixir host accepts a liveview ui (canonicalised match)", async () => {
+  it("an elixir host accepts a phoenixLiveView ui", async () => {
     const { errors } = await parseString(`
       system S {
         subdomain M { context C { aggregate A { x: int } } }
-        ui Admin { framework: liveview }
+        ui Admin { framework: phoenixLiveView }
         deployable app { platform: elixir, contexts: [C], hosts: Admin, port: 4000 }
       }
     `);
@@ -60,11 +62,11 @@ describe("validator: liveview framework alias + retired phoenix platform alias",
     ).toBe(false);
   });
 
-  it("still rejects a liveview ui on a non-elixir host (alias doesn't bypass the rule)", async () => {
+  it("still rejects a phoenixLiveView ui on a non-elixir host", async () => {
     const { errors } = await parseString(`
       system S {
         subdomain M { context C { aggregate A { x: int } } }
-        ui Admin { framework: liveview }
+        ui Admin { framework: phoenixLiveView }
         deployable api { platform: node, contexts: [C], port: 3000 }
         deployable web { platform: react, targets: api, hosts: Admin, port: 3001 }
       }
@@ -80,7 +82,7 @@ describe("validator: liveview framework alias + retired phoenix platform alias",
     const { errors } = await parseString(`
       system S {
         subdomain M { context C { aggregate A { x: int = 0 } repository As for A { } } }
-        ui Admin { framework: liveview  page Home { route: "/" } }
+        ui Admin { framework: phoenixLiveView  page Home { route: "/" } }
         deployable app { platform: elixir, contexts: [C], hosts: Admin, port: 4000, design: ashPhoenix }
       }
     `);
