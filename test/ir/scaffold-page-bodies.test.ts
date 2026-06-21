@@ -1,14 +1,11 @@
-// Tests for `expandInlineScaffoldPrimitives` — phase ⑤c of lowering.
+// Tests for scaffold page-body shapes after macro expansion.
 //
-// Since the `scaffold*(of:)` body primitives were removed, scaffolded
-// list / detail / form pages carry their full body tree directly (the
-// `with scaffold(...)` macro emits the `_body-builders.ts` scaffolders).
-// This file pins two things:
-//   * macro-scaffolded pages lower to full Stack / QueryView / Form
-//     trees with NO leftover `scaffold*` call, and
-//   * the three singleton index-page sentinels
-//     (`Home` / `WorkflowsIndex` / `ViewsIndex`) are still expanded
-//     inline by `expandInlineScaffoldPrimitives` into their Stack trees.
+// Every scaffold page — list / detail / form AND the Home / WorkflowsIndex /
+// ViewsIndex dashboards — carries its full body tree directly from the
+// `with scaffold(...)` macro (`_body-builders.ts`); there is no IR-phase
+// expander or sentinel left.  This file pins that macro-scaffolded pages lower
+// to full Stack / QueryView / Form trees with NO leftover `scaffold*`/`Home()`
+// call.
 
 import { describe, expect, it } from "vitest";
 import type { ExprIR, PageIR } from "../../src/ir/types/loom-ir.js";
@@ -181,7 +178,7 @@ const SCAFFOLD_VIEW_DDD = `
 
 // ---- tests -----------------------------------------------------------------
 
-describe("scaffolded aggregate pages — full body trees, singleton Home expanded", () => {
+describe("scaffolded aggregate pages — full body trees", () => {
   it("List page body is a Stack tree (no `scaffold*` call remains)", async () => {
     const loom = await buildLoomModel(SCAFFOLD_AGGREGATE_DDD);
     const list = findPage(uiPages(loom, "App"), "List");
@@ -243,7 +240,7 @@ describe("scaffolded aggregate pages — full body trees, singleton Home expande
     expect(calleeNames).toContain("CreateForm");
   });
 
-  it("Home sentinel page body is expanded (no bare Home() call remains)", async () => {
+  it("Home page body is a full Stack tree (no bare Home() call remains)", async () => {
     const loom = await buildLoomModel(SCAFFOLD_AGGREGATE_DDD);
     const home = findPage(uiPages(loom, "App"), "Home");
     expect(topCallee(home.body)).toBe("Stack");
@@ -251,7 +248,7 @@ describe("scaffolded aggregate pages — full body trees, singleton Home expande
   });
 });
 
-describe("scaffolded workflow pages — full body trees, WorkflowsIndex expanded", () => {
+describe("scaffolded workflow pages — full body trees", () => {
   it("workflow form page body is a Stack with a WorkflowForm", async () => {
     const loom = await buildLoomModel(SCAFFOLD_WORKFLOW_DDD);
     const page = findPage(uiPages(loom, "App"), "PlaceOrderWorkflow");
@@ -268,7 +265,7 @@ describe("scaffolded workflow pages — full body trees, WorkflowsIndex expanded
     expect(hasWorkflowForm).toBe(true);
   });
 
-  it("WorkflowsIndex sentinel page body is expanded (no `WorkflowsIndex()` call remains)", async () => {
+  it("WorkflowsIndex page body is a full Stack tree (no `WorkflowsIndex()` call remains)", async () => {
     const loom = await buildLoomModel(SCAFFOLD_WORKFLOW_DDD);
     const page = findPage(uiPages(loom, "App"), "WorkflowsIndex");
     expect(topCallee(page.body)).toBe("Stack");
@@ -276,7 +273,7 @@ describe("scaffolded workflow pages — full body trees, WorkflowsIndex expanded
   });
 });
 
-describe("scaffolded view pages — full body trees, ViewsIndex expanded", () => {
+describe("scaffolded view pages — full body trees", () => {
   it("view list page body is a Stack landing on a QueryView", async () => {
     const loom = await buildLoomModel(SCAFFOLD_VIEW_DDD);
     const page = findPage(uiPages(loom, "App"), "ActiveOrdersView");
@@ -286,7 +283,7 @@ describe("scaffolded view pages — full body trees, ViewsIndex expanded", () =>
     expect(stack.args.some((a) => topCallee(a) === "QueryView")).toBe(true);
   });
 
-  it("ViewsIndex sentinel page body is expanded (no `ViewsIndex()` call remains)", async () => {
+  it("ViewsIndex page body is a full Stack tree (no `ViewsIndex()` call remains)", async () => {
     const loom = await buildLoomModel(SCAFFOLD_VIEW_DDD);
     const page = findPage(uiPages(loom, "App"), "ViewsIndex");
     expect(topCallee(page.body)).toBe("Stack");
