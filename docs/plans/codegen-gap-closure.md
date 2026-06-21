@@ -1,6 +1,6 @@
 # Codegen gap-closure plan
 
-Status: active. Derived from a full audit (2026-06) of generated output across every
+Status: Wave 1 landed (5 branches pushed, no PRs). Derived from a full audit (2026-06) of generated output across every
 backend and frontend for unimplemented features — TODO comments emitted into generated
 files, `undefined`/null-render sentinels, runtime-throwing stub bodies, reserved-but-throwing
 adapter axes, and primitives lacking a renderer for a given target.
@@ -8,6 +8,25 @@ adapter axes, and primitives lacking a renderer for a given target.
 The buckets below touch **disjoint file trees** so they run as parallel agents without merge
 collisions. Each carries a cross-target **hint**: when a sibling backend/frontend already
 implements the feature, port the logic from there rather than designing fresh.
+
+## Wave 1 — landed
+
+Each bucket implemented on its own branch off fresh `main`, pushed, no PR.
+
+| Bucket | Branch | Result |
+|---|---|---|
+| V · validator guards | `claude/gap-validators` | F1/F2/P4/P0 as IR-validate errors; new `src/ir/util/find-predicate-capability.ts`; 12 negative tests; suite exit 0. |
+| E1 · Elixir vanilla workflow | `claude/gap-elixir-workflow` | for-each/if-let via `with`-chains, returning-op exhaustive; fixed 2 latent compile-gate bugs. Docker `--warnings-as-errors` vanilla gate still to re-run (port 443 was contended). |
+| E2 · Elixir LiveView | `claude/gap-elixir-liveview` | page `renderStmt` exhaustive over `StmtIR`; `new Part{}` struct literal; mix-compile verified. |
+| J · Java persistence reads | `claude/gap-java-reads` | document + event-sourced in-memory hydrate-then-filter (shared `inMemoryRetrievalLines`); `gradle bootJar` clean. |
+| A · Angular | `claude/gap-angular` | all api-read shapes + CreateForm/Action/Modal/WorkflowForm render real bodies; `ngc --strictTemplates` clean; stub gate narrowed to residual. |
+
+### Follow-ups discovered during Wave 1
+
+- **A-residual** — shared-RHF form primitives `Form` / `EditForm` / standalone `OperationForm` / `DestroyForm` not yet Angular-forked (still stubbed by the narrowed `pageNeedsDeferredFeatures`). New bucket.
+- **A-reactive-find** — a param-find driven by page state reads the signal as a snapshot at field-init (`useFind({ status: this.status() })`); compiles but isn't live-reactive. Convert to a getter-based binding. Small.
+- **E1-verify** — re-run `LOOM_PHOENIX_VANILLA_BUILD=1 LOOM_HEX_MIRROR=1` mix-compile now the hex-mirror port is free.
+- **V-F2-scrutiny** — `loom.method-call-unresolved-receiver` has false-positive risk on valid bodies; audit against all example `.ddd` before merge (full suite passed, good signal).
 
 ## Priority tiers
 
