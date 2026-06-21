@@ -87,6 +87,24 @@ describe("vanilla elixir event-sourced workflows", () => {
     expect(log).toContain('schema "order_fulfillment_events" do');
   });
 
+  it("the <Wf>Stream exposes list_instances/0 + instance_by_id/1 (fold-on-load reads)", async () => {
+    // workflow-instance-visibility.md: the ES instance reads fold the stream.
+    // LIST = load all rows, group by stream_id, fold each (mirrors the
+    // ES-aggregate repository list); byId = single-stream load + fold, nil on
+    // an empty stream.
+    const st = (await gen()).get(`${WF}/order_fulfillment_stream.ex`)!;
+    expect(st).toContain("def list_instances do");
+    expect(st).toContain(
+      "Repo.all(from(r in OrderFulfillmentEventLog, order_by: [asc: r.stream_id, asc: r.version]))",
+    );
+    expect(st).toContain("|> Enum.group_by(& &1.stream_id)");
+    expect(st).toContain("OrderFulfillmentFold.from_events(sid, Enum.map(rows, &row_to_event/1))");
+    expect(st).toContain("def instance_by_id(id) when is_binary(id) do");
+    expect(st).toContain("case load(id) do");
+    expect(st).toContain("[] -> nil");
+    expect(st).toContain("loaded -> OrderFulfillmentFold.from_events(id, loaded)");
+  });
+
   it("the create starter folds the stream and appends its own events", async () => {
     const h = (await gen()).get(`${WF}/order_fulfillment/start_order_placed.ex`)!;
     expect(h).toContain("def handle(%Api.Fulfillment.Events.OrderPlaced{} = event) do");

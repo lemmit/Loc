@@ -147,3 +147,57 @@ describe("vanilla foundation — workflow-instance read endpoints", () => {
     expect(files.get(router!)!).toContain("/workflows/order_fulfillment/instances");
   });
 });
+
+// An event-sourced workflow on the vanilla foundation
+// (workflow-and-applier.md A2-S5b): the instance-read body diverges — instead
+// of `Repo.all(<Wf>State)` / `Repo.get`, the actions fold the stream via the
+// `<Wf>Stream` module (`list_instances/0` for LIST, `instance_by_id/1` for
+// byId).  Route paths + action names + wire keys stay identical to the state
+// path (the projection reads `row.<field>` on both the Ecto row and the folded
+// struct), so cross-backend OpenAPI parity holds.
+describe("vanilla foundation — event-sourced workflow-instance reads", () => {
+  const ES_SRC = `system Sys {
+    subdomain F {
+      context F {
+        aggregate Order { status: string  create place() { status := "Placed"  emit OrderPlaced { order: id } } }
+        repository Orders for Order {}
+        event OrderPlaced { order: Order id }
+        event PaymentRegistered { order: Order id, amount: int }
+        channel L { carries: OrderPlaced, PaymentRegistered  delivery: broadcast  retention: ephemeral }
+        workflow OrderFulfillment eventSourced {
+          orderId: Order id
+          paid: int
+          create(p: OrderPlaced) by p.order { emit PaymentRegistered { order: p.order, amount: 0 } }
+          on(pr: PaymentRegistered) by pr.order { precondition paid >= 0  emit PaymentRegistered { order: pr.order, amount: paid } }
+          apply(pr: PaymentRegistered) { paid := paid + pr.amount }
+        }
+      }
+    }
+    api A from F
+    storage primary { type: postgres }
+    resource fState { for: F, kind: state, use: primary }
+    deployable api { platform: elixir { foundation: vanilla }  contexts: [F]  serves: A  dataSources: [fState]  port: 4000 }
+  }`;
+
+  it("routes the instance actions through the <Wf>Stream fold helpers", async () => {
+    const { model } = await parseString(ES_SRC, { validate: false });
+    const files = generateSystems(model).files;
+    const ctrlKey = [...files.keys()].find((k) =>
+      k.endsWith("/controllers/workflow_instances_controller.ex"),
+    );
+    expect(ctrlKey, "instances controller not emitted").toBeDefined();
+    const ctrl = files.get(ctrlKey!)!;
+    const Stream = "Api.F.Workflows.OrderFulfillmentStream";
+    // LIST folds every stream; byId folds one (nil → 404).
+    expect(ctrl).toContain(`data = Enum.map(${Stream}.list_instances(), fn row -> %{`);
+    expect(ctrl).toContain(`case ${Stream}.instance_by_id(id) do`);
+    expect(ctrl).toContain("orderId: row.order_id");
+    expect(ctrl).toContain("paid: row.paid");
+    // NOT the state-path Repo read.
+    expect(ctrl).not.toContain("Repo.all(Api.F.Workflows.OrderFulfillmentState)");
+    expect(ctrl).not.toContain("Repo.get(Api.F.Workflows.OrderFulfillmentState");
+    // Route paths/action names unchanged across ES vs state.
+    const routerKey = [...files.keys()].find((k) => k.endsWith("_web/router.ex"));
+    expect(files.get(routerKey!)!).toContain("/workflows/order_fulfillment/instances");
+  });
+});
