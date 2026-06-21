@@ -1,0 +1,77 @@
+// Auto-generated.  The app shell — a standalone component (selector
+// app-root) rendering the Spartan/shadcn sidebar chrome around the router
+// outlet.  Plain styled elements (no component library), so the component
+// registers only router directives.  Nav labels/links are baked at
+// generation time.
+import { Component{{#if navUsesSession}}, inject{{/if}} } from "@angular/core";
+import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from "@angular/router";
+{{#if authUi}}import { AuthGateComponent } from "./auth/auth-gate.component";
+{{/if}}{{#if navUsesSession}}import { SessionService } from "./auth/session.service";
+{{/if}}
+@Component({
+  selector: "app-root",
+  imports: [
+    RouterOutlet,
+    RouterLink,
+{{#if hasNav}}    RouterLinkActive,
+{{/if}}{{#if authUi}}    AuthGateComponent,
+{{/if}}  ],
+  template: `
+    <div class="loom-shell">
+      <aside class="loom-sidebar" data-testid="nav-sidebar">
+        <a routerLink="/" class="loom-brand">{{systemNameHuman}}</a>
+        <nav class="loom-nav">
+{{#each navSections}}          <div class="loom-nav-section">{{label}}</div>
+{{#each entries}}{{#if requiresJs}}          @if ({{{requiresJs}}}) { <a routerLink="{{to}}" routerLinkActive="loom-active" class="loom-nav-link" data-testid="{{testId}}">{{label}}</a> }
+{{else}}          <a routerLink="{{to}}" routerLinkActive="loom-active" class="loom-nav-link" data-testid="{{testId}}">{{label}}</a>
+{{/if}}{{/each}}{{/each}}        </nav>
+      </aside>
+      <main class="loom-main">
+{{#if authUi}}        <app-auth-gate>
+          <router-outlet />
+        </app-auth-gate>
+{{else}}        <router-outlet />
+{{/if}}      </main>
+    </div>
+  `,
+  styles: [
+    `
+    .loom-shell { display: flex; min-height: 100vh; background: hsl(var(--background)); }
+    .loom-sidebar {
+      width: 16rem;
+      flex-shrink: 0;
+      border-right: 1px solid hsl(var(--border));
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .loom-brand { color: inherit; text-decoration: none; font-weight: 700; font-size: 1.125rem; }
+    .loom-nav { display: flex; flex-direction: column; gap: 0.125rem; }
+    .loom-nav-section {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: hsl(var(--muted-foreground));
+      margin: 0.5rem 0 0.25rem;
+    }
+    .loom-nav-link {
+      display: block;
+      padding: 0.5rem 0.75rem;
+      border-radius: var(--radius);
+      color: hsl(var(--foreground));
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+    .loom-nav-link:hover { background: hsl(var(--accent)); }
+    .loom-active { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
+    .loom-main { flex: 1; padding: 1.5rem; min-width: 0; }
+  `,
+  ],
+})
+{{#if navUsesSession}}export class AppComponent {
+  readonly session = inject(SessionService);
+  get currentUser(): Record<string, unknown> { return this.session.user() ?? {}; }
+}{{else}}export class AppComponent {}{{/if}}

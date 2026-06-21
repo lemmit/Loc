@@ -2,7 +2,13 @@ import type { ExprIR, OperationIR } from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { namedArgValue, positionalArgs, stringNamed } from "../_walker/shared/args.js";
 import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
-import { type AngularFormControlSpec, addNg, controlInit, fieldInput } from "./form-fields.js";
+import {
+  type AngularFormControlSpec,
+  addNg,
+  controlInit,
+  fieldInput,
+  formButton,
+} from "./form-fields.js";
 
 // ---------------------------------------------------------------------------
 // Angular standalone `OperationForm(...)` renderer — the operation-command
@@ -100,7 +106,6 @@ export function renderAngularOperationForm(
   const ns = stringNamed(call, "testid") ?? `${snake(plural(aggName))}-op-${op.name}`;
 
   addNg(ctx, "@angular/forms", "FormControl", "FormGroup", "ReactiveFormsModule");
-  addNg(ctx, "@angular/material/button", "MatButtonModule");
   addNg(ctx, importFrom, mutationFn);
 
   const fields = bc ? op.params : [];
@@ -125,7 +130,12 @@ export function renderAngularOperationForm(
   const inner = "  ".repeat(depth + 1);
   const close = "  ".repeat(depth);
   const label = humanize(op.name);
-  const submit = `<button mat-raised-button type="submit" [disabled]="${mutationVar}.isPending()" data-testid="${ns}-submit">${label}</button>`;
+  const submit = formButton(ctx, {
+    type: "submit",
+    emphasis: "primary",
+    label,
+    attrs: ` [disabled]="${mutationVar}.isPending()" data-testid="${ns}-submit"`,
+  });
   return [
     `<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}">`,
     ...[...fieldMarkup, submit].map((m) => `${inner}${m}`),

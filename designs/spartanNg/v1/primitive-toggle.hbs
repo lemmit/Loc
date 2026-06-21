@@ -1,0 +1,1 @@
+<label class="loom-toggle"><input type="checkbox"{{{testidAttr}}}{{#if hasBind}} [checked]="{{bind}}()" (change)="{{bind}}.set($any($event.target).checked)"{{/if}} />{{{labelText}}}</label>

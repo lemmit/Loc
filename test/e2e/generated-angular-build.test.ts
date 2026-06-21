@@ -162,9 +162,10 @@ const SHOWCASE: Case = {
   `,
 };
 
-/** The angular pack matrix.  angularMaterial + primeng ship the required
- *  template surface today; spartanNg joins once its templates land. */
-const PACKS = ["angularMaterial@v1", "primeng@v1"] as const;
+/** The angular pack matrix.  angularMaterial (Material components), primeng
+ *  (PrimeNG components), and spartanNg (shadcn-for-Angular design language,
+ *  plain styled elements) all ship the required template surface. */
+const PACKS = ["angularMaterial@v1", "primeng@v1", "spartanNg@v1"] as const;
 
 interface MatrixCase extends Case {
   pack: (typeof PACKS)[number];

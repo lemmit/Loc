@@ -1,0 +1,20 @@
+<div{{{testidAttr}}}>
+{{indent}}@if ({{{queryExpr}}}.isLoading()) {
+{{branchIndent}}{{{loadingJsx}}}
+{{indent}} }
+{{indent}}@if ({{{queryExpr}}}.isError()) {
+{{branchIndent}}{{{errorJsx}}}
+{{indent}} }
+{{#if single}}{{indent}}@if (!{{{queryExpr}}}.isLoading() && !{{{queryExpr}}}.isError() && !{{{queryExpr}}}.data()) {
+{{branchIndent}}{{{emptyJsx}}}
+{{indent}} }
+{{indent}}@if ({{{queryExpr}}}.data()) {
+{{branchIndent}}{{{dataJsx}}}
+{{indent}} }
+{{else}}{{indent}}@if (!{{{queryExpr}}}.isLoading() && !{{{queryExpr}}}.isError() && ({{{queryExpr}}}.data() ?? []).length === 0) {
+{{branchIndent}}{{{emptyJsx}}}
+{{indent}} }
+{{indent}}@if (({{{queryExpr}}}.data() ?? []).length > 0) {
+{{branchIndent}}{{{dataJsx}}}
+{{indent}} }
+{{/if}}{{closeIndent}}</div>
