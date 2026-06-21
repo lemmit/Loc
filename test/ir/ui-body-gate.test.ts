@@ -110,9 +110,15 @@ describe("method-call receiver resolution (F2)", () => {
           }
         }
         deployable api { platform: node, contexts: [Sales], serves: SalesApi, port: 3000 }
-        deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
+        deployable web { platform: static, targets: api, port: 3001, ui: WebApp { Sales: api } }
       }
     `;
+    // Guard against vacuous pass: the `ui:` compose-binding must be the LAST
+    // deployable clause (its grammar rule has no trailing `,?`), otherwise the
+    // source parse-errors, the body is dropped, and F2 trivially sees nothing.
+    const { doc } = await parseString(src, { validate: false });
+    const parseErrs = (doc.parseResult.parserErrors ?? []).map((e) => e.message);
+    expect(parseErrs, `source must parse: ${parseErrs.join("; ")}`).toEqual([]);
     const errs = await errorsWithCode(src, "loom.method-call-unresolved-receiver");
     expect(errs).toEqual([]);
   });
