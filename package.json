@@ -36,6 +36,7 @@
     "test:vue-build": "LOOM_VUE_BUILD=1 vitest run test/e2e/generated-vue-build.test.ts",
     "test:vue-e2e": "LOOM_VUE_E2E=1 vitest run test/e2e/generated-vue-e2e.test.ts",
     "test:angular-build": "LOOM_ANGULAR_BUILD=1 vitest run test/e2e/generated-angular-build.test.ts",
+    "test:angular-e2e": "LOOM_ANGULAR_E2E=1 vitest run test/e2e/generated-angular-e2e.test.ts",
     "test:dotnet": "LOOM_DOTNET_BUILD=1 vitest run test/e2e/generated-dotnet-build.test.ts",
     "test:python": "LOOM_PYTHON_BUILD=1 vitest run test/e2e/generated-python-build.test.ts",
     "test:java": "LOOM_JAVA_BUILD=1 vitest run test/e2e/generated-java-build.test.ts",

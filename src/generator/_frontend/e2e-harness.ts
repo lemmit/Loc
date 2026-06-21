@@ -87,6 +87,17 @@ export const E2E_PACKAGE_JSON_SVELTE = E2E_PACKAGE_JSON.replace(
   '"loom-svelte-app-e2e"',
 );
 
+/** Same harness manifest under the Angular project's name.  The Angular
+ *  smoke spec + page objects drive the browser through the same
+ *  testid-keyed, framework-neutral runtime as React/Svelte/Vue, so the
+ *  only divergence from the base manifest is an honestly-named package
+ *  (the React constant keeps its bytes — React output is byte-identity
+ *  gated). */
+export const E2E_PACKAGE_JSON_ANGULAR = E2E_PACKAGE_JSON.replace(
+  '"loom-react-app-e2e"',
+  '"loom-angular-app-e2e"',
+);
+
 export const E2E_TSCONFIG_JSON =
   JSON.stringify(
     {

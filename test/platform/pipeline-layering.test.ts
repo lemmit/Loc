@@ -194,6 +194,7 @@ describe("pipeline layering — value imports point one way", () => {
     //     them rather than re-deriving. Relocation into _frontend/ is a
     //     follow-up — these are frozen, not a licence to grow new edges.
     const pinnedSibling = new Set([
+      "src/generator/angular/index.ts -> generator/react/",
       "src/generator/dotnet/index.ts -> generator/react/",
       "src/generator/dotnet/index.ts -> generator/svelte/",
       "src/generator/dotnet/index.ts -> generator/vue/",

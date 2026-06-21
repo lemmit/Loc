@@ -81,6 +81,13 @@ const BUILT_IN_PACKS: ReadonlyArray<PackUnderTest> = [
   { dir: "designs/flowbite/v1", label: "flowbite@v1", format: "svelte" },
   { dir: "designs/vuetify/v3", label: "vuetify@v3", format: "vue" },
   { dir: "designs/shadcnVue/v1", label: "shadcnVue@v1", format: "vue" },
+  // Angular packs splice the same `data-testid` literals into their HTML
+  // template strings, driven by the same testid-keyed page objects — so
+  // they share the TSX contract (`data-testid` literal, scanned by
+  // `TESTID_RX`).  Forms render inline via the walker seam, so `form-of`
+  // / `field-input-*` aren't pack templates here; the input testids come
+  // from `src/generator/angular/form-fields.ts`.
+  { dir: "designs/angularMaterial/v1", label: "angularMaterial@v1", format: "tsx" },
 ];
 
 // Phoenix testid emission is split between templates and the

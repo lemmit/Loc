@@ -14,12 +14,20 @@ import type { PageNameCtx } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
 import { AUTH_GATE_ANGULAR, AUTH_SESSION_SERVICE_ANGULAR } from "../_frontend/auth-ui.js";
+import {
+  E2E_FIXTURES_TS,
+  E2E_PACKAGE_JSON_ANGULAR,
+  E2E_TSCONFIG_JSON,
+  PLAYWRIGHT_CONFIG_TS,
+} from "../_frontend/e2e-harness.js";
 import { renderGateExpr } from "../_frontend/gate-expr.js";
+import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { hasAnyView } from "../_frontend/views-module.js";
 import { hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { walkBody } from "../_walker/walker-core.js";
+import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { buildAngularApiModule } from "./api-module.js";
 import { type AngularRouteDesc, renderAngularRoutes, routePath } from "./routes-emitter.js";
 import { buildAngularViewsModule } from "./views-module.js";
@@ -260,6 +268,43 @@ export function generateAngularForContexts(
   if (hasAnyWorkflow(contexts)) {
     out.set("src/api/workflows.ts", buildAngularWorkflowsModule(contexts));
   }
+
+  // --- Playwright e2e harness (angular-frontend-plan.md Slice 6) -------
+  // Page objects + smoke spec are framework-neutral — they drive the
+  // browser through the SAME testid-keyed runtime React/Vue/Svelte use, so
+  // the SHARED `_frontend/` emitters produce them verbatim.  Angular
+  // Material's `<mat-select>` is an overlay/portal combobox (ARIA
+  // `role="listbox"` + `role="option"`), so the page objects use the
+  // default `selectStyle: "combobox"` gesture (same as React) — no
+  // Angular-specific page-object fork.  The smoke spec navigates every
+  // param-less route; the `ui.spec.ts` driving the page objects is emitted
+  // by the system orchestrator (`mountsUi`) when `test e2e ui` blocks
+  // target this deployable.  Emitted only when the deployable mounts a ui.
+  if (ui) {
+    const pageObjects = emitPageObjectsForUi(
+      ui,
+      {
+        sys,
+        deployable,
+        aggregatesByName: aggregatesIRByName,
+        contextsByName: new Map(contexts.map((c) => [c.name, c])),
+        pack,
+        topLevelComponents: options.topLevelComponents ?? [],
+      },
+      // No walker-driven custom-page objects: Angular forms render inline
+      // (no pack form templates), so the shared React TSX walker would throw
+      // against the angularMaterial pack.  Scaffold-archetype page objects
+      // (framework-neutral) still emit.
+      false,
+    );
+    for (const [p, content] of pageObjects) out.set(p, content);
+    out.set("e2e/smoke.spec.ts", smokeSpec(ui, pageCtx));
+    out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
+    out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
+    out.set("e2e/package.json", E2E_PACKAGE_JSON_ANGULAR);
+    out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
+  }
+
   out.set("src/logger.ts", pack.render("logger", {}));
   // Static host for the built bundle (SPA fallback) + a same-origin `/api`
   // reverse proxy.  Replaces a bare static server (`serve`, which cannot
