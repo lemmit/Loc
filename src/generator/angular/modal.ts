@@ -2,7 +2,14 @@ import type { ExprIR, OperationIR } from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { namedArgValue, positionalArgs, stringNamed } from "../_walker/shared/args.js";
 import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
-import { type AngularFormControlSpec, addNg, controlInit, fieldInput } from "./form-fields.js";
+import {
+  type AngularFormControlSpec,
+  addNg,
+  controlInit,
+  fieldInput,
+  formButton,
+  isMaterialPack,
+} from "./form-fields.js";
 
 // ---------------------------------------------------------------------------
 // Angular `Modal { OperationForm(…), trigger: Button(…) }` renderer — the
@@ -98,11 +105,21 @@ export function renderAngularModal(
       : humanize(op.name);
   const emphasis =
     trigger?.kind === "call" ? (stringNamed(trigger, "emphasis") ?? "primary") : "primary";
-  const triggerBtn = emphasis === "primary" ? "mat-raised-button" : "mat-stroked-button";
+  const material = isMaterialPack(ctx);
+  const triggerBtn = material
+    ? emphasis === "primary"
+      ? "mat-raised-button"
+      : "mat-stroked-button"
+    : emphasis === "primary"
+      ? 'class="loom-button loom-button-primary"'
+      : 'class="loom-button loom-button-secondary"';
+  const cancelBtn = material
+    ? 'mat-button type="button"'
+    : 'class="loom-button loom-button-ghost" type="button"';
 
   const bc = ctx.bcByAggregate?.get(aggName);
   addNg(ctx, "@angular/forms", "FormControl", "FormGroup", "ReactiveFormsModule");
-  addNg(ctx, "@angular/material/button", "MatButtonModule");
+  if (material) addNg(ctx, "@angular/material/button", "MatButtonModule");
   addNg(ctx, importFrom, mutationFn);
 
   const fields = bc ? op.params : [];
@@ -135,8 +152,8 @@ export function renderAngularModal(
     `${inner}@if (${openSig}()) {`,
     `${deep}<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}-form">`,
     ...fieldMarkup.map((m) => `${deep}  ${m}`),
-    `${deep}  <button mat-raised-button type="submit" [disabled]="${mutationVar}.isPending()" data-testid="${ns}-submit">${label}</button>`,
-    `${deep}  <button mat-button type="button" (click)='${openSig}.set(false)'>Cancel</button>`,
+    `${deep}  ${formButton(ctx, { type: "submit", emphasis: "primary", label, attrs: ` [disabled]="${mutationVar}.isPending()" data-testid="${ns}-submit"` })}`,
+    `${deep}  <button ${cancelBtn} (click)='${openSig}.set(false)'>Cancel</button>`,
     `${deep}</form>`,
     `${inner}}`,
     `${close}</div>`,

@@ -2,7 +2,13 @@ import { createInputFields } from "../../ir/enrich/wire-projection.js";
 import type { ExprIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
 import type { WalkContext } from "../_walker/walker-core.js";
-import { type AngularFormControlSpec, addNg, controlInit, fieldInput } from "./form-fields.js";
+import {
+  type AngularFormControlSpec,
+  addNg,
+  controlInit,
+  fieldInput,
+  formButton,
+} from "./form-fields.js";
 
 // ---------------------------------------------------------------------------
 // Angular `CreateForm(of: <Agg>)` renderer (angular-frontend-plan.md Slice 4b).
@@ -67,14 +73,18 @@ export function renderAngularCreateForm(
 
   // Form-shell + per-field imports.
   addNg(ctx, "@angular/forms", "FormControl", "FormGroup", "ReactiveFormsModule");
-  addNg(ctx, "@angular/material/button", "MatButtonModule");
   addNg(ctx, importFrom, mutationFn, requestType);
   ctx.usesNavigate = true; // hoists inject(Router) for the redirect
 
   const inner = "  ".repeat(depth + 1);
   const close = "  ".repeat(depth);
   const fieldMarkup = fields.map((f) => fieldInput(f.name, f.type, bc, ns, ctx));
-  const submit = `<button mat-raised-button type="submit" [disabled]="${mutationVar}.isPending()" data-testid="${ns}-submit">Create</button>`;
+  const submit = formButton(ctx, {
+    type: "submit",
+    emphasis: "primary",
+    label: "Create",
+    attrs: ` [disabled]="${mutationVar}.isPending()" data-testid="${ns}-submit"`,
+  });
 
   ctx.collectedTestids.add(`${ns}-submit`);
   for (const f of fields) ctx.collectedTestids.add(`${ns}-input-${f.name}`);

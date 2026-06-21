@@ -2,7 +2,13 @@ import type { ExprIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 import { namedArgValue, stringNamed } from "../_walker/shared/args.js";
 import type { WalkContext } from "../_walker/walker-core.js";
-import { type AngularFormControlSpec, addNg, controlInit, fieldInput } from "./form-fields.js";
+import {
+  type AngularFormControlSpec,
+  addNg,
+  controlInit,
+  fieldInput,
+  formButton,
+} from "./form-fields.js";
 
 // ---------------------------------------------------------------------------
 // Angular `WorkflowForm(runs: <Wf>)` renderer — the workflow-command form,
@@ -61,7 +67,6 @@ export function renderAngularWorkflowForm(
   const submitMethod = `onRun${T}`;
 
   addNg(ctx, "@angular/forms", "FormControl", "FormGroup", "ReactiveFormsModule");
-  addNg(ctx, "@angular/material/button", "MatButtonModule");
   addNg(ctx, importFrom, mutationFn, requestType);
   ctx.usesNavigate = true; // hoists inject(Router) for the redirect
 
@@ -69,7 +74,12 @@ export function renderAngularWorkflowForm(
   const inner = "  ".repeat(depth + 1);
   const close = "  ".repeat(depth);
   const fieldMarkup = fields.map((f) => fieldInput(f.name, f.type, bc, ns, ctx));
-  const submit = `<button mat-raised-button type="submit" [disabled]="${mutationVar}.isPending()" data-testid="${ns}-submit">Run</button>`;
+  const submit = formButton(ctx, {
+    type: "submit",
+    emphasis: "primary",
+    label: "Run",
+    attrs: ` [disabled]="${mutationVar}.isPending()" data-testid="${ns}-submit"`,
+  });
 
   ctx.collectedTestids.add(ns);
   ctx.collectedTestids.add(`${ns}-submit`);

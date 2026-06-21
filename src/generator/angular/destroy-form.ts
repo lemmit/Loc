@@ -3,7 +3,7 @@ import { humanize, lowerFirst, plural, snake } from "../../util/naming.js";
 import { emitActionThen } from "../_walker/primitives/controls.js";
 import { namedArgValue, stringNamed } from "../_walker/shared/args.js";
 import type { WalkContext } from "../_walker/walker-core.js";
-import { addNg } from "./form-fields.js";
+import { addNg, isMaterialPack } from "./form-fields.js";
 
 // ---------------------------------------------------------------------------
 // Angular `DestroyForm(of: <Agg>, then?: navigate(...))` renderer — the
@@ -89,7 +89,8 @@ export function renderAngularDestroyForm(
   const ns = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-destroy`;
   ctx.collectedTestids.add(ns);
 
-  addNg(ctx, "@angular/material/button", "MatButtonModule");
+  const material = isMaterialPack(ctx);
+  if (material) addNg(ctx, "@angular/material/button", "MatButtonModule");
   addNg(ctx, importFrom, hookName);
 
   const spec: AngularDestroyFormSpec = {
@@ -102,5 +103,8 @@ export function renderAngularDestroyForm(
   const specs = ctx.angularDestroyForms as AngularDestroyFormSpec[];
   if (!specs.some((s) => s.localVar === localVar)) specs.push(spec);
 
-  return `<button mat-raised-button color="warn" (click)="${methodName}()" [disabled]="${localVar}.isPending()" data-testid="${ns}">Delete ${humanize(agg.name)}</button>`;
+  const btnAttr = material
+    ? 'mat-raised-button color="warn"'
+    : 'class="loom-button loom-button-warn"';
+  return `<button ${btnAttr} (click)="${methodName}()" [disabled]="${localVar}.isPending()" data-testid="${ns}">Delete ${humanize(agg.name)}</button>`;
 }

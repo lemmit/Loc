@@ -1,0 +1,21 @@
+// Auto-generated.
+import { provideHttpClient, withFetch } from "@angular/common/http";
+import { type ApplicationConfig, provideZoneChangeDetection } from "@angular/core";
+import { provideAnimationsAsync } from "@angular/platform-browser/animations/async";
+import { provideRouter } from "@angular/router";
+import { QueryClient, provideTanStackQuery } from "@tanstack/angular-query-experimental";
+import { routes } from "./app.routes";
+
+// App-wide providers: the router table, a fetch-backed HttpClient the api
+// query/mutation layer wraps, Material's async animations, and the TanStack
+// QueryClient that backs the server-state cache (caching + dedup +
+// invalidation shared across every component).
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideZoneChangeDetection({ eventCoalescing: true }),
+    provideRouter(routes),
+    provideHttpClient(withFetch()),
+    provideAnimationsAsync(),
+    provideTanStackQuery(new QueryClient()),
+  ],
+};

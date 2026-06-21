@@ -1,0 +1,10 @@
+<table class="loom-table{{#if striped}} loom-table-striped{{/if}}{{#if highlight}} loom-table-highlight{{/if}}{{#if sticky}} loom-table-sticky{{/if}}"{{{testidAttr}}}{{{styleAttr}}}>
+{{indent}}<thead>
+{{headIndent}}<tr>{{#each columns}}<th>{{{this.header}}}</th>{{/each}}</tr>
+{{indent}}</thead>
+{{indent}}<tbody>
+{{bodyIndent}}@for ({{rowVar}} of {{{rowsExpr}}}; track {{{keyExpr}}}) {
+{{rowIndent}}<tr{{#if hasRowTestid}} [attr.data-testid]='{{{rowTestid}}}'{{/if}}>{{#each columns}}<td>{{{this.cellJsx}}}</td>{{/each}}</tr>
+{{bodyIndent}} }
+{{indent}}</tbody>
+{{closeIndent}}</table>

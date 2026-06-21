@@ -1,0 +1,1 @@
+<label class="loom-field">{{#if labelText}}<span class="loom-label">{{{labelText}}}</span>{{/if}}<select class="loom-input"{{{testidAttr}}}{{#if hasBind}} [value]="{{bind}}()" (change)="{{bind}}.set($any($event.target).value)"{{/if}}>@for (opt of {{{optionsExpr}}}; track opt) {<option [value]="opt">\{{ opt }}</option>}</select></label>
