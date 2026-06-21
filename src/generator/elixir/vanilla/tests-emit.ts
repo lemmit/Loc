@@ -1,0 +1,358 @@
+import type {
+  AggregateIR,
+  ExprIR,
+  OperationIR,
+  TestIR,
+  TestStmtIR,
+} from "../../../ir/types/loom-ir.js";
+import { snake, upperFirst } from "../../../util/naming.js";
+
+// ---------------------------------------------------------------------------
+// Vanilla (Ecto/Phoenix) domain `test "..."` → runnable ExUnit, ported 1:1 from
+// the Loom test idiom onto the aggregate's PURE DOMAIN CORE (domain-core-emit.ts):
+//
+//   let p = Agg.create({...})            →  {:ok, p} = Agg.create(%{...})
+//   expect(Agg.create({bad})).toThrow()  →  assert {:error, _} = Agg.create(%{...})
+//   p.op(x)                              →  p = Agg.op(p, %{"x" => ...})  (threads state)
+//   expect(p.op(bad)).toThrow()          →  assert_raise ArgumentError, fn -> Agg.op(p, %{...}) end
+//   expect(p.field).toBe(v)              →  assert p.field == v   (money/decimal via Decimal)
+//
+// All DB-free: `create/1` runs `apply_action` (validations, no Repo); an op core
+// raises its precondition before any persist and mutates the struct in memory.
+// Verified end-to-end against a generated project (`mix test`, no database).
+//
+// Operation calls are recognised by NAME (the aggregate's declared operations),
+// not by `receiverType` — a `let p = Agg.create(...)` binding is only weakly
+// typed in test position, so the receiver type can't be trusted.
+//
+// The one shape vanilla can't yet run is a value-object construction invariant
+// (`expect(Money{ amount: -1 }).toThrow()`): a vanilla VO is a plain map with no
+// validating constructor, so the invariant isn't enforced at construction — a
+// real runtime gap, not a harness one.  Such a test (and anything else this
+// renderer can't faithfully lower) is emitted as a documented `@tag :skip`.
+// ---------------------------------------------------------------------------
+
+interface Env {
+  agg: AggregateIR;
+  /** Fully-qualified module of the aggregate under test, e.g. `App.Ctx.Order`. */
+  aggMod: string;
+  /** Bounded-context module prefix, e.g. `App.Ctx`. */
+  ctxModule: string;
+}
+
+const MATCHER_OP: Record<string, string> = {
+  toBe: "==",
+  toBeGreaterThan: ">",
+  toBeGreaterThanOrEqual: ">=",
+  toBeLessThan: "<",
+  toBeLessThanOrEqual: "<=",
+};
+
+/** Decimal comparison tail per matcher — `Decimal.compare/2` returns
+ *  `:lt | :eq | :gt`, scale-insensitive (unlike `==` on `%Decimal{}`). */
+const MONEY_CMP: Record<string, string> = {
+  toBeGreaterThan: "== :gt",
+  toBeGreaterThanOrEqual: "in [:gt, :eq]",
+  toBeLessThan: "== :lt",
+  toBeLessThanOrEqual: "in [:lt, :eq]",
+};
+
+const SKIP_BODY = [
+  "  # Skipped on vanilla Elixir: this test constructs/validates a value object",
+  "  # (a plain map with no validating constructor) or uses a shape this emitter",
+  "  # can't lower to the pure domain core. See",
+  "  # docs/audits/test-parity-generated-backends.md.",
+  "  :ok",
+];
+
+export function renderVanillaAggregateTestModule(agg: AggregateIR, contextModule: string): string {
+  const env: Env = {
+    agg,
+    aggMod: `${contextModule}.${upperFirst(agg.name)}`,
+    ctxModule: contextModule,
+  };
+  const blocks = agg.tests.map((t) => renderTest(t, env));
+  const body = blocks.flatMap((block) => ["", ...block.map((l) => (l === "" ? "" : `  ${l}`))]);
+  return `# Auto-generated.  Do not edit by hand.
+defmodule ${env.aggMod}Test do
+  use ExUnit.Case, async: true${body.length > 0 ? `\n${body.join("\n")}` : ""}
+end
+`;
+}
+
+function renderTest(t: TestIR, env: Env): string[] {
+  try {
+    const used = usedRefNames(t.statements);
+    const lines = t.statements.flatMap((s) => renderStmt(s, env, used));
+    return [`test ${JSON.stringify(t.name)} do`, ...lines.map((l) => `  ${l}`), "end"];
+  } catch {
+    // Anything we can't faithfully lower (VO-construction invariants, VO
+    // instance methods, exotic shapes) → a documented skip, never broken Elixir.
+    return ["@tag :skip", `test ${JSON.stringify(t.name)} do`, ...SKIP_BODY, "end"];
+  }
+}
+
+function renderStmt(s: TestStmtIR, env: Env, used: Set<string>): string[] {
+  switch (s.kind) {
+    case "let": {
+      const name = used.has(s.name) ? snake(s.name) : `_${snake(s.name)}`;
+      if (isCreate(s.expr)) {
+        // A bound create is the happy path → bind the {:ok, _} struct.
+        return [`{:ok, ${name}} = ${renderCreate(s.expr, env)}`];
+      }
+      return [`${name} = ${vtExpr(s.expr, env)}`];
+    }
+    case "expect":
+      return [renderExpect(s.expr, env)];
+    case "expect-throws":
+      return [renderThrows(s.expr, env)];
+    case "expression": {
+      // A bare operation call is state-threading setup: `p.confirm()` →
+      // rebind the receiver to the returned (mutated) struct.
+      if (s.expr.kind === "method-call" && isAggOp(s.expr, env)) {
+        return [`${vtExpr(s.expr.receiver, env)} = ${renderOp(s.expr, env)}`];
+      }
+      return [vtExpr(s.expr, env)];
+    }
+    case "call":
+      return [`${snake(s.name)}(${s.args.map((a) => vtExpr(a, env)).join(", ")})`];
+    default:
+      // assign / add / remove / return etc. don't appear at test top-level.
+      throw new Error(`unsupported test statement '${s.kind}'`);
+  }
+}
+
+function renderExpect(expr: ExprIR, env: Env): string {
+  if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) {
+    throw new Error("expect requires a matcher");
+  }
+  let receiver = expr.receiver;
+  let negate = false;
+  if (receiver.kind === "member" && receiver.member === "not") {
+    negate = true;
+    receiver = receiver.receiver;
+  }
+  const inner = receiver.kind === "paren" ? receiver.inner : receiver;
+  const op = MATCHER_OP[expr.member];
+  if (!op) throw new Error(`unsupported value matcher '${expr.member}'`);
+  const actual = vtExpr(inner, env);
+  const arg = expr.args[0];
+  const expected = arg ? vtExpr(arg, env) : "";
+  const verb = (s: string): string => (negate ? `refute ${s}` : `assert ${s}`);
+
+  if (isMoneyLike(inner, arg)) {
+    if (expr.member === "toBe") return verb(`Decimal.equal?(${actual}, ${expected})`);
+    return verb(`Decimal.compare(${actual}, ${expected}) ${MONEY_CMP[expr.member]}`);
+  }
+  return verb(`${actual} ${op} ${expected}`);
+}
+
+function renderThrows(expr: ExprIR, env: Env): string {
+  const inner = expr.kind === "paren" ? expr.inner : expr;
+  if (isCreate(inner)) {
+    // A failed create returns {:error, changeset}; it does not raise.
+    return `assert {:error, _} = ${renderCreate(inner, env)}`;
+  }
+  if (inner.kind === "method-call" && isAggOp(inner, env)) {
+    // A failed precondition raises ArgumentError before any persist.
+    return `assert_raise ArgumentError, fn -> ${renderOp(inner, env)} end`;
+  }
+  // VO-construction invariants and the like aren't enforced in memory on vanilla.
+  throw new Error("toThrow over a non-create/op expression is not runnable on vanilla");
+}
+
+// ---------------------------------------------------------------------------
+// Expression rendering
+// ---------------------------------------------------------------------------
+
+/** Render a test-position expression to Elixir, with money/decimal literals
+ *  coerced to `Decimal` and aggregate `create`/op calls routed to the pure
+ *  domain core. */
+function vtExpr(e: ExprIR, env: Env): string {
+  switch (e.kind) {
+    case "literal":
+      return renderLiteral(e.lit, e.value);
+    case "ref":
+      // Vanilla stores an enum value as its string; locals are snake names.
+      return e.refKind === "enum-value" ? JSON.stringify(snake(e.name)) : snake(e.name);
+    case "member": {
+      const recv = vtExpr(e.receiver, env);
+      if (e.receiverType.kind === "array" && (e.member === "count" || e.member === "length")) {
+        return `Enum.count(${recv})`;
+      }
+      if (
+        e.receiverType.kind === "primitive" &&
+        e.receiverType.name === "string" &&
+        e.member === "length"
+      ) {
+        return `String.length(${recv})`;
+      }
+      return `${recv}.${snake(e.member)}`;
+    }
+    case "method-call": {
+      if (isCreate(e)) return renderCreate(e, env);
+      if (isAggOp(e, env)) return renderOp(e, env);
+      throw new Error(`unsupported method-call '${e.member}' in vanilla test position`);
+    }
+    case "call":
+      // A value-object constructor builds a plain map on vanilla.
+      if (e.callKind === "value-object-ctor") {
+        const names = e.argNames ?? [];
+        const fields = e.args
+          .map((a, i) => `${snake(names[i] ?? `f${i}`)}: ${vtExpr(a, env)}`)
+          .join(", ");
+        return `%{${fields}}`;
+      }
+      if (e.callKind === "free") {
+        return `${snake(e.name)}(${e.args.map((a) => vtExpr(a, env)).join(", ")})`;
+      }
+      throw new Error(`unsupported call kind '${e.callKind}' in vanilla test position`);
+    case "object":
+    case "new":
+      return `%{${e.fields.map((f) => `${snake(f.name)}: ${vtExpr(f.value, env)}`).join(", ")}}`;
+    case "paren":
+      return `(${vtExpr(e.inner, env)})`;
+    case "unary":
+      return e.op === "!" ? `not ${vtExpr(e.operand, env)}` : `-${vtExpr(e.operand, env)}`;
+    case "binary":
+      return `${vtExpr(e.left, env)} ${binOp(e.op)} ${vtExpr(e.right, env)}`;
+    default:
+      throw new Error(`unsupported expression kind '${e.kind}' in vanilla test position`);
+  }
+}
+
+function renderLiteral(lit: string, value: string): string {
+  switch (lit) {
+    case "money":
+    case "decimal":
+      return `Decimal.new(${JSON.stringify(value)})`;
+    case "string":
+    case "datetime":
+      return JSON.stringify(value);
+    case "bool":
+      return value;
+    case "null":
+      return "nil";
+    default:
+      // int / long — emit verbatim.
+      return value;
+  }
+}
+
+function binOp(op: string): string {
+  switch (op) {
+    case "&&":
+      return "and";
+    case "||":
+      return "or";
+    default:
+      return op;
+  }
+}
+
+/** `Agg.create(%{...})` over the create call's object-literal argument. */
+function renderCreate(e: ExprIR, env: Env): string {
+  if (e.kind !== "method-call") throw new Error("renderCreate: not a method-call");
+  const arg = e.args[0];
+  const attrs =
+    arg && arg.kind === "object"
+      ? `%{${arg.fields.map((f) => `${snake(f.name)}: ${vtExpr(f.value, env)}`).join(", ")}}`
+      : "%{}";
+  // `Agg.create(...)` — the receiver is the bare aggregate ref; honour its name.
+  const mod =
+    e.receiver.kind === "ref" ? `${env.ctxModule}.${upperFirst(e.receiver.name)}` : env.aggMod;
+  return `${mod}.create(${attrs})`;
+}
+
+/** `Agg.<op>(recv, %{"param" => value, ...})` over the pure domain core. */
+function renderOp(e: ExprIR, env: Env): string {
+  if (e.kind !== "method-call") throw new Error("renderOp: not a method-call");
+  const op = findOp(e.member, env);
+  if (!op) throw new Error(`operation '${e.member}' not found on ${env.agg.name}`);
+  const recv = vtExpr(e.receiver, env);
+  const params = e.args
+    .map((a, i) => `${JSON.stringify(op.params[i]?.name ?? `arg${i}`)} => ${vtExpr(a, env)}`)
+    .join(", ");
+  return `${env.aggMod}.${snake(op.name)}(${recv}, %{${params}})`;
+}
+
+// ---------------------------------------------------------------------------
+// Classification + helpers
+// ---------------------------------------------------------------------------
+
+function findOp(member: string, env: Env): OperationIR | undefined {
+  return env.agg.operations.find((o) => o.name === member);
+}
+
+function isCreate(e: ExprIR): boolean {
+  return e.kind === "method-call" && e.member === "create" && !e.isIntrinsicMatcher;
+}
+
+/** A call to one of the aggregate's declared operations.  Detected by NAME
+ *  (receiver types are unreliable in test position); collection-ops and
+ *  intrinsic matchers are excluded. */
+function isAggOp(e: ExprIR, env: Env): boolean {
+  return (
+    e.kind === "method-call" &&
+    !e.isCollectionOp &&
+    !e.isIntrinsicMatcher &&
+    e.member !== "create" &&
+    findOp(e.member, env) !== undefined
+  );
+}
+
+function isMoneyLike(inner: ExprIR, arg: ExprIR | undefined): boolean {
+  const memberMoney =
+    inner.kind === "member" &&
+    inner.memberType.kind === "primitive" &&
+    (inner.memberType.name === "money" || inner.memberType.name === "decimal");
+  const argMoney = arg?.kind === "literal" && (arg.lit === "money" || arg.lit === "decimal");
+  return Boolean(memberMoney || argMoney);
+}
+
+function usedRefNames(statements: readonly TestStmtIR[]): Set<string> {
+  const used = new Set<string>();
+  const collect = (e: ExprIR): void => {
+    if (e.kind === "ref") used.add(e.name);
+    for (const c of childExprs(e)) collect(c);
+  };
+  for (const s of statements) {
+    for (const e of stmtExprs(s)) collect(e);
+  }
+  return used;
+}
+
+function stmtExprs(s: TestStmtIR): ExprIR[] {
+  if (s.kind === "expect" || s.kind === "expect-throws" || s.kind === "let") return [s.expr];
+  if (s.kind === "expression") return [s.expr];
+  if (s.kind === "call") return s.args;
+  return [];
+}
+
+function childExprs(e: ExprIR): ExprIR[] {
+  switch (e.kind) {
+    case "member":
+      return [e.receiver];
+    case "method-call":
+      return [e.receiver, ...e.args];
+    case "call":
+      return e.args;
+    case "new":
+    case "object":
+      return e.fields.map((f) => f.value);
+    case "paren":
+      return [e.inner];
+    case "unary":
+      return [e.operand];
+    case "binary":
+      return [e.left, e.right];
+    case "ternary":
+      return [e.cond, e.then, e.otherwise];
+    case "convert":
+      return [e.value];
+    case "list":
+      return e.elements;
+    default:
+      return [];
+  }
+}
