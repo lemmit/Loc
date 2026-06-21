@@ -192,11 +192,11 @@ upgrade pain — the project ships a small set of **stacks** under
 
 | Stack | React | Router | Zod | TypeScript | Vite | Used by |
 |---|---|---|---|---|---|---|
-| `v1` | 18 | `react-router-dom@^6` | 3 | 5.7 | 5 | (none currently — older pack versions historically rode it) |
-| `v3` | 19.2 | `react-router@^7` | 4 | 5.7 | 5 | every React pack version currently shipped |
-| `sv1` | (Svelte 5 / SvelteKit) | SvelteKit routing | 4 | 5.7 | 5 | the svelte packs (`shadcnSvelte`, `flowbite`) |
-| `vue1` | (Vue 3) | vue-router | 4 | 5.7 | 5 | the vue packs (`vuetify`, `shadcnVue`) |
-| `ng1` | (Angular 20) | `@angular/router` | 4 | (Angular CLI) | (Angular build) | the angular pack (`angularMaterial`) |
+| `v1` | 18 | `react-router-dom@^6` | 3 | 6 | 8 | pin-only older React packs: `chakra@v2`, `mantine@v7`, `mui@v5`, `shadcn@v3` |
+| `v3` | 19.2 | `react-router@^7` | 4 | 6 | 8 | the bareword-default React packs: `chakra@v3`, `mantine@v9`, `mui@v7`, `shadcn@v4` |
+| `sv1` | (Svelte 5 / SvelteKit) | SvelteKit routing | 4 | 6 | 8 | the svelte packs (`shadcnSvelte`, `flowbite`) |
+| `vue1` | (Vue 3) | vue-router | 4 | 6 | 8 | the vue packs (`vuetify`, `shadcnVue`) |
+| `ng1` | (Angular 22) | `@angular/router` | 4 | 6 | (Angular build) | the angular pack (`angularMaterial`) |
 
 Each stack ships:
 
