@@ -7,6 +7,7 @@ import type {
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
+import { voHasConstraints } from "./vanilla/changeset-validators.js";
 import { renderVanillaAggregateTestModule } from "./vanilla/tests-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,11 @@ export function emitAggregateTests(
   out: Map<string, string>,
 ): boolean {
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+  // Value objects with a validating constructor (F5) — the vanilla emitter
+  // lowers `expect(VO{bad}).toThrow()` against these (`<VO>.new/1`).
+  const validatableVos = new Set(
+    ctx.valueObjects.filter((vo) => voHasConstraints(vo)).map((vo) => vo.name),
+  );
   let emitted = false;
   for (const agg of ctx.aggregates) {
     if (agg.tests.length === 0) continue;
@@ -67,7 +73,7 @@ export function emitAggregateTests(
     // (Ash actions are data-layer-bound — see the file header).
     const content =
       foundation === "vanilla"
-        ? renderVanillaAggregateTestModule(agg, contextModule)
+        ? renderVanillaAggregateTestModule(agg, contextModule, validatableVos)
         : renderAggregateTestModule(agg.name, agg.tests, contextModule, foundation);
     out.set(`test/${snake(ctx.name)}/${snake(agg.name)}_test.exs`, content);
     emitted = true;

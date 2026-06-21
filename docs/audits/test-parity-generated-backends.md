@@ -157,21 +157,28 @@ none) — they are only exercised indirectly if a build-gated corpus
 example happens to contain `test` blocks. The emitters that emit are
 themselves unequally guarded.
 
-### F5 — vanilla value objects aren't validated at construction (runtime gap, surfaced while porting tests)
+### F5 — vanilla value objects weren't validated at construction (runtime gap) — *fixed*
 
-A `valueobject` with an `invariant` (e.g. `Money { amount: money …
-invariant amount >= 0 }`) compiles, on `foundation: vanilla`, to a plain
-`:map` (JSONB) column with **no validating constructor** — the VO
-invariant is enforced nowhere.  So `expect(Money{ amount: -1 }).toThrow()`
-cannot run (nothing rejects the negative amount), and — more importantly —
-**a negative Money silently persists at runtime**.  This is why the
-vanilla test emitter `@tag :skip`s VO-construction invariants (the one
-remaining skip).  Closing it means generating a VO changeset/constructor
-(`Money.new(attrs) :: {:ok, t} | {:error, changeset}`, an embedded-schema
-changeset running the invariant) and routing aggregate VO fields through
-it; the test emitter would then lower `expect(Money{bad}).toThrow()` to
-`assert {:error, _} = Money.new(%{…})`.  Ash enforces VO invariants
-through the embedded resource, so this gap is vanilla-specific.
+> **Update (shipped):** every value object that declares a single-field
+> invariant now emits a validating constructor module
+> (`valueobject-emit.ts` → `lib/<app>/<ctx>/<vo>.ex`): a schemaless Ecto
+> changeset (`{%{}, @types} |> cast |> validate_number/length/format`) plus
+> `new(attrs) :: {:ok, map} | {:error, changeset}`.  Storage stays `:map`
+> (wire shape + migrations unchanged); the constructor is purely additive.
+> The aggregate `base_changeset` runs it over each VO-typed field
+> (`changeset-emit.ts:validate_vo`), so an invariant-violating VO is
+> rejected at the **real create/update path** — a negative `Money` no longer
+> persists silently.  The emitted ExUnit test lowers
+> `expect(Money{bad}).toThrow()` → `assert {:error, _} = Money.new(%{…})`,
+> so it now runs (no skip).  Single VO fields only; an array-of-VO field
+> (`prices: Money[]`) and a VO without invariants are left as-is.
+
+The original gap: a `valueobject` with an `invariant` compiled, on
+`foundation: vanilla`, to a plain `:map` (JSONB) column with **no
+validating constructor** — the invariant was enforced nowhere, so a
+negative `Money` persisted silently and `expect(Money{ amount: -1 })
+.toThrow()` couldn't run.  Ash enforces VO invariants through the embedded
+resource, so this gap was vanilla-specific.
 
 ### F6 — vanilla didn't apply Loom field defaults in the domain layer (runtime gap) — *fixed*
 
@@ -194,13 +201,11 @@ pass every required field.  Independent of test emission — it affected the
 real create path — but it surfaced here because a DSL test that leans on a
 default would fail only on vanilla.
 
-> Both F5 and F6 are pre-existing **vanilla codegen** gaps the test-parity
-> work uncovered, not regressions introduced by it.  **F6 is now fixed**
-> (field defaults emitted); **F5 remains open** — its runtime fix is a
-> broad VO-storage change (`:map` → embedded schema, touching wire shape +
-> migrations + queries), and shipping only the test-enabling half would
-> make the VO-invariant test green while bad values still persist, so it's
-> deferred to a focused PR rather than half-done.
+> Both F5 and F6 were pre-existing **vanilla codegen** gaps the test-parity
+> work uncovered, not regressions introduced by it.  **Both are now fixed** —
+> F6 (field defaults emitted) and F5 (validating VO constructor + aggregate
+> `validate_vo`), the latter without changing VO storage (still `:map`), so
+> wire shape and migrations are untouched.
 
 ## What is at parity (the positives)
 
@@ -242,10 +247,11 @@ default would fail only on vanilla.
    changeset build, no data layer) — lowers invariant/precondition
    `toThrow` on ash without a DB.  Happy-path state assertions on ash
    still need a DataCase + `SQL.Sandbox` harness (deferred).
-4. **Close F5/F6 (vanilla runtime gaps):** generate a validating VO
-   constructor (un-skips the last vanilla test shape) and apply field
-   defaults in the vanilla schema/changeset.  Both are real correctness
-   fixes beyond tests.
+4. ~~**Close F5/F6 (vanilla runtime gaps)**~~ — **done**.  F6 emits field
+   defaults onto the Ecto field; F5 emits a validating VO constructor
+   (`valueobject-emit.ts`) and runs it from `base_changeset` (`validate_vo`),
+   so an invariant-violating VO is rejected at the real create/update path
+   (storage stays `:map`).  Single VO fields; array-of-VO is a follow-up.
 5. **Add a conformance gate** that every domain-logic backend emits a
    test artefact for an aggregate declaring `test` blocks, and pin the
    per-foundation classification (closes F2's detection gap).

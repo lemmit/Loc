@@ -38,6 +38,7 @@ import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaRetrievals } from "./retrieval-emit.js";
 import { emitVanillaSchemas } from "./schema-emit.js";
 import { emitVanillaShellFiles } from "./shell-emit.js";
+import { emitVanillaValueObjects } from "./valueobject-emit.js";
 import {
   emitVanillaViewModules,
   emitVanillaViewsController,
@@ -83,6 +84,9 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   let hasDomainTests = false;
   for (const ctx of contexts) {
     emitVanillaSchemas(appModule, ctx, out, sys);
+    // Validating value-object constructors (`<VO>.new/1`) for VOs with
+    // invariants — enforced at construction (F5) + called by the test suite.
+    emitVanillaValueObjects(appModule, ctx, out);
     emitVanillaChangesets(appModule, ctx, out, sys);
     emitVanillaRepositories(appModule, ctx, out, sys, principalIdKey);
     // Event-sourced aggregates (persistedAs(eventLog)) — struct + event-log
