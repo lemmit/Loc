@@ -16,10 +16,14 @@
 import { expect, test } from "@playwright/test";
 import { browserCanReachNetwork, waitForPlaygroundReady } from "./_helpers";
 
-// QUARANTINED (#1242): prepare() never resolves after a SUCCESSFUL in-browser
-// bundle, so this hangs the full 600s Bundle wait ×2 retries — the dominant
-// reason playground-e2e blew its job cap and ended `cancelled` (no report).
-// Un-fixme once #1242 lands.
+// #1242 (fixed): not a runtime stall — the bundle completes, prepare()
+// resolves, and the footer toast renders.  The spec asserted "…KB…", but the
+// Hono bundle is MB-scale, so `formatBytes` emits "MB" and the KB-only regex
+// never matched — reading as a 600s "stall".  The toast matcher below is now
+// unit-agnostic ([\d.]+ [KM]?B).  Still test.fixme: a *separate* Boot-step
+// failure (#1468) now blocks the full run — btn-boot times out /
+// backend-status never "booted" (it was masked by the 600s toast stall).
+// Un-fixme once #1468 lands; the toast fix below is already correct.
 test.fixme("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   // Capture *every* console error + pageerror surfaced both in the
   // playground host and inside the iframe sandbox.  The iframe shares
@@ -63,7 +67,7 @@ test.fixme("mantine@v9 preview boots without runtime errors", async ({ page }) =
   // React 19 runtime and Mantine 9 — ~140 modules; first cold run ~30 s.
   await page.getByTestId("btn-bundle").click();
   await expect(
-    page.getByText(/bundled .*KB in \d+ ms \(\d+ deps fetched\)/),
+    page.getByText(/bundled [\d.]+ [KM]?B in \d+ ms \(\d+ deps fetched\)/),
   ).toBeVisible({ timeout: 600_000 });
 
   // Boot the Hono backend — PGlite WASM + .data come from jsdelivr.
