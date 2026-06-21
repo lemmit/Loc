@@ -5,6 +5,7 @@ import type {
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  RepositoryIR,
   SystemIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
@@ -15,10 +16,13 @@ import { humanize, lowerFirst } from "../../util/naming.js";
 import { AUTH_GATE_ANGULAR, AUTH_SESSION_SERVICE_ANGULAR } from "../_frontend/auth-ui.js";
 import { renderGateExpr } from "../_frontend/gate-expr.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
+import { hasAnyView } from "../_frontend/views-module.js";
+import { hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { buildAngularApiModule } from "./api-module.js";
 import { type AngularRouteDesc, renderAngularRoutes, routePath } from "./routes-emitter.js";
+import { buildAngularViewsModule } from "./views-module.js";
 import { angularTarget } from "./walker/angular-target.js";
 import {
   pageComponentName,
@@ -27,6 +31,7 @@ import {
   renderAngularPage,
   renderAngularPageStub,
 } from "./walker/page-shell.js";
+import { buildAngularWorkflowsModule } from "./workflows-module.js";
 
 // ---------------------------------------------------------------------------
 // Angular frontend generator — orchestrator (angular-frontend-plan.md
@@ -74,6 +79,13 @@ export function generateAngularForContexts(
   const aggregates: Array<{ agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }> = [];
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) aggregates.push({ agg, ctx });
+  }
+  // Per-aggregate repository (carries the parameterised finds the api module
+  // emits a `use<Find><Agg>` factory for).  A plain aggregate without a
+  // declared `repository` has only the enriched auto-`all` find.
+  const repoByAggregate = new Map<string, RepositoryIR>();
+  for (const ctx of contexts) {
+    for (const repo of ctx.repositories) repoByAggregate.set(repo.aggregateName, repo);
   }
   const hasDelete = aggregates.some((a) => !!a.agg.canonicalDestroy);
   const usesMoney = contexts.some(contextUsesMoney);
@@ -233,7 +245,20 @@ export function generateAngularForContexts(
   // signal-backed `use<Op><Agg>` read factory (data-path sub-slice A; the
   // QueryView read path that consumes them lands in the next sub-slice).
   for (const { agg } of aggregates) {
-    out.set(`src/api/${lowerFirst(agg.name)}.ts`, buildAngularApiModule(agg));
+    out.set(
+      `src/api/${lowerFirst(agg.name)}.ts`,
+      buildAngularApiModule(agg, repoByAggregate.get(agg.name)),
+    );
+  }
+  // Views / workflows API modules — the Angular-native sibling of the
+  // React/Vue zod modules: TanStack `injectQuery` / `injectMutation` off an
+  // `@Injectable` service.  Emitted only when the served contexts declare any
+  // view / workflow, so a plain project's tree is unchanged.
+  if (hasAnyView(contexts)) {
+    out.set("src/api/views.ts", buildAngularViewsModule(contexts));
+  }
+  if (hasAnyWorkflow(contexts)) {
+    out.set("src/api/workflows.ts", buildAngularWorkflowsModule(contexts));
   }
   out.set("src/logger.ts", pack.render("logger", {}));
   // Static host for the built bundle (SPA fallback) + a same-origin `/api`

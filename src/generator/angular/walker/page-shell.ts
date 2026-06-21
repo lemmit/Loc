@@ -6,7 +6,10 @@ import type { LoadedPack } from "../../_packs/loader.js";
 import { emitExpr, type WalkContext, type WalkResult } from "../../_walker/walker-core.js";
 import type { AngularActionSpec } from "../action.js";
 import type { AngularCreateFormSpec } from "../create-form.js";
+import type { AngularDestroyFormSpec } from "../destroy-form.js";
 import type { AngularModalSpec } from "../modal.js";
+import type { AngularOperationFormSpec } from "../operation-form.js";
+import type { AngularWorkflowFormSpec } from "../workflow-form.js";
 import { angularTarget } from "./angular-target.js";
 
 // ---------------------------------------------------------------------------
@@ -60,21 +63,26 @@ export function pageSlug(page: PageIR, nameCtx: PageNameCtx): string {
   return pageSelector(page, nameCtx).slice("app-".length);
 }
 
-/** True when the walked body needs features not assembled yet — such a page
- *  is stubbed until a later sub-slice.  Reactive Forms (`formOfs`) are still
- *  deferred; of the api reads, only the collection `findAll` (`useAll*`) is
- *  wired, so a page using `byId` / mutations / parameterised finds stays
- *  stubbed until those sub-slices land. */
+/** True when the walked body needs features the Angular shell does not assemble
+ *  — such a page is stubbed.  EVERY form / mutation primitive is now
+ *  Angular-forked through a `WalkerTarget` seam onto its own side-channel:
+ *  `CreateForm` / `WorkflowForm` / standalone `OperationForm` (and the spoken
+ *  `Form(<inst>.<op>)`) → `angularForms` / `angularWorkflowForms` /
+ *  `angularOpForms`; `Action` / `Modal` / `DestroyForm` →
+ *  `angularActions` / `angularModals` / `angularDestroyForms`.  Every api read —
+ *  collection (`useAll…`), single-record (`use…ById`), reactive parameterised
+ *  finds (`use<Find><Agg>`), views (`use<View>View`) and workflow-instance reads
+ *  — is hoisted generically.  So the shared React-shaped sinks below stay EMPTY
+ *  on Angular for the whole primitive surface; the two checks remain only as
+ *  defence-in-depth — a future primitive that records onto the shared sink
+ *  before it is forked degrades to a labelled stub rather than emitting a
+ *  dangling reference. */
 export function pageNeedsDeferredFeatures(result: WalkResult): boolean {
+  // Shared RHF form sink — Angular forks every form primitive onto its own
+  // side-channel, so this is empty in practice (defence-in-depth only).
   if (result.formOfs.length > 0) return true;
-  // `Action(inst.op)` / operation forms record a mutation hook the shell does
-  // not assemble yet — stub rather than emit a dangling `<op><Agg>` reference.
+  // Shared mutation sink — likewise empty (Action/Modal/DestroyForm are forked).
   if (result.actionMutations.length > 0) return true;
-  for (const h of result.usedApiHooks.values()) {
-    // Collection (`useAll…`) and single-record (`use…ById`) reads are
-    // supported; anything else (action mutations) still defers.
-    if (!h.hookName.startsWith("useAll") && !h.hookName.endsWith("ById")) return true;
-  }
   return false;
 }
 
@@ -268,19 +276,44 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     for (const [from, names] of [...byPath.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       imports.push(`import { ${[...names].sort().join(", ")} } from ${JSON.stringify(from)};`);
     }
-    // Route-param args resolve against the bound class fields (`id` → `this.id`).
-    const bind = (arg: string): string => (boundParams.includes(arg) ? `this.${arg}` : arg);
+    // Hoist args are class-field initializers, so every member they read must
+    // resolve against `this`.  A bare route-param arg (`id`) → `this.id`; a
+    // parameterised-find query object (`{ status: status() }`) carries state /
+    // derived signal CALLS that need `this.` too (`{ status: this.status() }`).
+    // Route params bound as plain string fields are read bare inside the object
+    // (not as a signal call), so prefix them as whole words there.
+    const stateAndDerived = new Set<string>([
+      ...page.state.map((s) => s.name),
+      ...derived.map((d) => d.name),
+    ]);
+    const bind = (arg: string): string => {
+      if (boundParams.includes(arg)) return `this.${arg}`;
+      let out = prefixSignalReadsWithThis(arg, stateAndDerived);
+      for (const p of boundParams) {
+        out = out.replace(new RegExp(`(?<![.\\w])${p}\\b(?!\\()`, "g"), `this.${p}`);
+      }
+      return out;
+    };
     const hoisted = angularTarget.renderApiHoisting(
-      [...result.usedApiHooks.values()].map((h) => ({
-        apiHandle: "",
-        aggregateName: "",
-        operation: "",
-        kind: "query" as const,
-        args: [],
-        varName: h.varName,
-        hookName: h.hookName,
-        argsRendered: h.argsRendered.map(bind),
-      })),
+      [...result.usedApiHooks.values()].map((h) => {
+        const bound = h.argsRendered.map(bind);
+        // A parameterised `find` takes a REACTIVE getter, not a snapshot: wrap
+        // the resolved query object in `() => (...)` so the `injectQuery`
+        // options callback re-reads it and a state-bound filter live-refetches.
+        // A bare `{ status: this.status() }` field-initializer would freeze the
+        // query at construction.
+        const args = h.reactiveQuery && bound.length > 0 ? bound.map((a) => `() => (${a})`) : bound;
+        return {
+          apiHandle: "",
+          aggregateName: "",
+          operation: "",
+          kind: "query" as const,
+          args: [],
+          varName: h.varName,
+          hookName: h.hookName,
+          argsRendered: args,
+        };
+      }),
     );
     for (const line of hoisted) members.push(`  ${line}`);
   }
@@ -306,6 +339,88 @@ export function renderAngularPage(input: AngularPageShellInput): string {
         "  }",
       ].join("\n"),
     );
+  }
+
+  // `WorkflowForm(runs: …)` — the Angular renderer recorded one spec per form on
+  // `angularWorkflowForms`.  Each hoists the `use<Wf>Workflow` mutation, builds
+  // the typed Reactive `FormGroup` over the command params, and declares the
+  // submit handler (`mutateAsync(getRawValue())` → navigate `/workflows`).  The
+  // workflow command returns `void`, so the redirect is a fixed list route (no
+  // `out.id`).
+  const angularWorkflowForms = (result.angularWorkflowForms ?? []) as AngularWorkflowFormSpec[];
+  for (const form of angularWorkflowForms) {
+    members.push(`  readonly ${form.mutationVar} = ${form.mutationFn}();`);
+    const controls = form.controls
+      .map((c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`)
+      .join(", ");
+    members.push(`  readonly ${form.formVar} = new FormGroup({ ${controls} });`);
+    members.push(
+      [
+        `  async ${form.submitMethod}(): Promise<void> {`,
+        `    if (this.${form.formVar}.invalid) return;`,
+        `    await this.${form.mutationVar}.mutateAsync(this.${form.formVar}.getRawValue());`,
+        '    this.router.navigateByUrl("/workflows");',
+        "  }",
+      ].join("\n"),
+    );
+  }
+
+  // Standalone `OperationForm(...)` — the renderer recorded one spec per form on
+  // `angularOpForms`.  Each hoists the `use<Op><Agg>()` mutation, builds the
+  // typed Reactive `FormGroup` over the op params, and declares the submit
+  // handler (`mutateAsync({ id, input: getRawValue() })`).  The id expression
+  // resolves in template scope (a bare route `id`, or `<param>.id`); it's
+  // `this.`-prefixed here for the method body.
+  const angularOpForms = (result.angularOpForms ?? []) as AngularOperationFormSpec[];
+  if (angularOpForms.length > 0) {
+    // The `use<Op><Agg>` import rides `result.imports` (the renderer `addNg`s it),
+    // emitted once by the generic import block below — no separate line here.
+    const idFields = new Set<string>([
+      ...page.state.map((s) => s.name),
+      ...page.params.map((p) => p.name),
+      ...boundParams,
+    ]);
+    for (const f of angularOpForms) {
+      members.push(`  readonly ${f.mutationVar} = ${f.mutationFn}();`);
+      const controls = f.controls
+        .map((c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`)
+        .join(", ");
+      const group = controls ? `{ ${controls} }` : "{}";
+      members.push(`  readonly ${f.formVar} = new FormGroup(${group});`);
+      // The id expression is a template-scope ref (`id` / `order.id`); class
+      // fields read against `this` (`this.id` / `this.order.id`).
+      const idExpr = prefixWholeWordsWithThis(f.idExpr, idFields);
+      members.push(
+        [
+          `  async ${f.submitMethod}(): Promise<void> {`,
+          `    if (this.${f.formVar}.invalid) return;`,
+          `    await this.${f.mutationVar}.mutateAsync({ id: ${idExpr}, input: this.${f.formVar}.getRawValue() });`,
+          "  }",
+        ].join("\n"),
+      );
+    }
+  }
+
+  // `DestroyForm(of: …)` — the renderer recorded one spec per form on
+  // `angularDestroyForms`.  Each hoists `readonly <var> = useDelete<Agg>()` and a
+  // confirm-delete method: `window.confirm` → `mutateAsync(id)` → the `then:`
+  // redirect (default the aggregate's list route).
+  const angularDestroyForms = (result.angularDestroyForms ?? []) as AngularDestroyFormSpec[];
+  if (angularDestroyForms.length > 0) {
+    // The `useDelete<Agg>` import rides `result.imports` (the renderer `addNg`s
+    // it), emitted once by the generic import block below.
+    for (const f of angularDestroyForms) {
+      members.push(`  readonly ${f.localVar} = ${f.hookName}();`);
+      members.push(
+        [
+          `  async ${f.method.name}(): Promise<void> {`,
+          `    if (!window.confirm(${f.method.confirmMsg})) return;`,
+          `    await this.${f.localVar}.mutateAsync(this.id);`,
+          `    ${f.method.thenJs};`,
+          "  }",
+        ].join("\n"),
+      );
+    }
   }
 
   // `Action(inst.op)` — the Angular renderer recorded one spec per operation on
@@ -436,6 +551,20 @@ function prefixSignalReadsWithThis(expr: string, refNames: ReadonlySet<string>):
   let out = expr;
   for (const n of refNames) {
     out = out.replace(new RegExp(`(?<![.\\w])${n}\\(\\)`, "g"), `this.${n}()`);
+  }
+  return out;
+}
+
+/** Prefix `this.` before each bare WHOLE-WORD class-field reference in
+ *  `refNames` (e.g. a route-param field `id` → `this.id`, `order` → `this.order`
+ *  in `order.id`).  Used to lift a template-scope id expression into a method
+ *  body.  The negative lookbehind keeps an already-prefixed / member access
+ *  untouched; the trailing lookahead leaves a signal-CALL read (`name()`) to
+ *  `prefixSignalReadsWithThis`. */
+function prefixWholeWordsWithThis(expr: string, refNames: ReadonlySet<string>): string {
+  let out = expr;
+  for (const n of refNames) {
+    out = out.replace(new RegExp(`(?<![.\\w])${n}\\b(?!\\()`, "g"), `this.${n}`);
   }
   return out;
 }

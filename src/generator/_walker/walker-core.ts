@@ -169,6 +169,21 @@ export interface WalkResult {
    *  toggle signal, the op `FormGroup`, and the submit method.  `unknown[]`;
    *  ignored by the other frameworks. */
   angularModals?: unknown[];
+  /** OPTIONAL Angular side-channel: per-`WorkflowForm(runs:)` specs the Angular
+   *  target's `renderWorkflowForm` seam records so its page-shell can build the
+   *  typed Reactive `FormGroup` + the command-posting submit method.  `unknown[]`;
+   *  ignored by the other frameworks. */
+  angularWorkflowForms?: unknown[];
+  /** OPTIONAL Angular side-channel: per-standalone-`OperationForm` specs the
+   *  Angular target's `renderOperationForm` seam records so its page-shell can
+   *  build the typed Reactive `FormGroup` + the id-at-mutate submit method.
+   *  `unknown[]`; ignored by the other frameworks. */
+  angularOpForms?: unknown[];
+  /** OPTIONAL Angular side-channel: per-`DestroyForm` specs the Angular target's
+   *  `renderDestroyForm` seam records so its page-shell can hoist the
+   *  `useDelete<Agg>` mutation + emit the confirm-delete method.  `unknown[]`;
+   *  ignored by the other frameworks. */
+  angularDestroyForms?: unknown[];
   /** Every static `testid:` literal encountered while
    *  walking the body, plus the synthesised testid bases the walker
    *  generates on the user's behalf (e.g. `<form-namespace>-input-
@@ -393,6 +408,9 @@ export function walkBody(
     angularForms: [],
     angularActions: [],
     angularModals: [],
+    angularWorkflowForms: [],
+    angularOpForms: [],
+    angularDestroyForms: [],
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
@@ -417,6 +435,9 @@ export function walkBody(
     angularForms: ctx.angularForms,
     angularActions: ctx.angularActions,
     angularModals: ctx.angularModals,
+    angularWorkflowForms: ctx.angularWorkflowForms,
+    angularOpForms: ctx.angularOpForms,
+    angularDestroyForms: ctx.angularDestroyForms,
     actionMutations: ctx.actionMutations,
     collectedTestids: ctx.collectedTestids,
     usesCodeBlock: ctx.usesCodeBlock,
@@ -542,6 +563,15 @@ export interface Sink {
   /** Angular `Modal` operation-dialog specs — mutable sink the `renderModal`
    *  seam pushes into (see the WalkResult field). */
   angularModals?: unknown[];
+  /** Angular `WorkflowForm` specs — mutable sink the `renderWorkflowForm` seam
+   *  pushes into (see the WalkResult field). */
+  angularWorkflowForms?: unknown[];
+  /** Angular standalone `OperationForm` specs — mutable sink the
+   *  `renderOperationForm` seam pushes into (see the WalkResult field). */
+  angularOpForms?: unknown[];
+  /** Angular `DestroyForm` specs — mutable sink the `renderDestroyForm` seam
+   *  pushes into (see the WalkResult field). */
+  angularDestroyForms?: unknown[];
   /** `Action(<instance>.<op>)` mutation wiring (see
    *  `ActionMutationState`). */
   actionMutations: ActionMutationState[];

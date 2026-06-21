@@ -1,9 +1,10 @@
-// Angular page `requires` guard on the STUB path (D-AUTH-OIDC).  A gated page
-// whose body needs deferred features (here a parameterised find → the
-// `renderAngularPageStub` placeholder) must still render a `<Forbidden>`
-// fallback when the currentUser-only gate fails — otherwise the stub chrome
-// leaks to an unauthorized user.  Walkable gated bodies are covered by
-// page-requires-gate.test.ts; this covers the stub branch.
+// Angular page `requires` guard on a parameterised-find page (D-AUTH-OIDC).  A
+// gated page must render a `<Forbidden>` fallback when the currentUser-only gate
+// fails — otherwise the page chrome leaks to an unauthorized user.  This page
+// uses a parameterised find (`Support.Ticket.open("open")`), which the Angular
+// generator now renders as a REAL body (the `use<Find><Agg>` factory landed),
+// so the gate wraps the walked QueryView rather than the legacy stub.  Other
+// walkable gated bodies are covered by page-requires-gate.test.ts.
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";
@@ -34,27 +35,31 @@ system Helpdesk {
 }
 `;
 
-async function stubPage(authUi: boolean): Promise<string> {
+async function gatedPage(authUi: boolean): Promise<string> {
   const files = await generateSystemFiles(SYS({ authUi }));
   return files.get("web/src/app/pages/admin-q.component.ts")!;
 }
 
-describe("angular stub-path requires gate", () => {
-  it("gates the stub with @if/@else Forbidden + injects the session", async () => {
-    const page = await stubPage(true);
-    // It IS the stub (body uses a parameterised find — deferred feature).
-    expect(page).toContain("stub — body needs api/forms support");
+describe("angular parameterised-find requires gate", () => {
+  it("gates the walked body with @if/@else Forbidden + injects the session", async () => {
+    const page = await gatedPage(true);
+    // It is a REAL body now (the parameterised find is wired), not the stub.
+    expect(page).not.toContain("stub — body needs api/forms support");
+    expect(page).toContain('import { useOpenTicket } from "../../api/ticket";');
+    expect(page).toContain('readonly ticketOpen = useOpenTicket(() => ({ status: "open" }));');
+    // …gated by the currentUser-only `requires` predicate.
     expect(page).toContain('import { SessionService } from "../auth/session.service";');
     expect(page).toContain("readonly session = inject(SessionService);");
     expect(page).toContain('@if (currentUser.role === "manager") {');
     expect(page).toContain("<h2>Forbidden</h2>");
   });
 
-  it("leaves the stub byte-identical without auth: ui", async () => {
-    const page = await stubPage(false);
-    expect(page).toContain("stub — body needs api/forms support");
+  it("renders the ungated body (no session, no Forbidden) without auth: ui", async () => {
+    const page = await gatedPage(false);
+    expect(page).not.toContain("stub — body needs api/forms support");
+    expect(page).toContain('readonly ticketOpen = useOpenTicket(() => ({ status: "open" }));');
+    // No client-side gate without an `auth: ui` frontend.
     expect(page).not.toContain("SessionService");
-    expect(page).not.toContain("@if (");
     expect(page).not.toContain("Forbidden");
   });
 });

@@ -36,7 +36,10 @@ import type {
 import type { WalkContext } from "../../_walker/walker-core.js";
 import { renderAngularAction } from "../action.js";
 import { renderAngularCreateForm } from "../create-form.js";
+import { renderAngularDestroyForm } from "../destroy-form.js";
 import { renderAngularModal } from "../modal.js";
+import { renderAngularOperationForm } from "../operation-form.js";
+import { renderAngularWorkflowForm } from "../workflow-form.js";
 
 /** Angular-flavoured `WalkerTarget`.  Stateless and pure — no walker
  *  context is captured; every method takes the data it needs.  Consumed
@@ -170,19 +173,30 @@ export const angularTarget: WalkerTarget = {
     return call.kind === "call" ? renderAngularAction(call, ctx, depth) : null;
   },
 
-  /** Defer the operation-dialog form — Angular renders forms inline (no
-   *  `field-input-*` / `primitive-modal` templates), and the dialog form is a
-   *  later batch.  Returning a comment here keeps the op-form path off the
-   *  shared RHF dispatch so the page renders a placeholder instead of crashing
-   *  on a missing template. */
-  renderOperationForm(_call: ExprIR): string | null {
-    return "<!-- OperationForm: the operation-dialog form is not yet supported on Angular -->";
+  /** Fork a STANDALONE `OperationForm(...)` (flat `of:`/`op:` or instance
+   *  `<inst>.<op>` / `Form(<inst>.<op>)`) to an always-visible typed Reactive
+   *  Form (the modal-hosted variant is forked separately by `renderModal`). */
+  renderOperationForm(call: ExprIR, ctx: WalkContext, depth: number): string | null {
+    return call.kind === "call" ? renderAngularOperationForm(call, ctx, depth) : null;
   },
 
   /** Fork `Modal { OperationForm(…), trigger: … }` to a signal-toggled inline
    *  Reactive Form (the operation-dialog form). */
   renderModal(call: ExprIR, ctx: WalkContext, depth: number): string | null {
     return call.kind === "call" ? renderAngularModal(call, ctx, depth) : null;
+  },
+
+  /** Fork `DestroyForm(of: <Agg>)` to a confirm-delete button wired to the
+   *  `useDelete<Agg>` mutation (the shared `actionMutations`/`window.confirm`
+   *  path is skipped). */
+  renderDestroyForm(call: ExprIR, ctx: WalkContext, depth: number): string | null {
+    return call.kind === "call" ? renderAngularDestroyForm(call, ctx, depth) : null;
+  },
+
+  /** Fork `WorkflowForm(runs: <Wf>)` to a typed Reactive Form posting the
+   *  workflow command (the shared react-hook-form path is skipped). */
+  renderWorkflowForm(call: ExprIR, ctx: WalkContext, depth: number): string | null {
+    return call.kind === "call" ? renderAngularWorkflowForm(call, ctx, depth) : null;
   },
 
   /** `Button(to:)` → `router.navigateByUrl(<to>)` (bound as a statement by
