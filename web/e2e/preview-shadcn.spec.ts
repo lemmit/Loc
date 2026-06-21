@@ -22,11 +22,12 @@ import {
   waitForPlaygroundReady,
 } from "./_helpers";
 
-// QUARANTINED (#1242): prepare() never resolves after a SUCCESSFUL in-browser
-// bundle, so this hangs the full 600s Bundle wait ×2 retries — the dominant
-// reason playground-e2e blew its job cap and ended `cancelled` (no report).
-// Un-fixme once #1242 lands.
-test.fixme("editor → shadcn-design system → preview boots", async ({ page }) => {
+// #1242 (fixed): not a runtime stall — the bundle completes, prepare()
+// resolves, and the footer toast renders.  The spec asserted "…KB…", but the
+// Hono bundle is MB-scale, so `formatBytes` emits "MB" and the KB-only regex
+// never matched — reading as a 600s "stall".  The toast matcher below is now
+// unit-agnostic ([\d.]+ [KM]?B).
+test("editor → shadcn-design system → preview boots", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (msg) => {
     if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -84,7 +85,7 @@ test.fixme("editor → shadcn-design system → preview boots", async ({ page })
 
   await test.step("Bundle", async () => {
     await page.getByTestId("btn-bundle").click();
-    await expect(page.getByText(/bundled .*KB in \d+ ms \(\d+ deps fetched\)/)).toBeVisible({
+    await expect(page.getByText(/bundled [\d.]+ [KM]?B in \d+ ms \(\d+ deps fetched\)/)).toBeVisible({
       timeout: 600_000,
     });
   });
