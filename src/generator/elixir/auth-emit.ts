@@ -88,7 +88,7 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
  * always carries `:id`).  Only this id is stamped into the request context,
  * never the whole principal — minimal PII on the logs.
  */
-function actorIdKey(user: UserIR | undefined): string {
+export function actorIdKey(user: UserIR | undefined): string {
   if (!user || user.fields.length === 0) return "id";
   const idField = user.fields.find((f) => f.name.toLowerCase() === "id");
   return snake((idField ?? user.fields[0]).name);

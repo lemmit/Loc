@@ -808,44 +808,78 @@ export function validatePythonStampSupport(sys: SystemIR, diags: LoomDiagnostic[
   }
 }
 
-// Lifecycle stamps on the elixir backend.  Unlike java, .NET, node, and python
-// — which emit `_stampOn*` entity methods / an EF Core interceptor / Hono
-// write-hook calls / SQLAlchemy persist-time stamping — elixir does NOT consume
-// `contextStamps` yet: the audit COLUMNS are emitted (the `auditable` fields),
-// but nothing ever populates them, so a `stamp` (or `with audit`/`auditable`)
-// would silently leave `createdAt` / `createdBy` null.  Fail fast — never a
-// silent drop — mirroring `validateJavaStampSupport` /
-// `validateDotnetStampSupport`: any lifecycle stamp on an elixir deployable is
-// an error until the backend wires stamping.  Stable per-family diagnostic codes
-// (a literal each, so the diagnostic-codes-completeness source scan can see them
-// — it requires a double-quoted `code: "loom.…"` in every `diags.push`).
-const STAMP_UNSUPPORTED_CODE: Readonly<Record<string, string>> = {
-  elixir: "loom.elixir-stamp-unsupported",
-};
-
-export function validateStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+// Lifecycle stamps on the elixir backend.  The **Ash** foundation (the default
+// for `platform: elixir`) now APPLIES stamps: each `contextStamps` rule becomes
+// an Ash `change fn ... end, on: [:create|:update]` block in the resource that
+// `force_change_attribute`s the audit columns; a non-principal value renders
+// directly (`now()` → `DateTime.utc_now()`), and a `currentUser` value resolves
+// to the principal id read from the threaded Ash actor (`context.actor.<idKey>`,
+// the analogue of java `currentUser.id()` / .NET `RequestContext...CurrentUser`).
+// Two cases stay fail-fast (never a silent drop), mirroring
+// `validateJavaStampSupport` / `validateDotnetStampSupport`: a principal-
+// referencing stamp on a deployable WITHOUT auth (no request actor to thread),
+// and stamps on an event-sourced aggregate (state is folded from events, not
+// field-stamped).  The **vanilla** (plain Ecto) foundation does NOT yet consume
+// `contextStamps` — it stays fully gated (any stamp → `loom.elixir-stamp-unsupported`).
+export function validateElixirStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
   for (const dep of sys.deployables) {
-    const fam = platformFamily(dep.platform);
-    if (!fam || !(fam in STAMP_UNSUPPORTED_CODE)) continue;
+    if (platformFamily(dep.platform) !== "elixir") continue;
+    const vanilla = dep.foundation === "vanilla";
+    const authed = !!(dep.auth?.required && sys.user);
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
       for (const agg of ctx.aggregates) {
         const enriched = agg as EnrichedAggregateIR;
-        if ((enriched.contextStamps ?? []).length === 0) continue;
-        const base = {
-          severity: "error" as const,
-          message:
-            `Deployable '${dep.name}' (platform ${fam}) hosts aggregate '${ctxName}.${agg.name}' ` +
-            `with a lifecycle stamp (e.g. from \`with audit\`/\`auditable\`, or \`stamp onCreate { … }\`), ` +
-            `but the ${fam} backend does not yet apply lifecycle stamps — the audit columns would be ` +
-            `emitted but never populated. Host this context on a java, dotnet, node, or python ` +
-            `deployable, or remove the stamp (the \`auditable\` audit-columns capability and the \`audit\` stamp macro).`,
-          source: `${sys.name}/${dep.name}`,
-        };
-        if (fam === "elixir") diags.push({ ...base, code: "loom.elixir-stamp-unsupported" });
+        const stamps = enriched.contextStamps ?? [];
+        if (stamps.length === 0) continue;
+        // Vanilla foundation: stamping is not wired — gate every stamp loudly,
+        // exactly as the (now removed) generic gate did for elixir.
+        if (vanilla) {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform elixir, foundation: vanilla) hosts aggregate ` +
+              `'${ctxName}.${agg.name}' with a lifecycle stamp (e.g. from \`with audit\`/\`auditable\`, or ` +
+              `\`stamp onCreate { … }\`), but the vanilla (plain Ecto) foundation does not yet apply ` +
+              `lifecycle stamps — the audit columns would be emitted but never populated. Use ` +
+              `'foundation: ash' (which applies stamps), host this context on a java or dotnet ` +
+              `deployable, or remove the stamp.`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.elixir-stamp-unsupported",
+          });
+          continue;
+        }
+        const usesPrincipal = stamps.some((r) =>
+          r.assignments.some((a) => exprUsesCurrentUser(a.value)),
+        );
+        if (usesPrincipal && !authed) {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform elixir) hosts aggregate '${ctxName}.${agg.name}' ` +
+              `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
+              `from \`with audit\`), but the deployable has no auth — there is no request-scoped ` +
+              `principal (Ash actor) to stamp from. Add 'auth: required' (and a system 'user {}' block), ` +
+              `or use non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.elixir-stamp-unsupported",
+          });
+        }
+        if (enriched.persistedAs === "eventLog") {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform elixir) hosts event-sourced aggregate ` +
+              `'${ctxName}.${agg.name}' with a lifecycle stamp — stamps mutate state fields, but an ` +
+              `event-sourced aggregate's state is folded from its event stream. ` +
+              `Record the timestamp in an event instead, or drop persistedAs(eventLog).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.elixir-stamp-unsupported",
+          });
+        }
       }
     }
   }

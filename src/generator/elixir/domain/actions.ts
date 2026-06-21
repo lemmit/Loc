@@ -6,7 +6,14 @@
 // -------------------------------------------------------------------------
 
 import { isConstructible } from "../../../ir/enrich/wire-projection.js";
-import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ContextStampAssignmentIR,
+  ExprIR,
+  OperationIR,
+} from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { classifyForWire, singleFieldShape } from "../../../ir/validate/invariant-classify.js";
 import { snake } from "../../../util/naming.js";
 import {
@@ -160,6 +167,78 @@ export function renderActions(
 ${defaultCreate}
 ${opActions.join("\n")}
   end\n`;
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle stamps (audit / softDelete capability stamps) → Ash `changes`.
+//
+// `contextStamps` (from `stamp onCreate`/`onUpdate`, hand-written or
+// macro-emitted via `with audit`/`auditable`) become global `change fn` blocks
+// scoped by `on: [:create]` / `on: [:update]` — so EVERY create / update action
+// (the default `:create`/`:update` AND each named `update :<op>` action) applies
+// them, mirroring the EF Core interceptor / Java `_stampOn*` methods.  Each
+// assignment force-changes the attribute (`force_change_attribute` writes the
+// managed/private audit columns the action doesn't `accept`).  A non-principal
+// value (`createdAt := now()`) renders through the normal expression renderer
+// (`now()` → `DateTime.utc_now()`); a bare `currentUser` value resolves to the
+// principal id read from the threaded Ash actor (`context.actor.<idKey>`), the
+// analogue of Java's `currentUser.id()`.  Event-sourced aggregates and
+// principal stamps without auth are gated upstream (validateElixirStampSupport).
+// ---------------------------------------------------------------------------
+
+/** Render the value of one stamp assignment.  A bare `currentUser` ref is the
+ *  principal id (`current_user.<idKey>`); everything else (including a member
+ *  access like `currentUser.role`) renders via the normal expression renderer. */
+function renderStampValue(value: ExprIR, ctx: RenderCtx, principalIdKey: string): string {
+  if (value.kind === "ref" && value.refKind === "current-user") {
+    return `current_user.${principalIdKey}`;
+  }
+  return renderExpr(value, ctx);
+}
+
+export function renderStampChanges(
+  agg: AggregateIR,
+  ctx: RenderCtx,
+  principalIdKey: string,
+): string {
+  const stampsFor = (event: "create" | "update"): ContextStampAssignmentIR[] =>
+    (agg.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments);
+
+  // `on:` scope per stamp event.  onCreate stamps run on create only; onUpdate
+  // stamps run on BOTH create and update — mirroring the .NET AuditableInterceptor
+  // (`Added || Modified`).  This keeps a NOT-NULL `updated_at` / `updated_by`
+  // populated on the initial insert (created == updated), so the `auditable`
+  // audit columns (`allow_nil?: false`) don't reject a create.
+  const onScope: Record<"create" | "update", string> = {
+    create: "[:create]",
+    update: "[:create, :update]",
+  };
+
+  const block = (event: "create" | "update"): string | undefined => {
+    const rules = stampsFor(event);
+    if (rules.length === 0) return undefined;
+    const usesUser = rules.some((a) => exprUsesCurrentUser(a.value));
+    // The actor is read only when a stamp references the principal; otherwise
+    // the `_context` is unused (Elixir's --warnings-as-errors rejects an unused
+    // bound variable, so name it `_context` when no actor binding is emitted).
+    const contextBinding = usesUser ? "context" : "_context";
+    const actorBind = usesUser ? "        current_user = context.actor\n" : "";
+    const pipes = rules
+      .map(
+        (a) =>
+          `        |> Ash.Changeset.force_change_attribute(:${snake(a.field)}, ${renderStampValue(
+            a.value,
+            ctx,
+            principalIdKey,
+          )})`,
+      )
+      .join("\n");
+    return `    change fn changeset, ${contextBinding} ->\n${actorBind}        changeset\n${pipes}\n      end,\n      on: ${onScope[event]}`;
+  };
+
+  const blocks = [block("create"), block("update")].filter((b): b is string => b !== undefined);
+  if (blocks.length === 0) return "";
+  return `\n  changes do\n${blocks.join("\n\n")}\n  end\n`;
 }
 
 function renderOperationAction(op: OperationIR, ctx: RenderCtx, _ctxModule: string): string {

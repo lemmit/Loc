@@ -5,9 +5,11 @@ import {
 } from "../../ir/stdlib/generics.js";
 import { unionInstanceName, variantTag } from "../../ir/stdlib/unions.js";
 import {
+  aggregateStampUsesPrincipal,
   aggregateUsesPrincipalContextFilter,
   type BoundedContextIR,
   type DeployableIR,
+  exprUsesCurrentUser,
   type SystemIR,
   type TypeIR,
   workflowEmitsCommandRoute,
@@ -791,6 +793,15 @@ function renderAggregateController(
   const needsActor = aggregateUsesPrincipalContextFilter(agg);
   const actorKw = needsActor ? "actor: conn.assigns.current_user" : "";
   const actorOpt = needsActor ? `, ${actorKw}` : "";
+  // A principal-referencing lifecycle stamp (`createdBy := currentUser` from
+  // `with audit`/`auditable`) reads `context.actor` inside the resource's
+  // `change` block, so the create / update code-interface call must thread the
+  // request principal as the Ash actor — even when the aggregate has no
+  // principal read filter.  (validateElixirStampSupport guarantees auth is
+  // enabled, so `conn.assigns.current_user` is populated.)  Scoped to the
+  // write calls; reads keep `actorOpt` (driven by `needsActor`).
+  const stampActorOpt =
+    needsActor || aggregateStampUsesPrincipal(agg) ? `, actor: conn.assigns.current_user` : "";
   const crudOps = crudOpNames(agg);
   const crudSegments: { name: string; src: string }[] = [
     {
@@ -813,7 +824,7 @@ function renderAggregateController(
       name: "create",
       src: `  @doc "POST /api/${aggPlural}"
   def create(conn, params) do
-${wireInLine}    record = ${contextModule}.create_${aggSnake}!(params)
+${wireInLine}    record = ${contextModule}.create_${aggSnake}!(params${stampActorOpt})
     ${renderPhoenixLogCall("aggregateCreated", [
       { name: "aggregate", valueExpr: `"${agg.name}"` },
       { name: "id", valueExpr: "record.id" },
@@ -828,7 +839,7 @@ ${wireInLine}    record = ${contextModule}.create_${aggSnake}!(params)
       src: `  @doc "PATCH /api/${aggPlural}/:id"
   def update(conn, %{"id" => id} = params) do
 ${wireInLine}    attrs = Map.drop(params, ["id"])
-    record = ${contextModule}.update_${aggSnake}!(id, attrs${actorOpt})
+    record = ${contextModule}.update_${aggSnake}!(id, attrs${stampActorOpt})
     json(conn, record)
   end`,
     },
@@ -966,6 +977,13 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
     agg: agg as import("../../ir/types/loom-ir.js").EnrichedAggregateIR,
     foundation: foundation === "vanilla" ? "vanilla" : "ash",
   };
+  // Every named operation lowers to an Ash `update :<op>` action, so the
+  // resource's `on: [:update]` lifecycle-stamp change block fires on each one.
+  // When that block reads the principal (an `updatedBy := currentUser` onUpdate
+  // stamp), the op call must thread the actor too — not just the guarded ops.
+  const updateStampsNeedActor = (agg.contextStamps ?? []).some(
+    (r) => r.event === "update" && r.assignments.some((a) => exprUsesCurrentUser(a.value)),
+  );
   const opActions: string[] = [];
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     // Return-dominant `or`-union ops (exception-less.md A3, DEBT-03): call the
@@ -987,8 +1005,13 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
     // (a failed guard → Ash.Error.Forbidden → HTTP 403, matching Hono/.NET).
     // Unguarded ops keep the plain call (no policies → no authorize? needed).
     const guarded = op.statements.some((s) => s.kind === "requires");
-    const cuLine = guarded ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
-    const callOpts = guarded ? ", actor: current_user, authorize?: true" : "";
+    // The actor must be threaded when the op is authorized (`requires` guard) OR
+    // when an onUpdate principal stamp needs `context.actor` in the resource's
+    // change block.  `authorize?: true` is only for the guard (it triggers the
+    // policy check); a stamp-only actor thread skips it.
+    const needsCu = guarded || updateStampsNeedActor;
+    const cuLine = needsCu ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
+    const callOpts = needsCu ? `, actor: current_user${guarded ? ", authorize?: true" : ""}` : "";
     if (op.when) {
       // `when` canCommand state gate (criterion.md, use site 2): load the
       // record, evaluate the predicate, and 409 Disallowed before mutating —

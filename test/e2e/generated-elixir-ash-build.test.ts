@@ -230,6 +230,11 @@ describe.skipIf(!ENABLED)(
         // controller call passing the actor).  Both read the tenancy aggregate
         // under its `^actor(:field)` base_filter; the gate compiles both.
         { name: "tenancy-ops.ddd" },
+        // Lifecycle stamps: the resource's `changes do change fn ... end,
+        // on: [:create|:update] end` block force_change_attributes the audit
+        // columns — non-principal (now()) on one aggregate, principal
+        // (currentUser → context.actor.id) via `with auditable` on another.
+        { name: "stamps.ddd" },
       ]),
     )("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);

@@ -2,15 +2,15 @@ import { describe, expect, it } from "vitest";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { buildLoomModel } from "../_helpers/ir.js";
 
-// The elixir backend does NOT consume `contextStamps` everywhere yet — the
-// `auditable` audit columns would be emitted but never populated.
-// `validateStampSupport` fails fast (never a silent drop), mirroring the java /
-// dotnet stamp gates.  A `with auditable` aggregate on a gated deployable must
-// error with the per-family `loom.<family>-stamp-unsupported` code; the supported
-// backends (java / dotnet / node / python — which apply stamps at persist time)
-// and stamp-free models stay clean.
+// Lifecycle-stamp backend support.  Every backend now applies `contextStamps`
+// (java / dotnet entity hooks + interceptor, node Hono write hooks, python
+// persist-time stamping, elixir Ash `change` blocks), each guarded by its own
+// `validateXStampSupport` for the fail-fast cases (principal stamp without auth,
+// event-sourced aggregate).  The one remaining "not wired" case is the elixir
+// **vanilla** (plain Ecto) foundation, which still gates loudly
+// (`loom.elixir-stamp-unsupported`) rather than emitting unpopulated columns.
 
-const src = (platform: string) => `
+const src = (platformDecl: string) => `
   system PS {
     user { id: guid  name: string }
     subdomain D { context Shop {
@@ -20,31 +20,32 @@ const src = (platform: string) => `
     api A from D
     storage primary { type: postgres }
     resource st { for: Shop, kind: state, use: primary }
-    deployable api { platform: ${platform}, contexts: [Shop], dataSources: [st], serves: A, port: 8081, auth: required }
+    deployable api { platform: ${platformDecl}, contexts: [Shop], dataSources: [st], serves: A, port: 8081, auth: required }
   }
 `;
 
 describe("lifecycle-stamp backend support gate", () => {
   it.each([
-    ["elixir", "loom.elixir-stamp-unsupported"],
-  ])("gates `with auditable` on the %s backend fail-fast", async (platform, code) => {
-    const loom = await buildLoomModel(src(platform));
-    const errors = validateLoomModel(loom).filter((d) => d.code === code);
-    expect(errors.length, `expected a ${code} diagnostic`).toBeGreaterThan(0);
-    expect(errors[0]!.message).toContain("does not yet apply lifecycle stamps");
-  });
-
-  it.each([
     "dotnet",
     "java",
     "node",
     "python",
+    "elixir",
   ])("does NOT gate `with auditable` on the %s backend", async (platform) => {
     const loom = await buildLoomModel(src(platform));
     const stampErrors = validateLoomModel(loom).filter((d) =>
       /stamp-unsupported$/.test(d.code ?? ""),
     );
     expect(stampErrors).toEqual([]);
+  });
+
+  it("gates `with auditable` on the elixir vanilla foundation fail-fast", async () => {
+    const loom = await buildLoomModel(src("elixir { foundation: vanilla }"));
+    const errors = validateLoomModel(loom).filter(
+      (d) => d.code === "loom.elixir-stamp-unsupported",
+    );
+    expect(errors.length, "expected a loom.elixir-stamp-unsupported diagnostic").toBeGreaterThan(0);
+    expect(errors[0]!.message).toContain("vanilla");
   });
 
   it("a stamp-free aggregate on node is clean", async () => {
