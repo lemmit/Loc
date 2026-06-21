@@ -327,6 +327,97 @@ What shipped, and what stays deferred after an end-to-end investigation of the
   marker dedup is unblocked — but it remains low-value until a second stamping
   capability exists. Revisit then.
 
+## 11. Plan: named filters in service of **selective bypass** (the adopted feature)
+
+> **Status:** PLAN (approved scope, 2026-06). State audit + design review done
+> (fresh `main` @ `86d55e87`). Supersedes §5's "filters stay per-aggregate, don't
+> dedup" verdict on the *value question*: dedup is dropped as a goal; the feature
+> is **selectively-bypassable filters**, with the §4 provenance seam as its
+> substrate.
+
+### 11.1 The reframe (why not "dedup")
+
+Filter predicates are `this`-relative one-liners (§5, Fact A) — "dedup" only
+collapses one line per entity into one named registration: code-*size* polish, no
+capability. The value EF Core 10 / Hibernate *named* filters actually unlock is
+**bypass**: a query reading past a capability's filter (admin view ignoring
+`softDeletable`, cross-tenant report ignoring `tenantOwned`). That is green-field
+— the audit confirms `IgnoreQueryFilters` exists only in an `efcore.ts` comment,
+with no DSL surface and no emitted call site. So we build bypass; naming is a
+*means* (the EF/Hibernate handle), not a standalone slice.
+
+### 11.2 Surface — `ignoring <Cap>`, a clause on `find` (sibling of `where`)
+
+Keyed on the **capability name** (the stable identity the user wrote with
+`with <Cap>`), never on a per-filter name — the grammar already removed the
+`filter for "<name>"` qualifier precisely because *a capability co-locates its
+filter* (`ddd.langium:906-908`). No name is added to `FilterDecl`.
+
+```ddd
+aggregate Order with softDeletable, tenantOwned { code: string  total: money }
+
+repository Orders for Order {
+  find adminView(): Order[] ignoring softDeletable   // drop softDeletable's predicate; keep tenantOwned's
+  find raw(): Order[] ignoring all                    // bypass every capability filter (soft kw)
+}
+```
+```csharp
+// .NET / EF Core 10 — the bypass call site that is vapor today
+public Task<List<Order>> AdminViewAsync() =>
+    _db.Orders.IgnoreQueryFilters(["SoftDeletableFilter"]).ToListAsync();
+```
+
+Grammar: extend `FindDecl` (`ddd.langium:1050-1052`) with an optional
+`('ignoring' ('all' | bypass+=[Capability] (',' bypass+=[Capability])*))?` clause
+— soft keyword `ignoring`, flat `+=` list, discriminator over the `all` form.
+A capability contributing *several* filters is bypassed **as a unit**.
+Aggregate-local anonymous `filter <expr>` (no capability) is **not** bypassable —
+accepted scoping (you own that source); revisit only if a real need appears.
+
+### 11.3 Slices (incremental; per-backend, because there is no shared filter seam)
+
+| # | Scope | Files (phase) | Gate | Parallelizable? |
+|---|---|---|---|---|
+| **0** | `capabilityOrigin` provenance seam | `FilterEntry` + `collectFilters` (`lower-capabilities.ts:11-81`); `contextFilterOrigins?: (string\|undefined)[]` on `loom-ir.ts` (mirror `contextFilterRefs`) | **byte-identical** (no consumer) | no — serializing substrate |
+| **1** | surface + **.NET** | `ddd.langium` (+`langium:generate`, commit generated); `lower` `FindDecl`→`FindIR` bypass-set; `print-structural`/find printer arm; `efcore.ts` resolve origin→EF name→`IgnoreQueryFilters`; `loom.filter-bypass-unsupported` validator (`ir/validate/checks/*`, mirror `validateContextFilterSupport`) | runtime: `dotnet-build`, `dotnet-obs-e2e`, `k8s-e2e` read+write | no (grammar→regen→lower→emit is a chain) |
+| **2** | **Drizzle + Ecto** honor bypass (omit predicate from the AND-chain) | `typescript/repository-find-predicate.ts`; `elixir/vanilla/capability-filter.ts` | `behavioral-e2e`, `k8s-e2e` | **yes — 2 agents** (disjoint trees) |
+| defer | **Java** (idiomatic bypass — *under research*), **Ash** (base_filter→unfiltered action/policy), **Python** (filter-emission gap first, then bypass) | per-backend emit + drop from `NO_FILTER_EMISSION`/`LIMITED_FAMILIES` | each own runtime gate | **yes — independent fan-out** |
+
+Backends that can't honor a given `ignoring <Cap>` **fail-fast** via the new
+validator (mirrors `loom.context-filter-unsupported`), so an unsupported target
+errors at compile rather than silently still-filtering.
+
+### 11.4 Orchestration — skills & agent parallelization
+
+- **Skill:** `language-feature-developer` drives the gated phases. Done: state
+  audit, design review. Next: **feature-simulator → user sign-off** (paper
+  prototype of 11.2's `.ddd` + per-backend generated fragment) *before any code*.
+- **Bottleneck then fan-out:** Slice 0 is the single serializing dependency
+  (everything reads `capabilityOrigin`). One **feature-developer** agent lands it.
+  Slice 1 is an internal chain (one agent). After Slice 1, **Slice 2's two
+  backends and every deferred backend are independent** → spawn one
+  feature-developer per backend in a single turn (the "disjoint buckets"
+  pattern).
+- **Tests:** a `test-developer` agent places 1 parsing + 1 negative-validator + 1
+  IR + 1 generator test per touched backend at lowest altitude; bypass is
+  **runtime-gated** (byte-changing), verified via the `verify` skill driving
+  `k8s-e2e` read+write round-trips.
+- **Final review:** `simplify` + `code-review` over each diff; `pipeline-layering`
+  + Biome gates.
+
+### 11.5 Architecture notes (from the review)
+
+- **Derive, don't stamp:** store `capabilityOrigin` (a genuine propagation-time
+  input nothing can re-derive once the predicate is anonymized), but keep the EF
+  filter *name* derived in the emitter (`queryFilterName`) — resolve
+  `ignoring <Cap>` → origin → name at codegen, never onto the IR.
+- **Resolved facts on `LoomModel`:** the bypass set rides `FindIR`;
+  `contextFilterOrigins` is index-aligned with `contextFilters`. No backend
+  re-resolves.
+- **Completeness gates:** new `ignoring` syntax trips **print-completeness**
+  (printer arm) + round-trip; the new diagnostic needs a stable `loom.*` code
+  (**diagnostic-codes-completeness**). No walker/heex gates (not UI).
+
 ## 10. Cross-references
 
 - [`typed-capabilities.md`](./typed-capabilities.md) — OQ#1 this resolves; the
