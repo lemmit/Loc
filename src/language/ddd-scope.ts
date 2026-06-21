@@ -97,9 +97,9 @@ export class DddScopeProvider extends DefaultScopeProvider {
     // area-qualified dotted name (`Orders.List`, `Sales.Orders.List`).  The
     // qualifier is needed because the scaffold names every aggregate's pages by
     // ROLE (`List`/`New`/`Detail`), so the bare name collides across
-    // aggregates.  Built here (not in `computeExports`) because the scaffold
-    // macro synthesises the area+page nodes AFTER global indexing — they only
-    // exist on the tree at link time.
+    // aggregates.  Built here (not in `collectExportedSymbols`) because the
+    // scaffold macro synthesises the area+page nodes AFTER global indexing —
+    // they only exist on the tree at link time.
     if (context.container.$type === "MenuLink" && context.property === "page") {
       const ui = AstUtils.getContainerOfType(context.container, isUi);
       if (!ui) return super.getScope(context);

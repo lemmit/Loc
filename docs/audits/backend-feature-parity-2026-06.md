@@ -48,9 +48,9 @@ Legend: ✓ implemented · ✗ gated (validator error) · ⚠ partial · 🔴 **
 | Generic carriers (`paged<T>`, `envelope<T>`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_PAGED_BACKENDS` · structural-checks.ts:232 |
 | `when` canCommand gate + `can_<op>` query | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_WHEN_BACKENDS` · structural-checks.ts:484 |
 | Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ⚠ return-dominant only | ✓ | `SUPPORTED_RETURN_BACKENDS` · structural-checks.ts:518 |
-| Non-principal capability `filter` (relational) | ✓ | ✓ | ✓ | 🔴 | ✓ | ✓ | `LIMITED_FAMILIES` · system-checks.ts:1014 |
-| Principal capability `filter` (`currentUser`/tenancy, relational) | ✓ | ✓ | ✓ | 🔴 | ✓ | ✓ | system-checks.ts:1025 |
-| Capability `filter` on non-relational shape (doc/embedded) | ✓ | ✓ | ✓ | 🔴 | ⚠ embedded only | ⚠ embedded only | system-checks.ts:1048 |
+| Non-principal capability `filter` (relational) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` · system-checks.ts:1004 |
+| Principal capability `filter` (`currentUser`/tenancy, relational) | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | `supportsPrincipalFilter` · system-checks.ts:1021 |
+| Capability `filter` on non-relational shape (doc/embedded) | ✓ | ✓ | ✓ | ✗ | ⚠ embedded only | ⚠ embedded only | `supportsNonRelationalFilter` · system-checks.ts:1044 |
 | Provenanced fields (runtime trace) | ✓ | ✓ | ✗ | ✗ | ✗ | ✓ | `PROVENANCE_BACKENDS` · system-checks.ts:1814 |
 | Per-operation `audited` | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | `AUDIT_OP_BACKENDS` · system-checks.ts:1870 |
 | Audited **lifecycle** (`audited create`/`destroy`) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | `AUDIT_LIFECYCLE_BACKENDS` · system-checks.ts:1871 |
@@ -68,7 +68,39 @@ foundation still gates.
 
 ## Findings
 
-### F1 — 🔴 Python silently drops capability `filter` predicates (correctness hole)
+### F1 — ✅ RESOLVED (#1481/W1a) — Python capability `filter` is now gated AND the non-principal case is emitted
+
+> **[2026-06-21 audit refresh, code-verified against #1496]** This finding,
+> filed as a 🔴 silent gap, is now **resolved** on `main`. The original text
+> follows for history.
+
+On `main` today, `validateContextFilterSupport` reads
+`LIMITED_FAMILIES = new Set(["node", "elixir", "java", "python"])`
+(`system-checks.ts:1004`, wired at `validate.ts`). **`python` is now in the set**,
+so the validator no longer treats it as fully capable. The split is precise:
+
+- **Non-principal relational filters (W1a)** — `python` now **emits** them.
+  `contextFilterPredicate` in `src/generator/python/find-predicate.ts` lowers an
+  aggregate's non-principal capability filters to a SQLAlchemy predicate and
+  `repository-builder.ts` AND-s it into every root read (the SQLAlchemy analogue of
+  EF's `HasQueryFilter`). The grep that flagged the gap now hits:
+  `grep -rn contextFilters src/generator/python/` returns
+  `find-predicate.ts` (no longer zero matches).
+- **Principal filters (W1b — `currentUser`/tenancy)** — still **gated** on python.
+  `supportsPrincipalFilter` (`system-checks.ts:1021`) returns true only for
+  node/elixir/java; python falls through to `false`, so a principal-referencing
+  filter on a python aggregate is a hard `loom.*` error, not a silent no-op.
+- **Non-relational-shape filters (doc/embedded)** — still **gated** on python.
+  `supportsNonRelationalFilter` (`system-checks.ts:1044`) admits node (doc+embedded),
+  java (doc+embedded), elixir (embedded) — python is absent, so it errors.
+
+**Net:** the correctness hole the original finding described (a python aggregate's
+reads with no WHERE scoping) is closed — the only un-emitted cases (principal,
+non-relational) now fail fast at validation rather than silently emitting an
+unscoped backend. python is no longer a 🔴; it's ✓ for the non-principal relational
+case and ✗ (honest gate) for the rest.
+
+<details><summary>Original finding (pre-#1481, superseded)</summary>
 
 The capability-filter gate `validateContextFilterSupport`
 (`system-checks.ts:1006`, wired at `validate.ts:118`) only inspects families in
@@ -87,16 +119,12 @@ populates `AggregateIR.contextFilters` (`lower.ts:1210`) regardless of platform.
 **Impact:** a `with softDelete` / tenancy `filter !this.isDeleted` /
 `filter tenantId == currentUser.tenant` on a **python-hosted** aggregate passes
 validation and emits a backend whose reads have **no WHERE scoping** — soft-deleted
-rows are returned, and tenancy isolation is silently absent. This is precisely the
-footgun the other gates exist to prevent ("a parsed-but-unemitted feature is a
-footgun, so it fails fast").
+rows are returned, and tenancy isolation is silently absent.
 
-**Recommended fix (low-risk, fail-fast):** add `python` to `LIMITED_FAMILIES` so a
-capability filter on a python aggregate becomes `loom.context-filter-unsupported`
-rather than a silent no-op. (The principled fix is to emit the predicate into the
-SQLAlchemy reads — `find-predicate.ts` already lowers the same predicate subset for
-`where` finds — but the safe interim is the gate.) Either way it should not stay
-ungated-and-unemitted.
+**Recommended fix (low-risk, fail-fast):** add `python` to `LIMITED_FAMILIES`.
+(The principled fix is to emit the predicate into the SQLAlchemy reads.)
+
+</details>
 
 ### F2 — Provenance / audit are the widest real parity gap
 
@@ -162,12 +190,14 @@ defer to vanilla (DEBT-03).
 
 ### 4. Capability filters
 
-`LIMITED_FAMILIES = {node, elixir, java}` (system-checks.ts:1014). Principal
+`LIMITED_FAMILIES = {node, elixir, java, python}` (system-checks.ts:1004). Principal
 (`currentUser`) filters on relational aggregates are wired on node, elixir (both
 foundations), java, and dotnet (EF `HasQueryFilter`, ungated). Non-relational-shape
 filters: node + java (document + embedded), elixir (embedded only); principal +
 non-relational stays gated everywhere. **dotnet** is ungated because it genuinely
-supports the full surface; **python** is ungated but emits nothing — see **F1**.
+supports the full surface; **python** now emits the non-principal relational case
+(W1a — `contextFilterPredicate` in `find-predicate.ts`, AND-ed into every root read)
+and gates principal (W1b) + non-relational filters — see **F1** (resolved #1481).
 
 ### 5. Provenance & audit
 
@@ -200,8 +230,9 @@ in `generators.md` → "What the generators don't do."
 - Gate sets were read directly from `src/ir/validate/checks/{system,structural}-checks.ts`
   and `src/util/platform-axes.ts` on `main` @ `9a5949b`.
 - "🔴 silent gap" is reserved for a backend that is *absent from a gate's checked
-  set AND emits nothing* — verified for F1 by grepping the python generator for
-  `contextFilters` (zero hits) against the other four backends (all hit).
+  set AND emits nothing*. F1 was such a gap at the original snapshot; on #1496 it is
+  resolved — python is now in `LIMITED_FAMILIES` and `grep -rn contextFilters
+  src/generator/python/` hits `find-predicate.ts` (the non-principal case is emitted).
 - This is a point-in-time empirical snapshot. `main` moves fast; re-derive from the
   cited lines before treating any row as current.
 </content>

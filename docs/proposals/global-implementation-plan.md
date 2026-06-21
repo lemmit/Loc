@@ -34,11 +34,12 @@ hours of re-verification — that is the failure mode this rewrite fixes.
 
 ---
 
-## Current state on `origin/main` (2026-06-10, condensed)
+## Current state on `origin/main` (2026-06-10, condensed; refreshed 2026-06-21 against #1496)
 
-The ten-phase pipeline, three DB backends (node/Hono, .NET, elixir —
-both `ash` and `vanilla` foundations), and the React frontend are
-mature. Recent waves the older docs had not absorbed:
+The ten-phase pipeline, five DB/backends (node/Hono, .NET, Java/Spring
+Boot, Python/FastAPI, elixir — both `ash` and `vanilla` foundations),
+and four frontends (React, Vue, Svelte, Angular) are mature
+(`src/platform/registry.ts`). Recent waves the older docs had not absorbed:
 
 - **Elixir platform rename** (#1043) — `platform: elixir` canonical;
   back-compat aliases for `phoenix`/`phoenixLiveView`.
