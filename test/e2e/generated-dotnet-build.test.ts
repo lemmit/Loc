@@ -251,6 +251,40 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // `ignoring` filter-bypass (named-filter-bypass.md §11) — the only honoring
+    // backend this slice.  Compiles all three read sites (`find ignoring <Cap>`,
+    // `find ignoring *`, view bypass, inline `Repo.findAll(...) ignoring …`) so
+    // the emitted `.IgnoreQueryFilters([...])` / parameterless overload + the
+    // shared retrieval method's `ignoreAllFilters`/`ignoreFilters` params are
+    // exercised under /warnaserror (EF Core 10's named-filter API).
+    it("`ignoring` filter-bypass (dotnet) — IgnoreQueryFilters reads build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-bypass-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/filter-bypass.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // The "tech showcase" system (`examples/showcase.ddd`) exercises the whole
     // language surface across multiple contexts, but it's multi-context — the
     // single-context `generate dotnet` cases above can't reach it, and no other

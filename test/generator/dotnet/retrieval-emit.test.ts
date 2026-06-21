@@ -38,13 +38,17 @@ describe(".NET generator — retrieval", () => {
   it("emits a Run<Name>Async that applies a reified Specification + paging", async () => {
     const out = await files();
     const repo = out.get("Infrastructure/Repositories/CustomerRepository.cs")!;
+    // The signature carries the two trailing optional filter-bypass params
+    // (named-filter-bypass.md §11) so an inline `Repo.findAll(...) ignoring …`
+    // can name them; ordinary callers pass `cancellationToken` positionally.
     expect(repo).toMatch(
-      /public async Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, CancellationToken cancellationToken = default\)/,
+      /public async Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, CancellationToken cancellationToken = default, bool ignoreAllFilters = false, string\[\]\? ignoreFilters = null\)/,
     );
     // The retrieval is a reified Ardalis Specification, applied via
-    // `.WithSpecification(...)` + the shared `.ApplyPaging(page)` extension.
+    // `.WithSpecification(...)` + the shared `.ApplyPaging(page)` extension over
+    // the `__q` IQueryable (which the bypass params optionally `IgnoreQueryFilters`).
     expect(repo).toMatch(
-      /var result = await _db\.Customers\.WithSpecification\(new ByRegionSpec\(rgn\)\)\.ApplyPaging\(page\)\.ToListAsync\(cancellationToken\);/,
+      /var result = await __q\.WithSpecification\(new ByRegionSpec\(rgn\)\)\.ApplyPaging\(page\)\.ToListAsync\(cancellationToken\);/,
     );
     expect(repo).toMatch(/using Ardalis\.Specification\.EntityFrameworkCore;/);
     // The spec carries the where (reified criterion `where: InRegion(rgn)`) + sort.
@@ -75,7 +79,7 @@ describe(".NET generator — retrieval", () => {
     const out = await files();
     const iface = out.get("Domain/Customers/ICustomerRepository.cs")!;
     expect(iface).toMatch(
-      /Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, CancellationToken cancellationToken = default\);/,
+      /Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, CancellationToken cancellationToken = default, bool ignoreAllFilters = false, string\[\]\? ignoreFilters = null\);/,
     );
   });
 

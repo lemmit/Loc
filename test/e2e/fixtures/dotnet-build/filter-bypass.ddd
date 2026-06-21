@@ -1,0 +1,44 @@
+// `ignoring` filter-bypass clause (named-filter-bypass.md §11) on .NET — the
+// only backend that honors it this slice (EF `IgnoreQueryFilters`).  Compiles
+// all three read sites under `dotnet build /warnaserror`:
+//   - a repository find that bypasses a named capability filter (`ignoring softDeletable`)
+//   - a repository find that bypasses ALL filters (`ignoring *`)
+//   - a view whose read bypasses the named filter
+//   - an inline `Repo.findAll(...) ignoring …` in a workflow body
+//
+// `softDeletable` contributes the EF `IsDeletedFilter` named query filter (via
+// `HasQueryFilter("IsDeletedFilter", …)`); each bypass resolves to it and emits
+// `.IgnoreQueryFilters(["IsDeletedFilter"])` (or the parameterless overload for
+// `*`) on the IQueryable before the spec/WHERE composes.
+system PS {
+  capability softDeletable {
+    isDeleted: bool
+    filter this.isDeleted == false
+  }
+  subdomain D {
+    context Shop {
+      criterion BigOrders() of Order = this.total > 0
+      aggregate Order with softDeletable {
+        total: int
+      }
+      repository Orders for Order {
+        find recent(): Order[] where this.total > 0 ignoring softDeletable
+        find allRows(): Order[] ignoring *
+        find normal(): Order[] where this.total > 0
+      }
+      view ActiveOrders = Order where this.total > 0 ignoring softDeletable
+      workflow Sweep {
+        create(x: int) {
+          let scoped = Orders.findAll(BigOrders()) ignoring softDeletable
+          let everything = Orders.findAll(BigOrders()) ignoring *
+          for o in scoped { }
+          for o in everything { }
+        }
+      }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable api { platform: dotnet, contexts: [Shop], dataSources: [st], serves: A, port: 8081 }
+}
