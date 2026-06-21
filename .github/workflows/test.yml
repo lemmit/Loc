@@ -41,8 +41,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The fast vitest suite is ~900s of CPU-bound generator/IR work spread
+  # evenly across ~700 files (no single hot file — the slowest is <5%),
+  # so the only real lever is horizontal scaling: split the files across
+  # N runners with `vitest --shard`.  Each shard emits a `blob` report
+  # (raw per-test + v8 coverage data); the `coverage` job below merges
+  # the blobs into one combined report.  4 shards turns a ~20min single
+  # job into ~4 parallel jobs of ~3-4min each.  Bump the matrix (and the
+  # `/4` denominators) together to add shards.
   test:
+    name: test (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel sibling shards when one fails — we want the full
+      # failure picture across the whole suite in a single run.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
 
@@ -53,19 +68,58 @@ jobs:
           cache-dependency-path: package-lock.json
 
       # `npm ci` runs the `prepare` lifecycle (langium:generate + build),
-      # which produces src/language/generated/ — required before vitest
-      # transforms any file that imports the generated AST.
+      # which produces src/language/generated/ + out/ — required before
+      # vitest transforms any file that imports the generated AST, and
+      # before the CLI tests spawn `node bin/cli.js` (which runs `out/`).
       - name: Install (runs langium:generate + build)
         run: npm ci
 
-      - name: Lint (Biome)
-        run: npm run lint
+      # `--coverage` so the blob carries v8 coverage data for the merge
+      # job; `--reporter=default` keeps failures visible in this job's
+      # log, `--reporter=blob` writes .vitest-reports/blob-<i>-4.json.
+      - name: Test with coverage (shard ${{ matrix.shard }}/4)
+        run: npm run test:coverage -- --shard=${{ matrix.shard }}/4 --reporter=default --reporter=blob
 
-      - name: Test with coverage
-        run: npm run test:coverage
+      - name: Upload blob report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: blob-${{ matrix.shard }}
+          path: .vitest-reports/*
+          include-hidden-files: true
+          retention-days: 1
 
-      - name: Generated-code Biome gate
-        run: npm run test:biome-gen
+  # Merge the per-shard blob reports into one combined coverage report.
+  # `vitest --merge-reports` re-runs only the reporters (no tests) over
+  # the recorded blobs, so the summary/% is computed across all shards.
+  coverage:
+    name: coverage (merge shards)
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # Source must be present (+ built) for v8 coverage remapping during
+      # the merge; `npm ci` provides src/language/generated/ + out/.
+      - name: Install (runs langium:generate + build)
+        run: npm ci
+
+      - name: Download shard blob reports
+        uses: actions/download-artifact@v7
+        with:
+          pattern: blob-*
+          path: .vitest-reports
+          merge-multiple: true
+
+      - name: Merge shard reports + emit combined coverage
+        run: npx vitest --merge-reports --coverage
 
       - name: Coverage summary
         if: always()
@@ -93,6 +147,47 @@ jobs:
           name: coverage-html
           path: coverage/
           retention-days: 14
+
+  # Biome gates, split off the test shards so they run once (not 4×) and
+  # in parallel with them: `biome ci` over the repo + the generated-code
+  # Biome gate (emits TS/TSX projects and lints them).
+  lint:
+    name: lint + generated biome
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install (runs langium:generate + build)
+        run: npm ci
+
+      - name: Lint (Biome)
+        run: npm run lint
+
+      - name: Generated-code Biome gate
+        run: npm run test:biome-gen
+
+  # Single roll-up status for branch protection: succeeds only when every
+  # shard, the coverage merge, and the lint gates pass.  Require THIS
+  # check instead of the per-shard `test (shard i/4)` jobs so the shard
+  # count can change without editing branch-protection rules.
+  tests-passed:
+    name: tests passed
+    needs: [test, coverage, lint]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on upstream job results
+        run: |
+          echo "test=${{ needs.test.result }} coverage=${{ needs.coverage.result }} lint=${{ needs.lint.result }}"
+          [ "${{ needs.test.result }}" = "success" ] \
+            && [ "${{ needs.coverage.result }}" = "success" ] \
+            && [ "${{ needs.lint.result }}" = "success" ]
 
   # Fast typecheck gate for the playground (`web/`).  The playground imports
   # the Loom toolchain straight from `../src`, so a `src/` change can silently
