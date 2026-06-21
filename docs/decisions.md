@@ -690,14 +690,20 @@ sections (superseded by `lifecycle-url-style.md`); `ApiIR.urlStyle`,
 ## D-PHOENIX-SURFACE — the decomposed Phoenix platform surface
 
 **Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (the canonical platform
-name renamed `phoenix` → `elixir`; legacy `phoenix` and `phoenixLiveView`
-remain back-compat aliases at the lowering boundary). The *decomposition*
-conclusions of this decision (one platform for the language ecosystem; UI
-framework axis on `ui`; default domain Ash; no `family@version`; no
-`apiOnly`) all stand; only the spelling of the canonical platform name
-changes. (Reconciles two proposals that, taken individually, collide.
-Subsumes the **D-PHOENIX-ECTO** ask from
+name renamed `phoenix` → `elixir`). The *decomposition* conclusions of this
+decision (one platform for the language ecosystem; UI framework axis on `ui`;
+default domain Ash; no `family@version`; no `apiOnly`) all stand; only the
+spelling of the canonical platform name changes. (Reconciles two proposals
+that, taken individually, collide. Subsumes the **D-PHOENIX-ECTO** ask from
 `elixir-ecto-and-api-only-backends.md`.)
+
+**Amendment (aliases retired).** Both the `phoenix` / `phoenixLiveView`
+*platform* aliases (D-ELIXIR-PLATFORM amendment) and the `liveview` *framework*
+alias introduced by this decision have since been **removed**. `framework:
+phoenixLiveView` is the only framework spelling — the bare `liveview` keyword is
+gone from the grammar `Framework` rule, and the `canonicalFramework` desugar
+(both the lowering-side and validator-side copies) is deleted. `platform:
+elixir` + `framework: phoenixLiveView` are the only spellings.
 
 **Problem.** Two proposals each free a *different* axis off the single
 `phoenixLiveView` keyword, and their individually-recommended fixes
@@ -1209,6 +1215,14 @@ alias); the seven affected decisions get an amend-by-this-one note.
 
 **Status:** PINNED. (Depends on **D-ELIXIR-PLATFORM** and **D-REALIZATION-AXES**;
 spec in `proposals/elixir-platform-rename.md`.)
+
+**Amendment (alias retired).** The `phoenixRouter` → `phoenix` back-compat
+transport alias described below has since been **removed** — `phoenix` is the
+only `transport:` value now. The `canonicalTransport` desugar helper (which was
+already dead code — nothing called it) is gone, and `transport: phoenixRouter`
+no longer resolves to any adapter (it fails the realization-axes menu check
+like any unknown transport). Mirrors the retired platform aliases
+(`hono`/`phoenix`/`fastapi`) and the `liveview` framework alias.
 
 **Problem.** The transport value `phoenixRouter` carried a redundant `Router`
 suffix that named no real distinction (Phoenix has one router; there's no

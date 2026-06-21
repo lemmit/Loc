@@ -283,17 +283,16 @@ UiBlockBinding:
 // Frameworks the `ui:` mount lowers against.  `react` renders TSX
 // against a design pack (`mantine`/`shadcn`); `phoenixLiveView`
 // renders HEEx against the `ashPhoenix` pack as part of a fullstack
-// Elixir/Ash deployable.  `liveview` is the D-PHOENIX-SURFACE spelling
-// of `phoenixLiveView` (the framework, decoupled from the host
-// platform name); lowering canonicalises it to `phoenixLiveView`.
-// Future values (`blazor-wasm`, `blazor-server`, …) extend this enum
-// when their codegen backends land.  `svelte` renders Svelte 5
+// Elixir/Ash deployable.  (The `liveview` framework alias was RETIRED —
+// `phoenixLiveView` is the only spelling, mirroring the retired platform
+// aliases.)  Future values (`blazor-wasm`, `blazor-server`, …) extend
+// this enum when their codegen backends land.  `svelte` renders Svelte 5
 // (SvelteKit static SPA) against a svelte-format design pack
 // (`shadcnSvelte`/`flowbite`); `vue` renders Vue 3 (Vite SPA +
 // vue-router) against a vue-format design pack
 // (`vuetify`/`shadcnVue`).
 Framework returns string:
-    'react' | 'svelte' | 'vue' | 'angular' | 'phoenixLiveView' | 'liveview';
+    'react' | 'svelte' | 'vue' | 'angular' | 'phoenixLiveView';
 
 // Backend platforms accept a quoted `family@version` pin
 // (`platform: "node@v4"`) via the STRING alternative — symmetric
@@ -309,10 +308,11 @@ Framework returns string:
 // alias): `elixir` is now the only spelling and `platform: phoenix` /
 // `platform: phoenixLiveView` fail validation as unknown platforms.
 // `python` is the canonical language-ecosystem name for the
-// FastAPI + SQLAlchemy backend; `fastapi` is its framework-spelled
-// alias and desugars to `python`.
+// FastAPI + SQLAlchemy backend.  (The `fastapi` framework-spelled
+// platform alias was RETIRED — `python` is the only spelling and
+// `platform: fastapi` fails validation as an unknown platform.)
 Platform returns string:
-    'dotnet' | 'node' | 'react' | 'svelte' | 'vue' | 'angular' | 'static' | 'elixir' | 'python' | 'fastapi' | 'java' | STRING;
+    'dotnet' | 'node' | 'react' | 'svelte' | 'vue' | 'angular' | 'static' | 'elixir' | 'python' | 'java' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,

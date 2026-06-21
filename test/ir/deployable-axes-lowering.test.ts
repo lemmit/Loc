@@ -50,8 +50,8 @@ describe("realization axes — lowering defaults", () => {
   it("bare elixir → ash foundation + ashPostgres/byFeature (after canonicalization)", async () => {
     // D-ELIXIR-PLATFORM: `platform: elixir` is the canonical (and only)
     // name — the legacy `phoenix` / `phoenixLiveView` platform aliases
-    // were retired.  D-PHOENIX-TRANSPORT: `transport: phoenix` is
-    // canonical; `phoenixRouter` aliases to it.
+    // were retired.  D-PHOENIX-TRANSPORT: `transport: phoenix` is the
+    // canonical (and only) value — the `phoenixRouter` alias was retired.
     const d = await lowerDeployable("elixir");
     expect(d.foundation).toBe("ash");
     expect(d.application).toBe("ash");

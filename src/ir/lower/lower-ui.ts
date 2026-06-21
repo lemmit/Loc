@@ -36,7 +36,6 @@ import type {
 } from "../types/loom-ir.js";
 import { lowerExpr } from "./lower-expr.js";
 import { lowerDerived } from "./lower-members.js";
-import { canonicalFramework } from "./lower-platform.js";
 import { type Env, lowerType, withLocal } from "./lower-types.js";
 
 // ---------------------------------------------------------------------------
@@ -163,7 +162,7 @@ export function lowerUi(ui: Ui, user?: UserIR): UiIR {
   }
   return {
     name: ui.name,
-    framework: canonicalFramework(ui.framework),
+    framework: ui.framework,
     pages,
     components,
     menu,

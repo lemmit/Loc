@@ -80,9 +80,9 @@ const platforms: Record<Platform, PlatformSurface> = {
   // `platform: phoenix` / `phoenixLiveView` aliases were retired
   // (D-ELIXIR-PLATFORM), mirroring the retired `hono` → `node` alias.
   elixir: elixirPlatform,
-  // FastAPI + SQLAlchemy 2 backend.  The `fastapi` framework spelling
-  // desugars to `python` at the lowering boundary (mirrors `hono` →
-  // `node`).
+  // FastAPI + SQLAlchemy 2 backend.  `python` is the only spelling —
+  // the `fastapi` platform alias was retired (mirrors the retired
+  // `hono` → `node` alias).
   python: pythonPlatform,
   // Spring Boot / Spring Data JPA backend (backend-only; embeds a React
   // SPA when the deployable declares `ui:`, like dotnet).
