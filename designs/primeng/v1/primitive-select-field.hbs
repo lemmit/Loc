@@ -1,0 +1,1 @@
+<div class="loom-field">{{#if labelText}}<label class="loom-field-label">{{{labelText}}}</label>{{/if}}<p-select [options]="{{{optionsExpr}}}" styleClass="loom-field-input"{{{testidAttr}}}{{#if hasBind}} [ngModel]="{{bind}}()" (ngModelChange)="{{bind}}.set($event)"{{/if}}></p-select></div>

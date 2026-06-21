@@ -1,0 +1,282 @@
+/* Auto-generated.  Do not edit by hand.
+   Base resets + the design tokens projected from the system's
+   `theme { … }` block.  The PrimeNG Aura preset is configured via
+   `providePrimeNG` in app.config.ts; the Material prebuilt theme listed
+   first in angular.json `styles` covers the Material-rendered app shell
+   and the inline Reactive Forms. */
+html,
+body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  font-family: {{{fontFamily}}};
+}
+:root {
+  --loom-primary: {{brandShades.[6]}};
+  --loom-accent: {{accentShades.[6]}};
+}
+.loom-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.loom-group {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+.loom-toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.loom-container {
+  max-width: 960px;
+  margin: 0 auto;
+  width: 100%;
+}
+.loom-paper {
+  padding: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  background: #fff;
+}
+.loom-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.loom-stat-label {
+  font-size: 0.8rem;
+  color: rgba(0, 0, 0, 0.6);
+}
+.loom-stat-value {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+.loom-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--loom-primary);
+  color: #fff;
+}
+.loom-alert {
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+.loom-alert-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.loom-alert-red {
+  background: #fdecea;
+  border-color: #f5c6cb;
+  color: #842029;
+}
+.loom-alert-green {
+  background: #eafaf1;
+  border-color: #c3e6cb;
+  color: #0f5132;
+}
+.loom-alert-yellow {
+  background: #fff8e1;
+  border-color: #ffe8a1;
+  color: #664d03;
+}
+.loom-alert-blue {
+  background: #e7f1ff;
+  border-color: #b6d4fe;
+  color: #084298;
+}
+.loom-inline-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875em;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.loom-key-value-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0;
+}
+.loom-kv-label {
+  color: rgba(0, 0, 0, 0.6);
+}
+.loom-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  color: rgba(0, 0, 0, 0.6);
+}
+.loom-skeleton {
+  background: linear-gradient(90deg, #eee 25%, #f5f5f5 37%, #eee 63%);
+  background-size: 400% 100%;
+  border-radius: 4px;
+  animation: loom-skeleton-pulse 1.4s ease infinite;
+}
+.loom-skeleton-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+@keyframes loom-skeleton-pulse {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+.loom-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-block;
+}
+.loom-avatar-empty {
+  background: rgba(0, 0, 0, 0.12);
+}
+.loom-image {
+  max-width: 100%;
+  height: auto;
+}
+.loom-icon {
+  display: inline-flex;
+  align-items: center;
+  width: 24px;
+  height: 24px;
+}
+.loom-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.loom-icon-xs {
+  width: 16px;
+  height: 16px;
+}
+.loom-icon-sm {
+  width: 20px;
+  height: 20px;
+}
+.loom-icon-lg {
+  width: 32px;
+  height: 32px;
+}
+.loom-icon-xl {
+  width: 48px;
+  height: 48px;
+}
+.loom-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+.loom-anchor {
+  color: var(--loom-primary);
+  text-decoration: none;
+}
+.loom-anchor:hover {
+  text-decoration: underline;
+}
+.loom-breadcrumbs {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+}
+.loom-code-block {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 8px;
+  padding: 12px 16px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+.loom-code-block-title {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 8px;
+}
+.loom-code-block pre {
+  margin: 0;
+}
+.loom-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.loom-table th,
+.loom-table td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+}
+.loom-table th {
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.6);
+}
+.loom-table-striped tbody tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.03);
+}
+.loom-table-highlight tbody tr:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+.loom-table-sticky thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}
+.loom-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+.loom-field-label {
+  font-size: 0.8rem;
+  color: rgba(0, 0, 0, 0.6);
+}
+.loom-field-input {
+  width: 100%;
+}
+.loom-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.loom-loader-xs {
+  width: 16px;
+  height: 16px;
+}
+.loom-loader-sm {
+  width: 24px;
+  height: 24px;
+}
+.loom-loader-md {
+  width: 32px;
+  height: 32px;
+}
+.loom-loader-lg {
+  width: 48px;
+  height: 48px;
+}
+.loom-loader-xl {
+  width: 64px;
+  height: 64px;
+}

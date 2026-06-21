@@ -88,6 +88,7 @@ const BUILT_IN_PACKS: ReadonlyArray<PackUnderTest> = [
   // / `field-input-*` aren't pack templates here; the input testids come
   // from `src/generator/angular/form-fields.ts`.
   { dir: "designs/angularMaterial/v1", label: "angularMaterial@v1", format: "tsx" },
+  { dir: "designs/primeng/v1", label: "primeng@v1", format: "tsx" },
 ];
 
 // Phoenix testid emission is split between templates and the
