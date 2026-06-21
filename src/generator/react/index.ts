@@ -276,6 +276,11 @@ export function generateReactForContexts(
   // pack's "theme" template; the generated file always exists and
   // main.tsx always wires `<MantineProvider theme={theme}>`.
   out.set("src/theme.ts", renderTheme(sys.theme, pack));
+  // Vite ambient types — declares `*.css` (and other asset) modules so the
+  // pack's side-effect style imports (`import "@mantine/core/styles.css"`)
+  // type-check.  Required since TypeScript 6 (TS2882: side-effect imports of
+  // non-code modules need a declaration); harmless on earlier versions.
+  out.set("src/vite-env.d.ts", '/// <reference types="vite/client" />\n');
   out.set("src/main.tsx", renderMain(pack, routerBasename, authUi));
   // When the ui block declares an explicit `menu { … }`,
   // its derived sidebar overrides the hardcoded Aggregates /
