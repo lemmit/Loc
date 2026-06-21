@@ -166,6 +166,22 @@ layer that consumes it.
 
 **Read order:** lifecycle-operations first (foundation); forms second; frontend-acl third (form runtime); extern-component-escape-hatch alongside (the open-library seam, independent of the form family); extern-function-hook-escape-hatch after it (its logic twin).
 
+### Frontend actions, state & async (the MVU family)
+
+Naming page transitions, the shared-state container, and the explicit async
+surface — the structural premise that turns an Elmish target from synthesis into
+projection. Read order: named-actions first; async-effects + error-sink
+alongside; frontend-state-management for the `store` lifetime ladder; the
+fable-elmish target last (it consumes all of them).
+
+| Doc | Status | Core addition |
+|---|---|---|
+| [`named-actions-and-stores.md`](./named-actions-and-stores.md) | PROPOSED ("Proposal A") | Names page/component event handlers as declared, typed `action`s (purity an enforced invariant, not the pitch) → ends `event_N` gensym, gives a test surface, makes the Elmish `Msg` a projection. Adds `store` for shared state (keyword/lifetime owned by `frontend-state-management.md`). 5-stage rollout spanning A/B/C. |
+| [`async-actions-and-effects.md`](./async-actions-and-effects.md) | PROPOSED ("Proposal B") | The async surface for action bodies: explicit `await` marker (yields the op's `Result`, consumed by existing `match`), no `then`, `Result`-foundation with deferred `onError` sugar + `attempt { }` railway (projects to F# `asyncResult` CE) + `spawn` fire-and-forget, `async` actions. Day-one = `await` + `match`; everything else deferred/additive. |
+| [`error-handling-and-failure-sink.md`](./error-handling-and-failure-sink.md) | PROPOSED ("Proposal C") | The unhandled-error terminus, both tiers: frontend global error boundary + backend global handler, one error vocabulary → HTTP Response / UI effect. Good defaults + declarative `errors { }` override. **Defers the backend status mapping** to `exception-less.md`/`failure-taxonomy.md`/`validation-error-extension.md`; new contribution is the frontend boundary + two-tier unification. |
+| [`frontend-state-management.md`](./frontend-state-management.md) | PROPOSED (unadopted) | The `store` keyword + **lifetime ladder** (`store` in-memory default · `persist: local\|session` · `sync: url`), grammar, and per-frontend × per-lifetime lowering matrix (incl. LiveView server-session). Owns the `store` container; named actions over it are Proposal A. Supersedes an external "State Management DSL" draft. |
+| [`fable-elmish-frontend.md`](./fable-elmish-frontend.md) | PROPOSED | Effort/shape study for a Fable/Feliz/Elmish frontend. The headline "Loom already models named, typed actions, so `Msg` is a projection" is **false against today's IR** and **made true by `named-actions-and-stores.md`** (named as its prerequisite). Consumes A/B/C. |
+
 ### Frontend escape hatches (the `extern` family)
 
 | Doc | Status | Aspect |

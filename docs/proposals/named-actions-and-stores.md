@@ -10,8 +10,13 @@
 > closes with why this is the prerequisite that turns a hypothetical
 > Fable/Feliz/Elmish target from "synthesis" into "projection." The decisions
 > in §8 are settled (keyword, purity boundary, effect-vocabulary scoping,
-> composition, store deferral, async outcomes); the only remaining open item
-> is `store` persistence, explicitly out of v1 scope.
+> composition, store deferral); the **async-effect surface** (`await`/`spawn`,
+> `onError`, `async` actions) is split into its own note,
+> [`async-actions-and-effects.md`](async-actions-and-effects.md) ("Proposal B"),
+> because it changes call semantics and wants its own migration ramp. Keyword
+> spelling and `store` persistence are now settled (§9 — default in-memory,
+> persistence a deferred opt-in). The full phased plan across both notes is in
+> [Rollout](#rollout--the-whole-initiative).
 >
 > **Framing note (this revision):** "an action is a pure function" is
 > idiomatic to *nobody* — Redux calls the data an action and the *reducer*
@@ -22,13 +27,30 @@
 > *proves* it pure by reifying the declared effects. Lead users with "a named
 > state transition," reserve the `(state, payload) -> (state', Cmd)` reading
 > for the backend author.
+>
+> **Notation & ground truth.** Examples below are tagged **✅ ships today** or
+> **🔶 proposed (this note)**. Three corrections to earlier drafts, verified
+> against the grammar: (1) there is **no `call` keyword** — a bare invocation
+> is already a statement (`AssignOrCallStmt`, `ddd.langium:1704`; the `call?=`
+> there is a *has-parens* flag, not a keyword); (2) the only `then` that ships
+> is the **success-only named arg on the `Action {}` render primitive**
+> (`then:`, read via `namedArgValue`, `controls.ts:194`); the async-effect
+> surface (Proposal B) **drops `then` entirely** in favour of explicit
+> `await`/`spawn` markers + `onError`, and the `Action {}` `then:` retires when
+> that primitive becomes the macro over named actions; (3) there is **no nullary
+> `() =>` lambda** — the
+> rule requires exactly one param (`Lambda: param=ID '=>' …`,
+> `ddd.langium:1896`), so a nullary handler is reached only by *referencing* a
+> named action. `toast(…)` ships only inside live-event `on …(e) { toast(…) }`
+> handlers today (`react/realtime-handlers-builder.ts`); admitting it in action
+> bodies is part of the 🔶 surface.
 
 ## TL;DR
 
-A page/component handler today is an **anonymous lambda** with a statement
-block (`onSubmit: c => { draft.x := c.x; step := 1 }` — grammar
-`ddd.langium:743-747`, IR `{ kind: "lambda"; body?; block?: StmtIR[] }` at
-`loom-ir.ts:2500-2511`). It has no name in the source or the IR.
+A page/component handler today is an **anonymous, single-param lambda** with a
+statement block (`onSubmit: c => { draft.x := c.x; step := 1 }` — grammar
+`Lambda` at `ddd.langium:1896`, IR `{ kind: "lambda"; param; body?; block?:
+StmtIR[] }` at `loom-ir.ts:2493-2503`). It has no name in the source or the IR.
 
 Every target that must **hoist** a handler out of the markup therefore has to
 *invent* a name. The LiveView walker does exactly this — it gensyms
@@ -46,14 +68,17 @@ propose to close that gap: let authors name page-local transitions, the same
 way `operation` already names domain ones.
 
 ```ddd
-page NewOrder {
-  state { step: int = 0; draft: PlaceOrderRequest = {} }
+page NewOrder {                                            // 🔶 the action decls + bare-ref handlers are proposed
+  state {                                                  // ✅ state block / fields ship today
+    step: int = 0
+    draft: PlaceOrderRequest = {}
+  }
 
-  action next()   { step := step + 1 }
-  action submit() { placeOrder(draft); navigate(OrderConsole, { customerId: draft.customerId }) }
+  action next()   { step := step + 1 }                                       // 🔶 (body stmts are ✅ real)
+  async action submit() { await placeOrder(draft); navigate(OrderConsole, { customerId: draft.customerId }) }  // 🔶 decl; calls ✅
 
-  body: match {
-    step == 0 => Form { into: draft, fields: [customerId], onSubmit: next }
+  body: match {                                            // ✅ match / Form / onSubmit ship today
+    step == 0 => Form { into: draft, fields: [customerId], onSubmit: next }     // onSubmit: <named action> is 🔶
     step == 2 => Review { of: draft, onSubmit: submit }
     else => Empty {}
   }
@@ -92,9 +117,13 @@ action <name>(<param>: <Type>?) { <Statement>* }
 ```
 
 The body reuses the existing handler statement set (`Statement`,
-`ddd.langium:1577`): `:=` / `+=` / `-=` (state writes), bare calls
-(`placeOrder(draft)`, `navigate(...)`, `toast(...)`), `emit`, `let`, `for`,
-`if let`. **No new statement semantics.**
+`ddd.langium:1624`): `:=` / `+=` / `-=` (state writes), local/sync calls
+(`navigate(...)`, pure helpers), `emit`, `let`, `for`, `if let`, `return` — all
+✅ today. The one **🔶 statement-level addition** is the remote-call marker
+`await` (§2.3); a *remote* call may not be bare, and its `Result` is consumed by
+the existing `match` (`onError` sugar and `spawn` are deferred — Proposal B).
+(`toast(…)` is *not* yet a general body call either — it ships only in live-event
+`on` handlers; admitting it here is 🔶, see §3.2.)
 
 ### 2.1 The one rule that earns the payoff — purity by restriction
 
@@ -149,54 +178,46 @@ sites checked against it on the other. The cost relative to an anonymous
 lambda (which infers the param type from the site for free) is one
 annotation; the benefit is a stable, reusable, projectable identity.
 
-### 2.3 Effectful calls and outcomes — success/failure continuations
+### 2.3 Effectful calls and outcomes — split into a separate proposal
 
-A pure action that *only* writes state is `(state) -> state'`. The moment it
-invokes an async effect with a result — an API write that can succeed or fail —
-it is `(state) -> (state', Cmd)` and MVU needs **both** outcome arms. Loom
-splits this by direction:
+How an action invokes a **remote** effect (a server command/query that can
+succeed or fail) — the explicit `await` / `spawn` markers, success-by-sequencing
+(no `then`), `onError` failure arms, and `async` action composition — is its own
+note: [`async-actions-and-effects.md`](async-actions-and-effects.md)
+("Proposal B"). It was split out because it **changes call semantics** (a remote
+call must be marked) and so wants its own lint→required migration ramp, whereas
+*this* note's named sync actions are a non-breaking addition.
+
+**In this note's scope (sync named actions), the two outcome directions are:**
 
 - **Reads (server state / queries) — derived, no new surface.**
-  `QueryView { of: api.Order.byId(id), loading: …, error: …, data: … }`
-  already carries the endpoint, the wire shape, *and* the three branches — i.e.
-  `Idle | Loading | Loaded of T | Failed of E`. The generator **derives** the
-  remote-data union + load `Cmd` + outcome `Msg` from `QueryView`; no DSL
-  change.
+  `QueryView { of: api.Order.byId(id), loading: …, error: …, data: … }` already
+  carries the endpoint, the wire shape, *and* the three branches
+  (`Idle | Loading | Loaded of T | Failed of E`). The generator **derives** the
+  remote-data union + load `Cmd` + outcome `Msg`; no DSL change.
 
-- **Writes (commands with an outcome) — reuse `then:`, add a failure arm.**
-  The language already has a *success continuation*: the
-  `Action { confirm, then: navigate(...) }` primitive's `then:`. We extend that
-  one idea — an effectful call carries an optional `then` (success) and an
-  optional `onError` (failure); the pair **is** a `Result<T, E>` outcome `Msg`
-  with its two `update` arms. A call with neither keeps today's terse
-  implicit-success behaviour (failure bubbles to the generic error surface), so
-  the common case stays short.
-
-```ddd
-action submit() {
-  call placeOrder(draft)
-    then      => navigate(OrderConsole, { customerId: draft.customerId })
-    onError e => toast(e.message)
-}
-```
-
-projects to:
-
-```fsharp
-| Submit ->
-    model,
-    Cmd.OfAsync.either Api.placeOrder model.Draft
-        (fun _ -> Submitted (Ok ())) (fun e -> Submitted (Error e.Message))
-| Submitted (Ok ())   -> model, Navigation.navigate (Route.OrderConsole model.Draft.CustomerId)
-| Submitted (Error m) -> model, Cmd.ofMsg (Toast m)
-```
-
-This closes the one MVU axis named actions do not (async effect outcomes) with
-a single *precedented* syntactic addition rather than a new concept, and it
-degrades gracefully — the `onError` arm is optional. See §8 for the decision
-record.
+- **Writes (commands with an outcome) — Proposal B.** Until Proposal B's markers
+  land, a remote call inside an action behaves exactly as a handler call does
+  today (implicit, unmarked). Proposal B then makes the async boundary explicit
+  and enforced. The one-line summary of what it settles: success is implicit
+  statement sequencing (no `then`); every remote call carries the explicit
+  `await` marker; **errors are values** — ops return a `Result` union consumed by
+  the existing `match` (no `raises`); actions have no return value (they handle
+  errors internally or reduce them to state); `async` is a required, checked
+  declaration keyword. The `onError` sugar and `spawn` are **deferred, additive**
+  ergonomics (added only when multi-step chains / optimistic UI demand them).
 
 ## 3. The sharing boundary: `store` (optional extension)
+
+> **The `store` keyword itself is owned by
+> [`frontend-state-management.md`](frontend-state-management.md)** — that note
+> designs the keyword, the **lifetime ladder** (`store` in-memory default ·
+> `store … persist: local|session` · `store … sync: url`), the grammar
+> (`StoreLifetime`), and the full per-frontend × per-lifetime lowering matrix
+> (incl. the LiveView server-side wrinkle). *This* note adds only **named
+> actions over store state**; treat the two as one feature split by concern
+> (container/lifetime there, named transitions here). The persistence question
+> in §9 is answered there, not re-litigated here.
 
 `action` does **not** require a `store`. State used by one page/component and
 dying with it stays page-local; naming a transition over it is "store-less"
@@ -204,7 +225,7 @@ and is the common case. A `store` is for state that is **shared across pages
 or outlives a single page**:
 
 ```ddd
-store Cart {
+store Cart {                               // 🔶 store/use/action all proposed; body stmts (:=, +=, calls) ✅
   state { lines: OrderLine[] = [] }
   action add(l: OrderLine) { lines += l }
   action clear()           { lines := [] }
@@ -268,25 +289,26 @@ store Cart {
   action clear() { lines := [] }            // data only — no navigate/toast
 }
 
-page CartPage {
+page CartPage {                              // 🔶 store/use/action ✅; await/onError → Proposal B
   use Cart
-  action confirm() {
-    call placeOrder(Cart.lines)
-      then      => { Cart.clear(); navigate(OrderConsole, { id: ... }) }  // page owns the redirect
-      onError e => toast(e.message)
+  async action confirm() {
+    await placeOrder(Cart.lines) onError e => showError(e.message)   // await/onError: async-actions-and-effects.md
+    Cart.clear()                                       // sync store action — call (this note)
+    navigate(OrderConsole, { id: ... })                // page owns the redirect (view-scoped effect)
   }
 }
 ```
 
 ```fsharp
 // the page program owns the nav Cmd; the Cart program only ever mutates Lines
-| Confirmed (Ok ())  -> model, Cmd.batch [ Cmd.ofMsg (CartMsg Clear); Navigation.navigate (Route.OrderConsole ...) ]
-| Confirmed (Error m)-> model, Cmd.ofMsg (Toast m)
+| Confirm           -> model, Cmd.OfAsync.either Api.placeOrder model.Cart.Lines (Ok>>Confirmed) (Error>>ConfirmFailed)
+| Confirmed (Ok ()) -> model, Cmd.batch [ Cmd.ofMsg (CartMsg Clear); Navigation.navigate (Route.OrderConsole ...) ]
+| ConfirmFailed e   -> model, Cmd.ofMsg (ShowError e)
 ```
 
 | In an action body | page / component | store |
 |---|---|---|
-| `:=` own state · `call` · `emit` · call a store action | ✓ | ✓ |
+| `:=` own state · bare call · `emit` · call a store action | ✓ | ✓ |
 | `navigate` / `toast` | ✓ | ✗ — view-scoped |
 
 This is not a purity exception (`navigate` reifies to a `Cmd` cleanly) — it is
@@ -382,7 +404,7 @@ This is deliberately incremental: **store-less page/component actions first**
 This note is the prerequisite the (separate) Fable/Elmish-target analysis kept
 running into. The headline claim of that analysis — "Loom already models
 named, typed actions, so the Elmish `Msg` union is a *projection*" — is **false
-against today's IR** (handlers are anonymous; `loom-ir.ts:2500-2511`). Named
+against today's IR** (handlers are anonymous; `loom-ir.ts:2493-2503`). Named
 actions make it **true**:
 
 ```fsharp
@@ -400,8 +422,9 @@ type Msg =
 
 Independently of whether F# is ever emitted, named actions are worth doing for
 §6. They just *also* happen to be the missing structural premise that
-converts the Elmish target from a synthesis problem into a projection — see
-the gap analysis tracked alongside this note.
+converts the Elmish target from a synthesis problem into a projection — the full
+gap analysis is [`fable-elmish-frontend.md`](fable-elmish-frontend.md), which
+names this note as its prerequisite.
 
 ## 8. Decisions (ratified)
 
@@ -416,8 +439,9 @@ These were settled and are no longer open. They define v1.
    the `Action {}` overlap is later judged too costly.
 2. **Action body purity — enforced, not advertised; the admissible set is
    fixed.** An action body may contain *only*: state writes (`:=` / `+=` / `-=`)
-   on owned state; declared effects (`call` / `navigate` / `emit`); and `let` /
-   `for` / `if let` control flow. **No** DOM access, `fetch`, or escape to host
+   on owned state; declared effects (local/sync calls + `navigate` / `emit`, and
+   remote calls via `await` / `spawn` — §2.3); and `let` / `for` / `if let`
+   control flow. **No** DOM access, `fetch`, or escape to host
    APIs. This makes an action semantically pure `(state, payload) -> (state',
    Cmd)` — but purity is the *output* (the compiler harvests it by reifying
    declared effects), not the authoring model (Pinia-style named transition).
@@ -439,14 +463,57 @@ These were settled and are no longer open. They define v1.
    Cross-page sharing and lifetime/persistence are orthogonal to the MVU
    projection (which needs *named actions*, not *shared state*). `store` lands
    second (§3).
-7. **Async outcomes (§2.3).** Reads are **derived** from `QueryView` (no new
-   surface). Writes reuse the existing `then:` success continuation and add an
-   optional `onError` failure arm; the `(then, onError)` pair projects to a
-   `Result<T, E>` outcome `Msg` + two `update` arms. Continuation-less calls
-   keep implicit-success behaviour.
+7. **Reads are derived; writes are Proposal B.** Query/read outcomes are
+   **derived** from `QueryView` (no new surface). The async-*write* surface
+   (`await`/`spawn`, `onError`, `async` actions) is settled in
+   [Proposal B](async-actions-and-effects.md) — the only decision recorded here
+   is that it is a **separate, post-Stage-1** body of work, because it changes
+   call semantics and carries its own lint→required migration ramp.
 
-## 9. Remaining open item
+## 9. Remaining open items
 
-- **`store` lifetime/persistence** — in-memory only, or
-  session/local-storage-backed? Out of scope for v1; revisit when `store`
-  lands.
+- **`store` lifetime/persistence — owned by
+  [`frontend-state-management.md`](frontend-state-management.md), not open here.**
+  That note's **lifetime ladder** already answers it: default **in-memory**
+  (session-volatile — Zustand/Pinia module store / global Elmish program), with
+  `persist: local|session` and `sync: url` as opt-in longer lifetimes, and a
+  per-frontend lowering matrix (incl. the LiveView server-side-session wrinkle).
+  Named actions (this note) sit on top of whichever lifetime a store declares.
+- Remaining async-effect open items (async-action awaiting timing, default
+  failure sink) live in [Proposal B §8](async-actions-and-effects.md). Keyword
+  spelling is **settled** (`action`/`store`/`use`/`await`/`spawn`/`attempt`/
+  `async`/`onError`).
+
+## Rollout — the whole initiative
+
+Five stages spanning both notes. Each is independently shippable and leaves the
+system in a **coherent, improved** state — never a half-built bridge.
+
+| Stage | What lands | Note | Breaking? | The system after |
+|---|---|---|---|---|
+| **1. Named sync actions** | `action name(p){…}` in page/component: grammar, `ActionIR`, lower, validator (purity + payload conformance), generators replace the `event_N` gensym with the action name. Remote calls behave **exactly as today** (unmarked). | A (§2, §5) | **No** — pure addition | Handlers are named & testable; gensym gone. |
+| **2. `await` + `match`** | Just the `await` marker; `await op()` yields the op's `Result` union, consumed by the **existing `match`**. No new error syntax. Lint-first (bare remote call = warning + codemod), then required. | B (Stages 1–2) | Yes, via ramp | Async boundary visible & enforced; failures handled via `match`. |
+| **3. Retire `Action {}` `then:`** | Rewrite the `Action {}` render primitive as a macro over a named action with an `await`-sequenced body; remove the `then:` named arg. | B (cleanup) | Macro keeps surface | **One** continuation model — no `then` anywhere. |
+| **4. Async action composition** | `async` keyword (lint → required), transitive inference, action→action awaiting. | B (Stage 4) | Yes, via ramp | Async flows compose across actions. |
+| **5. `store`** | Shared/persistent state + store actions (async store actions already work from Stages 2/4). | A (§3) | No | Cross-page sharing; Zustand/Pinia emission. |
+| **— `onError` sugar + `spawn`** *(deferred)* | `onError` flat sugar over `match` (added when multi-step `await` chains nest); `spawn` fire-and-forget (added for optimistic UI/telemetry). Both additive — desugar to / sit beside Stage 2. | B (Stage 3) | No — additive | Ergonomic happy-path + optimistic UI, once justified. |
+
+**Ordering rationale.** Stage 1 is the non-breaking foundation everything builds
+on. Stage 2 makes async *explicit* with the **smallest possible surface** —
+`await` + the `match` Loom already has, no `onError`/`spawn` yet. Stage 3 follows
+so the legacy `then:` dies before more async surface accretes (avoids two
+continuation models coexisting). Stage 4 extends the markers to action
+composition. Stage 5 (`store`) depends only on Stage 1 and can be pulled earlier
+if sharing is prioritised. The `onError` sugar and `spawn` are **deferred and
+additive** — slotted in whenever real `.ddd` shows nesting pain / optimistic
+patterns, with no migration cost.
+
+**Enabled, separate initiative:** the Fable/Feliz/Elmish target (§7). Stages 1–4
+turn its `Msg`/`update` emission from synthesis into projection; it is tracked in
+the gap analysis alongside these notes, not scheduled here.
+
+**Parallel, cross-cutting track:** global error handling — the frontend error
+boundary + backend error handler that anything unhandled propagates to — is its
+own note, [`error-handling-and-failure-sink.md`](error-handling-and-failure-sink.md)
+("Proposal C"). It is largely independent of the actions/async stages (the
+backend sink exists regardless of actions) and ships defaults-first.
