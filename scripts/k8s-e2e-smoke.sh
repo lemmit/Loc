@@ -86,7 +86,7 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: postgres:16-alpine
+          image: postgres:18-alpine
           env:
             - { name: POSTGRES_USER, value: postgres }
             - { name: POSTGRES_PASSWORD, value: postgres }

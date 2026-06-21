@@ -394,7 +394,7 @@ function renderDockerCompose(sys: SystemIR): string {
   lines.push("# Auto-generated.");
   lines.push("services:");
   lines.push("  db:");
-  lines.push("    image: postgres:16-alpine");
+  lines.push("    image: postgres:18-alpine");
   lines.push("    environment:");
   lines.push("      POSTGRES_DB: postgres");
   lines.push("      POSTGRES_USER: postgres");

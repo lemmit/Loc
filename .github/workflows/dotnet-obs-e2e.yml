@@ -83,7 +83,7 @@ jobs:
       - name: Run .NET observability runtime e2e
         env:
           LOOM_OBS_E2E_DOTNET: '1'
-          # The test pulls postgres:16-alpine via the docker CLI; the
+          # The test pulls postgres:18-alpine via the docker CLI; the
           # github-actions runner has docker available without extra
           # setup, but we set DOCKER_BUILDKIT=1 for faster image fetches.
           DOCKER_BUILDKIT: '1'
