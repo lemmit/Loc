@@ -381,11 +381,54 @@ accepted scoping (you own that source); revisit only if a real need appears.
 | **0** | `capabilityOrigin` provenance seam | `FilterEntry` + `collectFilters` (`lower-capabilities.ts:11-81`); `contextFilterOrigins?: (string\|undefined)[]` on `loom-ir.ts` (mirror `contextFilterRefs`) | **byte-identical** (no consumer) | no — serializing substrate |
 | **1** | surface + **.NET** | `ddd.langium` (+`langium:generate`, commit generated); `lower` `FindDecl`→`FindIR` bypass-set; `print-structural`/find printer arm; `efcore.ts` resolve origin→EF name→`IgnoreQueryFilters`; `loom.filter-bypass-unsupported` validator (`ir/validate/checks/*`, mirror `validateContextFilterSupport`) | runtime: `dotnet-build`, `dotnet-obs-e2e`, `k8s-e2e` read+write | no (grammar→regen→lower→emit is a chain) |
 | **2** | **Drizzle + Ecto** honor bypass (omit predicate from the AND-chain) | `typescript/repository-find-predicate.ts`; `elixir/vanilla/capability-filter.ts` | `behavioral-e2e`, `k8s-e2e` | **yes — 2 agents** (disjoint trees) |
-| defer | **Java** (idiomatic bypass — *under research*), **Ash** (base_filter→unfiltered action/policy), **Python** (filter-emission gap first, then bypass) | per-backend emit + drop from `NO_FILTER_EMISSION`/`LIMITED_FAMILIES` | each own runtime gate | **yes — independent fan-out** |
+| defer | **Java** (`@SQLRestriction`→`@Filter` *only where bypassed* — §11.6), **Ash** (base_filter→unfiltered action/policy), **Python** (filter-emission gap first, then bypass) | per-backend emit + drop from `NO_FILTER_EMISSION`/`LIMITED_FAMILIES` | each own runtime gate | **yes — independent fan-out** |
 
 Backends that can't honor a given `ignoring <Cap>` **fail-fast** via the new
 validator (mirrors `loom.context-filter-unsupported`), so an unsupported target
 errors at compile rather than silently still-filtering.
+
+### 11.6 Java — the "pay for what you use" hybrid (researched; no regression)
+
+The two naïve options both lose: `@SQLRestriction` is **unbypassable by design**
+(Hibernate javadoc: *"always applied and cannot be disabled"*), and blanket-
+migrating to `@Filter` makes every existing soft-delete/tenancy filter
+**off-by-default** (a silent regression). The idiomatic resolution leans on the
+fact that **Loom owns every query site** and can triage per capability×entity:
+
+- **Triage at generation.** If the model contains **no** `ignoring <Cap>`
+  targeting an entity → keep today's **`@SQLRestriction`** (zero regression,
+  covers JPQL + by-id + lazy; no runtime cost). Only when an `ignoring <Cap>`
+  *does* target it → emit that predicate as a **bypassable `@Filter`** instead.
+  This is a *derived* fact (find-decls × capability membership), computed at
+  enrich/codegen — never stamped.
+- **Always-on without a global hook.** Loom targets **Spring Boot 4.1.0 →
+  Hibernate ORM 7.x** (`SPRING_BOOT_VERSION` in `java/emit/program.ts:21`), so
+  the 6.5+ machinery is available: emit
+  `@FilterDef(name=…, autoEnabled = true, applyToLoadByKey = true, parameters = @ParamDef(name=…, type=…, resolver = <Cap>Resolver.class))`
+  + `@Filter(name=…)`. `autoEnabled` reproduces `@SQLRestriction`'s always-on
+  semantics with no interceptor to forget; `applyToLoadByKey=true` keeps by-id /
+  lazy loads filtered (else a promoted filter leaks previously-hidden rows); a
+  request-scoped `Supplier<T>` resolver supplies parameters (e.g. the tenant id).
+- **Bypass call site.** At a generated `ignoring <Cap>` finder, wrap the query:
+  ```java
+  Session s = em.unwrap(Session.class);
+  s.disableFilter("softDeletable");
+  try   { return em.createQuery("select o from Order o", Order.class).getResultList(); }
+  finally { s.enableFilter("softDeletable"); /* re-arm for the rest of the session */ }
+  ```
+- **Gotchas to encode:** `@SQLRestriction` and `@Filter` coexist on one entity
+  (different predicates AND-cleanly); **native SQL bypasses both** — any native
+  query site must splice the predicate manually. `@SoftDelete` / `@TenantId` are
+  *not* used for bypassable capabilities (same no-escape limitation as
+  `@SQLRestriction`; reserve them for hard, never-`ignoring`-able isolation).
+
+This makes Java a **full bypass backend** (not deferred-only) at the cost of one
+triage pass — you pay the `@Filter` machinery exactly where bypass is modeled,
+and everything else keeps today's zero-cost behavior. The triage principle
+generalizes: *render a capability filter in its bypassable form only where the
+model actually bypasses it* — applicable to any backend whose always-on and
+bypassable forms differ (Java here; .NET needs none, EF's named filters are
+always-on **and** bypassable in one form).
 
 ### 11.4 Orchestration — skills & agent parallelization
 
