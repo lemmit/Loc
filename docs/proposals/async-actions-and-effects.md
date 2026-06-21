@@ -95,6 +95,20 @@ routed to a default telemetry sink). `let x = spawn …` is an error (nothing to
 bind). Both `await` and `spawn` reify to `Cmd`s, so the action stays pure
 `(state) -> (state', Cmd)` either way.
 
+**`spawn` has no success continuation — by design.** The statement *after* a
+`spawn` is the action's immediate continuation (it runs now, regardless of the
+op), **not** the op's continuation. The only thing tied to the op's completion
+is the detached `onError`. This maps exactly onto the Elmish combinators: bare
+`spawn` → `Cmd.OfAsync.start` (dispatch on neither outcome); `spawn … onError` →
+`Cmd.OfAsync.attempt` (dispatch on **failure only**); `await` → `Cmd.OfAsync.either`
+(both — and its success arm *is* the next statement). The rule that falls out:
+**need to react to the result → you're waiting on it → use `await`**; `spawn` is
+for "don't need the result (but maybe undo on failure)." The remaining quadrant
+— non-blocking *and* react to success (e.g. an autosave "saved ✓" indicator) — is
+intentionally **not** designed: it would re-introduce the deleted `then`/`onError`
+success-arm pair, and is added only if a concrete case ever justifies a symmetric
+detached success handler.
+
 The optimistic-update shape — no arm split, detached rollback — is the
 canonical `spawn`:
 
