@@ -1138,12 +1138,26 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 //       the set in later slices.
 // ---------------------------------------------------------------------------
 
-/** Backend families that honor an `ignoring` filter-bypass clause today.
- *  Slice 1 ships .NET only (EF `IgnoreQueryFilters`).  Slice 2 (Drizzle/Ecto)
- *  and later slices widen this set as each backend learns to honor the bypass —
- *  the canonical family names are `node` (Drizzle/Hono), `elixir` (Ecto/Ash),
- *  `java`, `python`. */
-const FILTER_BYPASS_FAMILIES = new Set(["dotnet"]);
+/** Backend families that honor an `ignoring` filter-bypass clause on EVERY
+ *  foundation.  `dotnet` (EF `IgnoreQueryFilters`, Slice 1) and `node`
+ *  (Drizzle — omits the bypassed conjunct from the `and(...)` chain, Slice 2)
+ *  always honor it.  `elixir` is foundation-conditional (`bypassSupported`):
+ *  the `vanilla` Ecto foundation omits the bypassed `where:` (Slice 2), but the
+ *  default `ash` foundation does NOT yet — so it stays fail-fast.  `java` /
+ *  `python` remain deferred. */
+const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node"]);
+
+/** Whether `dep`'s backend honors `ignoring` filter-bypass.  A backend must
+ *  not pass this gate while still silently filtering — a family is supported
+ *  only once its emitter actually OMITS the bypassed predicate.  Elixir is
+ *  split by foundation: `vanilla` (plain Ecto) honors it; `ash` (the default)
+ *  does not yet, so it must keep failing fast. */
+function bypassSupported(dep: { platform: string; foundation?: string }): boolean {
+  const fam = platformFamily(dep.platform);
+  if (!fam) return false;
+  if (dep.platform === "elixir") return dep.foundation === "vanilla";
+  return FILTER_BYPASS_FAMILIES.has(fam);
+}
 
 /** A read carrying an `ignoring` clause, plus the aggregate it targets and a
  *  human-readable site label for diagnostics. */
@@ -1228,7 +1242,7 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
     // Only backend deployables serve reads; a frontend (react/static/vue/…)
     // owns no repository/view read path, so it can't bypass a filter.
     if (!fam || !platformOwnsBackend(dep.platform)) continue;
-    const supported = FILTER_BYPASS_FAMILIES.has(fam);
+    const supported = bypassSupported(dep);
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
@@ -1247,11 +1261,13 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
             severity: "error",
             code: "loom.filter-bypass-unsupported",
             message:
-              `Deployable '${dep.name}' (platform ${dep.platform}) serves ${read.site} on ` +
+              `Deployable '${dep.name}' (platform ${dep.platform}${
+                dep.platform === "elixir" ? ` foundation ${dep.foundation ?? "ash"}` : ""
+              }) serves ${read.site} on ` +
               `aggregate '${ctxName}.${read.aggName}' with an 'ignoring' filter-bypass clause, but ` +
-              `the ${fam} backend does not honor capability-filter bypass yet — only the dotnet ` +
-              `backend (EF 'IgnoreQueryFilters') does in this release. Host this read on a .NET ` +
-              `deployable, or remove the 'ignoring' clause.`,
+              `this backend does not honor capability-filter bypass yet — the honoring backends are ` +
+              `dotnet (EF 'IgnoreQueryFilters'), node (Drizzle), and elixir on the vanilla foundation ` +
+              `(Ecto). Host this read on a supported backend, or remove the 'ignoring' clause.`,
             source: `${sys.name}/${dep.name}`,
           });
           continue;
