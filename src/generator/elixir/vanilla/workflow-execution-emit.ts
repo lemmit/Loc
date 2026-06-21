@@ -351,7 +351,10 @@ function lowerStatement(
       // a bare ref to a preceding `repo-run` binding — the validator
       // `loom.workflow-foreach-source` enforces this shape).
       const iterable = renderExpr(st.iterable, renderCtx);
-      const loopVar = snake(st.var);
+      // Underscore an unread loop var so `--warnings-as-errors` stays clean when
+      // the body iterates for effect without naming the row (e.g. a nested
+      // find/loop keyed off a workflow param rather than the element).
+      const loopVar = bindUsedLater(st.var, st.body) ? snake(st.var) : `_${snake(st.var)}`;
       const bodyLines = renderLoopBody(st.body, renderCtx, contextModule);
       // Multi-line clause: assembleBody indents the FIRST line at the
       // with-chain's column; subsequent lines keep their authored
@@ -382,12 +385,16 @@ function lowerStatement(
       const runArgs = [...st.retrievalArgs.map((a) => renderExpr(a, renderCtx)), "limit: 1"];
       const v = snake(st.var);
       const renderBranch = (body: WorkflowStmtIR[], present: string): string[] => {
-        // A branch with a guard (`precondition` / `requires`) needs a
-        // `with`-chain so the guard can short-circuit to `{:error, tag}` which
-        // threads up the outer with-chain.  A guard-free branch keeps the flat
-        // sequential `=`-bind form (the original shape).
-        const hasGuard = body.some((s) => s.kind === "precondition" || s.kind === "requires");
-        if (hasGuard) {
+        // A branch needs a `with`-chain when it holds a fallible statement that
+        // must short-circuit to `{:error, tag}` (so it threads up the outer
+        // with-chain): a guard (`precondition` / `requires`) OR nested control
+        // flow / repo binds (`for-each` / `if-let` / `repo-run` / `repo-let`).
+        // A branch of only flat side-effects keeps the sequential `=`-bind form.
+        const needsWith = body.some(
+          (s) =>
+            s.kind === "precondition" || s.kind === "requires" || NESTED_FLOW_KINDS.has(s.kind),
+        );
+        if (needsWith) {
           const clauses: string[] = [];
           const tail: string[] = [];
           for (let i = 0; i < body.length; i++) {
@@ -414,6 +421,10 @@ function lowerStatement(
             } else if (inner.kind === "expr-let") {
               const bind = bindUsedLater(inner.name, rest) ? snake(inner.name) : "_";
               clauses.push(`${bind} <- (${renderExpr(inner.expr, renderCtx)})`);
+            } else if (NESTED_FLOW_KINDS.has(inner.kind)) {
+              // Nested loop / if-let / repo bind — reuse `lowerStatement` so it
+              // lowers to a `<-` clause that threads {:error, _} up this branch.
+              pushNestedFlow(inner, contextModule, renderCtx, clauses, tail);
             } else {
               // emit / resource-call — pure side-effects, run in the do-branch.
               tail.push(...renderBranchStmt(inner, renderCtx, contextModule));
@@ -459,6 +470,43 @@ function opCallSource(
 ): string {
   const argFields = st.args.map((arg, i) => `arg${i}: ${renderExpr(arg, renderCtx)}`).join(", ");
   return `${contextModule}.${snake(st.op)}_${snake(st.aggName)}(${snake(st.target)}, %{${argFields}})`;
+}
+
+/** Statement kinds that are themselves fallible control flow / repo binds —
+ *  inside a `for-each` body or an `if-let` branch they lower (via the shared
+ *  `lowerStatement`) to a `<-` with-clause that threads `{:error, _}`, so they
+ *  must sit in a `with`-chain rather than the flat sequential form. */
+const NESTED_FLOW_KINDS: ReadonlySet<WorkflowStmtIR["kind"]> = new Set([
+  "for-each",
+  "if-let",
+  "repo-run",
+  "repo-let",
+]);
+
+/** Lower a nested control-flow / repo-bind statement that appears inside a
+ *  `for-each` body or an `if-let` branch by reusing the top-level
+ *  `lowerStatement` dispatch.  Each produced `with-clause` BodyLine becomes a
+ *  `<-` clause in the surrounding with-chain (so a nested loop/branch failure
+ *  short-circuits the same way a flat op does); `emit` / `resource-call`
+ *  side-effects land in the enclosing `do`-branch.  Returns the last bound
+ *  name (if any), so a loop body can thread it out as `{:cont, {:ok, <name>}}`. */
+function pushNestedFlow(
+  inner: WorkflowStmtIR,
+  contextModule: string,
+  renderCtx: RenderCtx,
+  clauses: string[],
+  sideEffects: string[],
+): string | undefined {
+  let bind: string | undefined;
+  for (const bl of lowerStatement(inner, contextModule, renderCtx)) {
+    if (bl.kind === "with-clause") {
+      clauses.push(bl.text);
+      if (bl.bindName) bind = bl.bindName;
+    } else {
+      sideEffects.push(bl.text);
+    }
+  }
+  return bind;
 }
 
 /** Render the body of a `for <var> in xs` loop as the inner Elixir lines of
@@ -547,11 +595,26 @@ function renderLoopBody(
       case "resource-call":
         doLines.push(`_ = ${renderExpr(inner.call, renderCtx)}`);
         break;
-      default:
-        // Nested loops / if-lets / repo binds in a loop body are out of v1
-        // scope (the validator never produces them); render a harmless TODO.
-        doLines.push(`# TODO: lower for-each body statement kind '${inner.kind}'`);
+      case "for-each":
+      case "if-let":
+      case "repo-run":
+      case "repo-let": {
+        // Nested control flow (a loop / if-let inside this loop body) and
+        // repo binds reuse the top-level `lowerStatement` dispatch — which
+        // already lowers each to a `<-` with-clause threading {:error, _}.
+        // Slotting them as clauses in this iteration's with-chain means a
+        // nested failure short-circuits to {:halt, err} just like a flat op.
+        const b = pushNestedFlow(inner, contextModule, renderCtx, clauses, doLines);
+        if (b) lastBind = b;
         break;
+      }
+      default: {
+        // Exhaustive over WorkflowStmtIR — a new kind is a compile error here
+        // rather than a silently-emitted `# TODO` into generated Elixir.
+        const _never: never = inner;
+        void _never;
+        break;
+      }
     }
   }
 
@@ -713,7 +776,10 @@ function renderBranchStmt(
     case "resource-call":
       return [`_ = ${renderExpr(st.call, renderCtx)}`];
     default:
-      // Nested control flow inside an if-let branch is out of v1 scope.
+      // Defence-in-depth: `renderBranch` routes guards + nested control flow
+      // (`for-each` / `if-let` / `repo-run` / `repo-let`) through the with-chain
+      // path, so the flat path only ever sees the kinds handled above.  A future
+      // kind reaching here surfaces as a visible TODO rather than silent-wrong.
       return [`# TODO: lower if-let branch statement kind '${st.kind}'`];
   }
 }

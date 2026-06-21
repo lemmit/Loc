@@ -150,3 +150,89 @@ describe("vanilla exception-less returning op — collection mutations + call", 
     expect(fn).not.toContain("# TODO(exception-less)");
   });
 });
+
+describe("vanilla nested control flow — for-each / if-let bodies recurse", () => {
+  // The for-each validator only inspects op-calls, so nested control flow /
+  // repo binds are valid input.  Before the recursion fix each dropped a
+  // `# TODO: lower ... statement kind`; now they reuse `lowerStatement` as a
+  // `<-` with-clause so a nested failure short-circuits the enclosing chain.
+
+  it("(1) an if-let inside a for-each body lowers with no # TODO", async () => {
+    const wf = await fileEndingIn(
+      wrap(`workflow ifLetInForEach {
+        create(d: bool) {
+          let xs = Orders.run(PendingQ(d), page: { offset: 0, limit: 50 })
+          for x in xs { if let o = Orders.find(Pending(d)) { x.confirm() } }
+        }
+      }`),
+      "/workflows/if_let_in_for_each.ex",
+    );
+    expect(wf).not.toContain("# TODO");
+    // The nested if-let is a `{:ok, _} <-` clause inside the reduce_while chain.
+    expect(wf).toMatch(/Enum\.reduce_while\([\s\S]*with \{:ok, _\} <- \([\s\S]*case Context\.run_/);
+  });
+
+  it("(2) a for-each over a branch-local repo-run inside an if-let branch lowers with no # TODO", async () => {
+    const wf = await fileEndingIn(
+      wrap(`workflow forEachInIfLet {
+        create(d: bool) {
+          if let o = Orders.find(Pending(d)) {
+            let ys = Orders.run(PendingQ(d))
+            for y in ys { y.confirm() }
+          }
+        }
+      }`),
+      "/workflows/for_each_in_if_let.ex",
+    );
+    expect(wf).not.toContain("# TODO");
+    // The branch threads the repo-run bind then the nested loop as with-clauses.
+    expect(wf).toMatch(/\{:ok, ys\} <- Context\.run_pending_q_order\(d\)/);
+    expect(wf).toMatch(/Enum\.reduce_while\(ys,/);
+  });
+
+  it("(3) an if-let inside an if-let branch lowers with no # TODO", async () => {
+    const wf = await fileEndingIn(
+      wrap(`workflow ifLetInIfLet {
+        create(d: bool) {
+          if let o = Orders.find(Pending(d)) {
+            if let p = Orders.find(Pending(d)) { p.confirm() }
+          }
+        }
+      }`),
+      "/workflows/if_let_in_if_let.ex",
+    );
+    expect(wf).not.toContain("# TODO");
+  });
+
+  it("(4) a for-each nested inside a for-each body lowers with no # TODO", async () => {
+    const wf = await fileEndingIn(
+      wrap(`workflow forEachInForEach {
+        create(d: bool) {
+          let xs = Orders.run(PendingQ(d))
+          for x in xs {
+            let ys = Orders.run(PendingQ(d))
+            for y in ys { y.confirm() }
+          }
+        }
+      }`),
+      "/workflows/for_each_in_for_each.ex",
+    );
+    expect(wf).not.toContain("# TODO");
+    // Inner reduce_while is a with-clause inside the outer reduce_while callback.
+    expect(wf).toMatch(/Enum\.reduce_while\(xs,[\s\S]*Enum\.reduce_while\(ys,/);
+  });
+
+  it("underscores an unused loop var so --warnings-as-errors stays clean", async () => {
+    // The body keys off the workflow param `d`, never naming the row `x`.
+    const wf = await fileEndingIn(
+      wrap(`workflow unusedRow {
+        create(d: bool) {
+          let xs = Orders.run(PendingQ(d))
+          for x in xs { if let o = Orders.find(Pending(d)) { o.confirm() } }
+        }
+      }`),
+      "/workflows/unused_row.ex",
+    );
+    expect(wf).toMatch(/fn _x, _acc ->/);
+  });
+});

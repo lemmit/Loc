@@ -135,6 +135,12 @@ describe.skipIf(!ENABLED)(
         // Ecto-state instance + correlation row + create/continuation handlers
         // compiled on the vanilla foundation.
         { name: "vanilla-workflows.ddd", deployable: "api" },
+        // Nested control flow in workflow bodies: `for-each` / `if-let` /
+        // `repo-run` nested inside a `for-each` body or an `if-let` branch
+        // (the for-each validator only inspects op-calls, so the nesting is
+        // valid input).  Before the recursion fix these dropped a `# TODO`
+        // (uncompilable); now each lowers as a `<-` with-clause.
+        { name: "vanilla-nested-flow.ddd", deployable: "api" },
       ]),
     )("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
