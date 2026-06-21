@@ -457,6 +457,14 @@ export interface AggregateIR {
    * the module-level `<name>Criterion` predicate fn instead of re-inlining
    * the body (reified-criteria.md, the anonymous-`filter` row). */
   contextFilterRefs?: ({ name: string; args: ExprIR[] } | undefined)[];
+  /** Per-`contextFilters` entry: the name of the capability that contributed
+   * the filter (e.g. `softDeletable`), or `undefined` for a hand-written /
+   * context-level bare filter — index-aligned with `contextFilters`, set by the
+   * expander on the spliced `FilterDecl` and threaded through lowering.  This is
+   * the provenance the `ignoring <Cap>` bypass surface resolves against: a
+   * backend maps a bypassed capability name to the predicate(s) it owns.  Purely
+   * additive — no consumer until the bypass surface lands, so byte-neutral. */
+  contextFilterOrigins?: (string | undefined)[];
   /** Lifecycle stamping rules contributed by `stamp onCreate { ... }`
    * / `stamp onUpdate { ... }` declarations (hand-written or
    * macro-emitted) on the aggregate, plus any propagated from the

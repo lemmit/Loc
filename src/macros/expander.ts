@@ -47,7 +47,7 @@ import {
   type Model,
   type Ui,
 } from "../language/generated/ast.js";
-import { CAPABILITIES_TAG } from "../util/capability-tag.js";
+import { CAPABILITIES_TAG, FILTER_ORIGIN_TAG } from "../util/capability-tag.js";
 import { readArgBool, readArgInt, readArgRef, readArgRefs, readArgString } from "./api/_read.js";
 import type {
   MacroDefinition,
@@ -455,7 +455,16 @@ function expandCapability(
         );
   for (const agg of targets) {
     const cloned: unknown[] = (cap.members ?? []).map((m) => AstUtils.copyAstNode(m, buildRef));
-    for (const m of cloned) resolveSelfTypes(m as AstNode, agg.name, buildRef);
+    for (const m of cloned) {
+      resolveSelfTypes(m as AstNode, agg.name, buildRef);
+      // Tag a spliced `filter` member with the capability that contributed it,
+      // so lowering can populate `contextFilterOrigins` — the provenance the
+      // `ignoring <Cap>` bypass surface resolves against.  Transient ($-key),
+      // set after the copy above.
+      if ((m as AstNode).$type === "FilterDecl") {
+        (m as { [FILTER_ORIGIN_TAG]?: string })[FILTER_ORIGIN_TAG] = cap.name;
+      }
+    }
     spliceMembers(agg, "aggregate", cloned, at, doc);
     // Record capability membership as a transient annotation on the aggregate
     // node (read by lowering's `collectCapabilities`).  Deliberately NOT an

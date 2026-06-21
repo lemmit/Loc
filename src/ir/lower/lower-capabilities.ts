@@ -1,5 +1,5 @@
 import type { Aggregate, BoundedContext, Expression } from "../../language/generated/ast.js";
-import { CAPABILITIES_TAG } from "../../util/capability-tag.js";
+import { CAPABILITIES_TAG, FILTER_ORIGIN_TAG } from "../../util/capability-tag.js";
 import type { ContextStampIR, ExprIR } from "../types/loom-ir.js";
 import { criterionRefOf, lowerExpr } from "./lower-expr.js";
 import type { Env } from "./lower-types.js";
@@ -7,14 +7,30 @@ import type { Env } from "./lower-types.js";
 /** A lowered capability-filter predicate plus, when the source expression is
  *  *exactly* one named `criterion` reference, that reference (mirrors
  *  `FindIR.criterionRef`) — so reifying backends can call the criterion's
- *  module-level predicate fn instead of re-inlining its body. */
+ *  module-level predicate fn instead of re-inlining its body.  `capabilityOrigin`
+ *  carries the name of the capability that contributed this filter (set by the
+ *  expander on the spliced `FilterDecl`), or `undefined` for a hand-written /
+ *  context-level bare filter — the provenance the `ignoring <Cap>` bypass
+ *  surface resolves against. */
 export interface FilterEntry {
   predicate: ExprIR;
   criterionRef?: { name: string; args: ExprIR[] };
+  capabilityOrigin?: string;
 }
 
-function filterEntry(expr: Expression, env: Env): FilterEntry {
-  return { predicate: lowerExpr(expr, env), criterionRef: criterionRefOf(expr, env) };
+/** A `FilterDecl` AST node carries its `expr` plus, when spliced from a
+ *  capability, the transient origin tag. */
+interface FilterDeclLike {
+  expr: Expression;
+  [FILTER_ORIGIN_TAG]?: string;
+}
+
+function filterEntry(m: FilterDeclLike, env: Env): FilterEntry {
+  return {
+    predicate: lowerExpr(m.expr, env),
+    criterionRef: criterionRefOf(m.expr, env),
+    capabilityOrigin: m[FILTER_ORIGIN_TAG],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -50,7 +66,7 @@ export function collectContextLevelCapabilities(
   const unqualifiedStamps: ContextStampIR[] = [];
   for (const m of ctx.members ?? []) {
     if (m.$type === "FilterDecl") {
-      unqualifiedFilters.push(filterEntry((m as { expr: Expression }).expr, env));
+      unqualifiedFilters.push(filterEntry(m as unknown as FilterDeclLike, env));
     } else if (m.$type === "StampDecl") {
       unqualifiedStamps.push(lowerStampDecl(m as unknown as StampDeclLike, env));
     }
@@ -65,7 +81,7 @@ export function collectFilters(
 ): FilterEntry[] {
   const own = (agg.members ?? [])
     .filter((m) => m.$type === "FilterDecl")
-    .map((m) => filterEntry((m as { expr: Expression }).expr, env));
+    .map((m) => filterEntry(m as unknown as FilterDeclLike, env));
   return [...ctxCaps.unqualifiedFilters, ...own];
 }
 

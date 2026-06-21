@@ -1211,6 +1211,9 @@ function lowerAggregate(
     contextFilterRefs: filters.some((f) => f.criterionRef)
       ? filters.map((f) => f.criterionRef)
       : undefined,
+    contextFilterOrigins: filters.some((f) => f.capabilityOrigin)
+      ? filters.map((f) => f.capabilityOrigin)
+      : undefined,
     contextStamps: stamps.length > 0 ? stamps : undefined,
     capabilities: capabilities.length > 0 ? capabilities : undefined,
     persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,
