@@ -3,6 +3,7 @@ import { allContexts } from "../types/loom-ir.js";
 import type { LoomDiagnostic } from "./checks/diagnostic.js";
 import {
   validateQueryableWheres,
+  validateRawSeedColumns,
   validateRetrievals,
   validateViewGates,
 } from "./checks/query-checks.js";
@@ -36,6 +37,7 @@ import {
   validateElixirStampSupport,
   validateEventSourcedStorage,
   validateEventSourcedWorkflowStorage,
+  validateFindPredicateAdapterSupport,
   validateInheritanceStorage,
   validateJavaContainmentSupport,
   validateJavaFullstackSupport,
@@ -54,6 +56,7 @@ import {
   validateVanillaDocumentScope,
 } from "./checks/system-checks.js";
 import { validateAggregateTestBodies } from "./checks/test-checks.js";
+import { validateUiBodies } from "./checks/ui-checks.js";
 import {
   validateEventChannelAmbiguous,
   validateEventConsumersCarried,
@@ -122,6 +125,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateElixirStampSupport(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);
+    validateFindPredicateAdapterSupport(sys, diags);
     validateVanillaContainmentSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
@@ -155,6 +159,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateQueryableWheres(c, diags);
     validateViewGates(c, diags);
     validateRetrievals(c, diags);
+    validateRawSeedColumns(c, diags);
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);
     validateExternOperations(c, diags);
@@ -205,5 +210,6 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateAuditedOperationSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
   validateExprIntegrity(loom, diags);
+  validateUiBodies(loom, diags);
   return diags;
 }
