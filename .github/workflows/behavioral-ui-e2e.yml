@@ -1,0 +1,90 @@
+name: Behavioral UI e2e (headless, no docker)
+
+# The UI sibling of behavioral-e2e.yml.  For each corpus case with a
+# React frontend + a `test e2e … against <react>` block: generate the
+# system, boot its generated Hono backend on PGlite (in-process — no
+# docker) as a real HTTP server, `vite build` + `vite preview` the
+# generated React frontend with `/api` proxied at that backend, then run
+# the EMITTED Playwright `*.ui.spec.ts` (the page-object round-trips —
+# create → submit → read back) against the live stack with a real
+# (headless Chromium) browser.
+#
+# This is the behavioral UI gate the in-process `app.fetch` API tier
+# can't provide: it exercises the generated React pages + forms end to
+# end and closes the Definition-of-Done rollup gap (the `against <react>`
+# UI testCases were "unverified" until this tier landed).  It sidesteps
+# the playground's in-browser npm bundle entirely (and so #1242) — the
+# frontend is built with the same `vite build` the generated-*-e2e
+# workflows use.
+#
+# Cross-pack UI coverage (shadcn/mui/chakra, vue, svelte) stays in the
+# generated-*-e2e runtime workflows + the docker conformance leg; this
+# tier is the additive Mantine/React behavioral round-trip.
+#
+# Triggers: PRs/pushes touching the toolchain, the React/frontend
+# emitters, the corpus example, or the harness itself.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'bin/**'
+      - 'designs/mantine/**'
+      - 'web/src/testing/**'
+      - 'web/src/runtime/ddl.ts'
+      - 'web/src/examples/sales-system.ddd'
+      - 'test/behavioral/**'
+      - 'package.json'
+      - '.github/workflows/behavioral-ui-e2e.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'bin/**'
+      - 'designs/mantine/**'
+      - 'web/src/testing/**'
+      - 'web/src/runtime/ddl.ts'
+      - 'web/src/examples/sales-system.ddd'
+      - 'test/behavioral/**'
+      - 'package.json'
+      - '.github/workflows/behavioral-ui-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  behavioral-ui:
+    runs-on: ubuntu-latest
+    # Real npm install of the React/Mantine tree + vite build + a Chromium
+    # download per case dominates; the boot + Playwright run are seconds.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Build the Loom toolchain so `bin/cli.js generate system` works
+      # (`prepare` lifecycle runs langium:generate).
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      # Pinned generated-backend runtime deps (drizzle, hono,
+      # @hono/node-server, pglite, esbuild) — isolated from the repo's.
+      - name: Install behavioral harness deps
+        working-directory: test/behavioral
+        run: npm ci || npm install --no-audit --no-fund
+
+      - name: Run behavioral UI tier (Playwright round-trips gate)
+        working-directory: test/behavioral
+        run: node run-ui.mjs

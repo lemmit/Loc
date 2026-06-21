@@ -57,7 +57,7 @@ export class OrderNewPage {
       }
     }
     if (input.placedAt !== undefined) {
-      await this.page.getByTestId("orders-new-input-placedAt").fill(input.placedAt!.slice(0, 19));
+      await this.page.getByTestId("orders-new-input-placedAt").fill(input.placedAt!.slice(0, 16));
     }
     return this;
   }
@@ -143,7 +143,7 @@ export class OrderDetailPage {
       }
     }
     if (input.placedAt !== undefined) {
-      await this.page.getByTestId("orders-op-update-input-placedAt").fill(input.placedAt!.slice(0, 19));
+      await this.page.getByTestId("orders-op-update-input-placedAt").fill(input.placedAt!.slice(0, 16));
     }
     await this.page.getByTestId("orders-op-update-submit").click();
     await this.page.getByTestId("orders-op-update-form").waitFor({ state: "detached" });
