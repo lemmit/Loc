@@ -95,19 +95,38 @@ routed to a default telemetry sink). `let x = spawn …` is an error (nothing to
 bind). Both `await` and `spawn` reify to `Cmd`s, so the action stays pure
 `(state) -> (state', Cmd)` either way.
 
-**`spawn` has no success continuation — by design.** The statement *after* a
-`spawn` is the action's immediate continuation (it runs now, regardless of the
-op), **not** the op's continuation. The only thing tied to the op's completion
-is the detached `onError`. This maps exactly onto the Elmish combinators: bare
-`spawn` → `Cmd.OfAsync.start` (dispatch on neither outcome); `spawn … onError` →
-`Cmd.OfAsync.attempt` (dispatch on **failure only**); `await` → `Cmd.OfAsync.either`
-(both — and its success arm *is* the next statement). The rule that falls out:
-**need to react to the result → you're waiting on it → use `await`**; `spawn` is
-for "don't need the result (but maybe undo on failure)." The remaining quadrant
-— non-blocking *and* react to success (e.g. an autosave "saved ✓" indicator) — is
-intentionally **not** designed: it would re-introduce the deleted `then`/`onError`
-success-arm pair, and is added only if a concrete case ever justifies a symmetric
-detached success handler.
+**`spawn` has no success continuation at the call site — by design.** The
+statement *after* a `spawn` is the action's immediate continuation (it runs now,
+regardless of the op), **not** the op's continuation. The only thing tied to a
+spawned *op*'s completion is the detached `onError`. This maps onto the Elmish
+combinators: bare `spawn` → `Cmd.OfAsync.start` (neither outcome); `spawn … onError`
+→ `Cmd.OfAsync.attempt` (**failure only**); `await` → `Cmd.OfAsync.either` (both —
+its success arm *is* the next statement).
+
+**Non-blocking work that must react to success goes inside a spawned async
+action.** You don't bolt a success arm onto `spawn`; you `spawn` a *named async
+action* whose body does the `await` + `match` (an autosave "saved ✓" indicator,
+say). The invocation mode never changes the callee's body — a spawned async
+action awaits/matches exactly like an awaited one; `spawn` only decides that the
+caller doesn't wait:
+
+```ddd
+async action autosave() {                    // 🔶 — handles BOTH outcomes internally
+  match await saveDraft(draft) {
+    Saved _  => savedAt  := now()
+    Failed e => saveError := e
+  }
+}
+action edit(f, v) { draft[f] := v; spawn autosave() }   // caller continues immediately
+```
+
+This covers the "non-blocking *and* react to success" quadrant **without** new
+syntax — the success handling is ordinary body statements in the spawned action,
+not the deleted `then`/`onError` success arm. Two consistency rules: `spawn <async
+action>` takes **no** `onError` (actions are infallible to the caller —
+`loom.spurious-onerror`; the only `onError`-on-`spawn` form is a single fallible
+**op**); and there are **no anonymous `spawn { … }` blocks** — name the work as an
+`async action` and spawn that, keeping with the named-actions thesis.
 
 The optimistic-update shape — no arm split, detached rollback — is the
 canonical `spawn`:
