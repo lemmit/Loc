@@ -43,17 +43,13 @@ const PYTHON_COMPILE_SKIP: Record<string, string> = {
   // fields need the trace-capture runtime, emitted for node/dotnet only (DBT-1,
   // provenance.md).  Hosting the context on python is a generate-time error.
   provenance: "PLATFORM LIMITATION: provenance runtime is node/dotnet-only (DBT-1)",
-  // Real Python generator bug: the repository hydration `_create(...)` call omits
-  // the value-object-array fields (`line_items` / `surcharges`), so mypy --strict
-  // rejects the missing named args (invoice_repository.py).
+  // FEATURE GAP: inline value-object-array fields (`Money[]`) aren't persisted on
+  // python at all — the SQLAlchemy schema emits no jsonb column for them, and the
+  // repo's save `root` dict + `_hydrate`'s `_create(...)` both drop them (mypy
+  // flags the missing `_create` args; the deeper gap is the absent column).
+  // Mapping inline VO arrays to a jsonb column (+ serialize/hydrate) is the fix.
   "value-collections":
-    "Python repo `_create` omits value-object-array args (mypy missing named arg)",
-  // Real Python generator bug: the stamps entity imports `datetime.UTC` without
-  // using it for this stamp shape (ruff F401, domain/order.py).
-  stamps: "Python stamps entity imports unused `datetime.UTC` (ruff F401)",
-  // Real Python generator bug: a workflow `let x = resource.get(...)` whose binding
-  // is unused emits a dead local assignment (ruff F841, workflows_routes.py).
-  resources: "Python workflow resource-let emits an unused local (ruff F841)",
+    "FEATURE GAP: inline value-object arrays unmapped on python (no jsonb column; repo drops them)",
 };
 
 // Every corpus feature the manifest declares to generate on `python`, minus the

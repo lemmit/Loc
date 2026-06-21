@@ -637,7 +637,11 @@ export function renderJavaAbstractBaseEntity(
     : [];
   const idAccessor = options.tph
     ? [`    public ${base.name}Id id() {`, `        return id;`, `    }`, ``]
-    : [];
+    : // TPC bases are id-less (each concrete owns its typed id), but the base's
+      // derived members (e.g. `inspect`) may read `id`.  Declare an abstract
+      // getter the concretes covariantly override (`<Concrete>Id id()` is a
+      // subtype of `Object id()`), so the base compiles standalone.
+      [`    public abstract Object id();`, ``];
   const fieldLines = base.fields.flatMap((f) => [
     // TPC bases are @MappedSuperclass — their column mappings flatten
     // into each concrete's own table (the schema merges base + own
@@ -654,9 +658,15 @@ export function renderJavaAbstractBaseEntity(
     `    }`,
     ``,
   ]);
+  // TPC bases have no `id` field — base-field/id reads in a derived body must
+  // go through the public accessors (`this.id()` / `this.label()`), not direct
+  // field access.  TPH bases own the shared id field, so keep field reads.
+  const derivedRenderCtx: JavaRenderContext = options.tph
+    ? renderCtx
+    : { ...renderCtx, accessorProps: true };
   const derivedLines = base.derived.flatMap((d) => [
     `    public ${renderJavaType(d.type)} ${d.name}() {`,
-    `        return ${renderJavaExpr(d.expr, renderCtx)};`,
+    `        return ${renderJavaExpr(d.expr, derivedRenderCtx)};`,
     `    }`,
     ``,
   ]);

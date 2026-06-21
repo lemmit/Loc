@@ -1,6 +1,7 @@
 import {
   type BoundedContextIR,
   type EnrichedBoundedContextIR,
+  type ExprIR,
   type OperationIR,
   operationUsesCurrentUser,
   type SystemIR,
@@ -17,6 +18,7 @@ import {
   opWorkflowInstances,
 } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
+import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
@@ -254,6 +256,58 @@ function reposFor(wf: WorkflowIR): RepoNeed[] {
   return [...out.values()];
 }
 
+/** Names of `let` bindings referenced anywhere in the workflow body.  An
+ *  `expr-let` whose name is absent here is dead — Python's ruff rejects the
+ *  unused local (F841), so the emitter drops the binding and keeps the (still
+ *  side-effecting) RHS as a bare statement.  Aggregate-binding lets
+ *  (`repo-let` / `factory-let` / `repo-run`) save at exit and are never
+ *  considered unused. */
+export function collectUsedLetNames(sts: WorkflowStmtIR[]): Set<string> {
+  const used = new Set<string>();
+  const addExpr = (e: ExprIR | undefined): void =>
+    walkExpr(e, (n) => {
+      if (n.kind === "ref" && n.refKind === "let") used.add(n.name);
+    });
+  const visit = (list: WorkflowStmtIR[]): void => {
+    for (const st of list) {
+      switch (st.kind) {
+        case "precondition":
+        case "requires":
+        case "expr-let":
+          addExpr(st.expr);
+          break;
+        case "emit":
+        case "factory-let":
+          for (const f of st.fields) addExpr(f.value);
+          break;
+        case "repo-let":
+        case "op-call":
+          for (const a of st.args) addExpr(a);
+          break;
+        case "repo-run":
+          for (const a of st.retrievalArgs) addExpr(a);
+          addExpr(st.page?.offset);
+          addExpr(st.page?.limit);
+          break;
+        case "for-each":
+          addExpr(st.iterable);
+          visit(st.body);
+          break;
+        case "if-let":
+          for (const a of st.retrievalArgs) addExpr(a);
+          visit(st.thenBody);
+          if (st.elseBody) visit(st.elseBody);
+          break;
+        case "resource-call":
+          addExpr(st.call);
+          break;
+      }
+    }
+  };
+  visit(sts);
+  return used;
+}
+
 function collectEmits(sts: WorkflowStmtIR[]): { eventName: string }[] {
   return sts.flatMap((st) =>
     st.kind === "emit"
@@ -324,7 +378,13 @@ function workflowRoute(
   }
   const hasEmit = collectEmits(wf.statements).length > 0;
   if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
-  out.push(...renderWorkflowStmts(wf.statements, pyWorkflowStmtTarget(undefined, ctx), "    "));
+  out.push(
+    ...renderWorkflowStmts(
+      wf.statements,
+      pyWorkflowStmtTarget(undefined, ctx, collectUsedLetNames(wf.statements)),
+      "    ",
+    ),
+  );
   for (const save of wf.savesAtExit) {
     out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
   }
@@ -421,6 +481,7 @@ export function instanceFieldValue(rowVar: string, f: WireField): string {
 export function pyWorkflowStmtTarget(
   rctx: PyRenderContext = { thisName: "self" },
   ctx?: EnrichedBoundedContextIR,
+  usedLets?: ReadonlySet<string>,
 ): WorkflowStmtTarget {
   return {
     indentUnit: "    ",
@@ -458,7 +519,18 @@ export function pyWorkflowStmtTarget(
         `${i}${snake(st.name)} = await ${snake(st.repoName)}.run_${snake(st.retrievalName)}(${args})`,
       ];
     },
-    exprLet: (st, i) => [`${i}${snake(st.name)} = ${renderPyExpr(st.expr, rctx)}`],
+    exprLet: (st, i) => {
+      const rendered = renderPyExpr(st.expr, rctx);
+      // A dead `let` (binding never read) would trip ruff F841 — drop the
+      // assignment but keep the RHS, which is still side-effecting (a resource
+      // get/fetch).  A bare resource-op renders as `(await …)`; strip the parens
+      // so it's a statement, mirroring the `resourceCall` arm.
+      if (usedLets && !usedLets.has(st.name)) {
+        const bare = rendered.startsWith("(await ") ? rendered.slice(1, -1) : rendered;
+        return [`${i}${bare}`];
+      }
+      return [`${i}${snake(st.name)} = ${rendered}`];
+    },
     opCall: (st, i) => {
       // A currentUser-gated op takes the actor as its trailing argument
       // (in scope: the route bound `current_user` for this workflow).
