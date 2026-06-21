@@ -1,0 +1,1 @@
+<div class="loom-field">{{#if labelText}}<label class="loom-field-label">{{{labelText}}}</label>{{/if}}<input pInputText class="loom-field-input"{{{testidAttr}}}{{#if hasBind}} [value]="{{bind}}()" (input)="{{bind}}.set($any($event.target).value)"{{/if}} /></div>

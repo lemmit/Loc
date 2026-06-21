@@ -56,7 +56,7 @@ jobs:
     steps:
       - id: set
         run: |
-          PACKS='["angularMaterial@v1"]'
+          PACKS='["angularMaterial@v1", "primeng@v1"]'
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             CASES='["showcase"]'
           else

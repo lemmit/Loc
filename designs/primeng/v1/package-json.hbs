@@ -1,0 +1,32 @@
+{
+  "name": "loom-angular-app",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "ng build",
+    "start": "ng serve",
+    "ng": "ng"
+  },
+  "dependencies": {
+{{> stack-package-deps}},
+    "@angular/cdk": "^22.0.0",
+    "@angular/material": "^22.0.0",
+    "@primeuix/themes": "^1.0.0",
+    "primeng": "^21.0.0",
+    "primeicons": "^7.0.0"{{#if usesMoney}},
+    "decimal.js": "^10.4.3"{{/if}}
+  },
+  "devDependencies": {
+{{> stack-package-devdeps}}
+  },
+  "overrides": {
+    "primeng": {
+      "@angular/cdk": "$@angular/cdk",
+      "@angular/core": "$@angular/core",
+      "@angular/common": "$@angular/common",
+      "@angular/forms": "$@angular/forms",
+      "@angular/router": "$@angular/router",
+      "@angular/platform-browser": "$@angular/platform-browser"
+    }
+  }
+}

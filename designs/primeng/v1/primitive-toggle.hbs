@@ -1,0 +1,1 @@
+<label class="loom-toggle">{{#if hasBind}}<p-toggleswitch{{{testidAttr}}} [ngModel]="{{bind}}()" (ngModelChange)="{{bind}}.set($event)"></p-toggleswitch>{{else}}<p-toggleswitch{{{testidAttr}}}></p-toggleswitch>{{/if}}<span>{{{labelText}}}</span></label>
