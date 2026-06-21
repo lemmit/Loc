@@ -342,6 +342,26 @@ What shipped, and what stays deferred after an end-to-end investigation of the
 > (`loom.filter-bypass-unknown-capability` / `loom.filter-bypass-no-filter` /
 > `loom.filter-bypass-unsupported`). Ship order: Slice 0 → .NET → Drizzle+Ecto →
 > Java (full hybrid) → defer Ash + Python.
+>
+> **SHIPPED (branch `claude/capability-filter-dedup`):**
+> - **Slice 0** — `capabilityOrigin` provenance seam (byte-neutral). ✅
+> - **Slice 1** — grammar (`find`/`view`/inline, `*`) + lowering + printer +
+>   the three validators + **.NET** `IgnoreQueryFilters`. Runtime-verified:
+>   emitted project compiles under `dotnet build /warnaserror` (the gate caught
+>   a CA1068/CS1503 inline-read signature bug, since fixed). ✅
+> - **Slice 2** — **node/Drizzle** + **Phoenix/Ecto-vanilla** honor bypass by
+>   omitting the predicate; validator widened to `{dotnet, node, elixir-vanilla}`
+>   (elixir-**Ash**, java, python still fail-fast — foundation-aware). Runtime-
+>   verified: elixir-vanilla `mix compile --warnings-as-errors` + node
+>   `tsc --noEmit` both pass. ✅
+> - **Deferred** (each a later gated slice, fail-fast until then): **Java** (the
+>   §11.6 `@Filter` hybrid), **elixir-Ash** (per-read `base_filter` bypass),
+>   **Python** (wire `contextFilters` first, then bypass).
+>
+> **Known pre-existing gap (orthogonal):** on node/Drizzle the criterion-based
+> retrieval path (`Repo.findAll(<Criterion>)`) does **not** apply capability
+> filters at all (even without `ignoring`), so inline-read bypass there is a
+> vacuous no-op. Not introduced by this work; tracked separately.
 
 ### 11.1 The reframe (why not "dedup")
 
