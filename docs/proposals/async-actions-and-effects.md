@@ -113,37 +113,49 @@ action like(post) {                                         // 🔶
 (An `await` here would freeze the button until the server answered — exactly
 what optimistic UI avoids.)
 
-## 3. Failure — `Result` is the foundation, `onError` is sugar
+## 3. Failure — `Result` + `match` (day one); `onError` is deferred sugar
 
 Errors are **values**, consistent with Loom's existing unions / `match` /
 `T option` / `A or B` *and* the backend's exception-less Result returns. A
 remote op returns its outcome as a `Result`-shaped union — the same
 `Placed | Failed` union the backend emits (`exception-less.md`) — so `await op()`
-*yields that union*. You may consume it with the ordinary `match`:
+*yields that union*, consumed by the ordinary `match`. **This is the entire
+day-one failure surface** — it adds no error syntax beyond `await`, reusing
+machinery Loom already has:
 
 ```ddd
-match await placeOrder(draft) {                            // 🔶 — the underlying model
-  Placed order => navigate(OrderConsole, { id: order.id })
-  Failed e     => showError(e.message)
+action submit() {                                          // 🔶 day-one
+  match await placeOrder(draft) {
+    Placed order => navigate(OrderConsole, { id: order.id })
+    Failed e     => showError(e.message)
+  }
 }
 ```
 
-**`onError` is flat sugar over that match** for the common binary case: it
-auto-binds the success payload and makes *the rest of the block* the success
-continuation, so multi-step flows don't nest one `match` per step (the sole
-reason the sugar exists — plain `match` stacks badly, the same flaw that sank
-`then`). The two forms below are identical:
+For the **single-async-op** action — the common first case — that is all you
+need: one call, one `match`, no nesting.
+
+### 3a. `onError` — deferred ergonomic sugar (not day one)
+
+`onError` is **flat sugar over the same `match`**, and is **deferred** until real
+`.ddd` files show multi-step `await` chains that nest badly (the *only*
+justification — plain `match` stacks one level per step, the flaw that sank
+`then`). It auto-binds the success payload and makes *the rest of the block* the
+success continuation. The two forms are identical, so adding `onError` later is
+**purely additive** — it desugars to the `match` above, needs no migration, and
+changes no semantics:
 
 ```ddd
-let order = await placeOrder(draft) onError e => { showError(e); return }
+let order = await placeOrder(draft) onError e => { showError(e); return }   // 🔶 (Stage 2b)
 navigate(OrderConsole, { id: order.id })
 ```
 
-There is **no separate error system** — no `raises`, no checked-exception
-channel. `match` for rich, multi-variant errors; `onError` for the flat binary
-case; both desugar to the same `Result` arms. A postfix `onError` attaches the
-failure arm to a single call; a block-level `onError` is the catch-all.
-Precedence: **per-call → block → propagate** (to a generic UI error boundary):
+There is **no separate error system** either way — no `raises`, no
+checked-exception channel. `match` for rich, multi-variant errors (day one);
+`onError` for the flat binary case (deferred); both are the same `Result` arms. A
+postfix `onError` attaches the failure arm to a single call; a block-level
+`onError` is the catch-all. Precedence: **per-call → block → propagate** (to a
+generic UI error boundary):
 
 ```ddd
 action submit() {                                          // 🔶
@@ -262,35 +274,47 @@ implicitly and signals failure by return/rollback; there is nothing to mark.
 
 This note is **Stages 2–4** of the rollout in
 [`named-actions-and-stores.md` → Rollout](named-actions-and-stores.md#rollout--the-whole-initiative).
-Internally:
+Internally, the **minimum first cut is just `await` + `match`** — everything
+else is additive sugar/capability, added only when real `.ddd` files show the
+need:
 
-1. **Markers, lint** — add `await` / `spawn` / `onError` to the grammar, IR,
-   lower, and the `WalkerTarget` await-lowering seam. A bare remote call is a
-   **warning**; existing `.ddd` still compiles. Ship a codemod (bare remote call
-   → `await` by default).
-2. **Markers, required** — flip `loom.missing-effect-marker` /
-   `loom.spurious-effect-marker` / `loom.bind-on-spawn` to **error** once the
-   codemod has run over the example corpus. After this, every remote call is
-   explicitly intentful.
-3. **`async` actions** — the `async` keyword + transitive inference +
-   action→action awaiting (`loom.*-async` lint → error, same ramp). Builds on
-   step 2.
+1. **`await` + `match` (lint)** — add only the `await` marker (grammar, IR,
+   lower, `WalkerTarget` await-lowering seam); `await op()` becomes an expression
+   yielding the op's `Result` union, consumed by the **existing** `match`. No
+   `onError`, no `spawn`. A bare remote call is a **warning**; ship a codemod
+   (bare remote call → `await`).
+2. **`await` required** — flip `loom.missing-effect-marker` /
+   `loom.spurious-effect-marker` to **error** once the codemod has run. Every
+   remote call is now explicitly `await`-marked and its `Result` handled by
+   `match`.
+3. **`onError` sugar + `spawn`** *(deferred — add when patterns demand it)* — the
+   `onError` postfix/block sugar over `match` (§3a), and `spawn` for
+   fire-and-forget/optimistic UI (§2), with `loom.bind-on-spawn` /
+   `loom.spurious-onerror`. Purely additive — `onError` desugars to step-1
+   `match`, so this breaks nothing.
+4. **`async` actions** — the `async` keyword + transitive inference +
+   action→action awaiting (`loom.*-async` lint → error, same ramp).
 
-Each step is independently shippable and leaves a coherent surface: step 1 makes
-async *visible* without breaking anything; step 2 makes it *enforced*; step 3
-makes it *composable*.
+Each step is independently shippable: step 1 makes async *visible* with zero new
+error syntax; step 2 makes it *enforced*; step 3 adds *ergonomics* once justified;
+step 4 makes it *composable*.
 
 ## 8. Decisions & open items
 
 **Settled (this note):** no `then` (success = implicit sequencing); explicit
-`await`/`spawn` markers, enforced both ways; `spawn` is first-class
-fire-and-forget with a detached `onError`; **errors are values — `Result` is the
+`await` marker, enforced both ways; **errors are values — `Result` is the
 foundation** (a remote op returns the backend's exception-less `Result` union;
-`await op()` yields it), **`match` consumes it and `onError` is flat sugar over
-that match** (per-call → block → propagate); **no `raises`/checked-exception
-channel**; actions have no return value and are infallible from the caller (they
-handle op failures internally or reduce them to error state); **`async` is
-required and checked** (via a lint→error ramp).
+`await op()` yields it, consumed by the **existing `match`**); **no
+`raises`/checked-exception channel**; actions have no return value and are
+infallible from the caller (they handle op failures internally or reduce them to
+error state); **`async` is required and checked** (via a lint→error ramp).
+
+**Deferred — designed, but not in the first cut** (added only when real `.ddd`
+shows the need; both are non-breaking, additive):
+- **`onError` sugar** — flat per-call/block sugar over `match` (§3a); justified
+  only by multi-step `await` chains that nest. Desugars to step-1 `match`.
+- **`spawn`** — fire-and-forget for optimistic-UI/telemetry (§2); a distinct
+  capability, deferred until those patterns appear.
 
 **Open:**
 - **Keyword spelling.** `await` / `spawn` — confirm vs alternatives

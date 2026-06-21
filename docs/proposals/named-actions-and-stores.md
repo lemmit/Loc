@@ -118,10 +118,11 @@ action <name>(<param>: <Type>?) { <Statement>* }
 The body reuses the existing handler statement set (`Statement`,
 `ddd.langium:1624`): `:=` / `+=` / `-=` (state writes), local/sync calls
 (`navigate(...)`, pure helpers), `emit`, `let`, `for`, `if let`, `return` — all
-✅ today. The one **🔶 statement-level addition** is the remote-call markers
-`await` / `spawn` + `onError` (§2.3); a *remote* call may not be bare. (`toast(…)`
-is *not* yet a general body call either — it ships only in live-event `on`
-handlers; admitting it here is 🔶, see §3.2.)
+✅ today. The one **🔶 statement-level addition** is the remote-call marker
+`await` (§2.3); a *remote* call may not be bare, and its `Result` is consumed by
+the existing `match` (`onError` sugar and `spawn` are deferred — Proposal B).
+(`toast(…)` is *not* yet a general body call either — it ships only in live-event
+`on` handlers; admitting it here is 🔶, see §3.2.)
 
 ### 2.1 The one rule that earns the payoff — purity by restriction
 
@@ -198,12 +199,12 @@ call must be marked) and so wants its own lint→required migration ramp, wherea
   land, a remote call inside an action behaves exactly as a handler call does
   today (implicit, unmarked). Proposal B then makes the async boundary explicit
   and enforced. The one-line summary of what it settles: success is implicit
-  statement sequencing (no `then`); every remote call carries `await`
-  (sequential) or `spawn` (fire-and-forget); **errors are values** — ops return
-  a `Result` union, `match` consumes it and `onError` is flat sugar over that
-  match (no `raises`); actions have no return value (they handle errors
-  internally or reduce them to state); and `async` is a required, checked
-  declaration keyword.
+  statement sequencing (no `then`); every remote call carries the explicit
+  `await` marker; **errors are values** — ops return a `Result` union consumed by
+  the existing `match` (no `raises`); actions have no return value (they handle
+  errors internally or reduce them to state); `async` is a required, checked
+  declaration keyword. The `onError` sugar and `spawn` are **deferred, additive**
+  ergonomics (added only when multi-step chains / optimistic UI demand them).
 
 ## 3. The sharing boundary: `store` (optional extension)
 
@@ -473,17 +474,21 @@ system in a **coherent, improved** state — never a half-built bridge.
 | Stage | What lands | Note | Breaking? | The system after |
 |---|---|---|---|---|
 | **1. Named sync actions** | `action name(p){…}` in page/component: grammar, `ActionIR`, lower, validator (purity + payload conformance), generators replace the `event_N` gensym with the action name. Remote calls behave **exactly as today** (unmarked). | A (§2, §5) | **No** — pure addition | Handlers are named & testable; gensym gone. |
-| **2. Explicit effect markers** | `await` / `spawn` / `onError` on remote calls. Ships **lint-first** (bare remote call = warning + codemod), then flips to **required (error)**. | B (Stages 1–2) | Yes, via ramp | Every async boundary is visible & enforced; failures handled. |
+| **2. `await` + `match`** | Just the `await` marker; `await op()` yields the op's `Result` union, consumed by the **existing `match`**. No new error syntax. Lint-first (bare remote call = warning + codemod), then required. | B (Stages 1–2) | Yes, via ramp | Async boundary visible & enforced; failures handled via `match`. |
 | **3. Retire `Action {}` `then:`** | Rewrite the `Action {}` render primitive as a macro over a named action with an `await`-sequenced body; remove the `then:` named arg. | B (cleanup) | Macro keeps surface | **One** continuation model — no `then` anywhere. |
-| **4. Async action composition** | `async` keyword (lint → required), transitive inference, action→action awaiting. | B (Stage 3) | Yes, via ramp | Async flows compose across actions. |
+| **4. Async action composition** | `async` keyword (lint → required), transitive inference, action→action awaiting. | B (Stage 4) | Yes, via ramp | Async flows compose across actions. |
 | **5. `store`** | Shared/persistent state + store actions (async store actions already work from Stages 2/4). | A (§3) | No | Cross-page sharing; Zustand/Pinia emission. |
+| **— `onError` sugar + `spawn`** *(deferred)* | `onError` flat sugar over `match` (added when multi-step `await` chains nest); `spawn` fire-and-forget (added for optimistic UI/telemetry). Both additive — desugar to / sit beside Stage 2. | B (Stage 3) | No — additive | Ergonomic happy-path + optimistic UI, once justified. |
 
 **Ordering rationale.** Stage 1 is the non-breaking foundation everything builds
-on. Stage 2 makes async *explicit*; Stage 3 immediately follows so the legacy
-`then:` dies before more async surface accretes (avoids two continuation models
-coexisting). Stage 4 extends the markers to action composition. Stage 5 (`store`)
-depends only on Stage 1 and is otherwise independent — it can be pulled earlier
-if sharing is prioritised, but defaults last per §8.6.
+on. Stage 2 makes async *explicit* with the **smallest possible surface** —
+`await` + the `match` Loom already has, no `onError`/`spawn` yet. Stage 3 follows
+so the legacy `then:` dies before more async surface accretes (avoids two
+continuation models coexisting). Stage 4 extends the markers to action
+composition. Stage 5 (`store`) depends only on Stage 1 and can be pulled earlier
+if sharing is prioritised. The `onError` sugar and `spawn` are **deferred and
+additive** — slotted in whenever real `.ddd` shows nesting pain / optimistic
+patterns, with no migration cost.
 
 **Enabled, separate initiative:** the Fable/Feliz/Elmish target (§7). Stages 1–4
 turn its `Msg`/`update` emission from synthesis into projection; it is tracked in
