@@ -95,7 +95,7 @@ subscriptions).
 
 ### 4. Scope (`src/language/ddd-scope.ts`)
 
-- `DddScopeComputation.computeExports` already exports
+- `DddScopeComputation.collectExportedSymbols` already exports
   aggregates / entity parts / value objects / enums under their bare
   name via `streamAllContents` — that machinery covers root-level VOs
   and enums automatically once the grammar admits them.

@@ -49,6 +49,13 @@ root-level payload declarations (#1024), the `?` propagation surface
 (#836), TPH emission on .NET + Phoenix, and the realization-axes
 alignment slices (#1061–#1064).
 
+> **[2026-06-21 refresh, code-verified against #1496]** Targeted docs-only
+> pass: corrected the `global-implementation-plan.md` "current state"
+> freeze line to the present registry (five backends — node/.NET/Java/
+> Python/elixir·ash+vanilla — and four frontends — React/Vue/Svelte/
+> Angular; `src/platform/registry.ts`). No per-proposal status tags were
+> flipped in this pass.
+
 ## Every proposal in this directory
 
 ### Reference & planning

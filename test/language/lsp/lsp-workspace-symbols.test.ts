@@ -62,7 +62,7 @@ describe("DefaultWorkspaceSymbolProvider with DddNodeKindProvider", () => {
   });
 
   // Events are deliberately scoped to their bounded context (not exported
-  // globally — see `DddScopeComputation.computeExports`).  Workspace
+  // globally — see `DddScopeComputation.collectExportedSymbols`).  Workspace
   // symbols therefore won't surface them, which matches the local-scope
   // semantic the validator enforces.
 

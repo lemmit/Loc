@@ -182,7 +182,7 @@ export function checkBuilderCallType(
       // Don't filter by node type at the index level: a typo-tolerant
       // lookup keeps the surface honest even if the description's
       // `type` doesn't match exactly.  Component descriptions exported
-      // by `DddScopeComputation.computeExports` carry the bare name,
+      // by `DddScopeComputation.collectExportedSymbols` carry the bare name,
       // so a name match is sufficient (the corresponding node is
       // checked below to be a Component).
       let workspaceTopLevel = false;

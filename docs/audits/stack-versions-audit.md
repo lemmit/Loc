@@ -8,20 +8,45 @@ Phase 1.X / Phase 2.
 Snapshot date: **2026-06** (verify against npm/nuget/hex before
 acting; these numbers age).
 
+> **⚠️ PARTIALLY SUPERSEDED — verify against disk (refreshed 2026-06-21,
+> code-verified against #1496).** Several columns below are stale; the
+> on-disk emitter pins are the contract. Confirmed drift corrected in this
+> refresh:
+> - **There is no `stacks/v2`.** `ls stacks/` returns `v1, v3, sv1, vue1,
+>   ng1`. The old "stack v2 (mantine@v9)" column was the React-19 stack;
+>   that is **stack `v3`** today (React 19.2 + Router 7 + Zod 4 —
+>   `stacks/v3/stack.json`). mantine@v9 maps to stack `v3`.
+> - **.NET is on `net10.0`**, not deferred-on-net8. `renderCsproj`
+>   (`src/generator/dotnet/emit/program.ts:632`) emits `<TargetFramework>net10.0`
+>   with EF Core / Npgsql.EntityFrameworkCore `10.0.x` (program.ts:594–603).
+> - **Spring Boot is `4.1.0`** (`src/generator/java/emit/program.ts:21`,
+>   `JAVA_VERSION = "21"`).
+> - **The Hono backend now lives in `src/platform/hono/v5/`** (zod 4, the
+>   default lane) with v4 pinnable via `platform: node@v4` — not
+>   `src/generator/typescript/index.ts`. Hono v5 pins: hono `^4.12.0`,
+>   zod `^4.0.0`, drizzle-orm `^0.45.0` (`src/platform/hono/v5/pins.ts`).
+> - Backends added since the original snapshot: **Java** (Spring Boot) and
+>   **Python** (FastAPI + SQLAlchemy 2) have no rows below; **Angular**
+>   (`stacks/ng1`), **Svelte** (`stacks/sv1`), and **Vue** (`stacks/vue1`)
+>   frontend stacks likewise post-date the React-only tables.
+> The per-package "latest stable" columns below are point-in-time and not
+> re-verified in this refresh.
+
 > **Phase 0.5 note:** the cross-cutting deps below are no longer
 > declared per-pack. They live in `stacks/<id>/stack-package-deps.hbs`
 > (and `-devdeps.hbs`) and are pulled into each pack's
 > `package-json.hbs` via `{{> stack-package-deps}}`. The columns
 > below are still organised per-pack for readability, but a pack's
 > column == the stack it declares (`mantine@v7` → stack `v1`,
-> `mantine@v9` → stack `v2`, …). See
+> `mantine@v9` → stack `v3` — the React-19 stack; **there is no stack
+> `v2` on disk**). See
 > [`stack-versioning.md`](./stack-versioning.md).
 
 ## Design packs (pack-specific deps in `designs/<family>/<vN>/package-json.hbs`; framework deps in `stacks/<id>/`)
 
 ### Stack-supplied cross-cutting deps (one row per stack)
 
-| package | stack v1 (mantine@v7, chakra@v2, mui@v5, shadcn@v3) | stack v2 (mantine@v9) | latest stable |
+| package | stack v1 (mantine@v7, chakra@v2, mui@v5, shadcn@v3) | stack v3 (mantine@v9; React 19 + Router 7 + Zod 4) | latest stable |
 | --- | --- | --- | --- |
 | `react` / `react-dom` | ^18.3.0 | **^19.2.0** | 19.2 |
 | `react-router-dom` | ^6.27.0 | ^6.27.0 (RR 7 is a follow-up stack axis) | **7.x** |
@@ -76,39 +101,43 @@ Per-pack legacy table (kept for the per-dep latest-stable column):
 
 ## Backends
 
-### Hono (TypeScript) — `src/generator/typescript/index.ts:204–216`
+### Hono (TypeScript) — `src/platform/hono/v5/pins.ts` (default lane; v4 pinnable via `platform: node@v4`)
 
 | package | pinned | latest | notes |
 | --- | --- | --- | --- |
-| `hono` | ^4.6.0 | 4.12 | same-major, safe bump |
-| `@hono/node-server` | ^1.13.0 | latest 1.x | safe bump |
-| `@hono/zod-openapi` | ^0.18.0 | latest | pre-1.0, check minors |
-| `zod` | ^3.23.0 | 4.x | major bump (paired with the pack-side zod bump) |
-| `drizzle-orm` | ^0.36.0 | **0.45+** | pre-1.0 — every minor is breaking; treat with care |
-| `drizzle-kit` | ^0.28.0 | latest | bump paired with drizzle-orm |
+| `hono` | ^4.12.0 | 4.12 | same-major |
+| `@hono/node-server` | ^1.19.0 | latest 1.x | safe bump |
+| `@hono/zod-openapi` | ^1.0.0 | latest | v5 is on the 1.x line |
+| `zod` | ^4.0.0 | 4.x | v5 default is zod 4 (v4 backend stays on zod 3) |
+| `drizzle-orm` | ^0.45.0 | 0.45+ | pre-1.0 — every minor is breaking; treat with care |
+| `drizzle-kit` | ^0.31.0 | latest | bump paired with drizzle-orm |
 | `pg` / `@types/pg` | ^8.13 / ^8.11 | 8.x | safe |
 | `typescript` (dev) | ^5.7 | 6.x | major bump |
 | `tsx` / `tsup` / `vitest` (dev) | recent | latest 4.x / 8.x / 2.x | safe |
 
-### Phoenix LiveView (Elixir / Ash) — `src/generator/phoenix-live-view/index.ts:600`
+### Phoenix LiveView (Elixir / Ash) — `src/generator/elixir/shell/project.ts:~67–93`
 
 | package | pinned | latest | notes |
 | --- | --- | --- | --- |
-| `phoenix` | `~> 1.7` | 1.8 | minor bump |
-| `phoenix_live_view` | `~> 1.0` | 1.1 | minor bump |
-| `ash` | `~> 3.0` | 3.24 | within major |
+| `phoenix` | `~> 1.8` | 1.8 | on 1.8 |
+| `phoenix_live_view` | `~> 1.0` | 1.1 | minor bump available |
+| `ash` | `~> 3.24` | 3.24 | within major |
+| `ash_postgres` | `~> 2.0` | 2.x | within major |
 | `ash_phoenix` | `~> 2.0` | 2.3 | within major |
 | `bandit` | `~> 1.5` | latest | safe |
-| `postgrex` | **`">= 0.0.0"`** | 0.20.x | **TIGHTEN to `~> 0.20`** — current range is the same loose-peer trap that bit Chakra |
+| `postgrex` | `~> 0.20` | 0.20.x | **DONE** — tightened from the old `">= 0.0.0"` loose-peer range |
 
-### .NET — `src/generator/dotnet/emit/program.ts:325–360`
+### .NET — `src/generator/dotnet/emit/program.ts` (`renderCsproj`, ~:585–700)
+
+TFM is `net10.0` (program.ts:632/677).
 
 | package | pinned | latest | notes |
 | --- | --- | --- | --- |
-| `Microsoft.EntityFrameworkCore` (suite) | 8.0.10 | 10.0.x | **defer until 2026-11** (.NET 8 is LTS); revisit when ecosystem catches up |
+| `Microsoft.EntityFrameworkCore` (suite) | 10.0.9 | 10.0.x | on net10.0 (was deferred-on-net8 in the original snapshot) |
+| `Npgsql.EntityFrameworkCore.PostgreSQL` | 10.0.2 | 10.0.x | within major |
 | `MediatR` (in code: `Mediator.SourceGenerator`) | 2.1.7 | 14.1 | defer |
 | `FluentValidation` | 11.10.0 | 12.1 | defer |
-| `Microsoft.NET.Test.Sdk` | 17.11.1 | latest | defer |
+| `Ardalis.Specification` (+ EF Core) | 9.3.1 | latest | criterion query objects |
 
 ## Playground itself (`web/package.json`)
 
@@ -133,14 +162,14 @@ Per-pack legacy table (kept for the per-dep latest-stable column):
 | `ignore` | ^7.0 | latest | safe |
 | `langium` | **~4.3** | 4.3 | bumped 3.3 → 4.3 — `computeExports`→`collectExportedSymbols`, `findDeclaration`→`findDeclarations`, hover returns raw string, `Reference.ref` now required, `copyAstNode` ref-builder gained `origReference` |
 | `vscode-languageserver` | ~10.0 | 10.x | bumped with Langium 4 (subpaths `/node`, `/browser`) |
-| `typescript` (dev) | **~5.9** | 6.x | bumped 5.7 → 5.9 (Langium 4 needs ≥5.8). **TS 6 is a separate follow-up** — it breaks `@types/node` global resolution across the Node-only islands (49 errors) independently of Langium |
+| `typescript` (dev) | **~6.0.0** | 6.x | now on TS 6 (the `@types/node` global-resolution follow-up landed) |
 | `vitest` (dev) | ~4.1 | 4.x | already on 4.x |
 
 ## Notable loose ranges to fix opportunistically
 
 | range | location | risk |
 | --- | --- | --- |
-| `postgrex: ">= 0.0.0"` | `src/generator/phoenix-live-view/index.ts:600` | accepts literally anything; Hex resolves to whatever's newest at install time. Tighten to `~> 0.20`. |
+| ~~`postgrex: ">= 0.0.0"`~~ | `src/generator/elixir/shell/project.ts` | **RESOLVED** — now pinned `~> 0.20` (project.ts:72). |
 | `@chakra-ui/icons@>=2.0.0` (was) | resolved in PR #146 by dropping the dep | for any future Chakra icon need, vendor inline SVG instead of pulling a sibling package |
 
 ## Refresh procedure

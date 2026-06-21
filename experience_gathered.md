@@ -583,7 +583,7 @@ or not.
 - **Qualified-name cross-references = scope work, not grammar work.**
   `entitles`/`covers` use `[Targetable:QualifiedName]`.  Resolution
   comes from exporting every `Targetable` under its dotted name in
-  `DddScopeComputation.computeExports` (`qualifiedNameOf` walks
+  `DddScopeComputation.collectExportedSymbols` (`qualifiedNameOf` walks
   containers up to, but excluding, the enclosing `system`).  The default
   scope provider then resolves the dotted reference text against those
   exports — no custom `getScope` branch needed.  Lowering reads the
@@ -679,7 +679,7 @@ or not.
   collision; first thing anyone touching either should do is grep both
   files so the topics don't bleed into each other.
 - **The export-side scope was already half-wired.**
-  `DddScopeComputation.computeExports` already exports every named
+  `DddScopeComputation.collectExportedSymbols` already exports every named
   declaration (aggregates / VOs / enums / entity parts) via
   `streamAllContents` — the only reason cross-document refs didn't
   resolve before is that the CLI only loaded *one* document.  Once
