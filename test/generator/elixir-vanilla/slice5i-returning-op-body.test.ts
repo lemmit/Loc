@@ -78,8 +78,8 @@ describe("vanilla — T2.c returning-op body statements", () => {
 
   it("controller still translates the tagged result to HTTP", async () => {
     const ctl = get(await files(), "/controllers/item_controller.ex");
-    expect(ctl).toContain("case Stock.adjust_item(record, attrs) do");
-    expect(ctl).toContain("{:ok, success} ->");
+    expect(ctl).toContain("adjust_item_result(conn, Stock.adjust_item(record, attrs))");
+    expect(ctl).toContain("def adjust_item_result(conn, {:ok, success})");
     expect(ctl).toContain('problem_variant(conn, 404, "/errors/not-found", "Not Found", data)');
   });
 });

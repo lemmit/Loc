@@ -475,16 +475,16 @@ export function renderEsController(
     (agg.creates ?? []).length > 0
       ? `
   def create(conn, params) do
-    case ${ctxModule}.create_${aggSnake}(params) do
-      {:ok, record} ->
-        conn
-        |> put_status(201)
-        |> json(serialize(record))
-
-      {:error, reason} ->
-        command_error(conn, reason)
-    end
+    create_result(conn, ${ctxModule}.create_${aggSnake}(params))
   end
+
+  def create_result(conn, {:ok, record}) do
+    conn
+    |> put_status(201)
+    |> json(serialize(record))
+  end
+
+  def create_result(conn, {:error, reason}), do: command_error(conn, reason)
 `
       : "";
 

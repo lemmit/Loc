@@ -92,7 +92,7 @@ describe("vanilla — workflow body lowering (repo-let / getById)", () => {
       [...ctrlFiles.keys()].find((k) => k.endsWith("/controllers/workflows_controller.ex"))!,
     )!;
     expect(wf).toContain("{:ok, t} <- Context.get_task(task_id)");
-    expect(ctrl).toMatch(/\{:error, :not_found\} ->/);
+    expect(ctrl).toMatch(/def respond\(conn, \{:error, :not_found\}\)/);
   });
 });
 
