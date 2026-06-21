@@ -1,0 +1,24 @@
+// `with auditable` (built-in capability) on .NET — the audit-columns +
+// create/update stamp bundle.  The capability types `createdBy`/`updatedBy` as
+// `User id`, the authentication PRINCIPAL's id — which is NOT a domain
+// aggregate, so it must lower to the principal's declared id scalar
+// (`user { id: guid }` → `Guid`), never a phantom `UserId` strong-id class.
+// Before the principal-id lowering fix this emitted an undefined `UserId` type
+// (field, EF `HasConversion`, and response DTO all dangled) and no build matrix
+// ever compiled it.  This cell compiles the full `auditable` surface under
+// `dotnet build /warnaserror`.
+system PS {
+  user { id: guid  name: string }
+  subdomain D {
+    context Shop {
+      aggregate Order with auditable {
+        code: string
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable api { platform: dotnet, contexts: [Shop], dataSources: [st], serves: A, port: 8081, auth: required }
+}

@@ -112,6 +112,34 @@ describe("macro capabilities propagate to AggregateIR", () => {
     );
   });
 
+  it("`auditable`'s `createdBy/updatedBy: User id` lower to the principal's id scalar", async () => {
+    // `User id` names the auth PRINCIPAL (no `aggregate User`), so it must NOT
+    // become a strong-id (`{ kind: "id", targetName: "User" }`) — that emits a
+    // dangling `UserId`/`UserId` class on every backend.  It lowers to the
+    // scalar declared by `user { id: <type> }`, and tracks that type.
+    for (const idType of ["string", "guid"] as const) {
+      const ir = await buildLoomModel(`
+        system Demo {
+          user { id: ${idType}  role: string }
+          subdomain M { context C {
+            aggregate Order with auditable {
+              subject: string
+            }
+          }}
+        }
+      `);
+      const agg = findAgg(ir, "Order");
+      for (const name of ["createdBy", "updatedBy"]) {
+        const wf = agg.wireShape.find((f) => f.name === name)!;
+        expect(wf, `${name} present in wireShape`).toBeDefined();
+        expect(wf.type, `${name} is a plain ${idType} scalar, not a UserId strong-id`).toEqual({
+          kind: "primitive",
+          name: idType,
+        });
+      }
+    }
+  });
+
   it("aggregates without macros have undefined capabilities", async () => {
     const ir = await buildLoomModel(`
       system Demo {

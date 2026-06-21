@@ -261,19 +261,26 @@ What shipped, and what stays deferred after an end-to-end investigation of the
   (`createdBy: guid` + `:= currentUser`), the same one Java's
   `stamps-principal.ddd` compiles.
 
-- **The `auditable` capability's `createdBy/updatedBy: User id` fields stay
-  broken on every backend — deferred.** The prelude (and the pre-capability
-  `audit` macro it preserves) types these as `User id`, a strongly-typed id of
-  the `user {}` **principal**, which is not a domain aggregate — so no `UserId`
-  class is emitted and the reference dangles. No backend build matrix compiles
-  `with auditable`. Fixing it means giving a capability field "the principal id
-  type" without the capability knowing the system's user-id type — a real
-  capability-typing problem, out of scope here.
+- **The `auditable` capability's `createdBy/updatedBy: User id` fields now
+  compile on every backend.** The prelude types these as `User id` — the id of
+  the `user {}` **principal**, which is not a domain aggregate, so it has no
+  `UserId` strong-id class and the strong-id path dangled (an undefined `UserId`
+  field/EF-conversion/response-DTO; no backend build matrix compiled
+  `with auditable`). Fixed at lowering: `lowerBase`'s id branch detects an
+  *unresolved* id ref whose text is the principal name (`PRINCIPAL_TYPE_NAME`,
+  shared from `src/util/principal.ts`) with a `user {}` block in scope, and
+  lowers it to the principal's declared id **scalar** (`user { id: <type> }`) —
+  a plain primitive, not a strong id. So `createdBy` becomes the same plain
+  scalar a hand-written `createdBy: guid` produces, and the field / `currentUser`
+  stamp / wire all agree. Covered by `auditable.ddd` cells in both the
+  `dotnet-build` and `java-build` matrices, plus a lowering unit test
+  (`ir-capabilities.test.ts`) that pins the scalar tracks `user { id }`.
 
 - **Marker-interface dedup (`I<Capability>`) stays deferred.** The interceptor
-  switch is already one arm per aggregate; the dedup is cosmetic, and a
-  *verifiable* capability-marker dedup needs the `auditable` dangle fixed first
-  (it is the only stamping capability). Revisit once `auditable` compiles.
+  switch is already one arm per aggregate; the dedup is cosmetic. Now that
+  `auditable` compiles (it is the only stamping capability), a *verifiable*
+  marker dedup is unblocked — but it remains low-value until a second stamping
+  capability exists. Revisit then.
 
 ## 10. Cross-references
 

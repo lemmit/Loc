@@ -101,6 +101,11 @@ const FIXTURES: Array<[string, string]> = [
   // Principal stamps: `createdBy := currentUser` → currentUser.id() (the
   // guid), threaded from the request-scoped accessor under auth.
   ["test/e2e/fixtures/java-build/stamps-principal.ddd", "api1"],
+  // `with auditable` (built-in capability): its `createdBy/updatedBy: User id`
+  // names the PRINCIPAL (no `aggregate User`), so it must lower to the
+  // principal's id scalar (`user { id: guid }` → UUID), never a dangling
+  // `UserId`.  Compiles the full audit-columns + create/update stamp bundle.
+  ["test/e2e/fixtures/java-build/auditable.ddd", "api"],
   // `when` canCommand state gate (criterion.md, use site 2): the service
   // throws DisallowedException (→ 409) before mutating, and the controller
   // auto-exposes `GET /orders/{id}/can_cancel` → CanResponse { allowed }.

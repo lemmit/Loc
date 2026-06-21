@@ -22,6 +22,7 @@
 // pair into one co-located declaration.
 
 import type { Capability, CapabilityMember } from "../language/generated/ast.js";
+import { PRINCIPAL_TYPE_NAME } from "../util/principal.js";
 import {
   contextFilter,
   contextStamp,
@@ -55,8 +56,8 @@ function buildAuditable(): Capability {
   return capability("auditable", [
     field("createdAt", primType("datetime"), { access: "managed" }),
     field("updatedAt", primType("datetime"), { access: "managed" }),
-    field("createdBy", idRef("User"), { access: "managed" }),
-    field("updatedBy", idRef("User"), { access: "managed" }),
+    field("createdBy", idRef(PRINCIPAL_TYPE_NAME), { access: "managed" }),
+    field("updatedBy", idRef(PRINCIPAL_TYPE_NAME), { access: "managed" }),
     ...contextStamp({
       onCreate: [
         { field: "createdAt", value: nowExpr() },
