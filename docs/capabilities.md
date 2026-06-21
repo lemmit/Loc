@@ -221,12 +221,24 @@ aggregate with `with auditable`.
   (`context.actor.<idKey>`).  `onCreate` stamps run `on: [:create]`;
   `onUpdate` stamps run `on: [:create, :update]` (mirroring the .NET
   interceptor's `Added || Modified`) so a NOT-NULL `updated_at`/`updated_by`
-  is populated on the initial insert.  Two cases stay fail-fast
+  is populated on the initial insert.  See `src/generator/elixir/domain/actions.ts`.
+- **Phoenix** (`elixir`, **vanilla** / plain-Ecto foundation) — context stamps
+  are applied as `Ecto.Changeset.put_change` pipe lines on the changeset right
+  before `Repo.insert` / `Repo.update` (threaded through the context
+  `create_<agg>` / `update_<agg>` delegate into the repository).  `now()`
+  renders to `DateTime.utc_now()`, and a `currentUser` value resolves to the
+  principal id read off the threaded `current_user` map (`current_user.<idKey>`,
+  nil-safe) — the controller pulls it from `conn.assigns.current_user` (the Auth
+  plug populates it) and threads it on the write call.  As on Ash, `onCreate`
+  stamps apply on insert only and `onUpdate` stamps apply on BOTH insert and
+  update, so a NOT-NULL `updated_*` audit column is filled on the initial insert.
+  The audit `createdAt`/`updatedAt` become real Ecto schema fields (replacing the
+  bundled `timestamps()`), and the managed `createdBy`/`updatedBy` are excluded
+  from the changeset cast.  See `src/generator/elixir/vanilla/stamp-emit.ts`.
+- Both elixir foundations keep the same two fail-fast cases
   (`loom.elixir-stamp-unsupported`, `validateElixirStampSupport`): a
   `currentUser` stamp on a deployable WITHOUT auth (no actor to thread), and
-  stamps on an event-sourced aggregate.  The **vanilla** (plain Ecto)
-  foundation does not yet apply stamps and stays fully gated by the same
-  validator.  See `src/generator/elixir/domain/actions.ts`.
+  stamps on an event-sourced aggregate.
 
 ## `implements <Cap>` / `with <Cap>`
 

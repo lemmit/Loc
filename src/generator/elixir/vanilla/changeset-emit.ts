@@ -31,9 +31,19 @@ interface AggField {
   name: string;
   type: { kind: string; name?: string };
   optional?: boolean;
+  access?: string;
 }
 
 const SYSTEM_FIELDS = new Set(["id", "createdAt", "updatedAt"]);
+
+/** A lifecycle-managed field (audit `createdBy`/`updatedBy`, etc.) is never cast
+ *  from client attrs nor `validate_required`d — the server owns its value and
+ *  the lifecycle stamp `put_change`s it on the changeset right before persist
+ *  (see `stampPutChanges`).  Casting it would let a client spoof the actor; a
+ *  `validate_required` on it would reject the create before the stamp runs. */
+function isManaged(f: AggField): boolean {
+  return f.access === "managed";
+}
 
 export function emitVanillaChangesets(
   appModule: string,
@@ -85,7 +95,9 @@ function renderChangeset(appModule: string, ctxModule: string, agg: AggregateIR)
   const aggPascal = upperFirst(agg.name);
   const aggModule = `${appModule}.${ctxModule}.${aggPascal}`;
   const changesetMod = `${aggModule}Changeset`;
-  const allFields = (agg.fields as AggField[]).filter((f) => !SYSTEM_FIELDS.has(f.name));
+  const allFields = (agg.fields as AggField[]).filter(
+    (f) => !SYSTEM_FIELDS.has(f.name) && !isManaged(f),
+  );
   const requiredFields = allFields.filter((f) => !f.optional);
 
   const allCols = allFields.map((f) => `:${snake(f.name)}`).join(", ");

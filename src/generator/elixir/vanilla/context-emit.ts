@@ -29,6 +29,7 @@ import {
 } from "./operation-returns-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { customFindsOf } from "./repository-emit.js";
+import { stampUsesPrincipal } from "./stamp-emit.js";
 
 /** Operation names whose `<op>_<agg>` collide with the CRUD
  *  defdelegates emitted above (list/get/create/update/delete).  Skipped
@@ -75,6 +76,11 @@ function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedC
     // aggregates keep the original parameterless seam (byte-identical).
     const principal = aggregateUsesPrincipalContextFilter(agg);
     const actorArg = principal ? ", current_user \\\\ nil" : "";
+    // A principal-referencing lifecycle stamp threads `current_user` into the
+    // create/update WRITE seam too (the repository `insert`/`update` reads
+    // `current_user.<idKey>` for `createdBy`/`updatedBy`).  The `\\ nil` default
+    // keeps internal callers compiling + fail-safe (a nil actor stamps nil).
+    const stampActorArg = stampUsesPrincipal(agg) ? ", current_user \\\\ nil" : "";
     // Skip ops whose names collide with the CRUD defdelegates above —
     // notably `update`/`destroy` from `with crudish` would redefine
     // `update_<agg>/2`/`delete_<agg>/1` otherwise.  The CRUD seam
@@ -100,8 +106,8 @@ function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedC
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(${principal ? "current_user \\\\ nil" : ""}), to: ${repoMod}, as: :list
   defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id
-  defdelegate create_${aggSnake}(attrs), to: ${repoMod}, as: :insert
-  defdelegate update_${aggSnake}(record, attrs), to: ${repoMod}, as: :update
+  defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert
+  defdelegate update_${aggSnake}(record, attrs${stampActorArg}), to: ${repoMod}, as: :update
   defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete
 ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
   });
