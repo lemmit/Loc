@@ -31,13 +31,22 @@ mikroorm }` — see the "Realization axes" section of [`platforms.md`](platforms
 The alternates (`dapper`, `mikroorm`) share the domain layer below and only
 swap the repository/schema layer (minimal-v1 surface, validator-gated).
 
-> **Scope note.** This matrix tracks the three reference platforms
-> (TypeScript/Hono, .NET, React). The other backends — **Python/FastAPI**,
-> **Java/Spring Boot**, and **Elixir/Phoenix** — and the other frontends —
-> **Vue**, **Svelte**, and **Angular** — consume the same
-> `LoomModel` / `wireShape` IR contract and emit the analogous constructs
-> in their own idiom; they are not yet broken out as columns here. See
-> [`platforms.md`](platforms.md) for the full registered set.
+> **Scope note.** The construct-by-construct matrix below tracks the three
+> reference platforms (TypeScript/Hono, .NET, React) for readability — it maps
+> each DSL construct to its *emitted shape* in idiom. The other backends —
+> **Python/FastAPI**, **Java/Spring Boot**, and **Elixir/Phoenix** — and the
+> other frontends — **Vue**, **Svelte**, and **Angular** — consume the same
+> `LoomModel` / `wireShape` IR contract and emit the analogous constructs in
+> their own idiom. See [`platforms.md`](platforms.md) for the full registered
+> set.
+>
+> **For the cross-backend *feature-parity* view** (which of the five backends
+> emits each gated feature — event sourcing, inheritance, unions, capability
+> filters, provenance/audit, …), see the validator-grounded
+> [`audits/backend-feature-parity-2026-06.md`](audits/backend-feature-parity-2026-06.md).
+> Java and Python are now full backends and Elixir splits by foundation
+> (`ash`/`vanilla`); the headline gaps are tracked in
+> [`plans/backend-parity-plan.md`](plans/backend-parity-plan.md).
 
 | Construct | TypeScript (Hono + Drizzle) | .NET (ASP.NET + EF + Mediator) | React (Vite + RQ + Mantine) |
 | --- | --- | --- | --- |
