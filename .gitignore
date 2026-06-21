@@ -24,5 +24,6 @@ docs/_site/
 .claude/*
 !.claude/settings.json
 !.claude/hooks/
+!.claude/skills/
 .claude/settings.local.json
 .claude/worktrees/
