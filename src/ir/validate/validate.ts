@@ -44,6 +44,7 @@ import {
   validateNodeStampSupport,
   validatePermissions,
   validateProvenancedStorage,
+  validatePythonStampSupport,
   validateReactIdReferences,
   validateResourceConfig,
   validateSavingShapeSupport,
@@ -117,6 +118,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateJavaStampSupport(sys, diags);
     validateDotnetStampSupport(sys, diags);
     validateNodeStampSupport(sys, diags);
+    validatePythonStampSupport(sys, diags);
     validateStampSupport(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);

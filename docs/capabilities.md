@@ -206,14 +206,20 @@ aggregate with `with auditable`.
   `auth/middleware.ts` principal).  Support is gated by
   `validateNodeStampSupport` (a principal stamp without auth, or any stamp on
   an event-sourced aggregate, stays a fail-fast `loom.node-stamp-unsupported`).
-- **Phoenix** (`elixir`) and **Python** — context stamps are **not yet wired
-  through to runtime**.  The IR carries `contextStamps` on every aggregate
-  but those codegens don't consume them, so rather than silently emitting
-  unpopulated audit columns this is a **fail-fast error**
-  (`loom.{python,elixir}-stamp-unsupported`, gated by `validateStampSupport`).
-  Host the stamping context on a java / dotnet / node deployable, hand-write
-  the assignments inside operation bodies, or drop `with auditable` / the
-  `audit` macro for those backends.
+- **Python / FastAPI** — context stamps are applied right before the
+  repository persist: the domain class gets `_stamp_on_create` /
+  `_stamp_on_update` methods (`now()` → `datetime.now(UTC)`; a `currentUser`
+  value → `current_user.id`, threaded from `request.state.current_user`) that
+  the route handler calls before save.  Support is gated by
+  `validatePythonStampSupport` (a principal stamp without auth, or any stamp on
+  an event-sourced aggregate, stays a fail-fast `loom.python-stamp-unsupported`).
+- **Phoenix** (`elixir`) — context stamps are **not yet wired through to
+  runtime**.  The IR carries `contextStamps` on every aggregate but the codegen
+  doesn't consume them, so rather than silently emitting unpopulated audit
+  columns this is a **fail-fast error** (`loom.elixir-stamp-unsupported`, gated
+  by `validateStampSupport`).  Host the stamping context on a java / dotnet /
+  node / python deployable, hand-write the assignments inside operation bodies,
+  or drop `with auditable` / the `audit` macro for elixir.
 
 ## `implements <Cap>` / `with <Cap>`
 

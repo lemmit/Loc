@@ -1,0 +1,22 @@
+// `with auditable` (built-in capability) on Python — the audit-columns +
+// create/update stamp bundle.  The capability types `createdBy`/`updatedBy` as
+// `User id`, the authentication PRINCIPAL's id (NOT a domain aggregate), so it
+// lowers to the principal's declared id scalar (`user { id: guid }` → str).
+// The `currentUser` stamp renders `current_user.id` threaded off
+// `request.state.current_user` under auth, applied right before persist.
+// Compiles the full `auditable` surface under `uv sync` + ruff + mypy --strict.
+system PS {
+  user { id: guid  name: string }
+  subdomain D {
+    context Shop {
+      aggregate Order with auditable {
+        code: string
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable api { platform: python, contexts: [Shop], dataSources: [st], serves: A, port: 8081, auth: required }
+}

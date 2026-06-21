@@ -12,6 +12,7 @@ import {
   type EnrichedBoundedContextIR,
   type EnrichedEntityPartIR,
   type ExprIR,
+  exprUsesCurrentUser,
   findUsesCurrentUser,
   type OperationIR,
   operationIsGuarded,
@@ -179,7 +180,9 @@ export function buildPyRoutesFile(
     "from typing import Annotated",
     "",
     [...publicOps, ...externOps].some(operationUsesCurrentUser) ||
-      emittableFinds(repo).some(findUsesCurrentUser)
+      emittableFinds(repo).some(findUsesCurrentUser) ||
+      stampUsesUser(agg, "create") ||
+      stampUsesUser(agg, "update")
       ? "from app.auth.user import User"
       : null,
     "from app.db.engine import get_session",
@@ -510,6 +513,30 @@ export function pyWireToDomain(expr: string, t: TypeIR, ctx: BoundedContextIR): 
   }
 }
 
+// --- lifecycle stamps -----------------------------------------------------------
+
+/** The stamp assignments for one lifecycle event (create / update). */
+function stampRules(agg: EnrichedAggregateIR, event: "create" | "update") {
+  return (agg.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments);
+}
+
+/** Whether this aggregate carries a lifecycle stamp for `event`. */
+function hasStamp(agg: EnrichedAggregateIR, event: "create" | "update"): boolean {
+  return stampRules(agg, event).length > 0;
+}
+
+/** Whether the `event` stamp references the request principal (so the route
+ *  must thread `current_user` into the stamp call). */
+function stampUsesUser(agg: EnrichedAggregateIR, event: "create" | "update"): boolean {
+  return stampRules(agg, event).some((a) => exprUsesCurrentUser(a.value));
+}
+
+/** The `<var>._stamp_on_<event>([current_user])` call line — emitted right
+ *  before the repository persist (parity with Java's service stamp call). */
+function stampCall(agg: EnrichedAggregateIR, event: "create" | "update", varName: string): string {
+  return `    ${varName}._stamp_on_${event}(${stampUsesUser(agg, event) ? "current_user" : ""})`;
+}
+
 // --- routes ---------------------------------------------------------------------
 
 function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
@@ -530,10 +557,21 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
   const args = inputs
     .map((f) => `${snake(f.name)}=${pyWireToDomain(`body.${f.name}`, f.type, ctx)}`)
     .join(", ");
+  // Lifecycle stamps (audit / softDelete): apply onCreate stamps right before
+  // the persist.  A principal-referencing stamp threads `current_user` off the
+  // request scope (the route then takes a `request: Request` param).
+  const stampUsesPrincipal = stampUsesUser(agg, "create");
+  const sig = [
+    `body: Create${agg.name}Request`,
+    ...(stampUsesPrincipal ? ["request: Request"] : []),
+    "session: SessionDep",
+  ].join(", ");
   return lines(
     `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
-    `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
+    `async def create_${snake(agg.name)}(${sig}) -> dict[str, object]:`,
+    stampUsesPrincipal ? "    current_user: User = request.state.current_user" : null,
     `    created = ${agg.name}.create(${args})`,
+    hasStamp(agg, "create") ? stampCall(agg, "create", "created") : null,
     "    await _repo(session).save(created)",
     `    return {"id": created.id}`,
   );
@@ -637,16 +675,22 @@ function operationRoute(
       ];
     });
     const usesUser = operationUsesCurrentUser(op);
+    // Update stamps apply right before the persist; a principal-referencing
+    // stamp needs `current_user` bound (the route already takes `request`).
+    const stampUpdateUsesUser = stampUsesUser(agg, "update");
     const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
     if (usesUser) callArgs.push("current_user");
     return lines(
       `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
-      usesUser ? "    current_user: User = request.state.current_user" : null,
+      usesUser || stampUpdateUsesUser
+        ? "    current_user: User = request.state.current_user"
+        : null,
       "    repo = _repo(session)",
       `    found = await repo.get_by_id(${agg.name}Id(id))`,
       ...whenGate(agg, op),
       `    result = found.${snake(op.name)}(${callArgs.join(", ")})`,
+      hasStamp(agg, "update") ? stampCall(agg, "update", "found") : null,
       "    await repo.save(found)",
       ...translations,
       "    return result",
@@ -656,10 +700,14 @@ function operationRoute(
   // the request scope and thread it as the trailing domain argument; a
   // `requires`-guarded op additionally declares its 403 outcome.
   const usesUser = operationUsesCurrentUser(op);
+  // Update stamps apply right before the persist; a principal-referencing
+  // stamp threads `current_user` off the request scope (and takes `request`).
+  const stampUpdateUsesUser = stampUsesUser(agg, "update");
+  const needsRequest = usesUser || stampUpdateUsesUser;
   const opSig = [
     ID_PARAM,
     `body: ${upperFirst(op.name)}${agg.name}Request`,
-    ...(usesUser ? ["request: Request"] : []),
+    ...(needsRequest ? ["request: Request"] : []),
     "session: SessionDep",
   ].join(", ");
   const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
@@ -667,11 +715,12 @@ function operationRoute(
   return lines(
     `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
-    usesUser ? "    current_user: User = request.state.current_user" : null,
+    needsRequest ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
     ...whenGate(agg, op),
     `    found.${snake(op.name)}(${callArgs.join(", ")})`,
+    hasStamp(agg, "update") ? stampCall(agg, "update", "found") : null,
     "    await repo.save(found)",
     "    return Response(status_code=204)",
   );
@@ -689,10 +738,14 @@ function externRoute(
 ): string {
   const opSnake = snake(op.routeSlug ?? op.name);
   const usesUser = operationUsesCurrentUser(op);
+  // Update stamps apply after the handler mutates, right before persist; a
+  // principal-referencing stamp threads `current_user` (and takes `request`).
+  const stampUpdateUsesUser = stampUsesUser(agg, "update");
+  const needsRequest = usesUser || stampUpdateUsesUser;
   const sig = [
     ID_PARAM,
     `body: ${upperFirst(op.name)}${agg.name}Request`,
-    ...(usesUser ? ["request: Request"] : []),
+    ...(needsRequest ? ["request: Request"] : []),
     "session: SessionDep",
   ].join(", ");
   const checkArgs = [
@@ -705,7 +758,7 @@ function externRoute(
   return lines(
     `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${sig}) -> Response:`,
-    usesUser ? "    current_user: User = request.state.current_user" : null,
+    needsRequest ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
     ...whenGate(agg, op),
@@ -720,6 +773,7 @@ function externRoute(
     "    except Exception as err:",
     `        raise ExternHandlerError(${JSON.stringify(op.name)}, ${JSON.stringify(agg.name)}, err) from err`,
     "    found.assert_invariants()",
+    hasStamp(agg, "update") ? stampCall(agg, "update", "found") : null,
     "    await repo.save(found)",
     "    return Response(status_code=204)",
   );

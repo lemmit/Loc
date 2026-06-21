@@ -12,7 +12,7 @@ import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { generateReactForContexts } from "../react/index.js";
-import { emitPyAuthFiles, renderPyStubUserKwargs } from "./auth-emit.js";
+import { actorIdAttr, emitPyAuthFiles, renderPyStubUserKwargs } from "./auth-emit.js";
 import {
   abstractBasesOf,
   buildPyBaseReaderFile,
@@ -137,6 +137,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // (whose system declares a `user { ... }` block) carries the verifier
   // registry + middleware — anonymous deployables stay byte-identical.
   const authRequired = !!(args.deployable.auth?.required && args.sys.user);
+  // The principal's id attribute — a bare `currentUser` lifecycle-stamp value
+  // resolves to `current_user.<attr>`.  Only meaningful under auth; principal
+  // stamps without auth are gated upstream (loom.python-stamp-unsupported).
+  const principalIdAttr = authRequired && args.sys.user ? actorIdAttr(args.sys.user) : undefined;
   // An `auth { oidc }` block drives the generated OIDC verifier + handshake;
   // absent it, the dev stub keeps a fresh stack callable out of the box.
   const oidc = authRequired ? args.sys.auth : undefined;
@@ -249,7 +253,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     }
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract) continue;
-      out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx, args.emitTrace));
+      out.set(
+        `app/domain/${snake(agg.name)}.py`,
+        renderPyAggregate(agg, ctx, args.emitTrace, principalIdAttr),
+      );
       const externFile = buildPyExternHandlersFile(agg);
       if (externFile != null) {
         out.set(`app/domain/${snake(agg.name)}_handlers.py`, externFile);
