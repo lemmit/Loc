@@ -1,9 +1,10 @@
-import type {
-  AssociationIR,
-  EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
-  ExprIR,
-  WorkflowIR,
+import {
+  type AssociationIR,
+  type EnrichedAggregateIR,
+  type EnrichedBoundedContextIR,
+  type ExprIR,
+  exprUsesCurrentUser,
+  type WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { snake } from "../../util/naming.js";
@@ -135,4 +136,44 @@ function lower(
     default:
       return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Capability filters (`filter <expr>` → AggregateIR.contextFilters).
+//
+// SQLAlchemy has no global query filter (the EF Core `HasQueryFilter`
+// analogue), so the generated repository must AND each predicate into every
+// root-table read site (find_by_id / find_many_by_ids / all / find* / view
+// finds / retrievals).  W1a wires only the NON-principal relational case
+// (e.g. `filter !this.isDeleted`); principal-referencing filters
+// (`currentUser.<field>`, tenancy) stay gated by the IR validator
+// (`validateContextFilterSupport`) on python, so they never reach codegen
+// here — they're filtered out below.
+// ---------------------------------------------------------------------------
+
+/** Lower an aggregate's NON-principal capability filters to a single
+ *  SQLAlchemy predicate (conjoined with `and_(...)` when there is more than
+ *  one), or null when the aggregate has no non-principal filter.  Mirrors
+ *  node's `contextFilterPredicate`.  The principal-referencing subset is
+ *  dropped (W1b) — what remains always lowers to a closed expression because
+ *  the IR validator gated the queryable shape first; returns null (rather
+ *  than throwing) on a non-lowerable predicate, which is unreachable for
+ *  valid models. */
+export function contextFilterPredicate(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): PyPredicate | null {
+  const nonPrincipal = (agg.contextFilters ?? []).filter((p) => !exprUsesCurrentUser(p));
+  if (nonPrincipal.length === 0) return null;
+  const ops = new Set<string>();
+  const lowered: string[] = [];
+  for (const p of nonPrincipal) {
+    const l = lowerToSqlAlchemy(p, agg, ctx);
+    if (!l) return null;
+    for (const op of l.ops) ops.add(op);
+    lowered.push(l.expr);
+  }
+  if (lowered.length === 1) return { expr: lowered[0]!, ops };
+  ops.add("and_");
+  return { expr: `and_(${lowered.join(", ")})`, ops };
 }

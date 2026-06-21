@@ -23,7 +23,7 @@ import {
 } from "../../ir/util/inheritance.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
-import { lowerToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
+import { contextFilterPredicate, lowerToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
 import {
   columnsForFields,
   isRefCollectionField,
@@ -69,9 +69,32 @@ export function buildPyRepositoryFile(
   const root = rowClassName(owner);
   const kind = discriminatorValue(agg, ctx.aggregates);
   const assocs = agg.associations ?? [];
+  // The single AND-able capability-filter predicate for this aggregate
+  // (null when it has no non-principal `filter`).  Conjoined into every
+  // root-table read below via `rootWhere`; child/containment reads
+  // (parent_id-keyed) are unaffected — the filter constrains root rows.
+  // Principal-referencing filters are gated by the IR validator on python
+  // (W1b), so only non-principal predicates reach here.
+  const filterPred = contextFilterPredicate(agg, ctx);
   // Pin the enriched element type — the AggregateIR ∩ Enriched
   // intersection's `.parts` otherwise infers the un-enriched element.
   const parts: EnrichedEntityPartIR[] = agg.parts;
+
+  // `find_by_id` scopes by the id literal AND any kind / capability filter.
+  // No filter: preserve the prior emission byte-for-byte — a kind concrete
+  // uses comma-AND `.where(id, kind)`, a plain aggregate uses the cheap
+  // primary-key `session.get`.  A capability filter forces a single
+  // `rootWhere` so its predicate joins the id (and kind) scoping.
+  const findByIdRead = filterPred
+    ? `        row = (await self._session.execute(select(${root})${rootWhere(
+        { expr: `${root}.id == id`, ops: new Set() },
+        root,
+        kind,
+        filterPred,
+      )})).scalars().first()`
+    : kind
+      ? `        row = (await self._session.execute(select(${root}).where(${root}.id == id, ${root}.kind == ${JSON.stringify(kind)}))).scalars().first()`
+      : `        row = await self._session.get(${root}, id)`;
 
   const body = lines(
     `class ${agg.name}Repository:`,
@@ -80,9 +103,7 @@ export function buildPyRepositoryFile(
     "        self._events = events",
     "",
     `    async def find_by_id(self, id: ${agg.name}Id) -> ${agg.name} | None:`,
-    kind
-      ? `        row = (await self._session.execute(select(${root}).where(${root}.id == id, ${root}.kind == ${JSON.stringify(kind)}))).scalars().first()`
-      : `        row = await self._session.get(${root}, id)`,
+    findByIdRead,
     "        if row is None:",
     "            return None",
     "        return await self._hydrate(row)",
@@ -94,15 +115,20 @@ export function buildPyRepositoryFile(
     "        return found",
     "",
     `    async def all(self) -> list[${agg.name}]:`,
-    `        rows = (await self._session.execute(select(${root})${kindWhere(root, kind)})).scalars().all()`,
+    `        rows = (await self._session.execute(select(${root})${rootWhere(null, root, kind, filterPred)})).scalars().all()`,
     "        return [await self._hydrate(row) for row in rows]",
-    ...emittableFinds(repo).flatMap((f) => ["", relationalFindMethod(agg, f, ctx)]),
+    ...emittableFinds(repo).flatMap((f) => ["", relationalFindMethod(agg, f, ctx, filterPred)]),
     "",
     `    async def find_many_by_ids(self, ids: list[${agg.name}Id]) -> list[${agg.name}]:`,
-    `        rows = (await self._session.execute(select(${root}).where(${root}.id.in_(list(ids))))).scalars().all()`,
+    `        rows = (await self._session.execute(select(${root})${rootWhere(
+      { expr: `${root}.id.in_(list(ids))`, ops: new Set() },
+      root,
+      undefined,
+      filterPred,
+    )})).scalars().all()`,
     "        return [await self._hydrate(row) for row in rows]",
-    ...aggregateViews(agg, ctx).flatMap((v) => ["", viewFindMethod(agg, v, ctx)]),
-    ...aggregateRetrievals(agg, ctx).flatMap((r) => ["", runMethod(agg, r, ctx)]),
+    ...aggregateViews(agg, ctx).flatMap((v) => ["", viewFindMethod(agg, v, ctx, filterPred)]),
+    ...aggregateRetrievals(agg, ctx).flatMap((r) => ["", runMethod(agg, r, ctx, filterPred)]),
     "",
     saveMethod(agg, ctx, aggVar),
     agg.canonicalDestroy ? ["", deleteMethod(agg, ctx)] : null,
@@ -193,6 +219,7 @@ export function relationalFindMethod(
   agg: EnrichedAggregateIR,
   find: FindIR,
   ctx: EnrichedBoundedContextIR,
+  filterPred: PyPredicate | null = null,
 ): string {
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
@@ -203,7 +230,7 @@ export function relationalFindMethod(
   const pred = find.filter
     ? lowerToSqlAlchemy(find.filter, agg, ctx)
     : conventionPredicate(agg, find);
-  const where = withKind(pred, root, kind);
+  const where = rootWhere(pred, root, kind, filterPred);
   const isList = find.returnType.kind === "array";
   // Paged find (P3b): count + limit/offset against the same predicate,
   // returning the shared PagedResult carrier (1-based page).
@@ -256,16 +283,25 @@ function conventionPredicate(agg: EnrichedAggregateIR, find: FindIR): PyPredicat
   return { expr: `and_(${clauses.join(", ")})`, ops: new Set(["and_"]) };
 }
 
-/** `.where(kind == …)` suffix for TPH concretes; empty otherwise. */
-function kindWhere(root: string, kind: string | undefined): string {
-  return kind ? `.where(${root}.kind == ${JSON.stringify(kind)})` : "";
-}
-
-/** AND a lowered predicate with the TPH kind scope. */
-function withKind(pred: PyPredicate | null, root: string, kind: string | undefined): string {
-  if (pred && kind) return `.where(and_(${pred.expr}, ${root}.kind == ${JSON.stringify(kind)}))`;
-  if (pred) return `.where(${pred.expr})`;
-  return kindWhere(root, kind);
+/** Conjoin the predicate terms that scope a root read: an optional find/view/
+ *  retrieval predicate, the TPH `kind` discriminator, and the (non-principal)
+ *  capability-`filter` predicate (W1a).  Returns the `.where(...)` suffix, or
+ *  empty when no term applies.  When more than one term is present they're
+ *  AND-ed via `and_(...)` (NOT double-wrapped — every term contributes one
+ *  conjunct). */
+function rootWhere(
+  pred: PyPredicate | null,
+  root: string,
+  kind: string | undefined,
+  filterPred: PyPredicate | null,
+): string {
+  const terms: string[] = [];
+  if (pred) terms.push(pred.expr);
+  if (kind) terms.push(`${root}.kind == ${JSON.stringify(kind)}`);
+  if (filterPred) terms.push(filterPred.expr);
+  if (terms.length === 0) return "";
+  if (terms.length === 1) return `.where(${terms[0]})`;
+  return `.where(and_(${terms.join(", ")}))`;
 }
 
 // --- views + retrievals --------------------------------------------------------
@@ -290,11 +326,12 @@ function viewFindMethod(
   agg: EnrichedAggregateIR,
   view: ViewIR,
   ctx: EnrichedBoundedContextIR,
+  filterPred: PyPredicate | null = null,
 ): string {
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
   const pred = view.filter ? lowerToSqlAlchemy(view.filter, agg, ctx) : null;
-  const where = withKind(pred, root, kind);
+  const where = rootWhere(pred, root, kind, filterPred);
   return lines(
     `    async def ${snake(view.name)}(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${root})${where})).scalars().all()`,
@@ -310,6 +347,7 @@ function runMethod(
   agg: EnrichedAggregateIR,
   retrieval: RetrievalIR,
   ctx: EnrichedBoundedContextIR,
+  filterPred: PyPredicate | null = null,
 ): string {
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
@@ -334,7 +372,7 @@ function runMethod(
   ];
   return lines(
     `    async def run_${snake(retrieval.name)}(${params.join(", ")}) -> list[${agg.name}]:`,
-    `        query = select(${root})${withKind(pred, root, kind)}${orderBy}`,
+    `        query = select(${root})${rootWhere(pred, root, kind, filterPred)}${orderBy}`,
     "        if offset is not None:",
     "            query = query.offset(offset)",
     "        if limit is not None:",

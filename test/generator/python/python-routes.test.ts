@@ -106,7 +106,9 @@ describe("python routes", () => {
     expect(customer).toContain(
       '@router.post("", status_code=201, response_model=CreateCustomerResponse, operation_id="createCustomer", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
     );
-    expect(customer).toContain("created = Customer.create(name=body.name)");
+    expect(customer).toContain(
+      "created = Customer.create(name=body.name, is_deleted=body.isDeleted)",
+    );
     expect(customer).toContain('return {"id": created.id}');
   });
 
