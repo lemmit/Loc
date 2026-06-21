@@ -166,3 +166,36 @@ system Shop {
     ).toEqual([]);
   });
 });
+
+describe("python capability-filter support guard (W0 / F1)", () => {
+  // The python backend emits ZERO capability filters today, so ANY `filter`
+  // capability on a python-hosted aggregate fails fast (NO_FILTER_EMISSION) —
+  // for all three cases below — rather than silently dropping the WHERE scoping.
+
+  it("fails fast on a NON-PRINCIPAL relational filter (headline F1 case)", async () => {
+    // HEADLINE F1: a bare `LIMITED_FAMILIES` add would have MISSED this — a
+    // non-principal relational filter is the case node/java/elixir *accept*, so
+    // without the NO_FILTER_EMISSION early-reject python would have silently
+    // dropped the WHERE clause here instead of erroring.  Pin it explicitly.
+    const errs = await honoFilterErrors(sys("python", { filter: "filter !this.isDeleted" }));
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toContain("python");
+    expect(errs[0]).toContain("does not emit capability filters");
+  });
+
+  it("fails fast on a PRINCIPAL/tenancy filter", async () => {
+    const errs = await honoFilterErrors(
+      sys("python", { filter: "filter this.tenantId == currentUser.tenantId" }),
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toContain("python");
+  });
+
+  it("fails fast on a non-relational (document) shape filter", async () => {
+    const errs = await honoFilterErrors(
+      sys("python", { shape: "document", filter: "filter !this.isDeleted" }),
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toContain("python");
+  });
+});
