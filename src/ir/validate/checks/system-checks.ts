@@ -995,9 +995,23 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // .NET (EF `HasQueryFilter`) supports BOTH, so it's deliberately absent.
   // Canonical families (D-NODE-PLATFORM / D-ELIXIR-PLATFORM): `node` (was
   // `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
-  const LIMITED_FAMILIES = new Set(["node", "elixir", "java"]);
+  // `python` is included because it wires NO capability filter at all yet (no
+  // `contextFilters` references in `src/generator/python/`), so it fails fast on
+  // EVERY filter via `NO_FILTER_EMISSION` below — rather than silently dropping
+  // the WHERE scoping. It must be in this set so the loop guard lets python
+  // deployables enter; the per-case logic alone would let non-principal
+  // relational filters slip through (those ARE emitted by node/elixir/java).
+  const LIMITED_FAMILIES = new Set(["node", "elixir", "java", "python"]);
+  // Families with NO capability-filter emitter at all yet — every `filter`
+  // (principal or not, any shape) must fail fast rather than silently drop the
+  // WHERE scoping (audit F1: src/generator/python has zero `contextFilters`
+  // references). Removed per-case as W1 wires emission. .NET/node/elixir/java
+  // all emit at least the non-principal relational case, so they are NOT here.
+  const NO_FILTER_EMISSION = new Set(["python"]);
   // Backends that now wire PRINCIPAL-referencing filters (`currentUser.x`) on
-  // relational aggregates — every limited family does.  node renders the
+  // relational aggregates — every limited family does EXCEPT python (python is
+  // short-circuited by `NO_FILTER_EMISSION` above before this is ever
+  // consulted, so it never reaches this predicate).  node renders the
   // predicate against the ambient `requireCurrentUser()` accessor inside every
   // root read (the Drizzle analogue of .NET's `HasQueryFilter`).  elixir wires
   // it on BOTH foundations: **Ash** (`base_filter expr(... == ^actor(:field))` +
@@ -1044,6 +1058,20 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
         const enriched = agg as EnrichedAggregateIR;
         const filters = enriched.contextFilters ?? [];
         if (filters.length === 0) continue;
+        if (NO_FILTER_EMISSION.has(fam)) {
+          diags.push({
+            severity: "error",
+            code: "loom.context-filter-unsupported",
+            message:
+              `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
+              `'${ctxName}.${agg.name}' with a 'filter' capability predicate, but the ${fam} backend ` +
+              `does not emit capability filters yet (neither principal/tenancy nor non-principal, on any ` +
+              `shape) — the filter would be silently dropped, leaving reads unscoped. Host this aggregate ` +
+              `on a node / dotnet / elixir / java deployable, or remove the capability filter.`,
+            source: `${sys.name}/${dep.name}`,
+          });
+          continue;
+        }
         const usesPrincipal = filters.some((p) => exprUsesCurrentUser(p));
         const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
         const nonRelational = shape !== "relational";

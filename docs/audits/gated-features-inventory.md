@@ -1,5 +1,12 @@
 # Gated Features Inventory
 
+> **Superseded (2026-06-21).** This snapshot predates Java/Python being broken
+> out as backends and the Phoenix `vanilla` foundation gaining event-sourcing /
+> document / provenance support. For the current five-backend picture see
+> [`backend-feature-parity-2026-06.md`](backend-feature-parity-2026-06.md).
+> Several rows below are stale (notably: TPH is no longer node-only — all five
+> backends emit it).
+
 **Snapshot date:** 2026-06-03
 
 A cross-backend audit of features that work on some platforms but not others —
