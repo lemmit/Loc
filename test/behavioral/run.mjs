@@ -122,8 +122,9 @@ async function runCase(c) {
   try {
     execFileSync("node", [join(REPO, "bin/cli.js"), "generate", "system", join(REPO, c.ddd), "-o", genDir], { stdio: "pipe" });
     const deplDir = findNodeDeployable(genDir);
-    const e2eFile = c.api
-      ? walk(join(genDir, "e2e"), (p) => p.endsWith(".e2e.test.ts"))[0] ?? null
+    const e2eDir = join(genDir, "e2e");
+    const e2eFile = c.api && existsSync(e2eDir)
+      ? walk(e2eDir, (p) => p.endsWith(".e2e.test.ts"))[0] ?? null
       : null;
     const unitFiles = c.unit
       ? walk(deplDir, (p) => p.endsWith(".test.ts") && !p.includes("/e2e/"))
