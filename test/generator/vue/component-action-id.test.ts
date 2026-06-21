@@ -1,5 +1,5 @@
 // Regression: a Vue component-scope `Action(<instance>.<op>)` button must call
-// its mutation hook WITH the instance id — `useConfirmOrder(props.order.id)` —
+// its mutation hook WITH the instance id — `useConfirmOrder(props.order?.id)` —
 // matching React (`useConfirmOrder(order.id)`) and Svelte
 // (`useConfirmOrder(() => order.id)`).  Previously Vue emitted
 // `useConfirmOrder()` with no arg, so the mutation had no target id (and the
@@ -41,7 +41,7 @@ describe("vue component action-button mutation id", () => {
   it("passes the prop instance id to the mutation hook", async () => {
     const c = find(await generateSystemFiles(SYS), "OrderActions.vue");
     // The instance is a component prop, so `order.id` → `props.order.id`.
-    expect(c).toContain("const confirmOrder = reactive(useConfirmOrder(props.order.id));");
+    expect(c).toContain("const confirmOrder = reactive(useConfirmOrder(props.order?.id));");
     // Never the arg-less form (the bug).
     expect(c).not.toContain("reactive(useConfirmOrder())");
   });

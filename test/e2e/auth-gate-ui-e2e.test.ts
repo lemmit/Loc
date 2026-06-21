@@ -129,4 +129,18 @@ describe.skipIf(!ENABLED)("auth UI-gate runtime smoke", () => {
     run("npx svelte-kit sync", project);
     await previewAndTest(project, () => run("npx vite build", project), "build");
   });
+
+  // react + vue are plain Vite SPAs — same `vite preview` of the `dist/`
+  // build, no svelte-kit sync.  The shared spec + selectors are identical.
+  for (const fw of ["vue", "react"] as const) {
+    it(`${fw}: menu / page-guard / op-button gate by role`, { timeout: 900_000 }, async () => {
+      const work = fs.mkdtempSync(path.join(os.tmpdir(), `loom-gate-${fw}-`));
+      const project = generateAs(fw, work);
+      expect(fs.existsSync(path.join(project, "vite.config.ts")), `${fw} project emitted`).toBe(
+        true,
+      );
+      run("npm install --no-audit --no-fund", project);
+      await previewAndTest(project, () => run("npx vite build", project), "dist");
+    });
+  }
 });
