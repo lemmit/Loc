@@ -67,6 +67,14 @@ describe("provenanced-field storage capability validation", () => {
     expect(await provErrors(sys("dotnet"))).toEqual([]);
   });
 
+  it("accepts a provenanced field on a Java deployable (provenance runtime ported, W2)", async () => {
+    expect(await provErrors(sys("java"))).toEqual([]);
+  });
+
+  it("accepts a provenanced field on a Python deployable (provenance runtime ported, W2)", async () => {
+    expect(await provErrors(sys("python"))).toEqual([]);
+  });
+
   it("rejects a provenanced field on a Phoenix deployable (defaults to ash — no runtime)", async () => {
     const errs = await provErrors(sys("elixir"));
     expect(errs.length).toBe(1);

@@ -8,11 +8,12 @@ backend records a runtime trace on every write so a value can later
 be explained: "this 128.40 came from `reprice(qty=8, price=16)` via
 rule `<snapshotId>`".
 
-Provenance has a runtime on the **Hono (`node`)**, **.NET (`dotnet`)** and
-**elixir on the `vanilla` foundation** backends — each emits the co-located
-lineage column, per-write trace capture, and the transactional
-`provenance_records` flush.  The remaining surfaces (elixir on the **`ash`**
-foundation, `react`) parse the keyword but emit no trace code; only the
+Provenance has a runtime on the **Hono (`node`)**, **.NET (`dotnet`)**,
+**Java (`java`)**, **Python (`python`)** and **elixir on the `vanilla`
+foundation** backends — each emits the co-located lineage column, per-write
+trace capture, and the transactional `provenance_records` flush.  The
+remaining surfaces (elixir on the **`ash`** foundation, `react`) parse the
+keyword but emit no trace code; only the
 snapshot capture runs across all backends.  On Phoenix this is a *foundation*
 constraint — `foundation: vanilla` un-gates the runtime, `foundation: ash`
 stays gated (the validator rejects a provenanced field hosted on Ash, exactly
@@ -206,8 +207,9 @@ ignore it.
 
 This is intentional: provenance is opt-in at the deployable level
 without being opt-in at the language level — you can declare a
-`provenanced` field once and only a node/dotnet deployable will exercise
-it, until a runtime is wired up for the others.
+`provenanced` field once and only a runtime-capable deployable
+(node/dotnet/java/python, or elixir-vanilla) will exercise it, while the
+others ignore the runtime half.
 
 ## Cross-references
 

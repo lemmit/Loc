@@ -23,6 +23,7 @@ import {
 } from "../../ir/util/inheritance.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { provColumn, provenancedFieldsOf } from "./emit/provenance.js";
 import { contextFilterPredicate, lowerToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
 import {
   columnsForFields,
@@ -172,17 +173,21 @@ export function buildPyRepositoryFile(
     .sort();
   const saNames = ["and_", "delete", "func", "not_", "or_", "select"].filter(refersTo);
 
+  const hasProv = provenancedFieldsOf(agg).length > 0;
   return lines(
     `"""${agg.name} repository.  Auto-generated."""`,
     "",
+    hasProv ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
-    refersTo("Decimal") ? "" : null,
+    hasProv ? "from uuid import uuid4" : null,
+    refersTo("Decimal") || hasProv ? "" : null,
     saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,
     refersTo("insert") ? "from sqlalchemy.dialects.postgresql import insert" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
     emittableFinds(repo).some(findUsesCurrentUser) ? "from app.auth.user import User" : null,
     refersTo("PagedResult") ? "from app.db.paging import PagedResult" : null,
+    hasProv ? "from app.db.provenance import ProvenanceRecord" : null,
     rowNames.length > 0 ? `from app.db.schema import ${rowNames.join(", ")}` : null,
     refersTo("iso") ? "from app.db.wire import iso" : null,
     "from app.domain.errors import AggregateNotFoundError",
@@ -191,9 +196,11 @@ export function buildPyRepositoryFile(
     domainNames.length > 0
       ? `from app.domain.${snake(agg.name)} import ${domainNames.join(", ")}`
       : null,
+    hasProv ? "from app.domain.provenance import ProvLineage, drain" : null,
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
+    hasProv ? "from app.obs.log import actor_id, correlation_id, parent_id, scope_id" : null,
     "",
     "",
     body,
@@ -494,6 +501,25 @@ function hydrateMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR):
         : `${v}=(${hydrateOne}(${v}_rows[0]) if ${v}_rows else None)`,
     );
   }
+  // Restore co-located provenance lineage from the row's jsonb column —
+  // bind the instance so the backing fields can be set after construction
+  // (the full-state ctor doesn't take provenance).
+  const provFields = provenancedFieldsOf(agg);
+  if (provFields.length > 0) {
+    out.push(`        __agg = ${agg.name}._create(`);
+    out.push(...kwargs.map((k) => `            ${k},`));
+    out.push("        )");
+    for (const f of provFields) {
+      const col = provColumn(f.name);
+      out.push(
+        `        __agg._${col} = (`,
+        `            ProvLineage.from_wire(row.${col}) if row.${col} is not None else None`,
+        "        )",
+      );
+    }
+    out.push("        return __agg");
+    return out.join("\n");
+  }
   out.push(`        return ${agg.name}._create(`);
   out.push(...kwargs.map((k) => `            ${k},`));
   out.push("        )");
@@ -576,12 +602,21 @@ function saveMethod(
 ): string {
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
+  const provFields = provenancedFieldsOf(agg);
   const out: string[] = [`    async def save(self, ${aggVar}: ${agg.name}) -> None:`];
   const rootPairs: Array<[string, string]> = [["id", `${aggVar}.id`]];
   if (kind) rootPairs.push(["kind", JSON.stringify(kind)]);
   for (const f of agg.fields) {
     if (isRefCollectionField(f) || isValueCollectionField(f)) continue;
     rootPairs.push(...persistField(aggVar, f, ctx));
+  }
+  // Co-located provenance lineage (provenance.md): the current `<field>_provenance`
+  // jsonb column, serialised from the `ProvLineage` dataclass.
+  for (const f of provFields) {
+    rootPairs.push([
+      provColumn(f.name),
+      `(${aggVar}.${provColumn(f.name)}.to_wire() if ${aggVar}.${provColumn(f.name)} is not None else None)`,
+    ]);
   }
   out.push("        root = {");
   out.push(...rootPairs.map(([k, v]) => `            "${k}": ${v},`));
@@ -604,6 +639,37 @@ function saveMethod(
   if (ctx.events.length > 0) {
     out.push("        for event in aggregate.pull_events():");
     out.push("            await self._events.dispatch(event)");
+  }
+  // Provenance flush (provenance.md): drain the per-request trace buffer and
+  // insert one `provenance_records` row per write, stamped with the ambient
+  // request-context ids.  Done BEFORE the save `flush()` (no nested
+  // transaction) so the history commits atomically with the aggregate in the
+  // request-scoped session — the Python mirror of the .NET `DrainProv()`
+  // pre-SaveChanges insert / the elixir-vanilla `flush(Repo)`.
+  if (provFields.length > 0) {
+    out.push("        __traces = drain()");
+    out.push("        if __traces:");
+    out.push("            await self._session.execute(");
+    out.push("                insert(ProvenanceRecord),");
+    out.push("                [");
+    out.push("                    {");
+    out.push('                        "trace_id": str(uuid4()),');
+    out.push('                        "snapshot_id": __lin.snapshot_id,');
+    out.push('                        "target_type": __lin.target.type,');
+    out.push('                        "field": __lin.target.field,');
+    out.push(
+      '                        "inputs": [{"path": __i.path, "value": __i.value} for __i in __lin.inputs],',
+    );
+    out.push('                        "computed_value": __lin.computed_value,');
+    out.push('                        "at": datetime.now(UTC),');
+    out.push('                        "correlation_id": correlation_id(),');
+    out.push('                        "scope_id": scope_id(),');
+    out.push('                        "actor_id": actor_id(),');
+    out.push('                        "parent_id": parent_id(),');
+    out.push("                    }");
+    out.push("                    for __lin in __traces");
+    out.push("                ],");
+    out.push("            )");
   }
   // One transaction per request: the session dependency commits.
   out.push("        await self._session.flush()");
@@ -773,10 +839,16 @@ function wireProjection(
 }
 
 export function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
+  // Co-located provenance lineage rides the wire DTO so any GET surfaces the
+  // current lineage (`<field>_provenance`), mirroring the Hono / .NET DTO.
+  const provPairs = provenancedFieldsOf(agg).map((f) => {
+    const col = provColumn(f.name);
+    return `"${col}": (root.${col}.to_wire() if root.${col} is not None else None)`;
+  });
   return lines(
     `    def to_wire(self, root: ${agg.name}) -> dict[str, object]:`,
     "        return {",
-    wireProjection(agg, "root", ctx).map((p) => `            ${p},`),
+    [...wireProjection(agg, "root", ctx), ...provPairs].map((p) => `            ${p},`),
     "        }",
   );
 }

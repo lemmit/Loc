@@ -244,6 +244,16 @@ function wireRecord(
     return `${wireJavaType(t, "Response")} ${w.name}`;
   });
   const args = shape.map((w) => domainToWire(wireFieldType(w), `value.${accessor(w)}`));
+  // Co-located provenance (provenance.md): each provenanced field appends a
+  // trailing `<field>Provenance` component carrying the current lineage, so any
+  // GET surfaces it inline (the field's own value still emits above).  Parts
+  // carry no provenanced fields (write sites live on the root), so this is a
+  // no-op for them — keeping non-provenance responses byte-identical.
+  for (const f of entity.fields.filter((pf) => pf.provenanced)) {
+    imports.add(`${basePkg}.domain.common.ProvLineage`);
+    components.push(`ProvLineage ${f.name}Provenance`);
+    args.push(`value.${f.name}Provenance()`);
+  }
   const body = [
     `    public static ${recordName} from(${entity.name} value) {`,
     `        return new ${recordName}(${args.join(", ")});`,

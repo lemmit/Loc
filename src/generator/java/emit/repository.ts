@@ -50,6 +50,10 @@ export interface JavaRepoCtx {
   /** True when the retrieval's `where` is exactly an eligible criterion
    *  reference — the impl then consumes the Specification factory. */
   isReified?: (r: RetrievalIR) => boolean;
+  /** True when this aggregate declares a `provenanced` field (provenance.md):
+   *  the save impl drains the per-write lineage buffer into provenance_records
+   *  in the same `@Transactional` boundary as the aggregate save. */
+  provenance?: boolean;
 }
 
 const dottedSortPath = (t: SortTermIR): string => t.path.map((s) => s.name).join(".");
@@ -393,6 +397,7 @@ export function renderJavaRepositoryImpl(
   // which needs the request actor.  Inject CurrentUserAccessor only then.
   const principalScoped = (agg.contextFilters ?? []).some(exprUsesCurrentUser);
   const injectAccessor = anyReified && principalScoped;
+  const provenance = !!ctx.provenance;
   const tenantScopeAnd = injectAccessor
     ? `.and(${agg.name}Criteria.tenantScope(currentUserAccessor.user()))`
     : "";
@@ -488,9 +493,18 @@ export function renderJavaRepositoryImpl(
       ? `import ${ctx.criteriaPkg}.${agg.name}Criteria;`
       : null,
     injectAccessor ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
+    provenance ? `import java.time.Instant;` : null,
+    provenance ? `import org.springframework.transaction.annotation.Transactional;` : null,
     retrievals.length > 0 && ctx.persistencePkg && ctx.persistencePkg !== ctx.infraPkg
       ? `import ${ctx.persistencePkg}.OffsetLimitPageRequest;`
       : null,
+    provenance && ctx.persistencePkg && ctx.persistencePkg !== ctx.infraPkg
+      ? `import ${ctx.persistencePkg}.ProvenanceRecord;`
+      : null,
+    provenance && ctx.persistencePkg && ctx.persistencePkg !== ctx.infraPkg
+      ? `import ${ctx.persistencePkg}.ProvenanceRecordRepository;`
+      : null,
+    provenance ? `import ${ctx.basePkg}.config.RequestContext;` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
     `import ${ctx.basePkg}.domain.enums.*;`,
     ``,
@@ -498,17 +512,46 @@ export function renderJavaRepositoryImpl(
     `public class ${agg.name}RepositoryImpl implements ${agg.name}Repository {`,
     `    private final ${agg.name}JpaRepository jpa;`,
     injectAccessor ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
+    provenance ? `    private final ProvenanceRecordRepository provenanceRecords;` : null,
     ``,
-    injectAccessor
-      ? `    public ${agg.name}RepositoryImpl(${agg.name}JpaRepository jpa, CurrentUserAccessor currentUserAccessor) {`
-      : `    public ${agg.name}RepositoryImpl(${agg.name}JpaRepository jpa) {`,
+    provenance
+      ? `    public ${agg.name}RepositoryImpl(${agg.name}JpaRepository jpa${injectAccessor ? ", CurrentUserAccessor currentUserAccessor" : ""}, ProvenanceRecordRepository provenanceRecords) {`
+      : injectAccessor
+        ? `    public ${agg.name}RepositoryImpl(${agg.name}JpaRepository jpa, CurrentUserAccessor currentUserAccessor) {`
+        : `    public ${agg.name}RepositoryImpl(${agg.name}JpaRepository jpa) {`,
     `        this.jpa = jpa;`,
     injectAccessor ? `        this.currentUserAccessor = currentUserAccessor;` : null,
+    provenance ? `        this.provenanceRecords = provenanceRecords;` : null,
     `    }`,
     ``,
+    provenance ? `    @Transactional` : null,
     `    @Override`,
     `    public ${agg.name} save(${agg.name} aggregate) {`,
-    `        return jpa.save(aggregate);`,
+    provenance ? `        var saved = jpa.save(aggregate);` : `        return jpa.save(aggregate);`,
+    // Provenance flush (provenance.md): drain the per-write lineage buffer and
+    // persist one provenance_records row per write, BEFORE the @Transactional
+    // method returns, so the history commits atomically with the state (the
+    // Java mirror of the Hono/.NET transactional `drainProv()` insert).
+    ...(provenance
+      ? [
+          `        var __now = Instant.now();`,
+          `        for (var __lin : aggregate.drainProv()) {`,
+          `            provenanceRecords.save(new ProvenanceRecord(`,
+          `                java.util.UUID.randomUUID().toString(),`,
+          `                __lin.snapshotId(),`,
+          `                __lin.target().type(),`,
+          `                __lin.target().field(),`,
+          `                __lin.inputs(),`,
+          `                __lin.computedValue(),`,
+          `                __now,`,
+          `                RequestContext.correlationId(),`,
+          `                RequestContext.scopeId(),`,
+          `                RequestContext.actorId(),`,
+          `                RequestContext.parentId()));`,
+          `        }`,
+          `        return saved;`,
+        ]
+      : []),
     `    }`,
     ``,
     `    @Override`,

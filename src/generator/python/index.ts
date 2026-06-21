@@ -25,8 +25,13 @@ import { ERRORS_PY } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
 import { renderPyWireModels } from "./emit/http-models.js";
 import { renderPyIds } from "./emit/ids.js";
-import { emitPythonMigrations, MIGRATE_PY } from "./emit/migrations.js";
+import {
+  emitPythonMigrations,
+  emitPythonProvenanceMigration,
+  MIGRATE_PY,
+} from "./emit/migrations.js";
 import { OBS_LOG_PY, OBS_MIDDLEWARE_PY } from "./emit/obs.js";
+import { emitPyProvenance } from "./emit/provenance.js";
 import { renderPySchema } from "./emit/schema.js";
 import { buildPySeedFile } from "./emit/seed.js";
 import { renderPyTestsFile } from "./emit/tests.js";
@@ -219,6 +224,12 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // COPY valid on systems whose snapshot is already up to date.
   out.set("migrations/.gitkeep", "");
   emitPythonMigrations(args.migrations ?? [], out);
+  // Provenance runtime (provenance.md): the SDK modules + the LATE
+  // hand-emitted migration (co-located `<field>_provenance` columns +
+  // `provenance_records`).  No-op when no aggregate declares a provenanced
+  // field, so non-provenance projects stay byte-identical.
+  emitPyProvenance(args.contexts, out);
+  emitPythonProvenanceMigration(args.contexts, out, args.sys);
   if (seedFile != null) out.set("app/db/seed.py", seedFile);
 
   // In-process event dispatch (channels.md): only when a channel routes

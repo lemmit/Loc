@@ -1,4 +1,4 @@
-import type { PathIR, StmtIR } from "../../ir/types/loom-ir.js";
+import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { snake } from "../../util/naming.js";
 import { renderPyExpr } from "./render-expr.js";
 
@@ -31,6 +31,12 @@ export interface PyStmtCtx {
    *  `value_computed` domain-trace lines (no obs e2e asserts these;
    *  cosmetic parity with the Hono / .NET `--trace` instrumentation). */
   trace?: PyTraceCtx;
+  /** True when the aggregate hosts a `provenanced` field (provenance.md):
+   *  every instrumented write-site (`assign`/`add`) whose `prov` is set
+   *  snapshots its leaf inputs *before* the write, builds a `ProvLineage`,
+   *  routes it to the co-located `_<field>_provenance` backing field, and
+   *  pushes it onto the per-request ContextVar buffer via `record(...)`. */
+  emitProvenance?: boolean;
 }
 
 const METHOD_BODY_INDENT = "        ";
@@ -41,9 +47,111 @@ export function renderPyStatements(
   ctx: PyStmtCtx = {},
 ): string {
   let preIndex = 0;
+  let provIndex = 0;
   return stmts
-    .map((s) => renderPyStatement(s, indent, ctx, s.kind === "precondition" ? preIndex++ : 0))
+    .map((s) => {
+      const pre = s.kind === "precondition" ? preIndex++ : 0;
+      const pi = (s.kind === "assign" || s.kind === "add") && s.prov ? provIndex++ : 0;
+      return renderPyStatement(s, indent, ctx, pre, pi);
+    })
     .join("\n");
+}
+
+/** Bounded walk over the RHS expression collecting leaf inputs —
+ *  `this`-props, params and let-bindings (and member-access chains rooted at
+ *  them).  Each leaf is `(source path, rendered Python access)`; the access
+ *  re-uses `renderPyExpr`, so a `this`-prop renders `self._x`, a param `x`.
+ *  Mirrors the TS `collectLeaves`. */
+function collectLeaves(
+  e: ExprIR,
+  out: { path: string; value: string }[] = [],
+): { path: string; value: string }[] {
+  switch (e.kind) {
+    case "ref":
+      if (e.refKind === "this-prop" || e.refKind === "param" || e.refKind === "let") {
+        out.push({ path: e.name, value: renderPyExpr(e) });
+      }
+      break;
+    case "member":
+      out.push({ path: leafPath(e), value: renderPyExpr(e) });
+      break;
+    case "method-call":
+      collectLeaves(e.receiver, out);
+      for (const a of e.args) collectLeaves(a, out);
+      break;
+    case "call":
+      for (const a of e.args) collectLeaves(a, out);
+      break;
+    case "paren":
+      collectLeaves(e.inner, out);
+      break;
+    case "unary":
+      collectLeaves(e.operand, out);
+      break;
+    case "binary":
+      collectLeaves(e.left, out);
+      collectLeaves(e.right, out);
+      break;
+    case "ternary":
+      collectLeaves(e.cond, out);
+      collectLeaves(e.then, out);
+      collectLeaves(e.otherwise, out);
+      break;
+    case "match":
+      for (const arm of e.arms) {
+        collectLeaves(arm.cond, out);
+        collectLeaves(arm.value, out);
+      }
+      if (e.otherwise) collectLeaves(e.otherwise, out);
+      break;
+    case "new":
+    case "object":
+      for (const f of e.fields) collectLeaves(f.value, out);
+      break;
+  }
+  return out;
+}
+
+/** Dotted source-side path for a member-access chain (e.g. `line.price`). */
+function leafPath(e: ExprIR): string {
+  if (e.kind === "ref") return e.name;
+  if (e.kind === "this") return "this";
+  if (e.kind === "member") return `${leafPath(e.receiver)}.${e.member}`;
+  return "<expr>";
+}
+
+/** Splice provenance trace capture around a write-site `base` line:
+ *  snapshot the leaf inputs *before* the mutation (so a self-referential
+ *  `x := x + n` records the pre-write value), perform the write, build the
+ *  `ProvLineage` (rule snapshot + leaf inputs + post-write computed value)
+ *  and route it to both sinks — the co-located `_<field>_provenance` backing
+ *  field (current lineage, persisted on the row) and the per-request
+ *  ContextVar buffer via `record(...)` (drained into the history table by
+ *  the repository inside the save transaction).  Mirrors the TS `withTrace`. */
+function withProv(
+  base: string,
+  prov: ProvSite | undefined,
+  target: PathIR,
+  value: ExprIR,
+  emitProvenance: boolean,
+  i: string,
+  index: number,
+): string {
+  if (!emitProvenance || !prov) return base;
+  const tmp = `__prov_${index}`;
+  const lin = `__lin_${index}`;
+  const computed = renderPath(target);
+  const field = prov.target.field;
+  const inputs = collectLeaves(value)
+    .map((l) => `ProvInput(path=${JSON.stringify(l.path)}, value=${l.value})`)
+    .join(", ");
+  return [
+    `${i}${tmp} = [${inputs}]`,
+    base,
+    `${i}${lin} = ProvLineage(snapshot_id=${JSON.stringify(prov.snapshotId)}, target=ProvTarget(type=${JSON.stringify(prov.target.type)}, field=${JSON.stringify(field)}), inputs=${tmp}, computed_value=${computed})`,
+    `${i}self._${snake(field)}_provenance = ${lin}`,
+    `${i}record(${lin})`,
+  ].join("\n");
 }
 
 /** `log("trace", "<event>", <kwargs>)` — the domain-trace facade call. */
@@ -51,7 +159,13 @@ function traceLine(i: string, event: string, kwargs: string): string {
   return `${i}log("trace", ${JSON.stringify(event)}, ${kwargs})`;
 }
 
-function renderPyStatement(s: StmtIR, i: string, ctx: PyStmtCtx, preIndex: number): string {
+function renderPyStatement(
+  s: StmtIR,
+  i: string,
+  ctx: PyStmtCtx,
+  preIndex: number,
+  provIndex: number,
+): string {
   const sub = `${i}    `;
   switch (s.kind) {
     case "precondition": {
@@ -81,11 +195,11 @@ function renderPyStatement(s: StmtIR, i: string, ctx: PyStmtCtx, preIndex: numbe
     case "let":
       return `${i}${snake(s.name)} = ${renderPyExpr(s.expr)}`;
     case "assign": {
-      const base = `${i}${renderPath(s.target)} = ${renderPyExpr(s.value)}`;
+      let base = `${i}${renderPath(s.target)} = ${renderPyExpr(s.value)}`;
       // `value_computed` trace after a single-segment field assign (nested
       // paths are skipped, matching the Hono / .NET `withValueComputed`).
       if (ctx.trace && s.target.segments.length === 1) {
-        return [
+        base = [
           base,
           traceLine(
             i,
@@ -94,10 +208,12 @@ function renderPyStatement(s: StmtIR, i: string, ctx: PyStmtCtx, preIndex: numbe
           ),
         ].join("\n");
       }
-      return base;
+      return withProv(base, s.prov, s.target, s.value, !!ctx.emitProvenance, i, provIndex);
     }
-    case "add":
-      return `${i}${renderPath(s.target)}.append(${renderPyExpr(s.value)})`;
+    case "add": {
+      const base = `${i}${renderPath(s.target)}.append(${renderPyExpr(s.value)})`;
+      return withProv(base, s.prov, s.target, s.value, !!ctx.emitProvenance, i, provIndex);
+    }
     case "remove": {
       const path = renderPath(s.target);
       return [
