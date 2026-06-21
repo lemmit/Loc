@@ -42,10 +42,21 @@ export function esStateClass(wf: WorkflowIR): string {
   return `${upperFirst(wf.name)}State`;
 }
 
-/** Helper fn names the dispatch handler references. */
-export function esFns(wf: WorkflowIR): { fold: string; load: string; append: string } {
+/** Helper fn names the dispatch handler references.  `loadAll` is consumed by
+ *  the instance-LIST read route (workflow-instance-visibility.md). */
+export function esFns(wf: WorkflowIR): {
+  fold: string;
+  load: string;
+  loadAll: string;
+  append: string;
+} {
   const s = snake(wf.name);
-  return { fold: `_fold_${s}`, load: `_load_${s}_events`, append: `_append_${s}_events` };
+  return {
+    fold: `_fold_${s}`,
+    load: `_load_${s}_events`,
+    loadAll: `_load_all_${s}`,
+    append: `_append_${s}_events`,
+  };
 }
 
 /** The correlation field's id class (`OrderId`) — the stream key type. */
@@ -201,6 +212,20 @@ export function esWorkflowFoldBlock(wf: WorkflowIR, ctx: EnrichedBoundedContextI
     "    ).scalars().all()",
     `    return [_${snake(wf.name)}_row_to_event(r) for r in rows]`,
   );
+
+  // Load-all: read every stream ordered by (stream_id, version), group by
+  // stream_id, fold each — the instance-LIST read body, mirroring the
+  // event-sourced aggregate repository's group-fold list.
+  const loadAllFn = lines(
+    `async def ${fns.loadAll}(session: AsyncSession) -> list[${T}]:`,
+    "    rows = (",
+    `        await session.execute(select(${row}).order_by(${row}.stream_id, ${row}.version))`,
+    "    ).scalars().all()",
+    "    by_stream: dict[str, list[DomainEvent]] = {}",
+    "    for r in rows:",
+    `        by_stream.setdefault(r.stream_id, []).append(_${snake(wf.name)}_row_to_event(r))`,
+    `    return [${fns.fold}(key, evs) for key, evs in by_stream.items()]`,
+  );
   const appendFn = lines(
     `async def ${fns.append}(session: AsyncSession, key: str, events: list[DomainEvent]) -> None:`,
     "    if not events:",
@@ -253,6 +278,9 @@ export function esWorkflowFoldBlock(wf: WorkflowIR, ctx: EnrichedBoundedContextI
     "",
     "",
     loadFn,
+    "",
+    "",
+    loadAllFn,
     "",
     "",
     appendFn,

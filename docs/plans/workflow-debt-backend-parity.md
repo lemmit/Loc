@@ -40,20 +40,23 @@ landed across most backends:
 | `on`/event-`create` dispatch | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | instance read endpoints | ✓ | ✓ | (Ash defer) | ✓ | ✓ | ✓ |
 | view-over-workflow | ✓ | ✓ | (Ash defer) | ✓ | ✓ | ✓ |
-| `eventSourced` workflows (`apply`) | ✓ | gated | gated | gated | gated | gated |
+| `eventSourced` workflows (`apply`) | ✓ | ✓ | gated | ✓ | ✓ | ✓ |
 
-**`eventSourced` workflows now ship on Hono (node); gated elsewhere.** The
+**`eventSourced` workflows now ship on every backend except elixir-ash.** The
 surface (grammar → `WorkflowIR.eventSourced` / `.appliers`) + emit-only/pure-fold
-discipline (A1) landed long ago; the **Hono runtime** landed in this slice — an
-`eventSourced` workflow persists as an append-only `<wf>_events` stream (reusing
-the aggregate event store's table shape + `eventToData`/`rowToEvent`), folds it
-through its `apply(...)` blocks on load, and the dispatch handlers append their
-own emitted events to the stream (gap-free) and re-publish for choreography. On
-the other backends an `eventSourced` workflow stays a **hard error**
-(`loom.event-sourced-workflow-unsupported`, `validateEventSourcedWorkflowStorage`,
-gated by `EVENT_SOURCING_WORKFLOW_BACKENDS`) — before the gate it silently
-misgenerated as a state-based saga with the appliers dropped. The supported set
-grows per backend, mirroring the event-sourced *aggregate* `EVENT_SOURCING_BACKENDS`.
+discipline (A1) landed long ago; the **Hono runtime** was the reference, and the
+fan-out to .NET, Python, Java, and **elixir-vanilla** has since landed (see
+"Done — eventSourced workflow fan-out" below). An `eventSourced` workflow
+persists as an append-only `<wf>_events` stream (reusing the aggregate event
+store's table shape + `eventToData`/`rowToEvent`), folds it through its
+`apply(...)` blocks on load, and the dispatch handlers append their own emitted
+events to the stream (gap-free) and re-publish for choreography. On the one
+remaining unsupported host — **elixir-ash** — an `eventSourced` workflow stays a
+**hard error** (`loom.event-sourced-workflow-unsupported`,
+`validateEventSourcedWorkflowStorage`, gated by `EVENT_SOURCING_WORKFLOW_BACKENDS`
++ the foundation-aware elixir branch); the Ash foundation has no pure-ES fit, so
+the fix is `foundation: vanilla` (D-VANILLA-ES-HOME). Before the gate it silently
+misgenerated as a state-based saga with the appliers dropped.
 
 Corrections from earlier matrix drift (verified against code): **elixir-vanilla
 dispatch already ships** (`index.ts` calls the foundation-agnostic
@@ -61,8 +64,8 @@ dispatch already ships** (`index.ts` calls the foundation-agnostic
 landed its saga-state row (#1288), in-process dispatcher (#1291), instance read
 endpoints (#1293), and view-over-workflow (#1296) — so **java is now at full
 state-based workflow parity with node / dotnet / elixir-vanilla / python**. The
-remaining workflow gap is the `eventSourced`-workflow track, now **landed on Hono**
-and growing per backend.
+`eventSourced`-workflow track — once the last remaining workflow gap — has now
+**fanned out to every backend except elixir-ash** (see below).
 
 ## Done in this slice — python instance read endpoints
 
@@ -156,21 +159,64 @@ handlers fold-on-load (create: from-zero; on: drop+`event_unrouted` if the
 stream is empty), run the emit-only body, append the workflow's own (folded)
 events gap-free, and re-publish every emit for choreography. The migration +
 Drizzle schema emit `<wf>_events` (not a state row); `instanceWireShape` is
-suppressed for ES workflows (no read-model row). `EVENT_SOURCING_WORKFLOW_BACKENDS`
-= `{ node }`. Tests: `test/generator/typescript/hono-workflow-event-sourced.test.ts`
+suppressed for ES workflows (no read-model row). Tests:
+`test/generator/typescript/hono-workflow-event-sourced.test.ts`
 + a `generate system → tsc` case on the `build-generated-ts` gate
 (`test/e2e/fixtures/ts-build/eventsourced-workflow.ddd`).
 
+## Done — eventSourced workflow fan-out (dotnet / python / java / elixir-vanilla)
+
+The Hono runtime fanned out to every remaining DB backend except elixir-ash;
+`EVENT_SOURCING_WORKFLOW_BACKENDS` is now `{ node, dotnet, python, java }`, and
+the gate's foundation-aware elixir branch accepts `elixir + foundation: vanilla`
+(rejecting `elixir + ash`, which has no pure-ES fit — D-VANILLA-ES-HOME).  Each
+backend adapts its aggregate event-store machinery (fold/append repository over
+the `<wf>_events` table `MigrationsIR` already derives) + rebinds its dispatcher's
+persistence seam (fold-on-load / append-own-events):
+
+- **.NET** — `src/generator/dotnet/workflow-eventsourced-emit.ts`.
+- **Python** — `src/generator/python/workflow-eventsourced-emit.ts`.
+- **Java** — `src/generator/java/emit/workflow-eventsourced.ts`.
+- **elixir-vanilla** — `src/generator/elixir/vanilla/workflow-eventsourced-emit.ts`
+  (`emitVanillaEsWorkflowFiles`, dispatched from `vanilla/index.ts`): a plain
+  `<Wf>State` fold struct (no Ecto saga schema), a `<Wf>Fold` (`apply_event/2`
+  + `from_events/2`), a `<Wf>Stream` (load + gap-free append + Jason codec) over
+  the `<wf>_events` `<Wf>EventLog` Ecto schema, and create/`on` handlers that
+  fold-on-load (create from-zero; `on` drops + logs `event_unrouted` on an empty
+  stream), run the emit-only body, append the workflow's own events gap-free, and
+  re-dispatch each emit for choreography. Tests:
+  `test/generator/elixir/vanilla-workflow-eventsourced.test.ts`; CI compile gate
+  via `test/e2e/fixtures/elixir-vanilla-build/vanilla-eventsourced-workflow.ddd`
+  (`elixir-vanilla-build.yml`). Foundation-aware gate coverage in
+  `test/ir/workflow-event-sourced-storage.test.ts`.
+
+## Done — eventSourced-workflow instance reads (fold-on-load)
+
+`GET /workflows/<wf>/instances[/{id}]` now ships for `eventSourced` workflows on
+all 5 ES backends (node / dotnet / python / java / elixir-vanilla) — the same
+read surface state-based sagas already had, projecting the same
+`instanceWireShape`. Design: **enrich the shape, branch the body.**
+`enrichWorkflowInstanceShape` (`src/ir/enrich/enrichments.ts`) dropped its
+`|| wf.eventSourced` short-circuit, so an ES workflow with a correlation field +
+state fields now carries `instanceWireShape` from the same pure
+`wireFieldsForWorkflow` (no new IR field — the read body branches on the existing
+`wf.eventSourced`). Each backend's instance emitter branches the **read body**:
+**LIST** loads all `<wf>_events` ordered by `(stream_id, version)`, groups by
+`stream_id`, and folds each stream (mirroring that backend's own ES-aggregate
+`findAll`); **byId** loads + folds a single stream (reusing the dispatch-handler
+machinery), 404 on an empty stream. operationIds + route paths come unchanged
+from `src/ir/util/openapi-ids.ts`, so cross-backend OpenAPI parity holds by
+construction; no migration change (`<wf>_events` already emitted). Stateless
+(non-correlated) workflows still get no instance read surface. Tests:
+`test/ir/workflow-instance-shape.test.ts` (enrich) + the per-backend
+`*-workflow-instances` / ES-workflow generator suites. (`elixir+ash` stays out
+of scope — no pure-ES fit.)
+
 ## Next slices (recommended order)
 
-1. **`eventSourced` workflows — fan out to dotnet / python / java / elixir-vanilla.**
-   The Hono runtime above is the reference; each backend adapts its aggregate
-   event-store machinery (fold/append repository, `<wf>_events` table — already
-   derived by `MigrationsIR` for every backend) + rebinds its dispatcher's
-   persistence seam (fold-load / append-own-events), then adds its platform to
-   `EVENT_SOURCING_WORKFLOW_BACKENDS` to lift the gate. Design-first
-   (`workflow-and-applier.md` A2-S5b).
-2. **eventSourced-workflow instance reads (fold-on-load)** — optional read surface:
-   `GET /workflows/<wf>/instances[/{id}]` folding the stream per correlation
-   (today ES workflows have no `instanceWireShape`, so no read API). Lower priority
-   — the saga is fully functional via dispatch + choreography without it.
+1. **eventSourced-workflow instance _views_ (`view X = <Workflow> where …`)** —
+   the view-over-workflow source already ships for state-based sagas; extend it to
+   read the ES instance read-model (fold-projected) now that ES workflows carry
+   `instanceWireShape`. Additive; the saga is fully functional without it.
+2. **Scaffold instance _pages_ for ES workflows** — the opt-in scaffold instance
+   list/detail pages (already available for state sagas) over the new ES read API.

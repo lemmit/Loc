@@ -14,6 +14,8 @@ import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
 import { generateTypeScript } from "../../../src/platform/hono/v4/emit.js";
 import { BACKEND_PINS } from "../../../src/platform/hono/v4/pins.js";
+import { generateSystems } from "../../../src/system/index.js";
+import { parseString } from "../../_helpers/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..", "..", "..");
@@ -32,6 +34,35 @@ async function workflowsFile(file: string): Promise<string> {
   const files = generateTypeScript(doc.parseResult.value as Model, BACKEND_PINS);
   return files.get("http/workflows.ts") ?? "";
 }
+
+/** Generate the Hono `http/workflows.ts` from an inline `.ddd` source. */
+async function workflowsFromSrc(src: string): Promise<string> {
+  const { model, errors } = await parseString(src);
+  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
+  const files = generateSystems(model).files;
+  return files.get("api/http/workflows.ts") ?? "";
+}
+
+// An event-sourced workflow (workflow-and-applier.md A2-S5b) — correlation
+// field + state field + applier, ALSO subscribed (the `on` reactor) so the fold
+// helpers would be a duplicate-declaration risk between the instance-route
+// prelude and the subscription handlers.
+const ES_SRC = `system S { subdomain O { context O {
+  aggregate Order { status: string  operation place() { status := "P"  emit OrderPlaced { order: id } } }
+  repository Orders for Order { }
+  event OrderPlaced { order: Order id }
+  event PaymentRegistered { order: Order id, amount: int }
+  channel L { carries: OrderPlaced, PaymentRegistered  delivery: broadcast  retention: ephemeral }
+  workflow Tally eventSourced {
+    orderId: Order id
+    total: int
+    create(p: OrderPlaced) by p.order { emit PaymentRegistered { order: p.order, amount: 0 } }
+    on(pr: PaymentRegistered) by pr.order { precondition total >= 0  emit PaymentRegistered { order: pr.order, amount: total } }
+    apply(pr: PaymentRegistered) { total := total + pr.amount }
+  }
+} } api A from O storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: node contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
 
 describe("Hono workflow instance routes", () => {
   it("emits the instance response + list DTOs from the saga wire shape", async () => {
@@ -64,5 +95,52 @@ describe("Hono workflow instance routes", () => {
     const wf = await workflowsFile("examples/sales.ddd");
     expect(wf).not.toContain("/instances");
     expect(wf).not.toMatch(/InstanceListResponse/);
+  });
+});
+
+// Event-sourced instance reads (workflow-and-applier.md A2-S5b): the route
+// paths + operationIds + DTOs are identical to the state path (cross-backend
+// OpenAPI parity by construction); only the READ BODY diverges — LIST folds via
+// the `loadAll<T>` group-fold, byId single-stream load + fold + 404.
+describe("Hono event-sourced workflow instance routes", () => {
+  it("LIST reads via the loadAll<T> group-fold (not a state-table select)", async () => {
+    const wf = await workflowsFromSrc(ES_SRC);
+    expect(wf).toContain('path: "/tally/instances",');
+    expect(wf).toContain('operationId: "allTallyInstances",');
+    // ES read body: fold every stream, not `db.select().from(schema.tallys)`.
+    expect(wf).toContain("const rows = await loadAllTally(db);");
+    expect(wf).not.toContain("await db.select().from(schema.tallys);");
+  });
+
+  it("byId folds a single stream + 404s on an empty one", async () => {
+    const wf = await workflowsFromSrc(ES_SRC);
+    expect(wf).toContain('path: "/tally/instances/{id}",');
+    expect(wf).toContain('operationId: "getTallyInstanceById",');
+    expect(wf).toContain("const __stream = await loadTallyEvents(db, id);");
+    expect(wf).toContain(
+      'if (__stream.length === 0) throw new AggregateNotFoundError("not_found");',
+    );
+    expect(wf).toContain("const row = foldTally(id, __stream);");
+  });
+
+  it("emits the fold helpers + stream serializers exactly once (no dup with subscription handlers)", async () => {
+    const wf = await workflowsFromSrc(ES_SRC);
+    // `Tally` is subscribed (the `on` reactor) AND observable; the prelude emits
+    // the fold helpers / serializers and the subscription block must skip them.
+    const count = (needle: string): number => wf.split(needle).length - 1;
+    expect(count("async function loadAllTally(")).toBe(1);
+    expect(count("function foldTally(")).toBe(1);
+    expect(count("async function loadTallyEvents(")).toBe(1);
+    // The shared stream (de)serialisers emitted once too.
+    expect(count("function rowToEvent(")).toBe(1);
+    expect(count("function eventToData(")).toBe(1);
+  });
+
+  it("still emits the instance response DTOs from the folded state's wire shape", async () => {
+    const wf = await workflowsFromSrc(ES_SRC);
+    expect(wf).toContain("const TallyInstanceResponse = z.object({");
+    expect(wf).toContain("orderId: z.string(),");
+    expect(wf).toContain("total: z.number().int(),");
+    expect(wf).toContain("const TallyInstanceListResponse = z.array(TallyInstanceResponse)");
   });
 });

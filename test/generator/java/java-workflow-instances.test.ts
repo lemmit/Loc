@@ -85,3 +85,62 @@ describe("java workflow instance read endpoints", () => {
     expect([...files.keys()].some((k) => k.endsWith("InstanceResponse.java"))).toBe(false);
   });
 });
+
+// An event-sourced workflow (workflow-and-applier.md A2-S5b): correlation field
+// + state field + applier.  The instance reads fold the `<wf>_events` stream
+// over a shared JdbcTemplate (no mutable state repo); the `<Wf>State` fold class
+// carries record-style accessors so the api-package controller can project it.
+const ES = `system S { subdomain O { context O {
+  aggregate Order { status: string  operation place() { status := "P"  emit OrderPlaced { order: id } } }
+  repository Orders for Order { }
+  event OrderPlaced { order: Order id }
+  event PaymentRegistered { order: Order id, amount: int }
+  channel L { carries: OrderPlaced, PaymentRegistered  delivery: broadcast  retention: ephemeral }
+  workflow Tally eventSourced {
+    orderId: Order id
+    total: int
+    create(p: OrderPlaced) by p.order { emit PaymentRegistered { order: p.order, amount: 0 } }
+    on(pr: PaymentRegistered) by pr.order { precondition total >= 0  emit PaymentRegistered { order: pr.order, amount: total } }
+    apply(pr: PaymentRegistered) { total := total + pr.amount }
+  }
+} } api A from O storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: java contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
+
+describe("java event-sourced workflow instance read endpoints", () => {
+  it("injects a JdbcTemplate (no state repo) and folds the stream for LIST", async () => {
+    const ctrl = find(await gen(ES), "OWorkflowInstancesController.java");
+    expect(ctrl, "instance controller not emitted").toBeDefined();
+    expect(ctrl).toContain("private final JdbcTemplate jdbc;");
+    expect(ctrl).toContain("import org.springframework.jdbc.core.JdbcTemplate;");
+    // No mutable state repo for the ES workflow.
+    expect(ctrl).not.toContain("TallyStateRepository");
+    expect(ctrl).toContain('@GetMapping("/tally/instances")');
+    expect(ctrl).toContain("public List<TallyInstanceResponse> allTallyInstances() {");
+    expect(ctrl).toContain(
+      '"select stream_id, type, data from tally_events order by stream_id, version");',
+    );
+    expect(ctrl).toContain("var __byStream = new LinkedHashMap<String, List<DomainEvent>>();");
+    expect(ctrl).toContain(
+      ".map(__e -> TallyState._fromEvents(new OrderId(UUID.fromString(__e.getKey())), __e.getValue()))",
+    );
+    expect(ctrl).toContain("import java.util.LinkedHashMap;");
+  });
+
+  it("byId folds a single stream + 404s on an empty one", async () => {
+    const ctrl = find(await gen(ES), "OWorkflowInstancesController.java");
+    expect(ctrl).toContain('@GetMapping("/tally/instances/{id}")');
+    expect(ctrl).toContain(
+      "public ResponseEntity<TallyInstanceResponse> getTallyInstanceById(@PathVariable UUID id) {",
+    );
+    expect(ctrl).toContain("if (__rows.isEmpty()) return ResponseEntity.notFound().build();");
+    expect(ctrl).toContain("var x = TallyState._fromEvents(new OrderId(id), __loaded);");
+  });
+
+  it("the <Wf>State fold class exposes record-style accessors for the projection", async () => {
+    const files = await gen(ES);
+    const state = find(files, "TallyState.java")!;
+    expect(state).toContain("public OrderId orderId() { return this.orderId; }");
+    expect(state).toContain("public int total() { return this.total; }");
+  });
+});

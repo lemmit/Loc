@@ -174,6 +174,25 @@ export function emitWorkflowFoldHelpers(wf: WorkflowIR, ctx: EnrichedBoundedCont
   out.push(`  return rows.map((r) => rowToEvent({ type: r.type, data: r.data }));`);
   out.push(`}`);
 
+  // loadAll<T> — read every stream, group by correlation key, fold each.  The
+  // instance-LIST read body (workflow-instance-visibility.md) mirrors the
+  // event-sourced AGGREGATE's `_loadAll` group-fold.
+  out.push(`async function loadAll${T}(`);
+  out.push(`  db: NodePgDatabase<typeof schema>,`);
+  out.push(`): Promise<${T}State[]> {`);
+  out.push(`  const rows = await db`);
+  out.push(`    .select()`);
+  out.push(`    .from(${table})`);
+  out.push(`    .orderBy(${table}.streamId, ${table}.version);`);
+  out.push(`  const byStream = new Map<string, Events.DomainEvent[]>();`);
+  out.push(`  for (const r of rows) {`);
+  out.push(`    const list = byStream.get(r.streamId) ?? [];`);
+  out.push(`    list.push(rowToEvent({ type: r.type, data: r.data }));`);
+  out.push(`    byStream.set(r.streamId, list);`);
+  out.push(`  }`);
+  out.push(`  return [...byStream.entries()].map(([id, evs]) => fold${T}(id, evs));`);
+  out.push(`}`);
+
   // append<T>Events — gap-free append of the workflow's own (folded) events.
   out.push(`async function append${T}Events(`);
   out.push(`  db: NodePgDatabase<typeof schema>,`);
@@ -221,6 +240,7 @@ export function emitWorkflowStreamSerializers(ctx: EnrichedBoundedContextIR): st
 export function esHelperNames(wf: WorkflowIR): {
   fold: string;
   load: string;
+  loadAll: string;
   append: string;
   foldedSet: string;
 } {
@@ -228,6 +248,7 @@ export function esHelperNames(wf: WorkflowIR): {
   return {
     fold: `fold${T}`,
     load: `load${T}Events`,
+    loadAll: `loadAll${T}`,
     append: `append${T}Events`,
     foldedSet: `${T}_FOLDED_EVENTS`,
   };

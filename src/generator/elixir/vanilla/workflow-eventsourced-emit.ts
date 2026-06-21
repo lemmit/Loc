@@ -190,17 +190,40 @@ function renderStreamModule(
     })
     .join("\n");
 
+  const foldMod = `${wfModule(contextModule, wf)}Fold`;
+  const foldShort = `${upperFirst(wf.name)}Fold`;
+  const stateMod = `${contextModule}.Workflows.${upperFirst(wf.name)}State`;
   return `# Auto-generated.
 defmodule ${wfModule(contextModule, wf)}Stream do
   @moduledoc "Event stream IO for the ${upperFirst(wf.name)} event-sourced workflow."
   import Ecto.Query
   alias ${appModule}.Repo
   alias ${logMod}
+  alias ${foldMod}
 
   @spec load(binary()) :: [struct()]
   def load(stream_id) when is_binary(stream_id) do
     Repo.all(from(r in ${logShort}, where: r.stream_id == ^stream_id, order_by: [asc: r.version]))
     |> Enum.map(&row_to_event/1)
+  end
+
+  @doc "List every running instance: load all streams, group by stream_id, fold each."
+  @spec list_instances() :: [${stateMod}.t()]
+  def list_instances do
+    Repo.all(from(r in ${logShort}, order_by: [asc: r.stream_id, asc: r.version]))
+    |> Enum.group_by(& &1.stream_id)
+    |> Enum.map(fn {sid, rows} ->
+      ${foldShort}.from_events(sid, Enum.map(rows, &row_to_event/1))
+    end)
+  end
+
+  @doc "One instance by correlation id: load + fold one stream (nil if empty)."
+  @spec instance_by_id(binary()) :: ${stateMod}.t() | nil
+  def instance_by_id(id) when is_binary(id) do
+    case load(id) do
+      [] -> nil
+      loaded -> ${foldShort}.from_events(id, loaded)
+    end
   end
 
   @doc "Append gap-free event versions to the workflow's stream."

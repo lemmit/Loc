@@ -976,8 +976,11 @@ export interface WorkflowIR {
    *  declaration order.  This is the workflow-instance analogue of
    *  `AggregateIR.wireShape` — the read-only "instance" API + scaffold
    *  pages (workflow-instance-visibility.md) consume it the way the
-   *  aggregate read surface consumes `wireShape`.  Absent for stateless and
-   *  `eventSourced` workflows (no state table to read). */
+   *  aggregate read surface consumes `wireShape`.  Carried for both
+   *  state-table-backed sagas and `eventSourced` workflows (the instance shape
+   *  is identical — only the read body differs: a `<wf>_state` row select vs a
+   *  fold of the per-correlation `<wf>_events` stream).  Absent only for
+   *  stateless workflows (no correlation field ⇒ no instance to read). */
   instanceWireShape?: WireField[];
 }
 

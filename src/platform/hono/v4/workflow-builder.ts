@@ -146,11 +146,30 @@ export function buildWorkflowsFile(
   // OpenAPI dedupes the component definition.
   body.push("");
 
+  // Event-sourced workflows whose instance-LIST/byId read routes fold the
+  // `<wf>_events` stream need the per-workflow fold machinery (fold / apply /
+  // load / loadAll) + the shared stream (de)serialisers in scope.  When such a
+  // workflow is ALSO subscribed, `emitSubscriptionHandlers` would emit them; to
+  // avoid duplicate declarations we emit them once here (before the router) and
+  // pass the done-set down so the subscription block skips them.  `helperDone`
+  // tracks per-workflow fold-helper emission; serialisers are emitted once.
+  const esInstanceWorkflows = ctx.workflows.filter((w) => w.eventSourced && !!w.instanceWireShape);
+  const helperDone = new Set<string>();
+  if (esInstanceWorkflows.length > 0) {
+    body.push(...emitWorkflowStreamSerializers(ctx));
+    body.push("");
+    for (const wf of esInstanceWorkflows) {
+      body.push(...emitWorkflowFoldHelpers(wf, ctx));
+      body.push("");
+      helperDone.add(wf.name);
+    }
+  }
+
   // A context whose only workflows are event-sourced sagas (invoked via the
-  // dispatcher, never an HTTP route) emits an empty `workflowsRoutes` router —
-  // no command POSTs, no instance GETs (ES workflows have no `instanceWireShape`).
-  // Underscore the then-unused `db` / `events` params so the generated-code lint
-  // stays clean; a context with any route keeps them (and stays byte-identical).
+  // dispatcher, never an HTTP route) emits an empty `workflowsRoutes` router
+  // when none expose instance reads.  Underscore the then-unused `db` /
+  // `events` params so the generated-code lint stays clean; a context with any
+  // route keeps them (and stays byte-identical).
   const hasHttpRoutes =
     ctx.workflows.some(emitsCommandRoute) || ctx.workflows.some((w) => !!w.instanceWireShape);
   body.push(`export function workflowsRoutes(`);
@@ -212,7 +231,7 @@ export function buildWorkflowsFile(
   // byte-identical (and `createApp` keeps the Noop dispatcher).
   if (ctx.eventSubscriptions.length > 0) {
     body.push("");
-    body.push(...emitSubscriptionHandlers(ctx));
+    body.push(...emitSubscriptionHandlers(ctx, helperDone, esInstanceWorkflows.length > 0));
   }
   // Now derive imports from what the body actually references.
   const rawBodyStr = body.join("\n");
@@ -610,20 +629,28 @@ function emitInstanceResponseSchemas(wf: WorkflowIR): string[] {
 }
 
 /** The two read-only instance routes for an observable workflow:
- *    GET /<snake>/instances        → list every saga-state row
- *    GET /<snake>/instances/{id}   → one row by correlation id (404 if absent)
- *  Both read the workflow-state Drizzle table directly (the same table
- *  `emitWorkflowStateHelpers` loads/upserts).  Rows are cast to the response
- *  type: `c.json` JSON-serialises them (Date → ISO string, branded ids →
- *  string), so the raw row matches the wire shape for the common saga types —
- *  the read-side analogue of an aggregate route's `repo.toWire(...)` cast.
- *  The route prefix nests under the already-mounted `/workflows` router, so
- *  `/<snake>/instances` does not collide with the bare-path POST command. */
+ *    GET /<snake>/instances        → list every running instance
+ *    GET /<snake>/instances/{id}   → one instance by correlation id (404 if absent)
+ *  The route paths + operationIds are identical across state-based and
+ *  event-sourced workflows (they come from `opWorkflowInstances` /
+ *  `opWorkflowInstanceById`, so cross-backend OpenAPI parity holds); only the
+ *  READ BODY diverges on `wf.eventSourced`:
+ *    - state-based  → select the `<wf>` correlation-state Drizzle table directly
+ *      (the same table `emitWorkflowStateHelpers` loads/upserts).
+ *    - event-sourced → fold the per-correlation `<wf>_events` stream
+ *      (`loadAll<T>` group-fold for LIST; `load<T>Events` + `fold<T>` for byId),
+ *      mirroring the event-sourced aggregate repository's group-fold.
+ *  Rows / folded state are cast to the response type: `c.json` JSON-serialises
+ *  them (Date → ISO string, branded ids → string), so the value matches the
+ *  wire shape.  The route prefix nests under the already-mounted `/workflows`
+ *  router, so `/<snake>/instances` does not collide with the bare-path POST
+ *  command. */
 function emitInstanceRoutes(wf: WorkflowIR): string[] {
   const T = upperFirst(wf.name);
   const slug = snake(wf.name);
   const table = `schema.${lowerFirst(plural(wf.name))}`;
   const corr = wf.correlationField as string;
+  const helpers = esHelperNames(wf);
   const out: string[] = [];
   // List.
   out.push(`app.openapi(`);
@@ -639,7 +666,11 @@ function emitInstanceRoutes(wf: WorkflowIR): string[] {
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
-  out.push(`    const rows = await db.select().from(${table});`);
+  if (wf.eventSourced) {
+    out.push(`    const rows = await ${helpers.loadAll}(db);`);
+  } else {
+    out.push(`    const rows = await db.select().from(${table});`);
+  }
   out.push(
     `    return httpCtx.json(rows as unknown as z.infer<typeof ${T}InstanceListResponse>, 200);`,
   );
@@ -664,11 +695,19 @@ function emitInstanceRoutes(wf: WorkflowIR): string[] {
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
   out.push(`    const { id } = httpCtx.req.valid("param");`);
-  out.push(
-    `    const rows = await db.select().from(${table}).where(eq(${table}.${corr}, id)).limit(1);`,
-  );
-  out.push(`    const row = rows[0];`);
-  out.push(`    if (!row) throw new AggregateNotFoundError("not_found");`);
+  if (wf.eventSourced) {
+    // Single-stream load + fold for the given correlation id; an empty stream
+    // means no such instance.
+    out.push(`    const __stream = await ${helpers.load}(db, id);`);
+    out.push(`    if (__stream.length === 0) throw new AggregateNotFoundError("not_found");`);
+    out.push(`    const row = ${helpers.fold}(id, __stream);`);
+  } else {
+    out.push(
+      `    const rows = await db.select().from(${table}).where(eq(${table}.${corr}, id)).limit(1);`,
+    );
+    out.push(`    const row = rows[0];`);
+    out.push(`    if (!row) throw new AggregateNotFoundError("not_found");`);
+  }
   out.push(`    return httpCtx.json(row as unknown as z.infer<typeof ${T}InstanceResponse>, 200);`);
   out.push(`  },`);
   out.push(`);`);
@@ -695,13 +734,22 @@ function handlerName(workflow: string, trigger: "on" | "create", event: string):
 
 /** Emit the in-process subscription handlers + the `createInProcessDispatcher`
  *  factory for a context that has channel-routed subscriptions. */
-function emitSubscriptionHandlers(ctx: EnrichedBoundedContextIR): string[] {
+function emitSubscriptionHandlers(
+  ctx: EnrichedBoundedContextIR,
+  /** Workflows whose fold helpers were already emitted (by the instance-route
+   *  prelude in `buildWorkflowsFile`); skip re-emitting to avoid duplicate
+   *  declarations. */
+  helperDone: Set<string> = new Set<string>(),
+  /** Whether the stream (de)serialisers were already emitted by the prelude. */
+  serializersDone = false,
+): string[] {
   const subs = ctx.eventSubscriptions;
   const out: string[] = [];
   // Stream (de)serialisers shared by every event-sourced workflow's fold —
   // emitted once when any ES workflow is subscribed (workflow-and-applier.md
   // A2-S5b).  Reuses the aggregate event store's `eventToData` / `rowToEvent`.
-  if (eventSourcedWorkflows(ctx).length > 0) {
+  // Skipped when the instance-route prelude already emitted them.
+  if (eventSourcedWorkflows(ctx).length > 0 && !serializersDone) {
     out.push(...emitWorkflowStreamSerializers(ctx));
     out.push("");
   }
@@ -709,7 +757,6 @@ function emitSubscriptionHandlers(ctx: EnrichedBoundedContextIR): string[] {
   // handler loads from: an `eventSourced` workflow gets its fold-from-stream
   // helpers (fold / apply / load / append); a state-based saga gets its
   // load/save row helpers.
-  const helperDone = new Set<string>();
   for (const sub of subs) {
     const wf = ctx.workflows.find((w) => w.name === sub.workflow);
     if (wf?.correlationField && !helperDone.has(wf.name)) {

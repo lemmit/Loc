@@ -26,6 +26,7 @@ import { responsePyType } from "./emit/http-models.js";
 import { type PyRenderContext, renderPyExpr } from "./render-expr.js";
 import { resourceImportLines } from "./resource-clients.js";
 import { errorResponsesKwarg, pyWireToDomain, requestFieldDecl } from "./routes-builder.js";
+import { esFns } from "./workflow-eventsourced-emit.js";
 
 // ---------------------------------------------------------------------------
 // Workflow routes — `app/http/workflows_routes.py`, mounted at
@@ -151,12 +152,29 @@ export function buildPyWorkflowsFile(
     "from app.db.engine import get_session",
     ...resourceImports,
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
-    obsWfs.length > 0
-      ? `from app.db.schema import ${obsWfs
-          .map((wf) => `${wf.name}Row`)
-          .sort()
-          .join(", ")}`
-      : null,
+    (() => {
+      // State-based sagas read their `<Wf>Row` correlation row from schema; an
+      // event-sourced workflow has no such row (it folds the event stream).
+      const stateRows = obsWfs.filter((wf) => !wf.eventSourced).map((wf) => `${wf.name}Row`);
+      return stateRows.length > 0
+        ? `from app.db.schema import ${stateRows.sort().join(", ")}`
+        : null;
+    })(),
+    (() => {
+      // Event-sourced sagas fold via the dispatch fold helpers (the `<Wf>State`
+      // fold class + `_fold`/`_load`/`_load_all`), reused from `app.dispatch`
+      // so the read body mirrors the dispatch-handler load/fold machinery.
+      const esObs = obsWfs.filter((wf) => wf.eventSourced);
+      if (esObs.length === 0) return null;
+      const names = new Set<string>();
+      for (const wf of esObs) {
+        const fns = esFns(wf);
+        names.add(fns.fold);
+        names.add(fns.load);
+        names.add(fns.loadAll);
+      }
+      return `from app.dispatch import ${[...names].sort().join(", ")}`;
+    })(),
     refersTo("iso") ? "from app.db.wire import iso" : null,
     hasDispatch && refersTo("make_dispatcher") ? "from app.dispatch import make_dispatcher" : null,
     (() => {
@@ -440,20 +458,46 @@ function instanceRoutes(wf: WorkflowIR): string {
   const shape = wf.instanceWireShape ?? [];
   const proj = (rowVar: string): string =>
     shape.map((f) => `"${f.name}": ${instanceFieldValue(rowVar, f)}`).join(", ");
-  const list = lines(
-    `@router.get("/${slug}/instances", response_model=${T}InstanceListResponse, operation_id="${camelId(opWorkflowInstances(wf.name))}")`,
-    `async def ${slug}_instances(session: SessionDep) -> list[dict[str, object]]:`,
-    `    rows = (await session.execute(select(${row}))).scalars().all()`,
-    `    return [{${proj("row")}} for row in rows]`,
-  );
-  const byId = lines(
-    `@router.get("/${slug}/instances/{id}", response_model=${T}InstanceResponse, operation_id="${camelId(opWorkflowInstanceById(wf.name))}"${errorResponsesKwarg("getById")})`,
-    `async def ${slug}_instance(id: str, session: SessionDep) -> dict[str, object]:`,
-    `    row = await session.get(${row}, id)`,
-    "    if row is None:",
-    `        raise AggregateNotFoundError("not_found")`,
-    `    return {${proj("row")}}`,
-  );
+  // The read body diverges on `wf.eventSourced`: a state-based saga selects the
+  // `<Wf>Row` correlation row directly, while an event-sourced workflow folds
+  // the per-correlation `<wf>_events` stream via the dispatch fold helpers —
+  // LIST through `_load_all_<wf>` (group-fold, mirroring the ES-aggregate
+  // repository list), byId through `_load_<wf>_events` + `_fold_<wf>` (404 on an
+  // empty stream).  The folded `<Wf>State` instance exposes the same public
+  // snake-cased attrs `instance_field_value` projects, so the projection,
+  // operationIds, and route paths stay identical to the state path.
+  const fns = esFns(wf);
+  const list = wf.eventSourced
+    ? lines(
+        `@router.get("/${slug}/instances", response_model=${T}InstanceListResponse, operation_id="${camelId(opWorkflowInstances(wf.name))}")`,
+        `async def ${slug}_instances(session: SessionDep) -> list[dict[str, object]]:`,
+        `    rows = await ${fns.loadAll}(session)`,
+        `    return [{${proj("row")}} for row in rows]`,
+      )
+    : lines(
+        `@router.get("/${slug}/instances", response_model=${T}InstanceListResponse, operation_id="${camelId(opWorkflowInstances(wf.name))}")`,
+        `async def ${slug}_instances(session: SessionDep) -> list[dict[str, object]]:`,
+        `    rows = (await session.execute(select(${row}))).scalars().all()`,
+        `    return [{${proj("row")}} for row in rows]`,
+      );
+  const byId = wf.eventSourced
+    ? lines(
+        `@router.get("/${slug}/instances/{id}", response_model=${T}InstanceResponse, operation_id="${camelId(opWorkflowInstanceById(wf.name))}"${errorResponsesKwarg("getById")})`,
+        `async def ${slug}_instance(id: str, session: SessionDep) -> dict[str, object]:`,
+        `    __stream = await ${fns.load}(session, id)`,
+        "    if not __stream:",
+        `        raise AggregateNotFoundError("not_found")`,
+        `    row = ${fns.fold}(id, __stream)`,
+        `    return {${proj("row")}}`,
+      )
+    : lines(
+        `@router.get("/${slug}/instances/{id}", response_model=${T}InstanceResponse, operation_id="${camelId(opWorkflowInstanceById(wf.name))}"${errorResponsesKwarg("getById")})`,
+        `async def ${slug}_instance(id: str, session: SessionDep) -> dict[str, object]:`,
+        `    row = await session.get(${row}, id)`,
+        "    if row is None:",
+        `        raise AggregateNotFoundError("not_found")`,
+        `    return {${proj("row")}}`,
+      );
   return [list, byId].join("\n\n\n");
 }
 

@@ -216,15 +216,16 @@ already persists.
    the *API* (cheap, read-only, no schema cost) but gate the *pages*
    behind the existing `scaffold` selector, so instance UI is opt-in the
    way aggregate pages are.
-2. **eventSourced workflows.** An `eventSourced` workflow (`wf.eventSourced`)
-   folds state from an event stream rather than a state table; there is no
-   correlation-state table to read. Options: (a) defer instance views for
-   event-sourced workflows to a follow-up that reads/folds the stream, or
-   (b) emit a projection. **Recommendation:** scope v1 to
-   state-table-backed (non-`eventSourced`) workflows; treat the
-   event-sourced fold + an event-timeline detail view as a v2 amendment
-   (it pairs naturally with the deferred projections/read-models work in
-   `workflow-and-applier.md`).
+2. **eventSourced workflows.** ✅ SHIPPED (the v2 amendment below, all 5 ES
+   backends). An `eventSourced` workflow (`wf.eventSourced`) folds state from an
+   event stream rather than a state table; there is no correlation-state table to
+   read. The chosen path is option (a) — read/fold the stream: the same
+   `instanceWireShape` is enriched for ES workflows (the
+   `enrichWorkflowInstanceShape` short-circuit dropped its `|| wf.eventSourced`
+   clause), and each backend's instance read **body** branches on `wf.eventSourced`
+   — LIST group-folds the whole `<wf>_events` table by `stream_id`, byId folds a
+   single stream. The **event-timeline detail view** (raw stream rows) stays
+   deferred (item 5 / Deferred below).
 3. **Authorization.** Who may view instances? Reuse the page-level / route
    `requires` guard surface (cf. `frontend-acl.md`); instance lists may
    leak business state and should default to the same auth posture as the
@@ -279,8 +280,11 @@ to exist), so the instance surface is the right first slice either way.
 
 ## Deferred
 
-- Event-sourced workflow instance views (fold-from-stream) and the
-  per-instance event timeline (decision 2, 5).
+- ~~Event-sourced workflow instance views (fold-from-stream)~~ — SHIPPED
+  (decision 2): ES workflows now carry `instanceWireShape` and expose
+  `GET /workflows/<wf>/instances[/{id}]` via group-fold (LIST) / single-stream
+  fold (byId) on all 5 ES backends. The per-instance **event timeline** (raw
+  stream rows, decision 5) remains deferred.
 - Explicit workflow **state-machine** modelling / diagram (today state is
   implicit in saga columns; an explicit states+transitions surface would
   enable a mermaid state-chart view and a richer status column — a

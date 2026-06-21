@@ -505,10 +505,13 @@ function enrichWorkflowReturnType(wf: WorkflowIR): WorkflowIR {
 /** Attach `instanceWireShape` (the persisted correlation-state row's wire
  *  shape) to a correlation-bearing workflow, idempotently — the
  *  workflow-instance analogue of an aggregate's `wireShape`
- *  (workflow-instance-visibility.md).  No-op for stateless / `eventSourced`
- *  workflows (no correlation field ⇒ no state table to read). */
+ *  (workflow-instance-visibility.md).  No-op for stateless workflows (no
+ *  correlation field ⇒ no instance to read).  Event-sourced workflows DO carry
+ *  it: `wireFieldsForWorkflow` reads only `correlationField` + `stateFields`
+ *  (both present on ES workflows), and the read body folds the per-correlation
+ *  event stream instead of selecting a `<wf>_state` row. */
 function enrichWorkflowInstanceShape(wf: WorkflowIR): WorkflowIR {
-  if (!wf.correlationField || wf.eventSourced) return wf;
+  if (!wf.correlationField) return wf;
   return { ...wf, instanceWireShape: wireFieldsForWorkflow(wf) };
 }
 

@@ -94,3 +94,42 @@ describe("dotnet event-sourced workflows", () => {
     expect(h).toContain("if (!(state.Total >= 0))");
   });
 });
+
+// Read-only instance endpoints for the event-sourced workflow
+// (workflow-instance-visibility.md): route paths + operationIds + DTO identical
+// to the state path (OpenAPI parity by construction); only the read body folds
+// the `<wf>_events` stream instead of selecting the state DbSet.
+describe("dotnet event-sourced workflow instance reads", () => {
+  it("emits the instance Response record from the folded wire shape", async () => {
+    const dto = file(await gen(), "Application/Workflows/TallyInstanceResponse.cs");
+    expect(dto).toContain("public sealed record TallyInstanceResponse(");
+  });
+
+  it("LIST groups the event stream by StreamId and folds via _FromEvents", async () => {
+    const ctrl = file(await gen(), "Api/OWorkflowInstancesController.cs");
+    expect(ctrl).toContain('[HttpGet("tally/instances")]');
+    expect(ctrl).toContain("public async Task<IActionResult> AllTallyInstances()");
+    expect(ctrl).toContain(
+      "var __rows = await _db.TallyEvents.AsNoTracking().OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync();",
+    );
+    expect(ctrl).toContain(
+      "var rows = __rows.GroupBy(e => e.StreamId).Select(g => TallyState._FromEvents(new OrderId(Guid.Parse(g.Key)), g.Select(TallyState.RowToEvent).ToList()));",
+    );
+    // Not the state-table select.
+    expect(ctrl).not.toContain("await _db.TallyStates");
+  });
+
+  it("byId folds one stream + 404s on an empty one", async () => {
+    const ctrl = file(await gen(), "Api/OWorkflowInstancesController.cs");
+    expect(ctrl).toContain('[HttpGet("tally/instances/{id}")]');
+    expect(ctrl).toContain("public async Task<IActionResult> GetTallyInstanceById(Guid id)");
+    expect(ctrl).toContain("var __sid = id.ToString();");
+    expect(ctrl).toContain(
+      "var __rows = await _db.TallyEvents.AsNoTracking().Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync();",
+    );
+    expect(ctrl).toContain("if (__rows.Count == 0) return NotFound();");
+    expect(ctrl).toContain(
+      "var x = TallyState._FromEvents(new OrderId(id), __rows.Select(TallyState.RowToEvent).ToList());",
+    );
+  });
+});

@@ -8,6 +8,11 @@ import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId } from "../render-expr.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
+import {
+  esWorkflowCorrIdClass,
+  esWorkflowStateClass,
+  esWorkflowStreamTable,
+} from "./workflow-eventsourced.js";
 import { workflowStateClass } from "./workflow-state.js";
 
 // ---------------------------------------------------------------------------
@@ -118,64 +123,125 @@ function renderInstancesController(
   const anyUuid = workflows.some(
     (wf) => javaValueTypeForId(idValueType(corrWireField(wf))) === "UUID",
   );
+  const stateWfs = workflows.filter((wf) => !wf.eventSourced);
+  const esWfs = workflows.filter((wf) => wf.eventSourced);
+  // ES instance reads fold the `<wf>_events` stream over a shared JdbcTemplate
+  // (no mutable state repo); needs `ArrayList` for the fold accumulator.
+  const esPresent = esWfs.length > 0;
 
   const routes: string[] = [];
   for (const wf of workflows) {
     const T = `${upperFirst(wf.name)}InstanceResponse`;
     const slug = snake(wf.name);
-    const repo = stateRepoField(wf);
     const corr = corrWireField(wf);
-    const idClass = `${idTargetName(corr)}Id`;
     const idJava = javaValueTypeForId(idValueType(corr));
     const shape = wf.instanceWireShape ?? [];
     const proj = (rowVar: string): string =>
       shape.map((f) => domainToWire(f.type, `${rowVar}.${f.name}()`)).join(", ");
-    routes.push(
-      `    @GetMapping("/${slug}/instances")`,
-      `    public List<${T}> ${camelId(opWorkflowInstances(wf.name))}() {`,
-      `        return ${repo}.findAll().stream()`,
-      `            .map(x -> new ${T}(${proj("x")}))`,
-      `            .toList();`,
-      `    }`,
-      ``,
-      `    @GetMapping("/${slug}/instances/{id}")`,
-      `    public ResponseEntity<${T}> ${camelId(opWorkflowInstanceById(wf.name))}(@PathVariable ${idJava} id) {`,
-      `        return ${repo}.findById(new ${idClass}(id))`,
-      `            .map(x -> ResponseEntity.ok(new ${T}(${proj("x")})))`,
-      `            .orElse(ResponseEntity.notFound().build());`,
-      `    }`,
-      ``,
-    );
+    // The read body diverges on `wf.eventSourced`: a state-based saga reads its
+    // `<Wf>State` Spring Data repository, while an event-sourced workflow folds
+    // the per-correlation `<wf>_events` stream — LIST loads every event row
+    // ordered by (stream_id, version), groups by stream_id, folds each via
+    // `_fromEvents` (mirroring the ES-aggregate group-fold); byId loads one
+    // stream + folds it (404 on an empty stream).  The folded `<Wf>State`
+    // exposes record-style accessors, so projection / operationIds / paths stay
+    // identical to the state path.
+    if (wf.eventSourced) {
+      const cls = esWorkflowStateClass(wf);
+      const corrId = esWorkflowCorrIdClass(wf);
+      const table = esWorkflowStreamTable(wf);
+      routes.push(
+        `    @GetMapping("/${slug}/instances")`,
+        `    public List<${T}> ${camelId(opWorkflowInstances(wf.name))}() {`,
+        `        var __rows = jdbc.queryForList(`,
+        `            "select stream_id, type, data from ${table} order by stream_id, version");`,
+        `        var __byStream = new LinkedHashMap<String, List<DomainEvent>>();`,
+        `        for (var __r : __rows) {`,
+        `            var __sid = (String) __r.get("stream_id");`,
+        `            __byStream.computeIfAbsent(__sid, __k -> new ArrayList<>())`,
+        `                .add(${cls}._rowToEvent((String) __r.get("type"), String.valueOf(__r.get("data"))));`,
+        `        }`,
+        `        return __byStream.entrySet().stream()`,
+        `            .map(__e -> ${cls}._fromEvents(new ${corrId}(${idFromString("__e.getKey()", idJava)}), __e.getValue()))`,
+        `            .map(x -> new ${T}(${proj("x")}))`,
+        `            .toList();`,
+        `    }`,
+        ``,
+        `    @GetMapping("/${slug}/instances/{id}")`,
+        `    public ResponseEntity<${T}> ${camelId(opWorkflowInstanceById(wf.name))}(@PathVariable ${idJava} id) {`,
+        `        var __sid = String.valueOf(id);`,
+        `        var __rows = jdbc.queryForList(`,
+        `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
+        `        if (__rows.isEmpty()) return ResponseEntity.notFound().build();`,
+        `        var __loaded = new ArrayList<DomainEvent>();`,
+        `        for (var __r : __rows) __loaded.add(${cls}._rowToEvent((String) __r.get("type"), String.valueOf(__r.get("data"))));`,
+        `        var x = ${cls}._fromEvents(new ${corrId}(id), __loaded);`,
+        `        return ResponseEntity.ok(new ${T}(${proj("x")}));`,
+        `    }`,
+        ``,
+      );
+    } else {
+      const repo = stateRepoField(wf);
+      const idClass = `${idTargetName(corr)}Id`;
+      routes.push(
+        `    @GetMapping("/${slug}/instances")`,
+        `    public List<${T}> ${camelId(opWorkflowInstances(wf.name))}() {`,
+        `        return ${repo}.findAll().stream()`,
+        `            .map(x -> new ${T}(${proj("x")}))`,
+        `            .toList();`,
+        `    }`,
+        ``,
+        `    @GetMapping("/${slug}/instances/{id}")`,
+        `    public ResponseEntity<${T}> ${camelId(opWorkflowInstanceById(wf.name))}(@PathVariable ${idJava} id) {`,
+        `        return ${repo}.findById(new ${idClass}(id))`,
+        `            .map(x -> ResponseEntity.ok(new ${T}(${proj("x")})))`,
+        `            .orElse(ResponseEntity.notFound().build());`,
+        `    }`,
+        ``,
+      );
+    }
   }
   while (routes[routes.length - 1] === "") routes.pop();
 
-  const repoFields = workflows.map(
+  // Injected fields / ctor: a Spring Data repo per state-based saga + a single
+  // shared JdbcTemplate when any ES workflow folds its stream.
+  const repoFields = stateWfs.map(
     (wf) => `    private final ${workflowStateClass(wf)}Repository ${stateRepoField(wf)};`,
   );
-  const ctorParams = workflows
-    .map((wf) => `${workflowStateClass(wf)}Repository ${stateRepoField(wf)}`)
-    .join(", ");
-  const ctorAssigns = workflows.map(
-    (wf) => `        this.${stateRepoField(wf)} = ${stateRepoField(wf)};`,
-  );
+  const fieldDecls = [
+    ...repoFields,
+    ...(esPresent ? [`    private final JdbcTemplate jdbc;`] : []),
+  ];
+  const ctorParams = [
+    ...stateWfs.map((wf) => `${workflowStateClass(wf)}Repository ${stateRepoField(wf)}`),
+    ...(esPresent ? ["JdbcTemplate jdbc"] : []),
+  ].join(", ");
+  const ctorAssigns = [
+    ...stateWfs.map((wf) => `        this.${stateRepoField(wf)} = ${stateRepoField(wf)};`),
+    ...(esPresent ? ["        this.jdbc = jdbc;"] : []),
+  ];
 
   return lines(
     `package ${wctx.basePkg}.api;`,
     ``,
+    esPresent ? `import java.util.ArrayList;` : null,
     `import java.util.List;`,
+    esPresent ? `import java.util.LinkedHashMap;` : null,
     anyUuid ? `import java.util.UUID;` : null,
     ``,
     `import org.springframework.http.ResponseEntity;`,
+    esPresent ? `import org.springframework.jdbc.core.JdbcTemplate;` : null,
     `import org.springframework.web.bind.annotation.*;`,
     ``,
     `import ${wctx.pkg}.*;`,
-    `import ${wctx.stateRepoPkg}.*;`,
+    stateWfs.length > 0 ? `import ${wctx.stateRepoPkg}.*;` : null,
+    esPresent ? `import ${wctx.basePkg}.domain.events.*;` : null,
     `import ${wctx.basePkg}.domain.ids.*;`,
     ``,
     `@RestController`,
     `@RequestMapping("${wctx.routePrefix ?? ""}/workflows")`,
     `public class ${className} {`,
-    ...repoFields,
+    ...fieldDecls,
     ``,
     `    public ${className}(${ctorParams}) {`,
     ...ctorAssigns,
@@ -185,6 +251,23 @@ function renderInstancesController(
     `}`,
     ``,
   );
+}
+
+/** Convert a stream_id `String` back to the correlation id's value type so a
+ *  folded ES instance can wrap it in `new <Corr>Id(...)`.  The stream_id column
+ *  stores `String.valueOf(key.value())`, so the inverse depends on the value
+ *  type (UUID → `UUID.fromString`, numeric → parse, string → identity). */
+function idFromString(expr: string, idJava: string): string {
+  switch (idJava) {
+    case "UUID":
+      return `UUID.fromString(${expr})`;
+    case "int":
+      return `Integer.parseInt(${expr})`;
+    case "long":
+      return `Long.parseLong(${expr})`;
+    default:
+      return expr;
+  }
 }
 
 function idTargetName(f: WireField): string {
