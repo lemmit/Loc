@@ -1,8 +1,9 @@
 # Test parity across generated backends
 
-> Status: **first pass — 2026-06-21.** Empirical snapshot of what the
-> `.ddd` `test` / `test e2e` declarations actually emit on each of the
-> five backends. Read alongside [`docs/generators.md`](../generators.md)
+> Status: **first pass — 2026-06-21; F1 partially closed (pure-subset
+> ExUnit shipped for Phoenix).** Empirical snapshot of what the `.ddd`
+> `test` / `test e2e` declarations actually emit on each of the five
+> backends. Read alongside [`docs/generators.md`](../generators.md)
 > (per-backend feature matrix) and [`docs/conformance.md`](../conformance.md).
 
 ## Scope & method
@@ -39,23 +40,37 @@ Python (`python`), Java (`java`).
 
 | Capability | node | dotnet | elixir | python | java |
 |---|:--:|:--:|:--:|:--:|:--:|
-| Domain `test "…"` → unit-test file | ✅ vitest `*.test.ts` | ✅ xUnit `*Tests.cs` | ❌ **none emitted** | ✅ pytest `tests/test_*.py` | ✅ JUnit 5 `*Tests.java` |
-| `expect(x).toBe/…` (5 value matchers) | ✅ | ✅ | — | ✅ | ✅ |
-| `expect(call).toThrow()` | ✅ | ✅ | — | ✅ | ✅ |
-| `create({…})` input coercion (ids / VOs / datetime / omitted-optional fill) | ✅ | ✅ | — | ✅ | ✅ |
-| `currentUser`-gated op → synthetic admin actor threaded | ✅ | ✅ | — | ✅ | ✅ |
+| Domain `test "…"` → unit-test file | ✅ vitest `*.test.ts` | ✅ xUnit `*Tests.cs` | ◑ ExUnit `*_test.exs` (**pure-subset**: in-memory tests run, `create`/op/`toThrow` tests `@tag :skip`) | ✅ pytest `tests/test_*.py` | ✅ JUnit 5 `*Tests.java` |
+| `expect(x).toBe/…` (5 value matchers) | ✅ | ✅ | ✅ (pure tests) | ✅ | ✅ |
+| `expect(call).toThrow()` | ✅ | ✅ | skipped (no in-mem raise) | ✅ | ✅ |
+| `create({…})` input coercion (ids / VOs / datetime / omitted-optional fill) | ✅ | ✅ | skipped (DB-backed) | ✅ | ✅ |
+| `currentUser`-gated op → synthetic admin actor threaded | ✅ | ✅ | skipped (op = DB) | ✅ | ✅ |
 | `expect` with no matcher (bare boolean) | throws (gated) | throws (gated) | — | `assert <expr>` | `assertTrue(<expr>)` |
-| Dedicated unit test for the emitter | ✅ | ✅ | — | ❌ | ❌ |
+| Dedicated unit test for the emitter | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **E2E `api`** (HTTP, multi-backend replay) | ✅ exercised | ✅ exercised | ✅ exercised | ✅ exercised | ✅ exercised |
 | **E2E `ui`** (Playwright) | ✅ (react/vue/svelte hosts) | — frontend-hosted — | (ashPhoenix HEEx page objects) | — frontend-hosted — | — frontend-hosted — |
 
 ## Findings
 
-### F1 — Phoenix/Elixir silently drops domain `test "…"` blocks (major)
+### F1 — Phoenix/Elixir silently drops domain `test "…"` blocks (major) — *partially closed*
 
-`src/generator/elixir/` contains **no test emitter** — no reference to
-`agg.tests` / `TestIR` anywhere under it (Ash *or* `foundation: vanilla`
-paths). The other four backends each call an `emit/tests.ts`:
+> **Update (shipped):** `src/generator/elixir/tests-emit.ts` now emits a
+> **pure-subset** ExUnit suite on both foundations (wired into
+> `index.ts` and `vanilla/index.ts`; `test/<ctx>/<agg>_test.exs` +
+> `test/test_helper.exs`). An in-memory test (value-object construction +
+> field reads, asserted via `expect(x).<cmp>(y)`) runs; a test that calls
+> aggregate `create`/operations or asserts a construction-time
+> `expect(…).toThrow()` is emitted as an `@tag :skip` placeholder
+> (name + reason preserved). The "silent drop" below is therefore gone —
+> assertions are now either run or *visibly* skipped. The remaining gap
+> (DB-backed `create`/op/invariant tests) needs a DataCase + sandbox
+> harness to un-skip; see the recommendations. The original finding is
+> kept below for context.
+
+The original state: `src/generator/elixir/` contained **no test
+emitter** — no reference to `agg.tests` / `TestIR` anywhere under it
+(Ash *or* `foundation: vanilla` paths). The other four backends each
+call an `emit/tests.ts`:
 
 - node — `src/generator/typescript/emit/tests.ts` → `domain/<agg>.test.ts`
 - dotnet — `src/generator/dotnet/emit/tests.ts` → `Tests/<Plural>/<Agg>Tests.cs`
@@ -70,36 +85,29 @@ without a diagnostic. A user who writes value-object invariant tests
 and then targets Phoenix gets a green build that tested nothing on that
 backend.
 
-This is the single real parity break. It is **not** documented: the
-Phoenix section of `docs/generators.md` (the `## Phoenix LiveView
-fullstack` block) has no "Tests" row, while the Java (`test "…"` →
-JUnit 5) and Python (`test "…"` → pytest) sections do; the
-cross-platform matrix marks `test "name"` n/a only for the *React*
-column; and the gap is not in "What the generators don't do".
+This was the single real parity break, and it was **not** documented:
+the Phoenix section of `docs/generators.md` had no "Tests" row, while the
+Java (`test "…"` → JUnit 5) and Python (`test "…"` → pytest) sections
+did; the cross-platform matrix marked `test "name"` n/a only for the
+*React* column; and the gap was not in "What the generators don't do".
+(The Phoenix "Tests" row now exists.)
 
-ExUnit is the obvious target shape — `test/<app>_test.exs` with
-`describe`/`test` blocks asserting through the Ash resource / vanilla
-changeset factories, the elixir sibling of the existing four emitters.
+### F2 — No gate catches the silent drop (medium) — *mitigated*
 
-### F2 — No gate catches the silent drop (medium)
-
-Nothing fails when a backend that *can't* emit domain tests is handed a
-`.ddd` full of them. Compare F1's e2e sibling: `validateE2ETest` plus
-the system renderer reject an unlowerable e2e statement loudly
+The original concern: nothing failed when a backend that *can't* emit a
+test was handed a `.ddd` full of them — compare F1's e2e sibling, which
+rejects an unlowerable e2e statement loudly
 (`loom.e2e-unsupported-statement`) rather than ship a "green-but-empty"
-test — the stated design principle. The domain-test path has no
-equivalent. Two honest options:
+test.
 
-1. **Emit them** (close F1) — preferred.
-2. **Gate them** — a validator diagnostic (e.g.
-   `loom.domain-tests-unsupported-on-platform`) when an aggregate with
-   `tests.length > 0` is hosted only on a backend that emits none, so
-   the drop is a visible decision, not a silent one.
-
-Either way there should be a **conformance assertion** that every
-backend with domain logic emits a test artefact for an aggregate that
-declares `test` blocks (today nothing in `test/conformance/` checks
-test-file emission at all).
+The pure-subset emitter mitigates this at the **emission** layer: an
+un-portable Phoenix test is now an `@tag :skip` with its reason inline,
+not a dropped assertion — visible in the generated tree and in
+`mix test` output (`N skipped`). What's still missing is a
+**conformance assertion** that every domain-logic backend emits a test
+artefact for an aggregate that declares `test` blocks (nothing in
+`test/conformance/` checks test-file emission). That gate would also pin
+the pure-vs-skip classification so a future change can't regress it.
 
 ### F3 — `expect`-without-matcher contract diverges (minor)
 
@@ -159,17 +167,23 @@ themselves unequally guarded.
 
 ## Recommendations (ranked)
 
-1. **Emit ExUnit domain tests on Phoenix** (closes F1) — the
-   highest-value gap; brings the five-backend set to full domain-test
-   parity. New emitter `src/generator/elixir/*-tests-emit.ts` consumed
-   by `src/generator/elixir/index.ts`, plus a `Tests` row in the
-   Phoenix section of `docs/generators.md`.
-2. **Add a conformance gate** that every domain-logic backend emits a
-   test artefact for an aggregate declaring `test` blocks (closes F2's
-   detection gap). Until F1 lands, the gate would document the Phoenix
-   exception explicitly.
-3. **Unify the no-matcher / unknown-matcher failure mode** across the
-   four emitters (F3): python and java should `throw`, matching
-   node/dotnet.
-4. **Backfill emitter unit tests** for the python and java domain-test
+1. ~~**Emit ExUnit domain tests on Phoenix**~~ — **done** (pure-subset):
+   `src/generator/elixir/tests-emit.ts`, wired into `index.ts` +
+   `vanilla/index.ts`, with a Phoenix "Tests" row in `docs/generators.md`
+   and a generator test (`test/generator/elixir/exunit-tests-emit.test.ts`).
+2. **Promote the skipped Phoenix tests to runnable** with a DataCase +
+   `Ecto.Adapters.SQL.Sandbox` harness + a Postgres-backed `mix test`
+   CI gate (the sibling of the `*-obs-e2e` legs that already stand up a
+   Postgres sidecar). This is what un-skips the `create`/op/invariant
+   tests — the remaining half of F1. Bigger lift; deferred deliberately
+   (it makes Phoenix domain tests DB-backed integration tests, unlike the
+   pure/in-memory tests of the other four backends).
+3. **Add a conformance gate** that every domain-logic backend emits a
+   test artefact for an aggregate declaring `test` blocks, and pin the
+   Phoenix pure-vs-`@tag :skip` classification (closes F2's detection
+   gap; nothing in `test/conformance/` checks test-file emission today).
+4. **Unify the no-matcher / unknown-matcher failure mode** across the
+   emitters (F3): python and java should `throw`, matching node/dotnet.
+   (The new elixir emitter already `throw`s on an unknown matcher.)
+5. **Backfill emitter unit tests** for the python and java domain-test
    emitters (F4), mirroring `create-in-test-emission.test.ts`.
