@@ -1,11 +1,11 @@
 // Auto-generated.  The app shell — a standalone component (selector
-// app-root) rendering the Material toolbar + sidenav chrome around the
-// router outlet.  Nav labels/links are baked at generation time.
+// app-root) rendering PrimeNG chrome (a p-toolbar brand bar + a styled
+// sidebar) around the router outlet.  No Angular Material: the toolbar is
+// PrimeNG's `p-toolbar` and the sidebar is plain styled markup keyed by the
+// same nav testids the other Angular shells use.  Nav labels/links are baked
+// at generation time.
 import { Component{{#if navUsesSession}}, inject{{/if}} } from "@angular/core";
-import { MatIconModule } from "@angular/material/icon";
-import { MatListModule } from "@angular/material/list";
-import { MatSidenavModule } from "@angular/material/sidenav";
-import { MatToolbarModule } from "@angular/material/toolbar";
+import { ToolbarModule } from "primeng/toolbar";
 import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from "@angular/router";
 {{#if authUi}}import { AuthGateComponent } from "./auth/auth-gate.component";
 {{/if}}{{#if navUsesSession}}import { SessionService } from "./auth/session.service";
@@ -16,39 +16,66 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
     RouterOutlet,
     RouterLink,
 {{#if hasNav}}    RouterLinkActive,
-{{/if}}    MatToolbarModule,
-    MatSidenavModule,
-    MatListModule,
-    MatIconModule,
+{{/if}}    ToolbarModule,
 {{#if authUi}}    AuthGateComponent,
 {{/if}}  ],
   template: `
-    <mat-toolbar color="primary">
-      <a routerLink="/" class="loom-brand">{{systemNameHuman}}</a>
-    </mat-toolbar>
-    <mat-sidenav-container class="loom-shell">
-      <mat-sidenav mode="side" opened class="loom-sidenav">
-        <mat-nav-list data-testid="nav-sidebar">
-{{#each navSections}}          <h3 matSubheader>{{label}}</h3>
-{{#each entries}}{{#if requiresJs}}          @if ({{{requiresJs}}}) { <a mat-list-item routerLink="{{to}}" routerLinkActive="loom-active" data-testid="{{testId}}">{{label}}</a> }
-{{else}}          <a mat-list-item routerLink="{{to}}" routerLinkActive="loom-active" data-testid="{{testId}}">{{label}}</a>
-{{/if}}{{/each}}{{/each}}        </mat-nav-list>
-      </mat-sidenav>
-      <mat-sidenav-content class="loom-content">
+    <p-toolbar styleClass="loom-toolbar">
+      <ng-template pTemplate="start">
+        <a routerLink="/" class="loom-brand">{{systemNameHuman}}</a>
+      </ng-template>
+    </p-toolbar>
+    <div class="loom-shell">
+      <aside class="loom-sidebar" data-testid="nav-sidebar">
+        <nav class="loom-nav">
+{{#each navSections}}          <div class="loom-nav-section">{{label}}</div>
+{{#each entries}}{{#if requiresJs}}          @if ({{{requiresJs}}}) { <a routerLink="{{to}}" routerLinkActive="loom-active" class="loom-nav-link" data-testid="{{testId}}">{{label}}</a> }
+{{else}}          <a routerLink="{{to}}" routerLinkActive="loom-active" class="loom-nav-link" data-testid="{{testId}}">{{label}}</a>
+{{/if}}{{/each}}{{/each}}        </nav>
+      </aside>
+      <main class="loom-main">
 {{#if authUi}}        <app-auth-gate>
           <router-outlet />
         </app-auth-gate>
 {{else}}        <router-outlet />
-{{/if}}      </mat-sidenav-content>
-    </mat-sidenav-container>
+{{/if}}      </main>
+    </div>
   `,
   styles: [
     `
-    .loom-brand { color: inherit; text-decoration: none; font-weight: 600; }
-    .loom-shell { height: calc(100vh - 64px); }
-    .loom-sidenav { width: 240px; }
-    .loom-content { padding: 16px; }
-    .loom-active { background: rgba(0, 0, 0, 0.06); }
+    .loom-toolbar { border-radius: 0; }
+    .loom-brand { color: inherit; text-decoration: none; font-weight: 700; font-size: 1.125rem; }
+    .loom-shell { display: flex; min-height: calc(100vh - 4rem); }
+    .loom-sidebar {
+      width: 16rem;
+      flex-shrink: 0;
+      border-right: 1px solid var(--p-content-border-color, #e5e7eb);
+      padding: 1rem;
+    }
+    .loom-nav { display: flex; flex-direction: column; gap: 0.125rem; }
+    .loom-nav-section {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--p-text-muted-color, #6b7280);
+      margin: 0.5rem 0 0.25rem;
+    }
+    .loom-nav-link {
+      display: block;
+      padding: 0.5rem 0.75rem;
+      border-radius: var(--p-border-radius, 6px);
+      color: inherit;
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+    .loom-nav-link:hover { background: var(--p-highlight-bg, rgba(0, 0, 0, 0.04)); }
+    .loom-active {
+      background: var(--p-highlight-bg, rgba(0, 0, 0, 0.06));
+      color: var(--p-primary-color, inherit);
+    }
+    .loom-main { flex: 1; padding: 1.5rem; min-width: 0; }
   `,
   ],
 })
