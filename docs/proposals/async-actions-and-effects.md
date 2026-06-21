@@ -438,6 +438,8 @@ foundation** (a remote op returns the backend's exception-less `Result` union;
 `raises`/checked-exception channel**; actions have no return value and are
 infallible from the caller (they handle op failures internally or reduce them to
 error state); **`async` is required and checked** (via a lint→error ramp).
+**Keywords are settled** — `action` · `store` · `use` · `await` · `spawn` ·
+`attempt` · `async` · `onError` (postfix call-level + block).
 
 **Deferred — designed, but not in the first cut** (added only when real `.ddd`
 shows the need; all non-breaking, additive):
@@ -452,9 +454,6 @@ shows the need; all non-breaking, additive):
   capability, deferred until those patterns appear.
 
 **Open:**
-- **Keyword spelling.** `await` / `spawn` — confirm vs alternatives
-  (`go`/`detach`/`void` for fire-and-forget); and the postfix `onError`
-  attachment (call-level vs a wrapping form).
 - **Async action→action awaiting in v1** — ship in Stage 4, or defer alongside
   `store` if it proves to interact with store lifetime.
 - **Default failure sink** — what an unhandled `spawn` failure and a

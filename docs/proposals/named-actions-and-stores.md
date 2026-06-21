@@ -13,9 +13,10 @@
 > composition, store deferral); the **async-effect surface** (`await`/`spawn`,
 > `onError`, `async` actions) is split into its own note,
 > [`async-actions-and-effects.md`](async-actions-and-effects.md) ("Proposal B"),
-> because it changes call semantics and wants its own migration ramp. The
-> remaining open item *here* is `store` persistence. The full phased plan across
-> both notes is in [Rollout](#rollout--the-whole-initiative).
+> because it changes call semantics and wants its own migration ramp. Keyword
+> spelling and `store` persistence are now settled (§9 — default in-memory,
+> persistence a deferred opt-in). The full phased plan across both notes is in
+> [Rollout](#rollout--the-whole-initiative).
 >
 > **Framing note (this revision):** "an action is a pure function" is
 > idiomatic to *nobody* — Redux calls the data an action and the *reducer*
@@ -460,11 +461,20 @@ These were settled and are no longer open. They define v1.
 
 ## 9. Remaining open items
 
-- **`store` lifetime/persistence** — in-memory only, or
-  session/local-storage-backed? Out of scope for v1; revisit when `store`
-  lands.
-- The async-effect open items (marker spelling, async-action awaiting in v1,
-  default failure sink) live in [Proposal B §8](async-actions-and-effects.md).
+- **`store` lifetime/persistence — resolved: default in-memory; persistence is a
+  deferred, per-store opt-in.** A `store` outlives its page by definition; whether
+  it also survives a browser reload is the question. v1 (Stage 5) is **in-memory
+  only** (session-volatile — the default Zustand/Pinia module store / global
+  Elmish program), which covers the dominant cases (cart, wizard, filters within
+  a session). Client persistence (`sessionStorage`/`localStorage`/IndexedDB, e.g.
+  `store Cart persist { … }`) is **deferred opt-in** — it pulls in serialization,
+  rehydration + schema-versioning of the saved blob, *and* a real target split
+  (client storage vs LiveView's server-side session assigns), all orthogonal to
+  the MVU projection `store` is about.
+- Remaining async-effect open items (async-action awaiting timing, default
+  failure sink) live in [Proposal B §8](async-actions-and-effects.md). Keyword
+  spelling is **settled** (`action`/`store`/`use`/`await`/`spawn`/`attempt`/
+  `async`/`onError`).
 
 ## Rollout — the whole initiative
 
