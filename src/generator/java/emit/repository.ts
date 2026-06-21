@@ -67,6 +67,72 @@ function jpqlOrderBy(sort: readonly SortTermIR[]): string {
   return ` order by ${sort.map((t) => `e.${dottedSortPath(t)} ${t.direction}`).join(", ")}`;
 }
 
+/** A `sort:` term as a chained accessor key extractor over `x`
+ *  (`x.a().b()`) for an in-memory `Comparator`. */
+function inMemorySortKey(t: SortTermIR): string {
+  return `x -> x.${t.path.map((s) => `${s.name}()`).join(".")}`;
+}
+
+/** The in-memory `Comparator<Agg>` chain for a retrieval's `sort:`, or
+ *  null when unsorted.  Each term is keyed off the accessor path; `desc`
+ *  reverses that single term (`Comparator.comparing(...).reversed()`). */
+function inMemoryComparator(sort: readonly SortTermIR[], agg: string): string | null {
+  if (sort.length === 0) return null;
+  const term = (t: SortTermIR): string => {
+    const base = `Comparator.<${agg}, Comparable>comparing(${inMemorySortKey(t)})`;
+    return t.direction === "desc" ? `${base}.reversed()` : base;
+  };
+  return sort
+    .map(term)
+    .reduce((acc, t, i) => (i === 0 ? t : `${acc}.thenComparing(${term(sort[i])})`));
+}
+
+/** Document- / event-sourced repositories can't push a retrieval into the
+ *  store (the jsonb document / event log is not a query target), so each
+ *  `run<Name>` rehydrates every aggregate via `findAll()`, evaluates the
+ *  retrieval's `where` predicate (a typed `ExprIR`) in memory through the
+ *  Java expression renderer, applies the `sort:` as a `Comparator`, and —
+ *  for the paged overload — offset/limits the result (null offset → 0,
+ *  null limit → unbounded).  The .NET document/event repos take the same
+ *  hydrate-then-filter shape.  Returns the method lines plus the extra
+ *  imports they need (`java.util.Comparator` when any retrieval sorts). */
+export function inMemoryRetrievalLines(
+  agg: EnrichedAggregateIR,
+  retrievals: readonly RetrievalIR[],
+  exprImports: Set<string>,
+): string[] {
+  if (retrievals.length === 0) return [];
+  if (retrievals.some((r) => r.sort.length > 0)) exprImports.add("java.util.Comparator");
+  return retrievals.flatMap((r) => {
+    const declared = r.params.map((p) => {
+      collectJavaTypeImports(p.type, exprImports);
+      return `${renderJavaType(p.type)} ${p.name}`;
+    });
+    collectJavaExprImports(r.where, exprImports);
+    const where = renderJavaExpr(r.where, { thisName: "x", agg, accessorProps: true });
+    const cmp = inMemoryComparator(r.sort, agg.name);
+    const filtered = `findAll().stream().filter(x -> ${where})`;
+    const sorted = cmp ? `${filtered}.sorted(${cmp})` : filtered;
+    const bareParams = declared.join(", ");
+    const pagedParams = [bareParams, "Integer offset, Integer limit"].filter(Boolean).join(", ");
+    return [
+      `    @Override`,
+      `    public List<${agg.name}> run${upperFirst(r.name)}(${bareParams}) {`,
+      `        return ${sorted}.toList();`,
+      `    }`,
+      ``,
+      `    @Override`,
+      `    public List<${agg.name}> run${upperFirst(r.name)}(${pagedParams}) {`,
+      `        return ${sorted}`,
+      `            .skip(offset == null ? 0L : offset.longValue())`,
+      `            .limit(limit == null ? Long.MAX_VALUE : limit.longValue())`,
+      `            .toList();`,
+      `    }`,
+      ``,
+    ];
+  });
+}
+
 /** The enrichment-injected parameterless `all` find — already covered by
  *  the canonical `findAll()` surface (and the GET / route), so every
  *  emitter skips it. */
