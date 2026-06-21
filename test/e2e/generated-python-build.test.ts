@@ -49,6 +49,9 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   // `auth: required` — User dataclass + verifier registry + middleware,
   // requires-guarded op/workflow, currentUser-scoped find.
   ["test/e2e/fixtures/python-build/auth.ddd", "api"],
+  // `with auditable` — lifecycle stamps applied before persist: created_at /
+  // updated_at via now(), created_by / updated_by via the request principal id.
+  ["test/e2e/fixtures/python-build/auditable.ddd", "api"],
   // `auth { oidc }` — the PyJWT + JWKS verifier (app/auth/oidc.py), the
   // /auth/login|callback|logout handshake + /auth/me probe, and the
   // pyjwt[crypto] dep, under ruff + mypy --strict.

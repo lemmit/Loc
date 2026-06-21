@@ -188,7 +188,7 @@ def assert_user_verifier_registered() -> None:
 /** The principal's id key — the claim named `id`, else the first declared
  *  field.  Stamped into the RequestContext carrier (only the id rides the
  *  carrier; the full principal stays on request.state.current_user). */
-function actorIdAttr(user: UserIR): string | null {
+export function actorIdAttr(user: UserIR): string | null {
   const field = user.fields.find((f) => f.name === "id") ?? user.fields[0];
   return field ? snake(field.name) : null;
 }

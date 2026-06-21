@@ -3,8 +3,11 @@ import {
   type AggregateIR,
   type BoundedContextIR,
   type ContainmentIR,
+  type ContextStampAssignmentIR,
   type DerivedIR,
   type EntityPartIR,
+  type ExprIR,
+  exprUsesCurrentUser,
   type FieldIR,
   type FunctionIR,
   type InvariantIR,
@@ -58,15 +61,24 @@ interface EntityShape {
   eventSourced?: boolean;
   appliers?: import("../../../ir/types/loom-ir.js").ApplyIR[];
   esCreate?: OperationIR;
+  /** Root-only lifecycle stamps (audit / softDelete capability stamps, or
+   *  hand-written `stamp onCreate`/`onUpdate`) — `_stamp_on_create` /
+   *  `_stamp_on_update` methods the route calls before persist. */
+  contextStamps?: import("../../../ir/types/loom-ir.js").ContextStampIR[];
 }
 
 export function renderPyAggregate(
   agg: AggregateIR,
   ctx: BoundedContextIR,
   emitTrace = false,
+  /** The principal's id attribute (`actorIdAttr(sys.user)`) — a bare
+   *  `currentUser` stamp value resolves to `current_user.<attr>`.  Only
+   *  threaded for auth deployables; principal stamps without auth are
+   *  gated upstream (loom.python-stamp-unsupported). */
+  principalIdAttr?: string | null,
 ): string {
   const shapes = [...agg.parts.map((p) => partShape(p, agg)), rootShape(agg)];
-  const rendered = shapes.map((s) => renderEntity(s, emitTrace));
+  const rendered = shapes.map((s) => renderEntity(s, emitTrace, principalIdAttr));
   const body = rendered.join("\n\n\n");
 
   // --- import resolution -------------------------------------------------
@@ -102,6 +114,10 @@ export function renderPyAggregate(
       for (const st of ap.statements) collectStmtExprImports(st, exprImports);
     }
     for (const st of s.esCreate?.statements ?? []) collectStmtExprImports(st, exprImports);
+    // Lifecycle-stamp values (e.g. `now()`) need their own import triggers.
+    for (const rule of s.contextStamps ?? []) {
+      for (const a of rule.assignments) collectPyExprImports(a.value, exprImports);
+    }
   }
   // Server-init seeds in the create factory can stamp `datetime.now(UTC)`.
   const root = rootShape(agg);
@@ -161,7 +177,11 @@ export function renderPyAggregate(
   ].sort();
   const eventImports = ["DomainEvent", ...emittedEvents];
 
-  const usesCurrentUser = shapes.some((s) => s.operations.some(operationUsesCurrentUser));
+  const usesCurrentUser =
+    shapes.some((s) => s.operations.some(operationUsesCurrentUser)) ||
+    shapes.some((s) =>
+      (s.contextStamps ?? []).some((r) => r.assignments.some((a) => exprUsesCurrentUser(a.value))),
+    );
   const bodyUsesCast = /\bcast\(/.test(body);
   return lines(
     `"""${agg.name} aggregate.  Auto-generated."""`,
@@ -230,6 +250,7 @@ function rootShape(a: AggregateIR): EntityShape {
     eventSourced: a.persistedAs === "eventLog",
     appliers: a.appliers,
     esCreate: a.creates?.[0],
+    contextStamps: a.contextStamps,
   };
 }
 
@@ -277,7 +298,7 @@ function containsType(c: ContainmentIR): string {
   return c.collection ? `list[${c.partName}]` : `${c.partName} | None`;
 }
 
-function renderEntity(e: EntityShape, emitTrace = false): string {
+function renderEntity(e: EntityShape, emitTrace = false, principalIdAttr?: string | null): string {
   const self = `"${e.name}"`;
   // Under --trace, `_assert_invariants` takes an `__op` label threaded by
   // each caller (the ctor passes "<init>", the extern wrapper "extern") so
@@ -412,6 +433,33 @@ function renderEntity(e: EntityShape, emitTrace = false): string {
       ]
     : [];
 
+  // Lifecycle stamps (audit / softDelete capability stamps, or hand-written
+  // `stamp onCreate`/`onUpdate`): `_stamp_on_create` / `_stamp_on_update`
+  // methods the route calls right before persist.  A non-principal value
+  // (e.g. `now()`) renders directly; a bare `currentUser` value resolves to
+  // the principal id (`current_user.<idAttr>`, threaded from
+  // `request.state.current_user`).  Root-only; event-sourced aggregates and
+  // principal stamps without auth are gated upstream.
+  const stampRules = (event: "create" | "update"): ContextStampAssignmentIR[] =>
+    e.isRoot
+      ? (e.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments)
+      : [];
+  const renderStampValue = (value: ExprIR): string =>
+    value.kind === "ref" && value.refKind === "current-user"
+      ? `current_user.${principalIdAttr ?? "id"}`
+      : renderPyExpr(value);
+  const stampMethod = (event: "create" | "update"): string[] => {
+    const rules = stampRules(event);
+    if (rules.length === 0) return [];
+    const usesUser = rules.some((a) => exprUsesCurrentUser(a.value));
+    return [
+      "",
+      `    def _stamp_on_${event}(self${usesUser ? ", current_user: User" : ""}) -> None:`,
+      ...rules.map((a) => `        self._${snake(a.field)} = ${renderStampValue(a.value)}`),
+    ];
+  };
+  const stampMethods = [...stampMethod("create"), ...stampMethod("update")];
+
   const invariantLines = e.invariants.flatMap((inv, idx) => {
     const msg = JSON.stringify(`Invariant violated: ${inv.source}`);
     // Under --trace, evaluate into a temp, emit `invariant_evaluated`
@@ -545,6 +593,7 @@ function renderEntity(e: EntityShape, emitTrace = false): string {
     ...fns,
     ...ops,
     ...pullEvents,
+    ...stampMethods,
     ...esBlocks,
     ...assertInvariants,
     ...createAlias,
