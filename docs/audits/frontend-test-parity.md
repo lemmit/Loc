@@ -2,16 +2,25 @@
 
 *Snapshot: 2026-06-21, base `main` @ `9a5949b`. Empirical; reflects code on this branch, not aspirations.*
 
+> **Update (2026-06-21, @ `86d55e8`):** every finding below is now resolved on
+> `main` — **F3** by #1476 (React runtime e2e gate), **F1 + F2** by #1474
+> (Angular emits the full Playwright suite + has its own runtime gate). The
+> verdict/matrices have been refreshed to the post-fix state; the per-finding
+> sections are kept (marked RESOLVED) as the record of what was wrong and how it
+> was closed.
+
 ## Verdict
 
-The three Vite SPAs — **React, Vue, Svelte** — are at near-perfect test
-parity: they emit the same Playwright test surface from the same shared
-`_frontend/` generators. **Angular emits *zero* test artifacts** — no page
-objects, no smoke spec, no e2e harness — and that gap is not merely missing
-coverage: it produces a **broken generated project** when a system contains a
-`test e2e ui … against <angular-deployable>` block (see F2). Phoenix (HEEx) is
+All four Vite SPAs — **React, Vue, Svelte, Angular** — are now at parity: each
+emits the same Playwright test surface (page objects, route-driven
+`smoke.spec.ts`, e2e harness) from the same shared `_frontend/` generators, and
+each has both a build gate and a runtime `vite preview` + smoke gate. Angular
+reuses React's `emitPageObjectsForUi` (like Vue), with one documented narrowing
+— it skips *custom-walker* page objects (Angular forms render inline, so the
+shared React TSX walker can't run against the angularMaterial pack); the
+framework-neutral scaffold-archetype page objects still emit. Phoenix (HEEx) is
 server-rendered and largely at parity via a *parallel reimplementation* of the
-page objects.
+page objects (F4).
 
 ## What "test parity" means here
 
@@ -31,15 +40,14 @@ same way in CI.
 
 | Artifact | React | Vue | Svelte | **Angular** | Phoenix |
 |---|:--:|:--:|:--:|:--:|:--:|
-| Page objects (`e2e/pages/*`) | ✅ own emitter → shared `_frontend` builders | ✅ **reuses React's** `emitPageObjectsForUi` | ✅ own emitter → shared `_frontend` builders | ❌ **none** | ✅ own reimpl (`elixir/page-objects-emit.ts`) |
-| `smoke.spec.ts` | ✅ shared | ✅ shared | ✅ shared | ❌ **none** | ❌ (server-rendered) |
-| e2e harness (config/fixtures/pkg/tsconfig) | ✅ shared | ✅ shared | ✅ shared (pkg variant) | ❌ **none** | partial (fixtures via `system/index.ts`) |
-| `<System>.ui.spec.ts` (from `test e2e ui`) | ✅ | ✅ | ✅ | ⚠️ **emitted but dangling** (F2) | ✅ |
+| Page objects (`e2e/pages/*`) | ✅ own emitter → shared `_frontend` builders | ✅ **reuses React's** `emitPageObjectsForUi` | ✅ own emitter → shared `_frontend` builders | ✅ **reuses React's** `emitPageObjectsForUi` (no custom-walker pages) | ✅ own reimpl (`elixir/page-objects-emit.ts`) |
+| `smoke.spec.ts` | ✅ shared | ✅ shared | ✅ shared | ✅ shared | ❌ (server-rendered) |
+| e2e harness (config/fixtures/pkg/tsconfig) | ✅ shared | ✅ shared | ✅ shared (pkg variant) | ✅ shared (pkg variant) | partial (fixtures via `system/index.ts`) |
+| `<System>.ui.spec.ts` (from `test e2e ui`) | ✅ | ✅ | ✅ | ✅ (page objects now emitted) | ✅ |
 
-Source: `src/generator/{react,vue,svelte}/index.ts` each `out.set` the five
-`e2e/*` files (react `index.ts:216–220`, vue `:359–363`, svelte `:170–174`).
-`grep -niE 'e2e/|smoke|playwright|page-object' src/generator/angular/` returns
-**nothing** — Angular's `index.ts` emits app/api/docker files only.
+Source: `src/generator/{react,vue,svelte,angular}/index.ts` each `out.set` the
+five `e2e/*` files (react `index.ts:216–220`, vue `:359–363`, svelte
+`:170–174`, angular `:301–305`, gated on the deployable mounting a `ui`).
 
 ## Generator sharing (good parity engineering)
 
@@ -60,27 +68,29 @@ Source: `src/generator/{react,vue,svelte}/index.ts` each `out.set` the five
 | React | `generated-react-build.yml` (tsc) | `behavioral-ui-e2e.yml` runs the emitted **`*.ui.spec.ts`** (page-object round-trips); **`generated-react-e2e.yml`** (`vite preview` + emitted `smoke.spec.ts`) — added to close F3. |
 | Vue | `generated-vue-build.yml` | `generated-vue-e2e.yml` — `vite preview` + emitted `smoke.spec.ts` |
 | Svelte | `generated-svelte-build.yml` | `generated-svelte-e2e.yml` — `vite preview` + emitted `smoke.spec.ts` |
-| **Angular** | `generated-angular-build.yml` (`ng build`) | **none** (nothing to run — no specs emitted) |
+| **Angular** | `generated-angular-build.yml` (`ng build`) | `generated-angular-e2e.yml` — `vite preview` + emitted `smoke.spec.ts` (added by #1474) |
 
 ## Findings
 
-### F1 — Angular emits no generated test surface *(major)*
-React/Vue/Svelte each ship a complete `e2e/` suite; Angular ships none. A user
-who generates an Angular deployable gets a project with **no page objects, no
-smoke test, no Playwright harness**, while the other three SPAs are testable out
-of the box. The DOM is *testable* (Angular pages do emit `data-testid`
-attributes), but no page objects/specs target them.
+### F1 — Angular emits no generated test surface *(major — RESOLVED by #1474)*
+React/Vue/Svelte each ship a complete `e2e/` suite; Angular shipped none — a
+generated Angular deployable had **no page objects, no smoke test, no Playwright
+harness**, while the other three SPAs were testable out of the box. **Fixed**:
+Angular's `index.ts` now reuses React's `emitPageObjectsForUi` and the shared
+`smoke-spec.ts` / `e2e-harness.ts`, emitting `e2e/{pages/*, smoke.spec.ts,
+fixtures.ts, playwright.config.ts, package.json, tsconfig.json}` whenever the
+deployable mounts a `ui` (`angular/index.ts:283-306`). Custom-walker page
+objects are intentionally skipped (Angular forms render inline, so the React TSX
+walker can't run against the angularMaterial pack); scaffold-archetype page
+objects still emit.
 
-### F2 — `test e2e ui against <angular>` produces a broken project *(bug)*
-`src/system/index.ts:213-219` emits `<slug>/e2e/<System>.ui.spec.ts` (and
-`e2e/fixtures.ts`) for **every** deployable whose platform `mountsUi` and has a
-`uiName`. Angular's surface sets `mountsUi: true` (`src/platform/angular.ts:30`).
-The emitted spec imports page objects — `import { … } from "./pages/<agg>"`
-(`ui-e2e-render.ts:102`) — but the Angular generator emits **no `e2e/pages/*`
-modules**. Result: a `.ui.spec.ts` with dangling imports that cannot compile or
-run. The other four UI-mounting platforms (react/vue/svelte/phoenix) all emit
-matching page objects, so this is Angular-specific. *This is the parity gap that
-actually breaks codegen, not just thins coverage.*
+### F2 — `test e2e ui against <angular>` produced a broken project *(bug — RESOLVED by #1474)*
+`src/system/index.ts` emits `<slug>/e2e/<System>.ui.spec.ts` for **every**
+`mountsUi` deployable, and that spec imports page objects from `./pages/<agg>`
+(`ui-e2e-render.ts`). Angular sets `mountsUi: true` but emitted no `e2e/pages/*`
+modules, so the spec had dangling imports that couldn't compile or run.
+**Fixed** as a consequence of F1: now that Angular emits matching page objects,
+the `.ui.spec.ts` resolves like the other four UI-mounting platforms.
 
 ### F3 — React's route-driven `smoke.spec.ts` had no runtime CI gate *(minor — RESOLVED)*
 Vue and Svelte each have a dedicated `generated-*-e2e.yml` that `vite preview`s
@@ -99,31 +109,28 @@ mirroring the Vue/Svelte gate. `npm run test:react-e2e` runs it locally.
 page-object changes must be made twice; divergence is only caught by the
 heex-parity/conformance gates, not by a shared-builder compile error.
 
-## Recommendations (in priority order)
+## Recommendations
 
-1. **Fix F2 first** — either give Angular a page-object + harness emitter (port
-   `emitSveltePageObjectsForUi`: same shared `_frontend` builders, Angular api
-   import path + `angularTarget`), or, as a stopgap, gate the `.ui.spec.ts`
-   emission in `system/index.ts` on the target actually emitting page objects so
-   it never emits a dangling spec. The port is the parity-correct fix.
-2. **Close F1** by reusing the shared generators: Angular's missing pieces are
-   `smoke.spec.ts` (already framework-neutral — drop-in), the `e2e-harness.ts`
-   constants (drop-in), and a page-object emitter modeled on Svelte's. Then add
-   a `generated-angular-e2e.yml` mirroring the Vue/Svelte preview+smoke gate.
-3. **F3**: add a `generated-react-e2e.yml` (or fold the React smoke spec into an
-   existing preview job) for symmetry with Vue/Svelte.
-4. **F4**: leave as-is, but add a name-level pin (like the heex-parity freeze)
-   so a new shared page-object builder forces a conscious Phoenix decision.
+All three findings (F1, F2, F3) are **resolved** (#1474, #1476). The only open
+item is the standing watch:
 
-## How to reproduce
+- **F4** *(open, low priority)*: Phoenix page objects are a parallel
+  reimplementation. Leave as-is, but consider a name-level pin (like the
+  heex-parity freeze) so a new shared page-object builder forces a conscious
+  Phoenix decision rather than silent drift.
+
+Possible deepening (not a gap, an enhancement): the emitted `smoke.spec.ts` only
+navigates *param-less* pages — `/x/:id` detail routes are skipped (no seeded
+entity). Seeding one record and driving a detail page would close the largest
+remaining runtime-coverage hole, uniformly across all four frontends.
+
+## How to verify the resolved state
 
 ```bash
-# F1: Angular emits no e2e surface
-grep -niE 'e2e/|smoke|playwright|page-object' src/generator/angular/   # -> nothing
-grep -nE 'out\.set\("e2e' src/generator/{react,vue,svelte}/index.ts    # -> 5 files each
+# F1/F2: Angular now emits the full e2e surface (page objects + smoke + harness)
+grep -nE 'out\.set\("e2e|emitPageObjectsForUi|smoke\.spec' src/generator/angular/index.ts
+ls .github/workflows/generated-angular-e2e.yml                          # runtime gate exists
 
-# F2: dangling ui spec
-grep -n 'mountsUi' src/platform/angular.ts                              # mountsUi: true
-sed -n '213,219p' src/system/index.ts                                   # emits .ui.spec.ts for any mountsUi+uiName
-grep -n 'from "./pages/' src/system/ui-e2e-render.ts                    # spec imports e2e/pages/*
+# Every SPA emits the five e2e/* files
+grep -nE 'out\.set\("e2e' src/generator/{react,vue,svelte,angular}/index.ts
 ```
