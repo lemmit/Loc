@@ -67,7 +67,7 @@ export function collectWireImports(t: TypeIR, into: Set<string>): Set<string> {
     case "primitive":
       if (t.name === "decimal") into.add("java.math.BigDecimal");
       if (t.name === "guid") into.add("java.util.UUID");
-      if (t.name === "json") into.add("com.fasterxml.jackson.databind.JsonNode");
+      if (t.name === "json") into.add("tools.jackson.databind.JsonNode");
       return into;
     case "id":
       if (t.valueType === "guid") into.add("java.util.UUID");
