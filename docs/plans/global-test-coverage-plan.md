@@ -108,10 +108,20 @@ The Java tier immediately surfaced (and this slice **fixes**) a real Java bug: *
 
 The remaining failures are skip-listed with precise reasons (the compile-tier model: surface → skip-list → fix as follow-up), split into **platform limitations** (the CLI refuses at generate-time, by design) and **real bugs**:
 
-- **Java** — *limitations:* `provenance` (runtime node/dotnet-only, DBT-1), `embedded` (jsonb id-array column unmapped on java). *Bugs:* `inheritance` (base `inspect` references subclass-owned fields → cannot find symbol), `event-sourcing` (repo impl references an undefined symbol).
-- **Python** — *limitation:* `provenance` (node/dotnet-only). *Bugs:* `value-collections` (repo `_create` omits value-object-array args → mypy missing-arg), `stamps` (unused `datetime.UTC` import → ruff F401), `resources` (unused workflow resource-let local → ruff F841).
+- **Java** — *limitations:* `provenance` (runtime node/dotnet-only, DBT-1), `embedded` (jsonb id-array column unmapped on java).
+- **Python** — *limitation:* `provenance` (node/dotnet-only). *Feature gap:* `value-collections` — inline value-object arrays (`Money[]`) aren't persisted on python at all (the SQLAlchemy schema emits no jsonb column; the repo's `save` root dict + `_hydrate`'s `_create(...)` both drop them). Mapping inline VO arrays to a jsonb column (+ serialize/hydrate) is the fix; bigger than a lint nit.
 
 (`workflow-view` stays skip-listed on both as the documented cross-backend own-state-mutation feature gap.)
+
+**Landed — compile-tier skip-list drained (Java `inheritance` + `event-sourcing`, Python `stamps` + `resources`):**
+
+Re-validating the original skip-list against fresh `main` (after the typed-capabilities fixture ports) showed two were already **stale** and two were **genuine, fixed**:
+
+- **Java `inheritance` (fixed).** A TPC base (`@MappedSuperclass`) is id-less — each concrete owns its typed id — but the base's `inspect` derived read `this.id`, which doesn't resolve on the base (`cannot find symbol`, `Asset.java`). Fix: the TPC base now declares `public abstract Object id();` (concretes covariantly override it with `<Concrete>Id id()`), and the base's derived bodies render via accessor getters (`this.id()` / `this.label()`) instead of direct field reads. TPH bases (which own the shared id field) are unchanged.
+- **Python `resources` (fixed).** A dead workflow `let x = resource.get(...)` emitted an unused local (`ruff F841`). Fix: `expr-let` whose binding is never read (computed by a `collectUsedLetNames` walk over the workflow body) drops the assignment and keeps the still-side-effecting RHS as a bare `await …` statement — mirroring the existing bare-`resource-call` arm. Aggregate-binding lets (`repo-let`/`factory-let`/`repo-run`) save at exit and are never treated as unused.
+- **Java `event-sourcing` + Python `stamps` (stale → dropped).** Both already compile/lint clean on current `main` (the `stamps` fixture's typed-capability rewrite incidentally fixed the old unused-`datetime.UTC` import; the java event-sourced repo no longer references the old undefined symbol). Skip entries removed; the corpus shards now gate them.
+
+Net: Java compile tier **22/24**, Python **22/25** (each minus `workflow-view` feature gap + `provenance`/`embedded` platform limitations, and Python minus the `value-collections` VO-array-persistence feature gap).
 
 **Landed — Phase 0 migration (legacy dup-set collapse):**
 

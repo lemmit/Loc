@@ -16,7 +16,7 @@ import { renderWorkflowStmts } from "../_workflow/stmt-target.js";
 import { renderPyExpr } from "./render-expr.js";
 import { resourceImportLines } from "./resource-clients.js";
 import { esEventRow, esFns, esWorkflowFoldBlock } from "./workflow-eventsourced-emit.js";
-import { pyWorkflowStmtTarget } from "./workflows-builder.js";
+import { collectUsedLetNames, pyWorkflowStmtTarget } from "./workflows-builder.js";
 
 // ---------------------------------------------------------------------------
 // In-process event dispatch — `app/dispatch.py` (channels.md, the
@@ -367,7 +367,13 @@ function handlerFn(
   }
   const hasEmit = statements.some((st) => st.kind === "emit");
   if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
-  out.push(...renderWorkflowStmts(statements, pyWorkflowStmtTarget(rctx), "    "));
+  out.push(
+    ...renderWorkflowStmts(
+      statements,
+      pyWorkflowStmtTarget(rctx, undefined, collectUsedLetNames(statements)),
+      "    ",
+    ),
+  );
   for (const save of saves) {
     out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
   }
@@ -409,7 +415,11 @@ function esHandlerFn(
   // Render the body up front so we know whether it reads the folded snapshot
   // (a starter that only emits constants never touches `state`) — folding is a
   // pure no-op then, so we skip the unused binding (ruff F841).
-  const bodyLines = renderWorkflowStmts(statements, pyWorkflowStmtTarget(rctx), "    ");
+  const bodyLines = renderWorkflowStmts(
+    statements,
+    pyWorkflowStmtTarget(rctx, undefined, collectUsedLetNames(statements)),
+    "    ",
+  );
   const usesState = bodyLines.some((l) => /\bstate\b/.test(l));
   const out: string[] = [
     `async def ${fn}(`,
