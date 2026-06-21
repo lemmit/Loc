@@ -86,12 +86,18 @@ export function emitLiveViewPages(args: {
   // (`<.inputs_for :let={…}>`) for value-object-typed aggregate
   // fields.  See `renderFieldInputForField` in heex-walker.ts.
   const valueObjectsByName = new Map<string, ValueObjectIR>();
+  // Entity-part name → module-qualified context, so a page-body
+  // `new Part { … }` struct literal qualifies as `%<Ctx>.<Part>{…}`
+  // (matching the domain emitter).  An aggregate's parts live in its
+  // owning context's module namespace.
+  const partContextModule = new Map<string, string>();
   for (const ctx of contexts) {
     const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
     for (const agg of ctx.aggregates) {
       aggregatesByName.set(agg.name, agg);
       contextByAggName.set(agg.name, ctx);
       contextModuleByAggName.set(agg.name, ctxModule);
+      for (const part of agg.parts) partContextModule.set(part.name, ctxModule);
     }
     for (const en of ctx.enums) enumsByName.set(en.name, en);
     for (const vo of ctx.valueObjects) valueObjectsByName.set(vo.name, vo);
@@ -118,6 +124,7 @@ export function emitLiveViewPages(args: {
       enumsByName,
       valueObjectsByName,
       authEnabled,
+      partContextModule,
     );
     componentInfo.set(c.name, {
       actionBindings: w.actionBindings,
@@ -150,6 +157,7 @@ export function emitLiveViewPages(args: {
       enumsByName,
       valueObjectsByName,
       contextModuleByAggName,
+      partContextModule,
       componentInfo,
       authEnabled,
     });
@@ -183,6 +191,7 @@ export function emitLiveViewPages(args: {
         aggregatesByName,
         enumsByName,
         valueObjectsByName,
+        partContextModule,
         authEnabled,
       }),
     );
@@ -207,6 +216,9 @@ interface RenderArgs {
    *  keyed by aggregate PascalCase name.  Used to build the Ash
    *  `for_create(<Ctx>.<Agg>, :create)` call in mount/3. */
   contextModuleByAggName: ReadonlyMap<string, string>;
+  /** Module-qualified context keyed by entity-part name — qualifies a
+   *  page-body `new Part { … }` struct literal (`%<Ctx>.<Part>{…}`). */
+  partContextModule: ReadonlyMap<string, string>;
   /** Per-component action bindings + nested component usage, so a page
    *  LiveView can hoist the `handle_event` clauses for `Action`s inside
    *  the (stateless) components it renders. */
@@ -289,6 +301,7 @@ function renderLiveView(a: RenderArgs): string {
     enumsByName,
     valueObjectsByName,
     contextModuleByAggName,
+    partContextModule,
     componentInfo,
     authEnabled,
   } = a;
@@ -308,6 +321,7 @@ function renderLiveView(a: RenderArgs): string {
     enumsByName,
     valueObjectsByName,
     authEnabled,
+    partContextModule,
   );
   const heex = walked.heex;
   const handlers: HandleEventClause[] = walked.handlers;
@@ -652,11 +666,22 @@ function renderUiComponents(args: {
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
   enumsByName: ReadonlyMap<string, EnumIR>;
   valueObjectsByName: ReadonlyMap<string, ValueObjectIR>;
+  /** Entity-part name → module-qualified context, so a component-body
+   *  `new Part { … }` qualifies as `%<Ctx>.<Part>{…}`. */
+  partContextModule: ReadonlyMap<string, string>;
   /** True when the host deployable runs `auth: required` — drives
    *  currentUser action-button gating inside component bodies. */
   authEnabled: boolean;
 }): string {
-  const { ui, appModule, aggregatesByName, enumsByName, valueObjectsByName, authEnabled } = args;
+  const {
+    ui,
+    appModule,
+    aggregatesByName,
+    enumsByName,
+    valueObjectsByName,
+    partContextModule,
+    authEnabled,
+  } = args;
   const webModule = `${appModule}Web`;
   const defs = ui.components.map((c) => {
     const synthPage = {
@@ -675,6 +700,7 @@ function renderUiComponents(args: {
       enumsByName,
       valueObjectsByName,
       authEnabled,
+      partContextModule,
     );
     const attrLines = c.params
       .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)

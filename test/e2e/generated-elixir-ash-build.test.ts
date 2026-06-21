@@ -100,6 +100,13 @@ describe.skipIf(!ENABLED)(
     it.each(
       pickCases([
         { name: "acme-lv.ddd" },
+        // Bucket E2 — LiveView page statement coverage: a custom page whose
+        // Button handlers exercise the StmtIR kinds the HEEx hoisted-handler
+        // used to drop as `# TODO` (scalar `+=` / `-=` → pipe-`assign`
+        // arithmetic; `precondition` / `requires` → `|> then(fn socket -> if
+        // … put_flash … end)`).  The emitted `handle_event/3` pipe steps only
+        // fail at compile time, so this fixture is the real bar for them.
+        { name: "page-stmt-coverage.ddd" },
         // OIDC turnkey auth (D-AUTH-OIDC): compiles the generated ApiWeb.Auth
         // OIDC verifier (JOSE + JWKS discovery via :httpc), the /auth/me probe
         // controller, and the {:jose, ...} + :inets/:ssl mix.exs additions under
