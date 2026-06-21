@@ -193,7 +193,6 @@ upgrade pain — the project ships a small set of **stacks** under
 | Stack | React | Router | Zod | TypeScript | Vite | Used by |
 |---|---|---|---|---|---|---|
 | `v1` | 18 | `react-router-dom@^6` | 3 | 5.7 | 5 | (none currently — older pack versions historically rode it) |
-| `v2` | 19.2 | `react-router-dom@^6` | 3 | 5.7 | 5 | (intermediate) |
 | `v3` | 19.2 | `react-router@^7` | 4 | 5.7 | 5 | every React pack version currently shipped |
 | `sv1` | (Svelte 5 / SvelteKit) | SvelteKit routing | 4 | 5.7 | 5 | the svelte packs (`shadcnSvelte`, `flowbite`) |
 | `vue1` | (Vue 3) | vue-router | 4 | 5.7 | 5 | the vue packs (`vuetify`, `shadcnVue`) |
@@ -691,8 +690,7 @@ live in `stacks/<id>/`, not in each pack.  Decide which stack the new
 pack version targets (see [§ 2a](#2a-stacks-and-how-a-pack-picks-one)):
 
 - A pack version that requires **React 19 + RR 7 + zod 4** declares `"stack": "v3"`.
-- A pack version that requires **React 19 + RR 6 + zod 3** declares `"stack": "v2"`.
-- A pack version still on **React 18** declares `"stack": "v1"`.
+- A pack version still on **React 18 + RR 6 + zod 3** declares `"stack": "v1"`.
 - If the framework baseline you need doesn't exist yet, create a new
   stack first (see [§ 2a — Adding a new stack](#adding-a-new-stack)).
 
@@ -849,7 +847,7 @@ In a separate PR after the new version has soaked:
 - `src/generator/_packs/loader-fs.ts` — Node FS adapter
 - `web/src/build/loader-vfs.ts` — playground VFS adapter
 - `src/util/builtin-formats.ts` — built-in pack format map + bareword defaults
-- `stacks/<id>/` — stack definitions (`v1`, `v2`, `v3`, `sv1`, `vue1`, `ng1`)
+- `stacks/<id>/` — stack definitions (`v1`, `v3`, `sv1`, `vue1`, `ng1`)
 - `designs/<family>/<version>/` — reference implementations
 - `test/generated-react-build.test.ts` — the static-validation gate
 - `test/pack-manifest.test.ts` — manifest-shape contract tests
