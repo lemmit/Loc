@@ -16,13 +16,13 @@
 //
 // Mirrors the `builtin-formats.ts` pattern: a tiny pure lookup that
 // is the single source of truth, defaulting to today's behaviour so
-// every existing pack (stack v1/v2 or a custom pack with no stack)
+// every existing pack (stack v1 or a custom pack with no stack)
 // emits byte-identical output.
 // ---------------------------------------------------------------------------
 
 /** Stack ids whose React Router is v7 — the npm package is
  *  `react-router` (renamed from `react-router-dom`).  Everything else
- *  — v1, v2, or a custom pack with no `stack` field — stays on the
+ *  — v1 or a custom pack with no `stack` field — stays on the
  *  v6 `react-router-dom` package name. */
 const ROUTER_V7_STACKS: ReadonlySet<string> = new Set(["v3"]);
 

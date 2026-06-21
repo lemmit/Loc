@@ -58,14 +58,14 @@ export const BUILTIN_PACK_FORMATS = {
  *  upgrades.  Every default currently points at today's behaviour so
  *  the existing examples generate byte-identical output. */
 export const BUILTIN_PACK_LATEST = {
-  // mantine promoted to v9 (Mantine 9 / React 19, stack v2) once the
+  // mantine promoted to v9 (Mantine 9 / React 19, stack v3) once the
   // pinned v9 pack proved out live in the playground.  Bareword
   // `design: mantine` now resolves to mantine@v9; the v7 pack stays
   // loadable via the explicit pin `design: "mantine@v7"` for projects
   // that want React 18.  This flip was paired with refreshing
   // `test/fixtures/baseline-output/` (acme.ddd uses the bareword).
   mantine: "v9",
-  // chakra promoted to v3 (Chakra UI 3 / React 19, stack v2) and mui
+  // chakra promoted to v3 (Chakra UI 3 / React 19, stack v3) and mui
   // to v7 (Material UI 7) once their pinned packs proved out via the
   // tsc + vite-build shards and runtime-gate e2e specs.  Bareword
   // `design: chakra` / `design: mui` now resolve to the new majors;
@@ -76,7 +76,7 @@ export const BUILTIN_PACK_LATEST = {
   chakra: "v3",
   mui: "v7",
   // shadcn promoted to v4 (Tailwind 4 CSS-first / React 19, stack
-  // v2).  The blocker — the in-browser playground only knew the
+  // v3).  The blocker — the in-browser playground only knew the
   // Tailwind 3 Play CDN — was cleared: `iframe-html.ts`'s
   // `tailwindFlavor` now routes `@import "tailwindcss"` CSS through
   // `@tailwindcss/browser`, and the bundler externalises the v4

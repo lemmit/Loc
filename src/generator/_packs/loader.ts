@@ -63,8 +63,8 @@ export interface PackManifest {
   version: string;
   /** Stack identifier — names the cross-cutting framework baseline
    *  (React / react-router / zod / Vite / TS versions) the pack
-   *  ships against.  `"v1"` = React 18 family, `"v2"` = React 19
-   *  family.  The loader resolves to `<repo>/stacks/<id>/`
+   *  ships against.  `"v1"` = React 18 family, `"v3"` = React 19 +
+   *  Router 7 + zod 4 family.  The loader resolves to `<repo>/stacks/<id>/`
    *  and registers every `.hbs` it finds there as a Handlebars
    *  partial, so pack templates can pull in cross-cutting
    *  fragments via `{{> stack-package-deps}}` and friends.  Omit
