@@ -8,14 +8,19 @@
 //           <node backend>`), dispatched straight into `app.fetch`.
 //   - unit: the generated pure-domain `*.test.ts` (`test "…"` blocks).
 //
+// It then joins the outcomes onto the generated requirements graph
+// (.loom/traceability.json) via `computeVerification` for a per-system
+// Definition-of-Done verdict.
+//
 // This promotes the behavioral domain assertions — which otherwise only
 // run nightly in the docker `conformance-full` leg — to a fast, per-PR,
 // docker-free gate for the Hono/TS backend.  It reuses the playground's
-// own runners (web/src/testing/*, web/src/runtime/ddl) so the node tier
-// and the in-browser Tests tab share one execution path.
+// own runners (web/src/testing/*, web/src/runtime/ddl, src/verify) so the
+// node tier and the in-browser Tests tab share one execution path.
 //
 // Usage:  npm ci  (in this dir, once) ; node run.mjs [caseName...]
-// Exit code is non-zero if any case errors or any test fails.
+// Exit code is non-zero if any case errors, any test fails, or any
+// requirement is FAILING in the rollup.
 
 import { build, transform } from "esbuild";
 import { execFileSync } from "node:child_process";
@@ -56,12 +61,13 @@ function findNodeDeployable(genDir) {
 }
 
 /** Synthesise the per-case boot+run entry (bundled by esbuild). */
-function entrySource({ deplDir, e2eFile, unitFiles }) {
+function entrySource({ deplDir, e2eFile, unitFiles, traceFile }) {
   const J = JSON.stringify;
   return `
 import { synthDDL } from ${J(join(REPO, "web/src/runtime/ddl.ts"))};
 import { loadApiTests } from ${J(join(REPO, "web/src/testing/run-api-tests.ts"))};
 import { createHarness, runTests } from ${J(join(REPO, "web/src/testing/harness.ts"))};
+import { computeVerification } from ${J(join(REPO, "src/verify/verification.ts"))};
 import { createApp } from ${J(join(deplDir, "http/index.ts"))};
 import * as schema from ${J(join(deplDir, "db/schema.ts"))};
 import { drizzle } from "drizzle-orm/pglite";
@@ -74,6 +80,7 @@ import { createRequire } from "node:module";
 
 const E2E_FILE = ${J(e2eFile)};
 const UNIT_FILES = ${J(unitFiles)};
+const TRACE_FILE = ${J(traceFile)};
 const SHIM = ${J(SHIM)};
 
 export async function run() {
@@ -110,7 +117,21 @@ export async function run() {
   }
 
   await pglite.close?.();
-  return out;
+
+  // Definition-of-Done rollup: join these outcomes onto the generated
+  // requirements graph (.loom/traceability.json) via the same
+  // computeVerification the playground Tests tab uses.  Null when the
+  // source declares no requirements/testCases.
+  let verification = null;
+  try {
+    const trace = JSON.parse(readFileSync(TRACE_FILE, "utf8"));
+    const outcomes = out.map((r) => ({ name: r.name, suite: r.suite, status: r.status }));
+    verification = computeVerification(trace.index, trace.requirements.map((r) => r.id), outcomes);
+  } catch {
+    /* no traceability emitted — verification stays null */
+  }
+
+  return { results: out, verification };
 }
 `;
 }
@@ -130,9 +151,10 @@ async function runCase(c) {
       ? walk(deplDir, (p) => p.endsWith(".test.ts") && !p.includes("/e2e/"))
       : [];
 
+    const traceFile = join(genDir, ".loom", "traceability.json");
     const entry = join(workDir, "entry.mts");
     const bundle = join(workDir, "bundle.mjs");
-    writeFileSync(entry, entrySource({ deplDir, e2eFile, unitFiles }));
+    writeFileSync(entry, entrySource({ deplDir, e2eFile, unitFiles, traceFile }));
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);
     return await run();
@@ -147,25 +169,41 @@ const corpus = JSON.parse(readFileSync(join(HERE, "corpus.json"), "utf8")).cases
 );
 
 // Both tiers gate: `api` (emitted `test e2e`) and `unit` (emitted
-// aggregate `test`). A boot/infra error fails the case.
-let pass = 0, fail = 0, errored = 0;
+// aggregate `test`). A boot/infra error, or a FAILING requirement in the
+// Definition-of-Done rollup, fails the case.
+let pass = 0, fail = 0, errored = 0, reqFailing = 0;
 for (const c of corpus) {
   process.stdout.write(`\n▶ ${c.name}  (${c.ddd})\n`);
-  let results;
+  let out;
   try {
-    results = await runCase(c);
+    out = await runCase(c);
   } catch (err) {
     errored++;
     process.stdout.write(`  ERROR booting/running: ${err?.message ?? err}\n`);
     continue;
   }
-  for (const r of results) {
+  for (const r of out.results) {
     const ok = r.status === "pass";
     ok ? pass++ : fail++;
     process.stdout.write(`  ${ok ? "✓" : "✗"} [${r.tier}] ${r.name}\n`);
     if (!ok && r.error) process.stdout.write(`      ${String(r.error).split("\n")[0]}\n`);
   }
+  const v = out.verification;
+  if (v && v.summary.total > 0) {
+    const s = v.summary;
+    reqFailing += s.failing;
+    process.stdout.write(
+      `  ⟐ requirements: ${s.verified}/${s.total} verified` +
+        `${s.failing ? `, ${s.failing} FAILING` : ""}` +
+        `${s.unverified ? `, ${s.unverified} unverified` : ""}` +
+        `${s.untested ? `, ${s.untested} untested` : ""}\n`,
+    );
+    for (const [id, r] of Object.entries(v.requirements)) {
+      if (r.verdict === "FAILING") process.stdout.write(`      ✗ ${id} FAILING (${r.failingTestCaseIds.join(", ")})\n`);
+    }
+  }
 }
 
-process.stdout.write(`\n${pass} passed, ${fail} failed${errored ? `, ${errored} cases errored` : ""}\n`);
-process.exit(fail > 0 || errored > 0 ? 1 : 0);
+const reqTail = reqFailing ? `, ${reqFailing} requirement(s) FAILING` : "";
+process.stdout.write(`\n${pass} passed, ${fail} failed${reqTail}${errored ? `, ${errored} cases errored` : ""}\n`);
+process.exit(fail > 0 || errored > 0 || reqFailing > 0 ? 1 : 0);

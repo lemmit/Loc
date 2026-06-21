@@ -49,6 +49,28 @@ exactly one `platform: node` (Hono) deployable, so dispatch
 Multi-backend systems (`examples/showcase.ddd`, `examples/acme.ddd`)
 stay in the docker `conformance-full` leg.
 
+## Definition-of-Done rollup
+
+After running, each case joins its outcomes onto the generated
+requirements graph (`.loom/traceability.json`) via the same
+`computeVerification` (`src/verify/`) the playground Tests tab uses, and
+prints a per-system verdict line:
+
+```
+⟐ requirements: 2/4 verified, 2 unverified
+```
+
+- **verified** — every linked testCase passed.
+- **unverified** — a linked test didn't run here (e.g. a `against <web>`
+  UI testCase — the node tier covers api/unit only, so those stay
+  unverified until the UI tier lands). Does **not** fail the run.
+- **untested** — requirement has no testCase at all.
+- **FAILING** — a linked test failed. **Fails the run** (a cross-check on
+  top of the per-test gate).
+
+So the rollup surfaces requirement coverage honestly without false-gating
+on coverage the node tier can't provide.
+
 ## How it works
 
 Per case: `generate system` → locate the one node deployable → esbuild
