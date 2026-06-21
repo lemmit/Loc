@@ -25,6 +25,10 @@ system PySales {
 
       aggregate Customer {
         name: string
+        isDeleted: bool
+        // Non-principal relational capability filter (W1a) — soft-delete
+        // scoping AND-ed into every root read on the python backend.
+        filter !this.isDeleted
         operation rename(newName: string) {
           name := newName
         }
