@@ -179,7 +179,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // per-backend database has no schema on first boot, so every query 500s.
   // `rel/overlays/bin/server` evals `Release.migrate()` before starting, and
   // config/prod.exs sets `server: true` so the released endpoint listens.
-  emitMigrations(appName, args.migrations ?? [], appModule, out);
+  // The `vanilla` foundation tag tunes only the bundled `timestamps()` macro:
+  // when an audit capability supplies explicit `updated_at`, the vanilla Ecto
+  // schema drops `timestamps()` (it would collide), so the migration must too.
+  emitMigrations(appName, args.migrations ?? [], appModule, out, "vanilla");
   out.set("Dockerfile", renderDockerfile(appName));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");

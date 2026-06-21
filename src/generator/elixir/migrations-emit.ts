@@ -58,20 +58,60 @@ function schemaCreateLine(schema: string | undefined): string {
  *  than any realistic within-module span (`N*100 + joins`). */
 const MODULE_VERSION_STRIDE = 1_000_000;
 
+/** Which Phoenix foundation the migration is emitted for.  Only affects the
+ *  bundled `timestamps()` macro: when an audit capability declares explicit
+ *  `created_at`/`updated_at` columns, `ash` keeps the non-colliding auto
+ *  `inserted_at` while `vanilla` drops `timestamps()` entirely — each mirroring
+ *  its own schema emitter (`domain-emit.ts` / `vanilla/schema-emit.ts`).  See
+ *  `timestampsMacro`. */
+type Foundation = "ash" | "vanilla";
+
+/** The `timestamps()` line a state-table migration appends — foundation- and
+ *  column-aware so it matches the emitted schema (otherwise `ecto.migrate`
+ *  fails with "column updated_at specified more than once").  An audit
+ *  capability (`with audit` / `auditable`) declares explicit `created_at` /
+ *  `updated_at` columns; the bundled `timestamps()` would add a SECOND
+ *  `updated_at`.
+ *   - vanilla: the Ecto schema drops `timestamps()` entirely when an
+ *     `updated_at` field is present (`vanilla/schema-emit.ts`), so the
+ *     migration must too — the audit columns are the only timestamps.
+ *   - ash: the resource keeps `create_timestamp :inserted_at` alongside the
+ *     audit `updated_at` (`domain-emit.ts`), so the migration keeps
+ *     `inserted_at` but skips the colliding auto column(s) via
+ *     `timestamps(updated_at: false)`.
+ *  With no timestamp columns already present both foundations emit a plain
+ *  `timestamps()`, so non-audit output stays byte-identical. */
+function timestampsMacro(table: TableShape, foundation: Foundation): string | null {
+  const hasInsertedAt = table.columns.some((c) => c.name === "inserted_at");
+  const hasUpdatedAt = table.columns.some((c) => c.name === "updated_at");
+  if (foundation === "vanilla") {
+    return hasUpdatedAt ? null : "timestamps()";
+  }
+  if (!hasInsertedAt && !hasUpdatedAt) return "timestamps()";
+  const opts = [
+    ...(hasInsertedAt ? ["inserted_at: false"] : []),
+    ...(hasUpdatedAt ? ["updated_at: false"] : []),
+  ];
+  return opts.length === 2 ? null : `timestamps(${opts.join(", ")})`;
+}
+
 export function emitMigrations(
   _appName: string,
   migrations: MigrationsIR[],
   appModule: string,
   out: Map<string, string>,
+  /** Defaults to `ash` so the long-standing Ash call site stays unchanged;
+   *  the vanilla orchestrator passes `vanilla`. */
+  foundation: Foundation = "ash",
 ): void {
   let initialModuleIndex = 0;
   for (const m of migrations) {
     if (m.steps.length === 0) continue;
     if (m.baseline === null) {
-      emitInitial(m, appModule, out, initialModuleIndex * MODULE_VERSION_STRIDE);
+      emitInitial(m, appModule, out, initialModuleIndex * MODULE_VERSION_STRIDE, foundation);
       initialModuleIndex++;
     } else {
-      emitDelta(m, appModule, out);
+      emitDelta(m, appModule, out, foundation);
     }
   }
 }
@@ -84,6 +124,7 @@ function emitInitial(
    *  different modules don't collide in the shared dir.  See
    *  `MODULE_VERSION_STRIDE`. */
   baseOffset = 0,
+  foundation: Foundation = "ash",
 ): void {
   const base = BASE_TIMESTAMP + baseOffset;
   // Three classes of table, separated so timestamps preserve the
@@ -111,7 +152,7 @@ function emitInitial(
 
   // Parents — base + i.
   for (let i = 0; i < parentTables.length; i++) {
-    writeInitialFile(parentTables[i]!, base + i, appModule, out);
+    writeInitialFile(parentTables[i]!, base + i, appModule, out, foundation);
   }
   // Parts — grouped by parent.
   const parentCount = parentTables.length;
@@ -124,7 +165,7 @@ function emitInitial(
       .sort((a, b) => a.name.localeCompare(b.name));
     for (let j = 0; j < partsOfThis.length; j++) {
       const ts = base + parentCount * 10 + i * 10 + (j + 1);
-      writeInitialFile(partsOfThis[j]!, ts, appModule, out);
+      writeInitialFile(partsOfThis[j]!, ts, appModule, out, foundation);
     }
   }
   // Join tables — placed above the part block so the references on
@@ -132,7 +173,7 @@ function emitInitial(
   const sortedJoins = [...joinTables].sort((a, b) => a.name.localeCompare(b.name));
   for (let k = 0; k < sortedJoins.length; k++) {
     const ts = base + parentCount * 100 + k;
-    writeInitialFile(sortedJoins[k]!, ts, appModule, out);
+    writeInitialFile(sortedJoins[k]!, ts, appModule, out, foundation);
   }
 }
 
@@ -141,14 +182,15 @@ function writeInitialFile(
   ts: number,
   appModule: string,
   out: Map<string, string>,
+  foundation: Foundation,
 ): void {
   const path = `priv/repo/migrations/${ts}_create_${table.name}.exs`;
   const migrationName = `Create${tableToPascal(table.name)}`;
   const body = isJoinTable(table)
     ? renderInitialJoinFile(table, migrationName, appModule)
     : isStateTable(table)
-      ? renderInitialStateFile(table, migrationName, appModule)
-      : renderInitialFile(table, migrationName, appModule);
+      ? renderInitialStateFile(table, migrationName, appModule, foundation)
+      : renderInitialFile(table, migrationName, appModule, foundation);
   out.set(path, body);
 }
 
@@ -165,6 +207,7 @@ function renderInitialStateFile(
   table: TableShape,
   migrationName: string,
   appModule: string,
+  foundation: Foundation,
 ): string {
   const pk = new Set(table.primaryKey);
   const prefix = prefixOpt(table.schema);
@@ -174,24 +217,35 @@ function renderInitialStateFile(
     }
     return "      " + renderEctoColumn(c, table);
   });
+  const ts = timestampsMacro(table, foundation);
+  if (ts) colLines.push(`      ${ts}`);
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
   use Ecto.Migration
 
   def change do
 ${schemaCreateLine(table.schema)}    create table(:${table.name}, primary_key: false${prefix}) do
 ${colLines.join("\n")}
-      timestamps()
     end
   end
 end
 `;
 }
 
-function renderInitialFile(table: TableShape, migrationName: string, appModule: string): string {
+function renderInitialFile(
+  table: TableShape,
+  migrationName: string,
+  appModule: string,
+  foundation: Foundation,
+): string {
   const idCol = table.columns.find((c) => c.name === "id");
   const pkType = idCol ? ectoPrimaryKeyType(idCol.type) : ":uuid";
   const otherCols = collapseVoGroups(table.columns.filter((c) => c.name !== "id"));
-  const colLines = otherCols.map((c) => "      " + renderEctoColumn(c, table));
+  const colLines = [
+    `      add :id, ${pkType}, primary_key: true, null: false`,
+    ...otherCols.map((c) => "      " + renderEctoColumn(c, table)),
+  ];
+  const ts = timestampsMacro(table, foundation);
+  if (ts) colLines.push(`      ${ts}`);
   const prefix = prefixOpt(table.schema);
   const indexLines = table.indexes.map((i) => {
     const cols = i.columns.map((n) => `:${n}`).join(", ");
@@ -204,9 +258,7 @@ function renderInitialFile(table: TableShape, migrationName: string, appModule: 
 
   def change do
 ${schemaCreateLine(table.schema)}    create table(:${table.name}, primary_key: false${prefix}) do
-      add :id, ${pkType}, primary_key: true, null: false
 ${colLines.join("\n")}
-      timestamps()
     end
 ${indexLines.join("\n")}${indexLines.length > 0 ? "\n" : ""}  end
 end
@@ -258,14 +310,19 @@ end
 `;
 }
 
-function emitDelta(m: MigrationsIR, appModule: string, out: Map<string, string>): void {
+function emitDelta(
+  m: MigrationsIR,
+  appModule: string,
+  out: Map<string, string>,
+  foundation: Foundation,
+): void {
   const path = `priv/repo/migrations/${m.version}_${snake(m.name)}.exs`;
-  out.set(path, renderDeltaFile(m, appModule));
+  out.set(path, renderDeltaFile(m, appModule, foundation));
 }
 
-function renderDeltaFile(m: MigrationsIR, appModule: string): string {
+function renderDeltaFile(m: MigrationsIR, appModule: string, foundation: Foundation): string {
   const migrationName = upperFirst(m.name);
-  const stepLines = m.steps.flatMap(renderEctoStep);
+  const stepLines = m.steps.flatMap((s) => renderEctoStep(s, foundation));
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
   use Ecto.Migration
 
@@ -276,10 +333,10 @@ end
 `;
 }
 
-function renderEctoStep(step: MigrationStep): string[] {
+function renderEctoStep(step: MigrationStep, foundation: Foundation): string[] {
   switch (step.op) {
     case "createTable":
-      return renderCreateTableInline(step.table);
+      return renderCreateTableInline(step.table, foundation);
     case "dropTable":
       return [`drop table(:${step.name})`];
     case "addColumn": {
@@ -317,7 +374,7 @@ function renderEctoStep(step: MigrationStep): string[] {
   }
 }
 
-function renderCreateTableInline(table: TableShape): string[] {
+function renderCreateTableInline(table: TableShape, foundation: Foundation): string[] {
   const idCol = table.columns.find((c) => c.name === "id");
   const others = collapseVoGroups(table.columns.filter((c) => c.name !== "id"));
   const prefix = prefixOpt(table.schema);
@@ -328,7 +385,8 @@ function renderCreateTableInline(table: TableShape): string[] {
     lines.push(`  add :id, ${ectoPrimaryKeyType(idCol.type)}, primary_key: true, null: false`);
   }
   for (const c of others) lines.push("  " + renderEctoColumn(c, table));
-  lines.push("  timestamps()");
+  const ts = timestampsMacro(table, foundation);
+  if (ts) lines.push(`  ${ts}`);
   lines.push("end");
   for (const idx of table.indexes) {
     const cols = idx.columns.map((n) => `:${n}`).join(", ");

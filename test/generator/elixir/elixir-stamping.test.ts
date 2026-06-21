@@ -53,8 +53,22 @@ const PRINCIPAL = `system PS {
 }`;
 
 const RESOURCE = "api1/lib/api1/shop/order.ex";
+const MIGRATION = "api1/priv/repo/migrations/20260101000000_create_orders.exs";
 
 describe("elixir/Ash generator — lifecycle stamps", () => {
+  it("keeps inserted_at but drops the colliding auto updated_at when auditable", async () => {
+    // `auditable` declares explicit created_at/updated_at columns; the bundled
+    // `timestamps()` would add a SECOND `updated_at` → `ecto.migrate` aborts.
+    // Ash keeps `create_timestamp :inserted_at`, so the migration must keep
+    // `inserted_at` (via `timestamps(updated_at: false)`) while emitting the
+    // audit column exactly once.
+    const mig = (await generateSystemFiles(NON_PRINCIPAL)).get(MIGRATION)!;
+    expect(mig).toContain("add :updated_at, :utc_datetime, null: false");
+    expect(mig).toContain("timestamps(updated_at: false)");
+    // exactly one updated_at declaration (the audit column).
+    expect(mig.match(/:updated_at/g)?.length).toBe(1);
+  });
+
   it("emits an on:[:create] / on:[:update] change block stamping the fields with now()", async () => {
     const res = (await generateSystemFiles(NON_PRINCIPAL)).get(RESOURCE)!;
     expect(res).toContain("changes do");
@@ -197,6 +211,16 @@ describe("elixir/vanilla generator — lifecycle stamps", () => {
     const changeset = files.get("api1/lib/api1/shop/order_changeset.ex")!;
     expect(changeset).not.toContain(":created_by");
     expect(changeset).not.toContain(":updated_by");
+  });
+
+  it("drops timestamps() entirely when auditable (audit columns are the only timestamps)", async () => {
+    // The vanilla Ecto schema drops the bundled `timestamps()` when an explicit
+    // `updated_at` field is present (it would collide); the migration must
+    // mirror that or `ecto.migrate` aborts with a duplicate `updated_at`.
+    const mig = (await generateSystemFiles(VANILLA_NON_PRINCIPAL)).get(MIGRATION)!;
+    expect(mig).toContain("add :updated_at, :utc_datetime, null: false");
+    expect(mig).not.toContain("timestamps(");
+    expect(mig.match(/:updated_at/g)?.length).toBe(1);
   });
 
   it("gates a currentUser stamp on a vanilla deployable WITHOUT auth fail-fast", async () => {
