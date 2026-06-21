@@ -16,11 +16,14 @@
 import { expect, test } from "@playwright/test";
 import { browserCanReachNetwork, waitForPlaygroundReady } from "./_helpers";
 
-// QUARANTINED (#1242): prepare() never resolves after a SUCCESSFUL in-browser
-// bundle, so this hangs the full 600s Bundle wait ×2 retries — the dominant
-// reason playground-e2e blew its job cap and ended `cancelled` (no report).
-// Un-fixme once #1242 lands.
-test.fixme("mantine@v9 preview boots without runtime errors", async ({ page }) => {
+// #1242 fix landed (VfsBundlerClient.dispose() now resolves in-flight
+// runs instead of stranding prepare()'s awaiter). Un-fixme'd as the
+// validation spec: this is the canonical default pack, so it's the one
+// we re-enable first to confirm the post-bundle stall is gone before
+// un-fixme-ing the rest (chakra/mui/shadcn preview-runtime,
+// preview-shadcn, runtime.spec.ts). Still network-gated — self-skips
+// when the browser sandbox can't reach the npm registry.
+test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   // Capture *every* console error + pageerror surfaced both in the
   // playground host and inside the iframe sandbox.  The iframe shares
   // the page's console (it's same-origin) so a single listener catches
