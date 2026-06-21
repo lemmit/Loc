@@ -126,3 +126,114 @@ describe("elixir/Ash generator — lifecycle stamps", () => {
     expect(errors[0]!.message).toContain("event-sourced");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Vanilla (plain Ecto) foundation — stamps applied via `Ecto.Changeset.put_change`
+// pipe lines on the changeset right before `Repo.insert` / `Repo.update`, threaded
+// through `create_<agg>`/`update_<agg>`.  `now()` → `DateTime.utc_now()`; a
+// `currentUser` value resolves to the principal id off the threaded actor map
+// (`current_user.<idKey>`, nil-safe).  onUpdate stamps run on insert too (so a
+// NOT-NULL `updated_*` is filled on create).  Same two fail-fast gates apply.
+// ---------------------------------------------------------------------------
+
+const VANILLA_NON_PRINCIPAL = NON_PRINCIPAL.replace(
+  "platform: elixir,",
+  "platform: elixir { foundation: vanilla },",
+);
+const VANILLA_PRINCIPAL = PRINCIPAL.replace(
+  "platform: elixir,",
+  "platform: elixir { foundation: vanilla },",
+);
+const VANILLA_REPO = "api1/lib/api1/shop/order_repository.ex";
+const VANILLA_SCHEMA = "api1/lib/api1/shop/order.ex";
+const VANILLA_CONTEXT = "api1/lib/api1/shop.ex";
+
+describe("elixir/vanilla generator — lifecycle stamps", () => {
+  it("put_changes the audit columns in the changeset insert/update path", async () => {
+    const files = await generateSystemFiles(VANILLA_NON_PRINCIPAL);
+    const repo = files.get(VANILLA_REPO)!;
+    // onCreate + onUpdate stamps both apply on insert (NOT-NULL updated_at on
+    // create); onUpdate-only on update.
+    expect(repo).toContain("def insert(attrs) when is_map(attrs) do");
+    expect(repo).toContain("|> Ecto.Changeset.put_change(:created_at, DateTime.utc_now())");
+    expect(repo).toContain("|> Ecto.Changeset.put_change(:updated_at, DateTime.utc_now())");
+    expect(repo).toContain("|> Repo.insert()");
+    // A non-principal stamp threads no actor (byte-identical seam).
+    expect(repo).not.toContain("current_user");
+
+    // The audit timestamp fields are REAL schema fields (so put_change is valid)
+    // and the bundled `timestamps()` is dropped (it would collide on updated_at).
+    const schema = files.get(VANILLA_SCHEMA)!;
+    expect(schema).toContain("field :created_at, :utc_datetime");
+    expect(schema).toContain("field :updated_at, :utc_datetime");
+    expect(schema).not.toContain("timestamps(");
+  });
+
+  it("a currentUser stamp resolves to the threaded actor's principal id", async () => {
+    const files = await generateSystemFiles(VANILLA_PRINCIPAL);
+    const repo = files.get(VANILLA_REPO)!;
+    // The principal id reads off the threaded `current_user` map, nil-safe.
+    expect(repo).toContain("def insert(attrs, current_user \\\\ nil) when is_map(attrs) do");
+    expect(repo).toContain(
+      "|> Ecto.Changeset.put_change(:created_by, current_user && current_user.id)",
+    );
+    expect(repo).toContain(
+      "|> Ecto.Changeset.put_change(:updated_by, current_user && current_user.id)",
+    );
+
+    // The context delegate threads `current_user` through to the repo seam.
+    const context = files.get(VANILLA_CONTEXT)!;
+    expect(context).toContain(
+      "defdelegate create_order(attrs, current_user \\\\ nil), to: Api1.Shop.OrderRepository, as: :insert",
+    );
+
+    // The controller pulls the actor off conn.assigns and threads it.
+    const controller = files.get("api1/lib/api1_web/controllers/order_controller.ex")!;
+    expect(controller).toContain("current_user = Map.get(conn.assigns, :current_user)");
+    expect(controller).toContain("Shop.create_order(params, current_user)");
+
+    // Managed audit columns (`created_by`/`updated_by`) are NOT cast from client
+    // attrs — the stamp owns them.
+    const changeset = files.get("api1/lib/api1/shop/order_changeset.ex")!;
+    expect(changeset).not.toContain(":created_by");
+    expect(changeset).not.toContain(":updated_by");
+  });
+
+  it("gates a currentUser stamp on a vanilla deployable WITHOUT auth fail-fast", async () => {
+    const noAuth = VANILLA_PRINCIPAL.replace(", auth: required", "");
+    const loom = await buildLoomModel(noAuth);
+    const errors = validateLoomModel(loom).filter(
+      (d) => d.code === "loom.elixir-stamp-unsupported",
+    );
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]!.message).toContain("no auth");
+  });
+
+  it("gates a stamp on an event-sourced vanilla aggregate fail-fast", async () => {
+    const eventSourced = `system ES {
+      subdomain D {
+        context Shop {
+          stamp onCreate { createdAt := now() }
+          event OrderPlaced { order: Order id, code: string }
+          aggregate Order ids guid persistedAs(eventLog) {
+            code: string
+            createdAt: datetime
+            create place(code: string) { emit OrderPlaced { order: id, code: code } }
+            apply(e: OrderPlaced) { code := e.code }
+          }
+          repository Orders for Order { }
+        }
+      }
+      api A from D
+      storage primary { type: postgres }
+      resource el { for: Shop, kind: eventLog, use: primary }
+      deployable api1 { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [el], serves: A, port: 8081 }
+    }`;
+    const loom = await buildLoomModel(eventSourced);
+    const errors = validateLoomModel(loom).filter(
+      (d) => d.code === "loom.elixir-stamp-unsupported",
+    );
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]!.message).toContain("event-sourced");
+  });
+});

@@ -29,12 +29,14 @@ import {
 } from "./capability-filter.js";
 import { isVanillaDocAgg, renderDocRepository } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
+import { aggregateHasStamps, stampPutChanges, stampUsesPrincipal } from "./stamp-emit.js";
 
 export function emitVanillaRepositories(
   appModule: string,
   ctx: BoundedContextIR,
   out: Map<string, string>,
   sys?: SystemIR,
+  principalIdKey = "id",
 ): void {
   const ctxModule = upperFirst(ctx.name);
   for (const agg of ctx.aggregates) {
@@ -49,7 +51,7 @@ export function emitVanillaRepositories(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}_repository.ex`,
       isVanillaDocAgg(agg, ctx, sys)
         ? renderDocRepository(appModule, ctxModule, agg)
-        : renderRepository(appModule, ctxModule, agg, repo),
+        : renderRepository(appModule, ctxModule, agg, repo, principalIdKey),
     );
   }
 }
@@ -79,10 +81,31 @@ function renderRepository(
   ctxModule: string,
   agg: AggregateIR,
   repo: RepositoryIR | undefined,
+  principalIdKey: string,
 ): string {
   const aggModule = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const repoMod = `${aggModule}Repository`;
   const contextModule = `${appModule}.${ctxModule}`;
+
+  // Lifecycle stamps (`with audit`/`auditable`, `stamp onCreate/onUpdate`) →
+  // `put_change` pipe lines on the changeset right before the Repo write.  A
+  // stamp that references the principal threads `current_user` into the write
+  // seam (the analogue of the read-side `current_user \\ nil` for tenancy
+  // filters); a non-principal stamp (`createdAt := now()`) needs no actor.  On
+  // insert BOTH onCreate AND onUpdate stamps apply (so NOT-NULL `updated_*`
+  // audit columns are filled on the initial insert, mirroring the Ash
+  // `on: [:create, :update]`); on update only onUpdate stamps apply.
+  const hasStamps = aggregateHasStamps(agg);
+  const stampPrincipal = stampUsesPrincipal(agg);
+  const stampActorParam = stampPrincipal ? ", current_user \\\\ nil" : "";
+  const insertStamps = stampPutChanges(
+    agg,
+    ["create", "update"],
+    contextModule,
+    principalIdKey,
+    "    ",
+  );
+  const updateStamps = stampPutChanges(agg, ["update"], contextModule, principalIdKey, "    ");
 
   const finds = customFindsOf(repo);
   // A principal (tenancy) `filter` threads `current_user` (from the request) into
@@ -140,16 +163,16 @@ defmodule ${repoMod} do
     end
   end
 
-  @spec insert(map()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
-  def insert(attrs) when is_map(attrs) do
-    ${aggModule}Changeset.base_changeset(attrs)
+  @spec insert(map()${hasStamps && stampPrincipal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+  def insert(attrs${stampActorParam}) when is_map(attrs) do
+    ${aggModule}Changeset.base_changeset(attrs)${insertStamps}
     |> Repo.insert()
   end
 
-  @spec update(${aggModule}.t(), map()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
-  def update(%${aggModule}{} = record, attrs) when is_map(attrs) do
+  @spec update(${aggModule}.t(), map()${hasStamps && stampPrincipal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+  def update(%${aggModule}{} = record, attrs${stampActorParam}) when is_map(attrs) do
     record
-    |> ${aggModule}Changeset.base_changeset(attrs)
+    |> ${aggModule}Changeset.base_changeset(attrs)${updateStamps}
     |> Repo.update()
   end
 

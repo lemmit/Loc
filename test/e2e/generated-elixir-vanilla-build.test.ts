@@ -141,6 +141,12 @@ describe.skipIf(!ENABLED)(
         // valid input).  Before the recursion fix these dropped a `# TODO`
         // (uncompilable); now each lowers as a `<-` with-clause.
         { name: "vanilla-nested-flow.ddd", deployable: "api" },
+        // Lifecycle stamps (`with auditable`) — the audit columns are applied via
+        // `Ecto.Changeset.put_change` on the changeset before `Repo.insert`/
+        // `Repo.update`; `currentUser` resolves to the principal id off the
+        // threaded `current_user` map.  Compiles the stamped insert/update seam +
+        // the threaded context delegate + controller.
+        { name: "vanilla-auditable.ddd", deployable: "api" },
       ]),
     )("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);

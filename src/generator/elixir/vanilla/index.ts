@@ -19,7 +19,7 @@ import {
   emitPhoenixResourceFiles,
 } from "../adapters/resource-clients.js";
 import type { ApiRoute } from "../api-emit.js";
-import { emitAuth } from "../auth-emit.js";
+import { actorIdKey, emitAuth } from "../auth-emit.js";
 import { emitDispatch, emitWorkflowStateSchemas } from "../dispatch-emit.js";
 import type { GenerateElixirArgs } from "../index.js";
 import { emitMigrations } from "../migrations-emit.js";
@@ -75,10 +75,14 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // controllers.  Changeset before Repository so the latter can alias it.
   const apiRoutes: ApiRoute[] = [];
   const allViews: VanillaViewRef[] = [];
+  // The principal id field name a `currentUser` lifecycle stamp resolves to
+  // (`current_user.<idKey>`), defaulting to `id` when no `user {}` block — same
+  // derivation the Ash path threads into `renderStampChanges`.
+  const principalIdKey = actorIdKey(sys.user);
   for (const ctx of contexts) {
     emitVanillaSchemas(appModule, ctx, out, sys);
     emitVanillaChangesets(appModule, ctx, out, sys);
-    emitVanillaRepositories(appModule, ctx, out, sys);
+    emitVanillaRepositories(appModule, ctx, out, sys, principalIdKey);
     // Event-sourced aggregates (persistedAs(eventLog)) — struct + event-log
     // Ecto schema + fold + event-store repository (D-VANILLA-ES-HOME).  The
     // state emitters above skip them; the context module + controllers branch.

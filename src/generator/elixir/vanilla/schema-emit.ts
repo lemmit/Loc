@@ -153,13 +153,30 @@ function renderSchema(
   const provLines = provenancedFieldsOf(agg).map(
     (f) => `    field :${provColumn(f.name)}, ${appModule}.Provenance.Json`,
   );
-  const fieldLines = [...declaredLines, ...provLines].join("\n");
+  // Audit timestamp fields (`createdAt`/`updatedAt`, from `with audit`/`auditable`)
+  // are lifecycle-stamped onto the changeset (see `stampPutChanges` in
+  // `context-emit.ts` / `repository-emit.ts`), so they must be REAL schema
+  // fields the stamp can `put_change`.  When present we emit them as explicit
+  // `field :created_at|:updated_at, :utc_datetime` (mapped to the audit columns
+  // the shared migration adds) and DROP the bundled `timestamps()` macro — Ecto
+  // would otherwise declare a second `:updated_at` field and the schema fails to
+  // compile.  Without audit fields the plain `timestamps()` stays byte-identical.
+  const hasCreatedAt = agg.fields.some((f) => f.name === "createdAt");
+  const hasUpdatedAt = agg.fields.some((f) => f.name === "updatedAt");
+  const auditTsLines = [
+    ...(hasCreatedAt ? ["    field :created_at, :utc_datetime"] : []),
+    ...(hasUpdatedAt ? ["    field :updated_at, :utc_datetime"] : []),
+  ];
+  const fieldLines = [...declaredLines, ...auditTsLines, ...provLines].join("\n");
   // Entity containments (`contains items: Item[]`) → `embeds_many`/`embeds_one`
   // over the part's `embedded_schema` module (emitted above), stored inline in
   // one jsonb column — the vanilla analogue of the Ash embedded resource.
   // Operation bodies append the part struct + `put_embed` (`context-emit.ts`).
   const containLines = agg.contains.map((c) => embedLine(appModule, ctxModule, c)).join("\n");
-  const schemaBody = [fieldLines, containLines].filter(Boolean).join("\n");
+  // The bundled Ecto `timestamps()` (→ `inserted_at`/`updated_at`) is dropped
+  // when an explicit `updated_at` audit field is present (it would collide).
+  const timestampsLine = hasUpdatedAt ? "" : "    timestamps(type: :utc_datetime)";
+  const schemaBody = [fieldLines, containLines, timestampsLine].filter(Boolean).join("\n");
   const prefixLine = schemaPrefix ? `  @schema_prefix ${JSON.stringify(schemaPrefix)}\n` : "";
 
   return `# Auto-generated.
@@ -172,7 +189,6 @@ defmodule ${moduleName} do
 ${prefixLine}
   schema "${tableName}" do
 ${schemaBody}
-    timestamps(type: :utc_datetime)
   end
 end
 `;

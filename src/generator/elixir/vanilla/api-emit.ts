@@ -33,6 +33,7 @@ import {
   renderProblemVariantHelper,
   renderReturningOpControllerAction,
 } from "./operation-returns-emit.js";
+import { stampUsesPrincipal } from "./stamp-emit.js";
 
 /** Public operations that earn a dedicated `POST /<plural>/:id/<op>`
  *  member endpoint.  CRUD-verb-named ops (create/update/destroy/…) are
@@ -164,6 +165,26 @@ function renderController(
   const listArg = principal ? "current_user" : "";
   const getActor = principal ? ", current_user" : "";
 
+  // A principal-referencing lifecycle stamp (`createdBy := currentUser`) threads
+  // the request actor into the create/update WRITE seam — the controller pulls
+  // `current_user` off `conn.assigns` and passes it as the trailing arg to
+  // `create_<agg>`/`update_<agg>` (the Auth plug populated it; the validator
+  // requires `auth: required` for a principal stamp).  Non-principal stamps
+  // (`createdAt := now()`) need no actor, so the write seam stays byte-identical.
+  const stampPrincipal = stampUsesPrincipal(agg);
+  // The create action has no read-filter `cuBind`, so bind `current_user` there
+  // when a principal stamp needs it.
+  const createCuBind = stampPrincipal
+    ? "    current_user = Map.get(conn.assigns, :current_user)\n"
+    : "";
+  const createActor = stampPrincipal ? ", current_user" : "";
+  // The update action already binds `current_user` when the aggregate has a
+  // principal READ filter; bind it here too when only a principal stamp needs
+  // it (avoid a double bind when both apply).
+  const updateCuBind =
+    !principal && stampPrincipal ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
+  const updateActor = stampPrincipal ? ", current_user" : "";
+
   // Per-operation member actions.  A returning operation (`: A or B`) translates
   // its tagged result to HTTP (success → 200, error variant → ProblemDetails);
   // a plain side-effecting op returns 204.  Validation failures surface as 422;
@@ -226,7 +247,7 @@ ${cuBind}    case ${ctxModule}.get_${aggSnake}(id${getActor}) do
   end
 
   def create(conn, params) do
-    case ${ctxModule}.create_${aggSnake}(params) do
+${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
       {:ok, record} ->
         conn
         |> put_status(201)
@@ -239,9 +260,9 @@ ${cuBind}    case ${ctxModule}.get_${aggSnake}(id${getActor}) do
 
   def update(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
-${cuBind}
+${cuBind}${updateCuBind}
     with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
-         {:ok, updated} <- ${ctxModule}.update_${aggSnake}(record, attrs) do
+         {:ok, updated} <- ${ctxModule}.update_${aggSnake}(record, attrs${updateActor}) do
       json(conn, serialize(updated))
     else
       {:error, :not_found} ->
