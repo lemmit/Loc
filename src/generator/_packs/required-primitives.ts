@@ -200,15 +200,15 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat, RequiredSet> = {
     // the ui Dialog components on shadcnVue).
     form: [...TSX_FORM, "op-dialog"],
   },
-  // Angular's form path DIVERGES from the TSX/Vue packs: `CreateForm`
-  // renders as INLINE typed Reactive Forms (the `renderCreateForm` walker
-  // seam — `src/generator/angular/create-form.ts`), never dispatching the
-  // `primitive-form-of` shell or the `field-input-*` / `form-*` templates.
-  // Operation / modal pages stub for now (so `primitive-modal` is never
-  // looked up either).  The required surface is therefore the display /
-  // layout / input primitives ONLY — minus `form-of` + `modal` from the
-  // shared lists, and no `fieldInput` / `form` sets.  Shell delta: Angular
-  // emits an `angular-json` (CLI workspace) instead of `vite-config`.
+  // Angular's form path DIVERGES from the TSX/Vue packs: every form
+  // primitive (`CreateForm` / `OperationForm` / `Modal` / `WorkflowForm` /
+  // `DestroyForm`) renders as INLINE typed Reactive Forms via the Angular
+  // walker seams (`src/generator/angular/*-form.ts`), never dispatching the
+  // `primitive-form-of` shell, the `primitive-modal` template, or the
+  // `field-input-*` / `form-*` templates.  The required surface is therefore
+  // the display / layout / input primitives ONLY — minus `form-of` + `modal`
+  // from the shared lists, and no `fieldInput` / `form` sets.  Shell delta:
+  // Angular emits an `angular-json` (CLI workspace) instead of `vite-config`.
   angular: {
     core: [
       ...SHARED_PRIMITIVES.filter((p) => p !== "primitive-form-of"),

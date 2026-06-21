@@ -239,21 +239,27 @@ React / Vue / Svelte / Angular unless noted:
 
 | Frontend | Build gate | Runtime e2e gate |
 |---|---|---|
-| React | `generated-react-build.yml` (tsc, all examples × all packs) | ⚠️ none dedicated — boot/preview via `playground-e2e.yml` only |
+| React | `generated-react-build.yml` (tsc, all examples × all packs) | ✅ `generated-react-e2e.yml` (vite preview + Playwright) |
 | Vue | `generated-vue-build.yml` (vue-tsc + vite build) | ✅ `generated-vue-e2e.yml` (vite preview + Playwright) |
 | Svelte | `generated-svelte-build.yml` (svelte-check + vite build) | ✅ `generated-svelte-e2e.yml` |
-| Angular | `generated-angular-build.yml` (`ng build`) | ⚠️ **none** |
+| Angular | `generated-angular-build.yml` (`ng build`) | ✅ `generated-angular-e2e.yml` (#1474) |
 
-### Finding 3 (MEDIUM): e2e-CI parity gap
+### Finding 3 (MEDIUM) — ✅ FIXED: e2e-CI parity gap
 
-Vue and Svelte each have a dedicated runtime e2e workflow that
-`vite preview`s the bundle and runs the emitted Playwright smoke spec.
-**React and Angular have no equivalent generated-frontend runtime e2e.**
-React gets partial boot/preview coverage through `playground-e2e.yml`;
-Angular's only gate is `ng build` (typecheck + bundle). All four *emit*
-the same page-object/smoke-spec surface, so the gap is in *exercising*
-it, not generating it. Reusing the vue/svelte e2e harness for Angular
-(and adding a per-pack react runtime leg) would equalize this.
+> **Resolved (both legs landed independently on `main`).** Angular's
+> runtime e2e (`generated-angular-e2e.yml`) landed via #1474; React's
+> (`generated-react-e2e.yml` + `test:react-e2e` +
+> `test/e2e/generated-react-e2e.test.ts`) landed via #1476 (the parallel
+> frontend-test-parity pass — see `docs/audits/frontend-test-parity.md`) —
+> a direct mirror of the Vue gate (React is a Vite SPA, so the boot path
+> `vite build → vite preview → emitted Playwright smoke` is identical). All
+> four frontends now have both a build gate and a runtime e2e gate.
+
+Originally: Vue and Svelte each had a dedicated runtime e2e workflow that
+`vite preview`s the bundle and runs the emitted Playwright smoke spec;
+React and Angular had only build gates. All four already *emitted* the same
+page-object/smoke-spec surface, so the gap was in *exercising* it — closed
+by reusing the established sibling harness.
 
 ---
 
@@ -263,14 +269,15 @@ it, not generating it. Reusing the vue/svelte e2e harness for Angular
 |---|---|---|---|
 | 1 | **HIGH** — ✅ FIXED | `Section`/`Sticky` passed validation but crashed Vue & Angular codegen (ungated, not in any `RequiredSet`, no `templates.has` guard) | **Done:** shipped the 6 templates (vuetify/shadcnVue/angularMaterial) + added both to `TSX_ONLY_PRIMITIVES`; the load-time gate now enforces them. "validates ⇒ generates" restored. |
 | 2 | LOW | Pack breadth uneven (React 4 families, Vue/Svelte 2, Angular 1; `primeng`/`spartanNg` reserved but unshipped) | Roadmap item — ship the reserved Angular packs; not a correctness bug. |
-| 3 | MEDIUM | No runtime-e2e CI for generated React or Angular apps (Vue/Svelte have it) | Extend the vue/svelte e2e harness to Angular; add a per-pack React runtime leg. |
-| 4 | COSMETIC | Stale "stubbed/deferred" comments in `angular/index.ts` + `angular-target.ts` contradict the now-complete form seams | Refresh the comments. |
+| 3 | MEDIUM — ✅ FIXED | No runtime-e2e CI for generated React or Angular apps (Vue/Svelte had it) | **Done (landed on `main` independently):** Angular gate via #1474, React gate via #1476. All four frontends now have build + runtime-e2e gates. |
+| 4 | COSMETIC — ✅ FIXED | Stale "stubbed/deferred" comments in `angular/index.ts`, `target.ts`, `required-primitives.ts` contradicted the now-complete form seams | **Done:** refreshed the comments to describe the shipped Reactive-Form seams. |
 
 **Net assessment.** Contract-level parity is strong: all 17 required
 `WalkerTarget` seams are implemented on all four JSX frontends, the
 cross-cutting feature set (forms, realtime, views, workflows, layouts,
 auth, e2e surface) is uniform, and HEEx primitive parity is now complete.
-The one functional defect — Finding 1, a real reproducible crash violating
-the "validates ⇒ generates" invariant on two frontends — has been **fixed
-in this change**. Findings 2–4 remain as maturity/coverage gaps (pack
-breadth, runtime-e2e CI, stale comments), not correctness bugs.
+Finding 1 (the one functional defect — a reproducible crash violating
+"validates ⇒ generates"), Finding 3 (runtime-e2e CI parity), and Finding 4
+(stale comments) are all **fixed**. Only Finding 2 remains — pack breadth
+(Angular ships one pack; `primeng`/`spartanNg` are grammar-reserved), a
+maturity/roadmap item, not a correctness bug.
