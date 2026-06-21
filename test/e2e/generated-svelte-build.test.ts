@@ -36,11 +36,16 @@ function injectDesign(src: string, qualified: string): string {
   if (existing.test(src)) {
     return src.replace(existing, `$1"${qualified}"`);
   }
-  const multiLine = /(deployable web \{)([^}]*?)\n(\s*)\}/;
-  if (multiLine.test(src)) {
-    return src.replace(multiLine, (_, head, body, indent) => {
-      return `${head}${body}\n${indent}design: "${qualified}"\n${indent}}`;
-    });
+  // Insert `design:` right after the deployable's leading `platform:`
+  // line (the grammar requires `platform` first, then accepts the
+  // other axes — design included — in any order). Anchoring on the
+  // platform line rather than a body-spanning `[^}]*?` keeps nested
+  // braces in the block body — e.g. `ui: WebApp { Sales: api }` — from
+  // cutting the match short and silently leaving the deployable on its
+  // default pack.
+  const platformLine = /(deployable web \{\n[ \t]*platform:[^\n]*\n)([ \t]*)/;
+  if (platformLine.test(src)) {
+    return src.replace(platformLine, `$1$2design: "${qualified}"\n$2`);
   }
   const singleLine = /(deployable web \{[^}\n]+?)(\s*)\}/;
   return src.replace(singleLine, `$1, design: "${qualified}"$2}`);
