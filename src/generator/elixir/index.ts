@@ -16,6 +16,7 @@ import { emitApiControllers } from "./api-emit.js";
 import { actorIdKey, emitAuth } from "./auth-emit.js";
 import { emitContext } from "./context-emit.js";
 import { emitDispatch, emitWorkflowStateSchemas } from "./dispatch-emit.js";
+import { emitDomainServices } from "./domain-service-emit.js";
 import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
 import { emitMigrations } from "./migrations-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
@@ -145,6 +146,10 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
     emitContext(appName, ctx, appModule, out, { resolveDataSource, principalIdKey });
     // Domain `test "..."` blocks → ExUnit (pure-subset; see tests-emit.ts).
     if (emitAggregateTests(ctx, appModule, "ash", out)) hasDomainTests = true;
+    // Domain services — stateless pure-calculator modules under
+    // `<App>.Domain.Services.*` (domain-services.md).  Foundation-agnostic
+    // (no persistence): the same emitter feeds the vanilla orchestrator.
+    emitDomainServices(appName, appModule, ctx, out);
   }
   if (hasDomainTests) emitTestHelper(out);
 

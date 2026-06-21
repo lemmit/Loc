@@ -41,6 +41,7 @@ import {
 import { criterionEligible, renderJavaCriteriaClasses } from "./emit/criteria.js";
 import { renderJavaDispatcher } from "./emit/dispatch.js";
 import { renderJavaDocumentRepositoryImpl } from "./emit/document-store.js";
+import { renderJavaDomainServices } from "./emit/domain-service.js";
 import { renderDtoFiles } from "./emit/dto.js";
 import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
@@ -416,6 +417,15 @@ function emitProjectFromContexts(
       (a) => pkgFor("entity", a),
     )) {
       place(file.name, "criteria", file.content);
+    }
+    // Stateless pure-calculator domain services → a `public final class`
+    // of `public static` methods in `<base>.domain.services` (the
+    // `<Agg>Criteria` envelope); `or`-union returns reuse the shipped
+    // exception-less sealed-union machinery.
+    for (const file of renderJavaDomainServices(ctx, pkgFor("domain-service"), basePkg, (a) =>
+      pkgFor("entity", a),
+    )) {
+      place(file.name, "domain-service", file.content);
     }
     // Offset/limit Pageable behind the call-site `page:` on `Repo.run`.
     if ((ctx.retrievals ?? []).length > 0) {

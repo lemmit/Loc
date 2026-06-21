@@ -18,6 +18,7 @@ async function diags(body: string) {
       aggregate Cart { subtotal: money }
       repository Customers for Customer { }
       repository Carts for Cart { }
+      workflow Onboarding { create(c: Customer) { let z = 1 } }
       ${body}
     }
   `);
@@ -48,6 +49,35 @@ describe("IR validator — domainService no-infra contract", () => {
       }
     `);
     expect(d.some((x) => x.code === "loom.domain-service-no-repo")).toBe(true);
+  });
+
+  it("rejects a write to aggregate state in a domain-service operation body", async () => {
+    // A domain service has no `this` to mutate — any `target := value`
+    // (the `assign` statement) is the pure-calculator floor's hard error.
+    const d = await diags(`
+      domainService Pricing {
+        operation quote(cart: Cart, customer: Customer): money {
+          cart.subtotal := cart.subtotal
+          return cart.subtotal
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === "loom.domain-service-no-mutation")).toBe(true);
+  });
+
+  it("rejects starting a workflow from a domain-service operation body", async () => {
+    // `Onboarding.start(...)` — a call whose receiver names a context
+    // workflow reaches the application layer, which the domain-layer
+    // service may not do.
+    const d = await diags(`
+      domainService Pricing {
+        operation quote(cart: Cart, customer: Customer): money {
+          let r = Onboarding.start(customer)
+          return cart.subtotal
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === "loom.domain-service-no-workflow-start")).toBe(true);
   });
 
   it("warns when every operation takes a single aggregate parameter (anemic)", async () => {

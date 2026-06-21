@@ -38,26 +38,32 @@ export function renderCsStatements(
  *  usings — the union of `collectCsExprUsings` over every expression
  *  these statements render through `renderCsExpr`.  Mirrors the
  *  per-kind expression set of `renderCsStatement`. */
-export function collectCsStmtUsings(stmts: StmtIR[], into: Set<string> = new Set()): Set<string> {
+export function collectCsStmtUsings(
+  stmts: StmtIR[],
+  into: Set<string> = new Set(),
+  /** Forwarded to `collectCsExprUsings` so a domain-service call in any
+   *  statement body adds `${ns}.Domain.Services`.  Omitted ⇒ no such using. */
+  ns?: string,
+): Set<string> {
   for (const s of stmts) {
     switch (s.kind) {
       case "precondition":
       case "requires":
       case "let":
       case "expression":
-        collectCsExprUsings(s.expr, into);
+        collectCsExprUsings(s.expr, into, ns);
         break;
       case "assign":
       case "add":
       case "remove":
       case "return":
-        collectCsExprUsings(s.value, into);
+        collectCsExprUsings(s.value, into, ns);
         break;
       case "emit":
-        for (const f of s.fields) collectCsExprUsings(f.value, into);
+        for (const f of s.fields) collectCsExprUsings(f.value, into, ns);
         break;
       case "call":
-        for (const a of s.args) collectCsExprUsings(a, into);
+        for (const a of s.args) collectCsExprUsings(a, into, ns);
         break;
     }
   }

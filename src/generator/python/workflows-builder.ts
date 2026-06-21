@@ -22,6 +22,7 @@ import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
+import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
 import { responsePyType } from "./emit/http-models.js";
 import { type PyRenderContext, renderPyExpr } from "./render-expr.js";
 import { resourceImportLines } from "./resource-clients.js";
@@ -197,6 +198,9 @@ export function buildPyWorkflowsFile(
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
+    // Domain-service calls render as bare functions (`quote(...)`) — import
+    // them by name from app.domain.services.* (domain-services.md).
+    ...domainServiceImportLinesForWorkflow(wfs.flatMap((wf) => wf.statements)),
     refersTo("ProblemDetails") ? "from app.http.problem import ProblemDetails" : null,
     voModelImports.length > 0
       ? `from app.http.wire_models import ${voModelImports.map((n) => `${n} as ${n}Model`).join(", ")}`

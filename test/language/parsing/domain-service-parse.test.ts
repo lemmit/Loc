@@ -40,6 +40,29 @@ describe("parsing — domainService declaration", () => {
     expect(ops[1]!.returnType?.alternatives?.length).toBe(1);
   });
 
+  it("coexists with the pre-existing `service` soft-keyword and `action` type", async () => {
+    // `service` is a soft keyword (a usable field name / the
+    // ServiceConnectionSource head) and `action(T)` is the Tier-2
+    // `ActionType` — neither collides with the new hard `domainService`
+    // keyword.  A field named `service`, an `action`-typed component prop,
+    // and a `domainService` all parse together.
+    const { errors } = await parseString(`
+      context Sales {
+        valueobject Config { service: string }
+        aggregate Cart { subtotal: money }
+        repository Carts for Cart { }
+        domainService Pricing {
+          operation quote(cart: Cart): money or string { return cart.subtotal }
+        }
+      }
+      system S {}
+      ui Shell {
+        component Picker(onPick: action(Cart)) extern from "widgets/picker"
+      }
+    `);
+    expect(errors).toEqual([]);
+  });
+
   it("coexists with the `X id` cross-aggregate containment restriction", async () => {
     // A domainService cross-aggregate param (`customer: Customer`) is a
     // different grammar position from a containment partType, where a bare

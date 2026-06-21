@@ -128,17 +128,17 @@ export function renderEntity(
   // invariant / operation bodies rendered below so the file imports
   // only what its own expressions actually use.
   const usings = new Set<string>();
-  for (const d of entity.derived) collectCsExprUsings(d.expr, usings);
-  for (const fn of entity.functions) collectCsExprUsings(fn.body, usings);
+  for (const d of entity.derived) collectCsExprUsings(d.expr, usings, ns);
+  for (const fn of entity.functions) collectCsExprUsings(fn.body, usings, ns);
   for (const inv of entity.invariants) {
-    collectCsExprUsings(inv.expr, usings);
-    if (inv.guard) collectCsExprUsings(inv.guard, usings);
+    collectCsExprUsings(inv.expr, usings, ns);
+    if (inv.guard) collectCsExprUsings(inv.guard, usings, ns);
   }
-  for (const op of operations) collectCsStmtUsings(op.statements, usings);
+  for (const op of operations) collectCsStmtUsings(op.statements, usings, ns);
   // Applier + event-sourced-create bodies render through the same path, so
   // their expressions can pull in the same namespaces (e.g. regex).
-  for (const ap of appliers) collectCsStmtUsings(ap.statements, usings);
-  if (esCreate) collectCsStmtUsings(esCreate.statements, usings);
+  for (const ap of appliers) collectCsStmtUsings(ap.statements, usings, ns);
+  if (esCreate) collectCsStmtUsings(esCreate.statements, usings, ns);
   const renderCtx = {
     thisName: "this",
     // Threaded through so render-stmt's collection-mutation path can

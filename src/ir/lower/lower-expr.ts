@@ -1076,6 +1076,26 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
         return curType;
       }
     }
+    // Probe: `Pricing.quote(...)` domain-service member call — head is a
+    // `NameRef` resolving to a `domainService`, first suffix is a call
+    // MemberSuffix naming an operation.  The result type is the operation's
+    // declared return type (an `or`-union for an exception-less op, so a
+    // `let x = Pricing.applyCoupon(...)?` propagates the error variant).
+    // Mirrors the lowering MemberSuffix arm that stamps the call's
+    // `recvType` — without this `let`-binds would mis-type as `string`.
+    if (first && isMemberSuffix(first) && first.call && isNameRef(expr.head)) {
+      const svc = findDomainServiceByName(env, expr.head.name);
+      if (svc) {
+        const opDecl = svc.operations.find((o) => o.name === first.member);
+        curType = opDecl?.returnType
+          ? lowerType(opDecl.returnType, env)
+          : { kind: "primitive", name: "string" };
+        for (let i = 1; i < expr.suffixes.length; i++) {
+          curType = inferSuffixType(curType, expr.suffixes[i]!, env);
+        }
+        return curType;
+      }
+    }
     curType = inferExprType(expr.head, env);
     // Free-call collapse: head is NameRef and first suffix is CallSuffix
     // — the result type is the function's return type / VO type, then
