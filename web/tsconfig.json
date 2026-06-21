@@ -17,7 +17,6 @@
     "noEmit": true,
     "useDefineForClassFields": true,
     "types": ["vite/client"],
-    "baseUrl": ".",
     "paths": {
       "monaco-editor": ["./node_modules/@codingame/monaco-vscode-editor-api"]
     }

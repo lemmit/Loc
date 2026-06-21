@@ -505,6 +505,11 @@ export function generateVueForContexts(
   out.set("tsconfig.json", renderShell(pack, "tsconfig", {}));
   out.set("tsconfig.node.json", renderShell(pack, "tsconfig-node", {}));
   out.set("vite.config.ts", renderShell(pack, "vite-config", { base: viteBase, apiProxyTarget }));
+  // TS 6 (TS2882) requires a declaration for side-effect imports of
+  // non-code modules; the shadcnVue pack's `main.ts` does
+  // `import "./globals.css"`.  `vite/client` declares the `*.css`
+  // side-effect module (mirrors the React generator).
+  out.set("src/vite-env.d.ts", '/// <reference types="vite/client" />\n');
   out.set("index.html", renderShell(pack, "index-html", prepareIndexHtmlVM(deployable, ui)));
   out.set("Dockerfile", renderShell(pack, "dockerfile", {}));
   out.set(".dockerignore", renderShell(pack, "dockerignore", {}));

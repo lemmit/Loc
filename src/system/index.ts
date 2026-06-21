@@ -233,7 +233,7 @@ const E2E_PACKAGE_JSON =
       private: true,
       scripts: { test: "vitest run" },
       devDependencies: {
-        typescript: "^5.7.0",
+        typescript: "^6.0.0",
         vitest: "^2.1.0",
       },
     },

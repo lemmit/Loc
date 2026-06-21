@@ -87,7 +87,7 @@
     "isomorphic-git": "^1.38.5",
     "langium-cli": "~4.3.0",
     "marked": "^18.0.5",
-    "typescript": "~5.9.0",
+    "typescript": "~6.0.0",
     "vitest": "^4.1.9"
   }
 }

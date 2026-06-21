@@ -71,7 +71,7 @@ export const E2E_PACKAGE_JSON =
       devDependencies: {
         "@playwright/test": "^1.49.0",
         "@types/node": "^22.0.0",
-        typescript: "^5.7.0",
+        typescript: "^6.0.0",
       },
     },
     null,
