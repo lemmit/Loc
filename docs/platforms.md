@@ -112,20 +112,59 @@ available. The matured axis today is **`persistence:`**:
   repositories / MikroORM `EntitySchema` + `EntityManager`), so a project
   can switch persistence without touching its domain code.
 
-**Event-sourcing** (`persistedAs(eventLog)` + `apply(...)`) emits only on
-**node / `drizzle`** today (append-only event stream, fold-from-zero MVP).
-The roadmap grows it on .NET — **`efcore` first, then `dapper`** (an
-`<agg>_events` table folded through the same appliers; see
-[`proposals/workflow-and-applier.md`](proposals/workflow-and-applier.md)
-Phase A2.2). A dedicated **Marten** document/event-store backend is **3rd
-priority (if ever)**: `D-DOCUMENT-AXIS` (see [`decisions.md`](decisions.md))
-currently pins *no new Marten backend* — the event log lives on the existing
-relational stores.
+**Event-sourcing** (`persistedAs(eventLog)` + `apply(...)`) emits on **node,
+.NET, Python and Java**, plus **Elixir on `foundation: vanilla`** (append-only
+per-aggregate `<agg>_events` stream, fold-on-load). On the default `foundation:
+ash` it is a **fail-fast error** (`loom.event-sourcing-backend-unsupported`) —
+Ash has no pure-ES fit, so route the context to `foundation: vanilla` or a
+non-Phoenix backend (see *Phoenix foundations* below). A dedicated **Marten**
+document/event-store backend is **3rd priority (if ever)**: `D-DOCUMENT-AXIS`
+(see [`decisions.md`](decisions.md)) currently pins *no new Marten backend* —
+the event log lives on the existing relational stores.
 
 Other axes — `directoryLayout: byLayer | byFeature`, `style` / `application`,
-and the greenfield `foundation` / `transport` / `runtime` axes — are at
-varying stages; the rollout tracker above is the source of truth for what's
-real today.
+and the greenfield `transport` / `runtime` axes — are at varying stages; the
+rollout tracker above is the source of truth for what's real today.
+
+### Phoenix foundations (`foundation: ash` / `foundation: vanilla`)
+
+Elixir is the one backend with a **foundation** split. `foundation: ash`
+(default) emits `Ash.Resource` + `AshPostgres` + `AshPhoenix`; `foundation:
+vanilla` emits plain `Ecto.Schema` / `Ecto.Changeset` / `Ecto.Repo` over
+`Phoenix.Endpoint` + LiveView. Both are first-class and neither is deprecated
+(D-VANILLA-PHOENIX-FOUNDATION).
+
+A handful of features have **no idiomatic Ash fit** but a clean vanilla one.
+For these, "parity" on Phoenix is reached by **routing to `foundation:
+vanilla`**, *not* by forcing an un-idiomatic Ash emission — Loom will **not**
+adopt AshEvents/AshCommanded or a custom `Ash.DataLayer`/Ash provenance
+extension (D-VANILLA-ES-HOME; ratified — the Ash-side investment is out of
+scope). Each ash gap is a **fail-fast validator error** that names the
+constraint and points at `foundation: vanilla`, never a silent downgrade:
+
+| Feature | `foundation: ash` | `foundation: vanilla` | Ash gate (fail-fast) |
+|---|---|---|---|
+| Event-sourced storage `persistedAs(eventLog)` | 🚫 gated | ✓ emits | `loom.event-sourcing-backend-unsupported` |
+| Event-sourced **workflow** (saga appliers) | 🚫 gated | ✓ emits | `loom.event-sourced-workflow-unsupported` |
+| Provenanced fields (runtime trace) | 🚫 gated | ✓ emits | `loom.provenanced-backend-unsupported` |
+| `shape(document)` aggregate | 🚫 gated¹ | ✓ CRUD; custom finds/ops gated¹ | `loom.saving-shape-unsupported` (ash) / `loom.vanilla-document-unsupported` (vanilla sub-case) |
+| `or`-union-returning op with `emit`/`add`/`remove` body² | ⚠ return-dominant only² | ✓ full bodies | `loom.operation-return-unsupported` |
+| State persistence, unions, carriers, filters, stamping, inheritance | ✓ emits | ✓ emits | — (both foundations) |
+
+¹ `shape(document)` is gated outright on `ash` (its saving-shape menu is
+`relational` + `embedded` only — `Ash.Resource` has no idiomatic jsonb-document
+fit). `vanilla` emits the CRUD surface (an `(id, data, version)` jsonb table);
+a document aggregate with **custom finds or named operations** is still gated
+there (v1 limitation) — host those on node/dotnet/python/java.
+² For an `or`-union-**returning** op, `ash` emits when the body is
+return-dominant (`return`/`let`, in-memory `field := value`, and
+`precondition`/guard); a returning op whose body uses `emit`/`add`/`remove`
+routes to `foundation: vanilla` (DEBT-03).
+
+Every vanilla emitter is compiled against real Elixir/Ecto by
+`elixir-vanilla-build.yml` (one fixture per feature under
+`test/e2e/fixtures/elixir-vanilla-build/`), so the routing target is a verified
+escape hatch, not a paper one.
 
 ## Backend versioning
 
