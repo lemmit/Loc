@@ -35,11 +35,11 @@ node run.mjs sales-system    # one case
 ```
 
 The repo toolchain must be built first (`npm run build` at the root) so
-`bin/cli.js generate system` works.
+`bin/cli.js generate system` emits current output — a **stale `out/`**
+will generate old code and produce misleading failures.
 
-`api` failures and boot/infra errors fail the run. `unit` failures are
-**non-gating** today (see below); flip them on with `--gate-unit` or
-`LOOM_BEHAVIORAL_GATE_UNIT=1`.
+Both tiers gate: any `api` or `unit` failure, or a boot/infra error,
+fails the run.
 
 ## Corpus
 
@@ -58,15 +58,3 @@ the repo's `synthDDL`/runners) → PGlite → `exec(synthDDL)` →
 against `app.fetch`. All third-party deps stay external (resolved from
 this dir's `node_modules`), so there is one drizzle instance and PGlite's
 wasm assets load normally.
-
-## Known findings
-
-- **expect-throws emitter bug** (the reason `unit` is non-gating): the
-  emitted unit assertion for `expect(<call>).toThrow()` is mis-rendered
-  as `expect((<call>).toThrow()).toBe(true)` instead of
-  `expect(() => <call>).toThrow()`. The throwing call runs eagerly and
-  escapes, so the test errors even though the **domain logic is correct**
-  (it does throw). This was invisible before — emitted unit tests are
-  never compiled-as-tests or executed in CI. Lives in the
-  expect/`toThrow` lowering (`src/ir/lower/lower.ts` `expectStmtIR`) and
-  affects every backend's test emitter. Fix it, then make `unit` gate.

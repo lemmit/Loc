@@ -140,17 +140,14 @@ async function runCase(c) {
   }
 }
 
-const only = process.argv.slice(2);
+const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));
 const corpus = JSON.parse(readFileSync(join(HERE, "corpus.json"), "utf8")).cases.filter(
   (c) => only.length === 0 || only.includes(c.name),
 );
 
-// `unit` tier is non-gating by default (it currently surfaces a real
-// expect-throws emitter bug — see README "Known findings"); flip it on
-// with --gate-unit once the emitter is fixed.  `api` tier always gates.
-const gateUnit = only.includes("--gate-unit") || process.env.LOOM_BEHAVIORAL_GATE_UNIT === "1";
-
-let pass = 0, gatingFail = 0, reportFail = 0, errored = 0;
+// Both tiers gate: `api` (emitted `test e2e`) and `unit` (emitted
+// aggregate `test`). A boot/infra error fails the case.
+let pass = 0, fail = 0, errored = 0;
 for (const c of corpus) {
   process.stdout.write(`\n▶ ${c.name}  (${c.ddd})\n`);
   let results;
@@ -163,15 +160,11 @@ for (const c of corpus) {
   }
   for (const r of results) {
     const ok = r.status === "pass";
-    const gates = r.tier === "api" || gateUnit;
-    if (ok) pass++;
-    else if (gates) gatingFail++;
-    else reportFail++;
-    process.stdout.write(`  ${ok ? "✓" : gates ? "✗" : "⚠"} [${r.tier}] ${r.name}${ok || gates ? "" : "  (non-gating)"}\n`);
+    ok ? pass++ : fail++;
+    process.stdout.write(`  ${ok ? "✓" : "✗"} [${r.tier}] ${r.name}\n`);
     if (!ok && r.error) process.stdout.write(`      ${String(r.error).split("\n")[0]}\n`);
   }
 }
 
-const tail = reportFail ? `, ${reportFail} non-gating (unit) failed` : "";
-process.stdout.write(`\n${pass} passed, ${gatingFail} failed${tail}${errored ? `, ${errored} cases errored` : ""}\n`);
-process.exit(gatingFail > 0 || errored > 0 ? 1 : 0);
+process.stdout.write(`\n${pass} passed, ${fail} failed${errored ? `, ${errored} cases errored` : ""}\n`);
+process.exit(fail > 0 || errored > 0 ? 1 : 0);

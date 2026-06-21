@@ -5,8 +5,8 @@ name: Behavioral e2e (headless, no docker)
 # EMITS from the DSL:
 #   - api : the generated `e2e/<Sys>.e2e.test.ts` (`test e2e … against
 #           <node backend>`), dispatched into `app.fetch`.
-#   - unit: the generated pure-domain `*.test.ts` (`test "…"` blocks)
-#           — non-gating for now (see test/behavioral/README.md).
+#   - unit: the generated pure-domain `*.test.ts` (`test "…"` blocks).
+# Both tiers gate.
 #
 # This promotes the behavioral domain layer — which otherwise runs ONLY
 # nightly in the docker `conformance-full` leg (LOOM_E2E=1) — to a fast,
@@ -82,6 +82,6 @@ jobs:
         working-directory: test/behavioral
         run: npm ci || npm install --no-audit --no-fund
 
-      - name: Run behavioral tier (api gates; unit reports)
+      - name: Run behavioral tier (api + unit gate)
         working-directory: test/behavioral
         run: node run.mjs

@@ -83,7 +83,7 @@ npm run test:k8s-e2e      # cluster smoke — install ONE backend's chart (per-d
 **Behavioral tier (headless, no docker)** — boots the GENERATED Hono backend on PGlite in-process and runs the DSL-emitted `test e2e` (api) + `test` (unit) suites, promoting the behavioral domain layer (otherwise nightly-docker-only in `conformance-full`) to a fast per-PR gate. Reuses the playground's own runners (`web/src/testing/*`, `web/src/runtime/ddl.ts`). Not part of `npm test` (own pinned deps — zod 3 etc.):
 
 ```bash
-cd test/behavioral && npm ci && node run.mjs   # api gates; unit reports (see test/behavioral/README.md)
+cd test/behavioral && npm ci && node run.mjs   # api + unit both gate (see test/behavioral/README.md)
 ```
 
 Corpus is a curated allowlist in `test/behavioral/corpus.json` (single-`platform: node`-backend systems only, so dispatch is unambiguous). Gated by `behavioral-e2e.yml`.
@@ -275,7 +275,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `generated-svelte-build.yml` — matrix `{example × svelte pack}`, generates the SvelteKit project and typechecks it (the Svelte analogue of `generated-react-build.yml`). Vue has no dedicated generated-build workflow yet (it rides the fast vitest suite).
 - `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview).
 - `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader run). `conformance-full` (nightly / `run-conformance` label) is the only place the DSL-emitted behavioral `test e2e` suites run against a docker stack.
-- `behavioral-e2e.yml` — headless per-PR behavioral gate: boots the GENERATED Hono backend on PGlite in-process (no docker) and runs the DSL-emitted `test e2e` (api, gating) + `test` (unit, reporting) suites over `test/behavioral/corpus.json`. Promotes the behavioral domain layer from nightly-docker-only to a fast per-PR signal (Hono/TS only; cross-backend stays in conformance).
+- `behavioral-e2e.yml` — headless per-PR behavioral gate: boots the GENERATED Hono backend on PGlite in-process (no docker) and runs the DSL-emitted `test e2e` (api) + `test` (unit) suites over `test/behavioral/corpus.json` (both tiers gate). Promotes the behavioral domain layer from nightly-docker-only to a fast per-PR signal (Hono/TS only; cross-backend stays in conformance).
 - `cleanup-artifacts.yml` — scheduled tidy of test artefacts.
 
 ### Local enforcement (checked-in Claude Code hooks)
