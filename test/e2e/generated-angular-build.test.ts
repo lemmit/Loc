@@ -60,9 +60,10 @@ const MINIMAL: Case = {
   `,
 };
 
-/** Scaffolded ui — exercises the stub-page + router emitters across the
- *  scaffold-synthesised page set (list / new / detail / home).  The op-form
- *  detail pages stub; the list (QueryView) + new (CreateForm) pages render. */
+/** Scaffolded ui — exercises the router emitters across the
+ *  scaffold-synthesised page set (list / new / detail / home).  Every page
+ *  now renders a real body: the detail page's op-forms (#1457), the list
+ *  (QueryView), and the new (CreateForm) — no page stubs in this set. */
 const SCAFFOLD: Case = {
   name: "scaffold",
   angularDir: "web",
