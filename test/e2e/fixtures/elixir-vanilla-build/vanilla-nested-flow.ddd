@@ -1,0 +1,74 @@
+// Nested control flow inside vanilla (plain Ecto/Phoenix) workflow bodies.
+// Before this, the vanilla emitter lowered a `for-each` body / `if-let` branch
+// over a FLAT statement set only, dropping nested `for-each` / `if-let` /
+// `repo-run` / `repo-let` as `# TODO: lower ... statement kind` — uncompilable
+// Elixir for valid input (the for-each validator only inspects op-calls, so the
+// nesting was never rejected upstream).  Each nested form now reuses the shared
+// `lowerStatement` dispatch as a `<-` with-clause, so first-failure short-
+// circuits the same way a flat op does.  Compiled by build-generated-elixir-
+// vanilla so every nesting passes `mix compile --warnings-as-errors`.
+system Shop {
+  subdomain Sales {
+    context Orders {
+      criterion Pending(d: bool) of Order = this.open == d
+      aggregate Order with crudish {
+        open: bool
+        total: int
+        operation confirm() { open := false }
+      }
+      repository Orders for Order { }
+      retrieval PendingQ(d: bool) of Order { where: this.open == d }
+
+      // (1) if-let nested inside a for-each body.
+      workflow ifLetInForEach {
+        create(d: bool) {
+          let xs = Orders.run(PendingQ(d), page: { offset: 0, limit: 50 })
+          for x in xs {
+            if let o = Orders.find(Pending(d)) { x.confirm() }
+          }
+        }
+      }
+
+      // (2) for-each (over a branch-local repo-run) nested inside an if-let branch.
+      workflow forEachInIfLet {
+        create(d: bool) {
+          if let o = Orders.find(Pending(d)) {
+            let ys = Orders.run(PendingQ(d))
+            for y in ys { y.confirm() }
+          }
+        }
+      }
+
+      // (3) if-let nested inside an if-let branch.
+      workflow ifLetInIfLet {
+        create(d: bool) {
+          if let o = Orders.find(Pending(d)) {
+            if let p = Orders.find(Pending(d)) { p.confirm() }
+          }
+        }
+      }
+
+      // (4) for-each nested inside a for-each body (inner iterable is a
+      //     branch-local repo-run binding).
+      workflow forEachInForEach {
+        create(d: bool) {
+          let xs = Orders.run(PendingQ(d))
+          for x in xs {
+            let ys = Orders.run(PendingQ(d))
+            for y in ys { y.confirm() }
+          }
+        }
+      }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}
