@@ -7,29 +7,30 @@ import type {
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
+import { renderVanillaAggregateTestModule } from "./vanilla/tests-emit.js";
 
 // ---------------------------------------------------------------------------
 // `test "..." { ... }` DSL → ExUnit test module (the vitest/xUnit/pytest/JUnit
 // sibling).  This closes the Phoenix half of the domain-test parity gap
 // (docs/audits/test-parity-generated-backends.md, F1).
 //
-// PURE-SUBSET POLICY.  Unlike the other four backends, Elixir has no pure
-// in-memory domain object model: an Ash resource / Ecto schema validates only
-// at the changeset / action layer, which runs against a live DB.  So a domain
-// `test` block is emitted as a runnable ExUnit `test` ONLY when its body is
-// purely in-memory — value-object construction + field/derived reads + pure
-// arithmetic asserted via `expect(x).<cmp>(y)`.  A test that
+// The two foundations diverge because their domain models do:
 //
-//   * calls an aggregate `create(...)` or an aggregate/value-object operation
-//     (Elixir has no instance methods; these run a real action / Repo insert), or
-//   * asserts a construction-time invariant via `expect(...).toThrow()`
-//     (an Elixir struct literal never raises — invariants live on the changeset),
+//   * VANILLA (Ecto/Phoenix) — we control the code, so the aggregate carries a
+//     PURE domain core (`vanilla/domain-core-emit.ts`): `create/1` validates via
+//     `apply_action` and each op runs precondition + in-memory mutation, both
+//     Repo-free.  `vanilla/tests-emit.ts` ports the full Loom idiom (create / op
+//     / toThrow / field reads) onto it — nothing is skipped except value-object
+//     construction invariants (a vanilla VO is an unvalidated map — a real
+//     runtime gap, flagged with a documented `@tag :skip`).
 //
-// is emitted as an `@tag :skip` placeholder that preserves the test name and
-// records why, so the parity gap is visible in generated output (never silently
-// dropped) and a future DB-backed `mix test` harness can un-skip it.  Both
-// foundations (`ash` / `vanilla`) follow the same policy — vanilla's
-// `create_*` also goes through `Repo.insert`.
+//   * ASH — an Ash resource validates only through the data layer (actions run
+//     against a live DB) and has no in-memory object-with-methods.  So this file
+//     emits the PURE SUBSET: a runnable `test` only for an in-memory body
+//     (value-object construction + field reads via `expect(x).<cmp>(y)`); a test
+//     that calls `create`/operations or asserts a construction-time `toThrow`
+//     becomes an `@tag :skip` placeholder (name + reason preserved) pending a
+//     DB-backed `mix test` harness.
 // ---------------------------------------------------------------------------
 
 type Foundation = "ash" | "vanilla";
@@ -61,10 +62,14 @@ export function emitAggregateTests(
   let emitted = false;
   for (const agg of ctx.aggregates) {
     if (agg.tests.length === 0) continue;
-    out.set(
-      `test/${snake(ctx.name)}/${snake(agg.name)}_test.exs`,
-      renderAggregateTestModule(agg.name, agg.tests, contextModule, foundation),
-    );
+    // Vanilla ports the full idiom onto the aggregate's pure domain core
+    // (vanilla/tests-emit.ts + domain-core-emit.ts); ash stays the pure-subset
+    // (Ash actions are data-layer-bound — see the file header).
+    const content =
+      foundation === "vanilla"
+        ? renderVanillaAggregateTestModule(agg, contextModule)
+        : renderAggregateTestModule(agg.name, agg.tests, contextModule, foundation);
+    out.set(`test/${snake(ctx.name)}/${snake(agg.name)}_test.exs`, content);
     emitted = true;
   }
   return emitted;

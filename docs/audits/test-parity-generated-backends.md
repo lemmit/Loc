@@ -40,11 +40,11 @@ Python (`python`), Java (`java`).
 
 | Capability | node | dotnet | elixir | python | java |
 |---|:--:|:--:|:--:|:--:|:--:|
-| Domain `test "…"` → unit-test file | ✅ vitest `*.test.ts` | ✅ xUnit `*Tests.cs` | ◑ ExUnit `*_test.exs` (**pure-subset**: in-memory tests run, `create`/op/`toThrow` tests `@tag :skip`) | ✅ pytest `tests/test_*.py` | ✅ JUnit 5 `*Tests.java` |
+| Domain `test "…"` → unit-test file | ✅ vitest `*.test.ts` | ✅ xUnit `*Tests.cs` | ✅ ExUnit `*_test.exs` (**vanilla**: full port via a pure domain core; **ash**: pure-subset, `create`/op/`toThrow` `@tag :skip`) | ✅ pytest `tests/test_*.py` | ✅ JUnit 5 `*Tests.java` |
 | `expect(x).toBe/…` (5 value matchers) | ✅ | ✅ | ✅ (pure tests) | ✅ | ✅ |
-| `expect(call).toThrow()` | ✅ | ✅ | skipped (no in-mem raise) | ✅ | ✅ |
-| `create({…})` input coercion (ids / VOs / datetime / omitted-optional fill) | ✅ | ✅ | skipped (DB-backed) | ✅ | ✅ |
-| `currentUser`-gated op → synthetic admin actor threaded | ✅ | ✅ | skipped (op = DB) | ✅ | ✅ |
+| `expect(call).toThrow()` | ✅ | ✅ | ✅ vanilla (create→`{:error}`, op→`assert_raise`); ash skipped | ✅ | ✅ |
+| `create({…})` → factory | ✅ | ✅ | ✅ vanilla (`apply_action`, money→Decimal); ash skipped | ✅ | ✅ |
+| `currentUser`-gated op → synthetic admin actor threaded | ✅ | ✅ | n/a (no actor seam in the pure core yet) | ✅ | ✅ |
 | `expect` with no matcher (bare boolean) | throws (gated) | throws (gated) | — | `assert <expr>` | `assertTrue(<expr>)` |
 | Dedicated unit test for the emitter | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **E2E `api`** (HTTP, multi-backend replay) | ✅ exercised | ✅ exercised | ✅ exercised | ✅ exercised | ✅ exercised |
@@ -52,20 +52,32 @@ Python (`python`), Java (`java`).
 
 ## Findings
 
-### F1 — Phoenix/Elixir silently drops domain `test "…"` blocks (major) — *partially closed*
+### F1 — Phoenix/Elixir silently drops domain `test "…"` blocks (major) — *closed for vanilla; pure-subset for ash*
 
-> **Update (shipped):** `src/generator/elixir/tests-emit.ts` now emits a
-> **pure-subset** ExUnit suite on both foundations (wired into
-> `index.ts` and `vanilla/index.ts`; `test/<ctx>/<agg>_test.exs` +
-> `test/test_helper.exs`). An in-memory test (value-object construction +
-> field reads, asserted via `expect(x).<cmp>(y)`) runs; a test that calls
-> aggregate `create`/operations or asserts a construction-time
-> `expect(…).toThrow()` is emitted as an `@tag :skip` placeholder
-> (name + reason preserved). The "silent drop" below is therefore gone —
-> assertions are now either run or *visibly* skipped. The remaining gap
-> (DB-backed `create`/op/invariant tests) needs a DataCase + sandbox
-> harness to un-skip; see the recommendations. The original finding is
-> kept below for context.
+> **Update (shipped):** Phoenix now emits an ExUnit suite
+> (`test/<ctx>/<agg>_test.exs` + `test/test_helper.exs`), wired into
+> `index.ts` and `vanilla/index.ts`.  The two foundations diverge with
+> their domain models — and the investigation corrected an early wrong
+> claim that *both* needed a DB:
+>
+> * **vanilla — full port.**  We control the generated code, so the
+>   aggregate carries a **pure domain core** (`vanilla/domain-core-emit.ts`):
+>   `create/1 = base_changeset |> Ecto.Changeset.apply_action(:insert)` and
+>   `<op>/2 = precondition + in-memory mutation`, both Repo-free.
+>   `vanilla/tests-emit.ts` ports the whole idiom onto it — `create`
+>   (`{:ok,_}` / `{:error,_}`), operations (state-threaded), precondition
+>   `toThrow` (`assert_raise`), field reads (`assert ==`, money via
+>   `Decimal`).  **Verified green under `mix test` with no database.**  The
+>   only skip is a value-object construction invariant (`expect(Money{…})
+>   .toThrow()`) — a vanilla VO is an unvalidated map (a real *runtime* gap,
+>   see F5).
+> * **ash — pure-subset.**  An Ash resource validates only through the data
+>   layer (actions need a live DB) and has no in-memory object-with-methods,
+>   so only an in-memory value-object field read runs; `create`/op/`toThrow`
+>   stay `@tag :skip`.  (`Ash.Changeset.for_create/for_update` + `valid?`
+>   could lower the *rejection* tests DB-free — a viable follow-up.)
+>
+> The "silent drop" is gone — assertions are now run or *visibly* skipped.
 
 The original state: `src/generator/elixir/` contained **no test
 emitter** — no reference to `agg.tests` / `TestIR` anywhere under it
@@ -145,6 +157,41 @@ none) — they are only exercised indirectly if a build-gated corpus
 example happens to contain `test` blocks. The emitters that emit are
 themselves unequally guarded.
 
+### F5 — vanilla value objects aren't validated at construction (runtime gap, surfaced while porting tests)
+
+A `valueobject` with an `invariant` (e.g. `Money { amount: money …
+invariant amount >= 0 }`) compiles, on `foundation: vanilla`, to a plain
+`:map` (JSONB) column with **no validating constructor** — the VO
+invariant is enforced nowhere.  So `expect(Money{ amount: -1 }).toThrow()`
+cannot run (nothing rejects the negative amount), and — more importantly —
+**a negative Money silently persists at runtime**.  This is why the
+vanilla test emitter `@tag :skip`s VO-construction invariants (the one
+remaining skip).  Closing it means generating a VO changeset/constructor
+(`Money.new(attrs) :: {:ok, t} | {:error, changeset}`, an embedded-schema
+changeset running the invariant) and routing aggregate VO fields through
+it; the test emitter would then lower `expect(Money{bad}).toThrow()` to
+`assert {:error, _} = Money.new(%{…})`.  Ash enforces VO invariants
+through the embedded resource, so this gap is vanilla-specific.
+
+### F6 — vanilla doesn't apply Loom field defaults in the domain layer (runtime gap)
+
+A field default (`status: string = "open"`) is **not** applied by the
+vanilla schema or `base_changeset` — `status` lands in `@required_fields`
+with no default, so `create(%{customer: "acme"})` (relying on the default)
+fails `validate_required`.  The other backends fill the default in their
+`create` factory; vanilla requires the caller to pass every required
+field.  Confirmed by reading the generated schema/changeset (no `default:`
+on the field, no `put_default` in `base_changeset`).  Independent of test
+emission — it affects the real create path — but it surfaced here because
+a DSL test that leans on a default would fail only on vanilla.  Fix:
+emit the default onto the Ecto `field` (`field :status, :string, default:
+"open"`) and/or drop defaulted fields from `@required_fields`.
+
+> Both F5 and F6 are pre-existing **vanilla codegen** gaps the test-parity
+> work uncovered, not regressions introduced by it.  Neither is exercised
+> by the current corpus's elixir-targeted tests, so no CI is red today —
+> but each is a latent correctness issue worth its own fix.
+
 ## What is at parity (the positives)
 
 - **E2E `api` parity is strong.** `renderE2EFile` emits one vitest file
@@ -167,23 +214,33 @@ themselves unequally guarded.
 
 ## Recommendations (ranked)
 
-1. ~~**Emit ExUnit domain tests on Phoenix**~~ — **done** (pure-subset):
-   `src/generator/elixir/tests-emit.ts`, wired into `index.ts` +
-   `vanilla/index.ts`, with a Phoenix "Tests" row in `docs/generators.md`
-   and a generator test (`test/generator/elixir/exunit-tests-emit.test.ts`).
-2. **Promote the skipped Phoenix tests to runnable** with a DataCase +
-   `Ecto.Adapters.SQL.Sandbox` harness + a Postgres-backed `mix test`
-   CI gate (the sibling of the `*-obs-e2e` legs that already stand up a
-   Postgres sidecar). This is what un-skips the `create`/op/invariant
-   tests — the remaining half of F1. Bigger lift; deferred deliberately
-   (it makes Phoenix domain tests DB-backed integration tests, unlike the
-   pure/in-memory tests of the other four backends).
-3. **Add a conformance gate** that every domain-logic backend emits a
+1. ~~**Emit ExUnit domain tests on Phoenix**~~ — **done**.  Vanilla is a
+   full port via the pure domain core (`vanilla/domain-core-emit.ts` +
+   `vanilla/tests-emit.ts`); ash is the pure-subset (`tests-emit.ts`).
+   Wired into `index.ts` + `vanilla/index.ts`, Phoenix "Tests" row in
+   `docs/generators.md`, generator test
+   (`test/generator/elixir/exunit-tests-emit.test.ts`), and the emitted
+   vanilla suite verified green under `mix test` (no DB).
+2. **Add a Postgres-backed `mix test` CI gate for the vanilla suite** —
+   today the emitted vanilla tests are DB-free, so the existing per-PR
+   build gate (`elixir-vanilla-build.yml`, `mix compile`) does **not**
+   compile or run `test/`.  A `mix test` leg (no sidecar needed — the
+   suite never touches the Repo) would pin the parity so a generator
+   change can't silently break the emitted tests.
+3. **Un-skip the ash rejection tests DB-free** via
+   `Ash.Changeset.for_create/for_update` + `valid?` (validations run at
+   changeset build, no data layer) — lowers invariant/precondition
+   `toThrow` on ash without a DB.  Happy-path state assertions on ash
+   still need a DataCase + `SQL.Sandbox` harness (deferred).
+4. **Close F5/F6 (vanilla runtime gaps):** generate a validating VO
+   constructor (un-skips the last vanilla test shape) and apply field
+   defaults in the vanilla schema/changeset.  Both are real correctness
+   fixes beyond tests.
+5. **Add a conformance gate** that every domain-logic backend emits a
    test artefact for an aggregate declaring `test` blocks, and pin the
-   Phoenix pure-vs-`@tag :skip` classification (closes F2's detection
-   gap; nothing in `test/conformance/` checks test-file emission today).
-4. **Unify the no-matcher / unknown-matcher failure mode** across the
+   per-foundation classification (closes F2's detection gap).
+6. **Unify the no-matcher / unknown-matcher failure mode** across the
    emitters (F3): python and java should `throw`, matching node/dotnet.
-   (The new elixir emitter already `throw`s on an unknown matcher.)
+   (Both new elixir emitters already `throw` / skip on an unknown shape.)
 5. **Backfill emitter unit tests** for the python and java domain-test
    emitters (F4), mirroring `create-in-test-emission.test.ts`.

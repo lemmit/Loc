@@ -23,6 +23,7 @@ import type {
 import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { isVanillaDocAgg, renderDocSchema } from "./document-emit.js";
+import { renderAggregatePureCore } from "./domain-core-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 
@@ -55,7 +56,7 @@ export function emitVanillaSchemas(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}.ex`,
       isVanillaDocAgg(agg, ctx, sys)
         ? renderDocSchema(appModule, ctxModule, agg, schemaPrefix)
-        : renderSchema(appModule, ctxModule, agg, enumsByName, schemaPrefix),
+        : renderSchema(appModule, ctxModule, agg, enumsByName, schemaPrefix, ctx, sys),
     );
     // Each entity part (`entity Line { … }`) becomes an Ecto `embedded_schema`
     // module the aggregate `embeds_many`/`embeds_one`s — the vanilla analogue of
@@ -142,6 +143,8 @@ function renderSchema(
   agg: AggregateIR,
   enumsByName: Map<string, EnumIR>,
   schemaPrefix?: string,
+  ctx?: BoundedContextIR,
+  sys?: SystemIR,
 ): string {
   const moduleName = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const tableName = snake(plural(agg.name));
@@ -179,6 +182,13 @@ function renderSchema(
   const schemaBody = [fieldLines, containLines, timestampsLine].filter(Boolean).join("\n");
   const prefixLine = schemaPrefix ? `  @schema_prefix ${JSON.stringify(schemaPrefix)}\n` : "";
 
+  // Pure domain core (`create/1` + `<op>/2`) — emitted only for an aggregate
+  // that declares `test "..."` blocks, so the generated ExUnit suite can run
+  // the domain logic in memory (no DB).  See `domain-core-emit.ts`.
+  const pureCore =
+    ctx && agg.tests.length > 0 ? renderAggregatePureCore(appModule, ctx, agg, sys) : [];
+  const pureCoreBlock = pureCore.length > 0 ? `\n${pureCore.join("\n")}\n` : "";
+
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc false
@@ -190,7 +200,7 @@ ${prefixLine}
   schema "${tableName}" do
 ${schemaBody}
   end
-end
+${pureCoreBlock}end
 `;
 }
 
