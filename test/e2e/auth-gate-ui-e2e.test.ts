@@ -217,21 +217,16 @@ describe.skipIf(!ENABLED)("auth UI-gate runtime smoke", () => {
 //   + a postgres:16 sidecar + `mix deps.get / ecto.create / ecto.migrate /
 //   phx.server` on :4000, then curl from the host (--network host).
 //
-// Two facts about the dev-stub make the assertions what they are:
-//   1. The LiveView `:browser` pipeline authenticates from the SESSION
-//      (LiveAuth.verify_session reads session["current_user"]) — NOT from the
-//      Auth plug's fixed-admin token (that's only on the :api JSON pipeline).
-//      Nothing in the dev-stub seeds that session, so a raw request 302s to
-//      /login.  We mint a signed session cookie carrying {role: "admin"} with
-//      the SAME secret_key_base + signing_salt the generated endpoint verifies
-//      with (config/dev.exs + endpoint.ex), so the server accepts it — the
-//      server-side analogue of the JSX legs mocking /auth/me to "admin".
-//   2. The generated dev endpoint omits `live_view: [signing_salt: …]`, which
-//      LiveView requires to compute the dead-render session token; without it
-//      even an authenticated render 500s.  We append it to the throwaway
-//      config/dev.exs at boot (test-local; touches no committed source).
+// The generated dev stub authenticates LiveViews out of the box: LiveAuth
+// falls back to the SAME built-in admin the :api plug grants every request
+// (so the empty browser session no longer 302s to /login), and config.exs
+// carries the `live_view: [signing_salt]` the dead-render needs.  So this leg
+// boots the emitted project AS-IS — no cookie minting, no config patch — and
+// the curls carry no session cookie at all.  (Both gaps were generator bugs
+// fixed in the same PR as this assertion; before the fix this leg needed two
+// test-local workarounds.)
 //
-// With one fixed admin identity this proves BOTH gate branches per site:
+// With the one fixed admin identity this proves BOTH gate branches per site:
 //   GET /public → 200, sidebar shows nav-public + nav-admin (admin sees admin
 //                 link) but NOT nav-super (admin is not superadmin);
 //   GET /admin  → 200, renders "Admin Area", not the deny path;
@@ -312,15 +307,7 @@ describe.skipIf(!PHX_RUN)("auth UI-gate runtime smoke (phoenix / server-rendered
     projDir = path.join(workDir, "out", "phoenix_app");
     expect(fs.existsSync(path.join(projDir, "mix.exs")), "phoenix project emitted").toBe(true);
 
-    // 2. The generated dev endpoint omits `live_view: [signing_salt]`; LiveView
-    //    needs it for the dead-render session token.  Inject it (test-local).
-    fs.appendFileSync(
-      path.join(projDir, "config", "dev.exs"),
-      "\n# [auth-gate-smoke] LiveView dead-render needs a signing salt.\n" +
-        'config :phoenix_app, PhoenixAppWeb.Endpoint, live_view: [signing_salt: "loom-gate-smoke-salt"]\n',
-    );
-
-    // 3. Postgres sidecar on the host (the app's dev default is
+    // 2. Postgres sidecar on the host (the app's dev default is
     //    postgres:postgres@localhost:5432/phoenix_app_dev; --network host below
     //    lets the container reach it on localhost).
     try {
@@ -347,32 +334,14 @@ describe.skipIf(!PHX_RUN)("auth UI-gate runtime smoke (phoenix / server-rendered
     const shellPrefix = mirror.shellPrefix;
     const dbUrl = "ecto://postgres:postgres@localhost:5432/phoenix_app_dev";
 
-    // 4. Mint a signed session cookie carrying current_user.role == "admin"
-    //    with the dev endpoint's own secret_key_base + signing_salt, so
-    //    LiveAuth.verify_session accepts it (the dev-stub never seeds the
-    //    session itself).  Done in-container so Plug.Crypto does the signing.
-    fs.writeFileSync(
-      path.join(projDir, "mint_cookie.exs"),
-      [
-        "# [auth-gate-smoke] Mint a signed Phoenix session cookie for the dev-stub",
-        "# LiveAuth gate, using the endpoint's own secret_key_base + signing_salt.",
-        'secret = "dev-secret-key-base-replace-in-production-with-mix-phx-gen-secret"',
-        'salt = "loom-generated"',
-        'session = %{"current_user" => %{role: System.get_env("ROLE") || "admin"}}',
-        "binary = :erlang.term_to_binary(session)",
-        "derived = Plug.Crypto.KeyGenerator.generate(secret, salt, iterations: 1000, length: 32, digest: :sha256)",
-        'IO.puts("_phoenix_app_key=" <> Plug.Crypto.MessageVerifier.sign(binary, derived))',
-      ].join("\n"),
-    );
-
-    // 5. Fetch deps + create/migrate the DB + boot phx.server (background), and
-    //    mint the cookie along the way.  All inside the elixir image with the
-    //    hex mirror's docker args + shell prefix.
+    // 3. Fetch deps + create/migrate the DB + boot phx.server (background),
+    //    inside the elixir image with the hex mirror's docker args + shell
+    //    prefix.  No cookie minting / config patching — the generated dev stub
+    //    authenticates LiveViews as the built-in admin on its own.
     phxLog = path.join(workDir, "phx.log");
     const bootCmd =
       `${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
       `mix deps.get && mix ecto.create && mix ecto.migrate && ` +
-      `mix run --no-start mint_cookie.exs > /app/cookie.txt && ` +
       `mix phx.server`;
     const dockerRun = [
       "docker",
@@ -415,35 +384,25 @@ describe.skipIf(!PHX_RUN)("auth UI-gate runtime smoke (phoenix / server-rendered
 
   it("phoenix: server-rendered menu + page-guard gate by role", { timeout: 120_000 }, async () => {
     try {
-      // The admin session cookie minted in-container (step 4).
-      const cookie = fs.readFileSync(path.join(projDir, "cookie.txt"), "utf-8").trim();
-      expect(cookie.startsWith("_phoenix_app_key="), "cookie minted").toBe(true);
-      const hdr = { cookie };
-
-      // Sanity: WITHOUT the cookie the LiveView session is empty → 302 /login.
-      const anon = await fetch("http://localhost:4000/public", { redirect: "manual" });
-      expect(anon.status, "anon /public redirects (no session)").toBe(302);
-      expect(anon.headers.get("location")).toBe("/login");
-
-      // /public — admin sees the menu, with the admin link shown and the
-      // super link hidden (both gate branches in one render).
-      const pub = await fetch("http://localhost:4000/public", { headers: hdr });
-      expect(pub.status).toBe(200);
+      // No cookie: the generated dev stub authenticates the LiveView as the
+      // built-in admin out of the box (the fix — previously this 302'd to
+      // /login).  /public renders 200 as admin, proving dev-session seeding.
+      const pub = await fetch("http://localhost:4000/public");
+      expect(pub.status, "dev stub renders /public as built-in admin (no login)").toBe(200);
       const pubHtml = await pub.text();
+      // Sidebar shows the admin link but hides the super link — both gate
+      // branches in one render (admin sees admin, admin is not superadmin).
       expect(pubHtml).toContain('data-testid="nav-public"');
       expect(pubHtml).toContain('data-testid="nav-admin"');
       expect(pubHtml).not.toContain('data-testid="nav-super"');
 
       // /admin — the page-guard ALLOWS admin: renders the page, no redirect.
-      const adm = await fetch("http://localhost:4000/admin", { headers: hdr });
+      const adm = await fetch("http://localhost:4000/admin");
       expect(adm.status).toBe(200);
       expect(await adm.text()).toContain("Admin Area");
 
       // /super — the page-guard DENIES a non-superadmin: 302 back to "/".
-      const sup = await fetch("http://localhost:4000/super", {
-        headers: hdr,
-        redirect: "manual",
-      });
+      const sup = await fetch("http://localhost:4000/super", { redirect: "manual" });
       expect(sup.status).toBe(302);
       expect(sup.headers.get("location")).toBe("/");
     } catch (err) {
