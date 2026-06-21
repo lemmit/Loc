@@ -190,9 +190,33 @@ persistence seam (fold-on-load / append-own-events):
   (`elixir-vanilla-build.yml`). Foundation-aware gate coverage in
   `test/ir/workflow-event-sourced-storage.test.ts`.
 
+## Done — eventSourced-workflow instance reads (fold-on-load)
+
+`GET /workflows/<wf>/instances[/{id}]` now ships for `eventSourced` workflows on
+all 5 ES backends (node / dotnet / python / java / elixir-vanilla) — the same
+read surface state-based sagas already had, projecting the same
+`instanceWireShape`. Design: **enrich the shape, branch the body.**
+`enrichWorkflowInstanceShape` (`src/ir/enrich/enrichments.ts`) dropped its
+`|| wf.eventSourced` short-circuit, so an ES workflow with a correlation field +
+state fields now carries `instanceWireShape` from the same pure
+`wireFieldsForWorkflow` (no new IR field — the read body branches on the existing
+`wf.eventSourced`). Each backend's instance emitter branches the **read body**:
+**LIST** loads all `<wf>_events` ordered by `(stream_id, version)`, groups by
+`stream_id`, and folds each stream (mirroring that backend's own ES-aggregate
+`findAll`); **byId** loads + folds a single stream (reusing the dispatch-handler
+machinery), 404 on an empty stream. operationIds + route paths come unchanged
+from `src/ir/util/openapi-ids.ts`, so cross-backend OpenAPI parity holds by
+construction; no migration change (`<wf>_events` already emitted). Stateless
+(non-correlated) workflows still get no instance read surface. Tests:
+`test/ir/workflow-instance-shape.test.ts` (enrich) + the per-backend
+`*-workflow-instances` / ES-workflow generator suites. (`elixir+ash` stays out
+of scope — no pure-ES fit.)
+
 ## Next slices (recommended order)
 
-1. **eventSourced-workflow instance reads (fold-on-load)** — optional read surface:
-   `GET /workflows/<wf>/instances[/{id}]` folding the stream per correlation
-   (today ES workflows have no `instanceWireShape`, so no read API). Lower priority
-   — the saga is fully functional via dispatch + choreography without it.
+1. **eventSourced-workflow instance _views_ (`view X = <Workflow> where …`)** —
+   the view-over-workflow source already ships for state-based sagas; extend it to
+   read the ES instance read-model (fold-projected) now that ES workflows carry
+   `instanceWireShape`. Additive; the saga is fully functional without it.
+2. **Scaffold instance _pages_ for ES workflows** — the opt-in scaffold instance
+   list/detail pages (already available for state sagas) over the new ES read API.
