@@ -329,11 +329,19 @@ What shipped, and what stays deferred after an end-to-end investigation of the
 
 ## 11. Plan: named filters in service of **selective bypass** (the adopted feature)
 
-> **Status:** PLAN (approved scope, 2026-06). State audit + design review done
-> (fresh `main` @ `86d55e87`). Supersedes §5's "filters stay per-aggregate, don't
-> dedup" verdict on the *value question*: dedup is dropped as a goal; the feature
-> is **selectively-bypassable filters**, with the §4 provenance seam as its
+> **Status:** PLAN — APPROVED, implementation started (2026-06). State audit +
+> design review + simulation sign-off done (fresh `main` @ `86d55e87`).
+> Supersedes §5's "filters stay per-aggregate, don't dedup" verdict on the
+> *value question*: dedup is dropped as a goal; the feature is
+> **selectively-bypassable filters**, with the §4 provenance seam as its
 > substrate.
+>
+> **User-approved decisions:** keyword `ignoring`; bypass-all via the `*`
+> wildcard; scope `find` + `view` + inline reads; bypassing an unknown /
+> filter-less capability or an unsupported backend is a compile error
+> (`loom.filter-bypass-unknown-capability` / `loom.filter-bypass-no-filter` /
+> `loom.filter-bypass-unsupported`). Ship order: Slice 0 → .NET → Drizzle+Ecto →
+> Java (full hybrid) → defer Ash + Python.
 
 ### 11.1 The reframe (why not "dedup")
 
@@ -358,8 +366,10 @@ aggregate Order with softDeletable, tenantOwned { code: string  total: money }
 
 repository Orders for Order {
   find adminView(): Order[] ignoring softDeletable   // drop softDeletable's predicate; keep tenantOwned's
-  find raw(): Order[] ignoring all                    // bypass every capability filter (soft kw)
+  find raw(): Order[] ignoring *                      // bypass every capability filter (wildcard)
 }
+
+view ActiveOrders = Order where this.total > 0 ignoring softDeletable   // also on views
 ```
 ```csharp
 // .NET / EF Core 10 — the bypass call site that is vapor today
@@ -367,19 +377,33 @@ public Task<List<Order>> AdminViewAsync() =>
     _db.Orders.IgnoreQueryFilters(["SoftDeletableFilter"]).ToListAsync();
 ```
 
-Grammar: extend `FindDecl` (`ddd.langium:1050-1052`) with an optional
-`('ignoring' ('all' | bypass+=[Capability] (',' bypass+=[Capability])*))?` clause
-— soft keyword `ignoring`, flat `+=` list, discriminator over the `all` form.
-A capability contributing *several* filters is bypassed **as a unit**.
-Aggregate-local anonymous `filter <expr>` (no capability) is **not** bypassable —
-accepted scoping (you own that source); revisit only if a real need appears.
+**Surface (user-approved 2026-06):** keyword **`ignoring`**; bypass-all via the
+**`*`** wildcard (not an `all` soft keyword); allowed scope is **`find` +
+`view` + inline reads** (broader than a find-only v1).
+
+- **`find` / `view`** — a trailing clause, sibling of `where`:
+  `('ignoring' ('*' | bypass+=[Capability] (',' bypass+=[Capability])*))?`
+  on `FindDecl` (`ddd.langium:1050-1052`) and on both `View` forms
+  (`ddd.langium:1151-1162`, after each `where`). Soft keyword `ignoring`; flat
+  `+=` list; `*` is the discriminator over the explicit-capability list.
+- **Inline reads** — `Repo.findAll(…)` / `Repo.run(<Retrieval>(…))` are *member-
+  call expressions*, so bypass there is an **expression-level** modifier, not a
+  declaration clause — a distinct grammar shape (e.g. a postfix `ignoring` on the
+  call, lowered onto the `repo-run` `ExprIR`). Settle its exact form during
+  Slice 1 design; it reuses the same `capabilityOrigin` resolution.
+
+Keyed on the **capability name** the user wrote with `with <Cap>` — never a
+per-filter name (the `filter for "<name>"` qualifier was deliberately removed). A
+capability contributing *several* filters is bypassed **as a unit**. Aggregate-
+local anonymous `filter <expr>` (no capability) is **not** bypassable — accepted
+scoping (you own that source); revisit only if a real need appears.
 
 ### 11.3 Slices (incremental; per-backend, because there is no shared filter seam)
 
 | # | Scope | Files (phase) | Gate | Parallelizable? |
 |---|---|---|---|---|
 | **0** | `capabilityOrigin` provenance seam | `FilterEntry` + `collectFilters` (`lower-capabilities.ts:11-81`); `contextFilterOrigins?: (string\|undefined)[]` on `loom-ir.ts` (mirror `contextFilterRefs`) | **byte-identical** (no consumer) | no — serializing substrate |
-| **1** | surface + **.NET** | `ddd.langium` (+`langium:generate`, commit generated); `lower` `FindDecl`→`FindIR` bypass-set; `print-structural`/find printer arm; `efcore.ts` resolve origin→EF name→`IgnoreQueryFilters`; `loom.filter-bypass-unsupported` validator (`ir/validate/checks/*`, mirror `validateContextFilterSupport`) | runtime: `dotnet-build`, `dotnet-obs-e2e`, `k8s-e2e` read+write | no (grammar→regen→lower→emit is a chain) |
+| **1** | surface (`find`+`view`+inline) + **.NET** | `ddd.langium` `ignoring`-clause on `FindDecl` + `View` (×2 forms) + the `Repo.findAll`/`run` call expr (+`langium:generate`, commit generated); `lower` → bypass-set on `FindIR`/`ViewIR`/the `repo-run` `ExprIR`; printer arms (print-completeness); `efcore.ts` resolve origin→EF name→`IgnoreQueryFilters` (repo finds + view reads + inline); `loom.filter-bypass-*` validators (`ir/validate/checks/*`, mirror `validateContextFilterSupport`) | runtime: `dotnet-build`, `dotnet-obs-e2e`, `k8s-e2e` read+write | no (grammar→regen→lower→emit is a chain) |
 | **2** | **Drizzle + Ecto** honor bypass (omit predicate from the AND-chain) | `typescript/repository-find-predicate.ts`; `elixir/vanilla/capability-filter.ts` | `behavioral-e2e`, `k8s-e2e` | **yes — 2 agents** (disjoint trees) |
 | defer | **Java** (`@SQLRestriction`→`@Filter` *only where bypassed* — §11.6), **Ash** (base_filter→unfiltered action/policy), **Python** (filter-emission gap first, then bypass) | per-backend emit + drop from `NO_FILTER_EMISSION`/`LIMITED_FAMILIES` | each own runtime gate | **yes — independent fan-out** |
 
