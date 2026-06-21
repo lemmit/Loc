@@ -95,11 +95,30 @@ describe("elixir domain `test` → ExUnit emission", () => {
     // value-object field read runs (map literal, money → Decimal).
     expect(src).toContain('m = %{amount: Decimal.new("10.5"), currency: "USD"}');
     expect(src).toContain('assert m.currency == "USD"');
-    // ONLY the value-object construction invariant skips on vanilla.
-    expect(src.split("@tag :skip").length - 1).toBe(1);
-    expect(src).toMatch(/@tag :skip\n {2}test "negative money rejected"/);
+    // F5: the value-object construction invariant now runs via the VO's
+    // validating constructor — nothing skips on vanilla anymore.
+    expect(src).toContain(
+      'assert {:error, _} = VanApi.Selling.Money.new(%{amount: Decimal.new("-1.0"), currency: "USD"})',
+    );
+    expect(src).not.toContain("@tag :skip");
 
     expect(findFile(files, /van_api\/test\/test_helper\.exs$/).trim()).toBe("ExUnit.start()");
+  });
+
+  it("vanilla: emits a validating value-object constructor + enforces it in base_changeset (F5)", async () => {
+    const files = await generateSystemFiles(FIXTURE);
+    // The VO module runs its invariant in a schemaless changeset.
+    const vo = findFile(files, /van_api\/lib\/van_api\/selling\/money\.ex$/);
+    expect(vo).toContain("defmodule VanApi.Selling.Money do");
+    expect(vo).toContain("@types %{amount: :decimal, currency: :string}");
+    expect(vo).toContain("|> validate_number(:amount, greater_than_or_equal_to: 0)");
+    expect(vo).toContain("def new(attrs) when is_map(attrs) do");
+    expect(vo).toContain("apply_action(changeset(attrs), :insert)");
+    // The aggregate create/update path runs the VO constructor over the price
+    // field — invariant enforced at runtime, not just in tests.
+    const cs = findFile(files, /van_api\/lib\/van_api\/selling\/order_changeset\.ex$/);
+    expect(cs).toContain("|> validate_vo(:price, &VanApi.Selling.Money.new/1)");
+    expect(cs).toContain("defp validate_vo(changeset, field, new_fun) do");
   });
 
   it("ash: keeps the pure-subset (field reads run, create/op/toThrow skip)", async () => {

@@ -19,11 +19,9 @@ import type {
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
-import {
-  type SingleFieldPattern,
-  singleFieldConstraints,
-} from "../../../ir/validate/invariant-classify.js";
+import { singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { ectoValidator, voHasConstraints } from "./changeset-validators.js";
 import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 
@@ -62,36 +60,17 @@ export function emitVanillaChangesets(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}_changeset.ex`,
       isVanillaDocAgg(agg, ctx, sys)
         ? renderDocChangeset(appModule, ctxModule, agg)
-        : renderChangeset(appModule, ctxModule, agg),
+        : renderChangeset(appModule, ctxModule, agg, ctx),
     );
   }
 }
 
-/** Map a recognised single-field invariant pattern to the idiomatic Ecto
- *  changeset validator pipe line — `validate_number` for numeric bounds,
- *  `validate_length` for string-length bounds, `validate_format` for regex. */
-function ectoValidator(field: string, p: SingleFieldPattern): string {
-  switch (p.kind) {
-    case "min":
-      return `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.n})`;
-    case "max":
-      return `    |> validate_number(:${field}, less_than_or_equal_to: ${p.n})`;
-    case "between":
-      return `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.lo}, less_than_or_equal_to: ${p.hi})`;
-    case "len-min":
-      return `    |> validate_length(:${field}, min: ${p.n})`;
-    case "len-max":
-      return `    |> validate_length(:${field}, max: ${p.n})`;
-    case "len-eq":
-      return `    |> validate_length(:${field}, is: ${p.n})`;
-    case "len-range":
-      return `    |> validate_length(:${field}, min: ${p.lo}, max: ${p.hi})`;
-    case "regex":
-      return `    |> validate_format(:${field}, ~r/${p.pattern}/)`;
-  }
-}
-
-function renderChangeset(appModule: string, ctxModule: string, agg: AggregateIR): string {
+function renderChangeset(
+  appModule: string,
+  ctxModule: string,
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+): string {
   const aggPascal = upperFirst(agg.name);
   const aggModule = `${appModule}.${ctxModule}.${aggPascal}`;
   const changesetMod = `${aggModule}Changeset`;
@@ -123,6 +102,40 @@ function renderChangeset(appModule: string, ctxModule: string, agg: AggregateIR)
   const castEmbedLines = agg.contains.map((c) => `    |> cast_embed(:${snake(c.name)})`).join("\n");
   const castEmbedBlock = castEmbedLines.length > 0 ? `\n${castEmbedLines}` : "";
 
+  // Value-object invariant enforcement (F5).  A VO field is stored as a plain
+  // `:map`, so `cast` accepts any object; we run the VO's own validating
+  // constructor over the cast value to reject an invariant-violating VO (e.g. a
+  // negative `Money`) at the real create/update path — not just in tests.  Only
+  // single VO fields whose VO declares a single-field invariant get a line; a
+  // VO without invariants (or an array-of-VO field) is left as-is.
+  const vosByName = new Map(ctx.valueObjects.map((vo) => [vo.name, vo]));
+  const voFieldLines = allFields
+    .map((f) => {
+      if (f.type.kind !== "valueobject" || !f.type.name) return null;
+      const vo = vosByName.get(f.type.name);
+      if (!vo || !voHasConstraints(vo)) return null;
+      const voMod = `${appModule}.${ctxModule}.${upperFirst(vo.name)}`;
+      return `    |> validate_vo(:${snake(f.name)}, &${voMod}.new/1)`;
+    })
+    .filter((l): l is string => l !== null);
+  const voBlock = voFieldLines.length > 0 ? `\n${voFieldLines.join("\n")}` : "";
+  // The shared helper is emitted only when a VO field uses it (no unused defp
+  // under `mix compile --warnings-as-errors`).
+  const voHelper =
+    voFieldLines.length > 0
+      ? `
+
+  # Run a value object's validating constructor over a cast map field; an
+  # invariant violation surfaces as a changeset error rather than persisting.
+  defp validate_vo(changeset, field, new_fun) do
+    validate_change(changeset, field, fn ^field, value ->
+      if is_map(value) and match?({:error, _}, new_fun.(value)),
+        do: [{field, "is invalid"}],
+        else: []
+    end)
+  end`
+      : "";
+
   // Per-action changeset helpers — create + destroy.  Named OPERATIONS no
   // longer get a `change_<op>` helper: their `<op>_<agg>` context fn renders the
   // body and `put_change`s the assigned columns directly (context-emit).  The
@@ -148,8 +161,8 @@ defmodule ${changesetMod} do
   def base_changeset(struct \\\\ %${aggPascal}{}, attrs) do
     struct
     |> cast(attrs, @all_fields)
-    |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}
-  end
+    |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${voBlock}
+  end${voHelper}
 
 ${actionHelpers}
 end

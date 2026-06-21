@@ -25,11 +25,11 @@ import { snake, upperFirst } from "../../../util/naming.js";
 // not by `receiverType` — a `let p = Agg.create(...)` binding is only weakly
 // typed in test position, so the receiver type can't be trusted.
 //
-// The one shape vanilla can't yet run is a value-object construction invariant
-// (`expect(Money{ amount: -1 }).toThrow()`): a vanilla VO is a plain map with no
-// validating constructor, so the invariant isn't enforced at construction — a
-// real runtime gap, not a harness one.  Such a test (and anything else this
-// renderer can't faithfully lower) is emitted as a documented `@tag :skip`.
+// A value-object construction invariant (`expect(Money{ amount: -1 }).toThrow()`)
+// lowers to the VO's validating constructor — `assert {:error, _} =
+// Money.new(%{…})` (F5; valueobject-emit.ts) — when the VO declares an invariant.
+// Anything this renderer still can't faithfully lower (a VO with no invariant,
+// an unexpected shape) is emitted as a documented `@tag :skip`, never broken Elixir.
 // ---------------------------------------------------------------------------
 
 interface Env {
@@ -38,6 +38,10 @@ interface Env {
   aggMod: string;
   /** Bounded-context module prefix, e.g. `App.Ctx`. */
   ctxModule: string;
+  /** Value objects that have a validating constructor (`<VO>.new/1`, F5) — only
+   *  these can lower a `expect(VO{bad}).toThrow()` to `assert {:error, _} =
+   *  <VO>.new(…)`; a VO without invariants has no module, so such a test skips. */
+  validatableVos: Set<string>;
 }
 
 const MATCHER_OP: Record<string, string> = {
@@ -65,11 +69,16 @@ const SKIP_BODY = [
   "  :ok",
 ];
 
-export function renderVanillaAggregateTestModule(agg: AggregateIR, contextModule: string): string {
+export function renderVanillaAggregateTestModule(
+  agg: AggregateIR,
+  contextModule: string,
+  validatableVos: Set<string>,
+): string {
   const env: Env = {
     agg,
     aggMod: `${contextModule}.${upperFirst(agg.name)}`,
     ctxModule: contextModule,
+    validatableVos,
   };
   const blocks = agg.tests.map((t) => renderTest(t, env));
   const body = blocks.flatMap((block) => ["", ...block.map((l) => (l === "" ? "" : `  ${l}`))]);
@@ -157,8 +166,20 @@ function renderThrows(expr: ExprIR, env: Env): string {
     // A failed precondition raises ArgumentError before any persist.
     return `assert_raise ArgumentError, fn -> ${renderOp(inner, env)} end`;
   }
-  // VO-construction invariants and the like aren't enforced in memory on vanilla.
-  throw new Error("toThrow over a non-create/op expression is not runnable on vanilla");
+  // A value-object construction invariant (F5): `expect(Money{-1}).toThrow()` →
+  // the VO's validating constructor returns {:error, _}.  Only VOs that declare
+  // an invariant have a `new/1` module; anything else can't be checked in memory.
+  if (
+    inner.kind === "call" &&
+    inner.callKind === "value-object-ctor" &&
+    env.validatableVos.has(inner.name)
+  ) {
+    const voMod = `${env.ctxModule}.${upperFirst(inner.name)}`;
+    return `assert {:error, _} = ${voMod}.new(${vtExpr(inner, env)})`;
+  }
+  throw new Error(
+    "toThrow over a non-create/op/validatable-VO expression is not runnable on vanilla",
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -212,8 +233,18 @@ function vtExpr(e: ExprIR, env: Env): string {
       return `%{${e.fields.map((f) => `${snake(f.name)}: ${vtExpr(f.value, env)}`).join(", ")}}`;
     case "paren":
       return `(${vtExpr(e.inner, env)})`;
-    case "unary":
-      return e.op === "!" ? `not ${vtExpr(e.operand, env)}` : `-${vtExpr(e.operand, env)}`;
+    case "unary": {
+      if (e.op === "!") return `not ${vtExpr(e.operand, env)}`;
+      // Fold a negative sign into a money/decimal literal — `-Decimal.new("1.0")`
+      // is invalid (unary minus doesn't apply to a %Decimal{} struct).
+      if (
+        e.operand.kind === "literal" &&
+        (e.operand.lit === "money" || e.operand.lit === "decimal")
+      ) {
+        return `Decimal.new(${JSON.stringify(`-${e.operand.value}`)})`;
+      }
+      return `-${vtExpr(e.operand, env)}`;
+    }
     case "binary":
       return `${vtExpr(e.left, env)} ${binOp(e.op)} ${vtExpr(e.right, env)}`;
     default:

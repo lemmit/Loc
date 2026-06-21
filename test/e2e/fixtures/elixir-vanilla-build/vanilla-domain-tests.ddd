@@ -9,14 +9,22 @@
 // a generated project carries `test/test_helper.exs`.
 //
 // Also pins F6 (field defaults): `status` defaults to "open", so `create` may
-// omit it and the validated struct still carries the default.
+// omit it and the validated struct still carries the default; and F5 (value-
+// object invariant enforcement): `Money` has a validating constructor, so a
+// negative amount is rejected both standalone and through the aggregate create.
 system Shop {
   subdomain Sales {
     context Selling {
+      valueobject Money {
+        amount: money
+        currency: string
+        invariant amount >= 0.0
+      }
       aggregate Order ids guid {
         customer: string
         status: string = "open"
         total: int = 0
+        price: Money?
         invariant customer.length > 0
         operation confirm() {
           precondition status == "open"
@@ -41,6 +49,22 @@ system Shop {
         test "confirming a confirmed order is rejected" {
           let o = Order.create({ customer: "acme", status: "confirmed" })
           expect(o.confirm()).toThrow()
+        }
+        // F5 — value-object invariant enforced at construction AND through the
+        // aggregate create (validate_vo over the `:map` price field).
+        test "a negative money is rejected" {
+          expect(Money { amount: -1.0, currency: "USD" }).toThrow()
+        }
+        test "a valid money builds" {
+          let m = Money { amount: 10.5, currency: "USD" }
+          expect(m.currency).toBe("USD")
+        }
+        test "an order with a negative price is rejected" {
+          expect(Order.create({ customer: "acme", price: Money { amount: -5.0, currency: "USD" } })).toThrow()
+        }
+        test "an order with a valid price is created" {
+          let o = Order.create({ customer: "acme", price: Money { amount: 5.0, currency: "USD" } })
+          expect(o.customer).toBe("acme")
         }
       }
       repository Orders for Order { }
