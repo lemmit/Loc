@@ -102,22 +102,26 @@ executed in CI. **Fixed**: `test/e2e/generated-react-e2e.test.ts` +
 build the bundle, `vite preview` it, and run the emitted `smoke.spec.ts`,
 mirroring the Vue/Svelte gate. `npm run test:react-e2e` runs it locally.
 
-### F4 — Phoenix page objects are a parallel reimplementation *(watch)*
+### F4 — Phoenix page objects are a parallel reimplementation *(watch — now pinned)*
 `elixir/page-objects-emit.ts` re-declares `buildAggregateListPageObject`,
 `buildWorkflowFormPageObject`, etc. locally (reusing only `fillBlock` from
 `_frontend/`), because HEEx output topology diverges. Justified, but it means
 page-object changes must be made twice; divergence is only caught by the
 heex-parity/conformance gates, not by a shared-builder compile error.
+**Guarded**: `test/generator/elixir/page-object-parity.test.ts` freezes the
+shared `_frontend` page-object builder surface (the heex-parity-style pin) — a
+new shared builder fails CI until the author records, in the pinned map, how
+Phoenix's parallel emitter covers (or declines) the same archetype.
 
 ## Recommendations
 
-All three findings (F1, F2, F3) are **resolved** (#1474, #1476). The only open
-item is the standing watch:
+All three findings (F1, F2, F3) are **resolved** (#1474, #1476), and F4 is now
+**guarded** by a pinned-allowlist test (no open items):
 
-- **F4** *(open, low priority)*: Phoenix page objects are a parallel
-  reimplementation. Leave as-is, but consider a name-level pin (like the
-  heex-parity freeze) so a new shared page-object builder forces a conscious
-  Phoenix decision rather than silent drift.
+- **F4** *(guarded)*: Phoenix's parallel page-object emitter stays a reviewed
+  fork, but `page-object-parity.test.ts` turns "someone added a shared builder
+  and forgot Phoenix" from a silent drift into a CI failure with a forced
+  decision — the same discipline as `heex-parity.test.ts`.
 
 Possible deepening (not a gap, an enhancement): the emitted `smoke.spec.ts` only
 navigates *param-less* pages — `/x/:id` detail routes are skipped (no seeded
