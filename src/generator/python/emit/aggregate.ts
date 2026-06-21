@@ -17,6 +17,7 @@ import {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
+import { provColumn, provenancedFieldsOf } from "../emit/provenance.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
 import { collectPyExprImports, renderPyExpr, renderPyType } from "../render-expr.js";
 import { renderPyStatements } from "../render-stmt.js";
@@ -77,8 +78,12 @@ export function renderPyAggregate(
    *  gated upstream (loom.python-stamp-unsupported). */
   principalIdAttr?: string | null,
 ): string {
+  // Provenance (provenance.md): the runtime is emitted only when the
+  // aggregate hosts a `provenanced` field (root fields only — captured at
+  // named-operation write sites, which target root columns).
+  const emitProvenance = provenancedFieldsOf(agg).length > 0;
   const shapes = [...agg.parts.map((p) => partShape(p, agg)), rootShape(agg)];
-  const rendered = shapes.map((s) => renderEntity(s, emitTrace, principalIdAttr));
+  const rendered = shapes.map((s) => renderEntity(s, emitTrace, principalIdAttr, emitProvenance));
   const body = rendered.join("\n\n\n");
 
   // --- import resolution -------------------------------------------------
@@ -195,6 +200,9 @@ export function renderPyAggregate(
     errorNames.length > 0 ? `from app.domain.errors import ${errorNames.join(", ")}` : null,
     `from app.domain.events import ${eventImports.join(", ")}`,
     `from app.domain.ids import ${idImports.join(", ")}`,
+    emitProvenance
+      ? "from app.domain.provenance import ProvInput, ProvLineage, ProvTarget, record"
+      : null,
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
@@ -234,6 +242,12 @@ function collectStmtExprImports(st: OperationIR["statements"][number], into: Set
       collectPyExprImports(st.value, into);
       return;
   }
+}
+
+/** The provenanced fields on an entity shape (root only — provenance targets
+ *  root columns at named-operation write sites). */
+function provFieldsOf(e: EntityShape): FieldIR[] {
+  return e.fields.filter((f) => f.provenanced);
 }
 
 function rootShape(a: AggregateIR): EntityShape {
@@ -298,7 +312,17 @@ function containsType(c: ContainmentIR): string {
   return c.collection ? `list[${c.partName}]` : `${c.partName} | None`;
 }
 
-function renderEntity(e: EntityShape, emitTrace = false, principalIdAttr?: string | null): string {
+function renderEntity(
+  e: EntityShape,
+  emitTrace = false,
+  principalIdAttr?: string | null,
+  emitProvenance = false,
+): string {
+  // Provenanced fields (root-only) carry a co-located `_<field>_provenance`
+  // backing field holding the current lineage — initialised to None in the
+  // ctor and restored on hydrate from the row's jsonb column.  The save
+  // persists it; `to_wire` surfaces it on the wire DTO.
+  const provFields = emitProvenance && e.isRoot ? provFieldsOf(e) : [];
   const self = `"${e.name}"`;
   // Under --trace, `_assert_invariants` takes an `__op` label threaded by
   // each caller (the ctor passes "<init>", the extern wrapper "extern") so
@@ -330,6 +354,9 @@ function renderEntity(e: EntityShape, emitTrace = false, principalIdAttr?: strin
     ...e.fields.map((f) => `        self._${snake(f.name)} = ${snake(f.name)}`),
     ...e.contains.map((c) => `        self._${snake(c.name)} = ${snake(c.name)}`),
     e.isRoot ? `        self._events: list[DomainEvent] = []` : null,
+    // Co-located provenance lineage, set on each provenanced write and
+    // restored on hydrate; None until first written.
+    ...provFields.map((f) => `        self._${provColumn(f.name)}: ProvLineage | None = None`),
     assertCall("<init>"),
   ].filter((s): s is string => s != null);
 
@@ -364,6 +391,9 @@ function renderEntity(e: EntityShape, emitTrace = false, principalIdAttr?: strin
   for (const d of e.derived) {
     getters.push(...prop(snake(d.name), renderPyType(d.type), renderPyExpr(d.expr)));
   }
+  for (const f of provFields) {
+    getters.push(...prop(provColumn(f.name), "ProvLineage | None", `self._${provColumn(f.name)}`));
+  }
   if (e.derived.some((d) => d.name === "inspect")) {
     getters.push("", "    def __repr__(self) -> str:", "        return self.inspect");
   }
@@ -390,6 +420,7 @@ function renderEntity(e: EntityShape, emitTrace = false, principalIdAttr?: strin
       const body = renderPyStatements(op.statements, undefined, {
         eventSourced: e.eventSourced,
         trace,
+        emitProvenance,
       });
       return [
         "",
@@ -402,6 +433,7 @@ function renderEntity(e: EntityShape, emitTrace = false, principalIdAttr?: strin
     const body = renderPyStatements(op.statements, undefined, {
       eventSourced: e.eventSourced,
       trace,
+      emitProvenance,
     });
     return [
       "",

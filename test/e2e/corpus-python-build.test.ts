@@ -39,10 +39,7 @@ const PYTHON_COMPILE_SKIP: Record<string, string> = {
   // in a saga body is documented ("own-state mutation", workflow.md) but not yet
   // lowered — the same cross-backend gap the Hono tier tracks (corpus-tsc-build).
   "workflow-view": "FEATURE GAP: workflow own-state mutation (`field := …`) not yet lowered",
-  // PLATFORM LIMITATION (the CLI refuses to generate, by design): provenanced
-  // fields need the trace-capture runtime, emitted for node/dotnet only (DBT-1,
-  // provenance.md).  Hosting the context on python is a generate-time error.
-  provenance: "PLATFORM LIMITATION: provenance runtime is node/dotnet-only (DBT-1)",
+  // (provenance: now emitted + ruff-/mypy-clean on python — W2 — so it gates here.)
   // FEATURE GAP: inline value-object-array fields (`Money[]`) aren't persisted on
   // python at all — the SQLAlchemy schema emits no jsonb column for them, and the
   // repo's save `root` dict + `_hydrate`'s `_create(...)` both drop them (mypy

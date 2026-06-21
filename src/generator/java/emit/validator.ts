@@ -1,10 +1,5 @@
 import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
-import type {
-  EnrichedAggregateIR,
-  InvariantIR,
-  OperationIR,
-  TypeIR,
-} from "../../../ir/types/loom-ir.js";
+import type { EnrichedAggregateIR, InvariantIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import {
   type ClassifyContext,
   classifyForWire,
@@ -179,15 +174,15 @@ function patternCheck(
   }
 }
 
-export function aggHasAnyWireValidator(agg: EnrichedAggregateIR): boolean {
+/** True when the `<Agg>Validators.create(...)` method is actually emitted —
+ *  i.e. at least one aggregate invariant classifies for the wire over the
+ *  create-input shape.  The service's `create(...)` call must gate on THIS:
+ *  a global "has any validator" check is also true when only an op
+ *  precondition translates, which leaves the create method omitted → a call
+ *  to a symbol that doesn't exist (the crudish-without-invariants footgun). */
+export function aggHasCreateWireValidator(agg: EnrichedAggregateIR): boolean {
   const createCtx: ClassifyContext = {
     available: new Set(forCreateInput(agg.fields).map((f) => f.name)),
   };
-  if (agg.invariants.some((i) => classifyForWire(i, createCtx))) return true;
-  return agg.operations.some((op: OperationIR) => {
-    const ctx: ClassifyContext = { available: new Set(op.params.map((p) => p.name)) };
-    return op.statements.some(
-      (s) => s.kind === "precondition" && classifyForWire({ expr: s.expr, source: s.source }, ctx),
-    );
-  });
+  return agg.invariants.some((i) => classifyForWire(i, createCtx));
 }

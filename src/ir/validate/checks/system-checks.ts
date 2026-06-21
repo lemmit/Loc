@@ -1807,7 +1807,7 @@ export function validateEventSourcedWorkflowStorage(
 // audit trail it promises — an error, not a silent no-op.  Mirrors the
 // event-sourcing storage gate (foundation-shaped on elixir; a parsed-but-
 // unemitted feature is a footgun, so it fails fast).
-const PROVENANCE_BACKENDS = new Set(["node", "dotnet"]);
+const PROVENANCE_BACKENDS = new Set(["node", "dotnet", "java", "python"]);
 export function validateProvenancedStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
@@ -1833,20 +1833,20 @@ export function validateProvenancedStorage(
     const hostNote =
       unsupported.length > 0
         ? `it is hosted by ${unsupported.join(", ")}, where the provenance runtime is not emitted`
-        : "no provenance-capable (node / dotnet / elixir-vanilla) backend deployable hosts this context";
+        : "no provenance-capable (node / dotnet / java / python / elixir-vanilla) backend deployable hosts this context";
     const names = provFields.map((f) => f.name).join(", ");
     diags.push({
       severity: "error",
       code: "loom.provenanced-backend-unsupported",
       message:
         `aggregate '${agg.name}' has provenanced field(s) ${names}, but the provenance runtime ` +
-        `(trace capture + history) is emitted for the Hono (node), .NET (dotnet) and elixir-vanilla ` +
-        `backends only — ${hostNote}. ` +
+        `(trace capture + history) is emitted for the Hono (node), .NET (dotnet), Java (java), ` +
+        `Python (python) and elixir-vanilla backends only — ${hostNote}. ` +
         (includesElixir
           ? `On Phoenix this is a foundation constraint: the Ash foundation has no provenance fit, ` +
             `so switch the deployable to foundation: vanilla. Otherwise host `
           : `Host `) +
-        `the context on a node / dotnet / elixir-vanilla deployable, or drop the 'provenanced' ` +
+        `the context on a node / dotnet / java / python / elixir-vanilla deployable, or drop the 'provenanced' ` +
         `modifier to use a plain field (all backends). Tracked in provenance.md / ` +
         `type-system-feature-migration.md (DBT-1).`,
       source: `${ctx.name}/${agg.name}`,

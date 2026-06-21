@@ -24,6 +24,7 @@ import {
   type PyColumn,
   rowClassName,
 } from "../py-columns.js";
+import { provColumn } from "./provenance.js";
 
 // ---------------------------------------------------------------------------
 // `app/db/schema.py` — SQLAlchemy 2 typed declarative models.  Table /
@@ -188,6 +189,11 @@ function renderModel(
         ]
       : []),
     ...columnsForFields(owner.fields, ctx),
+    // Co-located provenance lineage (provenance.md): a `<field>_provenance`
+    // jsonb column per provenanced field, holding the current lineage.  The
+    // column itself is added by the LATE hand-emitted migration; the model
+    // declares it so the save persist / hydrate read type-check.
+    ...provenanceColumns(owner.fields),
   ];
   const tableArgs = [
     ...(parentName
@@ -204,6 +210,19 @@ function renderModel(
     "",
     cols.map(renderColumn),
   );
+}
+
+/** Co-located `<field>_provenance` jsonb columns for an owner's provenanced
+ *  fields (provenance.md).  Nullable — null until the field is first written. */
+function provenanceColumns(fields: AggregateIR["fields"]): PyColumn[] {
+  return fields
+    .filter((f) => f.provenanced)
+    .map((f) => ({
+      attr: provColumn(f.name),
+      pyType: "object",
+      saType: "JSONB",
+      optional: true,
+    }));
 }
 
 function renderColumn(c: PyColumn): string {

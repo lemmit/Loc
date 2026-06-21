@@ -1,4 +1,4 @@
-import type { ExprIR, PathIR, StmtIR } from "../../ir/types/loom-ir.js";
+import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { collectJavaExprImports, type JavaRenderContext, renderJavaExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -81,12 +81,23 @@ function renderJavaStatement(
       return `${INDENT}var ${s.name} = ${renderJavaExpr(s.expr, ctx)};`;
     case "assign": {
       const base = `${INDENT}${renderPath(s.target)} = ${renderJavaExpr(s.value, ctx)};`;
-      return withValueComputed(base, s.target, traceCtx);
+      return withProvCapture(
+        withValueComputed(base, s.target, traceCtx),
+        s.prov,
+        s.target,
+        s.value,
+        index,
+        ctx,
+      );
     }
-    case "add":
-      return `${INDENT}${renderPath(s.target)}.add(${renderJavaExpr(s.value, ctx)});`;
-    case "remove":
-      return `${INDENT}${renderPath(s.target)}.remove(${renderJavaExpr(s.value, ctx)});`;
+    case "add": {
+      const base = `${INDENT}${renderPath(s.target)}.add(${renderJavaExpr(s.value, ctx)});`;
+      return withProvCapture(base, s.prov, s.target, s.value, index, ctx);
+    }
+    case "remove": {
+      const base = `${INDENT}${renderPath(s.target)}.remove(${renderJavaExpr(s.value, ctx)});`;
+      return withProvCapture(base, s.prov, s.target, s.value, index, ctx);
+    }
     case "emit": {
       const args = orderedEventArgs(s, ctx);
       if (traceCtx.eventSourced) {
@@ -166,6 +177,109 @@ function withValueComputed(base: string, target: PathIR, traceCtx: JavaTraceCtx)
     base,
     `${INDENT}DomainLog.traceValue("value_computed", "${traceCtx.aggregate}", "${field}", ${renderPath(target)});`,
   ].join("\n");
+}
+
+/** Wrap a provenanced write (a statement carrying a `ProvSite`) with lineage
+ *  capture — the Java mirror of the Hono `withTrace` / .NET `withProvCapture`.
+ *  Snapshot the leaf inputs *before* the mutation (so a self-referential
+ *  `x := x + n` records the pre-write value), perform the write, then build the
+ *  `ProvLineage` (rule snapshot + inputs + post-write computed value) and route
+ *  it to both sinks: the co-located `<field>Provenance` field (current lineage,
+ *  persisted on the row) and the per-instance `_provTraces` buffer (drained
+ *  into provenance_records by the repository inside the save transaction). */
+function withProvCapture(
+  base: string,
+  prov: ProvSite | undefined,
+  target: PathIR,
+  value: ExprIR,
+  index: number,
+  ctx: JavaRenderContext,
+): string {
+  if (!prov) return base;
+  // Co-located capture is for top-level provenanced fields of the aggregate
+  // root (the `<field>Provenance` field + `_provTraces` buffer live on the
+  // root).  A write-through into a containment (segments.length > 1) carries no
+  // co-located slot — skip, mirroring the value-computed trace's same guard.
+  if (target.segments.length !== 1) return base;
+  const inputs = collectLeaves(value, ctx)
+    .map((l) => `new ProvInput(${JSON.stringify(l.path)}, ${l.value})`)
+    .join(", ");
+  const tmp = `__prov_${index}`;
+  const lin = `__lin_${index}`;
+  const computed = renderPath(target);
+  const field = `${prov.target.field}Provenance`;
+  const targetLit = `new ProvTarget(${JSON.stringify(prov.target.type)}, ${JSON.stringify(prov.target.field)})`;
+  return [
+    `${INDENT}var ${tmp} = java.util.List.<ProvInput>of(${inputs});`,
+    base,
+    `${INDENT}var ${lin} = new ProvLineage(${JSON.stringify(prov.snapshotId)}, ${targetLit}, ${tmp}, ${computed});`,
+    `${INDENT}this.${field} = ${lin};`,
+    `${INDENT}this._provTraces.add(${lin});`,
+  ].join("\n");
+}
+
+/** Bounded walk over the RHS expression collecting leaf inputs — `this`-props,
+ *  params and let-bindings (and member-access chains rooted at them).  Mirrors
+ *  the Hono / .NET `collectLeaves`; renders each leaf value through
+ *  `renderJavaExpr` so the captured value is the Java expression (boxed into
+ *  `ProvInput.value`). */
+function collectLeaves(
+  e: ExprIR,
+  ctx: JavaRenderContext,
+  out: { path: string; value: string }[] = [],
+): { path: string; value: string }[] {
+  switch (e.kind) {
+    case "ref":
+      if (e.refKind === "this-prop" || e.refKind === "param" || e.refKind === "let") {
+        out.push({ path: e.name, value: renderJavaExpr(e, ctx) });
+      }
+      break;
+    case "member":
+      out.push({ path: leafPath(e), value: renderJavaExpr(e, ctx) });
+      break;
+    case "method-call":
+      collectLeaves(e.receiver, ctx, out);
+      for (const a of e.args) collectLeaves(a, ctx, out);
+      break;
+    case "call":
+      for (const a of e.args) collectLeaves(a, ctx, out);
+      break;
+    case "paren":
+      collectLeaves(e.inner, ctx, out);
+      break;
+    case "unary":
+      collectLeaves(e.operand, ctx, out);
+      break;
+    case "binary":
+      collectLeaves(e.left, ctx, out);
+      collectLeaves(e.right, ctx, out);
+      break;
+    case "ternary":
+      collectLeaves(e.cond, ctx, out);
+      collectLeaves(e.then, ctx, out);
+      collectLeaves(e.otherwise, ctx, out);
+      break;
+    case "match":
+      e.arms.forEach((a) => {
+        collectLeaves(a.cond, ctx, out);
+        collectLeaves(a.value, ctx, out);
+      });
+      if (e.otherwise) collectLeaves(e.otherwise, ctx, out);
+      break;
+    case "new":
+    case "object":
+      for (const f of e.fields) collectLeaves(f.value, ctx, out);
+      break;
+  }
+  return out;
+}
+
+/** Dotted source-side path for a member-access chain (e.g. `line.price`). */
+function leafPath(e: ExprIR): string {
+  if (e.kind === "ref") return e.name;
+  if (e.kind === "this") return "this";
+  if (e.kind === "member") return `${leafPath(e.receiver)}.${e.member}`;
+  return "<expr>";
 }
 
 /** Mutation paths read/write fields directly — generated domain classes

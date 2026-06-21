@@ -222,6 +222,27 @@ export function renderJavaEntity(
       fieldLines.push(`    ${c.partName} ${c.name};`);
     }
   }
+  // Provenance runtime (provenance.md): each `provenanced` ROOT field carries a
+  // co-located `<field>Provenance` lineage field (persisted on the row via a
+  // jsonb column — Hibernate's JSON FormatMapper) holding the lineage of its
+  // current value; `_provTraces` buffers every write's lineage for the
+  // repository to drain into provenance_records inside the save transaction.
+  // Root-only — operations (the write sites) live on the root; a containment
+  // write-through carries no co-located slot (render-stmt's segment guard).
+  const provFields = isRoot ? entity.fields.filter((f) => f.provenanced) : [];
+  if (provFields.length > 0) {
+    fieldLines.push("");
+    for (const f of provFields) {
+      if (persistence) {
+        fieldLines.push(`    @JdbcTypeCode(SqlTypes.JSON)`);
+        fieldLines.push(`    @Column(name = "${snake(f.name)}_provenance")`);
+      }
+      fieldLines.push(`    ProvLineage ${f.name}Provenance;`);
+    }
+    fieldLines.push(
+      `    private final transient List<ProvLineage> _provTraces = new ArrayList<>();`,
+    );
+  }
   if (isRoot) {
     fieldLines.push("");
     fieldLines.push(
@@ -253,6 +274,11 @@ export function renderJavaEntity(
     } else {
       accessor(c.partName, c.name);
     }
+  }
+  // Co-located provenance lineage accessor (current value's lineage; null
+  // before the field's first provenanced write) — surfaced on the wire DTO.
+  for (const f of provFields) {
+    accessor("ProvLineage", `${f.name}Provenance`);
   }
 
   // --- derived / functions ---------------------------------------------------
@@ -345,6 +371,20 @@ export function renderJavaEntity(
         ``,
       ]
     : [];
+  // Drain the per-write lineage buffer after a save (the Java mirror of the
+  // Hono/.NET `DrainProv()`); the repository persists one provenance_records
+  // row per entry inside the save transaction.
+  const drainProvLines =
+    provFields.length > 0
+      ? [
+          `    public List<ProvLineage> drainProv() {`,
+          `        var copy = List.copyOf(_provTraces);`,
+          `        _provTraces.clear();`,
+          `        return copy;`,
+          `    }`,
+          ``,
+        ]
+      : [];
 
   // --- event-sourcing fold (appliers) ------------------------------------------
   const applierLines: string[] = [];
@@ -530,6 +570,7 @@ export function renderJavaEntity(
     ...opLines,
     ...externHookLines,
     ...pullEventsLines,
+    ...drainProvLines,
     ...assertLines,
     "",
     ...stampLines,
@@ -543,6 +584,7 @@ export function renderJavaEntity(
   const usesHibernateTypes =
     persistence &&
     (needsHibernateTypes(entity.fields) ||
+      provFields.length > 0 ||
       (persistence.embedded &&
         (entity.contains.length > 0 || entity.fields.some((f) => isRefCollection(f.type)))));
   // Non-principal capability filters (relational soft-delete et al.) ride

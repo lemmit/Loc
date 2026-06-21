@@ -66,6 +66,16 @@ import {
   renderSpaWebConfig,
 } from "./emit/program.js";
 import {
+  contextsHaveProvenance,
+  emitJavaProvenanceMigration,
+  provenancedFieldsOf,
+  renderProvenanceRecordEntity,
+  renderProvenanceRecordRepository,
+  renderProvInput,
+  renderProvLineage,
+  renderProvLineageRecord,
+} from "./emit/provenance.js";
+import {
   type JavaRepoCtx,
   renderJavaRepositoryImpl,
   renderJavaRepositoryInterface,
@@ -249,6 +259,27 @@ function emitProjectFromContexts(
   // request-context.md).  The principal's actor_id is stamped by UserFilter.
   place("RequestContext.java", "config", renderRequestContext(basePkg));
   place("ExecutionContextFilter.java", "config", renderExecutionContextFilter(basePkg));
+
+  // Provenance runtime (provenance.md) — the shared lineage SDK + the
+  // append-only history table.  Emitted only when a context declares a
+  // `provenanced` field (gated on the field, not a backend allowlist).  The
+  // co-located column + per-write capture + flush are wired per aggregate
+  // (entity.ts / render-stmt.ts / repository.ts); the late migration lands in
+  // the migrations block below.  The lineage records ride a jsonb column, so
+  // the Hibernate JSON FormatMapper config is forced on too.
+  const hasProvenance = contextsHaveProvenance(contexts);
+  if (hasProvenance) {
+    place("ProvTarget.java", "domain-common", renderProvLineage(basePkg));
+    place("ProvInput.java", "domain-common", renderProvInput(basePkg));
+    place("ProvLineage.java", "domain-common", renderProvLineageRecord(basePkg));
+    place("ProvenanceRecord.java", "infra-persistence", renderProvenanceRecordEntity(basePkg));
+    place(
+      "ProvenanceRecordRepository.java",
+      "infra-persistence",
+      renderProvenanceRecordRepository(basePkg),
+    );
+    place("LoomJsonFormatMapperConfig.java", "config", renderJsonFormatMapperConfig(basePkg));
+  }
 
   for (const ctx of contexts) {
     // Ids — an abstract TPC base keeps no identity (each concrete owns a
@@ -437,7 +468,13 @@ function emitProjectFromContexts(
   // emitted V*.sql files still need Flyway to run).
   const allMigrations = system?.migrations ?? [];
   emitJavaMigrations(allMigrations, out);
-  const hasMigrations = allMigrations.some((m) => m.steps.length > 0 || m.baseline !== null);
+  // Provenance DDL (provenance.md) ships as one extra late Flyway migration
+  // sorting after every module migration (the aggregate tables must exist for
+  // the co-located-column ALTERs).  Feature-local — not part of MigrationsIR.
+  // Gated on a `provenanced` field, not a backend allowlist.
+  emitJavaProvenanceMigration(contexts, system?.sys, out);
+  const hasMigrations =
+    allMigrations.some((m) => m.steps.length > 0 || m.baseline !== null) || hasProvenance;
 
   // Project shell — stable from S1 on.
   out.set(
@@ -665,6 +702,7 @@ function emitAggregate(
     persistencePkg: pkgFor("infra-persistence"),
     retrievals: aggRetrievals,
     isReified,
+    provenance: provenancedFieldsOf(agg).length > 0,
   };
   place(
     `${agg.name}Repository.java`,

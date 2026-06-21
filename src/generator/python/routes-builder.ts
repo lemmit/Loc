@@ -39,6 +39,7 @@ import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../util/error-d
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
+import { provColumn } from "./emit/provenance.js";
 import { renderPyExpr } from "./render-expr.js";
 import { emittableFinds } from "./repository-builder.js";
 
@@ -272,6 +273,10 @@ function responseModel(
   ctx: EnrichedBoundedContextIR,
 ): string {
   const fields = forApiRead(wireShapeFor(ent));
+  // Co-located provenance lineage (provenance.md): each `provenanced` field
+  // exposes a trailing `<field>_provenance` carrying the current lineage on
+  // the wire (root-only; parts never carry provenanced fields).
+  const provFields = ent.fields.filter((f) => f.provenanced);
   return lines(
     `class ${name}Response(BaseModel):`,
     fields.map((wf) => {
@@ -284,6 +289,7 @@ function responseModel(
         optional && !t.endsWith("| None") ? " | None = None" : optional ? " = None" : "";
       return `    ${wf.name}: ${t}${suffix}`;
     }),
+    provFields.map((f) => `    ${provColumn(f.name)}: dict[str, object] | None = None`),
     "",
     "",
   );

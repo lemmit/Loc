@@ -39,10 +39,7 @@ const JAVA_COMPILE_SKIP: Record<string, string> = {
   // in a saga body is documented ("own-state mutation", workflow.md) but not yet
   // lowered — the same cross-backend gap the Hono tier tracks (corpus-tsc-build).
   "workflow-view": "FEATURE GAP: workflow own-state mutation (`field := …`) not yet lowered",
-  // PLATFORM LIMITATION (the CLI refuses to generate, by design): provenanced
-  // fields need the trace-capture runtime, emitted for node/dotnet only (DBT-1,
-  // provenance.md).  Hosting the context on java is a generate-time error.
-  provenance: "PLATFORM LIMITATION: provenance runtime is node/dotnet-only (DBT-1)",
+  // (provenance: now emitted + gradle-clean on java — W2 — so it gates here.)
   // PLATFORM LIMITATION (generate-time error): a shape(embedded) aggregate with a
   // reference-collection (`X id[]`) jsonb id-array column isn't mapped on java
   // (Hibernate's structured-JSON path bypasses the Jackson FormatMapper for

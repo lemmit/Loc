@@ -13,7 +13,7 @@ import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaExpr, renderJavaType } from "../render-expr.js";
 import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
-import { aggHasAnyWireValidator, renderJavaValidators } from "./validator.js";
+import { aggHasCreateWireValidator, renderJavaValidators } from "./validator.js";
 import { collectWireToDomainImports, wireToDomain } from "./wire.js";
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ export function renderJavaService(
   const dispatches = (ctx.boundedContext.eventSubscriptions ?? []).length > 0;
   const idJava = javaValueTypeForId(agg.idValueType);
   if (idJava === "UUID") imports.add("java.util.UUID");
-  const hasValidators = aggHasAnyWireValidator(agg);
+  const hasCreateValidator = aggHasCreateWireValidator(agg);
   const createInputs = forCreateInput(agg.fields);
   const eff = (t: TypeIR, optional: boolean): TypeIR =>
     optional && t.kind !== "optional" ? { kind: "optional", inner: t } : t;
@@ -88,7 +88,7 @@ export function renderJavaService(
       ? [
           `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
           ...createLets,
-          hasValidators && !ctx.esCreateParams
+          hasCreateValidator && !ctx.esCreateParams
             ? `        ${agg.name}Validators.create(${createArgs});`
             : null,
           stampUsesUser("create") ? `        var currentUser = currentUserAccessor.user();` : null,
