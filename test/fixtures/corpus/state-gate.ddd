@@ -1,0 +1,27 @@
+// `when` canCommand state gate (criterion.md): the operation evaluates the
+// predicate before mutating and auto-exposes a GET can-query companion.
+system WhenShop {
+  subdomain Sales {
+    context Orders {
+      enum OrderStatus { Draft, Shipped, Cancelled }
+      aggregate Order {
+        code: string
+        status: OrderStatus
+        operation cancel() when this.status != OrderStatus.Shipped && this.status != OrderStatus.Cancelled {
+          status := OrderStatus.Cancelled
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from Sales
+  storage primary { type: postgres }
+  resource st { for: Orders, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    dataSources: [st]
+    serves: A
+    port: 4000
+  }
+}

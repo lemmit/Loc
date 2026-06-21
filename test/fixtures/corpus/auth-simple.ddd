@@ -1,21 +1,7 @@
-system Helpdesk {
-  user {
-    id: string
-    role: string
-    email: string
-    permissions: string[]
-  }
-
-  auth {
-    provider: keycloak
-    oidc {
-      issuer: env("OIDC_ISSUER")
-      clientId: env("OIDC_CLIENT_ID")
-    }
-    sessions: cookie
-    claims: { role: "realm_access.roles" }
-  }
-
+// Simple (dev-stub) auth (auth.md): a `user` shape + `requires`-guarded
+// operation without an external OIDC provider.
+system SimpleAuth {
+  user { id: guid  role: string }
   subdomain Support {
     context Tickets {
       aggregate Ticket with crudish {
@@ -29,17 +15,15 @@ system Helpdesk {
       repository Tickets for Ticket { }
     }
   }
-
   storage primary { type: postgres }
   resource ticketState { for: Tickets, kind: state, use: primary }
-
   api SupportApi from Support
-  deployable api {
-    platform: node
+  deployable d {
+    platform: __PLATFORM__
     contexts: [Tickets]
     serves: SupportApi
     dataSources: [ticketState]
-    port: 8080
+    port: 4000
     auth: required
   }
 }

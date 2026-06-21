@@ -1,3 +1,8 @@
+// Table-per-hierarchy (TPH / sharedTable) inheritance (inheritance.md): an
+// abstract base + concretes share one kind-discriminated table.  Distinct from
+// the `inheritance` feature (which pairs TPH with TPC) — this is the focused
+// TPH-only canonical fixture the per-backend TPH gates + the java TPH unit test
+// assert against.
 system TPH {
   subdomain D {
     context Fleet {
@@ -19,11 +24,11 @@ system TPH {
   api A from D
   storage primary { type: postgres }
   resource st { for: Fleet, kind: state, use: primary }
-  deployable tphApi {
-    platform: java
+  deployable d {
+    platform: __PLATFORM__
     contexts: [Fleet]
     dataSources: [st]
     serves: A
-    port: 8081
+    port: 4000
   }
 }

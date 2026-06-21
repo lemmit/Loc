@@ -55,8 +55,17 @@ function wireProjectionEntity(
         parts.push(
           `${wf.name}: ${varExpr}.${wf.name}.map((e: ${partIR.name}) => (${wireProjectionEntity(partIR, "e", ctx)}))`,
         );
+      } else if (wf.optional) {
+        // Optional single containment — guard the null branch (matches the
+        // `<field>?: ...` wire field and the response schema's `.nullable()`).
+        parts.push(
+          `${wf.name}: ${varExpr}.${wf.name} == null ? null : ${wireProjectionEntity(partIR, `${varExpr}.${wf.name}`, ctx)}`,
+        );
       } else {
-        parts.push(`${wf.name}: ${wireProjectionEntity(partIR, `${varExpr}.${wf.name}`, ctx)}`);
+        // Required single containment is non-null on the wire (parity with the
+        // .NET `= default!` owned entity).  The domain getter is typed
+        // `Part | null`, so assert before projecting to satisfy strict tsc.
+        parts.push(`${wf.name}: ${wireProjectionEntity(partIR, `${varExpr}.${wf.name}!`, ctx)}`);
       }
       continue;
     }

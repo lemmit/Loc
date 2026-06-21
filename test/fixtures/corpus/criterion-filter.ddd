@@ -1,0 +1,30 @@
+// Reusable criterion (criterion.md): a zero-arg and an arg-bearing criterion
+// used both as capability filters and as a parameterised find criterion.
+system Crit {
+  subdomain Sales {
+    context Orders {
+      criterion Active of Order = !this.archived
+      criterion InRegion(region: string) of Order = this.region == region
+      aggregate Order ids guid {
+        code: string
+        region: string
+        archived: bool
+        filter Active
+        filter InRegion("EU")
+      }
+      repository Orders for Order {
+        find recent(): Order[] where this.archived == false
+      }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

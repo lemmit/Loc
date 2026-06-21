@@ -1,0 +1,25 @@
+// Exception-less operation returns: `T or Error` tagged-union result.
+system RU {
+  subdomain D {
+    context Shop {
+      error NotFound { resource: string }
+      aggregate Order {
+        code: string
+        reserved: bool
+        operation reject(): string or NotFound { return NotFound { resource: code } }
+        operation accept(): string or NotFound { reserved := true  return code }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    port: 4000
+  }
+}

@@ -1,10 +1,5 @@
-// Event-sourced workflow on .NET (workflow-and-applier.md A2-S5b): the saga
-// folds its own emitted events into state via apply(...) and persists as an
-// append-only `<wf>_events` stream (no mutable correlation-state row).  This
-// fixture compiles the `<Wf>State` fold class (_Apply / _FromEvents / RowToEvent
-// / ToData), the `<Wf>EventRecord` EF entity + configuration, the DbContext
-// `DbSet<<Wf>EventRecord>` registration, and the fold-load / append-own-events
-// dispatch handlers under `dotnet build /warnaserror`.
+// Event-sourced workflow (workflow-and-applier.md): the saga folds its own
+// emitted events into state and persists as an append-only stream.
 system FulfillmentSys {
   subdomain Fulfillment {
     context Fulfillment {
@@ -17,25 +12,18 @@ system FulfillmentSys {
         }
       }
       repository Orders for Order { }
-
       event OrderPlaced { order: Order id, at: datetime }
       event PaymentRegistered { order: Order id, amount: int }
       event FulfillmentCancelled { order: Order id }
-
       channel Lifecycle {
         carries: OrderPlaced, PaymentRegistered, FulfillmentCancelled
         delivery: broadcast
         retention: ephemeral
       }
-
-      // Event-sourced saga: started by OrderPlaced, accrues paid amounts and a
-      // cancellation flag through its OWN emitted events (every emit is folded
-      // by an apply(...)).  The reactor reads folded state in a precondition.
       workflow OrderFulfillment eventSourced {
-        orderId: Order id          // correlation field → stream key
-        paid: int                  // folded state
+        orderId: Order id
+        paid: int
         cancelled: bool
-
         create(p: OrderPlaced) by p.order {
           emit PaymentRegistered { order: p.order, amount: 0 }
         }
@@ -43,21 +31,19 @@ system FulfillmentSys {
           precondition paid >= 0
           emit FulfillmentCancelled { order: pr.order }
         }
-
         apply(pr: PaymentRegistered) { paid := paid + pr.amount }
         apply(fc: FulfillmentCancelled) { cancelled := true }
       }
     }
   }
-
   api FulfillmentApi from Fulfillment
   storage pg { type: postgres }
   resource fulfillmentState { for: Fulfillment, kind: state, use: pg }
-  deployable api {
-    platform: dotnet
+  deployable d {
+    platform: __PLATFORM__
     contexts: [Fulfillment]
     serves: FulfillmentApi
     dataSources: [fulfillmentState]
-    port: 8080
+    port: 4000
   }
 }

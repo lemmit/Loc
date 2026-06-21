@@ -53,7 +53,7 @@ describe("hono routes — discriminated-union finds (P4b)", () => {
   it("tags a found row with the success variant on 200", async () => {
     const r = await routes();
     expect(r).toContain(
-      'return c.json({ type: "Order", ...repo.toWire(result) } as z.infer<typeof OrderOrNotFound>, 200);',
+      'return c.json({ type: "Order", ...(repo.toWire(result) as Record<string, unknown>) } as z.infer<typeof OrderOrNotFound>, 200);',
     );
   });
 

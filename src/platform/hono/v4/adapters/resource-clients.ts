@@ -127,7 +127,9 @@ export const rabbitmqResourceAdapter: ResourceAdapter = {
   supportedKinds: ["queue"],
   supports: (storageType, kind) =>
     storageType === "rabbitmq" && supportsSurfaceKind("rabbitmq", kind),
-  emitProjectDeps: () => ({ amqplib: "^0.10.4" }),
+  // `amqplib` ships no bundled type declarations, so the queue client needs
+  // `@types/amqplib` or the generated project fails strict tsc (TS7016).
+  emitProjectDeps: () => ({ amqplib: "^0.10.4", "@types/amqplib": "^0.10.5" }),
   emitClientModule(resources): Lines {
     const out: string[] = [`import * as amqp from "amqplib";`, ``];
     for (const r of resources) {

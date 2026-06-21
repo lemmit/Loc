@@ -1,0 +1,26 @@
+// Read-model views (views.md): a where-filtered projection over an aggregate.
+system Viewing {
+  subdomain Sales {
+    context Orders {
+      enum Status { Draft, Placed, Cancelled }
+      aggregate Order ids guid {
+        code: string
+        status: Status
+        total: int
+      }
+      repository Orders for Order { }
+      view BigOrders = Order where total >= 1000
+      view SmallOrders = Order where total < 100
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

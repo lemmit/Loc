@@ -1,7 +1,5 @@
-// OIDC turnkey auth on .NET (D-AUTH-OIDC) — an auth { oidc } block emits the
-// generated OidcUserVerifier (JWKS validation + claims->User), registered in
-// Program.cs, with the Microsoft.IdentityModel.* NuGet refs.  This cell
-// compiles it under `dotnet build /warnaserror` (the AnalysisLevel CA gate).
+// OIDC authentication (auth.md): an OIDC provider config + a `requires`-guarded
+// operation; `auth: required` emits the verifier + principal middleware.
 system Helpdesk {
   user {
     id: string
@@ -9,19 +7,18 @@ system Helpdesk {
     email: string
     permissions: string[]
   }
-
   auth {
     provider: keycloak
     oidc {
       issuer: env("OIDC_ISSUER")
       clientId: env("OIDC_CLIENT_ID")
     }
+    sessions: cookie
     claims: { role: "realm_access.roles" }
   }
-
   subdomain Support {
     context Tickets {
-      aggregate Ticket {
+      aggregate Ticket with crudish {
         subject: string
         open: bool
         operation close() {
@@ -32,17 +29,15 @@ system Helpdesk {
       repository Tickets for Ticket { }
     }
   }
-
   storage primary { type: postgres }
   resource ticketState { for: Tickets, kind: state, use: primary }
-
   api SupportApi from Support
-  deployable api {
-    platform: dotnet
+  deployable d {
+    platform: __PLATFORM__
     contexts: [Tickets]
     serves: SupportApi
     dataSources: [ticketState]
-    port: 8080
+    port: 4000
     auth: required
   }
 }

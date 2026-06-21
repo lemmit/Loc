@@ -405,6 +405,33 @@ function applySuffixToRecv(
     const nextType = memberType(recvType, ms.member, env);
     return { recv: mcIR, recvType: nextType };
   }
+  // Qualified enum value `EnumName.Value` — when the receiver is an
+  // unresolved bare name matching a declared enum and the member names one of
+  // its values, resolve the whole access to an `enum-value` ref (carrying
+  // `enumName` + the enum type), exactly as a bare enum value resolves.
+  // Without this, a `when` / invariant predicate's `Status.Draft` stays a
+  // member access on an unknown `Status` ref and backends emit an undefined
+  // identifier (e.g. Hono TS2304 'Status').
+  if (recv.kind === "ref" && recv.refKind === "unknown") {
+    const enumName = recv.name;
+    const localEnum =
+      env.ctx?.members.some(
+        (m) => isEnumDecl(m) && m.name === enumName && m.values.some((v) => v.name === ms.member),
+      ) ?? false;
+    const rootEnum = ambientEnumIndex.get(ms.member) === enumName;
+    if (localEnum || rootEnum) {
+      return {
+        recv: {
+          kind: "ref",
+          name: ms.member,
+          refKind: "enum-value",
+          enumName,
+          type: { kind: "enum", name: enumName },
+        },
+        recvType: { kind: "enum", name: enumName },
+      };
+    }
+  }
   // Non-call MemberSuffix — preserve `stepInto` semantics on the IR
   // node's `memberType` (matches the legacy MemberAccess lowering),
   // but track the next type using `memberType` so chained access

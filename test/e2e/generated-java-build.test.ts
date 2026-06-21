@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "vitest";
+import { CORPUS_DEPLOYABLE, materializeCorpusFixture } from "../fixtures/corpus/harness.js";
 
 // ---------------------------------------------------------------------------
 // Generator regression test: emit each fixture via `ddd generate system`,
@@ -65,7 +66,7 @@ const FIXTURES: Array<[string, string]> = [
   ["test/e2e/fixtures/java-build/tenancy-reified.ddd", "api1"],
   // TPH (sharedTable) inheritance: JPA SINGLE_TABLE + @DiscriminatorColumn
   // on the abstract base, @DiscriminatorValue per concrete, shared <Base>Id.
-  ["test/e2e/fixtures/java-build/tph.ddd", "tph_api"],
+  ["corpus:tph", CORPUS_DEPLOYABLE],
   // Embedded-SPA fullstack mount: /api route prefix, SpaWebConfig
   // (resource handler + index.html fallback), ClientApp/ React project.
   ["test/e2e/fixtures/java-build/fullstack.ddd", "fs_app"],
@@ -80,7 +81,7 @@ const FIXTURES: Array<[string, string]> = [
   ["test/e2e/fixtures/java-build/event-sourced.ddd", "es_api"],
   // Event-sourced workflow: append-only `<wf>_events` stream + fold-on-load
   // + emit→append-own-event dispatch (the saga analogue of event-sourced.ddd).
-  ["test/e2e/fixtures/java-build/eventsourced-workflow.ddd", "eswf_api"],
+  ["corpus:eventsourced-workflow", CORPUS_DEPLOYABLE],
   // shape(document): whole aggregate in one jsonb column via the
   // field-visibility Jackson mapper, version-bumping upserts.
   ["test/e2e/fixtures/java-build/document.ddd", "doc_api"],
@@ -113,7 +114,8 @@ const FIXTURES: Array<[string, string]> = [
   // OIDC turnkey auth (D-AUTH-OIDC): the generated @Primary OidcUserVerifier
   // (Nimbus JWKS + dotted-path claim mapping), the AuthController /auth/*
   // handshake + /auth/me probe, and the BOM-managed nimbus-jose-jwt dep.
-  ["test/e2e/fixtures/java-build/auth-oidc.ddd", "api"],
+  // Generated from the shared corpus fixture (one canonical auth-oidc across all backends).
+  ["corpus:auth-oidc", CORPUS_DEPLOYABLE],
 ];
 
 describe.skipIf(!ENABLED)(
@@ -124,7 +126,10 @@ describe.skipIf(!ENABLED)(
       (fixture, slug) => {
         const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-java-"));
         try {
-          execSync(`node ${cli} generate system ${fixture} -o ${outDir}`, {
+          const src = fixture.startsWith("corpus:")
+            ? materializeCorpusFixture(fixture.slice("corpus:".length), "java", outDir)
+            : fixture;
+          execSync(`node ${cli} generate system ${src} -o ${outDir}`, {
             stdio: "inherit",
             cwd: repoRoot,
           });

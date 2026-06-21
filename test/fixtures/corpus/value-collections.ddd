@@ -1,0 +1,24 @@
+// Value-object array (`Money[]`) stored inline (no child table).
+system Billing {
+  subdomain Sales {
+    context Invoicing {
+      valueobject Money { amount: decimal  currency: string }
+      aggregate Invoice with crudish {
+        reference: string
+        lineItems: Money[]
+        surcharges: Money[]?
+      }
+      repository Invoices for Invoice { }
+    }
+  }
+  api InvoicingApi from Sales
+  storage primary { type: postgres }
+  resource invoicingState { for: Invoicing, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Invoicing]
+    dataSources: [invoicingState]
+    serves: InvoicingApi
+    port: 4000
+  }
+}
