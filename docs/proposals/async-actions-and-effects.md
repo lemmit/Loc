@@ -263,6 +263,57 @@ The payoff is the projection thesis exactly where async lives: because Loom has 
 neutral "chained awaits, one error" construct, the F# emit *is* a CE rather than
 hand-rolled `update` arms.
 
+### 3c. The explicit form — the railway as a first-class expression
+
+To make the fallible chain **visible** rather than inferred from "a run of
+`await`s plus a trailing `onError`," the chained form is an **explicit, delimited
+block that is itself an expression yielding a `Result`** — `attempt { … }`
+(spelling open: `chain` / `flow` / `do`). Inside it each `await` auto-unwraps
+`Ok` and short-circuits `Err` to the block's result; the block as a whole is a
+`Result` you `match`, bind, or pass — first-class and composable:
+
+```ddd
+let placed = attempt {                         // 🔶 : Result<Order, PaymentError>
+  let order = await placeOrder(draft)          // inside attempt: unwrap Ok, Err short-circuits
+  await sendReceipt(order.id)
+  order                                          // the block's success value
+}
+match placed {                                  // the "complete match" — once, on the whole chain
+  Placed order => navigate(OrderConsole, { id: order.id })
+  Failed e     => showError(e.message)
+}
+```
+
+```fsharp
+let placed = asyncResult { let! order = Api.placeOrder draft
+                           do!         Api.sendReceipt order.Id
+                           return order }       // match placed with Placed … | Failed …
+```
+
+This is the **explicit foundation of the chained step**; **block `onError` is
+sugar over it** — `attempt { … } onError e => h` ≡ `match attempt { … } { Placed _
+=> …continue | Failed e => h }`. It mirrors the single-op layering one level up:
+
+| | explicit foundation | deferred sugar |
+|---|---|---|
+| single op | `match await op() { … }` | `await op() onError e => …` |
+| **chain** | **`match attempt { … } { … }`** | `attempt { … } onError e => …` |
+
+Two orthogonal explicit markers (the design's through-line): **`await`** marks
+suspension; **`attempt { }`** marks Result-threading (the railway). A call you
+want to handle *locally* instead of short-circuiting uses `match await op()`
+inside the block, opting out of the thread.
+
+**Still neutral, still a projection.** `attempt { }` is a plain railway construct
+(sequence of fallible steps → short-circuit → yields `Result`), **not** F# CE
+machinery (no `let!`/`do!`/builder extensibility). It *projects* to `asyncResult`
+on F#, `try/catch` on TS, `?` on Rust — same status as `await`: a neutral marker
+mapping to each target's idiom. So §3b's "keep the CE a projection" still holds —
+we add a neutral delimiter, not F# syntax. (Per-step alternative for finer
+visibility, Rust-style: `let order = await placeOrder(draft)?`, with the enclosing
+`attempt` as the `?` sink — `attempt { }` makes the *boundary* visible, `?` each
+*exit*; open which to prefer, they compose.)
+
 ## 4. Async actions — `async`, awaiting actions, the interface
 
 If an action (transitively) `await`s a remote op, it has a suspension point and
@@ -366,11 +417,12 @@ need:
    `loom.spurious-effect-marker` to **error** once the codemod has run. Every
    remote call is now explicitly `await`-marked and its `Result` handled by
    `match`.
-3. **`onError` sugar + `spawn`** *(deferred — add when patterns demand it)* — the
-   `onError` postfix/block sugar over `match` (§3a), and `spawn` for
+3. **Chained fallible flows + `spawn`** *(deferred — add when patterns demand it)*
+   — the explicit `attempt { }` railway expression (§3c) as the foundation, the
+   `onError` postfix/block sugar over `match`/`attempt` (§3a), and `spawn` for
    fire-and-forget/optimistic UI (§2), with `loom.bind-on-spawn` /
-   `loom.spurious-onerror`. Purely additive — `onError` desugars to step-1
-   `match`, so this breaks nothing.
+   `loom.spurious-onerror`. Purely additive — `attempt`/`onError` desugar to
+   step-1 `match`, so this breaks nothing.
 4. **`async` actions** — the `async` keyword + transitive inference +
    action→action awaiting (`loom.*-async` lint → error, same ramp).
 
@@ -389,9 +441,14 @@ infallible from the caller (they handle op failures internally or reduce them to
 error state); **`async` is required and checked** (via a lint→error ramp).
 
 **Deferred — designed, but not in the first cut** (added only when real `.ddd`
-shows the need; both are non-breaking, additive):
-- **`onError` sugar** — flat per-call/block sugar over `match` (§3a); justified
-  only by multi-step `await` chains that nest. Desugars to step-1 `match`.
+shows the need; all non-breaking, additive):
+- **`attempt { }` railway expression** — the explicit chained-fallible form
+  (§3c): a delimited block that *yields* a `Result`, matched once. The explicit
+  foundation of the chained step; projects to an F# `asyncResult` CE. Neutral,
+  not F# CE machinery.
+- **`onError` sugar** — flat per-call/block sugar over `match` / `attempt`
+  (§3a, §3c); justified only by multi-step `await` chains that nest. Block
+  `onError` ≡ `match attempt { … } { … }`.
 - **`spawn`** — fire-and-forget for optimistic-UI/telemetry (§2); a distinct
   capability, deferred until those patterns appear.
 
