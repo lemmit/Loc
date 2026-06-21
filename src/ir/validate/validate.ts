@@ -41,6 +41,7 @@ import {
   validateJavaStampSupport,
   validateMikroOrmSupport,
   validateNeedCapabilities,
+  validateNodeStampSupport,
   validatePermissions,
   validateProvenancedStorage,
   validateReactIdReferences,
@@ -115,6 +116,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateJavaFullstackSupport(sys, diags);
     validateJavaStampSupport(sys, diags);
     validateDotnetStampSupport(sys, diags);
+    validateNodeStampSupport(sys, diags);
     validateStampSupport(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);

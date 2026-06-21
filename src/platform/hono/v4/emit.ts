@@ -69,6 +69,7 @@ import {
 import type { Model } from "../../../language/generated/ast.js";
 import { dedupeByName } from "../../../util/dedupe.js";
 import { lowerFirst } from "../../../util/naming.js";
+import { principalIdField } from "../../../util/principal.js";
 import {
   byLayerLayoutAdapter,
   type HonoArtifact,
@@ -277,6 +278,12 @@ export function generateTypeScriptForContexts(
   const emitTrace = !!options.emitTrace;
   const out = new Map<string, string>();
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
+  // The principal's id field — threaded into the aggregate emitter so a
+  // `currentUser` lifecycle-stamp value renders to `currentUser.<idField>`
+  // (the principal id), mirroring the Java backend's `currentUser.id()`.
+  // `null` without auth: a principal-referencing stamp is gated upstream
+  // (loom.node-stamp-unsupported), so only non-principal stamps can occur.
+  const userIdField = authRequired ? principalIdField(system?.sys.user) : null;
   // OIDC turnkey auth (D-AUTH-OIDC): present when the system declares an
   // `auth { oidc { … } }` block AND this deployable opts in.  Drives the
   // generated verifier + `/auth/*` handshake + the `jose` dep, replacing
@@ -447,7 +454,11 @@ export function generateTypeScriptForContexts(
       // the shared table filtered by `kind` (see the repository builders).
       if (agg.isAbstract) continue;
       const repo = findRepoFor(ctx, agg.name);
-      place("domain-aggregate", agg.name, renderAggregate(agg, ctx, emitProvenance, emitTrace));
+      place(
+        "domain-aggregate",
+        agg.name,
+        renderAggregate(agg, ctx, emitProvenance, emitTrace, userIdField),
+      );
       // Persistence routing.  Event-sourced (`persistedAs(eventLog)`) wins
       // over the saving-shape axis — its repository appends to / folds the
       // event stream rather than reading a state table.  Otherwise the
