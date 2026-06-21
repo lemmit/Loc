@@ -494,21 +494,27 @@ export function renderEsController(
   const opActions = publicOps
     .map((op) => {
       const opSnake = snake(op.name);
+      // The command result flows through a public `<op>_<agg>_result/2` rather
+      // than a second `with`-clause + `else` arm: a guard-free op body infers
+      // `{:ok, _}`-only, which would make the `{:error, reason}` else arm
+      // "never match" under Elixir 1.18's --warnings-as-errors.  A public fn
+      // keeps both arms at their full clause domain.
+      const opResultFn = `${opSnake}_${aggSnake}_result`;
       return `
   def ${opSnake}(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
 
-    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id),
-         {:ok, _updated} <- ${ctxModule}.${opSnake}_${aggSnake}(record, attrs) do
-      send_resp(conn, 204, "")
+    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id) do
+      ${opResultFn}(conn, ${ctxModule}.${opSnake}_${aggSnake}(record, attrs))
     else
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
-
-      {:error, reason} ->
-        command_error(conn, reason)
     end
-  end`;
+  end
+
+  def ${opResultFn}(conn, {:ok, _updated}), do: send_resp(conn, 204, "")
+
+  def ${opResultFn}(conn, {:error, reason}), do: command_error(conn, reason)`;
     })
     .join("\n");
 
