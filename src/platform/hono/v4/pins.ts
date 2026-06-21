@@ -10,29 +10,29 @@
 // `v4/`, and the emitter is parameterised on the active version's
 // pins instead of importing v4's directly.
 //
-// All values are within-major / within-0.x.  zod 3→4
-// and TS 5→6 are majors deferred to the `hono@v5` package, not an
-// in-place bump here.  The `LOOM_TS_BUILD` shard (`tsc --noEmit` +
-// tsup against an emitted Hono project) is the gate that proves
-// these resolve + typecheck together.
+// All values are within-major / within-0.x.  zod 3→4, TS 5→6, and the
+// cross-major dev tools (vitest 2→4, pino-pretty 11→13) are deferred to
+// the `hono@v5` package, not an in-place bump here.  The `LOOM_TS_BUILD`
+// shard (`tsc --noEmit` + tsup against an emitted Hono project) is the
+// gate that proves these resolve + typecheck together.
 // ---------------------------------------------------------------------------
 export const BACKEND_PINS = {
   dependencies: {
-    hono: "^4.12.0",
-    "@hono/node-server": "^1.14.0",
-    "@hono/zod-openapi": "^0.19.0",
-    zod: "^3.24.0",
-    "drizzle-orm": "^0.45.0",
-    pg: "^8.13.0",
-    pino: "^9.5.0",
+    hono: "^4.12.26",
+    "@hono/node-server": "^1.19.0",
+    "@hono/zod-openapi": "^0.19.10",
+    zod: "^3.25.0",
+    "drizzle-orm": "^0.45.2",
+    pg: "^8.22.0",
+    pino: "^9.14.0",
   },
   devDependencies: {
-    typescript: "^5.7.0",
-    tsx: "^4.19.0",
-    tsup: "^8.3.0",
+    typescript: "^5.9.0",
+    tsx: "^4.22.0",
+    tsup: "^8.5.0",
     vitest: "^2.1.0",
-    "drizzle-kit": "^0.30.0",
-    "@types/pg": "^8.11.0",
+    "drizzle-kit": "^0.31.0",
+    "@types/pg": "^8.20.0",
     "pino-pretty": "^11.3.0",
   },
 } as const;
