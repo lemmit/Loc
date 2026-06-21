@@ -449,7 +449,20 @@ function stmtUsesCodeBlock(stmt: import("../../ir/types/loom-ir.js").StmtIR): bo
 // actual file content.
 // ---------------------------------------------------------------------------
 
-export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string, string> {
+export function emitPageObjectsForUi(
+  ui: UiIR,
+  ctx: PageEmitContext,
+  /** Emit page objects for custom (walker-emitted) pages by collecting
+   *  their testids through the shared TSX walker.  Default `true` for the
+   *  JSX/markup frontends (React / Vue / Svelte) whose packs ship the
+   *  shared `field-input-*` / `form-of` form templates.  Angular sets this
+   *  `false`: its forms render inline via `angularTarget` + `form-fields.ts`
+   *  (no pack form templates), so driving the React TSX walker against the
+   *  angularMaterial pack would throw on the first `CreateForm`.  The
+   *  scaffold-archetype page objects above stay framework-neutral and emit
+   *  for every frontend. */
+  walkerPageObjects = true,
+): Map<string, string> {
   const out = new Map<string, string>();
   const pageCtx = pageNameCtx(ctx);
   const seenAggregates = new Set<string>();
@@ -546,6 +559,7 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
   // we still guard against an explicit page named identically to
   // a scaffold-aggregate fragment by skipping any walker output
   // whose path is already in `out`.
+  if (!walkerPageObjects) return out;
   const userComponents = buildUserComponentsMap(ui, ctx.topLevelComponents);
   const bcByAggregate = buildBcByAggregate(ctx);
   for (const page of ui.pages) {

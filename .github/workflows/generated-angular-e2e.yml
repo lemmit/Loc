@@ -1,0 +1,73 @@
+name: Generated Angular e2e
+
+# Runtime e2e for the Angular frontend: generate the Angular project,
+# `ng build` it, serve the static `dist/browser/` bundle with a tiny
+# SPA-fallback static server, and run the SPA's own emitted Playwright smoke
+# spec (every param-less page navigates + loads) against it.  The runtime
+# sibling of generated-angular-build.yml — that gate compiles the bundle;
+# this one proves it actually runs.  Pure client-side smoke (no backend), so
+# no docker/postgres sidecar is needed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'designs/**'
+      - 'api/**'
+      - 'docker/**'
+      - 'stacks/**'
+      - 'test/e2e/generated-angular-e2e.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-angular-e2e.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'designs/**'
+      - 'api/**'
+      - 'docker/**'
+      - 'stacks/**'
+      - 'test/e2e/generated-angular-e2e.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-angular-e2e.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  angular-e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pack: ['angularMaterial@v1']
+    timeout-minutes: 25
+    name: angular-scaffold × ${{ matrix.pack }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # Root install runs the `prepare` lifecycle (langium:generate).
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Run angular runtime e2e
+        env:
+          LOOM_ANGULAR_E2E: '1'
+          LOOM_ANGULAR_E2E_PACK: ${{ matrix.pack }}
+        run: npx vitest run test/e2e/generated-angular-e2e.test.ts
