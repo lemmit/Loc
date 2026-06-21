@@ -20,7 +20,7 @@ system Shop {
     page OrderDetail {
       route: "/orders/:id"
       body: QueryView {
-        of: Orders.Order.byId(id),
+        of: Order.byId(id),
         single: true,
         loading: Loader {},
         empty: Empty { "none" },
