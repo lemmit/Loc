@@ -6,8 +6,13 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
 
 - **api** — the generated `e2e/<Sys>.e2e.test.ts` (from `test e2e "…"
   against <node backend>`), dispatched straight into `app.fetch`.
+  (`run.mjs`)
 - **unit** — the generated pure-domain `*.test.ts` (from aggregate
-  `test "…"` blocks).
+  `test "…"` blocks). (`run.mjs`)
+- **ui** — the generated `*.ui.spec.ts` (from `test e2e "…" against
+  <react-deployable>`): real Playwright page-object round-trips against
+  the `vite build`-built React frontend wired to the backend.
+  (`run-ui.mjs` — see below.)
 
 ## Why
 
@@ -61,9 +66,11 @@ prints a per-system verdict line:
 ```
 
 - **verified** — every linked testCase passed.
-- **unverified** — a linked test didn't run here (e.g. a `against <web>`
-  UI testCase — the node tier covers api/unit only, so those stay
-  unverified until the UI tier lands). Does **not** fail the run.
+- **unverified** — a linked test didn't run in *this* runner (e.g. a
+  `against <web>` UI testCase is unverified under `run.mjs`, and an
+  `against <api>` testCase is unverified under `run-ui.mjs`). The two
+  runners are complementary: `run.mjs` verifies the api/unit testCases,
+  `run-ui.mjs` verifies the UI ones. Does **not** fail the run.
 - **untested** — requirement has no testCase at all.
 - **FAILING** — a linked test failed. **Fails the run** (a cross-check on
   top of the per-test gate).
@@ -80,3 +87,43 @@ the repo's `synthDDL`/runners) → PGlite → `exec(synthDDL)` →
 against `app.fetch`. All third-party deps stay external (resolved from
 this dir's `node_modules`), so there is one drizzle instance and PGlite's
 wasm assets load normally.
+
+## UI tier (`run-ui.mjs`)
+
+The sibling runner for the **`ui`** tier — the emitted Playwright spec
+Loom lowers from `test e2e "…" against <react-deployable>` (page-object
+round-trips: `ui.orders.create(...)` → submit → read back). It exercises
+the generated React pages/forms end to end against the real backend —
+behaviour the in-process `app.fetch` api tier can't reach.
+
+```bash
+cd test/behavioral
+npm ci                     # same deps as the api tier (adds nothing)
+node run-ui.mjs            # every corpus case with `"ui": true`
+node run-ui.mjs sales-system
+```
+
+Per case: `generate system` → `vite build` the generated React frontend
+→ boot **one** in-process node HTTP server that serves the built `dist/`
+**and** the generated Hono backend on PGlite (`/api`, `/health`, `/ready`
+delegated straight to `app.fetch`) → run the emitted `*.ui.spec.ts` with
+headless Chromium pointed at it.
+
+Two non-obvious invariants make the wiring work (both were dead ends
+first):
+
+- **One origin, no proxy.** The browser, the static bundle, and the
+  backend all share the single server's origin, so there's no `vite
+  preview` proxy hop and no CORS. (`/api/*` is matched first and handed
+  to `app.fetch`; everything else is static with an `index.html`
+  fallback for client routes.)
+- **Async `spawn`, never `spawnSync`.** Playwright is launched with async
+  `spawn`: `spawnSync` blocks the node event loop, which would freeze the
+  in-process server so every browser request hangs.
+
+It sidesteps the playground's in-browser npm bundle entirely (and so
+issue #1242). Heavier than the api/unit tiers (a real `npm install` of
+the React/Mantine tree + `vite build` + a Chromium download), so it's
+opt-in — its own `behavioral:ui` script and `behavioral-ui-e2e.yml`
+workflow, never part of the fast `npm test`. Corpus cases without a
+`test e2e … against <react>` block carry `"ui": false`.

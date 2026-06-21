@@ -10,7 +10,11 @@ export default defineConfig({
     // real tests — they require a running backend on :8080 and are
     // byte-for-byte copies of generated source we are diffing against,
     // not part of this project's own test surface.
-    exclude: ["node_modules/**", "test/fixtures/**"],
+    // `**/node_modules/**` (not just root `node_modules/**`) so the
+    // opt-in harness deps under test/behavioral/node_modules — installed
+    // by `npm ci` there for the behavioral tiers — aren't discovered as
+    // this project's tests.
+    exclude: ["**/node_modules/**", "test/fixtures/**"],
     testTimeout: 30_000,
     coverage: {
       provider: "v8",
