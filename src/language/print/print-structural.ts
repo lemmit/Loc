@@ -245,6 +245,12 @@ export function printStructural(node: AstNode): string {
       return printFindDecl(node as FindDecl);
     case "Criterion":
       return printCriterion(node as import("../generated/ast.js").Criterion);
+    case "DomainService":
+      return printDomainService(node as import("../generated/ast.js").DomainService);
+    case "DomainServiceOperation":
+      return printDomainServiceOperation(
+        node as import("../generated/ast.js").DomainServiceOperation,
+      );
     case "Retrieval":
       return printRetrieval(node as import("../generated/ast.js").Retrieval);
     case "Seed":
@@ -746,6 +752,23 @@ function printFindDecl(node: FindDecl): string {
 function printCriterion(node: import("../generated/ast.js").Criterion): string {
   const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
   return `criterion ${node.name}${params} of ${printTypeRef(node.target)} = ${printExpr(node.body)}`;
+}
+
+/** `domainService <Name> { operation … }` — a stateless container of
+ *  non-mutating operations (domain-services.md). */
+function printDomainService(node: import("../generated/ast.js").DomainService): string {
+  return block(`domainService ${node.name}`, node.operations.map(printDomainServiceOperation));
+}
+
+/** One `operation <name>(<params>)[: <ret>] { <stmts> }` of a domain
+ *  service — statement-body only in v1 (no `=`-shorthand), no
+ *  private/extern/audited/when modifiers. */
+function printDomainServiceOperation(
+  node: import("../generated/ast.js").DomainServiceOperation,
+): string {
+  const params = node.params.map(printParameter).join(", ");
+  const ret = node.returnType ? `: ${printTypeRef(node.returnType)}` : "";
+  return block(`operation ${node.name}(${params})${ret}`, node.stmts.map(printStmt));
 }
 
 /** `retrieval <Name>[(<params>)] of <T>` — single-line `= <where>` when no

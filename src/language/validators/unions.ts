@@ -17,6 +17,7 @@
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type { Model, TypeAtom, TypeRef } from "../generated/ast.js";
 import {
+  isDomainServiceOperation,
   isFindDecl,
   isOperation,
   isPayloadDecl,
@@ -50,6 +51,9 @@ function checkUnionPosition(t: TypeRef, accept: ValidationAcceptor): void {
   // An operation's `or`-union return type (exception-less.md): a designed-in
   // outcome (`operation place(): OrderId or NotFound`), not a stored value.
   if (isOperation(container)) return;
+  // A domainService operation's `or`-union return (domain-services.md) — the
+  // same designed-in-outcome shape as an aggregate operation return.
+  if (isDomainServiceOperation(container)) return;
   accept(
     "error",
     `An inline 'or' union is a transport shape — it may only appear as a repository find ` +

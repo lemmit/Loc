@@ -29,6 +29,7 @@ These cover a single language feature each.  Each one is self-contained.
 | [`resources.md`](resources.md) | `storage` / `resource`, source types, the `objectStore` / `queue` / `api` kinds, the `config` map, and workflow-level resource consumption (`files.put`, `jobs.enqueue`, `rates.get`). |
 | [`extern.md`](extern.md) | `extern` operations and their per-backend handler registries. |
 | [`capabilities.md`](capabilities.md) | `filter`, `stamp`, `implements` — cross-aggregate behaviours like soft-delete and audit. |
+| [`domain-services.md`](domain-services.md) | `domainService` — stateless cross-aggregate pure calculators, the no-infra contract, and per-backend emission. |
 | [`scaffold-macros.md`](scaffold-macros.md) | The `scaffold`, `crudish`, `audit`, and `softDelete` macros — what they expand to. |
 | [`provenance.md`](provenance.md) | `provenanced` field modifier, the `ddd snapshot` capture step, and the Hono runtime trace SDK. |
 | [`observability.md`](observability.md) | The catalog envelope, per-backend log emission, the catalog extension surface. |

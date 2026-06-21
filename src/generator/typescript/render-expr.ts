@@ -45,6 +45,11 @@ const TS_TARGET: ExprTarget<TsRenderContext> = {
   member: renderMember,
   methodCall: renderMethodCall,
   call: renderCall,
+  domainServiceCall(args, serviceRef) {
+    // `Pricing.quote(cart, customer)` — the generated TS service module is an
+    // exported namespace of pure functions (operation name camel-cased).
+    return `${serviceRef.service}.${lowerFirst(serviceRef.op)}(${args.join(", ")})`;
+  },
   lambda(param, body) {
     // Lambdas always introduce their own parameter; the body is rendered
     // with the outer `this` still pointing at the same receiver (lambdas in
@@ -253,6 +258,11 @@ function renderCall(
       // awaited inline so it composes in any expression position.
       const op = e.resourceOp!;
       return `(await ${op.resourceName}$${op.verb}(${argList}))`;
+    }
+    case "domain-service": {
+      // `Pricing.quote(cart, customer)` — generated TS service namespace.
+      const ref = e.serviceRef!;
+      return `${ref.service}.${lowerFirst(ref.op)}(${argList})`;
     }
     case "free":
       return `${e.name}(${argList})`;

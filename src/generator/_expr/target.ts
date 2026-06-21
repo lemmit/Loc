@@ -62,6 +62,12 @@ export interface ExprTarget<Ctx extends ExprCtxBase> {
   member(recv: string, e: MemberExpr): string;
   methodCall(recv: string, args: string[], e: MethodCallExpr, ctx: Ctx): string;
   call(args: string[], e: CallExpr, ctx: Ctx): string;
+  /** Render a `callKind: "domain-service"` member call
+   *  (`Pricing.quote(cart, customer)` → the backend's call syntax for the
+   *  generated domain-service module).  `serviceRef` is the resolved
+   *  `{ service, op }`; `args` arrive already rendered.  Per-backend leaf —
+   *  each backend's `call` switch delegates here (domain-services.md). */
+  domainServiceCall(args: string[], serviceRef: { service: string; op: string }, ctx: Ctx): string;
   lambda(param: string, body: string | undefined): string;
   newPart(fields: RenderedField[], e: NewExpr, ctx: Ctx): string;
   object(fields: RenderedField[]): string;

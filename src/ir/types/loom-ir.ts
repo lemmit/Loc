@@ -733,6 +733,34 @@ export interface CriterionIR {
   body: ExprIR;
 }
 
+/** A stateless, named, context-level container of NON-mutating
+ *  operations — the pure-calculator floor (domain-services.md, v1 Shape
+ *  A).  Operations take aggregates / value objects / primitives by
+ *  value and return a value or an `or`-union error; they may `throw`
+ *  for the bug regime but never touch infrastructure (a phase-⑦
+ *  validator rejects repo / extern / api / workflow-start / emit /
+ *  this-write).  Unlike a `criterion`, a domain service is NOT
+ *  queryable (it does not inline to SQL `where`); a member call
+ *  `Pricing.quote(...)` lowers to a Call with `callKind:
+ *  "domain-service"`, so each backend emits a real call into the
+ *  generated service module — no re-resolution. */
+export interface DomainServiceIR {
+  name: string;
+  operations: DomainServiceOperationIR[];
+}
+
+/** One operation of a `domainService` (domain-services.md).  Mirrors the
+ *  param/return/body shape of an aggregate `OperationIR`, but is always
+ *  non-mutating (no `this`) — there is no `mutating` field to stamp; the
+ *  no-infra contract is derived by the validator from the body. */
+export interface DomainServiceOperationIR {
+  name: string;
+  params: ParamIR[];
+  /** Declared `or`-union (or plain) return type; absent ⇒ no `: T` clause. */
+  returnType?: TypeIR;
+  body: StmtIR[];
+}
+
 /** One `sort` term of a retrieval — a structural path through the
  *  candidate aggregate plus an ordering direction. */
 export interface SortTermIR {
@@ -802,6 +830,9 @@ export interface BoundedContextIR {
   views: ViewIR[];
   /** Named predicate specifications declared in this context. */
   criteria: CriterionIR[];
+  /** Stateless pure-calculator domain services declared in this context
+   *  (domain-services.md, v1 Shape A). */
+  domainServices: DomainServiceIR[];
   /** Channel declarations in this context (channels.md, Slice 1) — the
    *  publisher-side transport contracts over this context's events. */
   channels: ChannelIR[];
@@ -2439,6 +2470,7 @@ export type CallKind =
   | "value-object-ctor" // calls a value-object constructor
   | "private-operation" // calls a private operation
   | "resource-op" // a verb call on an ambient resource handle (Phase 4)
+  | "domain-service" // a member call on a `domainService` (domain-services.md)
   | "free"; // unresolved free call
 
 export type BinOp =
@@ -2518,6 +2550,11 @@ export type ExprIR =
         capability: string;
         interface?: LoomInterface;
       };
+      /** Populated when `callKind === "domain-service"` (domain-services.md)
+       *  — the resolved `domainService` name and the operation invoked.
+       *  Structured (not overloaded onto flat `name`) so backends render
+       *  the call without re-resolving the receiver. */
+      serviceRef?: { service: string; op: string };
       /** Per-primitive `style:` escape hatch.  Populated by lowering
        *  when the source supplied a `style: { … }` named arg on a
        *  walker-primitive call (`Container { style: { background: "red" }, ... }`).

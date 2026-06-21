@@ -57,6 +57,10 @@ const PY_TARGET: ExprTarget<PyRenderContext> = {
   member: renderMember,
   methodCall: renderMethodCall,
   call: renderCall,
+  domainServiceCall(args, serviceRef) {
+    // `quote(cart, customer)` — bare module-level function (snake-cased).
+    return `${snake(serviceRef.op)}(${args.join(", ")})`;
+  },
   lambda(param, body) {
     if (body !== undefined) return `lambda ${snake(param)}: ${body}`;
     return `lambda ${snake(param)}: None  # block-body lambda — page metamodel territory`;
@@ -305,6 +309,12 @@ function renderCall(args: string[], e: CallExpr, ctx: PyRenderContext): string {
       // call shape mirrors TS's awaited helper.
       const op = e.resourceOp!;
       return `(await ${snake(op.resourceName)}_${snake(op.verb)}(${argList}))`;
+    }
+    case "domain-service": {
+      // `quote(cart, customer)` — the generated Python service module
+      // exports bare module-level functions (snake-cased), imported by name.
+      const ref = e.serviceRef!;
+      return `${snake(ref.op)}(${argList})`;
     }
     case "free":
       return `${snake(e.name)}(${argList})`;

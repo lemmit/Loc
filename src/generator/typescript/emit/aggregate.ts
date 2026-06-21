@@ -241,7 +241,7 @@ function serverInitSeed(t: TypeIR): string {
   return "null";
 }
 
-function renderOperationReturnType(returnType: TypeIR, ctx: BoundedContextIR): string {
+export function renderOperationReturnType(returnType: TypeIR, ctx: BoundedContextIR): string {
   if (returnType.kind !== "union") return renderTsType(returnType);
   const members = unionMembers(returnType.variants, ctx).map((m) => {
     if (m.shape === "none") return `{ type: "none" }`;

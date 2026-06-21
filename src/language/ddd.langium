@@ -781,7 +781,7 @@ BoundedContext:
 
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
-    | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl | Channel;
+    | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl | Channel | DomainService;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -1272,6 +1272,41 @@ LoadPath:
 
 LoadSegment:
     name=LooseName (collection?='[]')?;
+
+// Domain service — a stateless, named, context-level container of
+// NON-mutating `operation`s (the pure-calculator floor, v1 Shape A).
+// Operations take aggregates / value objects / primitives by value,
+// return a value or an `or`-union error, and may `throw` for the
+// bug regime.  Strict no-infra: a phase-⑦ validator rejects repo /
+// extern / api / workflow-start / emit / this-write inside a body.
+// Callable from operation / workflow / api bodies via a member call
+// (`Pricing.quote(cart, customer)`), lowered to a Call with
+// `callKind: "domain-service"`.  See docs/proposals/domain-services.md.
+//
+//   domainService Pricing {
+//     operation quote(cart: Cart, customer: Customer): Money {
+//       return cart.subtotal - customer.tier.discount(cart.subtotal)
+//     }
+//     operation applyCoupon(price: Money, coupon: Coupon): Money or CouponExpired {
+//       if (coupon.isExpired) return CouponExpired { code: coupon.code }
+//       return price - coupon.discount
+//     }
+//   }
+DomainService:
+    'domainService' name=ID '{'
+        operations+=DomainServiceOperation*
+    '}';
+
+// v1: statement body ONLY (no `= Expression` shorthand — deferred).
+// Reuses the existing `Parameter` / `TypeRef` / `Statement` rules; the
+// `TypeRef` already parses `or`-unions (`Money or CouponExpired`).  Does
+// NOT carry `private` / `extern` / `audited` / `when` — those are
+// aggregate-operation-only.
+DomainServiceOperation:
+    'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+    (':' returnType=TypeRef)? '{'
+        stmts+=Statement*
+    '}';
 
 // ---------------------------------------------------------------------------
 // Members

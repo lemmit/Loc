@@ -294,6 +294,7 @@ function emitProjectFromContexts(
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
     criteria: contexts.flatMap((c) => c.criteria),
+    domainServices: contexts.flatMap((c) => c.domainServices),
     channels: contexts.flatMap((c) => c.channels),
     retrievals: contexts.flatMap((c) => c.retrievals),
     seeds: contexts.flatMap((c) => c.seeds),

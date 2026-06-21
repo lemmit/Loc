@@ -126,6 +126,10 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   member: renderMember,
   methodCall: renderMethodCall,
   call: renderCall,
+  domainServiceCall(args, serviceRef) {
+    // `Pricing.Quote(cart, customer)` — generated `public static class`.
+    return `${upperFirst(serviceRef.service)}.${upperFirst(serviceRef.op)}(${args.join(", ")})`;
+  },
   lambda(param, body) {
     // Lambdas always introduce their own parameter; the body is rendered
     // with the outer `this` still pointing at the same receiver (lambdas in
@@ -383,6 +387,12 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
         );
       }
       return `${cls}.${upperFirst(op.resourceName)}_${upperFirst(op.verb)}(${argList})`;
+    }
+    case "domain-service": {
+      // `Pricing.Quote(cart, customer)` — the generated .NET service is a
+      // `public static class` (operation name PascalCased).
+      const ref = e.serviceRef!;
+      return `${upperFirst(ref.service)}.${upperFirst(ref.op)}(${argList})`;
     }
     case "free":
       return `${upperFirst(e.name)}(${argList})`;

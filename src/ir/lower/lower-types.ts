@@ -3,6 +3,7 @@ import { AstUtils } from "langium";
 import type {
   Aggregate,
   BoundedContext,
+  DomainService,
   EntityPart,
   EnumDecl,
   EventDecl,
@@ -20,6 +21,7 @@ import {
   isAggregate,
   isContainment,
   isDerivedProp,
+  isDomainService,
   isEntityPart,
   isEnumDecl,
   isEventDecl,
@@ -212,15 +214,31 @@ export interface AmbientDeclIndex {
   valueObjects: ReadonlyMap<string, ValueObject>;
   enums: ReadonlyMap<string, EnumDecl>;
   entities: ReadonlyMap<string, Aggregate | EntityPart>;
+  /** Project-global `domainService` declarations — a member call
+   *  `Pricing.quote(...)` resolves its receiver here when the service is
+   *  declared in a sibling context (domain-services.md). */
+  domainServices: ReadonlyMap<string, DomainService>;
 }
 let ambientDeclIndex: AmbientDeclIndex = {
   valueObjects: new Map(),
   enums: new Map(),
   entities: new Map(),
+  domainServices: new Map(),
 };
 
 export function setAmbientDeclIndex(index: AmbientDeclIndex): void {
   ambientDeclIndex = index;
+}
+
+/** Resolve a `domainService` by name — env-local context members first,
+ *  then the project-global ambient index (cross-context). */
+export function findDomainServiceByName(env: Env, name: string): DomainService | undefined {
+  if (env.ctx) {
+    for (const m of env.ctx.members) {
+      if (isDomainService(m) && m.name === name) return m;
+    }
+  }
+  return ambientDeclIndex.domainServices.get(name);
 }
 
 export function lowerType(t: TypeRef | undefined, env?: Env): TypeIR {
