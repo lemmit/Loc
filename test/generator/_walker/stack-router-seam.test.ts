@@ -25,7 +25,6 @@ describe("routerPackageForStack", () => {
 
   it("keeps pre-v3 stacks on react-router-dom (Router 6)", () => {
     expect(routerPackageForStack("v1")).toBe("react-router-dom");
-    expect(routerPackageForStack("v2")).toBe("react-router-dom");
   });
 
   it("defaults to react-router-dom for custom packs with no stack", () => {
@@ -45,7 +44,7 @@ describe("stacks/v3 partials", () => {
     // Zod 4 + the zod-4-compatible resolvers major.
     expect(deps).toMatch(/"zod":\s*"\^4\./);
     expect(deps).toMatch(/"@hookform\/resolvers":\s*"\^5\./);
-    // Same React 19 baseline as v2.
+    // React 19 baseline.
     expect(deps).toMatch(/"react":\s*"\^19\./);
   });
 
