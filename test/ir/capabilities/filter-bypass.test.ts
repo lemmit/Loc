@@ -122,6 +122,10 @@ const deployable = (platform: string) => `
   deployable api { platform: ${platform}, contexts: [C], dataSources: [st], serves: A, port: 8081 }
 `;
 
+// elixir on the vanilla foundation (Slice-2-supported); contrast with the
+// default `platform: elixir` (Ash foundation, still fail-fast).
+const ELIXIR_VANILLA = "elixir { foundation: vanilla }";
+
 const systemWith = (ctxBody: string, platform = "dotnet") => `
   system S {
     capability softDeletable { isDeleted: bool  filter this.isDeleted == false }
@@ -153,13 +157,49 @@ describe("ignoring filter-bypass validator gates", () => {
     expect(diags).toEqual([]);
   });
 
-  it("loom.filter-bypass-unsupported — non-dotnet backend", async () => {
+  it("accepts a valid bypass on a node deployable (Slice 2 — Drizzle omits the conjunct)", async () => {
     const diags = await bypassDiags(
       systemWith(
         `repository R for Order {
           find recent(): Order[] where this.total > 0 ignoring softDeletable
         }`,
         "node",
+      ),
+    );
+    expect(diags).toEqual([]);
+  });
+
+  it("accepts a valid bypass on an elixir VANILLA deployable (Slice 2 — Ecto omits the where)", async () => {
+    const diags = await bypassDiags(
+      systemWith(
+        `repository R for Order {
+          find recent(): Order[] where this.total > 0 ignoring softDeletable
+        }`,
+        ELIXIR_VANILLA,
+      ),
+    );
+    expect(diags).toEqual([]);
+  });
+
+  it("loom.filter-bypass-unsupported — elixir Ash foundation still fails fast", async () => {
+    const diags = await bypassDiags(
+      systemWith(
+        `repository R for Order {
+          find recent(): Order[] where this.total > 0 ignoring softDeletable
+        }`,
+        "elixir",
+      ),
+    );
+    expect(diags.map((d) => d.code)).toEqual(["loom.filter-bypass-unsupported"]);
+  });
+
+  it("loom.filter-bypass-unsupported — java backend still fails fast", async () => {
+    const diags = await bypassDiags(
+      systemWith(
+        `repository R for Order {
+          find recent(): Order[] where this.total > 0 ignoring softDeletable
+        }`,
+        "java",
       ),
     );
     expect(diags.map((d) => d.code)).toEqual(["loom.filter-bypass-unsupported"]);

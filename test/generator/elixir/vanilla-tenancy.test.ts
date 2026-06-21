@@ -94,7 +94,14 @@ describe("vanilla tenancy — principal filter threaded + pinned", () => {
   it("reads the actor from opts in the retrieval and pins it", async () => {
     const ret = file(await gen(), "/ledger/retrievals/rich_accounts.ex");
     expect(ret).toContain("current_user = opts[:current_user]");
-    expect(ret).toContain(`(record.balance >= ^min) and (record.tenant_id == ${PIN})`);
+    // The retrieval's own predicate is the base `where:`; the (bare, origin-less)
+    // principal capability filter applies as a separate, unconditional `where`
+    // pipe stage (Slice 2 — the per-origin gate lets a call-site `ignoring` skip
+    // capability filters; a bare filter has no origin, so it always applies).
+    expect(ret).toContain(
+      "query = from(record in Api.Ledger.Account, where: record.balance >= ^min)",
+    );
+    expect(ret).toContain(`query = where(query, [record], record.tenant_id == ${PIN})`);
   });
 
   it("uses the run/1 current_user in the view (no `_ = current_user` discard)", async () => {

@@ -79,7 +79,12 @@ describe("vanilla capability filter — AND-ed into every read", () => {
   it("conjoins the filter into a retrieval and a view", async () => {
     const files = await gen();
     const ret = file(files, "/shop/retrievals/big_orders.ex");
-    expect(ret).toContain("where: (record.total >= ^min) and (not record.archived)");
+    // A retrieval applies the capability filter as a SEPARATE `where` pipe
+    // stage (so a call-site `ignoring` can gate it per-origin); the base
+    // `where:` carries only the retrieval's own predicate.  A bare/hand-written
+    // `filter` (origin undefined) is unconditional — no `ignore_*` gate.
+    expect(ret).toContain("query = from(record in Api.Shop.Order, where: record.total >= ^min)");
+    expect(ret).toContain("query = where(query, [record], not record.archived)");
     const view = file(files, "/shop/views/active_orders.ex");
     expect(view).toContain("where: (record.total > 0) and (not record.archived)");
   });
