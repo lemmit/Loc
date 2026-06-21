@@ -1366,23 +1366,52 @@ function renderInstancesController(
       shape
         .map((f) => projectToResponse(`${rowVar}.${upperFirst(f.name)}`, f.type, ctx))
         .join(", ");
+    // The read body diverges on `wf.eventSourced`: a state-based saga selects
+    // the `<Wf>State` EF DbSet directly, while an event-sourced workflow folds
+    // the per-correlation `<wf>_events` stream — LIST loads every event row,
+    // groups by StreamId, and folds each through `_FromEvents` (mirroring the
+    // ES-aggregate `_LoadAll` group-fold); byId loads one stream + folds it.
+    // The `instanceWireShape` projection, operationIds, and route paths are
+    // identical to the state path, so cross-backend OpenAPI parity holds.
+    let listBody: string;
+    let byIdBody: string;
+    if (wf.eventSourced) {
+      const eventSet = esEventDbSet(wf);
+      const stateCls = workflowStateClass(wf);
+      const corrId = esCorrIdClass(wf);
+      listBody =
+        `        var __rows = await _db.${eventSet}.AsNoTracking().OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync();\n` +
+        `        var rows = __rows.GroupBy(e => e.StreamId).Select(g => ${stateCls}._FromEvents(new ${corrId}(Guid.Parse(g.Key)), g.Select(${stateCls}.RowToEvent).ToList()));\n` +
+        `        return Ok(rows.Select(x => new ${T}InstanceResponse(${proj("x")})));\n`;
+      byIdBody =
+        `        var __sid = id.ToString();\n` +
+        `        var __rows = await _db.${eventSet}.AsNoTracking().Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync();\n` +
+        `        if (__rows.Count == 0) return NotFound();\n` +
+        `        var x = ${stateCls}._FromEvents(new ${corrId}(id), __rows.Select(${stateCls}.RowToEvent).ToList());\n` +
+        `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n`;
+    } else {
+      listBody =
+        `        var rows = await _db.${dbSet}.AsNoTracking().ToListAsync();\n` +
+        `        return Ok(rows.Select(x => new ${T}InstanceResponse(${proj("x")})));\n`;
+      byIdBody =
+        `        var __key = new ${targetName}Id(id);\n` +
+        `        var x = await _db.${dbSet}.AsNoTracking().FirstOrDefaultAsync(r => r.${corrName} == __key);\n` +
+        `        if (x is null) return NotFound();\n` +
+        `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n`;
+    }
     blocks.push(
       `    [HttpGet("${slug}/instances")]\n` +
         `    [ProducesResponseType(typeof(IEnumerable<${T}InstanceResponse>), 200)]\n` +
         `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflowInstances(wf.name)))}()\n` +
         `    {\n` +
-        `        var rows = await _db.${dbSet}.AsNoTracking().ToListAsync();\n` +
-        `        return Ok(rows.Select(x => new ${T}InstanceResponse(${proj("x")})));\n` +
+        listBody +
         `    }\n` +
         `    [HttpGet("${slug}/instances/{id}")]\n` +
         `    [ProducesResponseType(typeof(${T}InstanceResponse), 200)]\n` +
         `    [ProducesResponseType(typeof(ProblemDetails), 404)]\n` +
         `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflowInstanceById(wf.name)))}(Guid id)\n` +
         `    {\n` +
-        `        var __key = new ${targetName}Id(id);\n` +
-        `        var x = await _db.${dbSet}.AsNoTracking().FirstOrDefaultAsync(r => r.${corrName} == __key);\n` +
-        `        if (x is null) return NotFound();\n` +
-        `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n` +
+        byIdBody +
         `    }\n`,
     );
   }

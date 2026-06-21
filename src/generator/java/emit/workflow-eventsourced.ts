@@ -84,6 +84,17 @@ export function renderEsWorkflowFoldClass(
     ...stateOnly.map((f) => `    ${renderJavaType(f.type)} ${f.name};`),
   ];
 
+  // Record-style public accessors (`<field>()`) so the cross-package
+  // instance-read controller (api package) can project a folded instance the
+  // same way it projects a JPA saga-state row — the package-private fields
+  // alone aren't reachable from another package.
+  const accessorMethods = [
+    `    public ${corrId} ${corr}() { return this.${corr}; }`,
+    ...stateOnly.map(
+      (f) => `    public ${renderJavaType(f.type)} ${f.name}() { return this.${f.name}; }`,
+    ),
+  ];
+
   // `_apply<Event>` appliers — rendered through the shared statement pipeline
   // with `this` as the receiver (the fold mutates this instance's fields),
   // exactly like the aggregate's appliers.
@@ -128,6 +139,8 @@ export function renderEsWorkflowFoldClass(
     `    private static final JsonMapper JSON = JsonMapper.builder().findAndAddModules().build();`,
     ``,
     ...fieldLines,
+    ``,
+    ...accessorMethods,
     ``,
     ...applierMethods,
     `    void _apply(DomainEvent ev) {`,

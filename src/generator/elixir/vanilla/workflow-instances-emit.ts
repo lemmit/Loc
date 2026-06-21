@@ -88,15 +88,40 @@ end
   return routes;
 }
 
-/** The list + by-id actions for one observable workflow.  Plain Ecto reads
- *  through `<App>.Repo`; the row projects to `instanceWireShape` (camelCase
- *  declared name ← snake struct field). */
+/** The list + by-id actions for one observable workflow.  The read body
+ *  diverges on `wf.eventSourced`: a state-based saga reads its `<Wf>State` Ecto
+ *  schema through `<App>.Repo` (`all` / `get`), while an event-sourced workflow
+ *  folds the per-correlation `<wf>_events` stream via `<Wf>Stream` —
+ *  `list_instances/0` (load-all + group-by-stream_id + fold each, mirroring the
+ *  ES-aggregate repository `list/0`) for LIST, `instance_by_id/1` (single-stream
+ *  load + fold, nil if empty) for byId.  The projection reads `row.<field>`
+ *  identically on the Ecto row and the folded `<Wf>State` struct, so the wire
+ *  keys, route paths, and action names stay identical to the state path. */
 function renderInstanceActions(contextModule: string, appModule: string, wf: WorkflowIR): string {
   const slug = snake(wf.name);
-  const stateMod = stateModule(contextModule, wf);
   const mapFields = (wf.instanceWireShape ?? [])
     .map((f) => `${f.name}: row.${snake(f.name)}`)
     .join(", ");
+  if (wf.eventSourced) {
+    const streamMod = `${contextModule}.Workflows.${upperFirst(wf.name)}Stream`;
+    return `  @doc "GET /api/workflows/${slug}/instances"
+  def ${slug}_instances(conn, _params) do
+    data = Enum.map(${streamMod}.list_instances(), fn row -> %{${mapFields}} end)
+    json(conn, %{data: data})
+  end
+
+  @doc "GET /api/workflows/${slug}/instances/:id"
+  def ${slug}_instance(conn, %{"id" => id}) do
+    case ${streamMod}.instance_by_id(id) do
+      nil ->
+        ProblemDetails.not_found_response(conn, "${upperFirst(wf.name)} instance", id)
+
+      row ->
+        json(conn, %{${mapFields}})
+    end
+  end`;
+  }
+  const stateMod = stateModule(contextModule, wf);
   return `  @doc "GET /api/workflows/${slug}/instances"
   def ${slug}_instances(conn, _params) do
     data = Enum.map(${appModule}.Repo.all(${stateMod}), fn row -> %{${mapFields}} end)
