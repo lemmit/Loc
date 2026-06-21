@@ -1049,7 +1049,21 @@ Repository:
 
 FindDecl:
     'find' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef
-        ('where' filter=Expression)?;
+        ('where' filter=Expression)?
+        IgnoringClause?;
+
+// Selective capability-filter bypass (named-filter-bypass.md, §11).  A trailing
+// clause on a read (find / view / inline `Repo.findAll`) that lets it skip a
+// capability's contributed query-filter(s), keyed on the CAPABILITY name.
+// `ignoring *` bypasses every capability filter on the aggregate; `ignoring A, B`
+// bypasses exactly those capabilities' filters.  Capability names are bare IDs
+// resolved by name (like `with` / `implements`), NOT Langium cross-references —
+// the expander resolves capabilities by its document-wide inventory, so there is
+// no Langium scope for them.  `ignoring` is a SOFT keyword (it stays admissible
+// as a NameRef / member name elsewhere), so existing identifiers named
+// `ignoring` keep parsing.
+fragment IgnoringClause:
+    'ignoring' (bypassAll?='*' | bypass+=ID (',' bypass+=ID)*);
 
 // Workflow — context-level orchestration of multiple aggregates.  The
 // body reuses operation-body Statement rules (precondition, let, emit,
@@ -1151,12 +1165,13 @@ type ViewSource = Aggregate | Workflow;
 View:
     'view' name=ID
     (
-        '=' source=[ViewSource:ID] ('requires' gate=Expression)? 'where' filter=Expression
+        '=' source=[ViewSource:ID] ('requires' gate=Expression)? 'where' filter=Expression IgnoringClause?
       | '{'
             fields+=Property*
             'from' source=[ViewSource:ID]
             ('requires' gate=Expression)?
             ('where' filter=Expression)?
+            IgnoringClause?
             'bind' binds+=BindEntry (',' binds+=BindEntry)* ','?
         '}'
     );
@@ -1530,7 +1545,12 @@ LooseName returns string:
     // `action` (extern-component-escape-hatch.md, Tier 2) admitted as soft
     // so user code can still name a field / arg `action`; hard only in the
     // `ActionType` type position.
-    | 'action';
+    | 'action'
+    // `ignoring` (named-filter-bypass.md, §11) is a soft keyword — hard only in
+    // the `IgnoringClause` filter-bypass tail on a read (find / view / inline
+    // `Repo.findAll`).  Admit it here so user code can still name a field /
+    // parameter `ignoring`.
+    | 'ignoring';
 
 // A dotted page reference for `menu { link <Area>.<Page> }` — lets a menu link
 // disambiguate role-named scaffold pages (`List` / `New` / `Detail`) by their
@@ -1822,7 +1842,14 @@ UnaryExpr infers Expression:
   | PostfixExpr;
 
 PostfixExpr infers Expression:
-    PrimaryExpr ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+)?;
+    // A trailing `ignoring` clause is admitted on the whole postfix chain so an
+    // inline read `Repo.findAll(...) ignoring softDeletable` / `... ignoring *`
+    // parses (named-filter-bypass.md, §11).  It is only meaningful on a repo
+    // read call; the lowering for `Repo.findAll`/`Repo.run` consumes
+    // `bypass`/`bypassAll`, and the IR validator rejects it elsewhere.  Kept on
+    // the chain (a discriminator/flat-list, not a recursive action) so it never
+    // alters the existing PostfixChain shape for callers that ignore it.
+    PrimaryExpr ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+ IgnoringClause?)?;
 
 PostfixSuffix:
       {infer MemberSuffix} '.' member=MemberName
@@ -1895,7 +1922,11 @@ MemberName returns string:
        // `Property.name` / `LooseName`; hard only in the page DSL metadata
        // slots (`title:` / `body:` / `description:` / the `state { … }` block).
        | 'description' | 'ogImage' | 'canonical' | 'favicon'
-       | 'title' | 'body' | 'state';
+       | 'title' | 'body' | 'state'
+       // `ignoring` (named-filter-bypass.md, §11) admitted after `.` so member
+       // access on a field named `ignoring` keeps parsing.  Hard only in the
+       // `IgnoringClause` read tail.
+       | 'ignoring';
 
 // Lambdas accept either a single expression body (the only form
 // in v22) or a brace-wrapped block of statements.  Block bodies
@@ -2108,7 +2139,11 @@ NameRefIdent returns string:
        | 'retrieval' | 'sort' | 'loads' | 'asc' | 'desc'
        // `action` admitted as a bare NameRef (Tier 2 `ActionType` is the only
        // hard position).
-       | 'action';
+       | 'action'
+       // `ignoring` (named-filter-bypass.md, §11) admitted as a bare NameRef so
+       // an expression can read a field named `ignoring`.  Hard only in the
+       // `IgnoringClause` read tail.
+       | 'ignoring';
 
 // ---------------------------------------------------------------------------
 // Terminals

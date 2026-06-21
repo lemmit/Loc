@@ -197,7 +197,13 @@ export function callExpr(
     _setContainer(a, suffix, "args", i);
   });
   const chain: PostfixChain = _tag(
-    mkPostfixChain({ $type: "PostfixChain", head: callee, suffixes: [suffix] }),
+    mkPostfixChain({
+      $type: "PostfixChain",
+      head: callee,
+      suffixes: [suffix],
+      bypass: [],
+      bypassAll: false,
+    }),
     origin,
   );
   _setContainer(callee, chain, "head");
