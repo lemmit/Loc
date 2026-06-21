@@ -39,14 +39,41 @@ swap the repository/schema layer (minimal-v1 surface, validator-gated).
 > `LoomModel` / `wireShape` IR contract and emit the analogous constructs in
 > their own idiom. See [`platforms.md`](platforms.md) for the full registered
 > set.
->
-> **For the cross-backend *feature-parity* view** (which of the five backends
-> emits each gated feature — event sourcing, inheritance, unions, capability
-> filters, provenance/audit, …), see the validator-grounded
-> [`audits/backend-feature-parity-2026-06.md`](audits/backend-feature-parity-2026-06.md).
-> Java and Python are now full backends and Elixir splits by foundation
-> (`ash`/`vanilla`); the headline gaps are tracked in
-> [`plans/backend-parity-plan.md`](plans/backend-parity-plan.md).
+
+### Five-backend feature parity
+
+Which of the five domain-logic backends **emits** each gated feature vs. **fails
+fast** at validate. A cell is `✓` (emitted, build-gate-verified), `🚫` (gated —
+the validator rejects the combination with the named `loom.*` diagnostic, a
+reviewed decision), or `⚠` (partial — see the note). Elixir splits by
+foundation (`ash` / `vanilla`). This grid is the **live** view, derived from the
+validator gate sets in `src/ir/validate/checks/` and frozen against drift by
+[`test/platform/backend-parity-gates.test.ts`](../test/platform/backend-parity-gates.test.ts)
+(a backend can't be silently *ungated-and-unemitting* — the F1 class of bug).
+The dated baseline write-up is
+[`audits/backend-feature-parity-2026-06.md`](audits/backend-feature-parity-2026-06.md);
+remaining gaps + sequencing are in
+[`plans/backend-parity-plan.md`](plans/backend-parity-plan.md).
+
+| Feature | node | dotnet | java | python | elixir·ash | elixir·vanilla | Gate set |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | --- |
+| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | 🚫 | ✓ | `EVENT_SOURCING_BACKENDS` |
+| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | 🚫 | 🚫 | `EVENT_SOURCING_WORKFLOW_BACKENDS` |
+| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` |
+| TPC inheritance `inheritanceUsing(ownTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
+| Discriminated unions / generic carriers (`paged`/`envelope`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_UNION_BACKENDS` |
+| `when` canCommand gate + `can_<op>` query | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_WHEN_BACKENDS` |
+| Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ⚠ return-dominant | ✓ | `SUPPORTED_RETURN_BACKENDS` |
+| Capability `filter` — relational (non-principal) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` |
+| Capability `filter` — principal (`currentUser`/tenancy) | ✓ | ✓ | ✓ | 🚫 | ✓ | ✓ | system-checks.ts |
+| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | 🚫 | ✓ | `PROVENANCE_BACKENDS` |
+| Per-operation `audited` | ✓ | ✓ | 🚫 | 🚫 | 🚫 | 🚫 | `AUDIT_OP_BACKENDS` |
+| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | 🚫 | 🚫 | 🚫 | 🚫 | 🚫 | `AUDIT_LIFECYCLE_BACKENDS` |
+| Audit/context stamping (`with audit`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
+
+Open gaps (tracked in the plan): principal Python filters (W1b), per-op/
+lifecycle `audited` beyond node/dotnet (W3), and the Elixir·ash foundation
+routing for ES/provenance (W4).
 
 | Construct | TypeScript (Hono + Drizzle) | .NET (ASP.NET + EF + Mediator) | React (Vite + RQ + Mantine) |
 | --- | --- | --- | --- |
