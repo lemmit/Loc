@@ -1,0 +1,78 @@
+// Runtime auth UI-gate smoke fixture.  One backend + one gated ui, served by
+// each frontend (react/vue/svelte/angular SPAs + phoenix LiveView).  Menu
+// links + pages + an operation button are gated to distinct roles so a runtime
+// smoke asserts BOTH branches:
+//   - "Public" : ungated              → always visible (control)
+//   - "Admin"  : role == "admin"      → visible to admin, hidden otherwise
+//   - "Super"  : role == "superadmin" → hidden from the dev-stub admin
+// plus an Action button gated to "admin".  Drives test/e2e/auth-gate-ui-e2e.
+system Gatekeeper {
+  user { id: string  role: string }
+
+  auth {
+    provider: keycloak
+    oidc { issuer: env("OIDC_ISSUER") clientId: env("OIDC_CLIENT_ID") }
+    claims: { role: "role" }
+  }
+
+  subdomain Ops {
+    context Work {
+      aggregate Job {
+        title: string
+        status: string
+        operation approve() {
+          requires currentUser.role == "admin"
+          status := "approved"
+        }
+      }
+      repository Jobs for Job { }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource jobState { for: Work, kind: state, use: primary }
+
+  api OpsApi from Ops
+  deployable api {
+    platform: node
+    contexts: [Work]
+    serves: OpsApi
+    dataSources: [jobState]
+    port: 8080
+    auth: required
+  }
+
+  ui WebApp {
+    api Ops: OpsApi
+    page Public { route: "/public" body: Heading { "Public" } }
+    page Admin { route: "/admin" requires currentUser.role == "admin" body: Heading { "Admin Area" } }
+    page Super { route: "/super" requires currentUser.role == "superadmin" body: Heading { "Super Area" } }
+    page Job {
+      route: "/jobs/:id"
+      body: QueryView {
+        of: Ops.Job.byId(id),
+        single: true,
+        loading: Loader {},
+        empty: Empty { "Not found" },
+        data: j => Toolbar {
+          Action { j.approve }
+        }
+      }
+    }
+    menu {
+      section "Main" {
+        link Public,
+        link Admin,
+        link Super
+      }
+    }
+  }
+
+  deployable web {
+    platform: svelte
+    targets: api
+    ui: WebApp { Ops: api }
+    port: 3001
+    auth: ui
+  }
+}
