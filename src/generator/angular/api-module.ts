@@ -1,6 +1,6 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
 import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
-import type { EnrichedAggregateIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { EnrichedAggregateIR, FindIR, RepositoryIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { peelCollection, peelNullable, wireTypeInfo } from "../../ir/types/wire-types.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
@@ -59,8 +59,15 @@ function wireTsType(t: TypeIR): string {
   }
 }
 
+/** Parameterised finds (everything but the auto `all`) the aggregate's
+ *  repository declares — each lowers to a `GET /<tag>/<find>?<params>` route +
+ *  an `injectQuery` factory keyed on the rendered params. */
+function paramFinds(repo: RepositoryIR | undefined): FindIR[] {
+  return (repo?.finds ?? []).filter((f) => f.name !== "all");
+}
+
 /** Emit the `src/api/<agg>.ts` module for one aggregate. */
-export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
+export function buildAngularApiModule(agg: EnrichedAggregateIR, repo?: RepositoryIR): string {
   const single = agg.name;
   const serviceName = `${single}Service`;
   const responseName = `${single}Response`;
@@ -115,6 +122,60 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
     ];
   });
 
+  // Parameterised finds → a `GET /<tag>/<find>?<params>` service method each +
+  // an `injectQuery` factory keyed on the rendered param values.  The find's
+  // return type decides the response TS type: an array find returns
+  // `<Agg>Response[]`, an optional/single find `<Agg>Response | null`.  (Paged /
+  // discriminated-union returns fall back to the list shape — the precise
+  // envelope typing is a later slice; the read path only needs the row shape.)
+  const finds = paramFinds(repo);
+  const findReturnTs = (f: FindIR): string =>
+    f.returnType.kind === "array"
+      ? `${responseName}[]`
+      : f.returnType.kind === "optional"
+        ? `${responseName} | null`
+        : responseName;
+  // The find query type — the shared walker (`adjustFindHookArgs`) renders a
+  // find's args into a single `{ <param>: <value>, … }` object, so the Angular
+  // factory takes one `<Find><Agg>Query` object (matching that call shape) and
+  // the service method spreads it into the query string.
+  const findQueryType = (f: FindIR): string => `${upperFirst(f.name)}${single}Query`;
+  const findQueryInterfaces = finds.flatMap((f) => [
+    `export interface ${findQueryType(f)} {`,
+    ...f.params.map((p) => `  ${p.name}: ${wireTsType(p.type)};`),
+    "}",
+    "",
+  ]);
+  const findMethods = finds.flatMap((f) => {
+    const findSnake = snake(f.name);
+    return [
+      "",
+      `  ${f.name}(query: ${findQueryType(f)}) {`,
+      "    const qs = new URLSearchParams(",
+      "      Object.entries(query).map(([k, v]) => [k, String(v)]),",
+      "    ).toString();",
+      `    return this.http.get<${findReturnTs(f)}>(\`\${API_BASE_URL}/${tag}/${findSnake}\${qs ? "?" + qs : ""}\`);`,
+      "  }",
+    ];
+  });
+  const findFactories = finds.flatMap((f) => {
+    const fn = `use${upperFirst(f.name)}${single}`;
+    return [
+      `/** \`${f.name}\` parameterised find (TanStack \`injectQuery\`) — hoisted as a`,
+      " *  component field; the field initializer is the injection context.  Keyed",
+      " *  on the query object so a bound filter re-fetches when it changes; the",
+      " *  query stays the shared cache's `[tag, find, name, query]` entry. */",
+      `export function ${fn}(query: ${findQueryType(f)}) {`,
+      `  const service = inject(${serviceName});`,
+      "  return injectQuery(() => ({",
+      `    queryKey: ["${tag}", "find", "${snake(f.name)}", query] as const,`,
+      `    queryFn: () => firstValueFrom(service.${f.name}(query)),`,
+      "  }));",
+      "}",
+      "",
+    ];
+  });
+
   return lines(
     "// Auto-generated.  Do not edit by hand.",
     'import { HttpClient } from "@angular/common/http";',
@@ -133,6 +194,7 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
     "}",
     "",
     ...opRequests,
+    ...findQueryInterfaces,
     `@Injectable({ providedIn: "root" })`,
     `export class ${serviceName} {`,
     "  private readonly http = inject(HttpClient);",
@@ -149,6 +211,7 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
     `    return this.http.post<{ id: string }>(\`\${API_BASE_URL}/${tag}\`, input);`,
     "  }",
     ...opMethods,
+    ...findMethods,
     "}",
     "",
     "/** `findAll` query (TanStack `injectQuery`) — hoisted as a component field;",
@@ -191,6 +254,7 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR): string {
     "}",
     "",
     ...opFactories,
+    ...findFactories,
     // Reference the var names the page-shell will hoist so the naming stays
     // discoverable next to the factories.
     `// hoisted as: readonly ${allVar} = ${allFn}();`,

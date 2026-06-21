@@ -7,6 +7,7 @@ import { emitExpr, type WalkContext, type WalkResult } from "../../_walker/walke
 import type { AngularActionSpec } from "../action.js";
 import type { AngularCreateFormSpec } from "../create-form.js";
 import type { AngularModalSpec } from "../modal.js";
+import type { AngularWorkflowFormSpec } from "../workflow-form.js";
 import { angularTarget } from "./angular-target.js";
 
 // ---------------------------------------------------------------------------
@@ -60,21 +61,25 @@ export function pageSlug(page: PageIR, nameCtx: PageNameCtx): string {
   return pageSelector(page, nameCtx).slice("app-".length);
 }
 
-/** True when the walked body needs features not assembled yet — such a page
- *  is stubbed until a later sub-slice.  Reactive Forms (`formOfs`) are still
- *  deferred; of the api reads, only the collection `findAll` (`useAll*`) is
- *  wired, so a page using `byId` / mutations / parameterised finds stays
- *  stubbed until those sub-slices land. */
+/** True when the walked body needs features the Angular shell does not assemble
+ *  yet — such a page is stubbed.  The shared (React-shaped) Reactive-Forms sink
+ *  `formOfs` and the shared mutation sink `actionMutations` are populated by the
+ *  form primitives Angular has NOT forked (`Form` / `EditForm` / `WorkflowForm` /
+ *  standalone `OperationForm` / `DestroyForm`).  The forked primitives
+ *  (`CreateForm` / `Action` / `Modal`) route through their own
+ *  `angularForms` / `angularActions` / `angularModals` side-channels instead, so
+ *  they never trip the gate.  Every api read — collection (`useAll…`),
+ *  single-record (`use…ById`), parameterised finds (`use<Find><Agg>`), views
+ *  (`use<View>View`) and workflow-instance reads — is now hoisted generically by
+ *  the shell, so no api-read shape defers any longer. */
 export function pageNeedsDeferredFeatures(result: WalkResult): boolean {
+  // Shared RHF form sink — only populated by the not-yet-forked form primitives
+  // (the forked CreateForm uses `angularForms`).  Stub rather than emit a
+  // dangling form reference.
   if (result.formOfs.length > 0) return true;
-  // `Action(inst.op)` / operation forms record a mutation hook the shell does
-  // not assemble yet — stub rather than emit a dangling `<op><Agg>` reference.
+  // Shared mutation sink — only populated by the not-yet-forked mutation
+  // primitives (the forked Action/Modal use `angularActions`/`angularModals`).
   if (result.actionMutations.length > 0) return true;
-  for (const h of result.usedApiHooks.values()) {
-    // Collection (`useAll…`) and single-record (`use…ById`) reads are
-    // supported; anything else (action mutations) still defers.
-    if (!h.hookName.startsWith("useAll") && !h.hookName.endsWith("ById")) return true;
-  }
   return false;
 }
 
@@ -268,8 +273,24 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     for (const [from, names] of [...byPath.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       imports.push(`import { ${[...names].sort().join(", ")} } from ${JSON.stringify(from)};`);
     }
-    // Route-param args resolve against the bound class fields (`id` → `this.id`).
-    const bind = (arg: string): string => (boundParams.includes(arg) ? `this.${arg}` : arg);
+    // Hoist args are class-field initializers, so every member they read must
+    // resolve against `this`.  A bare route-param arg (`id`) → `this.id`; a
+    // parameterised-find query object (`{ status: status() }`) carries state /
+    // derived signal CALLS that need `this.` too (`{ status: this.status() }`).
+    // Route params bound as plain string fields are read bare inside the object
+    // (not as a signal call), so prefix them as whole words there.
+    const stateAndDerived = new Set<string>([
+      ...page.state.map((s) => s.name),
+      ...derived.map((d) => d.name),
+    ]);
+    const bind = (arg: string): string => {
+      if (boundParams.includes(arg)) return `this.${arg}`;
+      let out = prefixSignalReadsWithThis(arg, stateAndDerived);
+      for (const p of boundParams) {
+        out = out.replace(new RegExp(`(?<![.\\w])${p}\\b(?!\\()`, "g"), `this.${p}`);
+      }
+      return out;
+    };
     const hoisted = angularTarget.renderApiHoisting(
       [...result.usedApiHooks.values()].map((h) => ({
         apiHandle: "",
@@ -303,6 +324,30 @@ export function renderAngularPage(input: AngularPageShellInput): string {
         `    if (this.${form.formVar}.invalid) return;`,
         `    const out = await this.${form.mutationVar}.mutateAsync(this.${form.formVar}.getRawValue());`,
         `    this.router.navigateByUrl(\`/${form.redirectSlug}/\${out.id}\`);`,
+        "  }",
+      ].join("\n"),
+    );
+  }
+
+  // `WorkflowForm(runs: …)` — the Angular renderer recorded one spec per form on
+  // `angularWorkflowForms`.  Each hoists the `use<Wf>Workflow` mutation, builds
+  // the typed Reactive `FormGroup` over the command params, and declares the
+  // submit handler (`mutateAsync(getRawValue())` → navigate `/workflows`).  The
+  // workflow command returns `void`, so the redirect is a fixed list route (no
+  // `out.id`).
+  const angularWorkflowForms = (result.angularWorkflowForms ?? []) as AngularWorkflowFormSpec[];
+  for (const form of angularWorkflowForms) {
+    members.push(`  readonly ${form.mutationVar} = ${form.mutationFn}();`);
+    const controls = form.controls
+      .map((c) => `${c.name}: new FormControl(${c.init}, { nonNullable: true })`)
+      .join(", ");
+    members.push(`  readonly ${form.formVar} = new FormGroup({ ${controls} });`);
+    members.push(
+      [
+        `  async ${form.submitMethod}(): Promise<void> {`,
+        `    if (this.${form.formVar}.invalid) return;`,
+        `    await this.${form.mutationVar}.mutateAsync(this.${form.formVar}.getRawValue());`,
+        '    this.router.navigateByUrl("/workflows");',
         "  }",
       ].join("\n"),
     );

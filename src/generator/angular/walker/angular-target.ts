@@ -37,6 +37,7 @@ import type { WalkContext } from "../../_walker/walker-core.js";
 import { renderAngularAction } from "../action.js";
 import { renderAngularCreateForm } from "../create-form.js";
 import { renderAngularModal } from "../modal.js";
+import { renderAngularWorkflowForm } from "../workflow-form.js";
 
 /** Angular-flavoured `WalkerTarget`.  Stateless and pure — no walker
  *  context is captured; every method takes the data it needs.  Consumed
@@ -183,6 +184,12 @@ export const angularTarget: WalkerTarget = {
    *  Reactive Form (the operation-dialog form). */
   renderModal(call: ExprIR, ctx: WalkContext, depth: number): string | null {
     return call.kind === "call" ? renderAngularModal(call, ctx, depth) : null;
+  },
+
+  /** Fork `WorkflowForm(runs: <Wf>)` to a typed Reactive Form posting the
+   *  workflow command (the shared react-hook-form path is skipped). */
+  renderWorkflowForm(call: ExprIR, ctx: WalkContext, depth: number): string | null {
+    return call.kind === "call" ? renderAngularWorkflowForm(call, ctx, depth) : null;
   },
 
   /** `Button(to:)` → `router.navigateByUrl(<to>)` (bound as a statement by

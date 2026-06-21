@@ -149,12 +149,16 @@ export function emitDestroyForm(
 }
 
 /** `WorkflowForm(runs: <Wf>)` — the workflow-run form.  Delegates
- *  to `emitFormRuns`. */
+ *  to `emitFormRuns` (or a target's whole-primitive fork). */
 export function emitWorkflowForm(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
   depth: number,
 ): string {
+  // A target may fork the whole primitive (Angular emits a typed Reactive Form
+  // posting the workflow command, instead of the shared react-hook-form path).
+  const override = ctx.target.renderWorkflowForm?.(call, ctx, depth);
+  if (override != null) return override;
   const runsArg = namedArgValue(call, "runs");
   if (!runsArg) {
     return ctx.target.renderComment(`WorkflowForm: missing 'runs: <Workflow>'`);

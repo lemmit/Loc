@@ -999,3 +999,158 @@ describe("angular generator — Modal operation-dialog form", () => {
     expect(page).toContain('import { useAddNoteOrder } from "../../api/order";');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Parameterised find + view + workflow reads (gap-closure: the api-service
+// layer).  A `QueryView(of: <api>.<Agg>.<find>(arg))` un-stubs and hoists the
+// `use<Find><Agg>(query)` factory; a `QueryView(of: Views.<View>)` hoists
+// `use<View>View()` from `../api/views`; both the per-aggregate module's find
+// factory and the views/workflows modules are emitted Angular-native (TanStack
+// injectQuery off an @Injectable service).  (ng build-verified separately.)
+// ---------------------------------------------------------------------------
+
+const FIND_SOURCE = `
+  system Smoke {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Orders {
+        enum OrderStatus { Draft, Confirmed, Shipped }
+        aggregate Order with crudish { customerId: string  status: OrderStatus }
+        repository Orders for Order { find byStatus(status: OrderStatus): Order[] }
+        view RecentOrders from Order
+      }
+    }
+    ui WebApp {
+      api Sales: SalesApi
+      page ByStatus {
+        route: "/by-status"
+        state { status: OrderStatus = Draft }
+        body: QueryView {
+          of: Sales.Order.byStatus(status),
+          loading: Loader {},
+          error: Alert { "err" },
+          empty: Empty { "none" },
+          data: rows => Stack { For { each: rows, o => Text { o.customerId } } }
+        }
+      }
+      page Recent {
+        route: "/recent"
+        body: QueryView {
+          of: Views.RecentOrders,
+          loading: Loader {},
+          error: Alert { "err" },
+          empty: Empty { "none" },
+          data: rows => Stack { For { each: rows, o => Text { o.id } } }
+        }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 8080 }
+    deployable web { platform: angular, targets: api, ui: WebApp { Sales: api }, port: 3004 }
+  }
+`;
+
+async function findFiles(): Promise<Map<string, string>> {
+  const all = await generateSystemFiles(FIND_SOURCE);
+  const out = new Map<string, string>();
+  for (const [p, c] of all) if (p.startsWith("web/")) out.set(p.slice("web/".length), c);
+  return out;
+}
+
+describe("angular generator — parameterised find + view reads", () => {
+  it("un-stubs the find page and hoists the query-object find factory", async () => {
+    const page = (await findFiles()).get("src/app/pages/by-status.component.ts")!;
+    expect(page).not.toContain("body needs api/forms support");
+    expect(page).toContain('import { useByStatusOrder } from "../../api/order";');
+    // The shared walker renders find args as a `{ <param>: <value> }` object;
+    // the state signal read resolves against `this` in the hoist initializer.
+    expect(page).toContain("readonly orderByStatus = useByStatusOrder({ status: this.status() });");
+  });
+
+  it("emits the find query interface + service method + injectQuery factory", async () => {
+    const api = (await findFiles()).get("src/api/order.ts")!;
+    expect(api).toContain("export interface ByStatusOrderQuery {");
+    expect(api).toContain("byStatus(query: ByStatusOrderQuery) {");
+    expect(api).toContain("export function useByStatusOrder(query: ByStatusOrderQuery) {");
+    expect(api).toContain(`queryKey: ["orders", "find", "by_status", query] as const,`);
+  });
+
+  it("un-stubs the view page and emits the Angular-native views module", async () => {
+    const files = await findFiles();
+    const page = files.get("src/app/pages/recent.component.ts")!;
+    expect(page).not.toContain("body needs api/forms support");
+    expect(page).toContain('import { useRecentOrdersView } from "../../api/views";');
+    expect(page).toContain("readonly recentOrdersView = useRecentOrdersView();");
+    const views = files.get("src/api/views.ts")!;
+    expect(views).toContain('import { injectQuery } from "@tanstack/angular-query-experimental";');
+    expect(views).toContain("export class ViewsService {");
+    expect(views).toContain("export function useRecentOrdersView() {");
+    expect(views).toContain(`queryKey: ["views", "recent_orders"] as const,`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WorkflowForm(runs: <Wf>) — the workflow-command form, forked to a typed
+// Reactive Form posting `use<Wf>Workflow` then navigating `/workflows`.  The
+// Angular workflows module emits the `injectMutation` command factory + (for
+// observable workflows) the instance read factories.  (ng build-verified.)
+// ---------------------------------------------------------------------------
+
+const WF_FORM_SOURCE = `
+  system Smoke {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Orders {
+        aggregate Order with crudish { customerId: string }
+        workflow Fulfill for Order {
+          actor staff
+          input { note: string }
+          state Packing
+          state Shipped
+          transition pack from Packing to Shipped by staff { }
+        }
+      }
+    }
+    ui WebApp {
+      api Sales: SalesApi
+      page RunFulfill {
+        route: "/run"
+        body: Card { WorkflowForm { runs: Fulfill, testid: "workflow-fulfill" } }
+      }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 8080 }
+    deployable web { platform: angular, targets: api, ui: WebApp { Sales: api }, port: 3004 }
+  }
+`;
+
+describe("angular generator — WorkflowForm typed Reactive Form", () => {
+  it("un-stubs the workflow page and wires the command FormGroup + submit", async () => {
+    const all = await generateSystemFiles(WF_FORM_SOURCE);
+    const page = all.get("web/src/app/pages/run-fulfill.component.ts")!;
+    expect(page).not.toContain("body needs api/forms support");
+    expect(page).toContain(
+      '<form [formGroup]="fulfillForm" (ngSubmit)="onRunFulfill()" data-testid="workflow-fulfill">',
+    );
+    expect(page).toContain("readonly fulfillRun = useFulfillWorkflow();");
+    expect(page).toContain("async onRunFulfill(): Promise<void> {");
+    expect(page).toContain("await this.fulfillRun.mutateAsync(this.fulfillForm.getRawValue());");
+    expect(page).toContain('this.router.navigateByUrl("/workflows");');
+    expect(page).toContain(
+      'import { FulfillRequest, useFulfillWorkflow } from "../../api/workflows";',
+    );
+  });
+
+  it("emits the Angular workflows module (injectMutation command factory)", async () => {
+    const all = await generateSystemFiles(WF_FORM_SOURCE);
+    const wf = all.get("web/src/api/workflows.ts")!;
+    expect(wf).toContain("export interface FulfillRequest {");
+    expect(wf).toContain("export class WorkflowsService {");
+    expect(wf).toContain("export function useFulfillWorkflow() {");
+    // A non-observable workflow has no instance reads, so only injectMutation
+    // is imported (an unused injectQuery would be an ng build error).
+    expect(wf).toContain('import { injectMutation } from "@tanstack/angular-query-experimental";');
+  });
+});

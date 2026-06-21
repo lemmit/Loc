@@ -469,6 +469,14 @@ export interface WalkerTarget {
   renderOperationForm?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
   renderModal?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
 
+  /** OPTIONAL — whole-primitive override for `WorkflowForm(runs: <Wf>)`.  The
+   *  shared `emitWorkflowForm` delegates here first; a non-null return is used
+   *  verbatim and the RHF `emitFormRuns` path (which records a `formOfs` sink)
+   *  is skipped.  Angular forks here to emit a typed Reactive Form posting the
+   *  workflow command (`use<Wf>Workflow`) and records its `FormGroup` + submit
+   *  wiring on `ctx.angularForms` for the page-shell. */
+  renderWorkflowForm?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
+
   /** OPTIONAL — the navigate CALL for a `Button(to:)` shorthand, given the
    *  already-rendered destination arg.  The JSX family omits it (default
    *  `navigate(<to>)`, wrapped in the arrow handler); Angular returns
