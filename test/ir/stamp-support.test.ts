@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { buildLoomModel } from "../_helpers/ir.js";
 
-// The node / python / elixir backends do NOT consume `contextStamps` yet — the
+// The python / elixir backends do NOT consume `contextStamps` yet — the
 // `auditable` audit columns are emitted but never populated.  `validateStampSupport`
 // fails fast (never a silent drop), mirroring the java / dotnet stamp gates.
 // A `with auditable` aggregate on each of these deployables must error with the
-// per-family `loom.<family>-stamp-unsupported` code; the supported backends and
+// per-family `loom.<family>-stamp-unsupported` code; the supported backends
+// (java / dotnet / node — which now applies stamps via the Hono write hooks) and
 // stamp-free models stay clean.
 
 const src = (platform: string) => `
@@ -25,7 +26,6 @@ const src = (platform: string) => `
 
 describe("lifecycle-stamp backend support gate", () => {
   it.each([
-    ["node", "loom.node-stamp-unsupported"],
     ["python", "loom.python-stamp-unsupported"],
     ["elixir", "loom.elixir-stamp-unsupported"],
   ])("gates `with auditable` on the %s backend fail-fast", async (platform, code) => {
@@ -38,6 +38,7 @@ describe("lifecycle-stamp backend support gate", () => {
   it.each([
     "dotnet",
     "java",
+    "node",
   ])("does NOT gate `with auditable` on the %s backend", async (platform) => {
     const loom = await buildLoomModel(src(platform));
     const stampErrors = validateLoomModel(loom).filter((d) =>

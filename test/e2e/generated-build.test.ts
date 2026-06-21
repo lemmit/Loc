@@ -161,6 +161,45 @@ describe.skipIf(!ENABLED)(
       }
     }, 300_000);
 
+    // Lifecycle stamping (capabilities.md) — `with auditable` on an
+    // `auth: required` node deployable.  The route handler calls the
+    // aggregate's `_stampOnCreate` / `_stampOnUpdate` before save; a `now()`
+    // value renders to `new Date()`, a `currentUser` value to the principal id
+    // (`currentUser.id`) read from the request scope.  System-mode only (the
+    // user block + auth/middleware.ts are system-level), so this gate compiles
+    // the emitted entity stamp methods (taking the typed `User` param) + the
+    // route's principal threading end-to-end.
+    it("system lifecycle stamps (auditable + auth) — generated project type-checks + bundles", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-stamps-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/auditable-stamps.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        // Sanity: auth middleware was emitted (the principal source the
+        // stamp threads from) + the entity carries the stamp methods.
+        expect(fs.existsSync(path.join(proj, "auth", "middleware.ts"))).toBe(true);
+        expect(fs.readFileSync(path.join(proj, "domain", "order.ts"), "utf8")).toContain(
+          "_stampOnCreate(currentUser: User): void {",
+        );
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 120_000 });
+        execSync(`npm run build`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        expect(fs.existsSync(path.join(proj, "dist", "index.js"))).toBe(true);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
     it("system OIDC auth (verifier + /auth/* handshake) — generated project type-checks + bundles", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-oidc-"));
       try {

@@ -696,19 +696,74 @@ export function validateDotnetStampSupport(sys: SystemIR, diags: LoomDiagnostic[
   }
 }
 
-// Lifecycle stamps on the node / python / elixir backends.  Unlike java and
-// .NET — which emit `_stampOn*` entity methods / an EF Core interceptor — these
-// three backends do NOT consume `contextStamps` at all yet: the audit COLUMNS
-// are emitted (the `auditable` fields), but nothing ever populates them, so a
-// `stamp` (or `with audit`/`auditable`) would silently leave `createdAt` /
-// `createdBy` null.  Fail fast — never a silent drop — mirroring
-// `validateJavaStampSupport` / `validateDotnetStampSupport`: any lifecycle stamp
-// on one of these deployables is an error until the backend wires stamping.
-// Stable per-family diagnostic codes (a literal each, so the
+// Lifecycle stamps on the node (Hono) backend.  Stamps become
+// `_stampOnCreate` / `_stampOnUpdate` methods on the aggregate that the route
+// handler calls right before save; a non-principal value renders directly, and
+// a `currentUser` value resolves to the principal id (`currentUser.<idField>`)
+// — the route threads the typed principal read from the request scope.  Two
+// cases stay fail-fast (never a silent drop), mirroring
+// `validateJavaStampSupport` / `validateDotnetStampSupport`: a
+// principal-referencing stamp on a deployable WITHOUT auth (no request-scoped
+// principal to read), and stamps on an event-sourced aggregate (state is folded
+// from events, not field-stamped).
+export function validateNodeStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "node") continue;
+    const authed = !!(dep.auth?.required && sys.user);
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        const stamps = enriched.contextStamps ?? [];
+        if (stamps.length === 0) continue;
+        const usesPrincipal = stamps.some((r) =>
+          r.assignments.some((a) => exprUsesCurrentUser(a.value)),
+        );
+        if (usesPrincipal && !authed) {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform node) hosts aggregate '${ctxName}.${agg.name}' ` +
+              `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
+              `from \`with audit\`), but the deployable has no auth — there is no request-scoped ` +
+              `principal to stamp from. Add 'auth: required' (and a system 'user {}' block), or use ` +
+              `non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.node-stamp-unsupported",
+          });
+        }
+        if (enriched.persistedAs === "eventLog") {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform node) hosts event-sourced aggregate ` +
+              `'${ctxName}.${agg.name}' with a lifecycle stamp — stamps mutate state fields, but an ` +
+              `event-sourced aggregate's state is folded from its event stream. ` +
+              `Record the timestamp in an event instead, or drop persistedAs(eventLog).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.node-stamp-unsupported",
+          });
+        }
+      }
+    }
+  }
+}
+
+// Lifecycle stamps on the python / elixir backends.  Unlike java, .NET, and
+// node — which emit `_stampOn*` entity methods / an EF Core interceptor / Hono
+// write-hook calls — these two backends do NOT consume `contextStamps` at all
+// yet: the audit COLUMNS are emitted (the `auditable` fields), but nothing ever
+// populates them, so a `stamp` (or `with audit`/`auditable`) would silently
+// leave `createdAt` / `createdBy` null.  Fail fast — never a silent drop —
+// mirroring `validateJavaStampSupport` / `validateDotnetStampSupport`: any
+// lifecycle stamp on one of these deployables is an error until the backend
+// wires stamping.  Stable per-family diagnostic codes (a literal each, so the
 // diagnostic-codes-completeness source scan can see them — it requires a
 // double-quoted `code: "loom.…"` in every `diags.push`).
 const STAMP_UNSUPPORTED_CODE: Readonly<Record<string, string>> = {
-  node: "loom.node-stamp-unsupported",
   python: "loom.python-stamp-unsupported",
   elixir: "loom.elixir-stamp-unsupported",
 };
@@ -735,8 +790,7 @@ export function validateStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
             `the stamp (the \`auditable\` audit-columns capability and the \`audit\` stamp macro).`,
           source: `${sys.name}/${dep.name}`,
         };
-        if (fam === "node") diags.push({ ...base, code: "loom.node-stamp-unsupported" });
-        else if (fam === "python") diags.push({ ...base, code: "loom.python-stamp-unsupported" });
+        if (fam === "python") diags.push({ ...base, code: "loom.python-stamp-unsupported" });
         else if (fam === "elixir") diags.push({ ...base, code: "loom.elixir-stamp-unsupported" });
       }
     }

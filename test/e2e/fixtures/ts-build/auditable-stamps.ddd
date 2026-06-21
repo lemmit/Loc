@@ -1,0 +1,35 @@
+// Hono lifecycle stamping — `with auditable` (createdAt/createdBy/updatedAt/
+// updatedBy) on an `auth: required` node deployable.  The route handler calls
+// the aggregate's `_stampOnCreate` / `_stampOnUpdate` before save: a `now()`
+// value renders to `new Date()`, a `currentUser` value to the principal id
+// (`currentUser.id`) read from the request scope.  Generated via
+// `generate system` (the user block + auth/middleware.ts are system-level), so
+// this gate type-checks the emitted entity stamp methods + the route threading
+// of the typed principal end-to-end.
+system AuditStamps {
+  user { id: guid  name: string }
+
+  subdomain Core {
+    context Shop {
+      // `auditable` injects createdAt/createdBy/updatedAt/updatedBy fields
+      // plus the onCreate/onUpdate stamps (createdBy/updatedBy := currentUser).
+      aggregate Order with crudish, auditable {
+        code: string
+      }
+      repository Orders for Order { }
+    }
+  }
+
+  api ShopApi from Core
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+
+  deployable api {
+    platform: node
+    contexts: [Shop]
+    dataSources: [shopState]
+    serves: ShopApi
+    auth: required
+    port: 4100
+  }
+}
