@@ -4,7 +4,12 @@ import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
 import { collectJavaExprImports, renderJavaExpr, renderJavaType } from "../render-expr.js";
 import type { JavaRepoCtx } from "./repository.js";
-import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
+import {
+  declaredFinds,
+  inMemoryRetrievalLines,
+  isPagedFind,
+  unionFindAsOptionalTwin,
+} from "./repository.js";
 
 // ---------------------------------------------------------------------------
 // Document-shaped persistence (`shape(document)`, D-DOCUMENT-AXIS) — the
@@ -29,11 +34,6 @@ export function renderJavaDocumentRepositoryImpl(
   idClass: string,
   schema: string | undefined,
 ): string {
-  if ((ctx.retrievals ?? []).length > 0) {
-    throw new Error(
-      `java document shape: retrievals on document aggregate '${agg.name}' are not implemented (the document column is not a query target).`,
-    );
-  }
   const bare = plural(snake(agg.name));
   const table = schema ? `${schema}.${bare}` : bare;
   const finds = declaredFinds(repo).map((f) => unionFindAsOptionalTwin(f, agg.name));
@@ -58,6 +58,12 @@ export function renderJavaDocumentRepositoryImpl(
   const exprImports = new Set<string>();
   for (const f of finds) if (f.filter) collectJavaExprImports(f.filter, exprImports);
   for (const p of agg.contextFilters ?? []) collectJavaExprImports(p, exprImports);
+
+  // Retrievals (`retrieval` bundles) can't query the jsonb document, so each
+  // `run<Name>` rehydrates every row and evaluates its `where` + `sort` in
+  // memory (the .NET document-repository shape).  `collectJavaExprImports`
+  // runs inside the helper, so its predicate imports land in `exprImports`.
+  const retrievalLines = inMemoryRetrievalLines(agg, ctx.retrievals ?? [], exprImports);
 
   const findLines = finds.flatMap((f) => {
     const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`);
@@ -93,12 +99,14 @@ export function renderJavaDocumentRepositoryImpl(
       ``,
     ];
   });
-  while (findLines[findLines.length - 1] === "") findLines.pop();
+  const methodLines = [...findLines, ...retrievalLines];
+  while (methodLines.length > 0 && methodLines[methodLines.length - 1] === "") methodLines.pop();
 
   return lines(
     `package ${ctx.infraPkg};`,
     ``,
     `import java.util.ArrayList;`,
+    exprImports.has("java.util.Comparator") ? `import java.util.Comparator;` : null,
     `import java.util.List;`,
     exprImports.has("java.util.Objects") ? `import java.util.Objects;` : null,
     `import java.util.Optional;`,
@@ -197,8 +205,8 @@ export function renderJavaDocumentRepositoryImpl(
     `            throw new IllegalStateException("document deserialization failed", e);`,
     `        }`,
     `    }`,
-    findLines.length > 0 ? `` : null,
-    ...findLines,
+    methodLines.length > 0 ? `` : null,
+    ...methodLines,
     `}`,
     ``,
   );

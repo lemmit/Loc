@@ -1,9 +1,19 @@
 import type { EnrichedAggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
-import { javaValueTypeForId, renderJavaExpr, renderJavaType } from "../render-expr.js";
+import {
+  collectJavaExprImports,
+  javaValueTypeForId,
+  renderJavaExpr,
+  renderJavaType,
+} from "../render-expr.js";
 import type { JavaRepoCtx } from "./repository.js";
-import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
+import {
+  declaredFinds,
+  inMemoryRetrievalLines,
+  isPagedFind,
+  unionFindAsOptionalTwin,
+} from "./repository.js";
 
 // ---------------------------------------------------------------------------
 // Event-sourced persistence (`persistedAs(eventLog)`, appliers A2) — the
@@ -25,11 +35,6 @@ export function renderJavaEventSourcedRepositoryImpl(
   idClass: string,
   schema: string | undefined,
 ): string {
-  if ((ctx.retrievals ?? []).length > 0) {
-    throw new Error(
-      `java event sourcing: retrievals on event-sourced aggregate '${agg.name}' are not implemented (the event log is not a query target).`,
-    );
-  }
   const table = schema ? `${schema}.${snake(agg.name)}_events` : `${snake(agg.name)}_events`;
   const idJava = javaValueTypeForId(agg.idValueType);
   const parseId =
@@ -43,6 +48,12 @@ export function renderJavaEventSourcedRepositoryImpl(
   // The event types this stream can contain — the events the appliers fold.
   const eventNames = [...new Set((agg.appliers ?? []).map((a) => a.event))];
   const finds = declaredFinds(repo).map((f) => unionFindAsOptionalTwin(f, agg.name));
+
+  // Expression imports the in-memory find / retrieval predicates need
+  // (notably `java.util.Objects` for `==`, `java.util.Comparator` for a
+  // sorted retrieval).  The retrieval helper appends its own below.
+  const exprImports = new Set<string>();
+  for (const f of finds) if (f.filter) collectJavaExprImports(f.filter, exprImports);
 
   const findLines = finds.flatMap((f) => {
     const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`);
@@ -78,14 +89,23 @@ export function renderJavaEventSourcedRepositoryImpl(
       ``,
     ];
   });
-  while (findLines[findLines.length - 1] === "") findLines.pop();
+  // Retrievals can't query the event log, so each `run<Name>` folds every
+  // stream via findAll() then evaluates its `where` + `sort` in memory
+  // (the .NET `_LoadAllAsync` shape).  The helper adds its predicate
+  // imports (and Comparator for sorted retrievals) to `exprImports`.
+  const retrievalLines = inMemoryRetrievalLines(agg, ctx.retrievals ?? [], exprImports);
+
+  const methodLines = [...findLines, ...retrievalLines];
+  while (methodLines.length > 0 && methodLines[methodLines.length - 1] === "") methodLines.pop();
 
   return lines(
     `package ${ctx.infraPkg};`,
     ``,
     `import java.util.ArrayList;`,
+    exprImports.has("java.util.Comparator") ? `import java.util.Comparator;` : null,
     `import java.util.LinkedHashMap;`,
     `import java.util.List;`,
+    exprImports.has("java.util.Objects") ? `import java.util.Objects;` : null,
     `import java.util.Optional;`,
     idJava === "UUID" ? `import java.util.UUID;` : null,
     ``,
@@ -193,8 +213,8 @@ export function renderJavaEventSourcedRepositoryImpl(
     `            throw new IllegalStateException("event deserialization failed", e);`,
     `        }`,
     `    }`,
-    findLines.length > 0 ? `` : null,
-    ...findLines,
+    methodLines.length > 0 ? `` : null,
+    ...methodLines,
     `}`,
     ``,
   );
