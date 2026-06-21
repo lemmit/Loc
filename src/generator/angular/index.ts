@@ -42,17 +42,17 @@ import {
 import { buildAngularWorkflowsModule } from "./workflows-module.js";
 
 // ---------------------------------------------------------------------------
-// Angular frontend generator — orchestrator (angular-frontend-plan.md
-// Slice 3, walking skeleton).
+// Angular frontend generator — orchestrator (angular-frontend-plan.md).
 //
-// Emits a complete, `ng build`-able empty Angular project: the project
+// Emits a complete, `ng build`-able standalone Angular project: the project
 // shell (package.json / angular.json / tsconfig[.app].json), the standalone
-// bootstrap (main.ts + app.config.ts), the Material app shell, an empty
-// route table (Home + wildcard NotFound), the DI-native api client/config,
-// theme, format helpers, and the docker stage.  Page walking + the
-// primitive/field/form tiers + per-aggregate @Injectable services land in
-// Slice 4 — at which point the pack's required-primitive surface is
-// complete and the `validateRequired: false` below flips on.
+// bootstrap (main.ts + app.config.ts), the Material app shell, the route
+// table (one component per page + wildcard NotFound), the DI-native api
+// client/config + per-aggregate @Injectable services, theme, format helpers,
+// the docker stage, and the emitted Playwright e2e suite.  Pages walk through
+// the shared markup walker with `angularTarget`; the primitive/field/form
+// tiers are fully wired (forms render inline via the Reactive-Form seams), so
+// `validateRequired` is on (see below).
 // ---------------------------------------------------------------------------
 
 export interface GenerateAngularOptions {
@@ -111,8 +111,9 @@ export function generateAngularForContexts(
   // --- Pages — bodies walk through the SHARED markup walker with
   // `angularTarget`; the angularMaterial pack templates own the markup
   // the primitives emit.  Each page becomes a standalone component under
-  // `src/app/pages/`.  Bodies needing api services / forms are stubbed
-  // until those Slice 4b batches land.
+  // `src/app/pages/`.  Forms / actions / reads render real bodies via the
+  // Angular Reactive-Form + signal walker seams; only a route/title-only
+  // page (no body) renders a title stub.
   const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
   const pages = (ui?.pages ?? []).filter((p) => p.route);
 

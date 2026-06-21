@@ -14,6 +14,8 @@
     "primitive-card": "primitive-card.hbs",
     "primitive-container": "primitive-container.hbs",
     "primitive-date-display": "primitive-date-display.hbs",
+    "primitive-section": "primitive-section.hbs",
+    "primitive-sticky": "primitive-sticky.hbs",
     "primitive-divider": "primitive-divider.hbs",
     "primitive-empty": "primitive-empty.hbs",
     "primitive-enum-badge": "primitive-enum-badge.hbs",

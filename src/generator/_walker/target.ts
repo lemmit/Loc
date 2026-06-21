@@ -463,9 +463,11 @@ export interface WalkerTarget {
   /** OPTIONAL — whole-primitive override for `OperationForm(...)` and `Modal {
    *  … }`.  The shared `emitOperationForm` / `emitModal` delegate here first; a
    *  non-null return is used verbatim and the RHF/`field-input-*` path is
-   *  skipped.  Angular returns a deferred-feature comment (the inline op-dialog
-   *  form is a later batch) so an op-form page renders a placeholder instead of
-   *  crashing on a `field-input-*` template the inline-forms pack doesn't ship. */
+   *  skipped.  Angular forks both to idiomatic typed Reactive Forms — a
+   *  standalone `OperationForm` renders an always-visible `[formGroup]` shell,
+   *  and `Modal { OperationForm(…) }` renders a signal-toggled inline form —
+   *  so neither dispatches a `field-input-*` template the inline-forms pack
+   *  doesn't ship. */
   renderOperationForm?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
   renderModal?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
 
