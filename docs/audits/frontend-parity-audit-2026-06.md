@@ -120,7 +120,19 @@ pack-dispatched primitives, three are **not** in any `RequiredSet`:
 | **`primitive-section`** (`Section`) | `pack.render`, **no guard** (`layout.ts` `emitSection`) | ❌ | **Gap — crashes Vue/Angular** |
 | **`primitive-sticky`** (`Sticky`) | `pack.render`, **no guard** (`layout.ts` `emitSticky`) | ❌ | **Gap — crashes Vue/Angular** |
 
-### Finding 1 (HIGH): `Section` / `Sticky` crash Vue and Angular codegen
+### Finding 1 (HIGH) — ✅ FIXED: `Section` / `Sticky` crashed Vue and Angular codegen
+
+> **Resolved 2026-06-21.** Shipped `primitive-section.hbs` +
+> `primitive-sticky.hbs` to the two Vue packs (`vuetify`, `shadcnVue`) and
+> the Angular pack (`angularMaterial`), and added both names to
+> `TSX_ONLY_PRIMITIVES` in `required-primitives.ts` — the correct home,
+> since Phoenix renders them inline (`renderSectionHeex` /
+> `renderStickyHeex`) exactly like `modal` / `icon` / `code-block`. The
+> load-time `RequiredSet` gate now enforces them on every JSX-family pack,
+> so a future omission fails at pack-load (naming the pack) instead of
+> crashing mid-generation. Both repros below now generate clean; the
+> pack/parity gate tests stay green. The original analysis is preserved
+> below for the record.
 
 `Section` and `Sticky` are in `walker-stdlib.ts` (validator accepts them
 on **any** target) and in `WALKER_PRIMITIVES` with both `tsx` and `heex`
@@ -249,7 +261,7 @@ it, not generating it. Reusing the vue/svelte e2e harness for Angular
 
 | # | Severity | Finding | Recommended action |
 |---|---|---|---|
-| 1 | **HIGH** | `Section`/`Sticky` pass validation but crash Vue & Angular codegen (ungated, not in any `RequiredSet`, no `templates.has` guard) | Decide close-vs-gate (§3); restore "validates ⇒ generates" invariant. Add the names to `RequiredSet` once resolved so the gate enforces it. |
+| 1 | **HIGH** — ✅ FIXED | `Section`/`Sticky` passed validation but crashed Vue & Angular codegen (ungated, not in any `RequiredSet`, no `templates.has` guard) | **Done:** shipped the 6 templates (vuetify/shadcnVue/angularMaterial) + added both to `TSX_ONLY_PRIMITIVES`; the load-time gate now enforces them. "validates ⇒ generates" restored. |
 | 2 | LOW | Pack breadth uneven (React 4 families, Vue/Svelte 2, Angular 1; `primeng`/`spartanNg` reserved but unshipped) | Roadmap item — ship the reserved Angular packs; not a correctness bug. |
 | 3 | MEDIUM | No runtime-e2e CI for generated React or Angular apps (Vue/Svelte have it) | Extend the vue/svelte e2e harness to Angular; add a per-pack React runtime leg. |
 | 4 | COSMETIC | Stale "stubbed/deferred" comments in `angular/index.ts` + `angular-target.ts` contradict the now-complete form seams | Refresh the comments. |
@@ -258,6 +270,7 @@ it, not generating it. Reusing the vue/svelte e2e harness for Angular
 `WalkerTarget` seams are implemented on all four JSX frontends, the
 cross-cutting feature set (forms, realtime, views, workflows, layouts,
 auth, e2e surface) is uniform, and HEEx primitive parity is now complete.
-The one functional defect is Finding 1 — a real, reproducible crash that
-violates the "validates ⇒ generates" invariant on two of the four
-frontends. Findings 2–4 are maturity/coverage gaps, not correctness bugs.
+The one functional defect — Finding 1, a real reproducible crash violating
+the "validates ⇒ generates" invariant on two frontends — has been **fixed
+in this change**. Findings 2–4 remain as maturity/coverage gaps (pack
+breadth, runtime-e2e CI, stale comments), not correctness bugs.

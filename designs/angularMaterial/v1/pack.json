@@ -10,6 +10,8 @@
     "primitive-group": "primitive-group.hbs",
     "primitive-toolbar": "primitive-toolbar.hbs",
     "primitive-container": "primitive-container.hbs",
+    "primitive-section": "primitive-section.hbs",
+    "primitive-sticky": "primitive-sticky.hbs",
     "primitive-paper": "primitive-paper.hbs",
     "primitive-button": "primitive-button.hbs",
     "primitive-card": "primitive-card.hbs",

@@ -96,8 +96,12 @@ const SHARED_PRIMITIVES: readonly string[] = [
   "primitive-toolbar",
 ];
 
-// Primitives required only in TSX packs.  Three slots `ashPhoenix/v3`
-// doesn't ship as templates:
+// Primitives required only in the JSX-family packs (TSX / Svelte / Vue /
+// Angular — every format whose required set spreads this list).  Each is in
+// the closed primitive library and the validator accepts it on ANY target,
+// so a JSX pack that omits the template crashes codegen at the `pack.render`
+// call site rather than failing validation — these MUST be required.  HEEx is
+// exempt only because its walker emits them INLINE (no pack template):
 //   - `primitive-code-block`  — not in the HEEx pack; emitted inline by
 //                                `heex-walker.ts:renderCodeBlock`.
 //   - `primitive-icon`        — not in the HEEx pack; emitted inline by
@@ -110,10 +114,16 @@ const SHARED_PRIMITIVES: readonly string[] = [
 //                                convention vs TSX's competing libraries) — no
 //                                pack template is needed and the gate is
 //                                deliberately not extended to HEEx for these.
+//   - `primitive-section`     — plain `<section>` semantic anchor wrapper;
+//                                HEEx renders it inline via `renderSectionHeex`.
+//   - `primitive-sticky`      — `position: sticky` wrapper; HEEx renders it
+//                                inline via `renderStickyHeex`.
 const TSX_ONLY_PRIMITIVES: readonly string[] = [
   "primitive-code-block",
   "primitive-icon",
   "primitive-modal",
+  "primitive-section",
+  "primitive-sticky",
 ];
 
 // Shell-level templates every pack must emit, regardless of format.
