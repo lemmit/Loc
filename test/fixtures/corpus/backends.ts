@@ -15,7 +15,7 @@ export const PLATFORM_CLAUSE: Record<Backend, string> = {
   dotnet: "dotnet",
   java: "java",
   python: "python",
-  phoenix: "phoenix",
+  phoenix: "elixir { foundation: ash }",
   vanilla: "elixir { foundation: vanilla }",
 };
 
