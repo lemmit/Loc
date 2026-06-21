@@ -10,15 +10,14 @@
 import { expect, test } from "@playwright/test";
 import { browserCanReachNetwork, waitForPlaygroundReady } from "./_helpers";
 
-// #1242 (fixed): not a runtime stall — the bundle completes, prepare()
-// resolves, and the footer toast renders.  The spec asserted "…KB…", but the
-// Hono bundle is MB-scale, so `formatBytes` emits "MB" and the KB-only regex
-// never matched — reading as a 600s "stall".  The toast matcher below is now
-// unit-agnostic ([\d.]+ [KM]?B).  Still test.fixme: a *separate* Boot-step
-// failure (#1468) now blocks the full run — btn-boot times out /
-// backend-status never "booted" (it was masked by the 600s toast stall).
-// Un-fixme once #1468 lands; the toast fix below is already correct.
-test.fixme("mui@v7 preview boots without runtime errors", async ({ page }) => {
+// #1242 (fixed): the bundle toast asserted "…KB…" but the Hono bundle is
+// MB-scale, so the KB-only regex never matched.  The matcher is now
+// unit-agnostic ([\d.]+ [KM]?B).
+// #1468 (fixed): the boot click then timed out at 45s — not boot-button
+// gating but the boot button being *absent*.  The four-region dock defaults
+// to the Output tab; `btn-boot` only mounts on the Runtime ("backend") tab,
+// so switch to it before booting (same idiom as workspace-history.spec.ts).
+test("mui@v7 preview boots without runtime errors", async ({ page }) => {
   const errors: string[] = [];
   page.on("console", (msg) => {
     if (msg.type() === "error") {
@@ -56,6 +55,9 @@ test.fixme("mui@v7 preview boots without runtime errors", async ({ page }) => {
     page.getByText(/bundled [\d.]+ [KM]?B in \d+ ms \(\d+ deps fetched\)/),
   ).toBeVisible({ timeout: 600_000 });
 
+  // The boot button lives on the dock's Runtime tab (not the default Output
+  // tab), so switch to it first — otherwise btn-boot never mounts.
+  await page.getByTestId("devtools-tab-backend").click();
   await page.getByTestId("btn-boot").click();
   await expect(page.getByTestId("backend-status")).toHaveText("booted", {
     timeout: 600_000,
