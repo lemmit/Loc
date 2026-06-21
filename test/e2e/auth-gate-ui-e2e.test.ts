@@ -83,40 +83,76 @@ function generateAs(fw: string, work: string): string {
   return path.join(work, "out", "web");
 }
 
-/** Copy the shared gate spec into the emitted e2e/ dir, install it + a chromium
- *  browser, and run ONLY that spec against the preview server. */
+/** Copy the shared gate spec into the project's e2e/ dir, install it + a
+ *  chromium browser, and run ONLY that spec against the running server.  The
+ *  JSX frontends emit an `e2e/` harness (fixtures.ts + playwright.config);
+ *  Angular doesn't, so synthesize a minimal one when missing. */
 function runGateSpec(project: string, baseUrl: string): void {
   const e2e = path.join(project, "e2e");
-  expect(fs.existsSync(path.join(e2e, "fixtures.ts")), "e2e harness emitted").toBe(true);
+  if (!fs.existsSync(path.join(e2e, "fixtures.ts"))) {
+    fs.mkdirSync(e2e, { recursive: true });
+    fs.writeFileSync(
+      path.join(e2e, "package.json"),
+      JSON.stringify({
+        name: "gate-e2e",
+        private: true,
+        devDependencies: { "@playwright/test": "^1.56.0" },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(e2e, "playwright.config.ts"),
+      'import { defineConfig, devices } from "@playwright/test";\n' +
+        'export default defineConfig({ testDir: ".", testMatch: /.*\\.spec\\.ts$/, ' +
+        'use: { baseURL: process.env.E2E_BASE_URL ?? "http://localhost:4200" }, ' +
+        'projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }] });\n',
+    );
+    fs.writeFileSync(
+      path.join(e2e, "fixtures.ts"),
+      'export { test, expect } from "@playwright/test";\n',
+    );
+  }
   fs.copyFileSync(sharedSpec, path.join(e2e, "auth-gate.spec.ts"));
   run("npm install --no-audit --no-fund", e2e);
   run("npx playwright install --with-deps chromium", e2e);
   run(`E2E_BASE_URL=${baseUrl} npx playwright test auth-gate.spec.ts`, e2e);
 }
 
-async function previewAndTest(project: string, build: () => void, buildDir: string): Promise<void> {
+/** Build the project, start its server (vite preview / static SPA serve) on a
+ *  free port, run the shared gate spec against it, then tear the server down. */
+async function buildServeTest(
+  project: string,
+  build: () => void,
+  buildArtifact: string,
+  serverArgv: (port: number) => string[],
+): Promise<void> {
   build();
-  expect(fs.existsSync(path.join(project, buildDir)), "frontend build output").toBe(true);
+  expect(fs.existsSync(path.join(project, buildArtifact)), "frontend build output").toBe(true);
   const port = await freePort();
-  const preview = spawn(
-    "npx",
-    ["vite", "preview", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
-    { cwd: project, stdio: "pipe", detached: true },
-  );
+  const server = spawn("npx", serverArgv(port), { cwd: project, stdio: "pipe", detached: true });
   try {
     const baseUrl = `http://127.0.0.1:${port}`;
     await waitForServer(baseUrl, 60_000);
     runGateSpec(project, baseUrl);
   } finally {
-    if (preview.pid !== undefined) {
+    if (server.pid !== undefined) {
       try {
-        process.kill(-preview.pid, "SIGTERM");
+        process.kill(-server.pid, "SIGTERM");
       } catch {
         // already gone
       }
     }
   }
 }
+
+const vitePreview = (port: number): string[] => [
+  "vite",
+  "preview",
+  "--host",
+  "127.0.0.1",
+  "--port",
+  String(port),
+  "--strictPort",
+];
 
 describe.skipIf(!ENABLED)("auth UI-gate runtime smoke", () => {
   it("svelte: menu / page-guard / op-button gate by role", { timeout: 900_000 }, async () => {
@@ -127,7 +163,7 @@ describe.skipIf(!ENABLED)("auth UI-gate runtime smoke", () => {
     );
     run("npm install --no-audit --no-fund", project);
     run("npx svelte-kit sync", project);
-    await previewAndTest(project, () => run("npx vite build", project), "build");
+    await buildServeTest(project, () => run("npx vite build", project), "build", vitePreview);
   });
 
   // react + vue are plain Vite SPAs — same `vite preview` of the `dist/`
@@ -140,7 +176,26 @@ describe.skipIf(!ENABLED)("auth UI-gate runtime smoke", () => {
         true,
       );
       run("npm install --no-audit --no-fund", project);
-      await previewAndTest(project, () => run("npx vite build", project), "dist");
+      await buildServeTest(project, () => run("npx vite build", project), "dist", vitePreview);
     });
   }
+
+  // Angular: `ng build` → dist/browser, served as a SPA (serve -s falls back to
+  // index.html for client routes).  No emitted e2e/ harness — runGateSpec
+  // synthesizes one.  Angular's op hook (`useApproveJob()`, id-less) never
+  // eager-derefs, so it was already crash-free.  NB: the Angular CLI requires
+  // Node >= 22.22.3; on an older patch the `ng build` step fails the version
+  // gate (CI runs a current Node, so this leg is green there).
+  it("angular: menu / page-guard / op-button gate by role", { timeout: 900_000 }, async () => {
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), "loom-gate-angular-"));
+    const project = generateAs("angular", work);
+    expect(fs.existsSync(path.join(project, "angular.json")), "angular project emitted").toBe(true);
+    run("npm install --no-audit --no-fund", project);
+    await buildServeTest(
+      project,
+      () => run("npx ng build", project),
+      path.join("dist", "browser", "index.html"),
+      (port) => ["serve", "-s", path.join("dist", "browser"), "-l", String(port)],
+    );
+  });
 });
