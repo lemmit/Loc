@@ -309,10 +309,9 @@ inside the block, opting out of the thread.
 machinery (no `let!`/`do!`/builder extensibility). It *projects* to `asyncResult`
 on F#, `try/catch` on TS, `?` on Rust — same status as `await`: a neutral marker
 mapping to each target's idiom. So §3b's "keep the CE a projection" still holds —
-we add a neutral delimiter, not F# syntax. (Per-step alternative for finer
-visibility, Rust-style: `let order = await placeOrder(draft)?`, with the enclosing
-`attempt` as the `?` sink — `attempt { }` makes the *boundary* visible, `?` each
-*exit*; open which to prefer, they compose.)
+we add a neutral delimiter, not F# syntax. (The block boundary is the single
+visible marker; there is **no** per-step propagation operator — a Rust-style `?`
+was considered and rejected as cryptic.)
 
 ## 4. Async actions — `async`, awaiting actions, the interface
 
@@ -461,3 +460,19 @@ shows the need; all non-breaking, additive):
 - **Default failure sink** — what an unhandled `spawn` failure and a
   fully-unhandled `await` (no per-call, no block `onError`) route to (a generic
   toast/error-boundary vs a hard requirement to handle).
+
+**Considered & dropped** (recorded so they aren't re-litigated):
+- **`then` statement continuation** — success is implicit sequencing instead; a
+  `then`-arm doesn't stack and is async-only.
+- **`raises` / checked-exception channel** — errors are values (`Result`); a
+  second error idiom isn't worth it.
+- **`abort` keyword** — the existing `return` is the early-exit.
+- **Rust-style `?` propagation operator** — cryptic; the `attempt { }` boundary
+  is the one visible marker.
+- **Anonymous `spawn { … }` blocks** — name the work as an `async action`; an
+  anonymous block is the gensym/no-test-surface problem this proposal exists to
+  remove.
+- **Action return values** — actions are transitions (`Msg`), not functions; to
+  get a value, `await` the op or read shared state.
+- **A `spawn` success continuation** — react-to-success means you're waiting →
+  `await`; or `spawn` a named async action whose body matches both outcomes.
