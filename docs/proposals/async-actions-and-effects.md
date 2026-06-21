@@ -9,6 +9,13 @@
 > actions give the markers a body to live in) and supplies the async-outcome
 > axis Proposal A deliberately leaves open. Nothing is implemented.
 >
+> **Related notes.** The `Result` model here builds on the shipped error family —
+> [`exception-less.md`](exception-less.md) (errors-as-data, per-error `httpStatus`)
+> and [`failure-taxonomy.md`](failure-taxonomy.md) (the current direction); where
+> a fully-unhandled failure *goes* is [`error-handling-and-failure-sink.md`](error-handling-and-failure-sink.md)
+> ("Proposal C"). The Elmish `update`-arm projections shown throughout are the
+> subject of [`fable-elmish-frontend.md`](fable-elmish-frontend.md).
+>
 > **Why this is split out.** Named *sync* actions (Proposal A, Stage 1) are a
 > pure, non-breaking win — they end `event_N` gensym, add a test surface, and
 > need **no** change to call semantics (a remote call in a handler behaves

@@ -209,6 +209,16 @@ call must be marked) and so wants its own lint→required migration ramp, wherea
 
 ## 3. The sharing boundary: `store` (optional extension)
 
+> **The `store` keyword itself is owned by
+> [`frontend-state-management.md`](frontend-state-management.md)** — that note
+> designs the keyword, the **lifetime ladder** (`store` in-memory default ·
+> `store … persist: local|session` · `store … sync: url`), the grammar
+> (`StoreLifetime`), and the full per-frontend × per-lifetime lowering matrix
+> (incl. the LiveView server-side wrinkle). *This* note adds only **named
+> actions over store state**; treat the two as one feature split by concern
+> (container/lifetime there, named transitions here). The persistence question
+> in §9 is answered there, not re-litigated here.
+
 `action` does **not** require a `store`. State used by one page/component and
 dying with it stays page-local; naming a transition over it is "store-less"
 and is the common case. A `store` is for state that is **shared across pages
@@ -412,8 +422,9 @@ type Msg =
 
 Independently of whether F# is ever emitted, named actions are worth doing for
 §6. They just *also* happen to be the missing structural premise that
-converts the Elmish target from a synthesis problem into a projection — see
-the gap analysis tracked alongside this note.
+converts the Elmish target from a synthesis problem into a projection — the full
+gap analysis is [`fable-elmish-frontend.md`](fable-elmish-frontend.md), which
+names this note as its prerequisite.
 
 ## 8. Decisions (ratified)
 
@@ -461,16 +472,13 @@ These were settled and are no longer open. They define v1.
 
 ## 9. Remaining open items
 
-- **`store` lifetime/persistence — resolved: default in-memory; persistence is a
-  deferred, per-store opt-in.** A `store` outlives its page by definition; whether
-  it also survives a browser reload is the question. v1 (Stage 5) is **in-memory
-  only** (session-volatile — the default Zustand/Pinia module store / global
-  Elmish program), which covers the dominant cases (cart, wizard, filters within
-  a session). Client persistence (`sessionStorage`/`localStorage`/IndexedDB, e.g.
-  `store Cart persist { … }`) is **deferred opt-in** — it pulls in serialization,
-  rehydration + schema-versioning of the saved blob, *and* a real target split
-  (client storage vs LiveView's server-side session assigns), all orthogonal to
-  the MVU projection `store` is about.
+- **`store` lifetime/persistence — owned by
+  [`frontend-state-management.md`](frontend-state-management.md), not open here.**
+  That note's **lifetime ladder** already answers it: default **in-memory**
+  (session-volatile — Zustand/Pinia module store / global Elmish program), with
+  `persist: local|session` and `sync: url` as opt-in longer lifetimes, and a
+  per-frontend lowering matrix (incl. the LiveView server-side-session wrinkle).
+  Named actions (this note) sit on top of whichever lifetime a store declares.
 - Remaining async-effect open items (async-action awaiting timing, default
   failure sink) live in [Proposal B §8](async-actions-and-effects.md). Keyword
   spelling is **settled** (`action`/`store`/`use`/`await`/`spawn`/`attempt`/

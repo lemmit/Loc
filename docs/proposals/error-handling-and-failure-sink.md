@@ -5,11 +5,15 @@
 > when nothing handles it locally. It spans **both tiers** — a frontend global
 > **error boundary** and a backend global **error handler** — because every
 > system has both. Loom ships a **good default**; customization is a declarative
-> **override**. It depends on nothing hard, and complements
-> [Proposal B](async-actions-and-effects.md) (the unhandled-`await` terminus),
-> the exception-less backend `Result` model (`exception-less.md`), typed `error`
-> records (`payloads.md`), and observability (`observability.md`). Nothing is
-> implemented.
+> **override**. The **backend half is not new** — it is the
+> [`exception-less.md`](exception-less.md) / [`failure-taxonomy.md`](failure-taxonomy.md)
+> direction (errors-as-data, per-error `httpStatus` on the edge — *shipped* — RFC
+> 7807 ProblemDetails, plus [`validation-error-extension.md`](validation-error-extension.md)'s
+> `errors[]`), which this note **defers to**. Its **new** contribution is the
+> **frontend global error boundary** and **unifying both tiers** under one error
+> vocabulary (§6). Complements [Proposal B](async-actions-and-effects.md) (the
+> unhandled-`await` terminus); reuses typed `error` records (`payloads.md`) and
+> observability (`observability.md`). Nothing is implemented.
 >
 > **Notation.** Examples are tagged 🔶 proposed; the `.ddd` source *and* the
 > generated target are shown together (the repo's two-examples rule).
@@ -127,29 +131,40 @@ All target-native — the `errors { }` policy is a neutral routing table that
 projects to each framework's idiom, the same way `attempt { }` projects to a CE
 vs `try/catch`.
 
-## 5. Where the status mapping lives (open)
+## 5. Status mapping — already settled upstream (not this note)
 
-Two reasonable homes for the backend status of a typed error:
+The backend "where does a typed error's status live" question is **already
+answered** by the shipped error family, and this note does **not** re-open it:
+per-error `httpStatus` lives on the edge (`exception-less.md`, *shipped*),
+`failure-taxonomy.md` maps the four guard constructs to status (VO `invariant`→422,
+`precondition`→400, `requires`→403, aggregate `invariant`→500), and
+`validation-error-extension.md` ships the RFC 7807 §3.2 `errors[]` body. So the
+backend `errors api { }` policy here is a thin **override/catch-all** over that
+existing mapping, not a new home for status. (The `?` propagation operator that
+once accompanied it is **dropped** — see `exception-less.md`; do not reintroduce.)
 
-- **On the `error` record** — `error NotFound status 404` (co-located; the error
-  knows its own status; DRY). The default sink reads it; the policy only handles
-  cross-cutting overrides + the catch-all.
-- **In the policy** — all mappings in one place (`errors api { … }`), nothing on
-  the record.
+## 6. Relationship to the rest — and what is genuinely new here
 
-Recommended: **status on the record for the default**, policy for overrides and
-the frontend UI mapping. So a plain `error NotFound status 404` needs *no* policy
-at all — it just maps; the policy is for the non-obvious cases.
+**The backend half is not new.** Errors-as-data, HTTP-blind domain + edge
+`httpStatus`, RFC 7807 ProblemDetails, and the two-regime throw/return split are
+the `exception-less.md` / `failure-taxonomy.md` direction; the per-field
+`errors[]` wire is `validation-error-extension.md`; the frontend per-field
+decoder (`applyServerErrors`) is `frontend-acl.md`. This note **defers the
+backend mapping to those** and contributes two things they don't cover:
 
-## 6. Relationship to the rest
+1. the **frontend global error boundary** — the terminus for an unhandled
+   `await`/`spawn`/`attempt` failure *and* a render-time crash (`frontend-acl.md`
+   handles per-field *form* errors; this is the app-wide fallback above it);
+2. **unifying both tiers** under one error vocabulary + one `errors { }` policy
+   surface, so a single `error` type's backend status and frontend UI reaction
+   read together.
 
-- **Proposal B** — this is the "propagate" terminus the async note routes to when
-  no `onError`/`match`/`attempt` catches a failure.
-- **`exception-less.md`** — the backend sink is what turns an unhandled `Failed`
-  variant / exception into the Response; the policy is the mapping table.
+Cross-references:
+- **Proposal B** — this is the "propagate" terminus when no `onError`/`match`/`attempt` catches a failure.
+- **`exception-less.md` / `failure-taxonomy.md`** — own the backend error→status mapping this note consumes.
+- **`validation-error-extension.md` / `frontend-acl.md`** — the shipped `errors[]` wire + per-field form decoder the frontend boundary sits above.
 - **`payloads.md`** — the matched error types *are* the declared `error` records.
-- **`observability.md`** — the sink is the canonical log/trace hook; the
-  `traceId` in the default envelope comes from there.
+- **`observability.md`** — the sink is the canonical log/trace hook (`traceId` in the envelope).
 - **`auth.md`** — `401 → navigate(Login)` is the canonical frontend override.
 
 ## 7. Staging
@@ -161,20 +176,19 @@ second. Independent of the actions/async stages — a parallel track.
    `traceId`, made a wire contract across all backends.
 2. **Frontend default boundary** — wire the unhandled-`await` terminus + a
    render-time error boundary with a default fallback page.
-3. **`errors { }` policy** — the declarative override on both tiers; `error …
-   status N` on the record for the common case.
+3. **`errors { }` policy** — the declarative override on both tiers (backend
+   status mapping itself stays where `exception-less.md` already puts it).
 
 ## 8. Decisions & open items
 
 **Settled (this note):** one concept, two tier projections; a good default that
 needs no declaration plus a declarative override; it is the terminus of the
 `onError`/`match`/`attempt` chain; it reuses typed `error` records and
-observability (no new error vocabulary).
+observability (no new error vocabulary); the **backend status mapping is deferred
+to `exception-less.md`/`failure-taxonomy.md`** (§5), not re-opened here.
 
 **Open:**
 - **`errors { }` spelling and scope** — `errors api { }` / `errors ui { }` vs one
   block; system-wide vs per-deployable, and override precedence.
-- **Status home** — on the `error` record (`status 404`) vs in the policy (§5;
-  recommended: on the record).
 - **Retry / backoff** — automatic retry of failed `await`s (transient errors) is
   probably a *separate* concern; likely out of scope here.

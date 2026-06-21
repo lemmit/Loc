@@ -13,6 +13,12 @@
 > 2026-06-10 — its shipped surface-only slice is slated for removal;
 > see the exception-less status header and the global plan's T1.2).
 > Everything else that shipped stands; this note reframes it.
+>
+> **Scope note:** this note (with `exception-less.md`) owns the **backend**
+> error→status mapping. The **frontend** global error boundary and the
+> two-tier unification over one error vocabulary are
+> [`error-handling-and-failure-sink.md`](./error-handling-and-failure-sink.md)
+> ("Proposal C"), which defers its backend half here.
 
 ## TL;DR
 
