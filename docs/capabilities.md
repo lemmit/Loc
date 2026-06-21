@@ -213,13 +213,20 @@ aggregate with `with auditable`.
   the route handler calls before save.  Support is gated by
   `validatePythonStampSupport` (a principal stamp without auth, or any stamp on
   an event-sourced aggregate, stays a fail-fast `loom.python-stamp-unsupported`).
-- **Phoenix** (`elixir`) — context stamps are **not yet wired through to
-  runtime**.  The IR carries `contextStamps` on every aggregate but the codegen
-  doesn't consume them, so rather than silently emitting unpopulated audit
-  columns this is a **fail-fast error** (`loom.elixir-stamp-unsupported`, gated
-  by `validateStampSupport`).  Host the stamping context on a java / dotnet /
-  node / python deployable, hand-write the assignments inside operation bodies,
-  or drop `with auditable` / the `audit` macro for elixir.
+- **Phoenix** (`elixir`, **Ash** foundation) — context stamps are emitted
+  as an Ash `changes do change fn changeset, context -> … end, on: […] end`
+  block on the resource.  Each assignment `force_change_attribute`s its
+  audit column; `now()` renders to `DateTime.utc_now()`, and a `currentUser`
+  value resolves to the principal id read from the threaded Ash actor
+  (`context.actor.<idKey>`).  `onCreate` stamps run `on: [:create]`;
+  `onUpdate` stamps run `on: [:create, :update]` (mirroring the .NET
+  interceptor's `Added || Modified`) so a NOT-NULL `updated_at`/`updated_by`
+  is populated on the initial insert.  Two cases stay fail-fast
+  (`loom.elixir-stamp-unsupported`, `validateElixirStampSupport`): a
+  `currentUser` stamp on a deployable WITHOUT auth (no actor to thread), and
+  stamps on an event-sourced aggregate.  The **vanilla** (plain Ecto)
+  foundation does not yet apply stamps and stays fully gated by the same
+  validator.  See `src/generator/elixir/domain/actions.ts`.
 
 ## `implements <Cap>` / `with <Cap>`
 

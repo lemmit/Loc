@@ -33,6 +33,7 @@ import {
   validateDataSourceUnwiredKnobs,
   validateDefaultDeny,
   validateDotnetStampSupport,
+  validateElixirStampSupport,
   validateEventSourcedStorage,
   validateEventSourcedWorkflowStorage,
   validateInheritanceStorage,
@@ -48,7 +49,6 @@ import {
   validateReactIdReferences,
   validateResourceConfig,
   validateSavingShapeSupport,
-  validateStampSupport,
   validateSystem,
   validateVanillaContainmentSupport,
   validateVanillaDocumentScope,
@@ -119,7 +119,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDotnetStampSupport(sys, diags);
     validateNodeStampSupport(sys, diags);
     validatePythonStampSupport(sys, diags);
-    validateStampSupport(sys, diags);
+    validateElixirStampSupport(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);
     validateVanillaContainmentSupport(sys, diags);

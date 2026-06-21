@@ -2757,6 +2757,18 @@ export function aggregateUsesPrincipalContextFilter(agg: { contextFilters?: Expr
   return (agg.contextFilters ?? []).some(exprUsesCurrentUser);
 }
 
+/** True when any of the aggregate's lifecycle stamps (`contextStamps`, from
+ *  `with audit`/`auditable` or `stamp onCreate`/`onUpdate`) assigns a value
+ *  that reads `currentUser` (e.g. `createdBy := currentUser`).  Such a stamp
+ *  needs the request principal threaded as the Ash actor onto the create /
+ *  update call so the stamp's `change` block can read `context.actor` — the
+ *  stamp-side analogue of `aggregateUsesPrincipalContextFilter`. */
+export function aggregateStampUsesPrincipal(agg: { contextStamps?: ContextStampIR[] }): boolean {
+  return (agg.contextStamps ?? []).some((r) =>
+    r.assignments.some((a) => exprUsesCurrentUser(a.value)),
+  );
+}
+
 function stmtUsesCurrentUser(s: StmtIR): boolean {
   switch (s.kind) {
     case "precondition":

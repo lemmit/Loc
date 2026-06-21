@@ -13,7 +13,7 @@ import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
 import { emitApiControllers } from "./api-emit.js";
-import { emitAuth } from "./auth-emit.js";
+import { actorIdKey, emitAuth } from "./auth-emit.js";
 import { emitContext } from "./context-emit.js";
 import { emitDispatch, emitWorkflowStateSchemas } from "./dispatch-emit.js";
 import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
@@ -135,8 +135,12 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   out.set(`lib/${appName}/types.ex`, renderTypesModule(typesModule));
 
   // --- Per-context domain files -------------------------------------------
+  // Lifecycle-stamp `change` blocks resolve a `currentUser` stamp value to the
+  // principal id read from the threaded actor (`context.actor.<key>`); the key
+  // is the system `user { id: … }` field name (`actorIdKey`, default `id`).
+  const principalIdKey = actorIdKey(sys.user);
   for (const ctx of contexts) {
-    emitContext(appName, ctx, appModule, out, { resolveDataSource });
+    emitContext(appName, ctx, appModule, out, { resolveDataSource, principalIdKey });
   }
 
   // --- Workflow + view files -----------------------------------------------

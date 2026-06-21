@@ -34,6 +34,10 @@ export function emitContext(
     resolveDataSource?: (
       agg: AggregateIR,
     ) => import("../../ir/util/resolve-datasource.js").ResolvedDataSource | undefined;
+    /** Atom key under which the principal id lives in the actor map (from the
+     *  system `user { id: … }` block).  Threaded into lifecycle-stamp `change`
+     *  blocks so a `currentUser` stamp resolves to `context.actor.<key>`. */
+    principalIdKey?: string;
   } = {},
 ): void {
   const ctxSnake = snake(ctx.name);
@@ -66,6 +70,7 @@ export function emitContext(
   const allResources: string[] = [];
   const aggFiles = emitAggregateResources(ctx, appModule, appName, {
     resolveDataSource: options.resolveDataSource,
+    principalIdKey: options.principalIdKey,
   });
   for (const [path, content] of aggFiles) out.set(path, content);
   for (const agg of ctx.aggregates) {
