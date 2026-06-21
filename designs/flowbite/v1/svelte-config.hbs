@@ -4,7 +4,12 @@ import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
-  preprocess: vitePreprocess(),
+  // `script: true` runs esbuild TS-stripping on every .svelte the
+  // compiler sees — including flowbite-svelte's own dist/*.svelte,
+  // which ship uncompiled `<script lang="ts">`. Without it the bare
+  // `vitePreprocess()` leaves Svelte 5's built-in type-stripper to
+  // choke on the dependency's TS-only syntax during `vite build`.
+  preprocess: vitePreprocess({ script: true }),
   kit: {
     // SPA mode — every route falls back to index.html; the app is a
     // pure client bundle calling the backend API (see +layout.ts).
