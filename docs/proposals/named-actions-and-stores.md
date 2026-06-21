@@ -199,9 +199,11 @@ call must be marked) and so wants its own lint→required migration ramp, wherea
   today (implicit, unmarked). Proposal B then makes the async boundary explicit
   and enforced. The one-line summary of what it settles: success is implicit
   statement sequencing (no `then`); every remote call carries `await`
-  (sequential) or `spawn` (fire-and-forget); failure is a per-call `onError`
-  falling back to a block `onError`; actions have no return value; and `async`
-  is a required, checked declaration keyword.
+  (sequential) or `spawn` (fire-and-forget); **errors are values** — ops return
+  a `Result` union, `match` consumes it and `onError` is flat sugar over that
+  match (no `raises`); actions have no return value (they handle errors
+  internally or reduce them to state); and `async` is a required, checked
+  declaration keyword.
 
 ## 3. The sharing boundary: `store` (optional extension)
 

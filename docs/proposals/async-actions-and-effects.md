@@ -39,8 +39,11 @@ async action submit() {                                    // 🔶
 
 Three principles: **success is implicit sequencing** (the next statement — no
 `then`); **every remote call carries an explicit `await` or `spawn`** (a bare
-remote call is an error); **failure is a per-call `onError` falling back to a
-block `onError`**. Each `await` projects to one MVU `update` arm.
+remote call is an error); **errors are values** — a remote op returns a
+`Result` union (the backend's exception-less one), so `await op()` yields it;
+`match` consumes it and **`onError` is flat sugar over that match** (per-call →
+block → propagate). No `raises`/checked-exception channel. Each `await` projects
+to one MVU `update` arm.
 
 ## 1. Success is implicit sequencing — there is no `then`
 
@@ -110,12 +113,37 @@ action like(post) {                                         // 🔶
 (An `await` here would freeze the button until the server answered — exactly
 what optimistic UI avoids.)
 
-## 3. Failure — per-call `onError`, block fallback
+## 3. Failure — `Result` is the foundation, `onError` is sugar
 
-A postfix handler attaches the **failure** arm to a single call (success is
-still the next statement, so this does *not* reintroduce `then`'s nesting); a
-block-level `onError` is the catch-all. Precedence: **per-call → block →
-propagate** (to a generic UI error boundary):
+Errors are **values**, consistent with Loom's existing unions / `match` /
+`T option` / `A or B` *and* the backend's exception-less Result returns. A
+remote op returns its outcome as a `Result`-shaped union — the same
+`Placed | Failed` union the backend emits (`exception-less.md`) — so `await op()`
+*yields that union*. You may consume it with the ordinary `match`:
+
+```ddd
+match await placeOrder(draft) {                            // 🔶 — the underlying model
+  Placed order => navigate(OrderConsole, { id: order.id })
+  Failed e     => showError(e.message)
+}
+```
+
+**`onError` is flat sugar over that match** for the common binary case: it
+auto-binds the success payload and makes *the rest of the block* the success
+continuation, so multi-step flows don't nest one `match` per step (the sole
+reason the sugar exists — plain `match` stacks badly, the same flaw that sank
+`then`). The two forms below are identical:
+
+```ddd
+let order = await placeOrder(draft) onError e => { showError(e); return }
+navigate(OrderConsole, { id: order.id })
+```
+
+There is **no separate error system** — no `raises`, no checked-exception
+channel. `match` for rich, multi-variant errors; `onError` for the flat binary
+case; both desugar to the same `Result` arms. A postfix `onError` attaches the
+failure arm to a single call; a block-level `onError` is the catch-all.
+Precedence: **per-call → block → propagate** (to a generic UI error boundary):
 
 ```ddd
 action submit() {                                          // 🔶
@@ -189,11 +217,20 @@ notably it adds **no return value**:
 An action returns **nothing bindable** — it is a `(state, payload) -> (state',
 Cmd)` transition. `await checkout()` *sequences* but yields no value;
 `let x = await checkout()` is an error. To get a value back, `await` the remote
-**op** directly (ops return their result — `let order = await placeOrder(draft)`)
+**op** directly (ops return their `Result` — `let order = await placeOrder(draft)`)
 or read shared `store` state. Keeping actions value-less preserves the MVU
 projection: an action is a `Msg` (payload *in*, no value *out*); a
 value-returning action would be a general async function and break the
 `update`-arm shape.
+
+**Action failure is handled internally — not propagated.** Because `Result` is
+the only error model (no `raises`), and an action has no return value to carry a
+`Result`, an action is **infallible from its caller's view**: it handles its
+own op failures inline (the failing thing is a leaf op, `onError`/`match`-ed
+right there — the common case), or it signals failure as **error state**
+(`error := e`) the caller reads (errors-as-state, the MVU-native form). So
+`onError` on an *action* call is spurious — only a remote *op* call is fallible.
+This keeps one error idiom: ops return `Result`; actions reduce it to state.
 
 ## 5. Backend symmetry — one `Result` contract, two lowerings
 
@@ -216,6 +253,8 @@ implicitly and signals failure by return/rollback; there is nothing to mark.
 - `loom.bind-on-spawn` — `let x = spawn …` → error.
 - `loom.bind-on-action` — `let x = await <action>()` (actions have no return) →
   error.
+- `loom.spurious-onerror` — `onError` on anything but a remote **op** call (the
+  only fallible call) — e.g. on an action call or a local call → error (§4).
 - `loom.missing-async` / `loom.spurious-async` — `async` keyword must match the
   body (§4) → error (lint-warning during the Stage-4 ramp).
 
@@ -245,10 +284,13 @@ makes it *composable*.
 
 **Settled (this note):** no `then` (success = implicit sequencing); explicit
 `await`/`spawn` markers, enforced both ways; `spawn` is first-class
-fire-and-forget with a detached `onError`; failure is per-call `onError` →
-block `onError` → propagate; actions have no return value; backend stays
-`await`-free and supplies the `Result` union; **`async` is required and
-checked** (via a lint→error ramp).
+fire-and-forget with a detached `onError`; **errors are values — `Result` is the
+foundation** (a remote op returns the backend's exception-less `Result` union;
+`await op()` yields it), **`match` consumes it and `onError` is flat sugar over
+that match** (per-call → block → propagate); **no `raises`/checked-exception
+channel**; actions have no return value and are infallible from the caller (they
+handle op failures internally or reduce them to error state); **`async` is
+required and checked** (via a lint→error ramp).
 
 **Open:**
 - **Keyword spelling.** `await` / `spawn` — confirm vs alternatives
