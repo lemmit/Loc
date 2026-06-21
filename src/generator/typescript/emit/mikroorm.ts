@@ -731,6 +731,7 @@ export function renderMikroEventSourcedRepository(
     "  switch (row.type) {",
     ...rowToEventArms,
     "    default:",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: emits a template literal into the generated TS source, not interpolated here
     "      throw new Error(`unknown event type: ${row.type}`);",
     "  }",
     "}",
