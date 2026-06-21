@@ -151,7 +151,20 @@ rather than a static count.
 
 ---
 
-## Workstream W4 — Elixir foundation gaps *(has a user-owned fork — run the simulator)*
+## Workstream W4 — Elixir foundation gaps *(RESOLVED by routing — no Ash investment)*
+
+**Status (2026-06):** ✅ resolved. The fork below was decided **(a) foundation
+routing** and ratified as
+[D-PHOENIX-FOUNDATION-ROUTING](../decisions.md) — the Ash-side investment is
+out of scope. No compiler work was needed: every routed feature already emits
+on `foundation: vanilla` and fails fast on `ash` on fresh `main` (the
+"genuine emission gap" the original plan called out — **ES workflows on
+vanilla** — had already shipped: `src/generator/elixir/vanilla/workflow-eventsourced-emit.ts`
++ `vanilla-eventsourced-workflow.ddd` under the `elixir-vanilla-build.yml`
+gate). W4 landed as documentation: the *Phoenix foundations* routing table in
+[`platforms.md`](../platforms.md), the `elixir·ash`/`vanilla` columns of the
+[`generators.md`](../generators.md) matrix, and the decision record. The
+historical fork analysis is kept below for context.
 
 **Gaps (foundation-shaped):**
 - ES aggregate storage gated on `ash` (`vanilla` emits it).
