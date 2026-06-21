@@ -1854,8 +1854,8 @@ export interface PageIR {
   name: string;
   params: ParamIR[];
   /** Path-with-`:params` from `route: "..."`.  Always set for pages
-   *  written in source; pages synthesised by the scaffold expander
-   *  populate this from the rewrite rule. */
+   *  written in source; scaffold-synthesised pages set it directly in
+   *  the `with scaffold(...)` macro. */
   route?: string;
   /** Optional title expression.  May interpolate state / data refs. */
   title?: ExprIR;
@@ -1881,7 +1881,7 @@ export interface PageIR {
    *  this path instead of the default `src/pages/<page-snake>.tsx`.
    *  Populated during lowering so a scaffold-emitted page lands at
    *  its conventional path (`src/pages/<plural>/list.tsx` for an
-   *  `aggregate-list` origin, etc.) — preserves URL/file shape. */
+   *  aggregate's list page, etc.) — preserves URL/file shape. */
   emitPath?: string;
   /** Containing-area path (outermost → innermost), when the page is
    *  declared inside one or more `area { … }` blocks.  Drives `emitPath`

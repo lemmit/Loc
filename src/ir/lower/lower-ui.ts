@@ -1,5 +1,5 @@
 // -------------------------------------------------------------------------
-// UI lowering — ui blocks, pages (+ origin inference), components, state
+// UI lowering — ui blocks, pages, components, state
 // fields, menu blocks, and layouts.  Consumed by lowerContext / lowerProject
 // in ./lower.ts.
 // -------------------------------------------------------------------------
