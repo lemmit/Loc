@@ -78,8 +78,8 @@ export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
       name: "Detail",
       route: `/${pluralSnake}/:id`,
       // `Stack { Breadcrumbs, Heading, QueryView, <operations> }` — the read
-      // view's parts flattened directly into the page Stack (matching the ⑤c
-      // expander, which splices rather than nests), then the auto-fanned
+      // view's parts flattened directly into the page Stack (spliced, not
+      // nested), then the auto-fanned
       // per-operation modals.  The outer Stack testid (`<plural>-detail`)
       // anchors the e2e page-objects.
       body: callExpr("Stack", [
@@ -130,8 +130,8 @@ export function workflowIsObservable(wf: Workflow): boolean {
 /** The two read-only instance pages for an observable workflow: a list of
  *  running instances and a per-instance detail (no `New` analogue — instances
  *  are born from triggers, not a form).  Mirrors `pagesForAggregate`'s
- *  List/Detail; the bodies expand inline via the `scaffoldInstance*`
- *  sentinels in `walker-primitive-expander.ts`. */
+ *  List/Detail; the bodies are built by `scaffoldInstanceList` /
+ *  `scaffoldInstanceDetails` in `_body-builders.ts`. */
 export function pagesForWorkflowInstances(wf: Workflow): Page[] {
   const slug = snake(wf.name);
   const wfName = wf.name;

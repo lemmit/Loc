@@ -1,22 +1,19 @@
 // Macro-layer (AST→AST) scaffolders for page bodies.
 //
-// These are the unfoldable twins of the IR-phase expanders in
-// `src/ir/lower/walker-primitive-expander.ts`.  Where the ⑤c expanders build
-// `ExprIR` (opaque, never printable), these build the SAME tree as Langium
-// AST, so a scaffolder's output prints to literal `.ddd` source and unfolds
-// like any other macro.  `scaffoldList` scaffolds a list; `scaffoldNewForm`
-// scaffolds a new-form — the name is the spec.  See
-// `docs/proposals/unfoldable-page-scaffolding.md`.
+// Each scaffolder builds a page body as Langium AST, so its output prints to
+// literal `.ddd` source and unfolds like any other macro.  `scaffoldList`
+// scaffolds a list; `scaffoldNewForm` scaffolds a new-form — the name is the
+// spec.  See `docs/proposals/unfoldable-page-scaffolding.md`.
 //
-// Status: wired.  The scaffold macro family (`_pages.ts`) returns these full
-// AST trees directly as page bodies — `unfold` on a scaffolded page reveals
-// real `.ddd` source rather than a `scaffold*(of:)` sentinel.  The full family
-// is in place: `scaffoldList` (per-type columns + `rowTestid` + the find-filter
-// bar), `scaffoldNewForm`, `scaffoldDetails` (value-object sub-rows +
-// related-entity cards), `scaffoldOperations`, `scaffoldWorkflowForm`,
-// `scaffoldViewList`, and the workflow-instance list/detail.  The ⑤c expander
-// twins stay live for HAND-WRITTEN `scaffold*` body primitives (a
-// validator-admissible user surface) — the macro no longer emits them.
+// Status: this is the ONLY scaffold body path.  The scaffold macro family
+// (`_pages.ts`) returns these full AST trees directly as page bodies — `unfold`
+// on a scaffolded page reveals real `.ddd` source.  The full family is in place:
+// `scaffoldList` (per-type columns + `rowTestid` + the find-filter bar),
+// `scaffoldNewForm`, `scaffoldDetails` (value-object sub-rows + related-entity
+// cards), `scaffoldOperations`, `scaffoldWorkflowForm`, `scaffoldViewList`, the
+// workflow-instance list/detail, and the `scaffoldHome` / `scaffoldWorkflowsIndex`
+// / `scaffoldViewsIndex` dashboards.  (The old IR-phase ⑤c expanders these once
+// mirrored are deleted — there is no sentinel layer left.)
 
 import type {
   Aggregate,
@@ -44,8 +41,7 @@ import {
 } from "../../api/index.js";
 
 /** `scaffoldNewForm` — scaffolds the create page body:
- *  `Stack(Breadcrumbs, Heading "Create <agg>", Card(CreateForm(of:)))`.
- *  AST twin of `expandScaffoldNewForm`. */
+ *  `Stack(Breadcrumbs, Heading "Create <agg>", Card(CreateForm(of:)))`. */
 export function scaffoldNewForm(aggName: string): Expression {
   const slug = snake(plural(aggName));
   const humanPlural = humanize(plural(aggName));
@@ -76,7 +72,7 @@ export function scaffoldNewForm(aggName: string): Expression {
  *  `Group(Modal × N)`, one Modal per public operation, each holding an
  *  `OperationForm(of: <Agg>, op: <opName>)` and triggered by a button (the
  *  first operation's button is primary, the rest secondary).  No public
- *  operations ⇒ an empty `Group()`.  AST twin of `expandScaffoldOperations`;
+ *  operations ⇒ an empty `Group()`.
  *  public = the aggregate's non-`private` operations. */
 export function scaffoldOperations(agg: Aggregate): Expression {
   const slug = snake(plural(agg.name));
@@ -110,8 +106,7 @@ export function scaffoldOperations(agg: Aggregate): Expression {
 }
 
 /** `scaffoldWorkflowForm` — scaffolds a workflow's command page body:
- *  `Stack(Breadcrumbs, Heading, Card(WorkflowForm(runs: <Wf>)))`.  AST twin of
- *  `expandScaffoldWorkflowForm`. */
+ *  `Stack(Breadcrumbs, Heading, Card(WorkflowForm(runs: <Wf>)))`. */
 export function scaffoldWorkflowForm(wfName: string): Expression {
   const wfSlug = snake(wfName);
   const humanWf = humanize(wfName);
@@ -154,8 +149,7 @@ export function scaffoldWorkflowForm(wfName: string): Expression {
 }
 
 /** `scaffoldViewList` — scaffolds a view's read page body:
- *  `Stack(Heading, QueryView(of: Views.<View>, …, Paper(Table)))`.  AST twin of
- *  `expandScaffoldViewList`.  Columns come from the view's own output record
+ *  `Stack(Heading, QueryView(of: Views.<View>, …, Paper(Table)))`.  Columns come from the view's own output record
  *  when it declares one, else the source's shape — a workflow source's instance
  *  wire shape, or the source aggregate's fields. */
 export function scaffoldViewList(view: View): Expression {
@@ -200,7 +194,7 @@ export function scaffoldViewList(view: View): Expression {
 }
 
 /** `scaffoldHome` — the welcome page body: one summary `Card` per non-empty
- *  section (aggregates / workflows / views).  AST twin of `expandScaffoldHome`.
+ *  section (aggregates / workflows / views).
  *  Counts come from the scaffold macro's gathered inventory. */
 export function scaffoldHome(counts: {
   aggregates: number;
@@ -281,8 +275,7 @@ export function scaffoldHome(counts: {
 }
 
 /** `scaffoldWorkflowsIndex` — the workflows index page body: Breadcrumbs +
- *  Heading + one `Card` per workflow.  AST twin of
- *  `expandScaffoldWorkflowsIndex`. */
+ *  Heading + one `Card` per workflow. */
 export function scaffoldWorkflowsIndex(workflows: readonly Workflow[]): Expression {
   const cards = workflows.map((wf) => {
     const slug = snake(wf.name);
@@ -324,7 +317,7 @@ export function scaffoldWorkflowsIndex(workflows: readonly Workflow[]): Expressi
 }
 
 /** `scaffoldViewsIndex` — the views index page body: Breadcrumbs + Heading +
- *  one `Card` per view.  AST twin of `expandScaffoldViewsIndex`. */
+ *  one `Card` per view. */
 export function scaffoldViewsIndex(views: readonly View[]): Expression {
   const cards = views.map((view) => {
     const slug = snake(view.name);
@@ -363,13 +356,13 @@ export function scaffoldViewsIndex(views: readonly View[]): Expression {
   ]);
 }
 
-/** `${n} ${singular|plural}` — twin of the ⑤c expander's `pluralize`. */
+/** `${n} ${singular|plural}` — a pluralised count label. */
 function pluralizeCount(n: number, singular: string, plural: string): string {
   return `${n} ${n === 1 ? singular : plural}`;
 }
 
 /** `scaffoldInstanceList` — scaffolds an observable workflow's running-instances
- *  list page body.  AST twin of `expandScaffoldInstanceList`: the correlation
+ *  list page body.  The correlation
  *  column links to the instance detail (an `Anchor`, not an `IdLink`), the rest
  *  dispatch by type; `rowTestid` keys on the correlation field. */
 export function scaffoldInstanceList(wf: Workflow): Expression {
@@ -476,8 +469,7 @@ export function scaffoldInstanceList(wf: Workflow): Expression {
 
 /** `scaffoldInstanceDetails` — scaffolds a workflow instance's detail page body:
  *  a `QueryView` (by id) over a `Card` of `KeyValueRow`s, one per instance field
- *  (arrays skipped, value-objects rendered as `Text`).  AST twin of
- *  `expandScaffoldInstanceDetails`. */
+ *  (arrays skipped, value-objects rendered as `Text`). */
 export function scaffoldInstanceDetails(wf: Workflow): Expression {
   const slug = snake(wf.name);
   const humanWf = humanize(wf.name);
@@ -549,7 +541,7 @@ export function scaffoldInstanceDetails(wf: Workflow): Expression {
 
 /** `scaffoldDetails` — scaffolds an aggregate's read-side Detail section:
  *  `Stack(Breadcrumbs, Heading, QueryView(byId) → Card of field rows + related
- *  cards)`.  AST twin of `expandScaffoldDetails` + `buildDataCardParts`.  Pairs
+ *  cards)`.  Pairs
  *  with `scaffoldOperations` on the Detail page; `apiHandle` is the ui's api
  *  param when the aggregate is served over one. */
 export function scaffoldDetails(agg: Aggregate, opts: { apiHandle?: string } = {}): Expression {
@@ -558,8 +550,7 @@ export function scaffoldDetails(agg: Aggregate, opts: { apiHandle?: string } = {
 
 /** The Detail read-section's `Stack` children — `[Breadcrumbs, Heading,
  *  QueryView]`.  Exposed separately so the Detail page can *flatten* them into
- *  its outer `Stack` alongside the operation modals (matching the ⑤c expander,
- *  which splices `scaffoldDetails` into the page Stack rather than nesting it). */
+ *  its outer `Stack` alongside the operation modals (flattened into the page Stack rather than nested). */
 export function scaffoldDetailsParts(
   agg: Aggregate,
   opts: { apiHandle?: string } = {},
@@ -785,8 +776,7 @@ function workflowInstanceProperties(wf: Workflow): Property[] {
 }
 
 /** The display dispatch a list/table column renders through — the
- *  macro-layer mirror of `columnAccessorFor`'s type switch in
- *  `walker-primitive-expander.ts`.  Resolved from the aggregate's AST at
+ *  column's type switch, resolved from the aggregate's AST at
  *  scaffold time (see `scalarColumnsForAggregate`) so the builder stays
  *  data-only. */
 export type ColumnKind =
@@ -803,7 +793,7 @@ export interface ScaffoldColumn {
 }
 
 /** A type-dispatched cell renderer rooted at an arbitrary receiver — the
- *  macro-layer twin of `typedCellFor`: ids link, datetimes format, bools render
+ *  type-dispatched cell: ids link, datetimes format, bools render
  *  a Yes/No ternary, enums badge, everything else is plain `Text`.  `receiver`
  *  is a thunk so each call builds fresh AST nodes. */
 function typedCell(receiver: () => Expression, kind: ColumnKind): Expression {
@@ -833,8 +823,8 @@ function columnAccessor(fieldName: string, kind: ColumnKind, rowVar: string): Ex
 
 /** Resolve an aggregate's scalar list columns from its AST — one `ScaffoldColumn`
  *  per non-array `Property`, dispatched by the field's resolved type, skipping
- *  value-object fields (no scalar cell, matching `expandScaffoldList`).  This is
- *  the "compute it at macro time" twin of the ⑤c loop over lowered `agg.fields`:
+ *  value-object fields (no scalar cell).  It computes, at macro time from the
+ *  aggregate's AST, the column kinds a list page needs:
  *  the type kinds it needs (id target, primitive name, enum-vs-VO) are all
  *  reachable through the post-link cross-references. */
 export function scalarColumnsForAggregate(agg: Aggregate): ScaffoldColumn[] {
@@ -858,8 +848,8 @@ function propertiesOf(members: readonly { $type: string }[]): Property[] {
 
 /** Dispatch a field's display `kind` from its AST type.  Arrays never have a
  *  scalar cell (→ null).  `voAsText` decides value-objects: list/table columns
- *  skip them (`false`, → null, like the expander's `valueobject` column skip),
- *  the detail rows render them as plain `Text` (`true`, like `typedCellFor`'s
+ *  skip them (`false`, → null),
+ *  the detail rows render them as plain `Text` (`true`, the
  *  fallback over a `data.<vo>` receiver). */
 function kindForType(type: TypeRef, voAsText: boolean): ColumnKind | null {
   if (type.array) return null; // arrays have no scalar cell
@@ -903,7 +893,7 @@ export interface FilterFind {
 /** Resolve a list's filter finds from the aggregate's repository in the same
  *  context: each `find` (excluding the synthetic `all`) whose params are all
  *  plain non-array/non-optional strings and whose return is an unwrapped list.
- *  Twin of the ⑤c `filterFinds` filter over the lowered repo — the repository
+ *  Filters the aggregate's repository finds to the bar-eligible ones — the repository
  *  is a sibling `ContextMember`, so it's reachable from the aggregate's AST
  *  without lowering. */
 export function filterFindsForAggregate(agg: Aggregate): FilterFind[] {
@@ -932,7 +922,7 @@ function isPlainString(type: TypeRef): boolean {
 }
 
 /** The page-state field name a filter input binds to: `<find><Param>`
- *  (camel-joined), matching the ⑤c `stateNameFor`. */
+ *  (camel-joined). */
 export function stateNameFor(findName: string, param: string): string {
   return `${findName}${param[0]!.toUpperCase()}${param.slice(1)}`;
 }
@@ -946,8 +936,8 @@ export function filterStateFields(filters: readonly FilterFind[]): Array<{ name:
 
 /** `scaffoldList` — scaffolds the list page body: breadcrumbs, a toolbar with
  *  a "New <agg>" button, and a `QueryView` over `<api?>.<Agg>.all` rendering a
- *  Paper-framed `Table` (ID column + one column per scalar field).  AST twin
- *  of `expandScaffoldList`'s no-filter path.  `columns` are the scalar columns
+ *  Paper-framed `Table` (ID column + one column per scalar field).  The
+ *  no-filter list path.  `columns` are the scalar columns
  *  the caller resolved off the aggregate (`scalarColumnsForAggregate`), each
  *  carrying its display `kind`; `apiHandle` is the ui's api param when the
  *  aggregate is served over one. */
@@ -1028,8 +1018,8 @@ export function scaffoldList(
 
   // Find-filter bar (T3.14): each qualifying `find` gets one text input per
   // param; when every input of a find is non-empty the list switches to that
-  // find's results (first matching arm wins), else `all` renders.  Twin of
-  // `expandScaffoldList`'s filter block; the page-state fields the inputs bind
+  // find's results (first matching arm wins), else `all` renders.  The
+  // list's filter block; the page-state fields the inputs bind
   // to are resolved by `filterStateFields`, attached by the page builder.
   const filterFields: Array<{ name?: string; value: Expression }> = [];
   let listRegion: Expression = allView();

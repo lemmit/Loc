@@ -20,8 +20,8 @@
 // - Project shell (App.tsx, main.tsx, vite.config.ts, package.json,
 //   theme, smoke spec) — orthogonal to the page metamodel.
 //
-// Explicit pages (`source: "explicit"`) flow through the closed-stdlib
-// component emission path, not the per-archetype dispatch below.
+// Hand-written (custom) pages flow through the closed-stdlib component
+// emission path, not the per-archetype dispatch below.
 
 import type {
   AggregateIR,

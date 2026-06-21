@@ -608,7 +608,7 @@ function nameCtxOf(ctx: WalkerExpandContext): PageNameCtx {
  *  (no create surface — `!isConstructible`).  The backends emit no POST
  *  route for such an aggregate (`hasCreate`), so a scaffolded create form
  *  would submit to a route that doesn't exist; the matching list "New"
- *  button is suppressed in `expandScaffoldList`.  Removing the page here
+ *  button is suppressed in the list scaffolder.  Removing the page here
  *  (before the origin / expand passes) also drops it from the router and
  *  menu, which derive from `ui.pages` at emit time. */
 function dropNonConstructibleNewPages(sys: SystemIR): void {
@@ -625,9 +625,9 @@ function dropNonConstructibleNewPages(sys: SystemIR): void {
 }
 
 /** Suppress the list "New <agg>" button for a non-constructible aggregate — the
- *  backends emit no POST route, so the create surface must not appear.  The ⑤c
- *  `expandScaffoldList` omitted the button inline; the flipped (macro-emitted)
- *  list body always carries it, so we strip it here, where `isConstructible`
+ *  backends emit no POST route, so the create surface must not appear.  The
+ *  macro-emitted list body always carries the button, so we strip it here,
+ *  where `isConstructible`
  *  (an enriched-IR analysis the macro can't run) is available.  Mirrors
  *  `dropNonConstructibleNewPages`, which drops the matching `New` page. */
 function stripNonConstructibleListCreate(sys: SystemIR): void {
