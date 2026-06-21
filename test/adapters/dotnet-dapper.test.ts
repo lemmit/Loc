@@ -321,7 +321,7 @@ system D {
     // they are present-but-unused here — a Dapper-specific bypass gate is a later
     // slice's concern.
     expect(repo).toContain(
-      "public async Task<IReadOnlyList<Customer>> RunByNameSortedAsync(string n, (int? offset, int? limit)? page = null, CancellationToken cancellationToken = default, bool ignoreAllFilters = false, string[]? ignoreFilters = null)",
+      "public async Task<IReadOnlyList<Customer>> RunByNameSortedAsync(string n, (int? offset, int? limit)? page = null, bool ignoreAllFilters = false, string[]? ignoreFilters = null, CancellationToken cancellationToken = default)",
     );
     // criterion `where: NameIs(n)` → inline SQL with this-prop → column.
     expect(repo).toContain(

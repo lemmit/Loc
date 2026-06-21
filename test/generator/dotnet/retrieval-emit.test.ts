@@ -40,9 +40,10 @@ describe(".NET generator — retrieval", () => {
     const repo = out.get("Infrastructure/Repositories/CustomerRepository.cs")!;
     // The signature carries the two trailing optional filter-bypass params
     // (named-filter-bypass.md §11) so an inline `Repo.findAll(...) ignoring …`
-    // can name them; ordinary callers pass `cancellationToken` positionally.
+    // can name them; `cancellationToken` stays LAST (CA1068) and callers pass
+    // it named (it follows the optional `page` + `ignore*` params).
     expect(repo).toMatch(
-      /public async Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, CancellationToken cancellationToken = default, bool ignoreAllFilters = false, string\[\]\? ignoreFilters = null\)/,
+      /public async Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, bool ignoreAllFilters = false, string\[\]\? ignoreFilters = null, CancellationToken cancellationToken = default\)/,
     );
     // The retrieval is a reified Ardalis Specification, applied via
     // `.WithSpecification(...)` + the shared `.ApplyPaging(page)` extension over
@@ -79,7 +80,7 @@ describe(".NET generator — retrieval", () => {
     const out = await files();
     const iface = out.get("Domain/Customers/ICustomerRepository.cs")!;
     expect(iface).toMatch(
-      /Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, CancellationToken cancellationToken = default, bool ignoreAllFilters = false, string\[\]\? ignoreFilters = null\);/,
+      /Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, bool ignoreAllFilters = false, string\[\]\? ignoreFilters = null, CancellationToken cancellationToken = default\);/,
     );
   });
 
@@ -90,7 +91,7 @@ describe(".NET generator — retrieval", () => {
     )?.[1];
     expect(handler).toBeDefined();
     expect(handler!).toMatch(
-      /var matched = await _customers\.RunByRegionAsync\(command\.Rgn, \(0, 100\), cancellationToken\);/,
+      /var matched = await _customers\.RunByRegionAsync\(command\.Rgn, \(0, 100\), cancellationToken: cancellationToken\);/,
     );
     expect(handler!).toMatch(/foreach \(var c in matched\)/);
     expect(handler!).toMatch(/c\.Deactivate\(\);/);

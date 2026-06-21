@@ -889,11 +889,12 @@ export function renderRetrievalParamsWithCt(params: ParamIR[]): string {
     ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
     "(int? offset, int? limit)? page = null",
   ].join(", ");
-  // The two trailing `ignore*` params carry an inline read's `ignoring` clause
+  // The two `ignore*` params carry an inline read's `ignoring` clause
   // (named-filter-bypass.md §11) from the call site to the shared retrieval
-  // method.  Optional + last, so existing call sites (which pass
-  // `cancellationToken` positionally) are unaffected; only an `ignoring` read
-  // names them.  `ignoreAllFilters` → `ignoring *`; `ignoreFilters` → the EF
-  // named-filter list for `ignoring <Cap>`.
-  return `${head}, CancellationToken cancellationToken = default, bool ignoreAllFilters = false, string[]? ignoreFilters = null`;
+  // method.  `cancellationToken` MUST stay last (CA1068, an error under
+  // `/warnaserror`), so the ignore params sit before it; call sites pass
+  // `cancellationToken` as a NAMED arg (it follows the optional `page`).
+  // `ignoreAllFilters` → `ignoring *`; `ignoreFilters` → the EF named-filter
+  // list for `ignoring <Cap>`.
+  return `${head}, bool ignoreAllFilters = false, string[]? ignoreFilters = null, CancellationToken cancellationToken = default`;
 }
