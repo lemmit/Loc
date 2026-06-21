@@ -10,11 +10,32 @@ system Tasks {
       aggregate Task with crudish {
         title: string
         done: bool
+        priority: int?
+        labels: string[]
 
         operation markDone() {
           done := true
         }
+
+        // Exception-less returning op — exercises Bucket E1 coverage of the
+        // returning-op body's collection mutations (`add`/`remove`) AND a bare
+        // `call` statement, all in one body.  `relabel` appends then drops a
+        // label, makes a bare call (a no-op on vanilla, which emits no
+        // aggregate-function helpers), and falls through to the `Task` success
+        // variant.  The compile gate proves all three lower to compilable
+        // Elixir under --warnings-as-errors (previously the `call` # TODO'd).
+        operation relabel(label: string): Task or Rejected {
+          labels += label
+          labels -= label
+          noop()
+        }
+
+        // Domain function decl — accepted by the parser; on vanilla the helper
+        // is not emitted onto the schema module, so a bare `call` to it lowers
+        // to a discarding no-op (see operation-returns-emit `call` arm).
+        function noop(): int = 1
       }
+      error Rejected { reason: string }
       // A custom-find — exercises Slice 8 (repository custom-find emission +
       // context defdelegate).  Convention-find: no explicit `where`,
       // so the params match aggregate property names.
@@ -34,7 +55,7 @@ system Tasks {
       // create-fields (the simplest mutating shape).
       workflow createAndComplete transactional {
         create() {
-          let t = Task.create({ title: "Untitled", done: false })
+          let t = Task.create({ title: "Untitled", done: false, labels: ["init"] })
           t.markDone()
         }
       }
@@ -51,7 +72,7 @@ system Tasks {
           precondition initialTitle.length > 0
           requires true
           let normalised = initialTitle
-          let t = Task.create({ title: normalised, done: false })
+          let t = Task.create({ title: normalised, done: false, labels: ["init"] })
           t.markDone()
         }
       }
@@ -128,9 +149,43 @@ system Tasks {
           }
         }
       }
+
+      // Bucket E1 — for-each body with MORE than a bare op-call.  The loop
+      // body mixes an `op-call` with an `emit`, so it lowers through a
+      // per-iteration `with`-chain (the op-call as a fallible `<-` clause, the
+      // broadcast in the do-branch) instead of the flat `case` form.  Gates
+      // that the broader for-each body compiles under --warnings-as-errors.
+      workflow finalizeBatchEmitting {
+        create(d: bool) {
+          let xs = Tasks.run(DoneTasks(d), page: { offset: 0, limit: 100 })
+          for x in xs {
+            x.markDone()
+            emit TaskFinished { task: x.id, at: now() }
+          }
+        }
+      }
+
+      // Reusable predicate for the if-let lookup below.
+      criterion Pending(flag: bool) of Task = this.done == flag
+
+      // Bucket E1 — if-let with branch bodies BEYOND a bare op-call.  The
+      // then-branch runs an op-call + an emit; the else-branch creates a fresh
+      // aggregate (factory-let).  Both branches lower the full statement set.
+      workflow findOrCreate transactional {
+        create(flag: bool) {
+          if let t = Tasks.find(Pending(flag)) {
+            t.markDone()
+            emit TaskFinished { task: t.id, at: now() }
+          } else {
+            let fresh = Task.create({ title: "fallback", done: false, labels: ["init"] })
+          }
+        }
+      }
     }
   }
-  api TrackerApi from Productivity
+  api TrackerApi from Productivity {
+    httpStatus Rejected 409
+  }
   storage primary { type: postgres }
   storage objects { type: s3, config: { bucket: "loom-test" } }
   resource trackerState { for: Tracker, kind: state, use: primary }
