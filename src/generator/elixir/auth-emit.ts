@@ -67,7 +67,7 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
   const auth = sys.auth;
 
   files.set(`lib/${appName}_web/auth.ex`, renderAuthPlug(sys.user, webModule, auth));
-  files.set(`lib/${appName}_web/live_auth.ex`, renderLiveAuth(webModule));
+  files.set(`lib/${appName}_web/live_auth.ex`, renderLiveAuth(webModule, auth));
   files.set(
     `lib/${appName}_web/controllers/auth_controller.ex`,
     renderAuthController(webModule, auth, deployable.port ?? 4000),
@@ -117,6 +117,19 @@ function renderAuthPlug(
   const verifierDoc = auth
     ? "validates the inbound JWT against the issuer's JWKS (D-AUTH-OIDC)"
     : "is a permissive DEV STUB — replace verify_token/1 for production";
+  // DEV STUB only: expose the built-in admin principal so LiveAuth can grant
+  // LiveViews the SAME out-of-the-box identity this plug grants every :api
+  // request.  In dev there's no /auth/callback handshake to seed the browser
+  // session, so without this the sidebar + every gated page would 302 to
+  // /login even though the JSON API authenticates.  OIDC mode omits it — a
+  // real login must populate the session.
+  const devUserFn = auth
+    ? ""
+    : `
+  # DEV STUB: the built-in admin principal, exposed so LiveAuth grants
+  # LiveViews the same identity the :api pipeline grants every request.
+  def dev_user, do: build_user(elem(verify_token(nil), 1))
+`;
 
   // OIDC: the token rides the Authorization header OR the `session` cookie the
   // /auth/callback handshake issued (the browser flow), so read both.  Dev
@@ -225,7 +238,7 @@ ${extractTokenDef}
     |> send_resp(401, ~s({"error":"unauthorized"}))
     |> halt()
   end
-
+${devUserFn}
 ${verifierSection}
   # ---------------------------------------------------------------------------
   # Maps verified JWT claims onto the system's user { } shape.  OIDC walks
@@ -624,7 +637,23 @@ end
 // Mirrors Auth but reads from the session instead of an Authorization header.
 // ---------------------------------------------------------------------------
 
-function renderLiveAuth(webModule: string): string {
+function renderLiveAuth(webModule: string, auth: AuthIR | undefined): string {
+  // DEV STUB: no /auth/callback handshake seeds the browser session in dev, so
+  // fall back to the same built-in admin the :api plug grants every request —
+  // LiveViews (the sidebar + every gated page) render out of the box instead
+  // of 302-ing to /login.  OIDC mode keeps the strict path: a missing session
+  // redirects to /login, where the real handshake populates it.
+  const missingSessionArm = auth
+    ? `_ -> {:error, :unauthenticated}`
+    : `_ -> {:ok, ${webModule}.Auth.dev_user()}`;
+  const verifyDoc = auth
+    ? `reads \\\`current_user\\\` directly from the session map (populated by the
+  /auth/callback handshake).  Extend it to validate a session token, load from
+  the database, etc.`
+    : `reads \\\`current_user\\\` from the session, falling back to the dev-stub
+  admin so LiveViews render without a login handshake (symmetric with the
+  permissive :api plug).  Replace for production, or declare an
+  \\\`auth { oidc }\\\` block to require a real session.`;
   return `# Auto-generated.
 defmodule ${webModule}.LiveAuth do
   @moduledoc """
@@ -637,9 +666,7 @@ defmodule ${webModule}.LiveAuth do
         ...
       end
 
-  The \`verify_session/1\` private function is a v0 stub that reads
-  \`current_user\` directly from the session map.  Extend it to validate
-  a session token, load from the database, etc.
+  The \`verify_session/1\` private function ${verifyDoc}
   """
 
   import Phoenix.Component, only: [assign: 3]
@@ -652,14 +679,13 @@ defmodule ${webModule}.LiveAuth do
   end
 
   # ---------------------------------------------------------------------------
-  # Mirrors Auth.verify_token but reads from session["token"] /
-  # session["current_user"].  v0 stub — extend as needed.
+  # Mirrors Auth.verify_token but reads from session["current_user"].
   # ---------------------------------------------------------------------------
 
   defp verify_session(session) do
     case session do
       %{"current_user" => user} -> {:ok, user}
-      _ -> {:error, :unauthenticated}
+      ${missingSessionArm}
     end
   end
 end

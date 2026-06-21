@@ -39,7 +39,13 @@ config :${appName}, ${appModule}Web.Endpoint,
   render_errors: [
     formats: [json: ${appModule}Web.ErrorJSON, html: ${appModule}Web.ErrorHTML],
     layout: false
-  ]
+  ],
+  # LiveView signs the session token embedded in the dead-render (the initial
+  # static HTML, before the socket connects).  Without a configured salt the
+  # very first render of any LiveView raises, so a generated LiveView UI 500s
+  # out of the box — the salt must be present even though the @session_options
+  # cookie store carries its own.
+  live_view: [signing_salt: "loom-generated"]
 
 ${ashLines.join("\n")}
 

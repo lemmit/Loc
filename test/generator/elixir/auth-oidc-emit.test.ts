@@ -163,3 +163,38 @@ describe("Phoenix OIDC verifier emission", () => {
     ).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// LiveView dev-stub auth + the LiveView dead-render signing salt — without
+// either, a generated Phoenix LiveView UI doesn't render in dev: every page
+// 302s to /login (the dev stub never seeds the browser session, only the :api
+// pipeline) and the first dead-render raises with no `live_view:` salt.
+// ---------------------------------------------------------------------------
+describe("Phoenix LiveView dev-stub auth", () => {
+  it("dev stub: LiveAuth falls back to the same built-in admin the :api plug grants", async () => {
+    const files = await build(source({ oidc: false }));
+    const auth = files.get("api/lib/api_web/auth.ex")!;
+    const live = files.get("api/lib/api_web/live_auth.ex")!;
+    // The plug exposes the built-in principal...
+    expect(auth).toContain("def dev_user, do: build_user(elem(verify_token(nil), 1))");
+    // ...and LiveAuth grants it when the browser session is empty (dev has no
+    // /auth/callback handshake to seed it) instead of redirecting to /login.
+    expect(live).toContain("{:ok, ApiWeb.Auth.dev_user()}");
+    expect(live).not.toContain("{:error, :unauthenticated}");
+  });
+
+  it("oidc: LiveAuth stays strict — a missing session redirects to /login, no dev_user", async () => {
+    const files = await build(source({ oidc: true }));
+    const auth = files.get("api/lib/api_web/auth.ex")!;
+    const live = files.get("api/lib/api_web/live_auth.ex")!;
+    expect(auth).not.toContain("def dev_user");
+    expect(live).toContain("{:error, :unauthenticated}");
+    expect(live).not.toContain("dev_user");
+    expect(live).toContain('redirect(socket, to: "/login")');
+  });
+
+  it("emits the live_view dead-render signing salt in config.exs", async () => {
+    const config = (await build(source({ oidc: false }))).get("api/config/config.exs")!;
+    expect(config).toContain("live_view: [signing_salt:");
+  });
+});
