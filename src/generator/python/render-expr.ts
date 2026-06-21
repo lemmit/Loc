@@ -15,7 +15,7 @@ import {
 // Expression renderer for the Python backend.
 //
 // Same shape as the TS / .NET renderers — consumes fully-resolved Loom
-// ExprIR; output is idiomatic Python 3.12.  The 17-arm dispatch +
+// ExprIR; output is idiomatic Python 3.13.  The 17-arm dispatch +
 // recursion live in `../_expr/target.ts`; this file is the Python leaf
 // table (`PY_TARGET`) plus the thin `renderPyExpr` entry point.
 //

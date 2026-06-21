@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 // LOOM_PYTHON_BUILD=1 so the default `npm test` stays fast.  CI's
 // `.github/workflows/python-build.yml` runs the same check.
 //
-// Requires `uv` on PATH (it provisions Python 3.12 itself).
+// Requires `uv` on PATH (it provisions Python 3.13 itself).
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));

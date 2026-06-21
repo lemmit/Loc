@@ -56,7 +56,7 @@ import {
 //
 // File layout (grows slice by slice — docs/plans/python-backend-plan.md):
 //   pyproject.toml                  — uv-managed project + tool config
-//   Dockerfile, .dockerignore       — python:3.12-slim + uv image
+//   Dockerfile, .dockerignore       — python:3.13-slim + uv image
 //   certs/.gitkeep                  — proxy-CA escape hatch
 //   app/main.py                     — FastAPI app: CORS, /health, /ready
 //   app/settings.py                 — DATABASE_URL from env
@@ -336,7 +336,7 @@ function renderPyproject(
     "[project]",
     `name = "${slug}"`,
     `version = "0.1.0"`,
-    `requires-python = ">=3.12"`,
+    `requires-python = ">=3.13"`,
     "dependencies = [",
     [...PYTHON_PINS.dependencies, ...extraDeps].map(dep),
     "]",
@@ -353,7 +353,7 @@ function renderPyproject(
     "",
     "[tool.ruff]",
     "line-length = 100",
-    `target-version = "py312"`,
+    `target-version = "py313"`,
     "",
     "# E741: DSL-authored lambda params (idiomatically `l` for lines) flow",
     "# into the generated source verbatim.  E711/E712: DSL equality against",
@@ -364,7 +364,7 @@ function renderPyproject(
     `ignore = ["E711", "E712", "E741"]`,
     "",
     "[tool.mypy]",
-    `python_version = "3.12"`,
+    `python_version = "3.13"`,
     "strict = true",
     "",
     "[tool.pytest.ini_options]",
@@ -613,7 +613,7 @@ function renderMain(
 const DOCKERFILE_PY = `# syntax=docker/dockerfile:1
 # Auto-generated.
 
-FROM python:3.12-slim
+FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 # wget backs the compose healthcheck (debian-slim ships neither wget
@@ -650,7 +650,7 @@ RUN npm install --no-audit --no-fund
 COPY ClientApp/ ./
 RUN npm run build
 
-FROM python:3.12-slim
+FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 RUN apt-get update \\
