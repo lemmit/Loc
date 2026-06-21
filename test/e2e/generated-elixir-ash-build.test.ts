@@ -67,7 +67,7 @@ function pickCases<T extends { name: string }>(all: T[]): T[] {
   return selected;
 }
 
-const IMAGE = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
+const IMAGE = "hexpm/elixir:1.18.4-erlang-27.3.4-debian-bookworm-20260610-slim";
 
 // `mix local.hex && mix local.rebar && mix deps.get && mix compile` inside the
 // elixir image.  --warnings-as-errors catches Ash 3.x API drift (deprecated

@@ -141,7 +141,7 @@ describe.skipIf(!ENABLED)(
         throw new Error(
           "LOOM_OBS_E2E_PHOENIX=1 set but `mix` is not on PATH. " +
             "The suite needs Erlang/OTP + Elixir. " +
-            "Add `erlef/setup-beam@v1` with `otp-version: '27.0'` and `elixir-version: '1.17.2'` to the workflow.",
+            "Add `erlef/setup-beam@v1` with `otp-version: '27.3'` and `elixir-version: '1.18.4'` to the workflow.",
         );
       }
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-obs-px-"));

@@ -643,7 +643,7 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 const DOCKERFILE_PY_FULLSTACK = `# syntax=docker/dockerfile:1
 # Auto-generated — fullstack Python + React (embedded SPA).
 
-FROM node:20-alpine AS spa-build
+FROM node:24-alpine AS spa-build
 WORKDIR /spa
 COPY ClientApp/package.json ./
 RUN npm install --no-audit --no-fund

@@ -28,7 +28,7 @@ const repoRoot = path.resolve(here, "..", "..");
 const cli = path.join(repoRoot, "bin", "cli.js");
 const fixturesDir = path.join(here, "fixtures", "elixir-vanilla-build");
 const ENABLED = process.env.LOOM_PHOENIX_VANILLA_BUILD === "1";
-const IMAGE = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
+const IMAGE = "hexpm/elixir:1.18.4-erlang-27.3.4-debian-bookworm-20260610-slim";
 
 // `mix deps.get && mix compile --warnings-as-errors` inside the elixir image.
 // When `mirror` is set (LOOM_HEX_MIRROR=1) hex.pm traffic is routed through the

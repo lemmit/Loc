@@ -57,7 +57,7 @@ describe.skipIf(!ENABLED)(
         // Phoenix projects the typical `import_deps: [:phoenix, ...]`
         // line means we need `deps/` populated.  Use the same image
         // and `mix deps.get` as the compile gate.
-        const image = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
+        const image = "hexpm/elixir:1.18.4-erlang-27.3.4-debian-bookworm-20260610-slim";
         execSync(
           `docker run --rm -v ${projDir}:/app -w /app ${image} ` +
             `bash -c 'mix local.hex --force && mix local.rebar --force && ` +

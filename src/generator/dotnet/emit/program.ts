@@ -720,7 +720,7 @@ export function renderDockerfile(
     return `# syntax=docker/dockerfile:1
 # Auto-generated — fullstack .NET + React (embedded SPA).
 
-FROM node:20-alpine AS spa-build
+FROM node:24-alpine AS spa-build
 WORKDIR /spa
 COPY ClientApp/package.json ClientApp/package-lock.json* ./
 RUN npm ci --prefer-offline --no-audit --no-fund || npm install
