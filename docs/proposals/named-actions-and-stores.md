@@ -503,3 +503,9 @@ patterns, with no migration cost.
 **Enabled, separate initiative:** the Fable/Feliz/Elmish target (§7). Stages 1–4
 turn its `Msg`/`update` emission from synthesis into projection; it is tracked in
 the gap analysis alongside these notes, not scheduled here.
+
+**Parallel, cross-cutting track:** global error handling — the frontend error
+boundary + backend error handler that anything unhandled propagates to — is its
+own note, [`error-handling-and-failure-sink.md`](error-handling-and-failure-sink.md)
+("Proposal C"). It is largely independent of the actions/async stages (the
+backend sink exists regardless of actions) and ships defaults-first.

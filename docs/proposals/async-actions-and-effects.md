@@ -456,9 +456,12 @@ shows the need; all non-breaking, additive):
 **Open:**
 - **Async action→action awaiting in v1** — ship in Stage 4, or defer alongside
   `store` if it proves to interact with store lifetime.
-- **Default failure sink** — what an unhandled `spawn` failure and a
-  fully-unhandled `await` (no per-call, no block `onError`) route to (a generic
-  toast/error-boundary vs a hard requirement to handle).
+- **Default failure sink — split into its own note.** Where a fully-unhandled
+  `await`/`spawn`/`attempt` failure goes (the "propagate" terminus) is a
+  cross-cutting, both-tiers concern (frontend error boundary + backend error
+  handler), covered in
+  [`error-handling-and-failure-sink.md`](error-handling-and-failure-sink.md)
+  ("Proposal C"): a good default + a declarative override.
 
 **Considered & dropped** (recorded so they aren't re-litigated):
 - **`then` statement continuation** — success is implicit sequencing instead; a
