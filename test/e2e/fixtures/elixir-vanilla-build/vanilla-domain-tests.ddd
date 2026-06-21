@@ -1,0 +1,59 @@
+// Domain `test "..."` blocks on the vanilla foundation — the parity gate for
+// the pure-domain-core test emission (docs/audits/test-parity-generated-backends.md).
+//
+// The aggregate carries a pure domain core (`src/generator/elixir/vanilla/
+// domain-core-emit.ts`): `create/1` validates via `apply_action` and `confirm/2`
+// runs precondition + in-memory mutation, both Repo-free.  The emitted ExUnit
+// suite (`vanilla/tests-emit.ts`) exercises create / op / toThrow / field reads
+// and MUST pass `mix test` with no database — the build harness runs it whenever
+// a generated project carries `test/test_helper.exs`.
+//
+// Also pins F6 (field defaults): `status` defaults to "open", so `create` may
+// omit it and the validated struct still carries the default.
+system Shop {
+  subdomain Sales {
+    context Selling {
+      aggregate Order ids guid {
+        customer: string
+        status: string = "open"
+        total: int = 0
+        invariant customer.length > 0
+        operation confirm() {
+          precondition status == "open"
+          status := "confirmed"
+        }
+
+        // Create relying on the field default (F6) + an invariant rejection.
+        test "a fresh order takes its defaults" {
+          let o = Order.create({ customer: "acme" })
+          expect(o.status).toBe("open")
+          expect(o.total).toBe(0)
+        }
+        test "blank customer is rejected" {
+          expect(Order.create({ customer: "" })).toThrow()
+        }
+        // Operation happy-path (state threaded) + precondition rejection.
+        test "confirming an open order makes it confirmed" {
+          let o = Order.create({ customer: "acme" })
+          o.confirm()
+          expect(o.status).toBe("confirmed")
+        }
+        test "confirming a confirmed order is rejected" {
+          let o = Order.create({ customer: "acme", status: "confirmed" })
+          expect(o.confirm()).toThrow()
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api SalesApi from Sales
+  storage pg { type: postgres }
+  resource sellingState { for: Selling, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Selling]
+    dataSources: [sellingState]
+    serves: SalesApi
+    port: 4000
+  }
+}

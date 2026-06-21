@@ -45,6 +45,23 @@ function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
   );
 }
 
+// `mix test` (MIX_ENV=test) for a fixture whose aggregates declare domain
+// `test "..."` blocks — the emitted ExUnit suite runs the pure domain core
+// (vanilla/domain-core-emit.ts) with NO database, so this gate just compiles +
+// runs the tests.  Catches an emitter regression that produces invalid Elixir
+// or a behaviourally wrong assertion (the `mix compile --warnings-as-errors`
+// gate above is MIX_ENV=prod and never compiles `test/`).
+function runMixTest(projDir: string, mirror: HexMirror | undefined): void {
+  const dockerArgs = mirror ? `${mirror.dockerArgs.join(" ")} ` : "";
+  const shellPrefix = mirror?.shellPrefix ?? "";
+  execSync(
+    `docker run --rm ${dockerArgs}-v ${projDir}:/app -w /app ${IMAGE} ` +
+      `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
+      `mix deps.get && mix test'`,
+    { stdio: "inherit", timeout: 600_000 },
+  );
+}
+
 // CI shards one fixture per matrix cell (see elixir-vanilla-build.yml) so a cold
 // dep compile fits the per-cell timeout and reseeds its own cache.
 // `LOOM_PHOENIX_VANILLA_BUILD_CASE=<fixture>.ddd` selects that single fixture;
@@ -147,6 +164,11 @@ describe.skipIf(!ENABLED)(
         // threaded `current_user` map.  Compiles the stamped insert/update seam +
         // the threaded context delegate + controller.
         { name: "vanilla-auditable.ddd", deployable: "api" },
+        // Domain `test "..."` blocks → ExUnit over the pure domain core: this
+        // fixture emits `test/` files, so the harness also runs `mix test`
+        // (DB-free) on top of the prod compile.  Pins the test-emission parity
+        // and the F6 field-default fix.
+        { name: "vanilla-domain-tests.ddd", deployable: "api" },
       ]),
     )("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
@@ -179,6 +201,12 @@ describe.skipIf(!ENABLED)(
         // 600s exec budget; the headroom absorbs transient hex slowness).
         // Routed through the loopback hex mirror when LOOM_HEX_MIRROR=1.
         runMixCompile(projDir, mirror);
+
+        // If the fixture's aggregates declared domain `test "..."` blocks, the
+        // emitter wrote an ExUnit suite (+ test_helper.exs) — run it (DB-free).
+        if (fs.existsSync(path.join(projDir, "test", "test_helper.exs"))) {
+          runMixTest(projDir, mirror);
+        }
       } finally {
         if (!baseOutDir) {
           try {

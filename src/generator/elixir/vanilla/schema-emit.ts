@@ -17,6 +17,7 @@ import type {
   EnrichedAggregateIR,
   EntityPartIR,
   EnumIR,
+  ExprIR,
   SystemIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
@@ -208,6 +209,7 @@ interface AggField {
   name: string;
   type: TypeIR;
   optional?: boolean;
+  default?: ExprIR;
 }
 
 function renderFieldLine(field: AggField, enumsByName: Map<string, EnumIR>): string {
@@ -216,7 +218,38 @@ function renderFieldLine(field: AggField, enumsByName: Map<string, EnumIR>): str
   if (field.name === "id" || field.name === "createdAt" || field.name === "updatedAt") return "";
   const ectoType = mapTypeToEcto(field.type, enumsByName);
   if (!ectoType) return "";
-  return `    field :${snake(field.name)}, ${ectoType}`;
+  // A declared Loom default (`field: T = <lit>`) becomes the Ecto schema
+  // `default:` so a fresh `%Agg{}` carries it — `base_changeset` then
+  // satisfies `validate_required` even when the caller omits the field, and
+  // `create/1`'s `apply_action` returns the defaulted value (F6 in
+  // docs/audits/test-parity-generated-backends.md).
+  const def = field.default ? renderEctoDefault(field.default) : null;
+  return `    field :${snake(field.name)}, ${ectoType}${def ? `, default: ${def}` : ""}`;
+}
+
+/** Render a simple literal default to its Ecto `default:` value, or `null`
+ *  for a non-literal default (skipped — keeps the field's struct default
+ *  unset rather than emitting an expression Ecto can't evaluate at compile
+ *  time). */
+function renderEctoDefault(e: ExprIR): string | null {
+  if (e.kind !== "literal") return null;
+  switch (e.lit) {
+    case "string":
+      return JSON.stringify(e.value);
+    case "money":
+    case "decimal":
+      return `Decimal.new(${JSON.stringify(e.value)})`;
+    case "bool":
+      return e.value;
+    case "null":
+      return "nil";
+    case "int":
+    case "long":
+      return e.value;
+    default:
+      // `now` (and anything non-static) can't be a compile-time Ecto default.
+      return null;
+  }
 }
 
 function mapTypeToEcto(t: TypeIR, enumsByName: Map<string, EnumIR>): string | null {

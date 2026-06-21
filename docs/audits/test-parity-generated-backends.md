@@ -173,24 +173,34 @@ it; the test emitter would then lower `expect(Money{bad}).toThrow()` to
 `assert {:error, _} = Money.new(%{…})`.  Ash enforces VO invariants
 through the embedded resource, so this gap is vanilla-specific.
 
-### F6 — vanilla doesn't apply Loom field defaults in the domain layer (runtime gap)
+### F6 — vanilla didn't apply Loom field defaults in the domain layer (runtime gap) — *fixed*
 
-A field default (`status: string = "open"`) is **not** applied by the
-vanilla schema or `base_changeset` — `status` lands in `@required_fields`
-with no default, so `create(%{customer: "acme"})` (relying on the default)
-fails `validate_required`.  The other backends fill the default in their
-`create` factory; vanilla requires the caller to pass every required
-field.  Confirmed by reading the generated schema/changeset (no `default:`
-on the field, no `put_default` in `base_changeset`).  Independent of test
-emission — it affects the real create path — but it surfaced here because
-a DSL test that leans on a default would fail only on vanilla.  Fix:
-emit the default onto the Ecto `field` (`field :status, :string, default:
-"open"`) and/or drop defaulted fields from `@required_fields`.
+> **Update (shipped):** the vanilla schema now emits the declared default
+> onto the Ecto field (`field :status, :string, default: "open"`) for
+> primitive-literal defaults (`schema-emit.ts:renderEctoDefault`).  A fresh
+> `%Agg{}` carries the default, so `base_changeset` satisfies
+> `validate_required` even when the caller omits the field and `create/1`'s
+> `apply_action` returns the defaulted value.  Verified under `mix test`.
+> Non-literal defaults (e.g. `now()`) and enum defaults are still skipped
+> (an Ecto `default:` must be a compile-time value; the enum atom-vs-string
+> question is a separate vanilla concern).
+
+The original gap: a field default (`status: string = "open"`) was **not**
+applied by the vanilla schema or `base_changeset` — `status` landed in
+`@required_fields` with no default, so `create(%{customer: "acme"})`
+(relying on the default) failed `validate_required`.  The other backends
+fill the default in their `create` factory; vanilla required the caller to
+pass every required field.  Independent of test emission — it affected the
+real create path — but it surfaced here because a DSL test that leans on a
+default would fail only on vanilla.
 
 > Both F5 and F6 are pre-existing **vanilla codegen** gaps the test-parity
-> work uncovered, not regressions introduced by it.  Neither is exercised
-> by the current corpus's elixir-targeted tests, so no CI is red today —
-> but each is a latent correctness issue worth its own fix.
+> work uncovered, not regressions introduced by it.  **F6 is now fixed**
+> (field defaults emitted); **F5 remains open** — its runtime fix is a
+> broad VO-storage change (`:map` → embedded schema, touching wire shape +
+> migrations + queries), and shipping only the test-enabling half would
+> make the VO-invariant test green while bad values still persist, so it's
+> deferred to a focused PR rather than half-done.
 
 ## What is at parity (the positives)
 
@@ -221,12 +231,12 @@ emit the default onto the Ecto `field` (`field :status, :string, default:
    `docs/generators.md`, generator test
    (`test/generator/elixir/exunit-tests-emit.test.ts`), and the emitted
    vanilla suite verified green under `mix test` (no DB).
-2. **Add a Postgres-backed `mix test` CI gate for the vanilla suite** —
-   today the emitted vanilla tests are DB-free, so the existing per-PR
-   build gate (`elixir-vanilla-build.yml`, `mix compile`) does **not**
-   compile or run `test/`.  A `mix test` leg (no sidecar needed — the
-   suite never touches the Repo) would pin the parity so a generator
-   change can't silently break the emitted tests.
+2. ~~**Add a `mix test` CI gate for the vanilla suite**~~ — **done**.
+   `generated-elixir-vanilla-build.test.ts` now runs `mix test` (DB-free —
+   no sidecar) on any generated project that carries `test/test_helper.exs`,
+   on top of the `MIX_ENV=prod` `mix compile --warnings-as-errors` gate
+   (which never compiles `test/`).  Pinned by the `vanilla-domain-tests.ddd`
+   fixture (4 tests, green).  This also gates the F6 default fix.
 3. **Un-skip the ash rejection tests DB-free** via
    `Ash.Changeset.for_create/for_update` + `valid?` (validations run at
    changeset build, no data layer) — lowers invariant/precondition
