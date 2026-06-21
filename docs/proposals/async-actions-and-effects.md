@@ -217,6 +217,52 @@ unchanged: a **store** action may `await` a remote op and recover *store* state
 in `onError`, but still may not `navigate`/`toast` (view-scoped) — the calling
 page owns the redirect.
 
+### 3b. Block `onError` = a computation-expression (railway) — projection, not surface
+
+The **block** form is railway-oriented programming: a chain of `await`s with a
+single error exit, every step short-circuiting to one handler. That is exactly
+an F# `asyncResult` **computation expression** — so block `onError` *projects
+straight to a CE*, no synthesis:
+
+```ddd
+action submit() {                              // 🔶 — one error exit for the whole chain
+  let order = await placeOrder(draft)
+  await sendReceipt(order.id)
+  await audit(order.id)
+  navigate(OrderConsole, { id: order.id })
+} onError e => toast(e.message)
+```
+
+```fsharp
+asyncResult {
+  let! order = Api.placeOrder model.Draft      // each let!/do! short-circuits to the Error arm
+  do!         Api.sendReceipt order.Id
+  do!         Api.audit order.Id
+  return Navigation.navigate (Route.OrderConsole order.Id)
+} |> AsyncResult.either id (fun e -> Cmd.ofMsg (Toast e))   // the single onError
+```
+
+So `} onError e => h` *is* `match (asyncResult { … }) with Ok _ -> () | Error e -> h`;
+per-call `onError` is the local override (handle one `let!` before it
+short-circuits); day-one `match` is the single-step base case.
+
+**Keep the CE a projection, not the DSL surface.** The same neutral block lowers
+idiomatically per target, so the surface stays imperative (`await` + statements +
+block `onError`) — importing CE *syntax* into the DSL would leak F# the way
+`msg`/`update` keywords would (the altitude mistake already rejected in
+Proposal A §4):
+
+| Target | Chained-awaits-one-error lowers to |
+|---|---|
+| F#/Elmish | `asyncResult { let! … }` + one match |
+| TS/React | `try { const x = await …; … } catch (e) { … }` |
+| Rust-ish | `?` propagation + one match |
+| Python | `try: … except E:` |
+
+The payoff is the projection thesis exactly where async lives: because Loom has a
+neutral "chained awaits, one error" construct, the F# emit *is* a CE rather than
+hand-rolled `update` arms.
+
 ## 4. Async actions — `async`, awaiting actions, the interface
 
 If an action (transitively) `await`s a remote op, it has a suspension point and
