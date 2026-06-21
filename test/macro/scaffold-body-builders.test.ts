@@ -23,9 +23,8 @@ const text = (name: string): ScaffoldColumn => ({ name, kind: { tag: "text" } })
 // ---------------------------------------------------------------------------
 // Phase 1 of docs/proposals/unfoldable-page-scaffolding.md — the macro-layer
 // (AST→AST) scaffolders produce printable, re-parseable `.ddd` source from AST
-// data alone.  This is the foundation for lifting the scaffold body expansion
-// out of the opaque IR-phase-⑤c expander: `scaffoldList` scaffolds a list,
-// `scaffoldNewForm` scaffolds a new-form, and each returns real AST.
+// data alone — this is the whole scaffold body path: `scaffoldList` scaffolds
+// a list, `scaffoldNewForm` scaffolds a new-form, and each returns real AST.
 // ---------------------------------------------------------------------------
 
 const inPage = (body: string): string =>
@@ -433,8 +432,8 @@ describe("scalarColumnsForAggregate — resolves columns from the aggregate AST"
     const order = findNode(model, "Aggregate", "Order");
     expect(order, "Order aggregate should parse").toBeTruthy();
     const cols = scalarColumnsForAggregate(order);
-    // value-object (`total: Money`) and array (`tags: Customer id[]`) drop out,
-    // mirroring `expandScaffoldList`'s `valueobject`/`array` skip.
+    // value-object (`total: Money`) and array (`tags: Customer id[]`) drop out
+    // of a list table (no plain-cell rendering).
     expect(cols).toEqual([
       { name: "buyer", kind: { tag: "id", targetName: "Customer" } },
       { name: "createdAt", kind: { tag: "datetime" } },

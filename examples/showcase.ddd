@@ -475,7 +475,7 @@ system DevPlatform {
     }
 
     deployable phoenixApi {
-        platform: phoenix { foundation: ash }
+        platform: elixir { foundation: ash }
         contexts: [Catalog, Builds, People]
         dataSources: [catalogState, buildsState, peopleState]
         serves: ProjectsApi, DeliveryApi, AccountsApi

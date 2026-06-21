@@ -182,7 +182,12 @@ export function emitAction(
   // component scope, not inside the onClick handler).
   const localVar = `${lowerFirst(op.name)}${agg.name}`;
   const hookName = `use${upperFirst(op.name)}${agg.name}`;
-  const idExpr = `${emitExpr(opRef.receiver, ctx)}.id`;
+  // Optional-chain the receiver: on a byId/single detail page the receiver is
+  // the query `data`, which is `undefined` until the fetch resolves.  React
+  // re-runs the hook per render (so it captures the real id once loaded); Vue
+  // (setup runs once) and Svelte (getter) tolerate the `undefined`.  Without
+  // the `?.`, React/Vue crash on mount dereferencing `.id` of pending data.
+  const idExpr = `${emitExpr(opRef.receiver, ctx)}?.id`;
   if (!ctx.actionMutations.some((m) => m.localVar === localVar)) {
     ctx.actionMutations.push({
       localVar,

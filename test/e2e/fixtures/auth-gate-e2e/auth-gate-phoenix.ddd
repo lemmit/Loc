@@ -1,0 +1,45 @@
+// Phoenix (LiveView) sibling of auth-gate.ddd — the SAME gated ui served by a
+// Phoenix/Ash deployable.  No `oidc {}` block, so the generator emits the
+// permissive DEV-STUB verifier (decodes an unsigned Bearer JWT's claims) — the
+// smoke boots the app and drives the role via the token, asserting the
+// server-rendered gate markup over HTTP for matching vs non-matching roles.
+system Gatekeeper {
+  user { id: string  role: string }
+
+  subdomain Ops {
+    context Work {
+      aggregate Job {
+        title: string
+        status: string
+        operation approve() {
+          requires currentUser.role == "admin"
+          status := "approved"
+        }
+      }
+      repository Jobs for Job { }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource jobState { for: Work, kind: state, use: primary }
+
+  api OpsApi from Ops
+
+  ui WebApp {
+    api Ops: OpsApi
+    page Public { route: "/public" body: Heading { "Public" } }
+    page Admin { route: "/admin" requires currentUser.role == "admin" body: Heading { "Admin Area" } }
+    page Super { route: "/super" requires currentUser.role == "superadmin" body: Heading { "Super Area" } }
+    menu { section "Main" { link Public, link Admin, link Super } }
+  }
+
+  deployable phoenixApp {
+    platform: elixir { foundation: ash }
+    contexts: [Work]
+    dataSources: [jobState]
+    serves: OpsApi
+    ui: WebApp { Ops: phoenixApp }
+    port: 4000
+    auth: required
+  }
+}

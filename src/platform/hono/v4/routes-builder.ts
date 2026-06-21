@@ -41,6 +41,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import {
   aggregateUsesMoney,
+  exprUsesCurrentUser,
   findUsesCurrentUser,
   operationIsGuarded,
   operationUsesCurrentUser,
@@ -119,6 +120,17 @@ export function buildRoutesFile(
   // Either feature pulls in the transactional handler + its db/events/
   // schema/randomUUID imports.
   const needsTx = fileHasAudit || fileHasProv;
+  // Lifecycle stamps (audit / softDelete): `_stampOnCreate` / `_stampOnUpdate`
+  // on the aggregate populate the audit columns before save.  The route only
+  // decides whether the method exists and whether to thread the principal
+  // (`currentUser`); the value rendering — incl. `currentUser` → the
+  // principal id — lives in the aggregate class.  Event-sourced + no-auth
+  // principal stamps are gated upstream (loom.node-stamp-unsupported).
+  const stampRules = (event: "create" | "update") =>
+    (agg.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments);
+  const hasStamp = (event: "create" | "update"): boolean => stampRules(event).length > 0;
+  const stampUsesUser = (event: "create" | "update"): boolean =>
+    stampRules(event).some((a) => exprUsesCurrentUser(a.value));
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   if (aggregateUsesMoney(agg)) {
@@ -437,6 +449,18 @@ export function buildRoutesFile(
       .map((f) => `${f.name}: ${wireToDomainExpr(`body.${f.name}`, f.type, ctx)}`)
       .join(", ");
     lines.push(`      const created = ${agg.name}.create({ ${createArgs} });`);
+    // Lifecycle stamps: populate createdAt / createdBy before persisting.
+    // A `currentUser` value resolves to the principal id inside the entity's
+    // `_stampOnCreate`, which then takes the typed principal — read from the
+    // request scope where the auth middleware stashed it.
+    if (hasStamp("create")) {
+      if (stampUsesUser("create")) {
+        lines.push(
+          `      const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+        );
+      }
+      lines.push(`      created._stampOnCreate(${stampUsesUser("create") ? "currentUser" : ""});`);
+    }
     lines.push(`      await repo.save(created);`);
     lines.push(
       `      ${renderHonoLogCall("aggregateCreated", `aggregate: "${agg.name}", id: created.id as string`)}`,
@@ -731,6 +755,13 @@ function emitOperationRoute(
   prov: boolean,
   emitTrace: boolean,
 ): string[] {
+  // Lifecycle-stamp helpers (audit / softDelete onUpdate) — same derivation
+  // as buildRoutesFile; recomputed here since this is a top-level function.
+  const stampRules = (event: "create" | "update") =>
+    (agg.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments);
+  const hasStamp = (event: "create" | "update"): boolean => stampRules(event).length > 0;
+  const stampUsesUser = (event: "create" | "update"): boolean =>
+    stampRules(event).some((a) => exprUsesCurrentUser(a.value));
   const aggSlug = snake(plural(agg.name));
   // Operation URL segment from the enriched routeSlug (D-URLSTYLE):
   // op.name under urlStyle:literal, plural(name) under :resource.  The
@@ -813,13 +844,21 @@ function emitOperationRoute(
   // deployable, the validator already prevents currentUser from
   // appearing in operation bodies, so this branch is dead.
   const usesUser = operationUsesCurrentUser(op);
-  if (usesUser) {
+  // An onUpdate stamp that references the principal needs the typed
+  // `currentUser` bound too (threaded into `_stampOnUpdate`) — bind it once
+  // here, whether the op body reads currentUser or only the stamp does.
+  if (usesUser || stampUsesUser("update")) {
     out.push(
       `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
   }
   const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
+  // The onUpdate stamp call, threaded before each save (plain + transactional).
+  const updateStamp = (pad: string): string[] =>
+    hasStamp("update")
+      ? [`${pad}aggregate._stampOnUpdate(${stampUsesUser("update") ? "currentUser" : ""});`]
+      : [];
 
   // The mutation block — extern dispatch or the direct method call —
   // operates on `aggregate` and is independent of which repo loaded it,
@@ -854,6 +893,7 @@ function emitOperationRoute(
     out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
     out.push(...whenGateLine(agg, op, "    "));
     out.push(...mutation("    "));
+    out.push(...updateStamp("    "));
     out.push(`    await repo.save(aggregate);`);
   } else {
     // Audited / provenanced: load, mutate, save, then write the audit row
@@ -879,6 +919,7 @@ function emitOperationRoute(
     out.push(...whenGateLine(agg, op, "      "));
     if (audit) out.push(`      const before = repoTx.toWire(aggregate);`);
     out.push(...mutation("      "));
+    out.push(...updateStamp("      "));
     out.push(`      await repoTx.save(aggregate);`);
     if (audit) {
       out.push(`      const after = repoTx.toWire(aggregate);`);
@@ -959,6 +1000,12 @@ function emitReturningOperationRoute(
   ctx: BoundedContextIR,
   emitTrace: boolean,
 ): string[] {
+  // Lifecycle-stamp helpers (onUpdate) — recomputed here (top-level fn).
+  const stampRules = (event: "create" | "update") =>
+    (agg.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments);
+  const hasStamp = (event: "create" | "update"): boolean => stampRules(event).length > 0;
+  const stampUsesUser = (event: "create" | "update"): boolean =>
+    stampRules(event).some((a) => exprUsesCurrentUser(a.value));
   const aggSlug = snake(plural(agg.name));
   const opSnake = snake(op.routeSlug ?? op.name);
   const variants = op.returnType?.kind === "union" ? op.returnType.variants : [];
@@ -1015,7 +1062,7 @@ function emitReturningOperationRoute(
     `    ${renderHonoLogCall("operationInvoked", `aggregate: "${agg.name}", op: "${op.name}", id`)}`,
   );
   const usesUser = operationUsesCurrentUser(op);
-  if (usesUser) {
+  if (usesUser || stampUsesUser("update")) {
     out.push(
       `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
@@ -1025,6 +1072,9 @@ function emitReturningOperationRoute(
   out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
   out.push(...whenGateLine(agg, op, "    "));
   out.push(`    const result = aggregate.${lowerFirst(op.name)}(${callArgs});`);
+  if (hasStamp("update")) {
+    out.push(`    aggregate._stampOnUpdate(${stampUsesUser("update") ? "currentUser" : ""});`);
+  }
   out.push(`    await repo.save(aggregate);`);
   // Translate each error variant to a ProblemDetails before the success path.
   // Status / title / type come from the stdlib defaults (exception-less.md A1);

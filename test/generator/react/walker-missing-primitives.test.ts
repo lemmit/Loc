@@ -100,7 +100,7 @@ describe("walker primitives — CodeBlock", () => {
   // The React emitter accepts both shapes: `source:` named arg (the
   // historical surface, used by `web/src/examples/loom-landing.ddd`) and
   // a positional first arg (the Phoenix surface, used by
-  // `test/generator/phoenix/heex-section-sticky-codeblock-icon.test.ts`).
+  // `test/generator/elixir/heex-section-sticky-codeblock-icon.test.ts`).
   // These tests pin both — see `src/generator/react/walker/primitives/code-block.ts`.
   it("CodeBlock { source:, language: } (named) emits a <pre><code class=language-…>", async () => {
     const tsx = await emit(`CodeBlock { source: "const x = 1", language: "ts" }`);

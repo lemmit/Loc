@@ -48,10 +48,10 @@ describe("realization axes — lowering defaults", () => {
   });
 
   it("bare elixir → ash foundation + ashPostgres/byFeature (after canonicalization)", async () => {
-    // D-ELIXIR-PLATFORM: `platform: elixir` is the canonical name; legacy
-    // `phoenix` aliases to it (`phoenix` is now a back-compat keyword).
-    // D-PHOENIX-TRANSPORT: `transport: phoenix` is canonical;
-    // `phoenixRouter` aliases to it.
+    // D-ELIXIR-PLATFORM: `platform: elixir` is the canonical (and only)
+    // name — the legacy `phoenix` / `phoenixLiveView` platform aliases
+    // were retired.  D-PHOENIX-TRANSPORT: `transport: phoenix` is the
+    // canonical (and only) value — the `phoenixRouter` alias was retired.
     const d = await lowerDeployable("elixir");
     expect(d.foundation).toBe("ash");
     expect(d.application).toBe("ash");
@@ -59,18 +59,6 @@ describe("realization axes — lowering defaults", () => {
     expect(d.directoryLayout).toBe("byFeature");
     expect(d.transport).toBe("phoenix");
     expect(d.runtime).toBe("transactional");
-  });
-
-  it("legacy bare phoenix aliases to elixir on the lowering boundary", async () => {
-    const d = await lowerDeployable("phoenix");
-    expect(d.platform).toBe("elixir");
-    expect(d.foundation).toBe("ash");
-    expect(d.transport).toBe("phoenix");
-  });
-
-  it("legacy bare phoenixLiveView aliases to elixir on the lowering boundary", async () => {
-    const d = await lowerDeployable("phoenixLiveView");
-    expect(d.platform).toBe("elixir");
   });
 
   it("defaults are sourced from the adapter menu, not hardcoded literals", async () => {
@@ -117,13 +105,14 @@ describe("realization axes — lowering defaults", () => {
   });
 
   // realization-axes-alignment.md — `foundation: vanilla` on elixir selects
-  // the plain-Phoenix axis defaults (Ecto + vanilla style), NOT the platform's
-  // ash-oriented defaults.  The foundation owns no axis, but the omitted-knob
-  // default follows the foundation (`foundationAdapterOverride`).
-  it("explicit `foundation: vanilla` on elixir defaults to ecto + vanilla style", async () => {
+  // the plain-Phoenix axis defaults (Ecto + the `layered` style), NOT the
+  // platform's ash-oriented defaults.  The foundation owns no axis, but the
+  // omitted-knob default follows the foundation (`foundationAdapterOverride`).
+  // `vanilla` is the FOUNDATION; the style is the real pipeline shape `layered`.
+  it("explicit `foundation: vanilla` on elixir defaults to ecto + layered style", async () => {
     const d = await lowerDeployable("elixir { foundation: vanilla }");
     expect(d.foundation).toBe("vanilla");
-    expect(d.application).toBe("vanilla");
+    expect(d.application).toBe("layered");
     expect(d.persistence).toBe("ecto");
     // Greenfield axes are unaffected by foundation today.
     expect(d.transport).toBe("phoenix");

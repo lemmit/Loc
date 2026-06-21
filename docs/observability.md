@@ -172,7 +172,7 @@ LOOM_OBS_E2E_PYTHON=1     npx vitest run test/e2e/observability-events-python.te
 
 Each suite:
 1. Generates the backend project from a fixture.
-2. Spins up a throwaway `postgres:16-alpine` sidecar.
+2. Spins up a throwaway `postgres:18-alpine` sidecar.
 3. Boots the server.
 4. Waits for `server_listening` to appear on stdout.
 5. Hits `/health`.

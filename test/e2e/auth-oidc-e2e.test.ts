@@ -104,7 +104,7 @@ describe.skipIf(!RUN)("auth OIDC e2e: real Keycloak token flow (LOOM_AUTH_E2E=1)
     // realm import).  KC_HOSTNAME pins the issuer/endpoints to the same
     // host-reachable URL the native backend validates against.
     execSync(
-      `docker run -d --name ${pgName} -p ${pgPort}:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=api postgres:16-alpine`,
+      `docker run -d --name ${pgName} -p ${pgPort}:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=api postgres:18-alpine`,
       { stdio: "inherit", timeout: 120_000 },
     );
     execSync(

@@ -68,7 +68,7 @@ describe("provenanced-field storage capability validation", () => {
   });
 
   it("rejects a provenanced field on a Phoenix deployable (defaults to ash — no runtime)", async () => {
-    const errs = await provErrors(sys("phoenixLiveView"));
+    const errs = await provErrors(sys("elixir"));
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("provenance runtime");
   });
@@ -119,7 +119,7 @@ system Shop {
   storage pg { type: postgres }
   resource ordersState { for: Ordering, kind: state, use: pg }
   deployable honoApi { platform: node, contexts: [Ordering], dataSources: [ordersState], port: 3000 }
-  deployable phx { platform: phoenixLiveView, contexts: [Ordering], dataSources: [ordersState], port: 8080 }
+  deployable phx { platform: elixir, contexts: [Ordering], dataSources: [ordersState], port: 8080 }
 }
 `;
     const errs = await provErrors(src);

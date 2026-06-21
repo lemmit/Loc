@@ -198,11 +198,35 @@ aggregate with `with auditable`.
   `_stampOnCreate` / `_stampOnUpdate` hooks (one arm per stamping
   rule) with the service calling them on create / update; support
   is gated by `validateJavaStampSupport`.
-- **Hono**, **Phoenix**, and **Python** — context stamps are **not
-  yet wired through to runtime**.  The IR carries `contextStamps` on
-  every aggregate but those codegens don't consume them.
-  Hand-writing the stamps inside operation bodies (or using the
-  `audit` macro under .NET-/Java-only deployment) is the workaround.
+- **Hono** (`node`) — context stamps are emitted as `_stampOnCreate` /
+  `_stampOnUpdate` methods on the aggregate (`this._<field> = <value>`)
+  that the route handler calls right before save.  A `now()` value renders
+  to `new Date()`; a `currentUser` value resolves to the principal id
+  (`currentUser.<idField>`), threaded from the request scope (the
+  `auth/middleware.ts` principal).  Support is gated by
+  `validateNodeStampSupport` (a principal stamp without auth, or any stamp on
+  an event-sourced aggregate, stays a fail-fast `loom.node-stamp-unsupported`).
+- **Python / FastAPI** — context stamps are applied right before the
+  repository persist: the domain class gets `_stamp_on_create` /
+  `_stamp_on_update` methods (`now()` → `datetime.now(UTC)`; a `currentUser`
+  value → `current_user.id`, threaded from `request.state.current_user`) that
+  the route handler calls before save.  Support is gated by
+  `validatePythonStampSupport` (a principal stamp without auth, or any stamp on
+  an event-sourced aggregate, stays a fail-fast `loom.python-stamp-unsupported`).
+- **Phoenix** (`elixir`, **Ash** foundation) — context stamps are emitted
+  as an Ash `changes do change fn changeset, context -> … end, on: […] end`
+  block on the resource.  Each assignment `force_change_attribute`s its
+  audit column; `now()` renders to `DateTime.utc_now()`, and a `currentUser`
+  value resolves to the principal id read from the threaded Ash actor
+  (`context.actor.<idKey>`).  `onCreate` stamps run `on: [:create]`;
+  `onUpdate` stamps run `on: [:create, :update]` (mirroring the .NET
+  interceptor's `Added || Modified`) so a NOT-NULL `updated_at`/`updated_by`
+  is populated on the initial insert.  Two cases stay fail-fast
+  (`loom.elixir-stamp-unsupported`, `validateElixirStampSupport`): a
+  `currentUser` stamp on a deployable WITHOUT auth (no actor to thread), and
+  stamps on an event-sourced aggregate.  The **vanilla** (plain Ecto)
+  foundation does not yet apply stamps and stays fully gated by the same
+  validator.  See `src/generator/elixir/domain/actions.ts`.
 
 ## `implements <Cap>` / `with <Cap>`
 

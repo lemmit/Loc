@@ -283,17 +283,16 @@ UiBlockBinding:
 // Frameworks the `ui:` mount lowers against.  `react` renders TSX
 // against a design pack (`mantine`/`shadcn`); `phoenixLiveView`
 // renders HEEx against the `ashPhoenix` pack as part of a fullstack
-// Elixir/Ash deployable.  `liveview` is the D-PHOENIX-SURFACE spelling
-// of `phoenixLiveView` (the framework, decoupled from the host
-// platform name); lowering canonicalises it to `phoenixLiveView`.
-// Future values (`blazor-wasm`, `blazor-server`, …) extend this enum
-// when their codegen backends land.  `svelte` renders Svelte 5
+// Elixir/Ash deployable.  (The `liveview` framework alias was RETIRED —
+// `phoenixLiveView` is the only spelling, mirroring the retired platform
+// aliases.)  Future values (`blazor-wasm`, `blazor-server`, …) extend
+// this enum when their codegen backends land.  `svelte` renders Svelte 5
 // (SvelteKit static SPA) against a svelte-format design pack
 // (`shadcnSvelte`/`flowbite`); `vue` renders Vue 3 (Vite SPA +
 // vue-router) against a vue-format design pack
 // (`vuetify`/`shadcnVue`).
 Framework returns string:
-    'react' | 'svelte' | 'vue' | 'angular' | 'phoenixLiveView' | 'liveview';
+    'react' | 'svelte' | 'vue' | 'angular' | 'phoenixLiveView';
 
 // Backend platforms accept a quoted `family@version` pin
 // (`platform: "node@v4"`) via the STRING alternative — symmetric
@@ -304,13 +303,16 @@ Framework returns string:
 // backend (Hono web framework); the framework name surfaces as the
 // `transport:` value, not as a platform alias.
 // `elixir` is the D-ELIXIR-PLATFORM canonical name for the
-// language-ecosystem platform; legacy `phoenix` and `phoenixLiveView`
-// desugar to `elixir` (the latter through a `phoenix → elixir` chain).
+// language-ecosystem platform.  The legacy `phoenix` / `phoenixLiveView`
+// platform aliases were RETIRED (mirroring the retired `hono` → `node`
+// alias): `elixir` is now the only spelling and `platform: phoenix` /
+// `platform: phoenixLiveView` fail validation as unknown platforms.
 // `python` is the canonical language-ecosystem name for the
-// FastAPI + SQLAlchemy backend; `fastapi` is its framework-spelled
-// alias and desugars to `python`.
+// FastAPI + SQLAlchemy backend.  (The `fastapi` framework-spelled
+// platform alias was RETIRED — `python` is the only spelling and
+// `platform: fastapi` fails validation as an unknown platform.)
 Platform returns string:
-    'dotnet' | 'node' | 'react' | 'svelte' | 'vue' | 'angular' | 'static' | 'phoenixLiveView' | 'phoenix' | 'elixir' | 'python' | 'fastapi' | 'java' | STRING;
+    'dotnet' | 'node' | 'react' | 'svelte' | 'vue' | 'angular' | 'static' | 'elixir' | 'python' | 'java' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,
@@ -678,7 +680,7 @@ MenuSection:
 // IDE affordances (autocomplete, go-to-def, find-refs, rename)
 // follow.
 MenuLink:
-      'link' page=[Page:LooseName] ('{' (props+=MenuLinkProp (','? props+=MenuLinkProp)* ','?)? '}')?
+      'link' page=[Page:QualifiedPageName] ('{' (props+=MenuLinkProp (','? props+=MenuLinkProp)* ','?)? '}')?
     | 'link' externalLabel=STRING '->' externalUrl=STRING;
 
 // Same approach as MenuMetaEntry — `LooseName` + validator-side
@@ -1529,6 +1531,14 @@ LooseName returns string:
     // so user code can still name a field / arg `action`; hard only in the
     // `ActionType` type position.
     | 'action';
+
+// A dotted page reference for `menu { link <Area>.<Page> }` — lets a menu link
+// disambiguate role-named scaffold pages (`List` / `New` / `Detail`) by their
+// area, e.g. `link Orders.List`.  A single segment (`link Home`) still parses
+// and resolves by bare name.  The area-qualified name is exported by
+// `DddScopeComputation` (see ddd-scope.ts).
+QualifiedPageName returns string:
+    LooseName ('.' LooseName)*;
 
 // ---------------------------------------------------------------------------
 // Type references

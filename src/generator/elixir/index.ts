@@ -6,13 +6,14 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import type { PageNameCtx } from "../../ir/util/page-kind.js";
 import { resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { StyleAdapter } from "../_adapters/index.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
 import { emitApiControllers } from "./api-emit.js";
-import { emitAuth } from "./auth-emit.js";
+import { actorIdKey, emitAuth } from "./auth-emit.js";
 import { emitContext } from "./context-emit.js";
 import { emitDispatch, emitWorkflowStateSchemas } from "./dispatch-emit.js";
 import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
@@ -105,7 +106,7 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   // React project is generated under `assets/` instead (phase 6a wires
   // the emit; the endpoint/router/Dockerfile serve-wiring is phase 6b).
   // Dormant until an example uses it: no current source pairs
-  // `platform: phoenix` with a `framework: react` ui, so output is
+  // `platform: elixir` with a `framework: react` ui, so output is
   // unchanged.  The Ash domain + `/api` controllers + OpenAPI are
   // emitted in either mode.
   const embedVue = deployable.uiFramework === "vue";
@@ -134,8 +135,12 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   out.set(`lib/${appName}/types.ex`, renderTypesModule(typesModule));
 
   // --- Per-context domain files -------------------------------------------
+  // Lifecycle-stamp `change` blocks resolve a `currentUser` stamp value to the
+  // principal id read from the threaded actor (`context.actor.<key>`); the key
+  // is the system `user { id: … }` field name (`actorIdKey`, default `id`).
+  const principalIdKey = actorIdKey(sys.user);
   for (const ctx of contexts) {
-    emitContext(appName, ctx, appModule, out, { resolveDataSource });
+    emitContext(appName, ctx, appModule, out, { resolveDataSource, principalIdKey });
   }
 
   // --- Workflow + view files -----------------------------------------------
@@ -218,13 +223,20 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
   // MenuBlockIR or per-page menuMeta, identical structure to the
   // React generator's sidebar.  Skipped in embedded-react mode (the
   // HEEx sidebar belongs to the LiveView shell, which the SPA replaces).
+  let hasSidebar = false;
   if (deployable.uiName && !embedReact) {
     const ui = sys.uis.find((u) => u.name === deployable.uiName);
     if (ui) {
+      const nameCtx: PageNameCtx = {
+        aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
+        workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
+        viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
+      };
       out.set(
         `lib/${appName}_web/components/sidebar.ex`,
-        renderSidebarComponent({ ui, appName, appModule }),
+        renderSidebarComponent({ ui, appName, appModule, nameCtx, authEnabled }),
       );
+      hasSidebar = true;
     }
   }
 
@@ -294,6 +306,7 @@ export function generateElixirProject(args: GenerateElixirArgs): Map<string, str
     out,
     migrations ?? [],
     styleAdapter,
+    hasSidebar,
   );
 
   return out;

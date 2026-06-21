@@ -1,5 +1,5 @@
 // -------------------------------------------------------------------------
-// UI lowering — ui blocks, pages (+ origin inference), components, state
+// UI lowering — ui blocks, pages, components, state
 // fields, menu blocks, and layouts.  Consumed by lowerContext / lowerProject
 // in ./lower.ts.
 // -------------------------------------------------------------------------
@@ -26,7 +26,6 @@ import type {
   PageIR,
   PageLayoutIR,
   PageMetadataIR,
-  PageOriginIR,
   StateFieldIR,
   UiApiParamIR,
   UiChannelParamIR,
@@ -37,7 +36,6 @@ import type {
 } from "../types/loom-ir.js";
 import { lowerExpr } from "./lower-expr.js";
 import { lowerDerived } from "./lower-members.js";
-import { canonicalFramework } from "./lower-platform.js";
 import { type Env, lowerType, withLocal } from "./lower-types.js";
 
 // ---------------------------------------------------------------------------
@@ -164,7 +162,7 @@ export function lowerUi(ui: Ui, user?: UserIR): UiIR {
   }
   return {
     name: ui.name,
-    framework: canonicalFramework(ui.framework),
+    framework: ui.framework,
     pages,
     components,
     menu,
@@ -270,12 +268,6 @@ function lowerPage(p: Page, user?: UserIR): PageIR {
   if (description !== undefined || ogImage !== undefined || canonical !== undefined) {
     metadata = { description, ogImage, canonical };
   }
-  // Infer the page's origin discriminator + `source` from its body
-  // shape.  Only the three singleton index-page sentinels (`Home` /
-  // `WorkflowsIndex` / `ViewsIndex`) are recognised here; scaffolded
-  // list / detail / form pages carry full body trees and get their
-  // origin re-sourced by name in `resourceScaffoldOrigins` (lower.ts).
-  const inferred = inferPageOrigin(body);
   return {
     name: p.name,
     params,
@@ -286,29 +278,9 @@ function lowerPage(p: Page, user?: UserIR): PageIR {
     derived,
     body,
     menuMeta,
-    source: inferred.kind === "custom" ? "explicit" : "scaffold",
-    origin: inferred,
     layout,
     metadata,
   };
-}
-
-/** Infer a page's `origin` from its body shape.  The scaffold macro
- *  emits the three singleton index pages with a sentinel-call body
- *  (`Home()` / `WorkflowsIndex()` / `ViewsIndex()`) whose name maps
- *  one-to-one to an origin kind.  Anything else is a user-written page
- *  → `{ kind: "custom" }`; scaffolded list / detail / form pages carry
- *  their full body tree directly and get their origin re-sourced by
- *  name in `resourceScaffoldOrigins` (`src/ir/lower/lower.ts`). */
-function inferPageOrigin(body: ExprIR | undefined): PageOriginIR {
-  if (!body || body.kind !== "call") return { kind: "custom" };
-  const callName = body.name;
-  // Singleton index pages — synthesised by the scaffold macro with
-  // sentinel-call bodies whose name matches the page's role.
-  if (callName === "Home") return { kind: "home" };
-  if (callName === "WorkflowsIndex") return { kind: "workflows-index" };
-  if (callName === "ViewsIndex") return { kind: "views-index" };
-  return { kind: "custom" };
 }
 
 export function lowerComponent(c: Component): ComponentIR {
@@ -378,9 +350,15 @@ function lowerMenuBlock(m: MenuBlock): MenuBlockIR {
         // not silent shim misses.
         const pageRef = l.page?.ref;
         if (pageRef) {
+          // Capture the resolved page's route as the menu emitter's match key —
+          // role-named scaffold pages (`List`/`New`/`Detail`) share `name`
+          // across aggregates, so `Orders.List` and `Items.List` are told apart
+          // by route, not name.
+          const routeProp = pageRef.props.find((pp) => pp.$type === "RouteProp");
           return {
             kind: "page",
             pageName: pageRef.name,
+            route: routeProp?.$type === "RouteProp" ? routeProp.value : undefined,
             props: (l.props ?? []).map((p) => ({
               name: p.name,
               value: lowerExpr(p.value, env),

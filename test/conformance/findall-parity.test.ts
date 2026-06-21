@@ -7,7 +7,7 @@
 // That structural equivalence is the whole correctness argument — and the
 // strict build gates already compile the equivalent author-declared shape
 // (`dotnet-build/dapper.ddd`'s `retrieval … { where: NameIs(n) }`,
-// `java-build/retrieval.ddd`, `phoenix-build/roster.ddd`,
+// `java-build/retrieval.ddd`, `elixir-ash-build/roster.ddd`,
 // `python-build/domain.ddd`).  What no gate pinned was that the *desugar*
 // keeps producing that shape on every backend; if `synthesizeFindAllRetrievals`
 // or a backend's retrieval emitter drifts, this fast (no-docker) test catches
@@ -64,7 +64,7 @@ const BACKENDS = [
   "dotnet",
   "java",
   "python",
-  "phoenix",
+  "elixir",
   "elixir { foundation: vanilla }",
 ] as const;
 
@@ -82,7 +82,7 @@ function filesMentioning(files: Map<string, string>, criterion: string): number 
 
 describe("Repo.findAll(<Criterion>) — cross-backend emission parity", () => {
   for (const platform of BACKENDS) {
-    const ui = platform === "phoenix";
+    const ui = platform === "elixir";
     it(`${platform}: both findAll retrievals are emitted and invoked`, async () => {
       const files = await generateSystemFiles(system(platform, ui));
       // Each criterion's synthetic retrieval must appear in ≥2 files: its

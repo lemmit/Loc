@@ -65,7 +65,7 @@ export class DddRenameProvider extends DefaultRenameProvider {
   private targetAt(document: LangiumDocument, position: Position): AstNode | undefined {
     const leaf = this.leafAt(document, position);
     if (!leaf) return undefined;
-    const declared = this.references.findDeclaration(leaf);
+    const declared = this.references.findDeclarations(leaf)[0];
     if (declared && declared.$type !== "MemberSuffix") return declared;
     return memberDeclAt(leaf);
   }

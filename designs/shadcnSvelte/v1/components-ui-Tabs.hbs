@@ -1,6 +1,6 @@
 <!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-  import type { Snippet } from "svelte";
+  import { untrack, type Snippet } from "svelte";
 
   // Rest props catch the walker's spliced `data-testid` attribute
   // (the triple-stash testidAttr splice lands on the component tag as
@@ -18,10 +18,12 @@
     [key: string]: unknown;
   } = $props();
 
-  // svelte-ignore state_referenced_locally — the initial tab is
-  // intentionally captured once; later `defaultValue` changes don't
-  // reset the user's selection.
-  let active = $state(defaultValue);
+  // The initial tab is intentionally captured once; later
+  // `defaultValue` changes don't reset the user's selection. `untrack`
+  // expresses that read-once intent (a bare `$state(defaultValue)`
+  // trips Svelte's `state_referenced_locally` warning, which a
+  // `svelte-ignore` comment does not suppress under svelte-check).
+  let active = $state(untrack(() => defaultValue));
 </script>
 
 <div {...rest}>

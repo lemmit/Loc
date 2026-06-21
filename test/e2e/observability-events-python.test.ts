@@ -16,13 +16,13 @@ import { describe, expect, it } from "vitest";
 // as flat snake_case keys — the same shape the Hono pino stream
 // produces).
 //
-// Postgres comes from docker (postgres:16-alpine) by default; set
+// Postgres comes from docker (postgres:18-alpine) by default; set
 // LOOM_OBS_PG_URL=postgresql+asyncpg://user:pass@host:port/db to use a
 // running instance instead (the local-dev path on docker-less
 // machines).
 //
 // Opt-in via LOOM_OBS_E2E_PYTHON=1 — keeps `npm test` fast.  Requires
-// `uv` on PATH (it provisions Python 3.12 itself).
+// `uv` on PATH (it provisions Python 3.13 itself).
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -119,7 +119,7 @@ describe.skipIf(!ENABLED)(
           execSync(
             `docker run -d --rm --name ${pgContainer} ` +
               `-e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=app ` +
-              `-p ${pgPort}:5432 postgres:16-alpine`,
+              `-p ${pgPort}:5432 postgres:18-alpine`,
             { stdio: "pipe", timeout: 60_000 },
           );
           startedContainer = true;

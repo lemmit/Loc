@@ -1,7 +1,9 @@
 // Realization-axes alignment (docs/plans/realization-axes-alignment.md) — the
 // elixir backend exposes BOTH data layers on the persistence axis
 // (`ashPostgres` for the Ash foundation, `ecto` for the vanilla foundation)
-// and BOTH styles on the application axis (`ash`, `vanilla`), so Ecto is a
+// and BOTH real pipeline styles on the application axis (`ash`, `layered` —
+// the latter being plain Phoenix's controller → context → repository shape,
+// DSL `serviceLayer`), so Ecto is a
 // first-class adapter exactly like `ashPostgres` — symmetric with dotnet
 // (`efcore`/`dapper`) and node (`drizzle`/`mikroorm`).
 
@@ -19,10 +21,11 @@ describe("elixir realization-axes alignment", () => {
     expect(names).toContain("ecto");
   });
 
-  it("application/style axis lists ash AND vanilla", () => {
+  it("application/style axis lists ash AND layered (vanilla is a foundation, not a style)", () => {
     const names = availableAdapterNames("elixir", "style");
     expect(names).toContain("ash");
-    expect(names).toContain("vanilla");
+    expect(names).toContain("layered");
+    expect(names).not.toContain("vanilla");
   });
 
   it("resolves the ecto persistence adapter (DB-agnostic: name is the library, not per-DB)", () => {
@@ -46,11 +49,13 @@ describe("elixir realization-axes alignment", () => {
     ).toBe(false);
   });
 
-  it("resolves the vanilla style adapter; its DI block is empty (no ash_domains)", () => {
-    const vanilla = resolveStyle("elixir", "vanilla");
-    expect(vanilla.name).toBe("vanilla");
+  it("resolves the layered (plain-Phoenix) style adapter; its DI block is empty (no ash_domains)", () => {
+    // `foundation: vanilla` selects the `layered` style (DSL `serviceLayer`),
+    // NOT a style named after the foundation.
+    const layered = resolveStyle("elixir", "layered");
+    expect(layered.name).toBe("layered");
     // Plain Phoenix needs no domain registration — contrast ash's ash_domains.
-    expect(vanilla.emitDi({ contexts: [], deployable: { name: "api" } } as never)).toEqual([]);
+    expect(layered.emitDi({ contexts: [], deployable: { name: "api" } } as never)).toEqual([]);
   });
 
   it("ashPostgres stays a distinct, postgres-only adapter (per-DB Ash data layer)", () => {

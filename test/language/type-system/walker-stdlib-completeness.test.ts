@@ -21,7 +21,6 @@ import { describe, expect, it } from "vitest";
 import { namesInGroup } from "../../../src/generator/_walker/registry.js";
 import {
   WALKER_LAYOUT_PRIMITIVES,
-  WALKER_SCAFFOLD_PRIMITIVES,
   WALKER_SUB_PRIMITIVES,
 } from "../../../src/language/walker-stdlib.js";
 
@@ -35,12 +34,6 @@ describe("walker stdlib language↔generator alignment", () => {
   it("WALKER_SUB_PRIMITIVES matches the registry's sub group", () => {
     const lang = [...WALKER_SUB_PRIMITIVES].sort();
     const gen = namesInGroup("sub");
-    expect(lang).toEqual(gen);
-  });
-
-  it("WALKER_SCAFFOLD_PRIMITIVES matches the registry's scaffold group", () => {
-    const lang = [...WALKER_SCAFFOLD_PRIMITIVES].sort();
-    const gen = namesInGroup("scaffold");
     expect(lang).toEqual(gen);
   });
 });

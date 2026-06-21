@@ -110,7 +110,7 @@ describe("fullstack dotnet — emits an embedded SPA alongside the API", () => {
     const model = await build(FULLSTACK_SOURCE);
     const { files } = generateSystems(model);
     const dockerfile = files.get("app/Dockerfile")!;
-    expect(dockerfile).toMatch(/FROM node:20-alpine AS spa-build/);
+    expect(dockerfile).toMatch(/FROM node:24-alpine AS spa-build/);
     expect(dockerfile).toMatch(/cd ClientApp|WORKDIR \/spa/);
     expect(dockerfile).toMatch(/COPY --from=spa-build \/spa\/dist \.\/wwwroot/);
     expect(dockerfile).toMatch(/COPY --from=dotnet-build \/app\/publish/);

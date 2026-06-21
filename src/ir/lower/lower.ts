@@ -111,7 +111,6 @@ import type {
   LayoutIR,
   LoadPlanIR,
   LoadSegmentIR,
-  PageOriginIR,
   PayloadIR,
   PermissionDeclIR,
   RawLoomModel,
@@ -137,6 +136,7 @@ import type {
   WorkflowIR,
 } from "../types/loom-ir.js";
 import { lit } from "../types/loom-ir.js";
+import { classifyPage, type PageKind, type PageNameCtx } from "../util/page-kind.js";
 import { lowerAuth } from "./lower-auth.js";
 import type { ContextLevelCapabilities } from "./lower-capabilities.js";
 import {
@@ -179,11 +179,7 @@ import {
 import { lowerComponent, lowerLayout, lowerUi } from "./lower-ui.js";
 import { lowerView } from "./lower-view.js";
 import { lowerWorkflow } from "./lower-workflow.js";
-import {
-  buildExpandContext,
-  expandInlineScaffoldPrimitives,
-  type WalkerExpandContext,
-} from "./walker-primitive-expander.js";
+import { buildExpandContext, type WalkerExpandContext } from "./walker-primitive-expander.js";
 
 // ---------------------------------------------------------------------------
 // Lowering — structure layer.
@@ -583,112 +579,65 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
     channelSources,
     layouts,
   };
-  // Scaffold post-passes.  Scaffolded list / detail / form pages carry their
-  // full body tree directly (the macro emits the `_body-builders.ts`
-  // scaffolders), so `resourceScaffoldOrigins` recovers each one's
-  // `page.origin` from its NAME (`<Agg>List|New|Detail`, `<Wf>Workflow`, …).
-  // `origin` then drives the per-page side effects (emit path, auto-`id` param
-  // for detail pages) and the per-aggregate page-object emitter
-  // (`e2e/pages/<agg>.ts`).  `expandInlineScaffoldPrimitiveCalls` rewrites the
-  // three singleton index-page sentinels (`Home`/`WorkflowsIndex`/`ViewsIndex`)
-  // — the macro emits those as bare sentinel calls, expanded here from the
-  // system shape; every other page is a no-op.
-  resourceScaffoldOrigins(built);
+  // Scaffold post-passes.  A page's kind (`<Agg>` list/new/detail, `<Wf>`
+  // form/instances, `<View>`, the singleton dashboards, or `custom`) is derived
+  // on demand from its role-scoped name + area via `classifyPage` — no stamped
+  // `origin` (slice 3c).  These passes drop the create surface for
+  // non-constructible aggregates and apply per-page side effects (emit path,
+  // auto-`id` param for detail pages).  Every scaffold page — dashboards
+  // included — already carries its full body from the macro, so there is no
+  // inline sentinel left to expand.
   dropNonConstructibleNewPages(built);
   stripNonConstructibleListCreate(built);
-  applyPageOriginSideEffects(built);
-  expandInlineScaffoldPrimitiveCalls(built);
+  applyPageSideEffects(built);
   return built;
 }
 
-/** Re-source `page.origin` for scaffold pages whose body is emitted as a full
- *  AST tree (the unfoldable scaffolders) rather than a `scaffold*` sentinel.
- *  Such pages lower to `origin: custom` (the body is no longer a recognisable
- *  primitive), so we recover the origin from the page's *name* — which the
- *  scaffold mints as `<Agg>List|New|Detail`, `<Wf>Workflow`,
- *  `<Wf>InstancesList|InstanceDetail`, `<View>View` — matched exactly against
- *  the system's aggregates / workflows / views.  Hand-written `scaffold*`
- *  sentinel pages keep the origin `inferPageOrigin` already gave them (not
- *  custom ⇒ skipped here); the singleton index pages likewise. */
-function resourceScaffoldOrigins(sys: SystemIR): void {
-  const up = (s: string): string => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
-  for (const ui of sys.uis) {
-    const ctx = buildExpandContext(sys, ui);
-    for (const page of ui.pages) {
-      if (page.origin && page.origin.kind !== "custom") continue;
-      const origin = classifyScaffoldPageByName(page.name, page.area ?? [], ctx, up);
-      if (origin) {
-        page.origin = origin;
-        page.source = "scaffold";
-      }
-    }
-  }
-}
-
-function classifyScaffoldPageByName(
-  name: string,
-  area: readonly string[],
-  ctx: WalkerExpandContext,
-  up: (s: string) => string,
-): PageOriginIR | undefined {
-  // Aggregate pages are named by role (`List`/`New`/`Detail`) and live in the
-  // per-aggregate `area <Plural>` block — the area's last segment identifies
-  // the aggregate, the role name the page kind.  Gating on the area keeps a
-  // hand-written top-level `page List` (sharing a role name by coincidence)
-  // on its `custom` origin.
-  const inArea = (aggName: string): boolean => area[area.length - 1] === pluralSnake(aggName);
-  for (const aggName of ctx.aggregatesByName.keys()) {
-    if (!inArea(aggName)) continue;
-    if (name === "List") return { kind: "aggregate-list", aggregateName: aggName, contextName: "" };
-    if (name === "New") return { kind: "aggregate-new", aggregateName: aggName, contextName: "" };
-    if (name === "Detail")
-      return { kind: "aggregate-detail", aggregateName: aggName, contextName: "" };
-  }
-  for (const wfName of ctx.workflowsByName.keys()) {
-    const p = up(wfName);
-    if (name === `${p}Workflow`)
-      return { kind: "workflow-form", workflowName: wfName, contextName: "" };
-    if (name === `${p}InstancesList`)
-      return { kind: "workflow-instances-list", workflowName: wfName, contextName: "" };
-    if (name === `${p}InstanceDetail`)
-      return { kind: "workflow-instance-detail", workflowName: wfName, contextName: "" };
-  }
-  for (const viewName of ctx.viewsByName.keys()) {
-    if (name === `${viewName}View`) return { kind: "view-list", viewName, contextName: "" };
-  }
-  return undefined;
+/** A page's classification context for the given ui — the served aggregate /
+ *  workflow / view names `classifyPage` matches role-scoped page names against
+ *  (slice 3c: replaces the stamped `PageIR.origin`). */
+function nameCtxOf(ctx: WalkerExpandContext): PageNameCtx {
+  return {
+    aggregateNames: [...ctx.aggregatesByName.keys()],
+    workflowNames: [...ctx.workflowsByName.keys()],
+    viewNames: [...ctx.viewsByName.keys()],
+  };
 }
 
 /** Drop the scaffolded `<Agg>New` page for a non-constructible aggregate
  *  (no create surface — `!isConstructible`).  The backends emit no POST
  *  route for such an aggregate (`hasCreate`), so a scaffolded create form
  *  would submit to a route that doesn't exist; the matching list "New"
- *  button is suppressed in `expandScaffoldList`.  Removing the page here
+ *  button is suppressed in the list scaffolder.  Removing the page here
  *  (before the origin / expand passes) also drops it from the router and
  *  menu, which derive from `ui.pages` at emit time. */
 function dropNonConstructibleNewPages(sys: SystemIR): void {
   for (const ui of sys.uis) {
     const ctx = buildExpandContext(sys, ui);
+    const nameCtx = nameCtxOf(ctx);
     ui.pages = ui.pages.filter((page) => {
-      if (page.origin?.kind !== "aggregate-new") return true;
-      const agg = ctx.aggregatesByName.get(page.origin.aggregateName);
+      const kind = classifyPage(page, nameCtx);
+      if (kind.kind !== "aggregate-new") return true;
+      const agg = ctx.aggregatesByName.get(kind.aggregateName);
       return !agg || isConstructible(agg);
     });
   }
 }
 
 /** Suppress the list "New <agg>" button for a non-constructible aggregate — the
- *  backends emit no POST route, so the create surface must not appear.  The ⑤c
- *  `expandScaffoldList` omitted the button inline; the flipped (macro-emitted)
- *  list body always carries it, so we strip it here, where `isConstructible`
+ *  backends emit no POST route, so the create surface must not appear.  The
+ *  macro-emitted list body always carries the button, so we strip it here,
+ *  where `isConstructible`
  *  (an enriched-IR analysis the macro can't run) is available.  Mirrors
  *  `dropNonConstructibleNewPages`, which drops the matching `New` page. */
 function stripNonConstructibleListCreate(sys: SystemIR): void {
   for (const ui of sys.uis) {
     const ctx = buildExpandContext(sys, ui);
+    const nameCtx = nameCtxOf(ctx);
     for (const page of ui.pages) {
-      if (page.origin?.kind !== "aggregate-list" || !page.body) continue;
-      const agg = ctx.aggregatesByName.get(page.origin.aggregateName);
+      const kind = classifyPage(page, nameCtx);
+      if (kind.kind !== "aggregate-list" || !page.body) continue;
+      const agg = ctx.aggregatesByName.get(kind.aggregateName);
       if (!agg || isConstructible(agg)) continue;
       page.body = stripCreateButton(page.body, `${pluralSnake(agg.name)}-list-create`);
     }
@@ -742,40 +691,23 @@ function lowerConnectionSource(node: ConnectionSource): ConnectionSourceIR {
   }
 }
 
-/** Rewrite the singleton index-page sentinels — `Home()` /
- *  `WorkflowsIndex()` / `ViewsIndex()` — into their expanded ExprIR
- *  trees (the scaffold macro emits them as bare sentinel-call bodies,
- *  derived here from the system shape).  Runs against EVERY page's
- *  body; pages whose body never uses a sentinel are no-ops — the
- *  rewriter walks each tree once and returns the same reference when
- *  nothing changed. */
-function expandInlineScaffoldPrimitiveCalls(sys: SystemIR): void {
-  for (const ui of sys.uis) {
-    const ctx = buildExpandContext(sys, ui);
-    for (const page of ui.pages) {
-      if (!page.body) continue;
-      page.body = expandInlineScaffoldPrimitives(page.body, ctx);
-    }
-  }
-}
-
-/** Per-page side effects driven by `page.origin`: compute the
+/** Per-page side effects driven by the page's derived kind: compute the
  *  conventional emit path and synthesise the `id` route param on
- *  aggregate-detail pages.  Body content is left alone — the singleton
- *  index-page sentinels are expanded in a separate pass by
- *  `expandInlineScaffoldPrimitiveCalls`. */
-function applyPageOriginSideEffects(sys: SystemIR): void {
+ *  aggregate-/instance-detail pages. */
+function applyPageSideEffects(sys: SystemIR): void {
   for (const ui of sys.uis) {
     const ctx = buildExpandContext(sys, ui);
+    const nameCtx = nameCtxOf(ctx);
     for (const page of ui.pages) {
-      if (!page.origin || page.origin.kind === "custom") continue;
+      const kind = classifyPage(page, nameCtx);
+      if (kind.kind === "custom") continue;
       // `area` is authoritative for file placement (slice 3a): a page declared
       // inside an `area { … }` block already had its `emitPath` set from the
       // area containment path in `lowerUi` (`src/pages/orders/list.tsx`).  Only
-      // fall back to the origin-conventional path for area-less scaffold pages
-      // (the Home / Workflows / Views index singletons, workflow + view pages).
+      // fall back to the conventional path for area-less scaffold pages (the
+      // Home / Workflows / Views index singletons, workflow + view pages).
       if (!page.area || page.area.length === 0) {
-        page.emitPath = conventionalEmitPath(page.origin, ctx);
+        page.emitPath = conventionalEmitPath(kind, ctx);
       }
       // Detail page bodies reference `id` as a route param
       // (`api.Order.byId(id)`).  Scaffold emits the detail page with
@@ -783,8 +715,7 @@ function applyPageOriginSideEffects(sys: SystemIR): void {
       // synthesise the typed param here for the walker to consume
       // when it emits `useParams<{id: string}>()`.
       if (
-        (page.origin.kind === "aggregate-detail" ||
-          page.origin.kind === "workflow-instance-detail") &&
+        (kind.kind === "aggregate-detail" || kind.kind === "workflow-instance-detail") &&
         !page.params.some((p) => p.name === "id")
       ) {
         page.params.push({
@@ -796,40 +727,36 @@ function applyPageOriginSideEffects(sys: SystemIR): void {
   }
 }
 
-function conventionalEmitPath(origin: PageOriginIR, ctx: WalkerExpandContext): string | undefined {
+function conventionalEmitPath(kind: PageKind, ctx: WalkerExpandContext): string | undefined {
   if (
-    origin.kind === "aggregate-list" ||
-    origin.kind === "aggregate-new" ||
-    origin.kind === "aggregate-detail"
+    kind.kind === "aggregate-list" ||
+    kind.kind === "aggregate-new" ||
+    kind.kind === "aggregate-detail"
   ) {
-    const agg = ctx.aggregatesByName.get(origin.aggregateName);
+    const agg = ctx.aggregatesByName.get(kind.aggregateName);
     if (!agg) return undefined;
     const slug = pluralSnake(agg.name);
     const file =
-      origin.kind === "aggregate-list"
-        ? "list"
-        : origin.kind === "aggregate-new"
-          ? "new"
-          : "detail";
+      kind.kind === "aggregate-list" ? "list" : kind.kind === "aggregate-new" ? "new" : "detail";
     return `src/pages/${slug}/${file}.tsx`;
   }
-  if (origin.kind === "workflow-form") {
-    const wf = ctx.workflowsByName.get(origin.workflowName);
+  if (kind.kind === "workflow-form") {
+    const wf = ctx.workflowsByName.get(kind.workflowName);
     if (!wf) return undefined;
     return `src/pages/workflows/${snakeOnly(wf.name)}.tsx`;
   }
-  if (origin.kind === "workflow-instances-list" || origin.kind === "workflow-instance-detail") {
-    const wf = ctx.workflowsByName.get(origin.workflowName);
+  if (kind.kind === "workflow-instances-list" || kind.kind === "workflow-instance-detail") {
+    const wf = ctx.workflowsByName.get(kind.workflowName);
     if (!wf) return undefined;
-    const file = origin.kind === "workflow-instances-list" ? "instances" : "instance_detail";
+    const file = kind.kind === "workflow-instances-list" ? "instances" : "instance_detail";
     return `src/pages/workflows/${snakeOnly(wf.name)}/${file}.tsx`;
   }
-  if (origin.kind === "view-list") {
-    return `src/pages/views/${snakeOnly(origin.viewName)}.tsx`;
+  if (kind.kind === "view-list") {
+    return `src/pages/views/${snakeOnly(kind.viewName)}.tsx`;
   }
-  if (origin.kind === "home") return "src/pages/home.tsx";
-  if (origin.kind === "workflows-index") return "src/pages/workflows/index.tsx";
-  if (origin.kind === "views-index") return "src/pages/views/index.tsx";
+  if (kind.kind === "home") return "src/pages/home.tsx";
+  if (kind.kind === "workflows-index") return "src/pages/workflows/index.tsx";
+  if (kind.kind === "views-index") return "src/pages/views/index.tsx";
   // `custom` pages emit at the default `src/pages/<page-snake>.tsx`
   // path — return undefined so the page-emitter falls back to its
   // default.

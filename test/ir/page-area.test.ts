@@ -32,7 +32,10 @@ describe("page areas — containment grouping", () => {
       system Acme {
         subdomain S { context C { aggregate Order { name: string } } }
         ui App {
-          page Home { route: "/" body: Text { "hi" } }
+          // A neutral top-level page (Home/WorkflowsIndex/ViewsIndex are the
+          // reserved dashboard names classifyPage keys on) — stays custom with a
+          // flat, unset emitPath.
+          page Landing { route: "/" body: Text { "hi" } }
           area Sales {
             area Orders {
               page List { route: "/orders" body: Text { "list" } }
@@ -44,7 +47,7 @@ describe("page areas — containment grouping", () => {
     `);
 
     // top-level page: no area, default flat path (emitPath unset)
-    const home = pageNamed(loom, "Home");
+    const home = pageNamed(loom, "Landing");
     expect(home.area).toBeUndefined();
     expect(home.emitPath).toBeUndefined();
 

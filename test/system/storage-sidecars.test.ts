@@ -35,7 +35,7 @@ describe("storage sidecars in docker-compose", () => {
     expect(compose).toMatch(/files:\n {4}image: minio/);
     expect(compose).toMatch(/bus:\n {4}image: rabbitmq/);
     // the postgres db service + its volume are still present
-    expect(compose).toMatch(/image: postgres:16-alpine/);
+    expect(compose).toMatch(/image: postgres:18-alpine/);
     expect(compose).toMatch(/files-data: \{\}/);
     expect(compose).toMatch(/pgdata: \{\}/);
   });

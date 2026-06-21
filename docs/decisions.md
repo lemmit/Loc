@@ -690,14 +690,20 @@ sections (superseded by `lifecycle-url-style.md`); `ApiIR.urlStyle`,
 ## D-PHOENIX-SURFACE — the decomposed Phoenix platform surface
 
 **Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (the canonical platform
-name renamed `phoenix` → `elixir`; legacy `phoenix` and `phoenixLiveView`
-remain back-compat aliases at the lowering boundary). The *decomposition*
-conclusions of this decision (one platform for the language ecosystem; UI
-framework axis on `ui`; default domain Ash; no `family@version`; no
-`apiOnly`) all stand; only the spelling of the canonical platform name
-changes. (Reconciles two proposals that, taken individually, collide.
-Subsumes the **D-PHOENIX-ECTO** ask from
+name renamed `phoenix` → `elixir`). The *decomposition* conclusions of this
+decision (one platform for the language ecosystem; UI framework axis on `ui`;
+default domain Ash; no `family@version`; no `apiOnly`) all stand; only the
+spelling of the canonical platform name changes. (Reconciles two proposals
+that, taken individually, collide. Subsumes the **D-PHOENIX-ECTO** ask from
 `elixir-ecto-and-api-only-backends.md`.)
+
+**Amendment (aliases retired).** Both the `phoenix` / `phoenixLiveView`
+*platform* aliases (D-ELIXIR-PLATFORM amendment) and the `liveview` *framework*
+alias introduced by this decision have since been **removed**. `framework:
+phoenixLiveView` is the only framework spelling — the bare `liveview` keyword is
+gone from the grammar `Framework` rule, and the `canonicalFramework` desugar
+(both the lowering-side and validator-side copies) is deleted. `platform:
+elixir` + `framework: phoenixLiveView` are the only spellings.
 
 **Problem.** Two proposals each free a *different* axis off the single
 `phoenixLiveView` keyword, and their individually-recommended fixes
@@ -1147,6 +1153,21 @@ property on `PlatformSurface`. **Depends on D-REALIZATION-AXES**; mirrors
 **D-PHOENIX-SURFACE**'s platform-name choice; depends on **D-REALIZATION-AXES**
 for the `transport:` axis. Spec in `proposals/elixir-platform-rename.md`.)
 
+**Amendment (alias retired).** The `phoenix` / `phoenixLiveView` → `elixir`
+back-compat platform aliases described below have since been **removed** —
+`elixir` is now the only spelling, exactly mirroring the retired `hono` →
+`node` alias (D-NODE-PLATFORM). The `phoenix` and `phoenixLiveView` keywords
+are gone from the grammar `Platform` rule, `LEGACY_PLATFORM_ALIASES`
+(`src/platform/metadata.ts`) and `canonicalPlatform`
+(`src/ir/lower/lower-platform.ts`) no longer map them, and `platform: phoenix`
+/ `platform: "phoenixLiveView"` now fail validation as unknown platforms. All
+in-tree sources, fixtures and tests were migrated to `platform: elixir`. The
+Phoenix web framework keeps its name only as the `transport: phoenix` value
+(D-PHOENIX-TRANSPORT) and the `phoenixLiveView` **framework** value (with its
+`liveview` alias, D-PHOENIX-SURFACE — *not* retired); the `ashPhoenix` design
+pack and the generated-project code likewise keep the framework name. The
+historical body below is preserved as the original rationale for the rename.
+
 **Problem.** D-NODE-PLATFORM (the later decision) renamed `platform: hono` →
 `platform: node` on the principle that *platform names the language-ecosystem,
 transport names the web framework*. Its own text justifies itself by asserting
@@ -1194,6 +1215,14 @@ alias); the seven affected decisions get an amend-by-this-one note.
 
 **Status:** PINNED. (Depends on **D-ELIXIR-PLATFORM** and **D-REALIZATION-AXES**;
 spec in `proposals/elixir-platform-rename.md`.)
+
+**Amendment (alias retired).** The `phoenixRouter` → `phoenix` back-compat
+transport alias described below has since been **removed** — `phoenix` is the
+only `transport:` value now. The `canonicalTransport` desugar helper (which was
+already dead code — nothing called it) is gone, and `transport: phoenixRouter`
+no longer resolves to any adapter (it fails the realization-axes menu check
+like any unknown transport). Mirrors the retired platform aliases
+(`hono`/`phoenix`/`fastapi`) and the `liveview` framework alias.
 
 **Problem.** The transport value `phoenixRouter` carried a redundant `Router`
 suffix that named no real distinction (Phoenix has one router; there's no
@@ -1823,11 +1852,17 @@ trees (`src/macros/stdlib/scaffold/_body-builders.ts`). The sentinels are no
 longer `admissibleInSource` — a hand-written `body: scaffoldList { of: X }`
 now fails validation with "Unknown builder type". Embedding a list/detail in a
 custom page therefore means writing the body explicitly (the example
-`web/src/examples/extern-showcase.ddd` shows the inlined list tree). The three
-**singleton index-page sentinels** (`Home` / `WorkflowsIndex` / `ViewsIndex`)
-remain — the macro still emits them as the body of the per-UI index pages, and
-a slimmed `expandInlineScaffoldPrimitives` expands those three from the system
-shape.
+`web/src/examples/extern-showcase.ddd` shows the inlined list tree).
+
+**Update (2026-06-20).** The three **singleton index-page sentinels** (`Home` /
+`WorkflowsIndex` / `ViewsIndex`) — the last holdouts — are gone too. They are
+now ordinary scaffold macros (`scaffoldHome` / `scaffoldWorkflowsIndex` /
+`scaffoldViewsIndex` in `_body-builders.ts`) emitting full bodies from the
+gathered inventory; the `expandInlineScaffoldPrimitives` expander, the ⑤c pass,
+the `Home`/`WorkflowsIndex`/`ViewsIndex` registry primitives, and the page
+`origin`/`source` fields are all removed. `walker-primitive-expander.ts` is now
+just `buildExpandContext`. A page's kind is derived on demand from its
+role-scoped name + area via `classifyPage` (`src/ir/util/page-kind.ts`).
 
 ---
 

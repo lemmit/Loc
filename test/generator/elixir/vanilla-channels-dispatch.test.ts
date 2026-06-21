@@ -4,7 +4,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 // ---------------------------------------------------------------------------
 // Channels-on-vanilla — the in-process `Dispatcher` that fans an emitted
 // event struct to per-context handler modules.  The vanilla mirror of the
-// Phoenix/Ash slice covered by `test/generator/phoenix/phoenix-dispatch-
+// Phoenix/Ash slice covered by `test/generator/elixir/phoenix-dispatch-
 // emission.test.ts`.
 //
 // On vanilla:

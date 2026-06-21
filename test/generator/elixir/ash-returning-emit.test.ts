@@ -32,7 +32,7 @@ system Inventory {
   storage pg { type: postgres }
   resource itemState { for: Stock, kind: state, use: pg }
   deployable phoenixApp {
-    platform: phoenix
+    platform: elixir
     contexts: [Stock]
     dataSources: [itemState]
     serves: InventoryApi

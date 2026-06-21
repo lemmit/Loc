@@ -1,6 +1,5 @@
 import type { AstNode, MaybePromise } from "langium";
 import { AstNodeHoverProvider } from "langium/lsp";
-import type { Hover } from "vscode-languageserver";
 import {
   type Aggregate,
   type Containment,
@@ -62,12 +61,8 @@ import {
 // ---------------------------------------------------------------------------
 
 export class DddHoverProvider extends AstNodeHoverProvider {
-  protected getAstNodeHoverContent(node: AstNode): MaybePromise<Hover | undefined> {
-    const content = this.contentFor(node);
-    if (!content) return undefined;
-    return {
-      contents: { kind: "markdown", value: content },
-    };
+  protected getAstNodeHoverContent(node: AstNode): MaybePromise<string | undefined> {
+    return this.contentFor(node);
   }
 
   private contentFor(node: AstNode): string | undefined {

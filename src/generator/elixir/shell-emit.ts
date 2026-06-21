@@ -32,6 +32,7 @@ import {
 import {
   renderApplication,
   renderEndpoint,
+  renderLiveNav,
   renderLogFormatter,
   renderRepo,
   renderRequestContext,
@@ -73,6 +74,10 @@ export function emitShellFiles(
   out: Map<string, string>,
   migrations: MigrationsIR[],
   styleAdapter?: StyleAdapter,
+  // True when this deployable emitted a `components/sidebar.ex` — drives the
+  // app layout's `<.sidebar>` invocation + the Sidebar import in `<App>Web`.
+  // False in embedded-SPA mode (no Sidebar module to reference).
+  hasSidebar = false,
 ): void {
   const port = deployable.port ?? 4000;
   // D-PHOENIX-SURFACE phase 6b: when the deployable embeds a React SPA
@@ -159,6 +164,13 @@ export function emitShellFiles(
   // lib/<app>_web.ex
   out.set(`lib/${appName}_web.ex`, renderWebModule(appName, appModule));
 
+  // lib/<app>_web/nav.ex — on_mount hook that assigns @current_path on every
+  // LiveView in the live_session (the app layout's sidebar reads it).  Always
+  // emitted on the Ash/LiveView path: renderRouter always wraps live routes in
+  // a `live_session :default, on_mount: [..., Nav]`, so the module must exist
+  // even in embedded-SPA mode (where the session is empty).
+  out.set(`lib/${appName}_web/nav.ex`, renderLiveNav(appModule));
+
   // lib/<app>_web/endpoint.ex
   out.set(`lib/${appName}_web/endpoint.ex`, renderEndpoint(appName, appModule, embedReact));
 
@@ -192,7 +204,10 @@ export function emitShellFiles(
   out.set(`lib/${appName}_web/components/layouts/root.html.heex`, renderRootLayout(appName));
 
   // lib/<app>_web/components/layouts/app.html.heex
-  out.set(`lib/${appName}_web/components/layouts/app.html.heex`, renderAppLayout());
+  out.set(
+    `lib/${appName}_web/components/layouts/app.html.heex`,
+    renderAppLayout(appModule, hasSidebar, authEnabled),
+  );
 
   // Error views — the endpoint config wires these as the render_errors
   // formats so a 500 in (say) the openapi controller renders a JSON

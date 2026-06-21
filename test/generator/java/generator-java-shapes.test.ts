@@ -75,7 +75,7 @@ describe("java generator — shape(embedded)", () => {
     // The field-visibility FormatMapper is installed once.
     const cfg = files.get(`${root}/config/LoomJsonFormatMapperConfig.java`)!;
     expect(cfg).toContain(
-      "props.put(AvailableSettings.JSON_FORMAT_MAPPER, new JacksonJsonFormatMapper(mapper));",
+      "props.put(AvailableSettings.JSON_FORMAT_MAPPER, new Jackson3JsonFormatMapper(mapper));",
     );
   });
 

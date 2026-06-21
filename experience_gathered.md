@@ -865,7 +865,7 @@ of footgun worth documenting.
 - **Layered failures stay hidden behind earlier blockers.**
   PR #524 hard-broke the `Property` grammar's `display` modifier but
   missed migrating `examples/showcase.ddd` (added 12 min earlier in
-  #401) and an inline fixture in `phoenix-build.yml`.  Both files
+  #401) and an inline fixture in `elixir-ash-build.yml`.  Both files
   parsed-error at `node bin/cli.js generate`, so every downstream
   failure was invisible.  Fix in #529 + #541.  Lesson: a hard grammar
   break needs a corpus sweep, not just an "in-tree fixtures
@@ -1218,7 +1218,7 @@ TLS-intercepting egress proxy:
 
 - **Pulling the CI Elixir image:** `docker pull hexpm/elixir:…` hits the
   Docker Hub anonymous rate limit. **Google's mirror works:**
-  `docker pull mirror.gcr.io/hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim`,
+  `docker pull mirror.gcr.io/hexpm/elixir:1.18.4-erlang-27.3.4-debian-bookworm-20260610-slim`,
   then re-tag to the canonical name so the test harness finds it.
 - **Trusting the proxy CA inside the container:** mount the host's
   `/usr/local/share/ca-certificates/` (the `egress-gateway-ca-*` /
@@ -1243,7 +1243,7 @@ errors across the whole tree) without needing deps. It does **not** catch
 `--warnings-as-errors` traps (unused alias/var, undefined refs) or Ash
 semantics — so write the emitters defensively (fully-qualified module refs so
 no unused `alias`; underscore statically-unused vars; `require Logger` only
-where a `Logger` macro is used) and treat the **`build-generated-phoenix` CI
+where a `Logger` macro is used) and treat the **`build-generated-elixir-ash` CI
 job as the authoritative gate**. On #1020 the local syntax pass + careful
 emission got it green on the first CI compile.
 
@@ -1452,3 +1452,72 @@ Lesson: when a sandbox "can't reach the internet", check *which client* — a 50
 that an identical `openssl`/curl request doesn't get is a fingerprint allowlist,
 not a network block. The fix is to re-originate through an accepted client, not
 to fight the CA.
+
+## 15. Derive, don't stamp — and when you delete machinery, sweep its footprints
+
+This is the retro for the scaffold-page-kind cleanup (PRs #1408 → #1441). It
+fixed a class of slow-accreting debt, and the cheapest way to keep it from
+re-accreting is to recognise the three shapes it took.
+
+### Prefer derive-on-demand over a denormalized IR field
+
+A page's **kind** (aggregate list/new/detail, workflow form/instances, view
+list, home/workflows-index/views-index, custom) used to be stamped onto the IR
+node twice — once as `PageIR.origin`, once as a `source: "scaffold" | "explicit"`
+tag — and then read back later. Both were **denormalized restatements of facts
+already present** in the node: its role-scoped name and its `area`. The stamp
+*looked* convenient but it (a) had to be kept in sync at every construction
+site, (b) leaked the macro layer's intent into the IR vocabulary, and (c) was
+the root of the "magical interference" bug — a hand-written `Home` page got the
+scaffold stamp's behaviour because the classifier trusted the stamp instead of
+the name.
+
+The fix was to delete both fields and compute the kind on demand from the name +
+area via `classifyPage` (`src/ir/util/page-kind.ts`). **Rule of thumb:** if a
+field is a pure function of other fields already on the node, don't store it —
+write the function. Store a fact only when it's an *input* the pipeline can't
+re-derive (a user-authored choice, a non-deterministic id), never when it's a
+*classification* of inputs you already hold. A stamped classification is a cache
+with no invalidation story; the bug is when (not if) a construction site forgets
+to populate it.
+
+### A macro should emit its full expansion, not a sentinel expanded later
+
+The dashboard pages (`scaffoldHome` / `scaffoldWorkflowsIndex` /
+`scaffoldViewsIndex`) used to be emitted by the macro as a **placeholder call**
+that a *later lowering sub-pass* (the deleted phase ⑤c,
+`expandInlineScaffoldPrimitiveCalls`) rewrote into the real page body. That
+split one feature across two layers for no reason: the macro layer **already has
+the full inventory** (`aggregatesIn` / `workflowsIn` / `viewsIn`), so it can
+build the complete AST body up front like every other scaffold macro. The
+sentinel bought nothing and cost a whole extra pass, a stamped marker to find
+the sentinels again, and a second mental model. **Rule of thumb:** a macro emits
+real, final AST (so `unfold` ejects real `.ddd` source); if you find yourself
+emitting a marker "to be filled in later," check whether the later pass has any
+information the macro lacks — usually it doesn't, and the deferral is
+accidental, not essential.
+
+### When you delete machinery, the references outlive it — sweep them
+
+Removing `origin` / `source` / phase ⑤c took **five follow-up PRs** (#1416 the
+code, #1431 the docs, #1438 + #1441 the comment/test drift) because the deleted
+concepts lived on in: header comments describing the old sub-pass, doc-comments
+on *adjacent* fields (`route` / `emitPath`) that mentioned the dead one, test
+*names* and framing (`walker-primitive-expander.test.ts` → `scaffold-page-bodies.test.ts`),
+and prose in `docs/` + `CLAUDE.md`. Each scrub claimed "all done"; each next
+grep found more. **Rule of thumb:** deleting a concept isn't done when the code
+compiles — grep the *name of the concept* (not just the symbol) across `src/`,
+`test/`, `docs/`, `CLAUDE.md`, and this file, including comments and test
+titles, in one pass. A symbol the compiler removed for you is the easy 20%; the
+prose that still teaches the dead model is the lingering 80%.
+
+### One concrete gotcha from the rewrite: `PageNameCtx` is arrays, not iterators
+
+`classifyPage` takes a `PageNameCtx` of `{ aggregateNames, workflowNames,
+viewNames }`. These must be `readonly string[]`. An early version passed
+`Map.keys()` iterators straight through; the first page consumed each iterator
+and every subsequent page saw an empty set and was misclassified (it surfaced as
+a workflow-form page emitting to the wrong path). **Lesson:** a context object
+reused across a loop must hold re-iterable collections — materialise
+`[...map.keys()]` at the boundary, never hand a single-use iterator to a helper
+that's called per element.

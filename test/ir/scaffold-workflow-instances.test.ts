@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { ExprIR, PageIR } from "../../src/ir/types/loom-ir.js";
+import { classifyPage, type PageNameCtx } from "../../src/ir/util/page-kind.js";
 import { buildLoomModel } from "../_helpers/index.js";
 
 const SRC = `
@@ -70,8 +71,19 @@ describe("scaffold — observable workflow instance pages", () => {
     const detail = pages.find((p) => p.name === "FulfillmentInstanceDetail")!;
     expect(list.route).toBe("/workflows/fulfillment/instances");
     expect(detail.route).toBe("/workflows/fulfillment/instances/:id");
-    expect(list.origin?.kind).toBe("workflow-instances-list");
-    expect(detail.origin?.kind).toBe("workflow-instance-detail");
+    const nameCtx: PageNameCtx = {
+      aggregateNames: loom.systems.flatMap((s) =>
+        s.subdomains.flatMap((m) => m.contexts.flatMap((c) => c.aggregates.map((a) => a.name))),
+      ),
+      workflowNames: loom.systems.flatMap((s) =>
+        s.subdomains.flatMap((m) => m.contexts.flatMap((c) => c.workflows.map((w) => w.name))),
+      ),
+      viewNames: loom.systems.flatMap((s) =>
+        s.subdomains.flatMap((m) => m.contexts.flatMap((c) => c.views.map((v) => v.name))),
+      ),
+    };
+    expect(classifyPage(list, nameCtx).kind).toBe("workflow-instances-list");
+    expect(classifyPage(detail, nameCtx).kind).toBe("workflow-instance-detail");
     // Detail synthesises the `id` route param (like aggregate-detail).
     expect(detail.params.some((p) => p.name === "id")).toBe(true);
   });

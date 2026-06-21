@@ -22,6 +22,7 @@ import {
   renderActions,
   renderPolicies,
   renderPolicyChecks,
+  renderStampChanges,
 } from "./domain/actions.js";
 import {
   ashBuiltinValidate,
@@ -60,7 +61,14 @@ export function emitAggregateResources(
   ctx: EnrichedBoundedContextIR,
   appModule: string,
   appSnake: string,
-  options: { resolveDataSource?: DataSourceLookup } = {},
+  options: {
+    resolveDataSource?: DataSourceLookup;
+    /** Atom key under which the principal id lives in the actor map (from the
+     *  system `user { id: … }` block — `actorIdKey(sys.user)`).  A bare
+     *  `currentUser` lifecycle-stamp value renders to `context.actor.<key>`.
+     *  Defaults to `"id"`. */
+    principalIdKey?: string;
+  } = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
   const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
@@ -78,7 +86,12 @@ export function emitAggregateResources(
     // Part}`) instead of child tables + `has_many`.  The root stays a
     // postgres-backed resource; the part becomes `data_layer: :embedded`.
     const embedded = effectiveSavingShape(agg, ds) === "embedded";
-    const aggOpts = { schema: ds?.schema, prefix: ds?.tablePrefix, embedded };
+    const aggOpts = {
+      schema: ds?.schema,
+      prefix: ds?.tablePrefix,
+      embedded,
+      principalIdKey: options.principalIdKey,
+    };
     const path = `lib/${appSnake}/${ctxSnake}/${snake(agg.name)}.ex`;
     out.set(path, renderAggregateResource(agg, ctx, appModule, ctxModule, aggOpts));
     for (const part of agg.parts) {
@@ -98,7 +111,12 @@ function renderAggregateResource(
   ctx: BoundedContextIR,
   appModule: string,
   ctxModule: string,
-  options: { schema?: string; prefix?: string; embedded?: boolean } = {},
+  options: {
+    schema?: string;
+    prefix?: string;
+    embedded?: boolean;
+    principalIdKey?: string;
+  } = {},
 ): string {
   const embedded = !!options.embedded;
   const moduleName = `${ctxModule}.${upperFirst(agg.name)}`;
@@ -233,6 +251,26 @@ function renderAggregateResource(
     renderCriterionCalculation(c, agg, ctxModule),
   );
 
+  // Ash's `timestamps()` macro adds `inserted_at` + `updated_at` columns.  An
+  // audit capability (`with audit`/`auditable`, now stamped — see
+  // renderStampChanges) declares an explicit `updatedAt` field that snakes to
+  // `updated_at`, colliding with the auto `update_timestamp` (Spark raises a
+  // DslError: "2 fields share the name `updated_at`").  When an explicit
+  // attribute already occupies a timestamp name, emit only the non-colliding
+  // auto timestamp(s) via the granular `create_timestamp` / `update_timestamp`
+  // macros instead of the bundled `timestamps()`.  (`createdAt` → `created_at`
+  // does NOT collide — Ash's create column is `inserted_at`.)
+  const attrNames = new Set(persistedFields.map((f) => snake(f.name)));
+  const hasInsertedAt = attrNames.has("inserted_at");
+  const hasUpdatedAt = attrNames.has("updated_at");
+  const timestampLines =
+    !hasInsertedAt && !hasUpdatedAt
+      ? "timestamps()"
+      : [
+          ...(hasInsertedAt ? [] : ["create_timestamp :inserted_at"]),
+          ...(hasUpdatedAt ? [] : ["update_timestamp :updated_at"]),
+        ].join("\n    ");
+
   return `${checksPrefix}defmodule ${moduleName} do
   use Ash.Resource,
     domain: ${ctxModule},
@@ -244,10 +282,9 @@ ${postgresBlockLines.join("\n")}
 ${baseFilterLine}
   attributes do
     ${renderPrimaryKey(agg.idValueType)}
-    ${[...(kindValue ? [`attribute :kind, :string, default: ${JSON.stringify(kindValue)}, allow_nil?: false`] : []), ...persistedFields.map((f) => renderAttribute(f, ctxModule)), ...embeddedAttrLines].join("\n    ")}
-    timestamps()
+    ${[...(kindValue ? [`attribute :kind, :string, default: ${JSON.stringify(kindValue)}, allow_nil?: false`] : []), ...persistedFields.map((f) => renderAttribute(f, ctxModule)), ...embeddedAttrLines].join("\n    ")}${timestampLines ? `\n    ${timestampLines}` : ""}
   end
-${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg, criterionCalcLines)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
+${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg, criterionCalcLines)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderStampChanges(agg, renderCtx, options.principalIdKey ?? "id")}${renderActions(agg, ctx, renderCtx, ctxModule)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
 
 ${jasonImpl}`;
 }

@@ -4,7 +4,10 @@ import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
-  preprocess: vitePreprocess(),
+  // `script: true` runs esbuild TS-stripping on every .svelte the
+  // compiler sees — the explicit, robust form (matches the flowbite
+  // pack and survives any uncompiled-TS .svelte dependency).
+  preprocess: vitePreprocess({ script: true }),
   kit: {
     // SPA mode — every route falls back to index.html; the app is a
     // pure client bundle calling the backend API (see +layout.ts).

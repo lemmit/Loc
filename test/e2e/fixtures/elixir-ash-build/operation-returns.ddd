@@ -1,0 +1,44 @@
+// Operation `or`-union returns on `foundation: ash` (exception-less.md A3,
+// DEBT-03).  A return-dominant `operation foo(): Agg or NotFound { return … }`
+// lowers to an Ash 3.x *generic action* (`action :foo, :term do … run fn …`)
+// whose run fn loads the record and hands back a tagged term; the controller
+// translates it to HTTP (success → 200, error variant → RFC-7807
+// ProblemDetails).  Compiled by `build-generated-elixir-ash` so the generic
+// action, its `:id`-first code interface, and the `problem_variant/5`
+// translation actually pass `mix compile --warnings-as-errors` against real
+// Ash 3.x.
+system Orders {
+  subdomain Sales {
+    context Reservations {
+      error NotFound { resource: string }
+
+      aggregate Order ids guid {
+        code: string
+
+        // Error-variant return (the canonical absent-record shape).
+        operation reserve(): Order or NotFound {
+          return NotFound { resource: code }
+        }
+
+        // Scalar success return — exercises the `{:success, <scalar>}` branch.
+        operation lookup(): string or NotFound {
+          return code
+        }
+      }
+
+      repository Orders for Order { }
+    }
+  }
+
+  api OrdersApi from Sales
+  storage pg { type: postgres }
+  resource orderState { for: Reservations, kind: state, use: pg }
+
+  deployable phoenixApp {
+    platform: elixir
+    contexts: [Reservations]
+    dataSources: [orderState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

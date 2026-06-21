@@ -9,6 +9,7 @@ import type {
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { contextUsesMoney } from "../../ir/types/loom-ir.js";
+import type { PageNameCtx } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
 import { AUTH_GATE_ANGULAR, AUTH_SESSION_SERVICE_ANGULAR } from "../_frontend/auth-ui.js";
@@ -115,13 +116,19 @@ export function generateAngularForContexts(
   }
   const pageRoutes = new Map<string, string>();
   for (const page of pages) pageRoutes.set(page.name, page.route!);
+  // Name-context for the page's emitted identifier (slice 3c — replaces origin).
+  const pageCtx: PageNameCtx = {
+    aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
+    workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
+    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
+  };
 
   const routeDescs: AngularRouteDesc[] = [];
   for (const page of pages) {
-    const slug = pageSlug(page);
+    const slug = pageSlug(page, pageCtx);
     let content: string;
     if (!page.body) {
-      content = renderAngularPageStub(page);
+      content = renderAngularPageStub(page, pageCtx, authUi);
     } else {
       const result = walkBody(
         page.body,
@@ -139,13 +146,21 @@ export function generateAngularForContexts(
         pageRoutes,
         new Set(),
         new Set(page.derived.map((d) => d.name)),
+        authUi,
       );
       content = pageNeedsDeferredFeatures(result)
-        ? renderAngularPageStub(page)
-        : renderAngularPage({ page, result, derived: page.derived, pack, authUi });
+        ? renderAngularPageStub(page, pageCtx, authUi)
+        : renderAngularPage({
+            page,
+            result,
+            derived: page.derived,
+            pack,
+            authUi,
+            nameCtx: pageCtx,
+          });
     }
     out.set(`src/app/pages/${slug}.component.ts`, content);
-    routeDescs.push({ route: page.route!, component: pageComponentName(page), slug });
+    routeDescs.push({ route: page.route!, component: pageComponentName(page, pageCtx), slug });
   }
 
   // Nav sidebar — one entry per routed page (routerLink keeps the
@@ -158,7 +173,7 @@ export function generateAngularForContexts(
   const navEntries = pages.map((p) => ({
     to: p.route!,
     label: humanize(p.name),
-    testId: `nav-${pageSlug(p)}`,
+    testId: `nav-${pageSlug(p, pageCtx)}`,
     requiresJs: authUi && p.requires ? renderGateExpr(p.requires, "currentUser") : undefined,
   }));
   const navSections =

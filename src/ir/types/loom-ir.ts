@@ -1854,8 +1854,8 @@ export interface PageIR {
   name: string;
   params: ParamIR[];
   /** Path-with-`:params` from `route: "..."`.  Always set for pages
-   *  written in source; pages synthesised by the scaffold expander
-   *  populate this from the rewrite rule. */
+   *  written in source; scaffold-synthesised pages set it directly in
+   *  the `with scaffold(...)` macro. */
   route?: string;
   /** Optional title expression.  May interpolate state / data refs. */
   title?: ExprIR;
@@ -1876,24 +1876,12 @@ export interface PageIR {
   /** Per-page menu metadata.  Read by the menu emitter when
    *  no explicit ui-level menu block is declared. */
   menuMeta?: MenuMetaIR;
-  /** Provenance discriminator: `"explicit"` for pages
-   *  written in source; `"scaffold"` for pages synthesised by the
-   *  expander.  The page emitter uses this to fast-path the legacy
-   *  per-aggregate / per-workflow / per-view builders for the bulk-
-   *  scaffold case (byte-equivalence target). */
-  source: "explicit" | "scaffold";
-  /** Only set for scaffold-synthesised pages.  Carries the structural
-   *  shape of the page so the page emitter can dispatch without
-   *  re-parsing the body expression.  Same source context the legacy
-   *  generator's per-aggregate / per-workflow / per-view loop
-   *  received. */
-  origin?: PageOriginIR;
   /** Explicit emit path override for walker-rendered
    *  pages.  When set, the page-emitter writes the rendered TSX to
    *  this path instead of the default `src/pages/<page-snake>.tsx`.
    *  Populated during lowering so a scaffold-emitted page lands at
    *  its conventional path (`src/pages/<plural>/list.tsx` for an
-   *  `aggregate-list` origin, etc.) — preserves URL/file shape. */
+   *  aggregate's list page, etc.) — preserves URL/file shape. */
   emitPath?: string;
   /** Containing-area path (outermost → innermost), when the page is
    *  declared inside one or more `area { … }` blocks.  Drives `emitPath`
@@ -1933,19 +1921,6 @@ export interface PageMetadataIR {
  *  re-introspecting the body.  User-written explicit pages get
  *  `{ kind: "custom" }` — they emit at `src/pages/<page-snake>.tsx`
  *  and contribute no auto-nav entry. */
-export type PageOriginIR =
-  | { kind: "aggregate-list"; aggregateName: string; contextName: string }
-  | { kind: "aggregate-new"; aggregateName: string; contextName: string }
-  | { kind: "aggregate-detail"; aggregateName: string; contextName: string }
-  | { kind: "workflow-form"; workflowName: string; contextName: string }
-  | { kind: "workflow-instances-list"; workflowName: string; contextName: string }
-  | { kind: "workflow-instance-detail"; workflowName: string; contextName: string }
-  | { kind: "view-list"; viewName: string; contextName: string }
-  | { kind: "workflows-index" }
-  | { kind: "views-index" }
-  | { kind: "home" }
-  | { kind: "custom" };
-
 /** A user-defined component: typed function from params (and optional
  *  local state) to a body expression.  Components compose other
  *  components but never produce pages or routes. */
@@ -2009,6 +1984,12 @@ export type MenuLinkIR =
   | {
       kind: "page";
       pageName: string;
+      /** The linked page's route, captured from the resolved cross-reference.
+       *  Role-named scaffold pages share a `pageName` (`List`) across
+       *  aggregates, so the menu emitter keys on this unique route to find the
+       *  exact target page (e.g. `link Orders.List` → `/orders`).  Undefined
+       *  only when the reference didn't resolve. */
+      route?: string;
       /** Override props (`label`, `order`).  Validator checks the
        *  allowed key names. */
       props: { name: string; value: ExprIR }[];
@@ -2131,8 +2112,8 @@ export interface NeedIR {
 // declares `ui:`).
 //
 // `python` is the FastAPI + SQLAlchemy 2 backend (backend-only, like
-// `node`/`dotnet`); the legacy-style `fastapi` spelling desugars to it
-// at the lowering boundary (mirrors `hono` → `node`).
+// `node`/`dotnet`).  (The `fastapi` platform alias was retired — `python`
+// is the only spelling, mirroring the retired `hono`/`phoenix` aliases.)
 //
 // `svelte` is the second frontend-only platform: a Svelte 5 /
 // SvelteKit static SPA rendered against a svelte-format design pack
@@ -2167,9 +2148,9 @@ export interface DeployableIR {
    *  `family@version` pin in the source is normalised here to its
    *  family so `platform === "node"` etc. stay valid. */
   platform: Platform;
-  /** The fully-qualified backend ref (`"hono@v4"`) after lowering,
+  /** The fully-qualified backend ref (`"node@v4"`) after lowering,
    *  mirroring `design?`.  Bareword `platform: node` resolves through
-   *  `BUILTIN_PLATFORM_LATEST`; a pin (`platform: "hono@v4"`) flows
+   *  `BUILTIN_PLATFORM_LATEST`; a pin (`platform: "node@v4"`) flows
    *  through as written.  For frontend platforms (`react`/`static`)
    *  this equals `platform` (they version via the design/stack axis,
    *  not here).  The system orchestrator's dispatch keys on `platform`
@@ -2774,6 +2755,18 @@ export function viewUsesCurrentUser(view: ViewIR): boolean {
  *  closure-captured `HasQueryFilter`.) */
 export function aggregateUsesPrincipalContextFilter(agg: { contextFilters?: ExprIR[] }): boolean {
   return (agg.contextFilters ?? []).some(exprUsesCurrentUser);
+}
+
+/** True when any of the aggregate's lifecycle stamps (`contextStamps`, from
+ *  `with audit`/`auditable` or `stamp onCreate`/`onUpdate`) assigns a value
+ *  that reads `currentUser` (e.g. `createdBy := currentUser`).  Such a stamp
+ *  needs the request principal threaded as the Ash actor onto the create /
+ *  update call so the stamp's `change` block can read `context.actor` — the
+ *  stamp-side analogue of `aggregateUsesPrincipalContextFilter`. */
+export function aggregateStampUsesPrincipal(agg: { contextStamps?: ContextStampIR[] }): boolean {
+  return (agg.contextStamps ?? []).some((r) =>
+    r.assignments.some((a) => exprUsesCurrentUser(a.value)),
+  );
 }
 
 function stmtUsesCurrentUser(s: StmtIR): boolean {

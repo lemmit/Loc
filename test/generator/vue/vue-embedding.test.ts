@@ -60,7 +60,7 @@ describe("vue embedding on backend hosts", () => {
   });
 
   it("phoenix host embeds the Vue SPA under assets/", async () => {
-    const out = await files(src("phoenix"));
+    const out = await files(src("elixir"));
     expect(out.has("app/assets/src/App.vue")).toBe(true);
     expect(out.get("app/assets/src/api/config.ts")).toContain('?? "/api"');
     // No LiveView page modules for the vue ui.

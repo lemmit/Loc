@@ -1,0 +1,29 @@
+// Value-object array (`Money[]`) on Phoenix/Ash: stored inline as a
+// `{:array, Money}` embedded attribute → `{:array, :map}` migration column
+// (no child table).  Compiles the Ash embedded-array path.
+system Billing {
+  subdomain Sales {
+    context Invoicing {
+      valueobject Money {
+        amount: decimal
+        currency: string
+      }
+      aggregate Invoice with crudish {
+        reference: string
+        lineItems: Money[]
+        surcharges: Money[]?
+      }
+      repository Invoices for Invoice { }
+    }
+  }
+  api InvoicingApi from Sales
+  storage primary { type: postgres }
+  resource invoicingState { for: Invoicing, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: elixir
+    contexts: [Invoicing]
+    dataSources: [invoicingState]
+    serves: InvoicingApi
+    port: 4000
+  }
+}

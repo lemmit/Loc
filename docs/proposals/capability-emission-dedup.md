@@ -242,6 +242,46 @@ capability identity. Status quo (per-aggregate copies) is correct until then.
    (interceptors are per-`DbContext`). That is correct (per-store), but confirm
    the marker interface type is shared, not per-context-duplicated.
 
+## 9b. Implementation status (2026-06)
+
+What shipped, and what stays deferred after an end-to-end investigation of the
+`.NET` stamp path:
+
+- **`.NET` lifecycle stamping now compiles and is CI-covered.** The
+  `AuditableInterceptor` previously emitted uncompilable code (a bare
+  `currentUser` identifier; `private set` stamped fields the interceptor could
+  not write) and **no build matrix exercised it**. Fixed to mirror the Java
+  reference: a `currentUser` stamp value resolves to the principal id read from
+  the ambient `RequestContext.Current` (the .NET analogue of Java's
+  `currentUser.id()`); stamped fields widen to `internal set` (same-assembly
+  interceptor); a `loom.dotnet-stamp-unsupported` validator gates principal
+  stamps without auth (mirrors `loom.java-stamp-unsupported`); covered by
+  `test/e2e/fixtures/dotnet-build/stamps-principal.ddd` under
+  `dotnet build /warnaserror`. This is the working *raw-id* stamp pattern
+  (`createdBy: guid` + `:= currentUser`), the same one Java's
+  `stamps-principal.ddd` compiles.
+
+- **The `auditable` capability's `createdBy/updatedBy: User id` fields now
+  compile on every backend.** The prelude types these as `User id` — the id of
+  the `user {}` **principal**, which is not a domain aggregate, so it has no
+  `UserId` strong-id class and the strong-id path dangled (an undefined `UserId`
+  field/EF-conversion/response-DTO; no backend build matrix compiled
+  `with auditable`). Fixed at lowering: `lowerBase`'s id branch detects an
+  *unresolved* id ref whose text is the principal name (`PRINCIPAL_TYPE_NAME`,
+  shared from `src/util/principal.ts`) with a `user {}` block in scope, and
+  lowers it to the principal's declared id **scalar** (`user { id: <type> }`) —
+  a plain primitive, not a strong id. So `createdBy` becomes the same plain
+  scalar a hand-written `createdBy: guid` produces, and the field / `currentUser`
+  stamp / wire all agree. Covered by `auditable.ddd` cells in both the
+  `dotnet-build` and `java-build` matrices, plus a lowering unit test
+  (`ir-capabilities.test.ts`) that pins the scalar tracks `user { id }`.
+
+- **Marker-interface dedup (`I<Capability>`) stays deferred.** The interceptor
+  switch is already one arm per aggregate; the dedup is cosmetic. Now that
+  `auditable` compiles (it is the only stamping capability), a *verifiable*
+  marker dedup is unblocked — but it remains low-value until a second stamping
+  capability exists. Revisit then.
+
 ## 10. Cross-references
 
 - [`typed-capabilities.md`](./typed-capabilities.md) — OQ#1 this resolves; the

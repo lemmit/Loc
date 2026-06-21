@@ -415,9 +415,9 @@ scaffold views:      ActiveOrders, … → page ActiveOrdersView  (+ shared View
 
 ### What each scaffolded page contains
 
-Scaffold is sugar: it lowers (via `src/ir/lower/walker-primitive-expander.ts`,
-the final sub-pass of `lowerModel`) to a walker-stdlib body identical
-to one the user could hand-write. The contract per page:
+Scaffold is sugar: the `with scaffold(...)` macro emits each page with a
+walker-stdlib body (built by `src/macros/stdlib/scaffold/_body-builders.ts`)
+identical to one the user could hand-write. The contract per page:
 
 | Page | Body |
 |---|---|
@@ -487,8 +487,8 @@ Pages carry `menu { … }` metadata; sidebar is derived. Optional `ui`-level
 
 ```ddd
 menu {
-  section "Sales"   { link OrderList, link OrderConsole, link OrderNew }
-  section "Lookup"  { link CustomerList, link ProductList }
+  section "Sales"   { link Orders.List, link OrderConsole, link Orders.New }
+  section "Lookup"  { link Customers.List, link Products.List }
   section "Reports" { link ActiveOrdersView, link OrderSummaryView }
   section "External" {
     link "Docs" -> "https://docs.acme.com"
@@ -496,11 +496,18 @@ menu {
 }
 ```
 
+A scaffold names an aggregate's pages by **role** (`List` / `New` / `Detail`)
+inside its per-aggregate `area` (`area Orders`), so a bare `link List` is
+ambiguous across aggregates.  Disambiguate with the **area-qualified** form
+`link Orders.List` / `link Orders.New`.  Pages with a unique name — custom pages
+(`OrderConsole`), views (`ActiveOrdersView`), and the singleton dashboards
+(`Home`) — link by bare name.
+
 `scaffold` doesn't *return* anything — it contributes pages-with-menu-metadata
 to a shared registry. The `menu` block is the explicit composition operator
 over that registry.
 
-Per-link auth: a `link OrderList` inherits the underlying page's `requires`
+Per-link auth: a `link Orders.List` inherits the underlying page's `requires`
 clause.  The React page guard (above) already renders `<Forbidden/>` on a gated
 page; conditionally **hiding** the matching menu link (so it never shows for a
 caller who can't reach it) is the next slice — today the link still renders and
@@ -756,11 +763,11 @@ lowering time, lowered to typed router calls / notifications.
 
 ---
 
-## 16. LiveView lowering (`platform: phoenixLiveView`)
+## 16. LiveView lowering (`platform: elixir`)
 
-A deployable that picks `platform: phoenixLiveView` consumes the same
+A deployable that picks `platform: elixir` consumes the same
 `ui { … }` source the React platform consumes — the metamodel is
-framework-neutral by design.  The generator (`src/generator/phoenix-live-view/`)
+framework-neutral by design.  The generator (`src/generator/elixir/`)
 lowers the IR onto Phoenix LiveView semantics.  Per-construct mapping:
 
 | Metamodel construct | LiveView lowering |

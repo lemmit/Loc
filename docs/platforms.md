@@ -19,7 +19,7 @@ versioning works.
 | `node` (default `node@v4`; Hono web framework) | `src/platform/hono/v4/index.ts` | 3000 | ✓ | ✗ |
 | `dotnet` (default `dotnet@v10`) | `src/platform/dotnet.ts` | 8080 | ✓ | ✓ (when `ui:` is declared) |
 | `elixir` (default `elixir@v1`; legacy aliases `phoenix` / `phoenixLiveView` desugar to it) | `src/platform/elixir.ts` | 4000 | ✓ | ✓ (fullstack) |
-| `python` (default `python@v1`; framework alias `fastapi`) | `src/platform/python.ts` | 8000 | ✓ | ✓ (when `ui:` is declared — dotnet-style dual mode) |
+| `python` (default `python@v1`) | `src/platform/python.ts` | 8000 | ✓ | ✓ (when `ui:` is declared — dotnet-style dual mode) |
 | `java` (default `java@v1`) | `src/platform/java.ts` | 8081 | ✓ | ✓ (`ui:` embedded-SPA mount; `hosts:` gated) |
 | `react` | `src/platform/react.ts` | 3001 | ✗ | ✓ |
 | `vue` | `src/platform/vue.ts` | 3003 | ✗ | ✓ |

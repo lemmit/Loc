@@ -32,6 +32,8 @@ import {
   validateDataSourceCoverage,
   validateDataSourceUnwiredKnobs,
   validateDefaultDeny,
+  validateDotnetStampSupport,
+  validateElixirStampSupport,
   validateEventSourcedStorage,
   validateEventSourcedWorkflowStorage,
   validateInheritanceStorage,
@@ -40,8 +42,10 @@ import {
   validateJavaStampSupport,
   validateMikroOrmSupport,
   validateNeedCapabilities,
+  validateNodeStampSupport,
   validatePermissions,
   validateProvenancedStorage,
+  validatePythonStampSupport,
   validateReactIdReferences,
   validateResourceConfig,
   validateSavingShapeSupport,
@@ -112,6 +116,10 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateJavaContainmentSupport(sys, diags);
     validateJavaFullstackSupport(sys, diags);
     validateJavaStampSupport(sys, diags);
+    validateDotnetStampSupport(sys, diags);
+    validateNodeStampSupport(sys, diags);
+    validatePythonStampSupport(sys, diags);
+    validateElixirStampSupport(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);
     validateVanillaContainmentSupport(sys, diags);

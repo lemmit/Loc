@@ -720,13 +720,15 @@ defmodule ${moduleName} do
 
   @spec run(map()) :: {:ok, term()} | {:error, term()}
   def run(params) when is_map(params) do
-    Repo.transaction(fn ->
-      case run_inner(params) do
-        {:ok, result} -> result
-        {:error, reason} -> Repo.rollback(reason)
-      end
-    end)
+    Repo.transaction(fn -> commit_result(run_inner(params)) end)
   end
+
+  # Public (not defp): Elixir 1.18 narrows a private fn's parameter to
+  # run_inner's inferred result, which flags whichever arm this workflow's
+  # body can't produce (e.g. a body that can't fail makes the rollback arm
+  # "never match").  A public fn keeps both arms at their full clause domain.
+  def commit_result({:ok, result}), do: result
+  def commit_result({:error, reason}), do: Repo.rollback(reason)
 
   defp run_inner(params) when is_map(params) do
 ${finalBody}
@@ -761,27 +763,7 @@ function renderWorkflowsController(
       const wfSnake = snake(wf.name);
       const wfMod = `${appModule}.${ctxModule}.Workflows.${upperFirst(wf.name)}`;
       return `  def ${wfSnake}(conn, params) do
-    case ${wfMod}.run(params) do
-      {:ok, result} ->
-        conn
-        |> put_status(202)
-        |> json(%{status: "accepted", result: serialize(result)})
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
-
-      {:error, :not_found} ->
-        ProblemDetails.problem_response(conn, 404, "Not Found", "Resource not found")
-
-      {:error, :forbidden} ->
-        ProblemDetails.problem_response(conn, 403, "Forbidden", "Workflow guard rejected the request")
-
-      {:error, :precondition_failed} ->
-        ProblemDetails.problem_response(conn, 422, "Precondition Failed", "Workflow precondition rejected the request")
-
-      {:error, reason} ->
-        ProblemDetails.problem_response(conn, 400, "Bad Request", inspect(reason))
-    end
+    respond(conn, ${wfMod}.run(params))
   end`;
     })
     .join("\n\n");
@@ -797,6 +779,32 @@ defmodule ${webModule}.WorkflowsController do
   """
 
 ${actions}
+
+  # Shared result handler.  Each workflow's run/1 result flows through
+  # here; keeping the dispatch in one multi-clause function (rather than a
+  # case inlined per action) means Elixir 1.18's type checker doesn't
+  # narrow the scrutinee to a single workflow's exact result shape and
+  # flag the error branches that workflow can't produce.
+  def respond(conn, {:ok, result}) do
+    conn
+    |> put_status(202)
+    |> json(%{status: "accepted", result: serialize(result)})
+  end
+
+  def respond(conn, {:error, %Ecto.Changeset{} = changeset}),
+    do: ProblemDetails.validation_error_response(conn, changeset)
+
+  def respond(conn, {:error, :not_found}),
+    do: ProblemDetails.problem_response(conn, 404, "Not Found", "Resource not found")
+
+  def respond(conn, {:error, :forbidden}),
+    do: ProblemDetails.problem_response(conn, 403, "Forbidden", "Workflow guard rejected the request")
+
+  def respond(conn, {:error, :precondition_failed}),
+    do: ProblemDetails.problem_response(conn, 422, "Precondition Failed", "Workflow precondition rejected the request")
+
+  def respond(conn, {:error, reason}),
+    do: ProblemDetails.problem_response(conn, 400, "Bad Request", inspect(reason))
 
   defp serialize(%_{} = struct), do: struct |> Map.from_struct() |> Map.drop([:__meta__, :__struct__])
   defp serialize(other), do: other

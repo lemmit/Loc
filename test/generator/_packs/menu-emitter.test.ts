@@ -24,6 +24,19 @@ function uiOf(loom: LoomModel, name: string): UiIR {
   return ui;
 }
 
+function nameCtxOf(loom: LoomModel) {
+  const sys = loom.systems[0]!;
+  return {
+    aggregateNames: sys.subdomains.flatMap((m) =>
+      m.contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
+    ),
+    workflowNames: sys.subdomains.flatMap((m) =>
+      m.contexts.flatMap((c) => c.workflows.map((w) => w.name)),
+    ),
+    viewNames: sys.subdomains.flatMap((m) => m.contexts.flatMap((c) => c.views.map((v) => v.name))),
+  };
+}
+
 describe("menu emitter", () => {
   it("returns undefined when the ui has no explicit menu block", async () => {
     const loom = await buildLoom(`
@@ -37,7 +50,7 @@ describe("menu emitter", () => {
         ui WebApp { scaffold aggregates: Order }
       }
     `);
-    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"));
+    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom));
     expect(sidebar).toBeUndefined();
   });
 
@@ -63,7 +76,7 @@ describe("menu emitter", () => {
         }
       }
     `);
-    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"));
+    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom));
     expect(sidebar).toBeDefined();
     expect(sidebar!.map((s) => s.label)).toEqual(["Sales", "External"]);
     const sales = sidebar![0]!;
@@ -92,7 +105,7 @@ describe("menu emitter", () => {
         }
       }
     `);
-    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"))!;
+    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom))!;
     expect(sidebar[0]!.entries[0]!.label).toBe("All Orders");
   });
 
@@ -109,7 +122,7 @@ describe("menu emitter", () => {
         }
       }
     `);
-    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"))!;
+    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom))!;
     const link = sidebar[0]!.entries[0]!;
     expect(link.to).toBe("__external:https://example.com");
     expect(link.label).toBe("Docs");
@@ -142,7 +155,7 @@ describe("menu emitter", () => {
         }
       }
     `);
-    const entries = deriveSidebarFromUi(uiOf(loom, "WebApp"))![0]!.entries;
+    const entries = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom))![0]!.entries;
     expect(entries.map((e) => e.testId)).toEqual([
       "nav-orders",
       "nav-workflow-place_order",
@@ -172,7 +185,7 @@ describe("menu emitter", () => {
         }
       }
     `);
-    const sidebar = deriveSidebarFromUi(uiOf(loom, "B"))!;
+    const sidebar = deriveSidebarFromUi(uiOf(loom, "B"), nameCtxOf(loom))!;
     expect(sidebar[0]!.entries).toEqual([]);
   });
 
@@ -197,6 +210,35 @@ describe("menu emitter", () => {
         ui WebApp { scaffold aggregates: Order }
       }
     `);
-    expect(deriveSidebarFromUi(uiOf(loom, "WebApp"))).toBeUndefined();
+    expect(deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom))).toBeUndefined();
+  });
+
+  it("disambiguates role-named pages via qualified `Area.Page` links", async () => {
+    const loom = await buildLoom(`
+      system S {
+        subdomain M {
+          context C {
+            aggregate Order { x: int }
+            aggregate Item { x: int }
+            repository Orders for Order { }
+            repository Items for Item { }
+          }
+        }
+        ui WebApp with scaffold(aggregates: [Order, Item]) {
+          menu {
+            section "Main" {
+              link Items.List,
+              link Orders.List
+            }
+          }
+        }
+      }
+    `);
+    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom))!;
+    const entries = sidebar[0]!.entries;
+    // Both links are named `List` (role-scoped); the qualifier must route each
+    // to its OWN aggregate page, in link order — not both to the first `List`.
+    expect(entries.map((e) => e.to)).toEqual(["/items", "/orders"]);
+    expect(entries.map((e) => e.testId)).toEqual(["nav-items", "nav-orders"]);
   });
 });

@@ -641,6 +641,250 @@ export function validateJavaStampSupport(sys: SystemIR, diags: LoomDiagnostic[])
   }
 }
 
+// Lifecycle stamps on the .NET backend.  Stamps are applied by the EF Core
+// AuditableInterceptor before SaveChanges; a non-principal value renders
+// directly, and a `currentUser` value resolves to the principal id read from
+// the ambient RequestContext (`RequestContext.Current!.CurrentUser!.<idProp>`).
+// Two cases stay fail-fast (never a silent drop), mirroring
+// `validateJavaStampSupport`: a principal-referencing stamp on a deployable
+// WITHOUT auth (no request-scoped principal to read; `actorIdProp` would be
+// undefined), and stamps on an event-sourced aggregate (state is folded from
+// events, not field-stamped — and EF interception doesn't apply).
+export function validateDotnetStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "dotnet") continue;
+    const authed = !!(dep.auth?.required && sys.user);
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        const stamps = enriched.contextStamps ?? [];
+        if (stamps.length === 0) continue;
+        const usesPrincipal = stamps.some((r) =>
+          r.assignments.some((a) => exprUsesCurrentUser(a.value)),
+        );
+        if (usesPrincipal && !authed) {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform dotnet) hosts aggregate '${ctxName}.${agg.name}' ` +
+              `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
+              `from \`with audit\`), but the deployable has no auth — there is no request-scoped ` +
+              `principal to stamp from. Add 'auth: required' (and a system 'user {}' block), or use ` +
+              `non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.dotnet-stamp-unsupported",
+          });
+        }
+        if (enriched.persistedAs === "eventLog") {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform dotnet) hosts event-sourced aggregate ` +
+              `'${ctxName}.${agg.name}' with a lifecycle stamp — stamps mutate state fields, but an ` +
+              `event-sourced aggregate's state is folded from its event stream. ` +
+              `Record the timestamp in an event instead, or drop persistedAs(eventLog).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.dotnet-stamp-unsupported",
+          });
+        }
+      }
+    }
+  }
+}
+
+// Lifecycle stamps on the node (Hono) backend.  Stamps become
+// `_stampOnCreate` / `_stampOnUpdate` methods on the aggregate that the route
+// handler calls right before save; a non-principal value renders directly, and
+// a `currentUser` value resolves to the principal id (`currentUser.<idField>`)
+// — the route threads the typed principal read from the request scope.  Two
+// cases stay fail-fast (never a silent drop), mirroring
+// `validateJavaStampSupport` / `validateDotnetStampSupport`: a
+// principal-referencing stamp on a deployable WITHOUT auth (no request-scoped
+// principal to read), and stamps on an event-sourced aggregate (state is folded
+// from events, not field-stamped).
+export function validateNodeStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "node") continue;
+    const authed = !!(dep.auth?.required && sys.user);
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        const stamps = enriched.contextStamps ?? [];
+        if (stamps.length === 0) continue;
+        const usesPrincipal = stamps.some((r) =>
+          r.assignments.some((a) => exprUsesCurrentUser(a.value)),
+        );
+        if (usesPrincipal && !authed) {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform node) hosts aggregate '${ctxName}.${agg.name}' ` +
+              `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
+              `from \`with audit\`), but the deployable has no auth — there is no request-scoped ` +
+              `principal to stamp from. Add 'auth: required' (and a system 'user {}' block), or use ` +
+              `non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.node-stamp-unsupported",
+          });
+        }
+        if (enriched.persistedAs === "eventLog") {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform node) hosts event-sourced aggregate ` +
+              `'${ctxName}.${agg.name}' with a lifecycle stamp — stamps mutate state fields, but an ` +
+              `event-sourced aggregate's state is folded from its event stream. ` +
+              `Record the timestamp in an event instead, or drop persistedAs(eventLog).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.node-stamp-unsupported",
+          });
+        }
+      }
+    }
+  }
+}
+
+// Lifecycle stamps on the python backend.  Stamps are applied right before
+// the repository persist: a non-principal value (e.g. `createdAt := now()`)
+// renders directly through the python expression renderer, and a `currentUser`
+// value resolves to the principal id read off the request-scoped principal
+// (`current_user.<idAttr>`, threaded from `request.state.current_user`).  Two
+// cases stay fail-fast (never a silent drop), mirroring
+// `validateJavaStampSupport` / `validateDotnetStampSupport`: a principal-
+// referencing stamp on a deployable WITHOUT auth (no request-scoped principal
+// to thread), and stamps on an event-sourced aggregate (state is folded from
+// events, not field-stamped).
+export function validatePythonStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "python") continue;
+    const authed = !!(dep.auth?.required && sys.user);
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        const stamps = enriched.contextStamps ?? [];
+        if (stamps.length === 0) continue;
+        const usesPrincipal = stamps.some((r) =>
+          r.assignments.some((a) => exprUsesCurrentUser(a.value)),
+        );
+        if (usesPrincipal && !authed) {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform python) hosts aggregate '${ctxName}.${agg.name}' ` +
+              `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
+              `from \`with audit\`), but the deployable has no auth — there is no request-scoped ` +
+              `principal to stamp from. Add 'auth: required' (and a system 'user {}' block), or use ` +
+              `non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.python-stamp-unsupported",
+          });
+        }
+        if (enriched.persistedAs === "eventLog") {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform python) hosts event-sourced aggregate ` +
+              `'${ctxName}.${agg.name}' with a lifecycle stamp — stamps mutate state fields, but an ` +
+              `event-sourced aggregate's state is folded from its event stream. ` +
+              `Record the timestamp in an event instead, or drop persistedAs(eventLog).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.python-stamp-unsupported",
+          });
+        }
+      }
+    }
+  }
+}
+
+// Lifecycle stamps on the elixir backend.  The **Ash** foundation (the default
+// for `platform: elixir`) now APPLIES stamps: each `contextStamps` rule becomes
+// an Ash `change fn ... end, on: [:create|:update]` block in the resource that
+// `force_change_attribute`s the audit columns; a non-principal value renders
+// directly (`now()` → `DateTime.utc_now()`), and a `currentUser` value resolves
+// to the principal id read from the threaded Ash actor (`context.actor.<idKey>`,
+// the analogue of java `currentUser.id()` / .NET `RequestContext...CurrentUser`).
+// Two cases stay fail-fast (never a silent drop), mirroring
+// `validateJavaStampSupport` / `validateDotnetStampSupport`: a principal-
+// referencing stamp on a deployable WITHOUT auth (no request actor to thread),
+// and stamps on an event-sourced aggregate (state is folded from events, not
+// field-stamped).  The **vanilla** (plain Ecto) foundation does NOT yet consume
+// `contextStamps` — it stays fully gated (any stamp → `loom.elixir-stamp-unsupported`).
+export function validateElixirStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "elixir") continue;
+    const vanilla = dep.foundation === "vanilla";
+    const authed = !!(dep.auth?.required && sys.user);
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        const stamps = enriched.contextStamps ?? [];
+        if (stamps.length === 0) continue;
+        // Vanilla foundation: stamping is not wired — gate every stamp loudly,
+        // exactly as the (now removed) generic gate did for elixir.
+        if (vanilla) {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform elixir, foundation: vanilla) hosts aggregate ` +
+              `'${ctxName}.${agg.name}' with a lifecycle stamp (e.g. from \`with audit\`/\`auditable\`, or ` +
+              `\`stamp onCreate { … }\`), but the vanilla (plain Ecto) foundation does not yet apply ` +
+              `lifecycle stamps — the audit columns would be emitted but never populated. Use ` +
+              `'foundation: ash' (which applies stamps), host this context on a java or dotnet ` +
+              `deployable, or remove the stamp.`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.elixir-stamp-unsupported",
+          });
+          continue;
+        }
+        const usesPrincipal = stamps.some((r) =>
+          r.assignments.some((a) => exprUsesCurrentUser(a.value)),
+        );
+        if (usesPrincipal && !authed) {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform elixir) hosts aggregate '${ctxName}.${agg.name}' ` +
+              `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
+              `from \`with audit\`), but the deployable has no auth — there is no request-scoped ` +
+              `principal (Ash actor) to stamp from. Add 'auth: required' (and a system 'user {}' block), ` +
+              `or use non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.elixir-stamp-unsupported",
+          });
+        }
+        if (enriched.persistedAs === "eventLog") {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform elixir) hosts event-sourced aggregate ` +
+              `'${ctxName}.${agg.name}' with a lifecycle stamp — stamps mutate state fields, but an ` +
+              `event-sourced aggregate's state is folded from its event stream. ` +
+              `Record the timestamp in an event instead, or drop persistedAs(eventLog).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.elixir-stamp-unsupported",
+          });
+        }
+      }
+    }
+  }
+}
+
 export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
@@ -1383,11 +1627,11 @@ export function validateEventSourcedStorage(
   // don't (e.g. an Ash-foundation Phoenix deployable hosting the context).
   const unsupported = [...backendPlatforms].filter((p) => !isEsCapable(p));
   const anyBackend = backendPlatforms.size > 0;
-  const includesPhoenix = unsupported.includes("elixir");
+  const includesElixir = unsupported.includes("elixir");
   for (const agg of ctx.aggregates) {
     if (agg.persistedAs !== "eventLog") continue;
     if (anyBackend && unsupported.length === 0) continue;
-    const message = includesPhoenix
+    const message = includesElixir
       ? // Phoenix-specific: name the Ash-foundation constraint, point at the
         // planned vanilla foundation (D-VANILLA-ES-HOME) and the cross-backend
         // escape (host the context on node / dotnet).
@@ -1458,7 +1702,7 @@ export function validateEventSourcedWorkflowStorage(
   const unsupported = [...backendPlatforms].filter((p) => !isEsCapable(p));
   if (unsupported.length === 0) return;
   const hosts = unsupported.sort().join(", ");
-  const includesPhoenix = unsupported.includes("elixir");
+  const includesElixir = unsupported.includes("elixir");
   for (const wf of ctx.workflows) {
     if (!wf.eventSourced) continue;
     diags.push({
@@ -1469,7 +1713,7 @@ export function validateEventSourcedWorkflowStorage(
         `(a per-correlation event stream folded through its apply(...) blocks) is ` +
         `implemented on the Hono (node), .NET (dotnet), Python (FastAPI), Java (Spring) ` +
         `and elixir-vanilla backends — this context is also hosted by ${hosts}. ` +
-        (includesPhoenix
+        (includesElixir
           ? `On Phoenix this is a foundation constraint: the Ash foundation has no pure-ES ` +
             `fit, so switch the deployable to foundation: vanilla (D-VANILLA-ES-HOME). Otherwise host `
           : `Host `) +
@@ -1512,7 +1756,7 @@ export function validateProvenancedStorage(
     const provFields = agg.fields.filter((f) => f.provenanced);
     if (provFields.length === 0) continue;
     if (anyBackend && unsupported.length === 0) continue;
-    const includesPhoenix = unsupported.includes("elixir");
+    const includesElixir = unsupported.includes("elixir");
     const hostNote =
       unsupported.length > 0
         ? `it is hosted by ${unsupported.join(", ")}, where the provenance runtime is not emitted`
@@ -1525,7 +1769,7 @@ export function validateProvenancedStorage(
         `aggregate '${agg.name}' has provenanced field(s) ${names}, but the provenance runtime ` +
         `(trace capture + history) is emitted for the Hono (node), .NET (dotnet) and elixir-vanilla ` +
         `backends only — ${hostNote}. ` +
-        (includesPhoenix
+        (includesElixir
           ? `On Phoenix this is a foundation constraint: the Ash foundation has no provenance fit, ` +
             `so switch the deployable to foundation: vanilla. Otherwise host `
           : `Host `) +

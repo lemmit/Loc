@@ -121,8 +121,10 @@ defmodule ${appModule}Web.ProblemDetails do
   # Each atom segment is camelCased (matching the JsonCamelCase wire
   # shape the schemas emit); RFC 6901 escapes apply (\`~\` → \`~0\`,
   # \`/\` → \`~1\`).
-  defp pointer_of([]), do: ""
-
+  #
+  # The only caller passes a one-element list (\`[field]\`), so an empty-list
+  # clause would be dead code — Elixir 1.18's compiler flags unreachable
+  # clauses, which \`--warnings-as-errors\` rejects.
   defp pointer_of(segments) do
     encoded =
       segments

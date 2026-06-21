@@ -309,10 +309,16 @@ export const angularTarget: WalkerTarget = {
   /** `@if (cond) { … } @else { … }` control-flow block pair.  Angular
    *  template expressions can't evaluate to markup, so conditional
    *  children render as control-flow blocks (the Vue `<template v-if>` /
-   *  Svelte `{#if}` analogue). */
+   *  Svelte `{#if}` analogue).  A literal `"null"` else (the "render
+   *  nothing" sentinel the JSX frontends pass — e.g. the action-button
+   *  gate) drops the `@else` entirely, since Angular renders bare `null`
+   *  as the visible text "null" rather than nothing. */
   renderConditionalChild(cond: string, thenS: string, elseS: string, depth: number): string {
     const pad = "  ".repeat(depth);
     const inner = "  ".repeat(depth + 1);
+    if (elseS === "null") {
+      return [`@if (${cond}) {`, `${inner}${thenS}`, `${pad}}`].join("\n");
+    }
     return [
       `@if (${cond}) {`,
       `${inner}${thenS}`,

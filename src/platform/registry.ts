@@ -47,7 +47,7 @@ export {
 // version, aliased to the same surface object the bareword returns
 // — so the resolution paths yield identical `PlatformSurface` instances
 // regardless of whether the source pins a version.  The grammar/lowering
-// wires `platform: "hono@v4"` pins, so additional per-family versions
+// wires `platform: "node@v4"` pins, so additional per-family versions
 // slot in by registering them in `versionedPlatforms`.
 //
 // Adding a new platform: write the surface implementation, register
@@ -76,12 +76,13 @@ const platforms: Record<Platform, PlatformSurface> = {
   static: reactPlatform,
   // Fullstack Elixir / Ash + Phoenix LiveView platform.  Owns its own
   // database, mounts a `ui:`, and (when populated) `serves:` an
-  // Ash-derived API.  Legacy `platform: phoenix` / `phoenixLiveView`
-  // desugar to `elixir` at the lowering boundary (D-ELIXIR-PLATFORM).
+  // Ash-derived API.  `elixir` is the only spelling — the legacy
+  // `platform: phoenix` / `phoenixLiveView` aliases were retired
+  // (D-ELIXIR-PLATFORM), mirroring the retired `hono` → `node` alias.
   elixir: elixirPlatform,
-  // FastAPI + SQLAlchemy 2 backend.  The `fastapi` framework spelling
-  // desugars to `python` at the lowering boundary (mirrors `hono` →
-  // `node`).
+  // FastAPI + SQLAlchemy 2 backend.  `python` is the only spelling —
+  // the `fastapi` platform alias was retired (mirrors the retired
+  // `hono` → `node` alias).
   python: pythonPlatform,
   // Spring Boot / Spring Data JPA backend (backend-only; embeds a React
   // SPA when the deployable declares `ui:`, like dotnet).
@@ -105,7 +106,7 @@ export interface DiscoveredBackend {
 
 // hono@v4 ships a real co-located manifest (it is the only backend
 // already restructured into a versioned package dir).  dotnet@v10 /
-// phoenixLiveView@v1 are still flat `src/platform/<name>.ts`; their
+// elixir@v1 are still flat `src/platform/<name>.ts`; their
 // manifests are synthesised here until they are packaged, so
 // the discovered set — and thus every resolution — is unchanged.
 const inTreeBackends: DiscoveredBackend[] = [

@@ -1,0 +1,22 @@
+// `with auditable` (built-in capability) on Java — the audit-columns +
+// create/update stamp bundle.  The capability types `createdBy`/`updatedBy` as
+// `User id`, the authentication PRINCIPAL's id — NOT a domain aggregate, so it
+// lowers to the principal's declared id scalar (`user { id: guid }` → UUID),
+// never a dangling `UserId`.  The `currentUser` stamp renders `currentUser.id()`
+// threaded from the request-scoped accessor under auth.  Compiles the full
+// `auditable` surface under `gradle testClasses bootJar`.
+system PS {
+  user { id: guid  name: string }
+  subdomain D {
+    context Shop {
+      aggregate Order with auditable {
+        code: string
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable api { platform: java, contexts: [Shop], dataSources: [st], serves: A, port: 8081, auth: required }
+}

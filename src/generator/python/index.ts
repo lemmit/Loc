@@ -12,7 +12,7 @@ import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { generateReactForContexts } from "../react/index.js";
-import { emitPyAuthFiles, renderPyStubUserKwargs } from "./auth-emit.js";
+import { actorIdAttr, emitPyAuthFiles, renderPyStubUserKwargs } from "./auth-emit.js";
 import {
   abstractBasesOf,
   buildPyBaseReaderFile,
@@ -56,7 +56,7 @@ import {
 //
 // File layout (grows slice by slice — docs/plans/python-backend-plan.md):
 //   pyproject.toml                  — uv-managed project + tool config
-//   Dockerfile, .dockerignore       — python:3.12-slim + uv image
+//   Dockerfile, .dockerignore       — python:3.13-slim + uv image
 //   certs/.gitkeep                  — proxy-CA escape hatch
 //   app/main.py                     — FastAPI app: CORS, /health, /ready
 //   app/settings.py                 — DATABASE_URL from env
@@ -137,6 +137,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // (whose system declares a `user { ... }` block) carries the verifier
   // registry + middleware — anonymous deployables stay byte-identical.
   const authRequired = !!(args.deployable.auth?.required && args.sys.user);
+  // The principal's id attribute — a bare `currentUser` lifecycle-stamp value
+  // resolves to `current_user.<attr>`.  Only meaningful under auth; principal
+  // stamps without auth are gated upstream (loom.python-stamp-unsupported).
+  const principalIdAttr = authRequired && args.sys.user ? actorIdAttr(args.sys.user) : undefined;
   // An `auth { oidc }` block drives the generated OIDC verifier + handshake;
   // absent it, the dev stub keeps a fresh stack callable out of the box.
   const oidc = authRequired ? args.sys.auth : undefined;
@@ -249,7 +253,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     }
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract) continue;
-      out.set(`app/domain/${snake(agg.name)}.py`, renderPyAggregate(agg, ctx, args.emitTrace));
+      out.set(
+        `app/domain/${snake(agg.name)}.py`,
+        renderPyAggregate(agg, ctx, args.emitTrace, principalIdAttr),
+      );
       const externFile = buildPyExternHandlersFile(agg);
       if (externFile != null) {
         out.set(`app/domain/${snake(agg.name)}_handlers.py`, externFile);
@@ -329,7 +336,7 @@ function renderPyproject(
     "[project]",
     `name = "${slug}"`,
     `version = "0.1.0"`,
-    `requires-python = ">=3.12"`,
+    `requires-python = ">=3.13"`,
     "dependencies = [",
     [...PYTHON_PINS.dependencies, ...extraDeps].map(dep),
     "]",
@@ -346,7 +353,7 @@ function renderPyproject(
     "",
     "[tool.ruff]",
     "line-length = 100",
-    `target-version = "py312"`,
+    `target-version = "py313"`,
     "",
     "# E741: DSL-authored lambda params (idiomatically `l` for lines) flow",
     "# into the generated source verbatim.  E711/E712: DSL equality against",
@@ -357,7 +364,7 @@ function renderPyproject(
     `ignore = ["E711", "E712", "E741"]`,
     "",
     "[tool.mypy]",
-    `python_version = "3.12"`,
+    `python_version = "3.13"`,
     "strict = true",
     "",
     "[tool.pytest.ini_options]",
@@ -606,7 +613,7 @@ function renderMain(
 const DOCKERFILE_PY = `# syntax=docker/dockerfile:1
 # Auto-generated.
 
-FROM python:3.12-slim
+FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 # wget backs the compose healthcheck (debian-slim ships neither wget
@@ -636,14 +643,14 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 const DOCKERFILE_PY_FULLSTACK = `# syntax=docker/dockerfile:1
 # Auto-generated — fullstack Python + React (embedded SPA).
 
-FROM node:20-alpine AS spa-build
+FROM node:24-alpine AS spa-build
 WORKDIR /spa
 COPY ClientApp/package.json ./
 RUN npm install --no-audit --no-fund
 COPY ClientApp/ ./
 RUN npm run build
 
-FROM python:3.12-slim
+FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 RUN apt-get update \\

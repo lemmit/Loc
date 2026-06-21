@@ -8,7 +8,7 @@ import { ashPostgresPersistenceAdapter } from "../generator/elixir/adapters/ash-
 import { ashStyleAdapter } from "../generator/elixir/adapters/ash-style.js";
 import { byFeatureLayoutAdapter } from "../generator/elixir/adapters/by-feature-layout.js";
 import { ectoPersistenceAdapter } from "../generator/elixir/adapters/ecto-persistence.js";
-import { vanillaStyleAdapter } from "../generator/elixir/adapters/vanilla-style.js";
+import { layeredStyleAdapter } from "../generator/elixir/adapters/layered-style.js";
 import { generateElixirProject } from "../generator/elixir/index.js";
 import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 
@@ -94,16 +94,19 @@ const elixirPlatform: PlatformSurface = {
   // `ash` owns `application` + `transport` (NOT persistence — `ashPostgres`
   // stays selectable); `vanilla` owns nothing.  So both data layers are
   // first-class on the persistence axis (`ashPostgres` for Ash, `ecto` for
-  // plain Phoenix) and both styles on the application axis (`ash`, `vanilla`).
+  // plain Phoenix) and both styles are real PIPELINE shapes on the
+  // application axis: `ash` (Ash's action surface) and `layered` (DSL
+  // `serviceLayer` — plain Phoenix's controller → context → repository).
+  // `vanilla` is a FOUNDATION value, never a style.
   // The defaults below describe elixir's DEFAULT foundation (ash); a
-  // `foundation: vanilla` deployable overrides them to `ecto` / `vanilla` in
+  // `foundation: vanilla` deployable overrides them to `ecto` / `layered` in
   // lowering (`foundationAdapterOverride`).  The resource/style/transport
   // adapters are real; `genserver` (process-per-aggregate runtime) is a
   // reserved stub.
   adapters(): PlatformAdapters {
     const menu: PlatformAdapters = {
       persistence: { ashPostgres: ashPostgresPersistenceAdapter, ecto: ectoPersistenceAdapter },
-      styles: { ash: ashStyleAdapter, vanilla: vanillaStyleAdapter },
+      styles: { ash: ashStyleAdapter, layered: layeredStyleAdapter },
       layouts: { byFeature: byFeatureLayoutAdapter },
       // Phoenix (Router + controllers) — the Elixir backend's HTTP surface,
       // shared by both foundations (D-PHOENIX-TRANSPORT).

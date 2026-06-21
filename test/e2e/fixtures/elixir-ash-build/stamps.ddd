@@ -1,0 +1,44 @@
+// Lifecycle stamps on the elixir (Ash 3.x) backend — the resource emits an Ash
+// `changes do change fn ... end, on: [:create|:update] end` block that
+// force_change_attributes the audit columns before save.  Two flavours, one per
+// context so neither aggregate double-stamps:
+//   - Tickets: non-principal `stamp onCreate/onUpdate { now() }` (no actor).
+//   - Orders:  `with auditable` → createdBy/updatedBy := currentUser, resolved
+//     to the threaded Ash actor's id (`context.actor.id`); needs auth.
+// Compiled against real Ash 3.x so the change/actor wiring is verified.
+system Stamps {
+  user { id: guid  name: string }
+
+  subdomain D {
+    // Non-principal now() stamps.
+    context Support {
+      stamp onCreate { createdAt := now() }
+      stamp onUpdate { updatedAt := now() }
+      aggregate Ticket with crudish {
+        code: string
+        createdAt: datetime
+        updatedAt: datetime
+      }
+      repository Tickets for Ticket { }
+    }
+
+    // Principal stamps via `with auditable`.
+    context Shop {
+      aggregate Order with auditable, crudish { code: string }
+      repository Orders for Order { }
+    }
+  }
+
+  api A from D
+  storage primary { type: postgres }
+  resource supportSt { for: Support, kind: state, use: primary }
+  resource shopSt { for: Shop, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: elixir { foundation: ash }
+    contexts: [Support, Shop]
+    dataSources: [supportSt, shopSt]
+    serves: A
+    port: 8081
+    auth: required
+  }
+}

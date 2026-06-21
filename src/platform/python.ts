@@ -8,8 +8,8 @@ import {
 // ---------------------------------------------------------------------------
 // Python platform — FastAPI + SQLAlchemy 2 backend deployable
 // (canonical language-ecosystem name, like `node`/`dotnet`/`elixir`;
-// the `fastapi` spelling desugars to `python` at the lowering
-// boundary — see `canonicalPlatform` / `LEGACY_PLATFORM_ALIASES`).
+// the `fastapi` framework-spelled platform alias was RETIRED — `python`
+// is the only spelling, mirroring the retired `hono`/`phoenix` aliases).
 //
 // Backend-only: serves an api (`serves:`), owns a Postgres database
 // (`needsDb: true`), mounts no `ui:` in v1 (static SPA hosting is a

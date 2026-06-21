@@ -38,7 +38,7 @@ enrichment it:
   model, datasources.md, traceability).
 
 `renderDockerCompose` (`src/system/index.ts:310`) hard-codes a single
-`postgres:16-alpine` service, then per deployable calls
+`postgres:18-alpine` service, then per deployable calls
 `platform.composeService({ deployable, sys, slug })` to get a
 `ComposeServiceShape`:
 

@@ -477,7 +477,7 @@ function resolveSelfTypes(root: AstNode, hostName: string, buildRef: BuildRef): 
     const container = node.$container as Record<string, unknown> | undefined;
     if (!container || node.$containerProperty !== "base") continue;
     const idNode: Record<string, unknown> = { $type: "IdType" };
-    idNode.target = buildRef(idNode as never, "target", undefined, hostName);
+    idNode.target = buildRef(idNode as never, "target", undefined, hostName, undefined as never);
     idNode.$container = container;
     idNode.$containerProperty = "base";
     container.base = idNode;

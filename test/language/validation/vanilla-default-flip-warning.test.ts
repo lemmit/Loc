@@ -65,22 +65,7 @@ describe("D-VANILLA-DEFAULT — warn-then-flip sequencing", () => {
     expect(warnings.some((w) => /D-VANILLA-DEFAULT/.test(w))).toBe(false);
   });
 
-  it("does NOT warn on the legacy `phoenix` alias with `foundation: vanilla`", async () => {
-    // The desugar maps `phoenix` → `elixir`, and the explicit foundation
-    // suppresses the warning.
-    const { errors, warnings } = await parse(sys("phoenix { foundation: vanilla }"));
-    expect(errors).toEqual([]);
-    expect(warnings.some((w) => /D-VANILLA-DEFAULT/.test(w))).toBe(false);
-  });
-
-  it("DOES warn on bare `platform: phoenix` (legacy alias, same default semantics)", async () => {
-    // The desugar maps `phoenix` → `elixir`; bare `phoenix` carries the
-    // same implicit-foundation default-flip risk as bare `elixir`.
-    const { warnings } = await parse(sys("phoenix"));
-    expect(warnings.some((w) => /D-VANILLA-DEFAULT/.test(w))).toBe(true);
-  });
-
-  it("does NOT warn on other backend platforms (hono / dotnet / java / python)", async () => {
+  it("does NOT warn on other backend platforms (node / dotnet / java / python)", async () => {
     for (const plat of ["node", "dotnet", "java", "python"]) {
       const { warnings } = await parse(sys(plat));
       expect(

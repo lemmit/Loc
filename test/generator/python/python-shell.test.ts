@@ -66,7 +66,7 @@ describe("python project shell", () => {
     const files = await build();
     const pyproject = files.get("api/pyproject.toml")!;
     expect(pyproject).toContain('name = "api"');
-    expect(pyproject).toContain('requires-python = ">=3.12"');
+    expect(pyproject).toContain('requires-python = ">=3.13"');
     expect(pyproject).toContain('"fastapi>=');
     expect(pyproject).toContain('"sqlalchemy[asyncio]>=');
     expect(pyproject).toContain('"asyncpg>=');
@@ -110,7 +110,7 @@ describe("python project shell", () => {
   it("Dockerfile serves via uvicorn from a uv-synced venv", async () => {
     const files = await build();
     const docker = files.get("api/Dockerfile")!;
-    expect(docker).toContain("FROM python:3.12-slim");
+    expect(docker).toContain("FROM python:3.13-slim");
     expect(docker).toContain("uv sync --no-dev");
     expect(docker).toContain('CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0"');
   });

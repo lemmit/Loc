@@ -7,12 +7,11 @@
 //     `requires` guard), handle_event/3 (per onSubmit/Action lambda),
 //     and render(assigns) — HEEx body emitted by the heex-walker.
 //
-// All pages (scaffold and custom) route through the HEEx walker.
-// Scaffold pages emit canonical body primitives that
-// `expandInlineScaffoldPrimitives` (src/ir/lower/walker-primitive-expander.ts) rewrites
-// during lowering, so `page.body` is always
-// a walker-stdlib `ExprIR` tree.  The walker (heex-walker.ts::walkBodyToHeex)
-// emits HEEx directly — no pack templates for full pages.
+// All pages (scaffold and custom) route through the HEEx walker.  Scaffold
+// pages carry their full walker-stdlib body directly from the macro, so
+// `page.body` is always a walker-stdlib `ExprIR` tree.  The walker
+// (heex-walker.ts::walkBodyToHeex) emits HEEx directly — no pack templates for
+// full pages.
 //
 // Also returns a list of `live "<route>", <Module>` entries the
 // orchestrator splices into router.ex.
@@ -29,7 +28,7 @@ import type {
   UiIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
-import { pageEmitName } from "../../ir/util/page-emit-name.js";
+import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import {
   type ActionBinding,
@@ -56,6 +55,11 @@ export function emitLiveViewPages(args: {
   const { contexts, deployable, sys, appName, appModule } = args;
   const out = new Map<string, string>();
   const routes: LiveRoute[] = [];
+
+  // True when this deployable runs `auth: required` — `LiveAuth.on_mount`
+  // then assigns `@current_user`, which a gated `Action` button reads in its
+  // `<%= if (@current_user.…) do %>` wrapper.  Off ⇒ no gating (byte-identical).
+  const authEnabled = deployable.auth?.required === true;
 
   // Locate the UI block this deployable mounts.  Backends without a
   // `ui:` binding skip — they only emit the API surface.
@@ -104,7 +108,6 @@ export function emitLiveViewPages(args: {
       state: c.state,
       derived: c.derived,
       body: c.body,
-      source: "explicit",
     } as PageIR;
     const w = walkBodyToHeex(
       c.body,
@@ -114,6 +117,7 @@ export function emitLiveViewPages(args: {
       aggregatesByName,
       enumsByName,
       valueObjectsByName,
+      authEnabled,
     );
     componentInfo.set(c.name, {
       actionBindings: w.actionBindings,
@@ -121,12 +125,19 @@ export function emitLiveViewPages(args: {
     });
   }
 
+  // Name-context for `pageEmitName` (slice 3c — derives the emitted name from
+  // the page's role-scoped name + area against the served decls).
+  const nameCtx: PageNameCtx = {
+    aggregateNames: [...aggregatesByName.keys()],
+    workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
+    viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
+  };
   for (const page of ui.pages) {
     if (!page.route) continue; // can't emit a router entry without one
     // Phoenix derives the module + file stem from the page's emit name
     // (`OrderList` → `OrderListLive` / `order_list_live.ex`), not the scaffold's
     // role-scoped page name (`List`) — which would collide across aggregates.
-    const emitName = pageEmitName(page);
+    const emitName = pageEmitName(page, nameCtx);
     const liveModule = `${appModule}Web.${upperFirst(emitName)}Live`;
     const filePath = `lib/${appName}_web/live/${snake(emitName)}_live.ex`;
     const source = renderLiveView({
@@ -140,6 +151,7 @@ export function emitLiveViewPages(args: {
       valueObjectsByName,
       contextModuleByAggName,
       componentInfo,
+      authEnabled,
     });
     out.set(filePath, source);
     routes.push({ route: page.route, liveModule });
@@ -165,7 +177,14 @@ export function emitLiveViewPages(args: {
   if (ui.components.length > 0) {
     out.set(
       `lib/${appName}_web/components/ui_components.ex`,
-      renderUiComponents({ ui, appModule, aggregatesByName, enumsByName, valueObjectsByName }),
+      renderUiComponents({
+        ui,
+        appModule,
+        aggregatesByName,
+        enumsByName,
+        valueObjectsByName,
+        authEnabled,
+      }),
     );
   }
 
@@ -192,6 +211,9 @@ interface RenderArgs {
    *  LiveView can hoist the `handle_event` clauses for `Action`s inside
    *  the (stateless) components it renders. */
   componentInfo: ReadonlyMap<string, ComponentActionInfo>;
+  /** True when the deployable runs `auth: required` — drives currentUser
+   *  action-button gating in the page body (off ⇒ byte-identical). */
+  authEnabled: boolean;
 }
 
 interface ComponentActionInfo {
@@ -268,14 +290,13 @@ function renderLiveView(a: RenderArgs): string {
     valueObjectsByName,
     contextModuleByAggName,
     componentInfo,
+    authEnabled,
   } = a;
   const webModule = `${appModule}Web`;
 
   // All pages — scaffold and custom — route through the HEEx walker.
-  // Scaffold pages emit canonical body primitives that
-  // expandInlineScaffoldPrimitives (src/ir/lower/walker-primitive-expander.ts) rewrites
-  // during lowering, so page.body is always
-  // populated with a walker-stdlib ExprIR tree.  The walker produces
+  // Scaffold pages carry their full walker-stdlib body from the macro, so
+  // page.body is always a walker-stdlib ExprIR tree.  The walker produces
   // handle_event clauses and alias lines from helper imports the body
   // actually references.
   const walked = walkBodyToHeex(
@@ -286,6 +307,7 @@ function renderLiveView(a: RenderArgs): string {
     aggregatesByName,
     enumsByName,
     valueObjectsByName,
+    authEnabled,
   );
   const heex = walked.heex;
   const handlers: HandleEventClause[] = walked.handlers;
@@ -630,8 +652,11 @@ function renderUiComponents(args: {
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
   enumsByName: ReadonlyMap<string, EnumIR>;
   valueObjectsByName: ReadonlyMap<string, ValueObjectIR>;
+  /** True when the host deployable runs `auth: required` — drives
+   *  currentUser action-button gating inside component bodies. */
+  authEnabled: boolean;
 }): string {
-  const { ui, appModule, aggregatesByName, enumsByName, valueObjectsByName } = args;
+  const { ui, appModule, aggregatesByName, enumsByName, valueObjectsByName, authEnabled } = args;
   const webModule = `${appModule}Web`;
   const defs = ui.components.map((c) => {
     const synthPage = {
@@ -640,7 +665,6 @@ function renderUiComponents(args: {
       state: c.state,
       derived: c.derived,
       body: c.body,
-      source: "explicit",
     } as PageIR;
     const walked = walkBodyToHeex(
       c.body,
@@ -650,6 +674,7 @@ function renderUiComponents(args: {
       aggregatesByName,
       enumsByName,
       valueObjectsByName,
+      authEnabled,
     );
     const attrLines = c.params
       .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)

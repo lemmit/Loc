@@ -53,6 +53,7 @@ import type {
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
 import { humanize, snake, upperFirst } from "../../util/naming.js";
+import { tryRenderGate } from "../_frontend/gate-expr.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { heexTarget } from "./heex-target.js";
 
@@ -223,6 +224,15 @@ export interface WalkContext {
    *  operation forms (`OperationForm(data.confirm)`).  Populated when QueryView
    *  walks its single-record `data:` lambda. */
   instanceTypes?: ReadonlyMap<string, string>;
+  /** True when the host deployable runs `auth: required` — so
+   *  `LiveAuth.on_mount` assigns `@current_user` into the LiveView scope.
+   *  Gates an `Action(<instance>.<op>)` button whose operation's `requires`
+   *  predicates are all currentUser-only: the `<.button>` is wrapped in a
+   *  HEEx `<%= if (@current_user.…) do %> … <% end %>` so it's hidden
+   *  server-side when the gate fails (the Ash action still enforces it).
+   *  False ⇒ no `@current_user` exists, so NO gating is emitted and the
+   *  button stays byte-identical. */
+  authEnabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +256,10 @@ export function walkBodyToHeex(
    *  nested-form blocks.  Defaults to empty when callers haven't
    *  threaded VOs yet; the walker falls back to text input. */
   valueObjectsByName: ReadonlyMap<string, ValueObjectIR> = new Map(),
+  /** True when the host deployable runs `auth: required` — drives
+   *  action-button gating against `@current_user`.  Defaults to false
+   *  (no auth ⇒ no gating ⇒ byte-identical output). */
+  authEnabled = false,
 ): WalkResult {
   const stateNames = new Set<string>(page.state.map((f) => snake(f.name)));
   const stateFields = new Map<string, StateFieldIR>(page.state.map((f) => [snake(f.name), f]));
@@ -278,6 +292,7 @@ export function walkBodyToHeex(
     tabSeq: { value: 0 },
     position: "template",
     instanceTypes,
+    authEnabled,
   };
 
   const heex = body ? renderExpr(body, ctx) : `<!-- empty body -->`;
@@ -561,7 +576,41 @@ export function renderAction(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
       thenRoute,
     });
   }
-  return `<.button phx-click="${eventName}" phx-value-id={${idExpr}}>${humanize(opName)}</.button>`;
+  const button = `<.button phx-click="${eventName}" phx-value-id={${idExpr}}>${humanize(opName)}</.button>`;
+  return gateActionButton(button, op, ctx);
+}
+
+/** Wrap an `Action` `<.button>` in a server-side currentUser gate when the
+ *  host deployable has auth AND every `requires` predicate on the operation
+ *  is currentUser-only — the LiveView/HEEx mirror of the JSX frontends'
+ *  action-button gating (`emitAction` in _walker/primitives/controls.ts).
+ *
+ *  Gating signal: `ctx.authEnabled` (the deployable runs `auth: required`,
+ *  so `LiveAuth.on_mount` assigns `@current_user`).  Without auth there is
+ *  no `@current_user` to read, so the button is left ungated and the output
+ *  stays byte-identical.  An op with no `requires`, or any predicate that
+ *  touches `this.<field>` / params (not currentUser-only — `tryRenderGate`
+ *  returns null), is also left ungated; the Ash action still enforces the
+ *  gate server-side regardless (defence-in-depth). */
+function gateActionButton(
+  button: string,
+  op: import("../../ir/types/loom-ir.js").OperationIR,
+  ctx: WalkContext,
+): string {
+  if (!ctx.authEnabled) return button;
+  const gates = op.statements.filter((s) => s.kind === "requires").map((s) => s.expr);
+  if (gates.length === 0) return button;
+  // Classify with the JS gate-expr (currentUser-only ⇒ non-null); gate only
+  // when EVERY predicate is currentUser-only.  The rendered Elixir gate is
+  // produced by `renderExpr` in template scope (`@current_user.…`), NOT by
+  // the JS renderer — `tryRenderGate` is used purely as the classifier.
+  if (!gates.every((g) => tryRenderGate(g, "currentUser") !== null)) return button;
+  const tmplCtx: WalkContext = { ...ctx, position: "template" };
+  // Multiple `requires` clauses combine with Elixir's `and` (the JSX mirror
+  // uses `&&`); `renderExpr` already emits `@current_user.…` in template
+  // scope, so the parenthesised predicates compose directly inside `if`.
+  const gate = gates.map((g) => `(${renderExpr(g, tmplCtx)})`).join(" and ");
+  return `<%= if (${gate}) do %>${button}<% end %>`;
 }
 
 function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
@@ -912,15 +961,20 @@ function styleIrToHeex(expr: Extract<ExprIR, { kind: "call" }>): string | undefi
  *  expressions) — these should NOT be wrapped in `<%= %>`.  Consults
  *  the typed registry (anything with a `heex` renderer registered
  *  produces HEEx markup) so new primitives don't need a second list
- *  edit. */
-function isHEExCall(name: string): boolean {
-  return WALKER_PRIMITIVES[name]?.heex !== undefined;
+ *  edit, AND the ui's user `component`s — a `component` invocation
+ *  renders to a HEEx function-component tag
+ *  (`<…UiComponents.order_panel … />`), which is markup, so wrapping it
+ *  in `<%= %>` (e.g. inside a QueryView `data:` `cond` arm) produces
+ *  invalid HEEx. */
+function isHEExCall(name: string, ctx: WalkContext): boolean {
+  if (WALKER_PRIMITIVES[name]?.heex !== undefined) return true;
+  return ctx.ui.components.some((c) => c.name === name);
 }
 
 export function renderChild(child: ExprIR, ctx: WalkContext): string {
   // If the child is itself a primitive call that returns HEEx markup,
   // render it directly without `<%= %>` wrapping.
-  if (child.kind === "call" && isHEExCall(child.name)) {
+  if (child.kind === "call" && isHEExCall(child.name, ctx)) {
     return renderExpr(child, ctx);
   }
   if (child.kind === "literal" && child.lit === "string") {
@@ -932,7 +986,7 @@ export function renderChild(child: ExprIR, ctx: WalkContext): string {
 export function renderInTemplate(arg: ExprIR, ctx: WalkContext): string {
   if (arg.kind === "literal" && arg.lit === "string") return arg.value;
   // HEEx-generating calls should not be wrapped in <%= %>.
-  if (arg.kind === "call" && isHEExCall(arg.name)) {
+  if (arg.kind === "call" && isHEExCall(arg.name, ctx)) {
     return renderExpr(arg, ctx);
   }
   return `<%= ${renderExpr(arg, { ...ctx, position: "template" })} %>`;
@@ -1035,6 +1089,29 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
  *  null when the page has no guard.  Caller wraps in
  *  `if not (<pred>), do: push_navigate(socket, to: "/")`. */
 export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): string | null {
+  return renderRequiresGuardAt(page, ui, appModule, "handler");
+}
+
+/** Render a page's `requires <pred>` in HEEx *template* scope — the
+ *  current-user claim resolves to `@current_user` rather than the
+ *  handler-scope `socket.assigns.current_user`.  Used by the sidebar
+ *  emitter to gate a nav link inside a `<%= if (<gate>) do %>` against the
+ *  layout-assigned `@current_user`.  Returns null when the page has no
+ *  `requires` clause. */
+export function renderRequiresGuardInTemplate(
+  page: PageIR,
+  ui: UiIR,
+  appModule: string,
+): string | null {
+  return renderRequiresGuardAt(page, ui, appModule, "template");
+}
+
+function renderRequiresGuardAt(
+  page: PageIR,
+  ui: UiIR,
+  appModule: string,
+  position: RenderPosition,
+): string | null {
   if (!page.requires) return null;
   const ctx: WalkContext = {
     appModule,
@@ -1053,7 +1130,7 @@ export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): 
     usedComponents: new Set(),
     slotUsed: { value: false },
     tabSeq: { value: 0 },
-    position: "handler",
+    position,
   };
   return renderExpr(page.requires, ctx);
 }

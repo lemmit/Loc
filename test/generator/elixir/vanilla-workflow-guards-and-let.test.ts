@@ -98,7 +98,7 @@ describe("vanilla — WorkflowsController maps precondition failure to 422", () 
     const ctrl = files.get(
       [...files.keys()].find((k) => k.endsWith("/controllers/workflows_controller.ex"))!,
     )!;
-    expect(ctrl).toMatch(/\{:error, :precondition_failed\} ->/);
+    expect(ctrl).toMatch(/def respond\(conn, \{:error, :precondition_failed\}\)/);
     expect(ctrl).toMatch(/problem_response\(conn, 422,/);
   });
 });
