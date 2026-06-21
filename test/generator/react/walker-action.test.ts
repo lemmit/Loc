@@ -55,8 +55,8 @@ describe("Action primitive — instance-qualified operation refs", () => {
     const files = await buildAndGenerate(SRC);
     const tsx = files.get("web/src/components/OrderPanel.tsx");
     expect(tsx, "OrderPanel component is generated").toBeDefined();
-    expect(tsx!).toMatch(/const confirmOrder = useConfirmOrder\(order\.id\)/);
-    expect(tsx!).toMatch(/const cancelOrder = useCancelOrder\(order\.id\)/);
+    expect(tsx!).toMatch(/const confirmOrder = useConfirmOrder\(order\?\.id\)/);
+    expect(tsx!).toMatch(/const cancelOrder = useCancelOrder\(order\?\.id\)/);
     // Hooks imported from the aggregate's api module (one hop up).
     expect(tsx!).toMatch(
       /import \{[^}]*useCancelOrder[^}]*useConfirmOrder[^}]*\} from "\.\.\/api\/order"/,
