@@ -18,8 +18,8 @@ describe("parseBuiltinPlatformRef", () => {
   it("maps a backend bareword to its default version", () => {
     expect(parseBuiltinPlatformRef("node")).toEqual({
       family: "node",
-      version: "v4",
-      qualified: "node@v4",
+      version: "v5",
+      qualified: "node@v5",
     });
     expect(parseBuiltinPlatformRef("dotnet")?.qualified).toBe("dotnet@v10");
     expect(parseBuiltinPlatformRef("elixir")?.qualified).toBe("elixir@v1");
@@ -56,7 +56,7 @@ describe("platformFor — byte-identity guarantee", () => {
   it("bareword and its default pin resolve to the SAME surface", () => {
     // The crux: `platform: node` must yield the exact instance
     // its default pin resolves to, so emitted output is unchanged.
-    expect(platformFor("node")).toBe(platformFor("node@v4" as never));
+    expect(platformFor("node")).toBe(platformFor("node@v5" as never));
     expect(platformFor("dotnet")).toBe(platformFor("dotnet@v10" as never));
     expect(platformFor("elixir")).toBe(platformFor("elixir@v1" as never));
   });
@@ -80,8 +80,8 @@ describe("platformFor — byte-identity guarantee", () => {
   });
 
   it("throws a clear error for an unregistered backend version", () => {
-    expect(() => platformFor("node@v5" as never)).toThrow(
-      /Unknown backend platform version "node@v5"/,
+    expect(() => platformFor("node@v9" as never)).toThrow(
+      /Unknown backend platform version "node@v9"/,
     );
   });
 });

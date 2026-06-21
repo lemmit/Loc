@@ -27,29 +27,34 @@ describe("manifest contract", () => {
 });
 
 describe("in-tree discovery (default source)", () => {
-  it("discovers node@v4 with a real co-located manifest", () => {
+  it("discovers node@v5 (default) with a real co-located manifest", () => {
+    // The node family ships two co-located packages — v5 (default,
+    // zod 4 / TS 6) and v4 (zod 3 / TS 5).  v5 is listed first.
     const node = discoverBackends().find((b) => b.manifest.family === "node");
     expect(node?.manifest).toMatchObject({
       kind: "backend",
       family: "node",
-      loomVersion: "v4",
+      loomVersion: "v5",
     });
     expect(node?.manifest.core).toMatch(/^\^?\d/);
   });
 
-  it("discovers exactly the four backend families", () => {
+  it("discovers exactly the registered backend versions", () => {
     expect(
       discoverBackends()
         .map((b) => `${b.manifest.family}@${b.manifest.loomVersion}`)
         .sort(),
-    ).toEqual(["dotnet@v10", "elixir@v1", "java@v1", "node@v4", "python@v1"]);
+    ).toEqual(["dotnet@v10", "elixir@v1", "java@v1", "node@v4", "node@v5", "python@v1"]);
   });
 
-  it("resolution is byte-identical: bareword/pin yield the SAME surface", () => {
-    expect(platformFor("node")).toBe(platformFor("node@v4" as never));
+  it("resolution: bareword resolves to the default (v5) surface", () => {
+    expect(platformFor("node")).toBe(platformFor("node@v5" as never));
+    // v4 stays registered + distinct, pinnable via `platform: node@v4`.
+    expect(platformFor("node@v4" as never)).not.toBe(platformFor("node"));
     expect(platformFor("node").name).toBe("node");
-    expect(backendVersionsForFamily("node")).toEqual(["v4"]);
+    expect(backendVersionsForFamily("node")).toEqual(["v4", "v5"]);
     expect(isRegisteredBackendRef("node@v4")).toBe(true);
+    expect(isRegisteredBackendRef("node@v5")).toBe(true);
     expect(isRegisteredBackendRef("node@v9")).toBe(false);
   });
 });

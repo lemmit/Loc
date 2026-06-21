@@ -94,7 +94,7 @@ describe("lowering normalises platform + platformRef", () => {
   it("bareword: platform=family, platformRef=family@latest", async () => {
     const d = await lowerDeployable("node");
     expect(d.platform).toBe("node"); // byte-identical union value
-    expect(d.platformRef).toBe("node@v4");
+    expect(d.platformRef).toBe("node@v5");
   });
 
   it("pin: platform=family (NOT the pin), platformRef=the pin", async () => {

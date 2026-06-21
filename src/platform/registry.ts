@@ -3,6 +3,7 @@ import angularPlatform from "./angular.js";
 import dotnetPlatform from "./dotnet.js";
 import elixirPlatform from "./elixir.js";
 import honoPlatform, { loomManifest as honoV4Manifest } from "./hono/v4/index.js";
+import honoV5Platform, { loomManifest as honoV5Manifest } from "./hono/v5/index.js";
 import javaPlatform from "./java.js";
 import type { LoomBackendManifest } from "./manifest.js";
 // The pure, client-safe metadata half (descriptor table + `platform:` ref
@@ -57,7 +58,12 @@ export {
 
 const platforms: Record<Platform, PlatformSurface> = {
   dotnet: dotnetPlatform,
-  node: honoPlatform,
+  // Bareword `platform: node` → the default version (v5, zod 4 / TS 6).
+  // v4 stays resolvable via the pinned `platform: node@v4` (registered in
+  // `inTreeBackends` below).  Backend barewords actually resolve through
+  // `parseBuiltinPlatformRef` → `qualifiedBackendSurfaces()`, so this
+  // entry feeds `allPlatforms()` / the descriptor-consistency check.
+  node: honoV5Platform,
   react: reactPlatform,
   // Second frontend-only platform — Svelte 5 / SvelteKit static SPA.
   // Same deployable contract as `react` (targets a backend, no DB).
@@ -110,6 +116,9 @@ export interface DiscoveredBackend {
 // manifests are synthesised here until they are packaged, so
 // the discovered set — and thus every resolution — is unchanged.
 const inTreeBackends: DiscoveredBackend[] = [
+  // Both Hono package versions are registered: v5 (default, zod 4 / TS 6)
+  // and v4 (zod 3 / TS 5, pinnable via `platform: node@v4`).
+  { manifest: honoV5Manifest, surface: honoV5Platform },
   { manifest: honoV4Manifest, surface: honoPlatform },
   {
     manifest: {
