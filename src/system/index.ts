@@ -399,8 +399,16 @@ function renderDockerCompose(sys: SystemIR): string {
   lines.push("      POSTGRES_DB: postgres");
   lines.push("      POSTGRES_USER: postgres");
   lines.push("      POSTGRES_PASSWORD: postgres");
+  // postgres:18 moved the default PGDATA to /var/lib/postgresql/18/docker
+  // (and the declared VOLUME to /var/lib/postgresql). Pin it back to the
+  // legacy path so the named `pgdata` mount below keeps holding the data.
+  lines.push("      PGDATA: /var/lib/postgresql/data");
   lines.push("    volumes:");
-  lines.push("      - pgdata:/var/lib/postgresql/data");
+  // postgres:18+ stores data in a major-version subdirectory and wants the
+  // volume mounted at /var/lib/postgresql (NOT .../data) — mounting the old
+  // /data path makes the 18 image refuse to start ("PostgreSQL data in
+  // /var/lib/postgresql/data (unused mount/volume)").  See docker-library/postgres#1259.
+  lines.push("      - pgdata:/var/lib/postgresql");
   // Per-deployable databases keep each service's schema isolated.
   // EF Core's EnsureCreated is all-or-nothing per database, so two
   // .NET deployables sharing a DB race: the first to start creates

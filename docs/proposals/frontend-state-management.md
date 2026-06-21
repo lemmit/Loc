@@ -1,5 +1,11 @@
 # Frontend state management — the `store` keyword and the lifetime ladder
 
+> **Related:** this note owns the `store` *container* (keyword, lifetime ladder,
+> per-frontend lowering). **Named actions over store state** — the transitions
+> that mutate it — are [`named-actions-and-stores.md`](named-actions-and-stores.md)
+> ("Proposal A"); treat the two as one feature split by concern. Async effects in
+> those actions: [`async-actions-and-effects.md`](async-actions-and-effects.md).
+>
 > Status: **proposal** (unadopted). Supersedes the externally-drafted
 > "State Management DSL for Loom" (`state` / `store` / `machine` →
 > TypeScript / Zustand / XState). This revision keeps the one good idea in that

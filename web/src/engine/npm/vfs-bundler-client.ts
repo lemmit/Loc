@@ -132,12 +132,21 @@ export class VfsBundlerClient {
 
   dispose(): void {
     this.disposed = true;
-    for (const slot of this.pending.values()) clearTimeout(slot.timer);
+    // Resolve — not just clear — any in-flight runs.  A run pending at
+    // dispose time would otherwise leave its `prepare()` awaiter hanging
+    // forever (the timer is cleared, no reply ever comes): the lost
+    // completion behind #1242 (preview-runtime e2e specs stall the full
+    // 600s after a SUCCESSFUL bundle when a dispose races the run).
+    // Mirror `respawn`, which already resolves its pending set.
+    for (const slot of this.pending.values()) {
+      clearTimeout(slot.timer);
+      slot.resolve({ ok: false, message: "Bundler disposed" });
+    }
+    this.pending.clear();
     try {
       this.worker.terminate();
     } catch {
       /* ignore */
     }
-    this.pending.clear();
   }
 }

@@ -80,6 +80,14 @@ npm run test:k8s          # LOOM_K8S=1 — `generate system --k8s` → helm lint
 npm run test:k8s-e2e      # cluster smoke — install ONE backend's chart (per-deployable enabled toggle) into a kind cluster + throwaway postgres, assert it boots + /ready + real read (findAll GET) AND write (POST a fixture body → 201 → read back) round-trips; parametrized SMOKE_DDD/SMOKE_BACKEND/SMOKE_FIXTURE (k8s-e2e.yml fans it across backends as a matrix); needs kind + kubectl + helm + docker (run `kind create cluster` first)
 ```
 
+**Behavioral tier (headless, no docker)** — boots the GENERATED Hono backend on PGlite in-process and runs the DSL-emitted `test e2e` (api) + `test` (unit) suites, promoting the behavioral domain layer (otherwise nightly-docker-only in `conformance-full`) to a fast per-PR gate. Reuses the playground's own runners (`web/src/testing/*`, `web/src/runtime/ddl.ts`). Not part of `npm test` (own pinned deps — zod 3 etc.):
+
+```bash
+cd test/behavioral && npm ci && node run.mjs   # api + unit both gate (see test/behavioral/README.md)
+```
+
+Corpus is a curated allowlist in `test/behavioral/corpus.json` (single-`platform: node`-backend systems only, so dispatch is unambiguous). Gated by `behavioral-e2e.yml`.
+
 `LOOM_E2E_CA_DIR=<dir-of-*.crt>` injects custom CAs when running the e2e suite behind a TLS-intercepting proxy.
 
 ### Docker (running the container-backed suites)
@@ -248,7 +256,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 
 ## CI surface (what each workflow gates)
 
-- `test.yml` — the fast vitest suite (the same one `npm test` runs); also runs `test:biome-gen` against emitted TS/TSX.
+- `test.yml` — the fast vitest suite (the same one `npm test` runs), **sharded 4 ways** via `vitest --shard` (the suite is ~900s of evenly-spread CPU-bound work with no hot file, so it scales horizontally — not by optimising individual files). Each shard emits a `blob` report; the `coverage` job merges them (`vitest --merge-reports`) into one combined coverage summary. `biome ci` + `test:biome-gen` run in a separate `lint` job; `tests-passed` is the single roll-up status for branch protection — require it, not the per-shard `test (shard i/4)` checks, so the shard count can change without touching branch-protection rules. Locally, `npm run test:gen` / `test:lang` / `test:ir` scope to a subtree.
 - `langium-generated.yml` — guards that `npm run langium:generate` produces deterministic output (drift between `ddd.langium` and the committed types).
 - `k8s-build.yml` — `generate system --k8s` → `helm lint` + `helm template` | `kubeconform` (rendered chart + raw `k8s/`) against the k8s API schemas. Catches Helm/manifest emitter drift. See `docs/kubernetes.md`.
 - `k8s-e2e.yml` — heavier cluster smoke, **fanned across backends as a matrix** (one cell per backend, each installing just its workload via the chart's per-deployable `enabled` toggle): hono/dotnet/python/java/phoenix-Ash over `scripts/k8s-e2e/k8s-smoke.ddd` + phoenix-vanilla over `examples/tasks-vanilla.ddd`. Installs into a `kind` cluster (+ throwaway postgres named `db` so each backend's native default URL connects) and asserts the backend boots, reaches `/ready`, and real read (`findAll` `GET`) + write (`POST` a fixture body → `201` → read back) round-trips through the migrated DB. NOT per-PR — runs nightly, on the `e2e-k8s` PR label, or via manual dispatch. See `docs/kubernetes.md`.
@@ -266,7 +274,8 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-ash-obs-e2e.yml` / `java-obs-e2e.yml` / `python-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout).
 - `generated-svelte-build.yml` — matrix `{example × svelte pack}`, generates the SvelteKit project and typechecks it (the Svelte analogue of `generated-react-build.yml`). Vue has no dedicated generated-build workflow yet (it rides the fast vitest suite).
 - `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview).
-- `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader run).
+- `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader run). `conformance-full` (nightly / `run-conformance` label) is the only place the DSL-emitted behavioral `test e2e` suites run against a docker stack.
+- `behavioral-e2e.yml` — headless per-PR behavioral gate: boots the GENERATED Hono backend on PGlite in-process (no docker) and runs the DSL-emitted `test e2e` (api) + `test` (unit) suites over `test/behavioral/corpus.json` (both tiers gate). Promotes the behavioral domain layer from nightly-docker-only to a fast per-PR signal (Hono/TS only; cross-backend stays in conformance).
 - `cleanup-artifacts.yml` — scheduled tidy of test artefacts.
 
 ### Local enforcement (checked-in Claude Code hooks)

@@ -73,10 +73,15 @@ export function renderGradleBuild(
     `    implementation("org.jmolecules:jmolecules-ddd:${JMOLECULES_VERSION}")`,
     `    implementation("org.jmolecules:jmolecules-events:${JMOLECULES_VERSION}")`,
     `    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:${SPRINGDOC_VERSION}")`,
-    // Flyway runs the emitted db/migration/V*.sql on boot (Boot
-    // auto-configures it from the classpath; versions managed by the
-    // imported BOM).  Only shipped when the deployable owns migrations.
-    options.flyway ? `    implementation("org.flywaydb:flyway-core")` : null,
+    // Flyway runs the emitted db/migration/V*.sql on boot.  Spring Boot 4.x
+    // no longer auto-configures Flyway from `flyway-core` alone — the
+    // `spring-boot-starter-flyway` starter is what wires the
+    // FlywayAutoConfiguration, so migrations would silently skip without it.
+    // (versions managed by the imported BOM).  Only shipped when the
+    // deployable owns migrations.
+    options.flyway
+      ? `    implementation("org.springframework.boot:spring-boot-starter-flyway")`
+      : null,
     options.flyway ? `    implementation("org.flywaydb:flyway-database-postgresql")` : null,
     // OIDC turnkey auth (D-AUTH-OIDC): Nimbus JOSE+JWT — the lightweight
     // JWKS/JWT library Spring Security itself uses, for the generated
