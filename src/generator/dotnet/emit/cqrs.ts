@@ -95,6 +95,7 @@ export function renderQuery(args: {
   return `// Auto-generated.
 using Mediator;
 using ${args.ns}.Domain.Ids;
+using ${args.ns}.Domain.Enums;
 using ${args.ns}.Application.${plural(args.aggName)}.Responses;
 ${extra ? extra + "\n" : ""}
 namespace ${args.ns}.Application.${plural(args.aggName)}.Queries;

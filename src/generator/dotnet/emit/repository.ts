@@ -53,6 +53,10 @@ export function renderRepositoryInterface(
     lines(
       "// Auto-generated.",
       `using ${ns}.Domain.Ids;`,
+      // An enum-typed find/retrieval param (`ByStatus(status: Status)`) names a
+      // `Domain.Enums` type in the interface signature; the concrete repository
+      // already imports it unconditionally, so mirror that here.
+      `using ${ns}.Domain.Enums;`,
       anyFindUsesUser ? `using ${ns}.Auth;` : null,
       anyFindIsPaged ? `using ${ns}.Domain.Common;` : null,
       "",
