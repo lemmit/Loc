@@ -1,5 +1,6 @@
 // Auto-generated.
 using CatalogApi.Domain.Ids;
+using CatalogApi.Domain.Enums;
 
 namespace CatalogApi.Domain.Customers;
 

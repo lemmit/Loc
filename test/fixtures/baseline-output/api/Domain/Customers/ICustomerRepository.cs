@@ -1,5 +1,6 @@
 // Auto-generated.
 using Api.Domain.Ids;
+using Api.Domain.Enums;
 
 namespace Api.Domain.Customers;
 
