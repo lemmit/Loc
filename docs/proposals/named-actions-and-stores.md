@@ -10,8 +10,9 @@
 > closes with why this is the prerequisite that turns a hypothetical
 > Fable/Feliz/Elmish target from "synthesis" into "projection." The decisions
 > in §8 are settled (keyword, purity boundary, effect-vocabulary scoping,
-> composition, store deferral, async outcomes); the only remaining open item
-> is `store` persistence, explicitly out of v1 scope.
+> composition, store deferral, async-outcome *shape*); the remaining open items
+> are the continuation *spelling* (§2.3) and `store` persistence — both out of
+> v1 scope.
 >
 > **Framing note (this revision):** "an action is a pure function" is
 > idiomatic to *nobody* — Redux calls the data an action and the *reducer*
@@ -22,13 +23,28 @@
 > *proves* it pure by reifying the declared effects. Lead users with "a named
 > state transition," reserve the `(state, payload) -> (state', Cmd)` reading
 > for the backend author.
+>
+> **Notation & ground truth.** Examples below are tagged **✅ ships today** or
+> **🔶 proposed (this note)**. Three corrections to earlier drafts, verified
+> against the grammar: (1) there is **no `call` keyword** — a bare invocation
+> is already a statement (`AssignOrCallStmt`, `ddd.langium:1704`; the `call?=`
+> there is a *has-parens* flag, not a keyword); (2) the only `then` that ships
+> is the **success-only named arg on the `Action {}` render primitive**
+> (`then:`, read via `namedArgValue`, `controls.ts:194`) — the statement-level
+> `then`/`onError` continuation in §2.3 is 🔶, and its spelling (arrow vs the
+> colon precedent) is open; (3) there is **no nullary `() =>` lambda** — the
+> rule requires exactly one param (`Lambda: param=ID '=>' …`,
+> `ddd.langium:1896`), so a nullary handler is reached only by *referencing* a
+> named action. `toast(…)` ships only inside live-event `on …(e) { toast(…) }`
+> handlers today (`react/realtime-handlers-builder.ts`); admitting it in action
+> bodies is part of the 🔶 surface.
 
 ## TL;DR
 
-A page/component handler today is an **anonymous lambda** with a statement
-block (`onSubmit: c => { draft.x := c.x; step := 1 }` — grammar
-`ddd.langium:743-747`, IR `{ kind: "lambda"; body?; block?: StmtIR[] }` at
-`loom-ir.ts:2500-2511`). It has no name in the source or the IR.
+A page/component handler today is an **anonymous, single-param lambda** with a
+statement block (`onSubmit: c => { draft.x := c.x; step := 1 }` — grammar
+`Lambda` at `ddd.langium:1896`, IR `{ kind: "lambda"; param; body?; block?:
+StmtIR[] }` at `loom-ir.ts:2493-2503`). It has no name in the source or the IR.
 
 Every target that must **hoist** a handler out of the markup therefore has to
 *invent* a name. The LiveView walker does exactly this — it gensyms
@@ -46,14 +62,17 @@ propose to close that gap: let authors name page-local transitions, the same
 way `operation` already names domain ones.
 
 ```ddd
-page NewOrder {
-  state { step: int = 0; draft: PlaceOrderRequest = {} }
+page NewOrder {                                            // 🔶 the action decls + bare-ref handlers are proposed
+  state {                                                  // ✅ state block / fields ship today
+    step: int = 0
+    draft: PlaceOrderRequest = {}
+  }
 
-  action next()   { step := step + 1 }
-  action submit() { placeOrder(draft); navigate(OrderConsole, { customerId: draft.customerId }) }
+  action next()   { step := step + 1 }                                       // 🔶 (body stmts are ✅ real)
+  action submit() { placeOrder(draft); navigate(OrderConsole, { customerId: draft.customerId }) }  // 🔶 decl; calls ✅
 
-  body: match {
-    step == 0 => Form { into: draft, fields: [customerId], onSubmit: next }
+  body: match {                                            // ✅ match / Form / onSubmit ship today
+    step == 0 => Form { into: draft, fields: [customerId], onSubmit: next }     // onSubmit: <named action> is 🔶
     step == 2 => Review { of: draft, onSubmit: submit }
     else => Empty {}
   }
@@ -92,9 +111,11 @@ action <name>(<param>: <Type>?) { <Statement>* }
 ```
 
 The body reuses the existing handler statement set (`Statement`,
-`ddd.langium:1577`): `:=` / `+=` / `-=` (state writes), bare calls
-(`placeOrder(draft)`, `navigate(...)`, `toast(...)`), `emit`, `let`, `for`,
-`if let`. **No new statement semantics.**
+`ddd.langium:1624`): `:=` / `+=` / `-=` (state writes), bare calls
+(`placeOrder(draft)`, `navigate(...)`), `emit`, `let`, `for`, `if let`,
+`return` — all ✅ today. **No new statement semantics.** (`toast(…)` is *not*
+yet a general body call — it ships only in live-event `on` handlers; admitting
+it here is 🔶, see §3.2.)
 
 ### 2.1 The one rule that earns the payoff — purity by restriction
 
@@ -163,20 +184,27 @@ splits this by direction:
   remote-data union + load `Cmd` + outcome `Msg` from `QueryView`; no DSL
   change.
 
-- **Writes (commands with an outcome) — reuse `then:`, add a failure arm.**
-  The language already has a *success continuation*: the
-  `Action { confirm, then: navigate(...) }` primitive's `then:`. We extend that
-  one idea — an effectful call carries an optional `then` (success) and an
-  optional `onError` (failure); the pair **is** a `Result<T, E>` outcome `Msg`
-  with its two `update` arms. A call with neither keeps today's terse
-  implicit-success behaviour (failure bubbles to the generic error surface), so
-  the common case stays short.
+- **Writes (commands with an outcome) — reuse `then:`, add a failure arm.** 🔶
+  The shipped precedent is the **success-only `then:` named arg** on the
+  `Action {}` render primitive (`Action { order.confirm, then: navigate(...) }`
+  — ✅, read via `namedArgValue`, `controls.ts:194`). We promote that one idea
+  to a statement-level continuation: an effectful call carries an optional
+  `then` (success) and an optional `onError` (failure); the pair **is** a
+  `Result<T, E>` outcome `Msg` with its two `update` arms. A call with neither
+  keeps today's terse implicit-success behaviour (failure bubbles to the
+  generic error surface), so the common case stays short.
+
+  **No `call` keyword** — a bare invocation already parses as a statement; the
+  continuation just hangs off it. The exact spelling is open (the arrow below
+  vs the colon of the existing `Action { then: }` precedent; whether the arms
+  attach to the call or to a wrapping form). Shown with an arrow for contrast
+  only:
 
 ```ddd
-action submit() {
-  call placeOrder(draft)
+action submit() {                                          // 🔶 (then/onError surface; bare call ✅)
+  placeOrder(draft)
     then      => navigate(OrderConsole, { customerId: draft.customerId })
-    onError e => toast(e.message)
+    onError e => showError(e.message)
 }
 ```
 
@@ -188,7 +216,7 @@ projects to:
     Cmd.OfAsync.either Api.placeOrder model.Draft
         (fun _ -> Submitted (Ok ())) (fun e -> Submitted (Error e.Message))
 | Submitted (Ok ())   -> model, Navigation.navigate (Route.OrderConsole model.Draft.CustomerId)
-| Submitted (Error m) -> model, Cmd.ofMsg (Toast m)
+| Submitted (Error m) -> model, Cmd.ofMsg (ShowError m)
 ```
 
 This closes the one MVU axis named actions do not (async effect outcomes) with
@@ -204,7 +232,7 @@ and is the common case. A `store` is for state that is **shared across pages
 or outlives a single page**:
 
 ```ddd
-store Cart {
+store Cart {                               // 🔶 store/use/action all proposed; body stmts (:=, +=, calls) ✅
   state { lines: OrderLine[] = [] }
   action add(l: OrderLine) { lines += l }
   action clear()           { lines := [] }
@@ -268,12 +296,12 @@ store Cart {
   action clear() { lines := [] }            // data only — no navigate/toast
 }
 
-page CartPage {
+page CartPage {                              // 🔶 store/use/action + then/onError; bare call ✅
   use Cart
   action confirm() {
-    call placeOrder(Cart.lines)
+    placeOrder(Cart.lines)
       then      => { Cart.clear(); navigate(OrderConsole, { id: ... }) }  // page owns the redirect
-      onError e => toast(e.message)
+      onError e => showError(e.message)
   }
 }
 ```
@@ -281,12 +309,12 @@ page CartPage {
 ```fsharp
 // the page program owns the nav Cmd; the Cart program only ever mutates Lines
 | Confirmed (Ok ())  -> model, Cmd.batch [ Cmd.ofMsg (CartMsg Clear); Navigation.navigate (Route.OrderConsole ...) ]
-| Confirmed (Error m)-> model, Cmd.ofMsg (Toast m)
+| Confirmed (Error m)-> model, Cmd.ofMsg (ShowError m)
 ```
 
 | In an action body | page / component | store |
 |---|---|---|
-| `:=` own state · `call` · `emit` · call a store action | ✓ | ✓ |
+| `:=` own state · bare call · `emit` · call a store action | ✓ | ✓ |
 | `navigate` / `toast` | ✓ | ✗ — view-scoped |
 
 This is not a purity exception (`navigate` reifies to a `Cmd` cleanly) — it is
@@ -382,7 +410,7 @@ This is deliberately incremental: **store-less page/component actions first**
 This note is the prerequisite the (separate) Fable/Elmish-target analysis kept
 running into. The headline claim of that analysis — "Loom already models
 named, typed actions, so the Elmish `Msg` union is a *projection*" — is **false
-against today's IR** (handlers are anonymous; `loom-ir.ts:2500-2511`). Named
+against today's IR** (handlers are anonymous; `loom-ir.ts:2493-2503`). Named
 actions make it **true**:
 
 ```fsharp
@@ -440,13 +468,18 @@ These were settled and are no longer open. They define v1.
    projection (which needs *named actions*, not *shared state*). `store` lands
    second (§3).
 7. **Async outcomes (§2.3).** Reads are **derived** from `QueryView` (no new
-   surface). Writes reuse the existing `then:` success continuation and add an
-   optional `onError` failure arm; the `(then, onError)` pair projects to a
-   `Result<T, E>` outcome `Msg` + two `update` arms. Continuation-less calls
-   keep implicit-success behaviour.
+   surface). Writes promote the existing **success-only `then:` named arg** (on
+   the `Action {}` render primitive today) to a statement-level continuation and
+   add an optional `onError` failure arm; the `(then, onError)` pair projects to
+   a `Result<T, E>` outcome `Msg` + two `update` arms. Continuation-less calls
+   keep implicit-success behaviour. **No `call` keyword is introduced** (bare
+   invocation already parses); the continuation's exact spelling (arrow vs the
+   `Action { then: }` colon precedent) is the one open item here.
 
-## 9. Remaining open item
+## 9. Remaining open items
 
+- **Continuation spelling (§2.3).** Statement-level `then`/`onError` — arrow vs
+  colon, and whether the arms attach to the call or to a wrapping form.
 - **`store` lifetime/persistence** — in-memory only, or
   session/local-storage-backed? Out of scope for v1; revisit when `store`
   lands.
