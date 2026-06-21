@@ -1218,7 +1218,7 @@ TLS-intercepting egress proxy:
 
 - **Pulling the CI Elixir image:** `docker pull hexpm/elixir:…` hits the
   Docker Hub anonymous rate limit. **Google's mirror works:**
-  `docker pull mirror.gcr.io/hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim`,
+  `docker pull mirror.gcr.io/hexpm/elixir:1.18.4-erlang-27.3.4-debian-bookworm-20260610-slim`,
   then re-tag to the canonical name so the test harness finds it.
 - **Trusting the proxy CA inside the container:** mount the host's
   `/usr/local/share/ca-certificates/` (the `egress-gateway-ca-*` /

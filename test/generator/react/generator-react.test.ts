@@ -104,13 +104,20 @@ describe("react generator", () => {
     expect(newOrder).not.toMatch(/as never/);
   });
 
-  it("datetime fields use native input with second precision", async () => {
+  it("datetime fields use native input at minute precision (datetime-local without step)", async () => {
     // This originally swapped to Mantine's <DateTimePicker> via
     // Controller, but Mantine's picker renders as a button (not a
     // typeable input) and resists Playwright's `.fill()` even with
-    // valueFormat pinned.  Walked back to native datetime-local; we
-    // keep seconds (slice 0..19, not 0..16) and document the
-    // UTC-implicit timezone assumption.
+    // valueFormat pinned.  Walked back to native datetime-local.
+    //
+    // A `<input type="datetime-local">` with no `step` is
+    // MINUTE-precision: Chromium rejects a value carrying seconds
+    // (`YYYY-MM-DDTHH:mm:ss`) as "Malformed value", so the page object
+    // must fill 16 chars (`YYYY-MM-DDTHH:mm`), NOT 19.  The headless UI
+    // behavioral tier (test/behavioral/run-ui.mjs) caught the 19-char
+    // fill hanging the real browser; the backend accepts the
+    // minute-precision value (UTC-implicit), so the round-trip stays
+    // correct.
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);
     const newOrder = files.get("web_app/src/pages/orders/new.tsx")!;
@@ -118,9 +125,9 @@ describe("react generator", () => {
     expect(newOrder).not.toMatch(/DateTimePicker/);
     expect(newOrder).not.toMatch(/@mantine\/dates/);
     const orderPo = files.get("web_app/e2e/pages/order.ts")!;
-    // Page object preserves seconds.  No helpers file required.
-    expect(orderPo).toMatch(/\.slice\(0, 19\)/);
-    expect(orderPo).not.toMatch(/\.slice\(0, 16\)/);
+    // Page object fills minute precision (the input's accepted format).
+    expect(orderPo).toMatch(/\.slice\(0, 16\)/);
+    expect(orderPo).not.toMatch(/\.slice\(0, 19\)/);
     expect(orderPo).not.toMatch(/formatPickerValue/);
     expect(files.get("web_app/e2e/pages/_helpers.ts")).toBeFalsy();
   });

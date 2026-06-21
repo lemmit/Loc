@@ -84,7 +84,7 @@ describe.skipIf(!ENABLED)("Phoenix embeds React — runtime e2e (LOOM_EMBED_E2E_
     if (!hasElixir()) {
       throw new Error(
         "LOOM_EMBED_E2E_PHOENIX=1 set but `mix` is not on PATH. " +
-          "Add `erlef/setup-beam@v1` (otp 27.0 / elixir 1.17.2) to the workflow.",
+          "Add `erlef/setup-beam@v1` (otp 27.3 / elixir 1.18.4) to the workflow.",
       );
     }
 
@@ -102,7 +102,7 @@ describe.skipIf(!ENABLED)("Phoenix embeds React — runtime e2e (LOOM_EMBED_E2E_
         execSync(
           `docker run -d --rm --name ${pgContainer} ` +
             `-e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=${externalPgDb} ` +
-            `-p ${pgPort}:5432 postgres:16-alpine`,
+            `-p ${pgPort}:5432 postgres:18-alpine`,
           { stdio: "pipe", timeout: 60_000 },
         );
         const pgDeadline = Date.now() + 60_000;

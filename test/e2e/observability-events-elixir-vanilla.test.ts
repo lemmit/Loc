@@ -134,7 +134,7 @@ describe.skipIf(!ENABLED)(
         throw new Error(
           "LOOM_OBS_E2E_PHOENIX_VANILLA=1 set but `mix` is not on PATH. " +
             "The suite needs Erlang/OTP + Elixir. " +
-            "Add `erlef/setup-beam@v1` with `otp-version: '27.0'` and `elixir-version: '1.17.2'` to the workflow.",
+            "Add `erlef/setup-beam@v1` with `otp-version: '27.3'` and `elixir-version: '1.18.4'` to the workflow.",
         );
       }
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-obs-pxv-"));
@@ -158,7 +158,7 @@ describe.skipIf(!ENABLED)(
           execSync(
             `docker run -d --rm --name ${pgContainer} ` +
               `-e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=${externalPgDb} ` +
-              `-p ${pgPort}:5432 postgres:16-alpine`,
+              `-p ${pgPort}:5432 postgres:18-alpine`,
             { stdio: "pipe", timeout: 60_000 },
           );
           const pgDeadline = Date.now() + 60_000;

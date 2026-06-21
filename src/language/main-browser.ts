@@ -5,7 +5,7 @@ import {
   BrowserMessageReader,
   BrowserMessageWriter,
   createConnection,
-} from "vscode-languageserver/browser.js";
+} from "vscode-languageserver/browser";
 import { createDddServices } from "./ddd-module.js";
 
 // Browser entry for the Loom language server.  Hosts the full Langium LSP

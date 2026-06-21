@@ -131,10 +131,13 @@ export function buildTypeRef(spec: TypeSpec): TypeRef {
       base = mkPrimitiveType({ $type: "PrimitiveType", name: spec.base.name });
       break;
     case "id":
-      base = mkIdType({ $type: "IdType", target: { $refText: spec.base.target } });
+      base = mkIdType({ $type: "IdType", target: { $refText: spec.base.target, ref: undefined } });
       break;
     case "named":
-      base = mkNamedType({ $type: "NamedType", target: { $refText: spec.base.target } });
+      base = mkNamedType({
+        $type: "NamedType",
+        target: { $refText: spec.base.target, ref: undefined },
+      });
       break;
   }
   return mkTypeRef({

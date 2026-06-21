@@ -74,7 +74,7 @@ describe.skipIf(!ENABLED)(
         const mix = fs.readFileSync(path.join(projDir, "mix.exs"), "utf8");
         expect(mix).toMatch(/dialyxir/);
 
-        const image = "hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim";
+        const image = "hexpm/elixir:1.18.4-erlang-27.3.4-debian-bookworm-20260610-slim";
         // Dialyxir is a dev-only dep so `mix deps.get` here is
         // unscoped (NOT --only prod) — pulls dialyxir + transitive deps
         // alongside the runtime ones.  MIX_ENV defaults to :dev which

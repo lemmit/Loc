@@ -90,13 +90,13 @@ async function parseProject(
   }
 }
 
-function collectDiagnostics(docs: { uri: { toString(): string }; diagnostics?: { severity?: number; message: string; range?: { start: { line: number; character: number } }; source?: string }[] }[]): BuildDiagnostic[] {
+function collectDiagnostics(docs: { uri: { toString(): string }; diagnostics?: { severity?: number; message: string | { value: string }; range?: { start: { line: number; character: number } }; source?: string }[] }[]): BuildDiagnostic[] {
   const out: BuildDiagnostic[] = [];
   for (const doc of docs) {
     for (const d of doc.diagnostics ?? []) {
       out.push({
         severity: d.severity === 1 ? "error" : "warning",
-        message: d.message,
+        message: typeof d.message === "string" ? d.message : d.message.value,
         line: d.range ? d.range.start.line + 1 : undefined,
         column: d.range ? d.range.start.character + 1 : undefined,
         source: typeof d.source === "string" ? d.source : "loom",

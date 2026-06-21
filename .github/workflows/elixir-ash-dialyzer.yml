@@ -92,7 +92,7 @@ jobs:
           # new OTP / Elixir means the standard-library PLT changes.
           hash=$(cat /tmp/ci/phoenix-dialyzer/acme-lv/out/phoenix_app/mix.exs | sha256sum | cut -d' ' -f1)
           echo "hash=$hash" >> "$GITHUB_OUTPUT"
-          echo "image_tag=1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim" >> "$GITHUB_OUTPUT"
+          echo "image_tag=1.18.4-erlang-27.3.4-debian-bookworm-20260610-slim" >> "$GITHUB_OUTPUT"
 
       - name: Cache Phoenix deps + _build + PLTs
         uses: actions/cache@v5

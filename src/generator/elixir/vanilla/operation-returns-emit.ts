@@ -313,26 +313,37 @@ export function renderReturningOpControllerAction(
   const opSnake = snake(op.name);
   const aggSnake = snake(agg.name);
   const aggPascal = upperFirst(agg.name);
-  const errorClauses = errorVariantsOf(op, ctx).map(
-    (v) => `        {:error, ${JSON.stringify(v.tag)}, data} ->
-          problem_variant(conn, ${v.status}, ${JSON.stringify(v.type)}, ${JSON.stringify(v.title)}, data)`,
-  );
+  // The tagged-result dispatch lives in a dedicated `<op>_<agg>_result/2`
+  // helper rather than an inline `case` so Elixir 1.18's type checker can't
+  // narrow the scrutinee to the op's exact inferred result (e.g. an op whose
+  // body always rejects infers `{:error, …}`-only, which would flag the
+  // `{:ok, _}` arm — and vice-versa).  A multi-clause private fn keeps every
+  // outcome reachable.
+  const resultFn = `${opSnake}_${aggSnake}_result`;
+  // Public (not `defp`): Elixir 1.18 infers a private fn's parameter type
+  // from its (single) call site, so a `defp` helper would re-trigger an
+  // "unused clause" warning for whichever outcome this op's body can't
+  // produce.  A public fn keeps the parameter at its full clause domain.
+  const resultClauses = [
+    `  def ${resultFn}(conn, {:ok, success}), do: json(conn, success)`,
+    ...errorVariantsOf(op, ctx).map(
+      (v) => `  def ${resultFn}(conn, {:error, ${JSON.stringify(v.tag)}, data}),
+    do: problem_variant(conn, ${v.status}, ${JSON.stringify(v.type)}, ${JSON.stringify(v.title)}, data)`,
+    ),
+  ].join("\n\n");
   return `
   def ${opSnake}(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
 
     with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id) do
-      case ${ctxModule}.${opSnake}_${aggSnake}(record, attrs) do
-        {:ok, success} ->
-          json(conn, success)
-
-${errorClauses.join("\n\n")}
-      end
+      ${resultFn}(conn, ${ctxModule}.${opSnake}_${aggSnake}(record, attrs))
     else
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
     end
-  end`;
+  end
+
+${resultClauses}`;
 }
 
 /** The shared per-controller responder for an error variant — RFC-7807

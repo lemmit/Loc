@@ -183,7 +183,7 @@ export class DddScopeProvider extends DefaultScopeProvider {
  * cross-module reference must point at a *declaration*, not a wrapper.
  */
 export class DddScopeComputation extends DefaultScopeComputation {
-  override async computeExports(
+  override async collectExportedSymbols(
     document: LangiumDocument,
     cancelToken?: Cancellation.CancellationToken,
   ): Promise<AstNodeDescription[]> {
@@ -260,7 +260,7 @@ export class DddScopeComputation extends DefaultScopeComputation {
     }
     // Also include the default exports (Module, Deployable, etc.) so
     // local references like `repository ... for Order` keep working.
-    const defaults = await super.computeExports(document, cancelToken);
+    const defaults = await super.collectExportedSymbols(document, cancelToken);
     for (const d of defaults) {
       // Avoid duplicating the named-decl exports we just emitted.
       if (!exports.some((e) => e.name === d.name && e.path === d.path)) {
