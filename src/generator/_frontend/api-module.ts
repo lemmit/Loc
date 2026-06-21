@@ -161,6 +161,15 @@ export function buildApiModule(
       lines.push(
         `export type ${upperFirst(find.name)}Query = z.infer<typeof ${upperFirst(find.name)}Query>;`,
       );
+      // A paged query carries `.default()`ed `page`/`pageSize`, so its
+      // z.input (what a caller supplies) ≠ z.output (post-default): the
+      // controls are optional going in, required coming out.  Expose the
+      // input shape so the hook signature lets callers omit them.
+      if (pagedReturn(find.returnType)) {
+        lines.push(
+          `export type ${upperFirst(find.name)}QueryInput = z.input<typeof ${upperFirst(find.name)}Query>;`,
+        );
+      }
     }
   }
   lines.push("");
@@ -303,7 +312,12 @@ export function buildApiModule(
             : find.returnType.kind === "optional"
               ? `${agg.name}Response.nullable()`
               : `${agg.name}Response`;
-      const queryType = `${upperFirst(find.name)}Query`;
+      // Paged finds accept the caller-facing input shape (page/pageSize
+      // optional via their wire defaults); other finds have no input/output
+      // divergence, so the plain (z.infer) Query type is precise.
+      const queryType = paged
+        ? `${upperFirst(find.name)}QueryInput`
+        : `${upperFirst(find.name)}Query`;
       if (isVueQuery) {
         // Reactive: the arg is a getter/ref; `computed(toValue)` makes
         // the query key (and fetch) track its source so a bound filter

@@ -49,9 +49,17 @@ describe("react api-builder — paged finds (P3b)", () => {
     expect(api).toMatch(/export const InRegionQuery = z\.object\(\{[\s\S]*region:/);
   });
 
-  it("the find hook parses the paged envelope", async () => {
+  it("exposes the caller-facing z.input alias for a paged query (page/pageSize optional)", async () => {
     const api = await apiModule();
-    expect(api).toContain("export function useRecentWarehouse(query: RecentQuery) {");
+    // z.output (z.infer) makes the defaulted page/pageSize required; the
+    // input alias is what a caller actually supplies — they may omit them.
+    expect(api).toContain("export type RecentQueryInput = z.input<typeof RecentQuery>;");
+    expect(api).toContain("export type InRegionQueryInput = z.input<typeof InRegionQuery>;");
+  });
+
+  it("the find hook accepts the input shape and parses the paged envelope", async () => {
+    const api = await apiModule();
+    expect(api).toContain("export function useRecentWarehouse(query: RecentQueryInput) {");
     expect(api).toContain("return WarehousePaged.parse(r);");
   });
 });
