@@ -33,26 +33,34 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 afterEach(() => resetBackendSource());
 
 describe("fs-discovery — workspace symlink discovery", () => {
-  it("discovers @loom/backend-hono-v4 by its package.json loom key", async () => {
+  it("discovers both @loom/backend-hono-v4 and -v5 by their package.json loom keys", async () => {
     const fs = await discoverBackendsFs(repoRoot);
-    const hono = fs.find((b) => b.manifest.family === "node");
-    expect(hono).toBeDefined();
-    expect(hono?.manifest).toMatchObject({
-      kind: "backend",
-      family: "node",
-      loomVersion: "v4",
-    });
-    expect(hono?.manifest.core).toMatch(/^\^?\d/);
+    for (const version of ["v4", "v5"]) {
+      const hono = fs.find(
+        (b) => b.manifest.family === "node" && b.manifest.loomVersion === version,
+      );
+      expect(hono, `node@${version}`).toBeDefined();
+      expect(hono?.manifest).toMatchObject({
+        kind: "backend",
+        family: "node",
+        loomVersion: version,
+      });
+      expect(hono?.manifest.core).toMatch(/^\^?\d/);
+    }
   });
 
-  it("fs-discovered hono surface is the SAME INSTANCE as in-tree", async () => {
+  it("fs-discovered hono surfaces are the SAME INSTANCE as in-tree (per version)", async () => {
     // The byte-identical bridge — both delivery paths yield
     // the identical PlatformSurface, so every downstream resolver
     // is unaffected by the source swap.
     const fs = await discoverBackendsFs(repoRoot);
-    const fsHono = fs.find((b) => b.manifest.family === "node")!;
-    const inTreeHono = defaultBuiltInBackends().find((b) => b.manifest.family === "node")!;
-    expect(fsHono.surface).toBe(inTreeHono.surface);
+    for (const version of ["v4", "v5"]) {
+      const match = (b: { manifest: { family: string; loomVersion: string } }) =>
+        b.manifest.family === "node" && b.manifest.loomVersion === version;
+      const fsHono = fs.find(match)!;
+      const inTreeHono = defaultBuiltInBackends().find(match)!;
+      expect(fsHono.surface, `node@${version}`).toBe(inTreeHono.surface);
+    }
   });
 
   it("only emits backend entries — packages without a loom key are silently ignored", async () => {
@@ -79,9 +87,10 @@ describe("installFsBackendSource — composition with in-tree default", () => {
     // resolution silently breaks for `platform: dotnet` etc.
     expect(families).toContain("dotnet@v10");
     expect(families).toContain("elixir@v1");
-    // hono@v4 is now sourced through fs (its workspace symlink),
-    // but the entry still resolves to the same surface instance.
+    // both hono versions are sourced through fs (their workspace
+    // symlinks), each still resolving to the same surface instance.
     expect(families).toContain("node@v4");
+    expect(families).toContain("node@v5");
   });
 
   it("does not double-count a backend present in both fs and in-tree", async () => {

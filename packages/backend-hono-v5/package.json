@@ -1,0 +1,17 @@
+{
+  "name": "@loom/backend-hono-v5",
+  "version": "0.0.0-experimental",
+  "private": true,
+  "type": "module",
+  "description": "Hono 4.x backend generator on the zod 4 / TypeScript 6 dep majors — versioned package for Loom.  Discovered by the core resolver via the `loom` key below.",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "loom": {
+    "kind": "backend",
+    "family": "node",
+    "loomVersion": "v5",
+    "core": "^1.0.0"
+  }
+}

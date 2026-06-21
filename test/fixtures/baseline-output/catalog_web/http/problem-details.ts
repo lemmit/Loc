@@ -24,12 +24,12 @@ export const ProblemDetails = z.object({
 /** RFC 6901 JSON pointer from a Zod issue path.  Empty path → empty
  *  pointer (`""`, "the whole document").  Segments are slash-joined;
  *  literal `~` and `/` inside a segment are escaped to `~0` / `~1`. */
-function pointerOf(path: ReadonlyArray<string | number>): string {
+function pointerOf(path: ReadonlyArray<PropertyKey>): string {
   if (path.length === 0) return "";
   return "/" + path.map((seg) =>
-    typeof seg === "number"
-      ? String(seg)
-      : seg.replace(/~/g, "~0").replace(/\//g, "~1"),
+    typeof seg === "string"
+      ? seg.replace(/~/g, "~0").replace(/\//g, "~1")
+      : String(seg),
   ).join("/");
 }
 
@@ -44,7 +44,7 @@ function pointerOf(path: ReadonlyArray<string | number>): string {
  *  for input-shape errors).  Domain-rule violations carried by
  *  DomainError continue to emit 400 via the router's `app.onError`
  *  catch-all (different fault class, different code). */
-export function defaultHook(result: { success: boolean; error?: { issues: ReadonlyArray<{ path: ReadonlyArray<string | number>; message: string }> } }, c: Context): Response | undefined {
+export function defaultHook(result: { success: boolean; error?: { issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }> } }, c: Context): Response | undefined {
   if (result.success) return undefined;
   const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
   const errors = (result.error?.issues ?? []).map((issue) => ({

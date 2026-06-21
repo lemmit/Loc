@@ -1,0 +1,40 @@
+// ---------------------------------------------------------------------------
+// hono@v5 — dependency pins (the version-owned "templating" slice of
+// the backend package; see the hono@v4 sibling for the pattern).
+//
+// v5 is the cross-major successor to v4: it takes the dep majors v4's
+// within-major policy deferred — **zod 4** (and the `@hono/zod-openapi`
+// 1.x that requires it), **TypeScript 6**, **vitest 4**, and
+// **pino-pretty 13**.  Hono itself stays 4.x (there is no Hono 5 yet),
+// so the package *version* bump here is driven by the zod/TS majors, not
+// a Hono major — the `loomVersion` tracks the package's own evolution.
+//
+// v5 reuses the shared TypeScript/Hono emitter unchanged (the one
+// zod-3/4-divergent spot — the validation hook's issue-path typing — was
+// widened to `PropertyKey`, valid under both majors), so this file +
+// the thin `index.ts` surface ARE the whole package.  The previous v4
+// package stays registered and loadable (`platform: node@v4`) for
+// reproducibility.  The `LOOM_TS_BUILD` shard (`tsc --noEmit` + tsup
+// against an emitted Hono project) is the gate that proves these
+// resolve + typecheck together.
+// ---------------------------------------------------------------------------
+export const BACKEND_PINS = {
+  dependencies: {
+    hono: "^4.12.0",
+    "@hono/node-server": "^1.19.0",
+    "@hono/zod-openapi": "^1.0.0",
+    zod: "^4.0.0",
+    "drizzle-orm": "^0.45.0",
+    pg: "^8.13.0",
+    pino: "^9.5.0",
+  },
+  devDependencies: {
+    typescript: "^6.0.0",
+    tsx: "^4.19.0",
+    tsup: "^8.3.0",
+    vitest: "^4.0.0",
+    "drizzle-kit": "^0.31.0",
+    "@types/pg": "^8.11.0",
+    "pino-pretty": "^13.0.0",
+  },
+} as const;

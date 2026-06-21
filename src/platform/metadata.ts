@@ -28,7 +28,7 @@ import { type PlatformDescriptor, STATIC_BUNDLE_FRAMEWORKS } from "./surface.js"
 // straight through the descriptor table.
 // ---------------------------------------------------------------------------
 export const BUILTIN_PLATFORM_LATEST = {
-  node: "v4",
+  node: "v5",
   dotnet: "v10",
   elixir: "v1",
   python: "v1",
@@ -36,6 +36,13 @@ export const BUILTIN_PLATFORM_LATEST = {
 } as const satisfies Partial<Record<Platform, string>>;
 
 export type BackendFamily = keyof typeof BUILTIN_PLATFORM_LATEST;
+
+// Older in-tree backend versions still registered (resolvable via an
+// explicit `family@version` pin) but not the family default.  `node@v4`
+// (zod 3 / TS 5) stays loadable alongside the v5 default.
+const BUILTIN_PLATFORM_EXTRA_VERSIONS: Partial<Record<BackendFamily, string[]>> = {
+  node: ["v4"],
+};
 
 /** Resolved view of a `platform:` value pointing at a backend family.
  *  `null` for frontend (`react`/`static`/…) or unknown names — callers
@@ -81,9 +88,14 @@ export interface BackendVersionEntry {
   version: string;
 }
 
-const inTreeBackendVersions: BackendVersionEntry[] = (
-  Object.entries(BUILTIN_PLATFORM_LATEST) as [BackendFamily, string][]
-).map(([family, version]) => ({ family, version }));
+const inTreeBackendVersions: BackendVersionEntry[] = [
+  ...(Object.entries(BUILTIN_PLATFORM_LATEST) as [BackendFamily, string][]).map(
+    ([family, version]) => ({ family, version }),
+  ),
+  ...(Object.entries(BUILTIN_PLATFORM_EXTRA_VERSIONS) as [BackendFamily, string[]][]).flatMap(
+    ([family, versions]) => versions.map((version) => ({ family, version })),
+  ),
+];
 
 let backendVersionSource: () => BackendVersionEntry[] = () => inTreeBackendVersions;
 

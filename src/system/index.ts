@@ -7,6 +7,7 @@ import type {
   EnrichedLoomModel,
   EnrichedSubdomainIR,
   EnrichedSystemIR,
+  Platform,
   SystemIR,
 } from "../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../ir/types/migrations-ir.js";
@@ -329,7 +330,12 @@ function emitDeployable(
   // Hono uses lowercase imports, React uses kebab-/camel- as JSX
   // dictates).
   const sub = serviceSlug(d.name);
-  const platform = platformFor(d.platform);
+  // Resolve the EMITTER surface by the fully-qualified `platformRef`
+  // (`node@v4` / `node@v5`) so a backend version pin selects the right
+  // dep-pin set.  Family-level facts (`needsDb`, adapters) stay keyed on
+  // `d.platform` — they're version-independent.  (Before multiple node
+  // versions existed, family→default coincided with the only version.)
+  const platform = platformFor(d.platformRef as Platform);
   // D-REALIZATION-AXES (Phase 4): resolve the deployable's `application:`
   // (→ style) and `directoryLayout:` (→ layout) selections to concrete
   // adapters HERE — the system layer is the one allowed to import

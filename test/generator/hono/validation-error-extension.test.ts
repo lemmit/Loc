@@ -110,8 +110,11 @@ describe("Hono validation-error extension — emission", () => {
     expect(src).toMatch(/replace\(\/\\\/\/g,\s*"~1"\)/);
     // Empty-path → empty pointer (root error per RFC 6901).
     expect(src).toMatch(/path\.length === 0/);
-    // Numeric path segments are stringified, not escaped.
-    expect(src).toMatch(/typeof seg === "number"/);
+    // String path segments are escaped; number/symbol segments are
+    // stringified.  (The path element type is `PropertyKey` so the hook
+    // typechecks under both zod 3 and zod 4 — zod 4's issue path includes
+    // `symbol`.)
+    expect(src).toMatch(/typeof seg === "string"/);
     // newApp() factory — the public surface used by all router files.
     expect(src).toMatch(/export function newApp\(\)/);
     expect(src).toMatch(/new OpenAPIHono\(\{\s*defaultHook\s*\}\)/);
