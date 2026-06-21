@@ -641,6 +641,61 @@ export function validateJavaStampSupport(sys: SystemIR, diags: LoomDiagnostic[])
   }
 }
 
+// Lifecycle stamps on the .NET backend.  Stamps are applied by the EF Core
+// AuditableInterceptor before SaveChanges; a non-principal value renders
+// directly, and a `currentUser` value resolves to the principal id read from
+// the ambient RequestContext (`RequestContext.Current!.CurrentUser!.<idProp>`).
+// Two cases stay fail-fast (never a silent drop), mirroring
+// `validateJavaStampSupport`: a principal-referencing stamp on a deployable
+// WITHOUT auth (no request-scoped principal to read; `actorIdProp` would be
+// undefined), and stamps on an event-sourced aggregate (state is folded from
+// events, not field-stamped — and EF interception doesn't apply).
+export function validateDotnetStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "dotnet") continue;
+    const authed = !!(dep.auth?.required && sys.user);
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const enriched = agg as EnrichedAggregateIR;
+        const stamps = enriched.contextStamps ?? [];
+        if (stamps.length === 0) continue;
+        const usesPrincipal = stamps.some((r) =>
+          r.assignments.some((a) => exprUsesCurrentUser(a.value)),
+        );
+        if (usesPrincipal && !authed) {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform dotnet) hosts aggregate '${ctxName}.${agg.name}' ` +
+              `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
+              `from \`with audit\`), but the deployable has no auth — there is no request-scoped ` +
+              `principal to stamp from. Add 'auth: required' (and a system 'user {}' block), or use ` +
+              `non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.dotnet-stamp-unsupported",
+          });
+        }
+        if (enriched.persistedAs === "eventLog") {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform dotnet) hosts event-sourced aggregate ` +
+              `'${ctxName}.${agg.name}' with a lifecycle stamp — stamps mutate state fields, but an ` +
+              `event-sourced aggregate's state is folded from its event stream. ` +
+              `Record the timestamp in an event instead, or drop persistedAs(eventLog).`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.dotnet-stamp-unsupported",
+          });
+        }
+      }
+    }
+  }
+}
+
 export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);

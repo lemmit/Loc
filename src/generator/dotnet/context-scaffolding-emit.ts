@@ -31,12 +31,15 @@ export function emitStampingInterceptor(
   merged: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
+  /** System user-block id property (PascalCased) when the deployable carries
+   *  auth — threaded so `currentUser` stamps render the principal id. */
+  actorIdProp?: string,
 ): void {
   const anyStamping = merged.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
   if (!anyStamping) return;
   out.set(
     "Infrastructure/Persistence/AuditableInterceptor.cs",
-    renderAuditableInterceptor(ns, merged.aggregates),
+    renderAuditableInterceptor(ns, merged.aggregates, actorIdProp),
   );
 }
 

@@ -331,12 +331,20 @@ function emitProjectFromContexts(
   if (authRequired && system?.sys) {
     emitAuthFiles(system.sys, ns, out);
   }
+  // The principal's id property on the User record (PascalCased; the claim
+  // named `id`, else the first field).  Drives the carrier's ActorId accessor
+  // (audit/provenance "who computed") AND `currentUser` lifecycle stamps, which
+  // resolve the principal id from the ambient RequestContext.  Undefined
+  // without auth.
+  const userFields = authRequired ? system?.sys.user?.fields : undefined;
+  const actorIdField = userFields?.find((f) => f.name === "id") ?? userFields?.[0];
+  const actorIdProp = actorIdField ? upperFirst(actorIdField.name) : undefined;
   // SaveChangesInterceptor — emitted only when at least one
   // aggregate has stamping rules contributed by macros.  Driven by
   // a per-entity-type switch built from each aggregate's
-  // `contextStamps` IR (no marker interface, no per-aggregate
-  // hand-written stamping logic).
-  emitStampingInterceptor(merged, ns, out);
+  // `contextStamps` IR; a `currentUser` stamp resolves the principal
+  // id from the ambient RequestContext (so `actorIdProp` is threaded).
+  emitStampingInterceptor(merged, ns, out, actorIdProp);
   // Reified `criterion` specifications (evaluate face) — additive, not yet
   // wired into invariants/preconditions (see criteria-emit.ts).
   emitCriteria(merged, ns, out);
@@ -451,12 +459,6 @@ function emitProjectFromContexts(
   // resources — the csproj stays byte-identical.
   const resourceEmission = emitDotnetResourceFiles(system?.sys, ns);
   for (const [path, content] of resourceEmission.files) out.set(path, content);
-  // The principal's id property on the User record (PascalCased; the claim
-  // named `id`, else the first field), so the carrier's ActorId accessor can
-  // project it for audit/provenance "who computed".
-  const userFields = authRequired ? system?.sys.user?.fields : undefined;
-  const actorIdField = userFields?.find((f) => f.name === "id") ?? userFields?.[0];
-  const actorIdProp = actorIdField ? upperFirst(actorIdField.name) : undefined;
   emitProject(merged, ns, out, {
     authRequired,
     actorIdProp,
