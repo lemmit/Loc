@@ -266,13 +266,16 @@ export function fillBlock(
       lines.push(`    await this.page.getByTestId("${testId}").click();`);
       lines.push(`  }`);
     } else if (inner.name === "datetime") {
-      // Native `<input type="datetime-local">` accepts
-      // `YYYY-MM-DDTHH:mm:ss` (with optional sub-second precision).
-      // Tests pass an ISO string with `Z`; we slice to 19 chars to
-      // strip the timezone marker — the backend treats unmarked
-      // datetime values as UTC, so the round-trip is correct as long
-      // as the test source uses `Z` consistently.
-      lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!.slice(0, 19));`);
+      // The form renders a plain `<input type="datetime-local">` with no
+      // `step`, so the control is minute-precision: the browser rejects a
+      // value carrying seconds (`YYYY-MM-DDTHH:mm:ss`) as "Malformed
+      // value".  Tests pass an ISO string (often with `Z`); slice to 16
+      // chars (`YYYY-MM-DDTHH:mm`) — dropping seconds and the timezone
+      // marker — so the fill matches the input's accepted format.  The
+      // backend treats the unmarked value as UTC and accepts
+      // minute-precision datetimes, so the round-trip stays correct as
+      // long as the test source uses `Z` consistently.
+      lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!.slice(0, 16));`);
     } else if (inner.name === "int" || inner.name === "long" || inner.name === "decimal") {
       lines.push(`  await this.page.getByTestId("${testId}").fill(String(${accessor}));`);
     } else if (inner.name === "money") {
