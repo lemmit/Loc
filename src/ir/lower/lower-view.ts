@@ -6,6 +6,7 @@
 
 import { isWorkflow, type View } from "../../language/generated/ast.js";
 import type { ExprIR, ViewIR, ViewSourceIR } from "../types/loom-ir.js";
+import { resolveBypass } from "./lower-capabilities.js";
 import { inferExprType, lowerExpr } from "./lower-expr.js";
 import { lowerField } from "./lower-members.js";
 import { type Env, inAggregate, inWorkflow } from "./lower-types.js";
@@ -72,6 +73,7 @@ export function lowerView(view: View, env: Env): ViewIR {
     source: sourceIR,
     requires,
     filter,
+    ...resolveBypass(view),
     output,
   };
 }

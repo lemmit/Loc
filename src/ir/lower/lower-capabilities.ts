@@ -106,6 +106,23 @@ export function collectCapabilities(agg: Aggregate): string[] {
   return [...new Set(names)].sort();
 }
 
+/** Resolve the `ignoring`-clause grammar fields (`bypassAll` flag, `bypass`
+ *  bare-ID list) on a read node (FindDecl / View / PostfixChain) into the
+ *  IR's `{ bypassAll?, bypassCaps? }` shape (named-filter-bypass.md §11).
+ *  Returns an empty object when neither is set, so it spreads cleanly into a
+ *  read IR without polluting it.  Capability names stay as authored strings —
+ *  resolution against the aggregate's implemented capabilities / contributed
+ *  filters happens in the IR validator, not here (the IR carries the resolved
+ *  *names*; the EF-filter identity is derived per backend). */
+export function resolveBypass(node: { bypassAll?: boolean; bypass?: string[] }): {
+  bypassAll?: boolean;
+  bypassCaps?: string[];
+} {
+  if (node.bypassAll) return { bypassAll: true };
+  const caps = node.bypass ?? [];
+  return caps.length > 0 ? { bypassCaps: [...caps] } : {};
+}
+
 /** Shape we rely on from a `StampDecl` AST node.  Local alias so the
  * import surface stays narrow. */
 interface StampDeclLike {

@@ -145,6 +145,7 @@ import {
   collectFilters,
   collectStamps,
   EMPTY_CONTEXT_CAPABILITIES,
+  resolveBypass,
 } from "./lower-capabilities.js";
 import { lowerDeployable } from "./lower-deployment.js";
 import { criterionRefOf, lowerExpr, setAmbientEnumIndex } from "./lower-expr.js";
@@ -1289,6 +1290,7 @@ function lowerRepository(
         returnType: lowerType(f.returnType),
         filter: f.filter ? lowerExpr(f.filter, env) : undefined,
         criterionRef: criterionRefOf(f.filter, env),
+        ...resolveBypass(f),
       };
     }),
   };

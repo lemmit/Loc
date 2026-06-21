@@ -104,6 +104,10 @@ function printPostfixChain(node: PostfixChain): string {
   for (const s of node.suffixes) {
     out = appendSuffix(out, s);
   }
+  // Trailing `ignoring` filter-bypass clause (named-filter-bypass.md §11) on an
+  // inline read (`Repo.findAll(...) ignoring softDeletable` / `... ignoring *`).
+  if (node.bypassAll) out += " ignoring *";
+  else if (node.bypass.length > 0) out += ` ignoring ${node.bypass.join(", ")}`;
   return out;
 }
 

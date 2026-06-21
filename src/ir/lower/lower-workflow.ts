@@ -49,6 +49,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
+import { resolveBypass } from "./lower-capabilities.js";
 import { inferExprType, lowerExpr } from "./lower-expr.js";
 import { computeSaves, lowerApply, lowerField, plural } from "./lower-members.js";
 import { cstText, type Env, inWorkflow, lowerType, withLocal } from "./lower-types.js";
@@ -360,6 +361,10 @@ function lowerWorkflowStatement(
   }
   if (isLetStmt(stmt)) {
     const expr = stmt.expr;
+    // `ignoring` filter-bypass clause (named-filter-bypass.md §11) — only a
+    // postfix chain (`Repo.findAll(...) ignoring …`) carries it; resolve it
+    // once so the two `repo-run` arms below can spread it into the IR.
+    const bypass = isPostfixChain(expr) ? resolveBypass(expr) : {};
     // factory-let: `Agg.create({fields})`
     const factory = matchFactoryCall(expr, aggsByName);
     if (factory) {
@@ -430,6 +435,7 @@ function lowerWorkflowStatement(
                 ...(hasShaping ? { synthSort: sortTerms, synthLoadPlan: loadPlan } : {}),
               }
             : {}),
+          ...bypass,
           returnType: arrayType,
         },
         envAfter: withLocal(env, stmt.name, "let", arrayType),
@@ -470,6 +476,7 @@ function lowerWorkflowStatement(
               }
             : {}),
           synthCriterion: { name: findAllCall.criterionName },
+          ...bypass,
           returnType: arrayType,
         },
         envAfter: withLocal(env, stmt.name, "let", arrayType),
