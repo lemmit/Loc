@@ -26,6 +26,15 @@ This repo has **fast-moving `main`** (parallel agents land PRs continuously). A 
 - **Verify the task isn't already done — *on fresh `main`* — before building.** Check `git log --oneline -20`, grep the actual validator gates / emitters, and `list_pull_requests` for in-flight work. This session, two things were **already shipped** when I started building them (a principal-filter slice; the elixir embedded-filter slice → a duplicate PR that had to be closed), and one "blocker" was **stale** (vanilla op-bodies looked unimplemented because I was reading pre-merge code — a `git fetch` later showed `#1395` had just fixed it). When in doubt, the code on fresh `main` wins over your memory of it.
 - **A stale base lies twice:** you rebuild already-merged work, *and* you reason from behaviour that no longer exists. Both are expensive. One `git fetch` up front is cheaper than either.
 
+## Claim your work with a draft PR — before you build
+
+Parallel agents collide. The defence is the same one humans use: **announce intent publicly before doing the work.** A draft PR is that announcement, and it doubles as the claim ticket no other agent will step on.
+
+- **Open the draft PR first, then implement.** Before writing code, create a *draft* PR (empty or with a stub commit) whose title and body say plainly **what you're about to build and which files/area it touches** — enough that another agent reading only the PR list can tell whether it overlaps their task. This is the first action of the slice, not a wrap-up step.
+- **Check the open drafts before you claim.** Before opening yours, `list_pull_requests` (state `open`, include drafts) and read the titles/bodies. If an existing draft already covers your task — or a meaningful slice of it — **do not duplicate it.** Pick a different slice, build on theirs (stack your PR on their branch), or stop and surface the overlap. Treat this as the PR-level twin of the "verify the task isn't already done on fresh `main`" check above: stale `main` hides *merged* duplicates, open drafts hide *in-flight* ones.
+- **Keep the PR body honest as the claim narrows.** When you discover the work is bigger/smaller/different than the title promised, edit the PR body so the claim still matches reality — an inaccurate claim is worse than none, because it misroutes the next agent.
+- **Mark ready for review only when it actually is.** Draft = "claimed, in progress, don't duplicate." Ready = "built and green." Flipping it is the signal other agents read.
+
 ## What this is
 
 **Loom** — a Langium-based DSL for Domain-Driven Design. A `.ddd` source describes a `system` of `module`s, `aggregate`s, `valueobject`s, `event`s, `repository`s, `api`s, `storage`s, `ui`s, and `deployable`s; the toolchain generates a runnable multi-project tree wired together as one `docker compose` stack. Five backends (TypeScript/Hono, .NET/ASP.NET+EF+Mediator, Phoenix LiveView/Ash, Python/FastAPI+SQLAlchemy, Java/Spring Boot+JPA) and four frontends (React/Vite+Mantine, Vue 3/Vite+Vuetify, Svelte/SvelteKit, Angular+Angular Material) are supported.
