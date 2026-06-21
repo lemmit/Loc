@@ -139,6 +139,51 @@ the entity — but for **typing / tooling / discoverability** (find-implementors
 interface is emitted for type identity, not dedup. Reconcile the stale
 `loom-ir.ts` docstrings to say so.**
 
+> **⚠ This verdict is being revisited (2026-06).** §5's "filters can't dedup"
+> rests on **classic EF's one-filter-per-entity rule** (a second
+> `HasQueryFilter` overwrites). The .NET backend now targets **EF Core 10**,
+> whose **named** query filters lift that rule — and it already emits
+> `HasQueryFilter("<Name>", …)` (`emit/efcore.ts` `queryFilterName`). So the
+> premise of the "don't dedup" verdict no longer holds for two of five backends.
+> See **§5b** for the framework-capability grounding and **§11** for the
+> named+dedup plan that supersedes this verdict on the filter side.
+
+## 5b. Framework-native named-filter support (the §9.1 EF10-revisit input)
+
+"Named filter" = the framework lets you register a query/global filter under a
+**stable name** so it is (a) one addressable unit per capability and (b)
+**selectively bypassable by name**. Whether a backend *can* dedup a capability's
+filter into one named unit — vs. only AND-inline a `this`-relative predicate per
+entity — is a property of the target framework, not of Loom:
+
+| Backend | Framework | Native **named** filter? | Mechanism | Default state |
+|---|---|---|---|---|
+| **.NET** | EF Core 10 | ✅ yes | `HasQueryFilter("Name", …)` + `IgnoreQueryFilters(["Name"])` | on by default |
+| **Java** | Hibernate | ✅ yes | `@FilterDef`/`@Filter` (named, parameterized) + `session.enableFilter("name")` | **off** by default (must enable per session) |
+| **node** | Drizzle | ❌ no | query builder — no global/named filter layer; emulate with a named predicate fn (reified `<name>Criterion`) | n/a |
+| **Phoenix** | Ash | ⚠ partial | `base_filter` is single/anonymous; **policies** are named + bypassable but are authz, not query filters | base_filter always on |
+| **Phoenix (vanilla)** | Ecto | ❌ no | query DSL — no global filter; emulate with composable named query fns | n/a |
+| **Python** | SQLAlchemy | ⚠ partial | `with_loader_criteria(Entity, …)` in a `do_orm_execute` event — global + entity-keyed, but no named, individually-toggleable registry | n/a (and Loom does **not** consume `contextFilters` here yet — a gap) |
+
+Three consequences for the design:
+
+- **Two backends (.NET, Java) have first-class named filters** → a capability's
+  filter *can* map to one named DB-layer unit, bypassable by name. The other
+  three can only share a **named predicate expression/function** across
+  implementors — a codegen/IR concern, not a framework feature.
+- **Default-state divergence.** EF filters are on-by-default (bypass with
+  `IgnoreQueryFilters`); Hibernate filters are off-by-default (must
+  `enableFilter` per session) — so a named Hibernate filter needs an
+  interceptor/request aspect to *activate* it, where EF needs nothing. An
+  always-on `softDelete` is free on EF, wired on Hibernate.
+- **The dedup IR seam should carry capability identity (a stable name)**, letting
+  each backend choose its rendering: named-filter on .NET/Hibernate, shared
+  predicate fn on Drizzle/Ecto/SQLAlchemy, base_filter-or-policy on Ash. This is
+  the same `capabilityOrigin` seam §4 proposes — confirming it serves filters as
+  well as stamps.
+
+The §11 plan builds directly on this matrix.
+
 ## 6. Stamps — dedup via a marker-interface-keyed write-time hook (the real win)
 
 Stamp **bodies** are larger (multi-assignment, expression-valued) and the
