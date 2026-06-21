@@ -1,0 +1,78 @@
+name: Generated React e2e
+
+# Runtime e2e for the React frontend: generate the React project, `vite
+# build` it, serve the static bundle with `vite preview`, and run the
+# SPA's own emitted Playwright smoke spec (every param-less page navigates
+# + loads) against it.  The runtime sibling of generated-react-build.yml —
+# that gate compiles the bundle and behavioral-ui-e2e runs the emitted
+# *.ui.spec.ts, but neither runs the route-driven smoke.spec.ts; this one
+# does (Vue/Svelte already had this gate).  Pure client-side smoke (no
+# backend), so no docker/postgres sidecar is needed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'designs/**'
+      - 'examples/showcase.ddd'
+      - 'api/**'
+      - 'vite/**'
+      - 'docker/**'
+      - 'stacks/**'
+      - 'test/e2e/generated-react-e2e.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-react-e2e.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'designs/**'
+      - 'examples/showcase.ddd'
+      - 'api/**'
+      - 'vite/**'
+      - 'docker/**'
+      - 'stacks/**'
+      - 'test/e2e/generated-react-e2e.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/generated-react-e2e.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  react-e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pack: ['mantine@v7', 'shadcn@v4']
+    timeout-minutes: 20
+    name: showcase × ${{ matrix.pack }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # Root install runs the `prepare` lifecycle (langium:generate).
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Run react runtime e2e
+        env:
+          LOOM_REACT_E2E: '1'
+          LOOM_REACT_E2E_PACK: ${{ matrix.pack }}
+        run: npx vitest run test/e2e/generated-react-e2e.test.ts

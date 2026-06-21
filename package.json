@@ -32,6 +32,7 @@
     "test:java-corpus": "LOOM_JAVA_BUILD=1 vitest run test/e2e/corpus-java-build.test.ts",
     "test:python-corpus": "LOOM_PYTHON_BUILD=1 vitest run test/e2e/corpus-python-build.test.ts",
     "test:tsc-react": "LOOM_REACT_BUILD=1 vitest run test/e2e/generated-react-build.test.ts",
+    "test:react-e2e": "LOOM_REACT_E2E=1 vitest run test/e2e/generated-react-e2e.test.ts",
     "test:tsc-react-extern": "LOOM_REACT_BUILD=1 vitest run test/e2e/extern-component-build.test.ts",
     "test:vue-build": "LOOM_VUE_BUILD=1 vitest run test/e2e/generated-vue-build.test.ts",
     "test:vue-e2e": "LOOM_VUE_E2E=1 vitest run test/e2e/generated-vue-e2e.test.ts",

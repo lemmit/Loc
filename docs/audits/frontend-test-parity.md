@@ -57,7 +57,7 @@ Source: `src/generator/{react,vue,svelte}/index.ts` each `out.set` the five
 
 | Target | build/typecheck gate | runtime e2e gate (runs the emitted spec) |
 |---|---|---|
-| React | `generated-react-build.yml` (tsc) | `behavioral-ui-e2e.yml` runs the emitted **`*.ui.spec.ts`** (page-object round-trips). The route-driven **`smoke.spec.ts` is run by no workflow** (F3). |
+| React | `generated-react-build.yml` (tsc) | `behavioral-ui-e2e.yml` runs the emitted **`*.ui.spec.ts`** (page-object round-trips); **`generated-react-e2e.yml`** (`vite preview` + emitted `smoke.spec.ts`) — added to close F3. |
 | Vue | `generated-vue-build.yml` | `generated-vue-e2e.yml` — `vite preview` + emitted `smoke.spec.ts` |
 | Svelte | `generated-svelte-build.yml` | `generated-svelte-e2e.yml` — `vite preview` + emitted `smoke.spec.ts` |
 | **Angular** | `generated-angular-build.yml` (`ng build`) | **none** (nothing to run — no specs emitted) |
@@ -82,13 +82,15 @@ run. The other four UI-mounting platforms (react/vue/svelte/phoenix) all emit
 matching page objects, so this is Angular-specific. *This is the parity gap that
 actually breaks codegen, not just thins coverage.*
 
-### F3 — React's route-driven `smoke.spec.ts` has no runtime CI gate *(minor)*
+### F3 — React's route-driven `smoke.spec.ts` had no runtime CI gate *(minor — RESOLVED)*
 Vue and Svelte each have a dedicated `generated-*-e2e.yml` that `vite preview`s
-the bundle and runs the emitted `smoke.spec.ts`. React has no
-`generated-react-e2e.yml`; `behavioral-ui-e2e.yml` exercises the
-*`*.ui.spec.ts`* (a different, page-object path), not the route smoke spec. So
-the React smoke spec is emitted but never executed in CI — an asymmetry, though
-React's behavioral-ui tier gives it runtime coverage of another kind.
+the bundle and runs the emitted `smoke.spec.ts`. React had no such workflow;
+`behavioral-ui-e2e.yml` exercises the *`*.ui.spec.ts`* (a different, page-object
+path), not the route smoke spec — so the React smoke spec was emitted but never
+executed in CI. **Fixed**: `test/e2e/generated-react-e2e.test.ts` +
+`generated-react-e2e.yml` (`showcase` → `console_web` × `{mantine@v7, shadcn@v4}`)
+build the bundle, `vite preview` it, and run the emitted `smoke.spec.ts`,
+mirroring the Vue/Svelte gate. `npm run test:react-e2e` runs it locally.
 
 ### F4 — Phoenix page objects are a parallel reimplementation *(watch)*
 `elixir/page-objects-emit.ts` re-declares `buildAggregateListPageObject`,
