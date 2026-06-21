@@ -266,18 +266,47 @@ export function nonPrincipalContextFilterEntries(
     .filter((e) => !exprUsesCurrentUser(e.predicate));
 }
 
+/** A read's capability filter-bypass spec (`ignoring <Cap>` / `ignoring *`),
+ *  carried index-by-name on `FindIR` / `ViewIR` / the repo-run stmt.  Named
+ *  capabilities are matched against `AggregateIR.contextFilterOrigins`; a
+ *  filter whose origin is `undefined` (hand-written/bare) is never bypassable
+ *  — only capability-contributed filters can be `ignoring`-dropped. */
+export interface FilterBypass {
+  bypassAll?: boolean;
+  bypassCaps?: string[];
+}
+
+/** True when the capability filter at `contextFilterOrigins[i]` is dropped by
+ *  `bypass`: `ignoring *` drops every capability-origin filter; a named
+ *  `ignoring <Cap>` drops only the matching origin.  An `undefined` origin
+ *  (bare/hand-written filter) is never dropped. */
+function isFilterBypassed(origin: string | undefined, bypass: FilterBypass | undefined): boolean {
+  if (!bypass || origin === undefined) return false;
+  if (bypass.bypassAll) return true;
+  return (bypass.bypassCaps ?? []).includes(origin);
+}
+
 /** ALL capability-filter entries for an aggregate (principal-referencing
  *  included), index-aligned with their `criterionRef`.  A principal filter
  *  (`currentUser.tenantId`) renders to `currentUser.<field>` against the
  *  `currentUser: User` parameter the read method gains — see
- *  `aggregateUsesPrincipalContextFilter`.  (DEBT-01.) */
+ *  `aggregateUsesPrincipalContextFilter`.  (DEBT-01.)
+ *
+ *  When `bypass` is supplied (the read carried an `ignoring` clause), entries
+ *  whose `contextFilterOrigins[i]` the bypass names are dropped from the
+ *  conjunction — the capability's predicate is OMITTED for that read only. */
 export function allContextFilterEntries(
   agg: EnrichedAggregateIR,
+  bypass?: FilterBypass,
 ): { predicate: ExprIR; criterionRef?: { name: string; args: ExprIR[] } }[] {
-  return (agg.contextFilters ?? []).map((predicate, i) => ({
-    predicate,
-    criterionRef: agg.contextFilterRefs?.[i],
-  }));
+  return (agg.contextFilters ?? [])
+    .map((predicate, i) => ({
+      predicate,
+      criterionRef: agg.contextFilterRefs?.[i],
+      origin: agg.contextFilterOrigins?.[i],
+    }))
+    .filter((e) => !isFilterBypassed(e.origin, bypass))
+    .map(({ predicate, criterionRef }) => ({ predicate, criterionRef }));
 }
 
 // ---------------------------------------------------------------------------
@@ -328,8 +357,9 @@ export function contextFilterPredicate(
   tableName: string,
   ctx: EnrichedBoundedContextIR,
   ops: Set<string>,
+  bypass?: FilterBypass,
 ): string | null {
-  const entries = allContextFilterEntries(agg);
+  const entries = allContextFilterEntries(agg, bypass);
   if (entries.length === 0) return null;
   const lowered: string[] = [];
   for (const e of entries) {
