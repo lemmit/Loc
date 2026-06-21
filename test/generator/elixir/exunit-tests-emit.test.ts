@@ -25,7 +25,7 @@ system Shop {
       aggregate Order ids guid {
         customer: string
         status: string
-        price: Money
+        price: Money?
         invariant customer.length > 0
         operation confirm() { precondition status == "open" status := "confirmed" }
         test "blank customer is rejected" {

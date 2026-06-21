@@ -27,7 +27,7 @@ import { isEventSourced } from "./eventsourced-emit.js";
 
 interface AggField {
   name: string;
-  type: { kind: string; name?: string };
+  type: { kind: string; name?: string; inner?: { kind: string; name?: string } };
   optional?: boolean;
   access?: string;
 }
@@ -111,8 +111,17 @@ function renderChangeset(
   const vosByName = new Map(ctx.valueObjects.map((vo) => [vo.name, vo]));
   const voFieldLines = allFields
     .map((f) => {
-      if (f.type.kind !== "valueobject" || !f.type.name) return null;
-      const vo = vosByName.get(f.type.name);
+      // Resolve the VO name, unwrapping an `optional` (`price: Money?`) — the
+      // optional wrapper otherwise hides the value-object type and the field
+      // would skip validation (the negative-price-accepted regression).
+      const voName =
+        f.type.kind === "valueobject"
+          ? f.type.name
+          : f.type.kind === "optional" && f.type.inner?.kind === "valueobject"
+            ? f.type.inner.name
+            : undefined;
+      if (!voName) return null;
+      const vo = vosByName.get(voName);
       if (!vo || !voHasConstraints(vo)) return null;
       const voMod = `${appModule}.${ctxModule}.${upperFirst(vo.name)}`;
       return `    |> validate_vo(:${snake(f.name)}, &${voMod}.new/1)`;
