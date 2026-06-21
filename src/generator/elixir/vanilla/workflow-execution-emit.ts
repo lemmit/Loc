@@ -41,7 +41,17 @@
 //   ✓ for-each     → `{:ok, _} <- Enum.reduce_while(xs, {:ok, nil}, fn x, _acc ->
 //                                    case Context.<op>_<agg>(x, %{}) do ... end
 //                                  end)` — first body-op failure halts the
-//                     reduce and bubbles `{:error, _}` up the with-chain.
+//                     reduce and bubbles `{:error, _}` up the with-chain.  A
+//                     single op-call keeps the flat `case` shape; a broader
+//                     body (op-call + factory-let / emit / expr-let / guards)
+//                     lowers through a per-iteration `with`-chain whose first
+//                     failed clause halts the reduce.
+//   ✓ if-let       → `{:ok, _} <- (var = case ...run_<ret>...; if var != nil
+//                     do <thenBody> else <elseBody> end)`.  Both branches lower
+//                     the full statement set (op-call / factory-let / emit /
+//                     expr-let; a guard-bearing branch wraps in a `with`-chain
+//                     so a failed `precondition` / `requires` threads `{:error,
+//                     tag}` up the outer with-chain).
 // Every WorkflowStmtIR kind now lowers to real Elixir — there is no
 // `default:` / `# TODO` fallthrough remaining.  The switch over
 // `lowerStatement` is exhaustive over the IR union; if a new kind is
@@ -342,9 +352,7 @@ function lowerStatement(
       // `loom.workflow-foreach-source` enforces this shape).
       const iterable = renderExpr(st.iterable, renderCtx);
       const loopVar = snake(st.var);
-      const bodyLines = st.body.flatMap((inner) =>
-        renderLoopBodyStmt(inner, renderCtx, contextModule),
-      );
+      const bodyLines = renderLoopBody(st.body, renderCtx, contextModule);
       // Multi-line clause: assembleBody indents the FIRST line at the
       // with-chain's column; subsequent lines keep their authored
       // indentation, so bake in the leading spaces (11 spaces aligns each
@@ -374,40 +382,61 @@ function lowerStatement(
       const runArgs = [...st.retrievalArgs.map((a) => renderExpr(a, renderCtx)), "limit: 1"];
       const v = snake(st.var);
       const renderBranch = (body: WorkflowStmtIR[], present: string): string[] => {
-        const stmtLines = body.flatMap((inner) => {
-          if (inner.kind === "op-call") {
-            const argFields = inner.args
-              .map((a, i) => `arg${i}: ${renderExpr(a, renderCtx)}`)
-              .join(", ");
-            return [
-              `${contextModule}.${snake(inner.op)}_${snake(inner.aggName)}(${snake(inner.target)}, %{${argFields}})`,
-            ];
+        // A branch with a guard (`precondition` / `requires`) needs a
+        // `with`-chain so the guard can short-circuit to `{:error, tag}` which
+        // threads up the outer with-chain.  A guard-free branch keeps the flat
+        // sequential `=`-bind form (the original shape).
+        const hasGuard = body.some((s) => s.kind === "precondition" || s.kind === "requires");
+        if (hasGuard) {
+          const clauses: string[] = [];
+          const tail: string[] = [];
+          for (let i = 0; i < body.length; i++) {
+            const inner = body[i]!;
+            const rest = body.slice(i + 1);
+            if (inner.kind === "precondition") {
+              clauses.push(
+                `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, :precondition_failed})`,
+              );
+            } else if (inner.kind === "requires") {
+              clauses.push(
+                `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, :forbidden})`,
+              );
+            } else if (inner.kind === "op-call") {
+              clauses.push(`{:ok, _} <- ${opCallSource(inner, renderCtx, contextModule)}`);
+            } else if (inner.kind === "factory-let") {
+              const fields = inner.fields
+                .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
+                .join(", ");
+              const bind = bindUsedLater(inner.name, rest) ? snake(inner.name) : "_";
+              clauses.push(
+                `{:ok, ${bind}} <- ${contextModule}.create_${snake(inner.aggName)}(%{${fields}})`,
+              );
+            } else if (inner.kind === "expr-let") {
+              const bind = bindUsedLater(inner.name, rest) ? snake(inner.name) : "_";
+              clauses.push(`${bind} <- (${renderExpr(inner.expr, renderCtx)})`);
+            } else {
+              // emit / resource-call — pure side-effects, run in the do-branch.
+              tail.push(...renderBranchStmt(inner, renderCtx, contextModule));
+            }
           }
-          if (inner.kind === "emit") {
-            const fields = inner.fields
-              .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
-              .join(", ");
-            const appModule = contextModule.split(".")[0]!;
-            return [
-              `Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", %${contextModule}.Events.${upperFirst(inner.eventName)}{${fields}})`,
-            ];
-          }
-          if (inner.kind === "factory-let") {
-            const fields = inner.fields
-              .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
-              .join(", ");
-            return [
-              `{:ok, ${snake(inner.name)}} = ${contextModule}.create_${snake(inner.aggName)}(%{${fields}})`,
-            ];
-          }
-          return [`# TODO: lower if-let branch statement kind '${inner.kind}'`];
-        });
+          return [
+            `with ${clauses.join(",\n                  ")} do`,
+            ...tail.map((l) => `  ${l}`),
+            `  {:ok, ${present}}`,
+            `else`,
+            `  err -> err`,
+            `end`,
+          ];
+        }
+        const stmtLines = body.flatMap((inner, i) =>
+          renderBranchStmt(inner, renderCtx, contextModule, body.slice(i + 1)),
+        );
         return [...stmtLines, `{:ok, ${present}}`];
       };
       const lines = [
         `{:ok, _} <- (`,
         `           ${v} = case ${contextModule}.${action}(${runArgs.join(", ")}) do`,
-        `             {:ok, [__hit | _]} -> __hit`,
+        `             {:ok, [hit | _]} -> hit`,
         `             _ -> nil`,
         `           end`,
         `           if ${v} != nil do`,
@@ -422,34 +451,271 @@ function lowerStatement(
   }
 }
 
-/** Render a single body statement of a `for-each` as the inner Elixir
- *  source lines.  Wrapped in a `case ... do {:ok, _} -> {:cont, _}; err ->
- *  {:halt, err} end` so a failed op breaks the reduce_while with the
- *  error tuple intact — bubbled out to the with-chain by the enclosing
- *  `{:ok, _} <-` clause.  The validator restricts loop bodies to
- *  `op-call`s today (no nested loops, no factory-let); any other kind
- *  falls through to a `# TODO` comment so the workflow still compiles. */
-function renderLoopBodyStmt(
-  st: WorkflowStmtIR,
+/** A single op-call as the threaded `op_<agg>(target, %{...})` call source. */
+function opCallSource(
+  st: Extract<WorkflowStmtIR, { kind: "op-call" }>,
+  renderCtx: RenderCtx,
+  contextModule: string,
+): string {
+  const argFields = st.args.map((arg, i) => `arg${i}: ${renderExpr(arg, renderCtx)}`).join(", ");
+  return `${contextModule}.${snake(st.op)}_${snake(st.aggName)}(${snake(st.target)}, %{${argFields}})`;
+}
+
+/** Render the body of a `for <var> in xs` loop as the inner Elixir lines of
+ *  the `Enum.reduce_while(...)` callback (which must return `{:cont, _}` on
+ *  success / `{:halt, err}` on first failure).
+ *
+ *  The common single-`op-call` body keeps the flat `case ... do {:cont}/{:halt}`
+ *  shape.  A broader body (mixing op-calls with `factory-let` / `emit` /
+ *  `expr-let` / guards) is lowered through a per-iteration `with`-chain: every
+ *  fallible statement (op-calls, factory-lets, guards) becomes a `<-` clause so
+ *  the first failure short-circuits to `{:halt, err}`; `emit` / `expr-let`
+ *  side-effects render inside the `do`-branch before `{:cont, {:ok, _}}`. */
+function renderLoopBody(
+  body: WorkflowStmtIR[],
   renderCtx: RenderCtx,
   contextModule: string,
 ): string[] {
-  if (st.kind === "op-call") {
-    const argFields = st.args.map((arg, i) => `arg${i}: ${renderExpr(arg, renderCtx)}`).join(", ");
-    const target = snake(st.target);
-    const action = `${snake(st.op)}_${snake(st.aggName)}`;
-    const call = `${contextModule}.${action}(${target}, %{${argFields}})`;
+  // Fast path: a lone op-call keeps the original byte-for-byte shape.
+  if (body.length === 1 && body[0]!.kind === "op-call") {
     return [
-      `case ${call} do`,
+      `case ${opCallSource(body[0]!, renderCtx, contextModule)} do`,
       `  {:ok, updated} -> {:cont, {:ok, updated}}`,
       `  err -> {:halt, err}`,
       `end`,
     ];
   }
-  // Anything else inside a for-each body is unsupported today — emit a
-  // TODO comment so mix-compile stays green (the comment lives at the
-  // statement position, harmlessly within the lambda body).
-  return [`# TODO: lower for-each body statement kind '${st.kind}'`];
+  if (body.length === 0) {
+    // Empty loop body — iterate for the side effect of paging only.
+    return ["{:cont, {:ok, nil}}"];
+  }
+
+  // General path: a per-iteration with-chain.  Fallible statements become
+  // `<-` clauses; pure side-effects (emit / resource-call) render in the
+  // do-branch; the last bound name is threaded out as `{:cont, {:ok, <last>}}`.
+  const clauses: string[] = [];
+  const doLines: string[] = [];
+  let lastBind = "nil";
+  for (let i = 0; i < body.length; i++) {
+    const inner = body[i]!;
+    const rest = body.slice(i + 1);
+    switch (inner.kind) {
+      case "op-call": {
+        lastBind = "loop_updated";
+        clauses.push(`{:ok, ${lastBind}} <- ${opCallSource(inner, renderCtx, contextModule)}`);
+        break;
+      }
+      case "factory-let": {
+        const fields = inner.fields
+          .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
+          .join(", ");
+        // The new aggregate is the iteration result only when nothing reads it
+        // later; otherwise keep the real name and thread it out.
+        lastBind = snake(inner.name);
+        const bind = bindUsedLater(inner.name, rest) ? lastBind : "_";
+        clauses.push(
+          `{:ok, ${bind}} <- ${contextModule}.create_${snake(inner.aggName)}(%{${fields}})`,
+        );
+        if (bind === "_") lastBind = "nil";
+        break;
+      }
+      case "precondition":
+        clauses.push(
+          `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, :precondition_failed})`,
+        );
+        break;
+      case "requires":
+        clauses.push(
+          `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, :forbidden})`,
+        );
+        break;
+      case "expr-let": {
+        const bind = bindUsedLater(inner.name, rest) ? snake(inner.name) : "_";
+        clauses.push(`${bind} <- (${renderExpr(inner.expr, renderCtx)})`);
+        break;
+      }
+      case "emit": {
+        const fields = inner.fields
+          .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
+          .join(", ");
+        const appModule = contextModule.split(".")[0]!;
+        doLines.push(
+          `Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", %${contextModule}.Events.${upperFirst(inner.eventName)}{${fields}})`,
+        );
+        break;
+      }
+      case "resource-call":
+        doLines.push(`_ = ${renderExpr(inner.call, renderCtx)}`);
+        break;
+      default:
+        // Nested loops / if-lets / repo binds in a loop body are out of v1
+        // scope (the validator never produces them); render a harmless TODO.
+        doLines.push(`# TODO: lower for-each body statement kind '${inner.kind}'`);
+        break;
+    }
+  }
+
+  if (clauses.length === 0) {
+    // Pure side-effect body (emit / expr-let only) — no fallible clause to
+    // gate on; run the side effects then continue.
+    return [...doLines, `{:cont, {:ok, ${lastBind}}}`];
+  }
+  return [
+    `with ${clauses.join(",\n     ")} do`,
+    ...doLines.map((l) => `  ${l}`),
+    `  {:cont, {:ok, ${lastBind}}}`,
+    `else`,
+    `  err -> {:halt, err}`,
+    `end`,
+  ];
+}
+
+/** Collect every `ref` name reachable from `e` (any refKind) into `acc`. */
+function collectRefNames(e: ExprIR | undefined, acc: Set<string>): void {
+  if (!e) return;
+  switch (e.kind) {
+    case "ref":
+      acc.add(e.name);
+      return;
+    case "member":
+      collectRefNames(e.receiver, acc);
+      return;
+    case "method-call":
+      collectRefNames(e.receiver, acc);
+      for (const a of e.args) collectRefNames(a, acc);
+      return;
+    case "call":
+      for (const a of e.args) collectRefNames(a, acc);
+      return;
+    case "lambda":
+      collectRefNames(e.body, acc);
+      return;
+    case "new":
+    case "object":
+      for (const f of e.fields) collectRefNames(f.value, acc);
+      return;
+    case "list":
+      for (const el of e.elements) collectRefNames(el, acc);
+      return;
+    case "paren":
+      collectRefNames(e.inner, acc);
+      return;
+    case "unary":
+      collectRefNames(e.operand, acc);
+      return;
+    case "binary":
+      collectRefNames(e.left, acc);
+      collectRefNames(e.right, acc);
+      return;
+    case "ternary":
+      collectRefNames(e.cond, acc);
+      collectRefNames(e.then, acc);
+      collectRefNames(e.otherwise, acc);
+      return;
+    case "convert":
+      collectRefNames(e.value, acc);
+      return;
+    case "match":
+      for (const arm of e.arms) {
+        collectRefNames(arm.cond, acc);
+        collectRefNames(arm.value, acc);
+      }
+      collectRefNames(e.otherwise, acc);
+      return;
+  }
+}
+
+/** Is `name` referenced by any statement in `rest`?  Used to decide whether a
+ *  branch/loop `let`-bind needs its real name or can be `_`-discarded (an
+ *  unread real-named bind trips `mix compile --warnings-as-errors`). */
+function bindUsedLater(name: string, rest: WorkflowStmtIR[]): boolean {
+  const refs = new Set<string>();
+  for (const st of rest) collectWorkflowStmtParamRefsAll(st, refs);
+  return refs.has(name);
+}
+
+/** Like `collectWorkflowStmtParamRefs` but collects ALL ref names (not just
+ *  declared create-params) — feeds the unused-bind discard check. */
+function collectWorkflowStmtParamRefsAll(st: WorkflowStmtIR, acc: Set<string>): void {
+  switch (st.kind) {
+    case "precondition":
+    case "requires":
+    case "expr-let":
+      collectRefNames(st.expr, acc);
+      return;
+    case "factory-let":
+    case "emit":
+      for (const f of st.fields) collectRefNames(f.value, acc);
+      return;
+    case "op-call":
+      acc.add(st.target);
+      for (const a of st.args) collectRefNames(a, acc);
+      return;
+    case "repo-let":
+      for (const a of st.args) collectRefNames(a, acc);
+      return;
+    case "resource-call":
+      collectRefNames(st.call, acc);
+      return;
+    case "repo-run":
+      for (const a of st.retrievalArgs) collectRefNames(a, acc);
+      return;
+    case "for-each":
+      collectRefNames(st.iterable, acc);
+      for (const inner of st.body) collectWorkflowStmtParamRefsAll(inner, acc);
+      return;
+    case "if-let":
+      for (const a of st.retrievalArgs) collectRefNames(a, acc);
+      for (const inner of st.thenBody) collectWorkflowStmtParamRefsAll(inner, acc);
+      for (const inner of st.elseBody ?? []) collectWorkflowStmtParamRefsAll(inner, acc);
+      return;
+  }
+}
+
+/** Render a single `if-let` branch statement (`thenBody` / `elseBody`) as the
+ *  inner sequential Elixir lines.  `rest` is the statements that follow `st`
+ *  in the same branch — used to `_`-discard an unread `let`-bind.  The branch
+ *  ends in `{:ok, present}` (added by the caller) so the enclosing
+ *  `{:ok, _} <-` clause threads through the with-chain.  Branch statements run
+ *  sequentially with `=` binds (a raised error rolls the transaction back),
+ *  covering the full statement set the validator admits inside an if-let
+ *  branch: op-call / factory-let / emit / expr-let / resource-call (guards
+ *  ride the with-chain path in `renderBranch`). */
+function renderBranchStmt(
+  st: WorkflowStmtIR,
+  renderCtx: RenderCtx,
+  contextModule: string,
+  rest: WorkflowStmtIR[] = [],
+): string[] {
+  switch (st.kind) {
+    case "op-call":
+      return [opCallSource(st, renderCtx, contextModule)];
+    case "factory-let": {
+      const fields = st.fields
+        .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
+        .join(", ");
+      const bind = bindUsedLater(st.name, rest) ? snake(st.name) : "_";
+      return [`{:ok, ${bind}} = ${contextModule}.create_${snake(st.aggName)}(%{${fields}})`];
+    }
+    case "emit": {
+      const fields = st.fields
+        .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
+        .join(", ");
+      const appModule = contextModule.split(".")[0]!;
+      return [
+        `Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", %${contextModule}.Events.${upperFirst(st.eventName)}{${fields}})`,
+      ];
+    }
+    case "expr-let": {
+      const bind = bindUsedLater(st.name, rest) ? snake(st.name) : "_";
+      return [`${bind} = ${renderExpr(st.expr, renderCtx)}`];
+    }
+    case "resource-call":
+      return [`_ = ${renderExpr(st.call, renderCtx)}`];
+    default:
+      // Nested control flow inside an if-let branch is out of v1 scope.
+      return [`# TODO: lower if-let branch statement kind '${st.kind}'`];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -583,6 +849,11 @@ function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): voi
     case "for-each":
       collectParamRefs(st.iterable, acc);
       for (const inner of st.body) collectWorkflowStmtParamRefs(inner, acc);
+      return;
+    case "if-let":
+      for (const a of st.retrievalArgs) collectParamRefs(a, acc);
+      for (const inner of st.thenBody) collectWorkflowStmtParamRefs(inner, acc);
+      for (const inner of st.elseBody ?? []) collectWorkflowStmtParamRefs(inner, acc);
       return;
   }
 }

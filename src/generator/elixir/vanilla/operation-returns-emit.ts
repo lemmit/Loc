@@ -135,9 +135,12 @@ ${body}
  *  - `emit` broadcasts a domain event over `Phoenix.PubSub` (the same form the
  *    vanilla workflow body emits).
  *
- *  `add`/`remove` collection mutations are still a v1 gap (they need the
- *  association metadata the Ash changeset path carries) — emitted as a TODO so
- *  the module still compiles. */
+ *  `add`/`remove` collection mutations struct-rebind the threaded `record`'s
+ *  containment list (jsonb `{:array, :map}`) or arithmetic on a scalar column.
+ *  A bare `call` (`f(args)`) lowers to a discarding no-op — vanilla emits no
+ *  aggregate-`function` helpers, so there is no callable target, and a bare
+ *  call discards its result anyway.  The switch is now exhaustive over
+ *  `StmtIR` — there is no `# TODO` fallthrough. */
 export function renderReturningStmt(
   s: StmtIR,
   ctx: BoundedContextIR,
@@ -210,8 +213,20 @@ export function renderReturningStmt(
     }
     case "expression":
       return `    _ = ${renderExpr(s.expr, rc)}`;
-    default:
-      return `    # TODO(exception-less): unsupported returning-op statement '${s.kind}'`;
+    case "call": {
+      // `f(args)` — a bare call to a domain `function` / private-operation.
+      // The vanilla schema module does NOT emit aggregate `function` helpers
+      // (unlike the Ash resource, which exposes them as `def <name>(record,…)`),
+      // so there is no callable target here.  A bare call discards its result
+      // anyway (the value form rides `let`/`assign` instead), so this lowers to
+      // a no-op that still threads `record` — keeping the body compilable under
+      // `--warnings-as-errors` without referencing an undefined function.  The
+      // argument expressions are evaluated for their (pure) side-effect-free
+      // value and discarded.
+      const args = s.args.map((a) => renderExpr(a, rc));
+      const argTuple = args.length ? `{${args.join(", ")}}` : "nil";
+      return `    _ = ${argTuple}  # vanilla: bare call to '${s.name}' (no aggregate-function target); record unchanged`;
+    }
   }
 }
 
