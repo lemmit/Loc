@@ -54,6 +54,11 @@ const FIXTURES: Array<[string, string]> = [
   // Capability filters: @SQLRestriction from the non-principal filter
   // predicate (softDelete pattern).
   ["test/e2e/fixtures/java-build/context-filter.ddd", "cf_api"],
+  // §11.6 `ignoring` filter bypass: softDeletable promoted off @SQLRestriction to
+  // a bypassable @FilterDef/@Filter, disabled per-read via the Hibernate Session
+  // (disableFilter/enableFilter); the bare `filter price > 0` stays @SQLRestriction.
+  // Compiles the @Filter machinery + EntityManager-unwrap bypass under Hibernate 7.x.
+  ["test/e2e/fixtures/java-build/filter-bypass.ddd", "api"],
   // Principal (tenancy) capability filter: SpEL-principal JPQL clause
   // (`:#{@currentUserAccessor.user()?.tenantId()}`) AND-ed into the scoped
   // findAll/findById overrides + custom find + view, with the auth

@@ -1133,29 +1133,43 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 //       is intent-neutral, whereas naming a specific cap that contributes no
 //       filter is a likely authoring mistake.
 //   loom.filter-bypass-unsupported — the read is served by a deployable whose
-//       backend family is NOT in the supported set.  This slice ships .NET only
-//       (EF `IgnoreQueryFilters`); Drizzle/Ecto/Java/Ash/Python honoring widen
-//       the set in later slices.
+//       backend family is NOT in the supported set.  Honored by dotnet (EF
+//       `IgnoreQueryFilters`), node (Drizzle), elixir on BOTH foundations
+//       (vanilla Ecto omits the `where:`; Ash uses the §11.6 base_filter→per-read
+//       triage), java (§11.6 @SQLRestriction→bypassable @Filter triage,
+//       disabled per-read via the Hibernate Session), and python (SQLAlchemy
+//       has no global filter, so each read AND-s its predicates explicitly —
+//       a bypassing find/view/inline-run simply OMITS the named conjunct).
+//       Every honoring family is now in the set; the diagnostic only fires for
+//       a backend with no DB read path (which never carries `ignoring`).
 // ---------------------------------------------------------------------------
 
-/** Backend families that honor an `ignoring` filter-bypass clause on EVERY
- *  foundation.  `dotnet` (EF `IgnoreQueryFilters`, Slice 1) and `node`
- *  (Drizzle — omits the bypassed conjunct from the `and(...)` chain, Slice 2)
- *  always honor it.  `elixir` is foundation-conditional (`bypassSupported`):
- *  the `vanilla` Ecto foundation omits the bypassed `where:` (Slice 2), but the
- *  default `ash` foundation does NOT yet — so it stays fail-fast.  `java` /
- *  `python` remain deferred. */
-const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node"]);
+/** Backend families that honor an `ignoring` filter-bypass clause.  `dotnet`
+ *  (EF `IgnoreQueryFilters`, Slice 1), `node` (Drizzle — omits the bypassed
+ *  conjunct from the `and(...)` chain, Slice 2), `elixir` (Slice 2 vanilla Ecto
+ *  omits the bypassed `where:`; Slice 3 Ash uses the §11.6 "pay for what you
+ *  use" triage — a bypassed capability leaves the always-on `base_filter` and is
+ *  applied per-read instead, omitted on the reads that `ignoring` it; both
+ *  foundations), and `java` (§11.6 hybrid — a bypassed capability leaves the
+ *  always-on `@SQLRestriction` for a bypassable Hibernate named `@Filter`, which
+ *  a bypassing read disables via `session.disableFilter`/`enableFilter`;
+ *  principal filters omit the JPQL conjunct; document repos re-apply promoted
+ *  caps per-find), and `python` (SQLAlchemy has no global filter, so each read
+ *  AND-s its capability predicates explicitly via `contextFilterPredicate`; a
+ *  bypassing find/view omits the named conjunct statically, and a shared
+ *  `run_<retrieval>` omits the union of its inline call-sites' bypasses) all
+ *  honor it. */
+const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node", "elixir", "java", "python"]);
 
 /** Whether `dep`'s backend honors `ignoring` filter-bypass.  A backend must
  *  not pass this gate while still silently filtering — a family is supported
- *  only once its emitter actually OMITS the bypassed predicate.  Elixir is
- *  split by foundation: `vanilla` (plain Ecto) honors it; `ash` (the default)
- *  does not yet, so it must keep failing fast. */
+ *  only once its emitter actually OMITS the bypassed predicate.  Elixir honors
+ *  it on both foundations: `vanilla` (plain Ecto) omits the bypassed `where:`;
+ *  `ash` triages each capability per §11.6 (promoted out of `base_filter`,
+ *  applied per-read minus the reads that bypass it). */
 function bypassSupported(dep: { platform: string; foundation?: string }): boolean {
   const fam = platformFamily(dep.platform);
   if (!fam) return false;
-  if (dep.platform === "elixir") return dep.foundation === "vanilla";
   return FILTER_BYPASS_FAMILIES.has(fam);
 }
 
@@ -1266,8 +1280,8 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
               }) serves ${read.site} on ` +
               `aggregate '${ctxName}.${read.aggName}' with an 'ignoring' filter-bypass clause, but ` +
               `this backend does not honor capability-filter bypass yet — the honoring backends are ` +
-              `dotnet (EF 'IgnoreQueryFilters'), node (Drizzle), and elixir on the vanilla foundation ` +
-              `(Ecto). Host this read on a supported backend, or remove the 'ignoring' clause.`,
+              `dotnet (EF 'IgnoreQueryFilters'), node (Drizzle), and elixir (both the vanilla Ecto and ` +
+              `Ash foundations). Host this read on a supported backend, or remove the 'ignoring' clause.`,
             source: `${sys.name}/${dep.name}`,
           });
           continue;

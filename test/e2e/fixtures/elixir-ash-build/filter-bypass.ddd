@@ -1,0 +1,47 @@
+// `ignoring` filter-bypass on the Phoenix/Ash backend (named-filter-bypass.md
+// §11.6 — the "pay for what you use" triage).  Ash 3.x `base_filter` is
+// ALWAYS-ON with no per-query skip, so a capability some read `ignoring`s is
+// PROMOTED: removed from `base_filter` and applied per-read via
+// `filter expr(...)`, omitted only on the reads that bypass it.  This fixture
+// is the decisive check that the resulting resource — a reduced/absent
+// `base_filter`, an explicit `read :read do primary? true; filter … end`
+// override, and per-find/per-view `filter expr(...)` lines — compiles against
+// real Ash 3.x under `mix compile --warnings-as-errors`.
+//
+// Triage shapes exercised on `Product`:
+//   * softDeletable — a capability filter (`not is_deleted`) BYPASSED by
+//     `recent`/`allRows`, so it is PROMOTED out of base_filter and re-applied
+//     on `normal` + the default `:read`.
+//   * a bare `filter this.price > 0` — NOT bypassable (no capability origin),
+//     so it STAYS in base_filter (always-on) even though softDeletable left it.
+//   * `allRows` uses `ignoring *` (bypass every promoted capability).
+system BypassShop {
+  subdomain Sales {
+    context Catalog {
+      aggregate Product with softDeletable {
+        name: string
+        price: int
+        // bare capability-less filter — never bypassable, stays in base_filter.
+        filter this.price > 0
+      }
+      repository Products for Product {
+        find recent(): Product[] where this.name != "" ignoring softDeletable
+        find allRows(): Product[] ignoring *
+        find normal(): Product[] where this.name != ""
+      }
+      view ActiveProducts = Product where this.price > 0 ignoring softDeletable
+    }
+  }
+  api CatalogApi from Sales
+  ui CatalogAdmin {}
+  storage primary { type: postgres }
+  resource catState { for: Catalog, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: elixir { foundation: ash }
+    contexts: [Catalog]
+    dataSources: [catState]
+    serves: CatalogApi
+    ui: CatalogAdmin
+    port: 4000
+  }
+}

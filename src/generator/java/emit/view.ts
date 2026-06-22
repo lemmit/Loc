@@ -16,7 +16,9 @@ import { workflowStateClass } from "./workflow-state.js";
 // ---------------------------------------------------------------------------
 
 /** Views sourced from `agg`, as synthesized parameterless finds the
- *  repository emitters pick up (name = lowerFirst(view name)). */
+ *  repository emitters pick up (name = lowerFirst(view name)).  A view's
+ *  `ignoring` bypass (`bypassAll`/`bypassCaps`) rides onto the synthesized find
+ *  so the repository impl honours it exactly as a declared find would. */
 export function viewFindsFor(
   aggName: string,
   ctx: EnrichedBoundedContextIR,
@@ -25,6 +27,8 @@ export function viewFindsFor(
   params: never[];
   returnType: { kind: "array"; element: { kind: "entity"; name: string } };
   filter?: ViewIR["filter"];
+  bypassAll?: boolean;
+  bypassCaps?: string[];
 }[] {
   return ctx.views
     .filter((v) => v.source.kind === "aggregate" && v.source.name === aggName)
@@ -33,6 +37,8 @@ export function viewFindsFor(
       params: [],
       returnType: { kind: "array", element: { kind: "entity", name: aggName } },
       filter: v.filter,
+      bypassAll: v.bypassAll,
+      bypassCaps: v.bypassCaps,
     }));
 }
 

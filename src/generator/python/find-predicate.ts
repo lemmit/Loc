@@ -151,6 +151,27 @@ function lower(
 // here — they're filtered out below.
 // ---------------------------------------------------------------------------
 
+/** A read's capability filter-bypass spec (`ignoring <Cap>` / `ignoring *`),
+ *  carried index-by-name on `FindIR` / `ViewIR` / the repo-run stmt.  Named
+ *  capabilities are matched against `AggregateIR.contextFilterOrigins`; a
+ *  filter whose origin is `undefined` (hand-written/bare) is never bypassable
+ *  — only capability-contributed filters can be `ignoring`-dropped.  Mirrors
+ *  node's `FilterBypass`. */
+export interface FilterBypass {
+  bypassAll?: boolean;
+  bypassCaps?: string[];
+}
+
+/** True when the capability filter at `contextFilterOrigins[i]` is dropped by
+ *  `bypass`: `ignoring *` drops every capability-origin filter; a named
+ *  `ignoring <Cap>` drops only the matching origin.  An `undefined` origin
+ *  (bare/hand-written filter) is never dropped. */
+function isFilterBypassed(origin: string | undefined, bypass: FilterBypass | undefined): boolean {
+  if (!bypass || origin === undefined) return false;
+  if (bypass.bypassAll) return true;
+  return (bypass.bypassCaps ?? []).includes(origin);
+}
+
 /** Lower an aggregate's NON-principal capability filters to a single
  *  SQLAlchemy predicate (conjoined with `and_(...)` when there is more than
  *  one), or null when the aggregate has no non-principal filter.  Mirrors
@@ -158,17 +179,26 @@ function lower(
  *  dropped (W1b) — what remains always lowers to a closed expression because
  *  the IR validator gated the queryable shape first; returns null (rather
  *  than throwing) on a non-lowerable predicate, which is unreachable for
- *  valid models. */
+ *  valid models.
+ *
+ *  When `bypass` is supplied (the read carried an `ignoring` clause), every
+ *  capability filter whose `contextFilterOrigins[i]` the bypass names is
+ *  OMITTED from the conjunction for that read only.  The origins array is
+ *  index-aligned with the FULL `agg.contextFilters`, so the original index is
+ *  carried through the principal-drop filter before bypass matching. */
 export function contextFilterPredicate(
   agg: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
+  bypass?: FilterBypass,
 ): PyPredicate | null {
-  const nonPrincipal = (agg.contextFilters ?? []).filter((p) => !exprUsesCurrentUser(p));
-  if (nonPrincipal.length === 0) return null;
+  const kept = (agg.contextFilters ?? [])
+    .map((predicate, i) => ({ predicate, origin: agg.contextFilterOrigins?.[i] }))
+    .filter((e) => !exprUsesCurrentUser(e.predicate) && !isFilterBypassed(e.origin, bypass));
+  if (kept.length === 0) return null;
   const ops = new Set<string>();
   const lowered: string[] = [];
-  for (const p of nonPrincipal) {
-    const l = lowerToSqlAlchemy(p, agg, ctx);
+  for (const { predicate } of kept) {
+    const l = lowerToSqlAlchemy(predicate, agg, ctx);
     if (!l) return null;
     for (const op of l.ops) ops.add(op);
     lowered.push(l.expr);

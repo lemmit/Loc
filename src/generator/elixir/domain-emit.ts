@@ -17,6 +17,7 @@ import { discriminatorValue, isTphConcrete, tableOwnerName } from "../../ir/util
 import { effectiveSavingShape } from "../../ir/util/resolve-datasource.js";
 import { singleFieldShape } from "../../ir/validate/invariant-classify.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { promotedCapabilities, promotedReadFilter } from "./capability-filter.js";
 import {
   isAshPolicyGuardedOperation,
   renderActions,
@@ -169,7 +170,14 @@ function renderAggregateResource(
   // read of the shared table is scoped to this concrete's rows (Ash's analog to
   // the discriminator filter EF Core / Drizzle apply).
   const kindPredicate = kindValue ? `kind == ${JSON.stringify(kindValue)}` : undefined;
-  const baseFilterLine = renderBaseFilter(agg, renderCtx, ctx, kindPredicate);
+  // §11.6 selective-bypass triage: capabilities some read `ignoring`s leave the
+  // always-on `base_filter` and are applied per-read instead.  Derived here from
+  // the read-decls × `contextFilterOrigins` — never stamped on the IR.
+  const promoted = new Set(promotedCapabilities(agg, ctx));
+  const baseFilterLine = renderBaseFilter(agg, renderCtx, ctx, kindPredicate, promoted);
+  // The promoted capabilities' predicate, applied to the default `:read` action
+  // (which carries no `ignoring` clause, so it gets every promoted predicate).
+  const promotedReadExpr = promotedReadFilter(agg, ctx, renderCtx, promoted);
 
   // Field list for the `defimpl Jason.Encoder` block: :id, persisted
   // fields only, timestamps.  Reference-collection fields are excluded
@@ -240,6 +248,13 @@ function renderAggregateResource(
   // "module is not available").
   const hasGuards = agg.operations.some(isAshPolicyGuardedOperation);
   const authorizerLine = hasGuards ? ",\n    authorizers: [Ash.Policy.Authorizer]" : "";
+  // §11.6: when a capability is promoted out of `base_filter`, the default
+  // `:read` becomes the primary read carrying that predicate as a `filter`.  Ash
+  // warns ("primary read action has a filter") because a filtered primary read
+  // hides rows during relationship loads / policy checks — which is EXACTLY the
+  // intended soft-delete/tenancy semantics here, so opt out of the warning (Ash's
+  // own documented escape hatch) to keep --warnings-as-errors green.
+  const primaryReadWarningLine = promotedReadExpr ? ",\n    primary_read_warning?: false" : "";
   const policiesBlock = renderPolicies(agg, moduleName);
   const policyChecks = renderPolicyChecks(agg, renderCtx, moduleName);
   const checksPrefix = policyChecks ? `${policyChecks}\n\n` : "";
@@ -274,7 +289,7 @@ function renderAggregateResource(
   return `${checksPrefix}defmodule ${moduleName} do
   use Ash.Resource,
     domain: ${ctxModule},
-    data_layer: AshPostgres.DataLayer${authorizerLine}
+    data_layer: AshPostgres.DataLayer${authorizerLine}${primaryReadWarningLine}
 
   postgres do
 ${postgresBlockLines.join("\n")}
@@ -284,7 +299,7 @@ ${baseFilterLine}
     ${renderPrimaryKey(agg.idValueType)}
     ${[...(kindValue ? [`attribute :kind, :string, default: ${JSON.stringify(kindValue)}, allow_nil?: false`] : []), ...persistedFields.map((f) => renderAttribute(f, ctxModule)), ...embeddedAttrLines].join("\n    ")}${timestampLines ? `\n    ${timestampLines}` : ""}
   end
-${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg, criterionCalcLines)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderStampChanges(agg, renderCtx, options.principalIdKey ?? "id")}${renderActions(agg, ctx, renderCtx, ctxModule)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
+${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg, criterionCalcLines)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderStampChanges(agg, renderCtx, options.principalIdKey ?? "id")}${renderActions(agg, ctx, renderCtx, ctxModule, promotedReadExpr)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
 
 ${jasonImpl}`;
 }
@@ -424,10 +439,21 @@ function renderBaseFilter(
   ctx: RenderCtx,
   bctx: BoundedContextIR,
   extraPredicate?: string,
+  /** Capabilities PROMOTED out of `base_filter` (some read `ignoring`s them) —
+   *  §11.6 triage.  Their predicate is applied PER-READ instead, so it is
+   *  EXCLUDED here.  A bare (undefined-origin) or non-promoted capability filter
+   *  stays in `base_filter` (always-on).  Empty set → byte-identical with the
+   *  pre-bypass emit. */
+  promoted?: ReadonlySet<string>,
 ): string {
   const refs = agg.contextFilterRefs ?? [];
+  const origins = agg.contextFilterOrigins ?? [];
   const capability = (agg.contextFilters ?? [])
-    .map((predicate, i) => ({ predicate, ref: refs[i] }))
+    .map((predicate, i) => ({ predicate, ref: refs[i], origin: origins[i] }))
+    // §11.6: a promoted capability's predicate leaves `base_filter` (it is
+    // applied per-read instead — Ash's `base_filter` is always-on with no
+    // per-query skip).  Non-promoted caps and bare filters stay.
+    .filter(({ origin }) => !(origin != null && promoted?.has(origin)))
     .map(({ predicate, ref }) => {
       // A principal-referencing filter (tenancy, `currentUser.tenantId`) binds
       // the request actor: Ash evaluates `^actor(:field)` against the

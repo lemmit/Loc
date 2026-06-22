@@ -1,0 +1,50 @@
+// `ignoring` filter-bypass on the Python/FastAPI+SQLAlchemy backend
+// (named-filter-bypass.md §11).  SQLAlchemy has NO global query filter (the EF
+// Core HasQueryFilter analogue), so the generated repository AND-s each
+// capability predicate into every root read explicitly via
+// `contextFilterPredicate`.  A read carrying `ignoring <Cap>` / `ignoring *`
+// simply OMITS the named capability conjunct for that read only — no runtime
+// machinery, the bypass is baked in at codegen.  This fixture is the decisive
+// check that the resulting repository (a find that drops a conjunct, a view
+// that drops a conjunct, an `ignoring *` find that drops every cap predicate,
+// and a bare always-applied `filter`) stays ruff- + mypy --strict-clean.
+//
+// Triage shapes exercised on `Product`:
+//   * softDeletable — a capability filter (`not is_deleted`) BYPASSED by
+//     `recent`/`allRows`, so its predicate is OMITTED on those reads but KEPT
+//     on `normal` + the default `all()`/`find_by_id`.
+//   * a bare `filter this.price > 0` — NOT bypassable (no capability origin),
+//     so it stays AND-ed into every read even those that `ignoring` a cap.
+//   * `allRows` uses `ignoring *` (bypass every capability predicate).
+system BypassShop {
+  capability softDeletable {
+    isDeleted: bool
+    filter this.isDeleted == false
+  }
+  subdomain Sales {
+    context Catalog {
+      aggregate Product with softDeletable {
+        name: string
+        price: int
+        // bare capability-less filter — never bypassable, always AND-ed in.
+        filter this.price > 0
+      }
+      repository Products for Product {
+        find recent(): Product[] where this.name != "" ignoring softDeletable
+        find allRows(): Product[] ignoring *
+        find normal(): Product[] where this.name != ""
+      }
+      view ActiveProducts = Product where this.price > 0 ignoring softDeletable
+    }
+  }
+  api CatalogApi from Sales
+  storage primary { type: postgres }
+  resource catState { for: Catalog, kind: state, use: primary }
+  deployable api {
+    platform: python
+    contexts: [Catalog]
+    dataSources: [catState]
+    serves: CatalogApi
+    port: 8080
+  }
+}

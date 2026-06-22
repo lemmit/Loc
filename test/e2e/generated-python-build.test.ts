@@ -77,6 +77,10 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   // `when` state gate: DisallowedError (409) before the body + the
   // side-effect-free GET /{id}/can_<op> companion.
   ["test/e2e/fixtures/python-build/when.ddd", "api"],
+  // `ignoring <Cap>` / `ignoring *` filter-bypass: a find/view OMITS the named
+  // capability conjunct; a bare `filter` always applies.  The resulting
+  // repository must stay ruff- + mypy --strict-clean.
+  ["test/e2e/fixtures/python-build/filter-bypass.ddd", "api"],
   // `--trace` domain instrumentation: precondition_evaluated /
   // value_computed / invariant_evaluated trace lines must stay
   // ruff-/mypy-clean (the domain fixture exercises all three).

@@ -10,6 +10,11 @@ import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
 import {
+  bypassedPromotedCaps,
+  type FilterBypass,
+  wrapWithFilterBypass,
+} from "../capability-filter.js";
+import {
   boxedJavaType,
   collectJavaExprImports,
   collectJavaTypeImports,
@@ -54,6 +59,16 @@ export interface JavaRepoCtx {
    *  the save impl drains the per-write lineage buffer into provenance_records
    *  in the same `@Transactional` boundary as the aggregate save. */
   provenance?: boolean;
+  /** §11.6: the PROMOTED non-principal capabilities for this aggregate — those
+   *  some read `ignoring`s, emitted as bypassable Hibernate named @Filters on the
+   *  entity (capability-filter.ts).  A find / view / retrieval that drops one of
+   *  these is wrapped with `session.disableFilter`/`enableFilter` in the impl. */
+  promotedCaps?: ReadonlySet<string>;
+  /** §11.6: per-retrieval-name UNION bypass spec, drawn from the inline
+   *  `Repo.run(<Retrieval>(…)) ignoring …` call-sites in the context's workflows.
+   *  A retrieval's `run<Name>` impl method is SHARED across call-sites, so its
+   *  promoted-cap disable set is the union of every site's bypass. */
+  bypassByRetrieval?: ReadonlyMap<string, FilterBypass>;
 }
 
 const dottedSortPath = (t: SortTermIR): string => t.path.map((s) => s.name).join(".");
@@ -104,6 +119,13 @@ export function inMemoryRetrievalLines(
   agg: EnrichedAggregateIR,
   retrievals: readonly RetrievalIR[],
   exprImports: Set<string>,
+  /** §11.6: the promoted-cap `.filter(...)` clause to re-apply for a retrieval's
+   *  `run<Name>` (minus the caps the retrieval's inline `Repo.run` call-sites
+   *  `ignoring`).  `findAll()` applies only the always-on caps here, so a
+   *  document repo must conjoin the promoted ones it doesn't bypass.  Returns ""
+   *  when there are none.  Absent → no promoted re-application (event store /
+   *  the relational path's always-on @Filter handles it at the DB). */
+  promotedClauseFor?: (retrievalName: string, varName: string) => string,
 ): string[] {
   if (retrievals.length === 0) return [];
   if (retrievals.some((r) => r.sort.length > 0)) exprImports.add("java.util.Comparator");
@@ -115,7 +137,8 @@ export function inMemoryRetrievalLines(
     collectJavaExprImports(r.where, exprImports);
     const where = renderJavaExpr(r.where, { thisName: "x", agg, accessorProps: true });
     const cmp = inMemoryComparator(r.sort, agg.name);
-    const filtered = `findAll().stream().filter(x -> ${where})`;
+    const promotedClause = promotedClauseFor?.(r.name, "x") ?? "";
+    const filtered = `findAll().stream().filter(x -> ${where})${promotedClause}`;
     const sorted = cmp ? `${filtered}.sorted(${cmp})` : filtered;
     const bareParams = declared.join(", ");
     const pagedParams = [bareParams, "Integer offset, Integer limit"].filter(Boolean).join(", ");
@@ -401,7 +424,21 @@ export function renderJavaRepositoryImpl(
   const tenantScopeAnd = injectAccessor
     ? `.and(${agg.name}Criteria.tenantScope(currentUserAccessor.user()))`
     : "";
+  // §11.6 selective bypass: a find / view / retrieval read that `ignoring`s a
+  // PROMOTED capability runs with that cap's Hibernate named @Filter DISABLED.
+  // The impl wraps the delegate body with `session.disableFilter/enableFilter`;
+  // the @SQLRestriction-resident caps + principal filters are unaffected here
+  // (the latter omit the conjunct in the JpaRepository @Query instead).
+  const promotedCaps = ctx.promotedCaps ?? new Set<string>();
+  let needsEntityManager = false;
+  const wrapBypass = (bypass: FilterBypass | undefined, body: string[]): string[] => {
+    const caps = bypassedPromotedCaps(promotedCaps, bypass);
+    if (caps.length === 0) return body;
+    needsEntityManager = true;
+    return wrapWithFilterBypass(caps, body);
+  };
   const retrievalDelegates = retrievals.flatMap((r) => {
+    const retrievalBypass = ctx.bypassByRetrieval?.get(r.name);
     const params = r.params
       .map((p) => {
         collectJavaTypeImports(p.type, imports);
@@ -425,12 +462,16 @@ export function renderJavaRepositoryImpl(
       return [
         `    @Override`,
         `    public List<${agg.name}> run${upperFirst(r.name)}(${params}) {`,
-        `        return jpa.findAll(${spec}, ${springSort(r.sort)});`,
+        ...wrapBypass(retrievalBypass, [
+          `        return jpa.findAll(${spec}, ${springSort(r.sort)});`,
+        ]),
         `    }`,
         ``,
         `    @Override`,
         `    public List<${agg.name}> run${upperFirst(r.name)}(${pagedParams}) {`,
-        `        return jpa.findAll(${spec}, new OffsetLimitPageRequest(offset, limit, ${springSort(r.sort)})).getContent();`,
+        ...wrapBypass(retrievalBypass, [
+          `        return jpa.findAll(${spec}, new OffsetLimitPageRequest(offset, limit, ${springSort(r.sort)})).getContent();`,
+        ]),
         `    }`,
         ``,
       ];
@@ -441,18 +482,23 @@ export function renderJavaRepositoryImpl(
     return [
       `    @Override`,
       `    public List<${agg.name}> run${upperFirst(r.name)}(${params}) {`,
-      `        return jpa.run${upperFirst(r.name)}(${jpaArgs("Pageable.unpaged()")});`,
+      ...wrapBypass(retrievalBypass, [
+        `        return jpa.run${upperFirst(r.name)}(${jpaArgs("Pageable.unpaged()")});`,
+      ]),
       `    }`,
       ``,
       `    @Override`,
       `    public List<${agg.name}> run${upperFirst(r.name)}(${pagedParams}) {`,
-      `        return jpa.run${upperFirst(r.name)}(${jpaArgs("new OffsetLimitPageRequest(offset, limit, Sort.unsorted())")});`,
+      ...wrapBypass(retrievalBypass, [
+        `        return jpa.run${upperFirst(r.name)}(${jpaArgs("new OffsetLimitPageRequest(offset, limit, Sort.unsorted())")});`,
+      ]),
       `    }`,
       ``,
     ];
   });
   const delegateLines = finds.flatMap((f) => {
     const sig = findSignature(f, imports);
+    const findBypass: FilterBypass = { bypassAll: f.bypassAll, bypassCaps: f.bypassCaps };
     if (isPagedFind(f)) {
       imports.add("org.springframework.data.domain.PageRequest");
       const args = [...f.params.map((p) => p.name), "PageRequest.of(page - 1, pageSize)"].join(
@@ -461,8 +507,10 @@ export function renderJavaRepositoryImpl(
       return [
         `    @Override`,
         `    public ${sig} {`,
-        `        var result = jpa.${f.name}(${args});`,
-        `        return new Paged<>(result.getContent(), page, pageSize, (int) result.getTotalElements(), result.getTotalPages());`,
+        ...wrapBypass(findBypass, [
+          `        var result = jpa.${f.name}(${args});`,
+          `        return new Paged<>(result.getContent(), page, pageSize, (int) result.getTotalElements(), result.getTotalPages());`,
+        ]),
         `    }`,
         ``,
       ];
@@ -471,13 +519,29 @@ export function renderJavaRepositoryImpl(
     return [
       `    @Override`,
       `    public ${sig} {`,
-      `        return jpa.${f.name}(${args});`,
+      ...wrapBypass(findBypass, [`        return jpa.${f.name}(${args});`]),
       `    }`,
       ``,
     ];
   });
   while (delegateLines.length > 0 && delegateLines[delegateLines.length - 1] === "")
     delegateLines.pop();
+  // Constructor wiring — `jpa` plus any of: the principal accessor (reified +
+  // tenancy), the provenance-records repo, and (§11.6) the EntityManager when a
+  // read bypasses a promoted @Filter (the impl unwraps it to a Hibernate Session
+  // to disableFilter/enableFilter).
+  if (needsEntityManager) imports.add("jakarta.persistence.EntityManager");
+  if (needsEntityManager) imports.add("jakarta.persistence.PersistenceContext");
+  const ctorParams = [`${agg.name}JpaRepository jpa`];
+  const ctorAssigns = [`        this.jpa = jpa;`];
+  if (injectAccessor) {
+    ctorParams.push("CurrentUserAccessor currentUserAccessor");
+    ctorAssigns.push("        this.currentUserAccessor = currentUserAccessor;");
+  }
+  if (provenance) {
+    ctorParams.push("ProvenanceRecordRepository provenanceRecords");
+    ctorAssigns.push("        this.provenanceRecords = provenanceRecords;");
+  }
   return lines(
     `package ${ctx.infraPkg};`,
     ``,
@@ -513,15 +577,11 @@ export function renderJavaRepositoryImpl(
     `    private final ${agg.name}JpaRepository jpa;`,
     injectAccessor ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
     provenance ? `    private final ProvenanceRecordRepository provenanceRecords;` : null,
+    needsEntityManager ? `    @PersistenceContext` : null,
+    needsEntityManager ? `    private EntityManager em;` : null,
     ``,
-    provenance
-      ? `    public ${agg.name}RepositoryImpl(${agg.name}JpaRepository jpa${injectAccessor ? ", CurrentUserAccessor currentUserAccessor" : ""}, ProvenanceRecordRepository provenanceRecords) {`
-      : injectAccessor
-        ? `    public ${agg.name}RepositoryImpl(${agg.name}JpaRepository jpa, CurrentUserAccessor currentUserAccessor) {`
-        : `    public ${agg.name}RepositoryImpl(${agg.name}JpaRepository jpa) {`,
-    `        this.jpa = jpa;`,
-    injectAccessor ? `        this.currentUserAccessor = currentUserAccessor;` : null,
-    provenance ? `        this.provenanceRecords = provenanceRecords;` : null,
+    `    public ${agg.name}RepositoryImpl(${ctorParams.join(", ")}) {`,
+    ...ctorAssigns,
     `    }`,
     ``,
     provenance ? `    @Transactional` : null,

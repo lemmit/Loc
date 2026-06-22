@@ -1,7 +1,8 @@
-import type { EnrichedAggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
+import type { EnrichedAggregateIR, ExprIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
+import { bypassDrops, type FilterBypass } from "../capability-filter.js";
 import { collectJavaExprImports, renderJavaExpr, renderJavaType } from "../render-expr.js";
 import type { JavaRepoCtx } from "./repository.js";
 import {
@@ -40,16 +41,40 @@ export function renderJavaDocumentRepositoryImpl(
 
   // A document aggregate's every field lives in the `data` jsonb column, so a
   // (non-principal) capability `filter` is applied in-app over the rehydrated
-  // aggregate (the read already deserialises every row).  Gating findById +
-  // findAll covers the custom finds too — they all read through findAll().
-  const capBody = (varName: string): string | null => {
-    const preds = (agg.contextFilters ?? [])
-      .filter((p) => !exprUsesCurrentUser(p))
-      .map((p) => `(${renderJavaExpr(p, { thisName: varName, agg, accessorProps: true })})`);
+  // aggregate (the read already deserialises every row).  findById + findAll
+  // apply the ALWAYS-ON subset (non-promoted caps + bare filters); since every
+  // custom find reads through findAll(), that gates them too.
+  //
+  // §11.6 selective bypass: a PROMOTED capability (some read `ignoring`s it)
+  // leaves the always-on subset and is re-applied PER-FIND — conjoined into each
+  // find's stream `.filter`, omitted on the finds that bypass it.  `promotedCaps`
+  // is threaded by the orchestrator (capability-filter.ts).
+  const promotedCaps = ctx.promotedCaps ?? new Set<string>();
+  const origins = agg.contextFilterOrigins ?? [];
+  // The (predicate, origin) entries, principal-filters excluded (gated off java).
+  const capEntries: { pred: ExprIR; origin: string | undefined }[] = (agg.contextFilters ?? [])
+    .map((pred, i) => ({ pred, origin: origins[i] }))
+    .filter((e) => !exprUsesCurrentUser(e.pred));
+  const renderPred = (p: ExprIR, varName: string): string =>
+    `(${renderJavaExpr(p, { thisName: varName, agg, accessorProps: true })})`;
+  // Always-on predicates: bare filters (undefined origin) + non-promoted caps.
+  const alwaysOn = (varName: string): string | null => {
+    const preds = capEntries
+      .filter((e) => e.origin == null || !promotedCaps.has(e.origin))
+      .map((e) => renderPred(e.pred, varName));
     return preds.length > 0 ? preds.join(" && ") : null;
   };
-  const capRec = capBody("rec");
-  const capX = capBody("x");
+  // Promoted predicates a read does NOT bypass — conjoined into the find stream.
+  const promotedFilterClause = (bypass: FilterBypass | undefined, varName: string): string => {
+    const preds = capEntries
+      .filter(
+        (e) => e.origin != null && promotedCaps.has(e.origin) && !bypassDrops(e.origin, bypass),
+      )
+      .map((e) => renderPred(e.pred, varName));
+    return preds.length > 0 ? `.filter(${varName} -> ${preds.join(" && ")})` : "";
+  };
+  const capRec = alwaysOn("rec");
+  const capX = alwaysOn("x");
 
   // Expression imports the in-app find / capability predicates need — notably
   // `java.util.Objects` for a string/ref `==` (renders to `Objects.equals`).
@@ -63,13 +88,22 @@ export function renderJavaDocumentRepositoryImpl(
   // `run<Name>` rehydrates every row and evaluates its `where` + `sort` in
   // memory (the .NET document-repository shape).  `collectJavaExprImports`
   // runs inside the helper, so its predicate imports land in `exprImports`.
-  const retrievalLines = inMemoryRetrievalLines(agg, ctx.retrievals ?? [], exprImports);
+  const retrievalLines = inMemoryRetrievalLines(
+    agg,
+    ctx.retrievals ?? [],
+    exprImports,
+    (retrievalName, varName) =>
+      promotedFilterClause(ctx.bypassByRetrieval?.get(retrievalName), varName),
+  );
 
   const findLines = finds.flatMap((f) => {
     const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`);
-    const filter = f.filter
+    const ownFilter = f.filter
       ? `.filter(x -> ${renderJavaExpr(f.filter, { thisName: "x", agg, accessorProps: true })})`
       : "";
+    // Re-apply the promoted caps this find doesn't `ignoring`, over the same `x`.
+    const filter =
+      ownFilter + promotedFilterClause({ bypassAll: f.bypassAll, bypassCaps: f.bypassCaps }, "x");
     if (isPagedFind(f)) {
       const sig = [...params, "int page", "int pageSize"].join(", ");
       return [
