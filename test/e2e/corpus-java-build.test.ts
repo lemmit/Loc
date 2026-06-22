@@ -35,10 +35,6 @@ const CASE = process.env.LOOM_CORPUS_JAVA_CASE;
 // each line is a precise, reproducible bug report).  Widen the gate by FIXING
 // the emitter, then dropping the entry.
 const JAVA_COMPILE_SKIP: Record<string, string> = {
-  // FEATURE GAP (not an emitter bug): workflow own-state mutation.  `attempts := 1`
-  // in a saga body is documented ("own-state mutation", workflow.md) but not yet
-  // lowered — the same cross-backend gap the Hono tier tracks (corpus-tsc-build).
-  "workflow-view": "FEATURE GAP: workflow own-state mutation (`field := …`) not yet lowered",
   // (provenance: now emitted + gradle-clean on java — W2 — so it gates here.)
   // PLATFORM LIMITATION (generate-time error): a shape(embedded) aggregate with a
   // reference-collection (`X id[]`) jsonb id-array column isn't mapped on java

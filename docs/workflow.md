@@ -96,8 +96,14 @@ declared `find`).  The else-branch may create a fallback aggregate
 (`let s = Seat.create({...})`); branch-local creations / mutations save at the
 end of their branch.  `if let`'s source is a criterion `find` in this release.
 
-Mutation forms (`:=`, `+=`, `-=`) belong to aggregate operation bodies
-and are rejected inside a workflow.  Workflows can't call private
+Own-state assignment (`field := value`) — writing one of the workflow's own
+declared state fields — is allowed inside a `create` / `handle` / `on` body; it
+mutates the persisted saga-instance row (`attempts := 1`).  The compound mutation
+forms (`+=`, `-=`) and any cross-aggregate write (`order.status := …`) belong to
+aggregate operation bodies and stay rejected inside a workflow.  An *event-sourced*
+workflow can't use `:=` at all — its state is derived only by folding emitted
+events through `apply` clauses (`loom.workflow-eventsourced-assign`).  Workflows
+can't call private
 operations, can call `extern` operations (parameterless or
 parameterized — see docs/extern.md; the workflow handler
 injects the user's `IXAggHandler` and runs the same dispatch

@@ -37,10 +37,6 @@ const CASE = process.env.LOOM_CORPUS_DOTNET_CASE;
 // precise, reproducible bug report).  Widen the gate by FIXING the emitter,
 // then dropping the entry.
 const DOTNET_COMPILE_SKIP: Record<string, string> = {
-  // FEATURE GAP (not an emitter bug): workflow own-state mutation.  `attempts := 1`
-  // in a saga body is documented ("own-state mutation", workflow.md) but not yet
-  // lowered on any backend — the same cross-backend gap the Hono/Java tiers track.
-  "workflow-view": "FEATURE GAP: workflow own-state mutation (`field := …`) not yet lowered",
   // PLATFORM LIMITATION: `shape(embedded)` + a ref-collection (`X id[]`) — the
   // join-table type (`...Persistence.JoinTables`, `OrderTags`) the AppDbContext +
   // repository reference is not emitted on .NET for an embedded aggregate (CS0234).

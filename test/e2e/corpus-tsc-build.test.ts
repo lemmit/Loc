@@ -25,18 +25,7 @@ const CASE = process.env.LOOM_CORPUS_TSC_CASE;
 // real Hono generator gaps this compile tier surfaced (the generation gate still
 // covers all of them on all six backends; each line is a precise, reproducible
 // bug report).  Widen the gate by FIXING the emitter, then dropping the entry.
-const TS_COMPILE_SKIP: Record<string, string> = {
-  // FEATURE GAP (not an emitter bug): workflow own-state mutation.  The fixture's
-  // `create(p) by p.order { attempts := 1 }` writes a declared saga-state field —
-  // documented as "own-state mutation" (workflow.md) but not yet lowered: the
-  // assignment falls through to lower-workflow.ts's `__bad__` placeholder, so the
-  // route emits a bare `attempts` (TS2304).  Wiring it is a cross-backend slice
-  // (a new `assign` WorkflowStmtIR kind + state-row mutability across all five
-  // workflow backends — Java/.NET/Phoenix saga-state classes are immutable today),
-  // tracked separately from this compile tier.
-  "workflow-view":
-    "FEATURE GAP: workflow own-state mutation (`field := …`) not yet lowered (TS2304)",
-};
+const TS_COMPILE_SKIP: Record<string, string> = {};
 
 // Every corpus feature the manifest declares to generate on `node`, minus the
 // documented compile-tier skips.

@@ -56,10 +56,6 @@ function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
 // all six backends; each line is a precise, reproducible bug report).  Widen
 // the gate by FIXING the emitter, then dropping the entry.
 const ELIXIR_COMPILE_SKIP: Record<string, string> = {
-  // FEATURE GAP (not an emitter bug): workflow own-state mutation.  `attempts := 1`
-  // in a saga body is documented ("own-state mutation", workflow.md) but not yet
-  // lowered on any backend — the same cross-backend gap every other tier tracks.
-  "workflow-view": "FEATURE GAP: workflow own-state mutation (`field := …`) not yet lowered",
   // PLATFORM LIMITATION (Ash foundation, generate-time error): `shape(document)`.
   // Ash emits only relational/embedded shapes; the generator points to
   // foundation: vanilla (or a node/dotnet deployable) for whole-aggregate jsonb.
