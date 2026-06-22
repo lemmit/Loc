@@ -24,6 +24,7 @@ import { snake, upperFirst } from "../../../util/naming.js";
 import { ectoValidator, voHasConstraints } from "./changeset-validators.js";
 import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
+import { valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
 interface AggField {
   name: string;
@@ -74,8 +75,13 @@ function renderChangeset(
   const aggPascal = upperFirst(agg.name);
   const aggModule = `${appModule}.${ctxModule}.${aggPascal}`;
   const changesetMod = `${aggModule}Changeset`;
+  // Value-object collection fields (`charges: Money[]`) are `has_many`
+  // associations cast via `cast_assoc`, NOT scalar columns — exclude them from
+  // the flat `cast`/`validate_required` field lists (casting an association
+  // field raises `unknown field`).
+  const vcFieldNames = new Set(valueCollectionsWithVo(agg, ctx).map((v) => v.vc.fieldName));
   const allFields = (agg.fields as AggField[]).filter(
-    (f) => !SYSTEM_FIELDS.has(f.name) && !isManaged(f),
+    (f) => !SYSTEM_FIELDS.has(f.name) && !isManaged(f) && !vcFieldNames.has(f.name),
   );
   const requiredFields = allFields.filter((f) => !f.optional);
 
@@ -101,6 +107,84 @@ function renderChangeset(
   // emits).  Each delegates to the part module's `changeset/2`.
   const castEmbedLines = agg.contains.map((c) => `    |> cast_embed(:${snake(c.name)})`).join("\n");
   const castEmbedBlock = castEmbedLines.length > 0 ? `\n${castEmbedLines}` : "";
+
+  // Value-object collections (`charges: Money[]`) round-trip via `cast_assoc`
+  // onto the child schema (`on_replace: :delete` gives replace-on-update).  The
+  // ordinal is stamped into the RAW attrs element maps up front (see
+  // `prepare_vc_attrs/1`), NOT onto the cast child changesets — Ecto forbids a
+  // second `put_change` over a `cast_assoc` result ("cannot replace related …"),
+  // which is exactly what a post-cast ordinal stamp would do on update.
+  const valueCollections = valueCollectionsWithVo(agg, ctx);
+  const castAssocLines = valueCollections
+    .map(({ vc }) => {
+      const f = snake(vc.fieldName);
+      const childMod = `${appModule}.${ctxModule}.${vc.childTable
+        .split("_")
+        .map(upperFirst)
+        .join("")}`;
+      return `    |> cast_assoc(:${f}, with: &${childMod}.changeset/2)`;
+    })
+    .join("\n");
+  const castAssocBlock = castAssocLines.length > 0 ? `\n${castAssocLines}` : "";
+  // Attrs preprocessing for every value-collection field, done ONCE on the raw
+  // attrs before `cast`/`cast_assoc`: (1) alias the camelCase wire key onto the
+  // snake_case association key (the wire body is camelCase, Ecto associations are
+  // snake_case); (2) stamp a positional `:ordinal` into each element map (the
+  // client body carries none) so the array round-trips in declared order.  The
+  // child schema's `changeset/2` casts `:ordinal`, so it flows through naturally.
+  const vcSnakeKeys = valueCollections.map(({ vc }) => `"${snake(vc.fieldName)}"`);
+  const keyAliasPairs = valueCollections
+    .map(({ vc }) => {
+      const camel = vc.fieldName; // already camelCase as authored
+      const snk = snake(vc.fieldName);
+      return camel === snk ? null : `      {${JSON.stringify(camel)}, ${JSON.stringify(snk)}}`;
+    })
+    .filter((p): p is string => p !== null);
+  const aliasReduce =
+    keyAliasPairs.length > 0
+      ? `Enum.reduce(
+      [
+${keyAliasPairs.join(",\n")}
+      ],
+      attrs,
+      fn {camel, snake_key}, acc ->
+        case Map.fetch(acc, camel) do
+          {:ok, v} -> acc |> Map.delete(camel) |> Map.put(snake_key, v)
+          :error -> acc
+        end
+      end
+    )`
+      : "attrs";
+  const normalizeHelper =
+    valueCollections.length > 0
+      ? `
+
+  # Normalize the raw attrs for every value-collection field: alias the
+  # camelCase wire key → snake association key, then stamp a positional ordinal
+  # into each element map (before cast_assoc, so Ecto tracks one change per assoc).
+  defp prepare_vc_attrs(attrs) when is_map(attrs) do
+    attrs = ${aliasReduce}
+
+    Enum.reduce([${vcSnakeKeys.join(", ")}], attrs, fn key, acc ->
+      case Map.fetch(acc, key) do
+        {:ok, items} when is_list(items) ->
+          stamped =
+            items
+            |> Enum.with_index()
+            |> Enum.map(fn {item, i} ->
+              if is_map(item), do: Map.put(item, "ordinal", i), else: item
+            end)
+
+          Map.put(acc, key, stamped)
+
+        _ -> acc
+      end
+    end)
+  end
+
+  defp prepare_vc_attrs(attrs), do: attrs`
+      : "";
+  const ordinalHelper = "";
 
   // Value-object invariant enforcement (F5).  A VO field is stored as a plain
   // `:map`, so `cast` accepts any object; we run the VO's own validating
@@ -151,8 +235,8 @@ function renderChangeset(
   // old operation helper `cast`d the op's *params*, which raises `unknown field`
   // at runtime whenever a param isn't a column (e.g. `reprice(qty, price)`).
   const actionHelpers = [
-    ...(agg.creates ?? []).map((op) => renderActionHelper(aggModule, op, "create")),
-    ...(agg.destroys ?? []).map((op) => renderActionHelper(aggModule, op, "destroy")),
+    ...(agg.creates ?? []).map((op) => renderActionHelper(aggModule, op, "create", vcFieldNames)),
+    ...(agg.destroys ?? []).map((op) => renderActionHelper(aggModule, op, "destroy", vcFieldNames)),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -168,10 +252,10 @@ defmodule ${changesetMod} do
 
   @doc "Default cast/3 helper applied by every per-action changeset below."
   def base_changeset(struct \\\\ %${aggPascal}{}, attrs) do
-    struct
+    ${valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : ""}struct
     |> cast(attrs, @all_fields)
-    |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${voBlock}
-  end${voHelper}
+    |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${castAssocBlock}${voBlock}
+  end${voHelper}${normalizeHelper}${ordinalHelper}
 
 ${actionHelpers}
 end
@@ -182,10 +266,16 @@ function renderActionHelper(
   aggModule: string,
   op: OperationIR,
   kind: "create" | "operation" | "destroy",
+  /** Value-object collection field names — excluded from a cast allow-list
+   *  (they are `has_many` associations cast via `cast_assoc`, not columns). */
+  vcFieldNames: ReadonlySet<string> = new Set(),
 ): string {
   const aggPascal = aggModule.split(".").pop()!;
   const opName = snake(op.name);
-  const paramCols = op.params.map((p) => `:${snake(p.name)}`).join(", ");
+  const paramCols = op.params
+    .filter((p) => !vcFieldNames.has(p.name))
+    .map((p) => `:${snake(p.name)}`)
+    .join(", ");
   const allowList = paramCols ? `[${paramCols}]` : "[]";
 
   if (kind === "create") {
