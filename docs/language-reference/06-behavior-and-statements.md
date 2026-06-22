@@ -2,7 +2,7 @@
 
 How an aggregate changes state: the four action members — `operation` (a mutating method), `create` / `destroy` (lifecycle factory / terminator), and the event-sourcing `apply` fold — plus the statement vocabulary their bodies share (`precondition`, `requires`, `let`, `emit`, `return`, and the assignment family `:=` / `+=` / `-=`). Reach for it when you need a domain method that validates, mutates, raises an event, or returns a typed outcome.
 
-> **Grammar:** `Operation`, `Create`, `Destroy`, `Apply`, `Statement` (`PreconditionStmt`, `RequiresStmt`, `LetStmt`, `EmitStmt`, `ReturnStmt`, `AssignOrCallStmt`; `ForStmt` / `IfLetStmt` are workflow-body only — see [Workflows](08-workflows.md)) · **Lowering:** [`src/ir/lower/lower-stmt.ts`](../../src/ir/lower/lower-stmt.ts), `lower-members.ts` · **Docs:** [`../language.md`](../language.md), [`../workflow.md`](../workflow.md)
+> **Grammar:** `Operation`, `Create`, `Destroy`, `Apply`, `Statement` (`PreconditionStmt`, `RequiresStmt`, `LetStmt`, `EmitStmt`, `ReturnStmt`, `AssignOrCallStmt`; `ForStmt` / `IfLetStmt` are workflow-body only — see [Workflows](13-workflows.md)) · **Lowering:** [`src/ir/lower/lower-stmt.ts`](../../src/ir/lower/lower-stmt.ts), `lower-members.ts` · **Docs:** [`../language.md`](../language.md), [`../workflow.md`](../workflow.md)
 
 Every body lowers through one shared `lowerStatement`, so an `operation`, a `create`, a `destroy`, and an `apply` all draw from the same statement set; the **kind tag** (not the body syntax) carries the lifecycle asymmetry. Each backend's `render-stmt.ts` turns the lowered `StmtIR` into source — the per-tab output below is exactly what those emitters produce.
 
@@ -500,8 +500,8 @@ if not (record.status == :draft), do: raise(ArgumentError, "Precondition failed:
 ```
 ::: end
 
-A record variant flattens its fields beside `type` on the wire; a scalar variant wraps a `value`; a `none` variant is the bare `{ type: … }`. See [Payloads & unions](07-payloads-and-unions.md) for the union wire shape and [`../language.md`](../language.md) §"Exception-less returns".
+A record variant flattens its fields beside `type` on the wire; a scalar variant wraps a `value`; a `none` variant is the bare `{ type: … }`. See [Payloads & unions](09-payloads-and-unions.md) for the union wire shape and [`../language.md`](../language.md) §"Exception-less returns".
 
 ## `for` & `if let` — workflow bodies only
 
-`for x in xs { … }` and `if let x = Repo.find(C) { … } else { … }` parse via the same `Statement` rule but are meaningful only inside `workflow` bodies — there they lower (`lower-workflow.ts`) to `for-each` / `if-let` IR with per-iteration / per-branch repository saves. The aggregate-body lowerer (`lower-stmt.ts`) has no arm for them, so they have no effect in an `operation` / `create` / `destroy` / `apply` body. They're covered in [Workflows](08-workflows.md).
+`for x in xs { … }` and `if let x = Repo.find(C) { … } else { … }` parse via the same `Statement` rule but are meaningful only inside `workflow` bodies — there they lower (`lower-workflow.ts`) to `for-each` / `if-let` IR with per-iteration / per-branch repository saves. The aggregate-body lowerer (`lower-stmt.ts`) has no arm for them, so they have no effect in an `operation` / `create` / `destroy` / `apply` body. They're covered in [Workflows](13-workflows.md).

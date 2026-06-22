@@ -245,4 +245,4 @@ channels:
       transport: "bus"     # the channelSource's bound storage
 ```
 
-A UI subscribes to a context's broadcast channel with a `channel <Handle>: <Context>.<Channel>` parameter on its `ui` block (`UiChannelParam`); the frontend then refetches through its authorised reads when an event arrives. See [`../channels.md`](../channels.md) if present, else [`../resources.md`](../resources.md) for the broader infra model.
+A UI subscribes to a context's broadcast channel with a `channel <Handle>: <Context>.<Channel>` parameter on its `ui` block (`UiChannelParam`); the frontend then refetches through its authorised reads when an event arrives. See [`../resources.md`](../resources.md) for the broader infra model.

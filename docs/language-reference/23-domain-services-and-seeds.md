@@ -6,7 +6,7 @@ Two smaller context-level declarations that sit *beside* the aggregates rather t
 
 ## `domainService` — a stateless pure calculator
 
-`domainService Name { operation op(params): Type { stmts } }` declares a named container of **non-mutating** operations. Each operation takes aggregates / value objects / primitives **by value**, returns a value (or an `or`-union error — see [Payloads & unions](18-payloads-and-unions.md)), and has no `this` to mutate. It fills the gap between an aggregate `operation` (mutates one aggregate) and a `workflow` (orchestrates infrastructure): a cross-aggregate calculation that is pure domain logic.
+`domainService Name { operation op(params): Type { stmts } }` declares a named container of **non-mutating** operations. Each operation takes aggregates / value objects / primitives **by value**, returns a value (or an `or`-union error — see [Payloads & unions](09-payloads-and-unions.md)), and has no `this` to mutate. It fills the gap between an aggregate `operation` (mutates one aggregate) and a `workflow` (orchestrates infrastructure): a cross-aggregate calculation that is pure domain logic.
 
 ```ddd
 context Catalog {

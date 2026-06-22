@@ -55,7 +55,7 @@ subdomain Sales {
 
 The split matters for the deployment layer: deployables reference **contexts** (`contexts: [Orders]`), and an `api … from Sales` derives its contract from a **subdomain**. A `context` name must be unique across the whole project; cross-context aggregate references must spell out `X id` (a bare type ref only resolves within the same context).
 
-No generated tab on its own — the domain inside a context is the subject of [Aggregates & domain model](03-aggregates-and-domain.md). What this chapter shows is how that context is *shipped*.
+No generated tab on its own — the domain inside a context is the subject of [Aggregates & domain model](03-domain-modeling.md). What this chapter shows is how that context is *shipped*.
 
 ## `deployable`
 
@@ -324,7 +324,7 @@ The backend families and what they generate (registered in `src/platform/registr
 
 These are the only spellings — the legacy aliases (`hono` → `node`, `fastapi` → `python`, `phoenix`/`phoenixLiveView` → `elixir`) were **retired**; writing them now fails validation as an unknown platform. A backend may pin a `family@version` via the `STRING` alternative — `platform: "node@v4"` selects the zod-3 / TS-5 Hono package (`platform: node` resolves to the default version). `elixir` is dual-natured: it owns a database **and** mounts a `ui:` (Phoenix LiveView), so it is the one *fullstack* platform; `dotnet` and `java` are backend-only but embed a React SPA when the deployable declares `ui:`.
 
-Per-platform output for the same `aggregate Order` is the subject of [Aggregates & domain model](03-aggregates-and-domain.md); here the platform choice is what selects the *whole project shape* shown above.
+Per-platform output for the same `aggregate Order` is the subject of [Aggregates & domain model](03-domain-modeling.md); here the platform choice is what selects the *whole project shape* shown above.
 
 ## Frontend platforms & `targets:`
 

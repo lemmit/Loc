@@ -74,39 +74,41 @@ State is `const [draftName, setDraftName] = useState<string>("")`; the walker em
 == vue
 ```vue
 <!-- Vuetify — pages/product_detail.vue -->
-<div class="d-flex flex-column ga-3" data-testid="products-detail">
+<v-container data-testid="products-detail">
   <v-row>
-    <v-col cols="auto">
-      <div class="d-flex align-center ga-3"><v-avatar /><h2>Product detail</h2></div>
+    <v-col>
+      <div class="d-flex align-center flex-wrap ga-3"><v-avatar></v-avatar><h2>Product detail</h2></div>
     </v-col>
-    <v-col cols="auto">
+    <v-col>
       <v-card variant="outlined" class="pa-4">
         <div class="d-flex flex-column ga-3">
           <v-text-field label="Name" :model-value="draftName" @update:model-value="setDraftName" />
-          <v-switch label="Editing" :model-value="editing" @update:model-value="setEditing" />
-          <!-- Stat / Divider / Money / KeyValueRow … -->
+          <v-switch label="Editing" :model-value="editing" @update:model-value="(v) => setEditing(!!v)" />
+          <v-divider />
+          <span>{{ formatMoney(1999, "USD") }}</span>
+          <!-- Stat / KeyValueRow … -->
         </div>
       </v-card>
     </v-col>
   </v-row>
-</div>
+</v-container>
 ```
 State is `const draftName = ref("")` with a generated `setDraftName` writer; reads in handlers unwrap `.value`.
 == svelte
 ```svelte
 <!-- shadcnSvelte — routes/(app)/products/[id]/+page.svelte -->
-<div class="..." data-testid="products-detail">
-  <div class="grid ...">
+<div class="container ..." data-testid="products-detail">
+  <div class="grid gap-4 grid-cols-3">
     <div class="flex flex-row items-center gap-4"><!-- Avatar --><h2 class="text-2xl font-semibold tracking-tight">Product detail</h2></div>
-    <div class="rounded-lg border bg-card p-4 shadow-sm">
-      <div class="flex flex-col gap-2"><Label>Name</Label><Input bind:value={draftName} /></div>
-      <div class="flex items-center gap-2"><Switch bind:checked={editing} /><Label>Editing</Label></div>
+    <div class="rounded-xl border bg-card p-6">
+      <label class="flex flex-col gap-2"><span class="loom-label">Name</span><input class="loom-input" value={draftName} oninput={(e) => { draftName = e.currentTarget.value; }} /></label>
+      <label class="flex items-center gap-2"><input type="checkbox" role="switch" class="loom-switch" checked={editing} onchange={(e) => { editing = e.currentTarget.checked; }} /><span class="loom-label">Editing</span></label>
       <!-- Stat / Divider / Money / KeyValueRow … -->
     </div>
   </div>
 </div>
 ```
-State is a Svelte 5 rune: `let draftName = $state<string>("")`; the input uses native `bind:value`.
+State is a Svelte 5 rune: `let draftName = $state<string>("")`; the input writes the rune directly in its `oninput` handler.
 == angular
 ```ts
 // Angular Material — pages/product-detail.component.ts (template excerpt)
@@ -212,16 +214,18 @@ React Hook Form + zodResolver + a React Query mutation hook (`useCreateProduct`)
 == vue
 ```vue
 <!-- Vuetify — a useLoomForm composable drives the same field set -->
-<v-form @submit.prevent="onSubmit">
-  <v-text-field label="Name" v-model="form.name" data-testid="products-new-input-name" :error-messages="errors.name" />
-  <v-select label="Visibility" v-model="form.visibility" :items="['Private','Internal','Public']" />
-  <v-switch label="Active" v-model="form.active" />
-  <v-text-field label="Price" type="number" v-model.number="form.price" />
-  <v-text-field label="Created At" type="datetime-local" v-model="form.createdAt" />
-  <v-btn type="submit" :loading="create.isPending">Create</v-btn>
+const form = useLoomForm(CreateProductRequest, { name: "", visibility: "Private", active: false, price: 0, createdAt: "" });
+// …
+<v-form @submit.prevent='form.handleSubmit(async (vals) => { const out = await create.mutateAsync(vals); pushToast("Product created"); navigate(`/products/${out.id}`); })($event)'>
+  <v-text-field label="Name" v-model="form.values.name" :error-messages='form.errors["name"]' />
+  <v-select label="Visibility" :items='["Private","Internal","Public"]' v-model="form.values.visibility" />
+  <v-switch label="Active" v-model="form.values.active" />
+  <v-text-field label="Price" type="number" step="0.01" :model-value="form.values.price" @update:model-value="(v) => form.values.price = Number(v) || 0" />
+  <v-text-field label="Created At" type="datetime-local" v-model="form.values.createdAt" />
+  <v-btn type="submit" color="primary" variant="flat" :loading="create.isPending">Create</v-btn>
 </v-form>
 ```
-The same field dispatch (select / switch / number / datetime), bound with `v-model` instead of `Controller`.
+A `useLoomForm` composable + the same field dispatch (select / switch / number / datetime), bound with `v-model="form.values.*"` instead of `Controller`.
 ::: end
 
 > Form details (field-type dispatch, `onSubmit:`/`then:` overrides, the `OperationForm`/`WorkflowForm`/`DestroyForm` siblings) are in [`../page-metamodel.md`](../page-metamodel.md) §9 and the loom-forms reference.
