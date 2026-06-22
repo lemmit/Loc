@@ -2058,16 +2058,19 @@ export function validateProvenancedStorage(
 }
 
 // Per-operation audit-record emission (`operation … audited`) is implemented for
-// the Hono (`node`) and .NET (`dotnet`) backends — an audited public route /
-// command handler appends a who/what/when + before/after snapshot to the audit
-// sink in the operation's save transaction.  Audited LIFECYCLE actions (`audited
-// create` / `destroy`) stay node-only — the .NET create/destroy handlers are
-// not yet instrumented, so hosting one on dotnet would silently record nothing.
-// Either mismatch is an error, not a silent no-op.  (This gates the per-operation
+// the Hono (`node`), .NET (`dotnet`), Java (`java`) and Python (`python`)
+// backends — an audited public route / command handler / service method appends
+// a who/what/when + before/after snapshot to the audit sink in the operation's
+// save transaction.  Audited LIFECYCLE actions (`audited create` / `destroy`)
+// ship on the same four backends — the create/destroy handlers stage the audit
+// row (before:null/after=wire on create; before=wire/after:null on destroy) in
+// the lifecycle transaction.  Phoenix (`elixir`) stays uninstrumented for both,
+// so hosting an `audited` action there would silently record nothing — that
+// mismatch is an error, not a silent no-op.  (This gates the per-operation
 // `audited` flag only; the `with audit` capability macro emits stamping rules via
 // `contextStamps`, a separate concern.)
 const AUDIT_OP_BACKENDS = new Set(["node", "dotnet", "java", "python"]);
-const AUDIT_LIFECYCLE_BACKENDS = new Set(["node"]);
+const AUDIT_LIFECYCLE_BACKENDS = new Set(["node", "dotnet", "java", "python"]);
 export function validateAuditedOperationSupport(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
@@ -2120,7 +2123,7 @@ export function validateAuditedOperationSupport(
         "lifecycle action",
         auditedLifecycle.map((o) => o.name || "<create>"),
         lifecycleUnsupported,
-        "Hono (node)",
+        "Hono (node) / .NET (dotnet) / Java (java) / Python (python)",
       );
     }
   }

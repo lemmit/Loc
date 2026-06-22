@@ -176,6 +176,7 @@ export function buildPyRoutesFile(
     `from fastapi import ${["APIRouter", "Depends", refersTo("Path") ? "Path" : null, refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
     refersTo("JSONResponse") ? "from fastapi.responses import JSONResponse" : null,
     `from pydantic import ${["BaseModel", refersTo("Field") ? "Field" : null, refersTo("RootModel") ? "RootModel" : null, refersTo("model_validator") ? "model_validator" : null].filter(Boolean).join(", ")}`,
+    refersTo("JSON.NULL") ? "from sqlalchemy import JSON" : null,
     refersTo("IntegrityError") ? "from sqlalchemy.exc import IntegrityError" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
@@ -545,7 +546,26 @@ function stampCall(agg: EnrichedAggregateIR, event: "create" | "update", varName
 
 // --- routes ---------------------------------------------------------------------
 
+// The lifecycle audit row for a `create(...) audited` — staged through the repo
+// (same session, so it commits with the save).  Asymmetry: `before` is JSON null
+// (JSON.NULL → the `null` literal, satisfying the NOT NULL jsonb column),
+// `after` is the freshly-created wire snapshot keyed by the generated id.
+function createAuditCall(agg: EnrichedAggregateIR): string[] {
+  return [
+    "    await repo.record_audit(",
+    `        operation_id=${JSON.stringify(`create${agg.name}`)},`,
+    '        action="create",',
+    `        target_type=${JSON.stringify(agg.name)},`,
+    "        target_id=str(created.id),",
+    "        before=JSON.NULL,",
+    "        after=repo.to_wire(created),",
+    "    )",
+  ];
+}
+
 function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
+  const createAction = agg.persistedAs === "eventLog" ? agg.creates?.[0] : agg.canonicalCreate;
+  const auditCreate = !!createAction?.audited;
   const esCreate = agg.persistedAs === "eventLog" ? agg.creates?.[0] : undefined;
   if (esCreate) {
     const args = esCreate.params
@@ -555,7 +575,9 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
       `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
       `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
       `    created = ${agg.name}.create(${args})`,
-      "    await _repo(session).save(created)",
+      auditCreate ? "    repo = _repo(session)" : null,
+      auditCreate ? "    await repo.save(created)" : "    await _repo(session).save(created)",
+      ...(auditCreate ? createAuditCall(agg) : []),
       `    return {"id": created.id}`,
     );
   }
@@ -578,7 +600,9 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     stampUsesPrincipal ? "    current_user: User = request.state.current_user" : null,
     `    created = ${agg.name}.create(${args})`,
     hasStamp(agg, "create") ? stampCall(agg, "create", "created") : null,
-    "    await _repo(session).save(created)",
+    auditCreate ? "    repo = _repo(session)" : null,
+    auditCreate ? "    await repo.save(created)" : "    await _repo(session).save(created)",
+    ...(auditCreate ? createAuditCall(agg) : []),
     `    return {"id": created.id}`,
   );
 }
@@ -602,11 +626,32 @@ function byIdRoute(agg: EnrichedAggregateIR): string {
 }
 
 function destroyRoute(agg: EnrichedAggregateIR): string {
+  // Audited destroy: snapshot the loaded wire shape, stage the audit row through
+  // the repo (same session → commits with the delete), THEN hard-delete.
+  // Asymmetry: `before` is the last snapshot, `after` is JSON null (JSON.NULL →
+  // the `null` literal, satisfying the NOT NULL jsonb column).
+  const auditDestroy = !!agg.canonicalDestroy?.audited;
+  const destroyAuditCall = auditDestroy
+    ? [
+        "    await repo.record_audit(",
+        `        operation_id=${JSON.stringify(`destroy${agg.name}`)},`,
+        '        action="destroy",',
+        `        target_type=${JSON.stringify(agg.name)},`,
+        "        target_id=str(id),",
+        "        before=__before,",
+        "        after=JSON.NULL,",
+        "    )",
+      ]
+    : [];
   return lines(
     `@router.delete("/{id}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}"${errorResponsesKwarg("destroy")})`,
     `async def destroy_${snake(agg.name)}(${ID_PARAM}, request: Request, session: SessionDep) -> Response:`,
     "    repo = _repo(session)",
-    `    await repo.get_by_id(${agg.name}Id(id))`,
+    auditDestroy
+      ? `    __loaded = await repo.get_by_id(${agg.name}Id(id))`
+      : `    await repo.get_by_id(${agg.name}Id(id))`,
+    auditDestroy ? "    __before = repo.to_wire(__loaded)" : null,
+    ...destroyAuditCall,
     "    try:",
     `        await repo.delete(${agg.name}Id(id))`,
     "    except IntegrityError:",

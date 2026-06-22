@@ -16,6 +16,7 @@ import {
   type ViewIR,
   type WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
+import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import {
   baseOf,
   discriminatorValue,
@@ -24,7 +25,6 @@ import {
 } from "../../ir/util/inheritance.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
-import { aggHasAuditedOp } from "./emit/audit.js";
 import { provColumn, provenancedFieldsOf } from "./emit/provenance.js";
 import {
   contextFilterPredicate,
@@ -156,7 +156,7 @@ export function buildPyRepositoryFile(
     "",
     toWireMethod(agg, ctx),
     ...parts.flatMap((p) => ["", partWireMethod(p, ctx)]),
-    aggHasAuditedOp(agg) ? ["", recordAuditMethod()] : null,
+    aggHasAuditedTarget(agg) ? ["", recordAuditMethod()] : null,
   );
 
   // Import narrowing via body scan (string literals stripped).
@@ -192,7 +192,7 @@ export function buildPyRepositoryFile(
   const saNames = ["and_", "delete", "func", "not_", "or_", "select"].filter(refersTo);
 
   const hasProv = provenancedFieldsOf(agg).length > 0;
-  const hasAudit = aggHasAuditedOp(agg);
+  const hasAudit = aggHasAuditedTarget(agg);
   // The obs.log RequestContext accessors are shared between provenance (which
   // also reads `actor_id`) and audit (correlation / scope / parent).  Union the
   // names so a single sorted import covers both without duplication.
@@ -859,8 +859,12 @@ function recordAuditMethod(): string {
     "        action: str,",
     "        target_type: str,",
     "        target_id: str,",
-    "        before: dict[str, object],",
-    "        after: dict[str, object],",
+    // `before` / `after` are the wire-DTO snapshots either side of the mutation.
+    // A lifecycle action passes `JSON.NULL` on the asymmetric side (create → no
+    // before, destroy → no after): it stores the JSON `null` literal, satisfying
+    // the NOT NULL jsonb column (parity with the Hono route's `before: null`).
+    "        before: object,",
+    "        after: object,",
     "        actor: object | None = None,",
     '        status: str = "ok",',
     "    ) -> None:",

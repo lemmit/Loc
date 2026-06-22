@@ -3,6 +3,7 @@ import type {
   EnrichedBoundedContextIR,
   OperationIR,
 } from "../../../ir/types/loom-ir.js";
+import { aggHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { lines } from "../../../util/code-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -26,24 +27,25 @@ import { lines } from "../../../util/code-builder.js";
 // NOT part of the platform-neutral MigrationsIR.
 // ---------------------------------------------------------------------------
 
-/** The `audited` public operations on an aggregate — the per-op audit scope
- *  (lifecycle create/destroy audit is grammar-blocked and out of scope). */
+/** The `audited` public operations on an aggregate — the per-op audit scope. */
 export function auditedOpsOf(agg: EnrichedAggregateIR): OperationIR[] {
   return agg.operations.filter((o) => o.audited && o.visibility === "public");
 }
 
 /** True iff this aggregate has any `audited` public operation — gates the
- *  per-service audit instrumentation. */
+ *  per-service operation audit instrumentation. */
 export function aggHasAuditedOp(agg: EnrichedAggregateIR): boolean {
   return agg.operations.some((o) => o.audited && o.visibility === "public");
 }
 
-/** True iff any aggregate in the given contexts has an `audited` public
- *  operation — gates the shared runtime files + the audit_records DDL. */
+/** True iff any aggregate in the given contexts carries an `audited` command
+ *  action — operation, lifecycle create, OR destroy (the SHARED predicate).
+ *  Gates the shared runtime files + the audit_records DDL so a
+ *  lifecycle-only-audited aggregate still gets the table. */
 export function contextsHaveAudit(contexts: EnrichedBoundedContextIR[]): boolean {
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) {
-      if (aggHasAuditedOp(agg)) return true;
+      if (aggHasAuditedTarget(agg)) return true;
     }
   }
   return false;

@@ -10,6 +10,7 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
 import {
@@ -48,7 +49,6 @@ import { domainUnionFiles } from "./cqrs/dtos.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { canEmitToExpressionFor, emitCriteria } from "./criteria-emit.js";
 import {
-  aggHasAuditedOp,
   renderAuditRecord,
   renderAuditRecordConfiguration,
   renderAuditWriter,
@@ -365,7 +365,11 @@ function emitProjectFromContexts(
   // drives the lineage SDK + history table + co-located columns; `hasAudit`
   // drives the audit table + writer + per-handler instrumentation.
   const hasProvenance = !usingDapper && contextsHaveProvenance(contexts);
-  const hasAudit = !usingDapper && merged.aggregates.some(aggHasAuditedOp);
+  // Audit table/writer/DbSet emission is gated on the SHARED predicate
+  // (operations ∪ creates ∪ destroys) so a lifecycle-only-audited aggregate
+  // — `create(...) audited` / `destroy audited` with no audited operation —
+  // still gets the audit_records table + IAuditWriter seam.
+  const hasAudit = !usingDapper && merged.aggregates.some(aggHasAuditedTarget);
   if (usingDapper) {
     out.set("Infrastructure/Persistence/DbSchema.cs", renderDapperSchema(merged.aggregates, ns));
   } else {
