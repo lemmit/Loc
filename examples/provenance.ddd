@@ -2,9 +2,10 @@
 //
 // Mark a stored field `provenanced` and every assignment to it
 // (`:=`/`+=`/`-=`) becomes an immutable per-write-site rule snapshot.
-// The generated Hono backend records a runtime trace on each write
-// (see `domain/provenance.ts` + the `recordTrace(...)` calls in
-// `domain/order.ts`), and the explicit capture step
+// Every backend that runs domain logic (Hono, .NET, Java, Python,
+// Elixir/vanilla) records a runtime trace on each write — the capture
+// is inlined at the assignment site and drained on save — and the
+// explicit capture step
 //
 //     ddd snapshot examples/provenance.ddd -o out
 //

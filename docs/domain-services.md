@@ -78,11 +78,11 @@ behaviour could be an `operation` on that aggregate instead.
 | Backend | Shape | Call syntax |
 |---|---|---|
 | **TS / Hono** | `domain/services.ts` — `export namespace Pricing { export function quote(...) }` | `Pricing.quote(cart, customer)` |
-| **.NET** | `public static class Pricing` (planned) | `Pricing.Quote(cart, customer)` |
-| **Java** | static utility class (planned) | `Pricing.quote(cart, customer)` |
-| **Python** | bare module functions (planned) | `quote(cart, customer)` |
-| **Phoenix** | `App.Domain.Services.Pricing` plain module (planned) | `App.Domain.Services.Pricing.quote(cart, customer)` |
+| **.NET** | `public static class Pricing` | `Pricing.Quote(cart, customer)` |
+| **Java** | static utility class | `Pricing.quote(cart, customer)` |
+| **Python** | bare module functions | `quote(cart, customer)` |
+| **Phoenix** | `App.Domain.Services.Pricing` plain module | `App.Domain.Services.Pricing.quote(cart, customer)` |
 
-The call rendering for all five backends ships today (the shared
-`ExprTarget.domainServiceCall` arm); the TS declaration emitter ships
-with v1, the other four declaration emitters land per-backend.
+Both the call rendering (the shared `ExprTarget.domainServiceCall` arm)
+and the declaration emitters ship on all five backends today
+(`src/generator/{typescript,dotnet,java,python,elixir}/…/domain-service*`).
