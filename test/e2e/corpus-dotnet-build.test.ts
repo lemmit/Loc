@@ -43,11 +43,6 @@ const DOTNET_COMPILE_SKIP: Record<string, string> = {
   // The same shape java skip-lists; use shape(document)/relational or host on node.
   embedded:
     "PLATFORM LIMITATION: jsonb-embedded + ref collection has no join-table type on .NET (CS0234)",
-  // EMITTER GAP: outbox dispatcher — `OutboxDomainEventDispatcher` references
-  // `IDomainEvent` / `IDomainEventDispatcher.DispatchAsync` shapes that aren't
-  // emitted for the durable-channel outbox on .NET (CS0246 / CS0535).
-  outbox:
-    "EMITTER GAP: outbox dispatcher references unemitted IDomainEvent shapes on .NET (CS0246/CS0535)",
   // EMITTER GAP: tenancy `filter this.tenantId == currentUser.tenantId` — the EF
   // entity configuration emits a bare `currentUser` reference with nothing in
   // scope (CS0103); the filter expr isn't threaded a current-user accessor there.
