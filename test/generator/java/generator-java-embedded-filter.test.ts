@@ -42,3 +42,47 @@ describe("java embedded capability filter (DEBT-02)", () => {
     expect(e).not.toContain("import org.hibernate.annotations.SQLRestriction;");
   });
 });
+
+// ---------------------------------------------------------------------------
+// DEBT-02 Slice A — a PRINCIPAL-referencing capability filter
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape(embedded)`
+// aggregate (java).  A principal predicate can't ride the static
+// @SQLRestriction (no runtime principal), so — exactly like the relational
+// path — the OrderJpaRepository gets scoped findAll/findById @Query overrides
+// carrying the SpEL clause (`:#{@currentUserAccessor.user()?.tenantId()}`), and
+// each custom find AND-s it too.  Requires `auth: required`.  Previously gated
+// by `loom.context-filter-unsupported`.
+// ---------------------------------------------------------------------------
+
+const TENANCY_SRC = readFileSync("test/e2e/fixtures/java-build/embedded-tenancy.ddd", "utf8");
+const SPEL = ":#{@currentUserAccessor.user()?.tenantId()}";
+
+async function orderRepo(): Promise<string> {
+  const files = await generateSystemFiles(TENANCY_SRC);
+  return files.get(`${ROOT}/features/orders/OrderJpaRepository.java`)!;
+}
+
+describe("java embedded principal (tenancy) capability filter (DEBT-02 Slice A)", () => {
+  it("overrides findAll with a scoped @Query carrying the SpEL principal", async () => {
+    expect(await orderRepo()).toContain(
+      `@Query("select e from Order e where (e.tenantId = ${SPEL})")`,
+    );
+  });
+
+  it("overrides findById so a guessed cross-tenant id can't leak", async () => {
+    expect(await orderRepo()).toContain(
+      `@Query("select e from Order e where e.id = :id and (e.tenantId = ${SPEL})")`,
+    );
+  });
+
+  it("ANDs the principal into a custom find's own where", async () => {
+    expect(await orderRepo()).toContain(`where (e.code = :code) and (e.tenantId = ${SPEL})`);
+  });
+
+  it("does NOT put the principal filter on the embedded entity @SQLRestriction", async () => {
+    const files = await generateSystemFiles(TENANCY_SRC);
+    const entity = files.get(`${ROOT}/features/orders/Order.java`)!;
+    expect(entity).not.toContain("@SQLRestriction");
+    expect(entity).not.toContain("currentUser");
+  });
+});

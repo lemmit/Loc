@@ -1,0 +1,49 @@
+// DEBT-02 Slice A — a PRINCIPAL-referencing capability filter
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape(embedded)`
+// aggregate, on the JAVA (Spring Boot + JPA/Hibernate) backend.  An embedded
+// aggregate's root scalars (`tenantId`, `code`) are real JPA columns; only the
+// `contains` parts ride a jsonb column.  Previously this combination was GATED
+// by `loom.context-filter-unsupported`; Slice A lifts the gate and reuses the
+// relational-principal path — the `<Agg>JpaRepository` gets scoped
+// `findAll`/`findById` overrides carrying a `@Query` with the SpEL-principal
+// JPQL clause (`:#{@currentUserAccessor.user()?.tenantId()}`), the JPA analogue
+// of node's ambient `requireCurrentUser()`.
+//
+// `auth: required` emits the CurrentUserAccessor the SpEL resolves the request
+// principal through.  Decisive check that the generated Spring Data @Query +
+// SpEL on an EMBEDDED aggregate compile under `gradle testClasses bootJar`
+// (the java-build gate).  (`shape(document)` + principal stays gated — Slice B.)
+system EmbTenancy {
+  user { id: guid  tenantId: string }
+
+  subdomain D {
+    context Shop {
+      aggregate Order shape(embedded) {
+        tenantId: string
+        code: string
+        // Always-on row scoping by the requesting principal's tenant.
+        filter this.tenantId == currentUser.tenantId
+        contains items: Item[]
+        entity Item { sku: string  qty: int }
+        operation addItem(sku: string, qty: int) {
+          items += Item { sku: sku, qty: qty }
+        }
+      }
+      repository Orders for Order {
+        find byCode(code: string): Order[] where this.code == code
+      }
+    }
+  }
+
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable embApi {
+    platform: java
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    auth: required
+    port: 8081
+  }
+}

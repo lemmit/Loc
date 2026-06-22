@@ -155,6 +155,13 @@ describe.skipIf(!ENABLED)(
         // Compiles the threaded repository/context/controller/retrieval/view + the
         // auth plug spliced into the router.
         { name: "vanilla-tenancy.ddd", deployable: "api" },
+        // DEBT-02 Slice A — a PRINCIPAL-referencing capability filter on a
+        // `shape(embedded)` aggregate: the root scalars are real columns, so it
+        // reuses the relational-principal path — `record.tenant_id ==
+        // ^(current_user && current_user.tenant_id)` threaded through every read,
+        // with `current_user` from `conn.assigns` (Auth plug).  Previously gated
+        // by `loom.context-filter-unsupported`.
+        { name: "embedded-tenancy.ddd", deployable: "api" },
         // Plain (non-event-sourced) workflow saga: the `<Wf>` GenServer-free
         // Ecto-state instance + correlation row + create/continuation handlers
         // compiled on the vanilla foundation.

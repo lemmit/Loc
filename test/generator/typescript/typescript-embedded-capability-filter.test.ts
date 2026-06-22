@@ -69,3 +69,70 @@ describe("node embedded capability filter (DEBT-02 slice 2)", () => {
     expect(r).not.toContain("archived, true");
   });
 });
+
+// ---------------------------------------------------------------------------
+// DEBT-02 Slice A — a PRINCIPAL-referencing capability filter
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape(embedded)`
+// aggregate (node).  The embedded root scalars are real columns, so the
+// principal predicate reuses the relational-principal path: every embedded
+// root read AND-s `eq(schema.<agg>.tenantId, requireCurrentUser().tenantId)`,
+// and the repository imports `requireCurrentUser` from `../../auth/middleware`.
+// Previously gated by `loom.context-filter-unsupported`; the system needs a
+// `user {}` block AND `auth: required`.
+// ---------------------------------------------------------------------------
+
+const PRINCIPAL_SOURCE = `
+system EmbTenancy {
+  user { id: string  tenantId: string }
+  subdomain D {
+    context Shop {
+      aggregate Order shape(embedded) {
+        tenantId: string
+        code: string
+        filter this.tenantId == currentUser.tenantId
+        contains items: Item[]
+        entity Item { sku: string }
+        operation addItem(sku: string) { items += Item { sku: sku } }
+      }
+      repository Orders for Order { find byCode(code: string): Order[] where this.code == code }
+    }
+  }
+  api A from D
+  storage pg { type: postgres }
+  resource st { for: Shop, kind: state, use: pg }
+  deployable api { platform: node, contexts: [Shop], dataSources: [st], serves: A, auth: required, port: 4100 }
+}
+`;
+
+async function principalRepo(): Promise<string> {
+  const files = await generateSystemFiles(PRINCIPAL_SOURCE);
+  const key = [...files.keys()].find((k) => /repositories\/.*order/i.test(k));
+  expect(key, "Order embedded repository not emitted").toBeDefined();
+  return files.get(key!)!;
+}
+
+describe("node embedded principal (tenancy) capability filter (DEBT-02 Slice A)", () => {
+  it("imports requireCurrentUser from the auth middleware", async () => {
+    expect(await principalRepo()).toContain(
+      'import { requireCurrentUser } from "../../auth/middleware"',
+    );
+  });
+
+  it("weaves the principal predicate into the synthesized findAll", async () => {
+    expect(await principalRepo()).toContain(
+      "where(eq(schema.orders.tenantId, requireCurrentUser().tenantId))",
+    );
+  });
+
+  it("ANDs the principal into findById so a guessed cross-tenant id can't leak", async () => {
+    expect(await principalRepo()).toContain(
+      "where(and(eq(schema.orders.id, id), eq(schema.orders.tenantId, requireCurrentUser().tenantId)))",
+    );
+  });
+
+  it("ANDs the principal into a custom find's own predicate", async () => {
+    expect(await principalRepo()).toContain(
+      "where(and(eq(schema.orders.code, code), eq(schema.orders.tenantId, requireCurrentUser().tenantId)))",
+    );
+  });
+});

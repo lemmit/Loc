@@ -5,7 +5,11 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
-import { aggregateUsesMoney, findUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import {
+  aggregateUsesMoney,
+  aggregateUsesPrincipalContextFilter,
+  findUsesCurrentUser,
+} from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
@@ -210,6 +214,11 @@ export function buildEmbeddedRepositoryFile(
     `import * as Ids from "../../domain/ids";`,
     `import { AggregateNotFoundError } from "../../domain/errors";`,
     `import type { DomainEventDispatcher } from "../../domain/events";`,
+    // A principal-referencing capability filter (tenancy) weaves
+    // `requireCurrentUser()` into every embedded root read (DEBT-02), the same
+    // ambient-accessor path the relational builder uses — so import it.
+    aggregateUsesPrincipalContextFilter(agg) &&
+      `import { requireCurrentUser } from "../../auth/middleware";`,
     `import { requestLog } from "../../obs/als";`,
     "",
     `type Db = NodePgDatabase<typeof schema>;`,

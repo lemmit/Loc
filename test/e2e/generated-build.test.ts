@@ -271,6 +271,45 @@ describe.skipIf(!ENABLED)(
       }
     }, 300_000);
 
+    // DEBT-02 Slice A: a PRINCIPAL-referencing capability filter on a
+    // `shape(embedded)` aggregate.  The embedded aggregate's root scalars are
+    // real columns, so it reuses the relational-principal path — the embedded
+    // repository weaves `requireCurrentUser().tenantId` into every embedded
+    // root read and imports `requireCurrentUser` from `../../auth/middleware`.
+    // Previously gated by `loom.context-filter-unsupported`.  Generated via
+    // `generate system` (the user block + auth/middleware.ts are system-level);
+    // this gate compiles the emitted embedded repository + the import.
+    it("system embedded tenancy filter (principal filter on shape(embedded)) — generated project type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-embtenancy-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/embedded-tenancy.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        expect(fs.existsSync(path.join(proj, "auth", "middleware.ts"))).toBe(true);
+        const repo = fs.readFileSync(
+          path.join(proj, "db", "repositories", "order-repository.ts"),
+          "utf8",
+        );
+        // The principal weave is present in the embedded repository.
+        expect(repo).toContain('import { requireCurrentUser } from "../../auth/middleware"');
+        expect(repo).toContain("requireCurrentUser().tenantId");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 120_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
     it("system react auth: ui guard — generated web project type-checks + builds", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-authui-"));
       try {

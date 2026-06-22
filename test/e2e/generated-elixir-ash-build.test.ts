@@ -207,6 +207,14 @@ describe.skipIf(!ENABLED)(
         // carries an `{:array, Line}` embedded attribute.  The decisive check
         // that Ash 3.x compiles base_filter + embedded-array side by side.
         { name: "embedded-filter.ddd" },
+        // DEBT-02 Slice A — a PRINCIPAL-referencing capability filter on a
+        // `shape(embedded)` aggregate: the embedded Ash resource's root
+        // attributes are real columns, so it reuses the relational-principal
+        // path — `base_filter expr(tenant_id == ^actor(:tenant_id))` on a
+        // resource that ALSO carries an `{:array, Item}` embedded attribute,
+        // with `actor: current_user` threaded onto every read.  Previously
+        // gated by `loom.context-filter-unsupported`.
+        { name: "embedded-tenancy.ddd" },
         // `when` canCommand state gate (criterion.md, use site 2): the operation
         // loads the record, evaluates the predicate (enum → Ash atom), 409s
         // Disallowed before mutating, and auto-exposes the side-effect-free

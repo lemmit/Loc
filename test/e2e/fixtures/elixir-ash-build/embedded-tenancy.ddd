@@ -1,0 +1,62 @@
+// DEBT-02 Slice A — a PRINCIPAL-referencing capability filter
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape(embedded)`
+// aggregate, on the elixir/Ash foundation.  An embedded Ash resource's root
+// attributes (`tenant_id`, `code`) are real columns; only the `contains items`
+// parts ride an embedded resource.  Previously this combination was GATED by
+// `loom.context-filter-unsupported`; Slice A lifts the gate and reuses the
+// relational-principal path — the predicate rides the same
+// `base_filter expr(tenant_id == ^actor(:tenant_id))` the relational path
+// emits, and every read runs with `actor: current_user` (the request principal
+// from the JWT, on `conn.assigns.current_user`).
+//
+// Decisive check that Ash 3.x accepts an `^actor(:field)` reference inside
+// `base_filter` on a resource that ALSO carries an `{:array, Item}` embedded
+// attribute, under `mix compile --warnings-as-errors` (the elixir-ash-build
+// gate).  Auth is wired like the relational `tenancy-filter.ddd` sibling.
+// (`shape(document)` + principal stays gated — Slice B.)
+system EmbTenancy {
+  user {
+    id: string
+    tenantId: string
+  }
+
+  auth {
+    provider: keycloak
+    oidc {
+      issuer: env("OIDC_ISSUER")
+      clientId: env("OIDC_CLIENT_ID")
+    }
+    claims: { tenantId: "tenant_id" }
+  }
+
+  subdomain D {
+    context Shop {
+      aggregate Order shape(embedded) {
+        tenantId: string
+        code: string
+        // Always-on row scoping by the requesting principal's tenant.
+        filter this.tenantId == currentUser.tenantId
+        contains items: Item[]
+        entity Item { sku: string  qty: int }
+        operation addItem(sku: string, qty: int) {
+          items += Item { sku: sku, qty: qty }
+        }
+      }
+      repository Orders for Order {
+        find byCode(code: string): Order[] where this.code == code
+      }
+    }
+  }
+
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: elixir { foundation: ash }
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    port: 4000
+    auth: required
+  }
+}

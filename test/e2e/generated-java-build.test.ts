@@ -101,6 +101,13 @@ const FIXTURES: Array<[string, string]> = [
   // are real columns, so it rides @SQLRestriction (static SQL) on the root
   // entity, exactly like the relational path (no in-app filtering).
   ["test/e2e/fixtures/java-build/embedded-filter.ddd", "emb_api"],
+  // DEBT-02 Slice A: a PRINCIPAL-referencing capability filter on an EMBEDDED
+  // aggregate — the root scalars are real columns, so it reuses the
+  // relational-principal path: the OrderJpaRepository gets scoped
+  // findAll/findById overrides carrying a @Query with the SpEL clause
+  // (`:#{@currentUserAccessor.user()?.tenantId()}`), under `auth: required`.
+  // Previously gated by `loom.context-filter-unsupported`.
+  ["test/e2e/fixtures/java-build/embedded-tenancy.ddd", "emb_api"],
   // Lifecycle stamps (audit / softDelete): _stampOnCreate/_stampOnUpdate
   // entity methods the service calls before save (now() over a field).
   ["test/e2e/fixtures/java-build/stamps.ddd", "api1"],

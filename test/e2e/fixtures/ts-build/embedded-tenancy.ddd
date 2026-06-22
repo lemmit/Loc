@@ -1,0 +1,49 @@
+// DEBT-02 Slice A — a PRINCIPAL-referencing capability filter
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape(embedded)`
+// aggregate, on the Hono/Drizzle (node) backend.  An embedded aggregate's
+// root scalars (`tenantId`, `code`) are real columns; only the `contains`
+// parts ride a jsonb column.  Previously this combination was GATED by
+// `loom.context-filter-unsupported`; Slice A lifts the gate and reuses the
+// relational-principal path — the embedded repository weaves
+// `requireCurrentUser().tenantId` into every embedded root read and imports
+// `requireCurrentUser` from `../../auth/middleware`.
+//
+// Generated via `generate system` (the user block + auth/middleware.ts are
+// system-level); this gate compiles the emitted embedded repository + the
+// requireCurrentUser import end-to-end.  (`shape(document)` + principal stays
+// gated — Slice B.)
+system EmbTenancy {
+  user { id: string  tenantId: string }
+
+  subdomain D {
+    context Shop {
+      aggregate Order shape(embedded) {
+        tenantId: string
+        code: string
+        // Always-on row scoping: every read of Order is constrained to the
+        // requesting principal's tenant.
+        filter this.tenantId == currentUser.tenantId
+        contains items: Item[]
+        entity Item { sku: string  qty: int }
+        operation addItem(sku: string, qty: int) {
+          items += Item { sku: sku, qty: qty }
+        }
+      }
+      repository Orders for Order {
+        find byCode(code: string): Order[] where this.code == code
+      }
+    }
+  }
+
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable api {
+    platform: node
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    auth: required
+    port: 4100
+  }
+}
