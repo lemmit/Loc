@@ -380,6 +380,9 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       return args.length > 0
         ? `${snake(e.name)}(${ctx.thisName}, ${args.join(", ")})`
         : `${snake(e.name)}(${ctx.thisName})`;
+    case "action":
+    // Sibling action call (Proposal A Stage 1) — frontend-only; never lowered
+    // into a backend domain expression.  Plain call keeps the switch total.
     case "free":
       return `${snake(e.name)}(${args.join(", ")})`;
     case "resource-op": {

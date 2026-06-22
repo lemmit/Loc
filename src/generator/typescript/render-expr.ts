@@ -264,6 +264,10 @@ function renderCall(
       const ref = e.serviceRef!;
       return `${ref.service}.${lowerFirst(ref.op)}(${argList})`;
     }
+    case "action":
+    // A sibling page/component action call (Proposal A Stage 1) — frontend-
+    // only; never lowered into a backend domain expression.  Render as a plain
+    // call so the exhaustive switch stays total.
     case "free":
       return `${e.name}(${argList})`;
   }

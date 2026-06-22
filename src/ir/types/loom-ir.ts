@@ -2405,7 +2405,7 @@ export type StmtIR =
     }
   | {
       kind: "call";
-      target: "function" | "private-operation";
+      target: "function" | "private-operation" | "action";
       name: string;
       args: ExprIR[];
     }
@@ -2499,6 +2499,7 @@ export type CallKind =
   | "private-operation" // calls a private operation
   | "resource-op" // a verb call on an ambient resource handle (Phase 4)
   | "domain-service" // a member call on a `domainService` (domain-services.md)
+  | "action" // a bare call to a SIBLING page/component `action` (Proposal A Stage 1)
   | "free"; // unresolved free call
 
 export type BinOp =

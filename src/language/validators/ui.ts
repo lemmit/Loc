@@ -2,6 +2,7 @@
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import type {
+  ActionDecl,
   Api,
   Component,
   Layout,
@@ -17,7 +18,7 @@ import type {
   UiMember,
   UiNotification,
 } from "../generated/ast.js";
-import { isComponent, isMemberSuffix, isPostfixChain } from "../generated/ast.js";
+import { isActionDecl, isComponent, isMemberSuffix, isPostfixChain } from "../generated/ast.js";
 import { isWalkerPrimitive } from "../walker-stdlib.js";
 import {
   findAggregateInModule,
@@ -56,6 +57,33 @@ export function checkComponent(model: Model, accept: ValidationAcceptor): void {
         { node: comp, property: "name", code: "loom.component-missing-body" },
       );
     }
+    // Duplicate named action on one component — lowering's `indexActions` Map
+    // would silently overwrite the earlier body (named-actions-and-stores.md,
+    // Proposal A Stage 1).
+    checkDuplicateActions(comp.decls.filter(isActionDecl), `component '${comp.name}'`, accept);
+  }
+}
+
+/** Flag a second `action` member that re-declares a name already used on the
+ *  same page/component surface (`loom.duplicate-action`).  AST-level: the IR's
+ *  `indexActions` keys by name and would silently overwrite the first body, so
+ *  the duplicate must be rejected before lowering. */
+function checkDuplicateActions(
+  actions: readonly ActionDecl[],
+  surface: string,
+  accept: ValidationAcceptor,
+): void {
+  const seen = new Set<string>();
+  for (const a of actions) {
+    if (seen.has(a.name)) {
+      accept(
+        "error",
+        `Duplicate action '${a.name}' on ${surface}; action names must be unique on a page/component.`,
+        { node: a, property: "name", code: "loom.duplicate-action" },
+      );
+      continue;
+    }
+    seen.add(a.name);
   }
 }
 
@@ -335,6 +363,12 @@ export function checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
       );
     }
   }
+
+  // Duplicate named action on one page — `ActionDecl` is excluded from the
+  // single-valued-prop uniqueness loop above (multiple actions are the norm),
+  // so it gets its own name-uniqueness check (named-actions-and-stores.md,
+  // Proposal A Stage 1, Fix 2).
+  checkDuplicateActions(p.props.filter(isActionDecl), `page '${p.name}'`, accept);
 
   // PageMenuMeta key names — only `section` / `label` / `order` /
   // `hidden` are recognised (parser accepts any LooseName via the

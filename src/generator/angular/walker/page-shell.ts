@@ -10,6 +10,7 @@ import { upperFirst } from "../../../util/naming.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import {
+  closeUsedActions,
   emitExpr,
   emitStmt,
   extendLambdaParams,
@@ -209,9 +210,16 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     const paramNames = new Set(page.params.map((p) => p.name));
     const stateNames = new Set(page.state.map((s) => s.name));
     const derivedNames = new Set(derived.map((d) => d.name));
-    const refNames = new Set<string>([...stateNames, ...derivedNames]);
+    // Sibling action methods are `this.`-scoped class methods, so a body call
+    // `next()` must render `this.next()` (Proposal A Stage 1, Fix 1).  Include
+    // every action name in the whole-word prefix set alongside state/derived.
+    const actionNames = new Set(actions.map((a) => a.name));
+    const refNames = new Set<string>([...stateNames, ...derivedNames, ...actionNames]);
+    // Transitively include any sibling action a used action's body calls so its
+    // method emits too.
+    const effectiveUsed = closeUsedActions(actions, result.usedActions);
     for (const action of actions) {
-      if (!result.usedActions.has(action.name)) continue;
+      if (!effectiveUsed.has(action.name)) continue;
       const param = action.params[0]?.name;
       const baseCtx = derivedCtx(input.pack, paramNames, stateNames, derivedNames);
       const mctx: WalkContext = param

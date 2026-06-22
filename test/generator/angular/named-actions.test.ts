@@ -34,4 +34,37 @@ describe("Angular named `action` handlers", () => {
     // Statement binding calls the method (Angular `(click)` binds a statement).
     expect(comp).toContain("(click)='bump()'");
   });
+
+  it("prefixes a sibling action body call with `this.` (action = class method, Fix 1)", async () => {
+    const files = await angularFiles(`
+      page P {
+        route: "/p"
+        state { n: int = 0 }
+        action go() { bump() }
+        action bump() { n := n + 1 }
+        body: Stack { Button { "Go", onClick: go } }
+      }
+    `);
+    const comp = [...files].find(([p]) => p.endsWith(".component.ts"))?.[1] ?? "";
+    // The body call to a sibling action is a `this.`-scoped method call.
+    expect(comp).toContain("go() { this.bump(); }");
+    expect(comp).toContain("bump() { this.n.set((this.n() + 1)); }");
+  });
+
+  it("closes a 3-action transitive chain A→B→C via its own used-action loop (Fix 1)", async () => {
+    const files = await angularFiles(`
+      page P {
+        route: "/p"
+        state { n: int = 0 }
+        action a() { b() }
+        action b() { c() }
+        action c() { n := n + 1 }
+        body: Stack { Button { "A", onClick: a } }
+      }
+    `);
+    const comp = [...files].find(([p]) => p.endsWith(".component.ts"))?.[1] ?? "";
+    expect(comp).toContain("a() { this.b(); }");
+    expect(comp).toContain("b() { this.c(); }");
+    expect(comp).toContain("c() { this.n.set((this.n() + 1)); }");
+  });
 });

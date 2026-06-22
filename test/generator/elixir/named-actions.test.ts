@@ -53,4 +53,45 @@ describe("Phoenix named `action` handlers", () => {
     expect(src).toContain('def handle_event("bump"');
     expect(src).toContain("assign(:n");
   });
+
+  it("inlines a nullary sibling action's body at the call site (Fix 1, HEEx)", async () => {
+    // LiveView can't call one `handle_event` clause from another, so a nullary
+    // `a() { b() }` inlines b's body pipe-steps into a's clause — the socket
+    // flows through b's effect with NO call to an undefined function.
+    const src = await phoenixLive(`
+      page P {
+        route: "/p"
+        state { n: int = 0 }
+        action a() { b() }
+        action b() { n := n + 1 }
+        body: Stack { Button { "A", onClick: a } }
+      }
+    `);
+    // a's clause carries b's assign inline (not a `handle_event("b")` call).
+    const clauseA = src.match(/def handle_event\("a"[\s\S]*?\n {2}end/)?.[0] ?? "";
+    expect(clauseA).toContain("assign(:n");
+    // No attempt to invoke b as a function/clause from within a.
+    expect(clauseA).not.toMatch(/handle_event\("b"/);
+    expect(clauseA).not.toMatch(/\bb\(/);
+  });
+
+  it("emits a pinned no-op marker (no undefined call) for a parameterised action→action call (HEEx parity gap)", async () => {
+    // A parameterised callee can't be cleanly inlined without param rewriting,
+    // so codegen emits a `tap(fn _ -> :ok end)` marker — NOT a call to an
+    // undefined `set_label/…` function (which would be broken Elixir).
+    const src = await phoenixLive(`
+      page P {
+        route: "/p"
+        state { label: string = "" }
+        action setLabel(v: string) { label := v }
+        action go() { setLabel("hi") }
+        body: Stack { Button { "Go", onClick: go } }
+      }
+    `);
+    const clauseGo = src.match(/def handle_event\("go"[\s\S]*?\n {2}end/)?.[0] ?? "";
+    expect(clauseGo).toContain("tap(fn _ -> :ok end)");
+    expect(clauseGo).toContain("HEEx parity gap");
+    // The marker is a COMMENT; there is no real call to `set_label(...)`.
+    expect(clauseGo).not.toMatch(/^\s*\|>\s*set_label\(/m);
+  });
 });

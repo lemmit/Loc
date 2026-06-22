@@ -35,4 +35,23 @@ describe("Vue named `action` handlers", () => {
     expect(sfc).toContain("@click='bump'");
     expect(sfc).not.toContain("@click='() =>");
   });
+
+  it("closes a 3-action transitive chain A→B→C via its own used-action loop (Fix 1)", async () => {
+    // Vue has its own used-action loop (`vue/walker/page-shell.ts`); it must
+    // apply `closeUsedActions` so a callee reached only through a body call emits.
+    const files = await vueFiles(`
+      page P {
+        route: "/p"
+        state { n: int = 0 }
+        action a() { b() }
+        action b() { c() }
+        action c() { n := n + 1 }
+        body: Stack { Button { "A", onClick: a } }
+      }
+    `);
+    const sfc = files.get("web/src/pages/p.vue")!;
+    expect(sfc).toContain("const a = () => { b(); };");
+    expect(sfc).toContain("const b = () => { c(); };");
+    expect(sfc).toContain("const c = () => { n.value = (n.value + 1); };");
+  });
 });

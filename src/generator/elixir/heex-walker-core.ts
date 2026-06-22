@@ -226,6 +226,12 @@ export interface WalkContext {
    *  assign name it should resolve to.  Used by QueryView to map lambda
    *  parameter names (e.g. "rows") to their assign names (e.g. "items"). */
   varRemapping?: ReadonlyMap<string, string>;
+  /** Sibling action names currently being inlined (Proposal A Stage 1, Fix 1).
+   *  A `target: "action"` call inlines the callee's body pipe-steps in place;
+   *  this guards against an `A → B → A` cycle re-entering an action already on
+   *  the stack (validation would normally catch the cycle, but codegen must
+   *  not infinite-loop). */
+  actionInlineStack?: ReadonlySet<string>;
   /** In-scope instance variable → aggregate name, for instance-qualified
    *  operation forms (`OperationForm(data.confirm)`).  Populated when QueryView
    *  walks its single-record `data:` lambda. */
@@ -1177,6 +1183,37 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
       return `|> tap(fn _ -> Phoenix.PubSub.broadcast(${ctx.appModule}.PubSub, "events", %${ctx.appModule}.Events.${moduleName}{${fields}}) end)`;
     }
     case "call": {
+      if (stmt.target === "action") {
+        // Sibling action→action call (Proposal A Stage 1, Fix 1).  LiveView
+        // can't cleanly call one `handle_event` clause from another — the
+        // callee is a clause, not a callable function that returns a piped
+        // socket.  Inline the callee action's body pipe-steps at the call site
+        // instead (the same shape the hoist at `walkBodyToHeex` emits), so the
+        // socket flows through the callee's effects and back.  This is the
+        // HEEx analogue of the JS frontends marking the callee used.
+        if (ctx.actionInlineStack?.has(stmt.name)) {
+          // Cycle — already inlining this action higher in the chain.  Emit a
+          // no-op marker rather than recurse (the validator owns the cycle
+          // diagnostic; codegen just must not loop).
+          return `|> tap(fn _ -> :ok end) # action '${snake(stmt.name)}' cycle (HEEx)`;
+        }
+        const callee = ctx.page.actions?.find((a) => a.name === stmt.name);
+        if (callee && callee.params.length === 0) {
+          if (callee.body.length === 0) return "|> tap(fn _ -> :ok end)";
+          const innerCtx: WalkContext = {
+            ...ctx,
+            actionInlineStack: new Set([...(ctx.actionInlineStack ?? []), stmt.name]),
+          };
+          return callee.body.map((s) => renderStmt(s, innerCtx)).join("\n      ");
+        }
+        // Parameterised callee (a single payload param the caller would have
+        // to substitute) — no clean inline without param rewriting.  Emit a
+        // no-op marker rather than a call to an undefined function; this stays
+        // a reviewed HEEx parity gap (mirrors the component-level-action
+        // caveat).  Stage-1 action→action with a payload is rare; revisit if a
+        // real case needs it.
+        return `|> tap(fn _ -> :ok end) # action '${snake(stmt.name)}' (parameterised) not inlined in LiveView (HEEx parity gap)`;
+      }
       // Bare function / private-operation call statement.  Evaluated for
       // its effect; the socket flows through unchanged via `tap`.
       const args = stmt.args.map((a) => renderExpr(a, { ...ctx, position: "handler" })).join(", ");
