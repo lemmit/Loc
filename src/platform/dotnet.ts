@@ -85,6 +85,8 @@ const dotnetPlatform: PlatformSurface = {
           "ConnectionStrings__Default",
           `Host=db;Port=5432;Database=${slug};Username=postgres;Password=postgres`,
         ],
+        // Runtime log-level knob (default info; overridable here / in k8s).
+        ["LOG_LEVEL", "info"],
       ],
       dependsOnDb: true,
       // Compose healthcheck → /ready (DB-aware).  Sets the service

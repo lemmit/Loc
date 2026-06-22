@@ -113,7 +113,17 @@ config :${appName}, ${appModule}Web.Endpoint,
   cache_static_manifest: "priv/static/cache_manifest.json",
   server: true
 
-config :logger, level: :info
+# Runtime log-level knob — LOG_LEVEL (default "info").  The catalog's
+# trace/debug/info/warn/error map onto Elixir's Logger levels
+# (warn -> :warning, trace -> :debug); distinct from the generate-time
+# --trace switch.
+config :logger,
+  level:
+    case System.get_env("LOG_LEVEL") || "info" do
+      "trace" -> :debug
+      "warn" -> :warning
+      other -> String.to_atom(other)
+    end
 `;
 }
 

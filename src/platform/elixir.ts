@@ -80,6 +80,8 @@ const elixirPlatform: PlatformSurface = {
         ["PHX_HOST", "localhost"],
         ["PHX_SERVER", "true"],
         ["PORT", "4000"],
+        // Runtime log-level knob (default info; overridable here / in k8s).
+        ["LOG_LEVEL", "info"],
       ],
       // SECRET_KEY_BASE signs/encrypts sessions — sensitive, so the k8s
       // emitter routes it to a Secret rather than a plaintext ConfigMap.

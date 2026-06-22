@@ -275,6 +275,14 @@ describe("phoenixLiveView pipeline", () => {
     // dev.exs no longer overrides with the bracketed text format.
     const dev = files.get("phoenix_app/config/dev.exs")!;
     expect(dev).not.toMatch(/config :logger, :console, format:/);
+    // prod.exs honours the runtime LOG_LEVEL knob (default info) instead of
+    // hardcoding :info; warn -> :warning, trace -> :debug.
+    const prod = files.get("phoenix_app/config/prod.exs")!;
+    expect(prod).not.toMatch(/config :logger, level: :info/);
+    expect(prod).toMatch(/System\.get_env\("LOG_LEVEL"\) \|\| "info"/);
+    expect(prod).toMatch(/"warn" -> :warning/);
+    expect(prod).toMatch(/"trace" -> :debug/);
+    expect(prod).toMatch(/other -> String\.to_atom\(other\)/);
   });
 
   it("emits one LiveView module per scaffolded page + router lines", async () => {

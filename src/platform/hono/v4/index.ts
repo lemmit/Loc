@@ -94,7 +94,11 @@ export function makeHonoPlatform(pins: BackendPins): PlatformSurface {
     },
     composeService({ slug }): ComposeServiceShape {
       return {
-        env: [["DATABASE_URL", `postgres://postgres:postgres@db:5432/${slug}`]],
+        env: [
+          ["DATABASE_URL", `postgres://postgres:postgres@db:5432/${slug}`],
+          // Runtime log-level knob (default info; overridable here / in k8s).
+          ["LOG_LEVEL", "info"],
+        ],
         dependsOnDb: true,
         // Compose healthcheck → /ready (DB-aware).  Sets the service
         // `healthy` only once the app can reach its DB, so dependent
