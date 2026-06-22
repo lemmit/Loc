@@ -4,7 +4,9 @@ import { namedArgValue, positionalArgs, stringNamed } from "../_walker/shared/ar
 import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
 import {
   type AngularFormControlSpec,
+  type AngularIdTargetSpec,
   addNg,
+  collectIdTargets,
   controlInit,
   fieldInput,
   formButton,
@@ -35,6 +37,9 @@ export interface AngularModalSpec {
   importFrom: string;
   submitMethod: string;
   controls: AngularFormControlSpec[];
+  /** `useAll<X>()` queries the page-shell hoists for the form's `X id` Select
+   *  fields (empty when no field renders as a reference Select). */
+  idTargets: AngularIdTargetSpec[];
 }
 
 /** Resolve the operation a Modal's `OperationForm` child targets, plus the
@@ -147,6 +152,7 @@ export function renderAngularModal(
     importFrom,
     submitMethod,
     controls: fields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
+    idTargets: bc ? collectIdTargets(fields, bc, ctx) : [],
   };
   ctx.angularModals ??= [];
   (ctx.angularModals as AngularModalSpec[]).push(spec);
