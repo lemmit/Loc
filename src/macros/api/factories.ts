@@ -341,6 +341,8 @@ export function memberAccess(
       $type: "PostfixChain",
       head: receiver,
       suffixes: [suffix],
+      bypass: [],
+      bypassAll: false,
     }),
     origin,
   );

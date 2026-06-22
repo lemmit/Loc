@@ -142,6 +142,13 @@ describe.skipIf(!ENABLED)(
         // retrieval/view) — plain Ecto has no Ash base_filter, so the conjoined
         // `from(... where: ...)` reads must compile (and not silently drop the filter).
         { name: "vanilla-capability-filter.ddd", deployable: "api" },
+        // `ignoring <Cap>` / `ignoring *` filter-bypass (named-filter-bypass.md
+        // §11, Slice 2): a read OMITS the bypassed capability's `where:`
+        // predicate.  Compiles the per-find dropped conjuncts, the bypassed
+        // view, and the gated `where(query, [record], ...)` retrieval stages an
+        // inline `Repo.findAll(...) ignoring …` skips via `ignore_filters` /
+        // `ignore_all_filters` opts.
+        { name: "vanilla-filter-bypass.ddd", deployable: "api" },
         // Principal (tenancy) `filter this.tenantId == currentUser.tenantId` — the
         // request actor is threaded from `conn.assigns.current_user` (Auth plug)
         // into every read and pinned (`^(current_user && current_user.tenant_id)`).

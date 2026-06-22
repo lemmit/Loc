@@ -154,6 +154,11 @@ export function buildRepositoryFile(
       params: [],
       returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
       filter: view.filter,
+      // Carry the view's `ignoring` clause onto the synthesised find so its
+      // capability-filter conjunction drops the bypassed origins (the view
+      // read honours the bypass exactly as a find would).
+      bypassAll: view.bypassAll,
+      bypassCaps: view.bypassCaps,
     }));
 
   // Render the class body first so the file's imports + `type Tx` can be

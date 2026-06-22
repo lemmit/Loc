@@ -1116,6 +1116,195 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 }
 
 // ---------------------------------------------------------------------------
+// `ignoring` filter-bypass support gate (named-filter-bypass.md §11).
+//
+// A read (repository `find`, `view`, or inline `Repo.findAll(...)`/`Repo.run`)
+// may carry an `ignoring *` / `ignoring <Cap>, …` clause that bypasses a
+// capability's query-filter(s).  Three fail-fast gates run over the FULLY-
+// RESOLVED IR (the capability provenance lives on `agg.contextFilterOrigins`,
+// Slice 0):
+//
+//   loom.filter-bypass-unknown-capability — `ignoring X` where the target
+//       aggregate does NOT implement capability X (X ∉ agg.capabilities).
+//   loom.filter-bypass-no-filter — X is implemented but contributes NO filter
+//       (X ∉ agg.contextFilterOrigins), e.g. `ignoring auditable` (stamps-only).
+//       `ignoring *` is a harmless no-op when the aggregate has zero capability
+//       filters (only an EXPLICIT named cap errors) — bypassing "all of nothing"
+//       is intent-neutral, whereas naming a specific cap that contributes no
+//       filter is a likely authoring mistake.
+//   loom.filter-bypass-unsupported — the read is served by a deployable whose
+//       backend family is NOT in the supported set.  This slice ships .NET only
+//       (EF `IgnoreQueryFilters`); Drizzle/Ecto/Java/Ash/Python honoring widen
+//       the set in later slices.
+// ---------------------------------------------------------------------------
+
+/** Backend families that honor an `ignoring` filter-bypass clause on EVERY
+ *  foundation.  `dotnet` (EF `IgnoreQueryFilters`, Slice 1) and `node`
+ *  (Drizzle — omits the bypassed conjunct from the `and(...)` chain, Slice 2)
+ *  always honor it.  `elixir` is foundation-conditional (`bypassSupported`):
+ *  the `vanilla` Ecto foundation omits the bypassed `where:` (Slice 2), but the
+ *  default `ash` foundation does NOT yet — so it stays fail-fast.  `java` /
+ *  `python` remain deferred. */
+const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node"]);
+
+/** Whether `dep`'s backend honors `ignoring` filter-bypass.  A backend must
+ *  not pass this gate while still silently filtering — a family is supported
+ *  only once its emitter actually OMITS the bypassed predicate.  Elixir is
+ *  split by foundation: `vanilla` (plain Ecto) honors it; `ash` (the default)
+ *  does not yet, so it must keep failing fast. */
+function bypassSupported(dep: { platform: string; foundation?: string }): boolean {
+  const fam = platformFamily(dep.platform);
+  if (!fam) return false;
+  if (dep.platform === "elixir") return dep.foundation === "vanilla";
+  return FILTER_BYPASS_FAMILIES.has(fam);
+}
+
+/** A read carrying an `ignoring` clause, plus the aggregate it targets and a
+ *  human-readable site label for diagnostics. */
+interface BypassRead {
+  bypassAll?: boolean;
+  bypassCaps?: string[];
+  aggName: string;
+  site: string;
+}
+
+/** Recursively collect inline `Repo.findAll(...)`/`Repo.run(...)` reads that
+ *  carry an `ignoring` clause from a workflow-statement body (descends into
+ *  `for-each` + `if-let` bodies). */
+function collectBypassRepoRuns(
+  stmts: readonly WorkflowStmtIR[],
+  wfName: string,
+  out: BypassRead[],
+): void {
+  for (const s of stmts) {
+    if (s.kind === "repo-run" && (s.bypassAll || (s.bypassCaps?.length ?? 0) > 0)) {
+      out.push({
+        bypassAll: s.bypassAll,
+        bypassCaps: s.bypassCaps,
+        aggName: s.aggName,
+        site: `workflow '${wfName}' inline read '${s.name}'`,
+      });
+    }
+    if (s.kind === "for-each") collectBypassRepoRuns(s.body, wfName, out);
+    if (s.kind === "if-let") {
+      collectBypassRepoRuns(s.thenBody, wfName, out);
+      collectBypassRepoRuns(s.elseBody ?? [], wfName, out);
+    }
+  }
+}
+
+/** Every `ignoring`-bearing read in a context, paired with its target
+ *  aggregate: repository finds, views over an aggregate source, and inline
+ *  repo-runs in workflow bodies. */
+function bypassReadsInContext(ctx: BoundedContextIR): BypassRead[] {
+  const out: BypassRead[] = [];
+  for (const repo of ctx.repositories) {
+    for (const f of repo.finds) {
+      if (f.bypassAll || (f.bypassCaps?.length ?? 0) > 0) {
+        out.push({
+          bypassAll: f.bypassAll,
+          bypassCaps: f.bypassCaps,
+          aggName: repo.aggregateName,
+          site: `find '${repo.name}.${f.name}'`,
+        });
+      }
+    }
+  }
+  for (const v of ctx.views) {
+    if ((v.bypassAll || (v.bypassCaps?.length ?? 0) > 0) && v.source.kind === "aggregate") {
+      out.push({
+        bypassAll: v.bypassAll,
+        bypassCaps: v.bypassCaps,
+        aggName: v.source.name,
+        site: `view '${v.name}'`,
+      });
+    }
+  }
+  for (const wf of ctx.workflows) {
+    for (const c of wf.creates) collectBypassRepoRuns(c.statements, wf.name, out);
+    for (const h of wf.handlers ?? []) collectBypassRepoRuns(h.statements, wf.name, out);
+    for (const on of wf.subscriptions ?? []) collectBypassRepoRuns(on.statements, wf.name, out);
+  }
+  return out;
+}
+
+/** Capitalize the first letter of a diagnostic site label (sentence-start). */
+function capitalizeSite(s: string): string {
+  return s.length === 0 ? s : `${s[0]!.toUpperCase()}${s.slice(1)}`;
+}
+
+export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+
+  for (const dep of sys.deployables) {
+    const fam = platformFamily(dep.platform);
+    // Only backend deployables serve reads; a frontend (react/static/vue/…)
+    // owns no repository/view read path, so it can't bypass a filter.
+    if (!fam || !platformOwnsBackend(dep.platform)) continue;
+    const supported = bypassSupported(dep);
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      const aggByName = new Map<string, AggregateIR>();
+      for (const a of ctx.aggregates) aggByName.set(a.name, a);
+      for (const read of bypassReadsInContext(ctx)) {
+        const agg = aggByName.get(read.aggName);
+        const caps = new Set(agg?.capabilities ?? []);
+        const filterOrigins = new Set(
+          (agg?.contextFilterOrigins ?? []).filter((o): o is string => o != null),
+        );
+        // 1. Unsupported backend — gate FIRST so an `ignoring` read on a
+        //    non-dotnet backend always fails (regardless of cap validity).
+        if (!supported) {
+          diags.push({
+            severity: "error",
+            code: "loom.filter-bypass-unsupported",
+            message:
+              `Deployable '${dep.name}' (platform ${dep.platform}${
+                dep.platform === "elixir" ? ` foundation ${dep.foundation ?? "ash"}` : ""
+              }) serves ${read.site} on ` +
+              `aggregate '${ctxName}.${read.aggName}' with an 'ignoring' filter-bypass clause, but ` +
+              `this backend does not honor capability-filter bypass yet — the honoring backends are ` +
+              `dotnet (EF 'IgnoreQueryFilters'), node (Drizzle), and elixir on the vanilla foundation ` +
+              `(Ecto). Host this read on a supported backend, or remove the 'ignoring' clause.`,
+            source: `${sys.name}/${dep.name}`,
+          });
+          continue;
+        }
+        // 2. Per named capability: must be implemented AND contribute a filter.
+        //    `ignoring *` skips both checks (it's keyed on nothing specific).
+        for (const cap of read.bypassCaps ?? []) {
+          if (!caps.has(cap)) {
+            diags.push({
+              severity: "error",
+              code: "loom.filter-bypass-unknown-capability",
+              message:
+                `${capitalizeSite(read.site)} on aggregate '${ctxName}.${read.aggName}' ignores ` +
+                `capability '${cap}', but that aggregate does not implement '${cap}'. Implement it ` +
+                `(with ${cap} / implements ${cap}) or correct the capability name in the 'ignoring' clause.`,
+              source: `${sys.name}/${dep.name}`,
+            });
+            continue;
+          }
+          if (!filterOrigins.has(cap)) {
+            diags.push({
+              severity: "error",
+              code: "loom.filter-bypass-no-filter",
+              message:
+                `${capitalizeSite(read.site)} on aggregate '${ctxName}.${read.aggName}' ignores ` +
+                `capability '${cap}', but '${cap}' contributes no query-filter to bypass (it is a ` +
+                `stamps-only / fields-only capability). Remove '${cap}' from the 'ignoring' clause.`,
+              source: `${sys.name}/${dep.name}`,
+            });
+          }
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // `persistence: dapper` capability gate (D-REALIZATION-AXES Phase 5c).
 //
 // The .NET Dapper adapter is a MINIMAL-v1 alternate persistence: relational,

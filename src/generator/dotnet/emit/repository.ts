@@ -87,6 +87,7 @@ export function renderRepositoryImpl(
   ns: string,
   findBodies: Array<{
     name: string;
+    ignoreClause: string;
     filterClause: string;
     projectionClause: string;
   }>,
@@ -161,6 +162,10 @@ export function renderRepositoryImpl(
   const findMethodLines = finds.flatMap((f) => {
     const body = findBodies.find((b) => b.name === f.name);
     const filter = body?.filterClause ?? "";
+    // `.IgnoreQueryFilters(…)` for an `ignoring` clause (named-filter-bypass.md
+    // §11) — installed on the IQueryable BEFORE `.Where(...)`, so the bypassed
+    // capability filter(s) never compose into this read.
+    const ignore = body?.ignoreClause ?? "";
     const projection = body?.projectionClause ?? ".ToListAsync(cancellationToken)";
     const usesUser = findUsesCurrentUser(f);
     // Paged (P3b): a count query + a `Skip`/`Take` page query (the find's
@@ -171,9 +176,9 @@ export function renderRepositoryImpl(
         `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser, ["int page", "int pageSize"])})`,
         "    {",
         "        var offset = (page - 1) * pageSize;",
-        `        var total = await _db.${setName}${filter}.CountAsync(cancellationToken);`,
+        `        var total = await _db.${setName}${ignore}${filter}.CountAsync(cancellationToken);`,
         "        var totalPages = pageSize > 0 ? (int)System.Math.Ceiling((double)total / pageSize) : 0;",
-        `        var items = await _db.${setName}${filter}.Skip(offset).Take(pageSize).ToListAsync(cancellationToken);`,
+        `        var items = await _db.${setName}${ignore}${filter}.Skip(offset).Take(pageSize).ToListAsync(cancellationToken);`,
         `        ${renderDotnetLogCall("findExecuted", [
           { name: "aggregate", valueExpr: `"${agg.name}"` },
           { name: "find", valueExpr: `"${f.name}"` },
@@ -191,7 +196,7 @@ export function renderRepositoryImpl(
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",
-      `        var result = await _db.${setName}${filter}${projection};`,
+      `        var result = await _db.${setName}${ignore}${filter}${projection};`,
       `        ${renderDotnetLogCall("findExecuted", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "find", valueExpr: `"${f.name}"` },
@@ -222,7 +227,12 @@ export function renderRepositoryImpl(
     return [
       `    public async Task<IReadOnlyList<${agg.name}>> Run${upperFirst(r.name)}Async(${renderRetrievalParamsWithCt(r.params)})`,
       "    {",
-      `        var result = await _db.${setName}.WithSpecification(new ${upperFirst(r.name)}Spec(${specArgs})).ApplyPaging(page).ToListAsync(cancellationToken);`,
+      // Apply an inline read's `ignoring` clause (named-filter-bypass.md §11)
+      // to the base IQueryable BEFORE the spec composes its WHERE/ORDER.
+      `        var __q = _db.${setName}.AsQueryable();`,
+      "        if (ignoreAllFilters) __q = __q.IgnoreQueryFilters();",
+      "        else if (ignoreFilters is { Length: > 0 }) __q = __q.IgnoreQueryFilters(ignoreFilters);",
+      `        var result = await __q.WithSpecification(new ${upperFirst(r.name)}Spec(${specArgs})).ApplyPaging(page).ToListAsync(cancellationToken);`,
       `        ${renderDotnetLogCall("findExecuted", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "find", valueExpr: `"Run${upperFirst(r.name)}"` },
@@ -509,7 +519,12 @@ export function renderDocumentRepositoryImpl(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
   ns: string,
-  findBodies: Array<{ name: string; filterClause: string; projectionClause: string }>,
+  findBodies: Array<{
+    name: string;
+    ignoreClause: string;
+    filterClause: string;
+    projectionClause: string;
+  }>,
   options?: { extraUsings?: readonly string[]; idClass?: string },
 ): string {
   const idClass = options?.idClass ?? `${agg.name}Id`;
@@ -658,7 +673,12 @@ export function renderEventSourcedRepositoryImpl(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
   ns: string,
-  findBodies: Array<{ name: string; filterClause: string; projectionClause: string }>,
+  findBodies: Array<{
+    name: string;
+    ignoreClause: string;
+    filterClause: string;
+    projectionClause: string;
+  }>,
   options?: { extraUsings?: readonly string[]; idClass?: string },
 ): string {
   const idClass = options?.idClass ?? `${agg.name}Id`;
@@ -869,5 +889,12 @@ export function renderRetrievalParamsWithCt(params: ParamIR[]): string {
     ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
     "(int? offset, int? limit)? page = null",
   ].join(", ");
-  return `${head}, CancellationToken cancellationToken = default`;
+  // The two `ignore*` params carry an inline read's `ignoring` clause
+  // (named-filter-bypass.md §11) from the call site to the shared retrieval
+  // method.  `cancellationToken` MUST stay last (CA1068, an error under
+  // `/warnaserror`), so the ignore params sit before it; call sites pass
+  // `cancellationToken` as a NAMED arg (it follows the optional `page`).
+  // `ignoreAllFilters` → `ignoring *`; `ignoreFilters` → the EF named-filter
+  // list for `ignoring <Cap>`.
+  return `${head}, bool ignoreAllFilters = false, string[]? ignoreFilters = null, CancellationToken cancellationToken = default`;
 }

@@ -726,10 +726,18 @@ function printRepository(node: Repository): string {
   );
 }
 
+/** ` ignoring *` / ` ignoring A, B` — the trailing filter-bypass clause shared
+ *  by find / view / inline-read printing (named-filter-bypass.md §11).  Returns
+ *  "" when the read bypasses nothing, so it spreads cleanly onto the tail. */
+export function printIgnoringClause(node: { bypassAll?: boolean; bypass?: string[] }): string {
+  if (node.bypassAll) return " ignoring *";
+  return node.bypass && node.bypass.length > 0 ? ` ignoring ${node.bypass.join(", ")}` : "";
+}
+
 function printFindDecl(node: FindDecl): string {
   const params = node.params.map(printParameter).join(", ");
   const where = node.filter ? ` where ${printExpr(node.filter)}` : "";
-  return `find ${node.name}(${params}): ${printTypeRef(node.returnType)}${where}`;
+  return `find ${node.name}(${params}): ${printTypeRef(node.returnType)}${where}${printIgnoringClause(node)}`;
 }
 
 /** `criterion <Name>[(<params>)] of <T> = <expr>` — the single-line form
@@ -817,15 +825,20 @@ function printView(node: View): string {
   const gate = node.gate ? ` requires ${printExpr(node.gate)}` : "";
   // Full form is the only one that carries `bind` entries (grammar requires
   // ≥1), so a populated `binds` discriminates it from the shorthand.
+  const ignoring = printIgnoringClause(node);
   if (node.binds.length > 0) {
     const items: string[] = node.fields.map(printProperty);
     items.push(`from ${node.source.$refText}`);
     if (node.gate) items.push(`requires ${printExpr(node.gate)}`);
     if (node.filter) items.push(`where ${printExpr(node.filter)}`);
+    // The `ignoring` clause prints on its own line in the block form (it sits
+    // between `where` and `bind` in the grammar); `.trimStart()` drops the
+    // leading space `printIgnoringClause` adds for the inline form.
+    if (ignoring) items.push(ignoring.trimStart());
     items.push(`bind ${node.binds.map(printBindEntry).join(", ")}`);
     return block(`view ${node.name}`, items);
   }
-  return `view ${node.name} = ${node.source.$refText}${gate} where ${printExpr(node.filter!)}`;
+  return `view ${node.name} = ${node.source.$refText}${gate} where ${printExpr(node.filter!)}${ignoring}`;
 }
 
 function printBindEntry(node: BindEntry): string {

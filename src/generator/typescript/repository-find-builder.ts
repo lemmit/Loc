@@ -42,11 +42,30 @@ import {
 } from "./repository-find-hydrate.js";
 import {
   combinePredicate,
+  contextFilterPredicate,
   criterionFnName,
+  type FilterBypass,
   lowerToDrizzle,
   reifiableCriterion,
   renderCriterionArg,
 } from "./repository-find-predicate.js";
+
+/** The capability-filter predicate to AND into one read.  When the read
+ *  carries an `ignoring` clause (`bypassAll` / `bypassCaps`), recompute the
+ *  conjunction with the named capability origins dropped — otherwise reuse the
+ *  repo-wide `filterPred` the caller already lowered.  The dropped predicate's
+ *  Drizzle ops are a subset of the always-collected superset, so a throwaway
+ *  ops set is fine here (the import narrower keys off the emitted body). */
+function readFilterPred(
+  agg: EnrichedAggregateIR,
+  tableName: string,
+  ctx: EnrichedBoundedContextIR,
+  filterPred: string | null,
+  bypass: FilterBypass | undefined,
+): string | null {
+  if (!bypass || (!bypass.bypassAll && (bypass.bypassCaps ?? []).length === 0)) return filterPred;
+  return contextFilterPredicate(agg, tableName, ctx, new Set<string>(), bypass);
+}
 
 // Re-export the leaf modules' externally-consumed surface so the sibling
 // repository builders (and the queryable-subset-parity test) keep importing
@@ -320,7 +339,10 @@ export function findQueryMethod(
   const usesUser = findUsesCurrentUser(find);
   const baseParams = find.params.map((p) => `${p.name}: ${tsTypeForReturn(p.type)}`);
   const params = (usesUser ? [...baseParams, "currentUser: User"] : baseParams).join(", ");
-  const whereClause = buildFindWhereClause(agg, find, tableName, ctx, filterPred);
+  // An `ignoring <Cap>` / `ignoring *` on this find drops the named
+  // capability filters from its `where` conjunction (other finds keep them).
+  const readPred = readFilterPred(agg, tableName, ctx, filterPred, find);
+  const whereClause = buildFindWhereClause(agg, find, tableName, ctx, readPred);
 
   // Paged return (`find x(): <Agg> paged`, P3b): the method gains trailing
   // `page` / `pageSize` controls, runs a count query + a `limit`/`offset`

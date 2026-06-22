@@ -139,6 +139,51 @@ the entity — but for **typing / tooling / discoverability** (find-implementors
 interface is emitted for type identity, not dedup. Reconcile the stale
 `loom-ir.ts` docstrings to say so.**
 
+> **⚠ This verdict is being revisited (2026-06).** §5's "filters can't dedup"
+> rests on **classic EF's one-filter-per-entity rule** (a second
+> `HasQueryFilter` overwrites). The .NET backend now targets **EF Core 10**,
+> whose **named** query filters lift that rule — and it already emits
+> `HasQueryFilter("<Name>", …)` (`emit/efcore.ts` `queryFilterName`). So the
+> premise of the "don't dedup" verdict no longer holds for two of five backends.
+> See **§5b** for the framework-capability grounding and **§11** for the
+> named+dedup plan that supersedes this verdict on the filter side.
+
+## 5b. Framework-native named-filter support (the §9.1 EF10-revisit input)
+
+"Named filter" = the framework lets you register a query/global filter under a
+**stable name** so it is (a) one addressable unit per capability and (b)
+**selectively bypassable by name**. Whether a backend *can* dedup a capability's
+filter into one named unit — vs. only AND-inline a `this`-relative predicate per
+entity — is a property of the target framework, not of Loom:
+
+| Backend | Framework | Native **named** filter? | Mechanism | Default state |
+|---|---|---|---|---|
+| **.NET** | EF Core 10 | ✅ yes | `HasQueryFilter("Name", …)` + `IgnoreQueryFilters(["Name"])` | on by default |
+| **Java** | Hibernate | ✅ yes | `@FilterDef`/`@Filter` (named, parameterized) + `session.enableFilter("name")` | **off** by default (must enable per session) |
+| **node** | Drizzle | ❌ no | query builder — no global/named filter layer; emulate with a named predicate fn (reified `<name>Criterion`) | n/a |
+| **Phoenix** | Ash | ⚠ partial | `base_filter` is single/anonymous; **policies** are named + bypassable but are authz, not query filters | base_filter always on |
+| **Phoenix (vanilla)** | Ecto | ❌ no | query DSL — no global filter; emulate with composable named query fns | n/a |
+| **Python** | SQLAlchemy | ⚠ partial | `with_loader_criteria(Entity, …)` in a `do_orm_execute` event — global + entity-keyed, but no named, individually-toggleable registry | n/a (and Loom does **not** consume `contextFilters` here yet — a gap) |
+
+Three consequences for the design:
+
+- **Two backends (.NET, Java) have first-class named filters** → a capability's
+  filter *can* map to one named DB-layer unit, bypassable by name. The other
+  three can only share a **named predicate expression/function** across
+  implementors — a codegen/IR concern, not a framework feature.
+- **Default-state divergence.** EF filters are on-by-default (bypass with
+  `IgnoreQueryFilters`); Hibernate filters are off-by-default (must
+  `enableFilter` per session) — so a named Hibernate filter needs an
+  interceptor/request aspect to *activate* it, where EF needs nothing. An
+  always-on `softDelete` is free on EF, wired on Hibernate.
+- **The dedup IR seam should carry capability identity (a stable name)**, letting
+  each backend choose its rendering: named-filter on .NET/Hibernate, shared
+  predicate fn on Drizzle/Ecto/SQLAlchemy, base_filter-or-policy on Ash. This is
+  the same `capabilityOrigin` seam §4 proposes — confirming it serves filters as
+  well as stamps.
+
+The §11 plan builds directly on this matrix.
+
 ## 6. Stamps — dedup via a marker-interface-keyed write-time hook (the real win)
 
 Stamp **bodies** are larger (multi-assignment, expression-valued) and the
@@ -281,6 +326,184 @@ What shipped, and what stays deferred after an end-to-end investigation of the
   `auditable` compiles (it is the only stamping capability), a *verifiable*
   marker dedup is unblocked — but it remains low-value until a second stamping
   capability exists. Revisit then.
+
+## 11. Plan: named filters in service of **selective bypass** (the adopted feature)
+
+> **Status:** PLAN — APPROVED, implementation started (2026-06). State audit +
+> design review + simulation sign-off done (fresh `main` @ `86d55e87`).
+> Supersedes §5's "filters stay per-aggregate, don't dedup" verdict on the
+> *value question*: dedup is dropped as a goal; the feature is
+> **selectively-bypassable filters**, with the §4 provenance seam as its
+> substrate.
+>
+> **User-approved decisions:** keyword `ignoring`; bypass-all via the `*`
+> wildcard; scope `find` + `view` + inline reads; bypassing an unknown /
+> filter-less capability or an unsupported backend is a compile error
+> (`loom.filter-bypass-unknown-capability` / `loom.filter-bypass-no-filter` /
+> `loom.filter-bypass-unsupported`). Ship order: Slice 0 → .NET → Drizzle+Ecto →
+> Java (full hybrid) → defer Ash + Python.
+>
+> **SHIPPED (branch `claude/capability-filter-dedup`):**
+> - **Slice 0** — `capabilityOrigin` provenance seam (byte-neutral). ✅
+> - **Slice 1** — grammar (`find`/`view`/inline, `*`) + lowering + printer +
+>   the three validators + **.NET** `IgnoreQueryFilters`. Runtime-verified:
+>   emitted project compiles under `dotnet build /warnaserror` (the gate caught
+>   a CA1068/CS1503 inline-read signature bug, since fixed). ✅
+> - **Slice 2** — **node/Drizzle** + **Phoenix/Ecto-vanilla** honor bypass by
+>   omitting the predicate; validator widened to `{dotnet, node, elixir-vanilla}`
+>   (elixir-**Ash**, java, python still fail-fast — foundation-aware). Runtime-
+>   verified: elixir-vanilla `mix compile --warnings-as-errors` + node
+>   `tsc --noEmit` both pass. ✅
+> - **Deferred** (each a later gated slice, fail-fast until then): **Java** (the
+>   §11.6 `@Filter` hybrid), **elixir-Ash** (per-read `base_filter` bypass),
+>   **Python** (wire `contextFilters` first, then bypass).
+>
+> **Known pre-existing gap (orthogonal):** on node/Drizzle the criterion-based
+> retrieval path (`Repo.findAll(<Criterion>)`) does **not** apply capability
+> filters at all (even without `ignoring`), so inline-read bypass there is a
+> vacuous no-op. Not introduced by this work; tracked separately.
+
+### 11.1 The reframe (why not "dedup")
+
+Filter predicates are `this`-relative one-liners (§5, Fact A) — "dedup" only
+collapses one line per entity into one named registration: code-*size* polish, no
+capability. The value EF Core 10 / Hibernate *named* filters actually unlock is
+**bypass**: a query reading past a capability's filter (admin view ignoring
+`softDeletable`, cross-tenant report ignoring `tenantOwned`). That is green-field
+— the audit confirms `IgnoreQueryFilters` exists only in an `efcore.ts` comment,
+with no DSL surface and no emitted call site. So we build bypass; naming is a
+*means* (the EF/Hibernate handle), not a standalone slice.
+
+### 11.2 Surface — `ignoring <Cap>`, a clause on `find` (sibling of `where`)
+
+Keyed on the **capability name** (the stable identity the user wrote with
+`with <Cap>`), never on a per-filter name — the grammar already removed the
+`filter for "<name>"` qualifier precisely because *a capability co-locates its
+filter* (`ddd.langium:906-908`). No name is added to `FilterDecl`.
+
+```ddd
+aggregate Order with softDeletable, tenantOwned { code: string  total: money }
+
+repository Orders for Order {
+  find adminView(): Order[] ignoring softDeletable   // drop softDeletable's predicate; keep tenantOwned's
+  find raw(): Order[] ignoring *                      // bypass every capability filter (wildcard)
+}
+
+view ActiveOrders = Order where this.total > 0 ignoring softDeletable   // also on views
+```
+```csharp
+// .NET / EF Core 10 — the bypass call site that is vapor today
+public Task<List<Order>> AdminViewAsync() =>
+    _db.Orders.IgnoreQueryFilters(["SoftDeletableFilter"]).ToListAsync();
+```
+
+**Surface (user-approved 2026-06):** keyword **`ignoring`**; bypass-all via the
+**`*`** wildcard (not an `all` soft keyword); allowed scope is **`find` +
+`view` + inline reads** (broader than a find-only v1).
+
+- **`find` / `view`** — a trailing clause, sibling of `where`:
+  `('ignoring' ('*' | bypass+=[Capability] (',' bypass+=[Capability])*))?`
+  on `FindDecl` (`ddd.langium:1050-1052`) and on both `View` forms
+  (`ddd.langium:1151-1162`, after each `where`). Soft keyword `ignoring`; flat
+  `+=` list; `*` is the discriminator over the explicit-capability list.
+- **Inline reads** — `Repo.findAll(…)` / `Repo.run(<Retrieval>(…))` are *member-
+  call expressions*, so bypass there is an **expression-level** modifier, not a
+  declaration clause — a distinct grammar shape (e.g. a postfix `ignoring` on the
+  call, lowered onto the `repo-run` `ExprIR`). Settle its exact form during
+  Slice 1 design; it reuses the same `capabilityOrigin` resolution.
+
+Keyed on the **capability name** the user wrote with `with <Cap>` — never a
+per-filter name (the `filter for "<name>"` qualifier was deliberately removed). A
+capability contributing *several* filters is bypassed **as a unit**. Aggregate-
+local anonymous `filter <expr>` (no capability) is **not** bypassable — accepted
+scoping (you own that source); revisit only if a real need appears.
+
+### 11.3 Slices (incremental; per-backend, because there is no shared filter seam)
+
+| # | Scope | Files (phase) | Gate | Parallelizable? |
+|---|---|---|---|---|
+| **0** | `capabilityOrigin` provenance seam | `FilterEntry` + `collectFilters` (`lower-capabilities.ts:11-81`); `contextFilterOrigins?: (string\|undefined)[]` on `loom-ir.ts` (mirror `contextFilterRefs`) | **byte-identical** (no consumer) | no — serializing substrate |
+| **1** | surface (`find`+`view`+inline) + **.NET** | `ddd.langium` `ignoring`-clause on `FindDecl` + `View` (×2 forms) + the `Repo.findAll`/`run` call expr (+`langium:generate`, commit generated); `lower` → bypass-set on `FindIR`/`ViewIR`/the `repo-run` `ExprIR`; printer arms (print-completeness); `efcore.ts` resolve origin→EF name→`IgnoreQueryFilters` (repo finds + view reads + inline); `loom.filter-bypass-*` validators (`ir/validate/checks/*`, mirror `validateContextFilterSupport`) | runtime: `dotnet-build`, `dotnet-obs-e2e`, `k8s-e2e` read+write | no (grammar→regen→lower→emit is a chain) |
+| **2** | **Drizzle + Ecto** honor bypass (omit predicate from the AND-chain) | `typescript/repository-find-predicate.ts`; `elixir/vanilla/capability-filter.ts` | `behavioral-e2e`, `k8s-e2e` | **yes — 2 agents** (disjoint trees) |
+| defer | **Java** (`@SQLRestriction`→`@Filter` *only where bypassed* — §11.6), **Ash** (base_filter→unfiltered action/policy), **Python** (filter-emission gap first, then bypass) | per-backend emit + drop from `NO_FILTER_EMISSION`/`LIMITED_FAMILIES` | each own runtime gate | **yes — independent fan-out** |
+
+Backends that can't honor a given `ignoring <Cap>` **fail-fast** via the new
+validator (mirrors `loom.context-filter-unsupported`), so an unsupported target
+errors at compile rather than silently still-filtering.
+
+### 11.6 Java — the "pay for what you use" hybrid (researched; no regression)
+
+The two naïve options both lose: `@SQLRestriction` is **unbypassable by design**
+(Hibernate javadoc: *"always applied and cannot be disabled"*), and blanket-
+migrating to `@Filter` makes every existing soft-delete/tenancy filter
+**off-by-default** (a silent regression). The idiomatic resolution leans on the
+fact that **Loom owns every query site** and can triage per capability×entity:
+
+- **Triage at generation.** If the model contains **no** `ignoring <Cap>`
+  targeting an entity → keep today's **`@SQLRestriction`** (zero regression,
+  covers JPQL + by-id + lazy; no runtime cost). Only when an `ignoring <Cap>`
+  *does* target it → emit that predicate as a **bypassable `@Filter`** instead.
+  This is a *derived* fact (find-decls × capability membership), computed at
+  enrich/codegen — never stamped.
+- **Always-on without a global hook.** Loom targets **Spring Boot 4.1.0 →
+  Hibernate ORM 7.x** (`SPRING_BOOT_VERSION` in `java/emit/program.ts:21`), so
+  the 6.5+ machinery is available: emit
+  `@FilterDef(name=…, autoEnabled = true, applyToLoadByKey = true, parameters = @ParamDef(name=…, type=…, resolver = <Cap>Resolver.class))`
+  + `@Filter(name=…)`. `autoEnabled` reproduces `@SQLRestriction`'s always-on
+  semantics with no interceptor to forget; `applyToLoadByKey=true` keeps by-id /
+  lazy loads filtered (else a promoted filter leaks previously-hidden rows); a
+  request-scoped `Supplier<T>` resolver supplies parameters (e.g. the tenant id).
+- **Bypass call site.** At a generated `ignoring <Cap>` finder, wrap the query:
+  ```java
+  Session s = em.unwrap(Session.class);
+  s.disableFilter("softDeletable");
+  try   { return em.createQuery("select o from Order o", Order.class).getResultList(); }
+  finally { s.enableFilter("softDeletable"); /* re-arm for the rest of the session */ }
+  ```
+- **Gotchas to encode:** `@SQLRestriction` and `@Filter` coexist on one entity
+  (different predicates AND-cleanly); **native SQL bypasses both** — any native
+  query site must splice the predicate manually. `@SoftDelete` / `@TenantId` are
+  *not* used for bypassable capabilities (same no-escape limitation as
+  `@SQLRestriction`; reserve them for hard, never-`ignoring`-able isolation).
+
+This makes Java a **full bypass backend** (not deferred-only) at the cost of one
+triage pass — you pay the `@Filter` machinery exactly where bypass is modeled,
+and everything else keeps today's zero-cost behavior. The triage principle
+generalizes: *render a capability filter in its bypassable form only where the
+model actually bypasses it* — applicable to any backend whose always-on and
+bypassable forms differ (Java here; .NET needs none, EF's named filters are
+always-on **and** bypassable in one form).
+
+### 11.4 Orchestration — skills & agent parallelization
+
+- **Skill:** `language-feature-developer` drives the gated phases. Done: state
+  audit, design review. Next: **feature-simulator → user sign-off** (paper
+  prototype of 11.2's `.ddd` + per-backend generated fragment) *before any code*.
+- **Bottleneck then fan-out:** Slice 0 is the single serializing dependency
+  (everything reads `capabilityOrigin`). One **feature-developer** agent lands it.
+  Slice 1 is an internal chain (one agent). After Slice 1, **Slice 2's two
+  backends and every deferred backend are independent** → spawn one
+  feature-developer per backend in a single turn (the "disjoint buckets"
+  pattern).
+- **Tests:** a `test-developer` agent places 1 parsing + 1 negative-validator + 1
+  IR + 1 generator test per touched backend at lowest altitude; bypass is
+  **runtime-gated** (byte-changing), verified via the `verify` skill driving
+  `k8s-e2e` read+write round-trips.
+- **Final review:** `simplify` + `code-review` over each diff; `pipeline-layering`
+  + Biome gates.
+
+### 11.5 Architecture notes (from the review)
+
+- **Derive, don't stamp:** store `capabilityOrigin` (a genuine propagation-time
+  input nothing can re-derive once the predicate is anonymized), but keep the EF
+  filter *name* derived in the emitter (`queryFilterName`) — resolve
+  `ignoring <Cap>` → origin → name at codegen, never onto the IR.
+- **Resolved facts on `LoomModel`:** the bypass set rides `FindIR`;
+  `contextFilterOrigins` is index-aligned with `contextFilters`. No backend
+  re-resolves.
+- **Completeness gates:** new `ignoring` syntax trips **print-completeness**
+  (printer arm) + round-trip; the new diagnostic needs a stable `loom.*` code
+  (**diagnostic-codes-completeness**). No walker/heex gates (not UI).
 
 ## 10. Cross-references
 

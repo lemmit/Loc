@@ -115,7 +115,7 @@ function renderRepository(
   // callers (workflows) compiling and fail-closed (a nil actor scopes to no rows).
   const principal = aggregateUsesPrincipalContextFilter(agg);
   const cap = vanillaCapabilityFilter(agg, contextModule, { actor: principal });
-  const findFns = finds.map((f) => renderFindFn(f, aggModule, contextModule, cap, principal));
+  const findFns = finds.map((f) => renderFindFn(f, agg, aggModule, contextModule, principal));
   const findBlock = findFns.length > 0 ? `\n\n${findFns.join("\n\n")}\n` : "";
   // `import Ecto.Query` is required for `from(...)` — needed when there's a
   // custom find OR a capability filter (which turns `list`/`find_by_id` into
@@ -202,11 +202,18 @@ end
  *  examples/sales.ddd. */
 function renderFindFn(
   f: FindIR,
+  agg: AggregateIR,
   aggModule: string,
   contextModule: string,
-  cap: string | null,
   principal: boolean,
 ): string {
+  // The capability filter for THIS find — recomputed with the find's own
+  // `ignoring` clause so a bypassed capability's `where:` predicate is omitted
+  // from this finder only (other reads keep the full conjunction).
+  const cap = vanillaCapabilityFilter(agg, contextModule, {
+    actor: principal,
+    bypass: { bypassAll: f.bypassAll, bypassCaps: f.bypassCaps },
+  });
   const fnName = snake(f.name);
   const argNames = f.params.map((p) => snake(p.name));
   // A principal-filtered aggregate threads the request actor into the find too

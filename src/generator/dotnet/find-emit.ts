@@ -8,7 +8,24 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { canEmitToExpressionFor } from "./criteria-emit.js";
+import { bypassedFilterNames } from "./emit/efcore.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
+
+/** The `.IgnoreQueryFilters(…)` clause for an `ignoring`-bearing read
+ *  (named-filter-bypass.md §11), inserted on the `_db.<Set>` IQueryable BEFORE
+ *  the `.Where(...)`.  `ignoring *` → the parameterless overload (drop every
+ *  query filter); `ignoring <Cap>` → `IgnoreQueryFilters(["Name1", …])` for the
+ *  EF filters the bypassed capabilities contributed.  Returns "" when nothing
+ *  is bypassed (a `*` on a filterless aggregate is a harmless no-op). */
+export function ignoreFiltersClause(
+  agg: EnrichedAggregateIR,
+  bypass: { bypassAll?: boolean; bypassCaps?: string[] },
+): string {
+  if (bypass.bypassAll) return ".IgnoreQueryFilters()";
+  const names = bypassedFilterNames(agg, bypass);
+  if (names.length === 0) return "";
+  return `.IgnoreQueryFilters([${names.map((n) => JSON.stringify(n)).join(", ")}])`;
+}
 
 // ---------------------------------------------------------------------------
 // Repository find-method bodies.
@@ -44,12 +61,13 @@ export function buildFindBodies(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
   ctx?: BoundedContextIR,
-): Array<{ name: string; filterClause: string; projectionClause: string }> {
+): Array<{ name: string; ignoreClause: string; filterClause: string; projectionClause: string }> {
   if (!repo) return [];
   return repo.finds.map((raw) => {
     const find = unionFindAsOptionalTwin(raw, agg.name);
     return {
       name: find.name,
+      ignoreClause: ignoreFiltersClause(agg, find),
       filterClause: filterClauseFor(find, agg, ctx),
       projectionClause: projectionClauseFor(find.returnType),
     };

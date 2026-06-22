@@ -1136,6 +1136,11 @@ function mergeViewsAsFinds(
     params: [],
     returnType: arrayReturn,
     filter: v.filter,
+    // Carry the view's `ignoring` filter-bypass clause (named-filter-bypass.md
+    // §11) onto the synthesized find so the shared find emitter renders the
+    // view read's `.IgnoreQueryFilters(...)` exactly like a repository find.
+    ...(v.bypassAll ? { bypassAll: v.bypassAll } : {}),
+    ...(v.bypassCaps ? { bypassCaps: v.bypassCaps } : {}),
   }));
   if (!repo) {
     return {

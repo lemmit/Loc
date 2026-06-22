@@ -1,0 +1,55 @@
+// `ignoring <Cap>` / `ignoring *` filter-bypass on the vanilla (plain Ecto)
+// foundation (named-filter-bypass.md §11, Slice 2).  A read carrying an
+// `ignoring` clause OMITS the named capability's `where:` predicate from its
+// conjunction — for that read only; every non-bypassing read keeps the full
+// soft-delete scoping.  Compiled by build-generated-elixir-vanilla so the
+// gated `where(query, [record], ...)` retrieval stages + the per-find dropped
+// conjuncts pass `mix compile --warnings-as-errors`.
+//
+// Covered shapes:
+//   - find with `ignoring <Cap>` (drops the named conjunct, keeps a `where`)
+//   - find with `ignoring *` (drops ALL capability conjuncts → bare `from`)
+//   - find with no bypass (full conjunction retained)
+//   - view with `ignoring <Cap>`
+//   - inline `Repo.findAll(...) ignoring <Cap>` / `ignoring *` in a workflow
+//     (rides as `ignore_filters: [...]` / `ignore_all_filters: true` opts onto
+//     the gated retrieval stages)
+system Catalog {
+  capability softDeletable {
+    isDeleted: bool
+    filter this.isDeleted == false
+  }
+  subdomain Core {
+    context Shop {
+      criterion BigOrders() of Order = this.total > 0
+      aggregate Order ids guid with softDeletable {
+        customerId: string
+        total: int
+      }
+      repository Orders for Order {
+        find recent(): Order[] where this.total > 0 ignoring softDeletable
+        find allRows(): Order[] ignoring *
+        find normal(): Order[] where this.total > 0
+      }
+      view ActiveOrders = Order where total > 0 ignoring softDeletable
+      workflow Sweep {
+        create(min: int) {
+          let xs = Orders.findAll(BigOrders()) ignoring softDeletable
+          let ys = Orders.findAll(BigOrders()) ignoring *
+          for o in xs { }
+          for o in ys { }
+        }
+      }
+    }
+  }
+  api CatalogApi from Core
+  storage pg { type: postgres }
+  resource orderState { for: Shop, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Shop]
+    dataSources: [orderState]
+    serves: CatalogApi
+    port: 4000
+  }
+}

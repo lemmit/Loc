@@ -145,6 +145,7 @@ import {
   collectFilters,
   collectStamps,
   EMPTY_CONTEXT_CAPABILITIES,
+  resolveBypass,
 } from "./lower-capabilities.js";
 import { lowerDeployable } from "./lower-deployment.js";
 import { criterionRefOf, lowerExpr, setAmbientEnumIndex } from "./lower-expr.js";
@@ -1211,6 +1212,9 @@ function lowerAggregate(
     contextFilterRefs: filters.some((f) => f.criterionRef)
       ? filters.map((f) => f.criterionRef)
       : undefined,
+    contextFilterOrigins: filters.some((f) => f.capabilityOrigin)
+      ? filters.map((f) => f.capabilityOrigin)
+      : undefined,
     contextStamps: stamps.length > 0 ? stamps : undefined,
     capabilities: capabilities.length > 0 ? capabilities : undefined,
     persistedAs: agg.persistedAs as "state" | "eventLog" | undefined,
@@ -1286,6 +1290,7 @@ function lowerRepository(
         returnType: lowerType(f.returnType),
         filter: f.filter ? lowerExpr(f.filter, env) : undefined,
         criterionRef: criterionRefOf(f.filter, env),
+        ...resolveBypass(f),
       };
     }),
   };

@@ -56,6 +56,11 @@ describe.skipIf(!ENABLED)(
       // `error`-variant to an RFC-7807 ProblemDetails (404), a success to 200.
       // Compiles the inline tagged-union return type + the route translation.
       "test/e2e/fixtures/ts-build/operation-return.ddd",
+      // `ignoring <Cap>` / `ignoring *` filter-bypass (named-filter-bypass.md §11):
+      // node honors a bypass by omitting the capability's predicate from the
+      // Drizzle `and(...)` chain across repository finds + a view read. Pins that
+      // the bypassed/`*`/normal read variants all type-check.
+      "test/e2e/fixtures/ts-build/filter-bypass.ddd",
     ])("%s — `ddd generate ts` output type-checks + tsup-bundles", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
       try {

@@ -33,8 +33,7 @@ import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import {
   aggregateUsesPrincipalContextFilter,
-  combineWhere,
-  vanillaCapabilityFilter,
+  vanillaCapabilityFilterParts,
 } from "./capability-filter.js";
 
 /** Per-context fan-out: emit one Ecto query module per retrieval. */
@@ -59,12 +58,16 @@ export function emitVanillaRetrievals(
     // controller), so a caller that omits it scopes to no rows (fail-closed) —
     // never a cross-tenant leak.
     const principal = target ? aggregateUsesPrincipalContextFilter(target) : false;
-    const cap = target
-      ? vanillaCapabilityFilter(target, contextModule, { actor: principal })
-      : null;
+    // Each capability filter is applied as a SEPARATELY-gated `where` pipe stage
+    // (rather than baked into the base `where:`) so an inline `Repo.run(...)
+    // ignoring <Cap>` / `ignoring *` at a call site can skip individual origins
+    // at runtime via `opts[:ignore_filters]` / `opts[:ignore_all_filters]`.
+    const capParts = target
+      ? vanillaCapabilityFilterParts(target, contextModule, { actor: principal })
+      : [];
     out.set(
       `lib/${appName}/${ctxSnake}/retrievals/${snake(r.name)}.ex`,
-      renderRetrievalModule(r, contextModule, appModule, cap, principal),
+      renderRetrievalModule(r, contextModule, appModule, capParts, principal),
     );
   }
 }
@@ -73,7 +76,7 @@ function renderRetrievalModule(
   r: RetrievalIR,
   contextModule: string,
   appModule: string,
-  cap: string | null,
+  capParts: { origin: string | undefined; pred: string }[],
   principal: boolean,
 ): string {
   const aggName = (r.targetType as { kind: "entity"; name: string }).name;
@@ -89,8 +92,9 @@ function renderRetrievalModule(
   };
   const args = r.params.map((p) => snake(p.name));
   const argList = args.length > 0 ? `${args.join(", ")}, opts \\\\ []` : "opts \\\\ []";
-  // AND the target aggregate's capability filter into the retrieval predicate.
-  const whereExpr = combineWhere(renderExpr(r.where, renderCtx), cap)!;
+  // The retrieval's own `where` predicate (the capability filters apply below,
+  // as separately-gated pipe stages so a call-site `ignoring` can skip them).
+  const whereExpr = renderExpr(r.where, renderCtx);
   const sortClause = renderSortClause(r.sort);
 
   // Build the Ecto pipeline in stages.  `from(...)` opens, conditional
@@ -103,6 +107,20 @@ function renderRetrievalModule(
   // Principal-filtered retrievals read the threaded actor out of `opts`.
   if (principal) pipeline.push(`    current_user = opts[:current_user]`);
   pipeline.push(`    query = from(record in ${aggModule}, where: ${whereExpr})`);
+  // Each capability filter is its own gated `where` pipe stage.  A call-site
+  // `Repo.run(...) ignoring *` passes `ignore_all_filters: true` (skips every
+  // capability stage); `ignoring <Cap>` passes `ignore_filters: ["<Cap>", …]`
+  // (skips only the matching origin).  A bare/hand-written filter (origin
+  // `nil`) is never bypassable, so it applies unconditionally.
+  for (const part of capParts) {
+    if (part.origin === undefined) {
+      pipeline.push(`    query = where(query, [record], ${part.pred})`);
+    } else {
+      pipeline.push(
+        `    query = if opts[:ignore_all_filters] || ${JSON.stringify(part.origin)} in (opts[:ignore_filters] || []), do: query, else: where(query, [record], ${part.pred})`,
+      );
+    }
+  }
   pipeline.push(`    query = if opts[:limit], do: limit(query, ^opts[:limit]), else: query`);
   pipeline.push(`    query = if opts[:offset], do: offset(query, ^opts[:offset]), else: query`);
   if (sortClause) pipeline.push(`    query = ${sortClause}`);

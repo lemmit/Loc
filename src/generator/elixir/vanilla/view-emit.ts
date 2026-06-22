@@ -159,7 +159,12 @@ function renderVanillaView(
   // principal (tenancy) filter scopes by the `current_user` the controller
   // already threads into `run/1`; the predicate pins it (`^(current_user && …)`).
   const principal = aggregateUsesPrincipalContextFilter(agg);
-  const cap = vanillaCapabilityFilter(agg, contextModule, { actor: principal });
+  // An `ignoring` clause on the view drops the named capability filters from
+  // this view's `where:` (the bypass rides the ViewIR — same as a find).
+  const cap = vanillaCapabilityFilter(agg, contextModule, {
+    actor: principal,
+    bypass: { bypassAll: view.bypassAll, bypassCaps: view.bypassCaps },
+  });
   const isShorthand = !view.output;
   const body = isShorthand
     ? buildShorthandBody(view, aggModule, renderCtx, cap)

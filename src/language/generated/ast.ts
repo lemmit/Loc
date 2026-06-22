@@ -149,6 +149,7 @@ export type DddKeywordNames =
     | "id"
     | "ids"
     | "if"
+    | "ignoring"
     | "immutable"
     | "implements"
     | "import"
@@ -1291,6 +1292,8 @@ export function isFilterDecl(item: unknown): item is FilterDecl {
 export interface FindDecl extends langium.AstNode {
     readonly $container: Repository;
     readonly $type: 'FindDecl';
+    bypass: Array<string>;
+    bypassAll: boolean;
     filter?: Expression;
     name: string;
     params: Array<Parameter>;
@@ -1299,6 +1302,8 @@ export interface FindDecl extends langium.AstNode {
 
 export const FindDecl = {
     $type: 'FindDecl',
+    bypass: 'bypass',
+    bypassAll: 'bypassAll',
     filter: 'filter',
     name: 'name',
     params: 'params',
@@ -1727,10 +1732,10 @@ export function isLoadSegment(item: unknown): item is LoadSegment {
     return reflection.isInstance(item, LoadSegment.$type);
 }
 
-export type LooseName = 'action' | 'aggregates' | 'api' | 'application' | 'asc' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'desc' | 'description' | 'design' | 'directoryLayout' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'foundation' | 'framework' | 'handle' | 'id' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'payload' | 'permissions' | 'persistence' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'runtime' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'transactional' | 'transport' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
+export type LooseName = 'action' | 'aggregates' | 'api' | 'application' | 'asc' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'desc' | 'description' | 'design' | 'directoryLayout' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'foundation' | 'framework' | 'handle' | 'id' | 'ignoring' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'payload' | 'permissions' | 'persistence' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'runtime' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'transactional' | 'transport' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'by' || item === 'handle' || item === 'cache' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'foundation' || item === 'application' || item === 'persistence' || item === 'directoryLayout' || item === 'transport' || item === 'runtime' || item === 'transactional' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'by' || item === 'handle' || item === 'cache' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'foundation' || item === 'application' || item === 'persistence' || item === 'directoryLayout' || item === 'transport' || item === 'runtime' || item === 'transactional' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || item === 'ignoring' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface LValue extends langium.AstNode {
@@ -1913,10 +1918,10 @@ export function isMatchExpr(item: unknown): item is MatchExpr {
     return reflection.isInstance(item, MatchExpr.$type);
 }
 
-export type MemberName = 'action' | 'aggregates' | 'api' | 'body' | 'by' | 'canonical' | 'command' | 'contains' | 'contexts' | 'create' | 'description' | 'destroy' | 'envelope' | 'error' | 'favicon' | 'filter' | 'find' | 'handle' | 'id' | 'implements' | 'modules' | 'ogImage' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'stamp' | 'state' | 'title' | 'ui' | 'views' | 'where' | 'workflows' | string;
+export type MemberName = 'action' | 'aggregates' | 'api' | 'body' | 'by' | 'canonical' | 'command' | 'contains' | 'contexts' | 'create' | 'description' | 'destroy' | 'envelope' | 'error' | 'favicon' | 'filter' | 'find' | 'handle' | 'id' | 'ignoring' | 'implements' | 'modules' | 'ogImage' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'stamp' | 'state' | 'title' | 'ui' | 'views' | 'where' | 'workflows' | string;
 
 export function isMemberName(item: unknown): item is MemberName {
-    return item === 'by' || item === 'handle' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'create' || item === 'destroy' || item === 'find' || item === 'where' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'action' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'title' || item === 'body' || item === 'state' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'by' || item === 'handle' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'create' || item === 'destroy' || item === 'find' || item === 'where' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'action' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'title' || item === 'body' || item === 'state' || item === 'ignoring' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface MemberSuffix extends langium.AstNode {
@@ -2106,10 +2111,10 @@ export function isNameRef(item: unknown): item is NameRef {
     return reflection.isInstance(item, NameRef.$type);
 }
 
-export type NameRefIdent = 'action' | 'aggregates' | 'api' | 'asc' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'create' | 'dataSources' | 'desc' | 'description' | 'design' | 'destroy' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'framework' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'payload' | 'permissions' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
+export type NameRefIdent = 'action' | 'aggregates' | 'api' | 'asc' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'create' | 'dataSources' | 'desc' | 'description' | 'design' | 'destroy' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'framework' | 'handle' | 'ignoring' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'payload' | 'permissions' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
 
 export function isNameRefIdent(item: unknown): item is NameRefIdent {
-    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'create' || item === 'destroy' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'by' || item === 'handle' || item === 'cache' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'create' || item === 'destroy' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'by' || item === 'handle' || item === 'cache' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || item === 'ignoring' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface NowExpr extends langium.AstNode {
@@ -2402,12 +2407,16 @@ export function isPlatform(item: unknown): item is Platform {
 export interface PostfixChain extends langium.AstNode {
     readonly $container: AssignOrCallStmt | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | IfLetStmt | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | Operation | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | RetrievalLiteral | ReturnStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | View | WorkflowCreateDecl;
     readonly $type: 'PostfixChain';
+    bypass: Array<string>;
+    bypassAll: boolean;
     head: Expression | NameRef;
     suffixes: Array<PostfixSuffix>;
 }
 
 export const PostfixChain = {
     $type: 'PostfixChain',
+    bypass: 'bypass',
+    bypassAll: 'bypassAll',
     head: 'head',
     suffixes: 'suffixes'
 } as const;
@@ -3540,6 +3549,8 @@ export interface View extends langium.AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'View';
     binds: Array<BindEntry>;
+    bypass: Array<string>;
+    bypassAll: boolean;
     fields: Array<Property>;
     filter: Expression;
     gate?: Expression;
@@ -3550,6 +3561,8 @@ export interface View extends langium.AstNode {
 export const View = {
     $type: 'View',
     binds: 'binds',
+    bypass: 'bypass',
+    bypassAll: 'bypassAll',
     fields: 'fields',
     filter: 'filter',
     gate: 'gate',
@@ -4647,6 +4660,16 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         FindDecl: {
             name: FindDecl.$type,
             properties: {
+                bypass: {
+                    name: FindDecl.bypass,
+                    defaultValue: [],
+                    optional: true
+                },
+                bypassAll: {
+                    name: FindDecl.bypassAll,
+                    defaultValue: false,
+                    optional: true
+                },
                 filter: {
                     name: FindDecl.filter,
                     optional: true
@@ -5467,6 +5490,16 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         PostfixChain: {
             name: PostfixChain.$type,
             properties: {
+                bypass: {
+                    name: PostfixChain.bypass,
+                    defaultValue: [],
+                    optional: true
+                },
+                bypassAll: {
+                    name: PostfixChain.bypassAll,
+                    defaultValue: false,
+                    optional: true
+                },
                 head: {
                     name: PostfixChain.head
                 },
@@ -6388,6 +6421,16 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 binds: {
                     name: View.binds,
                     defaultValue: [],
+                    optional: true
+                },
+                bypass: {
+                    name: View.bypass,
+                    defaultValue: [],
+                    optional: true
+                },
+                bypassAll: {
+                    name: View.bypassAll,
+                    defaultValue: false,
                     optional: true
                 },
                 fields: {

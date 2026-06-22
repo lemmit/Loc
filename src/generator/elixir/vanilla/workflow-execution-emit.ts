@@ -323,12 +323,23 @@ function lowerStatement(
       // ride as a trailing keyword list, which Elixir parses positionally
       // into the retrieval's `opts \\ []` arg.
       const args = st.retrievalArgs.map((a) => renderExpr(a, renderCtx));
+      // An `ignoring` clause on the inline read rides as trailing keyword opts
+      // the retrieval module gates each capability `where` stage on: `ignoring *`
+      // → `ignore_all_filters: true`; `ignoring <Cap>` → `ignore_filters: [...]`
+      // (the bypassed capability NAMES, which key the retrieval's per-origin gate).
+      const optEntries: string[] = [];
       if (st.page) {
-        const pageEntries: string[] = [];
-        if (st.page.offset) pageEntries.push(`offset: ${renderExpr(st.page.offset, renderCtx)}`);
-        if (st.page.limit) pageEntries.push(`limit: ${renderExpr(st.page.limit, renderCtx)}`);
-        if (pageEntries.length > 0) args.push(pageEntries.join(", "));
+        if (st.page.offset) optEntries.push(`offset: ${renderExpr(st.page.offset, renderCtx)}`);
+        if (st.page.limit) optEntries.push(`limit: ${renderExpr(st.page.limit, renderCtx)}`);
       }
+      if (st.bypassAll) {
+        optEntries.push("ignore_all_filters: true");
+      } else if ((st.bypassCaps?.length ?? 0) > 0) {
+        optEntries.push(
+          `ignore_filters: [${st.bypassCaps!.map((c) => JSON.stringify(c)).join(", ")}]`,
+        );
+      }
+      if (optEntries.length > 0) args.push(optEntries.join(", "));
       const action = `run_${snake(st.retrievalName)}_${snake(st.aggName)}`;
       const call = `${contextModule}.${action}(${args.join(", ")})`;
       return [

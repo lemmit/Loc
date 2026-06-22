@@ -73,6 +73,47 @@ describe("macro capabilities propagate to AggregateIR", () => {
     }
   });
 
+  it("contextFilterOrigins records the capability a filter came from (Slice 0 provenance seam)", async () => {
+    // A capability filter carries its origin; a hand-written aggregate-local
+    // filter carries `undefined` — index-aligned with contextFilters.  This is
+    // the provenance the `ignoring <Cap>` bypass surface resolves against.
+    const ir = await buildLoomModel(`
+      system Demo {
+        subdomain M { context C {
+          aggregate Doc with softDeletable {
+            archived: bool
+            filter !this.archived
+          }
+        }}
+      }
+    `);
+    const agg = findAgg(ir, "Doc");
+    // Two filters: softDeletable's `!this.isDeleted` + the local `!this.archived`.
+    expect(agg.contextFilters!.length).toBe(2);
+    expect(agg.contextFilterOrigins).toBeDefined();
+    expect(agg.contextFilterOrigins!.length).toBe(agg.contextFilters!.length);
+    // The capability filter is tagged; the hand-written one is not.
+    expect(agg.contextFilterOrigins).toContain("softDeletable");
+    expect(agg.contextFilterOrigins).toContain(undefined);
+  });
+
+  it("contextFilterOrigins is undefined when no filter came from a capability", async () => {
+    const ir = await buildLoomModel(`
+      system Demo {
+        subdomain M { context C {
+          aggregate Doc {
+            archived: bool
+            filter !this.archived
+          }
+        }}
+      }
+    `);
+    const agg = findAgg(ir, "Doc");
+    expect(agg.contextFilters!.length).toBe(1);
+    // Only a hand-written filter → the whole array stays undefined (byte-neutral).
+    expect(agg.contextFilterOrigins).toBeUndefined();
+  });
+
   it("composed trios yield both capability kinds, independently", async () => {
     const ir = await buildLoomModel(`
       system Demo {

@@ -457,6 +457,14 @@ export interface AggregateIR {
    * the module-level `<name>Criterion` predicate fn instead of re-inlining
    * the body (reified-criteria.md, the anonymous-`filter` row). */
   contextFilterRefs?: ({ name: string; args: ExprIR[] } | undefined)[];
+  /** Per-`contextFilters` entry: the name of the capability that contributed
+   * the filter (e.g. `softDeletable`), or `undefined` for a hand-written /
+   * context-level bare filter — index-aligned with `contextFilters`, set by the
+   * expander on the spliced `FilterDecl` and threaded through lowering.  This is
+   * the provenance the `ignoring <Cap>` bypass surface resolves against: a
+   * backend maps a bypassed capability name to the predicate(s) it owns.  Purely
+   * additive — no consumer until the bypass surface lands, so byte-neutral. */
+  contextFilterOrigins?: (string | undefined)[];
   /** Lifecycle stamping rules contributed by `stamp onCreate { ... }`
    * / `stamp onUpdate { ... }` declarations (hand-written or
    * macro-emitted) on the aggregate, plus any propagated from the
@@ -680,6 +688,17 @@ export interface FindIR {
    *  reified `Criterion`.  `filter` still carries the inlined predicate, so
    *  composed/anonymous filters and non-reifying backends are unaffected. */
   criterionRef?: { name: string; args: ExprIR[] };
+  /** `ignoring *` — bypass EVERY capability query-filter on the aggregate for
+   *  this read (named-filter-bypass.md §11).  Resolved from the grammar
+   *  `bypassAll` flag.  Mutually exclusive with `bypassCaps`. */
+  bypassAll?: boolean;
+  /** `ignoring A, B` — the resolved capability NAMES whose query-filters this
+   *  read bypasses (named-filter-bypass.md §11).  Index-aligned with nothing;
+   *  a backend maps each name to the predicate(s) it contributed via
+   *  `AggregateIR.contextFilterOrigins`.  Only the capability *name* is stored
+   *  (fully-resolved IR) — the per-backend filter identity (e.g. the EF
+   *  `HasQueryFilter` name) is derived in the emitter. */
+  bypassCaps?: string[];
 }
 
 export interface RepositoryIR {
@@ -868,6 +887,13 @@ export interface ViewIR {
    *  optional in the full form.  Subject to the same restrictions
    *  as repository find filters. */
   filter?: ExprIR;
+  /** `ignoring *` — bypass EVERY capability query-filter on the source
+   *  aggregate for this view read (named-filter-bypass.md §11).  Mutually
+   *  exclusive with `bypassCaps`.  See `FindIR.bypassAll`. */
+  bypassAll?: boolean;
+  /** `ignoring A, B` — resolved capability names whose filters this view read
+   *  bypasses (named-filter-bypass.md §11).  See `FindIR.bypassCaps`. */
+  bypassCaps?: string[];
   /** Custom output shape.  Undefined for the shorthand form. */
   output?: {
     fields: FieldIR[];
@@ -1099,6 +1125,15 @@ export type WorkflowStmtIR =
        *  distinct shapes over one criterion get distinct retrievals. */
       synthSort?: SortTermIR[];
       synthLoadPlan?: LoadPlanIR;
+      /** `ignoring *` on the inline `Repo.findAll(...)`/`Repo.run(...)` read —
+       *  bypass EVERY capability query-filter on the aggregate (named-filter-
+       *  bypass.md §11).  Mutually exclusive with `bypassCaps`.  See
+       *  `FindIR.bypassAll`. */
+      bypassAll?: boolean;
+      /** `ignoring A, B` on the inline read — resolved capability names whose
+       *  filters this read bypasses (named-filter-bypass.md §11).  See
+       *  `FindIR.bypassCaps`. */
+      bypassCaps?: string[];
       /** Element aggregate array type `{ kind: "array", element: entity }`. */
       returnType: TypeIR;
     }

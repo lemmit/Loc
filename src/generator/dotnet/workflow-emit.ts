@@ -33,6 +33,7 @@ import {
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
+import { bypassedFilterNames } from "./emit/efcore.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
 import { esCorrIdClass, esEventDbSet, esEventRecordClass } from "./workflow-eventsourced-emit.js";
 import {
@@ -1076,7 +1077,24 @@ function csWorkflowStmtTarget(
         const lim = st.page.limit ? renderArg(st.page.limit) : "null";
         args.push(`(${off}, ${lim})`);
       }
-      const callArgs = [...args, "cancellationToken"].join(", ");
+      // Inline `ignoring` clause (named-filter-bypass.md §11) → named retrieval-
+      // method args.  `ignoring *` → `ignoreAllFilters: true`; `ignoring <Cap>`
+      // → `ignoreFilters: ["Name1", …]` (the EF filter names the bypassed
+      // capabilities contributed on the target aggregate).
+      const bypassArgs: string[] = [];
+      if (st.bypassAll) {
+        bypassArgs.push("ignoreAllFilters: true");
+      } else if ((st.bypassCaps?.length ?? 0) > 0) {
+        const target = ctx.aggregates.find((a) => a.name === st.aggName);
+        const names = target ? bypassedFilterNames(target, { bypassCaps: st.bypassCaps }) : [];
+        if (names.length > 0) {
+          bypassArgs.push(`ignoreFilters: [${names.map((n) => JSON.stringify(n)).join(", ")}]`);
+        }
+      }
+      // `cancellationToken` is passed NAMED: the run method has an optional
+      // `page` param before it (and the optional `ignore*` params after), so a
+      // positional token would bind to `page`.  Named, it skips the defaults.
+      const callArgs = [...args, ...bypassArgs, "cancellationToken: cancellationToken"].join(", ");
       return [
         `${indent}var ${st.name} = await ${fieldName}.Run${upperFirst(st.retrievalName)}Async(${callArgs});`,
       ];
@@ -1105,7 +1123,8 @@ function csWorkflowStmtTarget(
       const fieldName = `_${st.repoName.charAt(0).toLowerCase() + st.repoName.slice(1)}`;
       const args = st.retrievalArgs.map(renderArg);
       args.push("(null, 1)"); // page: limit 1, no offset — single result
-      const callArgs = [...args, "cancellationToken"].join(", ");
+      // Named `cancellationToken` — it now follows the optional `ignore*` params.
+      const callArgs = [...args, "cancellationToken: cancellationToken"].join(", ");
       const hits = `__${st.var}Hits`;
       const inner = `${indent}    `;
       const saveLine = (sv: { repoName: string; name: string }): string => {

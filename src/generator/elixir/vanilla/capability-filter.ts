@@ -37,6 +37,24 @@ function pinPrincipal(rendered: string): string {
   return rendered.replace(/\bcurrent_user\.([a-z0-9_]+)/g, "^(current_user && current_user.$1)");
 }
 
+/** A read's capability filter-bypass spec (`ignoring <Cap>` / `ignoring *`),
+ *  carried by capability NAME on `FindIR` / `ViewIR` / the repo-run stmt.
+ *  Named caps match `AggregateIR.contextFilterOrigins`; a filter with an
+ *  `undefined` origin (bare/hand-written) is never bypassable. */
+export interface FilterBypass {
+  bypassAll?: boolean;
+  bypassCaps?: string[];
+}
+
+/** True when the capability filter at origin index `i` is dropped by `bypass`
+ *  (`ignoring *` drops every capability-origin filter; a named `ignoring <Cap>`
+ *  drops only the matching origin; an `undefined` origin is never dropped). */
+function isFilterBypassed(origin: string | undefined, bypass: FilterBypass | undefined): boolean {
+  if (!bypass || origin === undefined) return false;
+  if (bypass.bypassAll) return true;
+  return (bypass.bypassCaps ?? []).includes(origin);
+}
+
 /** The aggregate's capability filters as a single Ecto predicate (conjoined
  *  with the infix `and`, each parenthesised), or null when it has none.
  *  `contextModule` feeds the shared `renderExpr` (enum / type vocab).
@@ -44,14 +62,19 @@ function pinPrincipal(rendered: string): string {
  *  Without `{ actor: true }` only NON-principal predicates are emitted (the
  *  no-actor read sites — and the byte-identical default).  With `{ actor: true }`
  *  the principal predicates are included too, pinned against a `current_user`
- *  the caller must have threaded into scope. */
+ *  the caller must have threaded into scope.
+ *
+ *  When `opts.bypass` is supplied (the read carried an `ignoring` clause), the
+ *  capability filters whose `contextFilterOrigins[i]` the bypass names are
+ *  OMITTED from the conjunction — for that read only. */
 export function vanillaCapabilityFilter(
   agg: AggregateIR,
   contextModule: string,
-  opts?: { actor?: boolean },
+  opts?: { actor?: boolean; bypass?: FilterBypass },
 ): string | null {
   const ctx: RenderCtx = { thisName: "record", contextModule, foundation: "vanilla" };
   const preds = (agg.contextFilters ?? [])
+    .filter((_, i) => !isFilterBypassed(agg.contextFilterOrigins?.[i], opts?.bypass))
     .filter((p) => opts?.actor || !exprUsesCurrentUser(p))
     .map((p) => (exprUsesCurrentUser(p) ? pinPrincipal(renderExpr(p, ctx)) : renderExpr(p, ctx)));
   if (preds.length === 0) return null;
@@ -67,4 +90,26 @@ export function combineWhere(existing: string | null, cap: string | null): strin
   if (!cap) return existing;
   if (!existing) return cap;
   return `(${existing}) and (${cap})`;
+}
+
+/** One capability-filter predicate paired with its capability origin name —
+ *  used by the retrieval emitter to apply each cap as a separately-gated Ecto
+ *  `where` pipe stage so a call-site `ignoring` bypass can skip individual
+ *  origins at runtime.  Mirrors `vanillaCapabilityFilter`'s rendering exactly
+ *  (same principal pinning / actor gating), but keyed per filter rather than
+ *  conjoined into one string.  A filter whose origin is `undefined`
+ *  (bare/hand-written) renders with `origin: undefined` and is never bypassable. */
+export function vanillaCapabilityFilterParts(
+  agg: AggregateIR,
+  contextModule: string,
+  opts?: { actor?: boolean },
+): { origin: string | undefined; pred: string }[] {
+  const ctx: RenderCtx = { thisName: "record", contextModule, foundation: "vanilla" };
+  const parts: { origin: string | undefined; pred: string }[] = [];
+  (agg.contextFilters ?? []).forEach((p, i) => {
+    if (!opts?.actor && exprUsesCurrentUser(p)) return;
+    const pred = exprUsesCurrentUser(p) ? pinPrincipal(renderExpr(p, ctx)) : renderExpr(p, ctx);
+    parts.push({ origin: agg.contextFilterOrigins?.[i], pred });
+  });
+  return parts;
 }
