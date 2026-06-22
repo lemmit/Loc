@@ -104,7 +104,19 @@ did; the cross-platform matrix marked `test "name"` n/a only for the
 *React* column; and the gap was not in "What the generators don't do".
 (The Phoenix "Tests" row now exists.)
 
-### F2 — No gate catches the silent drop (medium) — *mitigated*
+### F2 — No gate catches the silent drop (medium) — *closed*
+
+> **Update (shipped):** `test/conformance/domain-test-emission-parity.test.ts`
+> is the conformance assertion this finding asked for. It generates one
+> test-bearing aggregate to all six domain-logic backends and asserts each
+> emits **exactly one** non-trivial domain-test file (both declared tests
+> reach the suite — checked via a separator-insensitive description match),
+> AND pins the per-foundation classification: the five full-port foundations
+> (node / dotnet / java / python / elixir-vanilla) carry **no** skip marker,
+> the Ash subset carries `@tag :skip`. A future emitter regression — or a new
+> backend that forgets the test wiring — now fails this fast (no-docker) gate
+> instead of shipping a green-but-empty suite. (Mutation-checked: flipping any
+> cell's expected file or shape fails it.)
 
 The original concern: nothing failed when a backend that *can't* emit a
 test was handed a `.ddd` full of them — compare F1's e2e sibling, which
@@ -115,11 +127,9 @@ test.
 The pure-subset emitter mitigates this at the **emission** layer: an
 un-portable Phoenix test is now an `@tag :skip` with its reason inline,
 not a dropped assertion — visible in the generated tree and in
-`mix test` output (`N skipped`). What's still missing is a
-**conformance assertion** that every domain-logic backend emits a test
-artefact for an aggregate that declares `test` blocks (nothing in
-`test/conformance/` checks test-file emission). That gate would also pin
-the pure-vs-skip classification so a future change can't regress it.
+`mix test` output (`N skipped`). The conformance gate above closes the
+remaining detection gap by pinning both the emission and the pure-vs-skip
+classification so a future change can't regress either silently.
 
 ### F3 — `expect`-without-matcher contract diverges (minor)
 
@@ -252,9 +262,11 @@ default would fail only on vanilla.
    (`valueobject-emit.ts`) and runs it from `base_changeset` (`validate_vo`),
    so an invariant-violating VO is rejected at the real create/update path
    (storage stays `:map`).  Single VO fields; array-of-VO is a follow-up.
-5. **Add a conformance gate** that every domain-logic backend emits a
-   test artefact for an aggregate declaring `test` blocks, and pin the
-   per-foundation classification (closes F2's detection gap).
+5. ~~**Add a conformance gate**~~ — **done**.
+   `test/conformance/domain-test-emission-parity.test.ts` asserts every
+   domain-logic backend emits exactly one non-trivial test artefact for an
+   aggregate declaring `test` blocks, and pins the per-foundation pure-vs-skip
+   classification (closes F2's detection gap).
 6. **Unify the no-matcher / unknown-matcher failure mode** across the
    emitters (F3): python and java should `throw`, matching node/dotnet.
    (Both new elixir emitters already `throw` / skip on an unknown shape.)
