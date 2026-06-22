@@ -91,8 +91,8 @@ public sealed class ExecutionContextBehavior<TMessage, TResponse> : IPipelineBeh
 
     public async ValueTask<TResponse> Handle(
         TMessage message,
-        MessageHandlerDelegate<TMessage, TResponse> next,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MessageHandlerDelegate<TMessage, TResponse> next)
     {
         var parent = RequestContext.Current;
         // A child frame under the caller, or a fresh root for a non-HTTP
@@ -149,8 +149,8 @@ public sealed class ExecutionContextBehavior<TMessage, TResponse> : IPipelineBeh
 {
     public async ValueTask<TResponse> Handle(
         TMessage message,
-        MessageHandlerDelegate<TMessage, TResponse> next,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MessageHandlerDelegate<TMessage, TResponse> next)
     {
         var parent = RequestContext.Current;
         // A child frame under the caller, or a fresh root for a non-HTTP
