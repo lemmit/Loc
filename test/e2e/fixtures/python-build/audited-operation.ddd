@@ -1,0 +1,39 @@
+// Per-operation `audited` (audit-and-logging.md) on the Python / FastAPI
+// backend — the port of the node / .NET / Java runtime.  An audited public
+// operation appends a who/what/when + before/after wire-DTO snapshot row into
+// the append-only audit_records table, persisted INSIDE the request's own
+// session (the same transaction as the aggregate save — atomic).  The before
+// snapshot is taken BEFORE the mutation, the after post-save; the record is
+// never on the operation response.
+//
+// Compiles end-to-end under LOOM_PYTHON_BUILD — `uv sync` + ruff + mypy
+// --strict + pytest against the generated FastAPI project.
+system AuditSystem {
+  subdomain Ordering {
+    context Ordering {
+      aggregate Order ids guid with crudish {
+        reference: string
+        status: string
+        operation cancel() audited {
+          status := "cancelled"
+        }
+        operation reopen() audited {
+          status := "open"
+        }
+      }
+      repository Orders for Order {
+        find byReference(reference: string): Order? where this.reference == reference
+      }
+    }
+  }
+  api OrderingApi from Ordering
+  storage primary { type: postgres }
+  resource orderingState { for: Ordering, kind: state, use: primary }
+  deployable api {
+    platform: python
+    contexts: [Ordering]
+    dataSources: [orderingState]
+    serves: OrderingApi
+    port: 8081
+  }
+}

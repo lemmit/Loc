@@ -195,11 +195,13 @@ const FEATURES: readonly Feature[] = [
     name: "audited operation (`operation … audited`)",
     code: "loom.audited-backend-unsupported",
     ddd: auditedDdd,
-    // AUDIT_OP_BACKENDS = node/dotnet only.
-    emits: new Set<Backend>(["node", "dotnet"]),
+    // AUDIT_OP_BACKENDS = node/dotnet/java/python.
+    emits: new Set<Backend>(["node", "dotnet", "java", "python"]),
     marker: {
       node: "audit_records",
       dotnet: "audit_records",
+      java: "audit_records",
+      python: "audit_records",
     },
   },
   {

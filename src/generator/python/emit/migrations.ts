@@ -1,7 +1,12 @@
-import type { BoundedContextIR, SystemIR } from "../../../ir/types/loom-ir.js";
+import type {
+  BoundedContextIR,
+  EnrichedBoundedContextIR,
+  SystemIR,
+} from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
 import { snake } from "../../../util/naming.js";
 import { renderPgStep } from "../../sql-pg.js";
+import { contextsHaveAudit } from "./audit.js";
 import {
   provenancedAggregates,
   provenanceMigrationTag,
@@ -70,6 +75,53 @@ export function emitPythonProvenanceMigration(
   const provAggs = provenancedAggregates(contexts, sys);
   if (provAggs.length === 0) return;
   out.set(`migrations/${provenanceMigrationTag()}.sql`, renderPyProvenanceMigration(provAggs));
+}
+
+// A version far in the future so this migration sorts after every module's
+// initial + delta migrations (parity with the provenance migration's
+// `29991231000000`).  `_1` keeps it distinct from the provenance tag.
+const AUDIT_MIGRATION_TAG = "29991231000001_audit";
+
+/** The LATE audit migration (audit-and-logging.md): hand-emitted — audit is
+ *  NOT in the shared MigrationsIR.  Creates `audit_records`.  The version sorts
+ *  after every module migration.  No-op (byte-identical) when no aggregate
+ *  declares an `audited` operation.  Each statement is one breakpoint chunk
+ *  (asyncpg runs one statement per call). */
+export function emitPythonAuditMigration(
+  contexts: EnrichedBoundedContextIR[],
+  out: Map<string, string>,
+): void {
+  if (!contextsHaveAudit(contexts)) return;
+  const statements: string[] = [];
+  statements.push(
+    [
+      "CREATE TABLE IF NOT EXISTS audit_records (",
+      "  audit_id text PRIMARY KEY,",
+      "  operation_id text NOT NULL,",
+      "  action text NOT NULL,",
+      "  target_type text NOT NULL,",
+      "  target_id text NOT NULL,",
+      "  actor jsonb,",
+      "  before jsonb NOT NULL,",
+      "  after jsonb NOT NULL,",
+      "  at timestamptz NOT NULL,",
+      "  status text NOT NULL,",
+      "  correlation_id text,",
+      "  scope_id text,",
+      "  parent_id text",
+      ");",
+    ].join("\n"),
+  );
+  statements.push(
+    "CREATE INDEX IF NOT EXISTS audit_records_target_idx ON audit_records (target_type, target_id);",
+  );
+  statements.push(
+    "CREATE INDEX IF NOT EXISTS audit_records_correlation_idx ON audit_records (correlation_id);",
+  );
+  out.set(
+    `migrations/${AUDIT_MIGRATION_TAG}.sql`,
+    `${statements.join(`\n${STATEMENT_BREAKPOINT}\n`)}\n`,
+  );
 }
 
 export const MIGRATE_PY = `"""Boot-time migration runner.  Auto-generated.
