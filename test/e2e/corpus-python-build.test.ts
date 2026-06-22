@@ -35,10 +35,8 @@ const CASE = process.env.LOOM_CORPUS_PYTHON_CASE;
 // covers all of them on all six backends; each line is a precise, reproducible
 // bug report).  Widen the gate by FIXING the emitter, then dropping the entry.
 const PYTHON_COMPILE_SKIP: Record<string, string> = {
-  // FEATURE GAP (not an emitter bug): workflow own-state mutation.  `attempts := 1`
-  // in a saga body is documented ("own-state mutation", workflow.md) but not yet
-  // lowered — the same cross-backend gap the Hono tier tracks (corpus-tsc-build).
-  "workflow-view": "FEATURE GAP: workflow own-state mutation (`field := …`) not yet lowered",
+  // (workflow-view: workflow own-state `:=` is now lowered + emitted on python —
+  //  `state.<field> = …` + session.flush — so it gates here.)
   // (provenance: now emitted + ruff-/mypy-clean on python — W2 — so it gates here.)
   // (value-collections: `<VO>[]` now persists to an id-less relational child
   //  table — flattened VO columns keyed by (parent_fk, ordinal), wholesale

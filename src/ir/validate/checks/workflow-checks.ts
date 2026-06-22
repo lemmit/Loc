@@ -359,6 +359,7 @@ function validateWorkflowBody(
     name: string;
     statements: import("../../types/loom-ir.js").WorkflowStmtIR[];
     transactional: boolean;
+    eventSourced?: boolean;
     isolation?: import("../../types/loom-ir.js").IsolationLevel;
     params: import("../../types/loom-ir.js").ParamIR[];
   },
@@ -783,12 +784,30 @@ function validateWorkflowBody(
         mutated = true;
         break;
       }
+      case "assign":
+        // `field := value` — own-state mutation onto the workflow's own
+        // `Property` state.  A recognised form (cross-aggregate / compound
+        // mutations never reach here — they stay `__bad__`).  The write is an
+        // effect, so a `transactional` workflow with only an assign is valid.
+        if (wf.eventSourced) {
+          // An event-sourced workflow's state is derived only by folding its
+          // own emitted events (the appliers) — a direct `:=` would bypass the
+          // event log.  Mutate state by `emit` + an `apply` clause instead.
+          diags.push({
+            severity: "error",
+            code: "loom.workflow-eventsourced-assign",
+            message: `workflow '${wf.name}': an event-sourced workflow can't assign its own state directly ('${st.target.segments.join(".")} := ...').  Change state by emitting an event with a matching 'apply' clause.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        mutated = true;
+        break;
       case "expr-let": {
         if (st.name === "__bad__") {
           diags.push({
             severity: "error",
             code: "loom.workflow-unrecognised-statement",
-            message: `workflow '${wf.name}': statement isn't a recognised workflow form.  Allowed: precondition, let (factory / repo / scalar), name.op(args), emit.`,
+            message: `workflow '${wf.name}': statement isn't a recognised workflow form.  Allowed: precondition, let (factory / repo / scalar), name.op(args), emit, own-state assignment ('field := value').`,
             source: `${ctx.name}/${wf.name}`,
           });
         }

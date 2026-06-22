@@ -335,6 +335,8 @@ function stepNode(id: string, s: WorkflowStmtIR): StepNode {
       };
     case "expr-let":
       return { id, decl: `${id}["${label(`let ${s.name}`)}"]` };
+    case "assign":
+      return { id, decl: `${id}["${label(`${s.target.segments.join(".")} := ...`)}"]` };
     case "op-call":
       return { id, decl: `${id}["${label(`${s.target}.${s.op}()`)}"]` };
     case "resource-call": {
@@ -517,6 +519,8 @@ function sequenceMessages(s: WorkflowStmtIR): string[] {
       ];
     case "expr-let":
       return [];
+    case "assign":
+      return [`  note over WF: ${label(`${s.target.segments.join(".")} := ...`)}`];
     case "resource-call": {
       const op = s.call.kind === "call" ? s.call.resourceOp : undefined;
       return [`  WF->>${op?.resourceName ?? "resource"}: ${op?.verb ?? "op"}()`];

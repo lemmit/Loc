@@ -23,6 +23,7 @@ import {
   wireJavaType,
   wireToDomain,
 } from "./wire.js";
+import { setterName } from "./workflow-state.js";
 
 /** Spring `Isolation` enum member for a DSL isolation level. */
 function javaIsolation(level: IsolationLevel): string {
@@ -172,6 +173,16 @@ export function javaWorkflowStmtTarget(
     exprLet: (s, indent) => {
       collectJavaExprImports(s.expr, imports);
       return [`${indent}var ${s.name} = ${renderJavaExpr(s.expr, renderCtx)};`];
+    },
+    // `field := value` — own-state mutation.  The persisted correlation row's
+    // fields are package-private, so the cross-package dispatcher writes through
+    // the public JavaBean setter (`state.setAttempts(1)`); `repo.save(state)`
+    // at handler exit flushes it.
+    assign: (s, indent) => {
+      collectJavaExprImports(s.value, imports);
+      return [
+        `${indent}${renderCtx.thisName}.${setterName(s.target.segments[0]!)}(${renderJavaExpr(s.value, renderCtx)});`,
+      ];
     },
     opCall: (s, indent) => {
       for (const a of s.args) collectJavaExprImports(a, imports);

@@ -334,6 +334,12 @@ function bodyUsesThis(statements: WorkflowStmtIR[]): boolean {
       case "expr-let":
         visitExpr(st.expr);
         break;
+      case "assign":
+        // The write target IS `state` (`Repo.update!(... state ...)`), so an
+        // own-state assignment always references it — bind `state`, not `_state`.
+        used = true;
+        visitExpr(st.value);
+        break;
       case "precondition":
       case "requires":
         visitExpr(st.expr);
@@ -491,6 +497,10 @@ interface BodyLine {
   kind: "with-clause" | "dispatch" | "expr" | "guard";
   text: string;
   bindName?: string;
+  /** An own-state assign that rebinds `state = Repo.update!(...)`.  The binding
+   *  is only needed when a later line reads `state`; otherwise it's dropped so
+   *  `mix compile --warnings-as-errors` doesn't trip on an unused variable. */
+  rebindsState?: boolean;
 }
 
 /** Render the constrained reactor / starter statement set into ordered,
@@ -513,6 +523,17 @@ function renderBody(
   // `with` clauses + `=` matches compose the chain, in source order.
   const chain = lines.filter((l) => l.kind === "with-clause" || l.kind === "expr");
   const dispatches = lines.filter((l) => l.kind === "dispatch");
+
+  // An own-state assign rebinds `state = Repo.update!(...)`.  A later line reads
+  // the rebound value only if it references `state` (a chained assign or an emit
+  // whose fields read state); when nothing does, drop the binding to the bare
+  // side-effecting call so Elixir doesn't warn the variable is unused.
+  for (let i = 0; i < dispatches.length; i++) {
+    const d = dispatches[i]!;
+    if (!d.rebindsState) continue;
+    const laterReadsState = dispatches.slice(i + 1).some((l) => /\bstate\b/.test(l.text));
+    if (!laterReadsState) d.text = d.text.replace(/^state = /, "");
+  }
 
   const out: string[] = [];
   for (const g of guards) out.push(g.text);
@@ -611,6 +632,25 @@ function renderStmt(
           kind: "expr",
           text: `${snake(st.name)} = ${renderExpr(st.expr, renderCtx)}`,
           bindName: snake(st.name),
+        },
+      ];
+    }
+    case "assign": {
+      // `field := value` — own-state mutation.  Saga state is a plain Ecto
+      // schema (no Ash resource), so persist the write directly: rebind `state`
+      // to the updated struct via an `Ecto.Changeset.change/2` + `Repo.update!`.
+      // Runs in the do-branch (`dispatch` kind) after any `with`-chain succeeds;
+      // the row already exists (allocated on `create`, loaded on `on`).  `Repo`
+      // is reached off the app module (the segment(s) before the context name
+      // in `contextModule = "<App>.<Ctx>"`).
+      const appModule = contextModule.split(".").slice(0, -1).join(".");
+      const field = snake(st.target.segments[0]!);
+      const value = renderExpr(st.value, renderCtx);
+      return [
+        {
+          kind: "dispatch",
+          text: `state = ${appModule}.Repo.update!(Ecto.Changeset.change(state, %{${field}: ${value}}))`,
+          rebindsState: true,
         },
       ];
     }
