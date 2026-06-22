@@ -119,12 +119,14 @@ describe("phoenixLiveView pipeline", () => {
     expect(mix).toMatch(/ignore_warnings: "\.dialyzer_ignore\.exs"/);
   });
 
-  it("runs Ecto migrations on boot via a Release task evaled by bin/server", async () => {
+  it("runs Ecto migrations in-process at boot via Application.start, before the Endpoint", async () => {
     // The per-backend database is created empty by the compose db-init SQL;
     // without a migrate-on-boot step the server starts against a tableless
     // DB and every query 500s with `42P01 relation does not exist`.  The
-    // release ships a `Release.migrate/0` task and `bin/server` evals it
-    // before `start` (mirrors the .NET backend's migrate-on-startup).
+    // release ships a `Release.migrate/0` task that `Application.start/2`
+    // calls IN-PROCESS before building the supervision tree (so before the
+    // Endpoint serves traffic) — see boot-migrator-events.test.ts for the
+    // lifecycle-event coverage.  `bin/server` no longer evals it separately.
     const model = await buildFixture();
     const { files } = generateSystems(model);
 
@@ -135,12 +137,19 @@ describe("phoenixLiveView pipeline", () => {
     expect(release!).toMatch(/Ecto\.Migrator\.with_repo/);
     expect(release!).toMatch(/Application\.fetch_env!\(@app, :ecto_repos\)/);
 
+    // Migrate is invoked in-process from Application.start/2, before the
+    // Endpoint child is supervised.
+    const application = files.get("phoenix_app/lib/phoenix_app/application.ex")!;
+    expect(application).toContain("PhoenixApp.Release.migrate()");
+    const migrateIdx = application.indexOf("PhoenixApp.Release.migrate()");
+    const endpointChildIdx = application.search(/^\s*PhoenixAppWeb\.Endpoint\s*$/m);
+    expect(endpointChildIdx).toBeGreaterThan(migrateIdx);
+
+    // bin/server just `start`s the release — the supervision tree (which runs
+    // the migrator) comes up as part of boot; no separate migrate eval.
     const server = files.get("phoenix_app/rel/overlays/bin/server")!;
-    // migrate is evaled BEFORE the server starts.
-    expect(server).toMatch(/eval "PhoenixApp\.Release\.migrate\(\)"/);
-    expect(server.indexOf("Release.migrate")).toBeLessThan(
-      server.indexOf('exec "./bin/phoenix_app" start'),
-    );
+    expect(server).not.toMatch(/Release\.migrate\(\)/);
+    expect(server).toMatch(/exec "\.\/bin\/phoenix_app" start/);
   });
 
   it("emits the shared <App>.Types module at lib/<app>/types.ex", async () => {

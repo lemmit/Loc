@@ -173,9 +173,14 @@ describe("vanilla orchestrator — Slice 0 shell skeleton", () => {
     expect(out.has("certs/.gitkeep")).toBe(true);
     expect(out.has("rel/env.sh.eex")).toBe(true);
     expect(out.has("lib/api/release.ex")).toBe(true);
-    // bin/server migrates before booting (fresh per-backend DB has no schema).
+    // Migrations run IN-PROCESS at boot: Application.start/2 calls
+    // Api.Release.migrate() before building the supervision tree (fresh
+    // per-backend DB has no schema).  bin/server just `start`s the release —
+    // no separate migrate eval (boot-migrator-events.test.ts covers the
+    // lifecycle events).
+    expect(out.get("lib/api/application.ex")!).toContain("Api.Release.migrate()");
     const server = out.get("rel/overlays/bin/server")!;
-    expect(server).toContain("Api.Release.migrate()");
+    expect(server).not.toContain("Release.migrate()");
     expect(server).toContain("./bin/api");
     expect(out.get("lib/api/release.ex")!).toContain("Ecto.Migrator");
     // prod.exs starts the endpoint server (a release doesn't run mix phx.server).

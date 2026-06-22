@@ -91,8 +91,9 @@ describe.skipIf(!RUN)(
       execSync(`node ${cli} generate system ${fixture} -o ${outDir}`, { stdio: "inherit" });
 
       // Boot the WHOLE generated stack — db + keycloak + the containerized
-      // Phoenix release (built from ./phoenix_app; its bin/server runs
-      // PhoenixApp.Release.migrate() then starts).  `--build` exercises the
+      // Phoenix release (built from ./phoenix_app; bin/server `start`s the
+      // release, whose Application.start/2 runs PhoenixApp.Release.migrate()
+      // in-process before the Endpoint serves traffic).  `--build` exercises the
       // emitted Dockerfile; `--wait` blocks on the compose healthchecks (db
       // pg_isready + phoenix /health).  The Phoenix image build (mix deps.get +
       // compiling Ash) is heavy — generous timeout.
