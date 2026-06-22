@@ -28,6 +28,7 @@ import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { provColumn, provenancedFieldsOf } from "./emit/provenance.js";
 import {
+  aggUsesPrincipalContextFilter,
   contextFilterPredicate,
   type FilterBypass,
   lowerToSqlAlchemy,
@@ -66,6 +67,17 @@ import { renderPyType } from "./render-expr.js";
  *  dedicated method/route pair; paged + union returns land in S12. */
 export function emittableFinds(repo: RepositoryIR | undefined): FindIR[] {
   return (repo?.finds ?? []).filter((f) => f.name !== "all");
+}
+
+/** The `from app.auth.user import …` line for a repository module, or null when
+ *  it references neither symbol.  `User` is needed for a per-find currentUser
+ *  param; `require_current_user` is the ambient accessor a principal capability
+ *  filter weaves into every root read (DEBT-02). */
+function authUserImport(needsUser: boolean, needsAccessor: boolean): string | null {
+  const names = [needsUser ? "User" : null, needsAccessor ? "require_current_user" : null]
+    .filter((n): n is string => n != null)
+    .sort();
+  return names.length > 0 ? `from app.auth.user import ${names.join(", ")}` : null;
 }
 
 export function buildPyRepositoryFile(
@@ -219,7 +231,14 @@ export function buildPyRepositoryFile(
     refersTo("insert") ? "from sqlalchemy.dialects.postgresql import insert" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
-    emittableFinds(repo).some(findUsesCurrentUser) ? "from app.auth.user import User" : null,
+    // `User` rides in whenever a per-find `where` threads the principal as a
+    // method param; `require_current_user` rides in when an always-on principal
+    // capability filter weaves the ambient accessor into every root read
+    // (DEBT-02).  One sorted import covers whichever (or both) apply.
+    authUserImport(
+      emittableFinds(repo).some(findUsesCurrentUser),
+      aggUsesPrincipalContextFilter(agg),
+    ),
     hasAudit ? "from app.db.audit import AuditRecordRow" : null,
     refersTo("PagedResult") ? "from app.db.paging import PagedResult" : null,
     hasProv ? "from app.db.provenance import ProvenanceRecord" : null,

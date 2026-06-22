@@ -995,20 +995,20 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // .NET (EF `HasQueryFilter`) supports BOTH, so it's deliberately absent.
   // Canonical families (D-NODE-PLATFORM / D-ELIXIR-PLATFORM): `node` (was
   // `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
-  // `python` is included because it emits ONLY the non-principal relational
-  // case (W1a): `contextFilterPredicate` in `src/generator/python/find-predicate.ts`
-  // AND-s those filters into every root read.  Principal (W1b) and non-relational
-  // filters stay gated — `supportsPrincipalFilter` / `supportsNonRelationalFilter`
-  // both return false for python — so it must be in this set for the per-case
-  // logic below to reject those shapes (and accept the non-principal relational one).
+  // `python` is included because it now emits the non-principal relational case
+  // (W1a) AND the PRINCIPAL relational case (DEBT-02): `contextFilterPredicate`
+  // in `src/generator/python/find-predicate.ts` AND-s both into every root read
+  // (principal predicates render `current_user.<claim>` against the ambient
+  // `require_current_user()` accessor).  Only the NON-relational principal case
+  // stays gated — `supportsPrincipalNonRelationalFilter` omits python — so it
+  // must be in this set for the per-case logic below to reject that one shape
+  // (and accept the relational principal + non-principal cases).
   const LIMITED_FAMILIES = new Set(["node", "elixir", "java", "python"]);
   // Backends that now wire PRINCIPAL-referencing filters (`currentUser.x`) on
-  // relational aggregates — node/elixir/java do; python does NOT yet.  python
-  // is a limited family that emits the non-principal relational case (W1a —
-  // `filter !this.isDeleted` AND-ed into every root read via
-  // `contextFilterPredicate` in `src/generator/python/find-predicate.ts`) but
-  // not yet the principal case (gated here by returning false for it — W1b)
-  // nor the non-relational case (gated via `supportsNonRelationalFilter`).
+  // relational aggregates — node/elixir/java/python all do.  python renders the
+  // predicate against the ambient `require_current_user()` accessor (a
+  // module-level `ContextVar[User | None]` set in the auth middleware) inside
+  // every root read (the SQLAlchemy analogue of node's `requireCurrentUser()`).
   // node renders the
   // predicate against the ambient `requireCurrentUser()` accessor inside every
   // root read (the Drizzle analogue of .NET's `HasQueryFilter`).  elixir wires
@@ -1022,6 +1022,13 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
     if (family === "node") return true;
     if (family === "elixir") return true;
     if (family === "java") return true;
+    // python (DEBT-02 last-backend parity): a principal capability filter on a
+    // RELATIONAL aggregate renders `current_user.<claim>` against an ambient
+    // ContextVar accessor (`require_current_user()`) AND-ed into every root read
+    // — the SQLAlchemy analogue of node's `requireCurrentUser()` weave / .NET's
+    // `HasQueryFilter`.  Non-relational (document/embedded) principal stays gated
+    // (`supportsPrincipalNonRelationalFilter` omits python).
+    if (family === "python") return true;
     return false;
   };
   // Backends that wire a NON-principal capability filter into a NON-relational

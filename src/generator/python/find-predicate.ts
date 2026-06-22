@@ -35,9 +35,23 @@ export function lowerToSqlAlchemy(
   e: ExprIR,
   agg: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
+  opts?: {
+    /** How a `currentUser.<field>` reference renders.  Defaults to the bare
+     *  `current_user` name (the per-find `where` path threads it in as a method
+     *  param).  The always-on principal-capability-filter path passes
+     *  `"require_current_user()"` — the ambient principal accessor — so no read
+     *  method needs a `current_user` parameter (DEBT-02; the SQLAlchemy analogue
+     *  of node's `requireCurrentUser()` weave / EF Core's `HasQueryFilter`). */
+    principalAccessor?: string;
+  },
 ): PyPredicate | null {
   // TPH concretes query the base's shared table.
-  return lowerOver(e, rowClassName(tableOwnerName(agg, ctx.aggregates)), agg.associations ?? []);
+  return lowerOver(
+    e,
+    rowClassName(tableOwnerName(agg, ctx.aggregates)),
+    agg.associations ?? [],
+    opts?.principalAccessor ?? "current_user",
+  );
 }
 
 /** Lower a workflow-sourced view's shorthand filter (workflow-instance-views.md)
@@ -46,12 +60,17 @@ export function lowerToSqlAlchemy(
  *  rows carry no reference collections, so the join-table `contains` arm never
  *  fires here. */
 export function lowerWorkflowFilterToSqlAlchemy(e: ExprIR, wf: WorkflowIR): PyPredicate | null {
-  return lowerOver(e, rowClassName(wf.name), []);
+  return lowerOver(e, rowClassName(wf.name), [], "current_user");
 }
 
-function lowerOver(e: ExprIR, row: string, associations: AssociationIR[]): PyPredicate | null {
+function lowerOver(
+  e: ExprIR,
+  row: string,
+  associations: AssociationIR[],
+  principalAccessor: string,
+): PyPredicate | null {
   const ops = new Set<string>();
-  const expr = lower(e, row, associations, ops);
+  const expr = lower(e, row, associations, ops, principalAccessor);
   if (expr == null) return null;
   return { expr, ops };
 }
@@ -61,11 +80,12 @@ function lower(
   row: string,
   associations: AssociationIR[],
   ops: Set<string>,
+  principalAccessor: string,
 ): string | null {
   switch (e.kind) {
     case "binary": {
-      const l = lower(e.left, row, associations, ops);
-      const r = lower(e.right, row, associations, ops);
+      const l = lower(e.left, row, associations, ops, principalAccessor);
+      const r = lower(e.right, row, associations, ops, principalAccessor);
       if (l == null || r == null) return null;
       if (e.op === "&&") {
         ops.add("and_");
@@ -78,7 +98,7 @@ function lower(
       return `(${l} ${e.op} ${r})`;
     }
     case "unary": {
-      const inner = lower(e.operand, row, associations, ops);
+      const inner = lower(e.operand, row, associations, ops, principalAccessor);
       if (inner == null) return null;
       if (e.op === "!") {
         ops.add("not_");
@@ -87,7 +107,7 @@ function lower(
       return `${e.op}${inner}`;
     }
     case "paren":
-      return lower(e.inner, row, associations, ops);
+      return lower(e.inner, row, associations, ops, principalAccessor);
     case "ref":
       // `this.<col>` → the row column; everything else (params, lets,
       // enum values, currentUser) renders as a plain bind value.
@@ -102,6 +122,14 @@ function lower(
       }
       if (e.receiver.kind === "member" && e.receiver.receiver.kind === "this") {
         return `${row}.${snake(`${e.receiver.member}_${e.member}`)}`;
+      }
+      // `currentUser.<claim>` — bind the principal's claim as a plain value.
+      // The accessor is the source: a per-find `where` passes the threaded
+      // `current_user` param; an always-on principal capability filter passes
+      // `require_current_user()` (the ambient ContextVar accessor) so no read
+      // method needs the principal as a parameter (DEBT-02).
+      if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user") {
+        return `${principalAccessor}.${snake(e.member)}`;
       }
       // Param member access (e.g. a VO param's field) — plain value.
       return renderPyExpr(e);
@@ -122,7 +150,7 @@ function lower(
               ? e.receiver.member
               : null;
         const assoc = fieldName ? associations.find((a) => a.fieldName === fieldName) : undefined;
-        const arg = lower(e.args[0]!, row, associations, ops);
+        const arg = lower(e.args[0]!, row, associations, ops, principalAccessor);
         if (assoc && arg != null) {
           const join = joinRowClassName(assoc);
           ops.add("select");
@@ -144,11 +172,13 @@ function lower(
 // SQLAlchemy has no global query filter (the EF Core `HasQueryFilter`
 // analogue), so the generated repository must AND each predicate into every
 // root-table read site (find_by_id / find_many_by_ids / all / find* / view
-// finds / retrievals).  W1a wires only the NON-principal relational case
-// (e.g. `filter !this.isDeleted`); principal-referencing filters
-// (`currentUser.<field>`, tenancy) stay gated by the IR validator
-// (`validateContextFilterSupport`) on python, so they never reach codegen
-// here — they're filtered out below.
+// finds / retrievals).  Both shapes of relational filter are wired: the
+// NON-principal case (e.g. `filter !this.isDeleted`) AND the PRINCIPAL case
+// (`filter this.tenantId == currentUser.tenantId`, DEBT-02), the latter
+// rendering `current_user.<claim>` against the ambient `require_current_user()`
+// accessor so no read method gains a parameter.  Non-relational (document /
+// embedded) principal filters stay gated by the IR validator
+// (`validateContextFilterSupport`), so they never reach codegen here.
 // ---------------------------------------------------------------------------
 
 /** A read's capability filter-bypass spec (`ignoring <Cap>` / `ignoring *`),
@@ -172,20 +202,30 @@ function isFilterBypassed(origin: string | undefined, bypass: FilterBypass | und
   return (bypass.bypassCaps ?? []).includes(origin);
 }
 
-/** Lower an aggregate's NON-principal capability filters to a single
- *  SQLAlchemy predicate (conjoined with `and_(...)` when there is more than
- *  one), or null when the aggregate has no non-principal filter.  Mirrors
- *  node's `contextFilterPredicate`.  The principal-referencing subset is
- *  dropped (W1b) — what remains always lowers to a closed expression because
- *  the IR validator gated the queryable shape first; returns null (rather
- *  than throwing) on a non-lowerable predicate, which is unreachable for
- *  valid models.
+/** Lower an aggregate's capability filters — non-principal AND principal — to a
+ *  single SQLAlchemy predicate (conjoined with `and_(...)` when there is more
+ *  than one), or null when the aggregate has no capability filter.  Mirrors
+ *  node's `contextFilterPredicate`.
+ *
+ *  A principal-referencing predicate (`this.tenantId == currentUser.tenantId`,
+ *  DEBT-02) renders its `currentUser.<claim>` against the ambient
+ *  `require_current_user()` accessor (the module-level `ContextVar[User | None]`
+ *  the auth middleware sets) — so the predicate AND-s into every root read
+ *  without any read method gaining a parameter, exactly like node's
+ *  `requireCurrentUser()` weave / EF Core's `HasQueryFilter`.  The validator
+ *  (`validateContextFilterSupport`) has already required `auth: required` + a
+ *  system `user {}` block, so the accessor is guaranteed to be emitted.
+ *
+ *  Every kept predicate always lowers to a closed expression because the IR
+ *  validator gated the queryable shape first; returns null (rather than
+ *  throwing) on a non-lowerable predicate, which is unreachable for valid
+ *  models.
  *
  *  When `bypass` is supplied (the read carried an `ignoring` clause), every
  *  capability filter whose `contextFilterOrigins[i]` the bypass names is
  *  OMITTED from the conjunction for that read only.  The origins array is
  *  index-aligned with the FULL `agg.contextFilters`, so the original index is
- *  carried through the principal-drop filter before bypass matching. */
+ *  carried through before bypass matching. */
 export function contextFilterPredicate(
   agg: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
@@ -193,12 +233,20 @@ export function contextFilterPredicate(
 ): PyPredicate | null {
   const kept = (agg.contextFilters ?? [])
     .map((predicate, i) => ({ predicate, origin: agg.contextFilterOrigins?.[i] }))
-    .filter((e) => !exprUsesCurrentUser(e.predicate) && !isFilterBypassed(e.origin, bypass));
+    .filter((e) => !isFilterBypassed(e.origin, bypass));
   if (kept.length === 0) return null;
   const ops = new Set<string>();
   const lowered: string[] = [];
   for (const { predicate } of kept) {
-    const l = lowerToSqlAlchemy(predicate, agg, ctx);
+    // A principal-referencing filter renders `current_user.<claim>` against the
+    // ambient `require_current_user()` accessor (no read-method parameter); a
+    // non-principal filter lowers as before (the accessor default is unused).
+    const l = lowerToSqlAlchemy(
+      predicate,
+      agg,
+      ctx,
+      exprUsesCurrentUser(predicate) ? { principalAccessor: "require_current_user()" } : undefined,
+    );
     if (!l) return null;
     for (const op of l.ops) ops.add(op);
     lowered.push(l.expr);
@@ -206,4 +254,13 @@ export function contextFilterPredicate(
   if (lowered.length === 1) return { expr: lowered[0]!, ops };
   ops.add("and_");
   return { expr: `and_(${lowered.join(", ")})`, ops };
+}
+
+/** True when the aggregate carries a principal-referencing capability `filter`
+ *  (`currentUser.<claim>`).  Drives the repository module's
+ *  `require_current_user` import gating — only those repos weave the ambient
+ *  accessor into their root reads (DEBT-02).  The node analogue is
+ *  `aggregateUsesPrincipalContextFilter`. */
+export function aggUsesPrincipalContextFilter(agg: EnrichedAggregateIR): boolean {
+  return (agg.contextFilters ?? []).some(exprUsesCurrentUser);
 }
