@@ -2084,29 +2084,40 @@ export function validateProvenancedStorage(
 }
 
 // Per-operation audit-record emission (`operation … audited`) is implemented for
-// the Hono (`node`), .NET (`dotnet`), Java (`java`) and Python (`python`)
-// backends — an audited public route / command handler / service method appends
-// a who/what/when + before/after snapshot to the audit sink in the operation's
-// save transaction.  Audited LIFECYCLE actions (`audited create` / `destroy`)
-// ship on the same four backends — the create/destroy handlers stage the audit
-// row (before:null/after=wire on create; before=wire/after:null on destroy) in
-// the lifecycle transaction.  Phoenix (`elixir`) stays uninstrumented for both,
-// so hosting an `audited` action there would silently record nothing — that
-// mismatch is an error, not a silent no-op.  (This gates the per-operation
-// `audited` flag only; the `with audit` capability macro emits stamping rules via
-// `contextStamps`, a separate concern.)
+// the Hono (`node`), .NET (`dotnet`), Java (`java`), Python (`python`) and
+// elixir-VANILLA backends — an audited public route / command handler / service
+// method appends a who/what/when + before/after snapshot to the audit sink in
+// the operation's save transaction.  Audited LIFECYCLE actions
+// (`audited create` / `destroy`) ship on the same set — the create/destroy
+// handlers stage the audit row (before:null/after=wire on create;
+// before=wire/after:null on destroy) in the lifecycle transaction.  Phoenix on
+// the **Ash** foundation stays uninstrumented for both (no audit fit), so
+// hosting an `audited` action there would silently record nothing — that
+// mismatch is an error, not a silent no-op.  Foundation-shaped exactly like the
+// provenance gate above (D-VANILLA-ES-HOME-shaped).  (This gates the
+// per-operation `audited` flag only; the `with audit` capability macro emits
+// stamping rules via `contextStamps`, a separate concern.)
 const AUDIT_OP_BACKENDS = new Set(["node", "dotnet", "java", "python"]);
 const AUDIT_LIFECYCLE_BACKENDS = new Set(["node", "dotnet", "java", "python"]);
 export function validateAuditedOperationSupport(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
+  elixirFoundations: Set<string> = new Set(),
 ): void {
+  // elixir hosts audit-record emission only on the vanilla foundation
+  // (D-VANILLA-ES-HOME-shaped) — the Ash foundation has no audit fit, exactly
+  // like provenance/event-sourced storage.  An `elixir` host counts as
+  // audit-capable iff every elixir deployable hosting it uses `vanilla`.
+  const elixirAuditCapable =
+    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
+  const isAuditCapable = (p: string): boolean =>
+    AUDIT_OP_BACKENDS.has(p) || (p === "elixir" && elixirAuditCapable);
+  const isLifecycleCapable = (p: string): boolean =>
+    AUDIT_LIFECYCLE_BACKENDS.has(p) || (p === "elixir" && elixirAuditCapable);
   const anyBackend = backendPlatforms.size > 0;
-  const opUnsupported = [...backendPlatforms].filter((p) => !AUDIT_OP_BACKENDS.has(p));
-  const lifecycleUnsupported = [...backendPlatforms].filter(
-    (p) => !AUDIT_LIFECYCLE_BACKENDS.has(p),
-  );
+  const opUnsupported = [...backendPlatforms].filter((p) => !isAuditCapable(p));
+  const lifecycleUnsupported = [...backendPlatforms].filter((p) => !isLifecycleCapable(p));
   const push = (
     agg: BoundedContextIR["aggregates"][number],
     kind: "operation" | "lifecycle action",
@@ -2114,6 +2125,7 @@ export function validateAuditedOperationSupport(
     unsupported: string[],
     capable: string,
   ): void => {
+    const includesElixir = unsupported.includes("elixir");
     const hostNote =
       unsupported.length > 0
         ? `it is hosted by ${unsupported.join(", ")}, where audit-record emission is not implemented`
@@ -2124,11 +2136,17 @@ export function validateAuditedOperationSupport(
       message:
         `aggregate '${agg.name}' has 'audited' ${kind}(s) ${names.join(", ")}, but per-operation ` +
         `audit-record emission for ${kind}s is implemented for the ${capable} backend(s) only — ${hostNote}. ` +
-        `Host the context on a capable deployable, or drop the 'audited' modifier (all backends). ` +
+        (includesElixir
+          ? `On Phoenix this is a foundation constraint: the Ash foundation has no audit fit, ` +
+            `so switch the deployable to foundation: vanilla. Otherwise host `
+          : `Host `) +
+        `the context on a capable deployable, or drop the 'audited' modifier (all backends). ` +
         `Tracked in audit-and-logging.md.`,
       source: `${ctx.name}/${agg.name}`,
     });
   };
+  const capableLabel =
+    "Hono (node) / .NET (dotnet) / Java (java) / Python (python) / elixir-vanilla";
   for (const agg of ctx.aggregates) {
     const auditedOps = agg.operations.filter((o) => o.audited);
     if (auditedOps.length > 0 && (!anyBackend || opUnsupported.length > 0)) {
@@ -2137,7 +2155,7 @@ export function validateAuditedOperationSupport(
         "operation",
         auditedOps.map((o) => o.name),
         opUnsupported,
-        "Hono (node) / .NET (dotnet) / Java (java) / Python (python)",
+        capableLabel,
       );
     }
     const auditedLifecycle = [...(agg.creates ?? []), ...(agg.destroys ?? [])].filter(
@@ -2149,7 +2167,7 @@ export function validateAuditedOperationSupport(
         "lifecycle action",
         auditedLifecycle.map((o) => o.name || "<create>"),
         lifecycleUnsupported,
-        "Hono (node) / .NET (dotnet) / Java (java) / Python (python)",
+        capableLabel,
       );
     }
   }
