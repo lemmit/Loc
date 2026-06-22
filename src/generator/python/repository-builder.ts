@@ -23,6 +23,7 @@ import {
   ownFieldsOf,
   tableOwnerName,
 } from "../../ir/util/inheritance.js";
+import { type ValueCollectionIR, valueCollectionsFor } from "../../ir/util/value-collections.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { provColumn, provenancedFieldsOf } from "./emit/provenance.js";
@@ -38,6 +39,7 @@ import {
   isValueCollectionField,
   joinRowClassName,
   rowClassName,
+  valueCollectionRowClassName,
 } from "./py-columns.js";
 import { renderPyType } from "./render-expr.js";
 
@@ -186,6 +188,10 @@ export function buildPyRepositoryFile(
     root,
     ...agg.parts.map((p) => rowClassName(p.name)),
     ...assocs.map(joinRowClassName),
+    // Id-less value-collection child tables (own + part `<VO>[]` fields).
+    ...[agg, ...agg.parts].flatMap((holder) =>
+      valueCollectionsFor(holder).map((vc) => valueCollectionRowClassName(vc.childTable)),
+    ),
   ]
     .filter(refersTo)
     .sort();
@@ -530,6 +536,23 @@ export function hydrateField(rowVar: string, f: FieldIR, ctx: EnrichedBoundedCon
   return hydrateScalar(`${rowVar}.${snake(f.name)}`, f.type, f.optional);
 }
 
+/** Reconstruct a value-object-collection list from its loaded child rows
+ *  (`<field>_rows`).  Each row → the VO ctor over its flattened columns,
+ *  read with the same `hydrateScalar` conversions as a single VO field; the
+ *  ctor re-checks the VO invariant.  Elements are identity-less, so the list
+ *  is rebuilt wholesale (ordinal order preserved by the SELECT's order_by). */
+export function hydrateValueCollection(
+  vc: ValueCollectionIR,
+  rowVar: string,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const vo = ctx.valueObjects.find((v) => v.name === vc.voName);
+  const args = (vo?.fields ?? [])
+    .map((vf) => hydrateScalar(`${rowVar}.${snake(vf.name)}`, vf.type, false))
+    .join(", ");
+  return `[${vc.voName}(${args}) for ${rowVar} in ${snake(vc.fieldName)}_rows]`;
+}
+
 function hydrateMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const out: string[] = [`    async def _hydrate(self, row: ${root}) -> ${agg.name}:`];
@@ -575,9 +598,27 @@ function hydrateMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR):
       "        ).scalars().all()",
     );
   }
+  // …and value-object-collection child rows (ordinal-ordered → VO list).
+  for (const vc of valueCollectionsFor(agg)) {
+    const vcRow = valueCollectionRowClassName(vc.childTable);
+    const v = snake(vc.fieldName);
+    out.push(
+      `        ${v}_rows = (`,
+      "            await self._session.execute(",
+      `                select(${vcRow})`,
+      `                .where(${vcRow}.${vc.parentFk} == row.id)`,
+      `                .order_by(${vcRow}.ordinal)`,
+      "            )",
+      "        ).scalars().all()",
+    );
+  }
   const kwargs: string[] = [`id=${agg.name}Id(row.id)`];
   for (const f of agg.fields) {
-    if (isValueCollectionField(f)) continue; // deferred — see schema emitter
+    if (isValueCollectionField(f)) {
+      const vc = valueCollectionsFor(agg).find((c) => c.fieldName === f.name);
+      if (vc) kwargs.push(`${snake(f.name)}=${hydrateValueCollection(vc, "__r", ctx)}`);
+      continue;
+    }
     if (isRefCollectionField(f)) {
       const assoc = assocFor(agg, f.name);
       if (!assoc) continue;
@@ -732,6 +773,12 @@ function saveMethod(
     const assoc = assocFor(agg, f.name);
     if (assoc) out.push(...syncJoinTable(assoc, f, aggVar));
   }
+  // Replace each value-object collection wholesale: the elements are
+  // identity-less, so there is nothing to diff on.  Delete every child row
+  // for this owner, then re-insert the current list with its ordinals.
+  for (const vc of valueCollectionsFor(agg)) {
+    out.push(...syncValueCollection(vc, ctx, aggVar));
+  }
   if (ctx.events.length > 0) {
     out.push("        for event in aggregate.pull_events():");
     out.push("            await self._events.dispatch(event)");
@@ -839,6 +886,40 @@ function syncJoinTable(assoc: AssociationIR, f: FieldIR, aggVar: string): string
     "            await self._session.execute(",
     `                insert(${joinRow}).values(**pair).on_conflict_do_update(`,
     `                    index_elements=["${assoc.ownerFk}", "${assoc.targetFk}"], set_={"ordinal": __i}`,
+    "                )",
+    "            )",
+  ];
+}
+
+/** Persist a value-object collection (`<VO>[]`) to its id-less child table.
+ *  The elements are identity-less, so the list is replaced wholesale: delete
+ *  every child row for the owner, then insert the current list ordered by
+ *  ordinal.  Each row is the owner FK + ordinal + the value object's flattened
+ *  columns (bare VO field names), persisted with the same `persistScalar`
+ *  conversions a single VO field uses.  An optional field (`<VO>[]?`) that is
+ *  None reduces to the empty list (parity with node's `?? []`). */
+function syncValueCollection(
+  vc: ValueCollectionIR,
+  ctx: EnrichedBoundedContextIR,
+  aggVar: string,
+): string[] {
+  const vcRow = valueCollectionRowClassName(vc.childTable);
+  const vo = ctx.valueObjects.find((v) => v.name === vc.voName);
+  const v = snake(vc.fieldName);
+  // Flattened VO column kwargs: `amount=Decimal(str(__e.amount)), …`.
+  const voKwargs = (vo?.fields ?? []).map(
+    (vf) => `${snake(vf.name)}=${persistScalar(`__e.${snake(vf.name)}`, vf.type, false)}`,
+  );
+  return [
+    "        await self._session.execute(",
+    `            delete(${vcRow}).where(${vcRow}.${vc.parentFk} == ${aggVar}.id)`,
+    "        )",
+    `        for __i, __e in enumerate(${aggVar}.${v} or []):`,
+    "            await self._session.execute(",
+    `                insert(${vcRow}).values(`,
+    `                    ${vc.parentFk}=${aggVar}.id,`,
+    "                    ordinal=__i,",
+    ...voKwargs.map((p) => `                    ${p},`),
     "                )",
     "            )",
   ];

@@ -15,6 +15,7 @@ import {
 } from "../../../ir/util/inheritance.js";
 import type { ResolvedDataSource } from "../../../ir/util/resolve-datasource.js";
 import { effectiveSavingShape } from "../../../ir/util/resolve-datasource.js";
+import { type ValueCollectionIR, valueCollectionsFor } from "../../../ir/util/value-collections.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
 import {
@@ -23,6 +24,8 @@ import {
   joinRowClassName,
   type PyColumn,
   rowClassName,
+  valueCollectionChildColumns,
+  valueCollectionRowClassName,
 } from "../py-columns.js";
 import { provColumn } from "./provenance.js";
 
@@ -91,6 +94,17 @@ export function renderPySchema(
       for (const assoc of (agg as EnrichedAggregateIR).associations ?? []) {
         models.push(renderJoinModel(assoc, schema, prefix));
       }
+      // Value-object collections (`<VO>[]`) on a TPH concrete or its parts
+      // persist as id-less child tables (the parent FK points at the SHARED
+      // base table for the concrete's own VO[] fields).
+      for (const vc of valueCollectionsFor(agg)) {
+        models.push(renderValueCollectionModel(vc, ctx, schema, prefix));
+      }
+      for (const part of agg.parts) {
+        for (const vc of valueCollectionsFor(part)) {
+          models.push(renderValueCollectionModel(vc, ctx, schema, prefix));
+        }
+      }
       continue;
     }
     // TPC base: owns no table (each concrete is standalone).
@@ -101,6 +115,17 @@ export function renderPySchema(
     }
     for (const assoc of (agg as EnrichedAggregateIR).associations ?? []) {
       models.push(renderJoinModel(assoc, schema, prefix));
+    }
+    // Id-less child tables for `<VO>[]` value-object collections — one row
+    // per element keyed by (parent_fk, ordinal), columns flattened from the
+    // value object.  Plain relational shape, portable across SQL backends.
+    for (const vc of valueCollectionsFor(agg)) {
+      models.push(renderValueCollectionModel(vc, ctx, schema, prefix));
+    }
+    for (const part of agg.parts) {
+      for (const vc of valueCollectionsFor(part)) {
+        models.push(renderValueCollectionModel(vc, ctx, schema, prefix));
+      }
     }
   }
   // Persisted workflow-correlation state (workflow-and-applier.md A2-S2):
@@ -402,6 +427,37 @@ function renderTphModel(
     `class ${rowClassName(base.name)}(Base):`,
     `    __tablename__ = "${tableName}"`,
     schema ? ["    __table_args__ = (", `        {"schema": "${schema}"},`, "    )"] : null,
+    "",
+    cols.map(renderColumn),
+  );
+}
+
+/** Id-less child table for a `<VO>[]` value-object collection — owner FK +
+ *  `ordinal` + the value object's flattened columns, composite PK
+ *  `(parentFk, ordinal)`, reverse FK index.  A plain relational child table
+ *  (no Postgres array / jsonb), so it shares the migration's DDL with every
+ *  other SQL backend.  The `parentFk` carried by the descriptor already
+ *  names the owner column (the TPH base for a concrete's own VO[] fields). */
+function renderValueCollectionModel(
+  vc: ValueCollectionIR,
+  ctx: EnrichedBoundedContextIR,
+  schema?: string,
+  prefix?: string,
+): string {
+  const tableName = `${prefix ?? ""}${vc.childTable}`;
+  const cols: PyColumn[] = [
+    { attr: vc.parentFk, pyType: "str", saType: "Uuid(as_uuid=False)", optional: false },
+    { attr: "ordinal", pyType: "int", saType: "Integer", optional: false },
+    ...valueCollectionChildColumns(vc.voName, ctx),
+  ];
+  return lines(
+    `class ${valueCollectionRowClassName(vc.childTable)}(Base):`,
+    `    __tablename__ = "${tableName}"`,
+    "    __table_args__ = (",
+    `        PrimaryKeyConstraint("${vc.parentFk}", "ordinal"),`,
+    `        Index("${tableName}_${vc.parentFk}_idx", "${vc.parentFk}"),`,
+    ...(schema ? [`        {"schema": "${schema}"},`] : []),
+    "    )",
     "",
     cols.map(renderColumn),
   );
