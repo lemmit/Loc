@@ -477,6 +477,10 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
       // List literals are walker-config sugar.  UI E2E tests don't
       // currently consume them, but keep the renderer total.
       return `[${e.elements.map((el) => renderUIExpr(el, ctx)).join(", ")}]`;
+    case "action-ref":
+      // Named-action references are a UI-handler-arg form — not reached by
+      // the UI e2e (page-object) renderer; keep the switch total.
+      return `/* action:${e.actionName} */`;
   }
 }
 

@@ -9,6 +9,8 @@ import { tryRenderGate } from "../../_frontend/gate-expr.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
+  actionHandlerName,
+  actionRefArg,
   boolNamed,
   lambdaArg,
   namedArgValue,
@@ -75,9 +77,22 @@ export function emitButton(
   // `onClick:` lambda named arg wires the button to
   // a multi-statement event handler.  Takes priority over `to:` if
   // both are written.
+  // A named-action reference (`onClick: confirm`) binds the hoisted handler
+  // the page-shell emits from `page.actions` (named-actions-and-stores.md,
+  // Proposal A Stage 1).  An onClick action is nullary (a button supplies no
+  // payload); JSX binds the bare function value (`onClick={confirm}`),
+  // statement-binding targets (Angular `(click)`) bind the call (`confirm()`)
+  // through the event-handler seam.
+  const onClickAction = actionRefArg(call, "onClick");
   const onClick = lambdaArg(call, "onClick");
   let onClickHandler: string | undefined;
-  if (onClick && (onClick.block || onClick.body)) {
+  if (onClickAction) {
+    ctx.usedActions?.add(onClickAction.actionName);
+    const handler = actionHandlerName(onClickAction.actionName);
+    onClickHandler = ctx.target.renderEventHandler
+      ? ctx.target.renderEventHandler([`${handler}();`], undefined)
+      : handler;
+  } else if (onClick && (onClick.block || onClick.body)) {
     onClickHandler = emitLambdaBody(onClick, ctx);
   } else {
     // `to:` named arg wires the button to a React

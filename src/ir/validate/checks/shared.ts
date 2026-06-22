@@ -258,6 +258,10 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       // Bracketed list literals are walker-config sugar (e.g. responsive
       // Grid cols) — never queryable.
       return "list literal";
+    case "action-ref":
+      // A named-action reference is a UI-handler-arg form — never queryable
+      // (it only appears in a page/component body, not a find/view `where`).
+      return "action reference";
   }
 }
 

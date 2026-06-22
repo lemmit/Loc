@@ -37,6 +37,7 @@ export type JavaArtifactCategory =
   | "entity" // aggregate root + parts
   | "repository-interface"
   | "criteria" // reified criterion Specification factories
+  | "domain-service" // stateless pure-calculator domain services
   // application
   | "request-dto"
   | "response-dto"
@@ -115,6 +116,8 @@ export function byLayerPackage(
       return `${basePkg}.domain.common`;
     case "criteria":
       return `${basePkg}.domain.criteria`;
+    case "domain-service":
+      return `${basePkg}.domain.services`;
     case "entity":
     case "repository-interface":
       return `${basePkg}.domain.${agg()}`;

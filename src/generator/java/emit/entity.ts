@@ -5,6 +5,7 @@ import type {
   ExprIR,
   FieldIR,
   IdValueType,
+  StmtIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
@@ -35,6 +36,62 @@ import {
  * (`Id<T>[]`) — persisted via a join table, not a column. */
 function isRefCollection(t: TypeIR): boolean {
   return t.kind === "array" && t.element.kind === "id";
+}
+
+/** True when an expression tree contains a domain-service member call
+ *  (`Pricing.quote(...)` → a `call` with `callKind: "domain-service"`).
+ *  Drives the `domain.services.*` import on the calling entity. */
+function exprCallsDomainService(e: ExprIR | undefined): boolean {
+  if (!e) return false;
+  if (e.kind === "call") {
+    if (e.callKind === "domain-service") return true;
+    return e.args.some(exprCallsDomainService);
+  }
+  switch (e.kind) {
+    case "method-call":
+      return exprCallsDomainService(e.receiver) || e.args.some(exprCallsDomainService);
+    case "member":
+      return exprCallsDomainService(e.receiver);
+    case "binary":
+      return exprCallsDomainService(e.left) || exprCallsDomainService(e.right);
+    case "ternary":
+      return (
+        exprCallsDomainService(e.cond) ||
+        exprCallsDomainService(e.then) ||
+        exprCallsDomainService(e.otherwise)
+      );
+    case "unary":
+      return exprCallsDomainService(e.operand);
+    case "paren":
+      return exprCallsDomainService(e.inner);
+    case "lambda":
+      return exprCallsDomainService(e.body);
+    case "new":
+    case "object":
+      return e.fields.some((f) => exprCallsDomainService(f.value));
+  }
+  return false;
+}
+
+/** True when any statement in a body invokes a domain service. */
+function stmtCallsDomainService(s: StmtIR): boolean {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+    case "let":
+    case "expression":
+      return exprCallsDomainService(s.expr);
+    case "assign":
+    case "add":
+    case "remove":
+    case "return":
+      return exprCallsDomainService(s.value);
+    case "emit":
+      return s.fields.some((f) => exprCallsDomainService(f.value));
+    case "call":
+      return s.args.some(exprCallsDomainService);
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -165,6 +222,17 @@ export function renderJavaEntity(
     eventFields: options.eventFields,
   };
   const anyOpUsesCurrentUser = operations.some(operationUsesCurrentUser);
+  // A body that calls a domain service (`Pricing.quote(...)`) needs the
+  // `domain.services.*` import so the generated static class resolves.
+  const callsDomainService =
+    operations.some((op) => op.statements.some(stmtCallsDomainService)) ||
+    appliers.some((ap) => ap.statements.some(stmtCallsDomainService)) ||
+    (esCreate ? esCreate.statements.some(stmtCallsDomainService) : false) ||
+    entity.derived.some((d) => exprCallsDomainService(d.expr)) ||
+    entity.functions.some((fn) => exprCallsDomainService(fn.body)) ||
+    entity.invariants.some(
+      (inv) => exprCallsDomainService(inv.expr) || exprCallsDomainService(inv.guard),
+    );
 
   // --- fields --------------------------------------------------------------
   const persistence = options.persistence;
@@ -614,6 +682,7 @@ export function renderJavaEntity(
     `import ${basePkg}.domain.events.*;`,
     `import ${basePkg}.domain.ids.*;`,
     `import ${basePkg}.domain.valueobjects.*;`,
+    callsDomainService ? `import ${basePkg}.domain.services.*;` : null,
     anyOpUsesCurrentUser ? `import ${basePkg}.auth.User;` : null,
     superType?.pkg && superType.pkg !== pkg ? `import ${superType.pkg}.${superType.name};` : null,
     ``,

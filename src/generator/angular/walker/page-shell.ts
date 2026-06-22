@@ -1,9 +1,21 @@
-import type { DerivedIR, ExprIR, PageIR, StateFieldIR } from "../../../ir/types/loom-ir.js";
+import type {
+  ActionIR,
+  DerivedIR,
+  ExprIR,
+  PageIR,
+  StateFieldIR,
+} from "../../../ir/types/loom-ir.js";
 import { type PageNameCtx, pageEmitName } from "../../../ir/util/page-kind.js";
 import { upperFirst } from "../../../util/naming.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
-import { emitExpr, type WalkContext, type WalkResult } from "../../_walker/walker-core.js";
+import {
+  emitExpr,
+  emitStmt,
+  extendLambdaParams,
+  type WalkContext,
+  type WalkResult,
+} from "../../_walker/walker-core.js";
 import type { AngularActionSpec } from "../action.js";
 import type { AngularCreateFormSpec } from "../create-form.js";
 import type { AngularDestroyFormSpec } from "../destroy-form.js";
@@ -184,15 +196,46 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     }
   }
 
+  // Named-action handlers → class methods (`<name>(<param>?) { … }`;
+  // named-actions-and-stores.md, Proposal A Stage 1).  The body lowers through
+  // the shared `emitStmt`, then signal reads (`count()`) + write targets
+  // (`count.set(…)`) are `this.`-prefixed for class-method scope (same lift the
+  // derived `computed` initializers apply).  Built before state so a handler
+  // that mutates state forces the `signal` declaration below.
+  const actions = (page.actions ?? []) as readonly ActionIR[];
+  const actionMethods: string[] = [];
+  let actionUsesState = false;
+  if (actions.length > 0 && input.pack && result.usedActions && result.usedActions.size > 0) {
+    const paramNames = new Set(page.params.map((p) => p.name));
+    const stateNames = new Set(page.state.map((s) => s.name));
+    const derivedNames = new Set(derived.map((d) => d.name));
+    const refNames = new Set<string>([...stateNames, ...derivedNames]);
+    for (const action of actions) {
+      if (!result.usedActions.has(action.name)) continue;
+      const param = action.params[0]?.name;
+      const baseCtx = derivedCtx(input.pack, paramNames, stateNames, derivedNames);
+      const mctx: WalkContext = param
+        ? { ...baseCtx, lambdaParams: extendLambdaParams(baseCtx, param, param) }
+        : baseCtx;
+      const stmts = action.body.map((s) => {
+        const rendered = emitStmt(s, mctx);
+        return prefixSignalReadsWithThis(prefixWholeWordsWithThis(rendered, refNames), refNames);
+      });
+      if (mctx.usesState) actionUsesState = true;
+      actionMethods.push(`  ${action.name}(${param ?? ""}) { ${stmts.join(" ")} }`);
+    }
+  }
+
   // State fields → signals (read `name()`, write `name.set()`).  Declared
   // before the derived `computed`s that may read them.
-  if (result.usesState || derivedUsesState) {
+  if (result.usesState || derivedUsesState || actionUsesState) {
     coreSymbols.add("signal");
     for (const f of page.state) {
       members.push(`  readonly ${f.name} = signal(${renderStateInit(f)});`);
     }
   }
   members.push(...derivedLines);
+  members.push(...actionMethods);
 
   // Navigation → `inject(Router)`; the walked handler calls
   // `router.navigateByUrl(...)`.

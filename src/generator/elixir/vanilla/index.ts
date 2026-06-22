@@ -21,6 +21,7 @@ import {
 import type { ApiRoute } from "../api-emit.js";
 import { actorIdKey, emitAuth } from "../auth-emit.js";
 import { emitDispatch, emitWorkflowStateSchemas } from "../dispatch-emit.js";
+import { emitDomainServices } from "../domain-service-emit.js";
 import type { GenerateElixirArgs } from "../index.js";
 import { emitMigrations } from "../migrations-emit.js";
 import { renderRelEnv, renderRelease, renderRelServer } from "../shell/config.js";
@@ -94,6 +95,11 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // state emitters above skip them; the context module + controllers branch.
     emitVanillaEventSourcedFiles(appModule, ctx, out);
     emitVanillaContextModule(appModule, ctx, out);
+    // Domain services — stateless pure-calculator modules under
+    // `<App>.Domain.Services.*` (domain-services.md).  Identical to the Ash
+    // path: a domain service touches no persistence, so the module is
+    // byte-identical across foundations (the shared `../domain-service-emit`).
+    emitDomainServices(appName, appModule, ctx, out);
     // Event struct modules — `lib/<app>/<ctx>/events/<event>.ex`.  The
     // workflow-execution `emit` lowering builds `%Context.Events.<Name>{...}`
     // structs against these (PubSub broadcast), and a future channel-on-

@@ -252,6 +252,26 @@ export interface DerivedIR {
   expr: ExprIR;
 }
 
+/** A named, typed page/component event handler — `action next(p: T) { … }`
+ *  (named-actions-and-stores.md, Proposal A Stage 1).  The named form of
+ *  today's anonymous handler lambda: a stable identity, a typed payload
+ *  param list (declared by the action; the call-site primitive supplies the
+ *  value), and a statement block reusing the existing `StmtIR` set — no new
+ *  statement semantics.  Each JSX frontend hoists one named handler function
+ *  per action at the page/component top; a bare `onSubmit: <name>` reference
+ *  binds the handler instead of an inline arrow. */
+export interface ActionIR {
+  name: string;
+  /** Declared payload params (zero or one in v1 — a Form `into:` two-way
+   *  binding ⇒ nullary; a Form value / List row id ⇒ a single payload
+   *  param).  The validator gates arity + assignability against what the
+   *  call-site primitive supplies. */
+  params: ParamIR[];
+  /** Handler body — the same `StmtIR` block an anonymous handler lambda
+   *  lowers to (`:=` / `+=` / `-=` / `let` / calls / `navigate` / `emit`). */
+  body: StmtIR[];
+}
+
 export interface InvariantIR {
   expr: ExprIR;
   guard?: ExprIR;
@@ -733,6 +753,34 @@ export interface CriterionIR {
   body: ExprIR;
 }
 
+/** A stateless, named, context-level container of NON-mutating
+ *  operations — the pure-calculator floor (domain-services.md, v1 Shape
+ *  A).  Operations take aggregates / value objects / primitives by
+ *  value and return a value or an `or`-union error; they may `throw`
+ *  for the bug regime but never touch infrastructure (a phase-⑦
+ *  validator rejects repo / extern / api / workflow-start / emit /
+ *  this-write).  Unlike a `criterion`, a domain service is NOT
+ *  queryable (it does not inline to SQL `where`); a member call
+ *  `Pricing.quote(...)` lowers to a Call with `callKind:
+ *  "domain-service"`, so each backend emits a real call into the
+ *  generated service module — no re-resolution. */
+export interface DomainServiceIR {
+  name: string;
+  operations: DomainServiceOperationIR[];
+}
+
+/** One operation of a `domainService` (domain-services.md).  Mirrors the
+ *  param/return/body shape of an aggregate `OperationIR`, but is always
+ *  non-mutating (no `this`) — there is no `mutating` field to stamp; the
+ *  no-infra contract is derived by the validator from the body. */
+export interface DomainServiceOperationIR {
+  name: string;
+  params: ParamIR[];
+  /** Declared `or`-union (or plain) return type; absent ⇒ no `: T` clause. */
+  returnType?: TypeIR;
+  body: StmtIR[];
+}
+
 /** One `sort` term of a retrieval — a structural path through the
  *  candidate aggregate plus an ordering direction. */
 export interface SortTermIR {
@@ -802,6 +850,9 @@ export interface BoundedContextIR {
   views: ViewIR[];
   /** Named predicate specifications declared in this context. */
   criteria: CriterionIR[];
+  /** Stateless pure-calculator domain services declared in this context
+   *  (domain-services.md, v1 Shape A). */
+  domainServices: DomainServiceIR[];
   /** Channel declarations in this context (channels.md, Slice 1) — the
    *  publisher-side transport contracts over this context's events. */
   channels: ChannelIR[];
@@ -1908,6 +1959,11 @@ export interface PageIR {
    *  frontend hoists these before the body (React `useMemo`, Vue
    *  `computed`, Svelte `$derived`, HEEx inline-recompute). */
   derived: DerivedIR[];
+  /** Named, typed event handlers — `action next() { … }` (Proposal A
+   *  Stage 1).  Each frontend hoists one named handler function per action
+   *  before the body; a bare `onSubmit: <name>` reference binds it instead
+   *  of an inline arrow. */
+  actions: ActionIR[];
   /** Single body expression.  Conditional rendering uses `match` in
    *  the expression engine, not a guarded-declaration form. */
   body?: ExprIR;
@@ -1971,6 +2027,9 @@ export interface ComponentIR {
    *  reactive/sequential semantics).  Absent (empty) on an `extern`
    *  component. */
   derived: DerivedIR[];
+  /** Named, typed event handlers — the component twin of `PageIR.actions`
+   *  (Proposal A Stage 1).  Absent (empty) on an `extern` component. */
+  actions: ActionIR[];
   /** Walked region tree.  Absent for an `extern` component, whose
    *  rendering is owned by a hand-written file. */
   body?: ExprIR;
@@ -2439,6 +2498,7 @@ export type CallKind =
   | "value-object-ctor" // calls a value-object constructor
   | "private-operation" // calls a private operation
   | "resource-op" // a verb call on an ambient resource handle (Phase 4)
+  | "domain-service" // a member call on a `domainService` (domain-services.md)
   | "free"; // unresolved free call
 
 export type BinOp =
@@ -2518,6 +2578,11 @@ export type ExprIR =
         capability: string;
         interface?: LoomInterface;
       };
+      /** Populated when `callKind === "domain-service"` (domain-services.md)
+       *  — the resolved `domainService` name and the operation invoked.
+       *  Structured (not overloaded onto flat `name`) so backends render
+       *  the call without re-resolving the receiver. */
+      serviceRef?: { service: string; op: string };
       /** Per-primitive `style:` escape hatch.  Populated by lowering
        *  when the source supplied a `style: { … }` named arg on a
        *  walker-primitive call (`Container { style: { background: "red" }, ... }`).
@@ -2526,6 +2591,20 @@ export type ExprIR =
        *  Use the ordered `entries` shape (not a `Record`) so entry order
        *  survives the IR pipeline. */
       style?: StyleIR;
+    }
+  | {
+      /** A bare reference to a named page/component `action` in
+       *  handler-arg position (`onSubmit: next`, `rowAction: add`) — the
+       *  named-action analogue of an inline handler lambda (Proposal A
+       *  Stage 1).  Fully resolved at lowering time: `actionName` is the
+       *  declared action; `paramType` is its single declared payload param
+       *  type (undefined ⇒ nullary action).  Backends and the validator
+       *  read these directly — they never re-resolve the name.  The walker
+       *  binds the hoisted handler (whose name derives from `actionName`)
+       *  instead of emitting an inline arrow. */
+      kind: "action-ref";
+      actionName: string;
+      paramType?: TypeIR;
     }
   | {
       kind: "lambda";

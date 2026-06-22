@@ -19,6 +19,7 @@ import {
   isChannel,
   isComponent,
   isContainment,
+  isDomainService,
   isEntityPart,
   isEnumDecl,
   isModel,
@@ -201,6 +202,16 @@ export class DddScopeComputation extends DefaultScopeComputation {
       // ref (`[ViewSource:ID]`) resolves by bare name, exactly as an aggregate
       // source does (workflow-instance-views.md).
       if (isWorkflow(node)) {
+        const name = this.nameProvider.getName(node);
+        if (name) {
+          exports.push(this.descriptions.createDescription(node, name, document));
+        }
+      }
+      // Domain services get a bare-name export too, the same way workflows do,
+      // so a member call `Pricing.quote(...)` from an operation / workflow /
+      // api body resolves its receiver to the `domainService` declaration
+      // (lowered to a Call with `callKind: "domain-service"`).
+      if (isDomainService(node)) {
         const name = this.nameProvider.getName(node);
         if (name) {
           exports.push(this.descriptions.createDescription(node, name, document));

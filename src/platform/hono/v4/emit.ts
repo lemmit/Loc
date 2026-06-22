@@ -14,6 +14,7 @@ import {
   buildBaseUnionFile,
   buildTpcBaseReaderFile,
 } from "../../../generator/typescript/base-reader-builder.js";
+import { renderDomainServices } from "../../../generator/typescript/emit/domain-service.js";
 import { emitTypescriptMigrations } from "../../../generator/typescript/emit/migrations.js";
 import {
   MIKRO_INDEX_IMPORTS,
@@ -325,6 +326,7 @@ export function generateTypeScriptForContexts(
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
     criteria: contexts.flatMap((c) => c.criteria),
+    domainServices: contexts.flatMap((c) => c.domainServices ?? []),
     channels: contexts.flatMap((c) => c.channels),
     retrievals: contexts.flatMap((c) => c.retrievals),
     seeds: contexts.flatMap((c) => c.seeds),
@@ -339,6 +341,8 @@ export function generateTypeScriptForContexts(
 
   out.set("domain/ids.ts", renderIds(merged));
   out.set("domain/value-objects.ts", renderEnumsAndValueObjects(merged));
+  const servicesFile = renderDomainServices(merged);
+  if (servicesFile) out.set("domain/services.ts", servicesFile);
   out.set("domain/events.ts", renderEvents(merged));
   out.set("domain/errors.ts", ERRORS_TS);
   out.set("http/problem-details.ts", PROBLEM_DETAILS_TS);

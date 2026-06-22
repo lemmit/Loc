@@ -54,6 +54,36 @@ export function lambdaArg(
   return undefined;
 }
 
+/** Extract a named-action reference from a handler-arg slot (`onSubmit: next`,
+ *  `rowAction: add`) — the named-action analogue of `lambdaArg`
+ *  (named-actions-and-stores.md, Proposal A Stage 1).  Returns the resolved
+ *  `action-ref` IR node (carrying the resolved `actionName` + declared
+ *  `paramType`) when the named arg is exactly a bare action reference;
+ *  undefined when missing or any other expression.  Call-site primitives
+ *  check this BEFORE `lambdaArg` so a named action binds the hoisted handler
+ *  instead of emitting an inline arrow. */
+export function actionRefArg(
+  call: ExprIR & { kind: "call" },
+  name: string,
+): (ExprIR & { kind: "action-ref" }) | undefined {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] !== name) continue;
+    const a = call.args[i]!;
+    if (a.kind === "action-ref") return a;
+  }
+  return undefined;
+}
+
+/** The hoisted handler-function identifier for a named action — derived on
+ *  demand from the action name (NOT stamped; invariant #4).  The action name
+ *  is already a camelCase identifier in source (`next`, `setCustomer`), so the
+ *  hoisted function is named identically across the JSX frontends; a bare
+ *  call-site reference binds `onClick={<handlerName>}` / `handleSubmit(<handlerName>)`. */
+export function actionHandlerName(actionName: string): string {
+  return actionName;
+}
+
 /** Render a renderTextContent() result as a JSX
  *  attribute value.  Quoted strings stay quoted; JSX-expression
  *  values (already brace-wrapped) stay brace-wrapped. */

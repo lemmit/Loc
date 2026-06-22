@@ -7,6 +7,7 @@ import {
   readArgString,
 } from "../../macros/api/_read.js";
 import type {
+  ActionDecl,
   Aggregate,
   Api,
   AuthBlock,
@@ -245,6 +246,12 @@ export function printStructural(node: AstNode): string {
       return printFindDecl(node as FindDecl);
     case "Criterion":
       return printCriterion(node as import("../generated/ast.js").Criterion);
+    case "DomainService":
+      return printDomainService(node as import("../generated/ast.js").DomainService);
+    case "DomainServiceOperation":
+      return printDomainServiceOperation(
+        node as import("../generated/ast.js").DomainServiceOperation,
+      );
     case "Retrieval":
       return printRetrieval(node as import("../generated/ast.js").Retrieval);
     case "Seed":
@@ -510,6 +517,8 @@ function printPageProp(node: PageProp): string {
       return `canonical: ${quote(node.value)}`;
     case "DerivedProp":
       return printDerivedProp(node);
+    case "ActionDecl":
+      return printActionDecl(node);
     default: {
       const exhaustive: never = node;
       throw new Error(`printPageProp: unhandled ${(exhaustive as { $type: string }).$type}`);
@@ -518,7 +527,14 @@ function printPageProp(node: PageProp): string {
 }
 
 function printComponentDecl(node: ComponentDecl): string {
-  return node.$type === "DerivedProp" ? printDerivedProp(node) : printStateBlock(node);
+  switch (node.$type) {
+    case "DerivedProp":
+      return printDerivedProp(node);
+    case "ActionDecl":
+      return printActionDecl(node);
+    default:
+      return printStateBlock(node);
+  }
 }
 
 function printComponent(node: Component): string {
@@ -748,6 +764,23 @@ function printCriterion(node: import("../generated/ast.js").Criterion): string {
   return `criterion ${node.name}${params} of ${printTypeRef(node.target)} = ${printExpr(node.body)}`;
 }
 
+/** `domainService <Name> { operation … }` — a stateless container of
+ *  non-mutating operations (domain-services.md). */
+function printDomainService(node: import("../generated/ast.js").DomainService): string {
+  return block(`domainService ${node.name}`, node.operations.map(printDomainServiceOperation));
+}
+
+/** One `operation <name>(<params>)[: <ret>] { <stmts> }` of a domain
+ *  service — statement-body only in v1 (no `=`-shorthand), no
+ *  private/extern/audited/when modifiers. */
+function printDomainServiceOperation(
+  node: import("../generated/ast.js").DomainServiceOperation,
+): string {
+  const params = node.params.map(printParameter).join(", ");
+  const ret = node.returnType ? `: ${printTypeRef(node.returnType)}` : "";
+  return block(`operation ${node.name}(${params})${ret}`, node.stmts.map(printStmt));
+}
+
 /** `retrieval <Name>[(<params>)] of <T>` — single-line `= <where>` when no
  *  `sort`/`loads`, otherwise the `{ where: … sort: … loads: … }` block. */
 function printRetrieval(node: import("../generated/ast.js").Retrieval): string {
@@ -866,6 +899,14 @@ function printContainment(node: Containment): string {
 
 function printDerivedProp(node: DerivedProp): string {
   return `derived ${node.name}: ${printTypeRef(node.type)} = ${printExpr(node.expr)}`;
+}
+
+/** `action <name>(<params>) { <stmts> }` — the named page/component event
+ *  handler (named-actions-and-stores.md, Proposal A Stage 1).  Body prints
+ *  through the shared statement printer, exactly like an operation body. */
+function printActionDecl(node: ActionDecl): string {
+  const params = node.params.map(printParameter).join(", ");
+  return block(`action ${node.name}(${params})`, node.stmts.map(printStmt));
 }
 
 function printInvariant(node: Invariant): string {

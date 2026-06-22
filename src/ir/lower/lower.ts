@@ -12,6 +12,7 @@ import type {
   Criterion,
   Deployable,
   Destroy,
+  DomainService,
   EntityPart,
   EnumDecl,
   EventDecl,
@@ -55,6 +56,7 @@ import {
   isDeployable,
   isDerivedProp,
   isDestroy,
+  isDomainService,
   isEntityPart,
   isEnumDecl,
   isEventDecl,
@@ -102,6 +104,7 @@ import type {
   DataSourceIR,
   DataSourceKind,
   DeployableIR,
+  DomainServiceIR,
   EntityPartIR,
   EnumIR,
   EventIR,
@@ -148,6 +151,7 @@ import {
   resolveBypass,
 } from "./lower-capabilities.js";
 import { lowerDeployable } from "./lower-deployment.js";
+import { lowerDomainService } from "./lower-domain-service.js";
 import { criterionRefOf, lowerExpr, setAmbientEnumIndex } from "./lower-expr.js";
 import {
   lowerApply,
@@ -237,6 +241,7 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
   const ambientVOs = new Map<string, ValueObject>();
   const ambientEnums = new Map<string, EnumDecl>();
   const ambientEntities = new Map<string, Aggregate | EntityPart>();
+  const ambientDomainServices = new Map<string, DomainService>();
   const indexMembers = (members: readonly AstNode[]): void => {
     for (const m of members) {
       if (isValueObject(m)) {
@@ -245,6 +250,8 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
         if (!ambientEnums.has(m.name)) ambientEnums.set(m.name, m);
       } else if (isAggregate(m)) {
         if (!ambientEntities.has(m.name)) ambientEntities.set(m.name, m);
+      } else if (isDomainService(m)) {
+        if (!ambientDomainServices.has(m.name)) ambientDomainServices.set(m.name, m);
       }
       if ("members" in m && Array.isArray((m as { members?: unknown }).members)) {
         indexMembers((m as { members: AstNode[] }).members);
@@ -256,6 +263,7 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     valueObjects: ambientVOs,
     enums: ambientEnums,
     entities: ambientEntities,
+    domainServices: ambientDomainServices,
   });
   const systemNodes = allMembers.filter(isSystem);
   // Every top-level system-scoped declaration across the import graph —
@@ -901,6 +909,7 @@ function lowerContext(
   const workflows: WorkflowIR[] = [];
   const views: ViewIR[] = [];
   const criteria: CriterionIR[] = [];
+  const domainServices: DomainServiceIR[] = [];
   const channels: ChannelIR[] = [];
   const retrievals: RetrievalIR[] = [];
   const seeds: SeedIR[] = [];
@@ -920,6 +929,7 @@ function lowerContext(
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
     else if (isView(m)) views.push(lowerView(m, env));
     else if (isCriterion(m)) criteria.push(lowerCriterion(m, env));
+    else if (isDomainService(m)) domainServices.push(lowerDomainService(m, env));
     else if (isChannel(m)) channels.push(lowerChannel(m));
     else if (isRetrieval(m)) retrievals.push(lowerRetrieval(m, env));
     else if (isSeed(m)) seeds.push(lowerSeed(m, env));
@@ -940,6 +950,7 @@ function lowerContext(
     workflows,
     views,
     criteria,
+    domainServices,
     channels,
     retrievals,
     seeds,

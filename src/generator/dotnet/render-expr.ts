@@ -67,7 +67,15 @@ const DEFAULT: CsRenderContext = { thisName: "this" };
  *  tree is safe — the renderer always renders the whole tree, so a
  *  `matches` shape anywhere is rendered (and thus needs the namespace)
  *  exactly when this finds it. */
-export function collectCsExprUsings(e: ExprIR, into: Set<string> = new Set()): Set<string> {
+export function collectCsExprUsings(
+  e: ExprIR,
+  into: Set<string> = new Set(),
+  /** Project root namespace — when present, a `domain-service` call adds
+   *  `${ns}.Domain.Services` so the hosting file resolves the static class
+   *  the call leaf emits (`Pricing.Quote(...)`).  Omitted by collectors that
+   *  never sit beside a domain-service call (criteria, finds, validators). */
+  ns?: string,
+): Set<string> {
   switch (e.kind) {
     case "method-call":
       if (
@@ -78,40 +86,46 @@ export function collectCsExprUsings(e: ExprIR, into: Set<string> = new Set()): S
       ) {
         into.add("System.Text.RegularExpressions");
       }
-      collectCsExprUsings(e.receiver, into);
-      for (const a of e.args) collectCsExprUsings(a, into);
+      collectCsExprUsings(e.receiver, into, ns);
+      for (const a of e.args) collectCsExprUsings(a, into, ns);
       return into;
     case "member":
-      return collectCsExprUsings(e.receiver, into);
+      return collectCsExprUsings(e.receiver, into, ns);
     case "binary":
-      collectCsExprUsings(e.left, into);
-      return collectCsExprUsings(e.right, into);
+      collectCsExprUsings(e.left, into, ns);
+      return collectCsExprUsings(e.right, into, ns);
     case "unary":
-      return collectCsExprUsings(e.operand, into);
+      return collectCsExprUsings(e.operand, into, ns);
     case "paren":
-      return collectCsExprUsings(e.inner, into);
+      return collectCsExprUsings(e.inner, into, ns);
     case "ternary":
-      collectCsExprUsings(e.cond, into);
-      collectCsExprUsings(e.then, into);
-      return collectCsExprUsings(e.otherwise, into);
+      collectCsExprUsings(e.cond, into, ns);
+      collectCsExprUsings(e.then, into, ns);
+      return collectCsExprUsings(e.otherwise, into, ns);
     case "call":
-      for (const a of e.args) collectCsExprUsings(a, into);
+      // A domain-service member call (`Pricing.Quote(...)`) reaches into the
+      // generated `Domain.Services` namespace — the call leaf renders the
+      // class name unqualified, so the file must import it.
+      if (e.callKind === "domain-service" && ns !== undefined) {
+        into.add(`${ns}.Domain.Services`);
+      }
+      for (const a of e.args) collectCsExprUsings(a, into, ns);
       return into;
     case "lambda":
-      if (e.body) collectCsExprUsings(e.body, into);
+      if (e.body) collectCsExprUsings(e.body, into, ns);
       return into;
     case "new":
     case "object":
-      for (const f of e.fields) collectCsExprUsings(f.value, into);
+      for (const f of e.fields) collectCsExprUsings(f.value, into, ns);
       return into;
     case "convert":
-      return collectCsExprUsings(e.value, into);
+      return collectCsExprUsings(e.value, into, ns);
     case "match":
       for (const arm of e.arms) {
-        collectCsExprUsings(arm.cond, into);
-        collectCsExprUsings(arm.value, into);
+        collectCsExprUsings(arm.cond, into, ns);
+        collectCsExprUsings(arm.value, into, ns);
       }
-      if (e.otherwise) collectCsExprUsings(e.otherwise, into);
+      if (e.otherwise) collectCsExprUsings(e.otherwise, into, ns);
       return into;
     default:
       // literal | this | id | ref — leaves with no sub-expressions.
@@ -126,6 +140,10 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   member: renderMember,
   methodCall: renderMethodCall,
   call: renderCall,
+  domainServiceCall(args, serviceRef) {
+    // `Pricing.Quote(cart, customer)` — generated `public static class`.
+    return `${upperFirst(serviceRef.service)}.${upperFirst(serviceRef.op)}(${args.join(", ")})`;
+  },
   lambda(param, body) {
     // Lambdas always introduce their own parameter; the body is rendered
     // with the outer `this` still pointing at the same receiver (lambdas in
@@ -383,6 +401,12 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
         );
       }
       return `${cls}.${upperFirst(op.resourceName)}_${upperFirst(op.verb)}(${argList})`;
+    }
+    case "domain-service": {
+      // `Pricing.Quote(cart, customer)` — the generated .NET service is a
+      // `public static class` (operation name PascalCased).
+      const ref = e.serviceRef!;
+      return `${upperFirst(ref.service)}.${upperFirst(ref.op)}(${argList})`;
     }
     case "free":
       return `${upperFirst(e.name)}(${argList})`;

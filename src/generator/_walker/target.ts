@@ -495,4 +495,21 @@ export interface WalkerTarget {
    *  statement.  Distinct from `renderNavigate` (raw-route, for `then:`/Anchor)
    *  — this takes the pre-rendered arg the button already resolved. */
   renderNavigateExpr?(toArg: string): string;
+
+  /** OPTIONAL — declare a named `action` as a hoisted handler function at the
+   *  page/component top (named-actions-and-stores.md, Proposal A Stage 1).
+   *  `name` is the action's identifier (the same name a bare handler-arg
+   *  reference binds); `param` is the single declared payload param name (or
+   *  undefined for a nullary action); `bodyStmts` are the already-rendered
+   *  statement strings (each `;`-terminated, via the shared `emitStmt`).  The
+   *  JSX/markup family (React/Vue/Svelte) declares an arrow const
+   *  (`const <name> = (<param>?) => { <stmts> };`) — the omitted default — so
+   *  a call site can bind the bare value.  Angular overrides to a class method
+   *  (`<name>(<param>?) { <stmts> }`).  Returned verbatim as one or more
+   *  source lines spliced into the shell's declaration region. */
+  renderNamedHandler?(
+    name: string,
+    param: string | undefined,
+    bodyStmts: readonly string[],
+  ): string;
 }

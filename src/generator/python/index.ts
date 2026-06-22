@@ -21,6 +21,7 @@ import {
 } from "./base-reader-builder.js";
 import { buildPyDispatchFile, dispatchSubscriptionsOf } from "./dispatch-builder.js";
 import { renderPyAggregate } from "./emit/aggregate.js";
+import { renderPyDomainServices } from "./emit/domain-service.js";
 import { ERRORS_PY } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
 import { renderPyWireModels } from "./emit/http-models.js";
@@ -252,6 +253,16 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // emitted in the context that owns it.  An abstract base owns no
   // instantiable domain module; it gets the polymorphic union alias +
   // read-only reader instead.
+  // Domain services (domain-services.md): one module of stateless pure
+  // functions per `domainService`, under app/domain/services/.  Emitted
+  // off the merged context so a multi-context deployable gets every
+  // service once (the package marker only when at least one exists).
+  const serviceFiles = renderPyDomainServices(merged);
+  if (serviceFiles.length > 0) {
+    out.set("app/domain/services/__init__.py", "");
+    for (const f of serviceFiles) out.set(f.path, f.content);
+  }
+
   for (const ctx of args.contexts) {
     for (const base of abstractBasesOf(ctx)) {
       const concretes = concretesOf(base, ctx);
@@ -311,6 +322,7 @@ function mergeContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBoundedCon
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
     criteria: contexts.flatMap((c) => c.criteria),
+    domainServices: contexts.flatMap((c) => c.domainServices ?? []),
     channels: contexts.flatMap((c) => c.channels),
     retrievals: contexts.flatMap((c) => c.retrievals),
     seeds: contexts.flatMap((c) => c.seeds),

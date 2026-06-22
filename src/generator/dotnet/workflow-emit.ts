@@ -374,7 +374,7 @@ function renderEventReactorHandler(
   });
   if (resourceClasses.size > 0 && usesResourceOp) usings.add(`${ns}.Resources`);
   const renderArg = (e: ExprIR): string => {
-    collectCsExprUsings(e, usings);
+    collectCsExprUsings(e, usings, ns);
     return renderExprWithEventParam(e, paramName, resourceClasses, thisName);
   };
   // Correlation routing: load-or-allocate (create) / route-or-drop+log (on).
@@ -761,7 +761,7 @@ function renderHandler(
     // workflow expression the handler emits) instead of threading a Set
     // through the renderer.  The cmd-param rewrite only renames refs, so
     // the `matches` shape collectCsExprUsings keys off is unchanged.
-    collectCsExprUsings(e, usings);
+    collectCsExprUsings(e, usings, ns);
     return renderExprWithCmdParams(e, paramNames, resourceClasses);
   };
 

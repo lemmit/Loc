@@ -1,6 +1,7 @@
 import type { EnrichedLoomModel } from "../types/loom-ir.js";
 import { allContexts } from "../types/loom-ir.js";
 import type { LoomDiagnostic } from "./checks/diagnostic.js";
+import { validateDomainServices } from "./checks/domain-service-checks.js";
 import {
   validateQueryableWheres,
   validateRawSeedColumns,
@@ -164,6 +165,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateRawSeedColumns(c, diags);
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);
+    validateDomainServices(c, diags);
     validateExternOperations(c, diags);
     validateEventSourcedDiscipline(c, diags);
     validateWorkflows(c, diags);

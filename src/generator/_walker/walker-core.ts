@@ -53,6 +53,7 @@
 
 import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
+  ActionIR,
   AggregateIR,
   BoundedContextIR,
   ExprIR,
@@ -91,6 +92,10 @@ export interface WalkResult {
   /** Extern functions called from the body — the shell emits one
    *  conformance-shim import line per name. */
   usedExternFunctions?: Set<string>;
+  /** Named page/component `action`s referenced from the body — the shell
+   *  emits one hoisted handler function per name from the IR's `actions`
+   *  list (named-actions-and-stores.md, Proposal A Stage 1). */
+  usedActions?: Set<string>;
   /** True when a `For { … }` comprehension emitted a keyed React
    *  `<Fragment>` (TSX target only).  The React shell adds `Fragment`
    *  to its `react` import line when set. */
@@ -417,6 +422,7 @@ export function walkBody(
     usesFragment: false,
     externFunctions,
     usedExternFunctions: new Set(),
+    usedActions: new Set(),
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -443,6 +449,7 @@ export function walkBody(
     usesCodeBlock: ctx.usesCodeBlock,
     usesFragment: ctx.usesFragment,
     usedExternFunctions: ctx.usedExternFunctions ?? new Set(),
+    usedActions: ctx.usedActions ?? new Set(),
   };
 }
 
@@ -581,6 +588,13 @@ export interface Sink {
   /** Extern functions actually called from this body — one shim
    *  import line each (`import { f } from "<hops>lib/f";`). */
   usedExternFunctions?: Set<string>;
+  /** Named page/component `action`s referenced from this body (`onSubmit:
+   *  next`, `rowAction: add`).  The page/component shell emits one hoisted
+   *  handler function per referenced action from the Page/Component IR's
+   *  `actions` list (named-actions-and-stores.md, Proposal A Stage 1) —
+   *  tracking which are USED keeps unreferenced actions from tripping
+   *  `noUnusedLocals` in the generated TSX. */
+  usedActions?: Set<string>;
   /** True when a `CodeBlock { … }` primitive emitted from this body.
    *  Read by the React orchestrator (aggregated across all pages)
    *  to drive conditional injection of the highlight.js CDN payload
@@ -919,6 +933,40 @@ export function extendLambdaParams(
   const next = new Map(ctx.lambdaParams);
   next.set(srcName, jsName);
   return next;
+}
+
+/** Render the hoisted handler functions for a page/component's named
+ *  `action`s (named-actions-and-stores.md, Proposal A Stage 1).  Only the
+ *  actions in `used` are emitted (an unreferenced action would trip
+ *  `noUnusedLocals` in the generated TSX).  Each body lowers through the
+ *  SAME `emitStmt` path as an anonymous handler block — state writes, calls,
+ *  navigate all resolve against `baseCtx` — so a body that mutates state sets
+ *  `baseCtx.usesState`, which the shell reads to import the state runtime.
+ *  The declaration shape (arrow const vs class method) is the active target's
+ *  `renderNamedHandler` seam (JSX/markup default: `const <name> = (<p>?) =>
+ *  { … }`).  Returns one joined string (newline-separated), or `""` when
+ *  nothing is emitted — splice it into the shell's declaration region. */
+export function renderActionHandlers(
+  actions: readonly ActionIR[],
+  used: ReadonlySet<string>,
+  baseCtx: WalkContext,
+): string {
+  const out: string[] = [];
+  for (const action of actions) {
+    if (!used.has(action.name)) continue;
+    // The single payload param (v1) binds as a lambda param so body refs to
+    // it resolve; nullary actions bind nothing.
+    const param = action.params[0]?.name;
+    const handlerCtx: WalkContext = param
+      ? { ...baseCtx, lambdaParams: extendLambdaParams(baseCtx, param, param) }
+      : baseCtx;
+    const bodyStmts = action.body.map((s) => emitStmt(s, handlerCtx));
+    out.push(
+      baseCtx.target.renderNamedHandler?.(action.name, param, bodyStmts) ??
+        `const ${action.name} = (${param ?? ""}) => { ${bodyStmts.join(" ")} };`,
+    );
+  }
+  return out.join("\n");
 }
 
 /** Money(value, currency?, decimals?, testid?).  Renders

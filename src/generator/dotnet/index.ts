@@ -60,6 +60,7 @@ import {
   renderDapperSchema,
 } from "./emit/dapper.js";
 import { renderDomainLog, renderExecutionContextBehavior } from "./emit/domain-log.js";
+import { emitDomainServices } from "./emit/domain-service.js";
 import { emitDotnetMigrations, emitDotnetProvenanceAuditMigration } from "./emit/migrations.js";
 import {
   renderOutboxDelivery,
@@ -273,6 +274,9 @@ function emitProjectFromContexts(
       emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace, emitCtx);
     }
     emitBaseReaders(ctx, ns, out);
+    // Domain services (domain-services.md) — stateless pure calculators, one
+    // `public static class` per `domainService` + its `or`-union return records.
+    emitDomainServices(ctx, ns, out);
     emitWorkflows(ctx, ns, out, { routePrefix, sys: system?.sys });
     emitWorkflowInstanceReads(ctx, ns, out, { routePrefix });
     emitViews(ctx, ns, out, { routePrefix });
@@ -294,6 +298,7 @@ function emitProjectFromContexts(
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
     criteria: contexts.flatMap((c) => c.criteria),
+    domainServices: contexts.flatMap((c) => c.domainServices ?? []),
     channels: contexts.flatMap((c) => c.channels),
     retrievals: contexts.flatMap((c) => c.retrievals),
     seeds: contexts.flatMap((c) => c.seeds),
@@ -587,6 +592,8 @@ function emitContext(
     emitAggregate(agg, ctx, ns, out, undefined, emitTrace);
   }
   emitBaseReaders(ctx, ns, out);
+  // Domain services (domain-services.md) — see the system-mode twin above.
+  emitDomainServices(ctx, ns, out);
   emitWorkflows(ctx, ns, out);
   emitWorkflowInstanceReads(ctx, ns, out);
   if (hasSubscriptions) emitDispatchHandlers(ctx, ns, out, undefined);

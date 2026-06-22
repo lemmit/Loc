@@ -121,6 +121,11 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   member: renderMember,
   methodCall: renderMethodCall,
   call: renderCall,
+  domainServiceCall(args, serviceRef, ctx) {
+    // `Shop.Domain.Services.Pricing.quote(...)` — fully-qualified module.
+    const app = ctx.contextModule.split(".")[0] ?? ctx.contextModule;
+    return `${app}.Domain.Services.${upperFirst(serviceRef.service)}.${snake(serviceRef.op)}(${args.join(", ")})`;
+  },
   lambda(param, body) {
     // Single-expression lambda: `x => expr` → `fn x -> expr end`
     // Block-body lambdas are not renderable as an inline expression.
@@ -389,6 +394,15 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
         );
       }
       return `${mod}.${snake(op.resourceName)}_${snake(op.verb)}(${args.join(", ")})`;
+    }
+    case "domain-service": {
+      // `Shop.Domain.Services.Pricing.quote(cart, customer)` — a plain
+      // stateless module (no GenServer / Ash resource), fully qualified
+      // under the app's `Domain.Services` namespace.  The app prefix is the
+      // first segment of `contextModule` (`MyApp.Sales` → `MyApp`).
+      const ref = e.serviceRef!;
+      const app = ctx.contextModule.split(".")[0] ?? ctx.contextModule;
+      return `${app}.Domain.Services.${upperFirst(ref.service)}.${snake(ref.op)}(${args.join(", ")})`;
     }
   }
 }

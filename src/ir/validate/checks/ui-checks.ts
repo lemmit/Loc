@@ -17,7 +17,13 @@
 //        receiver so the sentinel can't be reached.
 // -------------------------------------------------------------------------
 
-import type { AggregateIR, EnrichedLoomModel, ExprIR, PageIR } from "../../types/loom-ir.js";
+import type {
+  ActionIR,
+  AggregateIR,
+  EnrichedLoomModel,
+  ExprIR,
+  PageIR,
+} from "../../types/loom-ir.js";
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
@@ -56,17 +62,26 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         "Views",
       ]);
       for (const page of ui.pages) {
-        const ctx: BodyCheckCtx = { aggByName, handles, scope: new Set(), where: pageWhere(page) };
+        const actionsByName = new Map(page.actions.map((a) => [a.name, a]));
+        const ctx: BodyCheckCtx = {
+          aggByName,
+          handles,
+          scope: new Set(),
+          where: pageWhere(page),
+          actionsByName,
+        };
         checkBody(page.body, ctx, diags);
         checkBody(page.title, ctx, diags);
         checkBody(page.requires, ctx, diags);
       }
       for (const comp of ui.components) {
+        const actionsByName = new Map(comp.actions.map((a) => [a.name, a]));
         const ctx: BodyCheckCtx = {
           aggByName,
           handles,
           scope: new Set(),
           where: `component '${comp.name}'`,
+          actionsByName,
         };
         checkBody(comp.body, ctx, diags);
       }
@@ -85,6 +100,10 @@ interface BodyCheckCtx {
    *  `unknown` ref. */
   scope: ReadonlySet<string>;
   where: string;
+  /** Named `action`s declared on the enclosing page/component, by name —
+   *  used by the payload-conformance check to look up the referenced action's
+   *  declared arity / param type (named-actions-and-stores.md, Proposal A). */
+  actionsByName: ReadonlyMap<string, ActionIR>;
 }
 
 function pageWhere(p: PageIR): string {
@@ -99,6 +118,9 @@ function checkBody(e: ExprIR | undefined, ctx: BodyCheckCtx, diags: LoomDiagnost
     case "call": {
       // F1 — `Action(<inst>.<op>)` with a parameterized operation.
       if (e.callKind === "free" && e.name === "Action") checkActionParams(e, ctx, diags);
+      // Named-action payload conformance — a bare `onSubmit:`/`onRowClick:`
+      // action reference must match (arity) what the primitive supplies.
+      checkActionPayload(e, ctx, diags);
       // Descend, extending scope for any form primitive's lambda args.
       const shellLocals = FORM_SHELL_LOCALS[e.name];
       const childScope = shellLocals ? new Set<string>([...ctx.scope, ...shellLocals]) : ctx.scope;
@@ -210,6 +232,86 @@ function checkActionParams(
         `Use \`OperationForm(of: ${agg.name}, op: ${opName})\` — it renders the parameter inputs.`,
       source: ctx.where,
     });
+  }
+}
+
+/** Value of a named arg on a primitive call (parallel `argNames`). */
+function namedArg(call: Extract<ExprIR, { kind: "call" }>, name: string): ExprIR | undefined {
+  const names = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (names[i] === name) return call.args[i];
+  }
+  return undefined;
+}
+
+/** Named-action payload conformance (named-actions-and-stores.md, Proposal A
+ *  Stage 1).  A bare action reference in a handler slot must match (arity)
+ *  what the call-site primitive supplies:
+ *    - a Form with a two-way `into:` binding supplies NO value → the
+ *      `onSubmit:` action must be NULLARY (arity-1 ⇒ hard error);
+ *    - a Form WITHOUT `into:` supplies its value → the action should take one
+ *      payload param (arity-0 ⇒ the supplied value has nowhere to land);
+ *    - a Table `onRowClick:` supplies the clicked row → arity-0 or arity-1 are
+ *      both admissible (the handler may ignore the row), so only an over-arity
+ *      action is flagged.
+ *  One stable code: `loom.action-payload-mismatch`. */
+function checkActionPayload(
+  call: Extract<ExprIR, { kind: "call" }>,
+  ctx: BodyCheckCtx,
+  diags: LoomDiagnostic[],
+): void {
+  const flag = (handlerSlot: string, action: ActionIR, supplied: boolean): void => {
+    const arity = action.params.length;
+    if (supplied && arity === 0) {
+      diags.push({
+        severity: "error",
+        code: "loom.action-payload-mismatch",
+        message:
+          `${ctx.where}: \`${call.name} { ${handlerSlot}: ${action.name} }\` supplies a payload value, ` +
+          `but action '${action.name}' is nullary — declare a single payload parameter to receive it.`,
+        source: ctx.where,
+      });
+    } else if (!supplied && arity > 0) {
+      diags.push({
+        severity: "error",
+        code: "loom.action-payload-mismatch",
+        message:
+          `${ctx.where}: \`${call.name} { ${handlerSlot}: ${action.name} }\` supplies no payload ` +
+          `(two-way \`into:\` binding), but action '${action.name}' declares ${arity} parameter(s) ` +
+          `(${action.params.map((p) => p.name).join(", ")}) — make it nullary.`,
+        source: ctx.where,
+      });
+    } else if (arity > 1) {
+      diags.push({
+        severity: "error",
+        code: "loom.action-payload-mismatch",
+        message:
+          `${ctx.where}: action '${action.name}' referenced by \`${call.name} { ${handlerSlot}: … }\` ` +
+          `declares ${arity} parameters; a handler action takes at most one payload parameter.`,
+        source: ctx.where,
+      });
+    }
+  };
+
+  // Form family — `onSubmit:` action.  A two-way `into:` binding means the
+  // form supplies no value to the handler (it mutates the bound state
+  // directly), so the action must be nullary.
+  const FORM_PRIMITIVES = new Set(["CreateForm", "Form", "WorkflowForm", "OperationForm"]);
+  if (FORM_PRIMITIVES.has(call.name)) {
+    const onSubmit = namedArg(call, "onSubmit");
+    if (onSubmit?.kind === "action-ref") {
+      const action = ctx.actionsByName.get(onSubmit.actionName);
+      if (action) flag("onSubmit", action, namedArg(call, "into") === undefined);
+    }
+  }
+  // Table — `onRowClick:` supplies the clicked row.  Over-arity is the only
+  // hard error (a nullary handler may legitimately ignore the row).
+  if (call.name === "Table") {
+    const onRowClick = namedArg(call, "onRowClick");
+    if (onRowClick?.kind === "action-ref") {
+      const action = ctx.actionsByName.get(onRowClick.actionName);
+      if (action && action.params.length > 1) flag("onRowClick", action, true);
+    }
   }
 }
 

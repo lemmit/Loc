@@ -518,8 +518,24 @@ Page:
     '}';
 
 PageProp:
-      RouteProp | TitleProp | RequiresProp | StateBlock | DerivedProp | BodyProp | PageMenuMeta
+      RouteProp | TitleProp | RequiresProp | StateBlock | DerivedProp | ActionDecl | BodyProp | PageMenuMeta
     | LayoutProp | DescriptionProp | OgImageProp | CanonicalProp;
+
+// Named, typed page/component event handler — `action next() { … }`
+// (named-actions-and-stores.md, Proposal A Stage 1).  Names today's
+// anonymous handler lambda: a declared identity + a typed payload
+// param list + a statement block (reusing the existing `Parameter`
+// and `Statement` rules — NO new statement semantics).  Positionally
+// distinct from the `ActionType` param-slot type (`action(Order)`,
+// a handler-typed component PARAM) and the `Action {}` render
+// primitive (PascalCase builder-call in body position) — `action`
+// here leads a member declaration in a page/component body.  A
+// call site references it by bare name (`onSubmit: next`); the
+// reference resolves + carries the action's param type during
+// lowering so backends never re-resolve.
+ActionDecl:
+    'action' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+        '{' stmts+=Statement* '}';
 
 RouteProp:
     'route' ':' value=STRING;
@@ -620,7 +636,7 @@ Component:
         '}')?;
 
 ComponentDecl:
-    StateBlock | DerivedProp;
+    StateBlock | DerivedProp | ActionDecl;
 
 // ---- state --------------------------------------------------------------
 
@@ -781,7 +797,7 @@ BoundedContext:
 
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
-    | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl | Channel;
+    | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl | Channel | DomainService;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -1272,6 +1288,41 @@ LoadPath:
 
 LoadSegment:
     name=LooseName (collection?='[]')?;
+
+// Domain service — a stateless, named, context-level container of
+// NON-mutating `operation`s (the pure-calculator floor, v1 Shape A).
+// Operations take aggregates / value objects / primitives by value,
+// return a value or an `or`-union error, and may `throw` for the
+// bug regime.  Strict no-infra: a phase-⑦ validator rejects repo /
+// extern / api / workflow-start / emit / this-write inside a body.
+// Callable from operation / workflow / api bodies via a member call
+// (`Pricing.quote(cart, customer)`), lowered to a Call with
+// `callKind: "domain-service"`.  See docs/proposals/domain-services.md.
+//
+//   domainService Pricing {
+//     operation quote(cart: Cart, customer: Customer): Money {
+//       return cart.subtotal - customer.tier.discount(cart.subtotal)
+//     }
+//     operation applyCoupon(price: Money, coupon: Coupon): Money or CouponExpired {
+//       if (coupon.isExpired) return CouponExpired { code: coupon.code }
+//       return price - coupon.discount
+//     }
+//   }
+DomainService:
+    'domainService' name=ID '{'
+        operations+=DomainServiceOperation*
+    '}';
+
+// v1: statement body ONLY (no `= Expression` shorthand — deferred).
+// Reuses the existing `Parameter` / `TypeRef` / `Statement` rules; the
+// `TypeRef` already parses `or`-unions (`Money or CouponExpired`).  Does
+// NOT carry `private` / `extern` / `audited` / `when` — those are
+// aggregate-operation-only.
+DomainServiceOperation:
+    'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+    (':' returnType=TypeRef)? '{'
+        stmts+=Statement*
+    '}';
 
 // ---------------------------------------------------------------------------
 // Members

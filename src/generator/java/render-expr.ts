@@ -1,6 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
-import { upperFirst } from "../../util/naming.js";
+import { lowerFirst, upperFirst } from "../../util/naming.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -186,6 +186,10 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
   member: renderMember,
   methodCall: renderMethodCall,
   call: renderCall,
+  domainServiceCall(args, serviceRef) {
+    // `Pricing.quote(cart, customer)` — generated static utility class.
+    return `${upperFirst(serviceRef.service)}.${lowerFirst(serviceRef.op)}(${args.join(", ")})`;
+  },
   lambda(param, body) {
     if (body !== undefined) return `${param} -> ${body}`;
     return `${param} -> { /* block-body lambda — not Java-renderable */ }`;
@@ -391,6 +395,12 @@ function renderCall(args: string[], e: CallExpr, ctx: JavaRenderContext): string
         );
       }
       return `${cls}.${op.resourceName}${upperFirst(op.verb)}(${argList})`;
+    }
+    case "domain-service": {
+      // `Pricing.quote(cart, customer)` — generated static utility class
+      // (class name PascalCased, method name camelCased per Java convention).
+      const ref = e.serviceRef!;
+      return `${upperFirst(ref.service)}.${lowerFirst(ref.op)}(${argList})`;
     }
     case "free":
       return `${e.name}(${argList})`;

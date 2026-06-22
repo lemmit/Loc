@@ -21,6 +21,7 @@ import { provColumn, provenancedFieldsOf } from "../emit/provenance.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
 import { collectPyExprImports, renderPyExpr, renderPyType } from "../render-expr.js";
 import { renderPyStatements } from "../render-stmt.js";
+import { domainServiceImportLines } from "./domain-service.js";
 
 // ---------------------------------------------------------------------------
 // Aggregate emission — `app/domain/<snake(agg)>.py`.  One module per
@@ -188,6 +189,14 @@ export function renderPyAggregate(
       (s.contextStamps ?? []).some((r) => r.assignments.some((a) => exprUsesCurrentUser(a.value))),
     );
   const bodyUsesCast = /\bcast\(/.test(body);
+  // Domain-service calls render as bare functions (`quote(...)`), so the
+  // aggregate module imports them by name from app.domain.services.* —
+  // collected from every operation / applier / es-create body.
+  const serviceImports = domainServiceImportLines([
+    ...shapes.flatMap((s) => s.operations.flatMap((op) => op.statements)),
+    ...shapes.flatMap((s) => (s.appliers ?? []).flatMap((ap) => ap.statements)),
+    ...shapes.flatMap((s) => s.esCreate?.statements ?? []),
+  ]);
   return lines(
     `"""${agg.name} aggregate.  Auto-generated."""`,
     "",
@@ -206,6 +215,7 @@ export function renderPyAggregate(
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
+    ...serviceImports,
     emitTrace && /\blog\("trace"/.test(body) ? "from app.obs.log import log" : null,
     "",
     "",

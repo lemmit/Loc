@@ -20,6 +20,7 @@
 //     resolve unchanged
 
 import type {
+  ActionIR,
   AggregateIR,
   BoundedContextIR,
   DerivedIR,
@@ -43,7 +44,7 @@ import type {
   WalkContext,
   WorkflowFormState,
 } from "../../_walker/walker-core.js";
-import { emitExpr, walkBody } from "../../_walker/walker-core.js";
+import { emitExpr, renderActionHandlers, walkBody } from "../../_walker/walker-core.js";
 import { renderSvelteApiHookImports, renderSvelteImportLines } from "./import-lines.js";
 import { svelteTarget } from "./svelte-target.js";
 
@@ -209,6 +210,9 @@ export function renderSveltePage(
   /** True when the hosting deployable has `auth: ui` — enables currentUser-only
    *  operation-`requires` gating on `Action(...)` buttons in the body. */
   authUi = false,
+  /** Named, typed page event handlers — hoisted as `const <name> = … =>`
+   *  arrow consts in `<script>` (Proposal A Stage 1). */
+  actions: ActionIR[] = [],
 ): string {
   void pageName;
   const paramNames = new Set(params.map((p) => p.name));
@@ -227,6 +231,7 @@ export function renderSveltePage(
     formOfs,
     actionMutations,
     usedExternFunctions,
+    usedActions,
   } = walkBody(
     body,
     svelteTarget,
@@ -251,6 +256,17 @@ export function renderSveltePage(
   const derivedResult = buildDerivedLines(derived, pack, paramNames, stateNames);
   const derivedLines = derivedResult.lines;
 
+  // Named-action handlers → `<script>` arrow consts (Proposal A Stage 1).
+  // A handler that mutates state forces the `$state` declaration.
+  const actionResult = buildActionLines(
+    actions,
+    usedActions ?? new Set(),
+    pack,
+    paramNames,
+    stateNames,
+  );
+  const actionLines = actionResult.lines;
+
   // Title — a plain `$effect`; runes auto-track any param/state the
   // expression reads, so no deps array is derived.
   let titleEffect = "";
@@ -261,7 +277,8 @@ export function renderSveltePage(
     usesStateForTitle = titleCtx.usesState && !usesState;
     titleEffect = `  $effect(() => {\n    document.title = ${titleExpr};\n  });\n`;
   }
-  const effectiveUsesState = usesState || usesStateForTitle || derivedResult.usesState;
+  const effectiveUsesState =
+    usesState || usesStateForTitle || derivedResult.usesState || actionResult.usesState;
 
   const packImports = renderSvelteImportLines(imports);
   const userComponentImports = [...usedUserComponents]
@@ -341,7 +358,7 @@ export function renderSveltePage(
     : indentJsx(tsx, "");
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${gate.import}${navigateImport}${pageStateImport}${decimalImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${gate.binding}${titleEffect}</script>
+${gate.import}${navigateImport}${pageStateImport}${decimalImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${gate.binding}${titleEffect}</script>
 
 ${markup}
 ${templateScope}`;
@@ -400,6 +417,8 @@ export function renderSvelteComponentFile(
    *  operation-`requires` gating on `Action(...)` buttons (a component is the
    *  canonical Action host).  Binding-only: components carry no page gate. */
   authUi = false,
+  /** Named, typed component event handlers (Proposal A Stage 1). */
+  actions: ActionIR[] = [],
 ): string {
   void name;
   const paramNames = new Set(params.map((p) => p.name));
@@ -417,6 +436,7 @@ export function renderSvelteComponentFile(
     actionMutations,
     formOfs,
     usedExternFunctions,
+    usedActions,
   } = walkBody(
     body,
     svelteTarget,
@@ -443,6 +463,15 @@ export function renderSvelteComponentFile(
   // reading a state field forces the `$state` declaration.
   const derivedResult = buildDerivedLines(derived, pack, paramNames, stateNames);
   const derivedLines = derivedResult.lines;
+  // Named-action handlers → `<script>` arrow consts (Proposal A Stage 1).
+  const actionResult = buildActionLines(
+    actions,
+    usedActions ?? new Set(),
+    pack,
+    paramNames,
+    stateNames,
+  );
+  const actionLines = actionResult.lines;
   const actionWiring = renderActionMutations(actionMutations);
   const form = formOfs.reduce<FormWiring>(
     (acc, st) => {
@@ -519,7 +548,7 @@ export function renderSvelteComponentFile(
     if (!isSlotShape(p.type)) continue;
     markup = markup.split(`{${p.name}}`).join(`{@render ${p.name}?.()}`);
   }
-  const effectiveUsesState = usesState || derivedResult.usesState;
+  const effectiveUsesState = usesState || derivedResult.usesState || actionResult.usesState;
   const stateLines = effectiveUsesState
     ? state.map((f) => `  ${renderRunesState(f, pack)}\n`).join("")
     : "";
@@ -530,7 +559,7 @@ export function renderSvelteComponentFile(
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${gate.import}${snippetImport}${navigateImport}${decimalImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${gate.binding}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}</script>
+${gate.import}${snippetImport}${navigateImport}${decimalImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${gate.binding}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}</script>
 
 ${indentJsx(markup, "")}
 ${templateScope}`;
@@ -705,6 +734,29 @@ function buildDerivedLines(
     seenDerived.add(d.name);
   }
   return { lines, usesState };
+}
+
+/** Build the `<script>` named-action handlers for a page/component
+ *  (named-actions-and-stores.md, Proposal A Stage 1).  Svelte 5 `$state`
+ *  reads/writes are bare names everywhere (no `.value` deref), so the shared
+ *  `renderActionHandlers` default (`const <name> = (<p>?) => { … }`) is
+ *  already correct — only referenced actions emit. */
+function buildActionLines(
+  actions: readonly ActionIR[],
+  used: ReadonlySet<string>,
+  pack: LoadedPack,
+  paramNames: ReadonlySet<string>,
+  stateNames: ReadonlySet<string>,
+): { lines: string; usesState: boolean } {
+  const ctx = dummyCtx(pack, paramNames, stateNames, new Set());
+  const handlers = renderActionHandlers(actions, used, ctx);
+  const lines = handlers
+    ? `${handlers
+        .split("\n")
+        .map((l) => `  ${l}`)
+        .join("\n")}\n`
+    : "";
+  return { lines, usesState: ctx.usesState };
 }
 
 function stateTypeAsTsString(type: TypeIR): string {

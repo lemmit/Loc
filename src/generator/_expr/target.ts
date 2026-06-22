@@ -62,6 +62,12 @@ export interface ExprTarget<Ctx extends ExprCtxBase> {
   member(recv: string, e: MemberExpr): string;
   methodCall(recv: string, args: string[], e: MethodCallExpr, ctx: Ctx): string;
   call(args: string[], e: CallExpr, ctx: Ctx): string;
+  /** Render a `callKind: "domain-service"` member call
+   *  (`Pricing.quote(cart, customer)` → the backend's call syntax for the
+   *  generated domain-service module).  `serviceRef` is the resolved
+   *  `{ service, op }`; `args` arrive already rendered.  Per-backend leaf —
+   *  each backend's `call` switch delegates here (domain-services.md). */
+  domainServiceCall(args: string[], serviceRef: { service: string; op: string }, ctx: Ctx): string;
   lambda(param: string, body: string | undefined): string;
   newPart(fields: RenderedField[], e: NewExpr, ctx: Ctx): string;
   object(fields: RenderedField[]): string;
@@ -126,5 +132,12 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
       );
     case "list":
       return t.list(e.elements.map(r));
+    case "action-ref":
+      // A named page/component action reference is a UI-handler-arg form
+      // (named-actions-and-stores.md, Proposal A Stage 1).  It is consumed by
+      // the JSX walker's call-site primitives, never by a domain-logic
+      // expression renderer — reaching it here means it leaked to a domain
+      // position, which the IR validator should already have rejected.
+      throw new Error("renderExprWith: 'action-ref' is not a domain expression");
   }
 }

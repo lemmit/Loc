@@ -72,6 +72,7 @@ import { lowerStatement } from "./lower-stmt.js";
 import {
   cstText,
   type Env,
+  findDomainServiceByName,
   findEntityByName,
   findEventByName,
   findFunctionInEnv,
@@ -365,6 +366,35 @@ function applySuffixToRecv(
   if (ms.call) {
     const args = ms.args.map((a) => lowerExpr(a.value, env));
     const argNames = ms.args.map((a) => a.name || undefined);
+    // `Pricing.quote(args)` — a member call whose receiver resolves to a
+    // `domainService` declaration lowers to a Call with `callKind:
+    // "domain-service"` and the structured `serviceRef`, so backends emit
+    // a real call into the generated service module without re-resolving
+    // the receiver (domain-services.md).  Resolution is by bare name —
+    // env-local context members first, then the project-global ambient
+    // index for a sibling-context service.
+    if (recv.kind === "ref") {
+      const svc = findDomainServiceByName(env, recv.name);
+      if (svc) {
+        const opDecl = svc.operations.find((o) => o.name === ms.member);
+        const callIR: ExprIR = {
+          kind: "call",
+          callKind: "domain-service",
+          name: ms.member,
+          args,
+          ...(argNames.some((n) => n !== undefined) ? { argNames } : {}),
+          serviceRef: { service: svc.name, op: ms.member },
+        };
+        // Result type is the operation's declared return type (an `or`-union
+        // for an exception-less op, so `let x = Pricing.applyCoupon(...)?`
+        // propagates the error variant); falls back to string when the op
+        // declares no `: T`.
+        const resultType: TypeIR = opDecl?.returnType
+          ? lowerType(opDecl.returnType, env)
+          : { kind: "primitive", name: "string" };
+        return { recv: callIR, recvType: resultType };
+      }
+    }
     // `<resource>.<verb>(args)` — a verb call on an ambient resource
     // handle lowers to a `resource-op` call (Phase 4).  The verb's
     // capability comes from the resource-verb registry; an unknown verb
@@ -834,6 +864,16 @@ function resolveNameRef(name: string, env: Env): ExprIR {
       }
     }
   }
+  // Named page/component action reference — a bare `onSubmit: next` /
+  // `rowAction: add` handler arg.  Resolves to a fully-typed `action-ref`
+  // carrying the action's single declared payload param type (undefined ⇒
+  // nullary), so backends + the validator never re-resolve.  `env.actions`
+  // is populated only while lowering a page/component body; elsewhere this
+  // is skipped and the name falls through to the ordinary path.
+  if (env.actions?.has(name)) {
+    const { paramType } = env.actions.get(name) as { paramType?: TypeIR };
+    return { kind: "action-ref", actionName: name, ...(paramType ? { paramType } : {}) };
+  }
   // Parameterless criterion reference — inline the predicate body.  A
   // parameterised criterion referenced bare (no argument list) falls
   // through to the unresolved path; the validator reports the arity
@@ -1040,6 +1080,26 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
       const target = findEntityByName(env, expr.head.name);
       if (target && isAggregate(target)) {
         curType = { kind: "entity", name: target.name };
+        for (let i = 1; i < expr.suffixes.length; i++) {
+          curType = inferSuffixType(curType, expr.suffixes[i]!, env);
+        }
+        return curType;
+      }
+    }
+    // Probe: `Pricing.quote(...)` domain-service member call — head is a
+    // `NameRef` resolving to a `domainService`, first suffix is a call
+    // MemberSuffix naming an operation.  The result type is the operation's
+    // declared return type (an `or`-union for an exception-less op, so a
+    // `let x = Pricing.applyCoupon(...)?` propagates the error variant).
+    // Mirrors the lowering MemberSuffix arm that stamps the call's
+    // `recvType` — without this `let`-binds would mis-type as `string`.
+    if (first && isMemberSuffix(first) && first.call && isNameRef(expr.head)) {
+      const svc = findDomainServiceByName(env, expr.head.name);
+      if (svc) {
+        const opDecl = svc.operations.find((o) => o.name === first.member);
+        curType = opDecl?.returnType
+          ? lowerType(opDecl.returnType, env)
+          : { kind: "primitive", name: "string" };
         for (let i = 1; i < expr.suffixes.length; i++) {
           curType = inferSuffixType(curType, expr.suffixes[i]!, env);
         }

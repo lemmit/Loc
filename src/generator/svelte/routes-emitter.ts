@@ -185,6 +185,8 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
         // `auth: ui` enables currentUser-only operation-`requires` gating on
         // `Action(...)` buttons in this component.
         ctx.authUi,
+        // Named, typed component event handlers (Proposal A Stage 1).
+        c.actions,
       ),
     );
   }
@@ -225,6 +227,8 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
         // `auth: ui` also enables currentUser-only operation-`requires` gating
         // on `Action(...)` buttons inside the body.
         ctx.authUi,
+        // Named, typed page event handlers (Proposal A Stage 1).
+        page.actions,
       ),
     );
   }
