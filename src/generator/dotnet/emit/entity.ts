@@ -154,6 +154,14 @@ export function renderEntity(
   // it again would shadow the inherited member (CS0108, fatal under /warnaserror).
   if (!superType?.sharesIdentity) {
     propLines.push(`    public ${entity.name}Id Id { get; ${setterVisibility} set; }`);
+    // A TPC concrete (`extends` an `ownTable` base) implements the base's
+    // boxed-id accessor so the base's derived members can read the id
+    // polymorphically (the base owns no typed `Id` — each concrete's is its
+    // own strongly-typed record-struct, which can't covariantly override an
+    // `object` property, so we box through this getter instead).
+    if (superType) {
+      propLines.push(`    public override object IdBoxed => Id;`);
+    }
   }
   if (!isRoot) {
     propLines.push(`    public ${rootName}Id ParentId { get; ${setterVisibility} set; }`);
@@ -654,15 +662,22 @@ export function renderAbstractBaseEntity(
    *  excluded from the EF model via `Ignore<Base>()`. */
   options: { tph?: boolean } = {},
 ): string {
-  const renderCtx = { thisName: "this", agg: base };
+  // TPC bases own no typed `Id` (each concrete carries its own strongly-typed
+  // id); a base derived body that reads `id` must go through the boxed accessor
+  // the concretes override (`IdBoxed`).  TPH bases own the shared typed `Id`.
+  const renderCtx = options.tph
+    ? { thisName: "this", agg: base }
+    : { thisName: "this", agg: base, idAccessor: "IdBoxed" };
   const usings = new Set<string>();
   for (const d of base.derived) collectCsExprUsings(d.expr, usings);
   // A TPH base owns the shared `Id`; the concretes inherit it.  `internal set`
   // matches the field accessors so hydration (`_Create` / `Create`) assigns it
-  // across the same assembly.
+  // across the same assembly.  A TPC base owns no table/identity; it exposes a
+  // boxed `IdBoxed` accessor each concrete overrides so base derived members
+  // (e.g. the synthesized `inspect`) can read the concrete's id polymorphically.
   const idLines = options.tph
     ? [`    public ${base.name}Id Id { get; internal set; } = default!;`]
-    : [];
+    : [`    public abstract object IdBoxed { get; }`];
   const propLines = base.fields.map((f) => {
     // Optional fields default to null on their own — emitting `= default`
     // explicitly trips CA1805 ("redundant initialization to default").

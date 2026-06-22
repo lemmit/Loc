@@ -43,11 +43,6 @@ const DOTNET_COMPILE_SKIP: Record<string, string> = {
   // The same shape java skip-lists; use shape(document)/relational or host on node.
   embedded:
     "PLATFORM LIMITATION: jsonb-embedded + ref collection has no join-table type on .NET (CS0234)",
-  // EMITTER GAP: aggregate inheritance (TPH/TPC) — a polymorphic find body reads
-  // `.Id` off the abstract base (`Asset`), which the base class doesn't expose
-  // (CS1061).  The base aggregate's `Id` property isn't surfaced on .NET.
-  inheritance:
-    "EMITTER GAP: abstract base aggregate missing `Id` for polymorphic find on .NET (CS1061)",
   // EMITTER GAP: outbox dispatcher — `OutboxDomainEventDispatcher` references
   // `IDomainEvent` / `IDomainEventDispatcher.DispatchAsync` shapes that aren't
   // emitted for the durable-channel outbox on .NET (CS0246 / CS0535).

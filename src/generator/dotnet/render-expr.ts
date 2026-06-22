@@ -53,6 +53,13 @@ export interface CsRenderContext {
    *  `<name>_<Tag>(...)` variant record positionally.  Unset outside a
    *  union-returning operation body. */
   returnUnion?: { name: string; members: UnionMember[] };
+  /** TPC abstract-base derived bodies (aggregate-inheritance.md, `ownTable`):
+   *  the base owns no typed `Id` property (each concrete carries its own
+   *  strongly-typed id), so an `id` read in a base derived member (e.g. the
+   *  synthesized `inspect`) must go through the loosely-typed boxed accessor
+   *  the concretes override (`public override object IdBoxed => Id;`).  When
+   *  set, an `id` expr renders `this.<idAccessor>` instead of `this.Id`. */
+  idAccessor?: string;
 }
 
 const DEFAULT: CsRenderContext = { thisName: "this" };
@@ -135,7 +142,7 @@ export function collectCsExprUsings(
 
 const CS_TARGET: ExprTarget<CsRenderContext> = {
   literal: renderLiteral,
-  id: (ctx) => `${ctx.thisName}.Id`,
+  id: (ctx) => `${ctx.thisName}.${ctx.idAccessor ?? "Id"}`,
   ref: renderRef,
   member: renderMember,
   methodCall: renderMethodCall,
