@@ -497,6 +497,10 @@ interface BodyLine {
   kind: "with-clause" | "dispatch" | "expr" | "guard";
   text: string;
   bindName?: string;
+  /** An own-state assign that rebinds `state = Repo.update!(...)`.  The binding
+   *  is only needed when a later line reads `state`; otherwise it's dropped so
+   *  `mix compile --warnings-as-errors` doesn't trip on an unused variable. */
+  rebindsState?: boolean;
 }
 
 /** Render the constrained reactor / starter statement set into ordered,
@@ -519,6 +523,17 @@ function renderBody(
   // `with` clauses + `=` matches compose the chain, in source order.
   const chain = lines.filter((l) => l.kind === "with-clause" || l.kind === "expr");
   const dispatches = lines.filter((l) => l.kind === "dispatch");
+
+  // An own-state assign rebinds `state = Repo.update!(...)`.  A later line reads
+  // the rebound value only if it references `state` (a chained assign or an emit
+  // whose fields read state); when nothing does, drop the binding to the bare
+  // side-effecting call so Elixir doesn't warn the variable is unused.
+  for (let i = 0; i < dispatches.length; i++) {
+    const d = dispatches[i]!;
+    if (!d.rebindsState) continue;
+    const laterReadsState = dispatches.slice(i + 1).some((l) => /\bstate\b/.test(l.text));
+    if (!laterReadsState) d.text = d.text.replace(/^state = /, "");
+  }
 
   const out: string[] = [];
   for (const g of guards) out.push(g.text);
@@ -635,6 +650,7 @@ function renderStmt(
         {
           kind: "dispatch",
           text: `state = ${appModule}.Repo.update!(Ecto.Changeset.change(state, %{${field}: ${value}}))`,
+          rebindsState: true,
         },
       ];
     }

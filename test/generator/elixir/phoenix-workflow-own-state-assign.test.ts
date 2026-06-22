@@ -47,6 +47,10 @@ describe("phoenix/ash workflow own-state assignment", () => {
       k.endsWith("workflows/order_fulfillment/start_order_placed.ex"),
     )?.[1];
     expect(start, "start handler not emitted").toBeDefined();
-    expect(start).toContain("state = D.Repo.update!(Ecto.Changeset.change(state, %{attempts: 1}))");
+    expect(start).toContain("D.Repo.update!(Ecto.Changeset.change(state, %{attempts: 1}))");
+    // The update is the last statement and nothing reads its result, so it is a
+    // bare side-effecting call — NOT a `state = …` rebind, which `mix compile
+    // --warnings-as-errors` would reject as an unused variable.
+    expect(start).not.toContain("state = D.Repo.update!");
   });
 });
