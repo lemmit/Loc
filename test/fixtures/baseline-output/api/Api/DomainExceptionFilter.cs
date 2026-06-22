@@ -56,6 +56,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             problem.Extensions["errors"] = fv.Errors
                 .Select(e => new { pointer = PointerOf(e.PropertyName), message = e.ErrorMessage })
                 .ToArray();
+            _log.LogWarning("{Event} message={Message} status={Status}", "domain_error", "Validation failed", 422);
             context.HttpContext.Response.Headers["x-request-id"] = trace_id;
             context.Result = new ObjectResult(problem)
             {
@@ -67,24 +68,28 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         }
         if (context.Exception is ForbiddenException fe)
         {
+            _log.LogWarning("{Event} message={Message} status={Status}", "forbidden", fe.Message, 403);
             context.Result = Problem(context, 403, "Forbidden", fe.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is DisallowedException dx)
         {
+            _log.LogWarning("{Event} message={Message} status={Status}", "disallowed", dx.Message, 409);
             context.Result = Problem(context, 409, "Disallowed", dx.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is DomainException de)
         {
+            _log.LogWarning("{Event} message={Message} status={Status}", "domain_error", de.Message, 400);
             context.Result = Problem(context, 400, "Bad Request", de.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is AggregateNotFoundException nf)
         {
+            _log.LogWarning("{Event} status={Status}", "not_found", 404);
             context.Result = Problem(context, 404, "Not Found", nf.Message, trace_id);
             context.ExceptionHandled = true;
             return;
