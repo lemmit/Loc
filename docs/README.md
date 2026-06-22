@@ -8,6 +8,7 @@ section that matches what you need.
 
 | Doc | When to read |
 | --- | --- |
+| [`language-reference/`](language-reference/README.md) | **The complete language reference** — every feature, one chapter at a time, each with the `.ddd` source *and* its real generated output in per-platform tabs. Start here when you want the exhaustive surface. |
 | [`language.md`](language.md) | You're writing or reading `.ddd` source.  Declarations, types, expressions, statements, validation rules. |
 | [`page-metamodel.md`](page-metamodel.md) | You're writing `ui` / `page` / `component` blocks. |
 | [`architecture.md`](architecture.md) | You want to know how `module`, `deployable`, `api`, `storage`, and `ui` compose into a runnable system. |
