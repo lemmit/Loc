@@ -40,6 +40,17 @@ export function joinRowClassName(assoc: AssociationIR): string {
   return `${pascal}Row`;
 }
 
+/** SQLAlchemy row-model class name for a value-collection child table
+ *  (`order_charges` → `OrderChargesRow`).  Derived from the shared
+ *  `childTable` so the schema and repository reference the same class. */
+export function valueCollectionRowClassName(childTable: string): string {
+  const pascal = childTable
+    .split("_")
+    .map((p) => (p.length === 0 ? p : p[0]!.toUpperCase() + p.slice(1)))
+    .join("");
+  return `${pascal}Row`;
+}
+
 /** True for `T id[]` reference-collection fields (persisted via a join
  *  table, no column on the owner). */
 export function isRefCollectionField(f: FieldIR): boolean {
@@ -52,6 +63,33 @@ export function isRefCollectionField(f: FieldIR): boolean {
 export function isValueCollectionField(f: FieldIR): boolean {
   const t = f.type.kind === "optional" ? f.type.inner : f.type;
   return t.kind === "array" && t.element.kind === "valueobject";
+}
+
+/** The value object's flattened columns for an id-less value-collection
+ *  child table — bare VO field names (`amount`, `currency`), recursively
+ *  flattened for nested value objects (`outer_inner`).  Mirrors the shared
+ *  migration's `valueObjectChildColumns` (no field-name prefix) so the
+ *  SQLAlchemy model matches the DDL exactly.  The owner FK + `ordinal` are
+ *  added by the schema emitter; this is only the VO payload. */
+export function valueCollectionChildColumns(
+  voName: string,
+  ctx: BoundedContextIR,
+  prefix = "",
+): PyColumn[] {
+  const vo = ctx.valueObjects.find((v) => v.name === voName);
+  if (!vo) return [];
+  return vo.fields.flatMap((vf) => {
+    const name = prefix ? `${prefix}_${snake(vf.name)}` : snake(vf.name);
+    const inner = vf.type.kind === "optional" ? vf.type.inner : vf.type;
+    if (inner.kind === "valueobject") {
+      return valueCollectionChildColumns(inner.name, ctx, name);
+    }
+    // Reuse the scalar column mapping, but force the flattened name.
+    return columnsFor(name, inner, vf.optional || vf.type.kind === "optional", ctx).map((c) => ({
+      ...c,
+      attr: name,
+    }));
+  });
 }
 
 /** Flattened column list for a field set (VOs expand; ref/VO
