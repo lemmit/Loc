@@ -220,9 +220,10 @@ function defaultInitForHeex(type: TypeIR): string {
     switch (type.name) {
       case "int":
       case "long":
-      case "decimal":
         return "0";
+      case "decimal":
       case "money":
+        // Both are Decimal structs — zero is `Decimal.new("0")`, not `0`.
         return 'Decimal.new("0")';
       case "bool":
         return "false";

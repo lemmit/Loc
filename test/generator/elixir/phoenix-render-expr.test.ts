@@ -47,8 +47,10 @@ describe("phoenix renderExpr — literals", () => {
     expect(renderExpr({ kind: "literal", lit: "now", value: "" }, ctx)).toBe("DateTime.utc_now()");
   });
 
-  it("renders decimal literals as plain numbers", () => {
-    expect(renderExpr({ kind: "literal", lit: "decimal", value: "1.5" }, ctx)).toBe("1.5");
+  it('wraps decimal literals in Decimal.new("…") (decimal is a Decimal struct on Elixir, like money)', () => {
+    expect(renderExpr({ kind: "literal", lit: "decimal", value: "1.5" }, ctx)).toBe(
+      'Decimal.new("1.5")',
+    );
   });
 
   it('wraps money literals in Decimal.new("…")', () => {
@@ -448,7 +450,7 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
         },
         ctx,
       ),
-    ).toBe('%MyApp.Money{amount: 9.99, currency_code: "USD"}');
+    ).toBe('%MyApp.Money{amount: Decimal.new("9.99"), currency_code: "USD"}');
   });
 
   it("renders entity-part constructor (kind: new) with snake field keys", () => {

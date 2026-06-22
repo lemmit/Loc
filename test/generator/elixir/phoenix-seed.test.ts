@@ -48,10 +48,10 @@ describe("phoenix database seeding (Phase 3b, domain path)", () => {
 
     // Through the domain create action (D-SEED-PATH).
     expect(seeds).toContain(
-      'Web.Catalog.create_product!(%{sku: "BASE-1", price: %Web.Catalog.Money{amount: 1.0, currency: "USD"}, tier: :free, stock: 1})',
+      'Web.Catalog.create_product!(%{sku: "BASE-1", price: %Web.Catalog.Money{amount: Decimal.new("1.0"), currency: "USD"}, tier: :free, stock: 1})',
     );
     expect(seeds).toContain(
-      'Web.Catalog.create_product!(%{sku: "DEMO-1", price: %Web.Catalog.Money{amount: 9.99, currency: "USD"}, tier: :pro, stock: 10})',
+      'Web.Catalog.create_product!(%{sku: "DEMO-1", price: %Web.Catalog.Money{amount: Decimal.new("9.99"), currency: "USD"}, tier: :pro, stock: 10})',
     );
   });
 

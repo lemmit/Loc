@@ -128,7 +128,9 @@ describe("elixir domain `test` → ExUnit emission", () => {
     const src = findFile(files, /ash_api\/test\/selling\/order_test\.exs$/);
 
     // The in-memory value-object field read runs against the embedded struct.
-    expect(src).toContain('m = %AshApi.Selling.Money{amount: 10.5, currency: "USD"}');
+    expect(src).toContain(
+      'm = %AshApi.Selling.Money{amount: Decimal.new("10.5"), currency: "USD"}',
+    );
     expect(src).toContain('assert m.currency == "USD"');
 
     // Create-invariant rejection → a changeset-build `valid?` check (no DB).
