@@ -275,14 +275,18 @@ describe("phoenixLiveView pipeline", () => {
     // dev.exs no longer overrides with the bracketed text format.
     const dev = files.get("phoenix_app/config/dev.exs")!;
     expect(dev).not.toMatch(/config :logger, :console, format:/);
-    // prod.exs honours the runtime LOG_LEVEL knob (default info) instead of
-    // hardcoding :info; warn -> :warning, trace -> :debug.
+    // runtime.exs honours the runtime LOG_LEVEL knob (default info) — read at
+    // boot, not baked at compile time in prod.exs; warn -> :warning,
+    // trace -> :debug.  Extracted to a `log_level` variable because an inline
+    // `config :logger, level: case ... end` binds the do/end to `config`.
     const prod = files.get("phoenix_app/config/prod.exs")!;
-    expect(prod).not.toMatch(/config :logger, level: :info/);
-    expect(prod).toMatch(/System\.get_env\("LOG_LEVEL"\) \|\| "info"/);
-    expect(prod).toMatch(/"warn" -> :warning/);
-    expect(prod).toMatch(/"trace" -> :debug/);
-    expect(prod).toMatch(/other -> String\.to_atom\(other\)/);
+    expect(prod).not.toMatch(/config :logger, level:/);
+    const runtime = files.get("phoenix_app/config/runtime.exs")!;
+    expect(runtime).toMatch(/System\.get_env\("LOG_LEVEL"\) \|\| "info"/);
+    expect(runtime).toMatch(/"warn" -> :warning/);
+    expect(runtime).toMatch(/"trace" -> :debug/);
+    expect(runtime).toMatch(/other -> String\.to_atom\(other\)/);
+    expect(runtime).toMatch(/config :logger, level: log_level/);
   });
 
   it("emits one LiveView module per scaffolded page + router lines", async () => {
