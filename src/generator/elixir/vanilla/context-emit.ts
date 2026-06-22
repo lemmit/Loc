@@ -14,6 +14,7 @@ import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { stmtUsesParam } from "../domain/predicates.js";
 import type { RenderCtx } from "../render-expr.js";
+import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import {
   customFindsOfAgg,
@@ -181,12 +182,23 @@ function renderNamedOpFunction(
   // history table inside a transaction.  `captureProvenance` gates the body
   // rendering; `hasProv` gates the transactional persist tail.
   const hasProv = opHasProvSite(op);
+  // An audited operation captures a who/what/when + before/after wire snapshot
+  // into the `audit_records` table, recorded INSIDE the save transaction so the
+  // row commits atomically with the aggregate update.  Like provenance, `audited`
+  // forces the transactional persist tail — a bare changeset pipe has no
+  // transaction to record into.  Where both are present they SHARE one transaction.
+  const hasAudit = op.audited === true;
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
     foundation: "vanilla",
     captureProvenance: hasProv,
   };
+
+  // The `before` wire snapshot — taken from the ORIGINAL `record` before the
+  // body rebinds any field, so it reflects the pre-mutation state (parity with
+  // the Hono/Python `before` captured before the mutation).
+  const beforeBind = hasAudit ? `    __audit_before = ${wireSnapshot("record")}\n` : "";
 
   // Bind only the params the body references, so an unused param never trips
   // `mix compile --warnings-as-errors`.  (`record` is always used — the persist
@@ -232,28 +244,47 @@ function renderNamedOpFunction(
   const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");
 
   const prelude = [...paramBinds, ...bodyLines].join("\n");
-  const preludeBlock = prelude ? `${prelude}\n` : "";
+  const preludeBlock = prelude ? `${beforeBind}${prelude}\n` : beforeBind;
 
-  // Persist tail.  Without provenance: the plain changeset pipe.  With it: build
-  // the changeset, then run the save + history flush in ONE transaction so the
-  // `provenance_records` rows commit atomically with the aggregate update.
+  // Persist tail.  Without provenance or audit: the plain changeset pipe.  With
+  // either: build the changeset, then run the save + (history flush and/or audit
+  // record) in ONE shared transaction so the derived rows commit atomically with
+  // the aggregate update.
   const appModule = facadeMod.split(".")[0]!;
-  const persist = hasProv
-    ? `    changeset =
+  const aggPascalName = upperFirst(agg.name);
+  const txTail: string[] = [];
+  if (hasProv) txTail.push(`          ${appModule}.Provenance.flush(${appModule}.Repo)`);
+  if (hasAudit) {
+    txTail.push(
+      auditRecordCall({
+        appModule,
+        operationId: `${op.name}${aggPascalName}`,
+        action: op.name,
+        targetType: aggPascalName,
+        targetId: "saved.id",
+        before: "__audit_before",
+        after: wireSnapshot("saved"),
+        indent: "          ",
+      }),
+    );
+  }
+  const persist =
+    hasProv || hasAudit
+      ? `    changeset =
       record
       |> Ecto.Changeset.change(%{})${putBlock6}
 
     ${appModule}.Repo.transaction(fn ->
       case ${repoMod}.persist_change(changeset) do
         {:ok, saved} ->
-          ${appModule}.Provenance.flush(${appModule}.Repo)
+${txTail.join("\n")}
           saved
 
         {:error, reason} ->
           ${appModule}.Repo.rollback(reason)
       end
     end)`
-    : `    record
+      : `    record
     |> Ecto.Changeset.change(%{})${putBlock}
     |> ${repoMod}.persist_change()`;
 
