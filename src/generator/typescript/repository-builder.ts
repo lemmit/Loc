@@ -196,7 +196,7 @@ export function buildRepositoryFile(
     ...(repo?.finds ?? []).flatMap((find) => [findQueryMethod(agg, find, ctx, filterPred), ""]),
     ...viewFinds.flatMap((find) => [findQueryMethod(agg, find, ctx, filterPred), ""]),
     // `run<Name>` per context retrieval targeting this aggregate.
-    ...aggRetrievals.flatMap((r) => [runMethod(agg, r, ctx), ""]),
+    ...aggRetrievals.flatMap((r) => [runMethod(agg, r, ctx, filterPred), ""]),
     // toWire — domain instance → wire DTO (plain object).  Used by the
     // Hono routes layer to serialize responses; the shape mirrors the
     // .NET <Agg>Response record so the cross-check sees identical specs.

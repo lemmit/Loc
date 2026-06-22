@@ -466,6 +466,7 @@ export function runMethod(
   agg: EnrichedAggregateIR,
   retrieval: RetrievalIR,
   ctx: EnrichedBoundedContextIR,
+  filterPred: string | null = null,
 ): string {
   const tableName = repoTableName(agg, ctx);
   const methodName = `run${upperFirst(retrieval.name)}`;
@@ -493,7 +494,12 @@ export function runMethod(
         .map(renderCriterionArg)
         .join(", ")})`
     : lowered.expr;
-  const whereClause = `.where(${withKind(whereInner, kindPred)})`;
+  // A capability `filter` is always-on for every root read — including
+  // criterion retrievals.  AND it into the retrieval's own `where` exactly as
+  // the find path does (buildFindWhereClause); retrievals carry no `ignoring`
+  // bypass, so the full predicate applies.  Omitting it leaked soft-deleted /
+  // other-tenant rows through `run<Name>` (silent gap).
+  const whereClause = `.where(${combinePredicate(withKind(whereInner, kindPred), filterPred)})`;
 
   // `sort` → `.orderBy(asc(col), desc(col), …)`.  Only the first path
   // segment is used in v1 (a direct column); nested / collection sort
