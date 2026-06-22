@@ -219,7 +219,9 @@ describe("system / module / deployable", () => {
       // per-file applied (id/name/duration_ms) inside the loop
       expect(migrate).toContain('"migration_applied",');
       expect(migrate).toContain("duration_ms=round((time.monotonic() - started) * 1000, 3),");
-      expect(migrate).toContain('log("error", "migration_failed", id=tag, name=tag, error=str(exc))');
+      expect(migrate).toContain(
+        'log("error", "migration_failed", id=tag, name=tag, error=str(exc))',
+      );
       expect(migrate).toContain('log("info", "migrations_complete", applied=count)');
     });
   });

@@ -147,10 +147,32 @@ var app = builder.Build();
 // Apply pending EF Core migrations before serving traffic.  Idempotent —
 // EF tracks applied versions in the __EFMigrationsHistory table.  Runs
 // synchronously at startup so the schema is current on first request.
+// Bracketed with the catalog migration-lifecycle events (observability.md)
+// — same event names + level Hono/Python emit.  EF exposes the pending
+// migration ids before applying them, so we can emit migration_applied
+// per id (no cheap per-migration duration, so duration_ms is omitted).
 using (var migrationScope = app.Services.CreateScope())
 {
     var db = migrationScope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
+    var migrationLog = migrationScope.ServiceProvider
+        .GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+        .CreateLogger("Migrations");
+    var pendingMigrations = db.Database.GetPendingMigrations().ToList();
+    migrationLog.LogInformation("{Event} count={Count}", "migrations_starting", pendingMigrations.Count);
+    try
+    {
+        db.Database.Migrate();
+        foreach (var migrationId in pendingMigrations)
+        {
+            migrationLog.LogInformation("{Event} id={Id} name={Name}", "migration_applied", migrationId, migrationId);
+        }
+        migrationLog.LogInformation("{Event} applied={Applied}", "migrations_complete", pendingMigrations.Count);
+    }
+    catch (Exception migrationError)
+    {
+        migrationLog.LogError(migrationError, "{Event} error={Error}", "migration_failed", migrationError.Message);
+        throw;
+    }
 }
 
 // Catalog server-lifecycle events.  Same event names + level Hono and
