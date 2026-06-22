@@ -278,6 +278,13 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
             action: ":list",
           });
         }
+        // An abstract inheritance base exposes only the polymorphic `list`
+        // (union read) above — it owns no table, repository, or write actions,
+        // so skip create / per-find / get / update / destroy / per-op routes
+        // (their controller `def`s + code-interface fns don't exist).
+        if (agg.isAbstract) {
+          continue;
+        }
         if (!crudOps.has("create")) {
           apiRoutes.push({
             method: "post",
@@ -854,6 +861,12 @@ ${wireInLine}    attrs = Map.drop(params, ["id"])
   ];
   const crud = crudSegments
     .filter((s) => !crudOps.has(s.name))
+    // An abstract inheritance base is never instantiated and owns no table: the
+    // Ash domain defines only the polymorphic `list_<base>` read (the union of
+    // its concrete subtypes), so the controller exposes just `list` — a `get`/
+    // `create`/`update`/`destroy` would call an undefined `<base>!` code
+    // interface (compile error under --warnings-as-errors).
+    .filter((s) => !agg.isAbstract || s.name === "list")
     .map((s) => s.src)
     .join("\n\n");
 
