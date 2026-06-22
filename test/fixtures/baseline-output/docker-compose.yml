@@ -23,6 +23,7 @@ services:
         condition: service_healthy
     environment:
       ConnectionStrings__Default: "Host=db;Port=5432;Database=api;Username=postgres;Password=postgres"
+      LOG_LEVEL: "info"
     ports:
       - "8080:8080"
     healthcheck:
@@ -38,6 +39,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: "postgres://postgres:postgres@db:5432/catalog_web"
+      LOG_LEVEL: "info"
     ports:
       - "3000:3000"
     healthcheck:
@@ -53,6 +55,7 @@ services:
         condition: service_healthy
     environment:
       ConnectionStrings__Default: "Host=db;Port=5432;Database=catalog_api;Username=postgres;Password=postgres"
+      LOG_LEVEL: "info"
     ports:
       - "8081:8080"
     healthcheck:
