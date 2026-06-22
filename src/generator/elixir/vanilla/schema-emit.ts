@@ -28,6 +28,7 @@ import { isVanillaDocAgg, renderDocSchema } from "./document-emit.js";
 import { renderAggregatePureCore } from "./domain-core-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
+import { isRefCollField, manyToManyLine, refCollFields } from "./ref-collection-emit.js";
 import { valueCollectionModule, valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
 export function emitVanillaSchemas(
@@ -151,7 +152,19 @@ function renderSchema(
 ): string {
   const moduleName = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const tableName = snake(plural(agg.name));
-  const declaredLines = agg.fields.map((f) => renderFieldLine(f, enumsByName)).filter(Boolean);
+  // `X id[]` reference collections are NOT stored columns — they live in join
+  // tables and are wired below as `many_to_many` relationships.  Drop them from
+  // the plain `field` lines (the migration emits no such column, so a
+  // `{:array, :binary_id}` field would query a phantom column → runtime 500).
+  const declaredLines = agg.fields
+    .filter((f) => !isRefCollField(f))
+    .map((f) => renderFieldLine(f, enumsByName))
+    .filter(Boolean);
+  // `many_to_many :party, App.Ctx.Pokemon, join_through: "<schema>.trainer_party", …`
+  // — the runtime side of the already-correct join migration.
+  const refCollLines = refCollFields(agg).map((rc) =>
+    manyToManyLine(appModule, ctxModule, rc, schemaPrefix),
+  );
   // Co-located provenance backing columns — one `<field>_provenance` jsonb
   // (the pass-through `Provenance.Json` Ecto type) per provenanced field,
   // holding the current lineage persisted on the row.  Never cast from client
@@ -195,7 +208,8 @@ function renderSchema(
   // The bundled Ecto `timestamps()` (→ `inserted_at`/`updated_at`) is dropped
   // when an explicit `updated_at` audit field is present (it would collide).
   const timestampsLine = hasUpdatedAt ? "" : "    timestamps(type: :utc_datetime)";
-  const schemaBody = [fieldLines, containLines, valueCollectionLines, timestampsLine]
+  const refCollBlock = refCollLines.join("\n");
+  const schemaBody = [fieldLines, refCollBlock, containLines, valueCollectionLines, timestampsLine]
     .filter(Boolean)
     .join("\n");
   const prefixLine = schemaPrefix ? `  @schema_prefix ${JSON.stringify(schemaPrefix)}\n` : "";
@@ -230,8 +244,9 @@ interface AggField {
 }
 
 function renderFieldLine(field: AggField, enumsByName: Map<string, EnumIR>): string {
-  // Skip system-provided fields and ref-collection arrays (the latter
-  // live in join tables; covered when a richer fixture exercises them).
+  // Skip system-provided fields.  Reference-collection arrays (`X id[]`) are
+  // filtered out by the caller before this point — they live in join tables and
+  // are emitted as `many_to_many` relationships, not stored columns.
   if (field.name === "id" || field.name === "createdAt" || field.name === "updatedAt") return "";
   // Value-object collection arrays (`charges: Money[]`) persist as a `has_many`
   // child schema (emitted separately), NOT a `{:array, :map}` column — skip the

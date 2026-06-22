@@ -24,6 +24,7 @@ import { snake, upperFirst } from "../../../util/naming.js";
 import { ectoValidator, voHasConstraints } from "./changeset-validators.js";
 import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
+import { isRefCollField, refCollFieldNames } from "./ref-collection-emit.js";
 import { valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
 interface AggField {
@@ -79,9 +80,17 @@ function renderChangeset(
   // associations cast via `cast_assoc`, NOT scalar columns — exclude them from
   // the flat `cast`/`validate_required` field lists (casting an association
   // field raises `unknown field`).
+  // Reference-collection (`X id[]`) fields are `many_to_many` relationships, not
+  // castable columns either — `cast`ing one raises `unknown field`, and a
+  // `validate_required` on a relationship is meaningless.  They're wired via
+  // `put_assoc` on the create/update path (repository-emit), so drop them too.
   const vcFieldNames = new Set(valueCollectionsWithVo(agg, ctx).map((v) => v.vc.fieldName));
   const allFields = (agg.fields as AggField[]).filter(
-    (f) => !SYSTEM_FIELDS.has(f.name) && !isManaged(f) && !vcFieldNames.has(f.name),
+    (f) =>
+      !SYSTEM_FIELDS.has(f.name) &&
+      !isManaged(f) &&
+      !vcFieldNames.has(f.name) &&
+      !isRefCollField(f),
   );
   const requiredFields = allFields.filter((f) => !f.optional);
 
@@ -234,9 +243,17 @@ ${keyAliasPairs.join(",\n")}
   // body and `put_change`s the assigned columns directly (context-emit).  The
   // old operation helper `cast`d the op's *params*, which raises `unknown field`
   // at runtime whenever a param isn't a column (e.g. `reprice(qty, price)`).
+  // Reference-collection params are `many_to_many` relationships, not castable
+  // columns — exclude them from the per-action helper's `cast`/`validate_required`
+  // (the runtime create/update path wires them via `put_assoc`).
+  const refColl = refCollFieldNames(agg);
   const actionHelpers = [
-    ...(agg.creates ?? []).map((op) => renderActionHelper(aggModule, op, "create", vcFieldNames)),
-    ...(agg.destroys ?? []).map((op) => renderActionHelper(aggModule, op, "destroy", vcFieldNames)),
+    ...(agg.creates ?? []).map((op) =>
+      renderActionHelper(aggModule, op, "create", vcFieldNames, refColl),
+    ),
+    ...(agg.destroys ?? []).map((op) =>
+      renderActionHelper(aggModule, op, "destroy", vcFieldNames, refColl),
+    ),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -269,11 +286,14 @@ function renderActionHelper(
   /** Value-object collection field names — excluded from a cast allow-list
    *  (they are `has_many` associations cast via `cast_assoc`, not columns). */
   vcFieldNames: ReadonlySet<string> = new Set(),
+  /** Reference-collection field names (snake-cased) — excluded too; they are
+   *  `many_to_many` relationships wired via `put_assoc`, not castable columns. */
+  refColl: ReadonlySet<string> = new Set(),
 ): string {
   const aggPascal = aggModule.split(".").pop()!;
   const opName = snake(op.name);
   const paramCols = op.params
-    .filter((p) => !vcFieldNames.has(p.name))
+    .filter((p) => !vcFieldNames.has(p.name) && !refColl.has(snake(p.name)))
     .map((p) => `:${snake(p.name)}`)
     .join(", ");
   const allowList = paramCols ? `[${paramCols}]` : "[]";
