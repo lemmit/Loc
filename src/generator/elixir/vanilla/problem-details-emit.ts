@@ -11,6 +11,8 @@
 // `applyServerErrors` consumes either backend's output identically.
 // ---------------------------------------------------------------------------
 
+import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+
 export function renderVanillaProblemDetailsModule(appModule: string): string {
   return `# Auto-generated.  Do not edit by hand.
 defmodule ${appModule}Web.ProblemDetails do
@@ -39,12 +41,18 @@ defmodule ${appModule}Web.ProblemDetails do
   """
 
   import Plug.Conn
+  require Logger
 
   @doc """
   Send a 422 ProblemDetails response carrying the §3.2 \`errors[]\`
   extension built from an \`Ecto.Changeset\` errors map.
   """
   def validation_error_response(conn, %Ecto.Changeset{} = changeset) do
+    ${renderPhoenixLogCall("domainError", [
+      { name: "message", valueExpr: `"Validation failed"` },
+      { name: "status", valueExpr: "422" },
+    ])}
+
     pointer_errors =
       changeset.errors
       |> List.flatten()
@@ -80,6 +88,30 @@ defmodule ${appModule}Web.ProblemDetails do
   Send a base ProblemDetails response (no \`errors[]\` extension).
   """
   def problem_response(conn, status, title, detail) do
+    # Classify the fault onto the cross-backend catalog event by status, so
+    # every fault response (incl. not_found_response/3, which delegates here)
+    # surfaces a structured log line matching Hono/.NET/Python. Emitted with
+    # each fault's real HTTP status (not normalised).
+    case status do
+      403 -> ${renderPhoenixLogCall("forbidden", [
+        { name: "message", valueExpr: "detail" },
+        { name: "status", valueExpr: "status" },
+      ])}
+      409 -> ${renderPhoenixLogCall("disallowed", [
+        { name: "message", valueExpr: "detail" },
+        { name: "status", valueExpr: "status" },
+      ])}
+      404 -> ${renderPhoenixLogCall("notFound", [{ name: "status", valueExpr: "status" }])}
+      _ when status >= 500 -> ${renderPhoenixLogCall("internalError", [
+        { name: "error", valueExpr: "detail" },
+        { name: "status", valueExpr: "status" },
+      ])}
+      _ -> ${renderPhoenixLogCall("domainError", [
+        { name: "message", valueExpr: "detail" },
+        { name: "status", valueExpr: "status" },
+      ])}
+    end
+
     body =
       Jason.encode!(%{
         type: "about:blank",
