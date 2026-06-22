@@ -100,6 +100,14 @@ describe.skipIf(!ENABLED)(
     it.each(
       pickCases([
         { name: "acme-lv.ddd" },
+        // Aggregate inheritance (TPH Party/sharedTable + TPC Asset/ownTable)
+        // WITH an API surface, so the abstract base's controller is emitted.
+        // Regression guard: an abstract base is never instantiated and owns no
+        // table, so its controller exposes only the polymorphic `list_<base>`
+        // read — a get/create/update/destroy would call an undefined `<base>!`
+        // Ash code-interface fn, which only fails at `mix compile
+        // --warnings-as-errors`, so this fixture is the real bar for it.
+        { name: "inheritance.ddd" },
         // Bucket E2 — LiveView page statement coverage: a custom page whose
         // Button handlers exercise the StmtIR kinds the HEEx hoisted-handler
         // used to drop as `# TODO` (scalar `+=` / `-=` → pipe-`assign`
