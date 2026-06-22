@@ -1,5 +1,6 @@
 import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
+import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 
 // ---------------------------------------------------------------------------
 // Config + release shell files — config/config.exs (with the Ash domain
@@ -167,53 +168,125 @@ export function renderRelServer(appName: string): string {
   // (which the Dockerfile copies into `/app/`, so the binary lives
   // at `/app/bin/<app>`, NOT `/app/<app>/bin/<app>`).
   //
-  // Run pending Ecto migrations before booting the server.  The
-  // per-backend database is created by the compose `db-init` SQL, but its
-  // schema is empty on first boot — without this `eval` the server starts
-  // against a tableless DB and every query 500s with `42P01 relation does
-  // not exist`.  Mirrors the .NET backend's migrate-on-startup; the SQL
-  // migrations under priv/repo/migrations ship inside the release.
+  // Migrations are no longer run here via a separate `eval` process.  The
+  // generated app runs them IN-PROCESS at boot — a supervised one-shot
+  // `<App>.Release.Migrator` child placed BEFORE the Endpoint in
+  // `Application.start/2` — so the schema exists before the endpoint serves
+  // traffic AND the migration-lifecycle log events (`migrations_starting` /
+  // `migration_applied` / `migrations_complete` / `migration_failed`) surface
+  // on the same structured JSON stream as the rest of the app.  `start` boots
+  // the supervision tree (which includes that migrator child), so it's all
+  // that's needed here.  `<App>.Release.migrate/0` is still emitted for
+  // out-of-band manual runs (`bin/<app> eval`), now sharing the same
+  // instrumented `Ecto.Migrator` path.
   return `#!/bin/sh
 # Auto-generated.
 set -eu
-
-./bin/${appName} eval "${snakeToModule(appName)}.Release.migrate()"
 
 exec "./bin/${appName}" start
 `;
 }
 
-/** Convert a snake_case OTP app name (`phoenix_api`) to its PascalCase
- *  module prefix (`PhoenixApi`) — local to keep `renderRelServer`'s single
- *  `appName` argument unchanged. */
-function snakeToModule(appName: string): string {
-  return appName
-    .split("_")
-    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-    .join("");
-}
-
-/** `lib/<app>/release.ex` — release task module.  `migrate/0` runs all
- *  pending Ecto migrations for every configured repo; invoked by
- *  `rel/overlays/bin/server` before the server starts so the schema exists
- *  on first boot.  The canonical Phoenix-release migration pattern (mix
- *  tasks like `ecto.migrate` aren't available in a release). */
+/** `lib/<app>/release.ex` — release task module + the in-process boot
+ *  migrator.
+ *
+ *  `migrate/0` is the in-process boot migrator: `Application.start/2` calls it
+ *  BEFORE building the supervision tree (and so before the Phoenix Endpoint
+ *  starts), so a fresh per-backend database gets its schema before any request
+ *  is served (the canonical Phoenix migrate-at-boot pattern).  It runs every
+ *  pending Ecto migration for each configured repo via `Ecto.Migrator`,
+ *  emitting the cross-backend migration-lifecycle log events around the run:
+ *    - `migrations_starting {count}` (info) before,
+ *    - `migration_applied {id, name}` (info) per applied version,
+ *    - `migrations_complete {applied}` (info) after,
+ *    - `migration_failed {id, name, error}` (error) in the failure path,
+ *      re-raised so a failed migration crashes boot (fail-fast, like the
+ *      other backends' boot runners).
+ *  These match the catalog entries in `src/generator/_obs/log-events.ts`
+ *  exactly, so a downstream log consumer sees one schema across all backends.
+ *
+ *  `migrate/0` doubles as the out-of-band manual-run entry point
+ *  (`bin/<app> eval "<App>.Release.migrate()"`).  It uses
+ *  `Ecto.Migrator.with_repo`, which starts + stops its own short-lived Repo,
+ *  so it does not depend on the supervised Repo.  Foundation-neutral (pure
+ *  Ecto), so both the Ash and vanilla foundations emit it unchanged. */
 export function renderRelease(appName: string, appModule: string): string {
+  // Migration-lifecycle log calls — identical catalog events the Hono / .NET
+  // / Python / Java boot runners emit, so a cross-backend dashboard pivots on
+  // one event name (see PR-C #1509 + PR-A #1508).
+  const startingCall = renderPhoenixLogCall("migrationsStarting", [
+    { name: "count", valueExpr: "length(pending)" },
+  ]);
+  const appliedCall = renderPhoenixLogCall("migrationApplied", [
+    { name: "id", valueExpr: "to_string(version)" },
+    { name: "name", valueExpr: "name" },
+  ]);
+  const completeCall = renderPhoenixLogCall("migrationsComplete", [
+    { name: "applied", valueExpr: "length(applied)" },
+  ]);
+  const failedCall = renderPhoenixLogCall("migrationFailed", [
+    { name: "id", valueExpr: "to_string(version)" },
+    { name: "name", valueExpr: "name" },
+    { name: "error", valueExpr: "Exception.message(error)" },
+  ]);
   return `defmodule ${appModule}.Release do
   @moduledoc """
-  Release task entry points.  \`migrate/0\` runs every pending Ecto
-  migration for each configured repo; \`rel/overlays/bin/server\` calls it
-  before booting so a fresh per-backend database gets its schema on first
-  start (the generated SQL migrations under priv/repo/migrations ship inside
-  the release).
+  Release task entry points + the in-process boot migrator.
+
+  \`migrate/0\` is the in-process boot migrator: \`${appModule}.Application.start/2\`
+  calls it BEFORE the supervision tree (and so the Phoenix Endpoint) starts, so
+  a fresh per-backend database gets its schema before any request is served
+  (the canonical Phoenix migrate-at-boot pattern; the generated SQL migrations
+  under priv/repo/migrations ship inside the release).  It emits the
+  cross-backend migration-lifecycle log events (\`migrations_starting\` /
+  \`migration_applied\` / \`migrations_complete\` / \`migration_failed\`) over the
+  JSON log stream.  It doubles as the out-of-band manual entry point
+  (\`bin/<app> eval "${appModule}.Release.migrate()"\`).
   """
+  require Logger
   @app :${appName}
 
   def migrate do
     load_app()
 
     for repo <- repos() do
-      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
+      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &run_migrations(&1))
+    end
+  end
+
+  # Runs the repo's pending migrations with the lifecycle events bracketed
+  # around the \`Ecto.Migrator.run\`.  \`Ecto.Migrator.migrations/1\` reports the
+  # full {status, version, name} list; the pending ones (\`:down\`) give the
+  # pre-run count + the version→name map used to label each applied version.
+  defp run_migrations(repo) do
+    all = Ecto.Migrator.migrations(repo)
+    pending = Enum.filter(all, fn {status, _v, _n} -> status == :down end)
+    names = Map.new(all, fn {_status, v, n} -> {v, to_string(n)} end)
+    ${startingCall}
+
+    try do
+      applied = Ecto.Migrator.run(repo, :up, all: true)
+
+      for version <- applied do
+        name = Map.get(names, version, "")
+        ${appliedCall}
+      end
+
+      ${completeCall}
+      applied
+    rescue
+      error ->
+        # Best-effort: blame the lowest still-pending version (the one the run
+        # would have started on).  \`id\`/\`name\` are "" when nothing was pending.
+        version =
+          case pending do
+            [{_status, v, _n} | _] -> v
+            _ -> nil
+          end
+
+        name = if version, do: Map.get(names, version, ""), else: ""
+        ${failedCall}
+        reraise error, __STACKTRACE__
     end
   end
 

@@ -68,6 +68,18 @@ defmodule ${appModule}.Application do
     env = System.get_env("MIX_ENV") || "prod"
     ${startingCall}
 
+    # In-process boot migrator — run every pending Ecto migration BEFORE the
+    # supervision tree (and so the Endpoint) starts, so the schema exists
+    # before any request is served.  ${appModule}.Release.migrate/0 brackets
+    # the run with the migration-lifecycle log events (migrations_starting /
+    # migration_applied / migrations_complete / migration_failed) and starts /
+    # stops its own short-lived Repo via Ecto.Migrator.with_repo — it does NOT
+    # depend on the supervised Repo below.  A failed migration raises here,
+    # crashing boot (fail-fast, like the other backends' boot runners) rather
+    # than letting the Endpoint serve against a half-migrated schema.  Skipped
+    # under MIX_ENV=test, where the Ecto SQL sandbox owns migrations.
+    if env != "test", do: ${appModule}.Release.migrate()
+
     children = [
       ${appModule}.Repo,
       {Phoenix.PubSub, name: ${appModule}.PubSub},
