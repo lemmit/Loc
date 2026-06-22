@@ -462,4 +462,4 @@ Three identifiers resolve specially in expression position, plus the implicit `t
 
 ---
 
-Filters in repository `find` clauses, criteria, and views are this same expression language under a different validator lens (they must be *queryable* — translatable to SQL/Ash). See [`../criterion.md`](../criterion.md) for the predicate-specification surface and the queryability rules; [Statements](06-statements.md) for the `:=` / `+=` / `let` / `emit` forms that expressions appear inside.
+Filters in repository `find` clauses, criteria, and views are this same expression language under a different validator lens (they must be *queryable* — translatable to SQL/Ash). See [`../criterion.md`](../criterion.md) for the predicate-specification surface and the queryability rules; [Statements](06-behavior-and-statements.md) for the `:=` / `+=` / `let` / `emit` forms that expressions appear inside.
