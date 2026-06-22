@@ -1136,9 +1136,12 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 //       backend family is NOT in the supported set.  Honored by dotnet (EF
 //       `IgnoreQueryFilters`), node (Drizzle), elixir on BOTH foundations
 //       (vanilla Ecto omits the `where:`; Ash uses the §11.6 base_filter→per-read
-//       triage), and java (§11.6 @SQLRestriction→bypassable @Filter triage,
-//       disabled per-read via the Hibernate Session).  Python remains deferred
-//       (fail-fast until its slice).
+//       triage), java (§11.6 @SQLRestriction→bypassable @Filter triage,
+//       disabled per-read via the Hibernate Session), and python (SQLAlchemy
+//       has no global filter, so each read AND-s its predicates explicitly —
+//       a bypassing find/view/inline-run simply OMITS the named conjunct).
+//       Every honoring family is now in the set; the diagnostic only fires for
+//       a backend with no DB read path (which never carries `ignoring`).
 // ---------------------------------------------------------------------------
 
 /** Backend families that honor an `ignoring` filter-bypass clause.  `dotnet`
@@ -1151,8 +1154,12 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
  *  always-on `@SQLRestriction` for a bypassable Hibernate named `@Filter`, which
  *  a bypassing read disables via `session.disableFilter`/`enableFilter`;
  *  principal filters omit the JPQL conjunct; document repos re-apply promoted
- *  caps per-find) all honor it.  `python` remains deferred. */
-const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node", "elixir", "java"]);
+ *  caps per-find), and `python` (SQLAlchemy has no global filter, so each read
+ *  AND-s its capability predicates explicitly via `contextFilterPredicate`; a
+ *  bypassing find/view omits the named conjunct statically, and a shared
+ *  `run_<retrieval>` omits the union of its inline call-sites' bypasses) all
+ *  honor it. */
+const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node", "elixir", "java", "python"]);
 
 /** Whether `dep`'s backend honors `ignoring` filter-bypass.  A backend must
  *  not pass this gate while still silently filtering — a family is supported

@@ -7,7 +7,8 @@
 //
 // Validator (validateFilterBypassSupport), over a full system with a deployable:
 //   loom.filter-bypass-unsupported        — read served by an unsupported backend
-//                                            (python; dotnet/node/elixir/java honor it)
+//                                            (all DB backends — dotnet/node/elixir/
+//                                            java/python — now honor it)
 //   loom.filter-bypass-unknown-capability — ignoring an unimplemented capability
 //   loom.filter-bypass-no-filter          — ignoring a stamps-only capability
 
@@ -201,6 +202,18 @@ describe("ignoring filter-bypass validator gates", () => {
           find recent(): Order[] where this.total > 0 ignoring softDeletable
         }`,
         "java",
+      ),
+    );
+    expect(diags).toEqual([]);
+  });
+
+  it("accepts a valid bypass on a python deployable (SQLAlchemy omits the conjunct)", async () => {
+    const diags = await bypassDiags(
+      systemWith(
+        `repository R for Order {
+          find recent(): Order[] where this.total > 0 ignoring softDeletable
+        }`,
+        "python",
       ),
     );
     expect(diags).toEqual([]);

@@ -14,6 +14,7 @@ import {
   type RetrievalIR,
   type TypeIR,
   type ViewIR,
+  type WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import {
   baseOf,
@@ -24,7 +25,12 @@ import {
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { provColumn, provenancedFieldsOf } from "./emit/provenance.js";
-import { contextFilterPredicate, lowerToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
+import {
+  contextFilterPredicate,
+  type FilterBypass,
+  lowerToSqlAlchemy,
+  type PyPredicate,
+} from "./find-predicate.js";
 import {
   columnsForFields,
   isRefCollectionField,
@@ -77,6 +83,13 @@ export function buildPyRepositoryFile(
   // Principal-referencing filters are gated by the IR validator on python
   // (W1b), so only non-principal predicates reach here.
   const filterPred = contextFilterPredicate(agg, ctx);
+  // Inline `Repo.findAll(<Criterion>) ignoring …` / `Repo.run(…) ignoring …`
+  // call-sites lower to `run_<retrieval>(…)`; that method is SHARED across
+  // sites, so its baked-in capability filter must OMIT the UNION of the caps
+  // every inline site bypasses (named-filter-bypass.md §11.6 — the static
+  // analogue of java's `inlineRunBypassesByRetrieval`).  Keyed by retrieval
+  // name; empty when no inline read of this aggregate carries `ignoring`.
+  const inlineRunBypasses = inlineRunBypassesByRetrieval(ctx, agg.name);
   // Pin the enriched element type — the AggregateIR ∩ Enriched
   // intersection's `.parts` otherwise infers the un-enriched element.
   const parts: EnrichedEntityPartIR[] = agg.parts;
@@ -129,7 +142,10 @@ export function buildPyRepositoryFile(
     )})).scalars().all()`,
     "        return [await self._hydrate(row) for row in rows]",
     ...aggregateViews(agg, ctx).flatMap((v) => ["", viewFindMethod(agg, v, ctx, filterPred)]),
-    ...aggregateRetrievals(agg, ctx).flatMap((r) => ["", runMethod(agg, r, ctx, filterPred)]),
+    ...aggregateRetrievals(agg, ctx).flatMap((r) => [
+      "",
+      runMethod(agg, r, ctx, filterPred, inlineRunBypasses.get(r.name)),
+    ]),
     "",
     saveMethod(agg, ctx, aggVar),
     agg.canonicalDestroy ? ["", deleteMethod(agg, ctx)] : null,
@@ -237,7 +253,18 @@ export function relationalFindMethod(
   const pred = find.filter
     ? lowerToSqlAlchemy(find.filter, agg, ctx)
     : conventionPredicate(agg, find);
-  const where = rootWhere(pred, root, kind, filterPred);
+  // Per-find capability filter — a `find … ignoring <Cap>`/`ignoring *` OMITS
+  // the named capability predicate(s) for this method only (the bypass is
+  // baked in statically; no runtime param).  A non-bypassing find keeps the
+  // shared, all-caps predicate.
+  const methodFilterPred =
+    find.bypassAll || (find.bypassCaps?.length ?? 0) > 0
+      ? contextFilterPredicate(agg, ctx, {
+          bypassAll: find.bypassAll,
+          bypassCaps: find.bypassCaps,
+        })
+      : filterPred;
+  const where = rootWhere(pred, root, kind, methodFilterPred);
   const isList = find.returnType.kind === "array";
   // Paged find (P3b): count + limit/offset against the same predicate,
   // returning the shared PagedResult carrier (1-based page).
@@ -327,6 +354,49 @@ function aggregateRetrievals(
   );
 }
 
+/** The UNION bypass spec per retrieval name, drawn from the inline
+ *  `Repo.findAll(<Criterion>) ignoring …` / `Repo.run(<Retrieval>(…)) ignoring …`
+ *  call-sites in `ctx`'s workflows that hit `aggName`.  A retrieval's
+ *  `run_<name>` impl method is SHARED across call-sites, so its baked-in
+ *  bypass must cover EVERY site: `bypassAll` if any site bypasses all, else the
+ *  union of the named caps.  Empty map when no inline read of `aggName` carries
+ *  an `ignoring` clause.  Mirrors java's `inlineRunBypassesByRetrieval`. */
+function inlineRunBypassesByRetrieval(
+  ctx: EnrichedBoundedContextIR,
+  aggName: string,
+): Map<string, FilterBypass> {
+  const acc = new Map<string, { bypassAll: boolean; caps: Set<string> }>();
+  const collect = (stmts: readonly WorkflowStmtIR[]): void => {
+    for (const s of stmts) {
+      if (
+        s.kind === "repo-run" &&
+        s.aggName === aggName &&
+        (s.bypassAll || (s.bypassCaps?.length ?? 0) > 0)
+      ) {
+        const cur = acc.get(s.retrievalName) ?? { bypassAll: false, caps: new Set<string>() };
+        if (s.bypassAll) cur.bypassAll = true;
+        for (const c of s.bypassCaps ?? []) cur.caps.add(c);
+        acc.set(s.retrievalName, cur);
+      }
+      if (s.kind === "for-each") collect(s.body);
+      if (s.kind === "if-let") {
+        collect(s.thenBody);
+        collect(s.elseBody ?? []);
+      }
+    }
+  };
+  for (const wf of ctx.workflows) {
+    for (const c of wf.creates) collect(c.statements);
+    for (const h of wf.handlers ?? []) collect(h.statements);
+    for (const on of wf.subscriptions ?? []) collect(on.statements);
+  }
+  const out = new Map<string, FilterBypass>();
+  for (const [name, v] of acc) {
+    out.set(name, v.bypassAll ? { bypassAll: true } : { bypassCaps: [...v.caps] });
+  }
+  return out;
+}
+
 /** Per-view repository find — the lowered filter over the source
  *  aggregate (no filter → all).  The views router calls this. */
 function viewFindMethod(
@@ -338,7 +408,16 @@ function viewFindMethod(
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
   const pred = view.filter ? lowerToSqlAlchemy(view.filter, agg, ctx) : null;
-  const where = rootWhere(pred, root, kind, filterPred);
+  // A `view … ignoring <Cap>`/`ignoring *` OMITS the named capability
+  // predicate(s) for this view read only (baked in statically).
+  const methodFilterPred =
+    view.bypassAll || (view.bypassCaps?.length ?? 0) > 0
+      ? contextFilterPredicate(agg, ctx, {
+          bypassAll: view.bypassAll,
+          bypassCaps: view.bypassCaps,
+        })
+      : filterPred;
+  const where = rootWhere(pred, root, kind, methodFilterPred);
   return lines(
     `    async def ${snake(view.name)}(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${root})${where})).scalars().all()`,
@@ -355,9 +434,13 @@ function runMethod(
   retrieval: RetrievalIR,
   ctx: EnrichedBoundedContextIR,
   filterPred: PyPredicate | null = null,
+  bypass?: FilterBypass,
 ): string {
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
+  // When an inline `ignoring` call-site reaches this retrieval, OMIT the
+  // bypassed capability predicate(s) (the union across sites — baked in).
+  const methodFilterPred = bypass ? contextFilterPredicate(agg, ctx, bypass) : filterPred;
   const pred = lowerToSqlAlchemy(retrieval.where, agg, ctx);
   if (!pred) {
     throw new Error(
@@ -379,7 +462,7 @@ function runMethod(
   ];
   return lines(
     `    async def run_${snake(retrieval.name)}(${params.join(", ")}) -> list[${agg.name}]:`,
-    `        query = select(${root})${rootWhere(pred, root, kind, filterPred)}${orderBy}`,
+    `        query = select(${root})${rootWhere(pred, root, kind, methodFilterPred)}${orderBy}`,
     "        if offset is not None:",
     "            query = query.offset(offset)",
     "        if limit is not None:",
