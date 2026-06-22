@@ -193,6 +193,15 @@ describe.skipIf(!ENABLED)(
         // against real Ash 3.x — the decisive check that the event-triggered
         // saga path compiles under `--warnings-as-errors`.
         { name: "dispatch.ddd" },
+        // Workflow own-state COMPOUND mutation (`field += value` / `-= value`):
+        // the saga create + continuation handlers emit
+        // `Repo.update!(Ecto.Changeset.change(state, %{field: <state.field +|-
+        // value>}))` writes, type-correct per operand — int `state.attempts +
+        // 1` and decimal `Decimal.add(state.accrued, Decimal.new("9.99"))`.  An
+        // invalid arithmetic form (Decimal `+`, bad changeset shape) only fails
+        // at `mix compile --warnings-as-errors`, so this fixture is the bar for
+        // the compound own-state path on the Ash backend.
+        { name: "workflow-compound-assign.ddd" },
         // Reified criterion-ref capability filters (reified-criteria.md): a
         // `filter <Criterion>` reifies to an Ash boolean calculation that
         // `base_filter` references (`expr(active)` / `expr(in_region(region:

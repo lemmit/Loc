@@ -785,18 +785,22 @@ function validateWorkflowBody(
         break;
       }
       case "assign":
-        // `field := value` — own-state mutation onto the workflow's own
-        // `Property` state.  A recognised form (cross-aggregate / compound
-        // mutations never reach here — they stay `__bad__`).  The write is an
-        // effect, so a `transactional` workflow with only an assign is valid.
+        // `field := value` / `field += value` / `field -= value` — own-state
+        // mutation onto the workflow's own `Property` state.  Recognised forms:
+        // the plain `:=` and the SCALAR compound `+=`/`-=` both lower here (the
+        // compound RHS is rewritten to a `binary` over the current value).
+        // Cross-aggregate writes and COLLECTION compound mutations never reach
+        // here — they stay `__bad__`.  The write is an effect, so a
+        // `transactional` workflow with only a (compound) assign is valid.
         if (wf.eventSourced) {
           // An event-sourced workflow's state is derived only by folding its
-          // own emitted events (the appliers) — a direct `:=` would bypass the
-          // event log.  Mutate state by `emit` + an `apply` clause instead.
+          // own emitted events (the appliers) — a direct write (`:=`/`+=`/`-=`)
+          // would bypass the event log.  Mutate state by `emit` + an `apply`
+          // clause instead.
           diags.push({
             severity: "error",
             code: "loom.workflow-eventsourced-assign",
-            message: `workflow '${wf.name}': an event-sourced workflow can't assign its own state directly ('${st.target.segments.join(".")} := ...').  Change state by emitting an event with a matching 'apply' clause.`,
+            message: `workflow '${wf.name}': an event-sourced workflow can't assign its own state directly ('${st.target.segments.join(".")}').  Change state by emitting an event with a matching 'apply' clause.`,
             source: `${ctx.name}/${wf.name}`,
           });
         }

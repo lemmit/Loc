@@ -567,26 +567,61 @@ function lowerWorkflowStatement(
         envAfter: env,
       };
     }
-    // `field := value` — own-state mutation (workflow.md, "handle = own-state
-    // mutation").  Allowed ONLY for `:=` (not `+=`/`-=`) onto one of the
-    // workflow's OWN state `Property` members (a single-segment path resolving
-    // to `this`).  Cross-aggregate writes (`order.status := …`) and deep paths
-    // stay on the `__bad__` path below and are rejected at IR-validate.  Mirrors
-    // the aggregate-op `:=` lowering in lower-stmt.ts.
+    // `field := value` / `field += value` / `field -= value` — own-state
+    // mutation (workflow.md, "handle = own-state mutation").  Allowed onto one
+    // of the workflow's OWN state `Property` members (a single-segment path
+    // resolving to `this`).  Cross-aggregate writes (`order.status := …`) and
+    // deep paths stay on the `__bad__` path below and are rejected at
+    // IR-validate.  Mirrors the aggregate-op `:=` lowering in lower-stmt.ts.
+    //
+    // The compound forms (`+=`/`-=`) are SCALAR arithmetic on the saga state:
+    // they lower to the SAME `assign` IR node, with `value` rewritten to a
+    // synthetic `binary` (`<this-prop field> <+|-> <rhs>`).  This rides the
+    // shared expression seam — every backend's binary renderer already emits
+    // the type-correct form (int `state.x + v`, Java `state.getX().add(v)`,
+    // Phoenix `Decimal.add(state.x, v)`, …) — so no new WorkflowStmtIR kind,
+    // seam arm, or per-backend emitter is needed: the existing `assign` arm,
+    // which renders `state.<field> = <value>` off the expression renderer,
+    // carries it for free.  A COLLECTION own-state field (`X id[]`) is OUT OF
+    // SCOPE for `+=`/`-=` — it stays `__bad__` (saga-state collection
+    // append-mutation isn't supported yet), so the diagnostic still fires.
     if (
-      stmt.op === ":=" &&
+      (stmt.op === ":=" || stmt.op === "+=" || stmt.op === "-=") &&
       !lv.call &&
       lv.tail.length === 0 &&
-      env.workflow !== undefined &&
-      env.workflow.members.some((m) => isProperty(m) && m.name === lv.head)
+      env.workflow?.members.some((m) => isProperty(m) && m.name === lv.head)
     ) {
       const path: PathIR = { segments: [lv.head] };
       const targetType = pathType(path, env);
-      const value = lowerExprInContext(stmt.value, targetType, env);
-      return {
-        stmt: { kind: "assign", target: path, value, targetType },
-        envAfter: env,
-      };
+      const compound = stmt.op === "+=" || stmt.op === "-=";
+      // Collection own-state `+=`/`-=` is out of scope — fall through to
+      // `__bad__` (a saga-state list append isn't a recognised form yet).
+      if (!(compound && targetType.kind === "array")) {
+        // Element-type context so a numeric literal into a money/decimal field
+        // elaborates to the precise typed literal — same as the aggregate
+        // compound lowering in lower-stmt.ts.
+        const rhs = lowerExprInContext(stmt.value, targetType, env);
+        const value: ExprIR = compound
+          ? {
+              kind: "binary",
+              op: stmt.op === "+=" ? "+" : "-",
+              // The current persisted value of the own-state field — a
+              // `this-prop` read, rendered as `state.<field>` (thisName
+              // redirect) on every backend.
+              left: { kind: "ref", name: lv.head, refKind: "this-prop", type: targetType },
+              right: rhs,
+              // The field type drives money/decimal operator dispatch in the
+              // binary renderer; the compound result type is the field type
+              // (int += int → int, money += money → money).
+              leftType: targetType,
+              resultType: targetType,
+            }
+          : rhs;
+        return {
+          stmt: { kind: "assign", target: path, value, targetType },
+          envAfter: env,
+        };
+      }
     }
     // Anything else (mutation forms, bare calls, deep paths) becomes
     // an expr-let with no name — represented as an expr-let with a

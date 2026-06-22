@@ -166,6 +166,14 @@ describe.skipIf(!ENABLED)(
         // Ecto-state instance + correlation row + create/continuation handlers
         // compiled on the vanilla foundation.
         { name: "vanilla-workflows.ddd", deployable: "api" },
+        // Workflow own-state COMPOUND mutation (`+=`/`-=`) on the vanilla
+        // foundation: the saga create + continuation handlers persist each
+        // compound write as a `Repo.update!(Ecto.Changeset.change(state,
+        // %{field: <state.field +|- value>}))` — int `state.attempts + 1` and
+        // money `Decimal.add(state.accrued, Decimal.new("9.99"))`.  The money
+        // path's `Decimal.add/sub` (vs an uncompilable-at-runtime native `+`)
+        // is the real bar for the compound own-state arithmetic.
+        { name: "vanilla-workflow-compound.ddd", deployable: "api" },
         // Nested control flow in workflow bodies: `for-each` / `if-let` /
         // `repo-run` nested inside a `for-each` body or an `if-let` branch
         // (the for-each validator only inspects op-calls, so the nesting is
