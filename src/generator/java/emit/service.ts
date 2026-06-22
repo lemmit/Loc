@@ -381,8 +381,6 @@ export function renderJavaService(
     ``,
     ...[...imports].sort().map((i) => `import ${i};`),
     ``,
-    `import org.slf4j.Logger;`,
-    `import org.slf4j.LoggerFactory;`,
     `import org.springframework.stereotype.Service;`,
     `import org.springframework.transaction.annotation.Transactional;`,
     dispatches ? `import org.springframework.context.ApplicationEventPublisher;` : null,
@@ -401,12 +399,11 @@ export function renderJavaService(
     `import ${ctx.basePkg}.domain.enums.*;`,
     `import ${ctx.basePkg}.domain.ids.*;`,
     `import ${ctx.basePkg}.domain.valueobjects.*;`,
+    `import ${ctx.basePkg}.config.CatalogLog;`,
     ``,
     `@Service`,
     `@Transactional`,
     `public class ${agg.name}Service {`,
-    `    private static final Logger log = LoggerFactory.getLogger(${agg.name}Service.class);`,
-    ``,
     `    private final ${agg.name}Repository repository;`,
     ...externOps.map(
       (op) =>
@@ -445,7 +442,7 @@ export function renderJavaService(
     `        for (var event : aggregate.pullEvents()) {`,
     dispatches
       ? `            eventPublisher.publishEvent(event);`
-      : `            log.info("domain_event type={}", event.getClass().getSimpleName());`,
+      : `            CatalogLog.event("event_dispatched", "info", "event_type", event.getClass().getSimpleName(), "aggregate", "${agg.name}");`,
     `        }`,
     `    }`,
     `}`,

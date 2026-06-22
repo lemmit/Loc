@@ -122,7 +122,7 @@ export function renderApplication(basePkg: string): string {
     `@SpringBootApplication`,
     `public class Application {`,
     `    public static void main(String[] args) {`,
-    `        CatalogLog.event("server_starting");`,
+    `        CatalogLog.event("server_starting", "info");`,
     `        SpringApplication.run(Application.class, args);`,
     `    }`,
     `}`,
