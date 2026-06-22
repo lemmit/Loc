@@ -201,10 +201,14 @@ system Shop {
 describe("python capability-filter support guard (W1a)", () => {
   // W1a wired the NON-PRINCIPAL relational case on python (the WHERE predicate
   // AND-ed into every root read via `contextFilterPredicate` — see
-  // context-filter-emit.test.ts).  python stays in LIMITED_FAMILIES, so the
-  // remaining cases stay gated: a PRINCIPAL (`currentUser.*`) filter
-  // (supportsPrincipalFilter false for python) and a NON-RELATIONAL shape
-  // (supportsNonRelationalFilter false for python) both still error.
+  // context-filter-emit.test.ts).  DEBT-02 then wired the PRINCIPAL
+  // (`currentUser.*`) RELATIONAL case: the predicate renders
+  // `require_current_user().<claim>` against the ambient ContextVar accessor
+  // and AND-s into every root read (no read-method parameter — the SQLAlchemy
+  // analogue of node's `requireCurrentUser()` weave).  The remaining gated case
+  // is a NON-RELATIONAL shape (supportsNonRelationalFilter false for python) —
+  // a `shape(document)` filter still errors.  A principal filter still requires
+  // `auth: required` (no principal to scope by otherwise).
 
   it("accepts a NON-PRINCIPAL relational filter (W1a — now emitted)", async () => {
     // `sys("python", …)` declares `auth: required`, but a non-principal filter
@@ -212,14 +216,32 @@ describe("python capability-filter support guard (W1a)", () => {
     expect(await honoFilterErrors(sys("python", { filter: "filter !this.isDeleted" }))).toEqual([]);
   });
 
-  it("still gates a PRINCIPAL/tenancy filter (W1b — not yet wired on python)", async () => {
-    const errs = await honoFilterErrors(
-      sys("python", { filter: "filter this.tenantId == currentUser.tenantId" }),
-    );
-    expect(errs).toHaveLength(1);
-    expect(errs[0]).toContain("python");
-    expect(errs[0]).toContain("references currentUser");
-    expect(errs[0]).toContain("principal-referencing capability");
+  it("accepts a PRINCIPAL/tenancy filter on a relational python aggregate (DEBT-02)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("python", { filter: "filter this.tenantId == currentUser.tenantId" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("requires 'auth: required' for a principal filter on python (no principal to scope by otherwise)", async () => {
+    const noAuth = `
+system Shop {
+  user { id: string  tenantId: string }
+  subdomain Sales {
+    context Shop {
+      aggregate Cart ids guid { total: int  tenantId: string
+        filter this.tenantId == currentUser.tenantId }
+    }
+  }
+  api ShopApi from Sales
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: python, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }
+}`;
+    const errs = await honoFilterErrors(noAuth);
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("auth: required");
   });
 
   it("still gates a non-relational (document) shape filter", async () => {

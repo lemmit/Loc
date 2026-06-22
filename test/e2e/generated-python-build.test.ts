@@ -85,6 +85,11 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   // capability conjunct; a bare `filter` always applies.  The resulting
   // repository must stay ruff- + mypy --strict-clean.
   ["test/e2e/fixtures/python-build/filter-bypass.ddd", "api"],
+  // Principal (tenancy) capability filter (DEBT-02): `filter this.tenantId ==
+  // currentUser.tenantId` AND-s `require_current_user().tenant_id` (the ambient
+  // ContextVar accessor) into every root read; the generated SQLAlchemy must
+  // stay ruff- + mypy --strict-clean.
+  ["test/e2e/fixtures/python-build/tenancy-filter.ddd", "api"],
   // `--trace` domain instrumentation: precondition_evaluated /
   // value_computed / invariant_evaluated trace lines must stay
   // ruff-/mypy-clean (the domain fixture exercises all three).

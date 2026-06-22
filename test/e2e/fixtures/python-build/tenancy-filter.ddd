@@ -1,0 +1,45 @@
+// DEBT-02 — principal-referencing (tenancy) capability filter on the PYTHON
+// (FastAPI + SQLAlchemy) backend.  `filter this.tenantId ==
+// currentUser.tenantId` AND-s a principal predicate
+// (`require_current_user().tenant_id` — the ambient `ContextVar[User | None]`
+// accessor, the SQLAlchemy analogue of node's `requireCurrentUser()` weave /
+// EF Core's `HasQueryFilter`) into every root read: the auto findAll /
+// find_by_id / find_many_by_ids, each custom find (its own `where` AND-ed via
+// `and_(...)`), and each view (views merge into repository finds).  No read
+// method gains a parameter — the accessor reads the request-scoped principal
+// the auth middleware stashed.  `auth: required` emits the User dataclass +
+// `current_user_var` + fail-closed `require_current_user()` the predicate
+// resolves through.
+//
+// Decisive check that the generated SQLAlchemy reads stay ruff- and
+// mypy --strict-clean under the python-build gate.
+system PythonTenancy {
+  user { id: guid  tenantId: string }
+
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+        // Always-on row scoping by the requesting principal's tenant.
+        filter this.tenantId == currentUser.tenantId
+      }
+      repository Accounts for Account {
+        find byMinBalance(min: int): Account[] where this.balance >= min
+      }
+      view BigAccounts = Account where balance >= 1000
+    }
+  }
+
+  api LedgerApi from Core
+  storage primary { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: primary }
+  deployable api {
+    platform: python
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    port: 8081
+    auth: required
+  }
+}
