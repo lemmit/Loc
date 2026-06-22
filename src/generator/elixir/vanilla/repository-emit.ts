@@ -30,6 +30,7 @@ import {
 import { isVanillaDocAgg, renderDocRepository } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { aggregateHasStamps, stampPutChanges, stampUsesPrincipal } from "./stamp-emit.js";
+import { valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
 export function emitVanillaRepositories(
   appModule: string,
@@ -51,7 +52,7 @@ export function emitVanillaRepositories(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}_repository.ex`,
       isVanillaDocAgg(agg, ctx, sys)
         ? renderDocRepository(appModule, ctxModule, agg)
-        : renderRepository(appModule, ctxModule, agg, repo, principalIdKey),
+        : renderRepository(appModule, ctxModule, agg, repo, principalIdKey, ctx),
     );
   }
 }
@@ -82,10 +83,21 @@ function renderRepository(
   agg: AggregateIR,
   repo: RepositoryIR | undefined,
   principalIdKey: string,
+  ctx?: BoundedContextIR,
 ): string {
   const aggModule = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const repoMod = `${aggModule}Repository`;
   const contextModule = `${appModule}.${ctxModule}`;
+
+  // Value-object collections (`charges: Money[]`) are `has_many` associations —
+  // preloaded on every read so the wire shape materialises (an unloaded
+  // `has_many` serialises as `%Ecto.Association.NotLoaded{}`).  Ordered via the
+  // schema's `preload_order: [asc: :ordinal]`.
+  const valueCollectionRels = ctx
+    ? valueCollectionsWithVo(agg, ctx).map((v) => `:${snake(v.vc.fieldName)}`)
+    : [];
+  const preload =
+    valueCollectionRels.length > 0 ? ` |> Repo.preload([${valueCollectionRels.join(", ")}])` : "";
 
   // Lifecycle stamps (`with audit`/`auditable`, `stamp onCreate/onUpdate`) →
   // `put_change` pipe lines on the changeset right before the Repo write.  A
@@ -129,9 +141,11 @@ function renderRepository(
     ? `@spec list(map() | nil) :: {:ok, [${aggModule}.t()]} | {:error, term()}`
     : `@spec list() :: {:ok, [${aggModule}.t()]} | {:error, term()}`;
   // `list`: bare `Repo.all(<Agg>)` unless a capability filter scopes it.
-  const listBody = cap
-    ? `from(record in ${aggModule}, where: ${cap}) |> Repo.all()`
-    : `Repo.all(${aggModule})`;
+  // `Repo.preload/2` accepts the whole list, so the value-collection has_many
+  // associations come back loaded (and ordinal-ordered) in one round-trip.
+  const listBody =
+    (cap ? `from(record in ${aggModule}, where: ${cap}) |> Repo.all()` : `Repo.all(${aggModule})`) +
+    preload;
   const findByIdHead = principal
     ? `def find_by_id(id, ${actorParam}) when is_binary(id) do`
     : "def find_by_id(id) when is_binary(id) do";
@@ -159,7 +173,7 @@ defmodule ${repoMod} do
   ${findByIdHead}
     ${findByIdBody}
       nil -> {:error, :not_found}
-      record -> {:ok, record}
+      record -> {:ok, record${preload}}
     end
   end
 

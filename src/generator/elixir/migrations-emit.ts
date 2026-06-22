@@ -139,13 +139,17 @@ function emitInitial(
   const createSteps = m.steps.filter(
     (s): s is Extract<MigrationStep, { op: "createTable" }> => s.op === "createTable",
   );
-  // Value-object array child tables are a relational-backend concern;
-  // Phoenix/Ash stores the array inline as a `{:array, :map}` column on the
-  // parent (the parent's `valueArrayChildTable` column renders that), so the
-  // child table itself is dropped here.
-  const allTables = createSteps.map((s) => s.table).filter((t) => !t.valueCollection);
+  // Value-object array child tables (`charges: Money[]`) are now emitted as
+  // real id-less relational child tables on Phoenix too (both Ash and vanilla),
+  // not collapsed into an inline `{:array, :map}` column on the parent.  They
+  // are FK-cascaded children of their owner aggregate — the same tier as a
+  // containment part table — so they share the part block's create-ordering
+  // (parent before child).  See `renderInitialValueCollectionFile`.
+  const allTables = createSteps.map((s) => s.table);
   const joinTables = allTables.filter(isJoinTable);
-  const partTables = allTables.filter((t) => !joinTables.includes(t) && isPartTable(t));
+  const partTables = allTables.filter(
+    (t) => !joinTables.includes(t) && (isPartTable(t) || t.valueCollection),
+  );
   const parentTables = allTables
     .filter((t) => !joinTables.includes(t) && !partTables.includes(t))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -154,7 +158,7 @@ function emitInitial(
   for (let i = 0; i < parentTables.length; i++) {
     writeInitialFile(parentTables[i]!, base + i, appModule, out, foundation);
   }
-  // Parts — grouped by parent.
+  // Parts (incl. value-collection children) — grouped by parent.
   const parentCount = parentTables.length;
   for (let i = 0; i < parentTables.length; i++) {
     const parent = parentTables[i]!;
@@ -186,11 +190,13 @@ function writeInitialFile(
 ): void {
   const path = `priv/repo/migrations/${ts}_create_${table.name}.exs`;
   const migrationName = `Create${tableToPascal(table.name)}`;
-  const body = isJoinTable(table)
-    ? renderInitialJoinFile(table, migrationName, appModule)
-    : isStateTable(table)
-      ? renderInitialStateFile(table, migrationName, appModule, foundation)
-      : renderInitialFile(table, migrationName, appModule, foundation);
+  const body = table.valueCollection
+    ? renderInitialValueCollectionFile(table, migrationName, appModule)
+    : isJoinTable(table)
+      ? renderInitialJoinFile(table, migrationName, appModule)
+      : isStateTable(table)
+        ? renderInitialStateFile(table, migrationName, appModule, foundation)
+        : renderInitialFile(table, migrationName, appModule, foundation);
   out.set(path, body);
 }
 
@@ -211,12 +217,14 @@ function renderInitialStateFile(
 ): string {
   const pk = new Set(table.primaryKey);
   const prefix = prefixOpt(table.schema);
-  const colLines = table.columns.map((c) => {
-    if (pk.has(c.name)) {
-      return `      add :${c.name}, ${ectoPrimaryKeyType(c.type)}, primary_key: true, null: false`;
-    }
-    return "      " + renderEctoColumn(c, table);
-  });
+  const colLines = table.columns
+    .filter((c) => !c.valueArrayChildTable)
+    .map((c) => {
+      if (pk.has(c.name)) {
+        return `      add :${c.name}, ${ectoPrimaryKeyType(c.type)}, primary_key: true, null: false`;
+      }
+      return "      " + renderEctoColumn(c, table);
+    });
   const ts = timestampsMacro(table, foundation);
   if (ts) colLines.push(`      ${ts}`);
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
@@ -239,7 +247,13 @@ function renderInitialFile(
 ): string {
   const idCol = table.columns.find((c) => c.name === "id");
   const pkType = idCol ? ectoPrimaryKeyType(idCol.type) : ":uuid";
-  const otherCols = collapseVoGroups(table.columns.filter((c) => c.name !== "id"));
+  // The parent's value-collection stand-in column (`{:array, :map}`,
+  // tagged `valueArrayChildTable`) is dropped — the data lives in the
+  // emitted child table now, not inline on the parent.  Matches the
+  // relational backends' `sql-pg.ts` skip.
+  const otherCols = collapseVoGroups(
+    table.columns.filter((c) => c.name !== "id" && !c.valueArrayChildTable),
+  );
   const colLines = [
     `      add :id, ${pkType}, primary_key: true, null: false`,
     ...otherCols.map((c) => "      " + renderEctoColumn(c, table)),
@@ -259,6 +273,55 @@ function renderInitialFile(
   def change do
 ${schemaCreateLine(table.schema)}    create table(:${table.name}, primary_key: false${prefix}) do
 ${colLines.join("\n")}
+    end
+${indexLines.join("\n")}${indexLines.length > 0 ? "\n" : ""}  end
+end
+`;
+}
+
+/** Render a value-object collection child-table migration (`charges:
+ *  Money[]` → `order_charges`).  Unlike the relational backends — whose
+ *  child table is keyed by the composite `(parent_fk, ordinal)` in the
+ *  shared MigrationsIR — the Phoenix child carries a SYNTHETIC `id` uuid
+ *  primary key so it can be modelled as an Ash child resource
+ *  (`uuid_primary_key`) / Ecto `has_many` whose rows are managed via
+ *  `manage_relationship` / `cast_assoc` (both want row identity for the
+ *  replace-on-update diff).  The synthetic id never reaches the wire — the
+ *  child's Jason encoder projects only the value object's own fields, so
+ *  the array stays `[{amount,currency},…]`, byte-identical with every other
+ *  backend.  Parent FK cascades; `ordinal` preserves declared order. */
+function renderInitialValueCollectionFile(
+  table: TableShape,
+  migrationName: string,
+  appModule: string,
+): string {
+  const prefix = prefixOpt(table.schema);
+  // Synthetic uuid PK (NOT in the MigrationsIR composite PK — Phoenix adds
+  // it so the child has Ash/Ecto-managed row identity).
+  const lines: string[] = ["      add :id, :uuid, primary_key: true, null: false"];
+  for (const c of table.columns) {
+    const defaultClause = c.default !== undefined ? `, default: ${c.default}` : "";
+    const fk = table.foreignKeys.find((f) => f.column === c.name);
+    if (fk) {
+      const ref = `references(:${fk.refTable}${prefix}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${fk.onDelete === "cascade" ? "delete_all" : "restrict"})`;
+      lines.push(`      add :${c.name}, ${ref}, null: ${c.nullable}${defaultClause}`);
+    } else {
+      lines.push(
+        `      add :${c.name}, ${ectoColumnType(c.type)}, null: ${c.nullable}${defaultClause}`,
+      );
+    }
+  }
+  const indexLines = table.indexes.map((i) => {
+    const cols = i.columns.map((n) => `:${n}`).join(", ");
+    const unique = i.unique ? ", unique: true" : "";
+    return `    create index(:${i.table}, [${cols}]${unique}${prefix})`;
+  });
+  return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
+  use Ecto.Migration
+
+  def change do
+${schemaCreateLine(table.schema)}    create table(:${table.name}, primary_key: false${prefix}) do
+${lines.join("\n")}
     end
 ${indexLines.join("\n")}${indexLines.length > 0 ? "\n" : ""}  end
 end
@@ -376,7 +439,9 @@ function renderEctoStep(step: MigrationStep, foundation: Foundation): string[] {
 
 function renderCreateTableInline(table: TableShape, foundation: Foundation): string[] {
   const idCol = table.columns.find((c) => c.name === "id");
-  const others = collapseVoGroups(table.columns.filter((c) => c.name !== "id"));
+  const others = collapseVoGroups(
+    table.columns.filter((c) => c.name !== "id" && !c.valueArrayChildTable),
+  );
   const prefix = prefixOpt(table.schema);
   const lines: string[] = [];
   if (table.schema) lines.push(`execute "CREATE SCHEMA IF NOT EXISTS ${table.schema}"`);

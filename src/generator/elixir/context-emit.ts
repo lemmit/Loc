@@ -20,6 +20,12 @@ import {
   findRepoFor,
   mergeViewFindsForAgg,
 } from "./repository-emit.js";
+import {
+  renderValueCollectionResource,
+  valueCollectionEntityName,
+  valueCollectionsWithVo,
+} from "./value-collection-resource-emit.js";
+import { renderVoValidations } from "./vo-validation-emit.js";
 
 // ---------------------------------------------------------------------------
 // Context emission — one Ash.Resource per aggregate + one Ash.Domain per ctx
@@ -91,6 +97,20 @@ export function emitContext(
       out.set(joinPath, renderJoinResource(assoc, contextModule, appModule));
       allResources.push(`${contextModule}.${joinEntityName(assoc)}`);
     }
+    // Value-object collection (`charges: Money[]`) child resources — one
+    // Ash.Resource per VO-array field, owning the id-less `<owner>_<field>`
+    // child table.  Registered on the domain like the join resources so
+    // Ash's auto-discovery sees them; the parent's `has_many` +
+    // `manage_relationship` (domain-emit) point here by the same name.
+    const aggDs = options.resolveDataSource?.(agg);
+    for (const { vc, vo } of valueCollectionsWithVo(agg, ctx)) {
+      const vcPath = `lib/${appName}/${ctxSnake}/${vc.childTable}.ex`;
+      out.set(
+        vcPath,
+        renderValueCollectionResource(vc, vo, agg, contextModule, appModule, aggDs?.schema),
+      );
+      allResources.push(`${contextModule}.${valueCollectionEntityName(vc)}`);
+    }
   }
   // Custom find actions (repository finds + view-derived finds) are
   // spliced in via a separate side-channel — emitAggregateResources
@@ -160,8 +180,14 @@ function renderValueObjectModule(
   const moduleName = `${contextModule}.${upperFirst(vo.name)}`;
   const attrLines = vo.fields.map((f) => {
     const ashType = renderAshType(f.type, contextModule);
-    const opts = f.optional ? "allow_nil?: true" : "allow_nil?: false";
-    return `    attribute :${snake(f.name)}, ${ashType}, ${opts}`;
+    const nil = f.optional ? "allow_nil?: true" : "allow_nil?: false";
+    // `public?: true`: an embedded VO field is created/updated through the
+    // parent's `accept :*` (the default action over `:*` only takes PUBLIC
+    // attributes).  Ash 3.x defaults attributes to `public?: false`, so without
+    // this a `total: Money` create rejects the `amount`/`currency` inputs at
+    // runtime ("No such input … is currently public?: false") — invisible to
+    // `mix compile`, surfaced only by an actual POST.
+    return `    attribute :${snake(f.name)}, ${ashType}, ${nil}, public?: true`;
   });
 
   // Explicit @type t — Ash 3.x auto-generates a typespec for resource
@@ -182,6 +208,12 @@ function renderValueObjectModule(
   const fieldAtoms = vo.fields.map((f) => `:${snake(f.name)}`);
   const jasonImpl = renderJasonEncoderImpl(moduleName, fieldAtoms, appModule);
 
+  // Value-object invariants (`invariant amount >= 0`) enforced as Ash
+  // validations — previously emitted nowhere on the Ash path (a bad Money
+  // persisted silently).  Same shared renderer the value-collection child
+  // resource uses, so single VO + VO[] enforce identically.
+  const validationsBlock = renderVoValidations(vo, contextModule);
+
   return `# Auto-generated.
 defmodule ${moduleName} do
   use Ash.Resource, data_layer: :embedded
@@ -189,7 +221,7 @@ defmodule ${moduleName} do
   attributes do
 ${attrLines.join("\n")}
   end
-
+${validationsBlock}
   @type t :: %__MODULE__{
 ${typespecLines.join("\n")}
   }

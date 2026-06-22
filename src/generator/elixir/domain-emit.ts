@@ -48,6 +48,10 @@ import {
   reifiedCriterionForRef,
   renderCriterionCalculation,
 } from "./repository-emit.js";
+import {
+  valueCollectionEntityName,
+  valueCollectionsWithVo,
+} from "./value-collection-resource-emit.js";
 
 /** Per-aggregate dataSource lookup the orchestrator passes in.  When
  *  present, the resource's `postgres do … end` block picks up the
@@ -156,7 +160,15 @@ function renderAggregateResource(
   // it's intentionally absent from the wire shape until the caller
   // explicitly loads it).
   const associations = agg.associations;
-  const persistedFields = agg.fields.filter((f) => !isRefCollection(f.type));
+  // Value-object collection fields (`charges: Money[]`) persist as an id-less
+  // relational child table + a `has_many` relationship (NOT a stored
+  // attribute), so drop them from the attribute list — like ref-collections.
+  // They are still part of the wire shape (loaded + encoded as the VO array).
+  const valueCollections = valueCollectionsWithVo(agg, ctx);
+  const valueCollectionFields = new Set(valueCollections.map((v) => v.vc.fieldName));
+  const persistedFields = agg.fields.filter(
+    (f) => !isRefCollection(f.type) && !valueCollectionFields.has(f.name),
+  );
 
   // Capability filters (`filter <expr>` → contextFilters).  Ash's analog
   // to EF Core's HasQueryFilter is `base_filter` — applied to every read
@@ -200,7 +212,12 @@ function renderAggregateResource(
     // The TPH discriminator is part of the wire shape (tells the client which
     // concrete a row is), mirroring the `kind`/`type` tag on the other backends.
     ...(kindValue ? [":kind"] : []),
-    ...persistedFields.map((f) => `:${snake(f.name)}`),
+    // Declared-order field atoms — scalar attributes AND value-object
+    // collection fields (the latter are `has_many` relationships, loaded on
+    // read; their child structs Jason-encode to the VO array via the child's
+    // own VO-only encoder, so the wire stays `[{amount,currency},…]`).  Both
+    // are emitted in their source declaration order, only ref-collections drop.
+    ...agg.fields.filter((f) => !isRefCollection(f.type)).map((f) => `:${snake(f.name)}`),
     // Embedded containments serialise inline (each has its own Jason
     // encoder); add them to the wire shape.  Relational containments are
     // separate relationships and stay out of the attribute encoder.
@@ -299,7 +316,7 @@ ${baseFilterLine}
     ${renderPrimaryKey(agg.idValueType)}
     ${[...(kindValue ? [`attribute :kind, :string, default: ${JSON.stringify(kindValue)}, allow_nil?: false`] : []), ...persistedFields.map((f) => renderAttribute(f, ctxModule)), ...embeddedAttrLines].join("\n    ")}${timestampLines ? `\n    ${timestampLines}` : ""}
   end
-${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg, criterionCalcLines)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderStampChanges(agg, renderCtx, options.principalIdKey ?? "id")}${renderActions(agg, ctx, renderCtx, ctxModule, promotedReadExpr)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
+${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg, valueCollections)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg, criterionCalcLines)}${renderPreparations(associations, agg, valueCollections)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderStampChanges(agg, renderCtx, options.principalIdKey ?? "id")}${renderActions(agg, ctx, renderCtx, ctxModule, promotedReadExpr, valueCollections)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
 
 ${jasonImpl}`;
 }
@@ -540,8 +557,11 @@ function renderRelationships(
   associations: AssociationIR[],
   ctxModule: string,
   agg: AggregateIR,
+  valueCollections: ReturnType<typeof valueCollectionsWithVo> = [],
 ): string {
-  if (contains.length === 0 && associations.length === 0) return "";
+  if (contains.length === 0 && associations.length === 0 && valueCollections.length === 0) {
+    return "";
+  }
   const containLines = contains.map((c) => {
     const relName = snake(c.name);
     const destModule = `${ctxModule}.${upperFirst(c.partName)}`;
@@ -549,6 +569,14 @@ function renderRelationships(
       return `    has_many :${relName}, ${destModule}`;
     }
     return `    has_one :${relName}, ${destModule}`;
+  });
+  // Value-object collections (`charges: Money[]`) — a `has_many` onto the
+  // child resource owning the id-less child table, ordered by `:ordinal` so
+  // the array round-trips in declared order.
+  const valueCollectionLines = valueCollections.map(({ vc }) => {
+    const relName = snake(vc.fieldName);
+    const destModule = `${ctxModule}.${valueCollectionEntityName(vc)}`;
+    return `    has_many :${relName}, ${destModule} do\n      sort ordinal: :asc\n    end`;
   });
   const m2mLines = associations.flatMap((a) => {
     const rel = relationshipNameFor(agg, a.fieldName);
@@ -562,7 +590,7 @@ function renderRelationships(
       `    end`,
     ];
   });
-  const lines = [...containLines, ...m2mLines];
+  const lines = [...containLines, ...valueCollectionLines, ...m2mLines];
   return `\n  relationships do\n${lines.join("\n")}\n  end\n`;
 }
 
@@ -586,10 +614,21 @@ function renderAggregates(derived: DerivedIR[], contains: ContainmentIR[]): stri
  *  calculations are opt-in by default.  Emit a `preparations do prepare
  *  build(load: […]) end` block that applies to every read action on the
  *  resource (default `:read` + each custom `find`). */
-function renderPreparations(associations: AssociationIR[], _agg: AggregateIR): string {
-  if (associations.length === 0) return "";
-  const fieldNames = associations.map((a) => `:${snake(a.fieldName)}`).join(", ");
-  return `\n  preparations do\n    prepare build(load: [${fieldNames}])\n  end\n`;
+function renderPreparations(
+  associations: AssociationIR[],
+  _agg: AggregateIR,
+  valueCollections: ReturnType<typeof valueCollectionsWithVo> = [],
+): string {
+  // Ref-collection calculations AND value-object collection `has_many`
+  // relationships are both opt-in loads in Ash; load them on every read so
+  // the wire shape materialises (the VO array would otherwise surface as
+  // `%Ash.NotLoaded{}`).
+  const loads = [
+    ...associations.map((a) => `:${snake(a.fieldName)}`),
+    ...valueCollections.map(({ vc }) => `:${snake(vc.fieldName)}`),
+  ];
+  if (loads.length === 0) return "";
+  return `\n  preparations do\n    prepare build(load: [${loads.join(", ")}])\n  end\n`;
 }
 
 function renderCalculations(

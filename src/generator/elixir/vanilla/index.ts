@@ -40,6 +40,7 @@ import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaRetrievals } from "./retrieval-emit.js";
 import { emitVanillaSchemas } from "./schema-emit.js";
 import { emitVanillaShellFiles } from "./shell-emit.js";
+import { emitVanillaValueCollectionSchemas } from "./value-collection-schema-emit.js";
 import { emitVanillaValueObjects } from "./valueobject-emit.js";
 import {
   emitVanillaViewModules,
@@ -86,6 +87,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   let hasDomainTests = false;
   for (const ctx of contexts) {
     emitVanillaSchemas(appModule, ctx, out, sys);
+    // Value-object collection (`charges: Money[]`) child schemas — one Ecto
+    // schema per VO-array field, owning the id-less `<owner>_<field>` child
+    // table the parent `has_many`s + `cast_assoc`s.
+    emitVanillaValueCollectionSchemas(appModule, ctx, out);
     // Validating value-object constructors (`<VO>.new/1`) for VOs with
     // invariants — enforced at construction (F5) + called by the test suite.
     emitVanillaValueObjects(appModule, ctx, out);

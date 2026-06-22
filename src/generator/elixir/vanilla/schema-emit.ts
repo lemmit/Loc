@@ -22,11 +22,13 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
+import { isValueCollectionType } from "../../../ir/util/value-collections.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { isVanillaDocAgg, renderDocSchema } from "./document-emit.js";
 import { renderAggregatePureCore } from "./domain-core-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
+import { valueCollectionModule, valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
 export function emitVanillaSchemas(
   appModule: string,
@@ -177,10 +179,25 @@ function renderSchema(
   // one jsonb column — the vanilla analogue of the Ash embedded resource.
   // Operation bodies append the part struct + `put_embed` (`context-emit.ts`).
   const containLines = agg.contains.map((c) => embedLine(appModule, ctxModule, c)).join("\n");
+  // Value-object collections (`charges: Money[]`) → `has_many` onto the child
+  // schema owning the id-less child table, `preload_order` by `:ordinal` so the
+  // array round-trips in declared order; `on_replace: :delete` gives the
+  // changeset's `cast_assoc` replace-on-update semantics (delete-then-reinsert,
+  // mirroring the TS/.NET repositories).
+  const valueCollectionLines = ctx
+    ? valueCollectionsWithVo(agg, ctx)
+        .map(({ vc }) => {
+          const childMod = valueCollectionModule(appModule, ctx, vc);
+          return `    has_many :${snake(vc.fieldName)}, ${childMod}, foreign_key: :${vc.parentFk}, on_replace: :delete, preload_order: [asc: :ordinal]`;
+        })
+        .join("\n")
+    : "";
   // The bundled Ecto `timestamps()` (→ `inserted_at`/`updated_at`) is dropped
   // when an explicit `updated_at` audit field is present (it would collide).
   const timestampsLine = hasUpdatedAt ? "" : "    timestamps(type: :utc_datetime)";
-  const schemaBody = [fieldLines, containLines, timestampsLine].filter(Boolean).join("\n");
+  const schemaBody = [fieldLines, containLines, valueCollectionLines, timestampsLine]
+    .filter(Boolean)
+    .join("\n");
   const prefixLine = schemaPrefix ? `  @schema_prefix ${JSON.stringify(schemaPrefix)}\n` : "";
 
   // Pure domain core (`create/1` + `<op>/2`) — emitted only for an aggregate
@@ -216,6 +233,10 @@ function renderFieldLine(field: AggField, enumsByName: Map<string, EnumIR>): str
   // Skip system-provided fields and ref-collection arrays (the latter
   // live in join tables; covered when a richer fixture exercises them).
   if (field.name === "id" || field.name === "createdAt" || field.name === "updatedAt") return "";
+  // Value-object collection arrays (`charges: Money[]`) persist as a `has_many`
+  // child schema (emitted separately), NOT a `{:array, :map}` column — skip the
+  // scalar field line; `renderSchema` adds the `has_many` instead.
+  if (isValueCollectionType(field.type as TypeIR)) return "";
   const ectoType = mapTypeToEcto(field.type, enumsByName);
   if (!ectoType) return "";
   // A declared Loom default (`field: T = <lit>`) becomes the Ecto schema

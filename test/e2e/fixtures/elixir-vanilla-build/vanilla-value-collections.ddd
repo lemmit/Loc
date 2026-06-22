@@ -1,11 +1,12 @@
-// Value-object collections (`Money[]`) on Phoenix/Ash: persisted as id-less
-// relational CHILD TABLES (`invoice_line_items`, `invoice_surcharges`) — a
-// `has_many` of a child Ash resource keyed `(invoice_id, ordinal)` with a
-// synthetic uuid PK, managed via `manage_relationship` (replace-on-update).
-// The synthetic id / parent FK / ordinal are stripped from the wire, so the
+// Value-object collections (`Money[]`) on the vanilla Ecto/Phoenix foundation:
+// persisted as id-less relational CHILD TABLES (`invoice_line_items`,
+// `invoice_surcharges`) — a `has_many` of a child Ecto schema keyed
+// `(invoice_id, ordinal)` with a synthetic binary_id PK, cast via `cast_assoc`
+// with `on_replace: :delete` (replace-on-update).  The synthetic id / parent FK
+// / ordinal are stripped from the wire (`@derive Jason.Encoder, only:`), so the
 // array stays `[{amount,currency},…]`.  The single VO field (`total: Money`)
-// STAYS an embedded jsonb attribute.  The VO invariant (`amount >= 0`) is
-// enforced on BOTH the embedded single VO and every array element.
+// STAYS a plain `:map` (jsonb) column.  The VO invariant (`amount >= 0`) is
+// enforced on BOTH the single VO (`validate_vo`) and every array element.
 system Billing {
   subdomain Sales {
     context Invoicing {
@@ -26,8 +27,8 @@ system Billing {
   api InvoicingApi from Sales
   storage primary { type: postgres }
   resource invoicingState { for: Invoicing, kind: state, use: primary }
-  deployable phoenixApp {
-    platform: elixir
+  deployable api {
+    platform: elixir { foundation: vanilla }
     contexts: [Invoicing]
     dataSources: [invoicingState]
     serves: InvoicingApi
