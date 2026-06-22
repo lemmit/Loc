@@ -244,7 +244,14 @@ function renderHandler(
 ): string[] {
   const corr = wf.correlationField as string;
   const param = sub.param;
-  const renderCtx = { thisName: "state" };
+  // The persisted correlation row exposes its fields via record-style accessors
+  // (`state.attempts()`), not public fields — so own-state READS in the body
+  // (e.g. the `state.attempts() + 1` RHS of a compound `attempts += 1`) must go
+  // through the accessor.  Writes still use the JavaBean setter (the `assign`
+  // arm spells `state.setAttempts(...)` directly).  `accessorProps` only affects
+  // `this-prop` refs, so the `by <expr>` correlation key (an event-param member)
+  // is unchanged.
+  const renderCtx = { thisName: "state", accessorProps: true };
   // Routing key: the `by <expr>` value, else the event field name-matching the
   // correlation field (omitted-`by` rule).
   const keyExpr = resolved.correlation
@@ -311,6 +318,12 @@ function renderEsHandler(
 ): string[] {
   const corr = wf.correlationField as string;
   const param = sub.param;
+  // The event-sourced fold class lives in the dispatcher's OWN package and
+  // exposes package-private fields, so a same-package own-state READ
+  // (`state.total`) compiles as a bare field — no accessor redirect needed
+  // (unlike the cross-package mutable saga row in `renderHandler`).  Event-
+  // sourced workflows can't write their own state at all, so there's no
+  // compound-assign self-read here to worry about either.
   const renderCtx = { thisName: "state" };
   const keyExpr = resolved.correlation
     ? renderJavaExpr(resolved.correlation, renderCtx)
