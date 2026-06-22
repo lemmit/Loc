@@ -533,6 +533,35 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     }
   }
 
+  // `X id` Select fields — every form fork records the `useAll<X>()` queries
+  // its reference fields need (`idTargets`).  Hoist each distinct query once as
+  // a class field (`readonly <hookVar> = useAll<X>();`) and import its factory;
+  // the field markup (`form-fields.ts`) reads its options off `<hookVar>.data()`.
+  // Deduped across all forms on the page so two forms sharing a target share the
+  // single hoisted query.
+  const idTargets = [
+    ...angularForms.flatMap((f) => f.idTargets),
+    ...angularWorkflowForms.flatMap((f) => f.idTargets),
+    ...angularOpForms.flatMap((f) => f.idTargets),
+    ...angularModals.flatMap((m) => m.idTargets),
+  ];
+  if (idTargets.length > 0) {
+    const seen = new Set<string>();
+    const byPath = new Map<string, Set<string>>();
+    for (const t of idTargets) {
+      if (seen.has(t.hookVar)) continue;
+      seen.add(t.hookVar);
+      const from = t.importFrom.replace(/^\.\.\/api\//, "../../api/");
+      const names = byPath.get(from) ?? new Set<string>();
+      names.add(t.hookFn);
+      byPath.set(from, names);
+      members.push(`  readonly ${t.hookVar} = ${t.hookFn}();`);
+    }
+    for (const [from, names] of [...byPath.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      imports.push(`import { ${[...names].sort().join(", ")} } from ${JSON.stringify(from)};`);
+    }
+  }
+
   // Primitive imports collected by `renderPrimitive` (pack-declared) —
   // each becomes an import line, and Angular declarables (the `*Module`
   // symbols a standalone component must register) go into `imports: []`.

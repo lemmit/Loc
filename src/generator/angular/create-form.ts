@@ -4,7 +4,9 @@ import { lowerFirst, plural, snake } from "../../util/naming.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 import {
   type AngularFormControlSpec,
+  type AngularIdTargetSpec,
   addNg,
+  collectIdTargets,
   controlInit,
   fieldInput,
   formButton,
@@ -34,6 +36,9 @@ export interface AngularCreateFormSpec {
   submitMethod: string;
   redirectSlug: string;
   controls: AngularFormControlSpec[];
+  /** `useAll<X>()` queries the page-shell hoists for the form's `X id` Select
+   *  fields (empty when no field renders as a reference Select). */
+  idTargets: AngularIdTargetSpec[];
 }
 
 /** Resolve the `CreateForm(of: <Agg>)` aggregate ref. */
@@ -98,6 +103,7 @@ export function renderAngularCreateForm(
     submitMethod,
     redirectSlug: snake(plural(agg.name)),
     controls: fields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
+    idTargets: collectIdTargets(fields, bc, ctx),
   };
   ctx.angularForms ??= [];
   ctx.angularForms.push(spec);

@@ -4,7 +4,9 @@ import { namedArgValue, stringNamed } from "../_walker/shared/args.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 import {
   type AngularFormControlSpec,
+  type AngularIdTargetSpec,
   addNg,
+  collectIdTargets,
   controlInit,
   fieldInput,
   formButton,
@@ -31,6 +33,9 @@ export interface AngularWorkflowFormSpec {
   importFrom: string;
   submitMethod: string;
   controls: AngularFormControlSpec[];
+  /** `useAll<X>()` queries the page-shell hoists for the form's `X id` Select
+   *  fields (empty when no field renders as a reference Select). */
+  idTargets: AngularIdTargetSpec[];
 }
 
 export function renderAngularWorkflowForm(
@@ -93,6 +98,7 @@ export function renderAngularWorkflowForm(
     importFrom,
     submitMethod,
     controls: fields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
+    idTargets: collectIdTargets(fields, bc, ctx),
   };
   ctx.angularWorkflowForms ??= [];
   (ctx.angularWorkflowForms as AngularWorkflowFormSpec[]).push(spec);

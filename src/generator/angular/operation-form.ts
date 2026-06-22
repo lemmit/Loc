@@ -4,7 +4,9 @@ import { namedArgValue, positionalArgs, stringNamed } from "../_walker/shared/ar
 import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
 import {
   type AngularFormControlSpec,
+  type AngularIdTargetSpec,
   addNg,
+  collectIdTargets,
   controlInit,
   fieldInput,
   formButton,
@@ -41,6 +43,9 @@ export interface AngularOperationFormSpec {
    *  (`this.`-prefixed by the shell). */
   idExpr: string;
   controls: AngularFormControlSpec[];
+  /** `useAll<X>()` queries the page-shell hoists for the form's `X id` Select
+   *  fields (empty when no field renders as a reference Select). */
+  idTargets: AngularIdTargetSpec[];
 }
 
 /** Resolve the operation the call targets, plus the template-scope id
@@ -123,6 +128,7 @@ export function renderAngularOperationForm(
     submitMethod,
     idExpr,
     controls: fields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
+    idTargets: bc ? collectIdTargets(fields, bc, ctx) : [],
   };
   ctx.angularOpForms ??= [];
   (ctx.angularOpForms as AngularOperationFormSpec[]).push(spec);
