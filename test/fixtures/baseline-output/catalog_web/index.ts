@@ -36,8 +36,18 @@ baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "
 // Apply pending schema migrations before serving traffic.  Drizzle's
 // runtime migrator reads db/migrations/meta/_journal.json + each
 // referenced .sql file, tracking state in `__drizzle_migrations`;
-// idempotent across boots.
-await migrate(db, { migrationsFolder: "./db/migrations" });
+// idempotent across boots.  Bracketed with the catalog migration
+// lifecycle events (observability.md) — drizzle's migrator runs the
+// whole batch in one opaque call, so there's no per-migration
+// `migration_applied` seam (Hono limitation; Python/.NET emit it).
+baseLogger.info({ event: "migrations_starting" });
+try {
+  await migrate(db, { migrationsFolder: "./db/migrations" });
+  baseLogger.info({ event: "migrations_complete" });
+} catch (err) {
+  baseLogger.error({ event: "migration_failed", error: err instanceof Error ? err.message : String(err) });
+  throw err;
+}
 const app = createApp(db);
 const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });

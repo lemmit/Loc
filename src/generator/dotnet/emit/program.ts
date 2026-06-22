@@ -2,7 +2,7 @@ import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { isTphBase } from "../../../ir/util/inheritance.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { plural, upperFirst } from "../../../util/naming.js";
-import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
+import { renderDotnetLogCall, renderDotnetLogCallWithException } from "../../_obs/render-dotnet.js";
 import { DAPPER_PROJECT_DEPS, renderDapperConnectionSetup } from "./dapper.js";
 
 // Program.cs is top-level statements, not a class — so the renderer's
@@ -14,6 +14,11 @@ function asLifecycleStmt(rendered: string): string {
 }
 function asLifecycleExpr(rendered: string): string {
   return asLifecycleStmt(rendered).replace(/;\s*$/, "");
+}
+// Inside the migration scope the catalog renderer's `_log.` field
+// becomes the locally-created `migrationLog.`.
+function asMigrationStmt(rendered: string): string {
+  return rendered.replace("_log.", "migrationLog.");
 }
 
 // Program.cs hosting + DI registration, plus the project + Dockerfile +
@@ -425,10 +430,49 @@ await ${ns}.Infrastructure.Persistence.DbSchema.EnsureAsync(
 // Apply pending EF Core migrations before serving traffic.  Idempotent —
 // EF tracks applied versions in the __EFMigrationsHistory table.  Runs
 // synchronously at startup so the schema is current on first request.
+// Bracketed with the catalog migration-lifecycle events (observability.md)
+// — same event names + level Hono/Python emit.  EF exposes the pending
+// migration ids before applying them, so we can emit migration_applied
+// per id (no cheap per-migration duration, so duration_ms is omitted).
 using (var migrationScope = app.Services.CreateScope())
 {
     var db = migrationScope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
+    var migrationLog = migrationScope.ServiceProvider
+        .GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+        .CreateLogger("Migrations");
+    var pendingMigrations = db.Database.GetPendingMigrations().ToList();
+    ${asMigrationStmt(
+      renderDotnetLogCall("migrationsStarting", [
+        { name: "count", valueExpr: "pendingMigrations.Count" },
+      ]),
+    )}
+    try
+    {
+        db.Database.Migrate();
+        foreach (var migrationId in pendingMigrations)
+        {
+            ${asMigrationStmt(
+              renderDotnetLogCall("migrationApplied", [
+                { name: "id", valueExpr: "migrationId" },
+                { name: "name", valueExpr: "migrationId" },
+              ]),
+            )}
+        }
+        ${asMigrationStmt(
+          renderDotnetLogCall("migrationsComplete", [
+            { name: "applied", valueExpr: "pendingMigrations.Count" },
+          ]),
+        )}
+    }
+    catch (Exception migrationError)
+    {
+        ${asMigrationStmt(
+          renderDotnetLogCallWithException("migrationFailed", "migrationError", [
+            { name: "error", valueExpr: "migrationError.Message" },
+          ]),
+        )}
+        throw;
+    }
 }
 `
       : ""
