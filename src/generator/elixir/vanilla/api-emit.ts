@@ -34,6 +34,7 @@ import {
   renderProblemVariantHelper,
   renderReturningOpControllerAction,
 } from "./operation-returns-emit.js";
+import { serializeRefCollLines } from "./ref-collection-emit.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
 
 /** Public operations that earn a dedicated `POST /<plural>/:id/<op>`
@@ -156,6 +157,22 @@ function renderController(
 ): string {
   const aggPascal = upperFirst(agg.name);
   const facadeMod = `${appModule}.${ctxModule}`;
+
+  // Reference collections (`X id[]` → `many_to_many`) are projected to id arrays
+  // in the wire response (the Ash `calculate :party, {:array, :uuid}` analogue):
+  // each loaded relationship is mapped to its members' ids by `__ref_ids/1`.
+  const refCollSerLines = serializeRefCollLines(agg);
+  const serializeRefColls = refCollSerLines.length > 0 ? `\n${refCollSerLines.join("\n")}` : "";
+  const refIdsHelper =
+    refCollSerLines.length > 0
+      ? `
+
+  # Project a loaded \`many_to_many\` relationship to its members' ids (an
+  # unloaded relationship serializes as an empty list).
+  defp __ref_ids(%Ecto.Association.NotLoaded{}), do: []
+  defp __ref_ids(records) when is_list(records), do: Enum.map(records, & &1.id)
+  defp __ref_ids(_), do: []`
+      : "";
 
   // A principal (tenancy) `filter` scopes every read by the request actor, so the
   // controller pulls `current_user` off `conn.assigns` (set by the Auth plug,
@@ -373,8 +390,8 @@ ${
     : `  defp serialize(record) do
     record
     |> Map.from_struct()
-    |> Map.drop([:__meta__, :__struct__])
-  end`
+    |> Map.drop([:__meta__, :__struct__])${serializeRefColls}
+  end${refIdsHelper}`
 }
 end
 `;

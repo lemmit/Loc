@@ -29,6 +29,14 @@ import {
 } from "./capability-filter.js";
 import { isVanillaDocAgg, renderDocRepository } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
+import {
+  containsRefCollField,
+  hasRefColls,
+  preloadList,
+  preloadSuffix,
+  putAssocLines,
+  refCollRepoHelpers,
+} from "./ref-collection-emit.js";
 import { aggregateHasStamps, stampPutChanges, stampUsesPrincipal } from "./stamp-emit.js";
 import { valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
@@ -96,8 +104,6 @@ function renderRepository(
   const valueCollectionRels = ctx
     ? valueCollectionsWithVo(agg, ctx).map((v) => `:${snake(v.vc.fieldName)}`)
     : [];
-  const preload =
-    valueCollectionRels.length > 0 ? ` |> Repo.preload([${valueCollectionRels.join(", ")}])` : "";
 
   // Lifecycle stamps (`with audit`/`auditable`, `stamp onCreate/onUpdate`) →
   // `put_change` pipe lines on the changeset right before the Repo write.  A
@@ -127,13 +133,34 @@ function renderRepository(
   // callers (workflows) compiling and fail-closed (a nil actor scopes to no rows).
   const principal = aggregateUsesPrincipalContextFilter(agg);
   const cap = vanillaCapabilityFilter(agg, contextModule, { actor: principal });
-  const findFns = finds.map((f) => renderFindFn(f, agg, aggModule, contextModule, principal));
+  // Reference collections (`X id[]` → `many_to_many`) need `import Ecto.Query`
+  // for the id-list resolution (`from(t in Target, where: t.id in ^ids)`) and
+  // `Repo.preload(...)` on every read so the serializer sees the loaded ids.
+  const refColls = hasRefColls(agg);
+  // Reads preload BOTH the value-collection `has_many` and the reference-collection
+  // `many_to_many` relationships in one round-trip, so the serializer materialises
+  // every wire field (an unloaded assoc serialises as `%Ecto.Association.NotLoaded{}`).
+  const preloadRels = [...valueCollectionRels, ...preloadList(agg)];
+  const preload = preloadRels.length > 0 ? ` |> Repo.preload([${preloadRels.join(", ")}])` : "";
+  const findFns = finds.map((f) =>
+    renderFindFn(f, agg, aggModule, contextModule, principal, preload),
+  );
   const findBlock = findFns.length > 0 ? `\n\n${findFns.join("\n\n")}\n` : "";
+
+  // Reference-collection (`X id[]` → `many_to_many`) wiring on the write seam:
+  // resolve the incoming id list to target structs and `put_assoc` them.  Insert
+  // and the named-op persist start from a fresh / loaded record; update preloads
+  // the existing association first so `put_assoc` can replace it cleanly.
+  const refAssocLines = putAssocLines(appModule, ctxModule, agg, "    ");
+  const insertPutAssoc = refAssocLines.length > 0 ? `\n${refAssocLines.join("\n")}` : "";
+  const updatePutAssoc = insertPutAssoc;
+  const updatePreload = refColls ? ` |> Repo.preload([${preloadList(agg).join(", ")}])` : "";
+  const refHelpers = refColls ? `\n${refCollRepoHelpers(appModule)}\n` : "";
   // `import Ecto.Query` is required for `from(...)` — needed when there's a
   // custom find OR a capability filter (which turns `list`/`find_by_id` into
-  // `from(...)` reads).  Omit it otherwise to keep plain repositories
-  // byte-identical to before.
-  const ectoImport = finds.length > 0 || cap ? `\n  import Ecto.Query` : "";
+  // `from(...)` reads) OR a reference collection (id-list resolution).  Omit it
+  // otherwise to keep plain repositories byte-identical to before.
+  const ectoImport = finds.length > 0 || cap || refColls ? `\n  import Ecto.Query` : "";
   // The threaded actor parameter (principal filters only).
   const actorParam = principal ? "current_user \\\\ nil" : "";
   const listHead = principal ? `def list(${actorParam}) do` : "def list do";
@@ -142,7 +169,8 @@ function renderRepository(
     : `@spec list() :: {:ok, [${aggModule}.t()]} | {:error, term()}`;
   // `list`: bare `Repo.all(<Agg>)` unless a capability filter scopes it.
   // `Repo.preload/2` accepts the whole list, so the value-collection has_many
-  // associations come back loaded (and ordinal-ordered) in one round-trip.
+  // and reference-collection many_to_many associations come back loaded (and
+  // ordinal-ordered, for value collections) in one round-trip.
   const listBody =
     (cap ? `from(record in ${aggModule}, where: ${cap}) |> Repo.all()` : `Repo.all(${aggModule})`) +
     preload;
@@ -158,6 +186,9 @@ function renderRepository(
   const findByIdBody = cap
     ? `case Repo.one(from(record in ${aggModule}, where: record.id == ^id and (${cap}))) do`
     : `case Repo.get(${aggModule}, id) do`;
+  // Preload the reference-collection relationships on the loaded row so the
+  // serializer projects them to id arrays.
+  const findByIdHit = preload ? `record -> {:ok, record${preload}}` : "record -> {:ok, record}";
 
   return `# Auto-generated.
 defmodule ${repoMod} do
@@ -173,20 +204,20 @@ defmodule ${repoMod} do
   ${findByIdHead}
     ${findByIdBody}
       nil -> {:error, :not_found}
-      record -> {:ok, record${preload}}
+      ${findByIdHit}
     end
   end
 
   @spec insert(map()${hasStamps && stampPrincipal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def insert(attrs${stampActorParam}) when is_map(attrs) do
-    ${aggModule}Changeset.base_changeset(attrs)${insertStamps}
+    ${aggModule}Changeset.base_changeset(attrs)${insertStamps}${insertPutAssoc}
     |> Repo.insert()
   end
 
   @spec update(${aggModule}.t(), map()${hasStamps && stampPrincipal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def update(%${aggModule}{} = record, attrs${stampActorParam}) when is_map(attrs) do
-    record
-    |> ${aggModule}Changeset.base_changeset(attrs)${updateStamps}
+    record${updatePreload}
+    |> ${aggModule}Changeset.base_changeset(attrs)${updateStamps}${updatePutAssoc}
     |> Repo.update()
   end
 
@@ -200,8 +231,7 @@ defmodule ${repoMod} do
           {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def persist_change(%Ecto.Changeset{data: %${aggModule}{}} = changeset) do
     Repo.update(changeset)
-  end${findBlock}
-end
+  end${findBlock}${refHelpers || "\n"}end
 `;
 }
 
@@ -220,6 +250,7 @@ function renderFindFn(
   aggModule: string,
   contextModule: string,
   principal: boolean,
+  preload: string,
 ): string {
   // The capability filter for THIS find — recomputed with the find's own
   // `ignoring` clause so a bypassed capability's `where:` predicate is omitted
@@ -245,6 +276,36 @@ function renderFindFn(
     filterArgs: true,
   };
 
+  const fetchCallEarly = isSingleReturn(f.returnType) ? "Repo.one(query)" : "Repo.all(query)";
+  const specTailEarly = isSingleReturn(f.returnType)
+    ? `{:ok, ${aggModule}.t() | nil} | {:error, term()}`
+    : `{:ok, [${aggModule}.t()]} | {:error, term()}`;
+  const specArgsEarly = [...argNames.map(() => "term()"), ...(principal ? ["map() | nil"] : [])];
+
+  // `this.<refColl>.contains(arg)` over a reference collection → a join-table
+  // query against the `many_to_many` relationship (the vanilla analogue of the
+  // Ash `exists(<rel>, id == ^arg)` filter).  The orphan `Enum.member?` shape the
+  // shared renderer produces would query a phantom array column — this joins the
+  // real join table instead.  The argument is the find's single id parameter.
+  const containsField = containsRefCollField(f.filter, agg);
+  if (containsField) {
+    const rel = snake(containsField);
+    const arg = argNames[0] ?? "nil";
+    const where = combineWhere(`join_row.id == ^${arg}`, cap) ?? `join_row.id == ^${arg}`;
+    const spec = `  @spec ${fnName}(${specArgsEarly.join(", ")}) :: ${specTailEarly}`;
+    return `${spec}
+  def ${fnName}(${argList}) do
+    query =
+      from(record in ${aggModule},
+        join: join_row in assoc(record, :${rel}),
+        where: ${where},
+        distinct: true
+      )
+
+    {:ok, ${fetchCallEarly}${preload}}
+  end`;
+  }
+
   let whereExpr: string;
   if (f.filter) {
     whereExpr = renderExpr(f.filter, renderCtx);
@@ -258,7 +319,7 @@ function renderFindFn(
   // (a find must honour the same soft-delete / scoping the CRUD reads do).
   whereExpr = combineWhere(whereExpr || null, cap) ?? "";
 
-  const fetchCall = single ? `Repo.one(query)` : `Repo.all(query)`;
+  const fetchCall = (single ? `Repo.one(query)` : `Repo.all(query)`) + preload;
   const specTail = single
     ? `{:ok, ${aggModule}.t() | nil} | {:error, term()}`
     : `{:ok, [${aggModule}.t()]} | {:error, term()}`;

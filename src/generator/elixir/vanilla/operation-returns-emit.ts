@@ -27,6 +27,7 @@ import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
+import { isRefCollFieldName, refCollTargetModule } from "./ref-collection-emit.js";
 
 /** The wire field list a returning op's success branch serialises `record`
  *  into — the same ordered `wireShape` the find/CRUD controllers expose, so the
@@ -42,7 +43,12 @@ function wireFieldsOf(agg: AggregateIR): string[] {
  *  `put_embed`; scalar columns (incl. the co-located `<field>_provenance`
  *  backing columns the body assigned) via `put_change`.  Each is a real schema
  *  column on the mutated `record`, so `put_change`/`put_embed` is safe. */
-export function persistPutBodies(op: OperationIR, agg: AggregateIR): string[] {
+export function persistPutBodies(
+  op: OperationIR,
+  agg: AggregateIR,
+  appModule: string,
+  ctxModule: string,
+): string[] {
   const containNames = new Set(agg.contains.map((c) => snake(c.name)));
   const assignedFields: string[] = [];
   for (const s of op.statements) {
@@ -56,11 +62,21 @@ export function persistPutBodies(op: OperationIR, agg: AggregateIR): string[] {
   const provNames = new Set(provenancedFieldsOf(agg).map((f) => snake(f.name)));
   const provColumns = assignedFields.filter((f) => provNames.has(f)).map((f) => provColumn(f));
   return [
-    ...assignedFields.map((f) =>
-      containNames.has(f)
-        ? `Ecto.Changeset.put_embed(:${f}, record.${f})`
-        : `Ecto.Changeset.put_change(:${f}, record.${f})`,
-    ),
+    ...assignedFields.map((f) => {
+      // A containment (`embeds_many`/`embeds_one`) round-trips via `put_embed`; a
+      // reference collection (`X id[]` → `many_to_many`) resolves its mutated id
+      // list back to target structs and `put_assoc`s them (the schema's
+      // `on_replace: :delete` rewrites the join rows); plain scalar columns (incl.
+      // the provenance backing columns) via `put_change`.
+      if (containNames.has(f)) return `Ecto.Changeset.put_embed(:${f}, record.${f})`;
+      const targetMod = refCollTargetModule(appModule, ctxModule, agg, f);
+      if (targetMod) {
+        // The body bound a local `<field>` holding the new id list (it left
+        // `record.<field>` as the loaded assoc so put_assoc can replace it).
+        return `Ecto.Changeset.put_assoc(:${f}, __resolve_refs(${f}, ${targetMod}))`;
+      }
+      return `Ecto.Changeset.put_change(:${f}, record.${f})`;
+    }),
     ...provColumns.map((c) => `Ecto.Changeset.put_change(:${c}, record.${c})`),
   ];
 }
@@ -172,7 +188,7 @@ export function renderReturningOpFunction(
     // ONE transaction so the derived rows commit atomically with the state
     // change.  A persist failure rolls back to `{:error, changeset}` (the
     // controller's `_result/2` gains a matching validation clause).
-    const putBodies = persistPutBodies(op, agg);
+    const putBodies = persistPutBodies(op, agg, appModule, facadeMod.split(".").slice(1).join("."));
     const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");
     const txTail: string[] = [];
     if (hasProv) txTail.push(`          ${appModule}.Provenance.flush(${appModule}.Repo)`);
@@ -291,6 +307,15 @@ export function renderReturningStmt(
       // so the persist step (context-emit) `put_change`s the mutated field.
       const field = snake(s.target.segments[0] ?? "");
       const value = renderExpr(s.value, rc);
+      // A reference collection (`party += pokemon`, `X id[]`) is a `many_to_many`
+      // relationship whose preloaded value is target STRUCTS — not ids.  Bind the
+      // new id set to a local (`party = __ref_id_list(record.party) ++ [id]`)
+      // WITHOUT overwriting `record.party` (it must stay the loaded assoc so the
+      // persist's `put_assoc` can replace it cleanly).  The persist reads the
+      // local, resolves to structs, and `put_assoc`s.
+      if (s.collection && rc.agg && isRefCollFieldName(rc.agg, field)) {
+        return `    ${field} = __ref_id_list(record.${field}) ++ [${value}]`;
+      }
       return s.collection
         ? `    record = %{record | ${field}: (record.${field} || []) ++ [${value}]}`
         : `    record = %{record | ${field}: record.${field} + ${value}}`;
@@ -299,6 +324,9 @@ export function renderReturningStmt(
       // `items -= x` drops the first matching element; scalar `n -= x` subtracts.
       const field = snake(s.target.segments[0] ?? "");
       const value = renderExpr(s.value, rc);
+      if (s.collection && rc.agg && isRefCollFieldName(rc.agg, field)) {
+        return `    ${field} = List.delete(__ref_id_list(record.${field}), ${value})`;
+      }
       return s.collection
         ? `    record = %{record | ${field}: List.delete(record.${field} || [], ${value})}`
         : `    record = %{record | ${field}: record.${field} - ${value}}`;

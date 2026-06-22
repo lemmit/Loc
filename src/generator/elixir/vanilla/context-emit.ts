@@ -9,7 +9,12 @@
 // calls in the workflow body).
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, BoundedContextIR, OperationIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  EnrichedAggregateIR,
+  OperationIR,
+} from "../../../ir/types/loom-ir.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { stmtUsesParam } from "../domain/predicates.js";
@@ -29,6 +34,7 @@ import {
   renderReturningOpFunction,
   renderReturningStmt,
 } from "./operation-returns-emit.js";
+import { refCollFieldNames } from "./ref-collection-emit.js";
 import { customFindsOf } from "./repository-emit.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
 
@@ -138,6 +144,15 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
   // it never sits unused under --warnings-as-errors).
   const ensureBlock = esContextNeedsEnsure(ctx) ? `\n${renderEnsureHelper()}\n` : "";
 
+  // Shared ref-collection helpers — emitted once per context module when ANY
+  // named operation appends/removes through a `many_to_many` reference
+  // collection.  `__ref_id_list/1` normalises a preloaded relationship (target
+  // structs) — or an already-raw id list — to a list of id strings;
+  // `__resolve_refs/2` loads those ids back to target structs for `put_assoc`.
+  const refCollHelpers = contextUsesRefCollOp(ctx)
+    ? `\n${renderContextRefCollHelpers(appModule)}\n`
+    : "";
+
   return `# Auto-generated.
 defmodule ${facadeMod} do
   @moduledoc """
@@ -146,10 +161,53 @@ defmodule ${facadeMod} do
   handlers (Slice 5c prerequisite — workflows on vanilla need
   \`<op>_<agg>(record, params)\` for cross-aggregate calls in the
   workflow body).  Vanilla foundation (no Ash.Domain).
-  """
+  """${refCollHelpers ? "\n  import Ecto.Query" : ""}
 
-${blocks.join("\n")}${retrievalBlock}${ensureBlock}end
+${blocks.join("\n")}${retrievalBlock}${ensureBlock}${refCollHelpers}end
 `;
+}
+
+/** Does any non-CRUD named operation in the context append/remove through a
+ *  reference collection (`X id[]` → `many_to_many`)?  Gates the shared
+ *  `__ref_id_list` / `__resolve_refs` helper emission. */
+function contextUsesRefCollOp(ctx: BoundedContextIR): boolean {
+  return ctx.aggregates.some((agg) => {
+    if (isEventSourced(agg)) return false;
+    const names = refCollFieldNames(agg);
+    if (names.size === 0) return false;
+    return (agg.operations ?? []).some(
+      (op) =>
+        !CRUD_RESERVED_NAMES.has(op.name) &&
+        op.statements.some(
+          (s) =>
+            (s.kind === "add" || s.kind === "remove") &&
+            s.collection &&
+            names.has(snake(s.target.segments[0] ?? "")),
+        ),
+    );
+  });
+}
+
+/** The two private helpers a context module emits when a named op mutates a
+ *  reference collection. */
+function renderContextRefCollHelpers(appModule: string): string {
+  return `  # Normalise a reference-collection value to a list of id strings — a
+  # preloaded \`many_to_many\` is a list of target structs; a not-yet-loaded one
+  # (or already-raw id list) passes through.
+  defp __ref_id_list(%Ecto.Association.NotLoaded{}), do: []
+  defp __ref_id_list(list) when is_list(list) do
+    Enum.map(list, fn
+      %{id: id} -> to_string(id)
+      id -> to_string(id)
+    end)
+  end
+  defp __ref_id_list(_), do: []
+
+  # Load reference-collection ids back to target structs for \`put_assoc\`.
+  defp __resolve_refs(ids, target_mod) do
+    ids = ids |> List.wrap() |> Enum.map(&to_string/1)
+    ${appModule}.Repo.all(from(t in target_mod, where: t.id in ^ids))
+  end`;
 }
 
 // Named operation functions per aggregate operation.  `<op>_<agg>(record,
@@ -192,6 +250,10 @@ function renderNamedOpFunction(
     contextModule: facadeMod,
     foundation: "vanilla",
     captureProvenance: hasProv,
+    // The enriched aggregate, so the body renderer can detect reference-
+    // collection (`X id[]`) add/remove and normalise to id lists (the persist
+    // then `put_assoc`s the resolved structs instead of `put_change`).
+    agg: agg as EnrichedAggregateIR,
   };
 
   // The `before` wire snapshot — taken from the ORIGINAL `record` before the
@@ -214,9 +276,16 @@ function renderNamedOpFunction(
 
   // Persist the fields the body assigned (deduped, declaration order) + the
   // co-located `<field>_provenance` backing columns — shared with the
-  // returning-op persist tail.  Re-indented per persist path (4-space for the
-  // plain pipe, 6-space inside the `changeset =` assignment).
-  const putBodies = persistPutBodies(op, agg);
+  // returning-op persist tail.  A reference collection (`X id[]` → `many_to_many`)
+  // resolves its mutated id list back to target structs and `put_assoc`s them;
+  // see `persistPutBodies`.  Re-indented per persist path (4-space for the plain
+  // pipe, 6-space inside the `changeset =` assignment).
+  const putBodies = persistPutBodies(
+    op,
+    agg,
+    facadeMod.split(".")[0]!,
+    facadeMod.split(".").slice(1).join("."),
+  );
   const putBlock = putBodies.map((b) => `\n    |> ${b}`).join("");
   const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");
 
