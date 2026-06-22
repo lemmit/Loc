@@ -85,6 +85,25 @@ function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
   );
 }
 
+// `mix test` (MIX_ENV=test) for a fixture whose aggregates declare domain
+// `test "..."` blocks.  The Ash emitter ports the REJECTION half DB-free (Rec3):
+// invariant / precondition / value-object-construction `toThrow` lower to
+// `Ash.Changeset.for_create/for_update(...).valid?` checks that run at
+// changeset-build time — NO database (the happy-path state tests stay
+// `@tag :skip`).  Catches an emitter regression that produces invalid Elixir or
+// a behaviourally wrong assertion (the compile gate above is MIX_ENV=prod and
+// never compiles `test/`).
+function runMixTest(projDir: string, mirror: HexMirror | undefined): void {
+  const dockerArgs = mirror ? `${mirror.dockerArgs.join(" ")} ` : "";
+  const shellPrefix = mirror?.shellPrefix ?? "";
+  execSync(
+    `docker run --rm ${dockerArgs}-v ${projDir}:/app -w /app ${IMAGE} ` +
+      `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
+      `mix deps.get && mix test'`,
+    { stdio: "inherit", timeout: 600_000 },
+  );
+}
+
 describe.skipIf(!ENABLED)(
   "generated Phoenix project compiles against real Ash 3.x (LOOM_PHOENIX_BUILD=1)",
   () => {
@@ -274,6 +293,13 @@ describe.skipIf(!ENABLED)(
         // explicit `read :read do primary? true; filter … end` override, and the
         // per-find/per-view `filter expr(...)` lines against real Ash 3.x.
         { name: "filter-bypass.ddd" },
+        // Domain `test "..."` blocks → DB-free ExUnit rejections (Rec3): the
+        // emitted suite lowers invariant / precondition / value-object-construction
+        // `toThrow` to `refute Ash.Changeset.for_create/for_update(...).valid?` and
+        // is run via `mix test` (no DB) by the harness below, on top of the prod
+        // compile.  Pins both the changeset-build emission and that `config/test.exs`
+        // lets `mix test` load.
+        { name: "domain-tests.ddd" },
       ]),
     )("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
@@ -299,6 +325,12 @@ describe.skipIf(!ENABLED)(
 
         // 2. mix deps.get + mix compile inside the elixir image.
         runMixCompile(projDir, mirror);
+
+        // 3. When the emitter wrote an ExUnit suite (an aggregate declared
+        // `test` blocks), run it DB-free (Rec3 rejection tests).
+        if (fs.existsSync(path.join(projDir, "test", "test_helper.exs"))) {
+          runMixTest(projDir, mirror);
+        }
       } finally {
         // CI-driven runs (LOOM_PHOENIX_OUT_DIR set) MUST leave deps/
         // and _build/ on disk so `actions/cache` can save them after

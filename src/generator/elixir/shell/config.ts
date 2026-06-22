@@ -115,6 +115,36 @@ config :${appName}, ${appModule}Web.Endpoint,
 `;
 }
 
+/** `config/test.exs` — only present so `mix test` (the Rec3 DB-free domain-test
+ *  gate) can load.  The emitted ExUnit suites are DB-free (changeset-build
+ *  `valid?` checks), so the Repo never connects; it's configured with the
+ *  Sandbox pool (lazy, no connection at boot) and the Endpoint runs with
+ *  `server: false`.  The prod image never copies this file. */
+export function renderTestExs(appName: string, appModule: string): string {
+  return `# Auto-generated.
+import Config
+
+# DB-free domain tests: the Repo is configured but never queried (the suites
+# build changesets and check \`valid?\`), so the Sandbox pool's lazy connect is
+# never triggered.  A live database is NOT required to run \`mix test\`.
+config :${appName}, ${appModule}.Repo,
+  username: "postgres",
+  password: "postgres",
+  hostname: "localhost",
+  database: "${appName}_test#{System.get_env("MIX_TEST_PARTITION")}",
+  pool: Ecto.Adapters.SQL.Sandbox,
+  pool_size: 10
+
+config :${appName}, ${appModule}Web.Endpoint,
+  http: [ip: {127, 0, 0, 1}, port: 4002],
+  secret_key_base: "ZqJBpdEaAxQpgK0d63NydhxsP2VrZLgJ6mhJrShdWf6mYLRVy6Iuc1FdN5lW9bz9",
+  server: false
+
+config :logger, level: :warning
+config :phoenix, :plug_init_mode, :runtime
+`;
+}
+
 export function renderRuntimeExs(appName: string, appModule: string): string {
   return `# Auto-generated.
 import Config

@@ -5,14 +5,16 @@
 //   * VANILLA emits a pure domain core on the aggregate (`create/1` via
 //     `apply_action`, `<op>/2` precondition + in-memory mutation) and ports the
 //     full Loom test idiom onto it — create / op / toThrow / field reads all run
-//     DB-free. Only a value-object construction invariant skips (a vanilla VO is
-//     an unvalidated map).
-//   * ASH stays the pure-subset: an in-memory value-object field read runs;
-//     `create`/op/`toThrow` tests are `@tag :skip` placeholders (Ash actions are
-//     data-layer-bound).
+//     DB-free.
+//   * ASH runs the REJECTION subset DB-free (Rec3): an invariant / precondition /
+//     value-object-construction `toThrow` lowers to a changeset-build
+//     `Ash.Changeset.for_create/for_update(...).valid?` check (Ash validations run
+//     when the changeset is built, no data layer), plus in-memory field reads.
+//     Only a happy-path post-operation STATE assertion still `@tag :skip`s (it
+//     needs a persisted record / SQL.Sandbox).
 //
-// Both the vanilla pure core and the emitted suite are verified to compile and
-// pass under `mix test` (no DB) against a generated project.
+// Both emitted suites are verified to compile and pass under `mix test` (no DB)
+// against a generated project.
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";
@@ -121,16 +123,30 @@ describe("elixir domain `test` → ExUnit emission", () => {
     expect(cs).toContain("defp validate_vo(changeset, field, new_fun) do");
   });
 
-  it("ash: keeps the pure-subset (field reads run, create/op/toThrow skip)", async () => {
+  it("ash: runs the rejection subset DB-free, skips only the happy-path state test (Rec3)", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const src = findFile(files, /ash_api\/test\/selling\/order_test\.exs$/);
 
     // The in-memory value-object field read runs against the embedded struct.
     expect(src).toContain('m = %AshApi.Selling.Money{amount: 10.5, currency: "USD"}');
     expect(src).toContain('assert m.currency == "USD"');
-    // create / op / precondition / VO-construction tests are all skipped (4).
-    expect(src.split("@tag :skip").length - 1).toBe(4);
-    // No aggregate-core / instance-op calls leak into the ash output.
+
+    // Create-invariant rejection → a changeset-build `valid?` check (no DB).
+    expect(src).toContain(
+      'refute Ash.Changeset.for_create(AshApi.Selling.Order, :create, %{customer: ""',
+    );
+    // Value-object construction invariant → the embedded resource's create changeset.
+    expect(src).toContain(
+      'refute Ash.Changeset.for_create(AshApi.Selling.Money, :create, %{amount: -1.0, currency: "USD"}).valid?',
+    );
+    // Precondition rejection → an in-memory record + a `for_update` valid? check.
+    expect(src).toContain('o = %AshApi.Selling.Order{customer: "acme", status: "confirmed"');
+    expect(src).toContain("refute Ash.Changeset.for_update(o, :confirm, %{}).valid?");
+
+    // Only the happy-path post-operation STATE assertion still skips (needs a DB).
+    expect(src.split("@tag :skip").length - 1).toBe(1);
+    // The raw aggregate-core / instance-op call shapes never leak — rejections
+    // route through the Ash changeset API, not a `.create`/`.confirm` method.
     expect(src).not.toContain(".confirm(");
     expect(src).not.toContain("Order.create(");
 
