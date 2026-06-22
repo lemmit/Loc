@@ -29,6 +29,7 @@ import { renderDockerfile, renderDockerignore } from "../shell/project.js";
 import { toModulePrefix, toSnakeApp } from "../shell-emit.js";
 import { emitAggregateTests, emitTestHelper } from "../tests-emit.js";
 import { emitVanillaApiControllers } from "./api-emit.js";
+import { emitVanillaAudit } from "./audit-emit.js";
 import { emitVanillaChangesets } from "./changeset-emit.js";
 import { emitVanillaContextModule } from "./context-emit.js";
 import { emitVanillaEventModules } from "./events-emit.js";
@@ -153,6 +154,12 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // adds the co-located `<field>_provenance` columns + the `provenance_records`
   // table.  No-op unless a provenanced field exists (DEBT-06).
   emitVanillaProvenance(appName, appModule, contexts, out, sys);
+
+  // Audit runtime — the `<App>.Audit` sink (Record schema + the `Json` Ecto
+  // type + the transactional `record/2` insert) plus the late migration that
+  // creates `audit_records`.  No-op unless an aggregate carries an audited
+  // command action (operation / create / destroy) (audit-and-logging.md).
+  emitVanillaAudit(appName, appModule, contexts, out);
 
   // Auth modules — the foundation-agnostic Auth plug (Bearer-JWT → `conn.assigns
   // .current_user`), LiveAuth on_mount, and /auth controller.  Emitted when the

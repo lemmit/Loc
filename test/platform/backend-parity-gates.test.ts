@@ -195,7 +195,9 @@ const FEATURES: readonly Feature[] = [
     name: "audited operation (`operation … audited`)",
     code: "loom.audited-backend-unsupported",
     ddd: auditedDdd,
-    // AUDIT_OP_BACKENDS = node/dotnet/java/python.
+    // AUDIT_OP_BACKENDS = node/dotnet/java/python (elixir-ash gated; elixir-vanilla
+    // un-gates it, but this row uses the default-foundation `platform: elixir`
+    // spelling = ash, like the provenance/event-sourcing rows above).
     emits: new Set<Backend>(["node", "dotnet", "java", "python"]),
     marker: {
       node: "audit_records",

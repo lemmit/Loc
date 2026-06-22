@@ -22,6 +22,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
+import { auditRecordCall, createAuditMeta, destroyAuditMeta } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
 import { isVanillaDocAgg, renderDocSerialize } from "./document-emit.js";
@@ -224,6 +225,105 @@ ${cuBind}
   // `GET /<plural>/<find>` actions for the aggregate's custom finds.
   const findActions = renderFindActions(ctxModule, agg, ctx);
 
+  // Audited lifecycle actions — the create/destroy handler stages an audit row
+  // INSIDE a forced `Repo.transaction` so it commits atomically with the
+  // insert/delete (parity with the Hono/Python/.NET/Java lifecycle audit).
+  // create → before:null / after=wire(created), recorded AFTER the insert;
+  // destroy → before=wire(loaded) / after:null, recorded BEFORE the delete.
+  const auditCreate = (agg.creates ?? []).some((c) => c.audited);
+  const auditDestroy = (agg.destroys ?? []).some((d) => d.audited);
+  const createMeta = createAuditMeta(agg);
+  const destroyMeta = destroyAuditMeta(agg);
+
+  const createAction = auditCreate
+    ? `  def create(conn, params) do
+${createCuBind}    result =
+      ${appModule}.Repo.transaction(fn ->
+        case ${ctxModule}.create_${aggSnake}(params${createActor}) do
+          {:ok, record} ->
+${auditRecordCall({
+  appModule,
+  operationId: createMeta.operationId,
+  action: createMeta.action,
+  targetType: aggPascal,
+  targetId: "record.id",
+  before: "nil",
+  after: "serialize(record)",
+  indent: "            ",
+})}
+
+            record
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            ${appModule}.Repo.rollback(changeset)
+        end
+      end)
+
+    case result do
+      {:ok, record} ->
+        conn
+        |> put_status(201)
+        |> json(serialize(record))
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        ProblemDetails.validation_error_response(conn, changeset)
+    end
+  end`
+    : `  def create(conn, params) do
+${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
+      {:ok, record} ->
+        conn
+        |> put_status(201)
+        |> json(serialize(record))
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        ProblemDetails.validation_error_response(conn, changeset)
+    end
+  end`;
+
+  const deleteAction = auditDestroy
+    ? `  def delete(conn, %{"id" => id}) do
+${cuBind}    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
+         {:ok, _} <-
+           ${appModule}.Repo.transaction(fn ->
+${auditRecordCall({
+  appModule,
+  operationId: destroyMeta.operationId,
+  action: destroyMeta.action,
+  targetType: aggPascal,
+  targetId: "id",
+  before: "serialize(record)",
+  after: "nil",
+  indent: "             ",
+})}
+
+             case ${ctxModule}.delete_${aggSnake}(record) do
+               {:ok, deleted} -> deleted
+               {:error, %Ecto.Changeset{} = changeset} -> ${appModule}.Repo.rollback(changeset)
+             end
+           end) do
+      send_resp(conn, 204, "")
+    else
+      {:error, :not_found} ->
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        ProblemDetails.validation_error_response(conn, changeset)
+    end
+  end`
+    : `  def delete(conn, %{"id" => id}) do
+${cuBind}    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
+         {:ok, _} <- ${ctxModule}.delete_${aggSnake}(record) do
+      send_resp(conn, 204, "")
+    else
+      {:error, :not_found} ->
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        ProblemDetails.validation_error_response(conn, changeset)
+    end
+  end`;
+
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do
   use ${appModule}Web, :controller
@@ -246,17 +346,7 @@ ${cuBind}    case ${ctxModule}.get_${aggSnake}(id${getActor}) do
     end
   end
 
-  def create(conn, params) do
-${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
-      {:ok, record} ->
-        conn
-        |> put_status(201)
-        |> json(serialize(record))
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
-    end
-  end
+${createAction}
 
   def update(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
@@ -273,18 +363,7 @@ ${cuBind}${updateCuBind}
     end
   end
 
-  def delete(conn, %{"id" => id}) do
-${cuBind}    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
-         {:ok, _} <- ${ctxModule}.delete_${aggSnake}(record) do
-      send_resp(conn, 204, "")
-    else
-      {:error, :not_found} ->
-        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
-    end
-  end
+${deleteAction}
 ${findActions}
 ${opActions}
 ${problemVariant}

@@ -21,16 +21,48 @@ import type {
   ProvSite,
   StmtIR,
 } from "../../../ir/types/loom-ir.js";
+import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
-import { provColumn } from "./provenance-emit.js";
+import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
+import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 
 /** The wire field list a returning op's success branch serialises `record`
  *  into — the same ordered `wireShape` the find/CRUD controllers expose, so the
  *  success body matches what `GET /<plural>/:id` returns for the same aggregate. */
 function wireFieldsOf(agg: AggregateIR): string[] {
   return (agg.wireShape ?? []).map((f) => snake(f.name));
+}
+
+/** The `Ecto.Changeset` put bodies that persist the columns an operation body
+ *  assigned (deduped, declaration order) onto the threaded `record` — shared by
+ *  the named-op persist tail (`context-emit.ts`) and the returning-op persist
+ *  tail here.  A containment (`embeds_many`/`embeds_one`) round-trips via
+ *  `put_embed`; scalar columns (incl. the co-located `<field>_provenance`
+ *  backing columns the body assigned) via `put_change`.  Each is a real schema
+ *  column on the mutated `record`, so `put_change`/`put_embed` is safe. */
+export function persistPutBodies(op: OperationIR, agg: AggregateIR): string[] {
+  const containNames = new Set(agg.contains.map((c) => snake(c.name)));
+  const assignedFields: string[] = [];
+  for (const s of op.statements) {
+    // `assign` (`field := v`), collection `add`/`remove` (`items += Item{…}`),
+    // and scalar compound `add`/`remove` (`total += n`) all re-bind a real
+    // schema column on `record`.
+    if (s.kind !== "assign" && s.kind !== "add" && s.kind !== "remove") continue;
+    const f = snake(s.target.segments[0] ?? "");
+    if (f.length > 0 && !assignedFields.includes(f)) assignedFields.push(f);
+  }
+  const provNames = new Set(provenancedFieldsOf(agg).map((f) => snake(f.name)));
+  const provColumns = assignedFields.filter((f) => provNames.has(f)).map((f) => provColumn(f));
+  return [
+    ...assignedFields.map((f) =>
+      containNames.has(f)
+        ? `Ecto.Changeset.put_embed(:${f}, record.${f})`
+        : `Ecto.Changeset.put_change(:${f}, record.${f})`,
+    ),
+    ...provColumns.map((c) => `Ecto.Changeset.put_change(:${c}, record.${c})`),
+  ];
 }
 
 /** An operation that declares an `or`-union return type (exception-less). */
@@ -80,12 +112,24 @@ export function renderReturningOpFunction(
 ): string {
   const aggPascal = upperFirst(agg.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
+  const repoMod = `${aggModule}Repository`;
   const opSnake = snake(op.name);
   const aggSnake = snake(agg.name);
+  const appModule = facadeMod.split(".")[0]!;
+  // A provenanced write-site captures lineage inline and drains it into the
+  // history table in a transaction; an audited op records a who/what/when +
+  // before/after wire snapshot, INSIDE the same save transaction so the audit
+  // row commits atomically with the state change.  Either forces the persist
+  // tail to run inside a `Repo.transaction`; where both fire they SHARE one
+  // transaction (parity with the non-returning `renderNamedOpFunction` path,
+  // and with the node/.NET/Java/Python returning-op instrumentation).
+  const hasProv = opHasProvSite(op);
+  const hasAudit = op.audited === true;
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
     foundation: "vanilla",
+    captureProvenance: hasProv,
   };
 
   // The `params` arg is always referenced by the `when is_map(params)` guard,
@@ -94,31 +138,86 @@ export function renderReturningOpFunction(
   const paramReads = op.params.map(
     (p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})`,
   );
-  const bodyLines = op.statements.map((s) => renderReturningStmt(s, ctx, renderCtx));
+  // The `before` wire snapshot — taken from the ORIGINAL `record` before the
+  // body rebinds any field (parity with the non-returning path + the other
+  // backends' returning-op `__before` capture).  Relational only: a document
+  // aggregate can't carry a named operation on vanilla (validate-gated by
+  // `loom.vanilla-document-unsupported`), so the struct-drop snapshot always
+  // applies here.
+  const beforeBind = hasAudit ? [`    audit_before = ${wireSnapshot("record")}`] : [];
+  // Per-statement index disambiguates provenance temp vars across writes.
+  const bodyLines = op.statements.map((s, i) => renderReturningStmt(s, ctx, renderCtx, i));
 
-  // Success-path serialisation.  A body that doesn't end in an explicit
-  // `return` falls through to its aggregate success variant (`Order` in
-  // `Order or NotFound`) — the mutated `record`.  Append the terminal
-  // `{:ok, %{…wireShape…}}` so the context fn always returns a wire-ready
-  // tagged tuple (the controller just `json`s the map; no struct leaks
-  // `__meta__`/`__struct__` onto the wire).
+  // A body that doesn't end in an explicit `return` falls through to its
+  // aggregate success variant (`Order` in `Order or NotFound`) — the mutated
+  // `record`.  That fall-through success branch is the only place a state change
+  // commits, so it's also the only place an audit / provenance row is recorded.
   const lastIsReturn = op.statements[op.statements.length - 1]?.kind === "return";
   const succeedsWithAggregate =
     op.returnType?.kind === "union" &&
     op.returnType.variants.some((v) => v.kind === "entity" && v.name === agg.name);
-  const tailLines =
-    !lastIsReturn && succeedsWithAggregate
-      ? [
-          `    {:ok, %{${wireFieldsOf(agg)
-            .map((f) => `${f}: record.${f}`)
-            .join(", ")}}}`,
-        ]
-      : [];
-  const body = [...paramReads, ...bodyLines, ...tailLines].join("\n");
+  const hasSuccessPath = !lastIsReturn && succeedsWithAggregate;
+  // The wire map the success branch returns — the same ordered `wireShape` the
+  // CRUD controllers expose, projected off the SAVED struct so it reflects the
+  // persisted state (no struct leaks `__meta__`/`__struct__` onto the wire).
+  const wireMap = (recordVar: string): string =>
+    `%{${wireFieldsOf(agg)
+      .map((f) => `${f}: ${recordVar}.${f}`)
+      .join(", ")}}`;
+
+  let tailLines: string[];
+  if (hasSuccessPath && (hasProv || hasAudit)) {
+    // Forced transaction: persist the assigned columns, flush provenance and/or
+    // record the audit row, then return the wire-ready success tuple — all in
+    // ONE transaction so the derived rows commit atomically with the state
+    // change.  A persist failure rolls back to `{:error, changeset}` (the
+    // controller's `_result/2` gains a matching validation clause).
+    const putBodies = persistPutBodies(op, agg);
+    const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");
+    const txTail: string[] = [];
+    if (hasProv) txTail.push(`          ${appModule}.Provenance.flush(${appModule}.Repo)`);
+    if (hasAudit) {
+      txTail.push(
+        auditRecordCall({
+          appModule,
+          operationId: `${op.name}${aggPascal}`,
+          action: op.name,
+          targetType: aggPascal,
+          targetId: "saved.id",
+          before: "audit_before",
+          after: wireSnapshot("saved"),
+          indent: "          ",
+        }),
+      );
+    }
+    tailLines = [
+      `    changeset =`,
+      `      record`,
+      `      |> Ecto.Changeset.change(%{})${putBlock6}`,
+      ``,
+      `    ${appModule}.Repo.transaction(fn ->`,
+      `      case ${repoMod}.persist_change(changeset) do`,
+      `        {:ok, saved} ->`,
+      ...txTail,
+      `          ${wireMap("saved")}`,
+      ``,
+      `        {:error, reason} ->`,
+      `          ${appModule}.Repo.rollback(reason)`,
+      `      end`,
+      `    end)`,
+    ];
+  } else if (hasSuccessPath) {
+    // Unaudited / non-provenanced success: the in-memory wire projection (no DB
+    // round-trip — byte-identical to the pre-audit emission).
+    tailLines = [`    {:ok, ${wireMap("record")}}`];
+  } else {
+    tailLines = [];
+  }
+  const body = [...beforeBind, ...paramReads, ...bodyLines, ...tailLines].join("\n");
 
   return `  @doc "Returning operation \`${op.name}\` on \`${aggPascal}\` (exception-less)."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
-          {:ok, term()} | {:error, binary(), map()}
+          {:ok, term()} | {:error, binary(), map()} | {:error, Ecto.Changeset.t()}
   def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params) when is_map(params) do
 ${body}
   end`;
@@ -339,12 +438,25 @@ export function renderReturningOpControllerAction(
   // from its (single) call site, so a `defp` helper would re-trigger an
   // "unused clause" warning for whichever outcome this op's body can't
   // produce.  A public fn keeps the parameter at its full clause domain.
+  // An audited / provenanced returning op persists its mutated columns inside a
+  // forced transaction, so a persist validation failure surfaces as
+  // `{:error, %Ecto.Changeset{}}` — translated to a 422 (the same shape the
+  // generic update/create paths use).  Unaudited ops never persist, so they
+  // never produce this 2-tuple and the clause is omitted (an unreachable clause
+  // would trip Elixir 1.18's type checker / `--warnings-as-errors`).
+  const persists = op.audited === true || opHasProvSite(op);
   const resultClauses = [
     `  def ${resultFn}(conn, {:ok, success}), do: json(conn, success)`,
     ...errorVariantsOf(op, ctx).map(
       (v) => `  def ${resultFn}(conn, {:error, ${JSON.stringify(v.tag)}, data}),
     do: problem_variant(conn, ${v.status}, ${JSON.stringify(v.type)}, ${JSON.stringify(v.title)}, data)`,
     ),
+    ...(persists
+      ? [
+          `  def ${resultFn}(conn, {:error, %Ecto.Changeset{} = changeset}),
+    do: ProblemDetails.validation_error_response(conn, changeset)`,
+        ]
+      : []),
   ].join("\n\n");
   return `
   def ${opSnake}(conn, %{"id" => id} = params) do

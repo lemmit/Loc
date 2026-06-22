@@ -178,6 +178,13 @@ describe.skipIf(!ENABLED)(
         // threaded `current_user` map.  Compiles the stamped insert/update seam +
         // the threaded context delegate + controller.
         { name: "vanilla-auditable.ddd", deployable: "api" },
+        // Per-action `audited` audit-record emission (audit-and-logging.md) — the
+        // `<App>.Audit` sink (Record schema + Json Ecto type + transactional
+        // `record/2`), the late `audit_records` migration, and the forced
+        // `Repo.transaction` wrap on an audited operation (`<op>_<agg>` body),
+        // create (before:nil/after=wire), and destroy (before=wire/after:nil).
+        // Compiles the transactional audit tail against real vanilla Ecto/Phoenix.
+        { name: "vanilla-audited.ddd", deployable: "api" },
         // Domain `test "..."` blocks → ExUnit over the pure domain core: this
         // fixture emits `test/` files, so the harness also runs `mix test`
         // (DB-free) on top of the prod compile.  Pins the test-emission parity

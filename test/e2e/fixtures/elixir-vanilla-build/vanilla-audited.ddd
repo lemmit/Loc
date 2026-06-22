@@ -1,0 +1,55 @@
+// Per-action `audited` on the VANILLA (plain Ecto/Phoenix, non-Ash) foundation
+// — audit-and-logging.md.  The vanilla codegen now EMITS audit-record capture
+// for all three audited command shapes, the port of the node / .NET / Java /
+// Python runtime (Ash stays the honest rejecter — it has no audit fit):
+//
+//   - `operation cancel() audited` → the named-op `<op>_<agg>` runs its body,
+//     then persists the assigned columns + records a who/what/when row INSIDE a
+//     forced `Repo.transaction` (before = wire(record) pre-body, after =
+//     wire(saved) post-save).
+//   - `create(...) audited` → the create controller wraps the insert in a
+//     transaction and records before:nil / after=wire(created) AFTER the insert.
+//   - `destroy audited` → the delete controller records before=wire(loaded) /
+//     after:nil BEFORE the delete, in the same transaction (atomic).
+//
+// The shared `<App>.Audit` sink (Record schema + Json Ecto type + the
+// transactional `record/2` insert) + the late `audit_records` migration
+// (version 29991231000001, one above provenance) ride along.  Compiled under
+// `mix compile --warnings-as-errors` against real vanilla Ecto/Phoenix.
+system VanillaAudited {
+  subdomain Sales {
+    context Orders {
+      error NotFound { resource: string }
+
+      aggregate Order ids guid {
+        status: string
+        operation cancel() audited {
+          status := "cancelled"
+        }
+        // A RETURNING audited op (`: Order or NotFound`): the success branch
+        // persists the mutated columns + records the audit row INSIDE the same
+        // forced transaction (before = wire pre-body, after = wire(saved)); the
+        // controller maps each union arm to its HTTP status.  Exercises the
+        // returning-op audit instrumentation under `mix --warnings-as-errors`.
+        operation settle() audited: Order or NotFound {
+          status := "settled"
+        }
+        create(status: string) audited {
+          status := status
+        }
+        destroy audited { }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource orderState { for: Orders, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Orders]
+    dataSources: [orderState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

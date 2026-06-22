@@ -211,7 +211,12 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       backendPlatformsByContext.get(c.name) ?? new Set(),
       elixirFoundationsByContext.get(c.name) ?? new Set(),
     );
-    validateAuditedOperationSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateAuditedOperationSupport(
+      c,
+      diags,
+      backendPlatformsByContext.get(c.name) ?? new Set(),
+      elixirFoundationsByContext.get(c.name) ?? new Set(),
+    );
   }
   validateExprIntegrity(loom, diags);
   validateUiBodies(loom, diags);

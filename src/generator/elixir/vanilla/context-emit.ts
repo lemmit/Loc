@@ -14,6 +14,7 @@ import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { stmtUsesParam } from "../domain/predicates.js";
 import type { RenderCtx } from "../render-expr.js";
+import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import {
   customFindsOfAgg,
@@ -24,10 +25,10 @@ import {
 } from "./eventsourced-emit.js";
 import {
   isReturningOperation,
+  persistPutBodies,
   renderReturningOpFunction,
   renderReturningStmt,
 } from "./operation-returns-emit.js";
-import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { customFindsOf } from "./repository-emit.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
 
@@ -172,7 +173,6 @@ function renderNamedOpFunction(
   aggSnake: string,
   op: OperationIR,
 ): string {
-  const containNames = new Set(agg.contains.map((c) => snake(c.name)));
   const opSnake = snake(op.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
   const repoMod = `${aggModule}Repository`;
@@ -181,12 +181,23 @@ function renderNamedOpFunction(
   // history table inside a transaction.  `captureProvenance` gates the body
   // rendering; `hasProv` gates the transactional persist tail.
   const hasProv = opHasProvSite(op);
+  // An audited operation captures a who/what/when + before/after wire snapshot
+  // into the `audit_records` table, recorded INSIDE the save transaction so the
+  // row commits atomically with the aggregate update.  Like provenance, `audited`
+  // forces the transactional persist tail — a bare changeset pipe has no
+  // transaction to record into.  Where both are present they SHARE one transaction.
+  const hasAudit = op.audited === true;
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
     foundation: "vanilla",
     captureProvenance: hasProv,
   };
+
+  // The `before` wire snapshot — taken from the ORIGINAL `record` before the
+  // body rebinds any field, so it reflects the pre-mutation state (parity with
+  // the Hono/Python `before` captured before the mutation).
+  const beforeBind = hasAudit ? `    audit_before = ${wireSnapshot("record")}\n` : "";
 
   // Bind only the params the body references, so an unused param never trips
   // `mix compile --warnings-as-errors`.  (`record` is always used — the persist
@@ -201,59 +212,56 @@ function renderNamedOpFunction(
   // statement index disambiguates per-write provenance temp vars.
   const bodyLines = op.statements.map((s, i) => renderReturningStmt(s, ctx, rc, i));
 
-  // Persist the fields the body assigned (deduped, declaration order).  Each is
-  // a real schema column on the mutated `record`, so `put_change` is safe.
-  const assignedFields: string[] = [];
-  for (const s of op.statements) {
-    // `assign` (`field := v`), collection `add`/`remove` (`items += Item{…}`),
-    // and scalar compound `add`/`remove` (`total += n`) all re-bind a real
-    // schema column on `record` — persist each via `put_change`.
-    if (s.kind !== "assign" && s.kind !== "add" && s.kind !== "remove") continue;
-    const f = snake(s.target.segments[0] ?? "");
-    if (f.length > 0 && !assignedFields.includes(f)) assignedFields.push(f);
-  }
-  // Co-located provenance columns ride the same changeset: a `<field>_provenance`
-  // jsonb backing column for each provenanced field the body actually assigned.
-  const provNames = new Set(provenancedFieldsOf(agg).map((f) => snake(f.name)));
-  const provColumns = assignedFields.filter((f) => provNames.has(f)).map((f) => provColumn(f));
-  // Put bodies — re-indented per persist path (4-space for the plain pipe,
-  // 6-space inside the `changeset =` assignment).  A containment
-  // (`embeds_many`/`embeds_one`) round-trips via `put_embed`; scalar columns
-  // (incl. the provenance backing columns) via `put_change`.
-  const putBodies = [
-    ...assignedFields.map((f) =>
-      containNames.has(f)
-        ? `Ecto.Changeset.put_embed(:${f}, record.${f})`
-        : `Ecto.Changeset.put_change(:${f}, record.${f})`,
-    ),
-    ...provColumns.map((c) => `Ecto.Changeset.put_change(:${c}, record.${c})`),
-  ];
+  // Persist the fields the body assigned (deduped, declaration order) + the
+  // co-located `<field>_provenance` backing columns — shared with the
+  // returning-op persist tail.  Re-indented per persist path (4-space for the
+  // plain pipe, 6-space inside the `changeset =` assignment).
+  const putBodies = persistPutBodies(op, agg);
   const putBlock = putBodies.map((b) => `\n    |> ${b}`).join("");
   const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");
 
   const prelude = [...paramBinds, ...bodyLines].join("\n");
-  const preludeBlock = prelude ? `${prelude}\n` : "";
+  const preludeBlock = prelude ? `${beforeBind}${prelude}\n` : beforeBind;
 
-  // Persist tail.  Without provenance: the plain changeset pipe.  With it: build
-  // the changeset, then run the save + history flush in ONE transaction so the
-  // `provenance_records` rows commit atomically with the aggregate update.
+  // Persist tail.  Without provenance or audit: the plain changeset pipe.  With
+  // either: build the changeset, then run the save + (history flush and/or audit
+  // record) in ONE shared transaction so the derived rows commit atomically with
+  // the aggregate update.
   const appModule = facadeMod.split(".")[0]!;
-  const persist = hasProv
-    ? `    changeset =
+  const aggPascalName = upperFirst(agg.name);
+  const txTail: string[] = [];
+  if (hasProv) txTail.push(`          ${appModule}.Provenance.flush(${appModule}.Repo)`);
+  if (hasAudit) {
+    txTail.push(
+      auditRecordCall({
+        appModule,
+        operationId: `${op.name}${aggPascalName}`,
+        action: op.name,
+        targetType: aggPascalName,
+        targetId: "saved.id",
+        before: "audit_before",
+        after: wireSnapshot("saved"),
+        indent: "          ",
+      }),
+    );
+  }
+  const persist =
+    hasProv || hasAudit
+      ? `    changeset =
       record
       |> Ecto.Changeset.change(%{})${putBlock6}
 
     ${appModule}.Repo.transaction(fn ->
       case ${repoMod}.persist_change(changeset) do
         {:ok, saved} ->
-          ${appModule}.Provenance.flush(${appModule}.Repo)
+${txTail.join("\n")}
           saved
 
         {:error, reason} ->
           ${appModule}.Repo.rollback(reason)
       end
     end)`
-    : `    record
+      : `    record
     |> Ecto.Changeset.change(%{})${putBlock}
     |> ${repoMod}.persist_change()`;
 
